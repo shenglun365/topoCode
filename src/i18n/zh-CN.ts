@@ -193,6 +193,7 @@ export default {
     documents: '文档',
     sessions: '会话',
     chat: '对话',
+    explorer: '资源管理器',
     design: '设计',
     models: '模型',
     agents: 'Agent',
@@ -274,6 +275,11 @@ export default {
       clickNodeToView: '点击图中的节点或文件树中的项来查看详情',
       debug: '调试信息',
       projectInfo: '项目信息',
+      eventLog: '事件日志',
+      noEvents: '暂无事件',
+      copyLogs: '复制日志',
+      symbols: '符号索引',
+      symbolsPending: '等待分析模块完成后生成',
     },
   },
 
@@ -301,6 +307,7 @@ export default {
     syncStatus: '同步状态',
     syncing: '同步中',
     synced: '已同步',
+    closeAllTabs: '关闭全部',
     syncFailed: '同步失败',
     analysisComplete: '分析完成',
     analysisInProgress: '分析中 65%',
@@ -856,17 +863,6 @@ export default {
     december: '12月',
   },
 
-  // 导入
-  import: {
-    loading: '导入中...',
-    error: {
-      invalidPath: '无效的路径',
-      failed: '导入失败',
-      electronOnly: '此功能需要在 Electron 环境中运行',
-      duplicate: '项目已存在',
-    },
-  },
-
   // 预览
   preview: {
     fileTooLarge: '文件过大，不建议预览（>5MB）',
@@ -874,6 +870,8 @@ export default {
     readFailed: '读取文件失败',
     binaryFile: '二进制文件无法预览',
     pinToTab: '固定到标签页',
+    isDirectory: '这是一个目录，无法预览',
+    truncated: '文件过长，仅显示前 {max} 行（共 {total} 行）',
   },
 
   // 新手引导
@@ -942,6 +940,19 @@ export default {
     filePermissions: '文件权限',
     fileOwner: '文件所有者',
     noFiles: '暂无文件',
+    selectFile: '选择文件',
+    selectFileDesc: '在左侧文件树中选择一个文件以查看内容',
+  },
+
+  // 导入
+  import: {
+    loading: '导入中...',
+    error: {
+      invalidPath: '无效的路径',
+      failed: '导入失败',
+      electronOnly: '此功能需要在 Electron 环境中运行',
+      duplicate: '项目已存在',
+    },
     dragDrop: '拖放文件到此处',
     selectFolder: '选择文件夹',
     importing: '导入中...',
@@ -966,6 +977,7 @@ export default {
 
   // 代码
   code: {
+    wrap: '自动换行',
     title: '代码',
     newFile: '新建文件',
     openFile: '打开文件',

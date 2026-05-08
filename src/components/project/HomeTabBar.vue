@@ -9,7 +9,7 @@ defineProps<{
 
 const emit = defineEmits<{
   'update:activeTabId': [tabId: string | null]
-  close: [tabId: string]
+  'close': [tabId: string]
 }>()
 </script>
 
@@ -39,6 +39,7 @@ const emit = defineEmits<{
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
   overflow-x: auto;
+  min-height: 36px;
 }
 
 .home-tab {

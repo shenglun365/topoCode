@@ -4,7 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { FileTreeNode as FileNodeType } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
+import { useDebugStore } from '@/stores/debug'
 import FileTreeNode from './FileTreeNode.vue'
+
+const debug = useDebugStore()
 
 const props = defineProps<{
   nodes: FileNodeType[]
@@ -18,9 +21,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
-const expandedNodes = ref<Set<string>>(new Set())
-const loadedPaths = ref<Set<string>>(new Set(['/']))
-const loadingPaths = ref<Set<string>>(new Set())
+const expandedNodes = ref<string[]>([])
+const loadedPaths = ref<string[]>(['/'])
+const loadingPaths = ref<string[]>([])
 const lazyNodes = ref<FileNodeType[]>([...props.nodes])
 
 // 监听 props.nodes 变化，同步到 lazyNodes
@@ -33,21 +36,24 @@ const searchQuery = ref('')
 const isSearching = computed(() => searchQuery.value.trim().length > 0)
 
 function getNodeKey(node: FileNodeType, depth: number): string {
-  return node.path || `${depth}/${node.name}`
+  // 统一使用 node.path 作为 key，避免 depth/name 组合导致的不一致
+  return node.path || node.name
 }
 
 async function toggleNode(node: FileNodeType, depth: number) {
   if (node.type !== 'directory') return
 
   const key = getNodeKey(node, depth)
-  const wasExpanded = expandedNodes.value.has(key)
+  const idx = expandedNodes.value.indexOf(key)
+  const wasExpanded = idx >= 0
+  const path = node.path || '/'
+  const hasLoaded = loadedPaths.value.includes(path)
 
   if (wasExpanded) {
-    expandedNodes.value.delete(key)
+    expandedNodes.value.splice(idx, 1)
   } else {
-    expandedNodes.value.add(key)
-    const path = node.path || '/'
-    if (!loadedPaths.value.has(path)) {
+    expandedNodes.value.push(key)
+    if (!hasLoaded) {
       await loadChildren(path)
     }
   }
@@ -55,25 +61,30 @@ async function toggleNode(node: FileNodeType, depth: number) {
 
 async function loadChildren(fromPath: string) {
   if (!projectStore.selectedProjectId) return
-  if (loadingPaths.value.has(fromPath)) return
+  if (loadingPaths.value.includes(fromPath)) return
 
-  loadingPaths.value.add(fromPath)
+  loadingPaths.value.push(fromPath)
   try {
     const children = await projectStore.getFileTree(projectStore.selectedProjectId, fromPath)
-    loadedPaths.value.add(fromPath)
+    if (!loadedPaths.value.includes(fromPath)) {
+      loadedPaths.value.push(fromPath)
+    }
     updateNodeChildren(lazyNodes.value, fromPath, children)
   } catch (err) {
     console.error('Failed to load children:', err)
   } finally {
-    loadingPaths.value.delete(fromPath)
+    const idx = loadingPaths.value.indexOf(fromPath)
+    if (idx >= 0) loadingPaths.value.splice(idx, 1)
   }
 }
 
 function updateNodeChildren(nodes: FileNodeType[], targetPath: string, children: FileNodeType[]): boolean {
-  for (const node of nodes) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
     const key = getNodeKey(node, 0)
     if (key === targetPath && node.type === 'directory') {
-      node.children = children
+      // 强制触发响应式：替换整个节点
+      nodes[i] = { ...node, children: [...children] }
       return true
     }
     if (node.children && updateNodeChildren(node.children, targetPath, children)) {
@@ -84,15 +95,15 @@ function updateNodeChildren(nodes: FileNodeType[], targetPath: string, children:
 }
 
 function isExpanded(node: FileNodeType, depth: number): boolean {
-  return expandedNodes.value.has(getNodeKey(node, depth))
+  return expandedNodes.value.includes(getNodeKey(node, depth))
 }
 
 function isLoading(node: FileNodeType): boolean {
-  return loadingPaths.value.has(node.path || '/')
+  return loadingPaths.value.includes(node.path || '/')
 }
 
 function hasLoadedChildren(node: FileNodeType): boolean {
-  return loadedPaths.value.has(node.path || '/')
+  return loadedPaths.value.includes(node.path || '/')
 }
 
 function getFileColor(node: FileNodeType): string {
@@ -116,7 +127,9 @@ function handleToggle(node: FileNodeType, depth: number) {
 }
 
 function handleSelect(node: FileNodeType) {
-  emit('select', node)
+  if (node.type === 'file') {
+    emit('select', node)
+  }
 }
 
 function handleOpen(node: FileNodeType) {
@@ -181,8 +194,15 @@ function clearSearch() {
           :key="getNodeKey(node, 0)"
           :node="node"
           :depth="0"
-          :is-expanded="false"
+          :is-expanded="expandedNodes.includes(getNodeKey(node, 0))"
+          :is-loading="loadingPaths.includes(node.path || '/')"
+          :has-loaded-children="loadedPaths.includes(node.path || '/')"
           :get-file-color="getFileColor"
+          :expanded-nodes="expandedNodes"
+          :get-node-key="getNodeKey"
+          :loading-paths="loadingPaths"
+          :loaded-paths="loadedPaths"
+          @toggle="handleToggle"
           @select="handleSelect"
           @open="handleOpen"
         />

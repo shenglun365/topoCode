@@ -178,13 +178,18 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
 
+  // ==================== 文件系统 ====================
+  fs: {
+    addAllowedDir: (dirPath: string) => ipcRenderer.invoke('fs:add-allowed-dir', dirPath),
+    readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
+  },
+
   // ==================== 系统 ====================
   system: {
     selectDirectory: () => ipcRenderer.invoke('dialog:open-directory'),
     getAppDataPath: () => ipcRenderer.invoke('system:get-app-data-path'),
     get: (key: string) => ipcRenderer.invoke('store:get', key),
     set: (key: string, val: any) => ipcRenderer.invoke('store:set', key, val),
-    readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
   },
 
   // ==================== 事件订阅 ====================
@@ -226,6 +231,10 @@ declare global {
       store: {
         get: (key: string) => Promise<any>
         set: (key: string, value: any) => Promise<boolean>
+      }
+      fs: {
+        addAllowedDir: (dirPath: string) => Promise<void>
+        readFile: (filePath: string) => Promise<string>
       }
       project: {
         list: () => Promise<any[]>

@@ -31,13 +31,29 @@ function setupIPC() {
   })
 
   // ---- 文件读取 ----
+  // Allowed directories for file access
+  const allowedDirs: Set<string> = new Set()
+
+  ipcMain.handle('fs:add-allowed-dir', async (_, dirPath: string) => {
+    const path = await import('node:path')
+    const resolved = path.resolve(dirPath)
+    allowedDirs.add(resolved)
+    return true
+  })
+
   ipcMain.handle('fs:read-file', async (_, filePath: string) => {
     const fs = await import('node:fs')
     const path = await import('node:path')
     const resolved = path.resolve(filePath)
-    // 安全检查：只允许读取项目目录下的文件
-    if (!resolved.startsWith(process.cwd())) {
-      throw new Error('Access denied: path outside allowed directory')
+    // 安全检查：只允许读取已授权的项目目录
+    const isAllowed = Array.from(allowedDirs).some(dir => resolved.startsWith(dir))
+    if (!isAllowed) {
+      throw new Error(`Access denied: ${resolved} is not in allowed directories`)
+    }
+    // 检查是否为目录
+    const stat = fs.statSync(resolved)
+    if (stat.isDirectory()) {
+      throw new Error(`Cannot read directory: ${resolved}`)
     }
     return fs.readFileSync(resolved, 'utf-8')
   })

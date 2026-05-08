@@ -6,73 +6,33 @@ import {
   Cog6ToothIcon,
   DocumentTextIcon,
   RocketLaunchIcon,
+  XCircleIcon,
+  LightBulbIcon,
+  CodeBracketIcon,
+  ChatBubbleLeftRightIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useOnboardingStore } from '@/stores/onboarding'
-import type { FileTreeNode } from '@/types/ipc'
 import ProjectCard from '@/components/project/ProjectCard.vue'
 import ImportZone from '@/components/project/ImportZone.vue'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
-import FileTree from '@/components/project/FileTree.vue'
-import FilePreview from '@/components/project/FilePreview.vue'
+import CodeViewer from '@/components/code/CodeViewer.vue'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const onboardingStore = useOnboardingStore()
 
-const fileTreeNodes = ref<FileTreeNode[]>([])
-const fileTreeLoading = ref(false)
-const selectedFile = ref<FileTreeNode | null>(null)
-
-// 监听项目选择和 Tab 切换，加载文件树
-watch(
-  () => projectStore.selectedProjectId,
-  async (newId) => {
-    console.log('[HomePage] selectedProjectId changed:', newId)
-    if (newId) {
-      await loadFileTree()
-    }
-  }
-)
-
-async function loadFileTree() {
-  if (!projectStore.selectedProjectId) {
-    console.warn('[HomePage] loadFileTree skipped - no selectedProjectId')
-    return
-  }
-  console.log('[HomePage] loadFileTree started for project:', projectStore.selectedProjectId)
-  fileTreeLoading.value = true
-  try {
-    fileTreeNodes.value = await projectStore.getFileTree(projectStore.selectedProjectId)
-    console.log('[HomePage] loadFileTree result:', JSON.stringify(fileTreeNodes.value).substring(0, 200))
-  } catch (err) {
-    console.error('[HomePage] Failed to load file tree:', err)
-    fileTreeNodes.value = []
-  } finally {
-    fileTreeLoading.value = false
-    console.log('[HomePage] loadFileTree done, nodes count:', fileTreeNodes.value?.length)
-  }
+function onTabUpdate(tabId: string | null) {
+  projectStore.setActiveTab(tabId)
 }
 
-function onFileSelect(node: FileTreeNode) {
-  if (node.type === 'file') {
-    selectedFile.value = node
-  }
+function onTabClose(tabId: string) {
+  projectStore.closeTab(tabId)
 }
 
-function onClosePreview() {
-  selectedFile.value = null
-}
-
-function onPinPreview() {
-  // 固定到 Tab
-  if (selectedFile.value) {
-    projectStore.addTab({
-      id: `preview-${selectedFile.value.path}`,
-      type: 'file',
-      title: selectedFile.value.name,
-      filePath: selectedFile.value.path,
-    })
+function onCloseCodeViewer() {
+  if (projectStore.activeTabId) {
+    projectStore.closeTab(projectStore.activeTabId)
   }
 }
 
@@ -199,6 +159,10 @@ onMounted(async () => {
         <span style="font-size:13px; font-weight:600;">{{ projectStore.selectedProject?.name }}</span>
         <span class="badge badge-green" style="font-size:8px;">{{ t('project.synced') }}</span>
         <div style="flex:1;"></div>
+        <button class="btn btn-ghost btn-sm" v-if="projectStore.tabs.length > 0" @click="projectStore.closeAllTabs()" :title="t('project.closeAllTabs')">
+          <XCircleIcon class="w-4 h-4" />
+          <span>{{ t('project.closeAllTabs') }}</span>
+        </button>
         <button class="btn btn-ghost btn-sm">
           <Cog6ToothIcon class="w-4 h-4" />
           <span>{{ t('common.settings') }}</span>
@@ -210,34 +174,27 @@ onMounted(async () => {
 
       <!-- Tab 栏 -->
       <HomeTabBar
+        v-if="projectStore.tabs.length > 0"
         :tabs="projectStore.tabs"
         :active-tab-id="projectStore.activeTabId"
-        @update:active-tab-id="projectStore.setActiveTab($event)"
-        @close="projectStore.closeTab($event)"
+        @update:activeTabId="onTabUpdate"
+        @close="onTabClose"
       />
 
       <!-- 内容区 -->
       <div class="home-tab-content">
-        <!-- 文件树 + 预览 -->
-        <div class="file-tab-layout">
-          <div class="file-tree-panel">
-            <div v-if="fileTreeLoading" class="empty-state">
-              <div class="loading-spinner"></div>
-              <span class="text-muted">{{ t('file.loading') }}</span>
-            </div>
-            <div v-else-if="fileTreeNodes.length === 0" class="empty-state">
-              <div style="font-size:11px; color:var(--text-muted);">{{ t('file.noFiles') }}</div>
-            </div>
-            <FileTree v-else :nodes="fileTreeNodes" @select="onFileSelect" />
-          </div>
-          <div v-if="selectedFile" class="file-preview-panel">
-            <FilePreview
-              :node="selectedFile"
-              :root-path="projectStore.selectedProject?.rootPath || projectStore.selectedProject?.path || ''"
-              @close="onClosePreview"
-              @pin="onPinPreview"
-            />
-          </div>
+        <!-- 代码视图 -->
+        <div v-if="projectStore.activeTab" class="code-viewer-full">
+          <CodeViewer
+            :node="projectStore.activeTab.node"
+            :root-path="projectStore.selectedProject?.rootPath || projectStore.selectedProject?.path || ''"
+            @close="onCloseCodeViewer"
+          />
+        </div>
+        <div v-else class="empty-state centered">
+          <DocumentTextIcon class="w-12 h-12 text-accent" />
+          <div class="title">{{ t('file.selectFile') }}</div>
+          <div class="desc">{{ t('file.selectFileDesc') }}</div>
         </div>
       </div>
     </div>
@@ -270,25 +227,21 @@ onMounted(async () => {
 .home-tab-content {
   flex: 1;
   overflow: auto;
-}
-
-.file-tab-layout {
   display: flex;
-  height: 100%;
-  overflow: hidden;
 }
 
-.file-tree-panel {
+.code-viewer-full {
   flex: 1;
-  min-width: 0;
-  overflow: auto;
-  border-right: 1px solid var(--border);
+  overflow: hidden;
 }
 
-.file-preview-panel {
-  width: 50%;
-  min-width: 300px;
-  overflow: hidden;
+.empty-state.centered {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
 .task-list-view {

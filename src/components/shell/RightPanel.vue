@@ -4,11 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
+import { useProjectStore } from '@/stores/project'
 import DebugPanel from '@/components/debug/DebugPanel.vue'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
 const navigation = useNavigationStore()
+const projectStore = useProjectStore()
 
 const panelTitleKeys: Record<string, string> = {
   home: 'shell.rightPanel.projectDetail',
@@ -18,7 +20,12 @@ const panelTitleKeys: Record<string, string> = {
   user: 'shell.rightPanel.settingsDetail',
 }
 
-const title = computed(() => t(panelTitleKeys[navigation.currentPage] || 'common.detail'))
+const title = computed(() => {
+  if (projectStore.viewMode === 'project' && projectStore.activeTab) {
+    return t('shell.rightPanel.symbols')
+  }
+  return t(panelTitleKeys[navigation.currentPage] || 'common.detail')
+})
 </script>
 
 <template>
@@ -38,6 +45,15 @@ const title = computed(() => t(panelTitleKeys[navigation.currentPage] || 'common
     <div class="panel-body">
       <!-- DEBUG 面板 -->
       <DebugPanel v-if="panelStore.debugMode" />
+
+      <!-- 符号索引（预留） -->
+      <div v-else-if="projectStore.viewMode === 'project' && projectStore.activeTab" class="symbols-panel">
+        <div class="symbols-empty">
+          <div class="icon">🔍</div>
+          <div class="title">{{ t('shell.rightPanel.symbols') }}</div>
+          <div class="desc">{{ t('shell.rightPanel.symbolsPending') }}</div>
+        </div>
+      </div>
 
       <!-- 动态内容插槽 -->
       <template v-else>
@@ -110,5 +126,35 @@ const title = computed(() => t(panelTitleKeys[navigation.currentPage] || 'common
   flex: 1;
   overflow: auto;
   padding: 4px 0;
+}
+
+.symbols-panel {
+  padding: 12px;
+}
+
+.symbols-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 12px;
+  text-align: center;
+}
+
+.symbols-empty .icon {
+  font-size: 24px;
+  opacity: 0.5;
+}
+
+.symbols-empty .title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.symbols-empty .desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 </style>

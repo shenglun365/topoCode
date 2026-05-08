@@ -9,6 +9,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { FileTreeNode } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
+import { useDebugStore } from '@/stores/debug'
+
+const debug = useDebugStore()
 
 const props = defineProps<{
   node: FileTreeNode
@@ -45,7 +48,18 @@ function isBinaryFile(fileName: string): boolean {
 
 // 读取文件内容
 async function loadFileContent() {
-  if (!props.node.path) return
+  debug.log('FilePreview', `[loadFileContent] ${props.node.type}: ${props.node.name}, path=${props.node.path}`)
+  if (!props.node.path) {
+    debug.log('FilePreview', `  → no path, returning`)
+    return
+  }
+  // 目录不可读取
+  if (props.node.type === 'directory') {
+    debug.log('FilePreview', `  → BLOCKED (directory)`)
+    error.value = t('preview.isDirectory')
+    loading.value = false
+    return
+  }
 
   loading.value = true
   error.value = null
@@ -67,9 +81,9 @@ async function loadFileContent() {
 
   try {
     // Electron 环境：通过主进程读取文件
-    if (window.api && window.api.system) {
+    if (window.api && window.api.fs) {
       const fullPath = props.rootPath + '/' + props.node.path
-      const result = await window.api.system.readFile(fullPath)
+      const result = await window.api.fs.readFile(fullPath)
       content.value = result
       lineCount.value = result.split('\n').length
     } else {

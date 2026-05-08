@@ -249,7 +249,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         # 从项目库获取文件（SQLite，非实时文件系统）
         if fromPath and fromPath != "/":
-            # 懒加载：只获取指定目录下的子节点
+            # 懒加载：只获取指定目录下的直接子节点
             files = project_db.fetchall(
                 "SELECT * FROM source_files WHERE file_path LIKE ? AND parent_path = ?",
                 (f"{fromPath}/%", fromPath)
@@ -260,7 +260,13 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
                 "SELECT * FROM source_files WHERE parent_path IS NULL OR parent_path = ''"
             )
 
-        return _build_file_tree(files)
+        # fromPath 非空时是懒加载，直接返回扁平子节点列表
+        if fromPath and fromPath != "/":
+            result = _build_flat_children(files, fromPath)
+        else:
+            # 初始加载也只返回根目录的直接子节点，不递归
+            result = _build_file_tree(files, include_children=False)
+        return result
 
     @server.register("project.updatePath")
     def update_path(id: str, newRootPath: str):
@@ -1069,7 +1075,39 @@ def _simple_hash(path: str) -> str:
     return hashlib.md5(path.encode()).hexdigest()[:12]
 
 
-def _build_file_tree(files: list) -> list:
+def _build_flat_children(files: list, fromPath: str) -> list:
+    """从指定目录的文件列表构建扁平子节点（懒加载用）
+    file_path 格式为 fromPath/子节点名，直接提取子节点名
+    """
+    result = []
+    prefix = f"{fromPath}/"
+    for f in files:
+        file_path = f["file_path"]
+        # 去掉 fromPath 前缀，得到子节点名
+        if file_path.startswith(prefix):
+            child_name = file_path[len(prefix):]
+        else:
+            # 如果 file_path 就是 fromPath 本身（目录节点），直接使用
+            child_name = file_path
+
+        node = {
+            "name": child_name,
+            "type": "directory" if f.get("language") == "directory" else "file",
+            "path": file_path,
+        }
+        if f.get("language") != "directory":
+            node["language"] = f.get("language")
+            node["size"] = f.get("size")
+        else:
+            node["children"] = []
+        result.append(node)
+
+    # 排序：文件夹在前，文件在后，各自按名称字母排序
+    result.sort(key=lambda x: (0 if x["type"] == "directory" else 1, x["name"].lower()))
+    return result
+
+
+def _build_file_tree(files: list, include_children: bool = True) -> list:
     """从扁平文件列表构建树形结构"""
     # 按层级分组
     tree = {}
@@ -1080,25 +1118,37 @@ def _build_file_tree(files: list) -> list:
             if part not in current:
                 current[part] = {"_children": {}}
             current = current[part]["_children"]
-        current[parts[-1]] = {
-            "type": "file",
-            "language": f.get("language"),
-            "size": f.get("size"),
-            "path": f.get("file_path"),
-        }
 
-    return _flatten_tree(tree)
+        # 区分目录和文件
+        if f.get("language") == "directory":
+            # 目录节点 — 确保存在
+            if parts[-1] not in current:
+                current[parts[-1]] = {"_children": {}}
+        else:
+            # 文件节点
+            current[parts[-1]] = {
+                "type": "file",
+                "language": f.get("language"),
+                "size": f.get("size"),
+                "path": f.get("file_path"),
+            }
+
+    return _flatten_tree(tree, include_children=include_children)
 
 
-def _flatten_tree(tree: dict) -> list:
-    """扁平化树形结构"""
+def _flatten_tree(tree: dict, parent_path: str = "", include_children: bool = True) -> list:
+    """扁平化树形结构，为每个节点设置正确的 path
+    include_children: 是否递归包含子节点（懒加载时设为 False）
+    """
     result = []
     for name, data in tree.items():
+        current_path = f"{parent_path}/{name}" if parent_path else name
         if "_children" in data:
             result.append({
                 "name": name,
                 "type": "directory",
-                "children": _flatten_tree(data["_children"]),
+                "path": current_path,
+                "children": _flatten_tree(data["_children"], current_path) if include_children else [],
             })
         else:
             result.append({
@@ -1106,8 +1156,10 @@ def _flatten_tree(tree: dict) -> list:
                 "type": "file",
                 "language": data.get("language"),
                 "size": data.get("size"),
-                "path": data.get("path"),
+                "path": data.get("path") or current_path,
             })
+    # 排序：文件夹在前，文件在后，各自按名称字母排序
+    result.sort(key=lambda x: (0 if x["type"] == "directory" else 1, x["name"].lower()))
     return result
 
 

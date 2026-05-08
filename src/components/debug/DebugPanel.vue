@@ -1,10 +1,21 @@
 <script setup lang="ts">
 import { useProjectStore } from '@/stores/project'
+import { useDebugStore } from '@/stores/debug'
 import { useI18n } from 'vue-i18n'
-import { WrenchScrewdriverIcon } from '@heroicons/vue/24/outline'
+import { WrenchScrewdriverIcon, TrashIcon, DocumentDuplicateIcon, CheckIcon } from '@heroicons/vue/24/outline'
+import { ref } from 'vue'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
+const debugStore = useDebugStore()
+const copied = ref(false)
+
+function copyLogs() {
+  const text = debugStore.logs.map(l => `[${l.time}] ${l.source}: ${l.message}`).join('\n')
+  navigator.clipboard.writeText(text)
+  copied.value = true
+  setTimeout(() => { copied.value = false }, 2000)
+}
 </script>
 
 <template>
@@ -38,6 +49,10 @@ const projectStore = useProjectStore()
         <span class="debug-label">tabs.length</span>
         <span class="debug-value">{{ projectStore.tabs.length }}</span>
       </div>
+      <div class="debug-row">
+        <span class="debug-label">selectedFile</span>
+        <span class="debug-value">{{ projectStore.selectedFile ? `${projectStore.selectedFile.type}:${projectStore.selectedFile.name}` : '(null)' }}</span>
+      </div>
     </div>
 
     <div class="debug-section" v-if="projectStore.selectedProject">
@@ -53,6 +68,35 @@ const projectStore = useProjectStore()
       <div class="debug-row">
         <span class="debug-label">importedAt</span>
         <span class="debug-value">{{ projectStore.selectedProject.importedAt }}</span>
+      </div>
+    </div>
+
+    <div class="debug-section">
+      <div class="debug-section-title">
+        <span>{{ t('shell.rightPanel.eventLog') }}</span>
+        <div class="debug-actions">
+          <button class="debug-action-btn" @click="copyLogs()" :title="t('shell.rightPanel.copyLogs')">
+            <CheckIcon v-if="copied" class="w-3 h-3" />
+            <DocumentDuplicateIcon v-else class="w-3 h-3" />
+          </button>
+          <button class="debug-action-btn" @click="debugStore.clear()" :title="t('common.clear')">
+            <TrashIcon class="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+      <div v-if="debugStore.logs.length === 0" class="debug-empty">
+        {{ t('shell.rightPanel.noEvents') }}
+      </div>
+      <div v-else class="debug-log-list">
+        <div
+          v-for="(log, idx) in debugStore.logs"
+          :key="idx"
+          class="debug-log-entry"
+        >
+          <span class="debug-log-time">{{ log.time }}</span>
+          <span class="debug-log-source">{{ log.source }}</span>
+          <span class="debug-log-message">{{ log.message }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -74,6 +118,7 @@ const projectStore = useProjectStore()
 .debug-section-title {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 4px;
   font-size: 10px;
   font-weight: 600;
@@ -83,6 +128,32 @@ const projectStore = useProjectStore()
   margin-bottom: 6px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
+}
+
+.debug-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.debug-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 3px;
+}
+
+.debug-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.debug-action-btn.copied {
+  color: var(--accent);
 }
 
 .debug-row {
@@ -100,6 +171,44 @@ const projectStore = useProjectStore()
 .debug-value {
   color: var(--text-primary);
   text-align: right;
+  word-break: break-all;
+}
+
+.debug-empty {
+  padding: 8px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.debug-log-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.debug-log-entry {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 1px;
+}
+
+.debug-log-time {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.debug-log-source {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.debug-log-message {
+  color: var(--text-primary);
+  font-size: 9px;
+  white-space: pre-wrap;
   word-break: break-all;
 }
 </style>

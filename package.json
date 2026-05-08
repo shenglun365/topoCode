@@ -33,7 +33,7 @@
     "dayjs": "1.11.13",
     "element-plus": "^2.9.0",
     "events": "^3.3.0",
-    "highlight.js": "^11.11.0",
+    "highlight.js": "^11.11.1",
     "lodash-es": "4.17.21",
     "marked": "9.1.5",
     "mermaid": "^11.0.0",

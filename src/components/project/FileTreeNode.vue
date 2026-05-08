@@ -15,6 +15,11 @@ const props = defineProps<{
   isLoading?: boolean
   hasLoadedChildren?: boolean
   getFileColor?: (node: FileTreeNode) => string
+  // 展开状态管理（直接传递数组，让子节点自己查询）
+  expandedNodes?: string[]
+  getNodeKey?: (node: FileTreeNode, depth: number) => string
+  loadingPaths?: string[]
+  loadedPaths?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -64,9 +69,10 @@ function handleChildOpen(child: any) {
 const depth = computed(() => props.depth)
 
 function handleClick() {
-  emit('select', props.node)
   if (props.node.type === 'directory') {
     emit('toggle', props.node, props.depth)
+  } else {
+    emit('select', props.node)
   }
 }
 
@@ -100,7 +106,7 @@ function handleDblClick() {
       <component :is="icon" :class="['w-4 h-4', iconColor, 'shrink-0']" />
 
       <!-- 名称 -->
-      <span class="tree-name">{{ node.name }}</span>
+      <span class="tree-name" :title="node.name">{{ node.name }}</span>
 
       <!-- 懒加载指示器 -->
       <span
@@ -141,14 +147,20 @@ function handleDblClick() {
     </div>
 
     <!-- 子节点 -->
-    <div v-if="node.type === 'directory' && isExpanded && node.children">
+    <div v-if="node.type === 'directory' && isExpanded && node.children && node.children.length > 0">
       <FileTreeNode
         v-for="child in node.children"
         :key="child.path || child.name"
         :node="child"
         :depth="depth + 1"
-        :is-expanded="false"
+        :is-expanded="expandedNodes && getNodeKey ? expandedNodes.includes(getNodeKey(child, depth + 1)) : false"
+        :is-loading="loadingPaths ? loadingPaths.includes(child.path || '/') : false"
+        :has-loaded-children="loadedPaths ? loadedPaths.includes(child.path || '/') : false"
         :get-file-color="getFileColor"
+        :expanded-nodes="expandedNodes"
+        :get-node-key="getNodeKey"
+        :loading-paths="loadingPaths"
+        :loaded-paths="loadedPaths"
         @toggle="handleChildToggle"
         @select="handleChildSelect"
         @open="handleChildOpen"

@@ -193,6 +193,7 @@ export default {
     documents: 'Documents',
     sessions: 'Sessions',
     chat: 'Chat',
+    explorer: 'Explorer',
     design: 'Design',
     models: 'Models',
     agents: 'Agents',
@@ -274,6 +275,11 @@ export default {
       clickNodeToView: 'Click a node in the graph or file tree to view details',
       debug: 'Debug Info',
       projectInfo: 'Project Info',
+      eventLog: 'Event Log',
+      noEvents: 'No events',
+      copyLogs: 'Copy logs',
+      symbols: 'Symbols',
+      symbolsPending: 'Pending analysis module completion',
     },
   },
 
@@ -301,6 +307,7 @@ export default {
     syncStatus: 'Sync Status',
     syncing: 'Syncing',
     synced: 'Synced',
+    closeAllTabs: 'Close All',
     syncFailed: 'Sync Failed',
     analysisComplete: 'Analysis Complete',
     analysisInProgress: 'Analysis in Progress 65%',
@@ -867,6 +874,23 @@ export default {
     filePermissions: 'Permissions',
     fileOwner: 'Owner',
     noFiles: 'No files',
+    selectFile: 'Select a file',
+    selectFileDesc: 'Choose a file from the tree on the left to view its contents',
+  },
+
+  // Preview
+  preview: {
+    fileTooLarge: 'File too large, not recommended for preview (>5MB)',
+    electronOnly: 'File preview requires Electron environment',
+    readFailed: 'Failed to read file',
+    binaryFile: 'Binary file cannot be previewed',
+    pinToTab: 'Pin to tab',
+    isDirectory: 'This is a directory, cannot preview',
+    truncated: 'File too long, showing first {max} lines (of {total})',
+  },
+
+  // Import
+  import: {
     dragDrop: 'Drag and drop files here',
     selectFolder: 'Select Folder',
     importing: 'Importing...',
@@ -891,6 +915,7 @@ export default {
 
   // Code
   code: {
+    wrap: 'Word Wrap',
     title: 'Code',
     newFile: 'New File',
     openFile: 'Open File',

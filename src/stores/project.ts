@@ -1,15 +1,15 @@
 /** Project Store - 项目管理 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project } from '@/types/ipc'
+import type { Project, FileTreeNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 
 export interface HomeTab {
   id: string
-  type: 'file' | 'task' | 'report'
+  type: 'file'
   title: string
-  filePath?: string
-  taskId?: string
+  filePath: string
+  node: FileTreeNode
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -20,6 +20,7 @@ export const useProjectStore = defineStore('project', () => {
   const tabs = ref<HomeTab[]>([])
   const activeTabId = ref<string | null>(null)
   const loading = ref(false)
+  const selectedFile = ref<FileTreeNode | null>(null)
 
   // Getters
   const selectedProject = computed(() =>
@@ -74,12 +75,19 @@ export const useProjectStore = defineStore('project', () => {
   async function selectProject(id: string) {
     selectedProjectId.value = id
     viewMode.value = 'project'
-    // 初始化默认 tabs
-    tabs.value = [
-      { id: `tab-files-${id}`, type: 'file', title: '文件' },
-      { id: `tab-tasks-${id}`, type: 'task', title: '任务' },
-    ]
-    activeTabId.value = tabs.value[0]?.id || null
+    // 将项目根目录加入 Electron 白名单
+    const project = projects.value.find(p => p.id === id)
+    if (project && project.path) {
+      try {
+        await window.api.fs.addAllowedDir(project.path)
+      } catch (e) {
+        console.warn('Failed to add allowed dir:', e)
+      }
+    }
+    // 清空 tabs，不初始化默认 tab
+    tabs.value = []
+    activeTabId.value = null
+    selectedFile.value = null
   }
 
   function deselectProject() {
@@ -87,6 +95,11 @@ export const useProjectStore = defineStore('project', () => {
     viewMode.value = 'default'
     tabs.value = []
     activeTabId.value = null
+    selectedFile.value = null
+  }
+
+  function setSelectedFile(node: FileTreeNode | null) {
+    selectedFile.value = node
   }
 
   async function removeProject(id: string) {
@@ -112,6 +125,16 @@ export const useProjectStore = defineStore('project', () => {
     console.log('[ProjectStore] getFileTree id:', id, 'fromPath:', fromPath)
     const result = await ipc.project.getFileTree(id, fromPath)
     console.log('[ProjectStore] getFileTree result:', JSON.stringify(result).substring(0, 200))
+    // 记录到 debug store
+    try {
+      const debugStore = (await import('@/stores/debug')).useDebugStore()
+      debugStore.log('projectStore', `[getFileTree] id=${id} fromPath="${fromPath}" → ${result.length} nodes`)
+      if (result.length > 0) {
+        debugStore.log('projectStore', `  → nodes: ${result.map((n: any) => `${n.type}:${n.name}`).join(', ')}`)
+      }
+    } catch (e) {
+      // ignore
+    }
     return result
   }
 
@@ -153,11 +176,20 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  function addTab(tab: HomeTab) {
-    const existing = tabs.value.find(t => t.id === tab.id)
+  function openFileTab(node: FileTreeNode) {
+    // 按 filePath 去重，已打开则切换焦点
+    const existing = tabs.value.find(t => t.filePath === node.path)
     if (existing) {
-      activeTabId.value = tab.id
+      activeTabId.value = existing.id
       return
+    }
+    // 新开 tab
+    const tab: HomeTab = {
+      id: `tab-file-${node.path || node.name}`,
+      type: 'file',
+      title: node.name,
+      filePath: node.path || node.name,
+      node,
     }
     tabs.value.push(tab)
     activeTabId.value = tab.id
@@ -179,6 +211,11 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function closeAllTabs() {
+    tabs.value = []
+    activeTabId.value = null
+  }
+
   function setActiveTab(tabId: string) {
     activeTabId.value = tabId
   }
@@ -190,6 +227,7 @@ export const useProjectStore = defineStore('project', () => {
     tabs,
     activeTabId,
     loading,
+    selectedFile,
     selectedProject,
     activeTab,
     projectCount,
@@ -204,8 +242,10 @@ export const useProjectStore = defineStore('project', () => {
     checkFileChanges,
     initSampleData,
     clearSampleData,
-    addTab,
+    openFileTab,
     closeTab,
+    closeAllTabs,
     setActiveTab,
+    setSelectedFile,
   }
 })
