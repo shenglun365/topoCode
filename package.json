@@ -1,0 +1,208 @@
+{
+  "name": "topoone-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TopoOne - 源码架构分析与可视化教学工具",
+  "main": "./dist-electron/main.js",
+  "author": "TopoCodeProj Team",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json && electron . --no-sandbox",
+    "build": "npm run build:electron && npm run build:vite",
+    "build:electron": "tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json",
+    "build:vite": "vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:all": "npm run build && electron-builder --linux --win --mac"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.0",
+    "@heroicons/vue": "2.2.0",
+    "@vueuse/core": "^11.0.0",
+    "axios": "^1.7.0",
+    "d3": "^7.9.0",
+    "dayjs": "1.11.13",
+    "element-plus": "^2.9.0",
+    "events": "^3.3.0",
+    "highlight.js": "^11.11.0",
+    "lodash-es": "4.17.21",
+    "marked": "9.1.5",
+    "mermaid": "^11.0.0",
+    "pinia": "3.0.3",
+    "pinia-plugin-persistedstate": "^4.0.0",
+    "pixi.js": "^8.18.1",
+    "plantuml-encoder": "^1.4.0",
+    "socket.io-client": "^4.8.0",
+    "vue": "3.5.13",
+    "vue-i18n": "^9.14.5",
+    "vue-router": "4.5.1",
+    "zeromq": "^6.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/forms": "^0.5.7",
+    "@tailwindcss/typography": "^0.5.10",
+    "@types/d3": "^7.4.0",
+    "@types/highlight.js": "^10.1.0",
+    "@types/lodash-es": "^4.17.9",
+    "@types/marked": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "@vitejs/plugin-vue-jsx": "^4.1.0",
+    "@vue/tsconfig": "^0.8.1",
+    "autoprefixer": "^10.4.23",
+    "concurrently": "^9.2.1",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "eslint": "^8.56.0",
+    "eslint-plugin-vue": "^9.18.1",
+    "postcss": "^8.5.6",
+    "prettier": "^3.0.2",
+    "prettier-plugin-tailwindcss": "^0.5.4",
+    "sass": "^1.66.1",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.19",
+    "vue-tsc": "^1.8.12",
+    "wait-on": "^9.0.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "vue3",
+    "saas",
+    "code-analysis",
+    "smart-programming",
+    "ai-assisted-development",
+    "electron",
+    "desktop",
+    "animation",
+    "visualization",
+    "data-structures",
+    "algorithms"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/topocode/topoone-ui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/topocode/topoone-ui/issues"
+  },
+  "homepage": "https://github.com/topocode/topoone-ui#readme",
+  "build": {
+    "appId": "com.topoone.ui",
+    "productName": "TopoOne",
+    "copyright": "Copyright © 2026 TopoCodeProj Team",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "backend/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main.js"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "TopoOne UI",
+      "icon": "build/icon.icns",
+      "background": "build/dmg-bg.png"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TopoOne UI"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "npmRebuild": false,
+    "publish": null,
+    "electronDist": "node_modules/electron/dist"
+  }
+}

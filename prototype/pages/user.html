@@ -1,0 +1,613 @@
+<!-- ===== 用户设置页 /user ===== -->
+<!-- 注意：设置菜单已改为顶部 Tab -->
+<div style="display:flex; flex-direction:column; height:100%; overflow:hidden;">
+
+  <!-- 顶部 Tab 切换 -->
+  <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
+    <div class="tab active" data-settings-tab="ai" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">🤖</span>
+      <span>AI 模型</span>
+    </div>
+    <div class="tab" data-settings-tab="agents" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">🔧</span>
+      <span>Agent 管理</span>
+    </div>
+    <div class="tab" data-settings-tab="skills" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">🧩</span>
+      <span>SKILL 管理</span>
+    </div>
+    <div class="tab" data-settings-tab="general" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">⚙️</span>
+      <span>通用设置</span>
+    </div>
+    <div class="tab" data-settings-tab="plugins" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">🔌</span>
+      <span>插件管理</span>
+    </div>
+    <div class="tab" data-settings-tab="about" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">ℹ️</span>
+      <span>关于</span>
+    </div>
+    <div style="flex:1;"></div>
+    <!-- Python 后端状态 -->
+    <div style="display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text-muted);">
+      <span class="status-dot"></span>
+      <span>Python 后端</span>
+      <button class="btn btn-ghost btn-sm" style="padding:2px 6px; font-size:10px;">↻ 重启</button>
+    </div>
+  </div>
+
+  <!-- 设置内容区 -->
+  <div style="flex:1; overflow:auto; padding:24px;">
+
+    <!-- AI 模型配置 -->
+    <div class="settings-content" data-settings-tab="ai" style="max-width:600px;">
+      <h2 style="font-size:16px; font-weight:600; margin-bottom:4px;">AI 模型配置</h2>
+      <p class="text-muted" style="font-size:12px; margin-bottom:20px;">配置大模型后端，支持本地和云端模型</p>
+
+      <!-- 当前使用 -->
+      <div class="card" style="margin-bottom:16px; border-left:3px solid var(--accent);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">当前使用</div>
+            <div style="font-size:14px; font-weight:600;">Ollama / qwen2.5-coder:7b</div>
+            <div class="text-muted" style="font-size:11px;">http://localhost:11434</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-green">● 已连接</span>
+            <span style="font-size:10px; color:var(--text-muted);">延迟 12ms</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 配置列表 -->
+      <div style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="font-size:13px; font-weight:600;">已保存的配置</h3>
+          <button class="btn btn-primary btn-sm">＋ 添加配置</button>
+        </div>
+
+        <!-- 配置项 1 -->
+        <div class="card" style="padding:12px; margin-bottom:8px; border:1px solid var(--accent); position:relative;">
+          <div style="position:absolute; top:8px; right:8px;">
+            <span class="badge badge-blue">默认</span>
+          </div>
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="font-size:24px;">🦙</div>
+            <div style="flex:1;">
+              <div style="font-size:12px; font-weight:500; margin-bottom:2px;">Ollama - qwen2.5-coder:7b</div>
+              <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">http://localhost:11434</div>
+              <div style="display:flex; gap:8px; margin-top:6px;">
+                <span class="badge badge-green" style="font-size:9px;">本地</span>
+                <span class="badge badge-gray" style="font-size:9px;">Temperature: 0.7</span>
+                <span class="badge badge-gray" style="font-size:9px;">Max: 4096</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+            <button class="btn btn-ghost btn-sm">测试连接</button>
+            <button class="btn btn-ghost btn-sm">编辑</button>
+            <div style="flex:1;"></div>
+            <button class="btn btn-ghost btn-sm" style="color:var(--error);">删除</button>
+          </div>
+        </div>
+
+        <!-- 配置项 2 -->
+        <div class="card" style="padding:12px; margin-bottom:8px;">
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="font-size:24px;">🤖</div>
+            <div style="flex:1;">
+              <div style="font-size:12px; font-weight:500; margin-bottom:2px;">OpenAI - gpt-4o</div>
+              <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">https://api.openai.com</div>
+              <div style="display:flex; gap:8px; margin-top:6px;">
+                <span class="badge badge-yellow" style="font-size:9px;">云端</span>
+                <span class="badge badge-gray" style="font-size:9px;">Temperature: 0.5</span>
+                <span class="badge badge-gray" style="font-size:9px;">Max: 8192</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+            <button class="btn btn-ghost btn-sm">测试连接</button>
+            <button class="btn btn-ghost btn-sm">设为默认</button>
+            <button class="btn btn-ghost btn-sm">编辑</button>
+            <div style="flex:1;"></div>
+            <button class="btn btn-ghost btn-sm" style="color:var(--error);">删除</button>
+          </div>
+        </div>
+
+        <!-- 配置项 3 -->
+        <div class="card" style="padding:12px; margin-bottom:8px;">
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="font-size:24px;">🧪</div>
+            <div style="flex:1;">
+              <div style="font-size:12px; font-weight:500; margin-bottom:2px;">LM-Studio - llama3-8b</div>
+              <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">http://localhost:1234</div>
+              <div style="display:flex; gap:8px; margin-top:6px;">
+                <span class="badge badge-green" style="font-size:9px;">本地</span>
+                <span class="badge badge-red" style="font-size:9px;">● 离线</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+            <button class="btn btn-ghost btn-sm">测试连接</button>
+            <button class="btn btn-ghost btn-sm">设为默认</button>
+            <button class="btn btn-ghost btn-sm">编辑</button>
+            <div style="flex:1;"></div>
+            <button class="btn btn-ghost btn-sm" style="color:var(--error);">删除</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 任务级模型绑定 -->
+      <div class="divider"></div>
+      <div style="margin-top:16px;">
+        <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">任务级模型绑定</h3>
+        <p class="text-muted" style="font-size:11px; margin-bottom:12px;">为不同类型的分析任务指定默认模型</p>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div class="card" style="padding:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-size:12px; font-weight:500;">语法结构分析</div>
+                <div class="text-muted" style="font-size:10px;">AST 解析、代码结构提取</div>
+              </div>
+              <select class="select" style="width:180px; padding:4px 8px; font-size:11px;">
+                <option selected>Ollama / qwen2.5-coder:7b</option>
+                <option>OpenAI / gpt-4o</option>
+                <option>LM-Studio / llama3-8b</option>
+              </select>
+            </div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-size:12px; font-weight:500;">代码功能分析</div>
+                <div class="text-muted" style="font-size:10px;">业务逻辑理解、功能讲解</div>
+              </div>
+              <select class="select" style="width:180px; padding:4px 8px; font-size:11px;">
+                <option>Ollama / qwen2.5-coder:7b</option>
+                <option selected>OpenAI / gpt-4o</option>
+                <option>LM-Studio / llama3-8b</option>
+              </select>
+            </div>
+          </div>
+          <div class="card" style="padding:10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-size:12px; font-weight:500;">AI 问答</div>
+                <div class="text-muted" style="font-size:10px;">自然语言问答、辅助理解</div>
+              </div>
+              <select class="select" style="width:180px; padding:4px 8px; font-size:11px;">
+                <option selected>Ollama / qwen2.5-coder:7b</option>
+                <option>OpenAI / gpt-4o</option>
+                <option>LM-Studio / llama3-8b</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 用量限制 -->
+      <div class="divider"></div>
+      <div style="margin-top:16px;">
+        <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">用量限制</h3>
+        <div class="card" style="padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div>
+              <div style="font-size:12px; font-weight:500;">OpenAI / gpt-4o</div>
+              <div class="text-muted" style="font-size:10px;">本月已用 12,450 tokens / 50,000 tokens</div>
+            </div>
+            <span class="badge badge-green">正常</span>
+          </div>
+          <div class="progress-bar" style="margin-bottom:4px;">
+            <div class="progress-bar-fill" style="width:25%;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-muted);">
+            <span>25% 已用</span>
+            <span>剩余 37,550 tokens</span>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:4px;">
+            <input type="number" class="input input-sm" value="50000" style="width:100px;" placeholder="月度限额">
+            <span class="text-muted" style="font-size:10px; line-height:28px;">tokens/月</span>
+            <div style="flex:1;"></div>
+            <button class="btn btn-ghost btn-sm">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模型优先级 -->
+      <div class="divider"></div>
+      <div style="margin-top:16px;">
+        <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">模型优先级</h3>
+        <p class="text-muted" style="font-size:11px; margin-bottom:12px;">拖拽调整模型调用优先级，优先级高的模型优先使用</p>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <div class="card" style="padding:10px; cursor:move; display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--text-muted); font-size:14px;">⠿</span>
+            <span style="font-size:12px; font-weight:500;">1.</span>
+            <span style="flex:1;">Ollama / qwen2.5-coder:7b</span>
+            <span class="badge badge-green">本地</span>
+          </div>
+          <div class="card" style="padding:10px; cursor:move; display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--text-muted); font-size:14px;">⠿</span>
+            <span style="font-size:12px; font-weight:500;">2.</span>
+            <span style="flex:1;">OpenAI / gpt-4o</span>
+            <span class="badge badge-yellow">云端</span>
+          </div>
+          <div class="card" style="padding:10px; cursor:move; display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--text-muted); font-size:14px;">⠿</span>
+            <span style="font-size:12px; font-weight:500;">3.</span>
+            <span style="flex:1;">LM-Studio / llama3-8b</span>
+            <span class="badge badge-green">本地</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 隐私设置 -->
+      <div class="divider"></div>
+      <div style="margin-top:16px;">
+        <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">隐私设置</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0;">
+          <div>
+            <div style="font-size:12px;">仅使用本地模型</div>
+            <div class="text-muted" style="font-size:10px;">启用后源码不会上传至外部服务器</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0;">
+          <div>
+            <div style="font-size:12px;">匿名使用数据</div>
+            <div class="text-muted" style="font-size:10px;">帮助改进产品体验</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent 管理 -->
+    <div class="settings-content" data-settings-tab="agents" style="max-width:600px; display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div>
+          <h2 style="font-size:16px; font-weight:600; margin-bottom:2px;">外部 Agent 管理</h2>
+          <p class="text-muted" style="font-size:12px;">配置可调度的 CLI Agent 工具</p>
+        </div>
+        <button class="btn btn-primary btn-sm">＋ 添加 Agent</button>
+      </div>
+
+      <!-- Agent 项: qwen-code -->
+      <div class="card" style="padding:14px; margin-bottom:10px; border:1px solid var(--accent); position:relative;">
+        <div style="position:absolute; top:10px; right:10px; display:flex; gap:4px;">
+          <span class="badge badge-blue">默认</span>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;">⚙️</button>
+        </div>
+        <div style="display:flex; gap:12px; align-items:flex-start;">
+          <div style="font-size:24px;">🤖</div>
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:2px;">qwen-code</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:6px;">/usr/local/bin/qwen-code</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+              参数: <code style="background:var(--bg-tertiary); padding:1px 4px; border-radius:3px; font-size:10px;">--workspace {project_root}</code>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <span class="badge badge-green" style="font-size:9px;">● 在线</span>
+              <span style="font-size:10px; color:var(--text-muted);">v1.2.3</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+          <button class="btn btn-ghost btn-sm">测试连接</button>
+          <button class="btn btn-ghost btn-sm">编辑</button>
+          <div style="flex:1;"></div>
+          <button class="btn btn-ghost btn-sm" style="color:var(--error);">删除</button>
+        </div>
+      </div>
+
+      <!-- Agent 项: cline -->
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="position:absolute; top:10px; right:10px;">
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;">⚙️</button>
+        </div>
+        <div style="display:flex; gap:12px; align-items:flex-start;">
+          <div style="font-size:24px;">🤖</div>
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:2px;">cline</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:6px;">~/.cline/bin/cline</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+              参数: <code style="background:var(--bg-tertiary); padding:1px 4px; border-radius:3px; font-size:10px;">--mode agent</code>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <span class="badge badge-gray" style="font-size:9px;">○ 未检测</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+          <button class="btn btn-ghost btn-sm">测试连接</button>
+          <button class="btn btn-ghost btn-sm">设为默认</button>
+          <button class="btn btn-ghost btn-sm">编辑</button>
+          <div style="flex:1;"></div>
+          <button class="btn btn-ghost btn-sm" style="color:var(--error);">删除</button>
+        </div>
+      </div>
+
+      <!-- Agent 项: opencode -->
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="position:absolute; top:10px; right:10px;">
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;">⚙️</button>
+        </div>
+        <div style="display:flex; gap:12px; align-items:flex-start;">
+          <div style="font-size:24px;">🤖</div>
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:2px;">opencode</div>
+            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:6px;">(待配置)</div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <span class="badge badge-red" style="font-size:9px;">○ 未配置</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+          <button class="btn btn-ghost btn-sm">编辑</button>
+          <div style="flex:1;"></div>
+          <button class="btn btn-ghost btn-sm" style="color:var(--error);">删除</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SKILL 管理 -->
+    <div class="settings-content" data-settings-tab="skills" style="max-width:600px; display:none;">
+      <div style="margin-bottom:16px;">
+        <h2 style="font-size:16px; font-weight:600; margin-bottom:2px;">SKILL 拓展管理</h2>
+        <p class="text-muted" style="font-size:12px;">设计契约校验拓展，执行任务时按需启用</p>
+      </div>
+
+      <!-- SKILL 项 -->
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">严格函数签名校验</div>
+            <div class="text-muted" style="font-size:11px;">校验生成代码的函数签名是否与 Spec 定义一致，包括参数类型、返回值</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">依赖合规检查</div>
+            <div class="text-muted" style="font-size:11px;">检查生成代码是否引入未授权的依赖库，确保符合项目依赖规范</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">安全规范强制</div>
+            <div class="text-muted" style="font-size:11px;">强制生成代码符合知识库中定义的安全标准和加密规范</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">同步生成动画脚本</div>
+            <div class="text-muted" style="font-size:11px;">要求 Agent 在实现代码的同时生成对应的动画脚本，用于演示和教学</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card" style="padding:14px; margin-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">代码风格检查</div>
+            <div class="text-muted" style="font-size:11px;">ESLint / Prettier / Black 等代码风格规则校验</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 通用设置 -->
+    <div class="settings-content" data-settings-tab="general" style="max-width:600px; display:none;">
+      <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">通用设置</h2>
+
+      <div class="form-group">
+        <label class="form-label">主题</label>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost btn-sm">☀️ 亮色</button>
+          <button class="btn btn-primary btn-sm">🌙 暗色</button>
+          <button class="btn btn-ghost btn-sm">💻 系统</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">语言</label>
+        <select class="select" style="width:200px;">
+          <option>简体中文</option>
+          <option>English</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">代码字体大小</label>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input type="range" class="slider" min="10" max="20" value="13" style="width:200px;">
+          <span style="font-size:12px; font-family:var(--font-mono); min-width:30px;">13px</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">自动保存间隔</label>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <select class="select" style="width:120px;">
+            <option>30 秒</option>
+            <option selected>60 秒</option>
+            <option>5 分钟</option>
+            <option>关闭</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 本地 HTTP 服务 -->
+      <div style="margin-top:16px;">
+        <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">本地 HTTP 服务</h3>
+        <div class="card" style="padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div>
+              <div style="font-size:12px; font-weight:500;">知识库文档本地访问</div>
+              <div class="text-muted" style="font-size:10px;">开启后可通过浏览器 URI 访问知识库文档</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="toggleKbHttpServer">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <span style="font-size:11px; color:var(--text-muted);">端口:</span>
+            <input type="number" class="input" id="kbHttpPort" value="8080" style="width:80px; padding:4px 8px; font-size:11px;">
+            <span style="font-size:11px; color:var(--text-muted);">地址:</span>
+            <span style="font-size:11px; font-family:var(--font-mono); color:var(--accent);">http://localhost:8080</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button class="btn btn-ghost btn-sm" id="btnTestKbHttp">🔗 测试连接</button>
+            <button class="btn btn-ghost btn-sm" id="btnOpenKbHttp">🌐 浏览器打开</button>
+          </div>
+          <div style="margin-top:8px; padding:8px; background:var(--bg-primary); border-radius:var(--radius-sm); font-size:10px; color:var(--text-muted);">
+            <strong>可用 URI 路径:</strong><br>
+            /kb/docs/&lt;文档ID&gt; — 浏览模式打开文档<br>
+            /kb/docs/&lt;文档ID&gt;/edit — 编辑模式打开文档
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 插件管理 -->
+    <div class="settings-content" data-settings-tab="plugins" style="max-width:600px; display:none;">
+      <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">插件管理</h2>
+
+      <!-- 插件 1 -->
+      <div class="card" style="padding:12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div style="font-size:20px;">🐍</div>
+            <div>
+              <div style="font-size:12px; font-weight:500;">Python AST 解析器</div>
+              <div class="text-muted" style="font-size:10px;">v2.1.0 · Tree-sitter 驱动</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-green">已加载</span>
+            <label class="toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 插件 2 -->
+      <div class="card" style="padding:12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div style="font-size:20px;">📜</div>
+            <div>
+              <div style="font-size:12px; font-weight:500;">JavaScript AST 解析器</div>
+              <div class="text-muted" style="font-size:10px;">v1.8.0 · Tree-sitter 驱动</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-green">已加载</span>
+            <label class="toggle">
+              <input type="checkbox" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 插件 3 -->
+      <div class="card" style="padding:12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div style="font-size:20px;">☕</div>
+            <div>
+              <div style="font-size:12px; font-weight:500;">Java AST 解析器</div>
+              <div class="text-muted" style="font-size:10px;">v1.5.0 · Tree-sitter 驱动</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-gray">未安装</span>
+            <button class="btn btn-primary btn-sm">安装</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 插件 4 -->
+      <div class="card" style="padding:12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div style="font-size:20px;">🐹</div>
+            <div>
+              <div style="font-size:12px; font-weight:500;">Go AST 解析器</div>
+              <div class="text-muted" style="font-size:10px;">v1.2.0 · Tree-sitter 驱动</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge badge-yellow">加载中</span>
+            <div class="progress-bar" style="width:80px;">
+              <div class="progress-bar-fill" style="width:60%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 关于 -->
+    <div class="settings-content" data-settings-tab="about" style="max-width:600px; display:none;">
+      <h2 style="font-size:16px; font-weight:600; margin-bottom:4px;">TopoOne UI</h2>
+      <div class="text-muted" style="font-size:12px; margin-bottom:16px;">版本 1.0.0 · 构建 20260429</div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div style="font-size:12px; line-height:1.8;">
+          <div><strong>源码架构分析与可视化教学工具</strong></div>
+          <div class="text-muted" style="margin-top:8px;">
+            Electron 33.0 · Vue 3.5 · Python 3.12<br>
+            D3.js 7.9 · Mermaid 11.0 · Tree-sitter
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-secondary btn-sm">检查更新</button>
+        <button class="btn btn-ghost btn-sm">查看日志</button>
+      </div>
+      <div class="text-muted" style="font-size:10px; margin-top:8px;">已是最新版本</div>
+    </div>
+
+  </div>
+</div>

@@ -1,0 +1,882 @@
+<!-- ===== 知识库页 /knowledge ===== -->
+<div style="display:flex; flex-direction:column; height:100%; overflow:hidden;">
+
+  <!-- 顶部 Tab 切换 -->
+  <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
+    <div class="tab active" data-kb-tab="graph" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">🕸️</span>
+      <span>知识图谱</span>
+    </div>
+    <div class="tab" data-kb-tab="categories" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">📂</span>
+      <span>分类管理</span>
+    </div>
+    <div class="tab" data-kb-tab="documents" style="border:none; border-bottom:2px solid transparent; height:36px;">
+      <span class="tab-icon">📄</span>
+      <span>知识点</span>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:flex; gap:4px; align-items:center;">
+      <button class="btn btn-ghost btn-sm" id="btnKbImport">📥 导入</button>
+      <button class="btn btn-ghost btn-sm" id="btnKbExport">📤 导出</button>
+    </div>
+  </div>
+
+  <!-- 内容区 -->
+  <div style="flex:1; overflow:hidden;">
+
+    <!-- Tab 1: 知识图谱 -->
+    <div class="kb-content" data-kb-tab="graph" style="height:100%; position:relative;">
+      <!-- 工具栏 -->
+      <div style="position:absolute; top:12px; left:12px; z-index:5; display:flex; gap:4px;">
+        <button class="btn btn-secondary btn-sm">🔍 适配视图</button>
+        <button class="btn btn-ghost btn-sm">＋ 放大</button>
+        <button class="btn btn-ghost btn-sm">－ 缩小</button>
+        <button class="btn btn-ghost btn-sm">↻ 重置</button>
+        <div class="divider-vertical"></div>
+        <button class="btn btn-ghost btn-sm">📤 导出 PNG</button>
+      </div>
+      <!-- 搜索 -->
+      <div style="position:absolute; top:12px; right:12px; z-index:5;">
+        <input type="text" class="input input-sm" placeholder="搜索节点..." style="width:180px;">
+      </div>
+      <!-- 图例 -->
+      <div style="position:absolute; bottom:12px; left:12px; z-index:5; display:flex; gap:12px; font-size:10px; color:var(--text-muted); background:var(--bg-secondary); padding:6px 10px; border-radius:var(--radius-md); border:1px solid var(--border);">
+        <span>● 模块</span>
+        <span>◼ 类</span>
+        <span>△ 函数</span>
+        <span>◇ 知识点</span>
+        <span>─→ 依赖</span>
+        <span>┄→ 引用</span>
+      </div>
+      <!-- SVG 画布 -->
+      <svg width="100%" height="100%" style="position:absolute; top:0; left:0;">
+        <defs>
+          <marker id="kg-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="var(--text-muted)" />
+          </marker>
+        </defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--border)" stroke-width="0.5" opacity="0.3"/>
+        </pattern>
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+        <!-- 边 - 依赖关系 -->
+        <line x1="350" y1="200" x2="200" y2="100" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#kg-arrow)" opacity="0.5"/>
+        <line x1="350" y1="200" x2="500" y2="100" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#kg-arrow)" opacity="0.5"/>
+        <line x1="350" y1="200" x2="200" y2="320" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#kg-arrow)" opacity="0.5"/>
+        <line x1="350" y1="200" x2="500" y2="320" stroke="var(--text-muted)" stroke-width="1.5" marker-end="url(#kg-arrow)" opacity="0.5"/>
+        <!-- 边 - 引用关系 (知识点 → 代码节点) -->
+        <defs>
+          <marker id="kg-ref-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="var(--accent)" opacity="0.8"/>
+          </marker>
+        </defs>
+        <line x1="100" y1="140" x2="180" y2="95" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#kg-ref-arrow)" opacity="0.7"/>
+        <line x1="620" y1="140" x2="540" y2="95" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#kg-ref-arrow)" opacity="0.7"/>
+        <line x1="100" y1="360" x2="180" y2="315" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#kg-ref-arrow)" opacity="0.7"/>
+        <!-- 节点 - 代码模块 -->
+        <circle cx="350" cy="200" r="36" fill="var(--accent)" opacity="0.15" stroke="var(--accent)" stroke-width="2"/>
+        <text x="350" y="205" text-anchor="middle" fill="var(--accent)" font-size="11" font-weight="600" font-family="var(--font-mono)">core</text>
+        <rect x="158" y="76" width="84" height="48" rx="6" fill="var(--success)" opacity="0.15" stroke="var(--success)" stroke-width="2"/>
+        <text x="200" y="100" text-anchor="middle" fill="var(--success)" font-size="10" font-family="var(--font-mono)">auth</text>
+        <text x="200" y="116" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)">认证服务</text>
+        <rect x="458" y="76" width="84" height="48" rx="6" fill="var(--warning)" opacity="0.15" stroke="var(--warning)" stroke-width="2"/>
+        <text x="500" y="100" text-anchor="middle" fill="var(--warning)" font-size="10" font-family="var(--font-mono)">api</text>
+        <text x="500" y="116" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)">API 网关</text>
+        <rect x="158" y="296" width="84" height="48" rx="6" fill="var(--error)" opacity="0.15" stroke="var(--error)" stroke-width="2"/>
+        <text x="200" y="320" text-anchor="middle" fill="var(--error)" font-size="10" font-family="var(--font-mono)">models</text>
+        <text x="200" y="336" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)">数据模型</text>
+        <rect x="458" y="296" width="84" height="48" rx="6" fill="var(--text-muted)" opacity="0.15" stroke="var(--text-muted)" stroke-width="2"/>
+        <text x="500" y="320" text-anchor="middle" fill="var(--text-muted)" font-size="10" font-family="var(--font-mono)">utils</text>
+        <text x="500" y="336" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="var(--font-sans)">工具函数</text>
+        <!-- 节点 - 知识点 (菱形) -->
+        <polygon points="100,110 130,140 100,170 70,140" fill="var(--accent)" opacity="0.2" stroke="var(--accent)" stroke-width="2"/>
+        <text x="100" y="144" text-anchor="middle" fill="var(--accent)" font-size="9" font-family="var(--font-sans)">JWT认证</text>
+        <polygon points="620,110 650,140 620,170 590,140" fill="var(--accent)" opacity="0.2" stroke="var(--accent)" stroke-width="2"/>
+        <text x="620" y="144" text-anchor="middle" fill="var(--accent)" font-size="9" font-family="var(--font-sans)">REST规范</text>
+        <polygon points="100,330 130,360 100,390 70,360" fill="var(--accent)" opacity="0.2" stroke="var(--accent)" stroke-width="2"/>
+        <text x="100" y="364" text-anchor="middle" fill="var(--accent)" font-size="9" font-family="var(--font-sans)">连接池</text>
+      </svg>
+    </div>
+
+    <!-- Tab 2: 分类管理 -->
+    <div class="kb-content" data-kb-tab="categories" style="height:100%; overflow:auto; padding:16px; display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="font-size:16px; font-weight:600;">四维分类管理</h2>
+        <div style="display:flex; gap:4px;">
+          <button class="btn btn-ghost btn-sm">🤖 LLM 辅助推荐标签</button>
+        </div>
+      </div>
+      <p class="text-muted" style="font-size:12px; margin-bottom:16px;">每个知识点可从四个维度各选 1~N 个标签，支持多维度交叉过滤</p>
+
+      <!-- 维度1: 开发生命周期 -->
+      <div class="card" style="padding:14px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:14px;">🔄</span>
+            <span style="font-size:13px; font-weight:600;">开发生命周期</span>
+            <span class="badge badge-blue" style="font-size:9px;">7 个标签</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button class="btn btn-ghost btn-sm">＋ 新增</button>
+            <button class="btn btn-ghost btn-sm">🤖 推荐</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="kb-tag-dim1" style="cursor:pointer;">需求</span>
+          <span class="kb-tag-dim1" style="cursor:pointer;">设计</span>
+          <span class="kb-tag-dim1" style="cursor:pointer;">编码</span>
+          <span class="kb-tag-dim1" style="cursor:pointer;">测试</span>
+          <span class="kb-tag-dim1" style="cursor:pointer;">部署</span>
+          <span class="kb-tag-dim1" style="cursor:pointer;">运维</span>
+          <span class="kb-tag-dim1" style="cursor:pointer;">重构</span>
+        </div>
+      </div>
+
+      <!-- 维度2: 技术栈工具链 -->
+      <div class="card" style="padding:14px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:14px;">🛠️</span>
+            <span style="font-size:13px; font-weight:600;">技术栈工具链</span>
+            <span class="badge badge-green" style="font-size:9px;">6 个标签</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button class="btn btn-ghost btn-sm">＋ 新增</button>
+            <button class="btn btn-ghost btn-sm">🤖 推荐</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="kb-tag-dim2" style="cursor:pointer;">Python</span>
+          <span class="kb-tag-dim2" style="cursor:pointer;">Go</span>
+          <span class="kb-tag-dim2" style="cursor:pointer;">JavaScript</span>
+          <span class="kb-tag-dim2" style="cursor:pointer;">数据库</span>
+          <span class="kb-tag-dim2" style="cursor:pointer;">Docker</span>
+          <span class="kb-tag-dim2" style="cursor:pointer;">CI-CD</span>
+        </div>
+      </div>
+
+      <!-- 维度3: 抽象层级 -->
+      <div class="card" style="padding:14px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:14px;">📐</span>
+            <span style="font-size:13px; font-weight:600;">抽象层级</span>
+            <span class="badge badge-yellow" style="font-size:9px;">6 个标签</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button class="btn btn-ghost btn-sm">＋ 新增</button>
+            <button class="btn btn-ghost btn-sm">🤖 推荐</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="kb-tag-dim3" style="cursor:pointer;">架构</span>
+          <span class="kb-tag-dim3" style="cursor:pointer;">模块</span>
+          <span class="kb-tag-dim3" style="cursor:pointer;">类</span>
+          <span class="kb-tag-dim3" style="cursor:pointer;">函数</span>
+          <span class="kb-tag-dim3" style="cursor:pointer;">配置</span>
+          <span class="kb-tag-dim3" style="cursor:pointer;">数据</span>
+        </div>
+      </div>
+
+      <!-- 维度4: 知识属性和用途 -->
+      <div class="card" style="padding:14px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:14px;">🎯</span>
+            <span style="font-size:13px; font-weight:600;">知识属性和用途</span>
+            <span class="badge badge-red" style="font-size:9px;">6 个标签</span>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button class="btn btn-ghost btn-sm">＋ 新增</button>
+            <button class="btn btn-ghost btn-sm">🤖 推荐</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="kb-tag-dim4" style="cursor:pointer;">最佳实践</span>
+          <span class="kb-tag-dim4" style="cursor:pointer;">设计模式</span>
+          <span class="kb-tag-dim4" style="cursor:pointer;">常见陷阱</span>
+          <span class="kb-tag-dim4" style="cursor:pointer;">规范</span>
+          <span class="kb-tag-dim4" style="cursor:pointer;">分析结果</span>
+          <span class="kb-tag-dim4" style="cursor:pointer;">教学素材</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab 3: 知识点 -->
+    <div class="kb-content" data-kb-tab="documents" style="height:100%; overflow:auto; padding:16px; display:none;">
+      <!-- 搜索 + 四维筛选 + 排序 -->
+      <div style="margin-bottom:12px;">
+        <!-- 第一行: 搜索 + 排序 -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" class="input input-sm kb-search-input" placeholder="🔍 搜索项目/文档..." style="width:220px;">
+            <span style="font-size:11px; color:var(--text-muted);" id="kbResultCount">共 10 项</span>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <select class="select select-sm kb-sort-select" style="width:120px;">
+              <option value="updated-desc">🕐 更新时间 ↓</option>
+              <option value="updated-asc">🕐 更新时间 ↑</option>
+              <option value="created-desc">📅 创建时间 ↓</option>
+              <option value="created-asc">📅 创建时间 ↑</option>
+              <option value="name-asc">🔤 名称 A→Z</option>
+            </select>
+            <button class="btn btn-primary btn-sm">＋ 新建</button>
+            <button class="btn btn-ghost btn-sm">📥 导入</button>
+          </div>
+        </div>
+        <!-- 第二行: 四维折叠筛选 -->
+        <div class="kb-dim-filter-bar">
+          <!-- 维度1 -->
+          <div class="kb-dim-filter-group">
+            <div class="kb-dim-filter-toggle" data-filter-dim="1">
+              <span class="kb-dim-filter-arrow">▸</span>
+              <span>🔄 生命周期</span>
+            </div>
+            <div class="kb-dim-filter-options" data-filter-dim="1">
+              <label class="kb-dim-chip"><input type="checkbox" value="需求"> 需求</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="设计"> 设计</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="编码"> 编码</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="测试"> 测试</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="部署"> 部署</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="运维"> 运维</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="重构"> 重构</label>
+            </div>
+          </div>
+          <!-- 维度2 -->
+          <div class="kb-dim-filter-group">
+            <div class="kb-dim-filter-toggle" data-filter-dim="2">
+              <span class="kb-dim-filter-arrow">▸</span>
+              <span>🛠️ 技术栈</span>
+            </div>
+            <div class="kb-dim-filter-options" data-filter-dim="2">
+              <label class="kb-dim-chip"><input type="checkbox" value="Python"> Python</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="Go"> Go</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="JavaScript"> JavaScript</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="数据库"> 数据库</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="Docker"> Docker</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="CI-CD"> CI-CD</label>
+            </div>
+          </div>
+          <!-- 维度3 -->
+          <div class="kb-dim-filter-group">
+            <div class="kb-dim-filter-toggle" data-filter-dim="3">
+              <span class="kb-dim-filter-arrow">▸</span>
+              <span>📐 抽象层级</span>
+            </div>
+            <div class="kb-dim-filter-options" data-filter-dim="3">
+              <label class="kb-dim-chip"><input type="checkbox" value="架构"> 架构</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="模块"> 模块</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="类"> 类</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="函数"> 函数</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="配置"> 配置</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="数据"> 数据</label>
+            </div>
+          </div>
+          <!-- 维度4 -->
+          <div class="kb-dim-filter-group">
+            <div class="kb-dim-filter-toggle" data-filter-dim="4">
+              <span class="kb-dim-filter-arrow">▸</span>
+              <span>🎯 知识属性</span>
+            </div>
+            <div class="kb-dim-filter-options" data-filter-dim="4">
+              <label class="kb-dim-chip"><input type="checkbox" value="最佳实践"> 最佳实践</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="设计模式"> 设计模式</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="常见陷阱"> 常见陷阱</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="规范"> 规范</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="分析结果"> 分析结果</label>
+              <label class="kb-dim-chip"><input type="checkbox" value="教学素材"> 教学素材</label>
+            </div>
+          </div>
+          <!-- 清除筛选 -->
+          <button class="btn btn-ghost btn-sm kb-clear-filters" style="align-self:flex-start; margin-top:2px;">✕ 清除筛选</button>
+        </div>
+      </div>
+
+      <!-- 项目/文档卡片列表 -->
+      <div class="kb-card-list" style="display:flex; flex-direction:column; gap:8px;">
+        <!-- 项目卡片 1 -->
+        <div class="card kb-item-card" data-type="project" data-id="proj-1" data-created="2026-04-01" data-updated="2026-05-01">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📂</span>
+              <span style="font-size:9px; color:var(--text-muted);">12个</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">topoOne-ui</span>
+                <span class="badge badge-green" style="font-size:8px;">项目</span>
+                <span class="badge badge-gray" style="font-size:8px;">⭐</span>
+                <span class="badge badge-gray" style="font-size:8px;">📌</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">TopoOne 前端界面 · 知识图谱可视化平台</div>
+            </div>
+            <!-- 四维标签 -->
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">设计</span>
+              <span class="badge badge-dim2" style="font-size:8px;">JavaScript</span>
+              <span class="badge badge-dim3" style="font-size:8px;">架构</span>
+              <span class="badge badge-dim4" style="font-size:8px;">分析结果</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              2天前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 项目卡片 2 -->
+        <div class="card kb-item-card" data-type="project" data-id="proj-2" data-created="2026-03-15" data-updated="2026-04-28">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📂</span>
+              <span style="font-size:9px; color:var(--text-muted);">8个</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">backend-api</span>
+                <span class="badge badge-green" style="font-size:8px;">项目</span>
+                <span class="badge badge-gray" style="font-size:8px;">⭐</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">后端 API 服务 · Go 微服务架构</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">编码</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Go</span>
+              <span class="badge badge-dim3" style="font-size:8px;">模块</span>
+              <span class="badge badge-dim4" style="font-size:8px;">最佳实践</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              5天前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 1 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-1" data-created="2026-04-20" data-updated="2026-05-02">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">JWT 认证规范</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-green" style="font-size:8px;">已审核</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">JWT token 的生成、验证、刷新完整流程，包含签名算法选择、过期时间设置</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">设计</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Python</span>
+              <span class="badge badge-dim3" style="font-size:8px;">模块</span>
+              <span class="badge badge-dim4" style="font-size:8px;">最佳实践</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              1天前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 2 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-2" data-created="2026-03-10" data-updated="2026-04-25">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">微服务架构设计</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-green" style="font-size:8px;">已审核</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">核心模块依赖 auth、api、models 三个子模块，通过 HTTP/gRPC 与外部服务通信</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">设计</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Go</span>
+              <span class="badge badge-dim3" style="font-size:8px;">架构</span>
+              <span class="badge badge-dim4" style="font-size:8px;">分析结果</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              1周前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 3 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-3" data-created="2026-04-05" data-updated="2026-04-30">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">数据库连接池配置</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-yellow" style="font-size:8px;">待审核</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">连接池最小连接数设为预期并发量的 50%，最大连接数 200，超时 30s</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">运维</span>
+              <span class="badge badge-dim2" style="font-size:8px;">数据库</span>
+              <span class="badge badge-dim3" style="font-size:8px;">配置</span>
+              <span class="badge badge-dim4" style="font-size:8px;">最佳实践</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              3天前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 4 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-4" data-created="2026-02-20" data-updated="2026-04-15">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">RESTful API 设计规范</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-gray" style="font-size:8px;">草稿</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">资源命名使用复数名词，HTTP 方法对应 CRUD 操作，版本控制通过 URL 路径实现</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">设计</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Go</span>
+              <span class="badge badge-dim3" style="font-size:8px;">模块</span>
+              <span class="badge badge-dim4" style="font-size:8px;">规范</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              2周前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 5 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-5" data-created="2026-04-10" data-updated="2026-04-28">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">SQL 注入防御指南</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-green" style="font-size:8px;">已审核</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">使用参数化查询替代字符串拼接，所有用户输入经过白名单校验</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">编码</span>
+              <span class="badge badge-dim2" style="font-size:8px;">数据库</span>
+              <span class="badge badge-dim3" style="font-size:8px;">函数</span>
+              <span class="badge badge-dim4" style="font-size:8px;">常见陷阱</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              5天前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 项目卡片 3 -->
+        <div class="card kb-item-card" data-type="project" data-id="proj-3" data-created="2026-03-01" data-updated="2026-04-20">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📂</span>
+              <span style="font-size:9px; color:var(--text-muted);">5个</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">data-pipeline</span>
+                <span class="badge badge-green" style="font-size:8px;">项目</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">数据处理管道 · ETL 工作流引擎</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">编码</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Python</span>
+              <span class="badge badge-dim3" style="font-size:8px;">数据</span>
+              <span class="badge badge-dim4" style="font-size:8px;">设计模式</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              2周前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 6 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-6" data-created="2026-04-15" data-updated="2026-04-26">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">Docker 部署手册</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-green" style="font-size:8px;">已审核</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">Dockerfile 编写规范、多阶段构建、docker-compose 编排配置</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">部署</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Docker</span>
+              <span class="badge badge-dim3" style="font-size:8px;">配置</span>
+              <span class="badge badge-dim4" style="font-size:8px;">规范</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              1周前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 项目卡片 4 -->
+        <div class="card kb-item-card" data-type="project" data-id="proj-4" data-created="2026-04-01" data-updated="2026-04-22">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📂</span>
+              <span style="font-size:9px; color:var(--text-muted);">3个</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">auth-service</span>
+                <span class="badge badge-green" style="font-size:8px;">项目</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">认证授权服务 · OAuth2 / JWT / RBAC</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">编码</span>
+              <span class="badge badge-dim2" style="font-size:8px;">Go</span>
+              <span class="badge badge-dim3" style="font-size:8px;">类</span>
+              <span class="badge badge-dim4" style="font-size:8px;">设计模式</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              2周前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文档卡片 7 -->
+        <div class="card kb-item-card" data-type="document" data-id="doc-7" data-created="2026-04-18" data-updated="2026-04-29">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+              <span style="font-size:20px;">📄</span>
+              <span style="font-size:9px; color:var(--text-muted);">文档</span>
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                <span style="font-size:13px; font-weight:600;">数据流转动画脚本</span>
+                <span class="badge badge-blue" style="font-size:8px;">文档</span>
+                <span class="badge badge-green" style="font-size:8px;">已审核</span>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted);">Request → 提取 → 验证 → User/Error 的完整数据流路径，D3.js 力导向图</div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+              <span class="badge badge-dim1" style="font-size:8px;">设计</span>
+              <span class="badge badge-dim2" style="font-size:8px;">JavaScript</span>
+              <span class="badge badge-dim3" style="font-size:8px;">数据</span>
+              <span class="badge badge-dim4" style="font-size:8px;">教学素材</span>
+            </div>
+            <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+              4天前
+            </div>
+            <div style="display:flex; gap:2px; flex-shrink:0;">
+              <button class="btn btn-ghost btn-sm kb-item-btn-fav" title="收藏">☆</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-pin" title="置顶">📌</button>
+              <button class="btn btn-ghost btn-sm kb-item-btn-more" title="更多">⋯</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分页 -->
+      <div style="display:flex; justify-content:center; align-items:center; gap:8px; margin-top:16px; padding:12px; font-size:11px; color:var(--text-muted);">
+        <span>共 10 项</span>
+        <div class="divider-vertical"></div>
+        <button class="btn btn-ghost btn-sm" disabled>‹ 上一页</button>
+        <button class="btn btn-ghost btn-sm" style="background:var(--bg-active);">1</button>
+        <button class="btn btn-ghost btn-sm" disabled>下一页 ›</button>
+      </div>
+    </div>
+
+    <!-- Tab 4: 文档编辑器 (默认隐藏) -->
+    <div class="kb-content" data-kb-tab="doc-editor" style="height:100%; overflow:hidden; display:none; flex-direction:column;">
+      <!-- 文档编辑器顶部栏 -->
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button class="btn btn-ghost btn-sm kb-doc-back" title="返回列表">← 返回</button>
+          <span style="font-size:13px; font-weight:600;" id="kbDocTitle">JWT 认证规范.md</span>
+          <span class="badge badge-blue" style="font-size:8px;">文档</span>
+          <span class="badge badge-green" style="font-size:8px;">已保存</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <!-- 模式切换 -->
+          <div style="display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden;">
+            <button class="btn btn-ghost kb-doc-mode-edit active" style="border:none; border-radius:0; font-size:11px; padding:4px 12px;">✏️ 编辑</button>
+            <button class="btn btn-ghost kb-doc-mode-browse" style="border:none; border-left:1px solid var(--border); border-radius:0; font-size:11px; padding:4px 12px;">👁️ 浏览</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="kbDocSave">💾 保存</button>
+          <button class="btn btn-ghost btn-sm" id="kbDocShare">🔗 分享链接</button>
+        </div>
+      </div>
+
+      <!-- 编辑模式: MD 代码编辑器 -->
+      <div class="kb-doc-edit-view" style="flex:1; overflow:auto; padding:0; display:flex;">
+        <!-- 行号栏 -->
+        <div style="width:40px; background:var(--bg-secondary); border-right:1px solid var(--border); padding:12px 0; text-align:right; font-family:'Fira Code','Cascadia Code',monospace; font-size:12px; line-height:1.6; color:var(--text-muted); user-select:none; flex-shrink:0;" id="kbDocLineNumbers">
+          1
+          2
+          3
+          4
+          5
+          6
+          7
+          8
+          9
+          10
+          11
+          12
+          13
+          14
+          15
+          16
+          17
+          18
+          19
+          20
+          21
+          22
+          23
+          24
+          25
+          26
+          27
+          28
+          29
+          30
+          31
+          32
+          33
+          34
+          35
+          36
+          37
+          38
+          39
+          40
+        </div>
+        <!-- 代码编辑区 -->
+        <textarea class="kb-doc-textarea" spellcheck="false" style="flex:1; padding:12px; border:none; outline:none; resize:none; font-family:'Fira Code','Cascadia Code',monospace; font-size:12px; line-height:1.6; background:var(--bg-secondary); color:var(--text-primary); tab-size:2;"># JWT 认证规范
+
+## 概述
+本文档描述了 TopoOne 系统中 JWT (JSON Web Token) 认证的完整流程，包括 token 的生成、验证、刷新机制。
+
+## 技术栈
+- **语言**: Python
+- **框架**: FastAPI
+- **库**: PyJWT, passlib
+
+## Token 生成流程
+
+### 1. 用户登录验证
+```python
+def authenticate_user(username: str, password: str):
+    user = db.query(User).filter(User.username == username).first()
+    if not user or not verify_password(password, user.hashed_password):
+        return None
+    return user
+
+### 2. 生成 Access Token
+```python
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+```
+
+## 动画演示
+
+:::animation
+name: JWT Token 流转动画
+type: sequence
+steps:
+  - label: "用户登录"
+    action: highlight(node: login_form)
+    duration: 1s
+  - label: "生成 Token"
+    action: animate(flow: login_form → auth_server)
+    duration: 1.5s
+  - label: "返回 Token"
+    action: animate(flow: auth_server → client)
+    duration: 1s
+  - label: "携带 Token 请求"
+    action: animate(flow: client → api_gateway, label: "Bearer xxx")
+    duration: 1.5s
+:::
+
+## 最佳实践
+1. Access Token 有效期设置为 15 分钟
+2. Refresh Token 有效期设置为 7 天
+3. 使用 HTTP-only Cookie 存储 Refresh Token
+4. Token 吊销使用黑名单机制</textarea>
+      </div>
+
+      <!-- 浏览模式: 文档渲染 + 动画执行 -->
+      <div class="kb-doc-browse-view" style="flex:1; overflow:auto; padding:20px 24px; display:none;">
+        <!-- 文档渲染区 -->
+        <div class="kb-doc-rendered" style="max-width:800px; margin:0 auto;">
+          <h1 style="font-size:24px; font-weight:700; margin-bottom:16px; padding-bottom:8px; border-bottom:2px solid var(--border);">JWT 认证规范</h1>
+          <h2 style="font-size:18px; font-weight:600; margin:20px 0 10px;">概述</h2>
+          <p style="font-size:13px; line-height:1.7; color:var(--text-secondary); margin-bottom:12px;">本文档描述了 TopoOne 系统中 JWT (JSON Web Token) 认证的完整流程，包括 token 的生成、验证、刷新机制。</p>
+
+          <h2 style="font-size:18px; font-weight:600; margin:20px 0 10px;">技术栈</h2>
+          <ul style="font-size:13px; line-height:1.7; color:var(--text-secondary); margin-bottom:12px; padding-left:20px;">
+            <li><strong>语言</strong>: Python</li>
+            <li><strong>框架</strong>: FastAPI</li>
+            <li><strong>库</strong>: PyJWT, passlib</li>
+          </ul>
+
+          <h2 style="font-size:18px; font-weight:600; margin:20px 0 10px;">Token 生成流程</h2>
+          <h3 style="font-size:15px; font-weight:600; margin:16px 0 8px;">1. 用户登录验证</h3>
+          <div style="background:var(--bg-primary); border:1px solid var(--border); border-radius:6px; padding:12px; font-family:'Fira Code',monospace; font-size:11px; line-height:1.6; color:var(--text-secondary); margin-bottom:12px; overflow-x:auto;">
+            <div style="color:var(--text-muted);"># Python 代码</div>
+            <div>def authenticate_user(username, password):</div>
+            <div style="padding-left:20px;">user = db.query(User).filter(User.username == username).first()</div>
+            <div style="padding-left:20px;">if not user or not verify_password(password, user.hashed_password):</div>
+            <div style="padding-left:40px;">return None</div>
+            <div style="padding-left:20px;">return user</div>
+          </div>
+
+          <h3 style="font-size:15px; font-weight:600; margin:16px 0 8px;">2. 生成 Access Token</h3>
+          <div style="background:var(--bg-primary); border:1px solid var(--border); border-radius:6px; padding:12px; font-family:'Fira Code',monospace; font-size:11px; line-height:1.6; color:var(--text-secondary); margin-bottom:12px; overflow-x:auto;">
+            <div>def create_access_token(data, expires_delta=None):</div>
+            <div style="padding-left:20px;">to_encode = data.copy()</div>
+            <div style="padding-left:20px;">expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))</div>
+            <div style="padding-left:20px;">to_encode.update({"exp": expire})</div>
+            <div style="padding-left:20px;">return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)</div>
+          </div>
+
+          <!-- 动画区块 -->
+          <div class="kb-animation-block" style="margin:20px 0; border:1px solid var(--accent); border-radius:8px; overflow:hidden; background:rgba(99,102,241,0.04);">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(99,102,241,0.08); border-bottom:1px solid var(--accent);">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:14px;">🎬</span>
+                <span style="font-size:13px; font-weight:600; color:var(--accent);">JWT Token 流转动画</span>
+                <span class="badge badge-blue" style="font-size:8px;">sequence</span>
+              </div>
+              <div style="display:flex; gap:4px;">
+                <button class="btn btn-primary btn-sm kb-anim-play">▶ 播放</button>
+                <button class="btn btn-ghost btn-sm kb-anim-step">⏭ 单步</button>
+                <button class="btn btn-ghost btn-sm kb-anim-reset">↻ 重置</button>
+              </div>
+            </div>
+            <!-- 动画画布 -->
+            <div class="kb-anim-canvas" style="height:200px; background:var(--bg-primary); margin:12px; border-radius:6px; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden;">
+              <div class="kb-anim-placeholder" style="text-align:center; color:var(--text-muted);">
+                <div style="font-size:24px; margin-bottom:8px;">🎬</div>
+                <div style="font-size:12px;">点击 "▶ 播放" 执行动画</div>
+                <div style="font-size:10px; margin-top:4px;">4 个步骤 · 预计 5s</div>
+              </div>
+              <!-- 动画节点 (隐藏, 播放时显示) -->
+              <div class="kb-anim-nodes" style="display:none; width:100%; height:100%; position:absolute; top:0; left:0;">
+                <div class="kb-anim-node" style="position:absolute; left:10%; top:50%; transform:translateY(-50%); padding:8px 12px; background:var(--bg-secondary); border:2px solid var(--accent); border-radius:8px; font-size:11px; font-weight:600;">👤 用户</div>
+                <div class="kb-anim-node" style="position:absolute; left:35%; top:50%; transform:translateY(-50%); padding:8px 12px; background:var(--bg-secondary); border:2px solid var(--border); border-radius:8px; font-size:11px; font-weight:600;">🔐 Auth Server</div>
+                <div class="kb-anim-node" style="position:absolute; left:65%; top:50%; transform:translateY(-50%); padding:8px 12px; background:var(--bg-secondary); border:2px solid var(--border); border-radius:8px; font-size:11px; font-weight:600;">🌐 API Gateway</div>
+                <div class="kb-anim-node" style="position:absolute; left:88%; top:50%; transform:translateY(-50%); padding:8px 12px; background:var(--bg-secondary); border:2px solid var(--border); border-radius:8px; font-size:11px; font-weight:600;">📦 Service</div>
+                <!-- 动画箭头 -->
+                <div class="kb-anim-arrow" style="position:absolute; left:22%; top:48%; width:13%; height:2px; background:var(--accent);">→</div>
+                <div class="kb-anim-arrow" style="position:absolute; left:50%; top:48%; width:15%; height:2px; background:var(--border);">→</div>
+                <div class="kb-anim-arrow" style="position:absolute; left:78%; top:48%; width:10%; height:2px; background:var(--border);">→</div>
+              </div>
+            </div>
+            <!-- 动画步骤指示器 -->
+            <div style="display:flex; gap:8px; padding:8px 14px; border-top:1px solid var(--border); background:var(--bg-secondary);">
+              <span class="kb-anim-step-indicator active" style="font-size:10px; padding:2px 8px; border-radius:3px; background:var(--accent); color:#fff;">1. 用户登录</span>
+              <span class="kb-anim-step-indicator" style="font-size:10px; padding:2px 8px; border-radius:3px; background:var(--bg-primary); color:var(--text-muted);">2. 生成 Token</span>
+              <span class="kb-anim-step-indicator" style="font-size:10px; padding:2px 8px; border-radius:3px; background:var(--bg-primary); color:var(--text-muted);">3. 返回 Token</span>
+              <span class="kb-anim-step-indicator" style="font-size:10px; padding:2px 8px; border-radius:3px; background:var(--bg-primary); color:var(--text-muted);">4. 携带 Token 请求</span>
+            </div>
+          </div>
+
+          <h2 style="font-size:18px; font-weight:600; margin:20px 0 10px;">最佳实践</h2>
+          <ol style="font-size:13px; line-height:1.7; color:var(--text-secondary); margin-bottom:12px; padding-left:20px;">
+            <li>Access Token 有效期设置为 15 分钟</li>
+            <li>Refresh Token 有效期设置为 7 天</li>
+            <li>使用 HTTP-only Cookie 存储 Refresh Token</li>
+            <li>Token 吊销使用黑名单机制</li>
+          </ol>
+        </div>
+
+        <!-- URI 分享栏 -->
+        <div class="kb-doc-uri-bar" style="position:fixed; bottom:0; left:0; right:0; padding:8px 16px; background:var(--bg-secondary); border-top:1px solid var(--border); display:flex; align-items:center; gap:10px; z-index:10;">
+          <span style="font-size:11px; color:var(--text-muted);">🔗 本地访问地址:</span>
+          <input type="text" class="kb-doc-uri-input" value="http://localhost:8080/kb/docs/jwt-auth-spec" readonly style="flex:1; padding:4px 8px; font-size:11px; background:var(--bg-primary); border:1px solid var(--border); border-radius:4px; color:var(--text-secondary); outline:none;">
+          <button class="btn btn-ghost btn-sm kb-doc-copy-uri">📋 复制</button>
+          <button class="btn btn-ghost btn-sm kb-doc-open-uri">🌐 浏览器打开</button>
+          <span style="font-size:10px; color:var(--text-muted);">需开启本地 HTTP 服务</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

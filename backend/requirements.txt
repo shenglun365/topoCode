@@ -1,0 +1,32 @@
+# TopoOne UI - Python Backend Dependencies
+
+# ZeroMQ
+pyzmq>=26.0.0
+
+# SQLite (built-in, no extra dependency needed)
+
+# Tree-sitter (代码解析)
+tree-sitter>=0.22.0
+tree-sitter-python>=0.21.0
+tree-sitter-javascript>=0.21.0
+tree-sitter-typescript>=0.21.0
+tree-sitter-go>=0.21.0
+tree-sitter-java>=0.21.0
+tree-sitter-rust>=0.21.0
+
+# 图计算 (调用链/依赖图/知识图谱)
+networkx>=3.0
+
+# 向量数据库 (可选 - P3)
+# chromadb>=0.4.0
+
+# 异步任务 (可选)
+# celery>=5.3.0
+# redis>=5.0.0
+
+# HTTP 客户端 (PlantUML 远程渲染)
+requests>=2.31.0
+
+# 工具库
+pydantic>=2.0.0
+pydantic-settings>=2.0.0

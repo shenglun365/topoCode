@@ -1,0 +1,63 @@
+/* ========================================
+   Catppuccin Mocha 主题变量
+   ======================================== */
+
+:root {
+  /* --- 暗色主题 (默认 - Catppuccin Mocha) --- */
+  --bg-primary:    #1e1e2e;  /* base */
+  --bg-secondary:  #181825;  /* mantle */
+  --bg-tertiary:   #313244;  /* surface0 */
+  --bg-hover:      #45475a;  /* surface1 */
+  --bg-active:     #585b70;  /* surface2 */
+
+  --text-primary:   #cdd6f4;  /* text */
+  --text-secondary: #a6adc8;  /* subtext0 */
+  --text-muted:     #6c7086;  /* overlay0 */
+
+  --accent:         #89b4fa;  /* blue */
+  --accent-hover:   #74c7ec;  /* sapphire */
+  --success:        #a6e3a1;  /* green */
+  --warning:        #f9e2af;  /* yellow */
+  --error:          #f38ba8;  /* red */
+
+  --border:         #45475a;  /* surface1 */
+  --border-light:   #585b70;  /* surface2 */
+
+  /* 尺寸 */
+  --activity-bar-width: 48px;
+  --tab-bar-height:    36px;
+  --status-bar-height: 24px;
+  --panel-left-width:  240px;
+  --panel-right-width: 280px;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* 字体 (含中文支持) */
+  --font-sans:    'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Noto Sans Mono CJK SC', Consolas, monospace;
+}
+
+/* 亮色主题 - Catppuccin Latte */
+[data-theme="light"] {
+  --bg-primary:    #eff1f5;
+  --bg-secondary:  #e6e9ef;
+  --bg-tertiary:   #ccd0da;
+  --bg-hover:      #bcc0cc;
+  --bg-active:     #acb0be;
+
+  --text-primary:   #4c4f69;
+  --text-secondary: #5c5f77;
+  --text-muted:     #8c8fa1;
+
+  --accent:         #1e66f5;
+  --accent-hover:   #2a6ef5;
+  --success:        #40a02b;
+  --warning:        #df8e1d;
+  --error:          #d20f39;
+
+  --border:         #acb0be;
+  --border-light:   #9ca0b0;
+}

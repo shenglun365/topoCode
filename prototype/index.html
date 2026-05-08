@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TopoOne UI — 源码架构分析工具</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- ===== 顶部区域 (菜单栏) ===== -->
+    <div class="app-top">
+      <div class="app-row1">
+        <!-- 产品 Logo -->
+        <div class="menu-bar-logo">
+          <span class="logo-icon">◆</span>
+          <span class="logo-text">TopoOne</span>
+        </div>
+
+        <!-- 通用菜单 -->
+        <div class="menu-bar" id="menuBar">
+          <div class="menu-item" data-menu="file">
+            <span>文件</span>
+          </div>
+          <div class="menu-item" data-menu="edit">
+            <span>编辑</span>
+          </div>
+          <div class="menu-item" data-menu="view">
+            <span>查看</span>
+          </div>
+          <div class="menu-item" data-menu="tools">
+            <span>工具</span>
+          </div>
+          <div class="menu-item" data-menu="help">
+            <span>帮助</span>
+          </div>
+        </div>
+
+        <!-- 占位 -->
+        <div style="flex:1;"></div>
+
+        <!-- 右侧工具 -->
+        <div class="tab-bar-actions">
+          <div class="icon-btn" id="btnToggleLeft" title="切换左面板">☰</div>
+          <div class="icon-btn" id="btnToggleRight" title="切换右面板">⫷</div>
+          <div class="icon-btn" id="btnTheme" title="切换主题">🌙</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 主内容行 ===== -->
+    <div class="app-row2">
+      <!-- 活动栏 (全高) -->
+      <nav class="activity-bar" id="activityBar">
+        <div class="activity-item" data-page="home" title="项目导入">📁</div>
+        <div class="activity-item active" data-page="analysis" title="代码分析">📊</div>
+        <div class="activity-item" data-page="knowledge" title="知识库">🧠</div>
+        <div class="activity-item" data-page="coder" title="AI 助手">🤖</div>
+        <div class="activity-spacer"></div>
+        <div class="activity-item" data-page="user" title="设置">⚙️</div>
+      </nav>
+
+      <!-- 左侧面板 -->
+      <aside class="panel-left" id="panelLeft">
+        <div class="panel-header">
+          <span>文件资源管理器</span>
+          <div class="panel-header-actions">
+            <div class="icon-btn" title="刷新">↻</div>
+            <div class="icon-btn" title="折叠">▸</div>
+          </div>
+        </div>
+        <div class="panel-body" id="leftPanelBody">
+          <!-- 动态内容 (由 JS 按页面注入) -->
+        </div>
+      </aside>
+
+      <!-- 主内容区 -->
+      <main class="content-area">
+        <div class="content-body" id="contentBody">
+          <!-- 各页面片段 (由 JS 动态加载) -->
+          <div class="page active" id="page-home"></div>
+          <div class="page" id="page-analysis"></div>
+          <div class="page" id="page-knowledge"></div>
+          <div class="page" id="page-coder"></div>
+          <div class="page" id="page-user"></div>
+        </div>
+      </main>
+
+      <!-- 右侧面板 -->
+      <aside class="panel-right" id="panelRight">
+        <div class="panel-header" id="rightPanelHeader">
+          <span>详情</span>
+          <div class="panel-header-actions">
+            <div class="icon-btn" title="关闭">✕</div>
+          </div>
+        </div>
+        <div class="panel-body" id="rightPanelBody">
+          <!-- 默认空状态 -->
+          <div class="empty-state" id="rightPanelDefault">
+            <div class="icon">📌</div>
+            <div class="title">节点详情</div>
+            <div class="desc">点击图中的节点或文件树中的项来查看详情</div>
+          </div>
+
+          <!-- coder 页专用: 右面板 4 Tab (M1: 原型补全, JS 动态切换显示) -->
+          <div class="right-panel-tabs" id="rightPanelCoderTabs" style="display:none; flex-direction:column; height:100%;">
+            <div class="coder-rp-tab-bar" style="display:flex; border-bottom:1px solid var(--border);">
+              <div class="coder-rp-tab active" data-rp-tab="code-parse">📊 代码解析</div>
+              <div class="coder-rp-tab" data-rp-tab="knowledge">🧠 知识库</div>
+              <div class="coder-rp-tab" data-rp-tab="spec">📄 Spec</div>
+              <div class="coder-rp-tab" data-rp-tab="task-config">⚙️ 任务配置</div>
+            </div>
+            <div class="coder-rp-content" style="flex:1; overflow:auto; padding:8px;">
+              <div class="coder-rp-pane active" data-rp-tab="code-parse">
+                <div class="empty-state">
+                  <div class="icon">📊</div>
+                  <div class="title">当前会话关联文件</div>
+                  <div class="desc">AI 对话涉及到的代码文件将在此展示</div>
+                </div>
+              </div>
+              <div class="coder-rp-pane" data-rp-tab="knowledge" style="display:none;">
+                <div class="empty-state">
+                  <div class="icon">🧠</div>
+                  <div class="title">知识库引用</div>
+                  <div class="desc">AI 检索到的知识库文档将在此展示</div>
+                </div>
+              </div>
+              <div class="coder-rp-pane" data-rp-tab="spec" style="display:none;">
+                <div class="empty-state">
+                  <div class="icon">📄</div>
+                  <div class="title">Spec 文档</div>
+                  <div class="desc">AI 生成的设计文档将在此展示</div>
+                </div>
+              </div>
+              <div class="coder-rp-pane" data-rp-tab="task-config" style="display:none;">
+                <div class="empty-state">
+                  <div class="icon">⚙️</div>
+                  <div class="title">任务配置与状态</div>
+                  <div class="desc">Agent 调度参数和任务执行状态</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ===== 底部状态栏 ===== -->
+    <footer class="status-bar">
+      <div class="status-item">
+        <span class="status-dot"></span>
+        <span>Python</span>
+      </div>
+      <div class="status-item">
+        <span>AST 解析完成</span>
+      </div>
+      <div class="status-item">
+        <span>分支: main</span>
+      </div>
+      <div class="status-spacer"></div>
+      <div class="status-item">
+        <span>AI: Ollama / qwen2.5-coder:7b</span>
+      </div>
+      <div class="status-item">
+        <span>UTF-8</span>
+      </div>
+      <div class="status-item">
+        <span>Zoom: 100%</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 页面片段模板 (隐藏) -->
+  <template id="tpl-home"></template>
+  <template id="tpl-analysis"></template>
+  <template id="tpl-knowledge"></template>
+  <template id="tpl-coder"></template>
+  <template id="tpl-user"></template>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
