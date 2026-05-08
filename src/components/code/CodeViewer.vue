@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
+import MarkdownIt from 'markdown-it'
 import type { FileTreeNode } from '@/types/ipc'
 
 const props = defineProps<{
@@ -18,8 +19,15 @@ const { t } = useI18n()
 
 const content = ref('')
 const highlightedLines = ref<string[]>([])
+const markdownHtml = ref('')
 const loading = ref(true)
 const error = ref<string | null>(null)
+
+// 判断是否为 markdown 文件
+const isMarkdown = computed(() => {
+  const ext = (props.node.name || '').split('.').pop()?.toLowerCase()
+  return ext === 'md' || ext === 'markdown'
+})
 
 // 大文件保护：最多渲染 5000 行
 const MAX_LINES = 5000
@@ -35,6 +43,32 @@ const visibleData = computed(() => {
   }
   return result
 })
+
+// Markdown 渲染
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+  breaks: true,
+  highlight: function (str: string, lang: string) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return hljs.highlight(str, { language: lang }).value
+      } catch (e) {
+        // 忽略高亮错误
+      }
+    }
+    return escapeHtml(str)
+  }
+})
+
+function renderMarkdown() {
+  if (!content.value) {
+    markdownHtml.value = ''
+    return
+  }
+  markdownHtml.value = md.render(content.value)
+}
 
 // 语法高亮 — 整体高亮后按行分割
 function applyHighlight() {
@@ -99,7 +133,12 @@ async function loadFileContent() {
       const lines = result.split('\n')
       truncated.value = lines.length > MAX_LINES
       totalLines.value = lines.length
-      applyHighlight()
+
+      if (isMarkdown.value) {
+        renderMarkdown()
+      } else {
+        applyHighlight()
+      }
     } else {
       error.value = t('preview.electronOnly')
     }
@@ -135,6 +174,11 @@ function handleClose() {
     <!-- 错误状态 -->
     <div v-else-if="error" class="code-error">
       <span>{{ error }}</span>
+    </div>
+
+    <!-- Markdown 渲染 -->
+    <div v-else-if="isMarkdown" class="markdown-container">
+      <div class="markdown-body" v-html="markdownHtml"></div>
     </div>
 
     <!-- 代码内容 -->
@@ -222,6 +266,137 @@ function handleClose() {
   font-size: 12px;
   font-style: italic;
   border-top: 1px solid var(--border);
+}
+
+/* Markdown 容器 */
+.markdown-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-primary);
+}
+
+.markdown-body {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 32px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+/* Markdown 内部样式 */
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4),
+.markdown-body :deep(h5),
+.markdown-body :deep(h6) {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.markdown-body :deep(h1) { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.markdown-body :deep(h2) { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.markdown-body :deep(h3) { font-size: 1.25em; }
+.markdown-body :deep(h4) { font-size: 1em; }
+
+.markdown-body :deep(p) {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-body :deep(code) {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text-primary);
+}
+
+.markdown-body :deep(pre) {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.6;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+}
+
+.markdown-body :deep(blockquote) {
+  padding: 0 1em;
+  margin: 0 0 16px 0;
+  color: var(--text-secondary);
+  border-left: 0.25em solid var(--border);
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  padding-left: 2em;
+  margin-bottom: 16px;
+}
+
+.markdown-body :deep(li) {
+  margin-bottom: 4px;
+}
+
+.markdown-body :deep(hr) {
+  margin: 24px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.markdown-body :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.markdown-body :deep(table) {
+  display: block;
+  width: 100%;
+  overflow: auto;
+  margin-bottom: 16px;
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+}
+
+.markdown-body :deep(th) {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.markdown-body :deep(tr:nth-child(even)) {
+  background: var(--bg-secondary);
 }
 
 /* highlight.js 样式覆盖 */

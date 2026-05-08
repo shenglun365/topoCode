@@ -113,7 +113,7 @@ MAIN_DB_TABLES_SQL = """
         project_id TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('ast', 'call-chain', 'dependency', 'dataflow', 'full')),
         name TEXT NOT NULL,
-        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'done', 'error', 'cancelled')),
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'done', 'error', 'cancelled', 'stopped')),
         progress INTEGER DEFAULT 0,
         total INTEGER DEFAULT 100,
         current INTEGER DEFAULT 0,
@@ -123,6 +123,10 @@ MAIN_DB_TABLES_SQL = """
         pinned INTEGER DEFAULT 0,
         tags TEXT,
         agent_id TEXT,
+        scope TEXT,
+        extensions TEXT,
+        exclude_dirs TEXT,
+        report_types TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -139,6 +143,7 @@ MAIN_DB_TABLES_SQL = """
         dependencies TEXT,
         dataflow TEXT,
         summary TEXT,
+        logs TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (task_id) REFERENCES analysis_tasks(id) ON DELETE CASCADE
     );
@@ -423,6 +428,28 @@ class MultiDBManager:
     def _init_main_tables(self):
         """初始化主库表"""
         self.main_db.conn.executescript(MAIN_DB_TABLES_SQL)
+        self._migrate_main_tables()
+
+    def _migrate_main_tables(self):
+        """迁移主库表 - 添加新字段"""
+        # 为已有数据库添加新字段
+        columns_to_add = {
+            "analysis_tasks": [
+                ("scope", "TEXT"),
+                ("extensions", "TEXT"),
+                ("exclude_dirs", "TEXT"),
+                ("report_types", "TEXT"),
+            ],
+            "analysis_reports": [
+                ("logs", "TEXT"),
+            ],
+        }
+        for table, columns in columns_to_add.items():
+            for col_name, col_type in columns:
+                try:
+                    self.main_db.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+                except Exception:
+                    pass  # 列已存在，忽略
         self.main_db.conn.commit()
         _init_default_skills(self.main_db)
 

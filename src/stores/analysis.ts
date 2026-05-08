@@ -1,7 +1,7 @@
 /** Analysis Store - 分析任务管理 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AnalysisTask, AnalysisResult } from '@/types/ipc'
+import type { AnalysisTask, AnalysisResult, FileStatsResult, ScanOptions } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 
 export interface TaskFilter {
@@ -18,6 +18,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     viewMode: 'card',
   })
   const loading = ref(false)
+  const fileStatsCache = ref<Map<string, FileStatsResult>>(new Map())
 
   // Getters
   const selectedTask = computed(() =>
@@ -55,10 +56,35 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
-  async function createTask(projectId: string, type: string, name: string) {
-    const task = await ipc.analysis.createTask({ projectId, type, name })
+  async function createTask(params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) {
+    const task = await ipc.analysis.createTask(params)
     tasks.value.push(task)
     return task
+  }
+
+  async function stopTask(taskId: string) {
+    await ipc.analysis.stopTask(taskId)
+    const task = tasks.value.find(t => t.id === taskId)
+    if (task) {
+      task.status = 'stopped'
+    }
+  }
+
+  async function reRunTask(taskId: string) {
+    const newTask = await ipc.analysis.reRunTask(taskId)
+    tasks.value.unshift(newTask)
+    return newTask
+  }
+
+  async function getTaskLogs(taskId: string) {
+    return await ipc.analysis.getTaskLogs(taskId)
+  }
+
+  async function updateTaskConfig(taskId: string, config: { name?: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) {
+    const updated = await ipc.analysis.updateTaskConfig({ taskId, config })
+    const idx = tasks.value.findIndex(t => t.id === taskId)
+    if (idx >= 0) tasks.value[idx] = updated
+    return updated
   }
 
   async function runTask(taskId: string) {
@@ -147,6 +173,20 @@ export const useAnalysisStore = defineStore('analysis', () => {
     })
   }
 
+  async function scanFileStats(projectId: string, options?: ScanOptions) {
+    console.log('[AnalysisStore] scanFileStats called:', { projectId, options })
+    const cacheKey = JSON.stringify({ projectId, ...options })
+    if (fileStatsCache.value.has(cacheKey)) {
+      console.log('[AnalysisStore] scanFileStats cache hit')
+      return fileStatsCache.value.get(cacheKey)!
+    }
+    console.log('[AnalysisStore] scanFileStats cache miss, calling IPC...')
+    const result = await ipc.analysis.scanFileStats(projectId, options)
+    console.log('[AnalysisStore] scanFileStats result:', result)
+    fileStatsCache.value.set(cacheKey, result)
+    return result
+  }
+
   return {
     tasks,
     selectedTaskId,
@@ -159,6 +199,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
     taskStats,
     loadTasks,
     createTask,
+    stopTask,
+    reRunTask,
+    getTaskLogs,
+    updateTaskConfig,
     runTask,
     getTask,
     getResults,
@@ -170,5 +214,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
     setViewMode,
     setStatusFilter,
     subscribeToEvents,
+    scanFileStats,
   }
 })

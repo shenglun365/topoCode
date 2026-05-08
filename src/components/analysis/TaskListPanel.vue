@@ -1,0 +1,528 @@
+<script setup lang="ts">
+import { ref, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import {
+  PlusIcon,
+  EyeIcon,
+  StopIcon,
+  ArrowPathIcon,
+  PencilIcon,
+  TrashIcon,
+  ExclamationTriangleIcon,
+} from '@heroicons/vue/24/outline'
+import { useAnalysisStore } from '@/stores/analysis'
+import TaskDetailDialog from './TaskDetailDialog.vue'
+import type { AnalysisTask } from '@/types/ipc'
+
+const props = defineProps<{
+  projectId: string
+}>()
+
+const emit = defineEmits<{
+  createTask: []
+}>()
+
+const { t } = useI18n()
+const analysisStore = useAnalysisStore()
+
+const detailTask = ref<AnalysisTask | null>(null)
+const deleteConfirm = ref<string | null>(null)
+
+// 加载任务列表
+async function loadTasks() {
+  if (props.projectId) {
+    await analysisStore.loadTasks(props.projectId)
+  }
+}
+
+onMounted(() => {
+  loadTasks()
+})
+
+// 状态颜色
+function getStatusColor(status: string): string {
+  const map: Record<string, string> = {
+    running: 'var(--accent)',
+    done: 'var(--success)',
+    error: 'var(--error)',
+    stopped: 'var(--warning)',
+    pending: 'var(--text-muted)',
+  }
+  return map[status] || 'var(--text-muted)'
+}
+
+function getStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    running: t('analysis.running'),
+    done: t('analysis.done'),
+    error: t('analysis.error'),
+    stopped: t('analysis.stopped'),
+    pending: t('analysis.pending'),
+  }
+  return map[status] || status
+}
+
+// 任务操作
+function onViewDetail(task: AnalysisTask) {
+  detailTask.value = task
+}
+
+async function onStopTask(taskId: string) {
+  try {
+    await analysisStore.stopTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to stop task:', err)
+  }
+}
+
+async function onRerunTask(taskId: string) {
+  try {
+    await analysisStore.reRunTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to rerun task:', err)
+  }
+}
+
+function onEditTask(taskId: string) {
+  emit('createTask')  // 由父组件处理打开编辑表单
+}
+
+function onDeleteTask(taskId: string) {
+  deleteConfirm.value = taskId
+}
+
+async function confirmDelete() {
+  if (!deleteConfirm.value) return
+  try {
+    await analysisStore.deleteTask(deleteConfirm.value)
+    deleteConfirm.value = null
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to delete task:', err)
+  }
+}
+
+function cancelDelete() {
+  deleteConfirm.value = null
+}
+
+// 格式化配置摘要
+function getConfigSummary(task: AnalysisTask): string {
+  const parts: string[] = []
+  if (task.reportTypes?.length) {
+    parts.push(task.reportTypes.join(', '))
+  }
+  if (task.scope) {
+    parts.push(task.scope)
+  }
+  if (task.extensions?.length) {
+    parts.push(task.extensions.join(', '))
+  }
+  return parts.join('  ')
+}
+</script>
+
+<template>
+  <div class="task-list-panel">
+    <!-- 标题栏 -->
+    <div class="panel-header">
+      <h2 class="panel-title">{{ t('analysis.taskList') }}</h2>
+      <button class="btn btn-primary btn-sm" @click="emit('createTask')">
+        <PlusIcon class="w-4 h-4" />
+        <span>{{ t('analysis.newTask') }}</span>
+      </button>
+    </div>
+
+    <!-- 统计摘要 -->
+    <div class="task-stats">
+      <span class="stat-item">
+        <span class="stat-label">{{ t('analysis.total') }}</span>
+        <span class="stat-value">{{ analysisStore.tasks.length }}</span>
+      </span>
+      <span class="stat-divider"></span>
+      <span class="stat-item">
+        <span class="stat-dot" style="background: var(--accent)"></span>
+        <span class="stat-label">{{ t('analysis.running') }}</span>
+        <span class="stat-value">{{ analysisStore.taskStats.running }}</span>
+      </span>
+      <span class="stat-divider"></span>
+      <span class="stat-item">
+        <span class="stat-dot" style="background: var(--success)"></span>
+        <span class="stat-label">{{ t('analysis.done') }}</span>
+        <span class="stat-value">{{ analysisStore.taskStats.done }}</span>
+      </span>
+      <span class="stat-divider"></span>
+      <span class="stat-item">
+        <span class="stat-dot" style="background: var(--error)"></span>
+        <span class="stat-label">{{ t('analysis.error') }}</span>
+        <span class="stat-value">{{ analysisStore.taskStats.error }}</span>
+      </span>
+    </div>
+
+    <!-- 任务列表 -->
+    <div v-if="analysisStore.tasks.length === 0" class="empty-state">
+      <span>{{ t('analysis.noTasks') }}</span>
+    </div>
+
+    <div v-else class="task-cards">
+      <div
+        v-for="task in analysisStore.tasks"
+        :key="task.id"
+        class="task-card"
+      >
+        <!-- 第一行: 名称/状态/进度 -->
+        <div class="task-card-header">
+          <div class="task-name-group">
+            <span class="status-dot" :style="{ background: getStatusColor(task.status) }"></span>
+            <span class="task-name">{{ task.name }}</span>
+            <span class="task-type-badge">{{ task.type }}</span>
+          </div>
+          <div class="task-progress-group">
+            <span class="task-status" :style="{ color: getStatusColor(task.status) }">
+              {{ getStatusLabel(task.status) }}
+            </span>
+            <div v-if="task.status === 'running'" class="task-progress-bar">
+              <div class="task-progress-fill" :style="{ width: `${task.progress || 0}%` }"></div>
+            </div>
+            <span v-if="task.progress != null" class="task-progress-text">{{ task.progress }}%</span>
+          </div>
+        </div>
+
+        <!-- 第二行: 配置摘要 -->
+        <div class="task-card-body">
+          <span class="task-config">{{ getConfigSummary(task) }}</span>
+        </div>
+
+        <!-- 错误信息 -->
+        <div v-if="task.error" class="task-error">
+          <ExclamationTriangleIcon class="w-3.5 h-3.5" />
+          <span>{{ task.error }}</span>
+        </div>
+
+        <!-- 第三行: 操作按钮 -->
+        <div class="task-card-actions">
+          <button class="btn btn-ghost btn-xs" @click="onViewDetail(task)" :title="t('analysis.viewDetail')">
+            <EyeIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.viewDetail') }}</span>
+          </button>
+
+          <button
+            v-if="task.status === 'running'"
+            class="btn btn-ghost btn-xs btn-warning"
+            @click="onStopTask(task.id)"
+            :title="t('analysis.stopTask')"
+          >
+            <StopIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.stopTask') }}</span>
+          </button>
+
+          <button
+            v-if="task.status === 'error'"
+            class="btn btn-ghost btn-xs"
+            @click="onRerunTask(task.id)"
+            :title="t('analysis.retryTask')"
+          >
+            <ArrowPathIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.retryTask') }}</span>
+          </button>
+
+          <button
+            v-if="task.status !== 'running' && task.status !== 'pending'"
+            class="btn btn-ghost btn-xs"
+            @click="onRerunTask(task.id)"
+            :title="t('analysis.rerunTask')"
+          >
+            <ArrowPathIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.rerunTask') }}</span>
+          </button>
+
+          <button
+            v-if="task.status !== 'running'"
+            class="btn btn-ghost btn-xs"
+            @click="onEditTask(task.id)"
+            :title="t('analysis.editTask')"
+          >
+            <PencilIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.editTask') }}</span>
+          </button>
+
+          <button
+            v-if="task.status !== 'running'"
+            class="btn btn-ghost btn-xs btn-danger"
+            @click="onDeleteTask(task.id)"
+            :title="t('analysis.deleteTask')"
+          >
+            <TrashIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.deleteTask') }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务详情对话框 -->
+    <TaskDetailDialog
+      v-if="detailTask"
+      :task="detailTask"
+      @close="detailTask = null"
+    />
+
+    <!-- 删除确认对话框 -->
+    <Teleport to="body">
+      <div v-if="deleteConfirm" class="dialog-overlay" @click.self="cancelDelete">
+        <div class="confirm-dialog">
+          <div class="confirm-title">
+            <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
+            <span>{{ t('analysis.confirmDelete') }}</span>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn btn-ghost" @click="cancelDelete">{{ t('analysis.deleteCancelled') }}</button>
+            <button class="btn btn-danger" @click="confirmDelete">{{ t('analysis.deleteConfirmed') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+<style scoped>
+.task-list-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.task-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.stat-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.stat-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.task-cards {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-card {
+  padding: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-card:hover {
+  border-color: var(--border-light);
+}
+
+.task-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.task-name-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.task-type-badge {
+  padding: 1px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.task-progress-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-status {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.task-progress-bar {
+  width: 60px;
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.task-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+  border-radius: 3px;
+}
+
+.task-progress-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 32px;
+  text-align: right;
+}
+
+.task-card-body {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.task-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--error)11;
+  border: 1px solid var(--error)33;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--error);
+}
+
+.task-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.btn-xs {
+  padding: 3px 8px;
+  font-size: 11px;
+  gap: 4px;
+}
+
+.btn-warning {
+  color: var(--warning);
+}
+
+.btn-warning:hover {
+  background: var(--warning)22;
+}
+
+.btn-danger {
+  color: var(--error);
+}
+
+.btn-danger:hover {
+  background: var(--error)22;
+}
+
+/* 确认对话框 */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirm-dialog {
+  width: 360px;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+</style>

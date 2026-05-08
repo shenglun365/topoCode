@@ -66,7 +66,7 @@ export interface AnalysisTask {
   projectId: string
   type: 'full-parse' | 'ast-gen' | 'call-chain' | 'dataflow' | 'dep-analysis'
   name: string
-  status: 'done' | 'running' | 'pending' | 'error'
+  status: 'done' | 'running' | 'pending' | 'error' | 'stopped'
   progress?: number
   total?: number
   current?: number
@@ -76,6 +76,48 @@ export interface AnalysisTask {
   favorite?: boolean
   pinned?: boolean
   tags?: string[]
+  // 分析配置
+  scope?: string           // 分析根目录
+  extensions?: string[]    // 文件后缀过滤
+  excludeDirs?: string[]   // 排除目录
+  reportTypes?: string[]   // ['dependency', 'callChain', 'dataFlow']
+}
+
+/** 文件统计结果 */
+export interface FileStatsResult {
+  extensions: Record<string, number>   // { "python": 128, "javascript": 56 }
+  totalFiles: number
+  totalDirs: number
+  directories: string[]
+}
+
+/** 扫描选项 */
+export interface ScanOptions {
+  scope?: string
+  patternType?: 'all' | 'glob' | 'regex'
+  pattern?: string
+  excludeDirs?: string[]
+}
+
+/** 任务日志条目 */
+export interface TaskLogEntry {
+  timestamp: string
+  message: string
+}
+
+/** 任务日志结果 */
+export interface TaskLogsResult {
+  logs: TaskLogEntry[]
+  completed: boolean
+}
+
+/** 任务配置更新 */
+export interface TaskConfigUpdate {
+  name?: string
+  scope?: string
+  extensions?: string[]
+  excludeDirs?: string[]
+  reportTypes?: string[]
 }
 
 /** 分析结果 */
@@ -252,12 +294,17 @@ export interface IPCAPI {
   // 代码分析
   analysis: {
     listTasks: (projectId: string) => Promise<AnalysisTask[]>
-    createTask: (params: { projectId: string; type: string; name: string }) => Promise<AnalysisTask>
+    createTask: (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => Promise<AnalysisTask>
     runTask: (taskId: string) => Promise<{ taskId: string; status: string }>
     getTask: (taskId: string) => Promise<AnalysisTask>
     getResults: (taskId: string) => Promise<AnalysisResult>
     updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<AnalysisTask>
     deleteTask: (taskId: string) => Promise<void>
+    stopTask: (taskId: string) => Promise<void>
+    reRunTask: (taskId: string) => Promise<AnalysisTask>
+    getTaskLogs: (taskId: string) => Promise<TaskLogsResult>
+    updateTaskConfig: (params: { taskId: string; config: TaskConfigUpdate }) => Promise<AnalysisTask>
+    scanFileStats: (projectId: string, options?: ScanOptions) => Promise<FileStatsResult>
     onProgress: (cb: (data: TaskProgressEvent) => void) => void
     onComplete: (cb: (data: TaskCompleteEvent) => void) => void
     onError: (cb: (data: TaskErrorEvent) => void) => void

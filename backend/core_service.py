@@ -513,10 +513,11 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
     main_db = multi_db.main_db
 
     @server.register("analysis.listTasks")
-    def list_tasks(project_id: str):
+    def list_tasks(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
         rows = main_db.fetchall(
             "SELECT * FROM analysis_tasks WHERE project_id = ? ORDER BY updated_at DESC",
-            (project_id,)
+            (pid,)
         )
         for row in rows:
             if row.get("tags"):
@@ -524,17 +525,27 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
         return rows
 
     @server.register("analysis.createTask")
-    def create_task(project_id: str, type: str, name: str):
+    def create_task(project_id: str = None, projectId: str = None, type: str = None, name: str = None, scope: str = None, extensions: list = None, exclude_dirs: list = None, excludeDirs: list = None, report_types: list = None, reportTypes: list = None):
+        pid = project_id or projectId
         task_id = f"task-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
 
+        # 兼容 camelCase 参数
+        ext = extensions or excludeDirs or []
+        excl = exclude_dirs or excludeDirs or []
+        rpt = report_types or reportTypes or []
+
         main_db.insert("analysis_tasks", {
             "id": task_id,
-            "project_id": project_id,
+            "project_id": pid,
             "type": type,
             "name": name,
             "status": "pending",
             "total": 100,
+            "scope": scope,
+            "extensions": json.dumps(ext) if ext else None,
+            "exclude_dirs": json.dumps(excl) if excl else None,
+            "report_types": json.dumps(rpt) if rpt else None,
             "created_at": now,
             "updated_at": now,
         })
@@ -594,6 +605,189 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("analysis.deleteTask")
     def delete_task(task_id: str):
         main_db.delete("analysis_tasks", "id = ?", (task_id,))
+
+    @server.register("analysis.stopTask")
+    def stop_task(task_id: str):
+        """停止正在运行的分析任务"""
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+        if task["status"] != "running":
+            raise ValueError(f"Task is not running (status={task['status']})")
+
+        main_db.update("analysis_tasks", {
+            "status": "stopped",
+            "updated_at": datetime.now().isoformat(),
+        }, "id = ?", (task_id,))
+
+        return {"taskId": task_id, "status": "stopped"}
+
+    @server.register("analysis.reRunTask")
+    def re_run_task(task_id: str):
+        """使用原任务配置重新执行，返回新任务的 ID"""
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+
+        new_task_id = f"task-{uuid.uuid4().hex[:8]}"
+        now = datetime.now().isoformat()
+
+        main_db.insert("analysis_tasks", {
+            "id": new_task_id,
+            "project_id": task["project_id"],
+            "type": task["type"],
+            "name": f"{task['name']} (重跑)",
+            "status": "pending",
+            "total": task.get("total", 100),
+            "scope": task.get("scope"),
+            "extensions": task.get("extensions"),
+            "exclude_dirs": task.get("exclude_dirs"),
+            "report_types": task.get("report_types"),
+            "created_at": now,
+            "updated_at": now,
+        })
+
+        new_task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (new_task_id,))
+        # 立即启动
+        main_db.update("analysis_tasks", {
+            "status": "running",
+            "progress": 0,
+            "current": 0,
+            "updated_at": datetime.now().isoformat(),
+        }, "id = ?", (new_task_id,))
+
+        asyncio.create_task(_execute_task(server, main_db, multi_db, new_task_id))
+
+        return new_task
+
+    @server.register("analysis.getTaskLogs")
+    def get_task_logs(task_id: str):
+        """获取任务的执行日志"""
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+
+        report = main_db.fetchone("SELECT * FROM analysis_reports WHERE task_id = ?", (task_id,))
+        logs = []
+        if report and report.get("logs"):
+            logs = json.loads(report.get("logs"))
+
+        return {
+            "logs": logs,
+            "completed": task["status"] in ("done", "error", "stopped"),
+        }
+
+    @server.register("analysis.updateTaskConfig")
+    def update_task_config(task_id: str, **kwargs):
+        """更新任务的配置（编辑功能）"""
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+        if task["status"] == "running":
+            raise ValueError("Cannot update config of running task")
+
+        allowed = {"name", "scope", "extensions", "exclude_dirs", "report_types"}
+        data = {k: v for k, v in kwargs.items() if k in allowed}
+        # 序列化列表字段
+        for key in ("extensions", "exclude_dirs", "report_types"):
+            if key in data and isinstance(data[key], list):
+                data[key] = json.dumps(data[key])
+        data["updated_at"] = datetime.now().isoformat()
+
+        main_db.update("analysis_tasks", data, "id = ?", (task_id,))
+        return main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+
+    @server.register("analysis.scanFileStats")
+    def scan_file_stats(project_id: str = None, projectId: str = None, scope: str = None, pattern_type: str = "all", patternType: str = None, pattern: str = None, exclude_dirs: list = None, excludeDirs: list = None):
+        """从 SQLite source_files 表读取文件类型分布统计"""
+        import logging
+        logger = logging.getLogger(__name__)
+        pid = project_id or projectId
+        pt = pattern_type or patternType or "all"
+        ed = exclude_dirs or excludeDirs or []
+        logger.info(f"[scanFileStats] called: pid={pid}, pt={pt}, scope={scope}, ed={ed}")
+        project_db = multi_db.get_project_db(pid)
+
+        # 构建 WHERE 子句
+        where_clauses = []
+        params = []
+
+        if scope:
+            where_clauses.append("(file_path LIKE ? OR file_path = ?)")
+            params.extend([f"{scope}/%", scope])
+
+        if ed:
+            for d in ed:
+                where_clauses.append("file_path NOT LIKE ?")
+                params.append(f"%/{d}/%")
+                where_clauses.append("file_path NOT LIKE ?")
+                params.append(f"{d}/%")
+
+        if pt == "glob" and pattern:
+            sql_pattern = pattern.replace('*', '%')
+            where_clauses.append("file_path LIKE ?")
+            params.append(sql_pattern)
+
+        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        # 按语言分组统计
+        rows = project_db.fetchall(
+            f"SELECT language, COUNT(*) as count, SUM(size) as total_size FROM source_files {where_sql} GROUP BY language ORDER BY count DESC",
+            params
+        )
+        extensions = {}
+        total_files = 0
+        for row in rows:
+            lang = row.get("language") or "unknown"
+            extensions[lang] = row["count"]
+            total_files += row["count"]
+
+        # 提取目录列表 (在原有 WHERE 基础上加条件)
+        dir_where = where_sql
+        dir_params = list(params)
+        if dir_where:
+            dir_where += " AND parent_path IS NOT NULL"
+        else:
+            dir_where = "WHERE parent_path IS NOT NULL"
+        dir_rows = project_db.fetchall(
+            f"SELECT DISTINCT parent_path FROM source_files {dir_where} ORDER BY parent_path",
+            dir_params
+        )
+        directories = [r["parent_path"] for r in dir_rows if r["parent_path"]]
+
+        # 正则匹配处理：如果 pt == 'regex'，在 Python 层过滤
+        if pt == "regex" and pattern:
+            import re
+            try:
+                regex = re.compile(pattern)
+                # 重新从数据库取所有 file_path 来过滤
+                all_files = project_db.fetchall(
+                    f"SELECT file_path, language, size FROM source_files {where_sql}",
+                    params if where_sql else []
+                )
+                filtered = [f for f in all_files if regex.search(f["file_path"])]
+                extensions = {}
+                total_files = 0
+                for f in filtered:
+                    lang = f.get("language") or "unknown"
+                    extensions[lang] = extensions.get(lang, 0) + 1
+                    total_files += 1
+                # 重新提取目录
+                filtered_dirs = set()
+                for f in filtered:
+                    parts = f["file_path"].rsplit('/', 1)
+                    if len(parts) > 1:
+                        filtered_dirs.add(parts[0])
+                directories = sorted(filtered_dirs)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern: {e}")
+
+        return {
+            "extensions": extensions,
+            "totalFiles": total_files,
+            "totalDirs": len(directories),
+            "directories": directories,
+        }
 
     return server
 

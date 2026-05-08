@@ -1,15 +1,22 @@
 /** Project Store - 项目管理 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project, FileTreeNode } from '@/types/ipc'
+import type { Project, FileTreeNode, AnalysisTask } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
+import { useAnalysisStore } from '@/stores/analysis'
+import i18n from '@/i18n'
+
+export type TabKind = 'file' | 'taskList' | 'taskCreate'
 
 export interface HomeTab {
   id: string
-  type: 'file'
+  kind: TabKind
   title: string
-  filePath: string
-  node: FileTreeNode
+  // file 类型
+  filePath?: string
+  node?: FileTreeNode
+  // taskCreate 类型
+  taskId?: string  // 编辑已有任务时传入
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -186,7 +193,7 @@ export const useProjectStore = defineStore('project', () => {
     // 新开 tab
     const tab: HomeTab = {
       id: `tab-file-${node.path || node.name}`,
-      type: 'file',
+      kind: 'file',
       title: node.name,
       filePath: node.path || node.name,
       node,
@@ -220,6 +227,39 @@ export const useProjectStore = defineStore('project', () => {
     activeTabId.value = tabId
   }
 
+  function openTaskListTab() {
+    // 若已存在 taskList tab，直接激活
+    const existing = tabs.value.find(tab => tab.kind === 'taskList')
+    if (existing) {
+      activeTabId.value = existing.id
+      return
+    }
+    const tab: HomeTab = {
+      id: `tab-taskList-${Date.now()}`,
+      kind: 'taskList',
+      title: i18n.global.t('analysis.taskList'),
+    }
+    tabs.value.push(tab)
+    activeTabId.value = tab.id
+
+    // 加载任务数据
+    if (selectedProjectId.value) {
+      const analysisStore = useAnalysisStore()
+      analysisStore.loadTasks(selectedProjectId.value)
+    }
+  }
+
+  function openTaskCreateForm(taskId?: string) {
+    const tab: HomeTab = {
+      id: `tab-taskCreate-${Date.now()}`,
+      kind: 'taskCreate',
+      title: taskId ? i18n.global.t('analysis.editTask') : i18n.global.t('analysis.newTask'),
+      taskId,
+    }
+    tabs.value.push(tab)
+    activeTabId.value = tab.id
+  }
+
   return {
     projects,
     selectedProjectId,
@@ -247,5 +287,7 @@ export const useProjectStore = defineStore('project', () => {
     closeAllTabs,
     setActiveTab,
     setSelectedFile,
+    openTaskListTab,
+    openTaskCreateForm,
   }
 })

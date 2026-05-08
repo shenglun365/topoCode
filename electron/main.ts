@@ -82,11 +82,13 @@ function setupIPC() {
 
   // ---- ZeroMQ RPC 调用 ----
   ipcMain.handle('ipc:call', async (_, { method, params }: { method: string; params: Record<string, any> }) => {
+    console.log(`[Main] ipc:call -> ${method}`, params)
     try {
       const result = await zmqRouter.call(method, params)
+      console.log(`[Main] ipc:call <- ${method} (success)`)
       return result
     } catch (error: any) {
-      console.error('[Main] ipc:call error:', error.message)
+      console.error(`[Main] ipc:call error (${method}):`, error.message)
       throw new Error(`IPC call failed: ${error.message}`)
     }
   })

@@ -124,6 +124,21 @@ function createRealIPC(): IPCAPI {
       deleteTask: async (taskId: string) => {
         return await api.analysis.deleteTask(taskId)
       },
+      stopTask: async (taskId: string) => {
+        return await api.analysis.stopTask(taskId)
+      },
+      reRunTask: async (taskId: string) => {
+        return await api.analysis.reRunTask(taskId)
+      },
+      getTaskLogs: async (taskId: string) => {
+        return await api.analysis.getTaskLogs(taskId)
+      },
+      updateTaskConfig: async (params: { taskId: string; config: TaskConfigUpdate }) => {
+        return await api.analysis.updateTaskConfig(params)
+      },
+      scanFileStats: async (projectId: string, options?: ScanOptions) => {
+        return await api.analysis.scanFileStats(projectId, options || {})
+      },
       onProgress: (cb: (data: TaskProgressEvent) => void) => {
         if (api.analysis.onProgress) {
           api.analysis.onProgress(cb)

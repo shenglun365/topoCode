@@ -10,16 +10,21 @@ import {
   LightBulbIcon,
   CodeBracketIcon,
   ChatBubbleLeftRightIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { useAnalysisStore } from '@/stores/analysis'
 import { useOnboardingStore } from '@/stores/onboarding'
 import ProjectCard from '@/components/project/ProjectCard.vue'
 import ImportZone from '@/components/project/ImportZone.vue'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import CodeViewer from '@/components/code/CodeViewer.vue'
+import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
+import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
+const analysisStore = useAnalysisStore()
 const onboardingStore = useOnboardingStore()
 
 function onTabUpdate(tabId: string | null) {
@@ -34,6 +39,18 @@ function onCloseCodeViewer() {
   if (projectStore.activeTabId) {
     projectStore.closeTab(projectStore.activeTabId)
   }
+}
+
+function onTaskCreated(taskId: string) {
+  // 关闭新建任务 tab，切换回任务列表
+  if (projectStore.activeTabId) {
+    projectStore.closeTab(projectStore.activeTabId)
+  }
+  projectStore.openTaskListTab()
+}
+
+function onTaskListCreateTask() {
+  projectStore.openTaskCreateForm()
 }
 
 // 快速开始操作
@@ -163,6 +180,10 @@ onMounted(async () => {
           <XCircleIcon class="w-4 h-4" />
           <span>{{ t('project.closeAllTabs') }}</span>
         </button>
+        <button class="btn btn-ghost btn-sm" @click="projectStore.openTaskListTab()" :title="t('analysis.parseSettings')">
+          <WrenchScrewdriverIcon class="w-4 h-4" />
+          <span>{{ t('analysis.parseSettings') }}</span>
+        </button>
         <button class="btn btn-ghost btn-sm">
           <Cog6ToothIcon class="w-4 h-4" />
           <span>{{ t('common.settings') }}</span>
@@ -184,13 +205,33 @@ onMounted(async () => {
       <!-- 内容区 -->
       <div class="home-tab-content">
         <!-- 代码视图 -->
-        <div v-if="projectStore.activeTab" class="code-viewer-full">
+        <div v-if="projectStore.activeTab?.kind === 'file'" class="code-viewer-full">
           <CodeViewer
-            :node="projectStore.activeTab.node"
+            :node="projectStore.activeTab.node!"
             :root-path="projectStore.selectedProject?.rootPath || projectStore.selectedProject?.path || ''"
             @close="onCloseCodeViewer"
           />
         </div>
+
+        <!-- 任务列表 -->
+        <div v-else-if="projectStore.activeTab?.kind === 'taskList'" class="task-list-panel">
+          <TaskListPanel
+            :project-id="projectStore.selectedProjectId!"
+            @create-task="onTaskListCreateTask"
+          />
+        </div>
+
+        <!-- 新建/编辑任务 -->
+        <div v-else-if="projectStore.activeTab?.kind === 'taskCreate'" class="task-create-form">
+          <TaskCreateForm
+            :project-id="projectStore.selectedProjectId!"
+            :task-id="projectStore.activeTab.taskId"
+            @created="onTaskCreated"
+            @cancelled="onCloseCodeViewer"
+          />
+        </div>
+
+        <!-- 空状态 -->
         <div v-else class="empty-state centered">
           <DocumentTextIcon class="w-12 h-12 text-accent" />
           <div class="title">{{ t('file.selectFile') }}</div>
@@ -231,6 +272,12 @@ onMounted(async () => {
 }
 
 .code-viewer-full {
+  flex: 1;
+  overflow: hidden;
+}
+
+.task-list-panel,
+.task-create-form {
   flex: 1;
   overflow: hidden;
 }

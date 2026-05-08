@@ -59,7 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   analysis: {
     listTasks: (projectId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.listTasks', params: { projectId } }),
-    createTask: (params: { projectId: string; type: string; name: string }) =>
+    createTask: (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.createTask', params }),
     runTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.runTask', params: { taskId } }),
@@ -71,6 +71,18 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.updateTask', params }),
     deleteTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.deleteTask', params: { taskId } }),
+    stopTask: (taskId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.stopTask', params: { taskId } }),
+    reRunTask: (taskId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.reRunTask', params: { taskId } }),
+    getTaskLogs: (taskId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getTaskLogs', params: { taskId } }),
+    updateTaskConfig: (params: { taskId: string; config: any }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.updateTaskConfig', params }),
+    scanFileStats: (projectId: string, options?: { scope?: string; patternType?: string; pattern?: string; excludeDirs?: string[] }) => {
+      console.log('[Preload] scanFileStats called:', { projectId, ...options })
+      return ipcRenderer.invoke('ipc:call', { method: 'analysis.scanFileStats', params: { projectId, ...options } })
+    },
 
     // 事件订阅
     onProgress: (callback: (data: any) => void) => {
@@ -246,12 +258,17 @@ declare global {
       }
       analysis: {
         listTasks: (projectId: string) => Promise<any[]>
-        createTask: (params: { projectId: string; type: string; name: string }) => Promise<any>
+        createTask: (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => Promise<any>
         runTask: (taskId: string) => Promise<{ taskId: string; status: string }>
         getTask: (taskId: string) => Promise<any>
         getResults: (taskId: string) => Promise<any>
         updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<any>
         deleteTask: (taskId: string) => Promise<void>
+        stopTask: (taskId: string) => Promise<void>
+        reRunTask: (taskId: string) => Promise<any>
+        getTaskLogs: (taskId: string) => Promise<any>
+        updateTaskConfig: (params: { taskId: string; config: any }) => Promise<any>
+        scanFileStats: (projectId: string, options?: { scope?: string; patternType?: string; pattern?: string; excludeDirs?: string[] }) => Promise<any>
         onProgress: (callback: (data: any) => void) => () => void
         onComplete: (callback: (data: any) => void) => () => void
         onError: (callback: (data: any) => void) => () => void

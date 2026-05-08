@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { XMarkIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon, DocumentTextIcon, ListBulletIcon, PlusCircleIcon } from '@heroicons/vue/24/outline'
 import type { HomeTab } from '@/stores/project'
 
 defineProps<{
@@ -11,6 +11,14 @@ const emit = defineEmits<{
   'update:activeTabId': [tabId: string | null]
   'close': [tabId: string]
 }>()
+
+function getTabIcon(tab: HomeTab) {
+  switch (tab.kind) {
+    case 'taskList': return ListBulletIcon
+    case 'taskCreate': return PlusCircleIcon
+    default: return DocumentTextIcon
+  }
+}
 </script>
 
 <template>
@@ -22,6 +30,7 @@ const emit = defineEmits<{
       :class="{ active: activeTabId === tab.id }"
       @click="emit('update:activeTabId', tab.id)"
     >
+      <component :is="getTabIcon(tab)" class="w-3.5 h-3.5 tab-icon" />
       <span class="tab-title">{{ tab.title }}</span>
       <button
         class="tab-close-btn"
@@ -65,6 +74,15 @@ const emit = defineEmits<{
   background: var(--bg-primary);
   color: var(--text-primary);
   border-bottom: 2px solid var(--accent);
+}
+
+.tab-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.home-tab.active .tab-icon {
+  color: var(--accent);
 }
 
 .tab-title {
