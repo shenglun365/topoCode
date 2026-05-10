@@ -9,6 +9,7 @@ import {
   PencilIcon,
   TrashIcon,
   ExclamationTriangleIcon,
+  PlayIcon,
 } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
 import TaskDetailDialog from './TaskDetailDialog.vue'
@@ -19,7 +20,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  createTask: []
+  createTask: [taskId?: string]  // 传入 taskId 表示编辑，否则表示新建
 }>()
 
 const { t } = useI18n()
@@ -28,9 +29,9 @@ const analysisStore = useAnalysisStore()
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
 
-// 加载任务列表
+// 加载任务列表（仅在 store 无数据时加载，避免重复请求）
 async function loadTasks() {
-  if (props.projectId) {
+  if (props.projectId && analysisStore.tasks.length === 0) {
     await analysisStore.loadTasks(props.projectId)
   }
 }
@@ -47,6 +48,7 @@ function getStatusColor(status: string): string {
     error: 'var(--error)',
     stopped: 'var(--warning)',
     pending: 'var(--text-muted)',
+    modified: 'var(--warning)',
   }
   return map[status] || 'var(--text-muted)'
 }
@@ -58,9 +60,23 @@ function getStatusLabel(status: string): string {
     error: t('analysis.error'),
     stopped: t('analysis.stopped'),
     pending: t('analysis.pending'),
+    modified: t('analysis.modified'),
   }
   return map[status] || status
 }
+
+// Computed task stats
+const taskStats = computed(() => {
+  const tasks = analysisStore.tasks
+  return {
+    total: tasks.length,
+    running: tasks.filter(t => t.status === 'running').length,
+    done: tasks.filter(t => t.status === 'done').length,
+    error: tasks.filter(t => t.status === 'error').length,
+    modified: tasks.filter(t => t.status === 'modified').length,
+    pending: tasks.filter(t => t.status === 'pending').length,
+  }
+})
 
 // 任务操作
 function onViewDetail(task: AnalysisTask) {
@@ -76,6 +92,17 @@ async function onStopTask(taskId: string) {
   }
 }
 
+// 首次运行（pending 状态，从未执行过）
+async function onRunTask(taskId: string) {
+  try {
+    await analysisStore.runTask(taskId)
+    await loadTasks()
+  } catch (err) {
+    console.error('Failed to run task:', err)
+  }
+}
+
+// 重跑（已有运行历史）
 async function onRerunTask(taskId: string) {
   try {
     await analysisStore.reRunTask(taskId)
@@ -86,7 +113,7 @@ async function onRerunTask(taskId: string) {
 }
 
 function onEditTask(taskId: string) {
-  emit('createTask')  // 由父组件处理打开编辑表单
+  emit('createTask', taskId)
 }
 
 function onDeleteTask(taskId: string) {
@@ -118,7 +145,8 @@ function getConfigSummary(task: AnalysisTask): string {
     parts.push(task.scope)
   }
   if (task.extensions?.length) {
-    parts.push(task.extensions.join(', '))
+    const exts = Array.isArray(task.extensions) ? task.extensions : JSON.parse(task.extensions)
+    parts.push(exts.join(', '))
   }
   return parts.join('  ')
 }
@@ -229,6 +257,16 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
+            v-if="task.status === 'pending'"
+            class="btn btn-ghost btn-xs btn-primary"
+            @click="onRunTask(task.id)"
+            :title="t('analysis.runTask')"
+          >
+            <PlayIcon class="w-3.5 h-3.5" />
+            <span>{{ t('analysis.runTask') }}</span>
+          </button>
+
+          <button
             v-if="task.status !== 'running' && task.status !== 'pending'"
             class="btn btn-ghost btn-xs"
             @click="onRerunTask(task.id)"
@@ -265,6 +303,7 @@ function getConfigSummary(task: AnalysisTask): string {
     <TaskDetailDialog
       v-if="detailTask"
       :task="detailTask"
+      :visible="!!detailTask"
       @close="detailTask = null"
     />
 
@@ -524,5 +563,56 @@ function getConfigSummary(task: AnalysisTask): string {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Stats bar */
+.task-stats-bar {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-running {
+  color: var(--accent);
+}
+
+.stat-done {
+  color: var(--success);
+}
+
+.stat-modified {
+  color: var(--warning);
+}
+
+.stat-error {
+  color: var(--error);
+}
+
+/* Modified badge */
+.task-modified-badge {
+  background: var(--warning);
+  color: var(--bg-primary);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.task-run-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 4px;
 }
 </style>

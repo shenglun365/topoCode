@@ -42,16 +42,8 @@ export const useProjectStore = defineStore('project', () => {
   async function loadProjects() {
     loading.value = true
     try {
-      const list = await ipc.project.list()
-      // 适配后端字段：snake_case → camelCase，过滤 null 条目
-      projects.value = (list || []).filter(Boolean).map(p => ({
-        ...p,
-        rootPath: p.root_path || p.rootPath || p.path || '',
-        path: p.root_path || p.path || '',
-        needsResync: p.needs_resync ?? p.needsResync ?? 0,
-        hasFileChanges: p.has_file_changes ?? p.hasFileChanges ?? 0,
-        isSample: p.is_sample ?? p.isSample ?? 0,
-      }))
+      // ipc.project.list() 已通过 adaptProject 完成 snake→camel 转换
+      projects.value = await ipc.project.list()
     } finally {
       loading.value = false
     }
@@ -60,18 +52,9 @@ export const useProjectStore = defineStore('project', () => {
   async function importProject(path: string) {
     loading.value = true
     try {
+      // ipc.project.import() 已通过 adaptProject 完成 snake→camel 转换
       const project = await ipc.project.import(path)
       if (!project) return null
-      // 适配后端字段：root_path → rootPath
-      project.rootPath = project.root_path || project.rootPath || project.path || ''
-      project.path = project.root_path || project.path || ''
-      project.needsResync = project.needs_resync ?? project.needsResync ?? 0
-      project.hasFileChanges = project.has_file_changes ?? project.hasFileChanges ?? 0
-      project.isSample = project.is_sample ?? project.isSample ?? 0
-      // 兼容旧字段
-      if (!project.path && project.rootPath) {
-        project.path = project.rootPath
-      }
       projects.value.push(project)
       return project
     } finally {
@@ -249,15 +232,27 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  function openTaskCreateForm(taskId?: string) {
-    const tab: HomeTab = {
-      id: `tab-taskCreate-${Date.now()}`,
-      kind: 'taskCreate',
-      title: taskId ? i18n.global.t('analysis.editTask') : i18n.global.t('analysis.newTask'),
-      taskId,
+  async function openTaskCreateForm(taskId?: string) {
+    if (taskId) {
+      // 编辑模式 - 使用通用标题，详细数据由 TaskCreateForm 自行加载
+      const tab: HomeTab = {
+        id: `tab-taskCreate-${Date.now()}`,
+        kind: 'taskCreate',
+        title: i18n.global.t('analysis.editTask'),
+        taskId,
+      }
+      tabs.value.push(tab)
+      activeTabId.value = tab.id
+    } else {
+      // 新建模式
+      const tab: HomeTab = {
+        id: `tab-taskCreate-${Date.now()}`,
+        kind: 'taskCreate',
+        title: i18n.global.t('analysis.newTask'),
+      }
+      tabs.value.push(tab)
+      activeTabId.value = tab.id
     }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
   }
 
   return {

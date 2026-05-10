@@ -106,8 +106,16 @@ function createRealIPC(): IPCAPI {
       listTasks: async (projectId: string) => {
         return await api.analysis.listTasks(projectId)
       },
-      createTask: async (params: { projectId: string; type: string; name: string }) => {
-        return await api.analysis.createTask(params)
+      createTask: async (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => {
+        console.log('[IPC] createTask -> api.analysis.createTask:', JSON.stringify(params))
+        try {
+          const result = await api.analysis.createTask(params)
+          console.log('[IPC] createTask result:', JSON.stringify(result))
+          return result
+        } catch (err: any) {
+          console.error('[IPC] createTask error:', err.message, err)
+          throw err
+        }
       },
       runTask: async (taskId: string) => {
         return await api.analysis.runTask(taskId)
@@ -130,14 +138,32 @@ function createRealIPC(): IPCAPI {
       reRunTask: async (taskId: string) => {
         return await api.analysis.reRunTask(taskId)
       },
-      getTaskLogs: async (taskId: string) => {
-        return await api.analysis.getTaskLogs(taskId)
+      getTaskLogs: async (params: { taskId: string; runId?: string }) => {
+        return await api.analysis.getTaskLogs(params)
+      },
+      getTaskRuns: async (taskId: string) => {
+        return await api.analysis.getTaskRuns(taskId)
       },
       updateTaskConfig: async (params: { taskId: string; config: TaskConfigUpdate }) => {
         return await api.analysis.updateTaskConfig(params)
       },
       scanFileStats: async (projectId: string, options?: ScanOptions) => {
-        return await api.analysis.scanFileStats(projectId, options || {})
+        console.log('[IPC] scanFileStats -> api.analysis.scanFileStats:', { projectId, options: JSON.stringify(options) })
+        const scopes = options?.scopes
+        const selectedExtensions = options?.selectedExtensions
+        const rest: Record<string, any> = { ...options }
+        delete rest.scopes
+        delete rest.selectedExtensions
+        const callParams = { ...rest, scopes, selectedExtensions }
+        console.log('[IPC] scanFileStats callParams:', JSON.stringify(callParams))
+        try {
+          const result = await api.analysis.scanFileStats(projectId, callParams)
+          console.log('[IPC] scanFileStats result:', JSON.stringify(result))
+          return result
+        } catch (err: any) {
+          console.error('[IPC] scanFileStats error:', err.message, err)
+          throw err
+        }
       },
       onProgress: (cb: (data: TaskProgressEvent) => void) => {
         if (api.analysis.onProgress) {

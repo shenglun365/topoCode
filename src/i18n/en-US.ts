@@ -406,6 +406,9 @@ export default {
     error: 'Error',
     stopped: 'Stopped',
     noLogs: 'No logs',
+    runHistory: 'Run History',
+    startTime: 'Start Time',
+    endTime: 'End Time',
 
     // FileStatsPanel
     fileDistribution: 'File Distribution',
@@ -431,6 +434,25 @@ export default {
     update: 'Save Changes',
     cancel: 'Cancel',
 
+    // TaskCreateForm new keys
+    configVersion: 'Config version',
+    confirmChange: 'Confirm Change',
+    edit: 'Edit',
+    invertSelection: 'Invert',
+    justNow: 'Just now',
+    lastStatus: 'Last status',
+    manualExtensionPlaceholder: 'Add extension manually, press Enter',
+    modified: 'Modified',
+    neverRun: 'Never run',
+    noDirectories: 'No directories',
+    runCount: 'Run count',
+    saveConfig: 'Save Config',
+    selectAll: 'Select All',
+    selectedExtensions: 'Selected extensions',
+    stopThenEdit: 'Stop & Edit',
+    total: 'Total',
+    viewLogs: 'View Logs',
+    viewTask: 'View Task',
     // ExtractDialog
     extractKnowledge: 'Extract Knowledge',
     extractTitle: 'Title',

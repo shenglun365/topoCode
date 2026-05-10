@@ -59,8 +59,17 @@ contextBridge.exposeInMainWorld('api', {
   analysis: {
     listTasks: (projectId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.listTasks', params: { projectId } }),
-    createTask: (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.createTask', params }),
+    createTask: (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => {
+      console.log('[Preload] createTask called:', JSON.stringify(params))
+      try {
+        const result = ipcRenderer.invoke('ipc:call', { method: 'analysis.createTask', params })
+        console.log('[Preload] createTask invoke returned (Promise):', typeof result)
+        return result
+      } catch (err: any) {
+        console.error('[Preload] createTask invoke error:', err.message, err)
+        throw err
+      }
+    },
     runTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.runTask', params: { taskId } }),
     getTask: (taskId: string) =>
@@ -75,13 +84,24 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.stopTask', params: { taskId } }),
     reRunTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.reRunTask', params: { taskId } }),
-    getTaskLogs: (taskId: string) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.getTaskLogs', params: { taskId } }),
+    getTaskLogs: (params: { taskId: string; runId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getTaskLogs', params }),
+    getTaskRuns: (taskId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getTaskRuns', params: { taskId } }),
     updateTaskConfig: (params: { taskId: string; config: any }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.updateTaskConfig', params }),
-    scanFileStats: (projectId: string, options?: { scope?: string; patternType?: string; pattern?: string; excludeDirs?: string[] }) => {
-      console.log('[Preload] scanFileStats called:', { projectId, ...options })
-      return ipcRenderer.invoke('ipc:call', { method: 'analysis.scanFileStats', params: { projectId, ...options } })
+    scanFileStats: (projectId: string, options?: { scope?: string; scopes?: string[]; selectedExtensions?: string[]; patternType?: string; pattern?: string; excludeDirs?: string[] }) => {
+      console.log('[Preload] scanFileStats called:', { projectId, options: JSON.stringify(options) })
+      const params = { projectId, ...options }
+      console.log('[Preload] scanFileStats params to invoke:', JSON.stringify(params))
+      try {
+        const result = ipcRenderer.invoke('ipc:call', { method: 'analysis.scanFileStats', params })
+        console.log('[Preload] scanFileStats invoke returned (Promise):', typeof result)
+        return result
+      } catch (err: any) {
+        console.error('[Preload] scanFileStats invoke error:', err.message, err)
+        throw err
+      }
     },
 
     // 事件订阅
@@ -266,9 +286,10 @@ declare global {
         deleteTask: (taskId: string) => Promise<void>
         stopTask: (taskId: string) => Promise<void>
         reRunTask: (taskId: string) => Promise<any>
-        getTaskLogs: (taskId: string) => Promise<any>
+        getTaskLogs: (params: { taskId: string; runId?: string }) => Promise<any>
+        getTaskRuns: (taskId: string) => Promise<any>
         updateTaskConfig: (params: { taskId: string; config: any }) => Promise<any>
-        scanFileStats: (projectId: string, options?: { scope?: string; patternType?: string; pattern?: string; excludeDirs?: string[] }) => Promise<any>
+        scanFileStats: (projectId: string, options?: { scope?: string; scopes?: string[]; selectedExtensions?: string[]; patternType?: string; pattern?: string; excludeDirs?: string[] }) => Promise<any>
         onProgress: (callback: (data: any) => void) => () => void
         onComplete: (callback: (data: any) => void) => () => void
         onError: (callback: (data: any) => void) => () => void

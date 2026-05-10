@@ -417,6 +417,9 @@ export default {
     error: '失败',
     stopped: '已停止',
     noLogs: '暂无日志',
+    runHistory: '运行历史',
+    startTime: '开始时间',
+    endTime: '结束时间',
 
     // FileStatsPanel
     fileDistribution: '文件分布',
@@ -442,6 +445,25 @@ export default {
     update: '保存修改',
     cancel: '取消',
 
+    // TaskCreateForm new keys
+    configVersion: '配置版本',
+    confirmChange: '确认修改',
+    edit: '编辑',
+    invertSelection: '反选',
+    justNow: '刚刚',
+    lastStatus: '最后状态',
+    manualExtensionPlaceholder: '手动添加后缀，回车确认',
+    modified: '已修改',
+    neverRun: '从未运行',
+    noDirectories: '暂无目录',
+    runCount: '运行次数',
+    saveConfig: '保存配置',
+    selectAll: '全选',
+    selectedExtensions: '已选后缀',
+    stopThenEdit: '停止并编辑',
+    total: '总数',
+    viewLogs: '查看日志',
+    viewTask: '查看任务',
     // ExtractDialog
     extractKnowledge: '提取知识点',
     extractTitle: '标题',

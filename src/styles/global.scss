@@ -106,6 +106,12 @@ html, body {
   background: var(--accent-hover);
 }
 
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn-secondary {
   background: var(--bg-tertiary);
   color: var(--text-primary);

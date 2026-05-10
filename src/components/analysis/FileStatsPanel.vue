@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { DocumentTextIcon, FolderIcon } from '@heroicons/vue/24/outline'
+import {
+  DocumentTextIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  XMarkIcon,
+  PlusIcon,
+} from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
 import type { FileStatsResult } from '@/types/ipc'
 
@@ -11,6 +17,8 @@ const props = defineProps<{
   patternType: 'all' | 'glob' | 'regex'
   pattern: string
   excludeDirs: string[]
+  selectedScopes?: string[]
+  selectedExtensions?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +26,8 @@ const emit = defineEmits<{
   'update:patternType': [val: 'all' | 'glob' | 'regex']
   'update:pattern': [val: string]
   'suggestExtensions': [exts: string[]]
+  'update:selectedScopes': [val: string[]]
+  'update:selectedExtensions': [val: string[]]
 }>()
 
 const { t } = useI18n()
@@ -26,43 +36,151 @@ const analysisStore = useAnalysisStore()
 const stats = ref<FileStatsResult | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
-const customScope = ref('')
 
-// 计算最大文件数用于条形图比例
+// Directory multi-select (从 props 初始化以支持编辑模式回显)
+const selectedScopes = ref<string[]>(props.selectedScopes ? [...props.selectedScopes] : [])
+const expandedDirs = ref<Set<string>>(new Set())
+
+// File type multi-select (从 props 初始化以支持编辑模式回显)
+const selectedExtensions = ref<string[]>(props.selectedExtensions ? [...props.selectedExtensions] : [])
+const manualExtensionInput = ref('')
+
+// Compute max count for bar chart
 const maxCount = computed(() => {
   if (!stats.value || !stats.value.extensions) return 1
   return Math.max(...Object.values(stats.value.extensions), 1)
 })
 
-// 加载统计数据
-async function loadStats() {
-  if (!props.projectId) {
-    console.warn('[FileStatsPanel] loadStats: projectId is empty')
-    return
+// Total files in selected scopes
+const filteredTotal = computed(() => {
+  return stats.value?.totalFiles || 0
+})
+
+// Toggle directory expand/collapse
+function toggleDir(dir: string) {
+  if (expandedDirs.value.has(dir)) {
+    expandedDirs.value.delete(dir)
+  } else {
+    expandedDirs.value.add(dir)
   }
+}
+
+// Toggle directory selection
+function toggleScope(dir: string) {
+  console.log('[FileStatsPanel] toggleScope:', dir, 'current:', [...selectedScopes.value])
+  const idx = selectedScopes.value.indexOf(dir)
+  if (idx >= 0) {
+    selectedScopes.value.splice(idx, 1)
+  } else {
+    selectedScopes.value.push(dir)
+  }
+  console.log('[FileStatsPanel] toggleScope after:', [...selectedScopes.value])
+  emitSelectedScopes()
+}
+
+// Select all directories
+function selectAllDirs() {
+  if (stats.value?.directories) {
+    selectedScopes.value = [...stats.value.directories]
+  }
+  emitSelectedScopes()
+}
+
+// Invert directory selection
+function invertDirs() {
+  if (!stats.value?.directories) return
+  const all = stats.value.directories
+  selectedScopes.value = all.filter(d => !selectedScopes.value.includes(d))
+  emitSelectedScopes()
+}
+
+// Toggle file type selection
+function toggleExtension(ext: string) {
+  console.log('[FileStatsPanel] toggleExtension:', ext, 'current:', [...selectedExtensions.value])
+  const idx = selectedExtensions.value.indexOf(ext)
+  if (idx >= 0) {
+    selectedExtensions.value.splice(idx, 1)
+  } else {
+    selectedExtensions.value.push(ext)
+  }
+  console.log('[FileStatsPanel] toggleExtension after:', [...selectedExtensions.value])
+  emitSelectedExtensions()
+}
+
+// Select all extensions
+function selectAllExtensions() {
+  if (stats.value?.extensions) {
+    selectedExtensions.value = [...Object.keys(stats.value.extensions)]
+  }
+  emitSelectedExtensions()
+}
+
+// Invert extension selection
+function invertExtensions() {
+  if (!stats.value?.extensions) return
+  const all = Object.keys(stats.value.extensions)
+  selectedExtensions.value = all.filter(e => !selectedExtensions.value.includes(e))
+  emitSelectedExtensions()
+}
+
+// Remove a selected extension
+function removeExtension(ext: string) {
+  const idx = selectedExtensions.value.indexOf(ext)
+  if (idx >= 0) {
+    selectedExtensions.value.splice(idx, 1)
+  }
+  emitSelectedExtensions()
+}
+
+// Add manual extension
+function addManualExtension() {
+  const ext = manualExtensionInput.value.trim()
+  if (!ext) return
+  const normalized = ext.startsWith('.') ? ext : `.${ext}`
+  if (!selectedExtensions.value.includes(normalized)) {
+    selectedExtensions.value.push(normalized)
+  }
+  manualExtensionInput.value = ''
+  emitSelectedExtensions()
+}
+
+function emitSelectedScopes() {
+  emit('update:selectedScopes', [...selectedScopes.value])
+}
+
+function emitSelectedExtensions() {
+  emit('update:selectedExtensions', [...selectedExtensions.value])
+}
+
+// Load stats
+async function loadStats() {
+  if (!props.projectId) return
 
   loading.value = true
   error.value = null
 
   try {
-    const scope = props.scope === '__custom__' ? customScope.value : (props.scope || undefined)
-    console.log('[FileStatsPanel] loadStats calling scanFileStats:', {
-      projectId: props.projectId,
-      scope,
-      patternType: props.patternType,
-      pattern: props.pattern,
-      excludeDirs: props.excludeDirs,
-    })
-    const result = await analysisStore.scanFileStats(props.projectId, {
-      scope: scope || undefined,
+    const scopes = selectedScopes.value.length > 0 ? [...selectedScopes.value] : undefined
+    const scanOptions = {
+      scopes,
+      scope: scopes ? undefined : (props.scope || undefined),
       patternType: props.patternType,
       pattern: props.pattern || undefined,
-      excludeDirs: props.excludeDirs.length > 0 ? props.excludeDirs : undefined,
-    })
-    console.log('[FileStatsPanel] loadStats result:', result)
+      excludeDirs: props.excludeDirs.length > 0 ? [...props.excludeDirs] : undefined,
+      selectedExtensions: selectedExtensions.value.length > 0 ? [...selectedExtensions.value] : undefined,
+    }
+    console.log('[FileStatsPanel] loadStats -> scanFileStats:', JSON.stringify(scanOptions))
+    const result = await analysisStore.scanFileStats(props.projectId, scanOptions)
+
+    console.log('[FileStatsPanel] loadStats result:', JSON.stringify(result))
     stats.value = result
 
-    // 推荐 top 5 扩展名
+    // Auto-expand first level directories
+    if (result.directories && result.directories.length > 0) {
+      result.directories.forEach(d => expandedDirs.value.add(d))
+    }
+
+    // Recommend top 5 extensions
     const exts = Object.keys(result.extensions).slice(0, 5)
     if (exts.length > 0) {
       emit('suggestExtensions', exts)
@@ -75,64 +193,84 @@ async function loadStats() {
   }
 }
 
-// 防抖加载
+// Debounced reload on scope/extension change
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 function debouncedLoadStats() {
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(loadStats, 300)
 }
 
-// 监听 props 变化
-watch([() => props.scope, () => props.patternType, () => props.pattern, () => props.excludeDirs], () => {
-  debouncedLoadStats()
+// Sync local refs with props (编辑模式下父组件异步加载数据后回显)
+watch(() => props.selectedScopes, (val) => {
+  if (val && val.length > 0) {
+    selectedScopes.value = [...val]
+  }
+})
+watch(() => props.selectedExtensions, (val) => {
+  if (val && val.length > 0) {
+    selectedExtensions.value = [...val]
+  }
+})
+
+// Track initial load to prevent duplicate requests
+let initialLoadDone = false
+
+// Watch for external changes (skip during initial load)
+watch([() => props.patternType, () => props.pattern, () => props.excludeDirs], () => {
+  if (initialLoadDone) debouncedLoadStats()
 }, { immediate: false })
 
-// 初始加载
-loadStats()
+// Watch internal changes (skip during initial load)
+watch([selectedScopes, selectedExtensions], () => {
+  if (initialLoadDone) debouncedLoadStats()
+}, { deep: true })
 
-function onScopeChange(val: string) {
-  emit('update:scope', val)
-  if (val !== '__custom__') {
-    loadStats()
-  }
-}
-
-function onCustomScopeInput() {
-  if (props.scope === '__custom__') {
-    debouncedLoadStats()
-  }
-}
+// Initial load
+loadStats().then(() => { initialLoadDone = true })
 </script>
 
 <template>
   <div class="file-stats-panel">
-    <!-- 目录范围选择 -->
+    <!-- Directory multi-select -->
     <div class="stats-section">
-      <label class="stats-label">{{ t('analysis.directoryScope') }}</label>
-      <select
-        class="stats-select"
-        :value="scope"
-        @change="onScopeChange(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="">{{ t('analysis.allDirectories') }}</option>
-        <option v-for="dir in stats?.directories" :key="dir" :value="dir">
-          {{ dir }}
-        </option>
-        <option value="__custom__">{{ t('analysis.customPath') }}</option>
-      </select>
+      <div class="section-header">
+        <span class="stats-label">{{ t('analysis.directoryScope') }}</span>
+        <div class="section-actions">
+          <button class="text-btn" @click="selectAllDirs">{{ t('analysis.selectAll') }}</button>
+          <span class="divider">/</span>
+          <button class="text-btn" @click="invertDirs">{{ t('analysis.invertSelection') }}</button>
+        </div>
+      </div>
+
+      <div class="dir-tree">
+        <div v-if="!stats?.directories || stats.directories.length === 0" class="empty-hint">
+          {{ t('analysis.noDirectories') }}
+        </div>
+        <template v-else>
+          <!-- Root level directories -->
+          <div
+            v-for="dir in stats.directories"
+            :key="dir"
+            class="dir-item"
+          >
+            <label class="dir-label">
+              <input
+                type="checkbox"
+                :checked="selectedScopes.includes(dir)"
+                @change="toggleScope(dir)"
+              />
+              <span class="dir-name">{{ dir }}</span>
+            </label>
+          </div>
+        </template>
+      </div>
+
+      <div class="selection-count">
+        {{ t('analysis.selectedCount', { count: selectedScopes.length, total: stats?.directories?.length || 0 }) }}
+      </div>
     </div>
 
-    <!-- 自定义路径输入 -->
-    <div v-if="scope === '__custom__'" class="stats-section">
-      <input
-        class="stats-input"
-        :value="customScope"
-        @input="onCustomScopeInput"
-        :placeholder="t('analysis.patternPlaceholder')"
-      />
-    </div>
-
-    <!-- 匹配模式 -->
+    <!-- Match mode -->
     <div class="stats-section">
       <label class="stats-label">{{ t('analysis.matchMode') }}</label>
       <div class="radio-group">
@@ -140,7 +278,7 @@ function onCustomScopeInput() {
           <input
             type="radio"
             value="all"
-            :value="patternType"
+            :checked="patternType === 'all'"
             @change="emit('update:patternType', 'all')"
           />
           <span>{{ t('analysis.allFiles') }}</span>
@@ -149,7 +287,7 @@ function onCustomScopeInput() {
           <input
             type="radio"
             value="glob"
-            :value="patternType"
+            :checked="patternType === 'glob'"
             @change="emit('update:patternType', 'glob')"
           />
           <span>{{ t('analysis.stringMatch') }}</span>
@@ -158,7 +296,7 @@ function onCustomScopeInput() {
           <input
             type="radio"
             value="regex"
-            :value="patternType"
+            :checked="patternType === 'regex'"
             @change="emit('update:patternType', 'regex')"
           />
           <span>{{ t('analysis.regexMatch') }}</span>
@@ -166,7 +304,7 @@ function onCustomScopeInput() {
       </div>
     </div>
 
-    <!-- 匹配模式输入 -->
+    <!-- Pattern input -->
     <div v-if="patternType !== 'all'" class="stats-section">
       <input
         class="stats-input"
@@ -176,31 +314,38 @@ function onCustomScopeInput() {
       />
     </div>
 
-    <!-- 加载状态 -->
+    <!-- Loading state -->
     <div v-if="loading" class="stats-loading">
       <div class="loading-spinner"></div>
       <span>{{ t('file.loading') }}</span>
     </div>
 
-    <!-- 错误状态 -->
+    <!-- Error state -->
     <div v-else-if="error" class="stats-error">
       <span>{{ error }}</span>
     </div>
 
-    <!-- 文件统计 -->
+    <!-- File distribution (clickable bars) -->
     <div v-else-if="stats && stats.extensions && Object.keys(stats.extensions).length > 0" class="stats-results">
-      <div class="stats-header">
+      <div class="section-header">
         <DocumentTextIcon class="w-4 h-4" />
         <span>{{ t('analysis.fileDistribution') }}</span>
+        <div class="section-actions">
+          <button class="text-btn" @click="selectAllExtensions">{{ t('analysis.selectAll') }}</button>
+          <span class="divider">/</span>
+          <button class="text-btn" @click="invertExtensions">{{ t('analysis.invertSelection') }}</button>
+        </div>
       </div>
 
       <div class="stats-bars">
         <div
-          v-for="(count, lang) in stats.extensions"
-          :key="lang"
+          v-for="(count, ext) in stats.extensions"
+          :key="ext"
           class="stat-bar-row"
+          :class="{ 'selected': selectedExtensions.includes(ext) }"
+          @click="toggleExtension(ext)"
         >
-          <span class="stat-lang">{{ lang }}</span>
+          <span class="stat-ext">{{ ext }}</span>
           <span class="stat-count">{{ count }}</span>
           <div class="stat-bar">
             <div
@@ -208,7 +353,44 @@ function onCustomScopeInput() {
               :style="{ width: `${(count / maxCount) * 100}%` }"
             />
           </div>
+          <button
+            v-if="selectedExtensions.includes(ext)"
+            class="remove-btn"
+            @click.stop="removeExtension(ext)"
+          >
+            <XMarkIcon class="w-3 h-3" />
+          </button>
         </div>
+      </div>
+
+      <!-- Selected extensions as tags -->
+      <div v-if="selectedExtensions.length > 0" class="selected-tags">
+        <span class="tags-label">{{ t('analysis.selectedExtensions') }}:</span>
+        <div class="tag-list">
+          <span
+            v-for="ext in selectedExtensions"
+            :key="ext"
+            class="tag-chip"
+          >
+            {{ ext }}
+            <button class="tag-remove" @click="removeExtension(ext)">
+              <XMarkIcon class="w-3 h-3" />
+            </button>
+          </span>
+        </div>
+      </div>
+
+      <!-- Manual extension input -->
+      <div class="manual-ext-input">
+        <input
+          class="stats-input"
+          v-model="manualExtensionInput"
+          @keydown.enter="addManualExtension"
+          :placeholder="t('analysis.manualExtensionPlaceholder')"
+        />
+        <button class="add-btn" @click="addManualExtension">
+          <PlusIcon class="w-4 h-4" />
+        </button>
       </div>
 
       <div class="stats-summary">
@@ -217,7 +399,7 @@ function onCustomScopeInput() {
       </div>
     </div>
 
-    <!-- 空状态 -->
+    <!-- Empty state -->
     <div v-else-if="stats && stats.totalFiles === 0" class="stats-empty">
       <span>{{ t('file.noFiles') }}</span>
     </div>
@@ -233,12 +415,32 @@ function onCustomScopeInput() {
   background: var(--bg-secondary);
   border-radius: 6px;
   border: 1px solid var(--border);
+  max-height: 600px;
+  overflow-y: auto;
 }
 
 .stats-section {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
   gap: 4px;
+}
+
+.divider {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .stats-label {
@@ -247,6 +449,69 @@ function onCustomScopeInput() {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.text-btn:hover {
+  background: var(--bg-hover);
+}
+
+/* Directory tree */
+.dir-tree {
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+}
+
+.dir-item {
+  padding: 2px 0;
+}
+
+.dir-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.dir-label:hover {
+  background: var(--bg-hover);
+}
+
+.dir-label input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.dir-name {
+  font-family: monospace;
+}
+
+.selection-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px;
+  text-align: center;
 }
 
 .stats-select,
@@ -306,32 +571,41 @@ function onCustomScopeInput() {
   gap: 8px;
 }
 
-.stats-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
 .stats-bars {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .stat-bar-row {
   display: grid;
-  grid-template-columns: 60px 40px 1fr;
+  grid-template-columns: 55px 35px 1fr 24px;
   align-items: center;
   gap: 8px;
   font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
 }
 
-.stat-lang {
+.stat-bar-row:hover {
+  background: var(--bg-hover);
+}
+
+.stat-bar-row.selected {
+  background: var(--bg-active);
+  border: 1px solid var(--accent);
+}
+
+.stat-bar-row:not(.selected) {
+  border: 1px solid transparent;
+}
+
+.stat-ext {
   color: var(--text-secondary);
   font-family: monospace;
+  font-weight: 600;
 }
 
 .stat-count {
@@ -340,7 +614,7 @@ function onCustomScopeInput() {
 }
 
 .stat-bar {
-  height: 12px;
+  height: 10px;
   background: var(--bg-tertiary);
   border-radius: 3px;
   overflow: hidden;
@@ -353,6 +627,99 @@ function onCustomScopeInput() {
   border-radius: 3px;
 }
 
+.stat-bar-row.selected .stat-bar-fill {
+  background: var(--accent-hover);
+}
+
+.remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+}
+
+.remove-btn:hover {
+  color: var(--error);
+  background: var(--bg-hover);
+}
+
+/* Selected tags */
+.selected-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tags-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--accent);
+  font-family: monospace;
+}
+
+.tag-remove {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+}
+
+.tag-remove:hover {
+  opacity: 1;
+  color: var(--error);
+}
+
+/* Manual extension input */
+.manual-ext-input {
+  display: flex;
+  gap: 4px;
+}
+
+.manual-ext-input .stats-input {
+  flex: 1;
+}
+
+.add-btn {
+  background: var(--accent);
+  border: none;
+  color: var(--bg-primary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.add-btn:hover {
+  background: var(--accent-hover);
+}
+
 .stats-summary {
   display: flex;
   align-items: center;
@@ -361,5 +728,18 @@ function onCustomScopeInput() {
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

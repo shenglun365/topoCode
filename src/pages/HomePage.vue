@@ -49,8 +49,8 @@ function onTaskCreated(taskId: string) {
   projectStore.openTaskListTab()
 }
 
-function onTaskListCreateTask() {
-  projectStore.openTaskCreateForm()
+function onTaskListCreateTask(taskId?: string) {
+  projectStore.openTaskCreateForm(taskId)
 }
 
 // 快速开始操作

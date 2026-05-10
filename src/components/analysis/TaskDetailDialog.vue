@@ -3,10 +3,11 @@ import { ref, computed, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { XMarkIcon, ClockIcon, DocumentTextIcon } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
-import type { AnalysisTask, TaskLogEntry } from '@/types/ipc'
+import type { AnalysisTask, TaskLogEntry, TaskRun } from '@/types/ipc'
 
 const props = defineProps<{
   task: AnalysisTask
+  visible?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -18,6 +19,8 @@ const analysisStore = useAnalysisStore()
 
 const logs = ref<TaskLogEntry[]>([])
 const loadingLogs = ref(false)
+const taskRuns = ref<TaskRun[]>([])
+const selectedRunId = ref<string>('')
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 // 状态颜色
@@ -32,6 +35,23 @@ const statusColor = computed(() => {
   return map[props.task.status] || 'var(--text-muted)'
 })
 
+// 安全解析数组字段（后端可能返回 JSON 字符串）
+const safeExtensions = computed(() => {
+  const data = props.task.extensions
+  if (!data) return []
+  return Array.isArray(data) ? data : JSON.parse(data)
+})
+const safeReportTypes = computed(() => {
+  const data = props.task.reportTypes || props.task.report_types
+  if (!data) return []
+  return Array.isArray(data) ? data : JSON.parse(data)
+})
+const safeExcludeDirs = computed(() => {
+  const data = props.task.excludeDirs || props.task.exclude_dirs
+  if (!data) return []
+  return Array.isArray(data) ? data : JSON.parse(data)
+})
+
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
     running: t('analysis.running'),
@@ -43,12 +63,26 @@ const statusLabel = computed(() => {
   return map[props.task.status] || props.task.status
 })
 
+// 加载运行历史
+async function loadRuns() {
+  if (!props.task.id) return
+  try {
+    taskRuns.value = await analysisStore.getTaskRuns(props.task.id)
+    // 默认选中最新的运行
+    if (taskRuns.value.length > 0) {
+      selectedRunId.value = taskRuns.value[0].id
+    }
+  } catch (err) {
+    console.error('Failed to load runs:', err)
+  }
+}
+
 // 加载日志
-async function loadLogs() {
+async function loadLogs(runId?: string) {
   if (!props.task.id) return
   loadingLogs.value = true
   try {
-    const result = await analysisStore.getTaskLogs(props.task.id)
+    const result = await analysisStore.getTaskLogs(props.task.id, runId || undefined)
     logs.value = result.logs || []
   } catch (err) {
     console.error('Failed to load logs:', err)
@@ -60,7 +94,7 @@ async function loadLogs() {
 // 运行中任务轮询日志
 function startPolling() {
   if (props.task.status === 'running') {
-    pollTimer = setInterval(loadLogs, 2000)
+    pollTimer = setInterval(() => loadLogs(selectedRunId.value), 2000)
   }
 }
 
@@ -72,8 +106,12 @@ function stopPolling() {
 }
 
 // 初始化
-loadLogs()
-startPolling()
+async function init() {
+  await loadRuns()
+  await loadLogs(selectedRunId.value)
+  startPolling()
+}
+init()
 
 onUnmounted(() => {
   stopPolling()
@@ -84,17 +122,47 @@ function handleClose() {
   emit('close')
 }
 
+function handleSelectRun(runId: string) {
+  selectedRunId.value = runId
+  loadLogs(runId)
+}
+
 // 格式化时间
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
+
+function formatDurationMs(ms?: number): string {
+  if (ms == null) return '--'
+  return formatDuration(Math.floor(ms / 1000))
+}
+
+function formatRunStatus(status: string): string {
+  const map: Record<string, string> = {
+    running: t('analysis.running'),
+    done: t('analysis.done'),
+    error: t('analysis.error'),
+    stopped: t('analysis.stopped'),
+  }
+  return map[status] || status
+}
+
+function formatRunStatusColor(status: string): string {
+  const map: Record<string, string> = {
+    running: 'var(--accent)',
+    done: 'var(--success)',
+    error: 'var(--error)',
+    stopped: 'var(--warning)',
+  }
+  return map[status] || 'var(--text-muted)'
+}
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="dialog-overlay" @click.self="handleClose">
+    <div v-if="visible" class="dialog-overlay" @click.self="handleClose">
       <div class="task-detail-dialog">
         <!-- 标题栏 -->
         <div class="dialog-header">
@@ -148,24 +216,54 @@ function formatDuration(seconds: number): string {
           </div>
 
           <!-- 分析配置 -->
-          <div class="detail-section" v-if="task.scope || task.extensions || task.excludeDirs || task.reportTypes">
+          <div class="detail-section" v-if="task.scope || safeExtensions.length || safeExcludeDirs.length || safeReportTypes.length">
             <h3 class="section-title">{{ t('analysis.taskConfig') }}</h3>
             <div class="info-grid">
-              <div class="info-row" v-if="task.reportTypes?.length">
+              <div class="info-row" v-if="safeReportTypes.length">
                 <span class="info-label">{{ t('analysis.reportTypes') }}</span>
-                <span class="info-value">{{ task.reportTypes.join(', ') }}</span>
+                <span class="info-value">{{ safeReportTypes.join(', ') }}</span>
               </div>
               <div class="info-row" v-if="task.scope">
                 <span class="info-label">{{ t('analysis.analysisRoot') }}</span>
                 <span class="info-value">{{ task.scope }}</span>
               </div>
-              <div class="info-row" v-if="task.extensions?.length">
+              <div class="info-row" v-if="safeExtensions.length">
                 <span class="info-label">{{ t('analysis.fileExtensions') }}</span>
-                <span class="info-value">{{ task.extensions.join(', ') }}</span>
+                <span class="info-value">{{ safeExtensions.join(', ') }}</span>
               </div>
-              <div class="info-row" v-if="task.excludeDirs?.length">
+              <div class="info-row" v-if="safeExcludeDirs.length">
                 <span class="info-label">{{ t('analysis.excludeDirs') }}</span>
-                <span class="info-value">{{ task.excludeDirs.join(', ') }}</span>
+                <span class="info-value">{{ safeExcludeDirs.join(', ') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 运行历史 -->
+          <div class="detail-section" v-if="taskRuns.length > 0">
+            <h3 class="section-title">{{ t('analysis.runHistory') }}</h3>
+            <div class="runs-table">
+              <div class="runs-table-header">
+                <span class="runs-col">#</span>
+                <span class="runs-col">{{ t('analysis.status') }}</span>
+                <span class="runs-col">{{ t('analysis.startTime') }}</span>
+                <span class="runs-col">{{ t('analysis.endTime') }}</span>
+                <span class="runs-col">{{ t('analysis.duration') }}</span>
+              </div>
+              <div
+                v-for="run in taskRuns"
+                :key="run.id"
+                class="runs-table-row"
+                :class="{ 'runs-table-row--selected': run.id === selectedRunId }"
+                @click="handleSelectRun(run.id)"
+              >
+                <span class="runs-col">{{ run.runNumber }}</span>
+                <span class="runs-col">
+                  <span class="status-dot" :style="{ background: formatRunStatusColor(run.status) }"></span>
+                  {{ formatRunStatus(run.status) }}
+                </span>
+                <span class="runs-col">{{ run.startedAt }}</span>
+                <span class="runs-col">{{ run.finishedAt || '--' }}</span>
+                <span class="runs-col">{{ formatDurationMs(run.durationMs) }}</span>
               </div>
             </div>
           </div>
@@ -178,7 +276,19 @@ function formatDuration(seconds: number): string {
 
           <!-- 执行日志 -->
           <div class="detail-section">
-            <h3 class="section-title">{{ t('analysis.executionLogs') }}</h3>
+            <div class="logs-header">
+              <h3 class="section-title">{{ t('analysis.executionLogs') }}</h3>
+              <select
+                v-if="taskRuns.length > 1"
+                v-model="selectedRunId"
+                @change="handleSelectRun(($event.target as HTMLSelectElement).value)"
+                class="run-select"
+              >
+                <option v-for="run in taskRuns" :key="run.id" :value="run.id">
+                  Run #{{ run.runNumber }} ({{ formatRunStatus(run.status) }})
+                </option>
+              </select>
+            </div>
             <div v-if="loadingLogs" class="logs-loading">
               <div class="loading-spinner"></div>
             </div>
@@ -402,5 +512,79 @@ function formatDuration(seconds: number): string {
   justify-content: flex-end;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+}
+
+.logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.run-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 2px 6px;
+  outline: none;
+  cursor: pointer;
+}
+
+.run-select:focus {
+  border-color: var(--accent);
+}
+
+.runs-table {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.runs-table-header {
+  display: grid;
+  grid-template-columns: 40px 100px 1fr 1fr 80px;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.runs-table-row {
+  display: grid;
+  grid-template-columns: 40px 100px 1fr 1fr 80px;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  align-items: center;
+}
+
+.runs-table-row:last-child {
+  border-bottom: none;
+}
+
+.runs-table-row:hover {
+  background: var(--bg-hover);
+}
+
+.runs-table-row--selected {
+  background: var(--accent)11;
+}
+
+.runs-col {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

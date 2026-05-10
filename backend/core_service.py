@@ -5,6 +5,7 @@ import fnmatch
 import hashlib
 import json
 import os
+
 import re
 import shutil
 import uuid
@@ -12,10 +13,15 @@ import zipfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from sqlite_ctx import SQLiteContext, MultiDBManager
 from zmq_server import ZMQServer
+
+# 解析任务线程池 - 隔离 CPU 密集型工作，不阻塞 ZMQ 事件循环
+parse_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="parse-worker")
+
 
 
 # ==================== .gitignore 解析器 ====================
@@ -515,19 +521,42 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("analysis.listTasks")
     def list_tasks(project_id: str = None, projectId: str = None):
         pid = project_id or projectId
-        rows = main_db.fetchall(
-            "SELECT * FROM analysis_tasks WHERE project_id = ? ORDER BY updated_at DESC",
-            (pid,)
-        )
+        # 获取任务列表，LEFT JOIN 运行记录获取统计信息
+        rows = main_db.fetchall("""
+            SELECT t.*,
+                   COALESCE(r.run_count, 0) as run_count,
+                   r.last_run_status,
+                   r.last_run_number
+            FROM analysis_tasks t
+            LEFT JOIN (
+                SELECT task_id,
+                       COUNT(*) as run_count,
+                       MAX(run_number) as last_run_number,
+                       status as last_run_status
+                FROM analysis_task_runs
+                GROUP BY task_id
+            ) r ON t.id = r.task_id
+            WHERE t.project_id = ?
+            ORDER BY t.updated_at DESC
+        """, (pid,))
         for row in rows:
             if row.get("tags"):
                 row["tags"] = json.loads(row["tags"])
+            if row.get("scopes"):
+                row["scopes"] = json.loads(row["scopes"])
+            if row.get("extensions"):
+                row["extensions"] = json.loads(row["extensions"])
+            if row.get("exclude_dirs"):
+                row["exclude_dirs"] = json.loads(row["exclude_dirs"])
+            if row.get("report_types"):
+                row["report_types"] = json.loads(row["report_types"])
         return rows
 
     @server.register("analysis.createTask")
-    def create_task(project_id: str = None, projectId: str = None, type: str = None, name: str = None, scope: str = None, extensions: list = None, exclude_dirs: list = None, excludeDirs: list = None, report_types: list = None, reportTypes: list = None):
+    def create_task(project_id: str = None, projectId: str = None, type: str = None, name: str = None, scope: str = None, scopes: list = None, extensions: list = None, exclude_dirs: list = None, excludeDirs: list = None, report_types: list = None, reportTypes: list = None, pattern_type: str = None, patternType: str = None, pattern: str = None):
         pid = project_id or projectId
-        task_id = f"task-{uuid.uuid4().hex[:8]}"
+        # UUID v4 格式
+        task_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
 
         # 兼容 camelCase 参数
@@ -535,47 +564,113 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
         excl = exclude_dirs or excludeDirs or []
         rpt = report_types or reportTypes or []
 
+        # 如果没有提供名称，使用 UUID 作为默认名称
+        task_name = name if name else task_id
+
+        pt = pattern_type or patternType
         main_db.insert("analysis_tasks", {
             "id": task_id,
             "project_id": pid,
             "type": type,
-            "name": name,
+            "name": task_name,
             "status": "pending",
             "total": 100,
             "scope": scope,
+            "scopes": json.dumps(scopes) if scopes else None,
             "extensions": json.dumps(ext) if ext else None,
             "exclude_dirs": json.dumps(excl) if excl else None,
             "report_types": json.dumps(rpt) if rpt else None,
+            "pattern_type": pt,
+            "pattern": pattern,
+            "config_version": 1,
             "created_at": now,
             "updated_at": now,
         })
 
-        return main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        # JSON 解析数组字段，确保前端收到的是 JS 数组而非字符串
+        for key in ("scopes", "extensions", "exclude_dirs", "report_types", "tags"):
+            if task.get(key) and isinstance(task[key], str):
+                try:
+                    task[key] = json.loads(task[key])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        logger.info(f"[analysis.createTask] id={task_id} name={task_name} projectId={pid} scopes={scopes}")
+        return task
 
     @server.register("analysis.runTask")
-    async def run_task(task_id: str):
+    async def run_task(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
         task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
         if not task:
             raise ValueError(f"Task not found: {task_id}")
+        if task.get("status") == "running":
+            raise ValueError(f"Task is already running: {task_id}")
 
+        # 获取当前运行次数
+        run_count_row = main_db.fetchone(
+            "SELECT COALESCE(MAX(run_number), 0) as cnt FROM analysis_task_runs WHERE task_id = ?",
+            (task_id,)
+        )
+        run_number = (run_count_row["cnt"] if run_count_row else 0) + 1
+
+        # 创建运行记录
+        run_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+
+        main_db.insert("analysis_task_runs", {
+            "id": run_id,
+            "task_id": task_id,
+            "run_number": run_number,
+            "status": "running",
+            "progress": 0,
+            "total": task.get("total", 100),
+            "current": 0,
+            "started_at": now,
+            "snapshot_scope": task.get("scope"),
+            "snapshot_scopes": task.get("scopes"),
+            "snapshot_extensions": task.get("extensions"),
+            "snapshot_exclude_dirs": task.get("exclude_dirs"),
+            "snapshot_report_types": task.get("report_types"),
+        })
+
+        # 更新任务状态
         main_db.update("analysis_tasks", {
             "status": "running",
             "progress": 0,
             "current": 0,
-            "updated_at": datetime.now().isoformat(),
+            "last_run_id": run_id,
+            "updated_at": now,
         }, "id = ?", (task_id,))
 
-        asyncio.create_task(_execute_task(server, main_db, multi_db, task_id))
+        asyncio.create_task(_execute_task(server, main_db, multi_db, task_id, run_id))
 
-        return {"taskId": task_id, "status": "running"}
+        return {"taskId": task_id, "runId": run_id, "runNumber": run_number, "status": "running"}
 
     @server.register("analysis.getTask")
-    def get_task(task_id: str):
-        return main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+    def get_task(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if task:
+            # 解析 JSON 字段为数组
+            for key in ("scopes", "extensions", "exclude_dirs", "report_types", "tags"):
+                if task.get(key) and isinstance(task[key], str):
+                    try:
+                        task[key] = json.loads(task[key])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+        return task
 
     @server.register("analysis.getResults")
-    def get_results(task_id: str):
-        report = main_db.fetchone("SELECT * FROM analysis_reports WHERE task_id = ?", (task_id,))
+    def get_results(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
+        # 优先获取最后一次运行的报告
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if task and task.get("last_run_id"):
+            report = main_db.fetchone("SELECT * FROM analysis_reports WHERE run_id = ?", (task["last_run_id"],))
+        else:
+            report = main_db.fetchone("SELECT * FROM analysis_reports WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", (task_id,))
+
         if not report:
             return {
                 "ast": {"type": "Program", "body": []},
@@ -592,7 +687,8 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
         }
 
     @server.register("analysis.updateTask")
-    def update_task(task_id: str, **kwargs):
+    def update_task(task_id: str = None, taskId: str = None, **kwargs):
+        task_id = task_id or taskId
         allowed = {"favorite", "pinned", "tags"}
         data = {k: v for k, v in kwargs.items() if k in allowed}
         if "tags" in data:
@@ -600,14 +696,25 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
         data["updated_at"] = datetime.now().isoformat()
 
         main_db.update("analysis_tasks", data, "id = ?", (task_id,))
-        return main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        updated = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        # 解析 JSON 字段
+        if updated:
+            for key in ("extensions", "exclude_dirs", "report_types", "tags"):
+                if updated.get(key) and isinstance(updated[key], str):
+                    try:
+                        updated[key] = json.loads(updated[key])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+        return updated
 
     @server.register("analysis.deleteTask")
-    def delete_task(task_id: str):
+    def delete_task(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
         main_db.delete("analysis_tasks", "id = ?", (task_id,))
 
     @server.register("analysis.stopTask")
-    def stop_task(task_id: str):
+    def stop_task(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
         """停止正在运行的分析任务"""
         task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
         if not task:
@@ -615,106 +722,242 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
         if task["status"] != "running":
             raise ValueError(f"Task is not running (status={task['status']})")
 
+        now = datetime.now().isoformat()
+
+        # 更新任务状态
         main_db.update("analysis_tasks", {
             "status": "stopped",
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": now,
         }, "id = ?", (task_id,))
+
+        # 更新当前运行记录的状态
+        if task.get("last_run_id"):
+            main_db.update("analysis_task_runs", {
+                "status": "stopped",
+                "finished_at": now,
+            }, "id = ?", (task["last_run_id"],))
 
         return {"taskId": task_id, "status": "stopped"}
 
     @server.register("analysis.reRunTask")
-    def re_run_task(task_id: str):
-        """使用原任务配置重新执行，返回新任务的 ID"""
+    async def re_run_task(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
+        """使用原任务配置重新执行，创建新的运行记录"""
         task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
         if not task:
             raise ValueError(f"Task not found: {task_id}")
+        if task.get("status") == "running":
+            raise ValueError(f"Task is already running: {task_id}")
 
-        new_task_id = f"task-{uuid.uuid4().hex[:8]}"
+        # 获取当前运行次数
+        run_count_row = main_db.fetchone(
+            "SELECT COALESCE(MAX(run_number), 0) as cnt FROM analysis_task_runs WHERE task_id = ?",
+            (task_id,)
+        )
+        run_number = (run_count_row["cnt"] if run_count_row else 0) + 1
+
+        run_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
 
-        main_db.insert("analysis_tasks", {
-            "id": new_task_id,
-            "project_id": task["project_id"],
-            "type": task["type"],
-            "name": f"{task['name']} (重跑)",
-            "status": "pending",
+        main_db.insert("analysis_task_runs", {
+            "id": run_id,
+            "task_id": task_id,
+            "run_number": run_number,
+            "status": "running",
+            "progress": 0,
             "total": task.get("total", 100),
-            "scope": task.get("scope"),
-            "extensions": task.get("extensions"),
-            "exclude_dirs": task.get("exclude_dirs"),
-            "report_types": task.get("report_types"),
-            "created_at": now,
-            "updated_at": now,
+            "current": 0,
+            "started_at": now,
+            "snapshot_scope": task.get("scope"),
+            "snapshot_scopes": task.get("scopes"),
+            "snapshot_extensions": task.get("extensions"),
+            "snapshot_exclude_dirs": task.get("exclude_dirs"),
+            "snapshot_report_types": task.get("report_types"),
         })
 
-        new_task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (new_task_id,))
-        # 立即启动
+        # 更新任务状态
         main_db.update("analysis_tasks", {
             "status": "running",
             "progress": 0,
             "current": 0,
-            "updated_at": datetime.now().isoformat(),
-        }, "id = ?", (new_task_id,))
+            "last_run_id": run_id,
+            "updated_at": now,
+        }, "id = ?", (task_id,))
 
-        asyncio.create_task(_execute_task(server, main_db, multi_db, new_task_id))
+        asyncio.create_task(_execute_task(server, main_db, multi_db, task_id, run_id))
 
-        return new_task
+        return main_db.fetchone("SELECT * FROM analysis_task_runs WHERE id = ?", (run_id,))
 
-    @server.register("analysis.getTaskLogs")
-    def get_task_logs(task_id: str):
-        """获取任务的执行日志"""
+    @server.register("analysis.getTaskRuns")
+    def get_task_runs(task_id: str = None, taskId: str = None):
+        task_id = task_id or taskId
+        """获取任务的运行历史"""
         task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
         if not task:
             raise ValueError(f"Task not found: {task_id}")
 
-        report = main_db.fetchone("SELECT * FROM analysis_reports WHERE task_id = ?", (task_id,))
+        runs = main_db.fetchall(
+            "SELECT * FROM analysis_task_runs WHERE task_id = ? ORDER BY run_number DESC",
+            (task_id,)
+        )
+        # 反序列化快照字段
+        for run in runs:
+            for key in ("snapshot_scope", "snapshot_extensions", "snapshot_exclude_dirs", "snapshot_report_types"):
+                val = run.get(key)
+                if val:
+                    try:
+                        run[key] = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+        return runs
+
+    @server.register("analysis.getTaskLogs")
+    def get_task_logs(task_id: str = None, taskId: str = None, run_id: str = None, runId: str = None):
+        # Handle nested params from frontend: { taskId: { taskId: '...', runId: '...' } }
+        if isinstance(taskId, dict):
+            task_id = task_id or taskId.get("taskId")
+            run_id = run_id or taskId.get("runId")
+        else:
+            task_id = task_id or taskId
+            run_id = run_id or runId
+        """获取任务的执行日志，支持按运行实例读取"""
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        if not task:
+            raise ValueError(f"Task not found: {task_id}")
+
+        # 如果指定了 run_id，按 run_id 查找；否则按 last_run_id 或 task_id
+        if run_id:
+            report = main_db.fetchone("SELECT * FROM analysis_reports WHERE run_id = ?", (run_id,))
+        elif task.get("last_run_id"):
+            report = main_db.fetchone("SELECT * FROM analysis_reports WHERE run_id = ?", (task["last_run_id"],))
+        else:
+            report = main_db.fetchone("SELECT * FROM analysis_reports WHERE task_id = ? ORDER BY created_at DESC LIMIT 1", (task_id,))
+
         logs = []
         if report and report.get("logs"):
             logs = json.loads(report.get("logs"))
 
+        # 获取当前运行记录的状态
+        current_run = None
+        if run_id:
+            current_run = main_db.fetchone("SELECT * FROM analysis_task_runs WHERE id = ?", (run_id,))
+        elif task.get("last_run_id"):
+            current_run = main_db.fetchone("SELECT * FROM analysis_task_runs WHERE id = ?", (task["last_run_id"],))
+
+        completed = False
+        if current_run:
+            completed = current_run["status"] in ("done", "error", "stopped")
+        else:
+            completed = task["status"] in ("done", "error", "stopped")
+
         return {
             "logs": logs,
-            "completed": task["status"] in ("done", "error", "stopped"),
+            "completed": completed,
         }
 
     @server.register("analysis.updateTaskConfig")
-    def update_task_config(task_id: str, **kwargs):
-        """更新任务的配置（编辑功能）"""
+    def update_task_config(task_id: str = None, taskId: str = None, **kwargs):
+        task_id = task_id or taskId
+        # 前端传参: { taskId: '...', config: { name: '...', extensions: ['vue'] } }
+        config = kwargs.get("config", {})
+        if not config:
+            config = kwargs  # fallback: 直接传参
+        # 修复前端传来的 extensions 被拆成字符的问题
+        if "extensions" in config and isinstance(config["extensions"], list):
+            exts = config["extensions"]
+            # 检测是否是字符数组（JSON 字符串被拆成字符）
+            if all(isinstance(e, str) and len(e) <= 1 for e in exts):
+                joined = "".join(exts)
+                try:
+                    config["extensions"] = json.loads(joined)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        """更新任务的配置（编辑功能）- 变更前保存旧配置到历史表"""
         task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
         if not task:
             raise ValueError(f"Task not found: {task_id}")
         if task["status"] == "running":
             raise ValueError("Cannot update config of running task")
 
-        allowed = {"name", "scope", "extensions", "exclude_dirs", "report_types"}
-        data = {k: v for k, v in kwargs.items() if k in allowed}
+        # 保存旧配置到历史表
+        import uuid as uuid_mod
+        history_id = f"hist-{uuid_mod.uuid4().hex[:12]}"
+        main_db.insert("task_config_history", {
+            "id": history_id,
+            "task_id": task_id,
+            "config_version": task.get("config_version") or 1,
+            "name": task.get("name"),
+            "scope": task.get("scope"),
+            "scopes": task.get("scopes"),
+            "extensions": task.get("extensions"),
+            "exclude_dirs": task.get("exclude_dirs"),
+            "report_types": task.get("report_types"),
+            "pattern_type": task.get("pattern_type"),
+            "pattern": task.get("pattern"),
+        })
+
+        # 兼容 camelCase 和 snake_case
+        field_map = {
+            "excludeDirs": "exclude_dirs",
+            "reportTypes": "report_types",
+            "patternType": "pattern_type",
+            "exclude_dirs": "exclude_dirs",
+            "report_types": "report_types",
+            "pattern_type": "pattern_type",
+        }
+        allowed = {"name", "scope", "scopes", "extensions", "exclude_dirs", "report_types", "pattern_type", "pattern", "patternType"}
+        data = {}
+        for k, v in config.items():
+            if v is None:
+                continue
+            mapped = field_map.get(k, k)
+            if mapped in allowed:
+                data[mapped] = v
         # 序列化列表字段
-        for key in ("extensions", "exclude_dirs", "report_types"):
+        for key in ("scopes", "extensions", "exclude_dirs", "report_types"):
             if key in data and isinstance(data[key], list):
                 data[key] = json.dumps(data[key])
+
+        # 版本号 +1，更新状态为 pending（等待重新运行）
+        data["config_version"] = (task.get("config_version") or 1) + 1
+        data["status"] = "pending"
         data["updated_at"] = datetime.now().isoformat()
 
         main_db.update("analysis_tasks", data, "id = ?", (task_id,))
-        return main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        updated = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+        # 解析 JSON 字段
+        if updated:
+            for key in ("extensions", "exclude_dirs", "report_types", "tags"):
+                if updated.get(key) and isinstance(updated[key], str):
+                    try:
+                        updated[key] = json.loads(updated[key])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+        return updated
 
     @server.register("analysis.scanFileStats")
-    def scan_file_stats(project_id: str = None, projectId: str = None, scope: str = None, pattern_type: str = "all", patternType: str = None, pattern: str = None, exclude_dirs: list = None, excludeDirs: list = None):
-        """从 SQLite source_files 表读取文件类型分布统计"""
+    def scan_file_stats(project_id: str = None, projectId: str = None, scope: str = None, scopes: list = None, pattern_type: str = "all", patternType: str = None, pattern: str = None, exclude_dirs: list = None, excludeDirs: list = None, selected_extensions: list = None, selectedExtensions: list = None):
+        """从 SQLite source_files 表读取文件类型分布统计，支持目录多选"""
         import logging
         logger = logging.getLogger(__name__)
         pid = project_id or projectId
         pt = pattern_type or patternType or "all"
         ed = exclude_dirs or excludeDirs or []
-        logger.info(f"[scanFileStats] called: pid={pid}, pt={pt}, scope={scope}, ed={ed}")
+        sel_ext = selected_extensions or selectedExtensions or []
+        logger.info(f"[scanFileStats] called: pid={pid}, pt={pt}, scope={scope}, scopes={scopes}, ed={ed}, sel_ext={sel_ext}")
+        logger.info(f"[scanFileStats] ALL params: project_id={project_id}, projectId={projectId}, scope={scope}, scopes={scopes}, pattern_type={pattern_type}, patternType={patternType}, pattern={pattern}, exclude_dirs={exclude_dirs}, excludeDirs={excludeDirs}, selected_extensions={selected_extensions}, selectedExtensions={selectedExtensions}")
         project_db = multi_db.get_project_db(pid)
 
         # 构建 WHERE 子句
         where_clauses = []
         params = []
 
-        if scope:
-            where_clauses.append("(file_path LIKE ? OR file_path = ?)")
-            params.extend([f"{scope}/%", scope])
+        # 支持 scopes 多选（优先）或 scope 单选
+        active_scopes = scopes if scopes else ([scope] if scope else [])
+        if active_scopes:
+            placeholders = " OR ".join(["file_path LIKE ?" for _ in active_scopes])
+            where_clauses.append(f"(({placeholders}))")
+            params.extend([f"{s}/%" for s in active_scopes])
 
         if ed:
             for d in ed:
@@ -782,12 +1025,14 @@ def register_analysis_methods(server: ZMQServer, multi_db: MultiDBManager):
             except re.error as e:
                 raise ValueError(f"Invalid regex pattern: {e}")
 
-        return {
+        result = {
             "extensions": extensions,
             "totalFiles": total_files,
             "totalDirs": len(directories),
             "directories": directories,
         }
+        logger.info(f"[scanFileStats] returning: totalFiles={total_files}, totalDirs={len(directories)}, dirs={directories[:5]}..., exts={list(extensions.keys())[:5]}...")
+        return result
 
     return server
 
@@ -1371,69 +1616,184 @@ def _export_graph_data(multi_db: MultiDBManager, project_id: str) -> dict:
     }
 
 
-async def _execute_task(server: ZMQServer, main_db: SQLiteContext, multi_db: MultiDBManager, task_id: str):
-    """异步执行分析任务"""
+async def _execute_task(server: ZMQServer, main_db: SQLiteContext, multi_db: MultiDBManager, task_id: str, run_id: str = None):
+    """调度层：将解析工作提交到线程池，自身不阻塞事件循环"""
+    task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
+    if not task:
+        return
+
+    start_time = datetime.now()
+
+    try:
+        # 将 CPU 密集型解析工作提交到线程池
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            parse_executor,
+            _do_parse,
+            server, main_db, task_id, run_id, start_time
+        )
+    except Exception as e:
+        end_time = datetime.now()
+        duration_ms = int((end_time - start_time).total_seconds() * 1000)
+
+        main_db.update("analysis_tasks", {
+            "status": "error",
+            "error": str(e),
+            "updated_at": end_time.isoformat(),
+        }, "id = ?", (task_id,))
+
+        if run_id:
+            main_db.update("analysis_task_runs", {
+                "status": "error",
+                "error": str(e),
+                "finished_at": end_time.isoformat(),
+                "duration_ms": duration_ms,
+            }, "id = ?", (run_id,))
+
+        server.publish("task", "error", {
+            "taskId": task_id,
+            "runId": run_id,
+            "error": str(e),
+        })
+
+
+def _do_parse(server: ZMQServer, main_db: SQLiteContext, task_id: str, run_id: str, start_time: datetime):
+    """
+    解析工作层：在独立线程中执行，可安全调用阻塞式 CPU 操作。
+
+    TODO: 替换为真实 Tree-sitter 解析逻辑。
+    当前为 mock 实现，模拟进度推进和报告生成。
+
+    接入真实解析时的替换点：
+    1. 读取 task 配置 (scope, extensions, exclude_dirs, report_types)
+    2. 调用 Tree-sitter 解析器扫描文件
+    3. 每处理一个文件，调用 _update_progress 更新进度
+    4. 解析完成后，写入 analysis_reports 表
+    5. 调用 server.publish 通知前端
+    """
     task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (task_id,))
     if not task:
         return
 
     total = task.get("total", 100)
 
-    try:
-        for i in range(0, total + 1, 5):
-            await asyncio.sleep(0.1)
-            main_db.update("analysis_tasks", {
-                "progress": i,
-                "current": i,
-                "updated_at": datetime.now().isoformat(),
-            }, "id = ?", (task_id,))
+    def _update_progress(current: int):
+        """线程安全：更新进度 + 推送事件"""
+        progress = int(current / total * 100) if total > 0 else 0
+        main_db.update("analysis_tasks", {
+            "progress": progress,
+            "current": current,
+            "updated_at": datetime.now().isoformat(),
+        }, "id = ?", (task_id,))
 
-            server.publish("task", "progress", {
-                "taskId": task_id,
-                "progress": i,
-                "total": total,
-                "current": i,
-            })
+        if run_id:
+            main_db.update("analysis_task_runs", {
+                "progress": progress,
+                "current": current,
+            }, "id = ?", (run_id,))
+
+        server.publish("task", "progress", {
+            "taskId": task_id,
+            "runId": run_id,
+            "progress": progress,
+            "total": total,
+            "current": current,
+        })
+
+    try:
+        # ============================================================
+        # TODO: 替换以下 mock 循环为真实解析逻辑
+        #
+        # 示例伪代码:
+        #   from tree_sitter import Language, Parser
+        #   ts_language = Language("build/my-languages.so", "python")
+        #   parser = Parser()
+        #   parser.set_language(ts_language)
+        #
+        #   files = _collect_files(task.get("scope"), task.get("extensions"), task.get("exclude_dirs"))
+        #   for idx, filepath in enumerate(files):
+        #       with open(filepath, "rb") as f:
+        #           source = f.read()
+        #       tree = parser.parse(source)
+        #       ast_json = _tree_to_json(tree.root_node)
+        #       # 累积 AST / 调用链 / 依赖 / 数据流 ...
+        #       _update_progress(idx + 1)
+        # ============================================================
+
+        # --- Mock 实现 (待替换) ---
+        import time
+        for i in range(0, total + 1, 5):
+            time.sleep(0.1)  # 模拟 CPU 耗时（线程中用 time.sleep，非 asyncio.sleep）
+            _update_progress(i)
+
+        # --- 生成报告 (mock 数据，待替换) ---
+        end_time = datetime.now()
+        duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
         main_db.update("analysis_tasks", {
             "status": "done",
             "progress": 100,
             "current": total,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": end_time.isoformat(),
         }, "id = ?", (task_id,))
 
-        report_id = f"report-{uuid.uuid4().hex[:8]}"
+        if run_id:
+            main_db.update("analysis_task_runs", {
+                "status": "done",
+                "progress": 100,
+                "current": total,
+                "finished_at": end_time.isoformat(),
+                "duration_ms": duration_ms,
+            }, "id = ?", (run_id,))
+
+        report_id = str(uuid.uuid4())
         main_db.insert("analysis_reports", {
             "id": report_id,
             "task_id": task_id,
+            "run_id": run_id,
             "ast_data": json.dumps({"type": "Program", "body": []}),
             "call_chain": json.dumps([]),
             "dependencies": json.dumps({"modules": [], "files": []}),
             "dataflow": json.dumps([]),
             "summary": "Analysis complete (mock data)",
+            "logs": json.dumps([
+                {"timestamp": start_time.isoformat(), "message": "开始分析..."},
+                {"timestamp": start_time.isoformat(), "message": f"扫描目录: {task.get('scope', '全部')}"},
+                {"timestamp": end_time.isoformat(), "message": f"完成, 耗时 {duration_ms}ms"},
+            ]),
         })
 
         server.publish("task", "complete", {
             "taskId": task_id,
+            "runId": run_id,
             "status": "done",
             "progress": 100,
         })
 
     except Exception as e:
+        end_time = datetime.now()
+        duration_ms = int((end_time - start_time).total_seconds() * 1000)
+
         main_db.update("analysis_tasks", {
             "status": "error",
             "error": str(e),
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": end_time.isoformat(),
         }, "id = ?", (task_id,))
+
+        if run_id:
+            main_db.update("analysis_task_runs", {
+                "status": "error",
+                "error": str(e),
+                "finished_at": end_time.isoformat(),
+                "duration_ms": duration_ms,
+            }, "id = ?", (run_id,))
 
         server.publish("task", "error", {
             "taskId": task_id,
+            "runId": run_id,
             "error": str(e),
         })
 
-    # ==================== 示例数据 ====================
-
-    @server.register("project.initSampleData")
     def init_sample_data():
         """初始化示例项目数据"""
         project_id = f"sample-{uuid.uuid4().hex[:8]}"

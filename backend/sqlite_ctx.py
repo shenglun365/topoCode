@@ -107,13 +107,13 @@ MAIN_DB_TABLES_SQL = """
         updated_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- 分析任务表
+    -- 分析任务表 (配置持久化)
     CREATE TABLE IF NOT EXISTS analysis_tasks (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('ast', 'call-chain', 'dependency', 'dataflow', 'full')),
         name TEXT NOT NULL,
-        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'done', 'error', 'cancelled', 'stopped')),
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'modified', 'running', 'done', 'error', 'cancelled', 'stopped')),
         progress INTEGER DEFAULT 0,
         total INTEGER DEFAULT 100,
         current INTEGER DEFAULT 0,
@@ -124,9 +124,14 @@ MAIN_DB_TABLES_SQL = """
         tags TEXT,
         agent_id TEXT,
         scope TEXT,
+        scopes TEXT,
         extensions TEXT,
         exclude_dirs TEXT,
         report_types TEXT,
+        pattern_type TEXT,
+        pattern TEXT,
+        config_version INTEGER DEFAULT 1,
+        last_run_id TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -134,10 +139,52 @@ MAIN_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_project ON analysis_tasks(project_id);
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status);
 
-    -- 分析报告表
+    -- 任务配置变更历史
+    CREATE TABLE IF NOT EXISTS task_config_history (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        config_version INTEGER NOT NULL,
+        name TEXT,
+        scope TEXT,
+        scopes TEXT,
+        extensions TEXT,
+        exclude_dirs TEXT,
+        report_types TEXT,
+        pattern_type TEXT,
+        pattern TEXT,
+        changed_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (task_id) REFERENCES analysis_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_config_history_task ON task_config_history(task_id);
+
+    -- 分析任务运行记录 (一次运行一条)
+    CREATE TABLE IF NOT EXISTS analysis_task_runs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        run_number INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('running', 'done', 'error', 'stopped')),
+        progress INTEGER DEFAULT 0,
+        total INTEGER DEFAULT 100,
+        current INTEGER DEFAULT 0,
+        error TEXT,
+        started_at TEXT DEFAULT (datetime('now')),
+        finished_at TEXT,
+        duration_ms INTEGER,
+        snapshot_scope TEXT,
+        snapshot_scopes TEXT,
+        snapshot_extensions TEXT,
+        snapshot_exclude_dirs TEXT,
+        snapshot_report_types TEXT,
+        FOREIGN KEY (task_id) REFERENCES analysis_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_runs_task ON analysis_task_runs(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_status ON analysis_task_runs(status);
+
+    -- 分析报告表 (关联到运行记录)
     CREATE TABLE IF NOT EXISTS analysis_reports (
         id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL UNIQUE,
+        task_id TEXT NOT NULL,
+        run_id TEXT,
         ast_data TEXT,
         call_chain TEXT,
         dependencies TEXT,
@@ -436,12 +483,28 @@ class MultiDBManager:
         columns_to_add = {
             "analysis_tasks": [
                 ("scope", "TEXT"),
+                ("scopes", "TEXT"),
                 ("extensions", "TEXT"),
                 ("exclude_dirs", "TEXT"),
                 ("report_types", "TEXT"),
+                ("pattern_type", "TEXT"),
+                ("pattern", "TEXT"),
+                ("config_version", "INTEGER DEFAULT 1"),
+                ("last_run_id", "TEXT"),
+            ],
+            "task_config_history": [
+                ("scopes", "TEXT"),
+                ("pattern_type", "TEXT"),
+                ("pattern", "TEXT"),
             ],
             "analysis_reports": [
                 ("logs", "TEXT"),
+                ("run_id", "TEXT"),
+            ],
+            "analysis_task_runs": [
+                ("snapshot_scopes", "TEXT"),
+            ],
+            "analysis_tasks_misc": [  # 通过 analysis_tasks 表执行
             ],
         }
         for table, columns in columns_to_add.items():
@@ -450,6 +513,7 @@ class MultiDBManager:
                     self.main_db.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
                 except Exception:
                     pass  # 列已存在，忽略
+
         self.main_db.conn.commit()
         _init_default_skills(self.main_db)
 

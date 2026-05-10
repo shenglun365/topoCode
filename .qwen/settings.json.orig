@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(~/miniconda3/bin/conda *)"
     ]
-  }
+  },
+  "$version": 3
 }
