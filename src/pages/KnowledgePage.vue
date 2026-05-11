@@ -10,17 +10,62 @@ import {
   ChevronRightIcon,
   XMarkIcon,
   PlusIcon,
+  PlayCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useKnowledgeStore } from '@/stores/knowledge'
 import KnowledgeGraph from '@/components/knowledge/KnowledgeGraph.vue'
 import CategoryManager from '@/components/knowledge/CategoryManager.vue'
 import KnowledgeDocCard from '@/components/knowledge/KnowledgeDocCard.vue'
 import KnowledgeDocEditor from '@/components/knowledge/KnowledgeDocEditor.vue'
+import AnimationStage from '@/components/visualization/AnimationStage.vue'
 import { knowledgeDimensions } from '@/utils/mock'
 
 const { t } = useI18n()
 const knowledgeStore = useKnowledgeStore()
 const showEditor = ref(false)
+const animSource = ref(`#TOPOSCRIPT v1.0
+# 微服务调用链演示
+
+scene "微服务调用链" layout force-directed width 800 height 600 fps 20
+
+node gateway at (100, 100) label "API Gateway" type service shape rect
+  style { fill: "#4A90D9", stroke: "#2C5F8D", radius: 8 }
+
+node auth at (300, 100) label "Auth Service" type service
+  style { fill: "#50C878", stroke: "#2E8B57" }
+
+node user_db at (500, 200) label "User DB" type database shape cylinder
+  style { fill: "#FFB347", stroke: "#E08C00" }
+
+node cache at (500, 50) label "Redis Cache" type queue
+  style { fill: "#FF6B6B", stroke: "#C0392B" }
+
+edge gateway -> auth label "authenticate"
+  style { color: "#4A90D9" }
+edge auth -> cache label "get token"
+edge auth -> user_db label "query user"
+  style { color: "#FFB347" }
+
+group auth_group label "认证模块" [auth, cache, user_db]
+  style { fill: "rgba(80,200,120,0.1)", stroke: "#50C878" }
+
+animate "请求认证流程" {
+  enter gateway effect fade-scale duration 500
+  wait 300
+  enter auth effect fade duration 500
+  draw-edge gateway -> auth duration 300
+  flow gateway -> auth duration 1500
+  highlight auth duration 800
+  enter cache, user_db effect fade-scale duration 500
+  draw-edge auth -> cache duration 300
+  draw-edge auth -> user_db duration 300
+  flow auth -> cache duration 1000
+  flow auth -> user_db duration 1000
+  highlight auth, cache, user_db duration 1000
+  wait 1500
+  reset auth, cache, user_db
+}
+`)
 const expandedFilters = ref<Record<string, boolean>>({
   lifecycle: false,
   techStack: false,
@@ -91,6 +136,14 @@ function handleSave(docId: string, content: string) {
           <DocumentTextIcon class="w-4 h-4" />
           <span>{{ t('knowledge.documents') }}</span>
         </div>
+        <div
+          class="kb-tab"
+          :class="{ active: knowledgeStore.activeTab === 'animation' }"
+          @click="knowledgeStore.setActiveTab('animation')"
+        >
+          <PlayCircleIcon class="w-4 h-4" />
+          <span>{{ t('knowledge.animation') }}</span>
+        </div>
         <div style="flex:1;"></div>
         <div style="display:flex; gap:4px; align-items:center;">
           <button class="btn btn-ghost btn-sm">
@@ -114,7 +167,7 @@ function handleSave(docId: string, content: string) {
 
         <!-- Tab 3: 知识点列表 -->
         <div
-          v-else
+          v-else-if="knowledgeStore.activeTab === 'documents'"
           style="width:100%; height:100%; overflow:auto; padding:16px;"
         >
           <!-- 搜索 + 排序 -->
@@ -302,6 +355,36 @@ function handleSave(docId: string, content: string) {
             <button class="btn btn-ghost btn-sm" disabled>‹ {{ t('common.prev') }}</button>
             <button class="btn btn-ghost btn-sm" style="background:var(--bg-active);">1</button>
             <button class="btn btn-ghost btn-sm" disabled>{{ t('common.next') }} ›</button>
+          </div>
+        </div>
+
+        <!-- Tab 4: 动画脚本编辑器 + 预览 -->
+        <div
+          v-else
+          style="display:flex; width:100%; height:100%;"
+        >
+          <!-- 左侧: 编辑器 -->
+          <div style="flex:1; display:flex; flex-direction:column; border-right:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:6px; padding:8px 12px; background:var(--bg-tertiary); border-bottom:1px solid var(--border);">
+              <PlayCircleIcon class="w-4 h-4" />
+              <span style="font-size:12px; font-weight:600; color:var(--text-primary);">{{ t('knowledge.animation') }}</span>
+              <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">TopoScript</span>
+            </div>
+            <textarea
+              v-model="animSource"
+              style="flex:1; padding:12px; font-size:12px; font-family:'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; line-height:1.6; resize:none; border:none; outline:none; background:var(--bg-primary); color:var(--text-secondary);"
+              spellcheck="false"
+            ></textarea>
+          </div>
+          <!-- 右侧: 预览 -->
+          <div style="flex:1; display:flex; flex-direction:column;">
+            <AnimationStage
+              :source="animSource"
+              :show-toolbar="true"
+              renderer="d3"
+              :width="600"
+              :height="500"
+            />
           </div>
         </div>
       </div>

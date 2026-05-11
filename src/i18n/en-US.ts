@@ -521,6 +521,7 @@ export default {
     sortNameAsc: 'Name A→Z',
     clearFilters: 'Clear Filters',
     addDocumentHint: 'Click "New" or "Import" to add documents',
+    animation: 'Animation',
   },
 
   // AI Assistant

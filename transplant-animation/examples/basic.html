@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topo Animation - 基础示例</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f23;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h1 { margin-bottom: 20px; color: #4A90D9; }
+    .container {
+      display: flex;
+      gap: 20px;
+      width: 100%;
+      max-width: 1200px;
+    }
+    .editor-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .preview-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    textarea {
+      flex: 1;
+      min-height: 400px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'Fira Code', 'Consolas', monospace;
+      font-size: 14px;
+      resize: none;
+    }
+    textarea:focus { outline: none; border-color: #4A90D9; }
+    #stage {
+      width: 100%;
+      max-width: 600px;
+      height: 400px;
+      background: #1a1a2e;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .controls {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+    }
+    .controls button {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 4px;
+      background: #4A90D9;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    .controls button:hover { background: #357abd; }
+    .controls button:disabled { background: #555; cursor: not-allowed; }
+    .status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #888;
+    }
+    .error {
+      color: #ff6b6b;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎬 Topo Animation - 基础示例</h1>
+  <div class="container">
+    <div class="editor-panel">
+      <textarea id="editor" spellcheck="false"># TopoScript 示例
+
+topo.scene({
+  name: "Basic Demo",
+  layout: "grid",
+  width: 600,
+  height: 400,
+  fps: 30
+})
+
+topo.node({ id: "A", label: "Node A", position: [150, 200] })
+topo.node({ id: "B", label: "Node B", position: [300, 200] })
+topo.node({ id: "C", label: "Node C", position: [450, 200] })
+
+topo.edge({ source: "A", target: "B", label: "1" })
+topo.edge({ source: "B", target: "C", label: "2" })
+
+topo.sequence({
+  name: "Demo",
+  autoPlay: true,
+  loop: true,
+  steps: [
+    { type: "enter", targets: ["A"], effect: "fade-scale", duration: 500 },
+    { type: "enter", targets: ["B"], effect: "fade-scale", duration: 500, delay: 300 },
+    { type: "enter", targets: ["C"], effect: "fade-scale", duration: 500, delay: 300 },
+    { type: "highlight", targets: ["A"], duration: 800 },
+    { type: "highlight", targets: ["B"], duration: 800, delay: 400 },
+    { type: "highlight", targets: ["C"], duration: 800, delay: 400 },
+    { type: "wait", duration: 1000 },
+    { type: "reset", targets: ["A", "B", "C"] }
+  ]
+})</textarea>
+      <div id="error" class="error"></div>
+    </div>
+    <div class="preview-panel">
+      <div id="stage"></div>
+      <div class="controls">
+        <button id="playBtn">▶ 播放</button>
+        <button id="pauseBtn" disabled>⏸ 暂停</button>
+        <button id="stopBtn">⏹ 停止</button>
+        <button id="exportPngBtn">📷 PNG</button>
+        <button id="exportSvgBtn">🎨 SVG</button>
+      </div>
+      <div id="status" class="status">就绪</div>
+    </div>
+  </div>
+
+  <script type="module">
+    // 这里需要构建后的库
+    // import { AnimationEngine, exportPNG, exportSVG, downloadImage } from '../dist/index.esm.js';
+    
+    document.getElementById('status').textContent = '注意: 需要先构建项目 (npm run build)';
+    
+    const editor = document.getElementById('editor');
+    const errorEl = document.getElementById('error');
+    const statusEl = document.getElementById('status');
+    
+    let engine = null;
+    let debounceTimer = null;
+    
+    function loadScript() {
+      errorEl.textContent = '';
+      try {
+        // if (engine) engine.destroy();
+        // engine = new AnimationEngine({
+        //   container: 'stage',
+        //   renderer: 'svg',
+        //   width: 600,
+        //   height: 400,
+        // });
+        // engine.init();
+        // engine.load(editor.value);
+        // statusEl.textContent = '加载成功';
+        statusEl.textContent = '构建后可运行';
+      } catch (e) {
+        errorEl.textContent = e.message;
+        statusEl.textContent = '错误';
+      }
+    }
+    
+    editor.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadScript, 1000);
+    });
+    
+    document.getElementById('playBtn').addEventListener('click', () => {
+      engine?.play();
+      document.getElementById('playBtn').disabled = true;
+      document.getElementById('pauseBtn').disabled = false;
+    });
+    
+    document.getElementById('pauseBtn').addEventListener('click', () => {
+      engine?.pause();
+      document.getElementById('playBtn').disabled = false;
+      document.getElementById('pauseBtn').disabled = true;
+    });
+    
+    document.getElementById('stopBtn').addEventListener('click', () => {
+      engine?.stop();
+      document.getElementById('playBtn').disabled = false;
+      document.getElementById('pauseBtn').disabled = true;
+    });
+    
+    document.getElementById('exportPngBtn').addEventListener('click', async () => {
+      // const blob = await exportPNG({ renderer: engine.getRenderer() });
+      // downloadImage(blob, 'animation.png', 'png');
+      alert('构建后可用');
+    });
+    
+    document.getElementById('exportSvgBtn').addEventListener('click', () => {
+      // const svg = exportSVG({ renderer: engine.getRenderer() });
+      // downloadImage(svg, 'animation.svg', 'svg');
+      alert('构建后可用');
+    });
+  </script>
+</body>
+</html>

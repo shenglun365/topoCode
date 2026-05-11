@@ -532,6 +532,7 @@ export default {
     sortNameAsc: '名称 A→Z',
     clearFilters: '清除筛选',
     addDocumentHint: '点击"新建"或"导入"添加知识点文档',
+    animation: '动画脚本',
   },
 
   // AI 助手

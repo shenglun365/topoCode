@@ -1,11 +1,24 @@
-/** 自定义动画系统 Composable - 预留接口，后续细化设计 */
+/**
+ * useAnimation — TopoScript 动画引擎 Composable
+ *
+ * 对接 @topo-animation 的 AnimationEngine，提供响应式的播放状态。
+ *
+ * 基本用法：
+ * ```ts
+ * const { play, pause, stop, seek, load } = useAnimation()
+ * load(container, topoScriptSource)
+ * play()
+ * ```
+ */
 
-import { ref, type Ref, onUnmounted } from 'vue'
+import { ref, readonly, onUnmounted } from 'vue'
+import { compile, createAnimationEngine } from '@topo-animation'
+import type { AnimationState, CompileResult } from '@topo-animation'
 
 export interface AnimationStep {
   id: string
   type: 'fade' | 'slide' | 'scale' | 'morph' | 'flow' | 'custom'
-  target: string // CSS selector 或元素 ID
+  target: string
   duration: number
   delay?: number
   easing?: string
@@ -21,105 +34,200 @@ export interface AnimationSequence {
   autoPlay?: boolean
 }
 
-export function useAnimation() {
+export interface UseAnimationOptions {
+  renderer?: 'd3' | 'pixi' | 'auto'
+  width?: number
+  height?: number
+  autoPlay?: boolean
+  zoom?: boolean
+  layout?: 'force-directed' | 'hierarchy' | 'grid' | 'circular'
+}
+
+export function useAnimation(options: UseAnimationOptions = {}) {
+  // ==================== 响应式状态 ====================
   const playing = ref(false)
+  const paused = ref(false)
   const currentStep = ref(0)
   const totalSteps = ref(0)
   const progress = ref(0)
   const error = ref<string | null>(null)
-  const sequences = new Map<string, AnimationSequence>()
-  let currentSequence: AnimationSequence | null = null
-  let rafId: number | null = null
-  let startTime = 0
+  const compileResult = ref<CompileResult | null>(null)
 
-  /** 注册动画序列 */
+  // ==================== 旧接口序列注册 ====================
+  const sequences = new Map<string, AnimationSequence>()
+
+  let engine: ReturnType<typeof createAnimationEngine> | null = null
+
   function registerSequence(seq: AnimationSequence): void {
     sequences.set(seq.id, seq)
   }
 
-  /** 播放动画序列 */
-  function play(sequenceId: string): void {
-    const seq = sequences.get(sequenceId)
-    if (!seq) {
-      error.value = `Animation sequence not found: ${sequenceId}`
-      return
-    }
-
-    currentSequence = seq
-    totalSteps.value = seq.steps.length
-    currentStep.value = 0
-    playing.value = true
-    progress.value = 0
-
-    // TODO: 后续实现具体的动画播放逻辑
-    // - Web Animations API
-    // - CSS animation 动态注入
-    // - requestAnimationFrame 驱动
-  }
-
-  /** 暂停 */
-  function pause(): void {
-    playing.value = false
-    if (rafId) {
-      cancelAnimationFrame(rafId)
-      rafId = null
-    }
-  }
-
-  /** 恢复 */
-  function resume(): void {
-    if (!currentSequence) return
-    playing.value = true
-    // TODO: 恢复动画
-  }
-
-  /** 停止 */
-  function stop(): void {
-    playing.value = false
-    currentStep.value = 0
-    progress.value = 0
-    currentSequence = null
-    if (rafId) {
-      cancelAnimationFrame(rafId)
-      rafId = null
-    }
-  }
-
-  /** 跳转到指定步骤 */
-  function seekTo(step: number): void {
-    if (!currentSequence) return
-    currentStep.value = Math.max(0, Math.min(step, currentSequence?.steps.length || 0 - 1))
-    // TODO: 跳转到指定步骤
-  }
-
-  /** 移除动画序列 */
   function unregisterSequence(id: string): void {
     sequences.delete(id)
   }
 
-  /** 获取已注册的序列 */
   function getSequences(): AnimationSequence[] {
     return Array.from(sequences.values())
   }
 
-  onUnmounted(() => {
+  // ==================== 编译 ====================
+  function compileSource(source: string): CompileResult {
+    const result = compile(source)
+    if (!result.success) {
+      error.value = result.errors?.[0] || 'Compilation failed'
+    } else {
+      error.value = null
+      compileResult.value = result
+      totalSteps.value = result.stats?.steps || 0
+    }
+    return result
+  }
+
+  // ==================== 装载 ====================
+  function load(container: HTMLElement, source: string): boolean {
+    if (engine) {
+      engine.destroy()
+    }
+
+    const merged = { ...options }
+    const rendererType = merged.renderer || 'd3'
+
+    engine = createAnimationEngine({
+      container,
+      renderer: rendererType,
+      width: merged.width || container.clientWidth || 800,
+      height: merged.height || container.clientHeight || 600,
+      autoPlay: merged.autoPlay || false,
+      zoom: merged.zoom !== false,
+      layout: merged.layout || 'force-directed',
+    })
+
+    // 绑定事件
+    engine.on('play', () => {
+      playing.value = true
+      paused.value = false
+    })
+
+    engine.on('pause', () => {
+      playing.value = false
+      paused.value = true
+    })
+
+    engine.on('stop', () => {
+      playing.value = false
+      paused.value = false
+      currentStep.value = 0
+      progress.value = 0
+    })
+
+    engine.on('complete', () => {
+      playing.value = false
+      paused.value = false
+      progress.value = 100
+    })
+
+    engine.on('step-change', (data: { step: number; state: AnimationState }) => {
+      currentStep.value = data.step
+      progress.value = totalSteps.value > 0
+        ? Math.round(((data.step + 1) / totalSteps.value) * 100)
+        : 0
+    })
+
+    engine.on('error', (err: Error) => {
+      error.value = err.message
+      playing.value = false
+    })
+
+    // 编译并加载
+    const compileRes = compileSource(source)
+    if (!compileRes.success) return false
+
+    engine.load(source)
+    return true
+  }
+
+  // ==================== 播放控制 ====================
+  function play(): void {
+    if (engine) {
+      engine.play()
+      return
+    }
+
+    error.value = 'No engine initialized. Call load() first.'
+  }
+
+  function pause(): void {
+    engine?.pause()
+  }
+
+  function stop(): void {
+    engine?.stop()
+  }
+
+  function seek(step: number): void {
+    engine?.seek(step)
+  }
+
+  // ==================== 导出 ====================
+  function exportPNG(): string | null {
+    if (!engine) return null
+    // TODO: 接入 export exportImage
+    return null
+  }
+
+  function exportSVG(): string | null {
+    if (!engine) return null
+    return null
+  }
+
+  // ==================== 清理 ====================
+  function destroy(): void {
     stop()
     sequences.clear()
+    compileResult.value = null
+
+    if (engine) {
+      engine.destroy()
+      engine = null
+    }
+  }
+
+  onUnmounted(() => {
+    destroy()
   })
 
   return {
-    playing,
-    currentStep,
-    totalSteps,
-    progress,
-    error,
+    // 状态（只读）
+    playing: readonly(playing),
+    paused: readonly(paused),
+    currentStep: readonly(currentStep),
+    totalSteps: readonly(totalSteps),
+    progress: readonly(progress),
+    error: readonly(error),
+    compileResult: readonly(compileResult),
+
+    // 编译
+    compileSource,
+
+    // 装载
+    load,
+
+    // 播放控制
+    play,
+    pause,
+    stop,
+    seek,
+
+    // 旧接口兼容
     registerSequence,
     unregisterSequence,
     getSequences,
-    play,
-    pause,
-    resume,
-    stop,
-    seekTo,
+
+    // 导出
+    exportPNG,
+    exportSVG,
+
+    // 生命周期
+    destroy,
   }
 }

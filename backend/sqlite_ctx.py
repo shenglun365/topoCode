@@ -4,30 +4,34 @@ import sqlite3
 import json
 import os
 import hashlib
+import threading
 from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
 
 class SQLiteContext:
-    """SQLite 数据库上下文"""
+    """SQLite 数据库上下文（线程安全）"""
 
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()
         self._connect()
 
     def _connect(self):
-        """建立数据库连接"""
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        # WAL 模式提升并发性能（多窗口共享后端时多个连接同时读写）
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        # 多窗口并发安全设置
-        self._conn.execute("PRAGMA busy_timeout=5000")  # 等待锁释放 5 秒
-        self._conn.execute("PRAGMA synchronous=NORMAL")  # 平衡性能和安全
-        self._conn.execute("PRAGMA cache_size=10000")  # 10MB 缓存
+        """建立数据库连接（线程安全）"""
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+                # WAL 模式提升并发性能（多窗口共享后端时多个连接同时读写）
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA foreign_keys=ON")
+                # 多窗口并发安全设置
+                self._conn.execute("PRAGMA busy_timeout=5000")  # 等待锁释放 5 秒
+                self._conn.execute("PRAGMA synchronous=NORMAL")  # 平衡性能和安全
+                self._conn.execute("PRAGMA cache_size=10000")  # 10MB 缓存
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -53,6 +57,10 @@ class SQLiteContext:
         cursor = self.conn.execute(sql, params)
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def commit(self):
+        """提交事务（用于 executemany 等不自动提交的场景）"""
+        self.conn.commit()
 
     def insert(self, table: str, data: dict) -> str:
         """插入数据，返回 ID"""
@@ -312,14 +320,18 @@ PROJECT_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS source_files (
         id TEXT PRIMARY KEY,
         file_path TEXT NOT NULL UNIQUE,
+        file_name TEXT,
         language TEXT,
         size INTEGER DEFAULT 0,
         content_hash TEXT,
+        hashcode TEXT,
         parent_path TEXT,
+        mtime REAL,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_source_files_parent ON source_files(parent_path);
+    CREATE INDEX IF NOT EXISTS idx_source_files_lang ON source_files(language);
 
     -- AST 数据表 (仅保留最新)
     CREATE TABLE IF NOT EXISTS ast_data (
@@ -380,6 +392,100 @@ PROJECT_DB_TABLES_SQL = """
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- ============================================
+    -- base_node — AST 节点 (项目级通用)
+    -- file_id 为 TEXT 类型，引用 source_files.id
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS base_node (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        scope_node_id TEXT,
+        def_node_id TEXT,
+        type TEXT NOT NULL,
+        name TEXT,
+        op TEXT,
+        refs TEXT,
+        start TEXT NOT NULL,
+        end TEXT NOT NULL,
+        content_size INTEGER,
+        FOREIGN KEY (file_id) REFERENCES source_files(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_base_node_file ON base_node(file_id);
+    CREATE INDEX IF NOT EXISTS idx_base_node_type ON base_node(type);
+    CREATE INDEX IF NOT EXISTS idx_base_node_name ON base_node(name);
+
+    -- ============================================
+    -- graph_node — 符号 + 调用边 + 依赖边 (任务级)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS graph_node (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        symbol_node_type TEXT NOT NULL,
+        file_id TEXT,
+        func_name TEXT,
+        class_name TEXT,
+        macro_name TEXT,
+        method_name TEXT,
+        caller_file_id TEXT,
+        caller_func_name TEXT,
+        caller_node_id TEXT,
+        callee_name TEXT,
+        callee_file_id TEXT,
+        callee_node_id TEXT,
+        callee_type TEXT,
+        call_site_node_id TEXT,
+        call_site_file_id TEXT,
+        include_path TEXT,
+        is_system INTEGER DEFAULT 0,
+        extra TEXT,
+        FOREIGN KEY (file_id) REFERENCES source_files(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_graph_task ON graph_node(task_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_type ON graph_node(symbol_node_type);
+    CREATE INDEX IF NOT EXISTS idx_graph_caller ON graph_node(task_id, caller_file_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_callee ON graph_node(callee_name);
+
+    -- ============================================
+    -- graph_doc — 社区分析结果 (任务级，分层)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS graph_doc (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        comm_lv TEXT NOT NULL,
+        parent_comm_id TEXT,
+        comm_id TEXT NOT NULL,
+        node_list TEXT NOT NULL,
+        node_count INTEGER NOT NULL,
+        edge_list TEXT,
+        edge_count INTEGER DEFAULT 0,
+        quality_score REAL,
+        description TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_graph_doc_task ON graph_doc(task_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_doc_type ON graph_doc(task_id, edge_type);
+    CREATE INDEX IF NOT EXISTS idx_graph_doc_comm ON graph_doc(comm_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_doc_score ON graph_doc(task_id, edge_type, quality_score DESC);
+
+    -- ============================================
+    -- community_hierarchy — 社区层级元数据 (任务级)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS community_hierarchy (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        comm_lv TEXT NOT NULL,
+        comm_id TEXT NOT NULL,
+        parent_comm_id TEXT,
+        node_count INTEGER,
+        quality_score REAL,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_comm_hier_task ON community_hierarchy(task_id);
+    CREATE INDEX IF NOT EXISTS idx_comm_hier_type ON community_hierarchy(task_id, edge_type);
 """
 
 
@@ -500,6 +606,16 @@ class MultiDBManager:
             "analysis_reports": [
                 ("logs", "TEXT"),
                 ("run_id", "TEXT"),
+                ("total_ast_nodes", "INTEGER DEFAULT 0"),
+                ("total_symbols", "INTEGER DEFAULT 0"),
+                ("total_call_edges", "INTEGER DEFAULT 0"),
+                ("total_dep_edges", "INTEGER DEFAULT 0"),
+                ("total_communities", "INTEGER DEFAULT 0"),
+                ("language_stats", "TEXT"),
+                ("files_processed", "INTEGER DEFAULT 0"),
+                ("skipped_files", "INTEGER DEFAULT 0"),
+                ("best_call_community_id", "TEXT"),
+                ("best_dep_community_id", "TEXT"),
             ],
             "analysis_task_runs": [
                 ("snapshot_scopes", "TEXT"),
@@ -534,6 +650,21 @@ class MultiDBManager:
         project_db.conn.executescript(PROJECT_DB_TABLES_SQL)
         project_db.conn.commit()
         return project_db
+
+    def _migrate_project_db(self, project_db: SQLiteContext):
+        """迁移项目库表 - 添加新字段"""
+        # 为 source_files 添加新字段
+        columns_to_add = [
+            ("file_name", "TEXT"),
+            ("hashcode", "TEXT"),
+            ("mtime", "REAL"),
+        ]
+        for col_name, col_type in columns_to_add:
+            try:
+                project_db.execute(f"ALTER TABLE source_files ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass  # 列已存在，忽略
+        project_db.conn.commit()
 
     def get_project_db(self, project_id: str) -> SQLiteContext:
         """

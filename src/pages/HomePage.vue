@@ -39,6 +39,7 @@ function onCloseCodeViewer() {
   if (projectStore.activeTabId) {
     projectStore.closeTab(projectStore.activeTabId)
   }
+  projectStore.openTaskListTab()
 }
 
 function onTaskCreated(taskId: string) {

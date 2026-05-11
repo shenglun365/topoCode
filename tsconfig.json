@@ -23,7 +23,9 @@
     /* Path alias */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@topo-animation": ["src/lib/topo-animation"],
+      "@topo-animation/*": ["src/lib/topo-animation/*"]
     },
 
     "types": ["vite/client", "node"]
@@ -33,6 +35,7 @@
     "src/**/*.d.ts",
     "src/**/*.tsx",
     "src/**/*.vue",
+    "src/lib/**/*.ts",
     "electron/**/*.ts"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]

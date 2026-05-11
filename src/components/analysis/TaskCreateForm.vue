@@ -249,11 +249,7 @@ async function handleSubmit() {
 }
 
 function handleCancel() {
-  if (isEditMode.value) {
-    cancelEdit()
-  } else {
-    emit('cancelled')
-  }
+  emit('cancelled')
 }
 
 // Stop task before editing

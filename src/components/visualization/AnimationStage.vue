@@ -1,9 +1,18 @@
 <script setup lang="ts">
-/** 动画舞台 - 预留接口，后续细化设计 */
+/**
+ * 动画舞台 — TopoScript 动画播放器
+ *
+ * 接受 TopoScript 源码，编译并通过 AnimationEngine 渲染播放。
+ * Props:
+ *   - source: TopoScript 源码
+ *   - renderer: 渲染器类型 (d3/pixi/auto)
+ *   - autoPlay: 是否自动播放
+ *   - showToolbar: 是否显示工具栏
+ */
 
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAnimation, type AnimationSequence } from '@/composables/useAnimation'
+import { useAnimation } from '@/composables/useAnimation'
 import {
   PlayIcon,
   PauseIcon,
@@ -14,44 +23,78 @@ import {
 const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
-  sequenceId?: string
+  source?: string
+  renderer?: 'd3' | 'pixi' | 'auto'
   autoPlay?: boolean
   showToolbar?: boolean
+  width?: number
+  height?: number
 }>(), {
-  sequenceId: '',
+  source: '',
+  renderer: 'd3',
   autoPlay: false,
   showToolbar: true,
+  width: 800,
+  height: 600,
 })
 
 const stageRef = ref<HTMLElement | null>(null)
+
 const {
   playing,
   currentStep,
   totalSteps,
   progress,
   error,
+  load,
   play,
   pause,
-  resume,
   stop,
-  seekTo,
-} = useAnimation()
-
-// 进度条点击跳转
-function onProgressClick(e: MouseEvent) {
-  if (!stageRef.value || !totalSteps.value) return
-  const rect = (e.target as HTMLElement).getBoundingClientRect()
-  const ratio = (e.clientX - rect.left) / rect.width
-  seekTo(Math.floor(ratio * totalSteps.value))
-}
-
-onMounted(() => {
-  if (props.autoPlay && props.sequenceId) {
-    play(props.sequenceId)
-  }
+} = useAnimation({
+  renderer: props.renderer,
+  width: props.width,
+  height: props.height,
+  autoPlay: props.autoPlay,
 })
 
-defineExpose({ play, pause, resume, stop, seekTo })
+let loaded = false
+
+// ==================== 初始化引擎 ====================
+async function init() {
+  if (!stageRef.value || !props.source || loaded) return
+
+  await nextTick()
+
+  const success = load(stageRef.value, props.source)
+  loaded = success
+
+  if (success && props.autoPlay) {
+    play()
+  }
+}
+
+// ==================== 进度条跳转 ====================
+function onProgressClick(e: MouseEvent) {
+  if (!totalSteps.value) return
+  const rect = (e.target as HTMLElement).getBoundingClientRect()
+  const ratio = (e.clientX - rect.left) / rect.width
+  const step = Math.floor(ratio * (totalSteps.value - 1))
+  const seek = (stageRef.value as any)?._seek
+  if (seek) seek(step)
+}
+
+// ==================== 监听 source 变化 ====================
+watch(() => props.source, () => {
+  loaded = false
+  stop()
+  init()
+})
+
+onMounted(() => {
+  init()
+})
+
+defineExpose({ play, pause, stop })
 </script>
 
 <template>
@@ -63,44 +106,73 @@ defineExpose({ play, pause, resume, stop, seekTo })
         <span v-if="playing" class="toolbar-status">
           {{ t('animation.animationPlaying') }} {{ currentStep + 1 }}/{{ totalSteps }}
         </span>
-        <span v-else-if="totalSteps > 0" class="toolbar-status">{{ t('animation.animationPaused') }}</span>
+        <span v-else-if="totalSteps > 0 && !playing" class="toolbar-status">
+          {{ t('animation.animationPaused') }}
+        </span>
+        <span v-else-if="error" class="toolbar-status error">{{ error }}</span>
         <span v-else class="toolbar-status">{{ t('animation.animationWaiting') }}</span>
-        <span v-if="error" class="toolbar-status error">{{ error }}</span>
       </div>
 
       <div class="toolbar-right">
-        <button v-if="!playing" class="btn btn-ghost btn-sm" @click="play(sequenceId || '')" :title="t('animation.play')">
+        <button
+          v-if="!playing"
+          class="btn btn-ghost btn-sm"
+          :disabled="!loaded"
+          @click="play"
+          :title="t('animation.play')"
+        >
           <PlayIcon class="w-4 h-4" />
         </button>
-        <button v-else class="btn btn-ghost btn-sm" @click="pause" :title="t('animation.pause')">
+        <button
+          v-else
+          class="btn btn-ghost btn-sm"
+          @click="pause"
+          :title="t('animation.pause')"
+        >
           <PauseIcon class="w-4 h-4" />
         </button>
 
-        <button class="btn btn-ghost btn-sm" @click="stop" :title="t('animation.stop')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!loaded"
+          @click="stop"
+          :title="t('animation.stop')"
+        >
           <StopIcon class="w-4 h-4" />
         </button>
 
-        <button class="btn btn-ghost btn-sm" @click="play(sequenceId || '')" :title="t('animation.replay')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!loaded"
+          @click="() => { stop(); play() }"
+          :title="t('animation.replay')"
+        >
           <ArrowPathIcon class="w-4 h-4" />
         </button>
       </div>
     </div>
 
     <!-- 进度条 -->
-    <div v-if="totalSteps > 0" class="progress-track" @click="onProgressClick">
-      <div class="progress-fill" :style="{ width: `${(progress || 0)}%` }"></div>
+    <div
+      v-if="totalSteps > 0"
+      class="progress-track"
+      @click="onProgressClick"
+    >
+      <div
+        class="progress-fill"
+        :style="{ width: `${progress}%` }"
+      ></div>
     </div>
 
-    <!-- 动画舞台 -->
+    <!-- 动画舞台 (发动机渲染区域) -->
     <div ref="stageRef" class="stage-content">
-      <slot>
-        <!-- 空状态 -->
-        <div v-if="!sequenceId" class="empty-state">
-          <div class="title">{{ t('animation.animationStage') }}</div>
-          <div class="desc">{{ t('animation.sequenceHint') }}</div>
-          <div class="hint">{{ t('animation.supportedEffects') }}</div>
-        </div>
-      </slot>
+      <!-- 空状态 -->
+      <div v-if="!source || !loaded" class="empty-state">
+        <div class="title">{{ t('animation.animationStage') }}</div>
+        <div v-if="!source" class="desc">{{ t('animation.sequenceHint') }}</div>
+        <div v-else-if="error" class="desc error">{{ error }}</div>
+        <div v-if="!source" class="hint">{{ t('animation.supportedEffects') }}</div>
+      </div>
     </div>
   </div>
 </template>
@@ -187,6 +259,10 @@ defineExpose({ play, pause, resume, stop, seekTo })
 .empty-state .desc {
   font-size: 12px;
   margin-bottom: 8px;
+}
+
+.empty-state .desc.error {
+  color: var(--danger);
 }
 
 .empty-state .hint {

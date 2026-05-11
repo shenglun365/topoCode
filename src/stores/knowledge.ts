@@ -19,7 +19,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
   // State
   const docs = ref<KnowledgeDoc[]>([])
   const selectedDocId = ref<string | null>(null)
-  const activeTab = ref<'graph' | 'categories' | 'documents'>('graph')
+  const activeTab = ref<'graph' | 'categories' | 'documents' | 'animation'>('graph')
   const filter = ref<KnowledgeFilter>({
     search: '',
     dimensions: {
@@ -138,7 +138,7 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     selectedDocId.value = null
   }
 
-  function setActiveTab(tab: 'graph' | 'categories' | 'documents') {
+  function setActiveTab(tab: 'graph' | 'categories' | 'documents' | 'animation') {
     activeTab.value = tab
   }
 
