@@ -49,6 +49,12 @@ export class PythonBridge {
         return
       }
 
+      // 如果旧进程还在，先清理
+      if (this.process && this.process.exitCode === null) {
+        try { this.process.kill('SIGKILL') } catch { /* already dead */ }
+        this.process = null
+      }
+
       this.status = { status: 'starting' }
       this.notify()
 
@@ -65,6 +71,9 @@ export class PythonBridge {
         // 读取端口配置 (从 Electron store)
         const dealerPort = 5671  // TODO: 从 store 读取
         const pubPort = 5680
+
+        // 启动前检查端口占用 — 如果有残留 Python 进程占用端口，先清理
+        this.checkAndKillPortOccupant(dealerPort)
 
         this.process = spawn(python, [this.pythonScript, this.dbPath], {
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -116,16 +125,45 @@ export class PythonBridge {
     })
   }
 
-  /** 停止 Python 后端 */
+  /** 停止 Python 后端 — 先 SIGTERM 优雅退出，超时后 SIGKILL */
   stop(): Promise<BackendStatus> {
     return new Promise((resolve) => {
-      if (this.process) {
-        this.process.kill('SIGTERM')
-        this.process = null
+      if (!this.process) {
+        this.status = { status: 'stopped' }
+        this.notify()
+        resolve({ ...this.status })
+        return
       }
-      this.status = { status: 'stopped' }
-      this.notify()
-      resolve({ ...this.status })
+
+      const proc = this.process
+      this.process = null
+
+      const onExit = () => {
+        this.status = { status: 'stopped' }
+        this.notify()
+        resolve({ ...this.status })
+      }
+
+      // 监听 exit 事件（可能已经注册过，用 once 确保只触发一次）
+      proc.once('exit', onExit)
+
+      // SIGTERM 优雅退出
+      try { proc.kill('SIGTERM') } catch { /* already dead */ }
+
+      // 5s 超时后 SIGKILL
+      const killTimer = setTimeout(() => {
+        try {
+          if (proc.exitCode === null) {
+            console.warn('[PythonBridge] SIGTERM timed out, sending SIGKILL')
+            proc.kill('SIGKILL')
+          }
+        } catch { /* already dead */ }
+      }, 5000)
+
+      // 成功退出时清理 timer
+      proc.once('exit', () => {
+        clearTimeout(killTimer)
+      })
     })
   }
 
@@ -164,6 +202,34 @@ export class PythonBridge {
   private notify(): void {
     const status = { ...this.status }
     this.listeners.forEach(cb => cb(status))
+  }
+
+  /** 检查并清理占用端口的残留进程 */
+  private checkAndKillPortOccupant(port: number): void {
+    try {
+      const { execSync } = require('child_process')
+      // Linux: 用 fuser 查找占用端口的进程
+      if (process.platform === 'linux') {
+        const pids = execSync(`fuser ${port}/tcp 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+        if (pids) {
+          console.warn(`[PythonBridge] Port ${port} occupied, killing: ${pids}`)
+          execSync(`fuser -k ${port}/tcp 2>/dev/null`, { stdio: ['pipe', 'pipe', 'ignore'] })
+          // 短暂等待端口释放
+          const start = Date.now()
+          while (Date.now() - start < 300) { /* busy-wait 300ms */ }
+        }
+      } else if (process.platform === 'darwin') {
+        const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+        if (output) {
+          console.warn(`[PythonBridge] Port ${port} occupied, killing: ${output}`)
+          execSync(`kill -9 ${output}`, { stdio: ['pipe', 'pipe', 'ignore'] })
+          const start = Date.now()
+          while (Date.now() - start < 300) { /* busy-wait 300ms */ }
+        }
+      }
+    } catch {
+      // fuser/lsof 不可用或无占用进程，忽略
+    }
   }
 
   /** 查找 Python 可执行文件 */
@@ -207,10 +273,10 @@ export class PythonBridge {
     return null
   }
 
-  /** 清理资源 */
-  destroy(): void {
-    this.stop()
+  /** 清理资源 — 返回 Promise 以便调用方等待 */
+  destroy(): Promise<void> {
     this.listeners = []
+    return this.stop().then(() => {})
   }
 }
 

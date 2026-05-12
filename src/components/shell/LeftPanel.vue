@@ -48,6 +48,10 @@ function onResizeEnd() {
 
 onMounted(() => {
   document.addEventListener('mouseup', onResizeEnd)
+  // 首页初始状态：无项目时自动折叠左侧面板
+  if (navigation.currentPage === 'home' && !projectStore.selectedProjectId) {
+    panelStore.setLeftCollapsed(true)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -75,10 +79,18 @@ const panelContent = ref('')
 const fileTreeNodes = ref<FileTreeNode[]>([])
 const fileTreeLoading = ref(false)
 
-// 监听项目选择，加载文件树
+// 监听项目选择，加载文件树 + 自动折叠/展开（仅首页生效）
 watch(
   () => projectStore.selectedProjectId,
   async (newId) => {
+    // 仅首页：无项目时自动折叠，选中项目时自动展开
+    if (navigation.currentPage === 'home') {
+      if (newId) {
+        panelStore.setLeftCollapsed(false)
+      } else {
+        panelStore.setLeftCollapsed(true)
+      }
+    }
     if (newId) {
       await loadFileTree()
     }

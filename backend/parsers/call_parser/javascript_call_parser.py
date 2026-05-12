@@ -11,8 +11,11 @@ JavaScript 调用图提取器
 - 箭头函数调用
 - 异步函数调用：await func()
 """
+import logging
 from typing import Dict, Any, Optional, List
 from .extractor_factory import CallGraphExtractor, register_call_extractor
+
+logger = logging.getLogger(__name__)
 
 
 @register_call_extractor('javascript')

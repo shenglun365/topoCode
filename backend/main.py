@@ -9,6 +9,7 @@ import sys
 import uuid
 from datetime import datetime
 
+from logging_config import setup_logging
 from sqlite_ctx import MultiDBManager
 from zmq_server import ZMQServer
 from core_service import (
@@ -20,14 +21,8 @@ from core_service import (
     register_render_methods,
 )
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+# 初始化统一日志系统
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # 加载语言处理器（自动注册到 LanguageRegistry）
@@ -62,15 +57,25 @@ class BackendApp:
         pub_port = int(os.environ.get('ZMQ_PUB_PORT', '5680'))
 
         self.server = ZMQServer(self.multi_db, dealer_port=dealer_port, pub_port=pub_port)
-        self._setup_signals()
 
     def _setup_signals(self):
-        """设置信号处理"""
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        """设置信号处理 - 在 asyncio 事件循环中注册"""
+        loop = asyncio.get_running_loop()
+
+        def _handle_signal():
+            logger.info("Received shutdown signal, stopping server...")
+            self.server.stop()
+            # stop() 关闭 socket → recv_multipart 抛异常 → run() 自然返回
+            # 不需要 loop.stop()，让 asyncio.run() 正常退出
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, _handle_signal)
+            except (NotImplementedError, ValueError):
+                signal.signal(sig, lambda s, f: _handle_signal())
 
     def _signal_handler(self, signum, frame):
-        """信号处理"""
+        """信号处理 (兼容旧版)"""
         logger.info(f"Received signal {signum}, shutting down...")
         self.shutdown()
 
@@ -88,7 +93,12 @@ class BackendApp:
         """运行后端"""
         logger.info(f"Starting TopoOne Backend (data_dir: {self.data_dir})")
         self.register_all()
-        await self.server.run_forever()
+        self._setup_signals()  # 必须在 asyncio 事件循环中调用
+        try:
+            await self.server.run_forever()
+        finally:
+            self.multi_db.close_all()
+            logger.info("Backend shutdown complete")
 
     def shutdown(self):
         """关闭后端"""

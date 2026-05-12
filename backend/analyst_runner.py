@@ -98,7 +98,7 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     """
     线程池中的阻塞执行函数 — 6 步分析流程
 
-    使用 transplant-parser-service/parsers/ 架构:
+    使用 backend/parsers/ 架构:
     - parser.parse_file() → AST 解析
     - extract_global_symbols() → 符号提取
     - extract_call_graph() → 调用图
@@ -146,7 +146,9 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     report_types = json.loads(task["report_types"]) if task.get("report_types") else []
 
     # 获取项目根路径
-    project = task_store.get_project(project_id)
+    project = multi_db.main_db.fetchone(
+        "SELECT * FROM projects WHERE id = ?", (project_id,)
+    )
     proj_path = project.get("root_path", "") if project else ""
 
     # 2. 清理旧数据（重运行时）

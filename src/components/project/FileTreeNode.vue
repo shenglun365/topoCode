@@ -68,6 +68,37 @@ function handleChildOpen(child: any) {
 
 const depth = computed(() => props.depth)
 
+/**
+ * 压缩节点展开后的子节点列表（VS Code 风格：逐层展开）
+ * 点击 "a/b/c" → 显示 "a/b/" 目录 + "c" 子节点
+ */
+const expandedChildren = computed(() => {
+  if (!props.node.compressedPath || !props.isExpanded) return null
+
+  const parts = props.node.compressedPath.split('/')
+  if (parts.length <= 1) return null
+
+  // 分离最后一层
+  const lastPart = parts[parts.length - 1]
+  const remainingParts = parts.slice(0, -1)
+  const remainingPath = remainingParts.join('/')
+
+  // 构建展开后的结构
+  const lastNode = props.node.children?.find(c => c.name === lastPart)
+
+  // 剩余部分作为父目录
+  const parentForRemaining: any = {
+    name: remainingPath,
+    type: 'directory',
+    compressedPath: remainingParts.length > 1 ? remainingPath : undefined,
+    path: props.node.path ? props.node.path.split('/').slice(0, -1).join('/') : '',
+    children: lastNode ? [lastNode] : [],
+    is_empty: false,
+  }
+
+  return [parentForRemaining]
+})
+
 function handleClick() {
   if (props.node.type === 'directory') {
     emit('toggle', props.node, props.depth)
@@ -88,6 +119,7 @@ function handleDblClick() {
   <div class="file-tree-node">
     <div
       class="tree-item"
+      :class="{ 'tree-item-compressed': node.compressedPath }"
       :style="{ paddingLeft: `${depth * 16 + 8}px` }"
       @click="handleClick"
       @dblclick="handleDblClick"
@@ -105,8 +137,24 @@ function handleDblClick() {
       <!-- 图标 -->
       <component :is="icon" :class="['w-4 h-4', iconColor, 'shrink-0']" />
 
-      <!-- 名称 -->
-      <span class="tree-name" :title="node.name">{{ node.name }}</span>
+      <!-- 名称（压缩节点显示 a/b/c 格式） -->
+      <span
+        v-if="node.compressedPath"
+        class="tree-name-compressed"
+        :title="node.compressedPath"
+      >
+        <template v-for="(part, idx) in node.compressedPath.split('/')" :key="idx">
+          <span v-if="idx > 0" class="tree-name-separator">/</span>
+          <span class="tree-name-part">{{ part }}</span>
+        </template>
+      </span>
+      <span
+        v-else
+        class="tree-name"
+        :title="node.name"
+      >
+        {{ node.name }}
+      </span>
 
       <!-- 懒加载指示器 -->
       <span
@@ -147,24 +195,47 @@ function handleDblClick() {
     </div>
 
     <!-- 子节点 -->
-    <div v-if="node.type === 'directory' && isExpanded && node.children && node.children.length > 0">
-      <FileTreeNode
-        v-for="child in node.children"
-        :key="child.path || child.name"
-        :node="child"
-        :depth="depth + 1"
-        :is-expanded="expandedNodes && getNodeKey ? expandedNodes.includes(getNodeKey(child, depth + 1)) : false"
-        :is-loading="loadingPaths ? loadingPaths.includes(child.path || '/') : false"
-        :has-loaded-children="loadedPaths ? loadedPaths.includes(child.path || '/') : false"
-        :get-file-color="getFileColor"
-        :expanded-nodes="expandedNodes"
-        :get-node-key="getNodeKey"
-        :loading-paths="loadingPaths"
-        :loaded-paths="loadedPaths"
-        @toggle="handleChildToggle"
-        @select="handleChildSelect"
-        @open="handleChildOpen"
-      />
+    <div v-if="node.type === 'directory' && isExpanded">
+      <!-- 压缩节点：显示展开后的子节点 -->
+      <template v-if="expandedChildren">
+        <FileTreeNode
+          v-for="child in expandedChildren"
+          :key="child.path || child.name"
+          :node="child"
+          :depth="depth + 1"
+          :is-expanded="expandedNodes && getNodeKey ? expandedNodes.includes(getNodeKey(child, depth + 1)) : false"
+          :is-loading="loadingPaths ? loadingPaths.includes(child.path || '/') : false"
+          :has-loaded-children="loadedPaths ? loadedPaths.includes(child.path || '/') : false"
+          :get-file-color="getFileColor"
+          :expanded-nodes="expandedNodes"
+          :get-node-key="getNodeKey"
+          :loading-paths="loadingPaths"
+          :loaded-paths="loadedPaths"
+          @toggle="handleChildToggle"
+          @select="handleChildSelect"
+          @open="handleChildOpen"
+        />
+      </template>
+      <!-- 普通节点：显示原始子节点 -->
+      <template v-else-if="node.children && node.children.length > 0">
+        <FileTreeNode
+          v-for="child in node.children"
+          :key="child.path || child.name"
+          :node="child"
+          :depth="depth + 1"
+          :is-expanded="expandedNodes && getNodeKey ? expandedNodes.includes(getNodeKey(child, depth + 1)) : false"
+          :is-loading="loadingPaths ? loadingPaths.includes(child.path || '/') : false"
+          :has-loaded-children="loadedPaths ? loadedPaths.includes(child.path || '/') : false"
+          :get-file-color="getFileColor"
+          :expanded-nodes="expandedNodes"
+          :get-node-key="getNodeKey"
+          :loading-paths="loadingPaths"
+          :loaded-paths="loadedPaths"
+          @toggle="handleChildToggle"
+          @select="handleChildSelect"
+          @open="handleChildOpen"
+        />
+      </template>
     </div>
   </div>
 </template>
@@ -212,6 +283,26 @@ function handleDblClick() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tree-name-compressed {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.tree-name-part {
+  color: var(--text-secondary);
+}
+
+.tree-name-separator {
+  color: var(--text-muted);
+  opacity: 0.5;
+  margin: 0 1px;
 }
 
 .loading-indicator {

@@ -2,6 +2,7 @@
 
 import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { windowManager } from './window-manager'
 import { pythonBridge } from './python-bridge'
 import { zmqRouter } from './zmq-router'
@@ -14,6 +15,69 @@ if (process.platform === 'linux' && isDev) {
   app.disableHardwareAcceleration()
   app.commandLine.appendSwitch('no-sandbox')
 }
+
+// ==================== 日志系统 ====================
+
+const LOG_DIR = join(app.getPath('userData'), 'logs')
+const isDevEnv = !app.isPackaged
+
+function ensureLogDir(): void {
+  if (!existsSync(LOG_DIR)) {
+    mkdirSync(LOG_DIR, { recursive: true })
+  }
+}
+
+function getLogFilePath(): string {
+  const now = new Date()
+  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  return join(LOG_DIR, `${dateStr}_electron.log`)
+}
+
+function writeLog(level: string, source: string, message: string, data?: unknown): void {
+  if (!isDevEnv) {
+    return // 生产环境不写日志文件
+  }
+  try {
+    ensureLogDir()
+    const now = new Date().toISOString()
+    const dataStr = data ? ` | ${JSON.stringify(data)}` : ''
+    const line = `[${now}] [${level}] [${source}] ${message}${dataStr}\n`
+    writeFileSync(getLogFilePath(), line, { flag: 'a' })
+  }
+  catch (e) {
+    // 日志写入失败不影响主流程
+    console.error('[log] write failed:', e)
+  }
+}
+
+// 包装 console 方法，自动写入日志文件
+const originalConsole = { ...console }
+console.log = (...args: any[]) => {
+  originalConsole.log(...args)
+  writeLog('INFO', 'electron', args.join(' '))
+}
+console.error = (...args: any[]) => {
+  originalConsole.error(...args)
+  writeLog('ERROR', 'electron', args.join(' '))
+}
+console.warn = (...args: any[]) => {
+  originalConsole.warn(...args)
+  writeLog('WARN', 'electron', args.join(' '))
+}
+
+// 渲染进程日志 IPC handler
+ipcMain.on('log:debug', (_event, source: string, message: string, data?: unknown) => {
+  writeLog('DEBUG', source, message, data)
+})
+ipcMain.on('log:info', (_event, source: string, message: string, data?: unknown) => {
+  writeLog('INFO', source, message, data)
+})
+ipcMain.on('log:warn', (_event, source: string, message: string, data?: unknown) => {
+  writeLog('WARN', source, message, data)
+})
+ipcMain.on('log:error', (_event, source: string, message: string, data?: unknown) => {
+  writeLog('ERROR', source, message, data)
+})
 
 // ==================== IPC 处理 ====================
 
@@ -117,16 +181,18 @@ app.whenReady().then(async () => {
 // 所有窗口关闭
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    // 清理资源
-    zmqRouter.close()
-    pythonBridge.destroy()
     app.quit()
   }
 })
 
-// 应用退出前清理
-app.on('will-quit', () => {
+// 应用退出前清理 — 等待后端优雅停止
+app.on('will-quit', (event) => {
   windowManager.cleanup()
-  pythonBridge.destroy()
   zmqRouter.close()
+
+  // 延迟退出，等待后端进程停止
+  event.preventDefault()
+  pythonBridge.destroy().finally(() => {
+    app.exit()
+  })
 })

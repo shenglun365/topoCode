@@ -51,6 +51,56 @@ const safeExcludeDirs = computed(() => {
   if (!data) return []
   return Array.isArray(data) ? data : JSON.parse(data)
 })
+const safeScopes = computed(() => {
+  const data = props.task.scopes
+  if (!data) return []
+  return Array.isArray(data) ? data : (data.split?.(',') || [])
+})
+
+// 文件分布数据
+const fileDistribution = ref<Record<string, number>>({})
+const totalFiles = ref(0)
+const loadingDistribution = ref(false)
+
+async function loadFileDistribution() {
+  if (!props.task.projectId) return
+  loadingDistribution.value = true
+  try {
+    const options: any = { patternType: 'all' }
+    if (safeScopes.value.length > 0) {
+      options.scopes = safeScopes.value
+    }
+    if (safeExtensions.value.length > 0) {
+      options.selectedExtensions = safeExtensions.value
+    }
+    if (safeExcludeDirs.value.length > 0) {
+      options.excludeDirs = safeExcludeDirs.value
+    }
+    const result = await analysisStore.scanFileStats(props.task.projectId, options)
+    fileDistribution.value = result.extensions || {}
+    totalFiles.value = result.totalFiles || 0
+  } catch (err) {
+    console.error('Failed to load file distribution:', err)
+    fileDistribution.value = {}
+    totalFiles.value = 0
+  } finally {
+    loadingDistribution.value = false
+  }
+}
+
+// 格式化扩展名显示
+function formatExtension(key: string): string {
+  if (!key || key === '') {
+    return t('analysis.noExtension')
+  }
+  return `.${key}`
+}
+
+// 按文件数降序排列
+const sortedDistribution = computed(() => {
+  return Object.entries(fileDistribution.value)
+    .sort((a, b) => b[1] - a[1])
+})
 
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
@@ -109,6 +159,7 @@ function stopPolling() {
 async function init() {
   await loadRuns()
   await loadLogs(selectedRunId.value)
+  await loadFileDistribution()
   startPolling()
 }
 init()
@@ -216,12 +267,18 @@ function formatRunStatusColor(status: string): string {
           </div>
 
           <!-- 分析配置 -->
-          <div class="detail-section" v-if="task.scope || safeExtensions.length || safeExcludeDirs.length || safeReportTypes.length">
+          <div class="detail-section" v-if="task.scope || safeScopes.length || safeExtensions.length || safeExcludeDirs.length || safeReportTypes.length">
             <h3 class="section-title">{{ t('analysis.taskConfig') }}</h3>
             <div class="info-grid">
               <div class="info-row" v-if="safeReportTypes.length">
                 <span class="info-label">{{ t('analysis.reportTypes') }}</span>
                 <span class="info-value">{{ safeReportTypes.join(', ') }}</span>
+              </div>
+              <div class="info-row" v-if="safeScopes.length">
+                <span class="info-label">{{ t('analysis.directoryScopes') }}</span>
+                <span class="info-value scopes-list">
+                  <span v-for="s in safeScopes" :key="s" class="scope-tag">{{ s }}</span>
+                </span>
               </div>
               <div class="info-row" v-if="task.scope">
                 <span class="info-label">{{ t('analysis.analysisRoot') }}</span>
@@ -234,6 +291,33 @@ function formatRunStatusColor(status: string): string {
               <div class="info-row" v-if="safeExcludeDirs.length">
                 <span class="info-label">{{ t('analysis.excludeDirs') }}</span>
                 <span class="info-value">{{ safeExcludeDirs.join(', ') }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 文件分布 -->
+          <div class="detail-section" v-if="totalFiles > 0">
+            <h3 class="section-title">
+              {{ t('analysis.fileDistribution') }}
+              <span v-if="loadingDistribution" class="distribution-loading">{{ t('common.loading') }}...</span>
+            </h3>
+            <div class="distribution-summary">
+              <span class="distribution-total">{{ t('analysis.totalFiles', { count: totalFiles }) }}</span>
+            </div>
+            <div class="distribution-bars">
+              <div
+                v-for="[ext, count] in sortedDistribution"
+                :key="ext"
+                class="distribution-row"
+              >
+                <span class="distribution-ext">{{ formatExtension(ext) }}</span>
+                <div class="distribution-bar-bg">
+                  <div
+                    class="distribution-bar-fill"
+                    :style="{ width: `${(count / totalFiles) * 100}%` }"
+                  ></div>
+                </div>
+                <span class="distribution-count">{{ count }}</span>
               </div>
             </div>
           </div>
@@ -436,6 +520,82 @@ function formatRunStatusColor(status: string): string {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+.scopes-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.scope-tag {
+  padding: 1px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* File distribution */
+.distribution-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.distribution-total {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.distribution-loading {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.distribution-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.distribution-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 40px;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.distribution-ext {
+  color: var(--text-secondary);
+  font-family: monospace;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.distribution-bar-bg {
+  height: 14px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.distribution-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s;
+  min-width: 2px;
+}
+
+.distribution-count {
+  color: var(--text-muted);
+  text-align: right;
 }
 
 .progress-bar-inline {

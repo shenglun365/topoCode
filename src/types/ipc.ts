@@ -55,8 +55,11 @@ export interface Project {
 export interface FileTreeNode {
   name: string
   type: 'file' | 'directory'
+  path?: string
   language?: string
   size?: number
+  is_empty?: boolean       // 后端标记：是否为空目录（无文件，只有空子目录）
+  compressedPath?: string  // 压缩显示路径，如 "java/main/com/example"
   children?: FileTreeNode[]
 }
 
@@ -110,12 +113,19 @@ export interface TaskRun {
   snapshotReportTypes?: string[]
 }
 
+/** 目录树节点 */
+export interface DirTreeNode {
+  name: string
+  path: string
+  children: DirTreeNode[]
+}
+
 /** 文件统计结果 */
 export interface FileStatsResult {
   extensions: Record<string, number>   // { "python": 128, "javascript": 56 }
   totalFiles: number
   totalDirs: number
-  directories: string[]
+  directories: DirTreeNode[]
 }
 
 /** 扫描选项 */

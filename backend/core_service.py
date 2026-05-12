@@ -961,8 +961,17 @@ def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str
             lang_map = {
                 ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
                 ".py": "python", ".go": "go", ".rs": "rust", ".java": "java",
+                ".c": "c", ".h": "c",
+                ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
+                ".cs": "csharp",
                 ".vue": "vue", ".html": "html", ".css": "css", ".scss": "scss",
                 ".json": "json", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
+                ".rb": "ruby", ".php": "php", ".swift": "swift", ".kt": "kotlin", ".scala": "scala",
+                ".r": "r", ".sql": "sql", ".sh": "bash",
+                ".dart": "dart", ".lua": "lua", ".perl": "perl", ".pl": "perl",
+                ".elixir": "elixir", ".ex": "elixir", ".exs": "elixir",
+                ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
+                ".zig": "zig", ".nim": "nim", ".v": "verilog",
             }
 
             if entry.is_file():
@@ -1027,16 +1036,22 @@ def _build_flat_children(files: list, fromPath: str) -> list:
             # 如果 file_path 就是 fromPath 本身（目录节点），直接使用
             child_name = file_path
 
+        is_dir = f.get("language") == "directory"
         node = {
             "name": child_name,
-            "type": "directory" if f.get("language") == "directory" else "file",
+            "type": "directory" if is_dir else "file",
             "path": file_path,
         }
-        if f.get("language") != "directory":
+        if not is_dir:
             node["language"] = f.get("language")
             node["size"] = f.get("size")
         else:
             node["children"] = []
+            # 检查是否为空目录：parent_path=fromPath 且 language=directory 的记录，
+            # 如果该目录下没有其他文件，则为空目录
+            # 这里简化处理：如果 files 中只有这个目录本身，没有其子路径的文件，则为空
+            sub_files = [ff for ff in files if ff["file_path"].startswith(f"{file_path}/")]
+            node["is_empty"] = len(sub_files) == 0
         result.append(node)
 
     # 排序：文件夹在前，文件在后，各自按名称字母排序
@@ -1073,6 +1088,32 @@ def _build_file_tree(files: list, include_children: bool = True) -> list:
     return _flatten_tree(tree, include_children=include_children)
 
 
+def _is_empty_dir(tree_node: dict) -> bool:
+    """检查目录节点是否为空目录（无文件，只有空子目录）"""
+    if "type" in tree_node:
+        return False  # 文件节点
+    children = tree_node.get("_children", {})
+    if not children:
+        return True
+    # 递归检查所有子节点是否都是空目录
+    return all(_is_empty_dir(v) for v in children.values())
+
+
+def _count_empty_chain(tree_node: dict) -> int:
+    """计算连续空目录链的长度"""
+    if "type" in tree_node:
+        return 0  # 文件节点，链终止
+    children = tree_node.get("_children", {})
+    if not children:
+        return 1  # 空目录
+    # 只有一条子链且也是空目录时，累加
+    if len(children) == 1:
+        child = list(children.values())[0]
+        if _is_empty_dir(child):
+            return 1 + _count_empty_chain(child)
+    return 0
+
+
 def _flatten_tree(tree: dict, parent_path: str = "", include_children: bool = True) -> list:
     """扁平化树形结构，为每个节点设置正确的 path
     include_children: 是否递归包含子节点（懒加载时设为 False）
@@ -1081,12 +1122,15 @@ def _flatten_tree(tree: dict, parent_path: str = "", include_children: bool = Tr
     for name, data in tree.items():
         current_path = f"{parent_path}/{name}" if parent_path else name
         if "_children" in data:
-            result.append({
+            is_empty = _is_empty_dir(data)
+            node = {
                 "name": name,
                 "type": "directory",
                 "path": current_path,
+                "is_empty": is_empty,
                 "children": _flatten_tree(data["_children"], current_path) if include_children else [],
-            })
+            }
+            result.append(node)
         else:
             result.append({
                 "name": name,

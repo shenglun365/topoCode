@@ -264,35 +264,74 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         try:
             project_db = multi_db.get_project_db(pid)
             store = AnalysisStore(project_db)
+            final_scopes = scopes if scopes else ([scope] if scope else None)
+            logger.debug(f"[scan_file_stats] scopes={scopes}, scope={scope}, final_scopes={final_scopes}")
+
+            # 1. 按 scopes 过滤的文件 — 用于文件分布统计
             files = store.list_source_files(
-                scopes=scopes or [scope] if scope else None,
+                scopes=final_scopes,
                 extensions=selected_extensions,
                 exclude_dirs=exclude_dirs,
                 pattern_type=pattern_type,
                 pattern=pattern,
             )
-        except Exception:
-            # 项目库不存在时返回空
-            files = []
+            logger.debug(f"[scan_file_stats] filtered {len(files)} files")
 
-        # 统计
+            # 2. 全量文件 — 用于构建完整目录树（不受 scopes 影响）
+            all_files = store.list_source_files()
+            logger.debug(f"[scan_file_stats] total {len(all_files)} files for directory tree")
+
+        except Exception as e:
+            logger.error(f"[scan_file_stats] error: {e}")
+            files = []
+            all_files = []
+
+        # 文件分布统计（基于过滤后的文件）
         extensions = {}
-        directories = set()
         for f in files:
             lang = f.get("language", "unknown")
             extensions[lang] = extensions.get(lang, 0) + 1
+
+        # 完整目录树（基于全量文件，不受 scopes 影响）
+        dir_tree: dict = {}
+        for f in all_files:
             dir_path = f.get("file_path", "")
             if dir_path:
-                # 提取目录部分
                 parts = dir_path.split("/")
-                if len(parts) > 1:
-                    directories.add("/".join(parts[:2]))
+                current = dir_tree
+                for part in parts[:-1]:  # 跳过文件名，只处理目录
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+
+        # 将树形结构展平为前端可用的格式
+        def flatten_dir_tree(tree: dict, prefix: str = "") -> list:
+            result = []
+            for name, children in sorted(tree.items()):
+                path = f"{prefix}/{name}" if prefix else name
+                node = {
+                    "name": name,
+                    "path": path,
+                    "children": flatten_dir_tree(children, path) if children else [],
+                }
+                result.append(node)
+            return result
+
+        def count_all_dirs(tree: dict) -> int:
+            """递归计算目录树中的节点总数"""
+            count = len(tree)
+            for children in tree.values():
+                count += count_all_dirs(children)
+            return count
+
+        dir_list = flatten_dir_tree(dir_tree)
+        total_dirs = count_all_dirs(dir_tree)
 
         return {
             "extensions": extensions,
             "totalFiles": len(files),
-            "totalDirs": len(directories),
-            "directories": sorted(directories),
+            "totalDirs": total_dirs,
+            "directories": dir_list,
         }
 
     logger.info("[task_manager] 所有 analysis.* 方法已注册")

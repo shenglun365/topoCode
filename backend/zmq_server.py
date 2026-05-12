@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 def check_port_available(port: int) -> bool:
-    """检查端口是否可用"""
+    """检查端口是否可用 - 忽略 TIME_WAIT 状态的残留"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(('127.0.0.1', port))
             return True
@@ -147,17 +148,43 @@ class ZMQServer:
 
         try:
             while self._running:
-                await self.handle_request()
-        except Exception as e:
-            logger.exception("Server error")
+                try:
+                    await asyncio.wait_for(self.handle_request(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+        except (asyncio.CancelledError, Exception):
+            logger.debug("Server loop exited")
         finally:
             self._running = False
-            self.publish("backend", "status", {"status": "stopped"})
+            try:
+                self.publish("backend", "status", {"status": "stopped"})
+            except Exception:
+                pass
+            await self.cleanup()  # 在事件循环中安全关闭 context
 
     def stop(self):
-        """停止服务器"""
+        """停止服务器 - 关闭 socket 中断 recv，不阻塞 term context"""
         self._running = False
-        self.context.term()
+        try:
+            if self.dealer:
+                self.dealer.close(linger=0)
+                self.dealer = None
+        except Exception:
+            pass
+        try:
+            if self.pub:
+                self.pub.close(linger=0)
+                self.pub = None
+        except Exception:
+            pass
+        # 不在这里调用 context.term() — 让 run() 的 finally 在事件循环中处理
+
+    async def cleanup(self):
+        """在事件循环中安全关闭 context"""
+        try:
+            self.context.term()
+        except Exception:
+            pass
 
     async def run_forever(self):
         """持续运行 (用于主进程)"""

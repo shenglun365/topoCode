@@ -14,6 +14,9 @@ import { useProjectStore } from '@/stores/project'
 import FileStatsPanel from './FileStatsPanel.vue'
 import TaskDetailDialog from './TaskDetailDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('TaskCreateForm')
 
 const props = defineProps<{
   projectId: string
@@ -113,7 +116,7 @@ async function loadExistingTask() {
       pattern.value = loaded.pattern
     }
   } catch (err) {
-    console.error('Failed to load task:', err)
+    logger.error('Failed to load task:', err)
   }
 }
 
@@ -148,54 +151,39 @@ function onSelectedExtensionsUpdate(exts: string[]) {
 
 // Submit form
 function onSaveClick() {
-  console.log('=== [TaskCreateForm] onSaveClick triggered ===')
-  console.log('[TaskCreateForm] onSaveClick: loading=', loading.value, 'taskName=', taskName.value, 'disabled=', loading.value || !taskName.value.trim())
-  console.log('[TaskCreateForm] onSaveClick: isEditMode=', isEditMode.value, 'isNewTask=', isNewTask.value)
-  console.log('[TaskCreateForm] onSaveClick: task.value=', task.value ? { id: task.value.id, status: task.value.status } : null)
-  console.log('[TaskCreateForm] onSaveClick: selectedExtensions=', selectedExtensions.value)
-  console.log('[TaskCreateForm] onSaveClick: reportTypes=', reportTypes.value)
-  console.log('[TaskCreateForm] onSaveClick: analysisStore=', analysisStore ? 'exists' : 'null')
-  console.log('[TaskCreateForm] onSaveClick: analysisStore.createTask=', typeof analysisStore.createTask)
-  
+  logger.debug('onSaveClick triggered', {
+    loading: loading.value,
+    taskName: taskName.value,
+    isEditMode: isEditMode.value,
+    isNewTask: isNewTask.value,
+  })
+
   try {
     handleSubmit()
-    console.log('[TaskCreateForm] handleSubmit returned (async promise started)')
   } catch (err: any) {
-    console.error('[TaskCreateForm] onSaveClick sync error:', err.message, err.stack)
+    logger.error('onSaveClick sync error:', err)
   }
 }
 
 async function handleSubmit() {
-  console.log('=== [TaskCreateForm] handleSubmit started ===')
   const name = taskName.value.trim()
-  console.log('[TaskCreateForm] handleSubmit: name=', name, 'isNewTask=', isNewTask.value)
-  
+
   if (!name) {
-    console.warn('[TaskCreateForm] handleSubmit: name is empty, aborting')
+    logger.warn('handleSubmit: name is empty, aborting')
     return
   }
 
   loading.value = true
-  console.log('[TaskCreateForm] handleSubmit: loading set to true')
-  
+
   try {
     const extArray = selectedExtensions.value.filter(Boolean)
     const excludeArray = excludeDirs.value.split(',').map(s => s.trim()).filter(Boolean)
 
-    console.log('[TaskCreateForm] handleSubmit: extArray=', extArray, 'excludeArray=', excludeArray)
-
     if (task.value && !isNewTask.value) {
       // Edit mode - update config
-      console.log('[TaskCreateForm] EDIT MODE: updating task', task.value.id)
-      console.log('[TaskCreateForm] EDIT MODE: config to update=', {
-        name,
-        scopes: selectedScopes.value.length > 0 ? [...selectedScopes.value] : undefined,
-        extensions: extArray.length > 0 ? [...extArray] : undefined,
-        excludeDirs: excludeArray.length > 0 ? [...excludeArray] : undefined,
-        reportTypes: reportTypes.value.length > 0 ? [...reportTypes.value] : undefined,
-      })
-      
-      const updated = await analysisStore.updateTaskConfig(task.value.id, {
+      logger.info('EDIT MODE: updating task', { taskId: task.value.id, name })
+
+      await analysisStore.updateTaskConfig(task.value.id, {
         name,
         scopes: selectedScopes.value.length > 0 ? [...selectedScopes.value] : undefined,
         extensions: extArray.length > 0 ? [...extArray] : undefined,
@@ -204,15 +192,11 @@ async function handleSubmit() {
         patternType: patternType.value !== 'all' ? patternType.value : undefined,
         pattern: pattern.value || undefined,
       })
-      console.log('[TaskCreateForm] EDIT MODE: updateTaskConfig returned=', updated)
-      
+
       isEditMode.value = false
-      // Reload task to get updated data
-      console.log('[TaskCreateForm] EDIT MODE: reloading task...')
       await loadExistingTask()
-      console.log('[TaskCreateForm] EDIT MODE: emitting created event, taskId=', task.value.id)
       emit('created', task.value.id)
-      console.log('[TaskCreateForm] EDIT MODE: completed successfully')
+      logger.info('EDIT MODE: completed successfully')
     } else {
       // New task
       const taskParams = {
@@ -226,25 +210,17 @@ async function handleSubmit() {
         patternType: patternType.value !== 'all' ? patternType.value : undefined,
         pattern: pattern.value || undefined,
       }
-      
-      console.log('[TaskCreateForm] NEW TASK: creating task with params:', JSON.stringify(taskParams, null, 2))
-      console.log('[TaskCreateForm] NEW TASK: calling analysisStore.createTask...')
-      
+
+      logger.info('NEW TASK: creating task', { name, projectId: props.projectId })
+
       const created = await analysisStore.createTask(taskParams)
-      console.log('[TaskCreateForm] NEW TASK: createTask returned=', created)
-      console.log('[TaskCreateForm] NEW TASK: emitting created event, taskId=', created.id)
-      
       emit('created', created.id)
-      console.log('[TaskCreateForm] NEW TASK: completed successfully')
+      logger.info('NEW TASK: completed successfully', { taskId: created.id })
     }
   } catch (err: any) {
-    console.error('=== [TaskCreateForm] Failed to save task ===')
-    console.error('[TaskCreateForm] Error message:', err.message)
-    console.error('[TaskCreateForm] Error stack:', err.stack)
-    console.error('[TaskCreateForm] Error object:', err)
+    logger.error('Failed to save task:', err)
   } finally {
     loading.value = false
-    console.log('[TaskCreateForm] handleSubmit: loading set to false, finally block executed')
   }
 }
 
@@ -260,7 +236,7 @@ async function stopThenEdit() {
     await loadExistingTask()
     isEditMode.value = true
   } catch (err) {
-    console.error('Failed to stop task:', err)
+    logger.error('Failed to stop task:', err)
   }
 }
 

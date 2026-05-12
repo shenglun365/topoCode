@@ -122,6 +122,66 @@ function getFileColor(node: FileNodeType): string {
   }
 }
 
+/**
+ * 压缩连续空目录链（至少 2 层才压缩）
+ * 将连续的空目录合并为一个压缩节点，如 java/main/com/example
+ */
+function compressEmptyDirectories(nodes: FileNodeType[]): FileNodeType[] {
+  const result: FileNodeType[] = []
+  for (const node of nodes) {
+    if (node.type === 'directory' && node.is_empty && node.children && node.children.length > 0) {
+      // 尝试压缩：收集连续空目录链
+      const chain: string[] = [node.name]
+      let current: FileNodeType | null = node
+      let maxDepth = 20 // 防止无限递归
+
+      while (current && current.type === 'directory' && current.is_empty
+        && current.children && current.children.length === 1 && maxDepth-- > 0) {
+        const child = current.children[0]
+        if (child.type === 'directory' && child.is_empty) {
+          chain.push(child.name)
+          current = child
+        }
+        else {
+          break
+        }
+      }
+
+      // 至少 2 层才压缩
+      if (chain.length >= 2) {
+        // 构建压缩节点
+        const compressedNode: FileNodeType = {
+          ...node,
+          name: chain.join('/'),
+          compressedPath: chain.join('/'),
+          path: current!.path || node.path,
+          children: current!.children,
+          is_empty: current!.is_empty,
+        }
+        result.push(compressedNode)
+      }
+      else {
+        // 不压缩，递归处理子节点
+        const cloned = { ...node }
+        if (node.children) {
+          cloned.children = compressEmptyDirectories(node.children)
+        }
+        result.push(cloned)
+      }
+    }
+    else if (node.type === 'directory' && node.children) {
+      // 非空目录，递归处理子节点
+      const cloned = { ...node }
+      cloned.children = compressEmptyDirectories(node.children)
+      result.push(cloned)
+    }
+    else {
+      result.push(node)
+    }
+  }
+  return result
+}
+
 function handleToggle(node: FileNodeType, depth: number) {
   toggleNode(node, depth)
 }
@@ -154,7 +214,11 @@ function filterTree(nodes: FileNodeType[], query: string): FileNodeType[] {
 }
 
 const filteredNodes = computed(() => {
-  if (!isSearching.value) return lazyNodes.value
+  if (!isSearching.value) {
+    // 非搜索模式：应用空目录压缩
+    return compressEmptyDirectories(lazyNodes.value)
+  }
+  // 搜索模式：不压缩，展开所有层级以显示匹配文件（VS Code 行为）
   return filterTree(lazyNodes.value, searchQuery.value)
 })
 

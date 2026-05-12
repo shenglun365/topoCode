@@ -15,6 +15,10 @@ export const usePanelStore = defineStore('panel', () => {
     leftCollapsed.value = !leftCollapsed.value
   }
 
+  function setLeftCollapsed(collapsed: boolean) {
+    leftCollapsed.value = collapsed
+  }
+
   function toggleRight() {
     rightCollapsed.value = !rightCollapsed.value
   }
@@ -45,6 +49,7 @@ export const usePanelStore = defineStore('panel', () => {
     rightWidth,
     debugMode,
     toggleLeft,
+    setLeftCollapsed,
     toggleRight,
     setLeftWidth,
     setRightWidth,

@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon,
-  FolderIcon,
-  FolderOpenIcon,
   XMarkIcon,
-  PlusIcon,
 } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
-import type { FileStatsResult } from '@/types/ipc'
+import type { FileStatsResult, DirTreeNode } from '@/types/ipc'
+import DirTreeNodeComponent from './DirTreeNodeComponent.vue'
 
 const props = defineProps<{
   projectId: string
@@ -37,13 +35,13 @@ const stats = ref<FileStatsResult | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-// Directory multi-select (从 props 初始化以支持编辑模式回显)
+// Directory multi-select (tree structure)
 const selectedScopes = ref<string[]>(props.selectedScopes ? [...props.selectedScopes] : [])
 const expandedDirs = ref<Set<string>>(new Set())
+const dirTreeRef = ref<HTMLElement | null>(null)
 
-// File type multi-select (从 props 初始化以支持编辑模式回显)
+// File type multi-select
 const selectedExtensions = ref<string[]>(props.selectedExtensions ? [...props.selectedExtensions] : [])
-const manualExtensionInput = ref('')
 
 // Compute max count for bar chart
 const maxCount = computed(() => {
@@ -51,13 +49,53 @@ const maxCount = computed(() => {
   return Math.max(...Object.values(stats.value.extensions), 1)
 })
 
-// Total files in selected scopes
-const filteredTotal = computed(() => {
-  return stats.value?.totalFiles || 0
-})
+/**
+ * 获取所有子目录的路径
+ */
+function getAllChildPaths(node: DirTreeNode): string[] {
+  const paths: string[] = []
+  if (node.children) {
+    for (const child of node.children) {
+      paths.push(child.path)
+      paths.push(...getAllChildPaths(child))
+    }
+  }
+  return paths
+}
 
-// Toggle directory expand/collapse
-function toggleDir(dir: string) {
+/**
+ * 切换目录选择（支持三级状态）
+ */
+function handleDirToggle(node: DirTreeNode) {
+  // Check if this is a synthetic event with __action
+  const action = (node as any).__action
+  const paths = (node as any).__paths
+  
+  if (action === 'select') {
+    const existing = new Set(selectedScopes.value)
+    for (const p of paths) {
+      existing.add(p)
+    }
+    selectedScopes.value = Array.from(existing)
+  } else if (action === 'deselect') {
+    selectedScopes.value = selectedScopes.value.filter(p => !paths.includes(p))
+  } else {
+    // Legacy: single node toggle
+    const idx = selectedScopes.value.indexOf(node.path)
+    if (idx >= 0) {
+      selectedScopes.value.splice(idx, 1)
+    } else {
+      selectedScopes.value.push(node.path)
+    }
+  }
+  
+  emitSelectedScopes()
+}
+
+/**
+ * 切换目录展开/折叠
+ */
+function handleDirExpand(dir: string) {
   if (expandedDirs.value.has(dir)) {
     expandedDirs.value.delete(dir)
   } else {
@@ -65,45 +103,45 @@ function toggleDir(dir: string) {
   }
 }
 
-// Toggle directory selection
-function toggleScope(dir: string) {
-  console.log('[FileStatsPanel] toggleScope:', dir, 'current:', [...selectedScopes.value])
-  const idx = selectedScopes.value.indexOf(dir)
-  if (idx >= 0) {
-    selectedScopes.value.splice(idx, 1)
-  } else {
-    selectedScopes.value.push(dir)
-  }
-  console.log('[FileStatsPanel] toggleScope after:', [...selectedScopes.value])
-  emitSelectedScopes()
-}
-
 // Select all directories
 function selectAllDirs() {
-  if (stats.value?.directories) {
-    selectedScopes.value = [...stats.value.directories]
+  if (!stats.value?.directories) return
+  const allPaths: string[] = []
+  function collectPaths(nodes: DirTreeNode[]) {
+    for (const node of nodes) {
+      allPaths.push(node.path)
+      if (node.children) collectPaths(node.children)
+    }
   }
+  collectPaths(stats.value.directories)
+  selectedScopes.value = allPaths
   emitSelectedScopes()
 }
 
 // Invert directory selection
 function invertDirs() {
   if (!stats.value?.directories) return
-  const all = stats.value.directories
-  selectedScopes.value = all.filter(d => !selectedScopes.value.includes(d))
+  const allPaths: string[] = []
+  function collectPaths(nodes: DirTreeNode[]) {
+    for (const node of nodes) {
+      allPaths.push(node.path)
+      if (node.children) collectPaths(node.children)
+    }
+  }
+  collectPaths(stats.value.directories)
+  const selected = new Set(selectedScopes.value)
+  selectedScopes.value = allPaths.filter(p => !selected.has(p))
   emitSelectedScopes()
 }
 
 // Toggle file type selection
 function toggleExtension(ext: string) {
-  console.log('[FileStatsPanel] toggleExtension:', ext, 'current:', [...selectedExtensions.value])
   const idx = selectedExtensions.value.indexOf(ext)
   if (idx >= 0) {
     selectedExtensions.value.splice(idx, 1)
   } else {
     selectedExtensions.value.push(ext)
   }
-  console.log('[FileStatsPanel] toggleExtension after:', [...selectedExtensions.value])
   emitSelectedExtensions()
 }
 
@@ -132,16 +170,14 @@ function removeExtension(ext: string) {
   emitSelectedExtensions()
 }
 
-// Add manual extension
-function addManualExtension() {
-  const ext = manualExtensionInput.value.trim()
-  if (!ext) return
-  const normalized = ext.startsWith('.') ? ext : `.${ext}`
-  if (!selectedExtensions.value.includes(normalized)) {
-    selectedExtensions.value.push(normalized)
+/**
+ * 格式化扩展名显示：空字符串显示为"无后缀名"
+ */
+function formatExtension(ext: string): string {
+  if (!ext || ext.trim() === '') {
+    return t('analysis.noExtension')
   }
-  manualExtensionInput.value = ''
-  emitSelectedExtensions()
+  return ext
 }
 
 function emitSelectedScopes() {
@@ -156,6 +192,9 @@ function emitSelectedExtensions() {
 async function loadStats() {
   if (!props.projectId) return
 
+  // Save scroll position before reload
+  const savedScrollTop = dirTreeRef.value?.scrollTop ?? 0
+
   loading.value = true
   error.value = null
 
@@ -169,31 +208,28 @@ async function loadStats() {
       excludeDirs: props.excludeDirs.length > 0 ? [...props.excludeDirs] : undefined,
       selectedExtensions: selectedExtensions.value.length > 0 ? [...selectedExtensions.value] : undefined,
     }
-    console.log('[FileStatsPanel] loadStats -> scanFileStats:', JSON.stringify(scanOptions))
     const result = await analysisStore.scanFileStats(props.projectId, scanOptions)
-
-    console.log('[FileStatsPanel] loadStats result:', JSON.stringify(result))
     stats.value = result
-
-    // Auto-expand first level directories
-    if (result.directories && result.directories.length > 0) {
-      result.directories.forEach(d => expandedDirs.value.add(d))
-    }
 
     // Recommend top 5 extensions
     const exts = Object.keys(result.extensions).slice(0, 5)
     if (exts.length > 0) {
       emit('suggestExtensions', exts)
     }
+
+    // Restore scroll position after DOM update
+    await nextTick()
+    if (dirTreeRef.value) {
+      dirTreeRef.value.scrollTop = savedScrollTop
+    }
   } catch (err: any) {
-    console.error('[FileStatsPanel] loadStats error:', err)
     error.value = err?.message || t('common.loadFailed')
   } finally {
     loading.value = false
   }
 }
 
-// Debounced reload on scope/extension change
+// Debounced reload for pattern input (typing)
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 function debouncedLoadStats() {
   if (debounceTimer) clearTimeout(debounceTimer)
@@ -215,14 +251,14 @@ watch(() => props.selectedExtensions, (val) => {
 // Track initial load to prevent duplicate requests
 let initialLoadDone = false
 
-// Watch for external changes (skip during initial load)
+// Watch pattern input changes — debounced (typing)
 watch([() => props.patternType, () => props.pattern, () => props.excludeDirs], () => {
   if (initialLoadDone) debouncedLoadStats()
 }, { immediate: false })
 
-// Watch internal changes (skip during initial load)
+// Watch scope/extension selection — immediate refresh (no debounce)
 watch([selectedScopes, selectedExtensions], () => {
-  if (initialLoadDone) debouncedLoadStats()
+  if (initialLoadDone) loadStats()
 }, { deep: true })
 
 // Initial load
@@ -231,7 +267,7 @@ loadStats().then(() => { initialLoadDone = true })
 
 <template>
   <div class="file-stats-panel">
-    <!-- Directory multi-select -->
+    <!-- Directory tree with checkboxes -->
     <div class="stats-section">
       <div class="section-header">
         <span class="stats-label">{{ t('analysis.directoryScope') }}</span>
@@ -242,31 +278,25 @@ loadStats().then(() => { initialLoadDone = true })
         </div>
       </div>
 
-      <div class="dir-tree">
+      <div class="dir-tree" ref="dirTreeRef">
         <div v-if="!stats?.directories || stats.directories.length === 0" class="empty-hint">
           {{ t('analysis.noDirectories') }}
         </div>
         <template v-else>
-          <!-- Root level directories -->
-          <div
+          <DirTreeNodeComponent
             v-for="dir in stats.directories"
-            :key="dir"
-            class="dir-item"
-          >
-            <label class="dir-label">
-              <input
-                type="checkbox"
-                :checked="selectedScopes.includes(dir)"
-                @change="toggleScope(dir)"
-              />
-              <span class="dir-name">{{ dir }}</span>
-            </label>
-          </div>
+            :key="dir.path"
+            :node="dir"
+            :selected-scopes="selectedScopes"
+            :expanded-dirs="expandedDirs"
+            @toggle="handleDirToggle"
+            @expand="handleDirExpand"
+          />
         </template>
       </div>
 
       <div class="selection-count">
-        {{ t('analysis.selectedCount', { count: selectedScopes.length, total: stats?.directories?.length || 0 }) }}
+        {{ t('analysis.selectedCount', { count: selectedScopes.length, total: stats?.totalDirs || 0 }) }}
       </div>
     </div>
 
@@ -340,12 +370,12 @@ loadStats().then(() => { initialLoadDone = true })
       <div class="stats-bars">
         <div
           v-for="(count, ext) in stats.extensions"
-          :key="ext"
+          :key="ext || '__no_ext__'"
           class="stat-bar-row"
           :class="{ 'selected': selectedExtensions.includes(ext) }"
           @click="toggleExtension(ext)"
         >
-          <span class="stat-ext">{{ ext }}</span>
+          <span class="stat-ext">{{ formatExtension(ext) }}</span>
           <span class="stat-count">{{ count }}</span>
           <div class="stat-bar">
             <div
@@ -369,10 +399,10 @@ loadStats().then(() => { initialLoadDone = true })
         <div class="tag-list">
           <span
             v-for="ext in selectedExtensions"
-            :key="ext"
+            :key="ext || '__no_ext__'"
             class="tag-chip"
           >
-            {{ ext }}
+            {{ formatExtension(ext) }}
             <button class="tag-remove" @click="removeExtension(ext)">
               <XMarkIcon class="w-3 h-3" />
             </button>
@@ -380,21 +410,7 @@ loadStats().then(() => { initialLoadDone = true })
         </div>
       </div>
 
-      <!-- Manual extension input -->
-      <div class="manual-ext-input">
-        <input
-          class="stats-input"
-          v-model="manualExtensionInput"
-          @keydown.enter="addManualExtension"
-          :placeholder="t('analysis.manualExtensionPlaceholder')"
-        />
-        <button class="add-btn" @click="addManualExtension">
-          <PlusIcon class="w-4 h-4" />
-        </button>
-      </div>
-
       <div class="stats-summary">
-        <FolderIcon class="w-3.5 h-3.5" />
         <span>{{ t('analysis.totalFiles', { total: stats.totalFiles, dirs: stats.totalDirs }) }}</span>
       </div>
     </div>
@@ -475,33 +491,6 @@ loadStats().then(() => { initialLoadDone = true })
   padding: 6px;
 }
 
-.dir-item {
-  padding: 2px 0;
-}
-
-.dir-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
-}
-
-.dir-label:hover {
-  background: var(--bg-hover);
-}
-
-.dir-label input[type="checkbox"] {
-  accent-color: var(--accent);
-}
-
-.dir-name {
-  font-family: monospace;
-}
-
 .selection-count {
   font-size: 11px;
   color: var(--text-muted);
@@ -514,7 +503,6 @@ loadStats().then(() => { initialLoadDone = true })
   text-align: center;
 }
 
-.stats-select,
 .stats-input {
   padding: 6px 8px;
   font-size: 12px;
@@ -525,7 +513,6 @@ loadStats().then(() => { initialLoadDone = true })
   outline: none;
 }
 
-.stats-select:focus,
 .stats-input:focus {
   border-color: var(--accent);
 }
@@ -579,7 +566,7 @@ loadStats().then(() => { initialLoadDone = true })
 
 .stat-bar-row {
   display: grid;
-  grid-template-columns: 55px 35px 1fr 24px;
+  grid-template-columns: 70px 35px 1fr 24px;
   align-items: center;
   gap: 8px;
   font-size: 11px;
@@ -606,6 +593,9 @@ loadStats().then(() => { initialLoadDone = true })
   color: var(--text-secondary);
   font-family: monospace;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stat-count {
@@ -693,31 +683,6 @@ loadStats().then(() => { initialLoadDone = true })
 .tag-remove:hover {
   opacity: 1;
   color: var(--error);
-}
-
-/* Manual extension input */
-.manual-ext-input {
-  display: flex;
-  gap: 4px;
-}
-
-.manual-ext-input .stats-input {
-  flex: 1;
-}
-
-.add-btn {
-  background: var(--accent);
-  border: none;
-  color: var(--bg-primary);
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-}
-
-.add-btn:hover {
-  background: var(--accent-hover);
 }
 
 .stats-summary {

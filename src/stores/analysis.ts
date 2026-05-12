@@ -3,6 +3,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { AnalysisTask, AnalysisResult, FileStatsResult, ScanOptions, TaskRun } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('analysis')
 
 export interface TaskFilter {
   status: string[]
@@ -57,19 +60,14 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function createTask(params: { projectId: string; type: string; name: string; scope?: string; scopes?: string[]; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) {
-    console.log('=== [AnalysisStore] createTask called ===')
-    console.log('[AnalysisStore] createTask params:', JSON.stringify(params, null, 2))
-    console.log('[AnalysisStore] createTask: calling ipc.analysis.createTask...')
+    logger.info('createTask', { projectId: params.projectId, name: params.name })
     try {
       const task = await ipc.analysis.createTask(params)
-      console.log('[AnalysisStore] createTask: ipc returned, task=', JSON.stringify(task))
-      console.log('[AnalysisStore] createTask: pushing task to tasks array (length:', tasks.value.length, '->', tasks.value.length + 1, ')')
       tasks.value.push(task)
-      console.log('[AnalysisStore] createTask: completed successfully')
+      logger.info('createTask completed', { taskId: task.id })
       return task
     } catch (err: any) {
-      console.error('=== [AnalysisStore] createTask FAILED ===')
-      console.error('[AnalysisStore] createTask error:', err.message, err.stack)
+      logger.error('createTask failed:', err)
       throw err
     }
   }
@@ -97,21 +95,15 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function updateTaskConfig(taskId: string, config: { name?: string; scope?: string; scopes?: string[]; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) {
-    console.log('=== [AnalysisStore] updateTaskConfig called ===')
-    console.log('[AnalysisStore] updateTaskConfig taskId:', taskId)
-    console.log('[AnalysisStore] updateTaskConfig config:', JSON.stringify(config, null, 2))
-    console.log('[AnalysisStore] updateTaskConfig: calling ipc.analysis.updateTaskConfig...')
+    logger.info('updateTaskConfig', { taskId })
     try {
       const updated = await ipc.analysis.updateTaskConfig({ taskId, config })
-      console.log('[AnalysisStore] updateTaskConfig: ipc returned, updated=', JSON.stringify(updated))
       const idx = tasks.value.findIndex(t => t.id === taskId)
-      console.log('[AnalysisStore] updateTaskConfig: task index in array=', idx)
       if (idx >= 0) tasks.value[idx] = updated
-      console.log('[AnalysisStore] updateTaskConfig: completed successfully')
+      logger.info('updateTaskConfig completed', { taskId })
       return updated
     } catch (err: any) {
-      console.error('=== [AnalysisStore] updateTaskConfig FAILED ===')
-      console.error('[AnalysisStore] updateTaskConfig error:', err.message, err.stack)
+      logger.error('updateTaskConfig failed:', err)
       throw err
     }
   }
@@ -203,21 +195,18 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function scanFileStats(projectId: string, options?: ScanOptions) {
-    console.log('[AnalysisStore] scanFileStats called:', { projectId, options })
     const cacheKey = JSON.stringify({ projectId, ...options })
     if (fileStatsCache.value.has(cacheKey)) {
-      console.log('[AnalysisStore] scanFileStats cache hit')
+      logger.debug('scanFileStats cache hit')
       return fileStatsCache.value.get(cacheKey)!
     }
-    console.log('[AnalysisStore] scanFileStats cache miss, calling IPC...')
-    console.log('[AnalysisStore] scanFileStats options to serialize:', JSON.stringify(options))
+    logger.debug('scanFileStats cache miss, calling IPC')
     try {
       const result = await ipc.analysis.scanFileStats(projectId, options)
-      console.log('[AnalysisStore] scanFileStats result from IPC:', JSON.stringify(result))
       fileStatsCache.value.set(cacheKey, result)
       return result
     } catch (err: any) {
-      console.error('[AnalysisStore] scanFileStats IPC error:', err.message, err)
+      logger.error('scanFileStats IPC error:', err)
       throw err
     }
   }

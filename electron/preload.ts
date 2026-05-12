@@ -233,6 +233,22 @@ contextBridge.exposeInMainWorld('api', {
   removeListener: (channel: string, callback: (...args: any[]) => void) => {
     ipcRenderer.removeListener(channel, callback)
   },
+
+  // ==================== 日志系统 ====================
+  log: {
+    debug: (source: string, message: string, data?: any) => {
+      ipcRenderer.send('log:debug', source, message, data)
+    },
+    info: (source: string, message: string, data?: any) => {
+      ipcRenderer.send('log:info', source, message, data)
+    },
+    warn: (source: string, message: string, data?: any) => {
+      ipcRenderer.send('log:warn', source, message, data)
+    },
+    error: (source: string, message: string, data?: any) => {
+      ipcRenderer.send('log:error', source, message, data)
+    },
+  },
 })
 
 // ==================== 类型声明 ====================
@@ -336,6 +352,12 @@ declare global {
       }
       on: (channel: string, callback: (...args: any[]) => void) => () => void
       removeListener: (channel: string, callback: (...args: any[]) => void) => void
+      log: {
+        debug: (source: string, message: string, data?: any) => void
+        info: (source: string, message: string, data?: any) => void
+        warn: (source: string, message: string, data?: any) => void
+        error: (source: string, message: string, data?: any) => void
+      }
     }
   }
 }
