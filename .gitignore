@@ -29,3 +29,7 @@ npm-debug.log*
 # Electron
 *.db
 *.sqlite
+
+# python
+*.pyc
+

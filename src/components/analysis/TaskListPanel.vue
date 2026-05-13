@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PlusIcon,
@@ -28,16 +28,49 @@ const analysisStore = useAnalysisStore()
 
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
-// 加载任务列表（仅在 store 无数据时加载，避免重复请求）
+// 加载任务列表
 async function loadTasks() {
-  if (props.projectId && analysisStore.tasks.length === 0) {
+  if (props.projectId) {
     await analysisStore.loadTasks(props.projectId)
   }
 }
 
+// 运行中任务轮询（3 秒刷新）
+function startPolling() {
+  stopPolling()
+  pollTimer = setInterval(async () => {
+    const hasRunning = analysisStore.tasks.some(t => t.status === 'running')
+    if (hasRunning && props.projectId) {
+      await analysisStore.loadTasks(props.projectId)
+    } else {
+      stopPolling()
+    }
+  }, 3000)
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+// 监听任务列表变化，有 running 任务时启动轮询
+watch(() => analysisStore.tasks, (tasks) => {
+  const hasRunning = tasks.some(t => t.status === 'running')
+  if (hasRunning) {
+    startPolling()
+  }
+}, { deep: true })
+
 onMounted(() => {
   loadTasks()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 
 // 状态颜色

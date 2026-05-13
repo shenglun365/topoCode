@@ -122,6 +122,8 @@ ALTER TABLE analysis_reports ADD COLUMN files_processed INTEGER DEFAULT 0;
 ALTER TABLE analysis_reports ADD COLUMN skipped_files INTEGER DEFAULT 0;
 ALTER TABLE analysis_reports ADD COLUMN best_call_community_id TEXT;
 ALTER TABLE analysis_reports ADD COLUMN best_dep_community_id TEXT;
+ALTER TABLE analysis_reports ADD COLUMN alias TEXT;
+ALTER TABLE analysis_reports ADD COLUMN node_style_map TEXT;
 """
 
 

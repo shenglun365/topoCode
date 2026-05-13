@@ -213,7 +213,7 @@ function formatRunStatusColor(status: string): string {
 
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="dialog-overlay" @click.self="handleClose">
+    <div v-if="visible" class="dialog-overlay" @click.self="handleClose" role="dialog" aria-modal="true">
       <div class="task-detail-dialog">
         <!-- 标题栏 -->
         <div class="dialog-header">
@@ -302,7 +302,7 @@ function formatRunStatusColor(status: string): string {
               <span v-if="loadingDistribution" class="distribution-loading">{{ t('common.loading') }}...</span>
             </h3>
             <div class="distribution-summary">
-              <span class="distribution-total">{{ t('analysis.totalFiles', { count: totalFiles }) }}</span>
+              <span class="distribution-total">{{ t('analysis.totalFilesCount', { count: totalFiles }) }}</span>
             </div>
             <div class="distribution-bars">
               <div

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
   ArrowPathIcon,
   ChevronRightIcon,
@@ -8,13 +9,17 @@ import {
 import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
+import { useAnalysisStore } from '@/stores/analysis'
 import FileTree from '@/components/project/FileTree.vue'
+import ProjectList from '@/components/project/ProjectList.vue'
 import type { FileTreeNode } from '@/types/ipc'
 
 const { t } = useI18n()
+const router = useRouter()
 const panelStore = usePanelStore()
 const navigation = useNavigationStore()
 const projectStore = useProjectStore()
+const analysisStore = useAnalysisStore()
 
 // 拖拽调整宽度
 const isResizing = ref(false)
@@ -52,6 +57,19 @@ onMounted(() => {
   if (navigation.currentPage === 'home' && !projectStore.selectedProjectId) {
     panelStore.setLeftCollapsed(true)
   }
+  // 分析页面：默认展开左侧面板
+  if (navigation.currentPage === 'analysis') {
+    panelStore.setLeftCollapsed(false)
+  }
+})
+
+// 监听页面切换，分析页面默认展开
+watch(() => navigation.currentPage, (page) => {
+  if (page === 'analysis') {
+    panelStore.setLeftCollapsed(false)
+  } else if (page === 'home' && !projectStore.selectedProjectId) {
+    panelStore.setLeftCollapsed(true)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -62,7 +80,7 @@ onBeforeUnmount(() => {
 
 const panelTitleKeys: Record<string, string> = {
   home: 'nav.projects',
-  analysis: 'nav.tasks',
+  analysis: 'nav.projects',
   knowledge: 'nav.knowledge',
   coder: 'nav.chat',
   user: 'nav.settings',
@@ -115,6 +133,39 @@ function onFileSelect(node: FileTreeNode) {
   projectStore.openFileTab(node)
 }
 
+// 处理选择报告（打开报告 tab）
+async function handleSelectReport(item: { taskId: string; type: string; taskName: string }, projectId: string) {
+  // 选中项目
+  projectStore.selectProject(projectId)
+  // 切换到分析页面
+  router.push('/analysis')
+  navigation.navigateTo('analysis')
+  // 打开报告 tab
+  const project = projectStore.selectedProject
+  projectStore.openReportTab({
+    taskId: item.taskId,
+    reportType: item.type,
+    taskName: item.taskName,
+    projectName: project?.name,
+  })
+}
+
+// 处理为项目创建任务（点击"无报告"）
+function handleCreateTaskForProject(project: any) {
+  // 选中项目并打开任务列表
+  projectStore.selectProject(project.id)
+  projectStore.openTaskListTab()
+  // 切换到首页项目视图
+  router.push('/home')
+  navigation.navigateTo('home')
+}
+
+// 处理导入项目
+function handleImportProject() {
+  router.push('/home')
+  navigation.navigateTo('home')
+}
+
 // 根据当前页面加载对应的左侧面板内容
 function loadPanelContent() {
   switch (navigation.currentPage) {
@@ -156,8 +207,17 @@ loadPanelContent()
       </div>
     </div>
     <div class="panel-body">
+      <!-- 分析页面：项目列表（优先判断，不受 viewMode 影响） -->
+      <template v-if="navigation.currentPage === 'analysis'">
+        <ProjectList
+          @select-report="handleSelectReport"
+          @import-project="handleImportProject"
+          @create-task-for-project="handleCreateTaskForProject"
+        />
+      </template>
+
       <!-- 项目文件树 -->
-      <template v-if="projectStore.viewMode === 'project'">
+      <template v-else-if="projectStore.viewMode === 'project'">
         <div v-if="fileTreeLoading" class="empty-state">
           <div class="loading-spinner"></div>
           <span class="text-muted">{{ t('file.loading') }}</span>

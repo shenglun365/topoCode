@@ -103,32 +103,30 @@ function handleDirExpand(dir: string) {
   }
 }
 
+// 从目录树中收集所有路径
+function collectAllDirPaths(): string[] {
+  const allPaths: string[] = []
+  function collect(nodes: DirTreeNode[]) {
+    for (const node of nodes) {
+      allPaths.push(node.path)
+      if (node.children) collect(node.children)
+    }
+  }
+  if (stats.value?.directories) collect(stats.value.directories)
+  return allPaths
+}
+
 // Select all directories
 function selectAllDirs() {
   if (!stats.value?.directories) return
-  const allPaths: string[] = []
-  function collectPaths(nodes: DirTreeNode[]) {
-    for (const node of nodes) {
-      allPaths.push(node.path)
-      if (node.children) collectPaths(node.children)
-    }
-  }
-  collectPaths(stats.value.directories)
-  selectedScopes.value = allPaths
+  selectedScopes.value = collectAllDirPaths()
   emitSelectedScopes()
 }
 
-// Invert directory selection
+// Invert directory selection — 选中的取消，没选中的选中
 function invertDirs() {
   if (!stats.value?.directories) return
-  const allPaths: string[] = []
-  function collectPaths(nodes: DirTreeNode[]) {
-    for (const node of nodes) {
-      allPaths.push(node.path)
-      if (node.children) collectPaths(node.children)
-    }
-  }
-  collectPaths(stats.value.directories)
+  const allPaths = collectAllDirPaths()
   const selected = new Set(selectedScopes.value)
   selectedScopes.value = allPaths.filter(p => !selected.has(p))
   emitSelectedScopes()

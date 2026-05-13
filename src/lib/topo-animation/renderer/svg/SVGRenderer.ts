@@ -30,6 +30,7 @@ export class SVGRenderer implements IRenderer {
   // 交互
   private onNodeClick?: (nodeId: string) => void;
   private onNodeHover?: (nodeId: string | null) => void;
+  private onEdgeClick?: (edgeId: string) => void;
 
   init(options: RenderOptions): void {
     this.container =
@@ -279,10 +280,15 @@ export class SVGRenderer implements IRenderer {
 
     bound.exit().remove();
 
-    const enter = bound.enter().append('g').attr('class', 'topo-edge');
+    const enter = bound.enter().append('g').attr('class', 'topo-edge').attr('cursor', 'pointer');
 
     enter.append('line').attr('class', 'edge-line');
     enter.append('text').attr('class', 'edge-label').attr('text-anchor', 'middle');
+
+    enter.on('click', (event: any, d: any) => {
+      event.stopPropagation();
+      self.onEdgeClick?.(d.id);
+    });
 
     const merged = enter.merge(bound) as d3.Selection<SVGGElement, any, any, any>;
 
@@ -304,7 +310,8 @@ export class SVGRenderer implements IRenderer {
         .attr('stroke', isHighlighted ? self.theme.edge.highlightColor : (d.style?.color || self.theme.edge.defaultColor))
         .attr('stroke-width', isHighlighted ? self.theme.edge.highlightWidth : (d.style?.strokeWidth || self.theme.edge.defaultWidth))
         .attr('stroke-dasharray', d.style?.strokeDasharray || 'none')
-        .attr('marker-end', d.style?.markerEnd ? 'url(#arrow)' : 'none');
+        .attr('marker-end', d.style?.markerEnd ? `url(#${d.style.markerEnd})` : 'none')
+        .attr('marker-start', d.style?.markerStart ? `url(#${d.style.markerStart})` : 'none');
 
       // 标签
       if (d.label) {
@@ -356,18 +363,35 @@ export class SVGRenderer implements IRenderer {
     if (!this.svg) return;
 
     const defs = this.svg.select('defs').empty() ? this.svg.append('defs') : this.svg.select('defs');
+    // 清除旧标记，避免重复
+    defs.selectAll('.topo-marker').remove();
 
-    defs.append('marker')
-      .attr('id', 'arrow')
-      .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 30)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-5L10,0L0,5')
-      .attr('fill', this.theme.edge.defaultColor);
+    const markerConfigs = [
+      { id: 'arrow', filled: true, size: 6, path: 'M0,-5L10,0L0,5' },
+      { id: 'arrow-open', filled: false, size: 6, path: 'M0,-5L10,0L0,5' },
+      { id: 'arrow-thick', filled: true, size: 8, path: 'M0,-6L12,0L0,6' },
+      { id: 'arrow-small', filled: true, size: 4, path: 'M0,-4L8,0L0,4' },
+    ];
+
+    for (const cfg of markerConfigs) {
+      const marker = defs.append('marker')
+        .attr('id', cfg.id)
+        .attr('class', 'topo-marker')
+        .attr('viewBox', '0 -6 12 12')
+        .attr('refX', cfg.filled ? 12 : 10)
+        .attr('refY', 0)
+        .attr('markerWidth', cfg.size)
+        .attr('markerHeight', cfg.size)
+        .attr('orient', 'auto');
+
+      const path = marker.append('path')
+        .attr('d', cfg.path)
+        .attr('fill', this.theme.edge.defaultColor);
+
+      if (!cfg.filled) {
+        path.attr('fill', 'none').attr('stroke', this.theme.edge.defaultColor).attr('stroke-width', 1.5);
+      }
+    }
   }
 
   private dragBehavior() {
@@ -402,9 +426,17 @@ export class SVGRenderer implements IRenderer {
     this.onNodeHover = handler;
   }
 
+  setEdgeClickHandler(handler: (edgeId: string) => void): void {
+    this.onEdgeClick = handler;
+  }
+
   zoomToLevel(level: number): void {
     if (!this.svg || !this.zoomBehavior) return;
     this.svg.transition().duration(750).call(this.zoomBehavior.scaleTo, level);
+  }
+
+  resetZoom(): void {
+    this.fitToScreen();
   }
 
   fitToScreen(padding: number = 40): void {

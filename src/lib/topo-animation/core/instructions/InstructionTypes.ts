@@ -67,6 +67,7 @@ export interface CreateGroupPayload {
   groupId: GroupId;
   nodeIds: NodeId[];
   edgeIds?: EdgeId[];
+  parentGroupId?: GroupId;
   label?: string;
   style?: Record<string, any>;
   metadata?: Record<string, any>;

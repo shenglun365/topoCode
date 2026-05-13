@@ -2,7 +2,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ChatSession, ChatMessage } from '@/utils/mock'
-import { mockSessions, mockModelConfig, delay } from '@/utils/mock'
+import { llmService } from '@/services/llm'
+import { useSettingsStore } from '@/stores/settings'
 
 export const useChatStore = defineStore('chat', () => {
   // State
@@ -11,7 +12,6 @@ export const useChatStore = defineStore('chat', () => {
   const inputMode = ref<'chat' | 'design'>('chat')
   const inputText = ref('')
   const isTyping = ref(false)
-  const modelConfig = ref(mockModelConfig)
   const loading = ref(false)
 
   // Getters
@@ -28,13 +28,23 @@ export const useChatStore = defineStore('chat', () => {
   // Actions
   async function loadSessions() {
     loading.value = true
-    await delay(300)
-    sessions.value = [...mockSessions]
-    activeSessionId.value = sessions.value[0]?.id || null
-    loading.value = false
+    try {
+      // 从后端加载会话列表
+      const result = await window.api.ipc.invoke('chat.listSessions', {})
+      if (result && result.sessions) {
+        sessions.value = result.sessions
+        activeSessionId.value = sessions.value[0]?.id || null
+      }
+    } catch (e) {
+      console.warn('[ChatStore] Failed to load sessions from backend:', e)
+      // 降级到本地空列表
+      sessions.value = []
+    } finally {
+      loading.value = false
+    }
   }
 
-  function createSession(title: string = '新对话') {
+  async function createSession(title: string = '新对话') {
     const newSession: ChatSession = {
       id: `session-${Date.now()}`,
       title,
@@ -46,9 +56,20 @@ export const useChatStore = defineStore('chat', () => {
     }
     sessions.value.unshift(newSession)
     activeSessionId.value = newSession.id
+
+    // 同步到后端
+    try {
+      await window.api.ipc.invoke('chat.createSession', {
+        id: newSession.id,
+        title: newSession.title,
+        mode: newSession.mode,
+      })
+    } catch (e) {
+      console.warn('[ChatStore] Failed to sync session to backend:', e)
+    }
   }
 
-  function closeSession(sessionId: string) {
+  async function closeSession(sessionId: string) {
     const idx = sessions.value.findIndex(s => s.id === sessionId)
     if (idx === -1) return
 
@@ -56,6 +77,13 @@ export const useChatStore = defineStore('chat', () => {
 
     if (activeSessionId.value === sessionId) {
       activeSessionId.value = sessions.value[0]?.id || null
+    }
+
+    // 同步到后端
+    try {
+      await window.api.ipc.invoke('chat.deleteSession', { id: sessionId })
+    } catch (e) {
+      console.warn('[ChatStore] Failed to delete session from backend:', e)
     }
   }
 
@@ -77,33 +105,67 @@ export const useChatStore = defineStore('chat', () => {
     const session = sessions.value.find(s => s.id === activeSessionId.value)
     if (!session) return
 
+    const userContent = inputText.value.trim()
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
-      content: inputText.value.trim(),
+      content: userContent,
       timestamp: new Date().toISOString(),
     }
 
     session.messages.push(userMessage)
     session.updatedAt = new Date().toISOString()
+    session.status = 'running'
     inputText.value = ''
     isTyping.value = true
 
-    // 模拟 AI 回复
-    await delay(1000)
+    // 创建 AI 消息占位
     const aiMessage: ChatMessage = {
       id: `msg-${Date.now() + 1}`,
       role: 'assistant',
-      content: '这是一个模拟的 AI 回复。实际功能将连接到后端 LLM 服务。',
+      content: '',
       timestamp: new Date().toISOString(),
     }
-
     session.messages.push(aiMessage)
-    isTyping.value = false
+
+    try {
+      // 获取默认模型配置
+      const settingsStore = useSettingsStore()
+      const defaultModel = settingsStore.models.find(m => m.isDefault) || settingsStore.models[0]
+
+      if (!defaultModel) {
+        aiMessage.content = '请先配置大模型 API（设置 → 模型配置）'
+        isTyping.value = false
+        session.status = 'idle'
+        return
+      }
+
+      // 构建消息历史
+      const messages = session.messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.content }))
+
+      // 调用 LLM（流式）
+      llmService.setConfig(defaultModel)
+      const fullContent = await llmService.chat(messages, (chunk) => {
+        if (aiMessage) {
+          aiMessage.content += chunk
+        }
+      })
+
+      aiMessage.content = fullContent
+    } catch (e: any) {
+      aiMessage.content = `LLM 调用失败: ${e.message || String(e)}`
+      console.error('[ChatStore] LLM call failed:', e)
+    } finally {
+      isTyping.value = false
+      session.status = 'idle'
+      session.updatedAt = new Date().toISOString()
+    }
   }
 
   function handleAction(action: string) {
-    // 模拟用户点击操作按钮
+    // 用户点击操作按钮
     const actionMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
@@ -114,6 +176,7 @@ export const useChatStore = defineStore('chat', () => {
     const session = activeSession.value
     if (session) {
       session.messages.push(actionMessage)
+      session.updatedAt = new Date().toISOString()
     }
   }
 
@@ -123,7 +186,6 @@ export const useChatStore = defineStore('chat', () => {
     inputMode,
     inputText,
     isTyping,
-    modelConfig,
     loading,
     activeSession,
     sessionCount,

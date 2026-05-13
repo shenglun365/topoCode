@@ -268,6 +268,31 @@ MAIN_DB_TABLES_SQL = """
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- 代码索引消息 (报告 tab 右侧面板对话历史)
+    CREATE TABLE IF NOT EXISTS code_index_messages (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        message_type TEXT NOT NULL CHECK(message_type IN ('node', 'edge', 'community', 'ai-explain')),
+        content TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (task_id) REFERENCES analysis_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_code_index_project ON code_index_messages(project_id);
+    CREATE INDEX IF NOT EXISTS idx_code_index_task ON code_index_messages(task_id);
+
+    -- 用户全局节点样式设置
+    CREATE TABLE IF NOT EXISTS user_node_styles (
+        id TEXT PRIMARY KEY,
+        symbol_type TEXT NOT NULL,
+        shape TEXT NOT NULL,
+        fill_color TEXT NOT NULL,
+        stroke_color TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_node_styles_type ON user_node_styles(symbol_type);
 """
 
 KNOWLEDGE_DB_TABLES_SQL = """
@@ -616,6 +641,8 @@ class MultiDBManager:
                 ("skipped_files", "INTEGER DEFAULT 0"),
                 ("best_call_community_id", "TEXT"),
                 ("best_dep_community_id", "TEXT"),
+                ("alias", "TEXT"),
+                ("node_style_map", "TEXT"),
             ],
             "analysis_task_runs": [
                 ("snapshot_scopes", "TEXT"),

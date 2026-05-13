@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('api', {
     checkFileChanges: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.checkFileChanges', params: { id } }),
     initSampleData: () => ipcRenderer.invoke('ipc:call', { method: 'project.initSampleData', params: {} }),
     clearSampleData: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.clearSampleData', params: { id } }),
+    checkPathValidity: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.checkPathValidity', params: { id } }),
   },
 
   // ==================== 代码分析 ====================
@@ -210,6 +211,28 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
 
+  // ==================== Chat 会话 ====================
+  chat: {
+    listSessions: () =>
+      ipcRenderer.invoke('ipc:call', { method: 'chat.listSessions', params: {} }),
+    createSession: (params: { id: string; title: string; mode?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'chat.createSession', params }),
+    deleteSession: (params: { id: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'chat.deleteSession', params }),
+    saveMessage: (params: { sessionId: string; message: any }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'chat.saveMessage', params }),
+  },
+
+  // ==================== LLM 服务 ====================
+  llm: {
+    summarizeCode: (params: { code: string; modelId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.summarizeCode', params }),
+    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.explainSymbol', params }),
+    summarizeCommunityName: (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.summarizeCommunityName', params }),
+  },
+
   // ==================== 文件系统 ====================
   fs: {
     addAllowedDir: (dirPath: string) => ipcRenderer.invoke('fs:add-allowed-dir', dirPath),
@@ -291,6 +314,7 @@ declare global {
         remove: (id: string) => Promise<void>
         sync: (id: string) => Promise<any>
         getFileTree: (id: string) => Promise<any[]>
+        checkPathValidity: (id: string) => Promise<{ pathValid: boolean; rootPath: string; needsResync: boolean }>
       }
       analysis: {
         listTasks: (projectId: string) => Promise<any[]>
@@ -342,6 +366,17 @@ declare global {
         getStatus: () => Promise<any>
         ping: () => Promise<any>
         onStatusChange: (callback: (data: any) => void) => () => void
+      }
+      llm: {
+        summarizeCode: (params: { code: string; modelId?: string }) => Promise<any>
+        explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => Promise<any>
+        summarizeCommunityName: (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) => Promise<any>
+      }
+      chat: {
+        listSessions: () => Promise<any>
+        createSession: (params: { id: string; title: string; mode?: string }) => Promise<any>
+        deleteSession: (params: { id: string }) => Promise<any>
+        saveMessage: (params: { sessionId: string; message: any }) => Promise<any>
       }
       system: {
         selectDirectory: () => Promise<string | null>

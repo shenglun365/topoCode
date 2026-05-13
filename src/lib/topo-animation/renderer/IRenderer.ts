@@ -24,4 +24,22 @@ export interface IRenderer {
 
   /** 获取 Canvas 元素（如适用） */
   getCanvasElement?(): HTMLCanvasElement | null;
+
+  /** 缩放到指定级别 */
+  zoomToLevel?(level: number): void;
+
+  /** 适配屏幕 */
+  fitToScreen?(padding?: number): void;
+
+  /** 重置缩放 */
+  resetZoom?(): void;
+
+  /** 设置节点点击处理器 */
+  setNodeClickHandler?(handler: (nodeId: string) => void): void;
+
+  /** 设置节点悬停处理器 */
+  setNodeHoverHandler?(handler: (nodeId: string | null) => void): void;
+
+  /** 设置边点击处理器 */
+  setEdgeClickHandler?(handler: (edgeId: string) => void): void;
 }

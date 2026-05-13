@@ -172,6 +172,37 @@ export class InstructionExecutor {
         break;
       }
 
+      // ==================== Group ====================
+      case 'createGroup': {
+        if (!delta.groups) delta.groups = { createOrUpdate: [] };
+        delta.groups.createOrUpdate.push({
+          id: payload.groupId,
+          nodeIds: payload.nodeIds,
+          edgeIds: payload.edgeIds,
+          label: payload.label,
+          style: payload.style,
+          metadata: payload.metadata,
+        });
+        break;
+      }
+
+      case 'updateGroup': {
+        if (!delta.groups) delta.groups = { createOrUpdate: [] };
+        const groupUpdate: any = { id: payload.groupId };
+        if (payload.nodeIds) groupUpdate.nodeIds = payload.nodeIds;
+        if (payload.edgeIds) groupUpdate.edgeIds = payload.edgeIds;
+        if (payload.label !== undefined) groupUpdate.label = payload.label;
+        if (payload.style) groupUpdate.style = payload.style;
+        delta.groups.createOrUpdate.push(groupUpdate);
+        break;
+      }
+
+      case 'removeGroup': {
+        if (!delta.groups) delta.groups = { remove: [] };
+        delta.groups.remove.push(payload.groupId);
+        break;
+      }
+
       // ==================== Animation ====================
       case 'moveTo': {
         const nodeUpdate: Partial<NodeState> = {
@@ -395,7 +426,8 @@ export class InstructionExecutor {
       delta.highlights !== undefined ||
       delta.selections !== undefined ||
       delta.comment !== undefined ||
-      delta.metadata !== undefined
+      delta.metadata !== undefined ||
+      delta.groups !== undefined
     );
   }
 

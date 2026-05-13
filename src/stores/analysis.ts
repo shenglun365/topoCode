@@ -81,9 +81,14 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function reRunTask(taskId: string) {
-    const newTask = await ipc.analysis.reRunTask(taskId)
-    tasks.value.unshift(newTask)
-    return newTask
+    await ipc.analysis.reRunTask(taskId)
+    // 后端复用同一任务，更新本地状态
+    const task = tasks.value.find(t => t.id === taskId)
+    if (task) {
+      task.status = 'running'
+      task.progress = 0
+      task.error = null
+    }
   }
 
   async function getTaskLogs(taskId: string, runId?: string) {
@@ -91,7 +96,25 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function getTaskRuns(taskId: string): Promise<TaskRun[]> {
-    return await ipc.analysis.getTaskRuns(taskId)
+    const runs = await ipc.analysis.getTaskRuns(taskId)
+    // 后端返回 snake_case，前端期望 camelCase
+    return runs.map((r: any) => ({
+      id: r.id,
+      taskId: r.task_id,
+      runNumber: r.run_number,
+      status: r.status,
+      progress: r.progress,
+      total: r.total,
+      current: r.current,
+      error: r.error,
+      startedAt: r.started_at,
+      finishedAt: r.finished_at,
+      durationMs: r.duration_ms,
+      snapshotScope: r.snapshot_scope,
+      snapshotExtensions: r.snapshot_extensions,
+      snapshotExcludeDirs: r.snapshot_exclude_dirs,
+      snapshotReportTypes: r.snapshot_report_types,
+    }))
   }
 
   async function updateTaskConfig(taskId: string, config: { name?: string; scope?: string; scopes?: string[]; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) {

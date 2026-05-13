@@ -75,11 +75,17 @@ export class PythonBridge {
         // 启动前检查端口占用 — 如果有残留 Python 进程占用端口，先清理
         this.checkAndKillPortOccupant(dealerPort)
 
+        // 设置 PYTHONPATH，让 Python 能找到 backend/ 目录下的依赖包
+        const backendDir = app.isPackaged
+          ? join(process.resourcesPath, 'backend')
+          : join(__dirname, '../../backend')
+
         this.process = spawn(python, [this.pythonScript, this.dbPath], {
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,
             PYTHONUNBUFFERED: '1',
+            PYTHONPATH: backendDir,
             ZMQ_DEALER_PORT: String(dealerPort),
             ZMQ_PUB_PORT: String(pubPort),
           },

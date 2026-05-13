@@ -266,12 +266,12 @@ class TaskStore:
     # ==================== analysis_reports ====================
 
     def upsert_report(self, report: dict):
-        """插入/覆盖分析报告（同 task_id + run_id 覆盖）"""
+        """插入/覆盖分析报告（同 task_id 只保留一份，按 task_id 删除旧报告）"""
         report_id = report.get("id") or str(uuid.uuid4())
-        # 先删除旧的
+        # 先删除该任务的所有旧报告（task_id 有 UNIQUE 约束）
         self._db.execute(
-            "DELETE FROM analysis_reports WHERE task_id = ? AND run_id = ?",
-            (report["task_id"], report["run_id"]),
+            "DELETE FROM analysis_reports WHERE task_id = ?",
+            (report["task_id"],),
         )
         self._db.execute("""
             INSERT INTO analysis_reports (
@@ -281,7 +281,7 @@ class TaskStore:
                 language_stats, files_processed, skipped_files,
                 best_call_community_id, best_dep_community_id,
                 logs, summary
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             report_id, report["task_id"], report["run_id"],
             report.get("total_ast_nodes", 0),

@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
 import DebugPanel from '@/components/debug/DebugPanel.vue'
+import CodeIndexPanel from '@/components/report/CodeIndexPanel.vue'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
 const navigation = useNavigationStore()
 const projectStore = useProjectStore()
+
+const codeIndexRef = ref<InstanceType<typeof CodeIndexPanel> | null>(null)
 
 const panelTitleKeys: Record<string, string> = {
   home: 'shell.rightPanel.projectDetail',
@@ -20,11 +23,25 @@ const panelTitleKeys: Record<string, string> = {
   user: 'shell.rightPanel.settingsDetail',
 }
 
+// 是否显示代码索引面板（分析页面 + 报告 tab）
+const showCodeIndex = computed(() => {
+  return navigation.currentPage === 'analysis' &&
+    projectStore.activeTab?.kind === 'report'
+})
+
 const title = computed(() => {
+  if (showCodeIndex.value) {
+    return t('report.codeIndex')
+  }
   if (projectStore.viewMode === 'project' && projectStore.activeTab) {
     return t('shell.rightPanel.symbols')
   }
   return t(panelTitleKeys[navigation.currentPage] || 'common.detail')
+})
+
+// 暴露给父组件调用
+defineExpose({
+  codeIndexRef,
 })
 </script>
 
@@ -45,6 +62,12 @@ const title = computed(() => {
     <div class="panel-body">
       <!-- DEBUG 面板 -->
       <DebugPanel v-if="panelStore.debugMode" />
+
+      <!-- 代码索引面板 -->
+      <CodeIndexPanel
+        v-else-if="showCodeIndex"
+        ref="codeIndexRef"
+      />
 
       <!-- 符号索引（预留） -->
       <div v-else-if="projectStore.viewMode === 'project' && projectStore.activeTab" class="symbols-panel">

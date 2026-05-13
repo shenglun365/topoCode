@@ -123,16 +123,20 @@ class ZMQServer:
             logger.exception("Error handling request")
 
     def publish(self, topic: str, event_type: str, data: dict):
-        """发布事件"""
+        """发布事件（线程安全，NOBLOCK 避免线程池中 event loop 冲突）"""
+        if self.pub is None:
+            return  # 后端已关闭，静默丢弃
         try:
             self.pub.send_multipart([
                 topic.encode("utf-8"),
                 event_type.encode("utf-8"),
                 json.dumps(data, default=str).encode("utf-8"),
-            ])
+            ], flags=zmq.NOBLOCK)
             logger.debug(f"Published: {topic}.{event_type}")
+        except zmq.Again:
+            logger.debug(f"Publish dropped (NOBLOCK): {topic}.{event_type}")
         except Exception as e:
-            logger.error(f"Error publishing event: {e}")
+            logger.debug(f"Publish failed (expected during shutdown): {e}")
 
     async def run(self):
         """运行服务器"""

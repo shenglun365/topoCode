@@ -43,6 +43,8 @@ export interface UseAnimationOptions {
   layout?: 'force-directed' | 'hierarchy' | 'grid' | 'circular'
 }
 
+export type LayoutType = 'force-directed' | 'hierarchy' | 'grid' | 'circular'
+
 export function useAnimation(options: UseAnimationOptions = {}) {
   // ==================== 响应式状态 ====================
   const playing = ref(false)
@@ -52,6 +54,11 @@ export function useAnimation(options: UseAnimationOptions = {}) {
   const progress = ref(0)
   const error = ref<string | null>(null)
   const compileResult = ref<CompileResult | null>(null)
+
+  // 交互事件回调
+  const onNodeClick = ref<((nodeId: string) => void) | null>(null)
+  const onNodeHover = ref<((nodeId: string | null) => void) | null>(null)
+  const onEdgeClick = ref<((edgeId: string) => void) | null>(null)
 
   // ==================== 旧接口序列注册 ====================
   const sequences = new Map<string, AnimationSequence>()
@@ -138,6 +145,17 @@ export function useAnimation(options: UseAnimationOptions = {}) {
       playing.value = false
     })
 
+    // 节点/边交互事件
+    engine.on('node-click', (data: { nodeId: string }) => {
+      onNodeClick.value?.(data.nodeId)
+    })
+    engine.on('node-hover', (data: { nodeId: string | null }) => {
+      onNodeHover.value?.(data.nodeId)
+    })
+    engine.on('edge-click', (data: { edgeId: string }) => {
+      onEdgeClick.value?.(data.edgeId)
+    })
+
     // 编译并加载
     const compileRes = compileSource(source)
     if (!compileRes.success) return false
@@ -166,6 +184,24 @@ export function useAnimation(options: UseAnimationOptions = {}) {
 
   function seek(step: number): void {
     engine?.seek(step)
+  }
+
+  // ==================== 缩放 ====================
+  function zoomToLevel(level: number): void {
+    engine?.zoomToLevel(level)
+  }
+
+  function fitToScreen(padding?: number): void {
+    engine?.fitToScreen(padding)
+  }
+
+  function resetZoom(): void {
+    engine?.resetZoom()
+  }
+
+  // ==================== 布局切换 ====================
+  function switchLayout(layout: LayoutType): void {
+    engine?.switchLayout(layout)
   }
 
   // ==================== 导出 ====================
@@ -217,6 +253,19 @@ export function useAnimation(options: UseAnimationOptions = {}) {
     pause,
     stop,
     seek,
+
+    // 缩放
+    zoomToLevel,
+    fitToScreen,
+    resetZoom,
+
+    // 布局切换
+    switchLayout,
+
+    // 交互事件
+    onNodeClick,
+    onNodeHover,
+    onEdgeClick,
 
     // 旧接口兼容
     registerSequence,

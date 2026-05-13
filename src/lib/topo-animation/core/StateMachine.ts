@@ -207,6 +207,7 @@ export class StateMachine {
     if (groupDelta.createOrUpdate) {
       for (const groupData of groupDelta.createOrUpdate) {
         const existing = state.groups.get(groupData.id);
+        const parentGroupId = (groupData.metadata as any)?.parentGroupId;
         const group: GroupState = existing
           ? {
               ...existing,
@@ -224,8 +225,24 @@ export class StateMachine {
               edgeIds: groupData.edgeIds || [],
               style: groupData.style,
               metadata: groupData.metadata,
+              childGroupIds: [],
+              nestingLevel: 0,
             };
         state.groups.set(groupData.id, group);
+
+        // 处理父子关系
+        if (parentGroupId) {
+          group.metadata = group.metadata || {} as any;
+          (group.metadata as any).parentGroupId = parentGroupId;
+          // 设置嵌套层级
+          const parent = state.groups.get(parentGroupId);
+          group.nestingLevel = (parent?.nestingLevel || 0) + 1;
+          // 加入父组的 childGroupIds
+          if (parent && !parent.childGroupIds?.includes(groupData.id)) {
+            if (!parent.childGroupIds) parent.childGroupIds = [];
+            parent.childGroupIds.push(groupData.id);
+          }
+        }
       }
     }
 
@@ -233,6 +250,13 @@ export class StateMachine {
     if (groupDelta.remove) {
       for (const groupId of groupDelta.remove) {
         state.groups.delete(groupId);
+        // 从父组中移除引用
+        for (const [, group] of state.groups!) {
+          if (group.childGroupIds) {
+            const idx = group.childGroupIds.indexOf(groupId);
+            if (idx !== -1) group.childGroupIds.splice(idx, 1);
+          }
+        }
       }
     }
   }

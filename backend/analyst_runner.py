@@ -7,6 +7,7 @@ Analyst Runner — 6 步分析流程执行器
 - _update_progress: 进度更新 + ZMQ PUB 推送
 """
 import asyncio
+import concurrent.futures
 import logging
 import os
 import time
@@ -28,6 +29,7 @@ parse_executor = ThreadPoolExecutor(
 
 # ==================== 停止标志 ====================
 _stop_flags: Dict[str, bool] = {}
+_executing_tasks: set = set()  # 正在执行的任务 ID 集合
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,11 @@ def clear_stop_flag(task_id: str):
 def should_stop(task_id: str) -> bool:
     """检查是否应该停止"""
     return _stop_flags.get(task_id, False)
+
+
+def is_task_executing(task_id: str) -> bool:
+    """检查任务是否正在线程池中执行"""
+    return task_id in _executing_tasks
 
 
 # ==================== 进度回调 ====================
@@ -115,7 +122,6 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     Returns:
         分析结果摘要
     """
-    import json
     import os
 
     from store.task_store import TaskStore
@@ -139,11 +145,11 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     analysis_store = AnalysisStore(project_db)
     adapter = SQLiteAdapter(project_db, task_id)
 
-    # 解析配置字段
-    scopes = json.loads(task["scopes"]) if task.get("scopes") else []
-    extensions = json.loads(task["extensions"]) if task.get("extensions") else []
-    exclude_dirs = json.loads(task["exclude_dirs"]) if task.get("exclude_dirs") else []
-    report_types = json.loads(task["report_types"]) if task.get("report_types") else []
+    # 解析配置字段（TaskStore.get_task 已通过 _parse_task_row 反序列化，无需再次 json.loads）
+    scopes = task.get("scopes") or []
+    extensions = task.get("extensions") or []
+    exclude_dirs = task.get("exclude_dirs") or []
+    report_types = task.get("report_types") or []
 
     # 获取项目根路径
     project = multi_db.main_db.fetchone(
@@ -151,11 +157,7 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     )
     proj_path = project.get("root_path", "") if project else ""
 
-    # 2. 清理旧数据（重运行时）
-    logger.info(f"[PARSE] 清理任务 {task_id} 的旧数据")
-    analysis_store.clear_task_data(task_id)
-
-    # 3. 获取文件列表
+    # 2. 获取文件列表
     files = analysis_store.list_source_files(
         scopes=scopes,
         extensions=extensions,
@@ -167,6 +169,19 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     if total == 0:
         logger.warning(f"[PARSE] 没有文件需要分析")
         return {"files_processed": 0, "skipped_files": 0}
+
+    # 3. 检查是否有旧报告（有则保留 base_node AST 数据，跳过重解析）
+    prev_report = task_store._db.execute(
+        "SELECT * FROM analysis_reports WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    skip_ast = False
+    if prev_report:
+        skip_ast = True
+        logger.info(f"[PARSE] 存在旧报告，保留 base_node AST 数据，跳过重解析")
+
+    # 4. 清理旧数据（符号/调用图/依赖图/社区 — 总是重新计算）
+    logger.info(f"[PARSE] 清理任务 {task_id} 的旧数据")
+    analysis_store.clear_task_data(task_id)
 
     # 4. 按语言分组
     files_by_lang = {}
@@ -184,50 +199,88 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         logs.append({"timestamp": datetime.utcnow().isoformat(), "message": msg})
         logger.info(f"[PARSE] {msg}")
 
-    # ==================== Step 1: AST 解析 ====================
-    _log("Step 1: AST 解析开始")
-    total_ast_nodes = 0
+    # ==================== Step 1: AST 解析（并行） ====================
+    if skip_ast:
+        _log("Step 1: AST 解析跳过（保留已有 base_node 数据）")
+        processed = total  # 标记所有文件已处理
+    else:
+        _log(f"Step 1: AST 解析开始（并行，{PARSE_WORKERS} 个工作线程）")
+        total_ast_nodes = 0
 
-    for lang, file_list in files_by_lang.items():
-        _log(f"处理语言 {lang}: {len(file_list)} 个文件")
-        lang_nodes = 0
-
-        for f in file_list:
-            if should_stop(task_id):
-                _log("检测到停止标志，中断解析")
-                break
-
-            try:
-                # 构建绝对路径
+        # 构建所有文件的解析任务
+        all_tasks = []
+        for lang, file_list in files_by_lang.items():
+            for f in file_list:
                 abs_path = os.path.join(proj_path, f["file_path"]) if proj_path else f["file_path"]
+                all_tasks.append((lang, f, abs_path))
 
-                node_count = parse_file(
+        _log(f"共 {len(all_tasks)} 个文件待解析")
+
+        def _parse_one(lang, f, abs_path):
+            """同步解析单个文件（在线程池中执行）"""
+            if should_stop(task_id):
+                return (lang, f, 'stopped')
+            try:
+                result = parse_file(
                     source_file_path=abs_path,
                     project_db=project_db,
                     task_id=task_id,
                     proj_path=proj_path,
                 )
-                if node_count == -1:
-                    skipped += 1
-                else:
-                    processed += 1
-                    language_stats[lang] = language_stats.get(lang, 0) + 1
-
-                # 文件级进度检查
-                if processed % PROGRESS_INTERVAL == 0:
-                    _update_progress(server, multi_db, task_id, run_id, processed, total)
-
+                return (lang, f, result)
             except Exception as e:
-                _log(f"解析失败 {f['file_path']}: {e}")
+                return (lang, f, f"error: {e}")
+
+        # 使用 ThreadPoolExecutor 并行解析（同步上下文）
+        with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as file_executor:
+            # 分批提交，每批最多 PARSE_WORKERS * 2 个任务
+            batch_size = PARSE_WORKERS * 2
+            for batch_start in range(0, len(all_tasks), batch_size):
+                if should_stop(task_id):
+                    _log("检测到停止标志，中断解析")
+                    break
+
+                batch = all_tasks[batch_start:batch_start + batch_size]
+                _log(f"提交批次 {(batch_start // batch_size) + 1}: {len(batch)} 个文件")
+
+                # 提交批次内所有任务
+                futures = {
+                    file_executor.submit(_parse_one, lang, f, abs_path): (lang, f)
+                    for lang, f, abs_path in batch
+                }
+
+                # 等待批次完成并收集结果
+                for future in concurrent.futures.as_completed(futures):
+                    if should_stop(task_id):
+                        _log("检测到停止标志，中断解析")
+                        break
+
+                    try:
+                        lang, f, node_count = future.result()
+                    except Exception as e:
+                        _log(f"解析任务异常: {e}")
+                        continue
+
+                    if node_count == 'stopped':
+                        continue
+                    elif str(node_count).startswith('error:'):
+                        _log(f"解析失败 {f['file_path']}: {node_count}")
+                        continue
+                    elif node_count == -1:
+                        skipped += 1
+                    else:
+                        processed += 1
+                        language_stats[lang] = language_stats.get(lang, 0) + 1
+
+                    # 文件级进度检查
+                    if processed % PROGRESS_INTERVAL == 0:
+                        _update_progress(server, multi_db, task_id, run_id, processed, total)
 
         if should_stop(task_id):
-            break
+            _log("AST 解析被用户停止")
+            return {"files_processed": processed, "skipped_files": skipped, "stopped": True}
 
-    if should_stop(task_id):
-        _log("AST 解析被用户停止")
-        return {"files_processed": processed, "skipped_files": skipped, "stopped": True}
-
-    _log(f"AST 解析完成 - 处理 {processed} 个文件，跳过 {skipped} 个")
+        _log(f"AST 解析完成 - 处理 {processed} 个文件，跳过 {skipped} 个")
 
     # 统计 AST 节点总数
     row = analysis_store.count_nodes()
@@ -352,6 +405,7 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
     """
     asyncio 协程: 提交 _do_parse 到线程池并等待完成
     """
+    _executing_tasks.add(task_id)
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(
@@ -382,6 +436,7 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
                 })
 
         clear_stop_flag(task_id)
+        _executing_tasks.discard(task_id)
         return result
 
     except Exception as e:
@@ -399,4 +454,5 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
             })
 
         clear_stop_flag(task_id)
+        _executing_tasks.discard(task_id)
         raise

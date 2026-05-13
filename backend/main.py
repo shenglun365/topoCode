@@ -20,6 +20,7 @@ from core_service import (
     register_backend_methods,
     register_render_methods,
 )
+from llm_service import register_llm_methods
 
 # 初始化统一日志系统
 setup_logging()
@@ -87,6 +88,7 @@ class BackendApp:
         register_settings_methods(self.server, self.multi_db)
         register_backend_methods(self.server, self.multi_db)
         register_render_methods(self.server, self.multi_db)
+        register_llm_methods(self.server, self.multi_db)
         logger.info(f"Registered {len(self.server.methods)} methods")
 
     async def run(self):

@@ -99,6 +99,9 @@ function createRealIPC(): IPCAPI {
       clearSampleData: async (id: string) => {
         return await api.project.clearSampleData(id)
       },
+      checkPathValidity: async (id: string) => {
+        return await api.project.checkPathValidity(id)
+      },
     },
 
     // ==================== 代码分析 ====================
@@ -273,6 +276,9 @@ function createRealIPC(): IPCAPI {
       getStatus: async () => {
         return await api.backend.getStatus()
       },
+      ping: async () => {
+        return await api.backend.ping()
+      },
       testPort: async (port: number) => {
         return await api.backend.testPort(port)
       },
@@ -282,6 +288,19 @@ function createRealIPC(): IPCAPI {
         } else {
           backendStatusCbs.push(cb)
         }
+      },
+    },
+
+    // ==================== LLM 服务 ====================
+    llm: {
+      summarizeCode: async (params: { code: string; modelId?: string }) => {
+        return await api.llm.summarizeCode(params)
+      },
+      explainSymbol: async (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => {
+        return await api.llm.explainSymbol(params)
+      },
+      summarizeCommunityName: async (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) => {
+        return await api.llm.summarizeCommunityName(params)
       },
     },
 

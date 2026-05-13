@@ -331,6 +331,7 @@ export interface IPCAPI {
     checkFileChanges: (id: string) => Promise<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean }>
     initSampleData: () => Promise<{ project: Project }>
     clearSampleData: (id: string) => Promise<{ success: boolean }>
+    checkPathValidity: (id: string) => Promise<{ pathValid: boolean; rootPath: string; needsResync: boolean }>
   }
 
   // 代码分析
@@ -389,6 +390,13 @@ export interface IPCAPI {
     restart: () => Promise<void>
     getStatus: () => Promise<BackendStatus>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void
+  }
+
+  // LLM 服务
+  llm: {
+    summarizeCode: (params: { code: string; modelId?: string }) => Promise<{ content: string; originalLength: number; summarizedLength: number; compressed: boolean }>
+    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => Promise<{ content: string }>
+    summarizeCommunityName: (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) => Promise<{ content: string }>
   }
 
   // 系统

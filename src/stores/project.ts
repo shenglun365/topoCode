@@ -6,7 +6,7 @@ import { ipc } from '@/services/ipc'
 import { useAnalysisStore } from '@/stores/analysis'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report'
 
 export interface HomeTab {
   id: string
@@ -17,6 +17,9 @@ export interface HomeTab {
   node?: FileTreeNode
   // taskCreate 类型
   taskId?: string  // 编辑已有任务时传入
+  // report 类型
+  reportType?: string  // dependency | callChain
+  alias?: string  // 用户自定义别名
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -232,7 +235,7 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  async function openTaskCreateForm(taskId?: string) {
+ async function openTaskCreateForm(taskId?: string) {
     if (taskId) {
       // 编辑模式 - 使用通用标题，详细数据由 TaskCreateForm 自行加载
       const tab: HomeTab = {
@@ -252,6 +255,64 @@ export const useProjectStore = defineStore('project', () => {
       }
       tabs.value.push(tab)
       activeTabId.value = tab.id
+    }
+  }
+
+  /** 打开报告 tab */
+  function openReportTab(params: {
+    taskId: string
+    reportType: string  // dependency | callChain
+    taskName: string
+    projectName?: string
+    alias?: string
+  }) {
+    // 检查是否已打开同一任务的同类型报告
+    const existing = tabs.value.find(
+      t => t.kind === 'report' && t.taskId === params.taskId && t.reportType === params.reportType
+    )
+    if (existing) {
+      activeTabId.value = existing.id
+      return existing.id
+    }
+
+    // 报告类型映射
+    const typeMap: Record<string, string> = {
+      dependency: i18n.global.t('project.reportType.dependency'),
+      callChain: i18n.global.t('project.reportType.callChain'),
+      dataFlow: i18n.global.t('project.reportType.dataFlow'),
+      architecture: i18n.global.t('project.reportType.architecture'),
+    }
+    const typeLabel = typeMap[params.reportType] || params.reportType
+    const title = params.alias || `${typeLabel} · ${params.taskName}`
+
+    const tab: HomeTab = {
+      id: `tab-report-${params.taskId}-${params.reportType}-${Date.now()}`,
+      kind: 'report',
+      title,
+      taskId: params.taskId,
+      reportType: params.reportType,
+      alias: params.alias,
+    }
+    tabs.value.push(tab)
+    activeTabId.value = tab.id
+
+    return tab.id
+  }
+
+  /** 关闭所有报告 tab */
+  function closeAllReportTabs() {
+    const reportIds = tabs.value.filter(t => t.kind === 'report').map(t => t.id)
+    for (const id of reportIds) {
+      const idx = tabs.value.findIndex(t => t.id === id)
+      if (idx !== -1) tabs.value.splice(idx, 1)
+    }
+    // 如果当前激活的是报告 tab，重置
+    if (reportIds.includes(activeTabId.value || '')) {
+      if (tabs.value.length > 0) {
+        activeTabId.value = tabs.value[tabs.value.length - 1].id
+      } else {
+        activeTabId.value = null
+      }
     }
   }
 
@@ -284,5 +345,7 @@ export const useProjectStore = defineStore('project', () => {
     setSelectedFile,
     openTaskListTab,
     openTaskCreateForm,
+    openReportTab,
+    closeAllReportTabs,
   }
 })

@@ -29,11 +29,20 @@ from parsers.code_parser.parser_factory import (
 from parsers.code_parser.registry import get_language_config
 from parsers.code_parser.lang_parser_conf import detect_language
 from parsers.db_adapter import SQLiteAdapter
+from config import MAX_AST_NODES
 
 logger = logging.getLogger(__name__)
 
 # 文件大小限制 (500KB)
 MAX_FILE_SIZE = 500 * 1024
+
+
+def _count_ast_nodes(node: Node) -> int:
+    """递归计算 AST 节点总数"""
+    count = 1
+    for child in node.children:
+        count += _count_ast_nodes(child)
+    return count
 
 
 def parse_file(
@@ -105,6 +114,16 @@ def parse_file(
         # === Step 5: 解析 AST ===
         src_content = source_path.read_bytes()
         tree = parser.parse(src_content)
+
+        # 检查 AST 节点总数是否超过限制
+        node_count = _count_ast_nodes(tree.root_node)
+        if node_count > MAX_AST_NODES:
+            logger.warning(
+                f"Skipping file with too many AST nodes: {source_file_path} "
+                f"({node_count} > {MAX_AST_NODES})"
+            )
+            return -1
+
         nodes_final = extract_node_info(root_node=tree.root_node, language_name=language_name)
 
         if not nodes_final:

@@ -132,6 +132,17 @@ export class AnimationEngine {
     this.animator.on('complete', (data) => this.emitter.emit('complete', data));
     this.animator.on('step-change', (data) => this.emitter.emit('step-change', data));
 
+    // 绑定渲染器交互事件
+    this.renderer.setNodeClickHandler?.((nodeId) => {
+      this.emitter.emit('node-click', { nodeId });
+    });
+    this.renderer.setNodeHoverHandler?.((nodeId) => {
+      this.emitter.emit('node-hover', { nodeId });
+    });
+    this.renderer.setEdgeClickHandler?.((edgeId) => {
+      this.emitter.emit('edge-click', { edgeId });
+    });
+
     RUNTIME.info('AnimationEngine initialized', {
       renderer: this.options.renderer,
       width: this.options.width,
@@ -299,6 +310,39 @@ export class AnimationEngine {
   /** 获取所有状态 */
   getStates(): AnimationState[] {
     return this.states;
+  }
+
+  /** 缩放到指定级别 */
+  zoomToLevel(level: number): void {
+    this.renderer?.zoomToLevel?.(level);
+  }
+
+  /** 适配屏幕 */
+  fitToScreen(padding?: number): void {
+    this.renderer?.fitToScreen?.(padding);
+  }
+
+  /** 重置缩放 */
+  resetZoom(): void {
+    this.renderer?.resetZoom?.();
+  }
+
+  /** 运行时切换布局 */
+  switchLayout(layout: LayoutType): void {
+    const currentState = this.getCurrentState();
+    if (!currentState || !this.renderer) return;
+
+    const laidOutNodes = applyLayout(
+      layout,
+      currentState.nodes,
+      currentState.edges,
+      this.options.width,
+      this.options.height
+    );
+    currentState.nodes = laidOutNodes;
+    this.renderer.render(currentState);
+
+    RUNTIME.info('Layout switched', { layout });
   }
 
   /** 事件订阅 */
