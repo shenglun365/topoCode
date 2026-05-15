@@ -21,9 +21,8 @@ export class LLMService {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
-    // OpenAI 需要 API key (实际应从安全存储获取)
-    if (this.config?.provider === 'openai') {
-      // headers['Authorization'] = `Bearer ${apiKey}`
+    if (this.config?.apiKey) {
+      headers['Authorization'] = `Bearer ${this.config.apiKey}`
     }
     return headers
   }
@@ -46,7 +45,7 @@ export class LLMService {
       case 'openai':
       case 'custom':
         return this.openAIChat(messages, onChunk)
-      case 'lmstudio':
+      case 'lm-studio':
         return this.lmStudioChat(messages, onChunk)
       default:
         throw new Error(`Unsupported provider: ${this.config.provider}`)

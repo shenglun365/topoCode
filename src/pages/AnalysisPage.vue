@@ -1,115 +1,107 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  ChartBarIcon,
-  PlusIcon,
-  ArrowPathIcon,
-  BookOpenIcon,
-  Squares2X2Icon,
-  ListBulletIcon,
-} from '@heroicons/vue/24/outline'
-import { useAnalysisStore } from '@/stores/analysis'
+import { ChartBarIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
-import TaskCard from '@/components/analysis/TaskCard.vue'
-import TaskReport from '@/components/analysis/TaskReport.vue'
+import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import ReportTabToolbar from '@/components/report/ReportTabToolbar.vue'
-import ReportQueryPanel from '@/components/report/ReportQueryPanel.vue'
-import ReportGraphView from '@/components/report/ReportGraphView.vue'
+import CascadeCommunityQuery from '@/components/report/CascadeCommunityQuery.vue'
+import LLMChatFlow from '@/components/report/LLMChatFlow.vue'
+import SubDocViewer from '@/components/report/SubDocViewer.vue'
+import type { CascadeQueryParams } from '@/components/report/CascadeCommunityQuery.vue'
 
 const { t } = useI18n()
-const analysisStore = useAnalysisStore()
 const projectStore = useProjectStore()
-const statusFilter = ref<string[]>(['all'])
-// 注意：任务列表由 LeftPanel 中的项目列表选择后加载，不再在 onMounted 中调用
 
-// 当前激活的报告 tab
+const activeTab = computed(() => projectStore.activeTab)
+const reportTabs = computed(() => projectStore.tabs.filter(t => t.kind === 'report' || t.kind === 'subdoc'))
+
+function onTabUpdate(tabId: string | null) {
+  projectStore.setActiveTab(tabId)
+}
+
+function onTabClose(tabId: string) {
+  projectStore.closeTab(tabId)
+}
+const isReportTab = computed(() => activeTab.value?.kind === 'report')
+const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
 const activeReportTab = computed(() => {
-  const tab = projectStore.activeTab
+  const tab = activeTab.value
   return tab?.kind === 'report' ? tab : null
 })
 
-function toggleStatus(status: string) {
-  if (status === 'all') {
-    statusFilter.value = ['all']
-  } else {
-    statusFilter.value = statusFilter.value.filter(s => s !== 'all')
-    if (statusFilter.value.includes(status)) {
-      statusFilter.value = statusFilter.value.filter(s => s !== status)
-    } else {
-      statusFilter.value.push(status)
-    }
-    if (statusFilter.value.length === 0) {
-      statusFilter.value = ['all']
-    }
-  }
-}
+// 选中社区
+const selectedCommIds = ref<string[]>([])
 
-// 关闭所有报告 tab
+// refs
+const chatFlowRef = ref<any>(null)
+
+// 关闭所有报告
 function handleCloseAllReports() {
   projectStore.closeAllReportTabs()
 }
 
-// 处理查询
-const graphViewRef = ref<any>(null)
-const currentQuery = ref<any>(null)
+// 处理级联查询 — 只给统计, 不渲染图
+async function handleCascadeQuery(params: CascadeQueryParams) {
+  console.log('[AnalysisPage] cascade query:', JSON.stringify(params))
+  selectedCommIds.value = params.selectedIds
 
-function handleQuery(params: { commLv: string; commIds: string[]; depth: number }) {
-  currentQuery.value = params
-  graphViewRef.value?.queryGraph(params)
-}
+  if (!activeReportTab.value) return
 
-// 节点/边/社区点击事件（对接右侧代码索引面板）
-async function handleNodeClick(nodeId: string, nodeData: any) {
-  // 请求后端获取符号详情
+  const edgeType = activeReportTab.value.reportType === 'dependency' ? 'INCLUDE' : 'CALL'
+
   try {
-    const detail = await window.api.ipc.invoke('analysis.getSymbolDetail', {
-      taskId: activeReportTab.value?.taskId,
-      symbolId: nodeId,
+    const stats = await window.api.analysis.getQueryStats({
+      taskId: activeReportTab.value.taskId!,
+      edgeType,
+      commLv: 'L0',
+      commIds: params.selectedIds,
+      depth: 1,
     })
-    if (detail) {
-      // TODO: 通过 App.vue 获取 RightPanel ref，调用 codeIndexRef.addNodeMessage()
-      console.log('[AnalysisPage] Node detail:', detail)
-    }
+
+    // 在对话流中显示查询结果 + AI分析快捷tag
+    chatFlowRef.value?.addQueryResultMessage({ selectedIds: params.selectedIds, stats })
   } catch (e) {
-    console.error('[AnalysisPage] Failed to get symbol detail:', e)
+    console.error('[AnalysisPage] Query failed:', e)
   }
 }
 
-async function handleEdgeClick(edgeId: string, edgeData: any) {
+// 保存子文档
+async function handleSaveSubdoc(params: { commId: string; title: string; content: string; templateId: string }) {
+  if (!activeReportTab.value?.taskId) return
+
   try {
-    const detail = await window.api.ipc.invoke('analysis.getEdgeDetail', {
-      taskId: activeReportTab.value?.taskId,
-      edgeId: edgeId,
+    const edgeType = activeReportTab.value.reportType === 'dependency' ? 'INCLUDE' : 'CALL'
+    const result = await window.api.report.createSubDoc({
+      taskId: activeReportTab.value.taskId,
+      edgeType,
+      commId: params.commId,
+      title: params.title,
+      content: params.content,
+      templateId: params.templateId,
     })
-    if (detail) {
-      console.log('[AnalysisPage] Edge detail:', detail)
-    }
+    console.log('[AnalysisPage] SubDoc saved:', result.id)
   } catch (e) {
-    console.error('[AnalysisPage] Failed to get edge detail:', e)
+    console.error('[AnalysisPage] Save subdoc failed:', e)
   }
 }
 
-function handleCommunityClick(commId: string, commData: any) {
-  console.log('[AnalysisPage] Community clicked:', commId, commData)
-  // TODO: 追加社区消息到代码索引面板
-}
-
-function handleCommunityDblClick(commId: string) {
-  console.log('[AnalysisPage] Community double-clicked:', commId)
-  // TODO: 深度 +1 重新查询
-  if (graphViewRef.value && currentQuery.value) {
-    const newQuery = { ...currentQuery.value, depth: Math.min(4, currentQuery.value.depth + 1) }
-    graphViewRef.value.queryGraph(newQuery)
-  }
-}
 </script>
 
 <template>
   <div class="page-analysis">
-    <!-- 报告 Tab 视图 -->
-    <template v-if="activeReportTab">
-      <!-- 报告工具栏 -->
+    <!-- Tab 栏 (报告/子文档) -->
+    <HomeTabBar
+      v-if="reportTabs.length > 0"
+      :tabs="reportTabs"
+      :active-tab-id="projectStore.activeTabId"
+      @update:activeTabId="onTabUpdate"
+      @close="onTabClose"
+    />
+
+    <!-- ===== 报告 Tab ===== -->
+    <template v-if="isReportTab && activeReportTab">
+      <!-- 工具栏 -->
       <ReportTabToolbar
         :tab="{
           taskId: activeReportTab.taskId!,
@@ -118,135 +110,42 @@ function handleCommunityDblClick(commId: string) {
         }"
         @close-all="handleCloseAllReports"
       />
-      <!-- 查询条件面板 -->
-      <ReportQueryPanel
+
+      <!-- 级联查询 -->
+      <CascadeCommunityQuery
         :task-id="activeReportTab.taskId!"
-        @query="handleQuery"
+        :edge-type="activeReportTab.reportType === 'dependency' ? 'INCLUDE' : 'CALL'"
+        @query="handleCascadeQuery"
       />
-      <!-- 图渲染区域 -->
-      <div class="report-graph-area">
-        <ReportGraphView
-          ref="graphViewRef"
+
+      <!-- 主内容: 对话流占满 -->
+      <div class="report-main">
+        <LLMChatFlow
+          ref="chatFlowRef"
           :task-id="activeReportTab.taskId!"
           :edge-type="activeReportTab.reportType === 'dependency' ? 'INCLUDE' : 'CALL'"
-          @node-click="handleNodeClick"
-          @edge-click="handleEdgeClick"
-          @community-click="handleCommunityClick"
-          @community-dblclick="handleCommunityDblClick"
+          :selected-comm-ids="selectedCommIds"
+          :graph-data="graphDataRef"
+          @save-subdoc="handleSaveSubdoc"
         />
       </div>
     </template>
 
-    <!-- 任务列表视图 -->
+    <!-- ===== 子文档 Tab ===== -->
+    <template v-else-if="isSubDocTab && activeTab">
+      <SubDocViewer
+        :sub-doc-id="activeTab.subDocId!"
+        @close="projectStore.closeTab(activeTab.id)"
+      />
+    </template>
+
+    <!-- ===== 空白状态 ===== -->
     <template v-else>
-      <!-- 工具栏 -->
-      <div style="display:flex; align-items:center; padding:6px 12px; gap:8px; border-bottom:1px solid var(--border); background:var(--bg-secondary);">
-        <button class="btn btn-primary btn-sm">
-          <PlusIcon class="w-4 h-4" />
-          <span>{{ t('analysis.newTask') }}</span>
-        </button>
-        <button class="btn btn-ghost btn-sm">
-          <ArrowPathIcon class="w-4 h-4" />
-          <span>{{ t('common.refresh') }}</span>
-        </button>
-        <div class="divider-vertical"></div>
-        <button class="btn btn-ghost btn-sm" style="color:var(--accent);">
-          <BookOpenIcon class="w-4 h-4" />
-          <span>{{ t('knowledge.extractKnowledge') }}</span>
-        </button>
-        <span class="badge badge-green">{{ t('analysis.astReady') }}</span>
-        <span class="badge badge-blue">{{ t('analysis.aiOnline') }}</span>
-        <div style="flex:1;"></div>
-        <span class="text-muted" style="font-size:11px;">
-          {{ t('analysis.taskSummary', { total: analysisStore.taskStats.total, done: analysisStore.taskStats.done }) }}
-        </span>
+      <div class="analysis-empty">
+        <ChartBarIcon class="w-16 h-16" />
+        <div class="title">{{ t('analysis.selectReportHint') }}</div>
+        <div class="desc">{{ t('analysis.selectReportHintDesc') }}</div>
       </div>
-
-      <!-- 内容区 -->
-      <div style="flex:1; overflow:hidden; display:flex; flex-direction:column;">
-        <!-- 任务列表 -->
-        <div style="flex:1; overflow:auto; padding:12px;">
-        <!-- 筛选栏 -->
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
-          <span style="font-size:11px; color:var(--text-muted);">{{ t('common.status') }}:</span>
-          <label class="checkbox" style="font-size:11px;">
-            <input type="checkbox" :checked="statusFilter.includes('all')" @change="toggleStatus('all')">
-            <span>{{ t('common.all') }}</span>
-          </label>
-          <label class="checkbox" style="font-size:11px;">
-            <input type="checkbox" :checked="statusFilter.includes('done')" @change="toggleStatus('done')">
-            <span style="color:var(--success);">● {{ t('common.completed') }}</span>
-          </label>
-          <label class="checkbox" style="font-size:11px;">
-            <input type="checkbox" :checked="statusFilter.includes('running')" @change="toggleStatus('running')">
-            <span style="color:var(--warning);">● {{ t('analysis.inProgress') }}</span>
-          </label>
-          <label class="checkbox" style="font-size:11px;">
-            <input type="checkbox" :checked="statusFilter.includes('pending')" @change="toggleStatus('pending')">
-            <span style="color:var(--text-muted);">● {{ t('analysis.notStarted') }}</span>
-          </label>
-          <label class="checkbox" style="font-size:11px;">
-            <input type="checkbox" :checked="statusFilter.includes('error')" @change="toggleStatus('error')">
-            <span style="color:var(--error);">● {{ t('common.failed') }}</span>
-          </label>
-          <div class="divider-vertical"></div>
-          <span style="font-size:11px; color:var(--text-muted);">{{ t('analysis.view') }}:</span>
-          <button
-            class="btn btn-ghost btn-sm"
-            :class="{ active: analysisStore.filter.viewMode === 'card' }"
-            @click="analysisStore.setViewMode('card')"
-            :title="t('analysis.cardView')"
-          >
-            <Squares2X2Icon class="w-4 h-4" />
-          </button>
-          <button
-            class="btn btn-ghost btn-sm"
-            :class="{ active: analysisStore.filter.viewMode === 'list' }"
-            @click="analysisStore.setViewMode('list')"
-            :title="t('analysis.listView')"
-          >
-            <ListBulletIcon class="w-4 h-4" />
-          </button>
-        </div>
-
-        <!-- 任务卡片网格 -->
-        <div
-          v-if="analysisStore.filteredTasks.length > 0"
-          style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px;"
-        >
-          <TaskCard
-            v-for="task in analysisStore.filteredTasks"
-            :key="task.id"
-            :task="task"
-            @select="analysisStore.selectTask(task.id)"
-            @run="analysisStore.runTask($event)"
-            @toggle-favorite="analysisStore.toggleFavorite($event)"
-            @toggle-pin="analysisStore.togglePin($event)"
-          />
-        </div>
-
-        <!-- 空状态 -->
-        <div v-else class="empty-state">
-          <ChartBarIcon class="icon" />
-          <div class="title">{{ t('analysis.noTasks') }}</div>
-          <div class="desc">{{ t('analysis.clickNewTask') }}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 选中的任务报告 -->
-    <div
-      v-if="analysisStore.selectedTask"
-      class="report-panel"
-    >
-      <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border);">
-        <span style="font-size:12px; font-weight:600;">{{ analysisStore.selectedTask.name }} - {{ t('common.report') }}</span>
-        <button class="btn btn-ghost btn-sm" @click="analysisStore.deselectTask()">
-          ✕
-        </button>
-      </div>
-      <TaskReport :task="analysisStore.selectedTask" />
-    </div>
     </template>
   </div>
 </template>
@@ -259,19 +158,30 @@ function handleCommunityDblClick(commId: string) {
   overflow: hidden;
 }
 
-.report-panel {
-  height: 40%;
-  border-top: 1px solid var(--border);
+.analysis-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+}
+
+.analysis-empty .title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.analysis-empty .desc {
+  font-size: 12px;
+}
+
+.report-main {
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.report-graph-area {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 </style>

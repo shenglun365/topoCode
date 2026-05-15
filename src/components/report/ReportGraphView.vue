@@ -32,6 +32,13 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const currentQuery = ref<QueryParams | null>(null)
 
+// 切换 tab 时重置
+watch(() => props.taskId, (newId, oldId) => {
+  console.log('[ReportGraphView] watch taskId changed:', oldId, '->', newId, 'resetting')
+  currentQuery.value = null
+  error.value = null
+})
+
 // 图数据（用于缓存 KEY 计算）
 const graphDataRef = ref<any>({ nodes: [], edges: [], communities: [] })
 
@@ -113,8 +120,13 @@ function assembleTopoScript(graphData: any, layout: string = 'force-directed'): 
     script += `})\n`
   }
 
-  // 边
+  // 边（过滤 source/target 不在 nodes 中的无效边）
+  const nodeIdSet = new Set(nodes.map((n: any) => n.id))
   for (const edge of edges) {
+    if (!nodeIdSet.has(edge.source) || !nodeIdSet.has(edge.target)) {
+      console.warn('[ReportGraphView] Skipping invalid edge:', edge.id, 'source:', edge.source, 'target:', edge.target)
+      continue
+    }
     const edgeStyle = getEdgeStyle(edge.type || 'CALL')
 
     script += `topo.edge({\n`
@@ -135,6 +147,7 @@ function assembleTopoScript(graphData: any, layout: string = 'force-directed'): 
 // ==================== 查询图数据 ====================
 
 async function queryGraph(params: QueryParams): Promise<void> {
+  console.log('[ReportGraphView] queryGraph called, params:', JSON.stringify(params), 'props.taskId=', props.taskId, 'props.edgeType=', props.edgeType)
   loading.value = true
   error.value = null
   currentQuery.value = params
@@ -148,23 +161,39 @@ async function queryGraph(params: QueryParams): Promise<void> {
       commIds: params.commIds,
       depth: params.depth,
     })
+    console.log('[ReportGraphView] cacheKey:', cacheKey)
 
     // 尝试从缓存读取
     const cached = await getCachedTopoScript(cacheKey)
     if (cached) {
+      console.log('[ReportGraphView] cache HIT, rendering')
       await renderTopoScript(cached)
       loading.value = false
       return
     }
-
-    // 请求后端获取图数据
-    const graphData = await window.api.ipc.invoke('analysis.getCommunityGraph', {
+    console.log('[ReportGraphView] cache MISS, calling backend')
+    
+    // 序列化参数（防 Vue Proxy 导致 Electron IPC 克隆错误）
+    const callParams = JSON.parse(JSON.stringify({
       taskId: props.taskId,
       edgeType: props.edgeType || 'CALL',
       commLv: params.commLv,
       commIds: params.commIds,
       depth: params.depth,
-    })
+    }))
+    console.log('[ReportGraphView] calling window.api.analysis.getCommunityGraph with:', JSON.stringify(callParams))
+
+    // 请求后端获取图数据
+    let graphData
+    try {
+      graphData = await window.api.analysis.getCommunityGraph(callParams)
+      console.log('[ReportGraphView] IPC call succeeded')
+    } catch (ipcErr: any) {
+      console.error('[ReportGraphView] IPC call failed:', ipcErr.message, ipcErr)
+      throw ipcErr
+    }
+
+    console.log('[ReportGraphView] backend response: nodes=', graphData?.nodes?.length, 'edges=', graphData?.edges?.length, 'communities=', graphData?.communities?.length)
 
     if (!graphData || !graphData.nodes) {
       error.value = t('report.noData')
@@ -176,6 +205,8 @@ async function queryGraph(params: QueryParams): Promise<void> {
 
     // 组装 TopoScript
     const topoScript = assembleTopoScript(graphData)
+    console.log('[ReportGraphView] assembled TopoScript (first 500 chars):', topoScript.substring(0, 500))
+    console.log('[ReportGraphView] assembled TopoScript total length:', topoScript.length)
 
     // 缓存
     const dataHash = JSON.stringify(graphData)
@@ -192,16 +223,27 @@ async function queryGraph(params: QueryParams): Promise<void> {
 }
 
 async function renderTopoScript(topoScript: string): Promise<void> {
-  if (!stageRef.value) return
+  if (!stageRef.value) {
+    console.warn('[ReportGraphView] renderTopoScript: stageRef is null, skipping')
+    return
+  }
 
   await nextTick()
+  console.log('[ReportGraphView] renderTopoScript: calling load(), stageRef exists:', !!stageRef.value)
 
   const success = load(stageRef.value, topoScript)
-  if (success) {
-    // 渲染完成后适配屏幕
-    await nextTick()
-    fitToScreen(40)
+  console.log('[ReportGraphView] renderTopoScript: load() returned:', success)
+  if (!success) {
+    error.value = 'TopoScript compilation failed'
+    console.error('[ReportGraphView] renderTopoScript FAILED — TopoScript length:', topoScript.length)
+    // 输出失败脚本的前 300 字符便于调试
+    console.error('[ReportGraphView] TopoScript preview:', topoScript.substring(0, 300))
+    return
   }
+  // 渲染完成后适配屏幕
+  await nextTick()
+  fitToScreen(40)
+  console.log('[ReportGraphView] renderTopoScript: fitToScreen done')
 }
 
 // ==================== 暴露 API ====================
@@ -239,6 +281,7 @@ defineExpose({
 <style scoped>
 .report-graph-view {
   flex: 1;
+  min-height: 0;
   position: relative;
   overflow: hidden;
   background: var(--bg-primary);

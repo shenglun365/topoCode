@@ -4,6 +4,10 @@ import { useSettingsStore } from '@/stores/settings'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+
+async function toggleSkill(id: string, enabled: boolean) {
+  await settingsStore.updateSkill({ id, enabled })
+}
 </script>
 
 <template>
@@ -15,7 +19,7 @@ const settingsStore = useSettingsStore()
 
     <!-- SKILL 列表 -->
     <div
-      v-for="skill in settingsStore.skillConfigs"
+      v-for="skill in settingsStore.skills"
       :key="skill.id"
       class="card"
       style="padding:14px; margin-bottom:10px;"
@@ -29,7 +33,7 @@ const settingsStore = useSettingsStore()
           <input
             type="checkbox"
             :checked="skill.enabled"
-            @change="settingsStore.toggleSkill(skill.id)"
+            @change="toggleSkill(skill.id, !skill.enabled)"
           >
           <span class="toggle-slider"></span>
         </label>

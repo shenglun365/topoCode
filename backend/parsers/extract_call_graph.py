@@ -278,9 +278,11 @@ def _find_enclosing_function(node_id: str, nodes: Dict[str, Dict]) -> Optional[s
         return None
 
     scope_id = node.get("scope_node_id")
-    if scope_id and str(scope_id) in nodes:
-        scope_node = nodes[str(scope_id)]
-        if scope_node.get("type") in ("function_definition", "method_definition", "function_declaration"):
+    if scope_id is not None:
+        # scope_node_id 可能是 int 或 str
+        scope_key = str(scope_id)
+        scope_node = nodes.get(scope_key)
+        if scope_node and scope_node.get("type") in ("function_definition", "method_definition", "function_declaration"):
             return scope_node.get("name")
 
     return None
@@ -289,8 +291,13 @@ def _find_enclosing_function(node_id: str, nodes: Dict[str, Dict]) -> Optional[s
 def _extract_callee_name(node: Dict, nodes: Dict[str, Dict]) -> Optional[str]:
     """从调用表达式提取被调用函数名"""
     refs = node.get("refs", [])
-    if refs:
-        # 第一个 ref 通常是函数名
+    # refs 在 SQLite 中存为 JSON 字符串，需解析
+    if isinstance(refs, str):
+        try:
+            refs = json.loads(refs)
+        except (json.JSONDecodeError, TypeError):
+            refs = []
+    if refs and isinstance(refs, list):
         return refs[0] if isinstance(refs[0], str) else str(refs[0])
 
     return node.get("name")

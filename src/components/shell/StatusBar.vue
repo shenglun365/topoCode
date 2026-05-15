@@ -1,9 +1,22 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStatusStore } from '@/stores/status'
+import { clearCache } from '@/utils/graphCache'
+import { TrashIcon } from '@heroicons/vue/24/outline'
 
 const { t } = useI18n()
 const status = useStatusStore()
+const clearing = ref(false)
+
+async function handleClearCache() {
+  clearing.value = true
+  try {
+    await clearCache()
+  } finally {
+    clearing.value = false
+  }
+}
 </script>
 
 <template>
@@ -42,6 +55,15 @@ const status = useStatusStore()
     <div class="status-item">
       <span>Zoom: {{ status.zoom }}%</span>
     </div>
+
+    <button
+      class="cache-clear-btn"
+      :disabled="clearing"
+      @click="handleClearCache"
+      :title="t('report.clearCache')"
+    >
+      <TrashIcon class="w-3.5 h-3.5" />
+    </button>
   </footer>
 </template>
 
@@ -87,5 +109,27 @@ const status = useStatusStore()
 
 .status-dot.warning {
   background: var(--warning);
+}
+
+.cache-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.15s;
+}
+
+.cache-clear-btn:hover {
+  color: var(--text-primary);
+}
+
+.cache-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 </style>

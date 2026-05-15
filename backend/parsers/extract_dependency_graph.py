@@ -153,7 +153,13 @@ def _extract_file_dependencies(
 def _extract_dependency_target(node: Dict, nodes: Dict[str, Dict]) -> Optional[str]:
     """从依赖节点提取目标路径"""
     refs = node.get("refs", [])
-    if refs:
+    # refs 在 SQLite 中存为 JSON 字符串，需解析
+    if isinstance(refs, str):
+        try:
+            refs = json.loads(refs)
+        except (json.JSONDecodeError, TypeError):
+            refs = []
+    if refs and isinstance(refs, list):
         ref = refs[0] if isinstance(refs[0], str) else str(refs[0])
         return ref.strip('"').strip("'").strip('<').strip('>')
 

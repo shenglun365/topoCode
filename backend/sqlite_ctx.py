@@ -511,6 +511,23 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_comm_hier_task ON community_hierarchy(task_id);
     CREATE INDEX IF NOT EXISTS idx_comm_hier_type ON community_hierarchy(task_id, edge_type);
+
+    -- ============================================
+    -- report_subdocs — 分析报告子文档 (任务级)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS report_subdocs (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        comm_id TEXT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        template_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_subdoc_task ON report_subdocs(task_id);
+    CREATE INDEX IF NOT EXISTS idx_subdoc_comm ON report_subdocs(comm_id);
 """
 
 

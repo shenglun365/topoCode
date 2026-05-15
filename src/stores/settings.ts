@@ -79,10 +79,17 @@ export const useSettingsStore = defineStore('settings', () => {
     name?: string
     temperature?: number
     maxTokens?: number
+    isDefault?: boolean
   }) {
     const model = await ipc.settings.updateModel(params)
     const idx = models.value.findIndex(m => m.id === params.id)
     if (idx >= 0) models.value[idx] = model
+    // 如果设为默认，清除其他模型的默认标记
+    if (params.isDefault) {
+      models.value.forEach(m => {
+        if (m.id !== params.id) m.isDefault = false
+      })
+    }
     return model
   }
 

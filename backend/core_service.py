@@ -676,6 +676,10 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         rows = main_db.fetchall("SELECT * FROM model_configs ORDER BY is_default DESC, name")
         for row in rows:
             row["isDefault"] = bool(row.get("is_default"))
+            # 安全：不返回 api_key，只标记是否存在
+            row["hasApiKey"] = bool(row.get("api_key"))
+            if row.get("api_key"):
+                del row["api_key"]
             if row.get("extra_config"):
                 row["extraConfig"] = json.loads(row["extra_config"])
         return rows
@@ -688,7 +692,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         if kwargs.get("isDefault"):
             main_db.execute("UPDATE model_configs SET is_default = 0")
 
-        main_db.insert("model_configs", {
+        data = {
             "id": model_id,
             "name": name,
             "provider": provider,
@@ -701,8 +705,11 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "max_tokens": kwargs.get("maxTokens", 4096),
             "created_at": now,
             "updated_at": now,
-        })
+        }
+        if kwargs.get("apiKey"):
+            data["api_key"] = kwargs["apiKey"]
 
+        main_db.insert("model_configs", data)
         return main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (model_id,))
 
     @server.register("settings.updateModel")
@@ -729,16 +736,34 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.testModel")
     async def test_model(id: str):
+        """测试模型连接 — 真实调用 LLM API"""
         model = main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (id,))
         if not model:
             raise ValueError(f"Model not found: {id}")
 
-        await asyncio.sleep(0.5)
-        return {
-            "status": "connected",
-            "latency": 50,
-            "model": model["model"],
-        }
+        import requests as req
+        start = __import__('time').time()
+        try:
+            if model.get('provider') == 'ollama':
+                resp = req.post(f"{model['url'].rstrip('/')}/api/tags", timeout=10)
+                if resp.status_code != 200:
+                    return {"status": "error", "latency": 0, "error": f"Ollama API {resp.status_code}"}
+            else:
+                headers = {'Content-Type': 'application/json'}
+                if model.get('api_key'):
+                    headers['Authorization'] = f"Bearer {model['api_key']}"
+                resp = req.post(f"{model['url'].rstrip('/')}/v1/models", headers=headers, timeout=10)
+                if resp.status_code != 200:
+                    return {"status": "error", "latency": 0, "error": f"API {resp.status_code}"}
+            latency = int((__import__('time').time() - start) * 1000)
+            model['status'] = 'connected'
+            model['latency'] = latency
+            main_db.update("model_configs", {"status": "connected", "latency": latency}, "id = ?", (id,))
+            return {"status": "connected", "latency": latency, "model": model["model"]}
+        except Exception as e:
+            model['status'] = 'error'
+            main_db.update("model_configs", {"status": "error"}, "id = ?", (id,))
+            return {"status": "error", "latency": 0, "error": str(e)}
 
     @server.register("settings.getAgents")
     def get_agents():

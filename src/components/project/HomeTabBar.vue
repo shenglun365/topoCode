@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { XMarkIcon, DocumentTextIcon, ListBulletIcon, PlusCircleIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon, DocumentTextIcon, ListBulletIcon, PlusCircleIcon, ChartBarIcon, DocumentDuplicateIcon } from '@heroicons/vue/24/outline'
 import type { HomeTab } from '@/stores/project'
 
 defineProps<{
@@ -16,6 +16,8 @@ function getTabIcon(tab: HomeTab) {
   switch (tab.kind) {
     case 'taskList': return ListBulletIcon
     case 'taskCreate': return PlusCircleIcon
+    case 'report': return ChartBarIcon
+    case 'subdoc': return DocumentDuplicateIcon
     default: return DocumentTextIcon
   }
 }

@@ -5,6 +5,7 @@ Task Manager — 13 个 analysis.* 后端方法
 """
 import asyncio
 import json
+import os
 import time
 import uuid
 import logging
@@ -388,21 +389,25 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not tid:
             raise ValueError("task_id is required")
 
-        project_db = multi_db.get_project_db(tid)
-        rows = project_db.execute(
-            "SELECT DISTINCT comm_lv FROM graph_doc WHERE task_id=? ORDER BY comm_lv",
-            (tid,)
-        ).fetchall()
-        levels = [row[0] for row in rows]
+        # 从主库获取任务所属项目
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
 
-        # 如果没有指定 edge_type，返回所有层级
-        # 如果指定了，过滤对应边类型的层级
+        project_db = multi_db.get_project_db(project_id)
         if et:
             rows = project_db.execute(
                 "SELECT DISTINCT comm_lv FROM graph_doc WHERE task_id=? AND edge_type=? ORDER BY comm_lv",
                 (tid, et)
             ).fetchall()
-            levels = [row[0] for row in rows]
+        else:
+            rows = project_db.execute(
+                "SELECT DISTINCT comm_lv FROM graph_doc WHERE task_id=? ORDER BY comm_lv",
+                (tid,)
+            ).fetchall()
+        levels = [row[0] for row in rows]
 
         return levels
 
@@ -422,25 +427,91 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not tid or not lv:
             raise ValueError("task_id and comm_lv are required")
 
-        project_db = multi_db.get_project_db(tid)
+        # 从主库获取任务所属项目
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+
+        project_db = multi_db.get_project_db(project_id)
+
+        # 构建 file_id → file_path 缓存
+        file_rows = project_db.execute(
+            "SELECT id, file_path FROM source_files"
+        ).fetchall()
+        file_path_map = {row[0]: row[1] for row in file_rows}
 
         # 查询选中的社区
         if ids and len(ids) > 0:
             placeholders = ','.join(['?' for _ in ids])
             rows = project_db.execute(
-                f"SELECT comm_id, node_list, edge_list, node_count, edge_count, quality_score, description FROM graph_doc WHERE task_id=? AND comm_lv=? AND comm_id IN ({placeholders})",
-                [tid, lv] + ids
+                f"SELECT comm_id, node_list, edge_list, node_count, edge_count, quality_score, description FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv=? AND comm_id IN ({placeholders})",
+                [tid, et, lv] + ids
             ).fetchall()
         else:
             # 返回该层级所有社区
             rows = project_db.execute(
-                "SELECT comm_id, node_list, edge_list, node_count, edge_count, quality_score, description FROM graph_doc WHERE task_id=? AND comm_lv=? ORDER BY quality_score DESC",
-                (tid, lv)
+                "SELECT comm_id, node_list, edge_list, node_count, edge_count, quality_score, description FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv=? ORDER BY quality_score DESC",
+                (tid, et, lv)
             ).fetchall()
 
         nodes = []
         edges = []
         communities = []
+
+        def node_label(node_id):
+            """将 file_id 转为可读的文件名"""
+            # CALL 节点格式: file-hash:functionName，取 file-hash 部分
+            clean_id = node_id.split(':')[0] if ':' in (node_id or '') else node_id
+            path = file_path_map.get(clean_id, '')
+            if path:
+                return os.path.basename(path) or path
+            return str(clean_id)
+
+        def clean_edge_source(src):
+            """清理边 source 中的 garbled 前缀（如 '[' 或 'None:['）"""
+            s = str(src) if src else ''
+            # 去掉前导的 '[' 或 'None:['
+            if s.startswith('None:['):
+                s = s[6:]
+            elif s.startswith('['):
+                s = s[1:]
+            return s
+
+        def aggregate_to_files(nodes, edges):
+            """将语法级节点汇聚到文件级：去重 + 合并边"""
+            # 文件级节点
+            file_nodes = {}  # file_id -> label
+            for node_id in nodes:
+                clean_id = node_id.split(':')[0] if ':' in (node_id or '') else node_id
+                if bad_id(clean_id):
+                    continue
+                if clean_id not in file_nodes:
+                    file_nodes[clean_id] = node_label(clean_id)
+
+            # 文件级边（去重）
+            file_edges = set()
+            for edge in edges:
+                if isinstance(edge, dict):
+                    s, t = edge.get('source', ''), edge.get('target', '')
+                elif isinstance(edge, list) and len(edge) >= 2:
+                    s, t = edge[0], edge[1]
+                else:
+                    continue
+                s_clean = clean_edge_source(s).split(':')[0] if ':' in str(s) else clean_edge_source(s)
+                t_clean = t.split(':')[0] if ':' in str(t) else str(t)
+                if bad_id(s_clean) or bad_id(t_clean):
+                    continue
+                if s_clean and t_clean and s_clean != t_clean:
+                    file_edges.add((s_clean, t_clean))
+
+            return list(file_nodes.keys()), file_nodes, list(file_edges)
+
+        def bad_id(v):
+            """判断是否为无效 ID"""
+            s = str(v).strip()
+            return not s or s == 'None'
 
         for row in rows:
             comm_id = row[0]
@@ -450,6 +521,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             edge_count = row[4] or 0
             quality_score = row[5] or 0
             description = row[6] or ''
+
+            # CALL 类型：汇聚到文件级
+            if et == 'CALL':
+                agg_ids, agg_labels, agg_edges = aggregate_to_files(node_list, edge_list)
+                node_list = agg_ids
+                edge_list = [{'source': s, 'target': t} for s, t in agg_edges]
+                description = f'CALL community ({len(agg_ids)} files, {len(agg_edges)} edges)'
 
             # 添加社区节点
             communities.append({
@@ -464,24 +542,34 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             for node in node_list:
                 nodes.append({
                     'id': f'n_{node}',
-                    'label': str(node),
+                    'label': node_label(node),
                     'comm_id': comm_id,
                     'type': 'symbol',
                 })
             for edge in edge_list:
-                if isinstance(edge, list) and len(edge) >= 2:
-                    edges.append({
-                        'id': f'e_{edge[0]}_{edge[1]}',
-                        'source': f'n_{edge[0]}',
-                        'target': f'n_{edge[1]}',
-                        'type': et or 'CALL',
-                    })
+                if isinstance(edge, dict):
+                    s, t = edge.get('source', ''), edge.get('target', '')
+                elif isinstance(edge, list) and len(edge) >= 2:
+                    s, t = edge[0], edge[1]
+                else:
+                    continue
+                # 清理 garbled source（如 '[' 前缀）
+                s = clean_edge_source(s)
+                t = t.split(':')[0] if ':' in str(t) else str(t)
+                if bad_id(s) or bad_id(t):
+                    continue
+                edges.append({
+                    'id': f'e_{s}_{t}',
+                    'source': f'n_{s}',
+                    'target': f'n_{t}',
+                    'type': et or 'CALL',
+                })
 
             # 深度展开：查询子社区
             if d > 1:
                 child_rows = project_db.execute(
-                    "SELECT comm_id, node_list, edge_list, node_count, comm_lv FROM graph_doc WHERE task_id=? AND parent_comm_id=?",
-                    (tid, comm_id)
+                    "SELECT comm_id, node_list, edge_list, node_count, comm_lv FROM graph_doc WHERE task_id=? AND edge_type=? AND parent_comm_id=?",
+                    (tid, et, comm_id)
                 ).fetchall()
 
                 for depth_level in range(d - 1):
@@ -504,27 +592,44 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         # 如果深度还没到最大，继续查询子社区
                         if depth_level < d - 2:
                             grandchild_rows = project_db.execute(
-                                "SELECT comm_id, node_list, edge_list, node_count FROM graph_doc WHERE task_id=? AND parent_comm_id=?",
-                                (tid, child_comm_id)
+                                "SELECT comm_id, node_list, edge_list, node_count FROM graph_doc WHERE task_id=? AND edge_type=? AND parent_comm_id=?",
+                                (tid, et, child_comm_id)
                             ).fetchall()
                             child_rows = grandchild_rows
                         else:
-                            # 最深层，直接添加符号节点
-                            for node in child_node_list:
-                                nodes.append({
-                                    'id': f'n_{child_comm_id}_{node}',
-                                    'label': str(node),
-                                    'comm_id': child_comm_id,
-                                    'type': 'symbol',
-                                })
-                            for edge in (child_edge_list or []):
-                                if isinstance(edge, list) and len(edge) >= 2:
-                                    edges.append({
-                                        'id': f'e_{child_comm_id}_{edge[0]}_{edge[1]}',
-                                        'source': f'n_{child_comm_id}_{edge[0]}',
-                                        'target': f'n_{child_comm_id}_{edge[1]}',
-                                        'type': et or 'CALL',
+                            # 最深层，直接添加符号节点（CALL 类型先汇聚到文件级）
+                            if et == 'CALL':
+                                agg_ids, agg_labels, agg_edges = aggregate_to_files(child_node_list, child_edge_list)
+                                for node in agg_ids:
+                                    nodes.append({
+                                        'id': f'n_{child_comm_id}_{node}',
+                                        'label': agg_labels.get(node, str(node)),
+                                        'comm_id': child_comm_id,
+                                        'type': 'symbol',
                                     })
+                                for s, t in agg_edges:
+                                    edges.append({
+                                        'id': f'e_{child_comm_id}_{s}_{t}',
+                                        'source': f'n_{child_comm_id}_{s}',
+                                        'target': f'n_{child_comm_id}_{t}',
+                                        'type': et,
+                                    })
+                            else:
+                                for node in child_node_list:
+                                    nodes.append({
+                                        'id': f'n_{child_comm_id}_{node}',
+                                        'label': node_label(node),
+                                        'comm_id': child_comm_id,
+                                        'type': 'symbol',
+                                    })
+                                for edge in (child_edge_list or []):
+                                    if isinstance(edge, list) and len(edge) >= 2:
+                                        edges.append({
+                                            'id': f'e_{child_comm_id}_{edge[0]}_{edge[1]}',
+                                            'source': f'n_{child_comm_id}_{edge[0]}',
+                                            'target': f'n_{child_comm_id}_{edge[1]}',
+                                            'type': et or 'CALL',
+                                        })
                             break
 
         return {
@@ -541,7 +646,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not tid or not sid:
             raise ValueError("task_id and symbol_id are required")
 
-        project_db = multi_db.get_project_db(tid)
+        # 从主库获取任务所属项目
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+
+        project_db = multi_db.get_project_db(project_id)
 
         # 查询符号信息
         row = project_db.execute(
@@ -625,7 +737,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not tid or not eid:
             raise ValueError("task_id and edge_id are required")
 
-        project_db = multi_db.get_project_db(tid)
+        # 从主库获取任务所属项目
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+
+        project_db = multi_db.get_project_db(project_id)
 
         # 从 edge_id 解析 source 和 target
         # edge_id 格式: e_source_target
@@ -676,6 +795,268 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             }
 
         return None
+
+    # ==================== 级联社区查询 ====================
+
+    @server.register("analysis.getCascadeLevels")
+    def get_cascade_levels(task_id=None, taskId=None, edge_type=None, edgeType=None):
+        """获取级联社区层级结构, 用于级联查询组件
+        返回格式: {levels: [{lv: 'L0', items: [{id, label, nodeCount, parentCommId}]}]}
+        前端按 parentCommId 过滤各级选项
+        """
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'CALL'
+        if not tid:
+            raise ValueError("task_id is required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+        project_db = multi_db.get_project_db(project_id)
+
+        # 查询所有层级的社区
+        rows = project_db.execute(
+            "SELECT comm_lv, comm_id, parent_comm_id, node_count, quality_score FROM community_hierarchy WHERE task_id=? AND edge_type=? ORDER BY comm_lv, comm_id",
+            (tid, et)
+        ).fetchall()
+
+        # 按层级分组
+        levels_dict: dict[str, list] = {}
+        for row in rows:
+            lv, comm_id, parent_id, node_count, quality = row
+            if lv not in levels_dict:
+                levels_dict[lv] = []
+            levels_dict[lv].append({
+                'id': comm_id,
+                'label': comm_id[:30],
+                'parentCommId': parent_id,
+                'nodeCount': node_count or 0,
+                'qualityScore': quality,
+            })
+
+        result = []
+        for lv in sorted(levels_dict.keys()):
+            result.append({
+                'lv': lv,
+                'items': levels_dict[lv],
+            })
+
+        return {'levels': result}
+
+    @server.register("analysis.getQueryStats")
+    def get_query_stats(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                        comm_lv=None, commLv=None, comm_ids=None, commIds=None,
+                        depth=None):
+        """获取查询统计: 社区数、节点数、边数"""
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'CALL'
+        cl = comm_lv or commLv
+        cids = comm_ids or commIds or []
+        d = depth or 1
+
+        if not tid or not cl:
+            raise ValueError("task_id and comm_lv are required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+        project_db = multi_db.get_project_db(project_id)
+
+        # 收集所有需要查询的社区ID(含深度展开)
+        all_comm_ids = set(cids) if cids else set()
+
+        # 如果不指定社区, 查询该层级所有社区
+        if not all_comm_ids:
+            rows = project_db.execute(
+                "SELECT comm_id FROM community_hierarchy WHERE task_id=? AND edge_type=? AND comm_lv=?",
+                (tid, et, cl)
+            ).fetchall()
+            all_comm_ids = {row[0] for row in rows}
+
+        # 深度展开子社区
+        if d and d > 1:
+            current_ids = set(all_comm_ids)
+            for _ in range(d - 1):
+                placeholders = ','.join(['?' for _ in current_ids])
+                child_rows = project_db.execute(
+                    f"SELECT comm_id FROM community_hierarchy WHERE task_id=? AND edge_type=? AND parent_comm_id IN ({placeholders})",
+                    [tid, et] + list(current_ids)
+                ).fetchall()
+                new_ids = {row[0] for row in child_rows}
+                all_comm_ids.update(new_ids)
+                current_ids = new_ids
+                if not new_ids:
+                    break
+
+        # 统计
+        total_nodes = 0
+        total_edges = 0
+        community_count = len(all_comm_ids)
+
+        if all_comm_ids:
+            placeholders = ','.join(['?' for _ in all_comm_ids])
+            doc_rows = project_db.execute(
+                f"SELECT node_count, edge_count FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_id IN ({placeholders})",
+                [tid, et] + list(all_comm_ids)
+            ).fetchall()
+            for row in doc_rows:
+                total_nodes += row[0] or 0
+                total_edges += row[1] or 0
+
+        return {
+            'communityCount': community_count,
+            'nodeCount': total_nodes,
+            'edgeCount': total_edges,
+        }
+
+    # ==================== 子文档 CRUD ====================
+
+    @server.register("report.createSubDoc")
+    def create_sub_doc(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                       comm_id=None, commId=None, title=None, content=None,
+                       template_id=None, templateId=None):
+        """创建分析报告子文档"""
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'CALL'
+        cid = comm_id or commId
+        tpl = template_id or templateId
+
+        if not tid or not title or not content:
+            raise ValueError("task_id, title, and content are required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+        project_db = multi_db.get_project_db(project_id)
+
+        doc_id = f"subdoc-{uuid.uuid4().hex[:12]}"
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+
+        project_db.execute(
+            "INSERT INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (doc_id, tid, et, cid, title, content, tpl, now, now)
+        )
+        project_db.commit()
+
+        return {'id': doc_id}
+
+    @server.register("report.listSubDocs")
+    def list_sub_docs(task_id=None, taskId=None, comm_id=None, commId=None):
+        """列出报告子文档"""
+        tid = task_id or taskId
+        cid = comm_id or commId
+
+        if not tid:
+            raise ValueError("task_id is required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_id = task["project_id"]
+        project_db = multi_db.get_project_db(project_id)
+
+        if cid:
+            rows = project_db.execute(
+                "SELECT id, title, template_id, created_at, updated_at FROM report_subdocs WHERE task_id=? AND comm_id=? ORDER BY created_at DESC",
+                (tid, cid)
+            ).fetchall()
+        else:
+            rows = project_db.execute(
+                "SELECT id, title, template_id, created_at, updated_at FROM report_subdocs WHERE task_id=? ORDER BY created_at DESC",
+                (tid,)
+            ).fetchall()
+
+        return [
+            {
+                'id': row[0],
+                'title': row[1],
+                'template_id': row[2],
+                'created_at': row[3],
+                'updated_at': row[4],
+            }
+            for row in rows
+        ]
+
+    @server.register("report.getSubDoc")
+    def get_sub_doc(sub_doc_id=None, subDocId=None):
+        """获取子文档内容"""
+        sid = sub_doc_id or subDocId
+        if not sid:
+            raise ValueError("sub_doc_id is required")
+
+        # 从所有项目库中查找
+        for proj_db in multi_db.project_dbs.values():
+            row = proj_db.execute(
+                "SELECT id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at FROM report_subdocs WHERE id=?",
+                (sid,)
+            ).fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'task_id': row[1],
+                    'edge_type': row[2],
+                    'comm_id': row[3],
+                    'title': row[4],
+                    'content': row[5],
+                    'template_id': row[6],
+                    'created_at': row[7],
+                    'updated_at': row[8],
+                }
+
+        raise ValueError(f"SubDoc {sid} not found")
+
+    @server.register("report.updateSubDoc")
+    def update_sub_doc(sub_doc_id=None, subDocId=None, title=None, content=None):
+        """更新子文档"""
+        sid = sub_doc_id or subDocId
+        if not sid:
+            raise ValueError("sub_doc_id is required")
+
+        for proj_db in multi_db.project_dbs.values():
+            row = proj_db.execute(
+                "SELECT id FROM report_subdocs WHERE id=?", (sid,)
+            ).fetchone()
+            if row:
+                now = time.strftime('%Y-%m-%d %H:%M:%S')
+                if content is not None:
+                    proj_db.execute(
+                        "UPDATE report_subdocs SET content=?, updated_at=? WHERE id=?",
+                        (content, now, sid)
+                    )
+                if title is not None:
+                    proj_db.execute(
+                        "UPDATE report_subdocs SET title=?, updated_at=? WHERE id=?",
+                        (title, now, sid)
+                    )
+                proj_db.commit()
+                return {'ok': True}
+
+        raise ValueError(f"SubDoc {sid} not found")
+
+    @server.register("report.deleteSubDoc")
+    def delete_sub_doc(sub_doc_id=None, subDocId=None):
+        """删除子文档"""
+        sid = sub_doc_id or subDocId
+        if not sid:
+            raise ValueError("sub_doc_id is required")
+
+        for proj_db in multi_db.project_dbs.values():
+            row = proj_db.execute(
+                "SELECT id FROM report_subdocs WHERE id=?", (sid,)
+            ).fetchone()
+            if row:
+                proj_db.execute("DELETE FROM report_subdocs WHERE id=?", (sid,))
+                proj_db.commit()
+                return {'ok': True}
+
+        raise ValueError(f"SubDoc {sid} not found")
 
     logger.info("[task_manager] 所有 analysis.* 方法已注册")
 

@@ -168,6 +168,30 @@ function createRealIPC(): IPCAPI {
           throw err
         }
       },
+      getAvailableLevels: async (taskId: string, edgeType?: string) => {
+        return await api.analysis.getAvailableLevels(taskId, edgeType)
+      },
+      getCommunityGraph: async (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => {
+        return await api.analysis.getCommunityGraph(params)
+      },
+      getSymbolDetail: async (params: { taskId: string; symbolId: string }) => {
+        return await api.analysis.getSymbolDetail(params)
+      },
+      getEdgeDetail: async (params: { taskId: string; edgeId: string }) => {
+        return await api.analysis.getEdgeDetail(params)
+      },
+      getCascadeLevels: async (taskId: string, edgeType?: string) => {
+        return await api.analysis.getCascadeLevels(taskId, edgeType)
+      },
+      getQueryStats: async (params: {
+        taskId: string
+        edgeType?: string
+        commLv?: string
+        commIds?: string[]
+        depth?: number
+      }) => {
+        return await api.analysis.getQueryStats(params)
+      },
       onProgress: (cb: (data: TaskProgressEvent) => void) => {
         if (api.analysis.onProgress) {
           api.analysis.onProgress(cb)
@@ -188,6 +212,36 @@ function createRealIPC(): IPCAPI {
         } else {
           taskErrorCbs.push(cb)
         }
+      },
+    },
+
+    // ==================== 报告子文档 ====================
+    report: {
+      createSubDoc: async (params: {
+        taskId: string
+        edgeType?: string
+        commId?: string
+        title: string
+        content: string
+        templateId?: string
+      }) => {
+        return await api.report.createSubDoc(params)
+      },
+      listSubDocs: async (params: { taskId: string; commId?: string }) => {
+        return await api.report.listSubDocs(params)
+      },
+      getSubDoc: async (subDocId: string) => {
+        return await api.report.getSubDoc(subDocId)
+      },
+      updateSubDoc: async (params: {
+        subDocId: string
+        title?: string
+        content?: string
+      }) => {
+        return await api.report.updateSubDoc(params)
+      },
+      deleteSubDoc: async (subDocId: string) => {
+        return await api.report.deleteSubDoc(subDocId)
       },
     },
 
@@ -288,19 +342,6 @@ function createRealIPC(): IPCAPI {
         } else {
           backendStatusCbs.push(cb)
         }
-      },
-    },
-
-    // ==================== LLM 服务 ====================
-    llm: {
-      summarizeCode: async (params: { code: string; modelId?: string }) => {
-        return await api.llm.summarizeCode(params)
-      },
-      explainSymbol: async (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => {
-        return await api.llm.explainSymbol(params)
-      },
-      summarizeCommunityName: async (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) => {
-        return await api.llm.summarizeCommunityName(params)
       },
     },
 

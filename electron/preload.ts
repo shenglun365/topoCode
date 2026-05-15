@@ -104,6 +104,18 @@ contextBridge.exposeInMainWorld('api', {
         throw err
       }
     },
+    getAvailableLevels: (taskId: string, edgeType?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getAvailableLevels', params: { taskId, edgeType } }),
+    getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityGraph', params }),
+    getSymbolDetail: (params: { taskId: string; symbolId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getSymbolDetail', params }),
+    getEdgeDetail: (params: { taskId: string; edgeId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getEdgeDetail', params }),
+    getCascadeLevels: (taskId: string, edgeType?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getCascadeLevels', params: { taskId, edgeType } }),
+    getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getQueryStats', params }),
 
     // 事件订阅
     onProgress: (callback: (data: any) => void) => {
@@ -147,6 +159,20 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'knowledge.getGraph', params }),
     getDimensions: () =>
       ipcRenderer.invoke('ipc:call', { method: 'knowledge.getDimensions', params: {} }),
+  },
+
+  // ==================== 报告子文档 ====================
+  report: {
+    createSubDoc: (params: { taskId: string; edgeType?: string; commId?: string; title: string; content: string; templateId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.createSubDoc', params }),
+    listSubDocs: (params: { taskId: string; commId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.listSubDocs', params }),
+    getSubDoc: (subDocId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getSubDoc', params: { subDocId } }),
+    updateSubDoc: (params: { subDocId: string; title?: string; content?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.updateSubDoc', params }),
+    deleteSubDoc: (subDocId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.deleteSubDoc', params: { subDocId } }),
   },
 
   // ==================== 设置配置 ====================
@@ -221,16 +247,6 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'chat.deleteSession', params }),
     saveMessage: (params: { sessionId: string; message: any }) =>
       ipcRenderer.invoke('ipc:call', { method: 'chat.saveMessage', params }),
-  },
-
-  // ==================== LLM 服务 ====================
-  llm: {
-    summarizeCode: (params: { code: string; modelId?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'llm.summarizeCode', params }),
-    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'llm.explainSymbol', params }),
-    summarizeCommunityName: (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'llm.summarizeCommunityName', params }),
   },
 
   // ==================== 文件系统 ====================
@@ -330,6 +346,12 @@ declare global {
         getTaskRuns: (taskId: string) => Promise<any>
         updateTaskConfig: (params: { taskId: string; config: any }) => Promise<any>
         scanFileStats: (projectId: string, options?: { scope?: string; scopes?: string[]; selectedExtensions?: string[]; patternType?: string; pattern?: string; excludeDirs?: string[] }) => Promise<any>
+        getAvailableLevels: (taskId: string, edgeType?: string) => Promise<string[]>
+        getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<{ nodes: any[]; edges: any[]; communities: any[] }>
+        getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
+        getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
+        getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; qualityScore: number }> }> }>
+        getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
         onProgress: (callback: (data: any) => void) => () => void
         onComplete: (callback: (data: any) => void) => () => void
         onError: (callback: (data: any) => void) => () => void
@@ -342,6 +364,13 @@ declare global {
         deleteDoc: (id: string) => Promise<void>
         getGraph: (params?: { projectId?: string }) => Promise<any>
         getDimensions: () => Promise<any>
+      }
+      report: {
+        createSubDoc: (params: { taskId: string; edgeType?: string; commId?: string; title: string; content: string; templateId?: string }) => Promise<{ id: string }>
+        listSubDocs: (params: { taskId: string; commId?: string }) => Promise<any[]>
+        getSubDoc: (subDocId: string) => Promise<any>
+        updateSubDoc: (params: { subDocId: string; title?: string; content?: string }) => Promise<{ ok: boolean }>
+        deleteSubDoc: (subDocId: string) => Promise<{ ok: boolean }>
       }
       settings: {
         getModels: () => Promise<any[]>
@@ -366,11 +395,6 @@ declare global {
         getStatus: () => Promise<any>
         ping: () => Promise<any>
         onStatusChange: (callback: (data: any) => void) => () => void
-      }
-      llm: {
-        summarizeCode: (params: { code: string; modelId?: string }) => Promise<any>
-        explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => Promise<any>
-        summarizeCommunityName: (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) => Promise<any>
       }
       chat: {
         listSessions: () => Promise<any>

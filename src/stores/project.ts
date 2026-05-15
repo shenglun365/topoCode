@@ -6,7 +6,7 @@ import { ipc } from '@/services/ipc'
 import { useAnalysisStore } from '@/stores/analysis'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'subdoc'
 
 export interface HomeTab {
   id: string
@@ -20,6 +20,10 @@ export interface HomeTab {
   // report 类型
   reportType?: string  // dependency | callChain
   alias?: string  // 用户自定义别名
+  // subdoc 类型
+  subDocId?: string  // 子文档 ID
+  parentReportId?: string  // 父报告 tab ID
+  hasUnsavedChanges?: boolean  // 未保存标记
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -66,8 +70,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function selectProject(id: string) {
-    selectedProjectId.value = id
     viewMode.value = 'project'
+    // 只有切换不同项目时才清空 tabs
+    if (selectedProjectId.value !== id) {
+      tabs.value = []
+      activeTabId.value = null
+      selectedFile.value = null
+      selectedProjectId.value = id
+    }
     // 将项目根目录加入 Electron 白名单
     const project = projects.value.find(p => p.id === id)
     if (project && project.path) {
@@ -77,10 +87,6 @@ export const useProjectStore = defineStore('project', () => {
         console.warn('Failed to add allowed dir:', e)
       }
     }
-    // 清空 tabs，不初始化默认 tab
-    tabs.value = []
-    activeTabId.value = null
-    selectedFile.value = null
   }
 
   function deselectProject() {
@@ -188,9 +194,18 @@ export const useProjectStore = defineStore('project', () => {
     activeTabId.value = tab.id
   }
 
-  function closeTab(tabId: string) {
+  function closeTab(tabId: string): boolean {
+    const tab = tabs.value.find(t => t.id === tabId)
+    if (!tab) return false
+
+    // 检查未保存更改
+    if (tab.hasUnsavedChanges) {
+      const confirmed = confirm(i18n.global.t('report.confirmCloseUnsaved'))
+      if (!confirmed) return false
+    }
+
     const idx = tabs.value.findIndex(t => t.id === tabId)
-    if (idx === -1) return
+    if (idx === -1) return false
 
     tabs.value.splice(idx, 1)
 
@@ -202,6 +217,39 @@ export const useProjectStore = defineStore('project', () => {
         activeTabId.value = null
       }
     }
+
+    return true
+  }
+
+  /** 打开子文档 tab */
+  function openSubDocTab(params: {
+    subDocId: string
+    title: string
+    taskId: string
+    parentReportId?: string
+  }) {
+    // 检查是否已打开
+    const existing = tabs.value.find(
+      t => t.kind === 'subdoc' && t.subDocId === params.subDocId
+    )
+    if (existing) {
+      activeTabId.value = existing.id
+      return existing.id
+    }
+
+    const tab: HomeTab = {
+      id: `tab-subdoc-${params.subDocId}`,
+      kind: 'subdoc',
+      title: params.title,
+      subDocId: params.subDocId,
+      taskId: params.taskId,
+      parentReportId: params.parentReportId,
+      hasUnsavedChanges: false,
+    }
+    tabs.value.push(tab)
+    activeTabId.value = tab.id
+
+    return tab.id
   }
 
   function closeAllTabs() {
@@ -258,7 +306,7 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  /** 打开报告 tab */
+  /** 打开报告 tab — 每次点击都新建 tab */
   function openReportTab(params: {
     taskId: string
     reportType: string  // dependency | callChain
@@ -266,15 +314,6 @@ export const useProjectStore = defineStore('project', () => {
     projectName?: string
     alias?: string
   }) {
-    // 检查是否已打开同一任务的同类型报告
-    const existing = tabs.value.find(
-      t => t.kind === 'report' && t.taskId === params.taskId && t.reportType === params.reportType
-    )
-    if (existing) {
-      activeTabId.value = existing.id
-      return existing.id
-    }
-
     // 报告类型映射
     const typeMap: Record<string, string> = {
       dependency: i18n.global.t('project.reportType.dependency'),
@@ -347,5 +386,6 @@ export const useProjectStore = defineStore('project', () => {
     openTaskCreateForm,
     openReportTab,
     closeAllReportTabs,
+    openSubDocTab,
   }
 })

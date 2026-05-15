@@ -150,7 +150,9 @@ function setupIPC() {
     try {
       const result = await zmqRouter.call(method, params)
       console.log(`[Main] ipc:call <- ${method} (success)`)
-      return result
+      // 强制深拷贝，过滤 Python 返回的不可克隆对象 (None→null, bytes→string)
+      // Electron IPC 要求返回值必须是可结构化的 (structured clone)
+      return JSON.parse(JSON.stringify(result))
     } catch (error: any) {
       console.error(`[Main] ipc:call error (${method}):`, error.message)
       throw new Error(`IPC call failed: ${error.message}`)

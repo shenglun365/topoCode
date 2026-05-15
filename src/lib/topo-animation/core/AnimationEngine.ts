@@ -152,6 +152,11 @@ export class AnimationEngine {
 
   /** 加载 TopoScript 源码 */
   load(source: string): this {
+    // 确保渲染器已初始化
+    if (!this.renderer) {
+      this.init()
+    }
+
     // 编译
     const compileResult = compile(source);
 
@@ -182,25 +187,29 @@ export class AnimationEngine {
     };
 
     // 应用布局
-    if (execResult.deltas.length > 0) {
-      // 从第一个 delta 构建初始状态
-      for (const [nodeId, nodeData] of execResult.deltas[0].nodeUpdates) {
-        initialState.nodes.set(nodeId, {
-          id: nodeId,
-          position: nodeData.position || [0, 0],
-          label: nodeData.label,
-          style: nodeData.style || {},
-          metadata: nodeData.metadata,
-        });
+    // 从所有 delta 累积初始节点/边（非动画场景下每个 addNode/addEdge 各占一个 delta）
+    for (const delta of execResult.deltas) {
+      for (const [nodeId, nodeData] of delta.nodeUpdates) {
+        if (!initialState.nodes.has(nodeId)) {
+          initialState.nodes.set(nodeId, {
+            id: nodeId,
+            position: nodeData.position || [0, 0],
+            label: nodeData.label,
+            style: nodeData.style || {},
+            metadata: nodeData.metadata,
+          })
+        }
       }
-      for (const [edgeId, edgeData] of execResult.deltas[0].edgeUpdates) {
-        initialState.edges.set(edgeId, {
-          id: edgeId,
-          source: edgeData.source || '',
-          target: edgeData.target || '',
-          label: edgeData.label,
-          style: edgeData.style || {},
-        });
+      for (const [edgeId, edgeData] of delta.edgeUpdates) {
+        if (!initialState.edges.has(edgeId)) {
+          initialState.edges.set(edgeId, {
+            id: edgeId,
+            source: edgeData.source || '',
+            target: edgeData.target || '',
+            label: edgeData.label,
+            style: edgeData.style || {},
+          })
+        }
       }
     }
 
@@ -225,7 +234,21 @@ export class AnimationEngine {
 
     // 渲染第一帧
     if (this.states.length > 0 && this.renderer) {
-      this.renderer.render(this.states[0]);
+      const s0 = this.states[0]
+      RUNTIME.info('Rendering first frame', {
+        nodes: s0.nodes.size,
+        edges: s0.edges.size,
+        states: this.states.length,
+      })
+      // 输出前 3 个节点位置用于调试
+      const sampleNodes = Array.from(s0.nodes.values()).slice(0, 3).map(n => ({
+        id: n.id,
+        pos: n.position,
+        shape: n.style?.shape,
+        fill: n.style?.fillColor,
+      }))
+      RUNTIME.info('Sample nodes:', sampleNodes)
+      this.renderer.render(s0)
     }
 
     // 自动播放
@@ -356,12 +379,14 @@ export class AnimationEngine {
 
   /** 销毁 */
   destroy(): void {
-    this.animator?.destroy();
-    this.renderer?.destroy();
-    this.emitter.removeAllListeners();
-    this.states = [];
-    this.instructions = [];
-    RUNTIME.info('AnimationEngine destroyed');
+    this.animator?.destroy()
+    this.renderer?.destroy()
+    this.emitter.removeAllListeners()
+    this.states = []
+    this.instructions = []
+    this.renderer = undefined as any
+    this.animator = undefined as any
+    RUNTIME.info('AnimationEngine destroyed')
   }
 }
 

@@ -32,6 +32,20 @@ function getStatusText(status: string): string {
     default: return ''
   }
 }
+
+async function detectAgent(id: string) {
+  await settingsStore.detectAgent(id)
+}
+
+async function setDefaultAgent(id: string) {
+  await settingsStore.updateAgent({ id })
+}
+
+async function removeAgent(id: string) {
+  if (confirm(t('settings.confirmDeleteAgent'))) {
+    await settingsStore.removeAgent(id)
+  }
+}
 </script>
 
 <template>
@@ -49,7 +63,7 @@ function getStatusText(status: string): string {
 
     <!-- Agent 列表 -->
     <div
-      v-for="agent in settingsStore.agentConfigs"
+      v-for="agent in settingsStore.agents"
       :key="agent.id"
       class="card"
       style="padding:14px; margin-bottom:10px;"
@@ -87,11 +101,15 @@ function getStatusText(status: string): string {
 
       <!-- 操作按钮 -->
       <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
-        <button v-if="agent.status !== 'not-configured'" class="btn btn-ghost btn-sm">
+        <button
+          v-if="agent.status !== 'not-configured'"
+          class="btn btn-ghost btn-sm"
+          @click="detectAgent(agent.id)"
+        >
           <ArrowPathIcon class="w-3 h-3" />
           <span>{{ t('settings.testConnection') }}</span>
         </button>
-        <button v-if="!agent.isDefault" class="btn btn-ghost btn-sm" @click="settingsStore.setDefaultAgent(agent.id)">
+        <button v-if="!agent.isDefault" class="btn btn-ghost btn-sm" @click="setDefaultAgent(agent.id)">
           {{ t('settings.setDefault') }}
         </button>
         <button class="btn btn-ghost btn-sm">
@@ -99,7 +117,11 @@ function getStatusText(status: string): string {
           <span>{{ t('common.edit') }}</span>
         </button>
         <div style="flex:1;"></div>
-        <button class="btn btn-ghost btn-sm" style="color:var(--error);">
+        <button
+          class="btn btn-ghost btn-sm"
+          style="color:var(--error);"
+          @click="removeAgent(agent.id)"
+        >
           <TrashIcon class="w-3 h-3" />
           <span>{{ t('common.delete') }}</span>
         </button>

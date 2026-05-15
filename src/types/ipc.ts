@@ -239,7 +239,7 @@ export interface Dimensions {
 export interface ModelConfigItem {
   id: string
   name: string
-  provider: 'ollama' | 'openai' | 'lmstudio' | 'custom'
+  provider: 'ollama' | 'openai' | 'lm-studio' | 'custom'
   model: string
   url: string
   type: 'local' | 'cloud'
@@ -248,6 +248,7 @@ export interface ModelConfigItem {
   temperature?: number
   maxTokens?: number
   latency?: number
+  apiKey?: string
 }
 
 /** Agent 配置 */
@@ -349,9 +350,24 @@ export interface IPCAPI {
     getTaskRuns: (taskId: string) => Promise<TaskRun[]>
     updateTaskConfig: (params: { taskId: string; config: TaskConfigUpdate }) => Promise<AnalysisTask>
     scanFileStats: (projectId: string, options?: ScanOptions) => Promise<FileStatsResult>
+    getAvailableLevels: (taskId: string, edgeType?: string) => Promise<string[]>
+    getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<any>
+    getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
+    getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
+    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; qualityScore: number }> }> }>
+    getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     onProgress: (cb: (data: TaskProgressEvent) => void) => void
     onComplete: (cb: (data: TaskCompleteEvent) => void) => void
     onError: (cb: (data: TaskErrorEvent) => void) => void
+  }
+
+  // 报告子文档
+  report: {
+    createSubDoc: (params: { taskId: string; edgeType?: string; commId?: string; title: string; content: string; templateId?: string }) => Promise<{ id: string }>
+    listSubDocs: (params: { taskId: string; commId?: string }) => Promise<Array<{ id: string; title: string; templateId: string; createdAt: string; updatedAt: string }>>
+    getSubDoc: (subDocId: string) => Promise<{ id: string; taskId: string; edgeType: string; commId: string; title: string; content: string; templateId: string; createdAt: string; updatedAt: string }>
+    updateSubDoc: (params: { subDocId: string; title?: string; content?: string }) => Promise<{ ok: boolean }>
+    deleteSubDoc: (subDocId: string) => Promise<{ ok: boolean }>
   }
 
   // 知识库
@@ -390,13 +406,6 @@ export interface IPCAPI {
     restart: () => Promise<void>
     getStatus: () => Promise<BackendStatus>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void
-  }
-
-  // LLM 服务
-  llm: {
-    summarizeCode: (params: { code: string; modelId?: string }) => Promise<{ content: string; originalLength: number; summarizedLength: number; compressed: boolean }>
-    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => Promise<{ content: string }>
-    summarizeCommunityName: (params: { nodeCount: number; edgeCount: number; nodeNames?: string[]; modelId?: string }) => Promise<{ content: string }>
   }
 
   // 系统

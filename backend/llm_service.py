@@ -95,7 +95,7 @@ async def _call_llm(
     provider = model_config.get('provider', 'ollama')
     if provider == 'ollama':
         return await asyncio.to_thread(_sync_call_ollama_chat, model_config, messages)
-    elif provider in ('openai', 'custom', 'lmstudio'):
+    elif provider in ('openai', 'custom', 'lm-studio'):
         return await asyncio.to_thread(_sync_call_openai_chat, model_config, messages)
     else:
         raise RuntimeError(f'Unsupported provider: {provider}')

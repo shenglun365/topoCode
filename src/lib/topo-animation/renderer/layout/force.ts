@@ -41,9 +41,9 @@ export function forceLayout(
   const simulation = d3
     .forceSimulation(nodeArray)
     .force('link', d3.forceLink(edgeArray).id((d: any) => d.id).distance(100))
-    .force('charge', d3.forceManyBody().strength(-300))
+    .force('charge', d3.forceManyBody().strength(-30))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collision', d3.forceCollide().radius(40))
+    .force('collision', d3.forceCollide().radius(20))
     .stop();
 
   // 运行迭代

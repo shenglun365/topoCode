@@ -82,6 +82,7 @@ export function useAnimation(options: UseAnimationOptions = {}) {
     const result = compile(source)
     if (!result.success) {
       error.value = result.errors?.[0] || 'Compilation failed'
+      console.error('[useAnimation] compileSource FAILED:', error.value, 'errors:', result.errors)
     } else {
       error.value = null
       compileResult.value = result

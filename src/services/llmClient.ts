@@ -1,10 +1,8 @@
 /**
- * LLM 前端客户端 — 双通道调用
+ * LLM 前端客户端 — 直调模式
  *
- * 1. 前端直调: 通过 llmService 直接 fetch 调用 LLM API（流式）
- * 2. 后端代理: 通过 Electron IPC → ZeroMQ → Python 后端（非流式）
- *
- * 默认优先前端直调，失败时自动降级到后端代理。
+ * 前端通过 llmService 直接 fetch 调用 LLM API（流式）。
+ * 不再经过后端代理，前后端完全解耦。
  */
 
 import { llmService } from '@/services/llm'
@@ -43,13 +41,6 @@ function ensureConfig(): ModelConfigItem | null {
     llmService.setConfig(model)
   }
   return model
-}
-
-/**
- * 通过后端代理调用 LLM（非流式）
- */
-async function callBackendLLM(method: string, params: Record<string, any>): Promise<any> {
-  return window.api.ipc.invoke(`llm.${method}`, params)
 }
 
 // ==================== 代码解释 ====================
@@ -98,25 +89,13 @@ ${params.codeSnippet}
 
 请解释这个代码符号。`
 
-  // 优先前端直调
-  try {
-    return await llmService.chat(
-      [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      onChunk
-    )
-  } catch {
-    // 降级到后端代理
-    const result = await callBackendLLM('explainSymbol', {
-      symbolName: params.symbolName,
-      symbolType: params.symbolType,
-      codeSnippet: params.codeSnippet,
-      fileName: params.fileName,
-    })
-    return result.content
-  }
+  return await llmService.chat(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    onChunk
+  )
 }
 
 /**
@@ -144,15 +123,10 @@ export async function explainEdge(
   if (params.isSystem !== undefined) userPrompt += `- 系统头文件: ${params.isSystem ? '是' : '否'}\n`
   userPrompt += '\n请解释这个关系。'
 
-  try {
-    return await llmService.chat(
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      onChunk
-    )
-  } catch {
-    // explainEdge 无后端代理，直接报错
-    throw new Error('LLM 调用失败')
-  }
+  return await llmService.chat(
+    [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    onChunk
+  )
 }
 
 /**
@@ -181,14 +155,10 @@ ${params.description ? `- 描述: ${params.description}` : ''}
 
 请解释这个社区在代码架构中可能代表的模块或功能。`
 
-  try {
-    return await llmService.chat(
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      onChunk
-    )
-  } catch {
-    throw new Error('LLM 调用失败')
-  }
+  return await llmService.chat(
+    [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    onChunk
+  )
 }
 
 /**
@@ -204,17 +174,10 @@ export async function summarizeCode(
   const systemPrompt = `你是一个代码压缩助手。用户会提供一段较长的代码，请将其压缩为简洁的伪码，保留核心逻辑和关键步骤。用中文回答。`
   const userPrompt = `请将以下代码压缩为伪码：\n\n\`\`\`\n${code}\n\`\`\`\n\n只保留核心逻辑，用简洁的中文伪码表示。`
 
-  // 优先前端直调
-  try {
-    return await llmService.chat(
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      onChunk
-    )
-  } catch {
-    // 降级到后端代理
-    const result = await callBackendLLM('summarizeCode', { code })
-    return result.content
-  }
+  return await llmService.chat(
+    [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    onChunk
+  )
 }
 
 /**
@@ -238,19 +201,8 @@ export async function summarizeCommunityName(
   }
   userPrompt += '\n\n请为这个社区生成一个简洁的名称。'
 
-  // 优先前端直调
-  try {
-    return await llmService.chat(
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      onChunk
-    )
-  } catch {
-    // 降级到后端代理
-    const result = await callBackendLLM('summarizeCommunityName', {
-      nodeCount: params.nodeCount,
-      edgeCount: params.edgeCount,
-      nodeNames: params.nodeNames,
-    })
-    return result.content
-  }
+  return await llmService.chat(
+    [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    onChunk
+  )
 }

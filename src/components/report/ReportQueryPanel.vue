@@ -20,6 +20,7 @@ const { t } = useI18n()
 
 const props = defineProps<{
   taskId: string
+  edgeType?: string
 }>()
 
 const emit = defineEmits<{
@@ -32,11 +33,11 @@ export interface QueryParams {
   depth: number
 }
 
-// 社区层级列表（待后端 API 对接）
+// 社区层级列表
 const availableLevels = ref<string[]>([])
 const loadingLevels = ref(false)
 
-// 社区分组列表（待后端 API 对接）
+// 社区分组列表
 const availableGroups = ref<Array<{ id: string; label: string; nodeCount: number }>>([])
 const loadingGroups = ref(false)
 
@@ -59,15 +60,21 @@ const filteredGroups = computed(() => {
 
 // 加载可用层级
 async function loadLevels() {
+  console.log('[ReportQueryPanel] loadLevels START taskId=', props.taskId, 'edgeType=', props.edgeType)
+  if (!props.taskId) return
   loadingLevels.value = true
   try {
-    // TODO: 对接后端 get_available_levels(taskId, edgeType)
-    // 模拟数据
-    await new Promise(r => setTimeout(r, 300))
-    availableLevels.value = ['L0', 'L1', 'L2', 'L3']
-    if (!selectedLevel.value) {
+    const result = await window.api.analysis.getAvailableLevels(props.taskId, props.edgeType)
+    console.log('[ReportQueryPanel] loadLevels RESULT:', result)
+    availableLevels.value = result
+    if (!selectedLevel.value && availableLevels.value.length > 0) {
       selectedLevel.value = availableLevels.value[0]
+      console.log('[ReportQueryPanel] loadLevels set selectedLevel=', selectedLevel.value)
     }
+    console.log('[ReportQueryPanel] loadLevels DONE availableLevels=', JSON.stringify(availableLevels.value), 'selectedLevel=', selectedLevel.value)
+  } catch (e) {
+    console.error('[ReportQueryPanel] Failed to load levels:', e)
+    availableLevels.value = []
   } finally {
     loadingLevels.value = false
   }
@@ -75,26 +82,50 @@ async function loadLevels() {
 
 // 加载分组列表（按选中的层级）
 async function loadGroups() {
-  if (!selectedLevel.value) return
+  console.log('[ReportQueryPanel] loadGroups START taskId=', props.taskId, 'edgeType=', props.edgeType, 'selectedLevel=', selectedLevel.value)
+  if (!selectedLevel.value || !props.taskId) return
   loadingGroups.value = true
   try {
-    // TODO: 对接后端 get_communities(taskId, edgeType, commLv)
-    // 模拟数据
-    await new Promise(r => setTimeout(r, 300))
-    availableGroups.value = Array.from({ length: 10 }, (_, i) => ({
-      id: `comm_${selectedLevel.value}_${i}`,
-      label: `社区 ${i + 1}`,
-      nodeCount: Math.floor(Math.random() * 50) + 5,
+    const params = {
+      taskId: props.taskId,
+      edgeType: props.edgeType || 'CALL',
+      commLv: selectedLevel.value,
+      commIds: [],
+      depth: 1,
+    }
+    console.log('[ReportQueryPanel] loadGroups calling getCommunityGraph:', JSON.stringify(params))
+    const data = await window.api.analysis.getCommunityGraph(params)
+    console.log('[ReportQueryPanel] loadGroups RESULT communities count=', data?.communities?.length, 'nodes count=', data?.nodes?.length)
+    console.log('[ReportQueryPanel] loadGroups communities:', JSON.stringify((data?.communities || []).map((c: any) => ({ id: c.comm_id, label: c.description, count: c.node_count }))))
+    availableGroups.value = (data?.communities || []).map((c: any) => ({
+      id: c.comm_id,
+      label: c.description || c.comm_id,
+      nodeCount: c.node_count || 0,
     }))
+    console.log('[ReportQueryPanel] loadGroups DONE availableGroups=', JSON.stringify(availableGroups.value))
+  } catch (e) {
+    console.error('[ReportQueryPanel] Failed to load groups:', e)
+    availableGroups.value = []
   } finally {
     loadingGroups.value = false
   }
 }
 
 // 监听层级变化，重新加载分组
-watch(selectedLevel, () => {
+watch(selectedLevel, (newVal) => {
+  console.log('[ReportQueryPanel] watch selectedLevel changed to:', newVal)
   selectedGroups.value = []
   loadGroups()
+})
+
+// 切换 tab（taskId / edgeType 变化）时重新初始化
+watch([() => props.taskId, () => props.edgeType], ([newTaskId, newEdgeType], [oldTaskId, oldEdgeType]) => {
+  console.log('[ReportQueryPanel] watch props changed: taskId', oldTaskId, '->', newTaskId, 'edgeType', oldEdgeType, '->', newEdgeType)
+  availableLevels.value = []
+  availableGroups.value = []
+  selectedLevel.value = ''
+  selectedGroups.value = []
+  init()
 })
 
 // 执行查询
@@ -109,9 +140,11 @@ function handleQuery() {
 
 // 初始化
 function init() {
+  console.log('[ReportQueryPanel] init() called, taskId=', props.taskId, 'edgeType=', props.edgeType)
   loadLevels()
 }
 
+console.log('[ReportQueryPanel] setup, taskId=', props.taskId, 'edgeType=', props.edgeType)
 init()
 
 defineExpose({ init, loadLevels, loadGroups })

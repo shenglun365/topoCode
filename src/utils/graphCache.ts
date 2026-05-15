@@ -128,6 +128,9 @@ async function evictIfOverLimit(): Promise<void> {
 
 // ==================== 公共 API ====================
 
+// 缓存版本 — 递增可使旧缓存失效
+const CACHE_VERSION = 'v6'
+
 /**
  * 计算图数据的缓存 KEY
  */
@@ -138,7 +141,7 @@ export async function computeCacheKey(params: {
   commIds: string[]
   depth: number
 }): Promise<string> {
-  const raw = `${params.taskId}|${params.edgeType}|${params.commLv}|${params.commIds.join(',')}|${params.depth}`
+  const raw = `${CACHE_VERSION}|${params.taskId}|${params.edgeType}|${params.commLv}|${params.commIds.join(',')}|${params.depth}`
   return sha256hex(raw)
 }
 

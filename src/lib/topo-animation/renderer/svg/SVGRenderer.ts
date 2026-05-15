@@ -86,11 +86,28 @@ export class SVGRenderer implements IRenderer {
   }
 
   render(state: AnimationState): void {
-    if (!this.g) return;
+    if (!this.g) {
+      console.warn('[SVGRenderer] render skipped: no <g> element (container may not be initialized)')
+      return
+    }
 
-    this.renderGroups(state);
-    this.renderEdges(state);
-    this.renderNodes(state);
+    const nodeCount = state.nodes.size
+    const edgeCount = state.edges.size
+    if (nodeCount === 0 && edgeCount === 0) {
+      console.warn('[SVGRenderer] render: state has 0 nodes and 0 edges')
+    }
+
+    this.renderGroups(state)
+    this.renderEdges(state)
+    this.renderNodes(state)
+
+    // 输出 DOM 元素数量
+    const svgEl = this.container?.querySelector('svg')
+    if (svgEl) {
+      const topoNodes = svgEl.querySelectorAll('.topo-node').length
+      const topoEdges = svgEl.querySelectorAll('.topo-edge').length
+      console.log(`[SVGRenderer] DOM after render: ${topoNodes} .topo-node, ${topoEdges} .topo-edge elements`)
+    }
   }
 
   private renderNodes(state: AnimationState): void {

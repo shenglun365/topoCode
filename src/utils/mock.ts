@@ -674,7 +674,7 @@ export const mockModelConfig = {
 export interface ModelConfigItem {
   id: string
   name: string
-  provider: 'ollama' | 'openai' | 'lmstudio' | 'custom'
+  provider: 'ollama' | 'openai' | 'lm-studio' | 'custom'
   model: string
   url: string
   type: 'local' | 'cloud'
@@ -735,7 +735,7 @@ export const mockModelConfigs: ModelConfigItem[] = [
   {
     id: 'model-3',
     name: 'LM-Studio - llama3-8b',
-    provider: 'lmstudio',
+    provider: 'lm-studio',
     model: 'llama3-8b',
     url: 'http://localhost:1234',
     type: 'local',
