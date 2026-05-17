@@ -199,9 +199,8 @@ defineExpose({
 
 <template>
   <div class="code-index-panel">
-    <!-- 头部 -->
-    <div class="panel-header">
-      <span class="panel-title">{{ t('report.codeIndex') }}</span>
+    <!-- 操作按钮（标题由 RightPanel 的 panel-header 渲染） -->
+    <div class="panel-actions">
       <div class="header-actions">
         <button
           v-if="selectedIds.size > 0"
@@ -281,13 +280,12 @@ defineExpose({
   height: 100%;
 }
 
-.panel-header {
+.panel-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
+  justify-content: flex-end;
+  padding: 4px 8px;
+  gap: 4px;
 }
 
 .panel-title {

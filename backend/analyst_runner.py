@@ -71,21 +71,19 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
     """
     progress = int(current * 100 / total) if total > 0 else 0
 
-    # 更新任务进度
+    # 更新任务进度 (execute() 已自动 commit)
     multi_db.main_db.execute("""
         UPDATE analysis_tasks
         SET progress = ?, current = ?, updated_at = datetime('now')
         WHERE id = ?
     """, (progress, current, task_id))
-    multi_db.main_db.commit()
 
-    # 更新运行记录进度
+    # 更新运行记录进度 (execute() 已自动 commit)
     multi_db.main_db.execute("""
         UPDATE analysis_task_runs
         SET progress = ?, current = ?
         WHERE id = ?
     """, (progress, current, run_id))
-    multi_db.main_db.commit()
 
     # 推送 ZMQ 事件
     if server:
@@ -145,6 +143,10 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     analysis_store = AnalysisStore(project_db)
     adapter = SQLiteAdapter(project_db, task_id)
 
+    # 调试日志：确认两个 store 是否共享连接
+    logger.info(f"[PARSE] [DEBUG] task_id={task_id}, project_id={project_id}")
+    logger.info(f"[PARSE] [DEBUG] analysis_store._db id={id(analysis_store._db)}, adapter._store._db id={id(adapter._store._db)}, same={analysis_store._db is adapter._store._db}")
+
     # 解析配置字段（TaskStore.get_task 已通过 _parse_task_row 反序列化，无需再次 json.loads）
     scopes = task.get("scopes") or []
     extensions = task.get("extensions") or []
@@ -190,7 +192,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         if lang:
             files_by_lang.setdefault(lang, []).append(f)
 
-    language_stats = {}
+    language_stats = {lang: len(fl) for lang, fl in files_by_lang.items()}
+    logger.info(f"[PARSE] [DEBUG] 语言分布: {language_stats}")
     processed = 0
     skipped = 0
     logs = []
@@ -316,11 +319,19 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     except Exception as e:
         _log(f"依赖图提取失败: {e}")
 
+    # 调试日志：确认边是否写入数据库
+    dep_check = analysis_store.get_dep_edges(task_id)
+    call_check = analysis_store.get_call_edges(task_id)
+    _log(f"[DEBUG] 数据库验证: dep_edges_in_db={len(dep_check)}, call_edges_in_db={len(call_check)}")
+
     # ==================== Step 5: 社区分析 ====================
     _log("Step 5: 社区分析开始")
     total_communities = 0
     best_call_community_id = None
     best_dep_community_id = None
+
+    # 调试日志：确认 task_id 和 analysis_store
+    _log(f"[DEBUG] 社区分析参数: task_id={task_id}, analysis_store id={id(analysis_store)}, report_types={report_types}")
 
     # 根据 report_types 配置选择分析类型
     if "dependency" in report_types or "full" in report_types:
@@ -419,12 +430,12 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
         task_store = TaskStore(multi_db.main_db)
 
         if result.get("stopped"):
-            task_store.update_task_status(task_id, "stopped",
+            task_store.update_task_status(task_id, "cancelled",
                                           progress=result.get("progress", 0))
-            task_store.finish_run(run_id, "stopped")
+            task_store.finish_run(run_id, "cancelled")
             if server:
                 server.publish("task", "stopped", {
-                    "taskId": task_id, "runId": run_id, "status": "stopped",
+                    "taskId": task_id, "runId": run_id, "status": "cancelled",
                 })
         else:
             task_store.update_task_status(task_id, "done", progress=100)

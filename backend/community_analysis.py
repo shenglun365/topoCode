@@ -27,6 +27,8 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     Returns:
         {"community_count": int, "levels": int}
     """
+    logger.info(f"[COMMUNITY] analyze_communities 入口: task_id={task_id}, edge_type={edge_type}, min_node_cnt={min_node_cnt}")
+
     # 1. 从 SQLite 加载边数据
     if edge_type == "INCLUDE":
         edges = analysis_store.get_dep_edges(task_id)
@@ -35,6 +37,10 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     else:
         logger.warning(f"未知的 edge_type: {edge_type}")
         return {"community_count": 0, "levels": 0}
+
+    logger.info(f"[COMMUNITY] {edge_type}: 加载边数据完成, count={len(edges)}")
+    if edges:
+        logger.info(f"[COMMUNITY] {edge_type}: 首条边样例 keys={list(edges[0].keys())}")
 
     if not edges:
         logger.info(f"[COMMUNITY] {edge_type}: 没有边数据，跳过")
@@ -64,7 +70,47 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     saved = _save_communities(task_id, edge_type, level, parent_comm_id,
                                communities, graph, analysis_store)
 
-    # 5. 递归分析子社区
+    # 5. 检测是否需要备选方案（CALL 图连通性过高）
+    # 条件：CALL 类型 + L0 只有 1 个社区 + 质量分 < 0.01
+    use_fallback = False
+    if edge_type == "CALL" and len(communities) == 1:
+        # 检查质量分
+        l0_comms = analysis_store.get_communities(task_id, edge_type, "L0")
+        if l0_comms and l0_comms[0].get("quality_score", 1.0) < 0.01:
+            use_fallback = True
+            logger.info(
+                f"[COMMUNITY] CALL: 检测到超级连通分量（1 个社区，质量分={l0_comms[0]['quality_score']:.4f}），"
+                f"启用备选方案：过滤同文件内调用"
+            )
+
+    if use_fallback:
+        # 清除已保存的社区数据
+        analysis_store.clear_communities_for_task(task_id, edge_type)
+        logger.info(f"[COMMUNITY] CALL: 已清除默认方案的社区数据，重新分析")
+
+        # 重新构建图（过滤同文件内调用）
+        graph = _build_graph(edges, edge_type, filter_intra_file=True)
+        all_nodes = set(graph.keys())
+        for neighbors in graph.values():
+            all_nodes.update(neighbors)
+
+        if len(all_nodes) < min_node_cnt:
+            logger.info(f"[COMMUNITY] CALL (备选): 节点数 {len(all_nodes)} < {min_node_cnt}，跳过")
+            return {"community_count": 0, "levels": 0}
+
+        logger.info(f"[COMMUNITY] CALL (备选): 图包含 {len(all_nodes)} 个节点")
+
+        # 重新执行社区检测
+        communities = _detect_communities(graph, all_nodes)
+        if not communities:
+            return {"community_count": 0, "levels": 0}
+
+        # 重新保存 L0
+        saved = _save_communities(task_id, edge_type, level, parent_comm_id,
+                                   communities, graph, analysis_store)
+        logger.info(f"[COMMUNITY] CALL (备选): L0 产生 {len(communities)} 个社区")
+
+    # 6. 递归分析子社区
     total_count = saved
     for depth in range(1, 6):  # 最多 6 层
         sub_communities = _get_sub_communities(
@@ -89,31 +135,68 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
             break
         level = new_level
 
-    logger.info(f"[COMMUNITY] {edge_type}: 共 {total_count} 个社区")
+    fallback_tag = " (备选)" if use_fallback else ""
+    logger.info(f"[COMMUNITY] {edge_type}{fallback_tag}: 共 {total_count} 个社区")
 
     return {"community_count": total_count, "levels": len(level) - 1}
 
 
-def _build_graph(edges: List[Dict], edge_type: str) -> Dict[str, Set[str]]:
-    """从边数据构建无向图（邻接表）"""
+def _build_graph(edges: List[Dict], edge_type: str, filter_intra_file: bool = False) -> Dict[str, Set[str]]:
+    """
+    从边数据构建无向图（邻接表）
+
+    Args:
+        edges: 边数据列表
+        edge_type: "INCLUDE" 或 "CALL"
+        filter_intra_file: 是否过滤同文件内调用（仅对 CALL 有效）
+    """
     graph = defaultdict(set)
+    skipped = 0
+    intra_skipped = 0  # 同文件内调用被过滤的数量
 
     for edge in edges:
         if edge_type == "INCLUDE":
             source = str(edge.get("file_id", ""))
             target = edge.get("include_path", "")
             if not source or not target:
+                skipped += 1
                 continue
         elif edge_type == "CALL":
-            source = f"{edge.get('caller_file_id', '')}:{edge.get('caller_func_name', '')}"
-            target = f"{edge.get('callee_file_id', '')}:{edge.get('callee_name', '')}"
+            caller_file = str(edge.get("caller_file_id", ""))
+            callee_file = str(edge.get("callee_file_id", ""))
+            caller_func = edge.get("caller_func_name", "")
+            callee_name = edge.get("callee_name", "")
+
+            # 过滤 callee_file_id 为 None 的边（外部库调用，无法追踪到具体文件）
+            if not callee_file or callee_file == "None":
+                skipped += 1
+                continue
+
+            source = f"{caller_file}:{caller_func}"
+            target = f"{callee_file}:{callee_name}"
             if not source or not target or source == ":None" or target == ":None":
+                skipped += 1
+                continue
+
+            # 过滤同文件内调用（备选方案）
+            if filter_intra_file and caller_file and callee_file and caller_file == callee_file:
+                intra_skipped += 1
                 continue
         else:
             continue
 
         graph[source].add(target)
         graph[target].add(source)  # 无向图
+
+    all_nodes = set(graph.keys())
+    for neighbors in graph.values():
+        all_nodes.update(neighbors)
+
+    log_msg = f"[COMMUNITY] _build_graph: edge_type={edge_type}, edges_in={len(edges)}, edges_used={len(edges)-skipped-intra_skipped}, skipped={skipped}"
+    if filter_intra_file:
+        log_msg += f", intra_file_skipped={intra_skipped}"
+    log_msg += f", nodes={len(all_nodes)}"
+    logger.info(log_msg)
 
     return dict(graph)
 

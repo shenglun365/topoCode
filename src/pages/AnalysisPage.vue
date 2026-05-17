@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChartBarIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import ReportTabToolbar from '@/components/report/ReportTabToolbar.vue'
 import CascadeCommunityQuery from '@/components/report/CascadeCommunityQuery.vue'
@@ -12,17 +13,26 @@ import type { CascadeQueryParams } from '@/components/report/CascadeCommunityQue
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
+const funcGroup = useFuncGroupStore()
 
-const activeTab = computed(() => projectStore.activeTab)
-const reportTabs = computed(() => projectStore.tabs.filter(t => t.kind === 'report' || t.kind === 'subdoc'))
+/* ===== 分析功能组上下文 ===== */
+const analysisContext = computed(() => funcGroup.context.analysis)
+const activeTab = computed(() => {
+  const ctx = analysisContext.value;
+  return ctx.tabs.find(t => t.id === ctx.activeTabId) || null;
+})
+const reportTabs = computed(() => {
+  return analysisContext.value.tabs.filter(t => t.kind === 'report' || t.kind === 'subdoc');
+})
 
 function onTabUpdate(tabId: string | null) {
-  projectStore.setActiveTab(tabId)
+  funcGroup.setActiveTab('analysis', tabId)
 }
 
 function onTabClose(tabId: string) {
-  projectStore.closeTab(tabId)
+  funcGroup.closeTab('analysis', tabId)
 }
+
 const isReportTab = computed(() => activeTab.value?.kind === 'report')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
 const activeReportTab = computed(() => {
@@ -35,11 +45,45 @@ const selectedCommIds = ref<string[]>([])
 
 // refs
 const chatFlowRef = ref<any>(null)
+const graphDataRef = ref<any>(null)
 
 // 关闭所有报告
 function handleCloseAllReports() {
-  projectStore.closeAllReportTabs()
+  const ctx = analysisContext.value;
+  const reportIds = ctx.tabs.filter(t => t.kind === 'report').map(t => t.id)
+  for (const id of reportIds) {
+    const idx = ctx.tabs.findIndex(t => t.id === id)
+    if (idx !== -1) ctx.tabs.splice(idx, 1)
+  }
+  if (reportIds.includes(ctx.activeTabId || '')) {
+    ctx.activeTabId = ctx.tabs.length > 0 ? ctx.tabs[ctx.tabs.length - 1].id : undefined
+  }
 }
+
+/* ===== 状态持久化 ===== */
+// 离开分析页时保存状态
+function saveAnalysisState() {
+  funcGroup.saveExtraState('analysis', {
+    activeReportSubTab: activeReportTab.value?.id,
+    selectedCommIds: selectedCommIds.value,
+  })
+}
+
+// 进入分析页时恢复状态
+function restoreAnalysisState() {
+  const extra = funcGroup.getExtraState('analysis');
+  if (extra?.selectedCommIds) {
+    selectedCommIds.value = extra.selectedCommIds;
+  }
+}
+
+onActivated(() => {
+  restoreAnalysisState();
+})
+
+onDeactivated(() => {
+  saveAnalysisState();
+})
 
 // 处理级联查询 — 只给统计, 不渲染图
 async function handleCascadeQuery(params: CascadeQueryParams) {
@@ -90,18 +134,9 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
 
 <template>
   <div class="page-analysis">
-    <!-- Tab 栏 (报告/子文档) -->
-    <HomeTabBar
-      v-if="reportTabs.length > 0"
-      :tabs="reportTabs"
-      :active-tab-id="projectStore.activeTabId"
-      @update:activeTabId="onTabUpdate"
-      @close="onTabClose"
-    />
-
     <!-- ===== 报告 Tab ===== -->
     <template v-if="isReportTab && activeReportTab">
-      <!-- 工具栏 -->
+      <!-- 工具栏 (名称提示 + 全部关闭) -->
       <ReportTabToolbar
         :tab="{
           taskId: activeReportTab.taskId!,
@@ -111,8 +146,17 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
         @close-all="handleCloseAllReports"
       />
 
+      <!-- Tab 栏 (报告/子文档) — 在工具栏下方 -->
+      <HomeTabBar
+        :tabs="reportTabs"
+        :active-tab-id="analysisContext.activeTabId"
+        @update:activeTabId="onTabUpdate"
+        @close="onTabClose"
+      />
+
       <!-- 级联查询 -->
       <CascadeCommunityQuery
+        :key="activeReportTab.id"
         :task-id="activeReportTab.taskId!"
         :edge-type="activeReportTab.reportType === 'dependency' ? 'INCLUDE' : 'CALL'"
         @query="handleCascadeQuery"
@@ -121,6 +165,7 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
       <!-- 主内容: 对话流占满 -->
       <div class="report-main">
         <LLMChatFlow
+          :key="activeReportTab.id"
           ref="chatFlowRef"
           :task-id="activeReportTab.taskId!"
           :edge-type="activeReportTab.reportType === 'dependency' ? 'INCLUDE' : 'CALL'"
@@ -133,9 +178,18 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
 
     <!-- ===== 子文档 Tab ===== -->
     <template v-else-if="isSubDocTab && activeTab">
+      <!-- Tab 栏 (报告/子文档) -->
+      <HomeTabBar
+        :tabs="reportTabs"
+        :active-tab-id="analysisContext.activeTabId"
+        @update:activeTabId="onTabUpdate"
+        @close="onTabClose"
+      />
+
       <SubDocViewer
+        :key="activeTab.id"
         :sub-doc-id="activeTab.subDocId!"
-        @close="projectStore.closeTab(activeTab.id)"
+        @close="onTabClose"
       />
     </template>
 

@@ -11,7 +11,8 @@
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json && electron . --no-sandbox",
-    "build": "npm run build:electron && npm run build:vite",
+    "build": "npm run build:worker && npm run build:electron && npm run build:vite",
+    "build:worker": "node build/bundle-worker.mjs",
     "build:electron": "tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json",
     "build:vite": "vite build",
     "preview": "vite preview",
@@ -27,6 +28,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
     "@heroicons/vue": "2.2.0",
+    "@qwen-code/qwen-code": "^0.15.10",
     "@vueuse/core": "^11.0.0",
     "axios": "^1.7.0",
     "d3": "^7.9.0",

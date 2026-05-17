@@ -46,6 +46,7 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
         调用边列表
     """
     task_id = adapter._task_id
+    logger.info(f"[extract_call_graph] 入口: task_id={task_id}, adapter._store id={id(adapter._store)}, language={language}")
 
     # === Step 1: 获取项目文件信息 ===
     files = adapter.list_files(language=language)
@@ -64,10 +65,8 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
 
     if extractor is None:
         supported_langs = get_supported_call_graph_languages()
-        raise ValueError(
-            f"Call graph extractor not found for language '{project_language}'. "
-            f"Supported languages: {supported_langs}"
-        )
+        logger.warning(f"Call graph extractor not found for language '{project_language}'. Supported: {supported_langs}")
+        return []
 
     logger.info(f"Using CallGraphExtractor for language: {project_language}")
 
@@ -106,7 +105,7 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
 
     # 对于 Java/JavaScript/TypeScript，使用专门的提取器
     if project_language in ['java', 'javascript', 'typescript']:
-        logger.info(f"开始使用 {project_language} 专用提取器...")
+        logger.info(f"[extract_call_graph] 开始使用 {project_language} 专用提取器...")
         # 转换 file_id 为 int 以兼容原始提取器
         int_nodes_by_file = {}
         for fid, nodes in all_nodes_by_file_id.items():
@@ -116,7 +115,9 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
                 int_fid = hash(fid) % 1000000
             int_nodes_by_file[int_fid] = nodes
 
+        logger.info(f"[extract_call_graph] {project_language} 专用提取器: int_nodes_by_file count={len(int_nodes_by_file)}")
         call_edges = extractor.extract(adapter._task_id, int_nodes_by_file)
+        logger.info(f"[extract_call_graph] {project_language} 专用提取器返回: {len(call_edges)} 条边")
     else:
         # 通用提取逻辑
         call_edges = _extract_call_edges(
@@ -139,11 +140,13 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
 
 
 def _detect_project_language(files: List[Dict]) -> str:
-    """自动检测项目主要语言"""
+    """自动检测项目主要语言（排除非代码文件）"""
+    CODE_LANGUAGES = {'c', 'cpp', 'c_header', 'cpp_header', 'python', 'javascript', 'typescript',
+                      'tsx', 'java', 'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'csharp'}
     lang_count: Dict[str, int] = defaultdict(int)
     for f in files:
         lang = f.get("language")
-        if lang:
+        if lang and lang in CODE_LANGUAGES:
             lang_count[lang] += 1
 
     if not lang_count:
@@ -156,8 +159,8 @@ def _build_function_map(adapter: SQLiteAdapter) -> Dict[str, Dict]:
     """构建全局函数定义映射：func_name -> {file_id, node_id}"""
     func_map: Dict[str, Dict] = {}
 
-    # 获取所有函数符号
-    symbols = adapter.find_graph(symbol_node_type='function')
+    # 获取所有函数符号（C/C++/Python/JS/Go/Rust 用 func_name）
+    symbols = adapter.find_graph(symbol_node_type='func_name')
     for s in symbols:
         func_name = s.get('func_name')
         if func_name:
@@ -167,8 +170,8 @@ def _build_function_map(adapter: SQLiteAdapter) -> Dict[str, Dict]:
                     'node_id': s.get('def_node_id'),
                 }
 
-    # 也获取 method_name
-    methods = adapter.find_graph(symbol_node_type='method')
+    # 获取方法符号（Java 用 method_name）
+    methods = adapter.find_graph(symbol_node_type='method_name')
     for m in methods:
         method_name = m.get('method_name')
         if method_name:

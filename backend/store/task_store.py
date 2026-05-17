@@ -99,7 +99,6 @@ class TaskStore:
             f"UPDATE analysis_tasks SET {', '.join(sets)} WHERE id = ?",
             params,
         )
-        self._db.commit()
 
     def update_task_config(self, task_id: str, config: dict) -> dict:
         """
@@ -142,7 +141,6 @@ class TaskStore:
             f"UPDATE analysis_tasks SET {', '.join(sets)} WHERE id = ?",
             params,
         )
-        self._db.commit()
         return self.get_task(task_id)
 
     def delete_task(self, task_id: str) -> int:
@@ -150,7 +148,6 @@ class TaskStore:
         cur = self._db.execute(
             "DELETE FROM analysis_tasks WHERE id = ?", (task_id,)
         )
-        self._db.commit()
         return cur.rowcount
 
     def update_task_meta(self, task_id: str, **kwargs) -> dict:
@@ -172,7 +169,6 @@ class TaskStore:
             f"UPDATE analysis_tasks SET {', '.join(sets)} WHERE id = ?",
             params,
         )
-        self._db.commit()
         return self.get_task(task_id)
 
     # ==================== analysis_task_runs ====================
@@ -243,7 +239,6 @@ class TaskStore:
             SET progress = ?, current = ?
             WHERE id = ?
         """, (progress, current, run_id))
-        self._db.commit()
 
     def finish_run(self, run_id: str, status: str, error: str = None):
         """完成运行记录"""
@@ -261,7 +256,6 @@ class TaskStore:
                     AS INTEGER)
             WHERE id = ?
         """, params + [run_id])
-        self._db.commit()
 
     # ==================== analysis_reports ====================
 
@@ -297,7 +291,6 @@ class TaskStore:
             json.dumps(report.get("logs", [])),
             report.get("summary"),
         ))
-        self._db.commit()
 
     def get_results(self, task_id: str, run_id: str = None) -> dict:
         """
@@ -367,7 +360,6 @@ class TaskStore:
             _to_json(task.get("report_types")),
             task.get("pattern_type"), task.get("pattern"),
         ))
-        self._db.commit()
 
     # ==================== 辅助方法 ====================
 

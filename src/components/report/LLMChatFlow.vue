@@ -14,8 +14,9 @@ import {
   DocumentArrowDownIcon,
   SparklesIcon,
   XMarkIcon,
+  TrashIcon,
 } from '@heroicons/vue/24/outline'
-import { llmService } from '@/services/llm'
+import { llmWorker } from '@/workers/llm.worker.instance'
 import { useSettingsStore } from '@/stores/settings'
 import { isLLMConfigured } from '@/services/llmClient'
 import {
@@ -166,11 +167,20 @@ async function onQuickParseCommunity(templateId?: string) {
 
     const model = settingsStore.models.find(m => m.isDefault) || settingsStore.models[0]
     console.log('[LLMChatFlow] Using model:', model)
-    if (model) llmService.setConfig(model)
+    if (model) {
+      llmWorker.setConfig({
+        url: model.url,
+        apiKey: model.apiKey,
+        provider: model.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
+        model: model.model,
+        temperature: model.temperature,
+        maxTokens: model.maxTokens,
+      })
+    }
 
     let fullContent = ''
     console.log('[LLMChatFlow] Starting LLM chat...')
-    await llmService.chat(
+    await llmWorker.chat(
       [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -249,10 +259,19 @@ async function sendFollowUp() {
     const chatMessages = [...merged.slice(-10), { role: 'user', content: question }]
 
     const model = settingsStore.models.find(m => m.isDefault) || settingsStore.models[0]
-    if (model) llmService.setConfig(model)
+    if (model) {
+      llmWorker.setConfig({
+        url: model.url,
+        apiKey: model.apiKey,
+        provider: model.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
+        model: model.model,
+        temperature: model.temperature,
+        maxTokens: model.maxTokens,
+      })
+    }
 
     let fullContent = ''
-    await llmService.chat(
+    await llmWorker.chat(
       chatMessages,
       (chunk: string) => {
         fullContent += chunk
@@ -322,6 +341,11 @@ function saveAsSubdoc(msgId: string) {
   })
 }
 
+// ===== 删除单条消息 =====
+function deleteMessage(msgId: string) {
+  messages.value = messages.value.filter(m => m.id !== msgId)
+}
+
 // ===== 清空对话 =====
 function clearChat() {
   messages.value = []
@@ -367,13 +391,24 @@ defineExpose({ addQueryResultMessage, clearChat })
             <template v-else>{{ t('report.system') }}</template>
           </span>
           <span class="msg-time">{{ new Date(msg.timestamp).toLocaleTimeString() }}</span>
+          <button
+            class="msg-delete-btn"
+            :title="t('common.delete')"
+            @click="deleteMessage(msg.id)"
+          >
+            <TrashIcon class="w-3 h-3" />
+          </button>
         </div>
 
         <!-- 消息内容 -->
         <div class="msg-body">
-          <div v-if="msg.isStreaming" class="streaming-dots">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          </div>
+          <template v-if="msg.isStreaming">
+            <div v-if="msg.content" class="msg-text">{{ msg.content }}</div>
+            <div class="streaming-indicator">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="streaming-count">{{ msg.content.length }} 字符</span>
+            </div>
+          </template>
           <div v-else class="msg-text">{{ msg.content }}</div>
         </div>
 
@@ -494,6 +529,26 @@ defineExpose({ addQueryResultMessage, clearChat })
   opacity: 0.5;
 }
 
+.msg-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.3;
+  transition: all 0.15s;
+}
+
+.msg-delete-btn:hover {
+  opacity: 1;
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+}
+
 .msg-body {
   padding: 5px 9px;
   border-radius: 6px;
@@ -530,13 +585,14 @@ defineExpose({ addQueryResultMessage, clearChat })
   word-break: break-word;
 }
 
-.streaming-dots {
+.streaming-indicator {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   padding: 4px 0;
 }
 
-.streaming-dots .dot {
+.streaming-indicator .dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -544,8 +600,14 @@ defineExpose({ addQueryResultMessage, clearChat })
   animation: dotPulse 1.4s infinite;
 }
 
-.streaming-dots .dot:nth-child(2) { animation-delay: 0.2s; }
-.streaming-dots .dot:nth-child(3) { animation-delay: 0.4s; }
+.streaming-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.streaming-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+
+.streaming-count {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
 
 /* 快捷操作 tag */
 .msg-quick-actions {

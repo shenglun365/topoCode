@@ -76,7 +76,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     await ipc.analysis.stopTask(taskId)
     const task = tasks.value.find(t => t.id === taskId)
     if (task) {
-      task.status = 'stopped'
+      task.status = 'cancelled'
     }
   }
 

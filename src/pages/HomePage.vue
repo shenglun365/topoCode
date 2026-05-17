@@ -196,8 +196,8 @@ onMounted(async () => {
 
       <!-- Tab 栏 -->
       <HomeTabBar
-        v-if="projectStore.tabs.length > 0"
-        :tabs="projectStore.tabs"
+        v-if="projectStore.currentProjectTabs.length > 0"
+        :tabs="projectStore.currentProjectTabs"
         :active-tab-id="projectStore.activeTabId"
         @update:activeTabId="onTabUpdate"
         @close="onTabClose"

@@ -10,9 +10,11 @@ import {
   ArrowDownTrayIcon,
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
+  ArchiveBoxXMarkIcon,
 } from '@heroicons/vue/24/outline'
 import type { Project } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
+import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
@@ -29,6 +31,11 @@ const emit = defineEmits<{
 const menuVisible = ref(false)
 const menuPosition = ref({ x: 0, y: 0 })
 const isSyncing = ref(false)
+
+// 确认弹窗状态
+const showDeleteConfirm = ref(false)
+const showClearCacheConfirm = ref(false)
+const isClearingCache = ref(false)
 
 // 示例项目
 const isSample = computed(() => !!props.project.isSample)
@@ -105,15 +112,37 @@ async function handleChangePath() {
 
 async function handleDelete() {
   hideMenu()
-  if (confirm(t('common.confirmDelete'))) {
-    await projectStore.removeProject(props.project.id)
-  }
+  showDeleteConfirm.value = true
+}
+
+async function confirmDelete() {
+  showDeleteConfirm.value = false
+  await projectStore.removeProject(props.project.id)
 }
 
 async function handleExport() {
   hideMenu()
   // TODO: 导出对话框
   console.log('Export project:', props.project.id)
+}
+
+async function handleClearCache() {
+  hideMenu()
+  showClearCacheConfirm.value = true
+}
+
+async function confirmClearCache() {
+  showClearCacheConfirm.value = false
+  isClearingCache.value = true
+  try {
+    const result = await projectStore.clearProjectCache(props.project.id)
+    // 简单的成功提示，通过 console 或后续可以扩展为 toast
+    console.log(`${t('project.clearCache')} 完成: 删除 ${result.deletedTasks} 个任务，保留 ${result.fileCount} 个源文件`)
+  } catch (err: any) {
+    console.error('Failed to clear cache:', err)
+  } finally {
+    isClearingCache.value = false
+  }
 }
 
 async function handleCheckChanges() {
@@ -235,6 +264,15 @@ function onDocumentClick() {
         <div class="context-menu-divider"></div>
         <div
           v-if="!isSample"
+          class="context-menu-item context-menu-item-warning"
+          @click="handleClearCache"
+        >
+          <ArchiveBoxXMarkIcon class="w-4 h-4" />
+          <span>{{ t('project.clearCache') }}</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div
+          v-if="!isSample"
           class="context-menu-item context-menu-item-danger"
           @click="handleDelete"
         >
@@ -250,6 +288,25 @@ function onDocumentClick() {
       class="context-menu-backdrop"
       @click="onDocumentClick"
     ></div>
+
+    <!-- 删除确认弹窗 -->
+    <ConfirmDialog
+      v-model:visible="showDeleteConfirm"
+      :title="t('common.delete')"
+      :message="t('common.confirmDelete')"
+      variant="danger"
+      @confirm="confirmDelete"
+    />
+
+    <!-- 清除缓存确认弹窗 -->
+    <ConfirmDialog
+      v-model:visible="showClearCacheConfirm"
+      :title="t('project.clearCache')"
+      :message="t('project.clearCacheConfirm').replace('{name}', project.name)"
+      variant="warning"
+      :confirm-label="t('project.clearCache')"
+      @confirm="confirmClearCache"
+    />
   </div>
 </template>
 
@@ -328,6 +385,14 @@ function languageBadge(lang: string): string {
 
 .context-menu-item-danger:hover {
   background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.context-menu-item-warning {
+  color: #f59e0b;
+}
+
+.context-menu-item-warning:hover {
+  background: color-mix(in srgb, #f59e0b 10%, transparent);
 }
 
 .context-menu-divider {

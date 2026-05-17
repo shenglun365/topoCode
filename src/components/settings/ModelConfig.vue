@@ -13,7 +13,7 @@ import {
   XCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
-import { llmService } from '@/services/llm'
+import { llmWorker } from '@/workers/llm.worker.instance'
 import type { ModelConfigItem } from '@/types/ipc'
 
 const { t } = useI18n()
@@ -191,22 +191,16 @@ async function testCurrentForm() {
   dialogTestResult.value = null
 
   try {
-    // 临时设置配置到 llmService
-    const tempConfig: ModelConfigItem = {
-      id: 'temp-test',
-      name: form.value.name || '测试',
-      provider: form.value.provider,
-      model: form.value.model,
+    // 临时设置配置到 Worker
+    llmWorker.setConfig({
       url: form.value.url,
-      type: form.value.type,
-      status: 'offline',
-      isDefault: false,
+      apiKey: form.value.apiKey || undefined,
+      provider: form.value.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
+      model: form.value.model,
       temperature: form.value.temperature,
       maxTokens: form.value.maxTokens,
-      apiKey: form.value.apiKey || undefined,
-    }
-    llmService.setConfig(tempConfig)
-    const result = await llmService.testConnection()
+    })
+    const result = await llmWorker.testConnection()
 
     if (result.status === 'connected') {
       dialogTestResult.value = 'success'

@@ -42,25 +42,31 @@ class SQLiteContext:
     # ==================== 通用查询方法 ====================
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        """执行 SQL 并提交"""
+        """执行 SQL — 写操作自动提交，读操作不提交"""
         cursor = self.conn.execute(sql, params)
-        self.conn.commit()
+        # 仅对写操作提交事务，避免 SELECT 等读操作触发无意义的 commit
+        if sql.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CREATE', 'DROP', 'REPLACE')):
+            self.conn.commit()
         return cursor
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
-        """查询所有结果"""
+        """查询所有结果（不提交）"""
         cursor = self.conn.execute(sql, params)
         return [dict(row) for row in cursor.fetchall()]
 
     def fetchone(self, sql: str, params: tuple = ()) -> Optional[dict]:
-        """查询单条结果"""
+        """查询单条结果（不提交）"""
         cursor = self.conn.execute(sql, params)
         row = cursor.fetchone()
         return dict(row) if row else None
 
     def commit(self):
         """提交事务（用于 executemany 等不自动提交的场景）"""
-        self.conn.commit()
+        try:
+            self.conn.commit()
+        except sqlite3.OperationalError as e:
+            if "cannot commit" not in str(e):
+                raise
 
     def insert(self, table: str, data: dict) -> str:
         """插入数据，返回 ID"""
@@ -121,7 +127,7 @@ MAIN_DB_TABLES_SQL = """
         project_id TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('ast', 'call-chain', 'dependency', 'dataflow', 'full')),
         name TEXT NOT NULL,
-        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'modified', 'running', 'done', 'error', 'cancelled', 'stopped')),
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'modified', 'running', 'done', 'error', 'cancelled')),
         progress INTEGER DEFAULT 0,
         total INTEGER DEFAULT 100,
         current INTEGER DEFAULT 0,
@@ -170,7 +176,7 @@ MAIN_DB_TABLES_SQL = """
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
         run_number INTEGER NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('running', 'done', 'error', 'stopped')),
+        status TEXT NOT NULL CHECK(status IN ('running', 'done', 'error', 'cancelled')),
         progress INTEGER DEFAULT 0,
         total INTEGER DEFAULT 100,
         current INTEGER DEFAULT 0,

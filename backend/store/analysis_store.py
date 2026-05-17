@@ -4,11 +4,14 @@ AnalysisStore — 项目库 CRUD 操作
 管理 source_files, base_node, graph_node, graph_doc, community_hierarchy
 """
 import json
+import logging
 from typing import Optional, List, Dict
 
 from config import BATCH_INSERT_SIZE
 
 from .connection import SQLiteContext
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisStore:
@@ -77,7 +80,6 @@ class AnalysisStore:
             "DELETE FROM base_node WHERE file_id = ?",
             (file_id,),
         )
-        self._db.commit()
 
     def bulk_insert_nodes(self, nodes: List[Dict]):
         """批量插入 AST 节点"""
@@ -135,17 +137,25 @@ class AnalysisStore:
             "DELETE FROM graph_node WHERE task_id = ?",
             (task_id,),
         )
-        self._db.commit()
 
     def delete_by_task_and_type(self, task_id: str, symbol_type: str):
         self._db.execute(
             "DELETE FROM graph_node WHERE task_id = ? AND symbol_node_type = ?",
             (task_id, symbol_type),
         )
-        self._db.commit()
 
     def bulk_insert_graph_nodes(self, nodes: List[Dict]):
         """批量插入图节点"""
+        if not nodes:
+            return
+        # 统计各类型数量
+        type_counts: Dict[str, int] = {}
+        task_ids = set()
+        for n in nodes:
+            t = n.get("symbol_node_type", "unknown")
+            type_counts[t] = type_counts.get(t, 0) + 1
+            task_ids.add(n.get("task_id", ""))
+
         db = self._db.conn
         for i in range(0, len(nodes), BATCH_INSERT_SIZE):
             batch = nodes[i:i + BATCH_INSERT_SIZE]
@@ -174,6 +184,7 @@ class AnalysisStore:
                 for n in batch
             ])
         self._db.commit()
+        logger.info(f"[AnalysisStore] bulk_insert_graph_nodes: task_id={list(task_ids)}, total={len(nodes)}, types={type_counts}")
 
     def get_symbols(self, task_id: str, symbol_type: str = None) -> List[Dict]:
         conditions = ["task_id = ?"]
@@ -186,7 +197,9 @@ class AnalysisStore:
             f"SELECT * FROM graph_node WHERE {where}",
             params,
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+        logger.info(f"[AnalysisStore] get_symbols: task_id={task_id}, type={symbol_type}, returned={len(result)}")
+        return result
 
     def get_call_edges(self, task_id: str) -> List[Dict]:
         return self.get_symbols(task_id, "call_relation")
@@ -216,7 +229,6 @@ class AnalysisStore:
             "DELETE FROM graph_doc WHERE task_id = ?",
             (task_id,),
         )
-        self._db.commit()
 
     def bulk_insert_communities(self, communities: List[Dict]):
         """批量插入社区分析结果"""
@@ -292,7 +304,6 @@ class AnalysisStore:
             "DELETE FROM community_hierarchy WHERE task_id = ?",
             (task_id,),
         )
-        self._db.commit()
 
     def bulk_insert_hierarchy(self, hierarchies: List[Dict]):
         db = self._db.conn
@@ -326,4 +337,21 @@ class AnalysisStore:
         self._db.execute(
             "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
         )
-        self._db.commit()
+        logger.info(f"[AnalysisStore] clear_task_data: task_id={task_id}")
+
+    def clear_communities_for_task(self, task_id: str, edge_type: str):
+        """
+        清理指定任务和边类型的社区数据（备选方案切换时调用）
+        只清除 graph_doc 和 community_hierarchy 中对应 edge_type 的数据
+        """
+        self._db.execute(
+            "DELETE FROM graph_doc WHERE task_id = ? AND edge_type = ?",
+            (task_id, edge_type)
+        )
+        self._db.execute(
+            "DELETE FROM community_hierarchy WHERE task_id = ? AND edge_type = ?",
+            (task_id, edge_type)
+        )
+        logger.info(
+            f"[AnalysisStore] clear_communities_for_task: task_id={task_id}, edge_type={edge_type}"
+        )

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   LightBulbIcon,
@@ -13,6 +13,7 @@ import {
   PlayCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useKnowledgeStore } from '@/stores/knowledge'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import KnowledgeGraph from '@/components/knowledge/KnowledgeGraph.vue'
 import CategoryManager from '@/components/knowledge/CategoryManager.vue'
 import KnowledgeDocCard from '@/components/knowledge/KnowledgeDocCard.vue'
@@ -22,6 +23,7 @@ import { knowledgeDimensions } from '@/utils/mock'
 
 const { t } = useI18n()
 const knowledgeStore = useKnowledgeStore()
+const funcGroup = useFuncGroupStore()
 const showEditor = ref(false)
 const animSource = ref(`#TOPOSCRIPT v1.0
 # 微服务调用链演示
@@ -75,6 +77,32 @@ const expandedFilters = ref<Record<string, boolean>>({
 
 onMounted(async () => {
   await knowledgeStore.loadDocs()
+})
+
+/* ===== 状态持久化 ===== */
+function saveKnowledgeState() {
+  funcGroup.saveExtraState('knowledge', {
+    activeTab: knowledgeStore.activeTab,
+    filter: knowledgeStore.filter,
+  })
+}
+
+function restoreKnowledgeState() {
+  const extra = funcGroup.getExtraState('knowledge');
+  if (extra?.activeTab) {
+    knowledgeStore.setActiveTab(extra.activeTab);
+  }
+  if (extra?.filter) {
+    knowledgeStore.filter = extra.filter;
+  }
+}
+
+onActivated(() => {
+  restoreKnowledgeState();
+})
+
+onDeactivated(() => {
+  saveKnowledgeState();
 })
 
 function toggleFilter(dim: string) {

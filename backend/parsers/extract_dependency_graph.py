@@ -46,6 +46,7 @@ def extract_dependency_graph(adapter: SQLiteAdapter, language: str = None) -> Li
         依赖边列表
     """
     task_id = adapter._task_id
+    logger.info(f"[extract_dependency_graph] 入口: task_id={task_id}, adapter._store id={id(adapter._store)}, language={language}")
 
     # === Step 1: 获取项目文件信息 ===
     files = adapter.list_files(language=language)
@@ -100,11 +101,13 @@ def extract_dependency_graph(adapter: SQLiteAdapter, language: str = None) -> Li
 
 
 def _detect_project_language(files: List[Dict]) -> str:
-    """自动检测项目主要语言"""
+    """自动检测项目主要语言（排除非代码文件）"""
+    CODE_LANGUAGES = {'c', 'cpp', 'c_header', 'cpp_header', 'python', 'javascript', 'typescript',
+                      'tsx', 'java', 'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'csharp'}
     lang_count: Dict[str, int] = defaultdict(int)
     for f in files:
         lang = f.get("language")
-        if lang:
+        if lang and lang in CODE_LANGUAGES:
             lang_count[lang] += 1
     return max(lang_count, key=lang_count.get) if lang_count else "python"
 

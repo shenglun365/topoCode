@@ -69,7 +69,7 @@ export interface AnalysisTask {
   projectId: string
   type: 'full-parse' | 'ast-gen' | 'call-chain' | 'dataflow' | 'dep-analysis'
   name: string
-  status: 'done' | 'running' | 'pending' | 'modified' | 'error' | 'cancelled' | 'stopped'
+  status: 'done' | 'running' | 'pending' | 'modified' | 'error' | 'cancelled'
   progress?: number
   total?: number
   current?: number
@@ -98,7 +98,7 @@ export interface TaskRun {
   id: string
   taskId: string
   runNumber: number
-  status: 'running' | 'done' | 'error' | 'stopped'
+  status: 'running' | 'done' | 'error' | 'cancelled'
   progress: number
   total: number
   current: number
@@ -345,6 +345,7 @@ export interface IPCAPI {
     updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<AnalysisTask>
     deleteTask: (taskId: string) => Promise<void>
     stopTask: (taskId: string) => Promise<void>
+    clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number }>
     reRunTask: (taskId: string) => Promise<AnalysisTask>
     getTaskLogs: (params: { taskId: string; runId?: string }) => Promise<TaskLogsResult>
     getTaskRuns: (taskId: string) => Promise<TaskRun[]>

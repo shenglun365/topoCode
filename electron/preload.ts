@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.deleteTask', params: { taskId } }),
     stopTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.stopTask', params: { taskId } }),
+    clearProjectCache: (projectId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.clearProjectCache', params: { projectId } }),
     reRunTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.reRunTask', params: { taskId } }),
     getTaskLogs: (params: { taskId: string; runId?: string }) =>
@@ -341,6 +343,7 @@ declare global {
         updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<any>
         deleteTask: (taskId: string) => Promise<void>
         stopTask: (taskId: string) => Promise<void>
+        clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number }>
         reRunTask: (taskId: string) => Promise<any>
         getTaskLogs: (params: { taskId: string; runId?: string }) => Promise<any>
         getTaskRuns: (taskId: string) => Promise<any>

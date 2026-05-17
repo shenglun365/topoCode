@@ -6,7 +6,7 @@
  * 支持多选、全选/反选、搜索.
  */
 
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FunnelIcon,
@@ -46,6 +46,9 @@ const selectedPerLevel = ref<Record<string, string[]>>({})
 
 // 展开的下拉
 const openLevel = ref<string | null>(null)
+
+// 级联锁定 — 上级"选中且收拢"后, 下级才可点击
+const lockedLevels = ref<Set<string>>(new Set())
 
 // 每级搜索
 const searchPerLevel = ref<Record<string, string>>({})
@@ -123,6 +126,8 @@ watch(selectedPerLevel, (newVal) => {
           searchPerLevel.value[depLv] = ''
         }
       }
+      // 上级清空时解锁本级和所有下级
+      unlockDownstream(lv)
     }
   }
   updateStats()
@@ -157,6 +162,23 @@ function getAllSelectedIds(): string[] {
   return Array.from(ids)
 }
 
+// 点击外部收拢下拉
+function handleClickOutside(e: MouseEvent) {
+  if (!openLevel.value) return
+  const target = e.target as Node
+  const cascadeEl = document.querySelector('.cascade-query-inline') as Element
+  if (cascadeEl && !cascadeEl.contains(target)) {
+    // 收拢时如果该级有选中项, 则锁定
+    const lv = openLevel.value
+    if (getSelectedCount(lv) > 0) {
+      const next = new Set(lockedLevels.value)
+      next.add(lv)
+      lockedLevels.value = next
+    }
+    openLevel.value = null
+  }
+}
+
 // 全选/反选/清空
 function selectAll(lv: string) {
   selectedPerLevel.value[lv] = getFilteredOptions(lv).map(o => o.id)
@@ -168,11 +190,44 @@ function invertSelection(lv: string) {
 }
 function clearLevel(lv: string) {
   selectedPerLevel.value[lv] = []
+  // 清空后解锁本级和所有下级
+  unlockDownstream(lv)
+}
+
+// 解锁指定级别及其所有下级
+function unlockDownstream(lv: string) {
+  const lvNum = parseInt(lv.replace('L', ''))
+  const next = new Set(lockedLevels.value)
+  for (let i = lvNum; i <= 4; i++) {
+    next.delete(`L${i}`)
+  }
+  lockedLevels.value = next
+}
+
+// 检查上级是否已锁定
+function isParentLocked(lv: string): boolean {
+  const lvNum = parseInt(lv.replace('L', ''))
+  if (lvNum === 0) return true // L0 无上级, 始终可用
+  const parentLv = `L${lvNum - 1}`
+  return lockedLevels.value.has(parentLv)
 }
 
 // 切换下拉
 function toggleLevel(lv: string) {
-  openLevel.value = openLevel.value === lv ? null : lv
+  // 上级未锁定则不允许展开下级
+  if (!isParentLocked(lv)) return
+
+  if (openLevel.value === lv) {
+    // 收拢时: 如果该级有选中项, 则锁定
+    if (getSelectedCount(lv) > 0) {
+      const next = new Set(lockedLevels.value)
+      next.add(lv)
+      lockedLevels.value = next
+    }
+    openLevel.value = null
+  } else {
+    openLevel.value = lv
+  }
 }
 
 // 查询
@@ -199,7 +254,19 @@ function getSelectedDisplay(lv: string): string {
   return `${count}/${total}`
 }
 
-onMounted(() => loadCascadeLevels())
+onMounted(() => {
+  loadCascadeLevels()
+  document.addEventListener('click', handleClickOutside)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
+
+// 监听 taskId/edgeType 变化，切换 tab 时重新加载数据
+watch([() => props.taskId, () => props.edgeType], () => {
+  loadCascadeLevels()
+})
+
 defineExpose({ loadCascadeLevels })
 </script>
 
@@ -217,10 +284,15 @@ defineExpose({ loadCascadeLevels })
         class="level-group"
       >
         <!-- 触发按钮 -->
-        <div class="level-trigger" @click="toggleLevel(lv)">
+        <div
+          class="level-trigger"
+          :class="{ 'level-locked': lockedLevels.has(lv), 'level-disabled': !isParentLocked(lv) }"
+          @click="toggleLevel(lv)"
+        >
           <span class="level-badge">{{ lv }}</span>
           <span class="level-display">{{ getSelectedDisplay(lv) }}</span>
-          <span class="level-arrow">▾</span>
+          <span v-if="!isParentLocked(lv)" class="level-disabled-dot" :title="t('report.selectParentFirst')"></span>
+          <span v-else class="level-arrow">▾</span>
         </div>
 
         <!-- 下拉面板 -->
@@ -270,7 +342,11 @@ defineExpose({ loadCascadeLevels })
       </div>
 
       <!-- 查询按钮 -->
-      <button class="btn btn-primary btn-sm query-btn" @click="handleQuery">
+      <button
+        class="btn btn-primary btn-sm query-btn"
+        :disabled="getAllSelectedIds().length === 0"
+        @click="handleQuery"
+      >
         <FunnelIcon class="w-4 h-4" />
         <span>{{ t('common.query') }}</span>
       </button>
@@ -326,6 +402,29 @@ defineExpose({ loadCascadeLevels })
 
 .level-trigger:hover {
   border-color: var(--accent);
+}
+
+.level-trigger.level-locked {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 6%, var(--bg-primary));
+}
+
+.level-trigger.level-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.level-trigger.level-disabled:hover {
+  border-color: var(--border);
+}
+
+.level-disabled-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.5;
 }
 
 .level-badge {
@@ -467,6 +566,11 @@ defineExpose({ loadCascadeLevels })
 
 .query-btn {
   flex-shrink: 0;
+}
+
+.query-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .stats-bar {

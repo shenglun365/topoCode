@@ -22,6 +22,7 @@ class CLanguageParser(CallGraphExtractor):
     
     # C 语言函数定义的节点类型
     FUNCTION_DEFINITION_TYPES = {'function_definition'}
+    MACRO_DEFINITION_TYPES = {'macro_definition'}
     
     # C 语言调用表达式的节点类型
     CALL_EXPRESSION_TYPES = {'call_expression', 'preproc_call'}
@@ -43,10 +44,10 @@ class CLanguageParser(CallGraphExtractor):
         
         
         # 构建全局函数定义映射
-        global_func_def_map = self._build_global_function_map(proj_id, graph_node_coll)
+        global_func_def_map = self._build_global_function_map_from_ast(nodes_by_file)
         
         # 构建全局宏定义映射
-        global_macro_map = self._build_global_macro_map(proj_id, graph_node_coll)
+        global_macro_map = self._build_global_macro_map_from_ast(nodes_by_file)
         
         # 提取调用边
         call_edges = []
@@ -59,37 +60,12 @@ class CLanguageParser(CallGraphExtractor):
         
         return call_edges
     
-    def _build_global_function_map(self, proj_id: int, graph_node_coll) -> Dict[str, Dict]:
-        """构建全局函数定义映射"""
-        func_map = {}
-        func_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "func_name"},
-            {"func_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in func_nodes:
-            name = rec["func_name"]
-            global_func_def_map[name] = {
-                "file_id": rec["def_file_id"],
-                "node_id": rec["def_node_id"]
-            }
-        return func_map
-    
-    def _build_global_macro_map(self, proj_id: int, graph_node_coll) -> Dict[str, Dict]:
-        """构建全局宏定义映射"""
-        macro_map = {}
-        macro_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "macro_name"},
-            {"macro_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in macro_nodes:
-            name = rec["macro_name"]
-            if name not in macro_map:
-                macro_map[name] = {
-                    "file_id": rec["def_file_id"],
-                    "node_id": rec["def_node_id"]
-                }
-        return macro_map
-    
+
+
+    def extract_macro_name(self, node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
+        """从宏定义节点提取宏名"""
+        return node.get("name") or (node.get("refs", [None])[0] if node.get("refs") else None)
+
     def _extract_file_calls(
         self,
         file_id: int,

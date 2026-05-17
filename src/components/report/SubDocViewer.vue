@@ -6,7 +6,7 @@
  * 保存后回到预览模式.
  */
 
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PencilIcon,
@@ -105,6 +105,11 @@ const renderedContent = computed(() => {
 })
 
 onMounted(() => {
+  loadDoc()
+})
+
+// 监听 subDocId 变化，切换 tab 时重新加载数据
+watch(() => props.subDocId, () => {
   loadDoc()
 })
 </script>

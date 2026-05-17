@@ -29,7 +29,7 @@ const statusColor = computed(() => {
     running: 'var(--accent)',
     done: 'var(--success)',
     error: 'var(--error)',
-    stopped: 'var(--warning)',
+    cancelled: 'var(--warning)',
     pending: 'var(--text-muted)',
   }
   return map[props.task.status] || 'var(--text-muted)'
@@ -107,7 +107,7 @@ const statusLabel = computed(() => {
     running: t('analysis.running'),
     done: t('analysis.done'),
     error: t('analysis.error'),
-    stopped: t('analysis.stopped'),
+    cancelled: t('analysis.cancelled'),
     pending: t('analysis.pending'),
   }
   return map[props.task.status] || props.task.status
@@ -195,7 +195,7 @@ function formatRunStatus(status: string): string {
     running: t('analysis.running'),
     done: t('analysis.done'),
     error: t('analysis.error'),
-    stopped: t('analysis.stopped'),
+    cancelled: t('analysis.cancelled'),
   }
   return map[status] || status
 }
@@ -205,7 +205,7 @@ function formatRunStatusColor(status: string): string {
     running: 'var(--accent)',
     done: 'var(--success)',
     error: 'var(--error)',
-    stopped: 'var(--warning)',
+    cancelled: 'var(--warning)',
   }
   return map[status] || 'var(--text-muted)'
 }

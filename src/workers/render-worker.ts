@@ -1,6 +1,8 @@
-/** 渲染 Worker - Mermaid 解析 + D3 布局计算 */
+/** 渲染 Worker - Mermaid 解析 + D3 布局计算
 
-import * as d3 from 'd3'
+注意: d3/mermaid 使用动态导入以避免 Vite Worker IIFE 格式下 code-splitting 报错。
+*/
+
 import type {
   RenderRequest,
   RenderResponse,
@@ -46,7 +48,14 @@ async function renderMermaid(data: MermaidData): Promise<MermaidResult> {
 
 // ==================== D3 力导向布局 ====================
 
-function computeD3Layout(data: D3LayoutData): D3LayoutResult {
+// 动态导入 d3，避免 Vite Worker IIFE 格式下 code-splitting 报错
+async function loadD3() {
+  const d3 = await import('d3')
+  return d3
+}
+
+async function computeD3Layout(data: D3LayoutData): Promise<D3LayoutResult> {
+  const d3 = await loadD3()
   const {
     nodes,
     edges,
@@ -93,7 +102,8 @@ function computeD3Layout(data: D3LayoutData): D3LayoutResult {
 
 // ==================== D3 层次布局 ====================
 
-function computeD3Hierarchy(data: D3HierarchyData): any {
+async function computeD3Hierarchy(data: D3HierarchyData): Promise<any> {
+  const d3 = await loadD3()
   const { root, width, height, nodeSize = [20, 60] } = data
 
   const hierarchy = d3.hierarchy(root)
@@ -157,13 +167,13 @@ self.onmessage = async (e: MessageEvent<RenderRequest>) => {
       }
 
       case 'd3-layout': {
-        const result = computeD3Layout(data as D3LayoutData)
+        const result = await computeD3Layout(data as D3LayoutData)
         response.result = result
         break
       }
 
       case 'd3-hierarchy': {
-        const result = computeD3Hierarchy(data as D3HierarchyData)
+        const result = await computeD3Hierarchy(data as D3HierarchyData)
         response.result = result
         break
       }

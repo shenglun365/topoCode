@@ -79,7 +79,7 @@ function getStatusColor(status: string): string {
     running: 'var(--accent)',
     done: 'var(--success)',
     error: 'var(--error)',
-    stopped: 'var(--warning)',
+    cancelled: 'var(--warning)',
     pending: 'var(--text-muted)',
     modified: 'var(--warning)',
   }
@@ -91,7 +91,7 @@ function getStatusLabel(status: string): string {
     running: t('analysis.running'),
     done: t('analysis.done'),
     error: t('analysis.error'),
-    stopped: t('analysis.stopped'),
+    cancelled: t('analysis.cancelled'),
     pending: t('analysis.pending'),
     modified: t('analysis.modified'),
   }

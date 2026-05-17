@@ -1,9 +1,16 @@
-/** Project Store - 项目管理 */
+/** Project Store - 项目管理
+
+职责划分：
+- 项目数据管理（projects, loading, selectedFile）保留在此 store
+- Tab 管理 + 功能组上下文已迁移至 funcGroup store
+- 保留向后兼容的 computed/函数，内部委托给 funcGroup store
+*/
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Project, FileTreeNode, AnalysisTask } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import i18n from '@/i18n'
 
 export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'subdoc'
@@ -12,6 +19,7 @@ export interface HomeTab {
   id: string
   kind: TabKind
   title: string
+  projectId?: string  // 归属项目 ID，用于跨项目 tab 隔离
   // file 类型
   filePath?: string
   node?: FileTreeNode
@@ -29,21 +37,29 @@ export interface HomeTab {
 export const useProjectStore = defineStore('project', () => {
   // State
   const projects = ref<Project[]>([])
-  const selectedProjectId = ref<string | null>(null)
-  const viewMode = ref<'default' | 'project'>('default')
-  const tabs = ref<HomeTab[]>([])
-  const activeTabId = ref<string | null>(null)
   const loading = ref(false)
   const selectedFile = ref<FileTreeNode | null>(null)
 
+  // 委托给 funcGroup store（首页功能组）
+  const funcGroup = useFuncGroupStore()
+
+  // 向后兼容 — 首页功能组的上下文
+  const selectedProjectId = computed(() => funcGroup.currentProjectId)
+  const viewMode = computed(() => funcGroup.currentProjectId ? 'project' as const : 'default' as const)
+  const tabs = computed(() => funcGroup.currentTabs)
+  const activeTabId = computed(() => funcGroup.currentActiveTabId)
+
   // Getters
   const selectedProject = computed(() =>
-    projects.value.find(p => p.id === selectedProjectId.value)
+    projects.value.find(p => p.id === funcGroup.currentProjectId)
   )
-  const activeTab = computed(() =>
-    tabs.value.find(t => t.id === activeTabId.value)
-  )
+  const activeTab = computed(() => funcGroup.currentActiveTab)
   const projectCount = computed(() => projects.value.length)
+  // 当前项目的 tabs（跨项目隔离）— 按 projectId 过滤
+  const currentProjectTabs = computed(() => {
+    const pid = funcGroup.currentProjectId;
+    return pid ? funcGroup.currentTabs.filter(t => t.projectId === pid) : funcGroup.currentTabs;
+  })
 
   // Actions
   async function loadProjects() {
@@ -70,13 +86,10 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function selectProject(id: string) {
-    viewMode.value = 'project'
-    // 只有切换不同项目时才清空 tabs
+    // 委托给 funcGroup store（首页功能组）
+    funcGroup.selectProject('home', id)
     if (selectedProjectId.value !== id) {
-      tabs.value = []
-      activeTabId.value = null
       selectedFile.value = null
-      selectedProjectId.value = id
     }
     // 将项目根目录加入 Electron 白名单
     const project = projects.value.find(p => p.id === id)
@@ -90,10 +103,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function deselectProject() {
-    selectedProjectId.value = null
-    viewMode.value = 'default'
-    tabs.value = []
-    activeTabId.value = null
+    funcGroup.deselectProject('home')
     selectedFile.value = null
   }
 
@@ -106,6 +116,12 @@ export const useProjectStore = defineStore('project', () => {
     const idx = projects.value.findIndex(p => p.id === id)
     if (idx >= 0) projects.value.splice(idx, 1)
     if (selectedProjectId.value === id) deselectProject()
+  }
+
+  async function clearProjectCache(id: string) {
+    const result = await ipc.analysis.clearProjectCache(id)
+    console.log('[ProjectStore] clearProjectCache result:', result)
+    return result
   }
 
   async function syncProject(id: string) {
@@ -176,10 +192,11 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function openFileTab(node: FileTreeNode) {
+    const pid = funcGroup.currentProjectId;
     // 按 filePath 去重，已打开则切换焦点
-    const existing = tabs.value.find(t => t.filePath === node.path)
+    const existing = funcGroup.currentTabs.find(t => t.filePath === node.path)
     if (existing) {
-      activeTabId.value = existing.id
+      funcGroup.setActiveTab('home', existing.id)
       return
     }
     // 新开 tab
@@ -187,15 +204,15 @@ export const useProjectStore = defineStore('project', () => {
       id: `tab-file-${node.path || node.name}`,
       kind: 'file',
       title: node.name,
+      projectId: pid,
       filePath: node.path || node.name,
       node,
     }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
+    funcGroup.openTab('home', tab)
   }
 
   function closeTab(tabId: string): boolean {
-    const tab = tabs.value.find(t => t.id === tabId)
+    const tab = funcGroup.currentTabs.find(t => t.id === tabId)
     if (!tab) return false
 
     // 检查未保存更改
@@ -204,21 +221,7 @@ export const useProjectStore = defineStore('project', () => {
       if (!confirmed) return false
     }
 
-    const idx = tabs.value.findIndex(t => t.id === tabId)
-    if (idx === -1) return false
-
-    tabs.value.splice(idx, 1)
-
-    if (activeTabId.value === tabId) {
-      if (tabs.value.length > 0) {
-        const newIdx = Math.min(idx, tabs.value.length - 1)
-        activeTabId.value = tabs.value[newIdx].id
-      } else {
-        activeTabId.value = null
-      }
-    }
-
-    return true
+    return funcGroup.closeTab('home', tabId)
   }
 
   /** 打开子文档 tab */
@@ -228,12 +231,13 @@ export const useProjectStore = defineStore('project', () => {
     taskId: string
     parentReportId?: string
   }) {
+    const pid = funcGroup.currentProjectId;
     // 检查是否已打开
-    const existing = tabs.value.find(
+    const existing = funcGroup.currentTabs.find(
       t => t.kind === 'subdoc' && t.subDocId === params.subDocId
     )
     if (existing) {
-      activeTabId.value = existing.id
+      funcGroup.setActiveTab('home', existing.id)
       return existing.id
     }
 
@@ -241,49 +245,49 @@ export const useProjectStore = defineStore('project', () => {
       id: `tab-subdoc-${params.subDocId}`,
       kind: 'subdoc',
       title: params.title,
+      projectId: pid,
       subDocId: params.subDocId,
       taskId: params.taskId,
       parentReportId: params.parentReportId,
       hasUnsavedChanges: false,
     }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
-
+    funcGroup.openTab('home', tab)
     return tab.id
   }
 
   function closeAllTabs() {
-    tabs.value = []
-    activeTabId.value = null
+    funcGroup.closeAllTabs('home')
   }
 
   function setActiveTab(tabId: string) {
-    activeTabId.value = tabId
+    funcGroup.setActiveTab('home', tabId)
   }
 
   function openTaskListTab() {
+    const pid = funcGroup.currentProjectId;
     // 若已存在 taskList tab，直接激活
-    const existing = tabs.value.find(tab => tab.kind === 'taskList')
+    const existing = funcGroup.currentTabs.find(tab => tab.kind === 'taskList')
     if (existing) {
-      activeTabId.value = existing.id
+      funcGroup.setActiveTab('home', existing.id)
       return
     }
     const tab: HomeTab = {
       id: `tab-taskList-${Date.now()}`,
       kind: 'taskList',
       title: i18n.global.t('analysis.taskList'),
+      projectId: pid,
     }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
+    funcGroup.openTab('home', tab)
 
     // 加载任务数据
-    if (selectedProjectId.value) {
+    if (pid) {
       const analysisStore = useAnalysisStore()
-      analysisStore.loadTasks(selectedProjectId.value)
+      analysisStore.loadTasks(pid)
     }
   }
 
  async function openTaskCreateForm(taskId?: string) {
+    const pid = funcGroup.currentProjectId;
     if (taskId) {
       // 编辑模式 - 使用通用标题，详细数据由 TaskCreateForm 自行加载
       const tab: HomeTab = {
@@ -291,22 +295,22 @@ export const useProjectStore = defineStore('project', () => {
         kind: 'taskCreate',
         title: i18n.global.t('analysis.editTask'),
         taskId,
+        projectId: pid,
       }
-      tabs.value.push(tab)
-      activeTabId.value = tab.id
+      funcGroup.openTab('home', tab)
     } else {
       // 新建模式
       const tab: HomeTab = {
         id: `tab-taskCreate-${Date.now()}`,
         kind: 'taskCreate',
         title: i18n.global.t('analysis.newTask'),
+        projectId: pid,
       }
-      tabs.value.push(tab)
-      activeTabId.value = tab.id
+      funcGroup.openTab('home', tab)
     }
   }
 
-  /** 打开报告 tab — 每次点击都新建 tab */
+  /** 打开报告 tab — 相同 taskId+reportType 已存在时切换到已有 tab */
   function openReportTab(params: {
     taskId: string
     reportType: string  // dependency | callChain
@@ -314,6 +318,16 @@ export const useProjectStore = defineStore('project', () => {
     projectName?: string
     alias?: string
   }) {
+    const pid = funcGroup.currentProjectId;
+    // 检查是否已存在相同 taskId + reportType 的报告 tab（在 analysis 功能组中查找）
+    const existing = funcGroup.context.analysis.tabs.find(
+      t => t.kind === 'report' && t.taskId === params.taskId && t.reportType === params.reportType
+    )
+    if (existing) {
+      funcGroup.setActiveTab('analysis', existing.id)
+      return existing.id
+    }
+
     // 报告类型映射
     const typeMap: Record<string, string> = {
       dependency: i18n.global.t('project.reportType.dependency'),
@@ -328,29 +342,29 @@ export const useProjectStore = defineStore('project', () => {
       id: `tab-report-${params.taskId}-${params.reportType}-${Date.now()}`,
       kind: 'report',
       title,
+      projectId: pid,
       taskId: params.taskId,
       reportType: params.reportType,
       alias: params.alias,
     }
-    tabs.value.push(tab)
-    activeTabId.value = tab.id
-
+    funcGroup.openTab('analysis', tab)
     return tab.id
   }
 
   /** 关闭所有报告 tab */
   function closeAllReportTabs() {
-    const reportIds = tabs.value.filter(t => t.kind === 'report').map(t => t.id)
+    const ctx = funcGroup.context.analysis;
+    const reportIds = ctx.tabs.filter(t => t.kind === 'report').map(t => t.id)
     for (const id of reportIds) {
-      const idx = tabs.value.findIndex(t => t.id === id)
-      if (idx !== -1) tabs.value.splice(idx, 1)
+      const idx = ctx.tabs.findIndex(t => t.id === id)
+      if (idx !== -1) ctx.tabs.splice(idx, 1)
     }
     // 如果当前激活的是报告 tab，重置
-    if (reportIds.includes(activeTabId.value || '')) {
-      if (tabs.value.length > 0) {
-        activeTabId.value = tabs.value[tabs.value.length - 1].id
+    if (reportIds.includes(ctx.activeTabId || '')) {
+      if (ctx.tabs.length > 0) {
+        ctx.activeTabId = ctx.tabs[ctx.tabs.length - 1].id
       } else {
-        activeTabId.value = null
+        ctx.activeTabId = undefined
       }
     }
   }
@@ -366,11 +380,13 @@ export const useProjectStore = defineStore('project', () => {
     selectedProject,
     activeTab,
     projectCount,
+    currentProjectTabs,
     loadProjects,
     importProject,
     selectProject,
     deselectProject,
     removeProject,
+    clearProjectCache,
     syncProject,
     getFileTree,
     updatePath,
@@ -387,5 +403,7 @@ export const useProjectStore = defineStore('project', () => {
     openReportTab,
     closeAllReportTabs,
     openSubDocTab,
+    // 暴露 funcGroup 供其他功能组使用
+    funcGroup,
   }
 })

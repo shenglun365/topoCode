@@ -1,10 +1,43 @@
 <script setup lang="ts">
+import { computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import TopBar from './TopBar.vue'
 import ActivityBar from './ActivityBar.vue'
 import LeftPanel from './LeftPanel.vue'
 import RightPanel from './RightPanel.vue'
 import StatusBar from './StatusBar.vue'
 import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
+import { useNavigationStore } from '@/stores/navigation'
+import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
+
+const route = useRoute()
+const navigation = useNavigationStore()
+const funcGroup = useFuncGroupStore()
+
+// 路由 path 到功能组 ID 的映射
+const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
+    '/home': 'home',
+    '/analysis': 'analysis',
+    '/knowledge': 'knowledge',
+    '/coder': 'coder',
+    '/user': 'home',
+}
+
+// 当前功能组
+const currentFuncGroup = computed(() => {
+    return routeToFuncGroupMap[route.path] || 'home';
+})
+
+// 同步路由切换和功能组切换
+watch(
+    () => route.path,
+    (newPath) => {
+        const group = routeToFuncGroupMap[newPath];
+        if (group) {
+            funcGroup.switchFuncGroup(group);
+        }
+    }
+);
 </script>
 
 <template>
@@ -23,7 +56,11 @@ import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
       <!-- 主内容区 -->
       <main class="content-area">
         <div class="content-body">
-          <router-view />
+          <router-view v-slot="{ Component }">
+            <keep-alive :include="['CoderPage']">
+              <component :is="Component" :key="route.name" />
+            </keep-alive>
+          </router-view>
         </div>
       </main>
 

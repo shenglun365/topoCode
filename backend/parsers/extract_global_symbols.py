@@ -131,11 +131,26 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
 
     file_id_to_name: Dict[str, str] = {f["id"]: f.get("file_path", "") for f in files}
 
+    # 统计语言分布
+    lang_stats: Dict[str, int] = defaultdict(int)
+    for f in files:
+        ext = os.path.splitext(f.get("file_path", ""))[1].lower()
+        if ext == '.java':
+            lang_stats['java'] += 1
+        elif ext in ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']:
+            lang_stats['ts_js'] += 1
+        else:
+            lang_stats['other(CFamily)'] += 1
+    logger.info(f"[extract_global_symbols] 入口: task_id={task_id}, total_files={len(files)}, lang_distribution={dict(lang_stats)}")
+
     macro_records: List[Dict[str, Any]] = []
     global_defs: List[Dict[str, Any]] = []
     class_defs: List[Dict[str, Any]] = []
 
     processed_count = 0
+    java_count = 0
+    ts_js_count = 0
+    c_family_count = 0
 
     for file_rec in files:
         file_id = file_rec["id"]
@@ -155,11 +170,14 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
         ext = os.path.splitext(filename)[1].lower()
 
         if ext == '.java':
+            java_count += 1
             extract_java_symbols(file_id, nodes, global_defs, class_defs)
         elif ext in ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']:
+            ts_js_count += 1
             lang = 'typescript' if ext in ('.ts', '.tsx', '.mts') else 'javascript'
             extract_typescript_symbols(file_id, nodes, global_defs, class_defs, lang)
         else:
+            c_family_count += 1
             handler = detect_language_handler(filename)
 
             for node in nodes.values():
@@ -191,6 +209,7 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
 
     # 写入 graph_node
     all_records = macro_records + global_defs + class_defs
+    logger.info(f"[extract_global_symbols] 处理完成: java={java_count}, ts_js={ts_js_count}, c_family={c_family_count}, macros={len(macro_records)}, funcs={len(global_defs)}, classes={len(class_defs)}")
     if all_records:
         adapter.insert_graph(all_records)
         logger.info(f"Inserted {len(all_records)} symbol records into graph_node for task {task_id}")

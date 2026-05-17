@@ -13,6 +13,8 @@ import type {
   D3LayoutResult,
   D3HierarchyResult,
 } from '@/workers/types'
+// Vite 5.4.x worker.format 有 bug，改用 ?url 导入预编译的 worker
+import renderWorkerUrl from '@/workers/render-worker-bundled.js?url'
 
 // ==================== 类型 ====================
 
@@ -56,9 +58,7 @@ class WorkerPool {
   /** 创建 Worker (懒加载) */
   private getWorker(): Worker {
     if (!this.worker) {
-      // Vite 需要 ?worker 后缀来正确处理 Worker
-      const WorkerModule = new URL('../workers/render-worker.ts', import.meta.url)
-      this.worker = new Worker(WorkerModule, { type: 'module' })
+      this.worker = new Worker(renderWorkerUrl, { type: 'module' })
 
       this.worker.onmessage = (e) => {
         const msg = e.data
@@ -117,7 +117,9 @@ class WorkerPool {
 
       this.pending.set(id, { resolve, reject, timer, onProgress: options?.onProgress })
 
-      worker.postMessage({ id, type, data, options })
+      // Strip onProgress callback before sending to Worker (functions can't be cloned)
+      const { onProgress: _, ...serializableOptions } = options || {}
+      worker.postMessage({ id, type, data, options: serializableOptions })
     })
   }
 

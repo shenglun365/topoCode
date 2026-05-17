@@ -25,7 +25,7 @@ class GoCallExtractor(CallGraphExtractor):
     def extract(self, proj_id: int, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
         
         
-        func_map = self._build_global_function_map(proj_id, graph_node_coll)
+        func_map = self._build_global_function_map_from_ast(nodes_by_file)
         
         call_edges = []
         for file_id, nodes in nodes_by_file.items():
@@ -34,15 +34,16 @@ class GoCallExtractor(CallGraphExtractor):
         
         return call_edges
     
-    def _build_global_function_map(self, proj_id: int, graph_node_coll) -> Dict[str, Dict]:
+    def _build_global_function_map_from_ast(self, nodes_by_file: Dict[int, Dict[int, Dict]]) -> Dict[str, Dict]:
+        """从 AST 节点中构建全局函数映射（不依赖数据库）"""
         func_map = {}
-        func_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "func_name"},
-            {"func_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in func_nodes:
-            name = rec["func_name"]
-            func_map[name] = {"file_id": rec["def_file_id"], "node_id": rec["def_node_id"]}
+        for file_id, nodes in nodes_by_file.items():
+            for node_id, node in nodes.items():
+                node_type = node.get("type", "")
+                if node_type in self.FUNCTION_DEFINITION_TYPES:
+                    func_name = self.extract_function_name(node, nodes)
+                    if func_name:
+                        func_map[func_name] = {"file_id": file_id, "node_id": node_id}
         return func_map
     
     def _extract_file_calls(self, proj_id: int, file_id: int, nodes: Dict[int, Dict], func_map: Dict[str, Dict]) -> List[Dict[str, Any]]:

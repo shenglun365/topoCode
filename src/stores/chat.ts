@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ChatSession, ChatMessage } from '@/utils/mock'
-import { llmService } from '@/services/llm'
+import { llmWorker } from '@/workers/llm.worker.instance'
 import { useSettingsStore } from '@/stores/settings'
 
 export const useChatStore = defineStore('chat', () => {
@@ -25,12 +25,18 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.filter(s => s.status === 'running')
   )
 
+  // 获取当前默认模型配置（从 settings store 读取）
+  const modelConfig = computed(() => {
+    const settingsStore = useSettingsStore()
+    return settingsStore.models.find(m => m.isDefault) || settingsStore.models[0] || null
+  })
+
   // Actions
   async function loadSessions() {
     loading.value = true
     try {
       // 从后端加载会话列表
-      const result = await window.api.ipc.invoke('chat.listSessions', {})
+      const result = await window.api.chat.listSessions()
       if (result && result.sessions) {
         sessions.value = result.sessions
         activeSessionId.value = sessions.value[0]?.id || null
@@ -59,7 +65,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // 同步到后端
     try {
-      await window.api.ipc.invoke('chat.createSession', {
+      await window.api.chat.createSession({
         id: newSession.id,
         title: newSession.title,
         mode: newSession.mode,
@@ -81,7 +87,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // 同步到后端
     try {
-      await window.api.ipc.invoke('chat.deleteSession', { id: sessionId })
+      await window.api.chat.deleteSession({ id: sessionId })
     } catch (e) {
       console.warn('[ChatStore] Failed to delete session from backend:', e)
     }
@@ -145,9 +151,16 @@ export const useChatStore = defineStore('chat', () => {
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }))
 
-      // 调用 LLM（流式）
-      llmService.setConfig(defaultModel)
-      const fullContent = await llmService.chat(messages, (chunk) => {
+      // 调用 LLM（流式 — Worker 执行）
+      llmWorker.setConfig({
+        url: defaultModel.url,
+        apiKey: defaultModel.apiKey,
+        provider: defaultModel.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
+        model: defaultModel.model,
+        temperature: defaultModel.temperature,
+        maxTokens: defaultModel.maxTokens,
+      })
+      const fullContent = await llmWorker.chat(messages, (chunk) => {
         if (aiMessage) {
           aiMessage.content += chunk
         }
@@ -190,6 +203,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSession,
     sessionCount,
     runningSessions,
+    modelConfig,
     loadSessions,
     createSession,
     closeSession,

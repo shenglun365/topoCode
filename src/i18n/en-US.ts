@@ -348,6 +348,14 @@ export default {
     askAI: 'Ask AI about project architecture',
     selectFileOrTask: 'Select file or task to view content',
     switchTab: 'Switch between file browser and task list in the tab bar above',
+    changePath: 'Change Path',
+    checkChanges: 'Check File Changes',
+    resyncConfirm: 'Resync project?',
+    clearCache: 'Clear Parse Cache',
+    clearCacheConfirm: 'Clear all parse cache for project "{name}" (AST, symbols, call graph, dependency graph, community analysis)?\n\nThis action cannot be undone. You will need to re-run analysis tasks.',
+    noChanges: 'No file changes',
+    needsResync: 'Path changed, needs resync',
+    hasFileChanges: 'File content changed',
   },
 
   // Report
@@ -495,6 +503,7 @@ export default {
     done: 'Done',
     error: 'Error',
     stopped: 'Stopped',
+    cancelled: 'Cancelled',
     noLogs: 'No logs',
     runHistory: 'Run History',
     startTime: 'Start Time',

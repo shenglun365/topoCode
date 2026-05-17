@@ -162,6 +162,68 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 删除主库中的任务（CASCADE 删除 runs/reports/history）
         return store.delete_task(tid)
 
+    @server.register("analysis.clearProjectCache")
+    def clear_project_cache(project_id=None):
+        """
+        清除项目的所有解析缓存（AST + 符号 + 调用图 + 依赖图 + 社区分析）
+        保留 source_files 和 project_config，以便重新解析项目文件。
+        """
+        if not project_id:
+            raise ValueError("project_id is required")
+
+        # 验证项目存在
+        project_db = multi_db.get_project_db(project_id)
+        file_count = project_db.execute("SELECT COUNT(*) FROM source_files").fetchone()[0]
+        if file_count == 0:
+            raise ValueError(f"Project {project_id} has no source files")
+
+        # 清除所有分析相关表
+        project_db.execute("DELETE FROM base_node")
+        project_db.execute("DELETE FROM graph_node")
+        project_db.execute("DELETE FROM graph_doc")
+        project_db.execute("DELETE FROM community_hierarchy")
+        project_db.execute("DELETE FROM ast_data")
+        project_db.execute("DELETE FROM dependencies")
+        project_db.execute("DELETE FROM call_chains")
+        project_db.execute("DELETE FROM components")
+        project_db.execute("DELETE FROM ai_qa")
+        project_db.commit()
+
+        # 先清理 WAL 文件，再 VACUUM 回收磁盘空间
+        project_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        import os
+        proj_db_path = os.path.join(multi_db.data_dir, f"{project_id}.db")
+        logger.info(f"[analysis.clearProjectCache] VACUUM 项目库 {project_id} (尺寸: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)...")
+        project_db.execute("VACUUM")
+        project_db.commit()
+        logger.info(f"[analysis.clearProjectCache] VACUUM 完成 (尺寸: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)")
+
+        # 清除主库中的任务（连带 runs/reports/history）
+        task_store = TaskStore(multi_db.main_db)
+        tasks = task_store.list_tasks(project_id)
+        deleted_count = 0
+        for task in tasks:
+            task_store.delete_task(task["id"])
+            deleted_count += 1
+
+        # VACUUM 主库
+        multi_db.main_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        main_db_path = os.path.join(multi_db.data_dir, "topoone.db")
+        logger.info(f"[analysis.clearProjectCache] VACUUM 主库 (尺寸: {os.path.getsize(main_db_path)/1024/1024:.1f} MB)...")
+        multi_db.main_db.execute("VACUUM")
+        multi_db.main_db.commit()
+        logger.info(f"[analysis.clearProjectCache] VACUUM 主库完成 (尺寸: {os.path.getsize(main_db_path)/1024/1024:.1f} MB)")
+
+        logger.info(
+            f"[analysis.clearProjectCache] project={project_id}, "
+            f"deleted {deleted_count} tasks, cleared all AST/analysis data"
+        )
+        return {
+            "projectId": project_id,
+            "deletedTasks": deleted_count,
+            "fileCount": file_count,
+        }
+
     @server.register("analysis.stopTask")
     def stop_task(task_id=None, taskId=None):
         tid = task_id or taskId
@@ -195,17 +257,17 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 return {"taskId": tid, "status": "error"}
 
             set_stop_flag(tid)
-            store.update_task_status(tid, "stopped")
+            store.update_task_status(tid, "cancelled")
 
         # 发布事件
         server.publish("task", "stopped", {
             "taskId": tid,
             "runId": task.get("last_run_id"),
-            "status": "stopped",
+            "status": "cancelled",
         })
 
         logger.info(f"[analysis.stopTask] task={tid}")
-        return {"taskId": tid, "status": "stopped"}
+        return {"taskId": tid, "status": "cancelled"}
 
     @server.register("analysis.reRunTask")
     async def re_run_task(task_id=None, taskId=None):

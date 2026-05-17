@@ -40,6 +40,7 @@ class PythonCallExtractor(CallGraphExtractor):
     
     # Python 函数定义的节点类型
     FUNCTION_DEFINITION_TYPES = {'function_definition', 'async_function_definition'}
+    CLASS_DEFINITION_TYPES = {'class_definition'}
     
     # Python 内置函数列表
     BUILTIN_FUNCTIONS = {
@@ -76,10 +77,10 @@ class PythonCallExtractor(CallGraphExtractor):
         
         
         # 构建全局函数定义映射
-        global_func_map = self._build_global_function_map(proj_id, graph_node_coll)
+        global_func_map = self._build_global_function_map_from_ast(nodes_by_file)
         
         # 构建全局类定义映射
-        global_class_map = self._build_global_class_map(proj_id, graph_node_coll)
+        global_class_map = self._build_global_class_map_from_ast(nodes_by_file)
         
         # 提取调用边
         call_edges = []
@@ -96,36 +97,12 @@ class PythonCallExtractor(CallGraphExtractor):
         
         return call_edges
     
-    def _build_global_function_map(self, proj_id: int, graph_node_coll) -> Dict[str, Dict]:
-        """构建全局函数定义映射"""
-        func_map = {}
-        func_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "func_name"},
-            {"func_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in func_nodes:
-            name = rec["func_name"]
-            func_map[name] = {
-                "file_id": rec["def_file_id"],
-                "node_id": rec["def_node_id"]
-            }
-        return func_map
-    
-    def _build_global_class_map(self, proj_id: int, graph_node_coll) -> Dict[str, Dict]:
-        """构建全局类定义映射"""
-        class_map = {}
-        class_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "class_name"},
-            {"class_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in class_nodes:
-            name = rec["class_name"]
-            class_map[name] = {
-                "file_id": rec["def_file_id"],
-                "node_id": rec["def_node_id"]
-            }
-        return class_map
-    
+
+
+    def extract_class_name(self, node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
+        """从类定义节点提取类名"""
+        return node.get("name") or (node.get("refs", [None])[0] if node.get("refs") else None)
+
     def _extract_file_calls(
         self,
         proj_id: int,

@@ -18,7 +18,6 @@ Java 调用图提取器
 """
 from typing import Dict, Any, Optional, List
 from .extractor_factory import CallGraphExtractor, register_call_extractor
-from .java_oop_resolver import JavaOOPMethodResolver
 
 
 @register_call_extractor('java')
@@ -27,102 +26,156 @@ class JavaCallExtractor(CallGraphExtractor):
     
     CALL_EXPRESSION_TYPES = {'method_invocation', 'object_creation_expression'}
     FUNCTION_DEFINITION_TYPES = {'method_declaration', 'constructor_declaration'}
+
+    # 继承/实现关系节点类型（用于构建类层次结构）
+    INHERITANCE_TYPES = {'extends_opt', 'extends_interfaces', 'super_interfaces', 'superclass'}
     
     def extract(self, proj_id: int, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
-
-
-        # 初始化 Java OOP 解析器
-        oop_resolver = JavaOOPMethodResolver(proj_id, graph_node_coll, base_node_coll)
+        # 构建全局方法定义映射（从 AST 节点中提取）
+        method_def_map = self._build_method_def_map(nodes_by_file)
 
         call_edges = []
         for file_id, nodes in nodes_by_file.items():
-            file_edges = self._extract_file_calls(proj_id, file_id, nodes, oop_resolver)
+            file_edges = self._extract_file_calls(proj_id, file_id, nodes, method_def_map)
             call_edges.extend(file_edges)
 
         return call_edges
-    
-    def _build_global_method_map(self, proj_id: int, graph_node_coll) -> Dict[str, Dict]:
+
+    def extract_inheritance_edges(self, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
         """
-        构建全局方法映射
-        
-        为了支持 Java 方法匹配，使用两种键：
-        1. 简单方法名 -> 所有同名方法（用于快速查找）
-        2. 文件 ID+ 方法名 -> 具体方法（用于精确匹配）
+        提取类的继承/实现关系边
+
+        Returns:
+            继承关系边列表，每条边包含:
+            - symbol_node_type: 'inherit_relation' 或 'implement_relation'
+            - child_class: 子类名
+            - parent_class: 父类/接口名
         """
-        method_map = {}
-        method_by_file = {}  # 按文件 ID 索引
+        class_hierarchy = self._build_class_hierarchy(nodes_by_file)
+        inheritance_edges = []
 
-        # 查询 Java 方法（symbol_node_type: method_name）
-        method_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "method_name"},
-            {"method_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in method_nodes:
-            name = rec["method_name"]
-            file_id = rec["def_file_id"]
-            node_id = rec["def_node_id"]
-            
-            # 简单方法名映射（可能有多个）
-            if name not in method_map:
-                method_map[name] = []
-            method_map[name].append({
-                "file_id": file_id,
-                "node_id": node_id
-            })
-            
-            # 文件 ID+ 方法名映射（精确）
-            key = f"{file_id}:{name}"
-            method_by_file[key] = {
-                "file_id": file_id,
-                "node_id": node_id
+        for class_name, hierarchy in class_hierarchy.items():
+            for parent in hierarchy.get("extends", []):
+                inheritance_edges.append({
+                    "symbol_node_type": "inherit_relation",
+                    "child_class": class_name,
+                    "parent_class": parent,
+                    "child_file_id": hierarchy["file_id"],
+                    "child_node_id": hierarchy["node_id"],
+                })
+            for iface in hierarchy.get("implements", []):
+                inheritance_edges.append({
+                    "symbol_node_type": "implement_relation",
+                    "child_class": class_name,
+                    "parent_class": iface,
+                    "child_file_id": hierarchy["file_id"],
+                    "child_node_id": hierarchy["node_id"],
+                })
+
+        return inheritance_edges
+
+    def _build_method_def_map(self, nodes_by_file: Dict[int, Dict[int, Dict]]) -> Dict[str, Dict]:
+        """从 AST 节点中构建方法定义映射：method_name -> {file_id, node_id}"""
+        method_map: Dict[str, Dict] = {}
+        for file_id, nodes in nodes_by_file.items():
+            for node_id, node in nodes.items():
+                if node.get("type") in self.FUNCTION_DEFINITION_TYPES:
+                    name = self.extract_function_name(node, nodes)
+                    if name and name not in method_map:
+                        method_map[name] = {
+                            "file_id": file_id,
+                            "node_id": node_id,
+                        }
+        return method_map
+
+    def _build_class_hierarchy(self, nodes_by_file: Dict[int, Dict[int, Dict]]) -> Dict[str, Dict]:
+        """
+        从 AST 节点中构建类继承/实现关系映射
+
+        Returns:
+            class_name -> {
+                'file_id': int,
+                'node_id': int,
+                'extends': [parent_class_names],
+                'implements': [interface_names],
             }
+        """
+        class_hierarchy: Dict[str, Dict] = {}
 
-        # 也查询 C/C++ 函数（symbol_node_type: func_name）
-        func_nodes = graph_node_coll.find(
-            {"proj_id": proj_id, "symbol_node_type": "func_name"},
-            {"func_name": 1, "def_file_id": 1, "def_node_id": 1, "_id": 0}
-        )
-        for rec in func_nodes:
-            name = rec["func_name"]
-            file_id = rec["def_file_id"]
-            node_id = rec["def_node_id"]
-            
-            if name not in method_map:
-                method_map[name] = []
-            method_map[name].append({
-                "file_id": file_id,
-                "node_id": node_id
-            })
-            
-            key = f"{file_id}:{name}"
-            method_by_file[key] = {
-                "file_id": file_id,
-                "node_id": node_id
-            }
+        for file_id, nodes in nodes_by_file.items():
+            for node_id, node in nodes.items():
+                if node.get("type") == "class_declaration":
+                    class_name = self.extract_function_name(node, nodes)
+                    if not class_name:
+                        continue
 
-        return {"by_name": method_map, "by_file_name": method_by_file}
+                    hierarchy = {
+                        "file_id": file_id,
+                        "node_id": node_id,
+                        "extends": [],
+                        "implements": [],
+                    }
+
+                    # 查找子节点中的继承/实现关系
+                    for child in nodes.values():
+                        child_scope = child.get("scope_node_id")
+                        # 检查是否是当前类的直接或间接子节点
+                        if self._is_descendant(child, node_id, nodes):
+                            if child.get("type") in ("extends_opt", "superclass"):
+                                parent_name = child.get("name")
+                                if parent_name:
+                                    hierarchy["extends"].append(parent_name)
+                            elif child.get("type") in ("extends_interfaces", "super_interfaces"):
+                                # 接口列表，从 refs 中提取
+                                refs_raw = child.get("refs", [])
+                                if isinstance(refs_raw, str):
+                                    try:
+                                        refs = json.loads(refs_raw)
+                                    except (json.JSONDecodeError, TypeError):
+                                        refs = []
+                                else:
+                                    refs = refs_raw
+                                if refs:
+                                    hierarchy["implements"].extend(refs)
+
+                    class_hierarchy[class_name] = hierarchy
+
+        return class_hierarchy
+
+    def _is_descendant(self, child: Dict, ancestor_id: int, all_nodes: Dict[int, Dict]) -> bool:
+        """检查 child 是否是 ancestor_id 的后代节点"""
+        scope = child.get("scope_node_id")
+        while scope is not None:
+            if scope == ancestor_id:
+                return True
+            parent = all_nodes.get(scope)
+            if not parent:
+                break
+            scope = parent.get("scope_node_id")
+        return False
     
+
     def _extract_file_calls(
         self,
         proj_id: int,
         file_id: int,
         nodes: Dict[int, Dict],
-        oop_resolver: JavaOOPMethodResolver
+        method_def_map: Dict[str, Dict],
     ) -> List[Dict[str, Any]]:
         """
         提取单个文件的调用边
-        
+
         Args:
             proj_id: 项目 ID
             file_id: 文件 ID
             nodes: 当前文件的 AST 节点映射
-            oop_resolver: Java OOP 方法解析器
-        
+            method_def_map: 全局方法定义映射
+
         Returns:
             调用边列表
         """
         call_edges = []
-        
+
         for node in nodes.values():
             if not self.is_call_expression(node):
                 continue
@@ -139,6 +192,9 @@ class JavaCallExtractor(CallGraphExtractor):
             if not caller_name:
                 continue
 
+            # 尝试解析 callee 定义位置
+            callee_info = method_def_map.get(callee_name)
+
             edge = {
                 "proj_id": proj_id,
                 "symbol_node_type": "call_relation",
@@ -148,21 +204,10 @@ class JavaCallExtractor(CallGraphExtractor):
                 "callee_name": callee_name,
                 "call_site_node_id": node["node_id"],
                 "call_site_file_id": file_id,
+                "callee_file_id": callee_info["file_id"] if callee_info else None,
+                "callee_node_id": callee_info["node_id"] if callee_info else None,
+                "callee_type": "method",
             }
-
-            # 使用 OOP 解析器解析方法调用
-            call_context = self._build_call_context(node, nodes)
-            callee_file_id, callee_node_id, callee_type = oop_resolver.resolve_method_call(
-                callee_name=callee_name,
-                caller_file_id=file_id,
-                call_context=call_context
-            )
-
-            edge.update({
-                "callee_file_id": callee_file_id,
-                "callee_node_id": callee_node_id,
-                "callee_type": callee_type
-            })
 
             call_edges.append(edge)
 
@@ -204,14 +249,30 @@ class JavaCallExtractor(CallGraphExtractor):
         - 对于简单调用：System.getenv()
           refs = ['System', 'getenv']
           最后一个标识符是方法名
+
+        - 对于全限定名调用：java.util.Objects.requireNonNull(...)
+          refs = ['java', 'util', 'Objects', 'requireNonNull']
+          最后一个标识符是方法名，但需要 scoped_identifier 来保留完整路径
         """
+        import json
+
         # 首先尝试从 refs 提取
-        refs = call_node.get("refs", [])
+        refs_raw = call_node.get("refs", [])
+        # 从 SQLite 读取的 refs 是 JSON 字符串，需要解析
+        if isinstance(refs_raw, str):
+            try:
+                refs = json.loads(refs_raw)
+            except (json.JSONDecodeError, TypeError):
+                refs = []
+        else:
+            refs = refs_raw
+
         if refs and len(refs) > 0:
             # 关键修复：refs 数组包含调用链上的所有标识符
             # 最后一个标识符才是当前调用的方法名
             # 例如：refs = ['DashScopeApi', 'builder'] -> 方法名是 'builder'
             #      refs = ['System', 'getenv'] -> 方法名是 'getenv'
+            #      refs = ['java', 'util', 'Objects', 'requireNonNull'] -> 方法名是 'requireNonNull'
             last_ref = refs[-1]
             if last_ref and len(last_ref) > 0:  # 确保非空
                 return last_ref
@@ -221,8 +282,14 @@ class JavaCallExtractor(CallGraphExtractor):
         if name:
             return name
 
-        # 从子节点中查找 identifier
+        # 从子节点中查找 scoped_identifier（全限定名，优先级高于 identifier）
         call_id = call_node["node_id"]
+        for node in all_nodes.values():
+            if (node.get("type") == "scoped_identifier" and
+                node.get("scope_node_id") == call_id):
+                return node.get("name")
+
+        # 从子节点中查找 identifier
         for node in all_nodes.values():
             if (node.get("type") == "identifier" and
                 node.get("scope_node_id") == call_id):
@@ -233,26 +300,35 @@ class JavaCallExtractor(CallGraphExtractor):
     def find_enclosing_function(self, node: Dict, all_nodes: Dict[int, Dict]) -> Optional[Dict]:
         """
         查找包含该节点的函数定义
-        
+
         Java 中方法可以嵌套在类中，所以需要查找 method_declaration 或 constructor_declaration
+        也支持 constructor_body 作为有效的作用域
         """
         scope = node.get("scope_node_id")
         while scope is not None and scope != 1 and scope in all_nodes:
             parent_node = all_nodes[scope]
             parent_type = parent_node.get("type")
-            
+
             # Java 使用 method_declaration 和 constructor_declaration
             if parent_type in self.FUNCTION_DEFINITION_TYPES:
                 return parent_node
-            
-            # 如果到了 class/interface/enum 级别，停止向上查找
+
+            # constructor_body 内的调用也属于构造函数
+            if parent_type == "constructor_body":
+                # 向上查找 constructor_declaration
+                grand_scope = parent_node.get("scope_node_id")
+                if grand_scope and grand_scope in all_nodes:
+                    grand_parent = all_nodes[grand_scope]
+                    if grand_parent.get("type") == "constructor_declaration":
+                        return grand_parent
+
+            # 如果到了 class/interface/enum 级别，继续向上查找（内部类场景）
             if parent_type in {'class_declaration', 'interface_declaration', 'enum_declaration'}:
-                # 继续查找，因为方法可能嵌套在内部类中
                 pass
-            
+
             scope = parent_node.get("scope_node_id")
         return None
-    
+
     def extract_function_name(self, func_node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
         """
         从函数定义节点提取函数名

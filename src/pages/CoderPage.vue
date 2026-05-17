@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { onMounted, nextTick, ref } from 'vue'
+
+defineOptions({
+    name: 'CoderPage',
+})
 import { useI18n } from 'vue-i18n'
 import {
   ChatBubbleLeftRightIcon,
@@ -93,7 +97,7 @@ function scrollToBottom() {
     <!-- 输入区 -->
     <ChatInput
       :mode="chatStore.inputMode"
-      :model-text="`${chatStore.modelConfig.provider} / ${chatStore.modelConfig.model}`"
+      :model-text="chatStore.modelConfig ? `${chatStore.modelConfig.provider} / ${chatStore.modelConfig.model}` : ''"
       :disabled="!chatStore.activeSessionId"
       @update:mode="chatStore.setMode"
       @input="chatStore.setInputText"

@@ -17,12 +17,14 @@ IMPORTANT_NODE_TYPES_SET = {
     # === 顶层结构 ===
     'program',                    # 整个 Java 文件
     'compilation_unit',           # 编译单元
-    
+
     # === 包和导入 ===
     'package_declaration',        # package 声明
+    'package_identifier',         # 包标识符（package com.example.foo 中的 com/example/foo）
     'import_declaration',         # import 声明
+    'import',                     # import 关键字节点
     'static_import',              # static import
-    
+
     # === 类/接口/枚举 ===
     'class_declaration',          # class 声明
     'class_body',                 # class 体
@@ -32,17 +34,25 @@ IMPORTANT_NODE_TYPES_SET = {
     'enum_body',                  # enum 体
     'enum_constant',              # enum 常量
     'record_declaration',         # Java 14+ record
-    
+
+    # === 继承/实现关系（高风险缺失） ===
+    'extends_opt',                # extends 子句（类继承）
+    'extends_interfaces',         # extends 接口列表
+    'super_interfaces',           # implements 接口列表
+    'superclass',                 # 父类类型引用
+
     # === 成员声明 ===
     'field_declaration',          # 字段声明
     'variable_declarator',        # 变量声明器
     'method_declaration',         # 方法声明
     'method_body',                # 方法体
     'constructor_declaration',    # 构造函数声明
+    'constructor_body',           # 构造函数体（高风险缺失）
     'initializer_block',          # 初始化块
     'static_initializer',         # 静态初始化块
-    
+
     # === 参数和类型 ===
+    'formal_parameters',          # 形参列表容器（高风险缺失）
     'formal_parameter',           # 形式参数
     'spread_parameter',           # 可变参数 (String... args)
     'receiver_parameter',         # 接收者参数
@@ -51,7 +61,7 @@ IMPORTANT_NODE_TYPES_SET = {
     'type_arguments',             # 类型参数 (List<String>)
     'wildcard',                   # 通配符 (?)
     'type_bound',                 # 类型边界 (extends)
-    
+
     # === 类型相关 ===
     'type_identifier',            # 类型标识符
     'generic_type',               # 泛型类型
@@ -61,12 +71,13 @@ IMPORTANT_NODE_TYPES_SET = {
     'floating_point_type',        # 浮点类型
     'boolean_type',               # boolean 类型
     'void_type',                  # void 类型
-    
+
     # === 标识符和字面量 ===
     'identifier',                 # 标识符
     'field_identifier',           # 字段标识符
     'type_identifier',            # 类型标识符
     'label_identifier',           # 标签标识符
+    'scoped_identifier',          # 全限定名（高风险缺失，如 java.util.List）
     'null_literal',               # null
     'boolean_literal',            # true/false
     'string_literal',             # 字符串字面量
@@ -79,7 +90,7 @@ IMPORTANT_NODE_TYPES_SET = {
     'floating_point_literal',     # 浮点数
     'decimal_floating_point_literal',
     'hex_floating_point_literal',
-    
+
     # === 表达式 ===
     'assignment_expression',      # 赋值表达式
     'binary_expression',          # 二元表达式
@@ -89,10 +100,12 @@ IMPORTANT_NODE_TYPES_SET = {
     'instanceof_expression',      # instanceof
     'ternary_expression',         # 三元表达式 (?:)
     'parenthesized_expression',   # 括号表达式
-    
+
     # === 方法调用和对象创建 ===
     'method_invocation',          # 方法调用
+    'argument_list',              # 参数列表（高风险缺失）
     'object_creation_expression', # new 对象
+    'new',                        # new 关键字（高风险缺失）
     'array_creation_expression',  # new 数组
     'qualified_name',             # 限定名 (a.b.c)
     'field_access',               # 字段访问 (.field)
@@ -100,11 +113,11 @@ IMPORTANT_NODE_TYPES_SET = {
     'method_reference',           # 方法引用 (::)
     'lambda_expression',          # Lambda 表达式
     'lambda_parameters',          # Lambda 参数
-    
+
     # === 特殊对象 ===
     'super',                      # super
     'this',                       # this
-    
+
     # === 语句 ===
     'statement',
     'block',                      # 代码块 {}
@@ -131,7 +144,10 @@ IMPORTANT_NODE_TYPES_SET = {
     'catch_clause',               # catch 子句
     'finally_clause',             # finally 子句
     'synchronized_statement',     # synchronized
-    
+
+    # === 异常声明 ===
+    'throws',                     # throws 子句（中风险缺失）
+
     # === 注解 ===
     'annotation',                 # 注解 (@Annotation)
     'marker_annotation',          # 标记注解
@@ -140,17 +156,15 @@ IMPORTANT_NODE_TYPES_SET = {
     'annotation_type_declaration', # 注解类型声明
     'annotation_type_body',
     'annotation_type_element_declaration',
-    
+
     # === 修饰符 ===
     'modifiers',                  # 修饰符
     'public', 'protected', 'private',
     'static', 'final', 'abstract', 'synchronized',
     'volatile', 'transient', 'native',
     'strictfp',
-    
+
     # === 其他 ===
-    'extends_interfaces',         # extends 接口
-    'super_interfaces',           # implements 接口
     'permits',                    # permits (sealed class)
     'sealed_class',               # 密封类
     'non_sealed_class',           # 非密封类
@@ -248,39 +262,50 @@ NODE_TYPE_TO_OP = {
     'record_declaration': 'def',
     'method_declaration': 'def',
     'constructor_declaration': 'def',
+    'constructor_body': 'def',
     'field_declaration': 'def',
     'variable_declarator': 'def',
     'formal_parameter': 'def',
+    'formal_parameters': 'def',
     'enum_constant': 'def',
     'annotation_type_declaration': 'def',
     'annotation_type_element_declaration': 'def',
     'package_declaration': 'def',
-    
+
     # === 导入操作 ===
     'import_declaration': 'import',
+    'import': 'import',
     'static_import': 'import',
-    
+
     # === 调用操作 ===
     'method_invocation': 'call',
     'object_creation_expression': 'call',  # new
+    'new': 'call',
     'array_creation_expression': 'call',
     'method_reference': 'call',
-    
+
     # === 赋值操作 ===
     'assignment_expression': 'assign',
     'variable_declarator': 'assign',  # 声明时初始化
-    
+
     # === 算术操作 ===
     'binary_expression': 'arith',
     'unary_expression': 'arith',
     'update_expression': 'arith',
-    
+
     # === 类型操作 ===
     'cast_expression': 'cast',
     'instanceof_expression': 'instanceof',
     'type_parameters': 'type',
     'type_arguments': 'type',
-    
+    'scoped_identifier': 'type_ref',  # 全限定名引用
+
+    # === 继承/实现关系 ===
+    'extends_opt': 'extends',
+    'extends_interfaces': 'implements',
+    'super_interfaces': 'implements',
+    'superclass': 'extends',
+
     # === 控制流 ===
     'return_statement': 'return',
     'if_statement': 'control',
@@ -292,21 +317,25 @@ NODE_TYPE_TO_OP = {
     'case_statement': 'control',
     'break_statement': 'control',
     'continue_statement': 'control',
-    
+
     # === 异常处理 ===
     'throw_statement': 'throw',
+    'throws': 'throws',
     'try_statement': 'try',
     'catch_clause': 'catch',
     'finally_clause': 'finally',
-    
+
     # === 条件操作 ===
     'ternary_expression': 'cond',
-    
+
     # === Lambda ===
     'lambda_expression': 'lambda',
 
     # === 同步 ===
     'synchronized_statement': 'sync',
+
+    # === 参数列表 ===
+    'argument_list': 'arg_list',
 }
 
 # ============================================================================
@@ -316,20 +345,34 @@ NODE_TYPE_TO_OP = {
 NAME_EXTRACT_RULES = {
     # 方法定义
     "method_declaration": ["identifier"],
-    "method_invocation": ["identifier"],
-    
+    "method_invocation": ["identifier", "scoped_identifier"],
+    "constructor_declaration": ["identifier"],
+
     # 类定义
     "class_declaration": ["identifier"],
     "interface_declaration": ["identifier"],
     "enum_declaration": ["identifier"],
-    
+    "record_declaration": ["identifier"],
+
     # 变量/字段定义
     "variable_declarator": ["identifier"],
     "field_declaration": ["identifier"],
-    
+    "formal_parameter": ["identifier"],
+
     # 导入
-    "import_declaration": ["identifier"],
-    "package_declaration": ["identifier"],
+    "import_declaration": ["identifier", "scoped_identifier"],
+    "package_declaration": ["identifier", "scoped_identifier"],
+
+    # 全限定名
+    "scoped_identifier": ["identifier"],
+
+    # 对象创建
+    "object_creation_expression": ["type_identifier", "scoped_identifier", "generic_type"],
+
+    # 继承/实现
+    "extends_opt": ["type_identifier", "scoped_identifier"],
+    "extends_interfaces": ["type_identifier", "scoped_identifier"],
+    "super_interfaces": ["type_identifier", "scoped_identifier"],
 }
 
 # 创建配置对象
