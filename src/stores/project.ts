@@ -100,6 +100,8 @@ export const useProjectStore = defineStore('project', () => {
         console.warn('Failed to add allowed dir:', e)
       }
     }
+    // 默认打开任务列表 tab
+    openTaskListTab()
   }
 
   function deselectProject() {
@@ -169,6 +171,15 @@ export const useProjectStore = defineStore('project', () => {
 
   async function checkFileChanges(id: string) {
     return await ipc.project.checkFileChanges(id)
+  }
+
+  async function updateProjectMeta(id: string, meta: Record<string, any>) {
+    const updated = await ipc.project.updateMeta(id, meta)
+    if (updated) {
+      const idx = projects.value.findIndex(p => p.id === id)
+      if (idx >= 0) projects.value[idx] = updated
+      return updated
+    }
   }
 
   async function initSampleData() {
@@ -391,6 +402,7 @@ export const useProjectStore = defineStore('project', () => {
     getFileTree,
     updatePath,
     checkFileChanges,
+    updateProjectMeta,
     initSampleData,
     clearSampleData,
     openFileTab,

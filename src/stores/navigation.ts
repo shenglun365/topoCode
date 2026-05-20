@@ -25,7 +25,7 @@ export const useNavigationStore = defineStore('navigation', () => {
       user: '设置',
     }
     breadcrumbs.value = [
-      { label: 'TopoOne', page: 'home' },
+      { label: 'TopoCode', page: 'home' },
       { label: pageNames[page], page },
     ]
   }

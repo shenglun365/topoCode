@@ -4,13 +4,13 @@ import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
   EllipsisVerticalIcon,
-  ArrowPathIcon,
   PencilIcon,
   TrashIcon,
-  ArrowDownTrayIcon,
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
   ArchiveBoxXMarkIcon,
+  StarIcon,
+  BookmarkSquareIcon,
 } from '@heroicons/vue/24/outline'
 import type { Project } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
@@ -30,12 +30,20 @@ const emit = defineEmits<{
 // 菜单状态
 const menuVisible = ref(false)
 const menuPosition = ref({ x: 0, y: 0 })
-const isSyncing = ref(false)
 
 // 确认弹窗状态
 const showDeleteConfirm = ref(false)
 const showClearCacheConfirm = ref(false)
 const isClearingCache = ref(false)
+
+// 修改名称弹窗
+const showRenameDialog = ref(false)
+const newNameInput = ref('')
+
+// 路径变更确认弹窗
+const showPathConfirm = ref(false)
+const pendingNewPath = ref('')
+const pathConfirmMessage = ref('')
 
 // 示例项目
 const isSample = computed(() => !!props.project.isSample)
@@ -77,36 +85,103 @@ function showMenu(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
   menuVisible.value = true
-  menuPosition.value = { x: e.clientX, y: e.clientY }
+
+  // 菜单尺寸（约 180x240）
+  const menuW = 190
+  const menuH = 260
+  let x = e.clientX
+  let y = e.clientY
+
+  // 右边界：超出则左移
+  if (x + menuW > window.innerWidth) x = window.innerWidth - menuW - 8
+  // 下边界：超出则上移
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 8
+
+  // 保底不超出视口
+  if (x < 4) x = 4
+  if (y < 4) y = 4
+
+  menuPosition.value = { x, y }
 }
 
 function hideMenu() {
   menuVisible.value = false
 }
 
-async function handleSync() {
-  hideMenu()
-  isSyncing.value = true
-  try {
-    await projectStore.syncProject(props.project.id)
-  } finally {
-    isSyncing.value = false
+// 收藏/置顶切换
+async function toggleFavorite() {
+  const newFav = props.project.favorite ? 0 : 1
+  await projectStore.updateProjectMeta(props.project.id, { favorite: newFav })
+}
+
+async function togglePinned() {
+  if (props.project.pinned) {
+    // 取消置顶
+    await projectStore.updateProjectMeta(props.project.id, { pinned: 0 })
+  } else {
+    // 检查置顶数量（最多10个）
+    const pinnedCount = projectStore.projects.filter(p => p.pinned).length
+    if (pinnedCount >= 10) {
+      alert(t('project.maxPinnedReached'))
+      return
+    }
+    await projectStore.updateProjectMeta(props.project.id, { pinned: 1 })
   }
 }
 
+// 修改名称
+function startRename() {
+  hideMenu()
+  newNameInput.value = props.project.name
+  showRenameDialog.value = true
+}
+
+async function confirmRename() {
+  const newName = newNameInput.value.trim()
+  if (!newName) return
+  if (newName === props.project.name) {
+    showRenameDialog.value = false
+    return
+  }
+  await projectStore.updateProjectMeta(props.project.id, { name: newName })
+  showRenameDialog.value = false
+}
+
+// 修改路径（带主目录名校验）
 async function handleChangePath() {
   hideMenu()
-  // 打开文件夹选择
   if (window.api && window.api.dialog) {
     const path = await window.api.dialog.openDirectory()
     if (path) {
-      try {
-        await projectStore.updatePath(props.project.id, path)
-        await projectStore.loadProjects()
-      } catch (err: any) {
-        console.error('Failed to update path:', err)
+      // 提取新路径的主目录名
+      const newDirName = path.split('/').pop() || path
+      const currentName = props.project.name
+
+      // 如果新目录名与当前项目名称不一致，弹窗确认
+      if (newDirName !== currentName) {
+        pendingNewPath.value = path
+        pathConfirmMessage.value = `${t('project.pathMismatchHint')}\n\n${t('project.currentName')}: ${currentName}\n${t('project.newDirName')}: ${newDirName}\n\n${t('project.confirmPathChange')}`
+        showPathConfirm.value = true
+      } else {
+        // 一致则直接更新
+        try {
+          await projectStore.updatePath(props.project.id, path)
+          await projectStore.loadProjects()
+        } catch (err: any) {
+          console.error('Failed to update path:', err)
+        }
       }
     }
+  }
+}
+
+async function confirmPathChange() {
+  showPathConfirm.value = false
+  try {
+    await projectStore.updatePath(props.project.id, pendingNewPath.value)
+    await projectStore.loadProjects()
+  } catch (err: any) {
+    console.error('Failed to update path:', err)
   }
 }
 
@@ -120,12 +195,6 @@ async function confirmDelete() {
   await projectStore.removeProject(props.project.id)
 }
 
-async function handleExport() {
-  hideMenu()
-  // TODO: 导出对话框
-  console.log('Export project:', props.project.id)
-}
-
 async function handleClearCache() {
   hideMenu()
   showClearCacheConfirm.value = true
@@ -136,7 +205,6 @@ async function confirmClearCache() {
   isClearingCache.value = true
   try {
     const result = await projectStore.clearProjectCache(props.project.id)
-    // 反馈每个表删除的记录数
     console.group(`${t('project.clearCache')} 完成`)
     console.log(`  删除 ${result.deletedTasks} 个分析任务`)
     console.log(`  保留 ${result.fileCount} 个源文件`)
@@ -170,25 +238,27 @@ async function handleCheckChanges() {
   }
 }
 
-// 关闭菜单（点击外部）
-function onDocumentClick() {
-  hideMenu()
-}
 </script>
 
 <template>
   <div
     class="project-card card card-clickable"
+    :class="{ 'card-pinned': project.pinned }"
     @click="emit('select', project)"
     @contextmenu="showMenu"
   >
     <!-- 头部: 名称 + 语言 + 菜单按钮 -->
     <div class="flex justify-between items-center" style="margin-bottom:8px;">
       <div class="flex items-center gap-2" style="min-width:0;">
+        <!-- 置顶/收藏图标 -->
+        <BookmarkSquareIcon v-if="project.pinned" class="w-4 h-4 text-accent shrink-0" :title="t('project.pinned')" />
+        <StarIcon v-if="project.favorite" class="w-3.5 h-3.5 text-yellow-400 shrink-0" :title="t('project.favorited')" />
         <FolderIcon class="w-4 h-4 text-accent shrink-0" />
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
         </span>
+        <!-- 分组 badge -->
+        <span v-if="project.group" class="badge badge-purple" style="font-size:8px;">{{ project.group }}</span>
         <!-- 示例 badge -->
         <span v-if="isSample" class="badge badge-blue" style="font-size:8px;">{{ t('common.new') }}</span>
         <!-- 状态提示 -->
@@ -252,24 +322,35 @@ function onDocumentClick() {
         class="context-menu"
         :style="{ left: menuPosition.x + 'px', top: menuPosition.y + 'px' }"
         @click.stop
+        @mouseleave="hideMenu"
       >
+        <!-- 收藏/置顶 -->
+        <div class="context-menu-item" @click="toggleFavorite">
+          <StarIcon class="w-4 h-4" />
+          <span>{{ project.favorite ? t('project.unfavorite') : t('project.favorite') }}</span>
+        </div>
+        <div class="context-menu-item" @click="togglePinned">
+          <BookmarkSquareIcon class="w-4 h-4" />
+          <span>{{ project.pinned ? t('project.unpin') : t('project.pin') }}</span>
+        </div>
+        <div class="context-menu-divider"></div>
+        <!-- 修改名称 -->
+        <div class="context-menu-item" @click="startRename">
+          <PencilIcon class="w-4 h-4" />
+          <span>{{ t('project.rename') }}</span>
+        </div>
+        <!-- 修改路径 -->
         <div class="context-menu-item" @click="handleChangePath">
           <PencilIcon class="w-4 h-4" />
           <span>{{ t('project.changePath') }}</span>
         </div>
+        <!-- 检查变更 -->
         <div class="context-menu-item" @click="handleCheckChanges">
           <MagnifyingGlassIcon class="w-4 h-4" />
           <span>{{ t('project.checkChanges') }}</span>
         </div>
-        <div class="context-menu-item" @click="handleSync" :class="{ disabled: isSyncing }">
-          <ArrowPathIcon class="w-4 h-4" :class="{ 'animate-spin': isSyncing }" />
-          <span>{{ isSyncing ? t('project.syncing') : t('common.sync') }}</span>
-        </div>
-        <div class="context-menu-item" @click="handleExport">
-          <ArrowDownTrayIcon class="w-4 h-4" />
-          <span>{{ t('common.export') }}</span>
-        </div>
         <div class="context-menu-divider"></div>
+        <!-- 清除缓存 -->
         <div
           v-if="!isSample"
           class="context-menu-item context-menu-item-warning"
@@ -279,6 +360,7 @@ function onDocumentClick() {
           <span>{{ t('project.clearCache') }}</span>
         </div>
         <div class="context-menu-divider"></div>
+        <!-- 删除 -->
         <div
           v-if="!isSample"
           class="context-menu-item context-menu-item-danger"
@@ -290,11 +372,11 @@ function onDocumentClick() {
       </div>
     </Teleport>
 
-    <!-- 全局点击关闭菜单 -->
+    <!-- 点击卡片其他区域关闭菜单 -->
     <div
       v-if="menuVisible"
       class="context-menu-backdrop"
-      @click="onDocumentClick"
+      @click="hideMenu"
     ></div>
 
     <!-- 删除确认弹窗 -->
@@ -315,11 +397,38 @@ function onDocumentClick() {
       :confirm-label="t('project.clearCache')"
       @confirm="confirmClearCache"
     />
+
+    <!-- 修改名称弹窗 -->
+    <ConfirmDialog
+      v-model:visible="showRenameDialog"
+      :title="t('project.rename')"
+      variant="info"
+      @confirm="confirmRename"
+    >
+      <template #message>
+        <input
+          v-model="newNameInput"
+          class="rename-input"
+          :placeholder="t('project.projectNamePlaceholder')"
+          @keydown.enter="confirmRename"
+          autofocus
+        />
+      </template>
+    </ConfirmDialog>
+
+    <!-- 路径变更确认弹窗 -->
+    <ConfirmDialog
+      v-model:visible="showPathConfirm"
+      :title="t('project.changePath')"
+      :message="pathConfirmMessage"
+      variant="warning"
+      :confirm-label="t('project.confirmUpdate')"
+      @confirm="confirmPathChange"
+    />
   </div>
 </template>
 
 <script lang="ts">
-// 语言 badge 颜色映射
 function languageBadge(lang: string): string {
   const map: Record<string, string> = {
     TypeScript: 'badge-blue',
@@ -340,6 +449,10 @@ function languageBadge(lang: string): string {
   position: relative;
 }
 
+.project-card.card-pinned {
+  border: 1px solid var(--accent);
+}
+
 .bg-success .progress-bar-fill {
   background: var(--success);
 }
@@ -351,6 +464,23 @@ function languageBadge(lang: string): string {
 
 .project-card:hover .card-menu-btn {
   opacity: 1;
+}
+
+.rename-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  margin-top: 8px;
+}
+
+.rename-input:focus {
+  border-color: var(--accent);
 }
 </style>
 

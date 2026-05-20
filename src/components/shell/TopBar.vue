@@ -72,7 +72,7 @@ function closeMenu() {
       <!-- 产品 Logo -->
       <div class="menu-bar-logo">
         <span class="logo-icon">◆</span>
-        <span class="logo-text">TopoOne</span>
+        <span class="logo-text">TopoCode</span>
       </div>
 
       <!-- 通用菜单 -->

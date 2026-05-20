@@ -431,14 +431,14 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
 
         if result.get("stopped"):
             task_store.update_task_status(task_id, "cancelled",
-                                          progress=result.get("progress", 0))
+                                          progress=result.get("progress", 0), error="")
             task_store.finish_run(run_id, "cancelled")
             if server:
                 server.publish("task", "stopped", {
                     "taskId": task_id, "runId": run_id, "status": "cancelled",
                 })
         else:
-            task_store.update_task_status(task_id, "done", progress=100)
+            task_store.update_task_status(task_id, "done", progress=100, error="")
             task_store.finish_run(run_id, "done")
             if server:
                 server.publish("task", "complete", {

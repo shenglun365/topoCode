@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "TopoOne - 源码架构分析与可视化教学工具",
+  "description": "TopoCode - 源码架构分析与学习工具",
   "main": "./dist-electron/main.js",
   "author": "TopoCodeProj Team",
   "license": "MIT",
@@ -106,8 +106,8 @@
   },
   "homepage": "https://github.com/topocode/topoone-ui#readme",
   "build": {
-    "appId": "com.topoone.ui",
-    "productName": "TopoOne",
+    "appId": "com.topocode.ui",
+    "productName": "TopoCode",
     "copyright": "Copyright © 2026 TopoCodeProj Team",
     "directories": {
       "output": "release",
@@ -151,7 +151,7 @@
       ]
     },
     "dmg": {
-      "title": "TopoOne UI",
+      "title": "TopoCode UI",
       "icon": "build/icon.icns",
       "background": "build/dmg-bg.png"
     },
@@ -180,7 +180,7 @@
       "installerHeaderIcon": "build/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "TopoOne UI"
+      "shortcutName": "TopoCode UI"
     },
     "linux": {
       "icon": "build/icon.png",

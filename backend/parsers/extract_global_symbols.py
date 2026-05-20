@@ -8,18 +8,20 @@ import os
 from collections import defaultdict
 from typing import Dict, List, Any, Optional
 
-from parsers.symbol_parser.c_family_handler import CFamilyHandler
+from parsers.symbol_parser.language_handlers import get_handler_for_extension
 from parsers.db_adapter import SQLiteAdapter
 
 logger = logging.getLogger(__name__)
 
 
 def detect_language_handler(filename: str):
-    """根据文件扩展名返回对应的语言处理器"""
-    ext = filename.split('.')[-1].lower() if '.' in filename else ''
-    if ext in ('c', 'h', 'cpp', 'cc', 'hpp', 'cxx'):
-        return CFamilyHandler()
-    return CFamilyHandler()  # 默认
+    """
+    根据文件扩展名返回对应的语言处理器
+    
+    实现真正的文件级语言分发，各语言独立隔离。
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    return get_handler_for_extension(ext)
 
 
 def extract_java_symbols(file_id: str, nodes: Dict[str, Dict],
@@ -168,58 +170,66 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
             continue
 
         ext = os.path.splitext(filename)[1].lower()
+        handler = detect_language_handler(filename)
 
+        # 按语言分类统计
         if ext == '.java':
             java_count += 1
-            extract_java_symbols(file_id, nodes, global_defs, class_defs)
         elif ext in ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']:
             ts_js_count += 1
-            lang = 'typescript' if ext in ('.ts', '.tsx', '.mts') else 'javascript'
-            extract_typescript_symbols(file_id, nodes, global_defs, class_defs, lang)
         else:
             c_family_count += 1
-            handler = detect_language_handler(filename)
 
-            for node in nodes.values():
-                node_type = node.get("type")
-                if node_type in handler.preproc_node_types:
-                    macro_name = handler.extract_macro_name(node, nodes)
-                    if macro_name:
-                        macro_records.append({
-                            "file_id": file_id,
-                            "symbol_node_type": "macro_name",
-                            "macro_name": macro_name,
-                            "def_file_id": file_id,
-                            "def_node_id": str(node["node_id"]),
-                            "start_line": str(node["start"]),
-                            "end_line": str(node["end"]),
-                        })
-                elif node_type in ("function_definition", "method_definition"):
-                    # 同时处理自由函数和类方法
-                    func_name = handler.extract_function_name(node, nodes)
-                    if func_name:
-                        global_defs.append({
-                            "file_id": file_id,
-                            "symbol_node_type": "func_name",
-                            "func_name": func_name,
-                            "def_file_id": file_id,
-                            "def_node_id": str(node["node_id"]),
-                            "start_line": str(node["start"]),
-                            "end_line": str(node["end"])
-                        })
-                elif node_type in ("class_specifier", "struct_specifier"):
-                    # 提取 C++ 类/结构体
-                    class_name = handler.extract_class_name(node, nodes)
-                    if class_name:
-                        class_defs.append({
-                            "file_id": file_id,
-                            "symbol_node_type": "class_name",
-                            "class_name": class_name,
-                            "def_file_id": file_id,
-                            "def_node_id": str(node["node_id"]),
-                            "start_line": str(node["start"]),
-                            "end_line": str(node["end"])
-                        })
+        # 统一的符号提取逻辑 — 各语言处理器独立处理
+        for node in nodes.values():
+            node_type = node.get("type")
+
+            # 预处理宏（仅 C 家族支持）
+            if node_type in handler.preproc_node_types:
+                macro_name = handler.extract_macro_name(node, nodes)
+                if macro_name:
+                    macro_records.append({
+                        "file_id": file_id,
+                        "symbol_node_type": "macro_name",
+                        "macro_name": macro_name,
+                        "def_file_id": file_id,
+                        "def_node_id": str(node["node_id"]),
+                        "start_line": str(node["start"]),
+                        "end_line": str(node["end"]),
+                    })
+
+            # 函数/方法定义
+            elif node_type in ("function_definition", "method_declaration", "constructor_declaration"):
+                func_name = handler.extract_function_name(node, nodes)
+                if func_name:
+                    # Java 方法使用 method_name，其他语言使用 func_name
+                    symbol_type = "method_name" if ext == '.java' else "func_name"
+                    global_defs.append({
+                        "file_id": file_id,
+                        "symbol_node_type": symbol_type,
+                        "func_name": func_name if symbol_type == "func_name" else None,
+                        "method_name": func_name if symbol_type == "method_name" else None,
+                        "def_file_id": file_id,
+                        "def_node_id": str(node["node_id"]),
+                        "start_line": str(node["start"]),
+                        "end_line": str(node["end"])
+                    })
+
+            # 类/接口/枚举定义
+            elif node_type in ("class_specifier", "struct_specifier", "class_declaration",
+                              "interface_declaration", "enum_declaration",
+                              "interface_declaration", "type_alias_declaration"):
+                class_name = handler.extract_class_name(node, nodes)
+                if class_name:
+                    class_defs.append({
+                        "file_id": file_id,
+                        "symbol_node_type": "class_name",
+                        "class_name": class_name,
+                        "def_file_id": file_id,
+                        "def_node_id": str(node["node_id"]),
+                        "start_line": str(node["start"]),
+                        "end_line": str(node["end"])
+                    })
 
     # 写入 graph_node
     all_records = macro_records + global_defs + class_defs

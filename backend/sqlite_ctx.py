@@ -45,7 +45,10 @@ class SQLiteContext:
         """执行 SQL — 写操作自动提交，读操作不提交"""
         cursor = self.conn.execute(sql, params)
         # 仅对写操作提交事务，避免 SELECT 等读操作触发无意义的 commit
-        if sql.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CREATE', 'DROP', 'REPLACE')):
+        upper_sql = sql.strip().upper()
+        if upper_sql.startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CREATE', 'DROP', 'REPLACE')):
+            self.conn.commit()
+        elif upper_sql == 'COMMIT':
             self.conn.commit()
         return cursor
 
@@ -59,6 +62,10 @@ class SQLiteContext:
         cursor = self.conn.execute(sql, params)
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def executemany(self, sql: str, params_list):
+        """批量执行 SQL（用于批量插入）"""
+        self.conn.executemany(sql, params_list)
 
     def commit(self):
         """提交事务（用于 executemany 等不自动提交的场景）"""
@@ -116,6 +123,10 @@ MAIN_DB_TABLES_SQL = """
         needs_resync INTEGER DEFAULT 0,
         has_file_changes INTEGER DEFAULT 0,
         is_sample INTEGER DEFAULT 0,
+        "group" TEXT DEFAULT '',
+        favorite INTEGER DEFAULT 0,
+        pinned INTEGER DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
         last_sync TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
@@ -731,11 +742,17 @@ class MultiDBManager:
             ],
             "analysis_tasks_misc": [  # 通过 analysis_tasks 表执行
             ],
+            "projects": [
+                ("group", "TEXT DEFAULT ''"),
+                ("favorite", "INTEGER DEFAULT 0"),
+                ("pinned", "INTEGER DEFAULT 0"),
+                ("sort_order", "INTEGER DEFAULT 0"),
+            ],
         }
         for table, columns in columns_to_add.items():
             for col_name, col_type in columns:
                 try:
-                    self.main_db.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+                    self.main_db.execute(f'ALTER TABLE {table} ADD COLUMN "{col_name}" {col_type}')
                 except Exception:
                     pass  # 列已存在，忽略
 
@@ -770,7 +787,7 @@ class MultiDBManager:
         ]
         for col_name, col_type in columns_to_add:
             try:
-                project_db.execute(f"ALTER TABLE source_files ADD COLUMN {col_name} {col_type}")
+                project_db.execute(f'ALTER TABLE source_files ADD COLUMN "{col_name}" {col_type}')
             except Exception:
                 pass  # 列已存在，忽略
         project_db.conn.commit()

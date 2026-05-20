@@ -102,6 +102,10 @@ function createRealIPC(): IPCAPI {
       checkPathValidity: async (id: string) => {
         return await api.project.checkPathValidity(id)
       },
+      updateMeta: async (id: string, meta: Record<string, any>) => {
+        const result = await api.project.updateMeta(id, meta)
+        return adaptProject(result)
+      },
     },
 
     // ==================== 代码分析 ====================

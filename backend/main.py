@@ -26,13 +26,6 @@ from llm_service import register_llm_methods
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# 加载语言处理器（自动注册到 LanguageRegistry）
-try:
-    import parsers.languages  # noqa: F401
-    logger.info("Language parsers loaded successfully")
-except ImportError as e:
-    logger.warning(f"Failed to load language parsers: {e} (tree-sitter may not be installed)")
-
 
 class BackendApp:
     """后端应用"""

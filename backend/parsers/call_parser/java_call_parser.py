@@ -27,8 +27,6 @@ class JavaCallExtractor(CallGraphExtractor):
     CALL_EXPRESSION_TYPES = {'method_invocation', 'object_creation_expression'}
     FUNCTION_DEFINITION_TYPES = {'method_declaration', 'constructor_declaration'}
 
-    # 继承/实现关系节点类型（用于构建类层次结构）
-    INHERITANCE_TYPES = {'extends_opt', 'extends_interfaces', 'super_interfaces', 'superclass'}
     
     def extract(self, proj_id: int, nodes_by_file: Dict[str, Dict[str, Dict]]) -> List[Dict[str, Any]]:
         # 构建全局方法定义映射（从 AST 节点中提取）
@@ -41,38 +39,6 @@ class JavaCallExtractor(CallGraphExtractor):
 
         return call_edges
 
-    def extract_inheritance_edges(self, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
-        """
-        提取类的继承/实现关系边
-
-        Returns:
-            继承关系边列表，每条边包含:
-            - symbol_node_type: 'inherit_relation' 或 'implement_relation'
-            - child_class: 子类名
-            - parent_class: 父类/接口名
-        """
-        class_hierarchy = self._build_class_hierarchy(nodes_by_file)
-        inheritance_edges = []
-
-        for class_name, hierarchy in class_hierarchy.items():
-            for parent in hierarchy.get("extends", []):
-                inheritance_edges.append({
-                    "symbol_node_type": "inherit_relation",
-                    "child_class": class_name,
-                    "parent_class": parent,
-                    "child_file_id": hierarchy["file_id"],
-                    "child_node_id": hierarchy["node_id"],
-                })
-            for iface in hierarchy.get("implements", []):
-                inheritance_edges.append({
-                    "symbol_node_type": "implement_relation",
-                    "child_class": class_name,
-                    "parent_class": iface,
-                    "child_file_id": hierarchy["file_id"],
-                    "child_node_id": hierarchy["node_id"],
-                })
-
-        return inheritance_edges
 
     def _build_method_def_map(self, nodes_by_file: Dict[str, Dict[str, Dict]]) -> Dict[str, Dict]:
         """
@@ -138,71 +104,8 @@ class JavaCallExtractor(CallGraphExtractor):
 
         return method_map
 
-    def _build_class_hierarchy(self, nodes_by_file: Dict[int, Dict[int, Dict]]) -> Dict[str, Dict]:
-        """
-        从 AST 节点中构建类继承/实现关系映射
 
-        Returns:
-            class_name -> {
-                'file_id': int,
-                'node_id': int,
-                'extends': [parent_class_names],
-                'implements': [interface_names],
-            }
-        """
-        class_hierarchy: Dict[str, Dict] = {}
 
-        for file_id, nodes in nodes_by_file.items():
-            for node_id, node in nodes.items():
-                if node.get("type") == "class_declaration":
-                    class_name = self.extract_function_name(node, nodes)
-                    if not class_name:
-                        continue
-
-                    hierarchy = {
-                        "file_id": file_id,
-                        "node_id": node_id,
-                        "extends": [],
-                        "implements": [],
-                    }
-
-                    # 查找子节点中的继承/实现关系
-                    for child in nodes.values():
-                        child_scope = child.get("scope_node_id")
-                        # 检查是否是当前类的直接或间接子节点
-                        if self._is_descendant(child, node_id, nodes):
-                            if child.get("type") in ("extends_opt", "superclass"):
-                                parent_name = child.get("name")
-                                if parent_name:
-                                    hierarchy["extends"].append(parent_name)
-                            elif child.get("type") in ("extends_interfaces", "super_interfaces"):
-                                # 接口列表，从 refs 中提取
-                                refs_raw = child.get("refs", [])
-                                if isinstance(refs_raw, str):
-                                    try:
-                                        refs = json.loads(refs_raw)
-                                    except (json.JSONDecodeError, TypeError):
-                                        refs = []
-                                else:
-                                    refs = refs_raw
-                                if refs:
-                                    hierarchy["implements"].extend(refs)
-
-                    class_hierarchy[class_name] = hierarchy
-
-        return class_hierarchy
-
-    def _is_descendant(self, child: Dict, ancestor_id: int, all_nodes: Dict[int, Dict]) -> bool:
-        """检查 child 是否是 ancestor_id 的后代节点"""
-        scope = child.get("scope_node_id")
-        while scope is not None:
-            if scope == ancestor_id:
-                return True
-            parent = all_nodes.get(scope)
-            if not parent:
-                break
-            scope = parent.get("scope_node_id")
-        return False
     def _find_enclosing_class_node(self, node: Dict, nodes: Dict[int, Dict],
                                      class_map: Dict[int, str]) -> Optional[tuple]:
         """
@@ -426,21 +329,7 @@ class JavaCallExtractor(CallGraphExtractor):
 
         return None
     
-    def _build_call_context(self, call_node: Dict, all_nodes: Dict[int, Dict]) -> Optional[Dict]:
-        """
-        构建调用上下文，用于重载消歧
-        
-        Args:
-            call_node: 调用表达式节点
-            all_nodes: 当前文件的所有节点映射
-        
-        Returns:
-            调用上下文字典，包含参数类型等信息
-        """
-        # TODO: 从调用节点提取参数类型信息
-        # 目前返回 None，后续可以扩展
-        return None
-    
+
     def is_call_expression(self, node: Dict) -> bool:
         return node.get("type") in self.CALL_EXPRESSION_TYPES
     

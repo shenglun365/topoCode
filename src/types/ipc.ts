@@ -46,6 +46,10 @@ export interface Project {
   needsResync?: number    // 路径变更标志
   hasFileChanges?: number // 内容变更标志
   isSample?: number       // 示例项目标志
+  group?: string          // 项目分组
+  favorite?: number       // 收藏标记 (0/1)
+  pinned?: number         // 置顶标记 (0/1)
+  sortOrder?: number      // 排序权重
   lastSync: string | null
   createdAt: string
   fileTree?: FileTreeNode[]

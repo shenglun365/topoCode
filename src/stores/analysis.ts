@@ -205,6 +205,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
       if (task) {
         task.status = 'done'
         task.progress = 100
+        task.error = null  // 清除之前的错误信息
       }
     })
 

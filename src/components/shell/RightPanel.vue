@@ -7,6 +7,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
 import DebugPanel from '@/components/debug/DebugPanel.vue'
 import CodeIndexPanel from '@/components/report/CodeIndexPanel.vue'
+import AIAssistantPanel from '@/components/ai/AIAssistantPanel.vue'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
@@ -16,7 +17,7 @@ const projectStore = useProjectStore()
 const codeIndexRef = ref<InstanceType<typeof CodeIndexPanel> | null>(null)
 
 const panelTitleKeys: Record<string, string> = {
-  home: 'shell.rightPanel.projectDetail',
+  home: 'ai.assistantTitle',
   analysis: 'shell.rightPanel.taskDetail',
   knowledge: 'shell.rightPanel.docDetail',
   coder: 'shell.rightPanel.context',
@@ -29,12 +30,20 @@ const showCodeIndex = computed(() => {
     projectStore.activeTab?.kind === 'report'
 })
 
+// 是否显示 AI 助手面板（首页）
+const showAIAssistant = computed(() => {
+  return navigation.currentPage === 'home'
+})
+
 const title = computed(() => {
   if (showCodeIndex.value) {
     return t('report.codeIndex')
   }
+  if (showAIAssistant.value) {
+    return t('ai.assistantTitle')
+  }
   if (projectStore.viewMode === 'project' && projectStore.activeTab) {
-    return t('shell.rightPanel.symbols')
+    return t('ai.assistantTitle')
   }
   return t(panelTitleKeys[navigation.currentPage] || 'common.detail')
 })
@@ -77,6 +86,9 @@ defineExpose({
           <div class="desc">{{ t('shell.rightPanel.symbolsPending') }}</div>
         </div>
       </div>
+
+      <!-- AI 助手面板（首页 / 项目视图） -->
+      <AIAssistantPanel v-else-if="showAIAssistant || (projectStore.viewMode === 'project' && projectStore.activeTab)" />
 
       <!-- 动态内容插槽 -->
       <template v-else>

@@ -47,7 +47,7 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const title = to.meta.title as string
   if (title) {
-    document.title = `${title} - TopoOne`
+    document.title = `${title} - TopoCode`
   }
   next()
 })

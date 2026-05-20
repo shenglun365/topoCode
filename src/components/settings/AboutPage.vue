@@ -6,11 +6,11 @@ const { t } = useI18n()
 
 <template>
   <div class="about-page">
-    <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">{{ t('settings.aboutTopoOne') }}</h2>
+    <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">{{ t('settings.aboutTopoCode') }}</h2>
 
     <div class="card" style="padding:20px; text-align:center; margin-bottom:16px;">
       <div style="font-size:32px; margin-bottom:8px;">🏔️</div>
-      <div style="font-size:18px; font-weight:700; margin-bottom:4px;">TopoOne</div>
+      <div style="font-size:18px; font-weight:700; margin-bottom:4px;">TopoCode</div>
       <div class="text-muted" style="font-size:12px; margin-bottom:8px;">{{ t('settings.aboutTagline') }}</div>
       <span class="badge badge-blue">v0.1.0</span>
     </div>

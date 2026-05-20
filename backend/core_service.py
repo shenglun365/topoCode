@@ -155,7 +155,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("project.list")
     def list_projects():
-        rows = main_db.fetchall("SELECT * FROM projects ORDER BY updated_at DESC")
+        rows = main_db.fetchall("SELECT * FROM projects ORDER BY pinned DESC, sort_order ASC, updated_at DESC")
         for row in rows:
             if row.get("tags"):
                 row["tags"] = json.loads(row["tags"])
@@ -165,22 +165,35 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     async def import_project(path: str):
         """导入项目 — 单次遍历 + 事务批量写入 + 异步释放 event loop"""
         import asyncio
+        import time
+
+        logger.info(f"[import] ===== 开始导入项目: {path} =====")
+        t0 = time.time()
 
         if not os.path.isdir(path):
             raise FileNotFoundError(f"Directory not found: {path}")
 
         # 加载 .gitignore
+        logger.info(f"[import] 加载 .gitignore...")
         gitignore = GitIgnoreParser().load_file(os.path.join(path, '.gitignore'))
+        logger.info(f"[import] .gitignore 加载完成, 耗时 {time.time() - t0:.2f}s")
 
         # 创建项目库
         project_id = f"proj-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
+        logger.info(f"[import] 创建项目库: {project_id}")
         project_db = multi_db.init_project_db(project_id)
+        logger.info(f"[import] 项目库创建完成, 耗时 {time.time() - t0:.2f}s")
 
         # 单次遍历：同时完成语言检测和文件扫描
+        logger.info(f"[import] 开始扫描文件...")
+        scan_t0 = time.time()
         file_count, language = await _scan_and_import(project_db, path, gitignore)
+        scan_elapsed = time.time() - scan_t0
+        logger.info(f"[import] 扫描完成: {file_count} 个文件, 主语言={language}, 耗时 {scan_elapsed:.2f}s")
 
         # 插入主库
+        logger.info(f"[import] 写入主库 projects 表...")
         main_db.insert("projects", {
             "id": project_id,
             "name": os.path.basename(path),
@@ -194,6 +207,9 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "last_sync": now,
         })
 
+        total_elapsed = time.time() - t0
+        logger.info(f"[import] ===== 导入完成: {project_id}, {file_count} 文件, 总耗时 {total_elapsed:.2f}s =====")
+
         return main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
 
     @server.register("project.get")
@@ -202,10 +218,27 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("project.remove")
     def remove_project(id: str):
+        if not id or id == "undefined":
+            raise ValueError(f"Invalid project id: {id}")
         # 删除项目库
         multi_db.delete_project_db(id)
         # 删除主库记录
         main_db.delete("projects", "id = ?", (id,))
+
+    @server.register("project.updateMeta")
+    def update_project_meta(id: str, **kwargs):
+        """更新项目元数据 (group, favorite, pinned, sort_order, name)"""
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
+        if not project:
+            raise ValueError(f"Project not found: {id}")
+
+        allowed = {"group", "favorite", "pinned", "sort_order", "name"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if updates:
+            updates["updated_at"] = datetime.now().isoformat()
+            main_db.update("projects", updates, "id = ?", (id,))
+
+        return main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
 
     @server.register("project.sync")
     async def sync_project(id: str):
@@ -307,57 +340,61 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         }
 
     @server.register("project.checkFileChanges")
-    def check_file_changes(id: str):
+    async def check_file_changes(id: str):
         """对比文件系统与 source_files.content_hash，返回变更列表（应用 gitignore 过滤）"""
+        import asyncio
+
+        def _scan_files():
+            """在后台线程执行文件扫描，不阻塞 event loop"""
+            project_db = multi_db.get_project_db(id)
+            root_path = project["root_path"]
+
+            # 加载 .gitignore
+            gitignore = GitIgnoreParser().load_file(os.path.join(root_path, '.gitignore'))
+
+            # 获取数据库中所有文件
+            db_files = project_db.fetchall("SELECT file_path, content_hash FROM source_files")
+            db_file_map = {f["file_path"]: f["content_hash"] for f in db_files}
+
+            # 扫描当前文件系统（应用 gitignore）
+            current_files = {}
+            for dirpath, dirnames, filenames in os.walk(root_path):
+                rel_root = os.path.relpath(dirpath, root_path)
+                dirnames[:] = [d for d in dirnames if not should_ignore_file(
+                    os.path.join(rel_root, d) if rel_root != '.' else d, gitignore, is_dir=True)]
+
+                for filename in filenames:
+                    full_path = os.path.join(dirpath, filename)
+                    rel_path = os.path.relpath(full_path, root_path)
+                    if should_ignore_file(rel_path, gitignore):
+                        continue
+                    content_hash = multi_db.compute_md5(full_path)
+                    current_files[rel_path] = content_hash
+
+            # 对比变更
+            added = []
+            modified = []
+            deleted = []
+
+            for rel_path, hash_val in current_files.items():
+                if rel_path not in db_file_map:
+                    added.append(rel_path)
+                elif db_file_map[rel_path] != hash_val:
+                    modified.append(rel_path)
+
+            for rel_path in db_file_map:
+                if rel_path not in current_files:
+                    deleted.append(rel_path)
+
+            return added, modified, deleted
+
         project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (id,))
         if not project:
             raise ValueError(f"Project not found: {id}")
 
-        project_db = multi_db.get_project_db(id)
-        root_path = project["root_path"]
-
-        # 加载 .gitignore
-        gitignore = GitIgnoreParser().load_file(os.path.join(root_path, '.gitignore'))
-
-        # 获取数据库中所有文件
-        db_files = project_db.fetchall("SELECT file_path, content_hash FROM source_files")
-        db_file_map = {f["file_path"]: f["content_hash"] for f in db_files}
-
-        # 扫描当前文件系统（应用 gitignore）
-        current_files = {}
-        for dirpath, dirnames, filenames in os.walk(root_path):
-            rel_root = os.path.relpath(dirpath, root_path)
-            # 过滤被忽略的目录
-            dirnames[:] = [d for d in dirnames if not should_ignore_file(
-                os.path.join(rel_root, d) if rel_root != '.' else d, gitignore, is_dir=True)]
-
-            for filename in filenames:
-                full_path = os.path.join(dirpath, filename)
-                rel_path = os.path.relpath(full_path, root_path)
-                # 跳过被忽略的文件
-                if should_ignore_file(rel_path, gitignore):
-                    continue
-                content_hash = multi_db.compute_md5(full_path)
-                current_files[rel_path] = content_hash
-
-        # 对比变更
-        added = []
-        modified = []
-        deleted = []
-
-        for rel_path, hash_val in current_files.items():
-            if rel_path not in db_file_map:
-                added.append(rel_path)
-            elif db_file_map[rel_path] != hash_val:
-                modified.append(rel_path)
-
-        for rel_path in db_file_map:
-            if rel_path not in current_files:
-                deleted.append(rel_path)
-
+        added, modified, deleted = await asyncio.to_thread(_scan_files)
         has_changes = bool(added or modified or deleted)
 
-        # 更新状态
         if has_changes:
             main_db.update("projects", {"has_file_changes": 1}, "id = ?", (id,))
 
@@ -936,6 +973,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
     """
     import asyncio
     import hashlib
+    import time
 
     # 语言映射（显示名用于项目语言，小写名用于文件语言）
     LANG_MAP_DISPLAY = {
@@ -962,26 +1000,33 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
     }
 
     file_count = 0
+    dir_count = 0
+    ignored_count = 0
     lang_counts = {}  # 扩展名 -> 计数
     batch_records = []  # 收集所有记录，事务批量写入
     BATCH_SIZE = 500  # 每 500 条提交一次
+    scan_t0 = time.time()
 
     async def _scan_dir(current_path: str, parent_path: str | None = None):
-        nonlocal file_count
+        nonlocal file_count, dir_count, ignored_count
         try:
             entries = list(os.scandir(current_path))
         except PermissionError:
+            logger.warning(f"[import] 权限拒绝: {current_path}")
             return
 
         for entry in entries:
-            # 每处理 100 个条目释放一次 event loop
-            if file_count % 100 == 0 and file_count > 0:
+            # 每处理 100 个条目释放一次 event loop 并打印进度
+            if file_count % 500 == 0 and file_count > 0:
                 await asyncio.sleep(0)
+                elapsed = time.time() - scan_t0
+                logger.info(f"[import] 扫描进度: {file_count} 文件, {dir_count} 目录, {ignored_count} 忽略, 耗时 {elapsed:.1f}s")
 
             rel_path = os.path.relpath(entry.path, root_path)
 
             # 跳过被忽略的文件/目录
             if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir()):
+                ignored_count += 1
                 continue
 
             ext = os.path.splitext(entry.name)[1].lower()
@@ -1019,15 +1064,28 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 batch_records.append((
                     dir_id, rel_path, "directory", 0, _simple_hash(rel_path), parent_path
                 ))
+                dir_count += 1
 
                 # 递归扫描子目录
                 await _scan_dir(entry.path, rel_path)
 
     # 执行扫描
+    logger.info(f"[import] 开始递归扫描目录: {root_path}")
     await _scan_dir(root_path)
+    scan_elapsed = time.time() - scan_t0
+    logger.info(f"[import] 扫描完成: {file_count} 文件, {dir_count} 目录, {ignored_count} 忽略, 耗时 {scan_elapsed:.2f}s")
+
+    # 打印语言分布 Top 10
+    if lang_counts:
+        sorted_langs = sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        lang_summary = ", ".join(f"{ext}={cnt}" for ext, cnt in sorted_langs)
+        logger.info(f"[import] 语言分布 Top10: {lang_summary}")
 
     # 事务批量写入
     if batch_records:
+        write_t0 = time.time()
+        num_batches = (len(batch_records) + BATCH_SIZE - 1) // BATCH_SIZE
+        logger.info(f"[import] 开始批量写入: {len(batch_records)} 条记录, {num_batches} 批次 (每批 {BATCH_SIZE} 条)")
         project_db.execute("BEGIN TRANSACTION")
         try:
             for i in range(0, len(batch_records), BATCH_SIZE):
@@ -1038,8 +1096,14 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     chunk,
                 )
+                batch_num = i // BATCH_SIZE + 1
+                elapsed = time.time() - write_t0
+                logger.info(f"[import] 写入进度: 批次 {batch_num}/{num_batches}, 已写入 {min(i + BATCH_SIZE, len(batch_records))}/{len(batch_records)}, 耗时 {elapsed:.2f}s")
             project_db.execute("COMMIT")
-        except Exception:
+            write_elapsed = time.time() - write_t0
+            logger.info(f"[import] 批量写入完成, 总耗时 {write_elapsed:.2f}s")
+        except Exception as e:
+            logger.error(f"[import] 批量写入失败: {e}")
             project_db.execute("ROLLBACK")
             raise
 
@@ -1049,6 +1113,9 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
     else:
         primary_ext = max(lang_counts, key=lang_counts.get)
         primary_language = LANG_MAP_DISPLAY.get(primary_ext, "Unknown")
+
+    total_elapsed = time.time() - scan_t0
+    logger.info(f"[import] _scan_and_import 完成: {file_count} 文件, 主语言={primary_language}, 总耗时 {total_elapsed:.2f}s")
 
     return file_count, primary_language
 

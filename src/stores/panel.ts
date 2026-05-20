@@ -5,7 +5,7 @@ import type { PanelState } from '@/types'
 export const usePanelStore = defineStore('panel', () => {
   // State
   const leftCollapsed = ref(false)
-  const rightCollapsed = ref(false)
+  const rightCollapsed = ref(true)
   const leftWidth = ref(240)
   const rightWidth = ref(280)
   const debugMode = ref(false)

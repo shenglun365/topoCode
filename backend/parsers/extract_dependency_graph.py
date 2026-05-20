@@ -38,9 +38,12 @@ def extract_dependency_graph(adapter: SQLiteAdapter, language: str = None) -> Li
     """
     从 SQLite 项目库提取依赖图，写入 graph_node 表
 
+    **文件级语言分发**：遍历所有文件，按每个文件的语言路由到对应提取器，
+    支持多语言混合项目。
+
     Args:
         adapter: SQLiteAdapter 实例
-        language: 指定语言（可选）
+        language: 指定语言（可选），如果为 None 则按文件级语言分发
 
     Returns:
         依赖边列表
@@ -59,43 +62,127 @@ def extract_dependency_graph(adapter: SQLiteAdapter, language: str = None) -> Li
 
     logger.info(f"Found {len(files)} files for dependency extraction")
 
-    # === Step 2: 确定语言并获取提取器 ===
-    project_language = language or _detect_project_language(files)
-    extractor = get_dependency_extractor(project_language)
-
-    if extractor is None:
-        supported = get_supported_dependency_languages()
-        logger.warning(f"No dependency extractor for '{project_language}'. Supported: {supported}")
-        return _extract_generic_dependencies(adapter, files, file_id_to_path, path_to_file_id)
-
-    logger.info(f"Using DependencyExtractor for language: {project_language}")
-
-    # === Step 3: 加载 AST 节点 ===
+    # === Step 2: 加载 AST 节点 ===
     all_nodes_by_file: Dict[str, Dict[str, Dict]] = defaultdict(dict)
     for file_id in file_id_to_path:
         nodes_list = adapter.find_nodes(file_id=file_id)
         for node in nodes_list:
             all_nodes_by_file[file_id][node["node_id"]] = node
 
-    # === Step 4: 提取依赖边 ===
-    dep_edges: List[Dict[str, Any]] = []
+    # === Step 3: 按文件级语言分发提取依赖边 ===
+    # 文件级语言分发：按文件语言分组
+    files_by_language: Dict[str, List[str]] = defaultdict(list)
+    for file_id, file_path in file_id_to_path.items():
+        file_lang = _detect_file_language(file_path)
+        files_by_language[file_lang].append(file_id)
 
-    for file_id, nodes in all_nodes_by_file.items():
-        edges = _extract_file_dependencies(
-            file_id=file_id,
-            file_path=file_id_to_path.get(file_id, ""),
-            nodes=nodes,
-            path_to_file_id=path_to_file_id,
-            extractor=extractor,
-        )
-        dep_edges.extend(edges)
+    lang_stats = {lang: len(fids) for lang, fids in files_by_language.items()}
+    logger.info(f"[extract_dependency_graph] 文件级语言分发: {lang_stats}")
 
-    # === Step 5: 保存依赖边 ===
+    all_dep_edges: List[Dict[str, Any]] = []
+
+    # 遍历每种语言的文件组
+    for file_lang, file_group in files_by_language.items():
+        extractor = get_dependency_extractor(file_lang)
+        if extractor is None:
+            logger.warning(f"No dependency extractor for '{file_lang}', using generic logic")
+            # fallback 到通用提取逻辑
+            for file_id in file_group:
+                file_path = file_id_to_path.get(file_id, "")
+                nodes = all_nodes_by_file[file_id]
+                edges = _extract_file_dependencies_generic(
+                    file_id=file_id,
+                    file_path=file_path,
+                    nodes=nodes,
+                    path_to_file_id=path_to_file_id,
+                )
+                all_dep_edges.extend(edges)
+            continue
+
+        logger.info(f"[extract_dependency_graph] 使用 {file_lang} 提取器处理 {len(file_group)} 个文件")
+
+        for file_id in file_group:
+            file_path = file_id_to_path.get(file_id, "")
+            nodes = all_nodes_by_file[file_id]
+            edges = _extract_file_dependencies(
+                file_id=file_id,
+                file_path=file_path,
+                nodes=nodes,
+                path_to_file_id=path_to_file_id,
+                extractor=extractor,
+            )
+            all_dep_edges.extend(edges)
+
+    dep_edges = all_dep_edges
+
+    # === Step 4: 保存依赖边 ===
     if dep_edges:
         adapter.insert_graph(dep_edges)
         logger.info(f"Inserted {len(dep_edges)} dependency edges for task {task_id}")
     else:
         logger.info(f"No dependency edges found for task {task_id}")
+
+    return dep_edges
+
+
+def _detect_file_language(file_path: str) -> str:
+    """
+    根据文件扩展名检测语言（文件级）
+
+    Returns:
+        语言名称，未知语言返回 'unknown'
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    
+    ext_to_lang = {
+        '.c': 'c', '.h': 'c',
+        '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp', '.hxx': 'cpp',
+        '.java': 'java',
+        '.py': 'python', '.pyw': 'python', '.pyi': 'python',
+        '.js': 'javascript', '.jsx': 'javascript', '.mjs': 'javascript', '.es6': 'javascript',
+        '.ts': 'typescript', '.tsx': 'typescript', '.cts': 'typescript', '.mts': 'typescript',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.rb': 'ruby',
+        '.php': 'php',
+        '.cs': 'csharp',
+        '.swift': 'swift',
+        '.kt': 'kotlin',
+    }
+    
+    return ext_to_lang.get(ext, 'unknown')
+
+
+def _extract_file_dependencies_generic(
+    file_id: str,
+    file_path: str,
+    nodes: Dict[str, Dict],
+    path_to_file_id: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    """通用依赖提取（当没有语言特定提取器时使用）"""
+    dep_edges: List[Dict[str, Any]] = []
+
+    for node_id, node in nodes.items():
+        node_type = node.get("type", "")
+        if node_type not in ('import_declaration', 'include_declaration', 'import_statement',
+                              'from_import', 'require_call'):
+            continue
+
+        target = _extract_dependency_target(node, nodes)
+        if target:
+            is_system = _is_system_dependency(target, file_path)
+            target_file_id = path_to_file_id.get(target)
+
+            edge = {
+                "symbol_node_type": "dependence",
+                "file_id": file_id,
+                "include_path": target,
+                "is_system": 1 if is_system else 0,
+            }
+            if target_file_id:
+                edge["callee_file_id"] = target_file_id
+
+            dep_edges.append(edge)
 
     return dep_edges
 

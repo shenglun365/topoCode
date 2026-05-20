@@ -19,6 +19,23 @@ export const useSettingsStore = defineStore('settings', () => {
   // General settings
   const fontSize = ref(14)
   const autoSaveInterval = ref(60)
+  const projectPageSize = ref(50)
+
+  // 从 localStorage 恢复每页数量
+  try {
+    const saved = localStorage.getItem('projectPageSize')
+    if (saved) {
+      const val = parseInt(saved, 10)
+      if ([20, 50, 100].includes(val)) projectPageSize.value = val
+    }
+  } catch {}
+
+  function setProjectPageSize(size: number) {
+    if ([20, 50, 100].includes(size)) {
+      projectPageSize.value = size
+      localStorage.setItem('projectPageSize', String(size))
+    }
+  }
   const kbHttpServer = ref(false)
   const kbHttpPort = ref(3000)
   const backendStatus = ref<'connected' | 'disconnected'>('disconnected')
@@ -193,6 +210,8 @@ export const useSettingsStore = defineStore('settings', () => {
     testPort,
     fontSize,
     autoSaveInterval,
+    projectPageSize,
+    setProjectPageSize,
     kbHttpServer,
     kbHttpPort,
     backendStatus,

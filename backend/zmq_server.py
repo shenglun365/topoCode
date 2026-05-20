@@ -79,16 +79,21 @@ class ZMQServer:
             return func
         return decorator
 
-    async def handle_request(self):
-        """处理 RPC 请求 (DEALER-DEALER 直连，无 IDENTITY 帧)"""
+    async def _receive_request(self):
+        """接收请求消息（仅 recv，不受超时限制影响）"""
         try:
-            # 接收多帧消息: [REQUEST_ID, METHOD, PARAMS_JSON]
             frames = await self.dealer.recv_multipart()
-
             if len(frames) < 3:
                 logger.error(f"Invalid message format: {len(frames)} frames")
-                return
+                return None
+            return frames
+        except Exception as e:
+            logger.exception("Error receiving request")
+            return None
 
+    async def _process_request(self, frames):
+        """处理请求并发送响应（独立任务，不受轮询超时限制）"""
+        try:
             request_id = frames[0].decode("utf-8")
             method_name = frames[1].decode("utf-8")
             params = json.loads(frames[2])
@@ -120,7 +125,13 @@ class ZMQServer:
             ])
 
         except Exception as e:
-            logger.exception("Error handling request")
+            logger.exception("Error processing request")
+
+    async def handle_request(self):
+        """接收请求并派发到独立任务处理"""
+        frames = await self._receive_request()
+        if frames:
+            asyncio.create_task(self._process_request(frames))
 
     def publish(self, topic: str, event_type: str, data: dict):
         """发布事件（线程安全，NOBLOCK 避免线程池中 event loop 冲突）"""
@@ -154,6 +165,8 @@ class ZMQServer:
 
         try:
             while self._running:
+                # handle_request 只负责接收消息 + 派发任务，非阻塞
+                # 0.5s 超时仅用于定期检查 self._running 标志（支持优雅关闭）
                 try:
                     await asyncio.wait_for(self.handle_request(), timeout=0.5)
                 except asyncio.TimeoutError:

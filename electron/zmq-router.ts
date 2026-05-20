@@ -86,10 +86,17 @@ export class ZMQRouter extends EventEmitter {
     const requestId = `req-${++this.requestCounter}`
 
     return new Promise<T>((resolve, reject) => {
+      // 按方法类型设置不同超时
+      const timeoutMap: Record<string, number> = {
+        'project.import': 300000,    // 300s — 大项目导入（数千文件扫描 + 批量写入）
+        'analysis.runTask': 600000,  // 600s — 分析任务（AST 解析 + 符号 + 调用图 + 依赖图 + 社区）
+      }
+      const timeout = timeoutMap[method] || 120000  // 默认 120s
+
       const timer = setTimeout(() => {
         this.pendingRequests.delete(requestId)
-        reject(new Error(`Request timeout: ${method}`))
-      }, 120000)  // 120s 超时（项目导入/分析等耗时操作需要更长时间）
+        reject(new Error(`Request timeout: ${method} (${timeout / 1000}s)`))
+      }, timeout)
 
       this.pendingRequests.set(requestId, { resolve, reject, timer })
 
