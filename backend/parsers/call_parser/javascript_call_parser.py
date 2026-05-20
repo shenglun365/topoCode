@@ -30,7 +30,7 @@ class JavaScriptCallExtractor(CallGraphExtractor):
     # 函数定义类型
     FUNCTION_DEFINITION_TYPES = {'function_declaration', 'function_expression', 'arrow_function', 'method_definition'}
     
-    def extract(self, proj_id: int, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
+    def extract(self, proj_id: int, nodes_by_file: Dict[str, Dict[str, Dict]]) -> List[Dict[str, Any]]:
         import logging
         
         logger = logging.getLogger(__name__)
@@ -303,23 +303,26 @@ class JavaScriptCallExtractor(CallGraphExtractor):
     
     def extract_function_name(self, func_node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
         """从函数节点提取函数名
-        
-        由于 AST 解析时 function_declaration 和 method_definition 的 name 字段为 null，
-        需要从 refs 字段中提取第一个标识符作为函数名。
-        
-        注意：这不是 100% 准确，但在没有更好方案的情况下是可行的。
+
+        策略:
+        1. 优先使用 name 字段
+        2. 回退: 查找同一作用域内的 identifier/property_identifier 子节点
+        3. 最后回退: 使用 node_id 作为占位符（而非误取 refs[0]）
         """
         name = func_node.get("name")
 
-        # 如果 name 字段为空，尝试从 refs 获取
         if not name:
-            refs = func_node.get("refs", [])
-            if refs:
-                # refs 的第一个元素通常是函数名（对于 function_declaration）
-                # 或者是方法名（对于 method_definition）
-                name = refs[0]
-                # 确保非空
-                if not name or len(name) == 0:
-                    name = None
+            # 查找同一作用域内的 identifier 子节点（函数名通常作为直接子节点）
+            func_id = func_node.get("node_id")
+            for node in all_nodes.values():
+                if node.get("scope_node_id") == func_id:
+                    if node.get("type") in ("identifier", "property_identifier", "method_name"):
+                        name = node.get("name")
+                        if name:
+                            break
+
+        if not name:
+            # 最后回退: 使用节点类型 + node_id 作为占位符
+            name = f"func_{func_node.get('node_id', 'unknown')}"
 
         return name

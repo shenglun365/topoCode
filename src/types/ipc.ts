@@ -345,7 +345,7 @@ export interface IPCAPI {
     updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<AnalysisTask>
     deleteTask: (taskId: string) => Promise<void>
     stopTask: (taskId: string) => Promise<void>
-    clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number }>
+    clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number; deletedTables: Record<string, number> }>
     reRunTask: (taskId: string) => Promise<AnalysisTask>
     getTaskLogs: (params: { taskId: string; runId?: string }) => Promise<TaskLogsResult>
     getTaskRuns: (taskId: string) => Promise<TaskRun[]>
@@ -415,6 +415,75 @@ export interface IPCAPI {
     getAppDataPath: () => Promise<string>
     get: (key: string) => Promise<any>
     set: (key: string, val: any) => Promise<void>
+  }
+
+  // LLM Session 管理 (v2)
+  session: {
+    list: (params?: { moduleType?: string; projectId?: string; status?: string }) => Promise<{ sessions: Array<{ id: string; module_type: string; project_id: string | null; title: string; status: string; metadata: string | null; created_at: string; updated_at: string }> }>
+    create: (params: { moduleType: string; title: string; projectId?: string; metadata?: Record<string, any> }) => Promise<{ id: string; moduleType: string; title: string }>
+    delete: (params: { sessionId: string }) => Promise<{ success: boolean }>
+    getMessages: (params: { sessionId: string; limit?: number; offset?: number }) => Promise<{ messages: Array<{ id: string; session_id: string; role: string; content: string; token_count: number | null; metadata: string | null; created_at: string }> }>
+    addMessage: (params: { sessionId: string; role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }) => Promise<{ id: string }>
+    deleteMessage: (params: { messageId: string }) => Promise<{ success: boolean }>
+    updateMeta: (params: { sessionId: string; metadata: Record<string, any> }) => Promise<{ sessionId: string; metadata: Record<string, any> }>
+    saveMessages: (params: { sessionId: string; messages: Array<{ role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }> }) => Promise<{ success: boolean }>
+  }
+
+  // LLM 推理 (v2)
+  llm: {
+    chat: (params: {
+      sessionId: string; modelId: string; mode?: 'chat' | 'tools' | 'structured'
+      messages?: Array<{ role: string; content: string }>; templateId?: string
+      variables?: Record<string, any>; tools?: string[]; outputSchema?: Record<string, any>
+    }) => Promise<{ requestId: string; status: string }>
+    abortChat: (params: { requestId: string }) => Promise<{ success: boolean }>
+    summarizeCode: (params: { code: string; modelId?: string }) => Promise<{ content: string }>
+    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => Promise<{ content: string }>
+    subscribe: (requestId: string, callbacks: {
+      onChunk?: (data: { index: number; text: string }) => void
+      onToolCall?: (data: { toolName: string; args: Record<string, any> }) => void
+      onToolResult?: (data: { toolName: string; result: Record<string, any> }) => void
+      onDone?: (data: { content: string; structured?: Record<string, any> }) => void
+      onError?: (data: { message: string; code: string }) => void
+    }) => () => void
+  }
+
+  // Prompt 模板
+  promptTemplate: {
+    list: (params?: { mode?: string; moduleType?: string; category?: string }) => Promise<{ templates: Array<{ id: string; name: string; mode: string; module_type: string | null; category: string; is_builtin: number }> }>
+    get: (params: { templateId: string }) => Promise<Record<string, any>>
+    create: (params: { name: string; mode: string; moduleType?: string; category?: string; systemPrompt?: string; userPromptTemplate?: string; toolsJson?: string; toolStrategy?: string; outputSchemaJson?: string; outputExample?: string; variablesJson?: string }) => Promise<Record<string, any>>
+    update: (params: { templateId: string;[key: string]: any }) => Promise<Record<string, any>>
+    delete: (params: { templateId: string }) => Promise<{ success: boolean }>
+    render: (params: { templateId: string; variables: Record<string, any> }) => Promise<{ messages: any[]; mode: string; tools: string[] | null; outputSchema: Record<string, any> | null }>
+  }
+
+  // Electron 专用 (preload 暴露)
+  window: {
+    toggleLeftPanel: () => Promise<void>
+    toggleRightPanel: () => Promise<void>
+    zoomIn: () => Promise<void>
+    zoomOut: () => Promise<void>
+    create: () => Promise<number | null>
+    close: (windowId: number) => Promise<boolean>
+    list: () => Promise<Array<{ id: number; title: string; isFocused: boolean }>>
+    focus: (windowId: number) => Promise<boolean>
+    getCount: () => Promise<number>
+    getMaxCount: () => Promise<number>
+    broadcast: (channel: string, data: any) => Promise<boolean>
+    onPanelToggle: (channel: string, callback: () => void) => () => void
+  }
+  dialog: { openDirectory: () => Promise<string | null> }
+  shell: { openExternal: (url: string) => Promise<void> }
+  store: { get: (key: string) => Promise<any>; set: (key: string, value: any) => Promise<boolean> }
+  fs: { addAllowedDir: (dirPath: string) => Promise<void>; readFile: (filePath: string) => Promise<string> }
+  on: (channel: string, callback: (...args: any[]) => void) => () => void
+  removeListener: (channel: string, callback: (...args: any[]) => void) => void
+  log: {
+    debug: (source: string, message: string, data?: any) => void
+    info: (source: string, message: string, data?: any) => void
+    warn: (source: string, message: string, data?: any) => void
+    error: (source: string, message: string, data?: any) => void
   }
 }
 

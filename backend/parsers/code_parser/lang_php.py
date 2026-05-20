@@ -48,10 +48,31 @@ NODE_TYPE_TO_OP = {
     'foreach_statement': 'control',
 }
 
+NAME_EXTRACT_RULES = {
+    # 函数定义
+    "function_definition": ["name"],
+    "method_declaration": ["name"],
+
+    # 类/接口/Trait
+    "class_declaration": ["name"],
+    "interface_declaration": ["name"],
+    "trait_declaration": ["name"],
+
+    # 变量/属性
+    "assignment_expression": ["variable_name"],
+
+    # 导入
+    "use_declaration": ["name"],
+
+    # 命名空间
+    "namespace_definition": ["name"],
+}
+
 CONFIG = LanguageConfig(
     important_node_types=IMPORTANT_NODE_TYPES_SET,
     is_name_node_types=IS_NAME_NODE_TYPES,
     scope_creating_types=SCOPE_CREATING_TYPES,
     defining_context_types=DEFINING_CONTEXT_TYPES,
     node_type_to_op=NODE_TYPE_TO_OP,
+    name_extract_rules=NAME_EXTRACT_RULES,
 )

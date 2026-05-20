@@ -194,13 +194,27 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
                             "start_line": str(node["start"]),
                             "end_line": str(node["end"]),
                         })
-                elif node_type == "function_definition":
+                elif node_type in ("function_definition", "method_definition"):
+                    # 同时处理自由函数和类方法
                     func_name = handler.extract_function_name(node, nodes)
                     if func_name:
                         global_defs.append({
                             "file_id": file_id,
                             "symbol_node_type": "func_name",
                             "func_name": func_name,
+                            "def_file_id": file_id,
+                            "def_node_id": str(node["node_id"]),
+                            "start_line": str(node["start"]),
+                            "end_line": str(node["end"])
+                        })
+                elif node_type in ("class_specifier", "struct_specifier"):
+                    # 提取 C++ 类/结构体
+                    class_name = handler.extract_class_name(node, nodes)
+                    if class_name:
+                        class_defs.append({
+                            "file_id": file_id,
+                            "symbol_node_type": "class_name",
+                            "class_name": class_name,
                             "def_file_id": file_id,
                             "def_node_id": str(node["node_id"]),
                             "start_line": str(node["start"]),

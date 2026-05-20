@@ -114,11 +114,11 @@ class JavaScriptRequireExtractor(DependencyExtractor):
                         from_file_id, name, node_type
                     )
                 else:
-                    # 回退：从 refs 中提取包含 / 或 . 的路径
+                    # 回退：从 refs 中提取包含 / 或 . 的路径（过滤 / 和 . 单独出现）
                     for ref in refs:
-                        if not ref:
+                        if not ref or ref in ('/', '.', '..'):
                             continue
-                        if '/' in ref or ref.startswith('.') or ref.startswith('..'):
+                        if '/' in ref or ref.startswith('.'):
                             self._add_dependency(
                                 dependencies, system_targets,
                                 from_file_id, ref, node_type
@@ -134,11 +134,11 @@ class JavaScriptRequireExtractor(DependencyExtractor):
                         from_file_id, name, node_type
                     )
                 else:
-                    # 回退：从 refs 中提取路径
+                    # 回退：从 refs 中提取路径（过滤 / 和 . 单独出现）
                     for ref in refs:
-                        if not ref:
+                        if not ref or ref in ('/', '.', '..'):
                             continue
-                        if '/' in ref or ref.startswith('.') or ref.startswith('..'):
+                        if '/' in ref or ref.startswith('.'):
                             self._add_dependency(
                                 dependencies, system_targets,
                                 from_file_id, ref, node_type

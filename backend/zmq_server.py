@@ -132,9 +132,11 @@ class ZMQServer:
                 event_type.encode("utf-8"),
                 json.dumps(data, default=str).encode("utf-8"),
             ], flags=zmq.NOBLOCK)
-            logger.debug(f"Published: {topic}.{event_type}")
+            if not (topic == 'llm' and event_type == 'chunk'):
+                logger.debug(f"Published: {topic}.{event_type}")
         except zmq.Again:
-            logger.debug(f"Publish dropped (NOBLOCK): {topic}.{event_type}")
+            if not (topic == 'llm' and event_type == 'chunk'):
+                logger.debug(f"Publish dropped (NOBLOCK): {topic}.{event_type}")
         except Exception as e:
             logger.debug(f"Publish failed (expected during shutdown): {e}")
 

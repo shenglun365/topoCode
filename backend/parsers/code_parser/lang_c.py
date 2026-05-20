@@ -220,7 +220,6 @@ NODE_TYPE_TO_OP = {
     
     # === 赋值操作 ===
     'assignment_expression': 'assign',
-    'init_declarator': 'assign',  # 初始化也是赋值
     
     # === 算术操作 ===
     'binary_expression': 'arith',
@@ -249,17 +248,12 @@ NODE_TYPE_TO_OP = {
     'conditional_expression': 'cond',
     
     # === 逻辑操作 ===
-    'binary_expression': 'logic',  # &&, ||
     
     # === 比较操作 ===
-    'binary_expression': 'compare',  # ==, !=, <, >, <=, >=
     
     # === 位操作 ===
-    'binary_expression': 'bitwise',  # &, |, ^, <<, >>
 
     # === 内存操作 ===
-    'unary_expression': 'address',  # &
-    'unary_expression': 'dereference',  # *
 }
 
 # ============================================================================

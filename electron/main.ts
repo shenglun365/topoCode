@@ -166,6 +166,19 @@ app.whenReady().then(async () => {
   // 初始化 ZMQ Router
   await zmqRouter.connect()
 
+  // ===== ZMQ PUB 事件 → Renderer 转发 =====
+  // LLM 流式 chunk 事件需要广播到所有窗口
+  zmqRouter.on('event', (event: { topic: string; eventType: string; data: any }) => {
+    if (event.topic === 'llm') {
+      const payload = {
+        requestId: event.data?.requestId,
+        eventType: event.eventType,  // chunk / tool_call / tool_result / done / error
+        data: event.data,
+      }
+      windowManager.broadcast('zmq:event', payload)
+    }
+  })
+
   // 设置 IPC
   setupIPC()
 

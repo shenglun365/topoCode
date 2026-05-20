@@ -103,20 +103,13 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
     logger.info(f"AST 节点统计：call_expression={call_expr_count}")
     logger.info(f"调用图提取器类型：{type(extractor).__name__}")
 
-    # 对于 Java/JavaScript/TypeScript，使用专门的提取器
-    if project_language in ['java', 'javascript', 'typescript']:
+    # 对于 Java/JavaScript/TypeScript/C/C++，使用专门的提取器（从 AST 直接构建函数映射）
+    if project_language in ['java', 'javascript', 'typescript', 'c', 'cpp']:
         logger.info(f"[extract_call_graph] 开始使用 {project_language} 专用提取器...")
-        # 转换 file_id 为 int 以兼容原始提取器
-        int_nodes_by_file = {}
-        for fid, nodes in all_nodes_by_file_id.items():
-            try:
-                int_fid = int(fid)
-            except (ValueError, TypeError):
-                int_fid = hash(fid) % 1000000
-            int_nodes_by_file[int_fid] = nodes
-
-        logger.info(f"[extract_call_graph] {project_language} 专用提取器: int_nodes_by_file count={len(int_nodes_by_file)}")
-        call_edges = extractor.extract(adapter._task_id, int_nodes_by_file)
+        # 修复: 不再将 file_id 转 int，直接使用原始字符串 file_id
+        # 原来的 hash() % 1000000 会导致 file_id 不可逆，后续无法关联 source_files
+        logger.info(f"[extract_call_graph] {project_language} 专用提取器: nodes_by_file count={len(all_nodes_by_file_id)}")
+        call_edges = extractor.extract(adapter._task_id, all_nodes_by_file_id)
         logger.info(f"[extract_call_graph] {project_language} 专用提取器返回: {len(call_edges)} 条边")
     else:
         # 通用提取逻辑
@@ -188,7 +181,10 @@ def _build_macro_map(adapter: SQLiteAdapter) -> Dict[str, Dict]:
     """构建全局宏定义映射"""
     macro_map: Dict[str, Dict] = {}
 
+    # 查询 macro 和 macro_name（兼容不同语言的写入格式）
     macros = adapter.find_graph(symbol_node_type='macro')
+    if not macros:
+        macros = adapter.find_graph(symbol_node_type='macro_name')
     for m in macros:
         macro_name = m.get('macro_name')
         if macro_name:

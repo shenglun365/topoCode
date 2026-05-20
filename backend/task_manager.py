@@ -163,11 +163,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return store.delete_task(tid)
 
     @server.register("analysis.clearProjectCache")
-    def clear_project_cache(project_id=None):
+    def clear_project_cache(project_id=None, projectId=None):
         """
         清除项目的所有解析缓存（AST + 符号 + 调用图 + 依赖图 + 社区分析）
         保留 source_files 和 project_config，以便重新解析项目文件。
+        兼容前端 camelCase 参数名 projectId。
         """
+        project_id = project_id or projectId
         if not project_id:
             raise ValueError("project_id is required")
 
@@ -177,16 +179,17 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if file_count == 0:
             raise ValueError(f"Project {project_id} has no source files")
 
-        # 清除所有分析相关表
-        project_db.execute("DELETE FROM base_node")
-        project_db.execute("DELETE FROM graph_node")
-        project_db.execute("DELETE FROM graph_doc")
-        project_db.execute("DELETE FROM community_hierarchy")
-        project_db.execute("DELETE FROM ast_data")
-        project_db.execute("DELETE FROM dependencies")
-        project_db.execute("DELETE FROM call_chains")
-        project_db.execute("DELETE FROM components")
-        project_db.execute("DELETE FROM ai_qa")
+        # 清除所有分析相关表，记录每个表的删除数量
+        deleted_tables = {}
+        tables_to_clear = [
+            "base_node", "graph_node", "graph_doc", "community_hierarchy",
+            "ast_data", "dependencies", "call_chains", "components", "ai_qa"
+        ]
+        for table in tables_to_clear:
+            before = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            project_db.execute(f"DELETE FROM {table}")
+            deleted_tables[table] = before
+            logger.info(f"[analysis.clearProjectCache] 删除 {table}: {before} 条记录")
         project_db.commit()
 
         # 先清理 WAL 文件，再 VACUUM 回收磁盘空间
@@ -222,6 +225,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "projectId": project_id,
             "deletedTasks": deleted_count,
             "fileCount": file_count,
+            "deletedTables": deleted_tables,
         }
 
     @server.register("analysis.stopTask")
@@ -498,11 +502,148 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         project_db = multi_db.get_project_db(project_id)
 
-        # 构建 file_id → file_path 缓存
+        # 构建 file_id → file_path 缓存 + file_id → 显示标签（使用相对路径避免同名文件混淆）
         file_rows = project_db.execute(
             "SELECT id, file_path FROM source_files"
         ).fetchall()
         file_path_map = {row[0]: row[1] for row in file_rows}
+        file_name_map = {row[0]: row[1] for row in file_rows if row[1]}
+
+        # ==================== 辅助函数 ====================
+
+        def bad_id(v):
+            """判断是否为无效 ID"""
+            s = str(v).strip()
+            return not s or s == 'None'
+
+        def clean_edge_source(src):
+            """清理边 source 中的 garbled 前缀"""
+            s = str(src) if src else ''
+            if s.startswith('None:['):
+                s = s[6:]
+            elif s.startswith('['):
+                s = s[1:]
+            return s
+
+        def build_node_ref_map(all_node_lists, all_edge_lists):
+            """构建 node_id → {label, fileId, filePath, graphNodeId, symbolName} 映射
+
+            node_id 格式:
+              - CALL:  file-{hash}:{funcName}  (如 file-abc123:constructor)
+              - INCLUDE: file-{hash} 或裸 hash (如 file-abc123, abc123)
+            """
+            ref_map = {}
+
+            # 收集所有唯一 node_id
+            all_node_ids = set()
+            for nl in all_node_lists:
+                for nid in nl:
+                    if nid and not bad_id(nid):
+                        all_node_ids.add(str(nid))
+
+            if not all_node_ids:
+                return ref_map
+
+            # 解析 node_id → (file_hash, func_name)
+            pairs = []
+            for nid in all_node_ids:
+                if ':' in nid:
+                    fh, fn = nid.split(':', 1)
+                    pairs.append((fh.strip(), fn.strip()))
+                else:
+                    pairs.append((nid, None))
+
+            # 从 graph_node 批量查询节点元数据
+            # 构建 (file_id, func_name) → graph_node row 的映射
+            gn_rows = project_db.execute(
+                "SELECT id, caller_file_id, caller_func_name, callee_file_id, callee_name,"
+                "       file_id, func_name, class_name, method_name, symbol_node_type"
+                " FROM graph_node WHERE task_id=?",
+                (tid,)
+            ).fetchall()
+
+            # 构建两个索引: (file_id, func_name) → row
+            caller_index = {}  # (caller_file_id, caller_func_name) → row
+            callee_index = {}  # (callee_file_id, callee_name) → row
+            file_index = {}    # (file_id,) → row (for INCLUDE)
+            for row in gn_rows:
+                cfi = str(row['caller_file_id'] or '')
+                cfn = str(row['caller_func_name'] or '')
+                cai = str(row['callee_file_id'] or '')
+                can = str(row['callee_name'] or '')
+                fi = str(row['file_id'] or '')
+                fn = str(row['func_name'] or '')
+                if cfi and cfi != 'None' and cfn and cfn != 'None':
+                    caller_index[(cfi, cfn)] = row
+                if cai and cai != 'None' and can and can != 'None':
+                    callee_index[(cai, can)] = row
+                if fi and fi != 'None' and fn and fn != "None":
+                    file_index[(fi, fn)] = row
+
+            # 为每个 node_id 查询元数据
+            for nid in all_node_ids:
+                label = nid
+                file_id = ''
+                file_path = ''
+                graph_node_id = None
+                symbol_name = ''
+
+                if ':' in nid:
+                    fh, fn_name = nid.split(':', 1)
+                    fh, fn_name = fh.strip(), fn_name.strip()
+
+                    # 先按 caller 查找
+                    row = caller_index.get((fh, fn_name))
+                    if not row:
+                        # 再按 callee 查找
+                        row = callee_index.get((fh, fn_name))
+                    if not row:
+                        # 最后按 file+func 查找
+                        row = file_index.get((fh, fn_name))
+
+                    if row:
+                        graph_node_id = row['id']
+                        file_id = str(row['caller_file_id'] or row['file_id'] or fh)
+                        symbol_name = fn_name
+                        # 构建实名标签
+                        file_name = file_name_map.get(file_id, '')
+                        if file_name:
+                            label = f'{file_name}::{symbol_name}'
+                        else:
+                            label = f'{fh}::{symbol_name}'
+                        if row['class_name']:
+                            label = f'{row["class_name"]}.{symbol_name} ({file_name or fh})'
+                else:
+                    # 无冒号：裸 file_id（INCLUDE 类型或 file-hash）
+                    fh = nid
+                    # 尝试用 file-hash 查找
+                    file_name = file_name_map.get(fh, '')
+                    if file_name:
+                        label = file_name
+                        file_id = fh
+                    else:
+                        # 可能是去掉 "file-" 前缀的 hash，尝试补全
+                        prefixed = f'file-{fh}'
+                        file_name = file_name_map.get(prefixed, '')
+                        if file_name:
+                            label = file_name
+                            file_id = prefixed
+                        else:
+                            label = fh
+                            file_id = fh
+
+                if file_id:
+                    file_path = file_path_map.get(file_id, '')
+
+                ref_map[nid] = {
+                    'label': label,
+                    'fileId': file_id,
+                    'filePath': file_path,
+                    'graphNodeId': graph_node_id,
+                    'symbolName': symbol_name,
+                }
+
+            return ref_map
 
         # 查询选中的社区
         if ids and len(ids) > 0:
@@ -522,39 +663,97 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         edges = []
         communities = []
 
-        def node_label(node_id):
-            """将 file_id 转为可读的文件名"""
-            # CALL 节点格式: file-hash:functionName，取 file-hash 部分
-            clean_id = node_id.split(':')[0] if ':' in (node_id or '') else node_id
-            path = file_path_map.get(clean_id, '')
-            if path:
-                return os.path.basename(path) or path
-            return str(clean_id)
+        # 先收集所有 node_list / edge_list，用于批量构建 ref_map
+        all_nls = []
+        all_els = []
+        rows_with_meta = []
 
-        def clean_edge_source(src):
-            """清理边 source 中的 garbled 前缀（如 '[' 或 'None:['）"""
-            s = str(src) if src else ''
-            # 去掉前导的 '[' 或 'None:['
-            if s.startswith('None:['):
-                s = s[6:]
-            elif s.startswith('['):
-                s = s[1:]
-            return s
+        for row in rows:
+            comm_id = row[0]
+            node_list = json.loads(row[1]) if row[1] else []
+            edge_list = json.loads(row[2]) if row[2] else []
+            node_count = row[3] or 0
+            edge_count = row[4] or 0
+            quality_score = row[5] or 0
+            description = row[6] or ''
+            direction = row[7] if len(row) > 7 else ''
 
-        def aggregate_to_files(nodes, edges):
-            """将语法级节点汇聚到文件级：去重 + 合并边"""
-            # 文件级节点
-            file_nodes = {}  # file_id -> label
-            for node_id in nodes:
+            all_nls.append(node_list)
+            all_els.append(edge_list)
+            rows_with_meta.append({
+                'comm_id': comm_id,
+                'node_list': node_list,
+                'edge_list': edge_list,
+                'node_count': node_count,
+                'edge_count': edge_count,
+                'quality_score': quality_score,
+                'description': description,
+            })
+
+        # 批量构建实名映射
+        ref_map = build_node_ref_map(all_nls, all_els)
+
+        def node_display(nid):
+            """获取节点的实名标签"""
+            info = ref_map.get(nid, {})
+            label = info.get('label', '')
+            if label and label != str(nid):
+                return label
+            # 尝试去掉后缀再查 ref_map（CALL 汇总后 key 不匹配场景）
+            if ':' in str(nid):
+                bare_id = str(nid).split(':', 1)[0]
+                info = ref_map.get(bare_id, {})
+                label = info.get('label', '')
+                if label and label != str(nid):
+                    return label
+            # Fallback: source_files 查询（多种 ID 格式兼容）
+            label = file_name_map.get(nid, '')
+            if not label:
+                label = file_name_map.get(f'file-{nid}', '')
+            if not label and nid.startswith('file-'):
+                label = file_name_map.get(nid[5:], '')  # 去掉 file- 前缀再查
+            return label or str(nid)
+
+        def node_ref_id(nid):
+            """获取节点的 graph_node 索引 ID"""
+            info = ref_map.get(nid, {})
+            return info.get('graphNodeId')
+
+        def node_file_id(nid):
+            """获取节点的 source_files.id"""
+            info = ref_map.get(nid, {})
+            return info.get('fileId', '')
+
+        def node_file_path(nid):
+            """获取节点的文件路径"""
+            info = ref_map.get(nid, {})
+            return info.get('filePath', '')
+
+        def aggregate_to_files(_nodes, _edges):
+            """将语法级节点汇聚到文件级：去重 + 合并边，用 source_files 实名"""
+            file_nodes = {}
+            for node_id in _nodes:
                 clean_id = node_id.split(':')[0] if ':' in (node_id or '') else node_id
                 if bad_id(clean_id):
                     continue
                 if clean_id not in file_nodes:
-                    file_nodes[clean_id] = node_label(clean_id)
+                    # 从 source_files / ref_map 获取标签（多种 ID 格式兼容）
+                    label = file_name_map.get(clean_id, '')
+                    if not label:
+                        # 尝试 file- 前缀补全
+                        label = file_name_map.get(f'file-{clean_id}', '')
+                    if not label and clean_id.startswith('file-'):
+                        # 尝试去掉 file- 前缀
+                        label = file_name_map.get(clean_id[5:], '')
+                    if not label:
+                        # 尝试 ref_map（原始 node_id 或干净 ID）
+                        label = ref_map.get(clean_id, {}).get('label', '')
+                    if not label:
+                        label = str(clean_id)
+                    file_nodes[clean_id] = label
 
-            # 文件级边（去重）
             file_edges = set()
-            for edge in edges:
+            for edge in _edges:
                 if isinstance(edge, dict):
                     s, t = edge.get('source', ''), edge.get('target', '')
                 elif isinstance(edge, list) and len(edge) >= 2:
@@ -570,11 +769,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
             return list(file_nodes.keys()), file_nodes, list(file_edges)
 
-        def bad_id(v):
-            """判断是否为无效 ID"""
-            s = str(v).strip()
-            return not s or s == 'None'
-
         for row in rows:
             comm_id = row[0]
             node_list = json.loads(row[1]) if row[1] else []
@@ -585,8 +779,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             description = row[6] or ''
 
             # CALL 类型：汇聚到文件级
+            agg_labels_map = {}
             if et == 'CALL':
-                agg_ids, agg_labels, agg_edges = aggregate_to_files(node_list, edge_list)
+                agg_ids, agg_labels_map, agg_edges = aggregate_to_files(node_list, edge_list)
                 node_list = agg_ids
                 edge_list = [{'source': s, 'target': t} for s, t in agg_edges]
                 description = f'CALL community ({len(agg_ids)} files, {len(agg_edges)} edges)'
@@ -600,22 +795,27 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 'description': description,
             })
 
-            # 添加节点和边
+            # 添加节点和边（使用实名 + 索引信息）
             for node in node_list:
                 nodes.append({
                     'id': f'n_{node}',
-                    'label': node_label(node),
+                    'label': agg_labels_map.get(node) or node_display(node),
+                    'refId': node_ref_id(node),
+                    'fileId': node_file_id(node),
+                    'filePath': node_file_path(node),
                     'comm_id': comm_id,
                     'type': 'symbol',
                 })
             for edge in edge_list:
                 if isinstance(edge, dict):
                     s, t = edge.get('source', ''), edge.get('target', '')
+                    direction = edge.get('direction', '')
                 elif isinstance(edge, list) and len(edge) >= 2:
                     s, t = edge[0], edge[1]
+                    direction = edge[2] if len(edge) > 2 else ''
                 else:
                     continue
-                # 清理 garbled source（如 '[' 前缀）
+                # 清理 garbled source
                 s = clean_edge_source(s)
                 t = t.split(':')[0] if ':' in str(t) else str(t)
                 if bad_id(s) or bad_id(t):
@@ -624,7 +824,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     'id': f'e_{s}_{t}',
                     'source': f'n_{s}',
                     'target': f'n_{t}',
+                    'sourceLabel': agg_labels_map.get(s) or node_display(s),
+                    'targetLabel': agg_labels_map.get(t) or node_display(t),
+                    'sourceRefId': node_ref_id(s),
+                    'targetRefId': node_ref_id(t),
                     'type': et or 'CALL',
+                    'direction': direction,
                 })
 
             # 深度展开：查询子社区
@@ -661,11 +866,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         else:
                             # 最深层，直接添加符号节点（CALL 类型先汇聚到文件级）
                             if et == 'CALL':
-                                agg_ids, agg_labels, agg_edges = aggregate_to_files(child_node_list, child_edge_list)
+                                agg_ids, agg_labels_map, agg_edges = aggregate_to_files(child_node_list, child_edge_list)
                                 for node in agg_ids:
                                     nodes.append({
                                         'id': f'n_{child_comm_id}_{node}',
-                                        'label': agg_labels.get(node, str(node)),
+                                        'label': agg_labels_map.get(node, str(node)),
+                                        'refId': node_ref_id(node),
+                                        'fileId': node_file_id(node),
+                                        'filePath': node_file_path(node),
                                         'comm_id': child_comm_id,
                                         'type': 'symbol',
                                     })
@@ -674,13 +882,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                         'id': f'e_{child_comm_id}_{s}_{t}',
                                         'source': f'n_{child_comm_id}_{s}',
                                         'target': f'n_{child_comm_id}_{t}',
+                                        'sourceLabel': agg_labels_map.get(s) or node_display(s),
+                                        'targetLabel': agg_labels_map.get(t) or node_display(t),
+                                        'sourceRefId': node_ref_id(s),
+                                        'targetRefId': node_ref_id(t),
                                         'type': et,
                                     })
                             else:
                                 for node in child_node_list:
                                     nodes.append({
                                         'id': f'n_{child_comm_id}_{node}',
-                                        'label': node_label(node),
+                                        'label': node_display(node),
+                                        'refId': node_ref_id(node),
+                                        'fileId': node_file_id(node),
+                                        'filePath': node_file_path(node),
                                         'comm_id': child_comm_id,
                                         'type': 'symbol',
                                     })
@@ -690,6 +905,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                             'id': f'e_{child_comm_id}_{edge[0]}_{edge[1]}',
                                             'source': f'n_{child_comm_id}_{edge[0]}',
                                             'target': f'n_{child_comm_id}_{edge[1]}',
+                                            'sourceLabel': node_display(edge[0]),
+                                            'targetLabel': node_display(edge[1]),
+                                            'sourceRefId': node_ref_id(edge[0]),
+                                            'targetRefId': node_ref_id(edge[1]),
                                             'type': et or 'CALL',
                                         })
                             break

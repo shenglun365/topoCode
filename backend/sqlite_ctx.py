@@ -275,6 +275,52 @@ MAIN_DB_TABLES_SQL = """
         updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- LLM Prompt 模板表
+    CREATE TABLE IF NOT EXISTS llm_prompt_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'tools', 'structured')),
+        module_type TEXT CHECK(module_type IN ('project_resource', 'project_analysis', 'knowledge_base', 'ai_assistant')),
+        category TEXT DEFAULT 'general',
+        is_builtin INTEGER DEFAULT 0,
+        system_prompt TEXT,
+        user_prompt_template TEXT,
+        tools_json TEXT,
+        tool_strategy TEXT DEFAULT 'auto',
+        output_schema_json TEXT,
+        output_example TEXT,
+        variables_json TEXT,
+        metadata TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_templates_mode ON llm_prompt_templates(mode);
+    CREATE INDEX IF NOT EXISTS idx_llm_templates_module ON llm_prompt_templates(module_type);
+
+    -- LLM 调用日志表
+    CREATE TABLE IF NOT EXISTS llm_call_logs (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        request_id TEXT NOT NULL,
+        model_id TEXT,
+        provider TEXT,
+        model_name TEXT,
+        mode TEXT NOT NULL,
+        template_id TEXT,
+        messages_json TEXT,
+        response_content TEXT,
+        tool_calls_json TEXT,
+        token_prompt INTEGER,
+        token_completion INTEGER,
+        token_total INTEGER,
+        latency_ms INTEGER,
+        status TEXT CHECK(status IN ('success', 'error', 'aborted')),
+        error_message TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_session ON llm_call_logs(session_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_logs_created ON llm_call_logs(created_at);
+
     -- 代码索引消息 (报告 tab 右侧面板对话历史)
     CREATE TABLE IF NOT EXISTS code_index_messages (
         id TEXT PRIMARY KEY,
@@ -322,28 +368,41 @@ KNOWLEDGE_DB_TABLES_SQL = """
 """
 
 SESSIONS_DB_TABLES_SQL = """
-    CREATE TABLE IF NOT EXISTS coder_sessions (
+    -- 废弃旧表 (v1 coder 会话)
+    DROP TABLE IF EXISTS coder_sessions;
+    DROP TABLE IF EXISTS chat_messages;
+
+    -- 统一 LLM 会话表 (v2 — 支持 4 模块类型)
+    CREATE TABLE IF NOT EXISTS llm_sessions (
         id TEXT PRIMARY KEY,
+        module_type TEXT NOT NULL CHECK(module_type IN (
+            'project_resource',   -- 项目资源：源码→伪码解析
+            'project_analysis',   -- 项目分析：社区图/调用图/数据流图分析
+            'knowledge_base',     -- 知识库：文档梳理/解析/问答
+            'ai_assistant'        -- AI 助手：Agent 式会话交互
+        )),
+        project_id TEXT,
         title TEXT NOT NULL,
-        mode TEXT DEFAULT 'chat' CHECK(mode IN ('chat', 'design')),
-        status TEXT DEFAULT 'idle' CHECK(status IN ('idle', 'running', 'done', 'error')),
-        spec_data TEXT,
-        agent_id TEXT,
-        task_id TEXT,
+        status TEXT DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+        metadata TEXT,            -- JSON: 模块专用扩展字段
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE INDEX IF NOT EXISTS idx_llm_sessions_module ON llm_sessions(module_type);
+    CREATE INDEX IF NOT EXISTS idx_llm_sessions_project ON llm_sessions(project_id);
 
-    CREATE TABLE IF NOT EXISTS chat_messages (
+    -- 统一 LLM 消息表
+    CREATE TABLE IF NOT EXISTS llm_messages (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
+        role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
         content TEXT NOT NULL,
-        timestamp TEXT DEFAULT (datetime('now')),
-        metadata TEXT,
-        FOREIGN KEY (session_id) REFERENCES coder_sessions(id) ON DELETE CASCADE
+        token_count INTEGER,
+        metadata TEXT,            -- JSON: tool_call / tool_result / structured_output 等
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES llm_sessions(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_messages_session ON llm_messages(session_id);
 """
 
 PROJECT_DB_TABLES_SQL = """

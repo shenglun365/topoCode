@@ -46,8 +46,8 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         logger.info(f"[COMMUNITY] {edge_type}: 没有边数据，跳过")
         return {"community_count": 0, "levels": 0}
 
-    # 2. 构建图（邻接表）
-    graph = _build_graph(edges, edge_type)
+    # 2. 构建图（邻接表）+ 方向映射
+    graph, edge_directions = _build_graph(edges, edge_type)
     all_nodes = set(graph.keys())
     for neighbors in graph.values():
         all_nodes.update(neighbors)
@@ -68,7 +68,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     level = "L0"
     parent_comm_id = None
     saved = _save_communities(task_id, edge_type, level, parent_comm_id,
-                               communities, graph, analysis_store)
+                               communities, graph, analysis_store, edge_directions)
 
     # 5. 检测是否需要备选方案（CALL 图连通性过高）
     # 条件：CALL 类型 + L0 只有 1 个社区 + 质量分 < 0.01
@@ -89,7 +89,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         logger.info(f"[COMMUNITY] CALL: 已清除默认方案的社区数据，重新分析")
 
         # 重新构建图（过滤同文件内调用）
-        graph = _build_graph(edges, edge_type, filter_intra_file=True)
+        graph, edge_directions = _build_graph(edges, edge_type, filter_intra_file=True)
         all_nodes = set(graph.keys())
         for neighbors in graph.values():
             all_nodes.update(neighbors)
@@ -107,7 +107,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
 
         # 重新保存 L0
         saved = _save_communities(task_id, edge_type, level, parent_comm_id,
-                                   communities, graph, analysis_store)
+                                   communities, graph, analysis_store, edge_directions)
         logger.info(f"[COMMUNITY] CALL (备选): L0 产生 {len(communities)} 个社区")
 
     # 6. 递归分析子社区
@@ -127,7 +127,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
             if sub_comms:
                 new_saved += _save_communities(
                     task_id, edge_type, new_level, parent_id,
-                    sub_comms, sub_graph, analysis_store
+                    sub_comms, sub_graph, analysis_store, edge_directions
                 )
                 total_count += new_saved
 
@@ -141,7 +141,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     return {"community_count": total_count, "levels": len(level) - 1}
 
 
-def _build_graph(edges: List[Dict], edge_type: str, filter_intra_file: bool = False) -> Dict[str, Set[str]]:
+def _build_graph(edges: List[Dict], edge_type: str, filter_intra_file: bool = False) -> tuple:
     """
     从边数据构建无向图（邻接表）
 
@@ -149,8 +149,15 @@ def _build_graph(edges: List[Dict], edge_type: str, filter_intra_file: bool = Fa
         edges: 边数据列表
         edge_type: "INCLUDE" 或 "CALL"
         filter_intra_file: 是否过滤同文件内调用（仅对 CALL 有效）
+
+    Returns:
+        (graph, edge_directions)
+        graph: 无向邻接表 {node → set(neighbors)}
+        edge_directions: 有向边映射 {(source, target) → direction_label}
+            direction_label: "caller→callee" | "INCLUDE"
     """
     graph = defaultdict(set)
+    edge_directions = {}  # (source, target) → direction label
     skipped = 0
     intra_skipped = 0  # 同文件内调用被过滤的数量
 
@@ -182,6 +189,9 @@ def _build_graph(edges: List[Dict], edge_type: str, filter_intra_file: bool = Fa
             if filter_intra_file and caller_file and callee_file and caller_file == callee_file:
                 intra_skipped += 1
                 continue
+
+            # 保留方向：caller → callee
+            edge_directions[(source, target)] = 'caller→callee'
         else:
             continue
 
@@ -198,7 +208,7 @@ def _build_graph(edges: List[Dict], edge_type: str, filter_intra_file: bool = Fa
     log_msg += f", nodes={len(all_nodes)}"
     logger.info(log_msg)
 
-    return dict(graph)
+    return dict(graph), edge_directions
 
 
 def _build_sub_graph(graph: Dict[str, Set[str]], nodes: Set[str]) -> Dict[str, Set[str]]:
@@ -309,10 +319,14 @@ def _save_communities(task_id: str, edge_type: str, level: str,
                        parent_comm_id: Optional[str],
                        communities: List[Set[str]],
                        graph: Dict[str, Set[str]],
-                       analysis_store) -> int:
+                       analysis_store,
+                       edge_directions: Dict = None) -> int:
     """保存社区到 SQLite"""
     if not communities:
         return 0
+
+    if edge_directions is None:
+        edge_directions = {}
 
     comm_docs = []
     hierarchies = []
@@ -320,13 +334,23 @@ def _save_communities(task_id: str, edge_type: str, level: str,
     for i, comm_nodes in enumerate(communities):
         comm_id = f"comm-{task_id[:8]}-{level}-{i:04d}"
 
-        # 计算社区内的边
+        # 计算社区内的边（保留有向信息）
         edge_list = []
         node_list = list(comm_nodes)
         for node in comm_nodes:
             for neighbor in graph.get(node, set()):
                 if neighbor in comm_nodes and neighbor > node:  # 避免重复
-                    edge_list.append({"source": node, "target": neighbor})
+                    # 查询方向
+                    direction = (
+                        edge_directions.get((node, neighbor), '') or
+                        edge_directions.get((neighbor, node), '') or
+                        'bidirectional'
+                    )
+                    edge_list.append({
+                        "source": node,
+                        "target": neighbor,
+                        "direction": direction,
+                    })
 
         # 计算质量评分（简化：密度 = 边数 / (节点数 * (节点数-1) / 2)）
         node_count = len(comm_nodes)

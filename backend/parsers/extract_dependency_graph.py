@@ -119,42 +119,100 @@ def _extract_file_dependencies(
     path_to_file_id: Dict[str, str],
     extractor,
 ) -> List[Dict[str, Any]]:
-    """提取单个文件的依赖边"""
+    """
+    提取单个文件的依赖边
+
+    修复: 优先调用语言特定提取器的 extract_dependencies() 方法，
+    各语言提取器中精心实现的逻辑（如 Java 静态导入区分、Python 相对导入）才能真正生效。
+     fallback 到通用提取逻辑。
+    """
     dep_edges: List[Dict[str, Any]] = []
 
-    dep_types = getattr(extractor, 'DEPENDENCY_NODE_TYPES', {
-        'import_declaration', 'include_declaration', 'import_statement',
-        'from_import', 'require_call',
-    })
+    # 获取依赖相关的 AST 节点类型
+    try:
+        dep_types = extractor.get_required_node_types()
+    except (AttributeError, NotImplementedError):
+        dep_types = [
+            'import_declaration', 'include_declaration', 'import_statement',
+            'from_import', 'require_call',
+        ]
 
+    # 收集依赖节点
+    dep_nodes = []
     for node_id, node in nodes.items():
         if node.get("type") not in dep_types:
             continue
+        # 附加 file_id 供 extract_dependencies 使用
+        node_with_file = dict(node)
+        node_with_file["file_id"] = file_id
+        dep_nodes.append(node_with_file)
 
-        target_path = _extract_dependency_target(node, nodes)
-        if not target_path:
-            continue
+    if not dep_nodes:
+        return dep_edges
 
-        is_system = _is_system_dependency(target_path, file_path)
-        target_file_id = path_to_file_id.get(target_path)
+    # 尝试调用语言特定的 extract_dependencies()
+    try:
+        dependencies, system_targets = extractor.extract_dependencies(dep_nodes)
 
-        edge = {
-            "symbol_node_type": "dependence",
-            "file_id": file_id,
-            "include_path": target_path,
-            "is_system": 1 if is_system else 0,
-        }
+        for dep in dependencies:
+            target = dep.get("target", "")
+            if not target:
+                continue
 
-        if target_file_id:
-            edge["callee_file_id"] = target_file_id
+            is_system = dep.get("is_system", target in system_targets
+                             or _is_system_dependency(target, file_path))
+            target_file_id = path_to_file_id.get(target)
 
-        dep_edges.append(edge)
+            edge = {
+                "symbol_node_type": "dependence",
+                "file_id": file_id,
+                "include_path": target,
+                "is_system": 1 if is_system else 0,
+            }
+
+            if target_file_id:
+                edge["callee_file_id"] = target_file_id
+
+            # 保留额外属性
+            if dep.get("is_static"):
+                edge["is_static_import"] = 1
+            if dep.get("is_wildcard"):
+                edge["is_wildcard"] = 1
+
+            dep_edges.append(edge)
+
+    except (AttributeError, NotImplementedError):
+        # fallback: 通用提取逻辑
+        for node in dep_nodes:
+            target_path = _extract_dependency_target(node, nodes)
+            if not target_path:
+                continue
+
+            is_system = _is_system_dependency(target_path, file_path)
+            target_file_id = path_to_file_id.get(target_path)
+
+            edge = {
+                "symbol_node_type": "dependence",
+                "file_id": file_id,
+                "include_path": target_path,
+                "is_system": 1 if is_system else 0,
+            }
+
+            if target_file_id:
+                edge["callee_file_id"] = target_file_id
+
+            dep_edges.append(edge)
 
     return dep_edges
 
 
 def _extract_dependency_target(node: Dict, nodes: Dict[str, Dict]) -> Optional[str]:
-    """从依赖节点提取目标路径"""
+    """
+    从依赖节点提取目标路径
+
+    修复: 原来只取 refs[0] 导致 "org.springframework.beans.BeansException" 被截断为 "org"
+    现在拼接完整路径: '.'.join(refs)
+    """
     refs = node.get("refs", [])
     # refs 在 SQLite 中存为 JSON 字符串，需解析
     if isinstance(refs, str):
@@ -162,9 +220,15 @@ def _extract_dependency_target(node: Dict, nodes: Dict[str, Dict]) -> Optional[s
             refs = json.loads(refs)
         except (json.JSONDecodeError, TypeError):
             refs = []
+
     if refs and isinstance(refs, list):
-        ref = refs[0] if isinstance(refs[0], str) else str(refs[0])
-        return ref.strip('"').strip("'").strip('<').strip('>')
+        # 过滤空元素并统一为字符串
+        valid_refs = [str(r).strip('"').strip("'").strip('<').strip('>')
+                      for r in refs if r and str(r).strip()]
+        if valid_refs:
+            # 拼接完整路径: ["org", "springframework", "beans", "BeansException"]
+            # → "org.springframework.beans.BeansException"
+            return '.'.join(valid_refs)
 
     return node.get("name")
 

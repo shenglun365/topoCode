@@ -324,7 +324,6 @@ NODE_TYPE_TO_OP = {
     # === 赋值操作 ===
     'assignment_expression': 'assign',
     'compound_assignment_expr': 'assign',
-    'let_declaration': 'assign',
     
     # === 算术操作 ===
     'binary_expression': 'arith',
@@ -372,26 +371,27 @@ NAME_EXTRACT_RULES = {
     # 函数定义
     "function_item": ["identifier"],
     "function_signature_item": ["identifier"],
-    
-    # 方法定义（impl 块内）
-    "associated_function": ["identifier"],
-    
+
     # 类型定义
     "struct_item": ["type_identifier"],
     "enum_item": ["type_identifier"],
     "union_item": ["type_identifier"],
     "trait_item": ["type_identifier"],
     "impl_item": ["type_identifier"],
-    "type_item": ["type_identifier"],
-    
+    "type_alias": ["type_identifier"],
+
     # 变量/常量定义
     "let_declaration": ["identifier"],
     "const_item": ["identifier"],
     "static_item": ["identifier"],
-    
+    "associated_constant": ["identifier"],
+
+    # 枚举变体
+    "enum_variant": ["identifier"],
+
     # 模块
     "mod_item": ["identifier"],
-    
+
     # 导入
     "use_declaration": ["identifier"],
     "use_wildcard": ["identifier"],

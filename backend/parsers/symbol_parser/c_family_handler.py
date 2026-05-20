@@ -34,31 +34,75 @@ class CFamilyHandler(LanguageHandler):
         return None
 
     def extract_function_name(self, func_node: Dict[str, Any], all_nodes: Dict[int, Dict]) -> Optional[str]:
+        import json
+
         func_id = func_node['node_id']
-        candidates = [
+
+        # 策略 1: 查找 def_node_id 匹配的 identifier（兼容 list 和字符串格式）
+        candidates = []
+        for n in all_nodes.values():
+            if n['type'] == 'identifier' and n.get('scope_node_id') == func_id:
+                did = n.get('def_node_id')
+                # 兼容 list 格式
+                if isinstance(did, list) and func_id in did:
+                    candidates.append(n)
+                # 兼容字符串格式 "[5]"
+                elif isinstance(did, str) and did.startswith('['):
+                    try:
+                        did_list = json.loads(did)
+                        if func_id in did_list:
+                            candidates.append(n)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+        if candidates:
+            candidates.sort(key=lambda x: (x['start'][0], x['start'][1]))
+
+            # Find function_declarator to guide selection
+            declarators = [
+                n for n in all_nodes.values()
+                if n['type'] == 'function_declarator'
+                   and n.get('scope_node_id') == func_id
+            ]
+            if declarators:
+                decl = declarators[0]
+                decl_line = decl['start'][0]
+                for cand in candidates:
+                    if decl_line <= cand['start'][0] <= decl['end'][0] + 1:
+                        return cand['name']
+
+            return candidates[0]['name']
+
+        # 策略 2: 同一作用域内的所有 identifier，按位置排序取第一个
+        all_identifiers = [
             n for n in all_nodes.values()
-            if n['type'] == 'identifier'
-               and n.get('scope_node_id') == func_id
-               and isinstance(n.get('def_node_id'), list)
-               and func_id in n['def_node_id']
+            if n['type'] == 'identifier' and n.get('scope_node_id') == func_id
         ]
-        if not candidates:
-            return None
+        if all_identifiers:
+            all_identifiers.sort(key=lambda x: (x['start'][0], x['start'][1]))
+            return all_identifiers[0].get('name')
 
-        candidates.sort(key=lambda x: (x['start'][0], x['start'][1]))
+        return None
 
-        # Find function_declarator to guide selection
-        declarators = [
-            n for n in all_nodes.values()
-            if n['type'] == 'function_declarator'
-               and n.get('scope_node_id') == func_id
-        ]
-        if declarators:
-            decl = declarators[0]
-            decl_line = decl['start'][0]
-            for cand in candidates:
-                if decl_line <= cand['start'][0] <= decl['end'][0] + 1:
-                    return cand['name']
+    def extract_class_name(self, class_node: Dict[str, Any], all_nodes: Dict[int, Dict]) -> Optional[str]:
+        """从 class_specifier/struct_specifier 提取类名"""
+        class_id = class_node.get('node_id')
 
-        return candidates[0]['name'] if candidates else None
+        # 策略 1: 查找同一作用域内的 identifier 子节点
+        for node in all_nodes.values():
+            if (node.get('scope_node_id') == class_id and
+                    node.get('type') == 'type_identifier' and
+                    node.get('name')):
+                return node['name']
+
+        # 策略 2: 使用 name 字段
+        name = class_node.get('name')
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+
+        return None
+
+    def extract_method_name(self, method_node: Dict[str, Any], all_nodes: Dict[int, Dict]) -> Optional[str]:
+        """从 method_definition 提取方法名（复用函数名提取逻辑）"""
+        return self.extract_function_name(method_node, all_nodes)
 

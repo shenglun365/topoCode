@@ -136,8 +136,16 @@ async function confirmClearCache() {
   isClearingCache.value = true
   try {
     const result = await projectStore.clearProjectCache(props.project.id)
-    // 简单的成功提示，通过 console 或后续可以扩展为 toast
-    console.log(`${t('project.clearCache')} 完成: 删除 ${result.deletedTasks} 个任务，保留 ${result.fileCount} 个源文件`)
+    // 反馈每个表删除的记录数
+    console.group(`${t('project.clearCache')} 完成`)
+    console.log(`  删除 ${result.deletedTasks} 个分析任务`)
+    console.log(`  保留 ${result.fileCount} 个源文件`)
+    if (result.deletedTables) {
+      for (const [table, count] of Object.entries(result.deletedTables)) {
+        console.log(`  [${table}] 删除 ${count} 条记录`)
+      }
+    }
+    console.groupEnd()
   } catch (err: any) {
     console.error('Failed to clear cache:', err)
   } finally {

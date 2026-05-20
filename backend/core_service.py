@@ -162,23 +162,23 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return rows
 
     @server.register("project.import")
-    def import_project(path: str):
+    async def import_project(path: str):
+        """导入项目 — 单次遍历 + 事务批量写入 + 异步释放 event loop"""
+        import asyncio
+
         if not os.path.isdir(path):
             raise FileNotFoundError(f"Directory not found: {path}")
 
         # 加载 .gitignore
         gitignore = GitIgnoreParser().load_file(os.path.join(path, '.gitignore'))
 
-        # 检测语言（统计最多语言）
-        language = _detect_language(path, gitignore)
-
         # 创建项目库
         project_id = f"proj-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
-
-        # 扫描文件树（相对路径 + MD5，应用 gitignore）
         project_db = multi_db.init_project_db(project_id)
-        file_count = _scan_file_tree(project_db, path, path, None, gitignore)
+
+        # 单次遍历：同时完成语言检测和文件扫描
+        file_count, language = await _scan_and_import(project_db, path, gitignore)
 
         # 插入主库
         main_db.insert("projects", {
@@ -929,48 +929,136 @@ def register_render_methods(server: ZMQServer, multi_db: MultiDBManager):
 
 # ==================== 辅助函数 ====================
 
-def _detect_language(path: str, gitignore: GitIgnoreParser | None = None) -> str:
-    """检测项目主要编程语言（统计所有扩展名后返回数量最多的语言，排除忽略文件）"""
-    extensions = {}
-    for root, dirs, files in os.walk(path):
-        rel_root = os.path.relpath(root, path)
-        # 过滤被忽略的目录
-        if gitignore:
-            dirs[:] = [d for d in dirs if not should_ignore_file(
-                os.path.join(rel_root, d) if rel_root != '.' else d, gitignore, is_dir=True)]
+async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParser | None = None) -> tuple:
+    """
+    单次遍历完成语言检测 + 文件扫描 + 事务批量写入
+    返回 (file_count, primary_language)
+    """
+    import asyncio
+    import hashlib
 
-        for f in files:
-            rel_path = os.path.relpath(os.path.join(root, f), path)
-            # 跳过被忽略的文件
-            if gitignore and should_ignore_file(rel_path, gitignore):
-                continue
-            ext = os.path.splitext(f)[1].lower()
-            extensions[ext] = extensions.get(ext, 0) + 1
-
-    lang_map = {
+    # 语言映射（显示名用于项目语言，小写名用于文件语言）
+    LANG_MAP_DISPLAY = {
         ".ts": "TypeScript", ".js": "JavaScript", ".jsx": "JavaScript", ".tsx": "TypeScript",
         ".py": "Python", ".go": "Go", ".rs": "Rust", ".java": "Java",
         ".cpp": "C++", ".c": "C", ".h": "C", ".cs": "C#",
         ".vue": "Vue", ".html": "HTML", ".css": "CSS", ".scss": "SCSS",
         ".json": "JSON", ".md": "Markdown", ".yaml": "YAML", ".yml": "YAML", ".toml": "TOML",
     }
+    LANG_MAP_FILE = {
+        ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
+        ".py": "python", ".go": "go", ".rs": "rust", ".java": "java",
+        ".c": "c", ".h": "c",
+        ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
+        ".cs": "csharp",
+        ".vue": "vue", ".html": "html", ".css": "css", ".scss": "scss",
+        ".json": "json", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
+        ".rb": "ruby", ".php": "php", ".swift": "swift", ".kt": "kotlin", ".scala": "scala",
+        ".r": "r", ".sql": "sql", ".sh": "bash",
+        ".dart": "dart", ".lua": "lua", ".perl": "perl", ".pl": "perl",
+        ".elixir": "elixir", ".ex": "elixir", ".exs": "elixir",
+        ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
+        ".zig": "zig", ".nim": "nim", ".v": "verilog",
+    }
 
-    lang_counts = {}
-    for ext, count in extensions.items():
-        lang = lang_map.get(ext)
-        if lang:
-            lang_counts[lang] = lang_counts.get(lang, 0) + count
+    file_count = 0
+    lang_counts = {}  # 扩展名 -> 计数
+    batch_records = []  # 收集所有记录，事务批量写入
+    BATCH_SIZE = 500  # 每 500 条提交一次
 
+    async def _scan_dir(current_path: str, parent_path: str | None = None):
+        nonlocal file_count
+        try:
+            entries = list(os.scandir(current_path))
+        except PermissionError:
+            return
+
+        for entry in entries:
+            # 每处理 100 个条目释放一次 event loop
+            if file_count % 100 == 0 and file_count > 0:
+                await asyncio.sleep(0)
+
+            rel_path = os.path.relpath(entry.path, root_path)
+
+            # 跳过被忽略的文件/目录
+            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir()):
+                continue
+
+            ext = os.path.splitext(entry.name)[1].lower()
+
+            if entry.is_file():
+                # 统计语言
+                if ext in LANG_MAP_DISPLAY:
+                    lang_counts[ext] = lang_counts.get(ext, 0) + 1
+
+                # 计算文件哈希
+                content_hash = ""
+                try:
+                    hash_md5 = hashlib.md5()
+                    with open(entry.path, "rb") as f:
+                        for chunk in iter(lambda: f.read(65536), b""):
+                            hash_md5.update(chunk)
+                    content_hash = hash_md5.hexdigest()
+                except (PermissionError, OSError):
+                    pass
+
+                file_id = f"file-{_simple_hash(rel_path)}"
+                language = LANG_MAP_FILE.get(ext) or ""
+                try:
+                    size = int(entry.stat().st_size)
+                except OSError:
+                    size = 0
+
+                batch_records.append((
+                    file_id, rel_path, language, size, content_hash, parent_path
+                ))
+                file_count += 1
+
+            elif entry.is_dir():
+                dir_id = f"dir-{_simple_hash(rel_path)}"
+                batch_records.append((
+                    dir_id, rel_path, "directory", 0, _simple_hash(rel_path), parent_path
+                ))
+
+                # 递归扫描子目录
+                await _scan_dir(entry.path, rel_path)
+
+    # 执行扫描
+    await _scan_dir(root_path)
+
+    # 事务批量写入
+    if batch_records:
+        project_db.execute("BEGIN TRANSACTION")
+        try:
+            for i in range(0, len(batch_records), BATCH_SIZE):
+                chunk = batch_records[i:i + BATCH_SIZE]
+                project_db.executemany(
+                    """INSERT OR REPLACE INTO source_files
+                       (id, file_path, language, size, content_hash, parent_path)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    chunk,
+                )
+            project_db.execute("COMMIT")
+        except Exception:
+            project_db.execute("ROLLBACK")
+            raise
+
+    # 确定主要语言
     if not lang_counts:
-        return "Unknown"
+        primary_language = "Unknown"
+    else:
+        primary_ext = max(lang_counts, key=lang_counts.get)
+        primary_language = LANG_MAP_DISPLAY.get(primary_ext, "Unknown")
 
-    return max(lang_counts, key=lang_counts.get)
+    return file_count, primary_language
 
 
 def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str, parent_path: str = None, gitignore: GitIgnoreParser | None = None) -> int:
     """
     扫描文件树到项目库（相对路径 + MD5 哈希，应用 gitignore 过滤）
     返回文件数量
+
+    注意：此函数保留用于 sync_project 等其他场景，import_project 已使用 _scan_and_import
     """
     file_count = 0
     try:

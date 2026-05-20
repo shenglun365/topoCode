@@ -44,6 +44,7 @@ export class ZMQRouter extends EventEmitter {
       this.sub.subscribe('task')
       this.sub.subscribe('project')
       this.sub.subscribe('backend')
+      this.sub.subscribe('llm')
       console.log('[ZMQRouter] SUB connected to tcp://127.0.0.1:5680')
 
       this.connected = true
@@ -88,7 +89,7 @@ export class ZMQRouter extends EventEmitter {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(requestId)
         reject(new Error(`Request timeout: ${method}`))
-      }, 30000)
+      }, 120000)  // 120s 超时（项目导入/分析等耗时操作需要更长时间）
 
       this.pendingRequests.set(requestId, { resolve, reject, timer })
 

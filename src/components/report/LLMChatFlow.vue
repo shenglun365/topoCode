@@ -16,20 +16,14 @@ import {
   XMarkIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
-import { llmWorker } from '@/workers/llm.worker.instance'
 import { useSettingsStore } from '@/stores/settings'
-import { isLLMConfigured } from '@/services/llmClient'
-import {
-  getDefaultTemplate,
-  getTemplateById,
-  renderPrompt,
-  type ParseMode,
-} from '@/services/promptTemplates'
+import { isLLMConfigured, chat } from '@/services/llmClient'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
 const props = defineProps<{
+  reportTabId: string
   taskId: string
   edgeType?: string
   selectedCommIds?: string[]
@@ -60,12 +54,21 @@ export interface QuickAction {
   templateId?: string
 }
 
-const messages = ref<ChatMessage[]>([])
+// 按 reportTabId 维护多组对话 — 切换 tab 时不丢失消息
+const tabMessages = ref<Map<string, ChatMessage[]>>(new Map())
 const userInput = ref('')
 const streaming = ref(false)
 
-// 当前解析模式 (社区/源码)
-const parseMode = ref<ParseMode>('community')
+/** 当前 tab 的消息列表 */
+const messages = computed({
+  get: () => tabMessages.value.get(props.reportTabId) || [],
+  set: (vals: ChatMessage[]) => {
+    tabMessages.value.set(props.reportTabId, vals)
+  },
+})
+
+// 当前解析模式 (社区/源码) — 用于过滤后端模板
+const parseCategory = ref<string>('community')
 const selectedTemplateId = ref<string>('')
 
 // ===== 添加查询结果消息 =====
@@ -79,13 +82,12 @@ function addQueryResultMessage(params: { selectedIds: string[]; stats: any }) {
     `- 边数: ${params.stats?.edgeCount || 0}`,
   ].join('\n')
 
-  const defaultTpl = getDefaultTemplate('community')
-
+  // 默认使用 community_explain 模板
   const quickActions: QuickAction[] = [
     {
       label: 'AI分析',
       action: 'parse_community',
-      templateId: defaultTpl?.id,
+      templateId: 'community_explain',
     },
   ]
 
@@ -125,12 +127,7 @@ async function onQuickParseCommunity(templateId?: string) {
     return
   }
 
-  const tplId = templateId || selectedTemplateId.value
-  const template = getTemplateById(tplId)
-  if (!template) {
-    addMessage('error', t('report.templateNotFound'))
-    return
-  }
+  const tplId = templateId || selectedTemplateId.value || 'community_explain'
 
   streaming.value = true
   const msgId = `msg-${Date.now()}`
@@ -148,7 +145,6 @@ async function onQuickParseCommunity(templateId?: string) {
     let graphData = props.graphData
     if (!graphData || !graphData.nodes?.length) {
       console.log('[LLMChatFlow] Fetching community graph...')
-      // 提取纯值，避免 Vue 响应式对象无法克隆
       const commIds = Array.isArray(props.selectedCommIds) ? [...props.selectedCommIds] : []
       graphData = await window.api.analysis.getCommunityGraph({
         taskId: props.taskId,
@@ -161,41 +157,45 @@ async function onQuickParseCommunity(templateId?: string) {
     }
 
     const commData = buildCommunityData(graphData)
-    const { systemPrompt, userPrompt } = renderPrompt(template, commData)
 
     addMessage('user', `${t('report.parseCommunity')} [${props.selectedCommIds.slice(0, 3).join(', ')}${props.selectedCommIds.length > 3 ? ` +${props.selectedCommIds.length - 3}` : ''}]`)
 
-    const model = settingsStore.models.find(m => m.isDefault) || settingsStore.models[0]
-    console.log('[LLMChatFlow] Using model:', model)
-    if (model) {
-      llmWorker.setConfig({
-        url: model.url,
-        apiKey: model.apiKey,
-        provider: model.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
-        model: model.model,
-        temperature: model.temperature,
-        maxTokens: model.maxTokens,
-      })
-    }
-
+    // 通过 IPC 调用后端模板渲染 + LLM
     let fullContent = ''
-    console.log('[LLMChatFlow] Starting LLM chat...')
-    await llmWorker.chat(
-      [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      (chunk: string) => {
-        fullContent += chunk
+    console.log('[LLMChatFlow] Starting LLM chat with template:', tplId)
+    const modelId = settingsStore.models.find(m => m.isDefault)?.id
+    if (!modelId) throw new Error('LLM API 未配置')
+
+    const result = await window.api.llm.chat({
+      sessionId: `_inline_${Date.now()}`,
+      modelId,
+      templateId: tplId,
+      variables: commData,
+      mode: 'chat',
+    })
+
+    const unsubscribe = window.api.llm.subscribe(result.requestId, {
+      onChunk(data: { index: number; text: string }) {
+        fullContent += data.text
         const msg = messages.value.find(m => m.id === msgId)
         if (msg) msg.content = fullContent
         scrollToBottom()
-      }
-    )
-    console.log('[LLMChatFlow] LLM chat complete')
+      },
+      onDone(data: { content: string }) {
+        const msg = messages.value.find(m => m.id === msgId)
+        if (msg) {
+          msg.content = data.content
+          msg.isStreaming = false
+        }
+        unsubscribe()
+      },
+      onError(errData: { message: string; code: string }) {
+        unsubscribe()
+        throw new Error(errData.message)
+      },
+    })
 
-    const msg = messages.value.find(m => m.id === msgId)
-    if (msg) msg.isStreaming = false
+    console.log('[LLMChatFlow] LLM chat complete')
   } catch (e: any) {
     console.error('[LLMChatFlow] Error:', e)
     console.error('[LLMChatFlow] Stack:', e.stack)
@@ -258,28 +258,16 @@ async function sendFollowUp() {
     // 取最近 5 轮 (10 条消息) + 当前问题
     const chatMessages = [...merged.slice(-10), { role: 'user', content: question }]
 
-    const model = settingsStore.models.find(m => m.isDefault) || settingsStore.models[0]
-    if (model) {
-      llmWorker.setConfig({
-        url: model.url,
-        apiKey: model.apiKey,
-        provider: model.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
-        model: model.model,
-        temperature: model.temperature,
-        maxTokens: model.maxTokens,
-      })
-    }
-
     let fullContent = ''
-    await llmWorker.chat(
-      chatMessages,
-      (chunk: string) => {
+    await chat({
+      messages: chatMessages,
+      onChunk: (chunk: string) => {
         fullContent += chunk
         const msg = messages.value.find(m => m.id === msgId)
         if (msg) msg.content = fullContent
         scrollToBottom()
       }
-    )
+    })
 
     const msg = messages.value.find(m => m.id === msgId)
     if (msg) msg.isStreaming = false
@@ -296,28 +284,41 @@ async function sendFollowUp() {
 
 // ===== 组装社区数据 =====
 function buildCommunityData(graphData?: any): Record<string, string> {
-  const commIds = props.selectedCommIds || []
   const gd = graphData || props.graphData || { nodes: [], edges: [] }
+  const edgeTypeLabel = props.edgeType === 'CALL' ? '调用' : '依赖'
 
   const nodeList = gd.nodes
     .slice(0, 50)
-    .map((n: any) => `- ${n.label || n.id} (${n.type || 'node'})`)
+    .map((n: any) => {
+      const label = n.label || n.id || ''
+      const refId = n.refId ? `node:${n.refId}` : ''
+      const fileId = n.fileId ? `file:${n.fileId}` : ''
+      const suffix = [refId, fileId].filter(Boolean).join(', ')
+      return suffix ? `- ${label} [${suffix}]` : `- ${label}`
+    })
     .join('\n')
 
   const edgeList = gd.edges
     .slice(0, 50)
     .map((e: any) => {
-      const source = e.source || e.from
-      const target = e.target || e.to
-      const type = e.type || (props.edgeType === 'CALL' ? '调用' : '依赖')
-      return `- ${source} → ${target} [${type}]`
+      const sLabel = e.sourceLabel || e.source || ''
+      const tLabel = e.targetLabel || e.target || ''
+      const direction = e.direction || ''
+      const dirLabel = direction === 'caller→callee' ? '调用'
+        : direction === 'INCLUDE' ? '包含'
+        : edgeTypeLabel
+
+      const refs = [e.sourceRefId, e.targetRefId].filter(Boolean)
+      const refSuffix = refs.length === 2 ? ` [ref:${refs[0]}→${refs[1]}]` : ''
+
+      return `- ${sLabel} -[${dirLabel}]→ ${tLabel}${refSuffix}`
     })
     .join('\n')
 
   return {
-    commId: commIds.join(', '),
-    nodeCount: String(gd.nodes.length),
-    edgeCount: String(gd.edges.length),
+    commId: (props.selectedCommIds || []).join(', '),
+    nodeCount: String(gd.nodes?.length || 0),
+    edgeCount: String(gd.edges?.length || 0),
     qualityScore: '0.8',
     nodeList: nodeList || t('report.noNodes'),
     edgeList: edgeList || t('report.noEdges'),
@@ -346,25 +347,36 @@ function deleteMessage(msgId: string) {
   messages.value = messages.value.filter(m => m.id !== msgId)
 }
 
-// ===== 清空对话 =====
+// ===== 清空当前 tab 对话 =====
 function clearChat() {
-  messages.value = []
+  tabMessages.value.set(props.reportTabId, [])
 }
 
 // ===== 初始化 =====
 function init() {
-  const defaultTpl = getDefaultTemplate('community')
-  if (defaultTpl) selectedTemplateId.value = defaultTpl.id
+  selectedTemplateId.value = 'community_explain'
+  // 确保当前 tab 有消息数组
+  if (!tabMessages.value.has(props.reportTabId)) {
+    tabMessages.value.set(props.reportTabId, [])
+  }
 }
 
-watch(() => props.taskId, () => {
-  clearChat()
+// tab 切换时不清空对话，只确保该 tab 有消息数组
+watch(() => props.reportTabId, () => {
+  if (!tabMessages.value.has(props.reportTabId)) {
+    tabMessages.value.set(props.reportTabId, [])
+  }
   init()
 })
 
+/** 清理指定 tab 的消息（供外部调用，tab 关闭时清理内存） */
+function clearTabMessages(tabId: string) {
+  tabMessages.value.delete(tabId)
+}
+
 init()
 
-defineExpose({ addQueryResultMessage, clearChat })
+defineExpose({ addQueryResultMessage, clearChat, clearTabMessages })
 </script>
 
 <template>

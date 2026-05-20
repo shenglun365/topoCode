@@ -63,7 +63,7 @@ class PythonCallExtractor(CallGraphExtractor):
         'bool', 'object', 'type',
     }
     
-    def extract(self, proj_id: int, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
+    def extract(self, proj_id: int, nodes_by_file: Dict[str, Dict[str, Dict]]) -> List[Dict[str, Any]]:
         """
         提取调用图边
         

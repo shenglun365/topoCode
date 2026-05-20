@@ -22,7 +22,7 @@ class GoCallExtractor(CallGraphExtractor):
     CALL_EXPRESSION_TYPES = {'call_expression', 'go_statement', 'defer_statement'}
     FUNCTION_DEFINITION_TYPES = {'function_declaration', 'method_declaration'}
     
-    def extract(self, proj_id: int, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
+    def extract(self, proj_id: int, nodes_by_file: Dict[str, Dict[str, Dict]]) -> List[Dict[str, Any]]:
         
         
         func_map = self._build_global_function_map_from_ast(nodes_by_file)

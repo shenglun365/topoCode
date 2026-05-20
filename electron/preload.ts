@@ -239,16 +239,89 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
 
-  // ==================== Chat 会话 ====================
-  chat: {
-    listSessions: () =>
-      ipcRenderer.invoke('ipc:call', { method: 'chat.listSessions', params: {} }),
-    createSession: (params: { id: string; title: string; mode?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'chat.createSession', params }),
-    deleteSession: (params: { id: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'chat.deleteSession', params }),
-    saveMessage: (params: { sessionId: string; message: any }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'chat.saveMessage', params }),
+  // ==================== LLM Session 管理 (v2) ====================
+  session: {
+    list: (params?: { moduleType?: string; projectId?: string; status?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.list', params: params || {} }),
+    create: (params: { moduleType: string; title: string; projectId?: string; metadata?: Record<string, any> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.create', params }),
+    delete: (params: { sessionId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.delete', params }),
+    getMessages: (params: { sessionId: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.getMessages', params }),
+    addMessage: (params: { sessionId: string; role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.addMessage', params }),
+    deleteMessage: (params: { messageId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.deleteMessage', params }),
+    updateMeta: (params: { sessionId: string; metadata: Record<string, any> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.updateMeta', params }),
+    saveMessages: (params: { sessionId: string; messages: Array<{ role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.saveMessages', params }),
+  },
+
+  // ==================== LLM 推理 (v2) ====================
+  llm: {
+    chat: (params: {
+      sessionId: string
+      modelId: string
+      mode?: 'chat' | 'tools' | 'structured'
+      messages?: Array<{ role: string; content: string }>
+      templateId?: string
+      variables?: Record<string, any>
+      tools?: string[]
+      outputSchema?: Record<string, any>
+    }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.chat', params }),
+    abortChat: (params: { requestId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.abortChat', params }),
+    summarizeCode: (params: { code: string; modelId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.summarizeCode', params }),
+    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'llm.explainSymbol', params }),
+    // 订阅流式事件 (requestId → callbacks → unsubscribe)
+    subscribe: (requestId: string, callbacks: {
+      onChunk?: (data: { index: number; text: string }) => void
+      onToolCall?: (data: { toolName: string; args: Record<string, any> }) => void
+      onToolResult?: (data: { toolName: string; result: Record<string, any> }) => void
+      onDone?: (data: { content: string; structured?: Record<string, any> }) => void
+      onError?: (data: { message: string; code: string }) => void
+    }) => {
+      const channel = 'zmq:event'
+      const handler = (_event: any, data: any) => {
+        if (data.requestId !== requestId) return
+        switch (data.eventType) {
+          case 'chunk': callbacks.onChunk?.(data.data); break
+          case 'tool_call': callbacks.onToolCall?.(data.data); break
+          case 'tool_result': callbacks.onToolResult?.(data.data); break
+          case 'done': callbacks.onDone?.(data.data); break
+          case 'error': callbacks.onError?.(data.data); break
+        }
+      }
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    },
+  },
+
+  // ==================== Prompt 模板 ====================
+  promptTemplate: {
+    list: (params?: { mode?: string; moduleType?: string; category?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.list', params: params || {} }),
+    get: (params: { templateId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.get', params }),
+    create: (params: {
+      name: string; mode: string; moduleType?: string; category?: string
+      systemPrompt?: string; userPromptTemplate?: string
+      toolsJson?: string; toolStrategy?: string
+      outputSchemaJson?: string; outputExample?: string
+      variablesJson?: string
+    }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.create', params }),
+    update: (params: { templateId: string;[key: string]: any }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.update', params }),
+    delete: (params: { templateId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.delete', params }),
+    render: (params: { templateId: string; variables: Record<string, any> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.render', params }),
   },
 
   // ==================== 文件系统 ====================
@@ -292,134 +365,5 @@ contextBridge.exposeInMainWorld('api', {
   },
 })
 
-// ==================== 类型声明 ====================
-
-declare global {
-  interface Window {
-    api: {
-      window: {
-        toggleLeftPanel: () => Promise<void>
-        toggleRightPanel: () => Promise<void>
-        zoomIn: () => Promise<void>
-        zoomOut: () => Promise<void>
-        create: () => Promise<number | null>
-        close: (windowId: number) => Promise<boolean>
-        list: () => Promise<Array<{ id: number; title: string; isFocused: boolean }>>
-        focus: (windowId: number) => Promise<boolean>
-        getCount: () => Promise<number>
-        getMaxCount: () => Promise<number>
-        broadcast: (channel: string, data: any) => Promise<boolean>
-        onPanelToggle: (channel: string, callback: () => void) => () => void
-      }
-      dialog: {
-        openDirectory: () => Promise<string | null>
-      }
-      shell: {
-        openExternal: (url: string) => Promise<void>
-      }
-      store: {
-        get: (key: string) => Promise<any>
-        set: (key: string, value: any) => Promise<boolean>
-      }
-      fs: {
-        addAllowedDir: (dirPath: string) => Promise<void>
-        readFile: (filePath: string) => Promise<string>
-      }
-      project: {
-        list: () => Promise<any[]>
-        import: (path: string) => Promise<any>
-        get: (id: string) => Promise<any>
-        remove: (id: string) => Promise<void>
-        sync: (id: string) => Promise<any>
-        getFileTree: (id: string) => Promise<any[]>
-        checkPathValidity: (id: string) => Promise<{ pathValid: boolean; rootPath: string; needsResync: boolean }>
-      }
-      analysis: {
-        listTasks: (projectId: string) => Promise<any[]>
-        createTask: (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => Promise<any>
-        runTask: (taskId: string) => Promise<{ taskId: string; status: string }>
-        getTask: (taskId: string) => Promise<any>
-        getResults: (taskId: string) => Promise<any>
-        updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<any>
-        deleteTask: (taskId: string) => Promise<void>
-        stopTask: (taskId: string) => Promise<void>
-        clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number }>
-        reRunTask: (taskId: string) => Promise<any>
-        getTaskLogs: (params: { taskId: string; runId?: string }) => Promise<any>
-        getTaskRuns: (taskId: string) => Promise<any>
-        updateTaskConfig: (params: { taskId: string; config: any }) => Promise<any>
-        scanFileStats: (projectId: string, options?: { scope?: string; scopes?: string[]; selectedExtensions?: string[]; patternType?: string; pattern?: string; excludeDirs?: string[] }) => Promise<any>
-        getAvailableLevels: (taskId: string, edgeType?: string) => Promise<string[]>
-        getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<{ nodes: any[]; edges: any[]; communities: any[] }>
-        getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
-        getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
-        getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; qualityScore: number }> }> }>
-        getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
-        onProgress: (callback: (data: any) => void) => () => void
-        onComplete: (callback: (data: any) => void) => () => void
-        onError: (callback: (data: any) => void) => () => void
-      }
-      knowledge: {
-        listDocs: (params?: any) => Promise<any[]>
-        createDoc: (params: { title: string; content?: string; projectId?: string; tags?: any; type?: string }) => Promise<any>
-        getDoc: (id: string) => Promise<any>
-        updateDoc: (params: any) => Promise<any>
-        deleteDoc: (id: string) => Promise<void>
-        getGraph: (params?: { projectId?: string }) => Promise<any>
-        getDimensions: () => Promise<any>
-      }
-      report: {
-        createSubDoc: (params: { taskId: string; edgeType?: string; commId?: string; title: string; content: string; templateId?: string }) => Promise<{ id: string }>
-        listSubDocs: (params: { taskId: string; commId?: string }) => Promise<any[]>
-        getSubDoc: (subDocId: string) => Promise<any>
-        updateSubDoc: (params: { subDocId: string; title?: string; content?: string }) => Promise<{ ok: boolean }>
-        deleteSubDoc: (subDocId: string) => Promise<{ ok: boolean }>
-      }
-      settings: {
-        getModels: () => Promise<any[]>
-        addModel: (params: any) => Promise<any>
-        updateModel: (params: any) => Promise<any>
-        removeModel: (id: string) => Promise<void>
-        testModel: (id: string) => Promise<any>
-        getAgents: () => Promise<any[]>
-        addAgent: (params: { name: string; path: string; args?: string; type?: string }) => Promise<any>
-        updateAgent: (params: any) => Promise<any>
-        removeAgent: (id: string) => Promise<void>
-        detectAgent: (id: string) => Promise<any>
-        getSkills: () => Promise<any[]>
-        updateSkill: (params: { id: string; enabled: boolean }) => Promise<any>
-        getBindings: () => Promise<Record<string, string>>
-        updateBindings: (params: { bindings: Record<string, string> }) => Promise<Record<string, string>>
-      }
-      backend: {
-        start: () => Promise<any>
-        stop: () => Promise<any>
-        restart: () => Promise<any>
-        getStatus: () => Promise<any>
-        ping: () => Promise<any>
-        onStatusChange: (callback: (data: any) => void) => () => void
-      }
-      chat: {
-        listSessions: () => Promise<any>
-        createSession: (params: { id: string; title: string; mode?: string }) => Promise<any>
-        deleteSession: (params: { id: string }) => Promise<any>
-        saveMessage: (params: { sessionId: string; message: any }) => Promise<any>
-      }
-      system: {
-        selectDirectory: () => Promise<string | null>
-        getAppDataPath: () => Promise<string>
-        get: (key: string) => Promise<any>
-        set: (key: string, val: any) => Promise<boolean>
-        readFile: (filePath: string) => Promise<string>
-      }
-      on: (channel: string, callback: (...args: any[]) => void) => () => void
-      removeListener: (channel: string, callback: (...args: any[]) => void) => void
-      log: {
-        debug: (source: string, message: string, data?: any) => void
-        info: (source: string, message: string, data?: any) => void
-        warn: (source: string, message: string, data?: any) => void
-        error: (source: string, message: string, data?: any) => void
-      }
-    }
-  }
-}
+// Window API 类型由 src/types/ipc.ts 中的 IPCAPI 统一声明
+// (含 session / llm / promptTemplate 等 v2 API)

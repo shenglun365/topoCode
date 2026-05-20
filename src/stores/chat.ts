@@ -1,11 +1,38 @@
-/** Chat Store - AI 助手会话管理 */
+/**
+ * Chat Store — Coder / AI Assistant 会话管理 (v2)
+ *
+ * 会话持久化走 session.* IPC (SQLite llm_sessions/llm_messages)。
+ * LLM 推理走 llm.chat IPC (ZMQ → Python 统一网关)，流式通过 ZMQ PUB 回传。
+ */
+
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ChatSession, ChatMessage } from '@/utils/mock'
-import { llmWorker } from '@/workers/llm.worker.instance'
 import { useSettingsStore } from '@/stores/settings'
 
+export interface ChatSession {
+  id: string
+  title: string
+  mode: string
+  status: string
+  messages: ChatMessage[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessage {
+  id: string
+  role: string
+  content: string
+  timestamp: string
+}
+
 export const useChatStore = defineStore('chat', () => {
+  // Helper: get window.api with check
+  function api() {
+    if (!window.api) throw new Error('IPC bridge not available')
+    return window.api
+  }
+
   // State
   const sessions = ref<ChatSession[]>([])
   const activeSessionId = ref<string | null>(null)
@@ -25,7 +52,14 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.filter(s => s.status === 'running')
   )
 
-  // 获取当前默认模型配置（从 settings store 读取）
+  // 获取当前默认模型 ID
+  const modelId = computed(() => {
+    const settingsStore = useSettingsStore()
+    const defaultModel = settingsStore.models.find(m => m.isDefault)
+    return defaultModel?.id || settingsStore.models[0]?.id || null
+  })
+
+  // 获取当前默认模型完整配置（用于 UI 展示）
   const modelConfig = computed(() => {
     const settingsStore = useSettingsStore()
     return settingsStore.models.find(m => m.isDefault) || settingsStore.models[0] || null
@@ -35,43 +69,84 @@ export const useChatStore = defineStore('chat', () => {
   async function loadSessions() {
     loading.value = true
     try {
-      // 从后端加载会话列表
-      const result = await window.api.chat.listSessions()
+      const result = await api().session.list({ moduleType: 'ai_assistant' })
       if (result && result.sessions) {
-        sessions.value = result.sessions
-        activeSessionId.value = sessions.value[0]?.id || null
+        sessions.value = result.sessions.map((s: any) => ({
+          id: s.id,
+          title: s.title,
+          mode: 'chat',
+          status: s.status,
+          messages: [],
+          createdAt: s.created_at,
+          updatedAt: s.updated_at,
+        }))
+
+        if (!activeSessionId.value && sessions.value.length > 0) {
+          activeSessionId.value = sessions.value[0].id
+          await loadMessages(activeSessionId.value)
+        }
       }
     } catch (e) {
-      console.warn('[ChatStore] Failed to load sessions from backend:', e)
-      // 降级到本地空列表
-      sessions.value = []
+      console.warn('[ChatStore] Failed to load sessions:', e)
     } finally {
       loading.value = false
     }
   }
 
-  async function createSession(title: string = '新对话') {
-    const newSession: ChatSession = {
-      id: `session-${Date.now()}`,
-      title,
-      mode: inputMode.value,
-      status: 'idle',
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-    sessions.value.unshift(newSession)
-    activeSessionId.value = newSession.id
-
-    // 同步到后端
+  /** 加载指定会话的消息 */
+  async function loadMessages(sessionId: string) {
     try {
-      await window.api.chat.createSession({
-        id: newSession.id,
-        title: newSession.title,
-        mode: newSession.mode,
-      })
+      const result = await api().session.getMessages({ sessionId })
+      if (result && result.messages) {
+        const session = sessions.value.find(s => s.id === sessionId)
+        if (session) {
+          session.messages = result.messages.map((m: any) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.created_at,
+          }))
+        }
+      }
     } catch (e) {
-      console.warn('[ChatStore] Failed to sync session to backend:', e)
+      console.warn('[ChatStore] Failed to load messages:', e)
+    }
+  }
+
+  async function createSession(title: string = '新对话') {
+    try {
+      const result = await api().session.create({
+        moduleType: 'ai_assistant',
+        title,
+      })
+
+      const newSession: ChatSession = {
+        id: result.id,
+        title,
+        mode: inputMode.value,
+        status: 'idle',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      sessions.value.unshift(newSession)
+      activeSessionId.value = newSession.id
+    } catch (e) {
+      console.warn('[ChatStore] Failed to create session:', e)
+      // 降级：本地创建
+      const fallbackId = `local-${Date.now()}`
+      const newSession: ChatSession = {
+        id: fallbackId,
+        title,
+        mode: inputMode.value,
+        status: 'idle',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      sessions.value.unshift(newSession)
+      activeSessionId.value = newSession.id
     }
   }
 
@@ -85,16 +160,19 @@ export const useChatStore = defineStore('chat', () => {
       activeSessionId.value = sessions.value[0]?.id || null
     }
 
-    // 同步到后端
     try {
-      await window.api.chat.deleteSession({ id: sessionId })
+      await api().session.delete({ sessionId })
     } catch (e) {
-      console.warn('[ChatStore] Failed to delete session from backend:', e)
+      console.warn('[ChatStore] Failed to delete session:', e)
     }
   }
 
   function switchSession(sessionId: string) {
     activeSessionId.value = sessionId
+    const session = sessions.value.find(s => s.id === sessionId)
+    if (session && session.messages.length === 0) {
+      loadMessages(sessionId)
+    }
   }
 
   function setMode(mode: 'chat' | 'design') {
@@ -103,6 +181,19 @@ export const useChatStore = defineStore('chat', () => {
 
   function setInputText(text: string) {
     inputText.value = text
+  }
+
+  /** 保存消息到后端 SQLite */
+  async function _saveMessage(sessionId: string, msg: ChatMessage) {
+    try {
+      await api().session.addMessage({
+        sessionId,
+        role: msg.role,
+        content: msg.content,
+      })
+    } catch (e) {
+      console.warn('[ChatStore] Failed to save message:', e)
+    }
   }
 
   async function sendMessage() {
@@ -125,6 +216,9 @@ export const useChatStore = defineStore('chat', () => {
     inputText.value = ''
     isTyping.value = true
 
+    // 持久化 user 消息
+    _saveMessage(session.id, userMessage)
+
     // 创建 AI 消息占位
     const aiMessage: ChatMessage = {
       id: `msg-${Date.now() + 1}`,
@@ -135,50 +229,56 @@ export const useChatStore = defineStore('chat', () => {
     session.messages.push(aiMessage)
 
     try {
-      // 获取默认模型配置
-      const settingsStore = useSettingsStore()
-      const defaultModel = settingsStore.models.find(m => m.isDefault) || settingsStore.models[0]
-
-      if (!defaultModel) {
+      if (!modelId.value) {
         aiMessage.content = '请先配置大模型 API（设置 → 模型配置）'
         isTyping.value = false
         session.status = 'idle'
         return
       }
 
-      // 构建消息历史
-      const messages = session.messages
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({ role: m.role, content: m.content }))
-
-      // 调用 LLM（流式 — Worker 执行）
-      llmWorker.setConfig({
-        url: defaultModel.url,
-        apiKey: defaultModel.apiKey,
-        provider: defaultModel.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
-        model: defaultModel.model,
-        temperature: defaultModel.temperature,
-        maxTokens: defaultModel.maxTokens,
-      })
-      const fullContent = await llmWorker.chat(messages, (chunk) => {
-        if (aiMessage) {
-          aiMessage.content += chunk
-        }
+      // v2: 通过 IPC 调用后端 LLM 网关
+      // 流式 chunk → ZMQ PUB 'llm' → main process → webContents.send → subscribe handler
+      const result = await api().llm.chat({
+        sessionId: session.id,
+        modelId: modelId.value,
+        messages: session.messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .slice(0, -1)  // 去掉刚追加的空 AI 消息占位
+          .map(m => ({ role: m.role, content: m.content })),
+        mode: 'chat',
       })
 
-      aiMessage.content = fullContent
+      let fullContent = ''
+
+      const unsubscribe = api().llm.subscribe(result.requestId, {
+        onChunk(data: { index: number; text: string }) {
+          fullContent += data.text
+          aiMessage.content = fullContent
+        },
+        onDone(data: { content: string }) {
+          aiMessage.content = data.content
+          isTyping.value = false
+          session.status = 'idle'
+          session.updatedAt = new Date().toISOString()
+          _saveMessage(session.id, aiMessage)
+          unsubscribe()
+        },
+        onError(errData: { message: string }) {
+          aiMessage.content = `LLM 调用失败: ${errData.message}`
+          isTyping.value = false
+          session.status = 'idle'
+          unsubscribe()
+        },
+      })
     } catch (e: any) {
       aiMessage.content = `LLM 调用失败: ${e.message || String(e)}`
       console.error('[ChatStore] LLM call failed:', e)
-    } finally {
       isTyping.value = false
       session.status = 'idle'
-      session.updatedAt = new Date().toISOString()
     }
   }
 
   function handleAction(action: string) {
-    // 用户点击操作按钮
     const actionMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
@@ -203,6 +303,7 @@ export const useChatStore = defineStore('chat', () => {
     activeSession,
     sessionCount,
     runningSessions,
+    modelId,
     modelConfig,
     loadSessions,
     createSession,

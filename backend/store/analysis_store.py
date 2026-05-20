@@ -14,6 +14,28 @@ from .connection import SQLiteContext
 logger = logging.getLogger(__name__)
 
 
+def _deserialize_node(node: Dict) -> Dict:
+    """反序列化节点中的 JSON 字段（refs, def_node_id 等）"""
+    if 'refs' in node and isinstance(node['refs'], str):
+        try:
+            node['refs'] = json.loads(node['refs'])
+        except (json.JSONDecodeError, TypeError):
+            node['refs'] = []
+
+    # def_node_id 写入时 str(list) 转成了 "[5]" 格式，需要反序列化回 list
+    if 'def_node_id' in node and isinstance(node['def_node_id'], str):
+        val = node['def_node_id']
+        if val and val.startswith('['):
+            try:
+                node['def_node_id'] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                node['def_node_id'] = []
+        elif not val:
+            node['def_node_id'] = []
+
+    return node
+
+
 class AnalysisStore:
     """项目库分析数据表的 CRUD 封装"""
 
@@ -108,14 +130,14 @@ class AnalysisStore:
             "SELECT * FROM base_node WHERE file_id = ?",
             (file_id,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_deserialize_node(dict(r)) for r in rows]
 
     def get_nodes_by_type(self, node_type: str) -> List[Dict]:
         rows = self._db.execute(
             "SELECT * FROM base_node WHERE type = ?",
             (node_type,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_deserialize_node(dict(r)) for r in rows]
 
     def count_nodes(self, file_id: str = None) -> int:
         if file_id:

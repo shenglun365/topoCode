@@ -20,8 +20,8 @@ class CLanguageParser(CallGraphExtractor):
     - 函数指针调用：(*fp)()
     """
     
-    # C 语言函数定义的节点类型
-    FUNCTION_DEFINITION_TYPES = {'function_definition'}
+    # C 语言函数定义的节点类型（包含 C++ 方法）
+    FUNCTION_DEFINITION_TYPES = {'function_definition', 'method_definition'}
     MACRO_DEFINITION_TYPES = {'macro_definition'}
     
     # C 语言调用表达式的节点类型
@@ -30,7 +30,7 @@ class CLanguageParser(CallGraphExtractor):
     # C 语言标识符节点类型
     IDENTIFIER_TYPES = {'identifier'}
     
-    def extract(self, proj_id: int, nodes_by_file: Dict[int, Dict[int, Dict]]) -> List[Dict[str, Any]]:
+    def extract(self, proj_id: int, nodes_by_file: Dict[str, Dict[str, Dict]]) -> List[Dict[str, Any]]:
         """
         提取调用图边
         
@@ -54,7 +54,7 @@ class CLanguageParser(CallGraphExtractor):
         
         for file_id, nodes in nodes_by_file.items():
             file_edges = self._extract_file_calls(
-                file_id, nodes, global_func_def_map, global_macro_map
+                proj_id, file_id, nodes, global_func_def_map, global_macro_map
             )
             call_edges.extend(file_edges)
         
@@ -62,12 +62,43 @@ class CLanguageParser(CallGraphExtractor):
     
 
 
+    def _build_global_function_map_from_ast(self, nodes_by_file: Dict[str, Dict[str, Dict]]) -> Dict[str, Dict]:
+        """从 AST 节点中构建全局函数映射（不依赖数据库）"""
+        func_map = {}
+        for file_id, nodes in nodes_by_file.items():
+            for node_id, node in nodes.items():
+                node_type = node.get("type", "")
+                if node_type in self.FUNCTION_DEFINITION_TYPES:
+                    func_name = self.extract_function_name(node, nodes)
+                    if func_name:
+                        func_map[func_name] = {"file_id": file_id, "node_id": node_id}
+        return func_map
+
+    def _build_global_macro_map_from_ast(self, nodes_by_file: Dict[str, Dict[str, Dict]]) -> Dict[str, Dict]:
+        """从 AST 节点中构建全局宏映射（不依赖数据库）"""
+        macro_map = {}
+        for file_id, nodes in nodes_by_file.items():
+            for node_id, node in nodes.items():
+                node_type = node.get("type", "")
+                if node_type in ("preproc_def", "preproc_function_def"):
+                    macro_name = self.extract_macro_name(node, nodes)
+                    if macro_name:
+                        macro_map[macro_name] = {"file_id": file_id, "node_id": node_id}
+        return macro_map
+
     def extract_macro_name(self, node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
         """从宏定义节点提取宏名"""
-        return node.get("name") or (node.get("refs", [None])[0] if node.get("refs") else None)
+        name = node.get("name")
+        if name:
+            return name
+        refs = node.get("refs", [])
+        if refs:
+            return refs[0]
+        return None
 
     def _extract_file_calls(
         self,
+        proj_id: int,
         file_id: int,
         nodes: Dict[int, Dict],
         func_map: Dict[str, Dict],
@@ -138,45 +169,51 @@ class CLanguageParser(CallGraphExtractor):
         """
         从函数定义节点提取函数名
 
-        算法:
-        1. 优先从 refs 数组提取（第一个非类型名的标识符）
-        2. 查找同一作用域内的 identifier 节点
-        3. 回退到第一个候选标识符
+        策略:
+        1. 优先从 identifier 子节点提取（查找 def_node_id 匹配的）
+        2. 回退: 从同一作用域内的 identifier 提取
+        3. 最后回退: 从 refs 数组提取（跳过常见类型名）
         """
-        # 方案 1: 从 refs 数组提取函数名
-        refs = func_node.get('refs', [])
-        if refs:
-            # refs 中第一个标识符通常是返回类型，第二个是函数名
-            # 但也可能只有一个函数名（无返回类型的旧式 C 函数）
-            for i, ref in enumerate(refs):
-                # 跳过常见的返回类型
-                if i == 0 and ref in {'void', 'int', 'char', 'long', 'short', 'unsigned',
-                                       'signed', 'float', 'double', 'size_t', 'ssize_t',
-                                       'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t',
-                                       'int8_t', 'int16_t', 'int32_t', 'int64_t',
-                                       'bool', 'const', 'static', 'extern', 'inline'}:
-                    continue
-                # 找到第一个非类型名的标识符，很可能是函数名
-                if ref and len(ref) > 0 and (ref[0].islower() or ref[0].isupper()):
-                    return ref
-        
-        # 方案 2: 从 identifier 节点提取
-        func_id = func_node['node_id']
-        
-        # 查找同一作用域内的 identifier 候选
+        import json
+
+        func_id = func_node.get('node_id')
+
+        # 策略 1: 查找 def_node_id 匹配的 identifier（最精确）
+        for node in all_nodes.values():
+            if node.get('type') == 'identifier' and node.get('scope_node_id') == func_id:
+                did = node.get('def_node_id')
+                # 兼容 list 和字符串格式
+                if isinstance(did, list) and func_id in did:
+                    return node.get('name')
+                elif isinstance(did, str) and did.startswith('['):
+                    try:
+                        did_list = json.loads(did)
+                        if func_id in did_list:
+                            return node.get('name')
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+        # 策略 2: 同一作用域内的所有 identifier，按位置排序取第一个
         candidates = [
             n for n in all_nodes.values()
-            if n['type'] == 'identifier'
-               and n.get('scope_node_id') == func_id
+            if n['type'] == 'identifier' and n.get('scope_node_id') == func_id
         ]
-        if not candidates:
-            return None
-        
-        # 按位置排序
-        candidates.sort(key=lambda x: (x['start'][0], x['start'][1]))
-        
-        # 返回第一个标识符作为函数名
-        return candidates[0].get('name') or (candidates[0].get('refs') and candidates[0]['refs'][0])
+        if candidates:
+            candidates.sort(key=lambda x: (x.get('start', [0, 0])[0], x.get('start', [0, 0])[1]))
+            return candidates[0].get('name')
+
+        # 策略 3: 从 refs 数组提取（跳过常见类型名）
+        refs = func_node.get('refs', [])
+        type_keywords = {'void', 'int', 'char', 'long', 'short', 'unsigned',
+                         'signed', 'float', 'double', 'size_t', 'ssize_t',
+                         'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t',
+                         'int8_t', 'int16_t', 'int32_t', 'int64_t',
+                         'bool', 'const', 'static', 'extern', 'inline'}
+        for ref in refs:
+            if ref and ref not in type_keywords:
+                return ref
+
+        return None
 
     def is_call_expression(self, node: Dict) -> bool:
         """判断节点是否为调用表达式"""
@@ -185,13 +222,22 @@ class CLanguageParser(CallGraphExtractor):
     def extract_callee_name(self, call_node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
         """
         从调用节点提取被调用函数名
-        
+
         策略:
         1. 优先从 refs 字段提取（最可靠）
         2. 回退到同行 identifier
         """
+        import json
+
         # 优先从 refs 提取
         refs = call_node.get('refs')
+        # 兼容字符串格式的 refs
+        if isinstance(refs, str) and refs.startswith('['):
+            try:
+                refs = json.loads(refs)
+            except (json.JSONDecodeError, TypeError):
+                refs = []
+
         if refs and isinstance(refs, list) and len(refs) > 0:
             name = refs[0]
             # 处理字符串字面量

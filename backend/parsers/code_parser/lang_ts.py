@@ -336,6 +336,51 @@ NODE_TYPE_TO_OP = {
     'yield_expression': 'yield',
 }
 
+
+# ============================================================================
+# 名称提取规则
+# ============================================================================
+
+NAME_EXTRACT_RULES = {
+    # 函数定义
+    "function_declaration": ["identifier"],
+    "generator_function": ["identifier"],
+    "function_expression": ["identifier"],
+    "arrow_function": ["identifier"],
+    "method_definition": ["property_identifier"],
+    "pair": ["identifier"],
+
+    # 类定义
+    "class_declaration": ["identifier"],
+    "class_expression": ["identifier"],
+    "abstract_class": ["identifier"],
+
+    # 接口/类型
+    "interface_declaration": ["identifier"],
+    "type_alias_declaration": ["identifier"],
+    "type_annotation": ["identifier"],
+
+    # 变量
+    "variable_declaration": ["identifier"],
+    "lexical_declaration": ["identifier"],
+    "constant_declaration": ["identifier"],
+    "variable_declarator": ["identifier"],
+
+    # 模块
+    "import_statement": ["identifier"],
+    "import_clause": ["identifier"],
+    "named_imports": ["identifier"],
+    "import_specifier": ["identifier"],
+    "export_statement": ["identifier"],
+    "export_named_declaration": ["identifier"],
+
+    # 调用
+    "call_expression": ["identifier", "property_identifier"],
+    "new_expression": ["identifier"],
+    "chain_expression": ["identifier"],
+    "member_expression": ["property_identifier"],
+    "tagged_template_expression": ["identifier"],
+}
 # 创建配置对象
 CONFIG = LanguageConfig(
     important_node_types=IMPORTANT_NODE_TYPES_SET,
@@ -343,6 +388,7 @@ CONFIG = LanguageConfig(
     scope_creating_types=SCOPE_CREATING_TYPES,
     defining_context_types=DEFINING_CONTEXT_TYPES,
     node_type_to_op=NODE_TYPE_TO_OP,
+    name_extract_rules=NAME_EXTRACT_RULES,
 )
 
 # 导出配置

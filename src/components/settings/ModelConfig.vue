@@ -13,7 +13,6 @@ import {
   XCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
-import { llmWorker } from '@/workers/llm.worker.instance'
 import type { ModelConfigItem } from '@/types/ipc'
 
 const { t } = useI18n()
@@ -23,6 +22,7 @@ const settingsStore = useSettingsStore()
 const showDialog = ref(false)
 const editMode = ref(false)
 const editingId = ref<string | null>(null)
+const newModelId = ref<string | null>(null)
 const testingId = ref<string | null>(null)
 const dialogTesting = ref(false)
 const dialogTestResult = ref<'success' | 'error' | null>(null)
@@ -191,21 +191,26 @@ async function testCurrentForm() {
   dialogTestResult.value = null
 
   try {
-    // 临时设置配置到 Worker
-    llmWorker.setConfig({
-      url: form.value.url,
-      apiKey: form.value.apiKey || undefined,
-      provider: form.value.provider as 'ollama' | 'openai' | 'lm-studio' | 'custom',
-      model: form.value.model,
-      temperature: form.value.temperature,
-      maxTokens: form.value.maxTokens,
-    })
-    const result = await llmWorker.testConnection()
-
-    if (result.status === 'connected') {
-      dialogTestResult.value = 'success'
+    // v2: 先暂存配置到 DB，然后通过后端 API 测试连接
+    // 如果是编辑已有模型，直接用其 ID；否则先保存再测试
+    if (editingId.value) {
+      const result = await window.api.settings.testModel(editingId.value)
+      dialogTestResult.value = result.status === 'ok' ? 'success' : 'error'
     } else {
-      dialogTestResult.value = 'error'
+      // 新建场景：先保存再测试
+      const saved = await window.api.settings.addModel({
+        name: form.value.name || form.value.model,
+        provider: form.value.provider,
+        model: form.value.model,
+        url: form.value.url,
+        type: form.value.type || 'chat',
+        temperature: form.value.temperature,
+        maxTokens: form.value.maxTokens,
+      })
+      const result = await window.api.settings.testModel(saved.id)
+      dialogTestResult.value = result.status === 'ok' ? 'success' : 'error'
+      // 清理临时记录（用户可以选择正式保存）
+      newModelId.value = saved.id
     }
   } catch {
     dialogTestResult.value = 'error'

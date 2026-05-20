@@ -138,6 +138,9 @@ function createRealIPC(): IPCAPI {
       stopTask: async (taskId: string) => {
         return await api.analysis.stopTask(taskId)
       },
+      clearProjectCache: async (projectId: string) => {
+        return await api.analysis.clearProjectCache(projectId)
+      },
       reRunTask: async (taskId: string) => {
         return await api.analysis.reRunTask(taskId)
       },

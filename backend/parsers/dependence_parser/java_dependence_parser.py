@@ -89,33 +89,63 @@ class JavaImportExtractor(DependencyExtractor):
         Returns:
             (dependencies, system_targets)
         """
+        import json
+
         dependencies = []
         system_targets = set()
-        
+
         for node in nodes:
             from_file_id = node.get("file_id")
-            refs = node.get("refs", [])
-            is_static = node.get("is_static", False)
-            is_wildcard = node.get("is_wildcard", False)
-            
-            for ref in refs:
-                if not ref:
+            refs_raw = node.get("refs", [])
+
+            # refs 在 SQLite 中可能存为 JSON 字符串
+            if isinstance(refs_raw, str):
+                try:
+                    refs = json.loads(refs_raw)
+                except (json.JSONDecodeError, TypeError):
+                    refs = []
+            else:
+                refs = refs_raw
+
+            # 判断是否为静态导入
+            is_static = node.get("type") == "static_import" or \
+                       (node.get("name") and "static" in node.get("name", "").lower().split())
+
+            # 判断是否为通配符导入
+            is_wildcard = '*' in (refs[-1] if refs else '')
+
+            # 拼接完整路径: ["org", "springframework", "beans", "BeansException"]
+            # -> "org.springframework.beans.BeansException"
+            valid_refs = [str(r).strip() for r in refs if r and str(r).strip()]
+            if not valid_refs:
+                # fallback: 使用 name 字段
+                target = node.get("name")
+                if target:
+                    target = target.strip('"').strip("'")
+                else:
                     continue
-                
-                # 判断是否为系统库
-                is_system = self._is_system_package(ref)
-                
-                dependencies.append({
-                    "from_file_id": from_file_id,
-                    "target": ref,
-                    "is_angle_bracket": False,
-                    "is_static": is_static,
-                    "is_wildcard": is_wildcard,
-                })
-                
-                if is_system:
-                    system_targets.add(ref)
-        
+            else:
+                target = '.'.join(valid_refs)
+
+            if not target:
+                continue
+
+            # 判断是否为系统库
+            is_system = self._is_system_package(target)
+
+            dependencies.append({
+                "from_file_id": from_file_id,
+                "target": target,
+                "is_angle_bracket": False,
+                "is_static": is_static,
+                "is_wildcard": is_wildcard,
+                "is_system": is_system,
+            })
+
+            if is_system:
+                system_targets.add(target)
+
+        return dependencies, system_targets
         return dependencies, system_targets
 
     def _is_system_package(self, package_path: str) -> bool:

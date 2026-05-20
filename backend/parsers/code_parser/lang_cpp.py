@@ -356,6 +356,46 @@ NODE_TYPE_TO_OP = {
     'lambda_expression': 'lambda',
 }
 
+
+# ============================================================================
+# 名称提取规则
+# ============================================================================
+
+NAME_EXTRACT_RULES = {
+    # 函数定义
+    "function_definition": ["identifier"],
+    "function_declarator": ["identifier"],
+    "constructor_declarator": ["identifier"],
+    "destructor_declarator": ["identifier"],
+    "operator_name": ["identifier"],
+
+    # 类/结构体/枚举定义
+    "class_specifier": ["identifier"],
+    "struct_specifier": ["identifier"],
+    "enum_specifier": ["identifier"],
+    "elaborated_type": ["identifier"],
+
+    # 变量/字段
+    "field_declaration": ["identifier"],
+    "init_declarator": ["identifier"],
+    "preproc_function_def": ["identifier"],
+
+    # 命名空间
+    "namespace_definition": ["identifier"],
+    "namespace_identifier": ["identifier"],
+
+    # 模板
+    "template_type_parameter": ["identifier"],
+    "type_arguments": ["identifier"],
+
+    # 调用
+    "call_expression": ["identifier", "field_identifier"],
+    "qualified_identifier": ["identifier"],
+
+    # 导入
+    "linkage_specification": ["identifier"],
+    "preproc_include": ["identifier"],
+}
 # 创建配置对象
 CONFIG = LanguageConfig(
     important_node_types=IMPORTANT_NODE_TYPES_SET,
@@ -363,6 +403,7 @@ CONFIG = LanguageConfig(
     scope_creating_types=SCOPE_CREATING_TYPES,
     defining_context_types=DEFINING_CONTEXT_TYPES,
     node_type_to_op=NODE_TYPE_TO_OP,
+    name_extract_rules=NAME_EXTRACT_RULES,
 )
 
 # 导出配置

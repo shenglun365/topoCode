@@ -30,6 +30,11 @@ function onTabUpdate(tabId: string | null) {
 }
 
 function onTabClose(tabId: string) {
+  // 关闭报告 tab 时清理 LLM 对话消息
+  const tab = analysisContext.value.tabs.find(t => t.id === tabId)
+  if (tab?.kind === 'report' && chatFlowRef.value) {
+    chatFlowRef.value.clearTabMessages(tabId)
+  }
   funcGroup.closeTab('analysis', tabId)
 }
 
@@ -162,13 +167,13 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
         @query="handleCascadeQuery"
       />
 
-      <!-- 主内容: 对话流占满 -->
+      <!-- 主内容: 对话流占满 — 移除 :key 避免 tab 切换时销毁重建 -->
       <div class="report-main">
         <LLMChatFlow
-          :key="activeReportTab.id"
           ref="chatFlowRef"
-          :task-id="activeReportTab.taskId!"
-          :edge-type="activeReportTab.reportType === 'dependency' ? 'INCLUDE' : 'CALL'"
+          :report-tab-id="activeReportTab!.id"
+          :task-id="activeReportTab!.taskId!"
+          :edge-type="activeReportTab!.reportType === 'dependency' ? 'INCLUDE' : 'CALL'"
           :selected-comm-ids="selectedCommIds"
           :graph-data="graphDataRef"
           @save-subdoc="handleSaveSubdoc"

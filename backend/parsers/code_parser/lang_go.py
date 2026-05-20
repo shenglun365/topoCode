@@ -236,8 +236,7 @@ NODE_TYPE_TO_OP = {
     'type_spec': 'def',
     'const_declaration': 'def',
     'var_declaration': 'def',
-    'value_spec': 'def',
-    'short_var_declaration': 'def',
+    'short_var_declaration': 'assign',
     'field_declaration': 'def',
     'package_clause': 'def',
     
@@ -247,13 +246,13 @@ NODE_TYPE_TO_OP = {
     
     # === 调用操作 ===
     'call_expression': 'call',
-    'go_statement': 'call',  # go routine 也是调用
+    'go_statement': 'goroutine',
+    'defer_statement': 'defer',
     
     # === 赋值操作 ===
     'assignment_statement': 'assign',
     'short_var_declaration': 'assign',
-    'value_spec': 'assign',
-    
+       
     # === 算术操作 ===
     'binary_expression': 'arith',
     'unary_expression': 'arith',
@@ -284,7 +283,6 @@ NODE_TYPE_TO_OP = {
     
     # === 特殊语句 ===
     'defer_statement': 'defer',
-    'go_statement': 'goroutine',
 }
 
 # ============================================================================

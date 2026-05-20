@@ -46,6 +46,26 @@ class SQLiteAdapter:
 
     def find_nodes(self, file_id: str = None, node_type: str = None) -> List[Dict]:
         """查询 AST 节点"""
+        import json
+
+        def _deserialize(node: Dict) -> Dict:
+            if 'refs' in node and isinstance(node['refs'], str):
+                try:
+                    node['refs'] = json.loads(node['refs'])
+                except (json.JSONDecodeError, TypeError):
+                    node['refs'] = []
+            # def_node_id 写入时 str(list) 转成了 "[5]" 格式，需要反序列化回 list
+            if 'def_node_id' in node and isinstance(node['def_node_id'], str):
+                val = node['def_node_id']
+                if val and val.startswith('['):
+                    try:
+                        node['def_node_id'] = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        node['def_node_id'] = []
+                elif not val:
+                    node['def_node_id'] = []
+            return node
+
         if file_id:
             return self._store.get_nodes_by_file(file_id)
         elif node_type:
@@ -54,7 +74,7 @@ class SQLiteAdapter:
             # 返回所有节点 — 通过 SQL 直接查询
             cursor = self._store._db.execute("SELECT * FROM base_node")
             columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            return [_deserialize(dict(zip(columns, row))) for row in cursor.fetchall()]
 
     def count_nodes(self, file_id: str = None) -> int:
         """统计 AST 节点数"""

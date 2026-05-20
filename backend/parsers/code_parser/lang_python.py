@@ -237,38 +237,34 @@ NODE_TYPE_TO_OP = {
     'function_definition': 'def',
     'async_function_definition': 'def',
     'class_definition': 'def',
-    'assignment': 'def',  # 变量定义
-    'named_expression': 'def',  # 海象运算符
-    'type_alias': 'def',
     'parameter': 'def',
     'default_parameter': 'def',
-    'typed_parameter': 'def',
-    
+
     # === 导入操作 ===
     'import_statement': 'import',
     'import_from_statement': 'import',
     'wildcard_import': 'import',
-    
+
     # === 调用操作 ===
     'call': 'call',
     'await': 'call',
-    
+
     # === 赋值操作 ===
     'assignment': 'assign',
     'augmented_assignment': 'assign',
     'named_expression': 'assign',
-    
+
     # === 算术操作 ===
     'binary_operator': 'arith',
     'unary_operator': 'arith',
-    
+
     # === 比较操作 ===
     'comparison_operator': 'compare',
-    
+
     # === 逻辑操作 ===
     'boolean_operator': 'logic',
     'not_operator': 'logic',
-    
+
     # === 类型操作 ===
     'typed_parameter': 'type',
     'type_alias': 'type',
