@@ -198,8 +198,8 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
                         "end_line": str(node["end"]),
                     })
 
-            # 函数/方法定义
-            elif node_type in ("function_definition", "method_declaration", "constructor_declaration"):
+            # 函数/方法定义 (Go: function_declaration, method_declaration)
+            elif node_type in ("function_definition", "function_declaration", "method_declaration", "constructor_declaration"):
                 func_name = handler.extract_function_name(node, nodes)
                 if func_name:
                     # Java 方法使用 method_name，其他语言使用 func_name
@@ -215,10 +215,11 @@ def extract_global_symbols(adapter: SQLiteAdapter) -> int:
                         "end_line": str(node["end"])
                     })
 
-            # 类/接口/枚举定义
+            # 类/接口/枚举定义 (Go: type_declaration, struct_type, interface_type)
             elif node_type in ("class_specifier", "struct_specifier", "class_declaration",
                               "interface_declaration", "enum_declaration",
-                              "interface_declaration", "type_alias_declaration"):
+                              "interface_declaration", "type_alias_declaration",
+                              "type_declaration", "struct_type", "interface_type"):
                 class_name = handler.extract_class_name(node, nodes)
                 if class_name:
                     class_defs.append({

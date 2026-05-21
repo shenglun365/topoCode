@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
@@ -9,10 +9,10 @@ import {
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
   ArchiveBoxXMarkIcon,
-  StarIcon,
-  BookmarkSquareIcon,
 } from '@heroicons/vue/24/outline'
-import type { Project } from '@/types/ipc'
+import { StarIcon } from '@heroicons/vue/24/solid'
+import type { Project, GroupNode } from '@/types/ipc'
+import { ipc } from '@/services/ipc'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
 
@@ -36,9 +36,11 @@ const showDeleteConfirm = ref(false)
 const showClearCacheConfirm = ref(false)
 const isClearingCache = ref(false)
 
-// 修改名称弹窗
-const showRenameDialog = ref(false)
-const newNameInput = ref('')
+// 修改信息弹窗
+const showEditDialog = ref(false)
+const editNameInput = ref('')
+const allGroups = ref<GroupNode[]>([])
+const selectedGroupIds = ref<string[]>([])
 
 // 路径变更确认弹窗
 const showPathConfirm = ref(false)
@@ -129,22 +131,91 @@ async function togglePinned() {
   }
 }
 
-// 修改名称
-function startRename() {
+// 修改信息（名称 + 分组）
+async function startEditInfo() {
   hideMenu()
-  newNameInput.value = props.project.name
-  showRenameDialog.value = true
+  editNameInput.value = props.project.name
+  allGroups.value = await ipc.group.list()
+  // 初始化当前项目已选的分组
+  selectedGroupIds.value = props.project.groups ? [...props.project.groups] : []
+  showEditDialog.value = true
 }
 
-async function confirmRename() {
-  const newName = newNameInput.value.trim()
-  if (!newName) return
-  if (newName === props.project.name) {
-    showRenameDialog.value = false
-    return
+function collectAllGroupIds(nodes: GroupNode[]): string[] {
+  const ids: string[] = []
+  for (const node of nodes) {
+    ids.push(node.id)
+    if (node.children) {
+      ids.push(...collectAllGroupIds(node.children))
+    }
   }
-  await projectStore.updateProjectMeta(props.project.id, { name: newName })
-  showRenameDialog.value = false
+  return ids
+}
+
+function flattenGroups(nodes: GroupNode[]): GroupNode[] {
+  const flat: GroupNode[] = []
+  for (const node of nodes) {
+    flat.push(node)
+    if (node.children) {
+      flat.push(...flattenGroups(node.children))
+    }
+  }
+  return flat
+}
+
+function toggleGroupSelect(id: string) {
+  const idx = selectedGroupIds.value.indexOf(id)
+  if (idx >= 0) {
+    selectedGroupIds.value.splice(idx, 1)
+  } else {
+    selectedGroupIds.value.push(id)
+  }
+}
+
+function handleOpenGroupManagerFromDialog() {
+  // 先关闭弹窗，再打开分组管理 tab
+  showEditDialog.value = false
+  // 等待弹窗关闭动画完成后再打开 tab
+  setTimeout(() => {
+    projectStore.openGroupManagerTab()
+  }, 50)
+}
+
+async function confirmEditInfo() {
+  const newName = editNameInput.value.trim()
+  if (!newName) return
+
+  // 更新名称
+  if (newName !== props.project.name) {
+    await projectStore.updateProjectMeta(props.project.id, { name: newName })
+  }
+
+  // 更新分组（对比当前项目分组）
+  const currentGroups = props.project.groups || []
+  const newGroups = selectedGroupIds.value
+  const hasGroupChange = currentGroups.length !== newGroups.length ||
+    !currentGroups.every(id => newGroups.includes(id))
+
+  if (hasGroupChange) {
+    // 移除所有旧分组
+    for (const gid of currentGroups) {
+      if (!newGroups.includes(gid)) {
+        await ipc.group.removeProject(props.project.id, gid)
+      }
+    }
+    // 添加新分组
+    for (const gid of newGroups) {
+      if (!currentGroups.includes(gid)) {
+        await ipc.group.addProject(props.project.id, gid)
+      }
+    }
+    // 刷新项目列表以获取最新分组
+    await projectStore.loadProjects()
+  }
+
+  showEditDialog.value = false
+  // 关闭分组管理 tab，回到项目列表
+  projectStore.closeGroupManagerTab()
 }
 
 // 修改路径（带主目录名校验）
@@ -250,8 +321,8 @@ async function handleCheckChanges() {
     <!-- 头部: 名称 + 语言 + 菜单按钮 -->
     <div class="flex justify-between items-center" style="margin-bottom:8px;">
       <div class="flex items-center gap-2" style="min-width:0;">
-        <!-- 置顶/收藏图标 -->
-        <BookmarkSquareIcon v-if="project.pinned" class="w-4 h-4 text-accent shrink-0" :title="t('project.pinned')" />
+        <!-- 置顶/收藏标识 -->
+        <span v-if="project.pinned" class="badge badge-pinned shrink-0">{{ t('project.pinnedBadge') }}</span>
         <StarIcon v-if="project.favorite" class="w-3.5 h-3.5 text-yellow-400 shrink-0" :title="t('project.favorited')" />
         <FolderIcon class="w-4 h-4 text-accent shrink-0" />
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
@@ -326,18 +397,18 @@ async function handleCheckChanges() {
       >
         <!-- 收藏/置顶 -->
         <div class="context-menu-item" @click="toggleFavorite">
-          <StarIcon class="w-4 h-4" />
+          <StarIcon :class="['w-4 h-4', project.favorite ? 'text-yellow-400' : '']" />
           <span>{{ project.favorite ? t('project.unfavorite') : t('project.favorite') }}</span>
         </div>
         <div class="context-menu-item" @click="togglePinned">
-          <BookmarkSquareIcon class="w-4 h-4" />
+          <span class="menu-icon-text">{{ project.pinned ? '✕' : '↑' }}</span>
           <span>{{ project.pinned ? t('project.unpin') : t('project.pin') }}</span>
         </div>
         <div class="context-menu-divider"></div>
-        <!-- 修改名称 -->
-        <div class="context-menu-item" @click="startRename">
+        <!-- 修改信息 -->
+        <div class="context-menu-item" @click="startEditInfo">
           <PencilIcon class="w-4 h-4" />
-          <span>{{ t('project.rename') }}</span>
+          <span>{{ t('project.editInfo') }}</span>
         </div>
         <!-- 修改路径 -->
         <div class="context-menu-item" @click="handleChangePath">
@@ -398,21 +469,52 @@ async function handleCheckChanges() {
       @confirm="confirmClearCache"
     />
 
-    <!-- 修改名称弹窗 -->
+    <!-- 修改信息弹窗 -->
     <ConfirmDialog
-      v-model:visible="showRenameDialog"
-      :title="t('project.rename')"
+      v-model:visible="showEditDialog"
+      :title="t('project.editInfo')"
       variant="info"
-      @confirm="confirmRename"
+      @confirm="confirmEditInfo"
     >
       <template #message>
-        <input
-          v-model="newNameInput"
-          class="rename-input"
-          :placeholder="t('project.projectNamePlaceholder')"
-          @keydown.enter="confirmRename"
-          autofocus
-        />
+        <div class="edit-info-dialog">
+          <div class="edit-info-field">
+            <label class="edit-info-label">{{ t('project.projectName') || '项目名称' }}</label>
+            <input
+              v-model="editNameInput"
+              class="edit-info-input"
+              :placeholder="t('project.projectNamePlaceholder')"
+              @keydown.enter="confirmEditInfo"
+              autofocus
+            />
+          </div>
+          <div class="edit-info-field">
+            <label class="edit-info-label">{{ t('project.editGroups') }}</label>
+            <div v-if="allGroups.length === 0" class="edit-info-no-groups">
+              <span class="text-muted">{{ t('project.noGroupsAvailable') }}</span>
+              <button
+                class="edit-info-set-groups-btn"
+                @click="handleOpenGroupManagerFromDialog"
+              >
+                {{ t('group.setGroups') }}
+              </button>
+            </div>
+            <div v-else class="edit-info-group-list">
+              <label
+                v-for="group in flattenGroups(allGroups)"
+                :key="group.id"
+                class="edit-info-group-item"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedGroupIds.includes(group.id)"
+                  @change="toggleGroupSelect(group.id)"
+                />
+                <span :style="{ paddingLeft: (group.depth || 0) * 12 + 'px' }">{{ group.name }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
       </template>
     </ConfirmDialog>
 
@@ -482,6 +584,91 @@ function languageBadge(lang: string): string {
 .rename-input:focus {
   border-color: var(--accent);
 }
+
+.edit-info-dialog {
+  width: 100%;
+}
+
+.edit-info-field {
+  margin-bottom: 12px;
+}
+
+.edit-info-field:last-child {
+  margin-bottom: 0;
+}
+
+.edit-info-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.edit-info-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.edit-info-input:focus {
+  border-color: var(--accent);
+}
+
+.edit-info-no-groups {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.edit-info-set-groups-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.edit-info-set-groups-btn:hover {
+  opacity: 0.9;
+}
+
+.edit-info-group-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+}
+
+.edit-info-group-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.edit-info-group-item:hover {
+  background: var(--bg-hover);
+}
+
+.edit-info-group-item input[type="checkbox"] {
+  accent-color: var(--accent);
+}
 </style>
 
 <style>
@@ -543,5 +730,26 @@ function languageBadge(lang: string): string {
   position: fixed;
   inset: 0;
   z-index: 9998;
+}
+
+.badge-pinned {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.menu-icon-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+  font-weight: 700;
 }
 </style>

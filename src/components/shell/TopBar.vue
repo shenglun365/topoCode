@@ -13,11 +13,23 @@ import {
 import { usePanelStore } from '@/stores/panel'
 import { useThemeStore } from '@/stores/theme'
 import { useWindowStore } from '@/stores/window'
+import { useProjectStore } from '@/stores/project'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
 const themeStore = useThemeStore()
 const windowStore = useWindowStore()
+const projectStore = useProjectStore()
+
+async function handleFileImport() {
+  closeMenu()
+  if (window.api && window.api.dialog) {
+    const paths = await window.api.dialog.openDirectory()
+    if (paths) {
+      await projectStore.importProject(paths)
+    }
+  }
+}
 
 onMounted(() => {
   windowStore.init()
@@ -27,7 +39,7 @@ const showMenu = ref<string | null>(null)
 
 const menus = {
   file: [
-    { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O' },
+    { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O', action: 'import' },
     { label: t('shell.topBar.closeProject'), shortcut: '' },
     { divider: true },
     { label: t('shell.topBar.exit'), shortcut: 'Ctrl+Q' },
@@ -64,6 +76,14 @@ function toggleMenu(menu: string) {
 function closeMenu() {
   showMenu.value = null
 }
+
+function handleMenuItemClick(item: any) {
+  if (item.action === 'import') {
+    handleFileImport()
+  } else {
+    closeMenu()
+  }
+}
 </script>
 
 <template>
@@ -96,7 +116,7 @@ function closeMenu() {
               <div
                 v-if="!menuItem.divider"
                 class="menu-dropdown-item"
-                @click="closeMenu()"
+                @click="handleMenuItemClick(menuItem)"
               >
                 <span>{{ menuItem.label }}</span>
                 <span v-if="menuItem.shortcut" class="shortcut">{{ menuItem.shortcut }}</span>

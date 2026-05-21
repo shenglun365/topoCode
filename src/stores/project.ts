@@ -13,7 +13,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'subdoc'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'subdoc' | 'groupManager'
 
 export interface HomeTab {
   id: string
@@ -176,8 +176,8 @@ export const useProjectStore = defineStore('project', () => {
   async function updateProjectMeta(id: string, meta: Record<string, any>) {
     const updated = await ipc.project.updateMeta(id, meta)
     if (updated) {
-      const idx = projects.value.findIndex(p => p.id === id)
-      if (idx >= 0) projects.value[idx] = updated
+      // 重新加载列表以获取正确的排序（pinned DESC, sort_order ASC, updated_at DESC）
+      await loadProjects()
       return updated
     }
   }
@@ -276,8 +276,8 @@ export const useProjectStore = defineStore('project', () => {
 
   function openTaskListTab() {
     const pid = funcGroup.currentProjectId;
-    // 若已存在 taskList tab，直接激活
-    const existing = funcGroup.currentTabs.find(tab => tab.kind === 'taskList')
+    // 若已存在 taskList tab，直接激活（在 home 功能组中查找）
+    const existing = funcGroup.context.home.tabs.find(tab => tab.kind === 'taskList')
     if (existing) {
       funcGroup.setActiveTab('home', existing.id)
       return
@@ -318,6 +318,33 @@ export const useProjectStore = defineStore('project', () => {
         projectId: pid,
       }
       funcGroup.openTab('home', tab)
+    }
+  }
+
+  /** 打开分组管理 tab — 全局单例 */
+  function openGroupManagerTab() {
+    // 确保在 home 功能组
+    funcGroup.switchFuncGroup('home')
+    // 若已存在 groupManager tab，直接激活
+    const existing = funcGroup.context.home.tabs.find(tab => tab.kind === 'groupManager')
+    if (existing) {
+      funcGroup.setActiveTab('home', existing.id)
+      return
+    }
+    const tab: HomeTab = {
+      id: `tab-groupManager`,
+      kind: 'groupManager',
+      title: i18n.global.t('group.manager'),
+      projectId: funcGroup.currentProjectId, // 关联当前项目，避免被 TabBar 过滤
+    }
+    funcGroup.openTab('home', tab)
+  }
+
+  /** 关闭分组管理 tab */
+  function closeGroupManagerTab() {
+    const tab = funcGroup.context.home.tabs.find(t => t.kind === 'groupManager')
+    if (tab) {
+      funcGroup.closeTab('home', tab.id)
     }
   }
 
@@ -412,6 +439,8 @@ export const useProjectStore = defineStore('project', () => {
     setSelectedFile,
     openTaskListTab,
     openTaskCreateForm,
+    openGroupManagerTab,
+    closeGroupManagerTab,
     openReportTab,
     closeAllReportTabs,
     openSubDocTab,

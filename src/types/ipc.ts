@@ -46,7 +46,8 @@ export interface Project {
   needsResync?: number    // 路径变更标志
   hasFileChanges?: number // 内容变更标志
   isSample?: number       // 示例项目标志
-  group?: string          // 项目分组
+  group?: string          // 项目分组（兼容旧字段）
+  groups?: string[]       // 项目所属分组名称列表（M:N）
   favorite?: number       // 收藏标记 (0/1)
   pinned?: number         // 置顶标记 (0/1)
   sortOrder?: number      // 排序权重
@@ -65,6 +66,17 @@ export interface FileTreeNode {
   is_empty?: boolean       // 后端标记：是否为空目录（无文件，只有空子目录）
   compressedPath?: string  // 压缩显示路径，如 "java/main/com/example"
   children?: FileTreeNode[]
+}
+
+/** 分组（树形结构） */
+export interface GroupNode {
+  id: string
+  name: string
+  parentId: string | null
+  depth: number
+  sortOrder: number
+  createdAt: string
+  children?: GroupNode[]
 }
 
 /** 分析任务 */
@@ -334,9 +346,21 @@ export interface IPCAPI {
     getFileTree: (id: string, fromPath?: string | null) => Promise<FileTreeNode[]>
     updatePath: (id: string, newRootPath: string) => Promise<{ project: Project; invalidFiles: string[]; needsResync: boolean }>
     checkFileChanges: (id: string) => Promise<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean }>
+    updateMeta: (id: string, meta: Record<string, any>) => Promise<Project>
     initSampleData: () => Promise<{ project: Project }>
     clearSampleData: (id: string) => Promise<{ success: boolean }>
     checkPathValidity: (id: string) => Promise<{ pathValid: boolean; rootPath: string; needsResync: boolean }>
+  }
+
+  // 分组管理
+  group: {
+    list: () => Promise<GroupNode[]>
+    create: (name: string, parentId?: string | null) => Promise<{ id: string; name: string; parentId: string | null; depth: number }>
+    update: (id: string, name?: string, parentId?: string | null) => Promise<{ success: boolean }>
+    delete: (id: string) => Promise<{ success: boolean }>
+    addProject: (projectId: string, groupId: string) => Promise<{ success: boolean }>
+    removeProject: (projectId: string, groupId: string) => Promise<{ success: boolean }>
+    getProjectGroups: (projectId: string) => Promise<GroupNode[]>
   }
 
   // 代码分析

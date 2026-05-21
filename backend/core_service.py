@@ -159,6 +159,16 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         for row in rows:
             if row.get("tags"):
                 row["tags"] = json.loads(row["tags"])
+            # 附加项目所属分组 ID 列表
+            pid = row.get("id")
+            if pid:
+                group_rows = main_db.fetchall(
+                    """SELECT g.id FROM project_groups g
+                       INNER JOIN project_group_map m ON g.id = m.group_id
+                       WHERE m.project_id = ?""",
+                    (pid,)
+                )
+                row["groups"] = [g["id"] for g in group_rows]
         return rows
 
     @server.register("project.import")
@@ -562,6 +572,125 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         main_db.delete("projects", "id = ?", (project_id,))
 
         return {"success": True}
+
+    # ==================== 分组管理方法 ====================
+
+    @server.register("group.list")
+    def list_groups():
+        """获取所有分组（树形结构）"""
+        rows = main_db.fetchall("SELECT * FROM project_groups ORDER BY sort_order, created_at")
+        groups = [dict(r) for r in rows]
+        # 构建树形结构
+        def build_tree(parent_id=None, depth=0):
+            result = []
+            for g in groups:
+                if g.get('parent_id') == parent_id:
+                    node = {**g, 'children': build_tree(g['id'], depth + 1)}
+                    result.append(node)
+            return result
+        return build_tree(None)
+
+    @server.register("group.create")
+    def create_group(name: str, parent_id: str = None):
+        """创建分组（支持父子层级，最多4层）"""
+        # 校验层级深度
+        if parent_id:
+            parent = main_db.fetchone("SELECT * FROM project_groups WHERE id = ?", (parent_id,))
+            if not parent:
+                raise ValueError("Parent group not found")
+            if parent.get('depth', 0) >= 3:
+                raise ValueError("分组层级不能超过4层（建议控制在2-3层）")
+            depth = parent['depth'] + 1
+        else:
+            depth = 0
+
+        gid = str(uuid.uuid4())[:12]
+        main_db.execute(
+            "INSERT INTO project_groups (id, name, parent_id, depth, sort_order) VALUES (?, ?, ?, ?, ?)",
+            (gid, name, parent_id, depth, 0)
+        )
+        main_db.conn.commit()
+        return {"id": gid, "name": name, "parent_id": parent_id, "depth": depth}
+
+    @server.register("group.update")
+    def update_group(id: str, name: str = None, parent_id: str = None):
+        """更新分组名称或父级"""
+        group = main_db.fetchone("SELECT * FROM project_groups WHERE id = ?", (id,))
+        if not group:
+            raise ValueError("Group not found")
+
+        updates = []
+        params = []
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if parent_id is not None:
+            # 不能把自己设为子节点（防止循环）
+            if parent_id == id:
+                raise ValueError("不能将自己设为父分组")
+            # 校验层级
+            if parent_id:
+                parent = main_db.fetchone("SELECT * FROM project_groups WHERE id = ?", (parent_id,))
+                if not parent:
+                    raise ValueError("Parent group not found")
+                if parent.get('depth', 0) >= 3:
+                    raise ValueError("分组层级不能超过4层")
+            updates.append("parent_id = ?")
+            updates.append("depth = ?")
+            params.append(parent_id)
+            params.append(parent['depth'] + 1 if parent_id else 0)
+        if updates:
+            params.append(id)
+            main_db.execute(f"UPDATE project_groups SET {', '.join(updates)} WHERE id = ?", params)
+            main_db.conn.commit()
+
+        return {"success": True}
+
+    @server.register("group.delete")
+    def delete_group(id: str):
+        """删除分组（级联删除子分组和关联）"""
+        main_db.execute("DELETE FROM project_groups WHERE id = ?", (id,))
+        main_db.conn.commit()
+        return {"success": True}
+
+    @server.register("group.addProject")
+    def add_project_to_group(project_id: str, group_id: str):
+        """将项目加入分组"""
+        # 验证存在
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
+        group = main_db.fetchone("SELECT * FROM project_groups WHERE id = ?", (group_id,))
+        if not project:
+            raise ValueError("Project not found")
+        if not group:
+            raise ValueError("Group not found")
+
+        main_db.execute(
+            "INSERT OR IGNORE INTO project_group_map (project_id, group_id) VALUES (?, ?)",
+            (project_id, group_id)
+        )
+        main_db.conn.commit()
+        return {"success": True}
+
+    @server.register("group.removeProject")
+    def remove_project_from_group(project_id: str, group_id: str):
+        """将项目从分组移除"""
+        main_db.execute(
+            "DELETE FROM project_group_map WHERE project_id = ? AND group_id = ?",
+            (project_id, group_id)
+        )
+        main_db.conn.commit()
+        return {"success": True}
+
+    @server.register("group.getProjectGroups")
+    def get_project_groups(project_id: str):
+        """获取项目所属的所有分组"""
+        rows = main_db.fetchall(
+            """SELECT g.* FROM project_groups g
+               INNER JOIN project_group_map m ON g.id = m.group_id
+               WHERE m.project_id = ?""",
+            (project_id,)
+        )
+        return [dict(r) for r in rows]
 
     return server
 

@@ -356,6 +356,25 @@ MAIN_DB_TABLES_SQL = """
         updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_user_node_styles_type ON user_node_styles(symbol_type);
+
+    -- 分组树（支持父子层级，最多4层 depth 0-3）
+    CREATE TABLE IF NOT EXISTS project_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        parent_id TEXT DEFAULT NULL REFERENCES project_groups(id) ON DELETE CASCADE,
+        depth INTEGER DEFAULT 0 CHECK(depth >= 0 AND depth <= 3),
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_groups_parent ON project_groups(parent_id);
+
+    -- 项目-分组 M:N 关联
+    CREATE TABLE IF NOT EXISTS project_group_map (
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        group_id TEXT NOT NULL REFERENCES project_groups(id) ON DELETE CASCADE,
+        PRIMARY KEY (project_id, group_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
 """
 
 KNOWLEDGE_DB_TABLES_SQL = """
@@ -755,6 +774,26 @@ class MultiDBManager:
                     self.main_db.execute(f'ALTER TABLE {table} ADD COLUMN "{col_name}" {col_type}')
                 except Exception:
                     pass  # 列已存在，忽略
+
+        # 迁移: 创建新表（project_groups + project_group_map）
+        self.main_db.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS project_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                parent_id TEXT DEFAULT NULL REFERENCES project_groups(id) ON DELETE CASCADE,
+                depth INTEGER DEFAULT 0 CHECK(depth >= 0 AND depth <= 3),
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_project_groups_parent ON project_groups(parent_id);
+
+            CREATE TABLE IF NOT EXISTS project_group_map (
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                group_id TEXT NOT NULL REFERENCES project_groups(id) ON DELETE CASCADE,
+                PRIMARY KEY (project_id, group_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
+        """)
 
         self.main_db.conn.commit()
         _init_default_skills(self.main_db)

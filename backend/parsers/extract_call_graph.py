@@ -132,8 +132,8 @@ def extract_call_graph(adapter: SQLiteAdapter, language: str = None) -> List[Dic
         for file_id in file_group:
             lang_nodes_by_file[file_id] = all_nodes_by_file_id[file_id]
 
-        # 对于 Java/JavaScript/TypeScript/C/C++，使用专门的提取器
-        if file_lang in ['java', 'javascript', 'typescript', 'c', 'cpp']:
+        # 对于 Java/JavaScript/TypeScript/C/C++/Go，使用专门的提取器
+        if file_lang in ['java', 'javascript', 'typescript', 'c', 'cpp', 'go']:
             logger.info(f"[extract_call_graph] {file_lang} 专用提取器: nodes_by_file count={len(lang_nodes_by_file)}")
             call_edges = extractor.extract(adapter._task_id, lang_nodes_by_file)
             logger.info(f"[extract_call_graph] {file_lang} 专用提取器返回: {len(call_edges)} 条边")

@@ -24,7 +24,7 @@ from .extractor_factory import DependencyExtractor, register_dependency_extracto
 class GoModExtractor(DependencyExtractor):
     """
     Go import 依赖提取器
-    
+
     支持识别:
     - 标准库导入：import "fmt"
     - 第三方导入：import "github.com/gin-gonic/gin"
@@ -32,7 +32,11 @@ class GoModExtractor(DependencyExtractor):
     - 别名导入：import alias "package"
     - 点导入：import . "package"
     - 空白导入：import _ "package"
+    - 模块路径解析：从 go.mod 读取 module path，映射 import 到内部文件
     """
+
+    # 缓存模块路径
+    _module_path_cache: str = None
     
     # Go 依赖相关的 AST 节点类型
     DEPENDENCY_NODE_TYPES = [
@@ -199,46 +203,71 @@ class GoModExtractor(DependencyExtractor):
         target: str,
         project_files_by_path: Dict[str, List[int]]
     ) -> Tuple[bool, Optional[int]]:
-        """
-        判断依赖是否指向项目内部文件
-        
+        """判断依赖是否指向项目内部文件
+
         Go 规则:
         - 相对路径直接解析
-        - 支持包目录匹配
-        - 检查 go.mod 中的 replace 指令
-        
-        Args:
-            target: 模块路径
-            project_files_by_path: 项目文件路径映射
-            
-        Returns:
-            (is_internal, matched_file_id)
+        - 绝对模块路径: 启发式检测 module path，strip 后匹配文件路径
+        - 支持包目录匹配（import "mymod/pkg" → 匹配 pkg/*.go）
         """
-        # 只处理相对导入
-        if not target.startswith('.'):
-            # 对于绝对路径，检查是否是项目模块的子包
-            # 这需要知道项目的 module path，暂时返回 False
-            return False, None
-        
-        # 规范化路径
-        target = os.path.normpath(target)
-        
-        # 可能的文件/目录模式
-        possible_paths = [
-            target,  # 目录
-            target + '.go',  # 文件
-            os.path.join(target, 'main.go'),
-        ]
-        
-        # 检查可能的路径
-        for path in possible_paths:
-            if path in project_files_by_path:
-                return True, project_files_by_path[path][0]
-        
-        # 检查目录下的 Go 文件
-        for file_path, file_ids in project_files_by_path.items():
-            if file_path.startswith(target + '/'):
-                if file_path.endswith('.go'):
+        # 处理相对导入
+        if target.startswith('.'):
+            norm_target = os.path.normpath(target)
+            possible_paths = [norm_target, norm_target + '.go', os.path.join(norm_target, 'main.go')]
+            for path in possible_paths:
+                if path in project_files_by_path:
+                    return True, project_files_by_path[path][0]
+            for file_path, file_ids in project_files_by_path.items():
+                if file_path.startswith(norm_target + '/') and file_path.endswith('.go'):
                     return True, file_ids[0]
-        
+            return False, None
+
+        # 绝对模块路径: 尝试 strip module path 后匹配
+        module_path = self._detect_module_path(project_files_by_path)
+        if module_path and target.startswith(module_path + '/'):
+            rel_path = target[len(module_path) + 1:]
+            return self._match_path_to_files(rel_path, project_files_by_path)
+
+        # 直接尝试匹配
+        return self._match_path_to_files(target, project_files_by_path)
+
+    def _detect_module_path(self, project_files_by_path: Dict[str, List[int]]) -> Optional[str]:
+        """从项目文件路径中启发式检测 module path"""
+        if self._module_path_cache is not None:
+            return self._module_path_cache
+
+        go_files = [p for p in project_files_by_path.keys() if p.endswith('.go')]
+        if len(go_files) >= 2:
+            first_dirs = set()
+            for f in go_files:
+                parts = f.split('/')
+                if len(parts) > 1:
+                    first_dirs.add(parts[0])
+            if len(first_dirs) == 1:
+                self._module_path_cache = list(first_dirs)[0]
+                return self._module_path_cache
+
+        return None
+
+    def _match_path_to_files(
+        self, rel_path: str, project_files_by_path: Dict[str, List[int]]
+    ) -> Tuple[bool, Optional[int]]:
+        """将包路径匹配到项目文件"""
+        # 直接文件匹配: "pkg/sub" → "pkg/sub.go"
+        direct_file = rel_path + '.go'
+        if direct_file in project_files_by_path:
+            return True, project_files_by_path[direct_file][0]
+
+        # 目录匹配: "pkg/sub" → "pkg/sub/*.go"
+        prefix = rel_path + '/'
+        for file_path, file_ids in project_files_by_path.items():
+            if file_path.startswith(prefix) and file_path.endswith('.go'):
+                return True, file_ids[0]
+
+        # 精确目录名匹配
+        for file_path, file_ids in project_files_by_path.items():
+            file_dir = os.path.dirname(file_path)
+            if file_dir == rel_path and file_path.endswith('.go'):
+                return True, file_ids[0]
+
         return False, None

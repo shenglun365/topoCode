@@ -82,15 +82,29 @@ class GoHandler(LanguageHandler):
         return None
 
     def extract_function_name(self, func_node: Dict[str, Any], all_nodes: Dict[int, Dict]) -> Optional[str]:
+        # 策略1: 直接 name 字段
         name = func_node.get('name')
         if isinstance(name, str) and name.strip():
             return name.strip()
+        # 策略2: 从 refs 中提取（AST 解析器可能把 identifier 放在 refs 里）
+        refs = func_node.get('refs')
+        if refs:
+            for ref in refs:
+                if isinstance(ref, str) and ref.strip():
+                    return ref.strip()
         return None
 
     def extract_class_name(self, class_node: Dict[str, Any], all_nodes: Dict[int, Dict]) -> Optional[str]:
+        # 策略1: 直接 name 字段 (type_declaration 有 type_identifier)
         name = class_node.get('name')
         if isinstance(name, str) and name.strip():
             return name.strip()
+        # 策略2: 从 refs 中提取 (struct_type/interface_type 可能没有 name 但有 refs)
+        refs = class_node.get('refs')
+        if refs:
+            for ref in refs:
+                if isinstance(ref, str) and ref.strip():
+                    return ref.strip()
         return None
 
 

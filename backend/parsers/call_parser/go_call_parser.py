@@ -97,12 +97,19 @@ class GoCallExtractor(CallGraphExtractor):
         return node.get("type") in self.CALL_EXPRESSION_TYPES
     
     def extract_callee_name(self, call_node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
+        # 策略1: 直接 name 字段（AST 解析器可能已提取）
+        name = call_node.get("name")
+        if isinstance(name, str) and name.strip():
+            # name 可能是 "fmt.Println"，取最后一段
+            return name.split(".")[-1]
+        # 策略2: 从 refs 中提取 — 取最后一个非空 ref（通常是函数名）
         refs = call_node.get("refs", [])
-        if refs and len(refs) > 0:
-            name = refs[0]
-            if name and len(name) > 0:  # 确保非空
-                return name.split(".")[-1] if "." in name else name
-        return call_node.get("name")
+        if refs:
+            # refs 可能是 ["fmt", "Println"]，取最后一个
+            for ref in reversed(refs):
+                if isinstance(ref, str) and ref.strip():
+                    return ref.split(".")[-1]
+        return None
     
     def find_enclosing_function(self, node: Dict, all_nodes: Dict[int, Dict]) -> Optional[Dict]:
         scope = node.get("scope_node_id")
@@ -114,4 +121,14 @@ class GoCallExtractor(CallGraphExtractor):
         return None
     
     def extract_function_name(self, func_node: Dict, all_nodes: Dict[int, Dict]) -> Optional[str]:
-        return func_node.get("name")
+        # 策略1: 直接 name 字段
+        name = func_node.get("name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        # 策略2: 从 refs 中提取
+        refs = func_node.get("refs", [])
+        if refs:
+            for ref in refs:
+                if isinstance(ref, str) and ref.strip():
+                    return ref.strip()
+        return None

@@ -7,6 +7,7 @@ import {
   DocumentTextIcon,
   RocketLaunchIcon,
   XCircleIcon,
+  XMarkIcon,
   LightBulbIcon,
   CodeBracketIcon,
   ChatBubbleLeftRightIcon,
@@ -20,7 +21,8 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useSettingsStore } from '@/stores/settings'
 import ProjectCard from '@/components/project/ProjectCard.vue'
-import ImportZone from '@/components/project/ImportZone.vue'
+import GroupFilter from '@/components/project/GroupFilter.vue'
+import GroupManager from '@/components/project/GroupManager.vue'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import CodeViewer from '@/components/code/CodeViewer.vue'
 import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
@@ -34,6 +36,10 @@ const settingsStore = useSettingsStore()
 
 // 筛选模式: all | favorites
 const filterMode = ref<'all' | 'favorites'>('all')
+
+// 分组筛选
+const selectedGroupIds = ref<string[]>([])
+const groupFilterRef = ref<InstanceType<typeof GroupFilter> | null>(null)
 
 // 分页
 const currentPage = ref(1)
@@ -65,12 +71,20 @@ function parseSearchQuery(query: string): { group?: string; name?: string; langu
   return result
 }
 
-// 按筛选模式过滤
+// 按筛选模式 + 分组过滤
 const scopeFilteredProjects = computed(() => {
+  let list = projectStore.projects
   if (filterMode.value === 'favorites') {
-    return projectStore.projects.filter(p => p.favorite)
+    list = list.filter(p => p.favorite)
   }
-  return projectStore.projects
+  // 按分组筛选
+  if (selectedGroupIds.value.length > 0) {
+    list = list.filter(p => {
+      const pGroups = p.groups || []
+      return selectedGroupIds.value.some(gid => pGroups.includes(gid))
+    })
+  }
+  return list
 })
 
 // 应用搜索过滤
@@ -147,25 +161,6 @@ function onTaskListCreateTask(taskId?: string) {
   projectStore.openTaskCreateForm(taskId)
 }
 
-// 快速开始操作
-function handleImportClick() {
-  // 触发 ImportZone 的文件夹选择
-  const btn = document.querySelector('.import-zone-btn') as HTMLButtonElement
-  btn?.click()
-}
-
-async function handleSampleClick() {
-  try {
-    await projectStore.initSampleData()
-  } catch (err) {
-    console.error('Failed to init sample data:', err)
-  }
-}
-
-function handleTutorialClick() {
-  onboardingStore.start()
-}
-
 onMounted(async () => {
   await projectStore.loadProjects()
 })
@@ -178,13 +173,29 @@ onMounted(async () => {
       v-if="projectStore.viewMode === 'default'"
       class="home-default-view"
     >
-      <!-- 页面标题 -->
-      <div style="margin-bottom:24px;">
-        <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">TopoCode</h1>
-        <p class="text-muted" style="font-size:12px;">{{ t('project.subtitle') }}</p>
+      <!-- 分组管理（覆盖整个默认视图） -->
+      <div v-if="projectStore.activeTab?.kind === 'groupManager'" class="group-manager-panel">
+        <div class="group-manager-header">
+          <h3 style="font-size:14px; font-weight:600; margin:0;">{{ t('group.manager') }}</h3>
+          <button class="btn btn-ghost btn-sm" @click="projectStore.closeTab(projectStore.activeTabId!)">
+            <XMarkIcon class="w-4 h-4" />
+            <span>{{ t('common.close') }}</span>
+          </button>
+        </div>
+        <div class="group-manager-body">
+          <GroupManager />
+        </div>
       </div>
 
-      <div v-if="projectStore.projects.length > 0">
+      <!-- 项目列表 -->
+      <template v-else>
+        <!-- 页面标题 -->
+        <div style="margin-bottom:24px;">
+          <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">TopoCode</h1>
+          <p class="text-muted" style="font-size:12px;">{{ t('project.subtitle') }}</p>
+        </div>
+
+        <div v-if="projectStore.projects.length > 0">
         <!-- 筛选按钮 + 搜索 -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
           <div style="display:flex; gap:4px; align-items:center;">
@@ -204,6 +215,8 @@ onMounted(async () => {
               <span>{{ t('project.myFavorites') }}</span>
               <span class="badge badge-yellow" style="font-size:9px; margin-left:2px;">{{ projectStore.projects.filter(p => p.favorite).length }}</span>
             </button>
+            <!-- 分组筛选 -->
+            <GroupFilter ref="groupFilterRef" @change="selectedGroupIds = $event" />
           </div>
           <div style="display:flex; gap:4px; align-items:center;">
             <!-- 每页数量选择 -->
@@ -270,60 +283,14 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div style="margin-bottom:8px;">
-        <h2 style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary);">
-          {{ t('project.importProject') }}
-        </h2>
-      </div>
-      <ImportZone />
-
-      <!-- 快速开始（无项目时显示大卡片） -->
-      <div v-if="projectStore.projects.length === 0" class="quick-start-empty">
-        <RocketLaunchIcon class="w-12 h-12 text-accent" />
-        <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">{{ t('project.quickStart') }}</h2>
-        <p class="text-muted" style="font-size:12px; margin-bottom:24px;">{{ t('project.quickStartDesc') }}</p>
-        <div class="quick-start-cards">
-          <div class="card quick-start-card" @click="handleImportClick">
-            <FolderIcon class="w-6 h-6 text-accent" />
-            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">{{ t('project.importProject') }}</div>
-            <div class="text-muted" style="font-size:11px;">{{ t('project.selectLocalRepo') }}</div>
-          </div>
-          <div class="card quick-start-card" @click="handleSampleClick">
-            <DocumentTextIcon class="w-6 h-6 text-green-400" />
-            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">{{ t('project.trySample') }}</div>
-            <div class="text-muted" style="font-size:11px;">{{ t('project.trySampleDesc') }}</div>
-          </div>
-          <div class="card quick-start-card" @click="handleTutorialClick">
-            <LightBulbIcon class="w-6 h-6 text-yellow-400" />
-            <div style="font-size:13px; font-weight:500; margin-bottom:4px;">{{ t('project.viewTutorial') }}</div>
-            <div class="text-muted" style="font-size:11px;">{{ t('project.viewTutorialDesc') }}</div>
-          </div>
+      <!-- 快速开始（无项目时显示提示） -->
+        <div v-if="projectStore.projects.length === 0" class="quick-start-empty">
+          <RocketLaunchIcon class="w-12 h-12 text-accent" />
+          <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">{{ t('project.quickStart') }}</h2>
+          <p class="text-muted" style="font-size:12px; margin-bottom:16px;">{{ t('project.quickStartDesc') }}</p>
+          <p class="text-muted" style="font-size:11px;">{{ t('project.menuImportHint') }}</p>
         </div>
-      </div>
-
-      <!-- 快速开始（有项目时显示小卡片） -->
-      <div v-else style="margin-top:auto; padding-top:24px;">
-        <h2 style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin-bottom:12px;">
-          {{ t('project.quickStart') }}
-        </h2>
-        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
-          <div class="card" style="padding:12px;">
-            <FolderIcon class="w-5 h-5 text-accent" style="margin-bottom:6px;" />
-            <div style="font-size:12px; font-weight:500; margin-bottom:4px;">{{ t('project.importProject') }}</div>
-            <div class="text-muted" style="font-size:11px;">{{ t('project.selectLocalRepo') }}</div>
-          </div>
-          <div class="card" style="padding:12px;">
-            <CodeBracketIcon class="w-5 h-5 text-accent" style="margin-bottom:6px;" />
-            <div style="font-size:12px; font-weight:500; margin-bottom:4px;">{{ t('project.viewAnalysis') }}</div>
-            <div class="text-muted" style="font-size:11px;">{{ t('project.browseAST') }}</div>
-          </div>
-          <div class="card" style="padding:12px;">
-            <ChatBubbleLeftRightIcon class="w-5 h-5 text-accent" style="margin-bottom:6px;" />
-            <div style="font-size:12px; font-weight:500; margin-bottom:4px;">{{ t('project.aiQnA') }}</div>
-            <div class="text-muted" style="font-size:11px;">{{ t('project.askAI') }}</div>
-          </div>
-        </div>
-      </div>
+      </template>
     </div>
 
     <!-- 项目视图 -->
@@ -392,6 +359,11 @@ onMounted(async () => {
           />
         </div>
 
+        <!-- 分组管理 -->
+        <div v-else-if="projectStore.activeTab?.kind === 'groupManager'" class="group-manager-panel">
+          <GroupManager />
+        </div>
+
         <!-- 空状态 -->
         <div v-else class="empty-state centered">
           <DocumentTextIcon class="w-12 h-12 text-accent" />
@@ -438,7 +410,24 @@ onMounted(async () => {
 }
 
 .task-list-panel,
-.task-create-form {
+.task-create-form,
+.group-manager-panel {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.group-manager-body {
   flex: 1;
   overflow: hidden;
 }

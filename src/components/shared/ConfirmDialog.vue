@@ -8,12 +8,13 @@ const { t } = useI18n()
 const props = withDefaults(defineProps<{
   visible?: boolean
   title: string
-  message: string
+  message?: string
   confirmLabel?: string
   cancelLabel?: string
   variant?: 'danger' | 'warning' | 'info'
 }>(), {
   visible: true,
+  message: '',
   confirmLabel: () => undefined,
   cancelLabel: () => undefined,
   variant: 'danger',
@@ -74,7 +75,11 @@ function handleKeydown(e: KeyboardEvent) {
           <component :is="IconComponent" class="w-8 h-8" />
         </div>
         <div class="confirm-dialog-title">{{ title }}</div>
-        <div class="confirm-dialog-message" v-html="message"></div>
+        <div class="confirm-dialog-message">
+          <slot name="message">
+            <span v-html="message"></span>
+          </slot>
+        </div>
         <div class="confirm-dialog-actions">
           <button class="btn btn-ghost" @click="handleCancel">
             {{ cancelLabel }}

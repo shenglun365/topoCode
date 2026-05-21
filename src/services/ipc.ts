@@ -34,6 +34,7 @@ function adaptProject(p: any): Project {
     isSample: p.is_sample ?? p.isSample ?? 0,
     lastSync: p.last_sync ?? p.lastSync ?? null,
     createdAt: p.created_at ?? p.createdAt ?? '',
+    groups: p.groups || [],
   }
 }
 
@@ -105,6 +106,31 @@ function createRealIPC(): IPCAPI {
       updateMeta: async (id: string, meta: Record<string, any>) => {
         const result = await api.project.updateMeta(id, meta)
         return adaptProject(result)
+      },
+    },
+
+    // ==================== 分组管理 ====================
+    group: {
+      list: async () => {
+        return await api.group.list()
+      },
+      create: async (name: string, parentId?: string | null) => {
+        return await api.group.create(name, parentId || null)
+      },
+      update: async (id: string, name?: string, parentId?: string | null) => {
+        return await api.group.update(id, name, parentId ?? null)
+      },
+      delete: async (id: string) => {
+        return await api.group.delete(id)
+      },
+      addProject: async (projectId: string, groupId: string) => {
+        return await api.group.addProject(projectId, groupId)
+      },
+      removeProject: async (projectId: string, groupId: string) => {
+        return await api.group.removeProject(projectId, groupId)
+      },
+      getProjectGroups: async (projectId: string) => {
+        return await api.group.getProjectGroups(projectId)
       },
     },
 

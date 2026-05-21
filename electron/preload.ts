@@ -57,6 +57,17 @@ contextBridge.exposeInMainWorld('api', {
     updateMeta: (id: string, meta: Record<string, any>) => ipcRenderer.invoke('ipc:call', { method: 'project.updateMeta', params: { id, ...meta } }),
   },
 
+  // ==================== 分组管理 ====================
+  group: {
+    list: () => ipcRenderer.invoke('ipc:call', { method: 'group.list', params: {} }),
+    create: (name: string, parent_id: string | null) => ipcRenderer.invoke('ipc:call', { method: 'group.create', params: { name, parent_id } }),
+    update: (id: string, name: string | undefined, parent_id: string | null) => ipcRenderer.invoke('ipc:call', { method: 'group.update', params: { id, name, parent_id } }),
+    delete: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'group.delete', params: { id } }),
+    addProject: (project_id: string, group_id: string) => ipcRenderer.invoke('ipc:call', { method: 'group.addProject', params: { project_id, group_id } }),
+    removeProject: (project_id: string, group_id: string) => ipcRenderer.invoke('ipc:call', { method: 'group.removeProject', params: { project_id, group_id } }),
+    getProjectGroups: (project_id: string) => ipcRenderer.invoke('ipc:call', { method: 'group.getProjectGroups', params: { project_id } }),
+  },
+
   // ==================== 代码分析 ====================
   analysis: {
     listTasks: (projectId: string) =>
