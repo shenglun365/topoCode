@@ -9,6 +9,7 @@
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from sqlite_ctx import MultiDBManager
@@ -26,9 +27,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "fileId": {"type": "string", "description": "文件的唯一标识 ID"}
+                    "fileId": {"type": "string", "description": "文件的唯一标识 ID"},
+                    "filePath": {"type": "string", "description": "文件的相对路径（与 fileId 二选一）"}
                 },
-                "required": ["fileId"]
+                "required": []
             }
         }
     },
@@ -56,6 +58,8 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "properties": {
                     "taskId": {"type": "string", "description": "分析任务 ID"},
                     "commId": {"type": "string", "description": "社区分组 ID"},
+                    "commLv": {"type": "string", "description": "社区层级 (L0/L1/L2)", "default": "L2"},
+                    "edgeType": {"type": "string", "description": "边类型 (CALL/DEPENDENCY)", "default": "CALL"},
                     "depth": {"type": "integer", "description": "展开深度 (1-4)，默认 2", "default": 2}
                 },
                 "required": ["taskId", "commId"]
@@ -108,6 +112,21 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             }
         }
     }
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ast_node",
+            "description": "获取指定 AST 节点的详细代码内容（含所在文件和行号范围）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nodeId": {"type": "string", "description": "AST 节点 ID（base_node 的 node_id）"},
+                    "fileId": {"type": "string", "description": "文件 ID（与 nodeId 配合精确定位）", "default": ""}
+                },
+                "required": ["nodeId"]
+            }
+        }
+    }
 ]
 
 # 工具名 → 索引映射
@@ -141,6 +160,7 @@ class ToolExecutor:
             'get_edge_detail': self._get_edge_detail,
             'search_symbols': self._search_symbols,
             'get_call_chain': self._get_call_chain,
+            'get_ast_node': self._get_ast_node,
         }
 
     def execute(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -164,38 +184,57 @@ class ToolExecutor:
     # ==================== 工具实现 ====================
 
     def _get_file_content(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """获取源码文件内容"""
+        """获取源码文件内容（从磁盘读取真实内容）"""
         file_id = args.get('fileId', '')
-        if not file_id:
-            return {"error": "fileId is required"}
+        file_path = args.get('filePath', '')
 
-        # 从项目库的 source_files 表查询
-        # 需要从 graph_node 或 base_node 找到关联的 project_id
-        row = self.multi_db.main_db.fetchone(
-            """SELECT p.id as project_id
-               FROM projects p
-               WHERE p.id IN (
-                   SELECT DISTINCT project_id FROM llm_sessions
-               )
-               LIMIT 1"""
+        if not file_id and not file_path:
+            return {"error": "fileId or filePath is required"}
+
+        # 从项目库找到关联的 project_id
+        project_row = self.multi_db.main_db.fetchone(
+            "SELECT id, root_path FROM projects ORDER BY updated_at DESC LIMIT 1"
         )
-        if not row or not row.get('project_id'):
-            return {"error": "No project context found"}
+        if not project_row:
+            return {"error": "No project found"}
 
-        project_id = row['project_id']
+        project_id = project_row['id']
+        root_path = project_row['root_path']
+
         try:
             project_db = self.multi_db.get_project_db(project_id)
-            row = project_db.fetchone(
-                "SELECT id, relative_path as path, language FROM source_files WHERE id = ?",
-                (file_id,)
-            )
+            if file_id:
+                row = project_db.fetchone(
+                    "SELECT id, file_path as path, language FROM source_files WHERE id = ?",
+                    (file_id,)
+                )
+            elif file_path:
+                row = project_db.fetchone(
+                    "SELECT id, file_path as path, language FROM source_files WHERE file_path = ?",
+                    (file_path,)
+                )
             if not row:
-                return {"error": f"File not found: {file_id}"}
+                return {"error": f"File not found: {file_id or file_path}"}
+
+            # 从磁盘读取真实内容
+            full_path = os.path.join(root_path, row['path'])
+            if not os.path.isfile(full_path):
+                return {"error": f"File not on disk: {full_path}"}
+
+            with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read(self.MAX_RESULT_LENGTH + 1000)
+
+            truncated = len(content) > self.MAX_RESULT_LENGTH
+            if truncated:
+                content = content[:self.MAX_RESULT_LENGTH] + "\n...(truncated)"
 
             return {
                 "fileId": row['id'],
                 "path": row['path'],
                 "language": row['language'],
+                "content": content,
+                "size": len(content),
+                "truncated": truncated,
             }
         except Exception as e:
             return {"error": f"Failed to read file: {e}"}
@@ -231,27 +270,141 @@ class ToolExecutor:
 
         return {"error": f"Symbol not found: {symbol_id}"}
 
+    def _get_ast_node(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """获取 AST 节点的详细代码内容"""
+        node_id = args.get('nodeId', '')
+        file_id = args.get('fileId', '')
+
+        if not node_id:
+            return {"error": "nodeId is required"}
+
+        for db_key in list(getattr(self.multi_db, '_project_db_cache', {}).keys()):
+            db = self.multi_db._project_db_cache[db_key]
+            row = db.fetchone(
+                """SELECT id, file_id, node_id, type, name, refs, start, end
+                   FROM base_node WHERE node_id = ?""",
+                (node_id,)
+            )
+            if not row and file_id:
+                row = db.fetchone(
+                    """SELECT id, file_id, node_id, type, name, refs, start, end
+                       FROM base_node WHERE node_id = ? AND file_id = ?""",
+                    (node_id, file_id)
+                )
+            if row:
+                # Get file path for context
+                file_row = db.fetchone(
+                    "SELECT file_path FROM source_files WHERE id = ?",
+                    (row['file_id'],)
+                )
+                return {
+                    "nodeId": row['node_id'],
+                    "fileId": row['file_id'],
+                    "filePath": file_row['file_path'] if file_row else '?',
+                    "type": row['type'],
+                    "name": row['name'],
+                    "refs": row.get('refs', ''),
+                    "start": row['start'],
+                    "end": row['end'],
+                }
+
+        return {"error": f"AST node not found: {node_id}"}
+
     def _get_community_subgraph(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """获取社区子图"""
+        """获取社区子图（真实查询 graph_doc 表）"""
         task_id = args.get('taskId', '')
         comm_id = args.get('commId', '')
+        comm_lv = args.get('commLv', 'L2')
+        edge_type = args.get('edgeType', 'CALL')
         depth = min(max(int(args.get('depth', 2)), 1), 4)
 
         if not task_id or not comm_id:
             return {"error": "taskId and commId are required"}
 
-        # 从 graph_doc 获取社区信息
-        project_id = task_id[:13]  # task_id format: project_id + suffix
-        try:
-            project_db = self.multi_db.get_project_db(project_id)
-        except Exception:
-            return {"error": f"Project DB not found for task: {task_id}"}
+        # 从所有项目库中找到包含此 task 的库
+        project_id = None
+        project_db = None
+        for db_key in list(self.multi_db._project_db_cache.keys()):
+            db = self.multi_db._project_db_cache[db_key]
+            row = db.fetchone(
+                "SELECT DISTINCT task_id FROM graph_doc WHERE task_id = ? LIMIT 1",
+                (task_id,)
+            )
+            if row:
+                project_id = db_key
+                project_db = db
+                break
 
-        return {
-            "communityId": comm_id,
-            "depth": depth,
-            "message": "Community subgraph query — detailed implementation in Phase 3 with graph analysis",
-        }
+        if not project_db:
+            # Fallback: try all project DBs
+            for db_key in self.multi_db._project_dbs:
+                db = self.multi_db._project_dbs[db_key]
+                row = db.fetchone(
+                    "SELECT DISTINCT task_id FROM graph_doc WHERE task_id = ? LIMIT 1",
+                    (task_id,)
+                )
+                if row:
+                    project_id = db_key
+                    project_db = db
+                    break
+
+        if not project_db:
+            return {"error": f"Task not found: {task_id}"}
+
+        try:
+            # 查找主社区记录
+            comm_row = project_db.fetchone(
+                """SELECT * FROM graph_doc
+                   WHERE task_id = ? AND comm_id = ? AND comm_lv = ? AND edge_type = ?
+                   LIMIT 1""",
+                (task_id, comm_id, comm_lv, edge_type)
+            )
+            if not comm_row:
+                # Try without comm_lv filter
+                comm_row = project_db.fetchone(
+                    """SELECT * FROM graph_doc
+                       WHERE task_id = ? AND comm_id = ?
+                       LIMIT 1""",
+                    (task_id, comm_id)
+                )
+            if not comm_row:
+                return {"error": f"Community not found: {comm_id} in task {task_id}"}
+
+            node_list = json.loads(comm_row['node_list']) if isinstance(comm_row['node_list'], str) else comm_row['node_list']
+            edge_list = json.loads(comm_row['edge_list']) if comm_row.get('edge_list') and isinstance(comm_row['edge_list'], str) else comm_row.get('edge_list', [])
+
+            # 查询子社区
+            children = []
+            if depth > 1:
+                child_rows = project_db.fetchall(
+                    """SELECT comm_id, comm_lv, node_count, edge_count FROM graph_doc
+                       WHERE task_id = ? AND parent_comm_id = ? AND edge_type = ?
+                       ORDER BY comm_lv, comm_id""",
+                    (task_id, comm_id, edge_type)
+                )
+                for cr in child_rows:
+                    children.append({
+                        "communityId": cr['comm_id'],
+                        "level": cr['comm_lv'],
+                        "nodeCount": cr['node_count'],
+                        "edgeCount": cr['edge_count'],
+                    })
+
+            return {
+                "communityId": comm_id,
+                "level": comm_row.get('comm_lv', comm_lv),
+                "edgeType": edge_type,
+                "nodeCount": comm_row['node_count'],
+                "edgeCount": comm_row['edge_count'],
+                "qualityScore": comm_row.get('quality_score'),
+                "nodes": node_list if isinstance(node_list, list) else str(node_list)[:2000],
+                "edges": edge_list if isinstance(edge_list, list) else str(edge_list)[:2000],
+                "children": children,
+                "depth": depth,
+            }
+        except Exception as e:
+            logger.error(f"[ToolExecutor] get_community_subgraph failed: {e}")
+            return {"error": str(e)}
 
     def _get_edge_detail(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """获取边详情"""
@@ -317,7 +470,7 @@ class ToolExecutor:
         }
 
     def _get_call_chain(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """获取调用链"""
+        """获取调用链（BFS 查询 graph_node 表）"""
         from_id = args.get('fromSymbolId', '')
         to_id = args.get('toSymbolId', '')
         task_id = args.get('taskId', '')
@@ -326,9 +479,78 @@ class ToolExecutor:
         if not from_id or not to_id or not task_id:
             return {"error": "fromSymbolId, toSymbolId, and taskId are required"}
 
-        return {
-            "fromSymbolId": from_id,
-            "toSymbolId": to_id,
-            "maxDepth": max_depth,
-            "message": "Call chain query — detailed BFS implementation in Phase 3",
-        }
+        # 找到正确的项目库
+        project_db = None
+        for db_key in list(getattr(self.multi_db, '_project_db_cache', {}).keys()):
+            db = self.multi_db._project_db_cache[db_key]
+            row = db.fetchone(
+                "SELECT DISTINCT task_id FROM graph_node WHERE task_id = ? LIMIT 1",
+                (task_id,)
+            )
+            if row:
+                project_db = db
+                break
+
+        if not project_db:
+            return {"error": f"Task not found: {task_id}"}
+
+        try:
+            # BFS 查找调用链
+            # node format: { 'id': graph_node.id, 'caller': name, 'callee': name, 'depth': d, 'path': [...] }
+            queue = [{'nodeId': from_id, 'depth': 0, 'path': [from_id]}]
+            visited = {from_id}
+            found_paths = []
+
+            while queue and len(found_paths) < 3:  # max 3 paths
+                current = queue.pop(0)
+                if current['depth'] >= max_depth:
+                    continue
+
+                # 查找以 current 为 caller 的边
+                edges = project_db.fetchall(
+                    """SELECT id, caller_func_name, callee_name, callee_node_id
+                       FROM graph_node
+                       WHERE task_id = ? AND caller_node_id = ?""",
+                    (task_id, current['nodeId'])
+                )
+
+                for edge in edges:
+                    callee_node = edge.get('callee_node_id') or str(edge['id'])
+                    new_path = current['path'] + [callee_node]
+
+                    if callee_node == to_id:
+                        # Found target
+                        path_details = []
+                        for pn in new_path:
+                            detail = project_db.fetchone(
+                                """SELECT id, caller_func_name, callee_name
+                                   FROM graph_node WHERE task_id = ? AND (caller_node_id = ? OR id = ?)
+                                   LIMIT 1""",
+                                (task_id, pn, pn)
+                            )
+                            path_details.append({
+                                'nodeId': pn,
+                                'caller': detail.get('caller_func_name', '?') if detail else '?',
+                                'callee': detail.get('callee_name', '?') if detail else '?',
+                            })
+                        found_paths.append(path_details)
+                        break
+
+                    if callee_node not in visited and current['depth'] + 1 < max_depth:
+                        visited.add(callee_node)
+                        queue.append({
+                            'nodeId': callee_node,
+                            'depth': current['depth'] + 1,
+                            'path': new_path,
+                        })
+
+            return {
+                "fromSymbolId": from_id,
+                "toSymbolId": to_id,
+                "maxDepth": max_depth,
+                "paths": found_paths if found_paths else [],
+                "message": f"Found {len(found_paths)} call path(s)" if found_paths else "No call path found",
+            }
+        except Exception as e:
+            logger.error(f"[ToolExecutor] get_call_chain failed: {e}")
+            return {"error": str(e)}

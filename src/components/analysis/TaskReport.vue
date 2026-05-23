@@ -11,7 +11,9 @@ import {
   ArrowDownTrayIcon,
 } from '@heroicons/vue/24/outline'
 import type { AnalysisTask } from '@/types'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-008')
 const { t } = useI18n()
 
 const props = defineProps<{
@@ -42,6 +44,7 @@ const tabLabels = computed(() => {
 
 <template>
   <div class="task-report">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 报告头部 -->
     <div class="report-header">
       <div class="flex items-center gap-2">

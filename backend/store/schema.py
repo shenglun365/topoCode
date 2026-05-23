@@ -234,11 +234,35 @@ CREATE TABLE IF NOT EXISTS community_hierarchy (
     comm_id TEXT NOT NULL,
     parent_comm_id TEXT,
     node_count INTEGER,
+    edge_count INTEGER DEFAULT 0,
     quality_score REAL,
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_comm_hier_task ON community_hierarchy(task_id);
 CREATE INDEX IF NOT EXISTS idx_comm_hier_type ON community_hierarchy(task_id, edge_type);
+
+-- ============================================
+-- community_llm_results — 社区 LLM 分析结果 (任务级)
+-- ============================================
+CREATE TABLE IF NOT EXISTS community_llm_results (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT    NOT NULL,
+    edge_type   TEXT    NOT NULL,
+    comm_lv     TEXT    NOT NULL,
+    comm_id     TEXT    NOT NULL,
+    name        TEXT,
+    summary     TEXT,
+    mermaid     TEXT,
+    plantuml    TEXT,
+    model_id    TEXT,
+    template_id TEXT,
+    name_manual TEXT,
+    created_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(task_id, edge_type, comm_lv, comm_id)
+);
+CREATE INDEX IF NOT EXISTS idx_llm_res_task ON community_llm_results(task_id);
+CREATE INDEX IF NOT EXISTS idx_llm_res_type ON community_llm_results(task_id, edge_type);
 """
 
 
@@ -265,4 +289,31 @@ def migrate_main_schema(db):
 def init_project_schema(db):
     """初始化项目库表结构"""
     db.conn.executescript(PROJECT_SCHEMA_SQL)
-    # auto-committed by execute()
+
+    # 迁移: 为 community_hierarchy 添加 edge_count 列（如不存在则忽略）
+    cursor = db.conn.execute("PRAGMA table_info(community_hierarchy)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'edge_count' not in cols:
+        db.conn.execute("ALTER TABLE community_hierarchy ADD COLUMN edge_count INTEGER DEFAULT 0")
+
+    # 迁移: 新建 community_llm_results 表（如已存在则忽略）
+    db.conn.execute("""
+        CREATE TABLE IF NOT EXISTS community_llm_results (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id     TEXT    NOT NULL,
+            edge_type   TEXT    NOT NULL,
+            comm_lv     TEXT    NOT NULL,
+            comm_id     TEXT    NOT NULL,
+            name        TEXT,
+            summary     TEXT,
+            mermaid     TEXT,
+            plantuml    TEXT,
+            model_id    TEXT,
+            template_id TEXT,
+            name_manual TEXT,
+            created_at  TEXT DEFAULT (datetime('now')),
+            updated_at  TEXT DEFAULT (datetime('now')),
+            UNIQUE(task_id, edge_type, comm_lv, comm_id)
+        )
+    """)
+    db.conn.commit()

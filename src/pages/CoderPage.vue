@@ -12,7 +12,9 @@ import { useChatStore } from '@/stores/chat'
 import SessionTabBar from '@/components/coder/SessionTabBar.vue'
 import ChatMessage from '@/components/coder/ChatMessage.vue'
 import ChatInput from '@/components/coder/ChatInput.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PG-003')
 const { t } = useI18n()
 const chatStore = useChatStore()
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -41,6 +43,7 @@ function scrollToBottom() {
 
 <template>
   <div class="page-coder">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- Session Tab 栏 -->
     <SessionTabBar
       :sessions="chatStore.sessions"

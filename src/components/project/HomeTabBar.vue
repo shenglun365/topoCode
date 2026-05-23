@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { XMarkIcon, DocumentTextIcon, ListBulletIcon, PlusCircleIcon, ChartBarIcon, DocumentDuplicateIcon } from '@heroicons/vue/24/outline'
 import type { HomeTab } from '@/stores/project'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-007')
 defineProps<{
   tabs: HomeTab[]
   activeTabId: string | null
@@ -25,6 +27,7 @@ function getTabIcon(tab: HomeTab) {
 
 <template>
   <div class="home-tab-bar">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div
       v-for="tab in tabs"
       :key="tab.id"

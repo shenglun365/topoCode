@@ -20,7 +20,9 @@ import KnowledgeDocCard from '@/components/knowledge/KnowledgeDocCard.vue'
 import KnowledgeDocEditor from '@/components/knowledge/KnowledgeDocEditor.vue'
 import AnimationStage from '@/components/visualization/AnimationStage.vue'
 import { knowledgeDimensions } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PG-004')
 const { t } = useI18n()
 const knowledgeStore = useKnowledgeStore()
 const funcGroup = useFuncGroupStore()
@@ -128,6 +130,7 @@ function handleSave(docId: string, content: string) {
 
 <template>
   <div class="page-knowledge">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 文档编辑器模式 -->
     <KnowledgeDocEditor
       v-if="showEditor && knowledgeStore.selectedDoc"

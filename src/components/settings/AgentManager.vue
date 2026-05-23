@@ -9,7 +9,9 @@ import {
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('ST-002')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -50,6 +52,7 @@ async function removeAgent(id: string) {
 
 <template>
   <div class="agent-manager">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div>
         <h2 style="font-size:16px; font-weight:600; margin-bottom:2px;">{{ t('settings.agentManagement') }}</h2>

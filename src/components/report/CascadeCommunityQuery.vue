@@ -12,6 +12,9 @@ import {
   FunnelIcon,
   CheckCircleIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('RP-013')
+
 
 const { t } = useI18n()
 
@@ -272,6 +275,7 @@ defineExpose({ loadCascadeLevels })
 
 <template>
   <div class="cascade-query-inline">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div v-if="loading" class="loading-hint">
       <span class="text-muted">{{ t('common.loading') }}</span>
     </div>

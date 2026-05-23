@@ -9,7 +9,9 @@ import {
   LightBulbIcon,
 } from '@heroicons/vue/24/outline'
 import { knowledgeDimensions } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('KN-005')
 const { t } = useI18n()
 
 const dimensions = [
@@ -42,6 +44,7 @@ const dimensions = [
 
 <template>
   <div class="category-manager">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部 -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <div>

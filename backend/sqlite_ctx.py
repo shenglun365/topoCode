@@ -332,6 +332,22 @@ MAIN_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_llm_logs_session ON llm_call_logs(session_id);
     CREATE INDEX IF NOT EXISTS idx_llm_logs_created ON llm_call_logs(created_at);
 
+    -- 报告/分析交互日志（记录每次 LLM 调用的上下文、pipeline 步骤等）
+    CREATE TABLE IF NOT EXISTS report_interaction_log (
+        id TEXT PRIMARY KEY,
+        session_id TEXT,
+        request_id TEXT,
+        provider TEXT,
+        model_name TEXT,
+        mode TEXT,
+        status TEXT,
+        latency_ms INTEGER,
+        meta_json TEXT,          -- 包含 template_id, pipeline_step, community_id 等上下文
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_log_created ON report_interaction_log(created_at);
+    CREATE INDEX IF NOT EXISTS idx_report_log_request ON report_interaction_log(request_id);
+
     -- 代码索引消息 (报告 tab 右侧面板对话历史)
     CREATE TABLE IF NOT EXISTS code_index_messages (
         id TEXT PRIMARY KEY,
@@ -433,6 +449,24 @@ SESSIONS_DB_TABLES_SQL = """
         FOREIGN KEY (session_id) REFERENCES llm_sessions(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_llm_messages_session ON llm_messages(session_id);
+
+    -- 分析报告会话表 (项目/任务/报告 三级隔离)
+    CREATE TABLE IF NOT EXISTS analysis_sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        report_id TEXT,
+        session_id TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES llm_sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES analysis_tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_analysis_sessions_project ON analysis_sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_analysis_sessions_task ON analysis_sessions(task_id);
+    CREATE INDEX IF NOT EXISTS idx_analysis_sessions_report ON analysis_sessions(report_id);
 """
 
 PROJECT_DB_TABLES_SQL = """
@@ -537,6 +571,23 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_base_node_name ON base_node(name);
 
     -- ============================================
+    -- file_summaries — 文件摘要缓存 (项目级)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS file_summaries (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        task_id TEXT,
+        file_path TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        summary_len INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'llm',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_summaries_project ON file_summaries(project_id);
+    CREATE INDEX IF NOT EXISTS idx_file_summaries_file ON file_summaries(project_id, file_path);
+
+    -- ============================================
     -- graph_node — 符号 + 调用边 + 依赖边 (任务级)
     -- ============================================
     CREATE TABLE IF NOT EXISTS graph_node (
@@ -601,6 +652,7 @@ PROJECT_DB_TABLES_SQL = """
         comm_id TEXT NOT NULL,
         parent_comm_id TEXT,
         node_count INTEGER,
+        edge_count INTEGER DEFAULT 0,
         quality_score REAL,
         created_at TEXT DEFAULT (datetime('now'))
     );
@@ -623,6 +675,29 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_subdoc_task ON report_subdocs(task_id);
     CREATE INDEX IF NOT EXISTS idx_subdoc_comm ON report_subdocs(comm_id);
+
+    -- ============================================
+    -- community_llm_results — 社区 LLM 分析结果 (任务级)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS community_llm_results (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id     TEXT    NOT NULL,
+        edge_type   TEXT    NOT NULL,
+        comm_lv     TEXT    NOT NULL,
+        comm_id     TEXT    NOT NULL,
+        name        TEXT,
+        summary     TEXT,
+        mermaid     TEXT,
+        plantuml    TEXT,
+        model_id    TEXT,
+        template_id TEXT,
+        name_manual TEXT,
+        created_at  TEXT DEFAULT (datetime('now')),
+        updated_at  TEXT DEFAULT (datetime('now')),
+        UNIQUE(task_id, edge_type, comm_lv, comm_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_llm_res_task ON community_llm_results(task_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_res_type ON community_llm_results(task_id, edge_type);
 """
 
 
@@ -735,6 +810,9 @@ class MultiDBManager:
                 ("config_version", "INTEGER DEFAULT 1"),
                 ("last_run_id", "TEXT"),
             ],
+            "model_configs": [
+                ("context_window", "INTEGER DEFAULT 8192"),
+            ],
             "task_config_history": [
                 ("scopes", "TEXT"),
                 ("pattern_type", "TEXT"),
@@ -817,7 +895,7 @@ class MultiDBManager:
         return project_db
 
     def _migrate_project_db(self, project_db: SQLiteContext):
-        """迁移项目库表 - 添加新字段"""
+        """迁移项目库表 - 添加新字段和新表"""
         # 为 source_files 添加新字段
         columns_to_add = [
             ("file_name", "TEXT"),
@@ -829,6 +907,31 @@ class MultiDBManager:
                 project_db.execute(f'ALTER TABLE source_files ADD COLUMN "{col_name}" {col_type}')
             except Exception:
                 pass  # 列已存在，忽略
+
+        # 新建 community_llm_results 表（对旧项目库兼容）
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS community_llm_results (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id     TEXT    NOT NULL,
+                    edge_type   TEXT    NOT NULL,
+                    comm_lv     TEXT    NOT NULL,
+                    comm_id     TEXT    NOT NULL,
+                    name        TEXT,
+                    summary     TEXT,
+                    mermaid     TEXT,
+                    plantuml    TEXT,
+                    model_id    TEXT,
+                    template_id TEXT,
+                    name_manual TEXT,
+                    created_at  TEXT DEFAULT (datetime('now')),
+                    updated_at  TEXT DEFAULT (datetime('now')),
+                    UNIQUE(task_id, edge_type, comm_lv, comm_id)
+                )
+            """)
+        except Exception:
+            pass
+
         project_db.conn.commit()
 
     def get_project_db(self, project_id: str) -> SQLiteContext:
@@ -851,8 +954,10 @@ class MultiDBManager:
         if not os.path.exists(db_path):
             # 自动创建
             project_db = self.init_project_db(project_id)
+            self._migrate_project_db(project_db)
         else:
             project_db = SQLiteContext(db_path)
+            self._migrate_project_db(project_db)
 
         # 加入缓存
         self._project_db_cache[project_id] = project_db

@@ -378,6 +378,8 @@ class LLMService:
         mode: str = 'chat',
         tools: Optional[List[str]] = None,
         output_schema: Optional[Dict[str, Any]] = None,
+        template_id: Optional[str] = None,
+        extra_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """发起流式 LLM 请求，立即返回 requestId，chunks 通过 ZMQ PUB 推送
 
@@ -388,6 +390,8 @@ class LLMService:
             mode: chat | tools | structured
             tools: tools 模式下可用的工具名列表
             output_schema: structured 模式下的 JSON Schema
+            template_id: 使用的模板 ID（用于日志记录）
+            extra_meta: 额外元数据（如 pipeline_step, community_id 等，用于日志）
         """
         if mode not in ('chat', 'tools', 'structured'):
             raise ValueError(f"Invalid mode: {mode}")
@@ -401,7 +405,7 @@ class LLMService:
 
         # 后台启动流式任务
         task = asyncio.create_task(
-            self._execute_streaming(request_id, session_id, messages, model, mode, tools, output_schema)
+            self._execute_streaming(request_id, session_id, messages, model, mode, tools, output_schema, template_id, extra_meta)
         )
         # 存储以便 abort
         if not hasattr(self, '_active_streams'):
@@ -434,8 +438,16 @@ class LLMService:
         mode: str,
         tools: Optional[List[str]],
         output_schema: Optional[Dict[str, Any]],
+        template_id: Optional[str] = None,
+        extra_meta: Optional[Dict[str, Any]] = None,
     ):
         """后台协程: 执行流式 LLM 调用 + Tools Calling loop"""
+        _start_time = time.monotonic()
+        _latency_ms = 0
+        _status = 'success'
+        _error_msg = None
+        _tool_calls_recorded = []
+        _token_data = {}
         try:
             full_content = ""
             chunk_queue: queue.Queue = queue.Queue()
@@ -449,11 +461,14 @@ class LLMService:
 
             while tool_round <= max_tool_rounds:
                 # 启动 HTTP streaming 线程
+                thread_token_data = {}
+
                 def _http_stream():
+                    nonlocal thread_token_data
                     if provider == 'ollama':
-                        _sync_stream_ollama(model, messages, chunk_queue, tools, mode)
+                        thread_token_data = _sync_stream_ollama(model, messages, chunk_queue, tools, mode)
                     else:
-                        _sync_stream_openai(model, messages, chunk_queue, tools, mode)
+                        thread_token_data = _sync_stream_openai(model, messages, chunk_queue, tools, mode)
 
                 thread = threading.Thread(target=_http_stream, daemon=True)
                 thread.start()
@@ -491,6 +506,7 @@ class LLMService:
                                 'text': batch_text,
                             })
                         full_content = item.get('content', '')
+                        _token_data = thread_token_data  # capture token info from stream thread
                         break
 
                     if isinstance(item, dict) and item.get('type') == 'error':
@@ -526,6 +542,7 @@ class LLMService:
                         for tc in tool_calls:
                             tool_name = tc.get('name', '')
                             tool_args = tc.get('arguments', {})
+                            _tool_calls_recorded.append({'name': tool_name, 'arguments': tool_args})
                             self._publish('llm', 'tool_call', {
                                 'requestId': request_id,
                                 'toolName': tool_name,
@@ -612,19 +629,52 @@ class LLMService:
                     'content': full_content,
                 })
 
+            # ===== 计算延迟 =====
+            _latency_ms = int((time.monotonic() - _start_time) * 1000)
+
             # ===== 保存消息到 SQLite =====
-            self._save_stream_messages(session_id, messages, full_content, model, mode, request_id)
+            self._save_stream_messages(
+                session_id, messages, full_content, model, mode, request_id,
+                template_id=template_id,
+                extra_meta=extra_meta,
+                tool_calls_recorded=_tool_calls_recorded,
+                latency_ms=_latency_ms,
+                token_data=_token_data,
+            )
+
+            # ===== 记录报告交互日志 =====
+            try:
+                log_meta = dict(extra_meta or {})
+                log_meta.setdefault('template_id', template_id)
+                self._save_interaction_log(session_id, request_id, model, mode, _status, _latency_ms, log_meta)
+            except Exception:
+                pass
 
         except asyncio.CancelledError:
+            _status = 'aborted'
+            _latency_ms = int((time.monotonic() - _start_time) * 1000)
+            self._save_stream_messages(
+                session_id, messages, "", model, mode, request_id,
+                template_id=template_id, extra_meta=extra_meta, latency_ms=_latency_ms, status='aborted',
+                error_message='Aborted by user',
+            )
             logger.info(f"[LLMService] Stream cancelled: requestId={request_id}")
             raise
         except Exception as e:
+            _status = 'error'
+            _error_msg = str(e)
+            _latency_ms = int((time.monotonic() - _start_time) * 1000)
             logger.error(f"[LLMService] Stream error: requestId={request_id}, error={e}")
             self._publish('llm', 'error', {
                 'requestId': request_id,
                 'message': str(e),
                 'code': 'stream_error',
             })
+            self._save_stream_messages(
+                session_id, messages, "", model, mode, request_id,
+                template_id=template_id, extra_meta=extra_meta, latency_ms=_latency_ms, status='error',
+                error_message=_error_msg,
+            )
         finally:
             if hasattr(self, '_active_streams') and request_id in self._active_streams:
                 self._active_streams.pop(request_id, None)
@@ -755,8 +805,15 @@ class LLMService:
         model: Dict[str, Any],
         mode: str,
         request_id: str,
+        template_id: Optional[str] = None,
+        extra_meta: Optional[Dict[str, Any]] = None,
+        tool_calls_recorded: Optional[List[Dict[str, Any]]] = None,
+        latency_ms: int = 0,
+        status: str = 'success',
+        error_message: Optional[str] = None,
+        token_data: Optional[Dict[str, Any]] = None,
     ):
-        """保存流式完成后的消息到 SQLite"""
+        """保存流式完成后的消息到 SQLite（完整日志）"""
         try:
             # 确保 session 存在（内联 session 自动创建）
             sessions_db = self.multi_db.sessions_db
@@ -775,23 +832,66 @@ class LLMService:
                 logger.debug(f"[LLMService] Auto-created session: {session_id}")
 
             # 保存 assistant 消息
-            self.add_message(session_id, 'assistant', full_content)
-            logger.debug(f"[LLMService] Messages saved for session={session_id}")
+            if full_content:
+                self.add_message(session_id, 'assistant', full_content)
+                logger.debug(f"[LLMService] Messages saved for session={session_id}")
 
-            # 记录调用日志（llm_call_logs 在主库）
+            # 记录调用日志（llm_call_logs 在主库）— 完整字段
             main_db = self.multi_db.main_db
             log_id = _make_id()
             now = datetime.now().isoformat()
+            messages_json = json.dumps([
+                {k: v for k, v in m.items() if k in ('role', 'content')}
+                for m in messages
+            ], ensure_ascii=False, default=str)
+            response_content = full_content[:100000] if full_content else None  # 截断避免 DB 过大
+            tool_calls_json = json.dumps(tool_calls_recorded or [], ensure_ascii=False, default=str)
+            token_data = token_data or {}
             main_db.execute(
                 """INSERT INTO llm_call_logs
-                   (id, session_id, request_id, model_id, provider, model_name, mode, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, session_id, request_id, model_id, provider, model_name, mode,
+                    template_id, messages_json, response_content, tool_calls_json,
+                    token_prompt, token_completion, token_total,
+                    latency_ms, status, error_message, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (log_id, session_id, request_id, model.get('id'), model.get('provider'),
-                 model.get('model'), mode, 'success', now),
+                 model.get('model'), mode,
+                 template_id, messages_json, response_content, tool_calls_json,
+                 token_data.get('prompt_tokens'), token_data.get('completion_tokens'),
+                 token_data.get('total_tokens'),
+                 latency_ms, status, error_message, now),
             )
             main_db.commit()
         except Exception as e:
             logger.error(f"[LLMService] Failed to save messages: {e}")
+
+    def _save_interaction_log(
+        self,
+        session_id: str,
+        request_id: str,
+        model: Dict[str, Any],
+        mode: str,
+        status: str,
+        latency_ms: int,
+        meta: Dict[str, Any],
+    ):
+        """记录报告/分析交互事件到 report_interaction_log"""
+        try:
+            main_db = self.multi_db.main_db
+            now = datetime.now().isoformat()
+            log_id = _make_id()
+            main_db.execute(
+                """INSERT INTO report_interaction_log
+                   (id, session_id, request_id, provider, model_name, mode, status,
+                    latency_ms, meta_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (log_id, session_id, request_id,
+                 model.get('provider'), model.get('model'), mode, status,
+                 latency_ms, json.dumps(meta, ensure_ascii=False, default=str), now),
+            )
+            main_db.commit()
+        except Exception as e:
+            logger.error(f"[LLMService] Failed to save interaction log: {e}")
 
     def save_messages_batch(
         self,
@@ -818,8 +918,10 @@ def _sync_stream_ollama(
     chunk_queue,
     tools: Optional[List[str]] = None,
     mode: str = 'chat',
-):
-    """在独立线程中运行: Ollama streaming HTTP"""
+) -> Dict[str, Any]:
+    """在独立线程中运行: Ollama streaming HTTP
+    Returns: token info dict {prompt_tokens, completion_tokens, total_tokens}
+    """
     import json as _json
     base_url = model_config['url'].rstrip('/')
     payload = {
@@ -833,12 +935,13 @@ def _sync_stream_ollama(
     if model_config.get('max_tokens') is not None:
         payload['options']['num_predict'] = model_config['max_tokens']
 
+    token_info = {}
     timeout = model_config.get('timeout', 300)
     try:
         resp = requests.post(f'{base_url}/api/chat', json=payload, stream=True, timeout=timeout)
         if resp.status_code != 200:
             chunk_queue.put({'type': 'error', 'message': f'Ollama API error {resp.status_code}'})
-            return
+            return token_info
 
         full_content = ""
         for line_bytes in resp.iter_lines():
@@ -848,6 +951,15 @@ def _sync_stream_ollama(
             try:
                 data = _json.loads(line)
                 if data.get('done'):
+                    # 捕获 token 使用量
+                    eval_count = data.get('eval_count')
+                    prompt_eval_count = data.get('prompt_eval_count')
+                    if eval_count is not None or prompt_eval_count is not None:
+                        token_info = {
+                            'prompt_tokens': prompt_eval_count,
+                            'completion_tokens': eval_count,
+                            'total_tokens': (prompt_eval_count or 0) + (eval_count or 0),
+                        }
                     chunk_queue.put({'type': 'done', 'content': full_content})
                     break
                 chunk = data.get('message', {}).get('content', '')
@@ -860,6 +972,7 @@ def _sync_stream_ollama(
         chunk_queue.put({'type': 'error', 'message': str(e)})
     finally:
         chunk_queue.put({'type': 'done', 'content': ''})  # sentinel for error case
+    return token_info
 
 
 def _sync_stream_openai(
@@ -868,8 +981,10 @@ def _sync_stream_openai(
     chunk_queue,
     tools: Optional[List[str]] = None,
     mode: str = 'chat',
-):
-    """在独立线程中运行: OpenAI 兼容 streaming HTTP"""
+) -> Dict[str, Any]:
+    """在独立线程中运行: OpenAI 兼容 streaming HTTP
+    Returns: token info dict {prompt_tokens, completion_tokens, total_tokens}
+    """
     import json as _json
     base_url = model_config['url'].rstrip('/')
     payload = {
@@ -895,6 +1010,7 @@ def _sync_stream_openai(
     if api_key:
         headers['Authorization'] = f'Bearer {api_key}'
 
+    token_info = {}
     timeout = model_config.get('timeout', 300)
     try:
         resp = requests.post(
@@ -903,10 +1019,11 @@ def _sync_stream_openai(
         )
         if resp.status_code != 200:
             chunk_queue.put({'type': 'error', 'message': f'OpenAI API error {resp.status_code}: {resp.text[:200]}'})
-            return
+            return token_info
 
         full_content = ""
         tool_calls_parts = []
+        usage_data = {}
 
         for line_bytes in resp.iter_lines():
             if not line_bytes:
@@ -924,6 +1041,10 @@ def _sync_stream_openai(
                 data = _json.loads(data_str)
                 delta = data.get('choices', [{}])[0].get('delta', {})
 
+                # 捕获 token 使用量（OpenAI 在最后一条非 DONE 消息中返回 usage）
+                if data.get('usage'):
+                    usage_data = data['usage']
+
                 # 文本内容
                 chunk = delta.get('content', '')
                 if chunk:
@@ -936,10 +1057,19 @@ def _sync_stream_openai(
                     tool_calls_parts.append(_json.dumps(tc))
             except _json.JSONDecodeError:
                 continue
+
+        # 解析 token 使用量
+        if usage_data:
+            token_info = {
+                'prompt_tokens': usage_data.get('prompt_tokens'),
+                'completion_tokens': usage_data.get('completion_tokens'),
+                'total_tokens': usage_data.get('total_tokens'),
+            }
     except Exception as e:
         chunk_queue.put({'type': 'error', 'message': str(e)})
     finally:
         chunk_queue.put({'type': 'done', 'content': ''})  # sentinel
+    return token_info
 
 def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册 LLM 相关方法到 ZMQServer"""
@@ -1063,7 +1193,20 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not messages:
             raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
 
-        return await service.streaming_chat(session_id, messages, model_id, mode, tools, output_schema)
+        # 构造 extra_meta 用于日志
+        extra_meta = {}
+        if template_id:
+            extra_meta['template_id'] = template_id
+        # 检查 variables 中是否有 pipeline_step / community_id 等
+        if variables:
+            for k in ('pipeline_step', 'community_id', 'community_level', 'batch_id', 'source'):
+                if k in variables:
+                    extra_meta[k] = variables[k]
+
+        return await service.streaming_chat(
+            session_id, messages, model_id, mode, tools, output_schema,
+            template_id=template_id, extra_meta=extra_meta,
+        )
 
     @server.register('llm.abortChat')
     async def abort_chat(request_id: str):
@@ -1074,6 +1217,83 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     def save_messages_batch(session_id: str, messages: List[Dict[str, Any]]):
         """批量保存消息"""
         return service.save_messages_batch(session_id, messages)
+
+    # ==================== 分析报告会话管理 (analysisSession) ====================
+
+    @server.register('analysisSession.list')
+    def list_analysis_sessions(
+        project_id: str = None,
+        task_id: str = None,
+        report_id: str = None,
+        projectId: str = None,
+        taskId: str = None,
+        reportId: str = None,
+    ):
+        """按项目/任务/报告查询分析会话"""
+        pid = project_id or projectId
+        tid = task_id or taskId
+        rid = report_id or reportId
+        main_db = multi_db.main_db
+        sql = "SELECT * FROM analysis_sessions WHERE 1=1"
+        params = []
+        if pid:
+            sql += " AND project_id = ?"
+            params.append(pid)
+        if tid:
+            sql += " AND task_id = ?"
+            params.append(tid)
+        if rid:
+            sql += " AND report_id = ?"
+            params.append(rid)
+        sql += " ORDER BY created_at DESC"
+        return {'sessions': main_db.fetchall(sql, tuple(params))}
+
+    @server.register('analysisSession.create')
+    def create_analysis_session(
+        project_id: str,
+        task_id: str,
+        session_id: str,
+        report_id: str = None,
+        metadata: Dict[str, Any] = None,
+        projectId: str = None,
+        taskId: str = None,
+        sessionId: str = None,
+        reportId: str = None,
+    ):
+        """创建分析会话关联记录"""
+        pid = project_id or projectId
+        tid = task_id or taskId
+        sid = session_id or sessionId
+        rid = report_id or reportId
+        import uuid, json
+        aid = f"anas-{uuid.uuid4().hex[:8]}"
+        now = datetime.now().isoformat()
+        main_db = multi_db.main_db
+        main_db.execute(
+            """INSERT INTO analysis_sessions (id, project_id, task_id, report_id, session_id, metadata, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (aid, pid, tid, rid, sid, json.dumps(metadata or {}), now, now),
+        )
+        main_db.conn.commit()
+        return {'id': aid, 'sessionId': sid}
+
+    @server.register('analysisSession.delete')
+    def delete_analysis_session(
+        id: str = None,
+        session_id: str = None,
+        sessionId: str = None,
+    ):
+        """删除分析会话关联"""
+        main_db = multi_db.main_db
+        sid = session_id or sessionId
+        if id:
+            main_db.execute("DELETE FROM analysis_sessions WHERE id = ?", (id,))
+        elif sid:
+            main_db.execute("DELETE FROM analysis_sessions WHERE session_id = ?", (sid,))
+        else:
+            raise ValueError("Either 'id' or 'sessionId' is required")
+        main_db.conn.commit()
+        return {'success': True}
 
     # ==================== Prompt 模板管理 ====================
 

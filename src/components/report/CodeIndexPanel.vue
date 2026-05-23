@@ -18,7 +18,9 @@ import { useProjectStore } from '@/stores/project'
 import SymbolDetailCard from './SymbolDetailCard.vue'
 import EdgeDetailCard from './EdgeDetailCard.vue'
 import CommunityNodeCard from './CommunityNodeCard.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('RP-012')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
@@ -199,6 +201,7 @@ defineExpose({
 
 <template>
   <div class="code-index-panel">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 操作按钮（标题由 RightPanel 的 panel-header 渲染） -->
     <div class="panel-actions">
       <div class="header-actions">

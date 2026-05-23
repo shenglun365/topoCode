@@ -21,6 +21,9 @@ import {
   CodeBracketIcon,
   ChartBarIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('KN-006')
+
 
 const { t } = useI18n()
 
@@ -120,6 +123,7 @@ function stepBackward() {
 
 <template>
   <div class="animation-player">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 控制栏 -->
     <div class="player-controls">
       <div class="control-buttons">

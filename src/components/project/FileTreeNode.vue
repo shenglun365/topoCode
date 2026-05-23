@@ -7,7 +7,9 @@ import {
   DocumentIcon,
 } from '@heroicons/vue/24/outline'
 import type { FileTreeNode } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-009')
 const props = defineProps<{
   node: FileTreeNode
   depth: number
@@ -117,6 +119,7 @@ function handleDblClick() {
 
 <template>
   <div class="file-tree-node">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div
       class="tree-item"
       :class="{ 'tree-item-compressed': node.compressedPath }"

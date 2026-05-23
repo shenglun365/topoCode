@@ -15,8 +15,10 @@ import {
   MagnifyingGlassIcon,
   StarIcon,
   Squares2X2Icon,
+  ArchiveBoxXMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useSettingsStore } from '@/stores/settings'
@@ -27,7 +29,9 @@ import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import CodeViewer from '@/components/code/CodeViewer.vue'
 import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
 import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PG-001')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
@@ -164,10 +168,53 @@ function onTaskListCreateTask(taskId?: string) {
 onMounted(async () => {
   await projectStore.loadProjects()
 })
+
+// ===== 项目设置菜单（清除缓存） =====
+const menuVisible = ref(false)
+const menuPosition = ref({ x: 0, y: 0 })
+const showClearCacheConfirm = ref(false)
+const selectedProject = computed(() => projectStore.selectedProject)
+const isSample = computed(() => !!selectedProject.value?.isSample)
+
+function showMenu(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  menuVisible.value = true
+  const menuW = 160
+  const menuH = 44
+  let x = e.clientX
+  let y = e.clientY
+  if (x + menuW > window.innerWidth) x = window.innerWidth - menuW - 8
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 8
+  if (x < 4) x = 4
+  if (y < 4) y = 4
+  menuPosition.value = { x, y }
+}
+
+function hideMenu() {
+  menuVisible.value = false
+}
+
+async function handleClearCache() {
+  hideMenu()
+  showClearCacheConfirm.value = true
+}
+
+async function confirmClearCache() {
+  if (!selectedProject.value) return
+  showClearCacheConfirm.value = false
+  try {
+    await projectStore.clearProjectCache(selectedProject.value.id)
+    await projectStore.loadProjects()
+  } catch (err: any) {
+    console.error('Failed to clear cache:', err)
+  }
+}
 </script>
 
 <template>
   <div class="page-home">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 默认视图: 项目列表 + 导入 -->
     <div
       v-if="projectStore.viewMode === 'default'"
@@ -312,7 +359,7 @@ onMounted(async () => {
           <WrenchScrewdriverIcon class="w-4 h-4" />
           <span>{{ t('analysis.taskList') }}</span>
         </button>
-        <button class="btn btn-ghost btn-sm">
+        <button class="btn btn-ghost btn-sm" @click="showMenu">
           <Cog6ToothIcon class="w-4 h-4" />
           <span>{{ t('common.settings') }}</span>
         </button>
@@ -372,6 +419,42 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- 清除缓存菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="menuVisible"
+        class="context-menu"
+        :style="{ left: menuPosition.x + 'px', top: menuPosition.y + 'px' }"
+        @click.stop
+        @mouseleave="hideMenu"
+      >
+        <div
+          v-if="!isSample"
+          class="context-menu-item context-menu-item-warning"
+          @click="handleClearCache"
+        >
+          <ArchiveBoxXMarkIcon class="w-4 h-4" />
+          <span>{{ t('project.clearCache') }}</span>
+        </div>
+      </div>
+    </Teleport>
+
+    <div
+      v-if="menuVisible"
+      class="context-menu-backdrop"
+      @click="hideMenu"
+    ></div>
+
+    <ConfirmDialog
+      v-if="showClearCacheConfirm"
+      :title="t('common.confirm')"
+      :message="t('project.clearCacheConfirm')"
+      :confirm-label="t('project.clearCache')"
+      variant="warning"
+      @cancel="showClearCacheConfirm = false"
+      @confirm="confirmClearCache"
+    />
   </div>
 </template>
 

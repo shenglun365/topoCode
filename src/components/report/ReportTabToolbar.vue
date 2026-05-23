@@ -10,7 +10,9 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('RP-004')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
@@ -48,6 +50,7 @@ const fullName = computed(() => {
 
 <template>
   <div class="report-tab-toolbar">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="toolbar-left">
       <span class="full-name" :title="fullName">{{ fullName }}</span>
     </div>

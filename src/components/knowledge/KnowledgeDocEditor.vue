@@ -9,7 +9,9 @@ import {
   LinkIcon,
 } from '@heroicons/vue/24/outline'
 import type { KnowledgeDoc } from '@/types'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('KN-002')
 const { t } = useI18n()
 
 const props = defineProps<{
@@ -33,6 +35,7 @@ function handleSave() {
 
 <template>
   <div class="kb-doc-editor">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 顶部栏 -->
     <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--bg-secondary); flex-shrink:0;">
       <div style="display:flex; align-items:center; gap:10px;">

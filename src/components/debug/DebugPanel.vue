@@ -4,7 +4,9 @@ import { useDebugStore } from '@/stores/debug'
 import { useI18n } from 'vue-i18n'
 import { WrenchScrewdriverIcon, TrashIcon, DocumentDuplicateIcon, CheckIcon } from '@heroicons/vue/24/outline'
 import { ref } from 'vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('OT-002')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const debugStore = useDebugStore()
@@ -20,6 +22,7 @@ function copyLogs() {
 
 <template>
   <div class="debug-panel">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="debug-section">
       <div class="debug-section-title">
         <WrenchScrewdriverIcon class="w-3.5 h-3.5" />

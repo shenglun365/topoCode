@@ -13,6 +13,9 @@ import {
   DocumentArrowDownIcon,
   ArrowLeftIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('RP-010')
+
 
 const { t } = useI18n()
 
@@ -116,6 +119,7 @@ watch(() => props.subDocId, () => {
 
 <template>
   <div class="subdoc-viewer">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-state">
       <span class="text-muted">{{ t('common.loading') }}</span>

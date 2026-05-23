@@ -35,6 +35,7 @@ function adaptProject(p: any): Project {
     lastSync: p.last_sync ?? p.lastSync ?? null,
     createdAt: p.created_at ?? p.createdAt ?? '',
     groups: p.groups || [],
+    doneTaskCount: p.done_task_count ?? p.doneTaskCount ?? 0,
   }
 }
 
@@ -154,7 +155,9 @@ function createRealIPC(): IPCAPI {
         return await api.analysis.runTask(taskId)
       },
       getTask: async (taskId: string) => {
-        return await api.analysis.getTask(taskId)
+        const t = await api.analysis.getTask(taskId)
+        if (!t) return null
+        return { ...t, projectId: t.project_id ?? t.projectId ?? '', createdAt: t.created_at ?? t.createdAt ?? '' }
       },
       getResults: async (taskId: string) => {
         return await api.analysis.getResults(taskId)
@@ -224,6 +227,18 @@ function createRealIPC(): IPCAPI {
         depth?: number
       }) => {
         return await api.analysis.getQueryStats(params)
+      },
+      saveCommunityResult: async (params: any) => {
+        return await api.analysis.saveCommunityResult(params)
+      },
+      getCommunityResult: async (params: any) => {
+        return await api.analysis.getCommunityResult(params)
+      },
+      listCommunityResults: async (taskId: string, edgeType: string) => {
+        return await api.analysis.listCommunityResults(taskId, edgeType)
+      },
+      updateCommunityName: async (params: any) => {
+        return await api.analysis.updateCommunityName(params)
       },
       onProgress: (cb: (data: TaskProgressEvent) => void) => {
         if (api.analysis.onProgress) {

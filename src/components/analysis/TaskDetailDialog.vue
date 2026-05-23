@@ -4,7 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { XMarkIcon, ClockIcon, DocumentTextIcon } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
 import type { AnalysisTask, TaskLogEntry, TaskRun } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-003')
 const props = defineProps<{
   task: AnalysisTask
   visible?: boolean
@@ -213,6 +215,7 @@ function formatRunStatusColor(status: string): string {
 
 <template>
   <Teleport to="body">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div v-if="visible" class="dialog-overlay" @click.self="handleClose" role="dialog" aria-modal="true">
       <div class="task-detail-dialog">
         <!-- 标题栏 -->

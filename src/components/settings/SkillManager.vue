@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('ST-003')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -12,6 +14,7 @@ async function toggleSkill(id: string, enabled: boolean) {
 
 <template>
   <div class="skill-manager">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div style="margin-bottom:16px;">
       <h2 style="font-size:16px; font-weight:600; margin-bottom:2px;">{{ t('settings.skillManagement') }}</h2>
       <p class="text-muted" style="font-size:12px;">{{ t('settings.skillDesc') }}</p>

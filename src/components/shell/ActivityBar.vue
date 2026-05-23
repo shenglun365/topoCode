@@ -11,7 +11,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useNavigationStore } from '@/stores/navigation'
 import type { PageType } from '@/types'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('SH-002')
 const { t } = useI18n()
 const router = useRouter()
 const navigation = useNavigationStore()
@@ -45,6 +47,7 @@ function navigateTo(page: PageType) {
 
 <template>
   <nav class="activity-bar">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div
       v-for="activity in activities"
       :key="activity.page"

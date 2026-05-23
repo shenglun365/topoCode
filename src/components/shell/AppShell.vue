@@ -9,7 +9,9 @@ import StatusBar from './StatusBar.vue'
 import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
 import { useNavigationStore } from '@/stores/navigation'
 import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('SH-001')
 const route = useRoute()
 const navigation = useNavigationStore()
 const funcGroup = useFuncGroupStore()
@@ -42,6 +44,7 @@ watch(
 
 <template>
   <div class="app-shell">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 顶部菜单栏 -->
     <TopBar />
 

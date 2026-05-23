@@ -18,7 +18,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
 import { isLLMConfigured, chat } from '@/services/llmClient'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('RP-011')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -381,6 +383,7 @@ defineExpose({ addQueryResultMessage, clearChat, clearTabMessages })
 
 <template>
   <div class="llm-chat-flow">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 对话消息区 -->
     <div class="chat-flow-messages">
       <div v-if="messages.length === 0" class="empty-chat">

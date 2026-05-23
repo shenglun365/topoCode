@@ -15,7 +15,9 @@ import FileStatsPanel from './FileStatsPanel.vue'
 import TaskDetailDialog from './TaskDetailDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
 import { createLogger } from '@/utils/logger'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-004')
 const logger = createLogger('TaskCreateForm')
 
 const props = defineProps<{
@@ -250,6 +252,7 @@ function viewLogs() {
 
 <template>
   <div class="task-create-form">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- Header bar -->
     <div class="form-header">
       <div class="header-left">

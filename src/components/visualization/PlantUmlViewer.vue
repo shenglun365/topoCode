@@ -11,6 +11,9 @@ import {
   EyeIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('VZ-002')
+
 
 const { t } = useI18n()
 
@@ -73,6 +76,7 @@ function refresh() {
 
 <template>
   <div class="plantuml-viewer">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 工具栏 -->
     <div v-if="showToolbar" class="viewer-toolbar">
       <div class="toolbar-left">

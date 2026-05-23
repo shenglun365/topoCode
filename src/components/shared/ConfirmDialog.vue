@@ -2,7 +2,9 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { XMarkIcon, ExclamationTriangleIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('SD-001')
 const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
@@ -62,6 +64,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <Teleport to="body">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div
       v-if="props.visible"
       class="confirm-dialog-overlay"

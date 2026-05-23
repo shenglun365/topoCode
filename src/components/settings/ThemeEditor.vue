@@ -11,6 +11,9 @@ import {
   ArrowPathIcon,
   EyeIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('ST-006')
+
 
 const { t } = useI18n()
 const themeStore = useThemeStore()
@@ -181,6 +184,7 @@ function applyPreset(presetColors: ThemeColors) {
 
 <template>
   <div class="theme-editor">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部操作 -->
     <div class="editor-header">
       <div class="header-left">

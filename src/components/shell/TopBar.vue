@@ -14,7 +14,9 @@ import { usePanelStore } from '@/stores/panel'
 import { useThemeStore } from '@/stores/theme'
 import { useWindowStore } from '@/stores/window'
 import { useProjectStore } from '@/stores/project'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('SH-005')
 const { t } = useI18n()
 const panelStore = usePanelStore()
 const themeStore = useThemeStore()
@@ -88,6 +90,7 @@ function handleMenuItemClick(item: any) {
 
 <template>
   <div class="app-top">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="app-row1">
       <!-- 产品 Logo -->
       <div class="menu-bar-logo">

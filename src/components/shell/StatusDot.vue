@@ -1,8 +1,11 @@
 <template>
-  <span class="status-dot" :class="`status-${status}`"></span>
+  <span class="status-dot" :class="`status-${status}`">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span></span>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts">import { useComponentId } from '@/composables/useComponentId'
+
+const { showId, componentId } = useComponentId('SH-007')
 defineProps<{
   status: 'connected' | 'disconnected' | 'connecting' | 'loaded' | 'loading' | 'error' | 'not-installed'
 }>()

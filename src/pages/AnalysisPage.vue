@@ -9,8 +9,11 @@ import ReportTabToolbar from '@/components/report/ReportTabToolbar.vue'
 import CascadeCommunityQuery from '@/components/report/CascadeCommunityQuery.vue'
 import LLMChatFlow from '@/components/report/LLMChatFlow.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
+import ReportHome from '@/components/report/ReportHome.vue'
 import type { CascadeQueryParams } from '@/components/report/CascadeCommunityQuery.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PG-002')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
@@ -39,6 +42,7 @@ function onTabClose(tabId: string) {
 }
 
 const isReportTab = computed(() => activeTab.value?.kind === 'report')
+const isReportHomeTab = computed(() => activeTab.value?.kind === 'reportHome')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
 const activeReportTab = computed(() => {
   const tab = activeTab.value
@@ -115,6 +119,15 @@ async function handleCascadeQuery(params: CascadeQueryParams) {
   }
 }
 
+// 处理报告首页的 open-md 事件
+function handleOpenMD(params: { taskId: string; content: string; title: string }) {
+  projectStore.openSubDocTab({
+    taskId: params.taskId,
+    title: params.title,
+    content: params.content,
+  })
+}
+
 // 保存子文档
 async function handleSaveSubdoc(params: { commId: string; title: string; content: string; templateId: string }) {
   if (!activeReportTab.value?.taskId) return
@@ -139,6 +152,7 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
 
 <template>
   <div class="page-analysis">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- ===== 报告 Tab ===== -->
     <template v-if="isReportTab && activeReportTab">
       <!-- 工具栏 (名称提示 + 全部关闭) -->
@@ -179,6 +193,21 @@ async function handleSaveSubdoc(params: { commId: string; title: string; content
           @save-subdoc="handleSaveSubdoc"
         />
       </div>
+    </template>
+
+    <!-- ===== 报告首页 Tab（分析报告生成） ===== -->
+    <template v-else-if="isReportHomeTab && activeTab">
+      <HomeTabBar
+        :tabs="reportTabs"
+        :active-tab-id="analysisContext.activeTabId"
+        @update:activeTabId="onTabUpdate"
+        @close="onTabClose"
+      />
+      <ReportHome
+        :key="activeTab.id"
+        :task-id="activeTab.taskId!"
+        @open-md="handleOpenMD"
+      />
     </template>
 
     <!-- ===== 子文档 Tab ===== -->

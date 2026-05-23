@@ -10,7 +10,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
 import type { SupportedLocale } from '@/i18n'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('ST-004')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -22,6 +24,7 @@ const languages = [
 
 <template>
   <div class="general-settings">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">{{ t('settings.generalSettings') }}</h2>
 
     <!-- 主题 -->

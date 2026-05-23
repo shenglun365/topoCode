@@ -7,7 +7,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import type { ContextCard } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-008')
 const { t } = useI18n()
 
 defineProps<{
@@ -35,6 +37,7 @@ function getColor(type: string): string {
 
 <template>
   <div class="context-cards">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div
       v-for="card in cards"
       :key="card.id"

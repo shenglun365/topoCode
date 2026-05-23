@@ -9,6 +9,9 @@ import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('VZ-005')
+
 
 const { t } = useI18n()
 
@@ -62,6 +65,7 @@ function refresh() {
 
 <template>
   <div class="pixi-canvas-container">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 工具栏 -->
     <div v-if="showToolbar" class="canvas-toolbar">
       <div class="toolbar-left">

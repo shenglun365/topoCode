@@ -10,7 +10,9 @@ import {
 import type { FileTreeNode } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
 import { useDebugStore } from '@/stores/debug'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-010')
 const debug = useDebugStore()
 
 const props = defineProps<{
@@ -110,6 +112,7 @@ watch(() => props.node.path, () => {
 
 <template>
   <div class="file-preview">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 标题栏 -->
     <div class="preview-header">
       <div class="preview-title">

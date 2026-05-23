@@ -18,7 +18,9 @@ import SkillManager from '@/components/settings/SkillManager.vue'
 import GeneralSettings from '@/components/settings/GeneralSettings.vue'
 import ThemeManager from '@/components/settings/ThemeManager.vue'
 import AboutPage from '@/components/settings/AboutPage.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PG-005')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const themeStore = useThemeStore()
@@ -41,6 +43,7 @@ const tabs = [
 
 <template>
   <div class="page-user">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 顶部 Tab 切换 -->
     <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
       <div

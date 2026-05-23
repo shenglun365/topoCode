@@ -1,5 +1,6 @@
 <template>
   <div class="plugin-manager">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="plugin-header">
       <h2 class="plugin-title">{{ t('settings.plugins') }}</h2>
       <p class="plugin-desc">{{ t('settings.pluginsDesc') }}</p>
@@ -77,7 +78,9 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import StatusDot from '../shell/StatusDot.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('ST-007')
 const { t } = useI18n()
 
 export interface ParserPlugin {

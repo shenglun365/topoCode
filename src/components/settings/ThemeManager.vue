@@ -19,6 +19,9 @@ import {
 import {
   CheckCircleIcon as CheckCircleSolid,
 } from '@heroicons/vue/24/solid'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('ST-005')
+
 
 const { t } = useI18n()
 const themeStore = useThemeStore()
@@ -145,6 +148,7 @@ onMounted(() => {
 
 <template>
   <div class="theme-manager">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部 -->
     <div class="manager-header">
       <div class="header-left">

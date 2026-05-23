@@ -1,5 +1,6 @@
 <template>
   <div class="dimension-filter">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="filter-header">
       <span class="filter-title">{{ t('knowledge.dimensionFilter') }}</span>
       <button v-if="hasSelection" class="clear-btn" @click="clearAll">
@@ -121,7 +122,9 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import type { Dimensions } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('KN-004')
 const { t } = useI18n()
 
 const props = defineProps<{

@@ -12,7 +12,9 @@ import {
   ArrowDownTrayIcon,
 } from '@heroicons/vue/24/outline'
 import type { D3Node, D3Edge } from '@/workers/types'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('VZ-004')
 const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
@@ -109,6 +111,7 @@ function exportSvg() {
 
 <template>
   <div class="d3-force-graph">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 工具栏 -->
     <div v-if="showToolbar" class="graph-toolbar">
       <div class="toolbar-left">

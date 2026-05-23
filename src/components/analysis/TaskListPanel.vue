@@ -14,7 +14,9 @@ import {
 import { useAnalysisStore } from '@/stores/analysis'
 import TaskDetailDialog from './TaskDetailDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-002')
 const props = defineProps<{
   projectId: string
 }>()
@@ -187,6 +189,7 @@ function getConfigSummary(task: AnalysisTask): string {
 
 <template>
   <div class="task-list-panel">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 标题栏 -->
     <div class="panel-header">
       <h2 class="panel-title">{{ t('analysis.taskList') }}</h2>

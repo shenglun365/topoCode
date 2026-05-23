@@ -8,7 +8,9 @@ import {
 import { useAnalysisStore } from '@/stores/analysis'
 import type { FileStatsResult, DirTreeNode } from '@/types/ipc'
 import DirTreeNodeComponent from './DirTreeNodeComponent.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-005')
 const props = defineProps<{
   projectId: string
   scope: string
@@ -265,6 +267,7 @@ loadStats().then(() => { initialLoadDone = true })
 
 <template>
   <div class="file-stats-panel">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- Directory tree with checkboxes -->
     <div class="stats-section">
       <div class="section-header">

@@ -1,5 +1,6 @@
 <template>
   <div class="spec-card" :class="statusClass">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="spec-header">
       <div class="spec-title-area">
         <DocumentTextIcon class="w-5 h-5 spec-icon" />
@@ -43,6 +44,9 @@ import {
   EyeIcon,
   PencilIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('CD-005')
+
 
 const { t } = useI18n()
 

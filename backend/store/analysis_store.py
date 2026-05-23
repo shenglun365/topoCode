@@ -279,10 +279,11 @@ class AnalysisStore:
         self._db.commit()
 
     def get_best_community(self, task_id: str, edge_type: str) -> Optional[Dict]:
-        """获取 quality_score 最高的社区"""
+        """获取 quality_score 最高的正常社区（排除 HUB/ORPHAN）"""
         row = self._db.execute("""
             SELECT * FROM graph_doc
             WHERE task_id = ? AND edge_type = ?
+              AND comm_lv NOT IN ('HUB', 'ORPHAN')
             ORDER BY quality_score DESC
             LIMIT 1
         """, (task_id, edge_type)).fetchone()
@@ -334,13 +335,14 @@ class AnalysisStore:
             db.executemany("""
                 INSERT INTO community_hierarchy (
                     task_id, edge_type, comm_lv, comm_id,
-                    parent_comm_id, node_count, quality_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    parent_comm_id, node_count, edge_count, quality_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 (
                     h["task_id"], h["edge_type"], h["comm_lv"],
                     h["comm_id"], h.get("parent_comm_id"),
-                    h.get("node_count"), h.get("quality_score"),
+                    h.get("node_count"), h.get("edge_count", 0),
+                    h.get("quality_score"),
                 )
                 for h in batch
             ])
@@ -359,6 +361,7 @@ class AnalysisStore:
         self._db.execute(
             "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
         )
+        self._safe_delete_llm_results(task_id)
         logger.info(f"[AnalysisStore] clear_task_data: task_id={task_id}")
 
     def clear_communities_for_task(self, task_id: str, edge_type: str):
@@ -374,6 +377,61 @@ class AnalysisStore:
             "DELETE FROM community_hierarchy WHERE task_id = ? AND edge_type = ?",
             (task_id, edge_type)
         )
+        self._safe_delete_llm_results(task_id, edge_type)
         logger.info(
             f"[AnalysisStore] clear_communities_for_task: task_id={task_id}, edge_type={edge_type}"
         )
+
+    def _safe_delete_llm_results(self, task_id: str, edge_type: str = None):
+        """安全删除 community_llm_results，兼容旧数据库未建表的情况"""
+        try:
+            if edge_type:
+                self._db.execute(
+                    "DELETE FROM community_llm_results WHERE task_id = ? AND edge_type = ?",
+                    (task_id, edge_type)
+                )
+            else:
+                self._db.execute(
+                    "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
+                )
+        except Exception as e:
+            logger.warning(
+                f"[AnalysisStore] 清理 community_llm_results 失败（表可能不存在）: {e}"
+            )
+
+    def bulk_insert_llm_results(self, results: List[Dict]):
+        db = self._db.conn
+        db.executemany("""
+            INSERT OR REPLACE INTO community_llm_results
+                (task_id, edge_type, comm_lv, comm_id, name, summary, mermaid, plantuml, model_id, template_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                r["task_id"], r["edge_type"], r["comm_lv"], r["comm_id"],
+                r.get("name"), r.get("summary"), r.get("mermaid"),
+                r.get("plantuml"), r.get("model_id"), r.get("template_id"),
+            )
+            for r in results
+        ])
+        self._db.commit()
+
+    def list_llm_results(self, task_id: str, edge_type: str) -> List[Dict]:
+        rows = self._db.execute(
+            "SELECT * FROM community_llm_results WHERE task_id=? AND edge_type=? ORDER BY comm_lv, comm_id",
+            (task_id, edge_type)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_llm_result(self, task_id: str, edge_type: str, comm_lv: str, comm_id: str) -> Optional[Dict]:
+        row = self._db.execute(
+            "SELECT * FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv=? AND comm_id=?",
+            (task_id, edge_type, comm_lv, comm_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_community_name(self, task_id: str, edge_type: str, comm_lv: str, comm_id: str, name: str):
+        self._db.execute(
+            "UPDATE community_llm_results SET name_manual=?, updated_at=datetime('now') WHERE task_id=? AND edge_type=? AND comm_lv=? AND comm_id=?",
+            (name, task_id, edge_type, comm_lv, comm_id)
+        )
+        self._db.commit()

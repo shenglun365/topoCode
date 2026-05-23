@@ -15,6 +15,7 @@ export default defineConfig({
       '@topo-animation': resolve(__dirname, 'src/lib/topo-animation'),
     },
   },
+  envPrefix: ['VITE_', 'TOPOCODE_'],
   base: './',
   server: {
     host: '0.0.0.0',

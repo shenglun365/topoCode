@@ -15,6 +15,9 @@ import {
   MagnifyingGlassIcon,
   ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('RP-015')
+
 
 const { t } = useI18n()
 
@@ -152,6 +155,7 @@ defineExpose({ init, loadLevels, loadGroups })
 
 <template>
   <div class="report-query-panel">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="query-row">
       <!-- 社区层级 -->
       <div class="query-item">

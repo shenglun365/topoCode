@@ -14,7 +14,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
 import { isLLMConfigured, chat } from '@/services/llmClient'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('OT-001')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -114,6 +116,7 @@ watch(llmConfigured, (val) => {
 
 <template>
   <div class="ai-assistant-panel">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 未配置状态 -->
     <div v-if="!llmConfigured" class="ai-empty-state">
       <SparklesIcon class="w-10 h-10 text-accent" />

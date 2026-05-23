@@ -10,7 +10,9 @@ import {
 import type { GroupNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { useProjectStore } from '@/stores/project'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-005')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
@@ -156,6 +158,7 @@ defineExpose({ loadGroups })
 
 <template>
   <div class="group-filter">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <button
       class="group-filter-btn"
       :class="{ active: selectedIds.length > 0 }"

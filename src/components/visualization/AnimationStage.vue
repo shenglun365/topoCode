@@ -19,6 +19,9 @@ import {
   StopIcon,
   ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
+const { showId, componentId } = useComponentId('VZ-001')
+
 
 const { t } = useI18n()
 
@@ -99,6 +102,7 @@ defineExpose({ play, pause, stop })
 
 <template>
   <div class="animation-stage">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 工具栏 -->
     <div v-if="showToolbar" class="stage-toolbar">
       <div class="toolbar-left">

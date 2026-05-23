@@ -7,7 +7,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import type { ChatSession } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-007')
 const { t } = useI18n()
 
 defineProps<{
@@ -32,6 +34,7 @@ function getModeColor(mode: string): string {
 
 <template>
   <div class="session-tabs-bar">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- Tab 列表 -->
     <div class="session-tabs">
       <div

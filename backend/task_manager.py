@@ -445,6 +445,79 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "directories": dir_list,
         }
 
+    # ==================== 社区 LLM 结果 ====================
+
+    @server.register("analysis.saveCommunityResult")
+    def save_community_result(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                                comm_lv=None, commLv=None, comm_id=None, commId=None,
+                                name=None, summary=None, mermaid=None, plantuml=None,
+                                model_id=None, modelId=None, template_id=None, templateId=None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        cl = comm_lv or commLv
+        cid = comm_id or commId
+        mid = model_id or modelId
+        tpid = template_id or templateId
+        if not tid or not et or not cl or not cid:
+            raise ValueError("task_id, edge_type, comm_lv, comm_id are required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        store = AnalysisStore(project_db)
+        store.bulk_insert_llm_results([{
+            "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
+            "name": name, "summary": summary, "mermaid": mermaid, "plantuml": plantuml,
+            "model_id": mid, "template_id": tpid,
+        }])
+        return {"success": True}
+
+    @server.register("analysis.getCommunityResult")
+    def get_community_result(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                              comm_lv=None, commLv=None, comm_id=None, commId=None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        cl = comm_lv or commLv
+        cid = comm_id or commId
+        if not tid or not et or not cl or not cid:
+            raise ValueError("task_id, edge_type, comm_lv, comm_id are required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        store = AnalysisStore(project_db)
+        return store.get_llm_result(tid, et, cl, cid) or {}
+
+    @server.register("analysis.listCommunityResults")
+    def list_community_results(task_id=None, taskId=None, edge_type=None, edgeType=None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        if not tid or not et:
+            raise ValueError("task_id and edge_type are required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        store = AnalysisStore(project_db)
+        return {"results": store.list_llm_results(tid, et)}
+
+    @server.register("analysis.updateCommunityName")
+    def update_community_name(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                               comm_lv=None, commLv=None, comm_id=None, commId=None, name=None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        cl = comm_lv or commLv
+        cid = comm_id or commId
+        if not tid or not et or not cl or not cid:
+            raise ValueError("task_id, edge_type, comm_lv, comm_id are required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        store = AnalysisStore(project_db)
+        store.update_community_name(tid, et, cl, cid, name or "")
+        return {"success": True}
+
     # ==================== 报告 Tab 接口 ====================
 
     @server.register("analysis.getAvailableLevels")
@@ -1097,16 +1170,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_id = task["project_id"]
         project_db = multi_db.get_project_db(project_id)
 
-        # 查询所有层级的社区
+        # 查询所有层级的社区（含 edge_count）
         rows = project_db.execute(
-            "SELECT comm_lv, comm_id, parent_comm_id, node_count, quality_score FROM community_hierarchy WHERE task_id=? AND edge_type=? ORDER BY comm_lv, comm_id",
+            """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
+               FROM community_hierarchy h
+               LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+               WHERE h.task_id=? AND h.edge_type=?
+               ORDER BY h.comm_lv, h.comm_id""",
             (tid, et)
         ).fetchall()
 
         # 按层级分组
         levels_dict: dict[str, list] = {}
         for row in rows:
-            lv, comm_id, parent_id, node_count, quality = row
+            lv, comm_id, parent_id, node_count, quality, edge_count = row
             if lv not in levels_dict:
                 levels_dict[lv] = []
             levels_dict[lv].append({
@@ -1114,6 +1191,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 'label': comm_id[:30],
                 'parentCommId': parent_id,
                 'nodeCount': node_count or 0,
+                'edgeCount': edge_count or 0,
                 'qualityScore': quality,
             })
 

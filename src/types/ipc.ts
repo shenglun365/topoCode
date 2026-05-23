@@ -51,6 +51,7 @@ export interface Project {
   favorite?: number       // 收藏标记 (0/1)
   pinned?: number         // 置顶标记 (0/1)
   sortOrder?: number      // 排序权重
+  doneTaskCount?: number  // 已完成分析任务数（含各报告类型）
   lastSync: string | null
   createdAt: string
   fileTree?: FileTreeNode[]
@@ -251,6 +252,37 @@ export interface Dimensions {
   purpose: string[]
 }
 
+/** 流水线任务节点（动态树结构） */
+export interface PipelineTaskNode {
+  id: string
+  label: string
+  type: 'group' | 'step' | 'subtask'
+  status: 'pending' | 'running' | 'completed' | 'error' | 'skipped'
+  progress: number
+  children?: PipelineTaskNode[]
+  error?: string
+  templateId?: string
+  dependsOn?: string[]
+}
+
+/** 流水线控制函数 */
+export interface PipelineControlFunctions {
+  runAll: () => Promise<void>
+  pause: () => void
+  resume: () => void
+  reset: () => void
+  stop: () => void
+}
+
+/** 流水线状态 */
+export interface PipelineState {
+  rootTask: PipelineTaskNode
+  currentPhase: 'validating' | 'preprocessing' | 'community_analysis' | 'step1' | 'step2' | 'step3' | 'step4' | 'step5' | 'done' | 'error'
+  overallProgress: number
+  startedAt: string
+  completedAt?: string
+}
+
 /** 模型配置 */
 export interface ModelConfigItem {
   id: string
@@ -383,20 +415,41 @@ export interface IPCAPI {
     getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<any>
     getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
     getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
-    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; qualityScore: number }> }> }>
+    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; edgeCount: number; qualityScore: number }> }> }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
+    // 社区 LLM 结果持久化
+    saveCommunityResult: (params: {
+      taskId: string; edgeType: string; commLv: string; commId: string;
+      name?: string; summary?: string; mermaid?: string; plantuml?: string;
+      modelId?: string; templateId?: string;
+    }) => Promise<{ success: boolean }>
+    getCommunityResult: (params: { taskId: string; edgeType: string; commLv: string; commId: string }) => Promise<any>
+    listCommunityResults: (taskId: string, edgeType: string) => Promise<{ results: Array<{
+      id: number; taskId: string; edgeType: string; commLv: string; commId: string;
+      name: string | null; summary: string | null; nameManual: string | null;
+    }> }>
+    updateCommunityName: (params: { taskId: string; edgeType: string; commLv: string; commId: string; name: string }) => Promise<{ success: boolean }>
     onProgress: (cb: (data: TaskProgressEvent) => void) => void
     onComplete: (cb: (data: TaskCompleteEvent) => void) => void
     onError: (cb: (data: TaskErrorEvent) => void) => void
   }
 
-  // 报告子文档
+  // 报告子文档 + 报告生成辅助
   report: {
     createSubDoc: (params: { taskId: string; edgeType?: string; commId?: string; title: string; content: string; templateId?: string }) => Promise<{ id: string }>
     listSubDocs: (params: { taskId: string; commId?: string }) => Promise<Array<{ id: string; title: string; templateId: string; createdAt: string; updatedAt: string }>>
     getSubDoc: (subDocId: string) => Promise<{ id: string; taskId: string; edgeType: string; commId: string; title: string; content: string; templateId: string; createdAt: string; updatedAt: string }>
     updateSubDoc: (params: { subDocId: string; title?: string; content?: string }) => Promise<{ ok: boolean }>
     deleteSubDoc: (subDocId: string) => Promise<{ ok: boolean }>
+    // 报告生成辅助
+    getReadmeContent: (params: { projectId: string }) => Promise<{ path: string | null; content: string; fullLength: number; error?: string }>
+    extractDependencyFiles: (params: { projectId: string }) => Promise<{ dependencyFiles: Array<{ file: string; type: string; dependencies: Record<string, string>; count: number }>; count: number }>
+    getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) => Promise<{ communities: Array<{ communityId: string; parentCommunityId: string | null; level: string; nodeCount: number; edgeCount: number; qualityScore: number | null; nodes: Array<{ id: string; name: string; type: string; filePath: string }>; edges: Array<{ source: string; target: string; type: string; direction: string }> }>; count: number; level: string; taskId: string }>
+    saveFileSummaries: (params: { projectId: string; taskId: string; summaries: Array<{ filePath: string; summary: string; source?: string }> }) => Promise<{ saved: number }>
+    getFileSummaries: (params: { projectId: string; taskId?: string; source?: string }) => Promise<{ summaries: Array<{ id: string; project_id: string; task_id: string | null; file_path: string; summary: string; source: string; created_at: string }>; count: number }>
+    // LLM 调用日志查询
+    getCallLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; status?: string; limit?: number; offset?: number }) => Promise<{ logs: Array<Record<string, any>>; count: number }>
+    getInteractionLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; limit?: number; offset?: number }) => Promise<{ logs: Array<Record<string, any>>; count: number }>
   }
 
   // 知识库
@@ -474,6 +527,13 @@ export interface IPCAPI {
       onDone?: (data: { content: string; structured?: Record<string, any> }) => void
       onError?: (data: { message: string; code: string }) => void
     }) => () => void
+  }
+
+  // 分析报告会话管理 (项目/任务/报告 三级隔离)
+  analysisSession: {
+    list: (params?: { projectId?: string; taskId?: string; reportId?: string }) => Promise<{ sessions: Array<{ id: string; project_id: string; task_id: string; report_id: string | null; session_id: string; metadata: string | null; created_at: string; updated_at: string }> }>
+    create: (params: { projectId: string; taskId: string; sessionId: string; reportId?: string; metadata?: Record<string, any> }) => Promise<{ id: string; sessionId: string }>
+    delete: (params: { id?: string; sessionId?: string }) => Promise<{ success: boolean }>
   }
 
   // Prompt 模板

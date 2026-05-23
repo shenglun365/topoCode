@@ -30,6 +30,14 @@ contextBridge.exposeInMainWorld('api', {
     openDirectory: () => ipcRenderer.invoke('dialog:open-directory'),
   },
 
+  // ==================== 环境变量 ====================
+  env: {
+    get: (key: string) => ipcRenderer.invoke('env:get', key),
+    TOPOCODE_LOG_LEVEL: process.env.TOPOCODE_LOG_LEVEL || null,
+    VITE_LOG_LEVEL: process.env.VITE_LOG_LEVEL || null,
+    TOPCODE_UI_DEBUG: process.env.TOPCODE_UI_DEBUG || null,
+  },
+
   // ==================== 外部链接 ====================
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
@@ -131,6 +139,19 @@ contextBridge.exposeInMainWorld('api', {
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getQueryStats', params }),
 
+    // 社区 LLM 结果持久化
+    saveCommunityResult: (params: {
+      taskId: string; edgeType: string; commLv: string; commId: string;
+      name?: string; summary?: string; mermaid?: string; plantuml?: string;
+      modelId?: string; templateId?: string;
+    }) => ipcRenderer.invoke('ipc:call', { method: 'analysis.saveCommunityResult', params }),
+    getCommunityResult: (params: { taskId: string; edgeType: string; commLv: string; commId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityResult', params }),
+    listCommunityResults: (taskId: string, edgeType: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.listCommunityResults', params: { taskId, edgeType } }),
+    updateCommunityName: (params: { taskId: string; edgeType: string; commLv: string; commId: string; name: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.updateCommunityName', params }),
+
     // 事件订阅
     onProgress: (callback: (data: any) => void) => {
       const listener = (_: any, data: any) => callback(data)
@@ -187,6 +208,21 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'report.updateSubDoc', params }),
     deleteSubDoc: (subDocId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.deleteSubDoc', params: { subDocId } }),
+    // 报告生成辅助
+    getReadmeContent: (params: { projectId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getReadmeContent', params }),
+    extractDependencyFiles: (params: { projectId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.extractDependencyFiles', params }),
+    getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getLevelCommunityDetail', params }),
+    saveFileSummaries: (params: { projectId: string; taskId: string; summaries: any[] }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.saveFileSummaries', params }),
+    getFileSummaries: (params: { projectId: string; taskId?: string; source?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getFileSummaries', params }),
+    getCallLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; status?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getCallLogs', params }),
+    getInteractionLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getInteractionLogs', params }),
   },
 
   // ==================== 设置配置 ====================

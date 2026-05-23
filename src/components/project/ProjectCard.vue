@@ -15,7 +15,9 @@ import type { Project, GroupNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-002')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
@@ -318,6 +320,7 @@ async function handleCheckChanges() {
     @click="emit('select', project)"
     @contextmenu="showMenu"
   >
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部: 名称 + 语言 + 菜单按钮 -->
     <div class="flex justify-between items-center" style="margin-bottom:8px;">
       <div class="flex items-center gap-2" style="min-width:0;">

@@ -14,7 +14,7 @@ import zipfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,17 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("project.list")
     def list_projects():
-        rows = main_db.fetchall("SELECT * FROM projects ORDER BY pinned DESC, sort_order ASC, updated_at DESC")
+        rows = main_db.fetchall("""
+            SELECT p.*, COALESCE(dc.done_count, 0) AS done_task_count
+            FROM projects p
+            LEFT JOIN (
+                SELECT project_id, COUNT(*) AS done_count
+                FROM analysis_tasks
+                WHERE status = 'done'
+                GROUP BY project_id
+            ) dc ON p.id = dc.project_id
+            ORDER BY p.pinned DESC, p.sort_order ASC, p.updated_at DESC
+        """)
         for row in rows:
             if row.get("tags"):
                 row["tags"] = json.loads(row["tags"])
@@ -1465,5 +1475,375 @@ def _export_graph_data(multi_db: MultiDBManager, project_id: str) -> dict:
         "callChains": project_db.fetchall("SELECT * FROM call_chains"),
         "components": project_db.fetchall("SELECT * FROM components"),
     }
+
+
+# ==================== 报告生成辅助方法 ====================
+
+_DEPENDENCY_FILE_PATTERNS = {
+    'package.json': 'node',
+    'requirements.txt': 'python',
+    'pyproject.toml': 'python',
+    'Pipfile': 'python',
+    'Cargo.toml': 'rust',
+    'go.mod': 'go',
+    'pom.xml': 'java',
+    'build.gradle': 'java',
+    'build.gradle.kts': 'java',
+    'Gemfile': 'ruby',
+    'composer.json': 'php',
+    'pubspec.yaml': 'dart',
+    'CMakeLists.txt': 'cmake',
+    'vcpkg.json': 'cpp',
+    'conanfile.txt': 'cpp',
+    '*.csproj': 'csharp',
+}
+
+
+def _parse_dependency_file(root_path: str, file_name: str, rel_path: str) -> Optional[Dict[str, Any]]:
+    """解析单个依赖文件，返回结构化依赖信息"""
+    full_path = os.path.join(root_path, rel_path)
+    if not os.path.isfile(full_path):
+        return None
+
+    eco = _DEPENDENCY_FILE_PATTERNS.get(file_name)
+    if not eco:
+        return None
+
+    dep_info = {"file": rel_path, "type": eco, "dependencies": {}}
+    try:
+        if file_name == 'package.json':
+            import json as _json
+            with open(full_path, 'r', encoding='utf-8') as f:
+                pkg = _json.load(f)
+            deps = {}
+            for section in ('dependencies', 'devDependencies', 'peerDependencies'):
+                if section in pkg:
+                    for k, v in pkg[section].items():
+                        deps[k] = str(v)
+            dep_info["dependencies"] = deps
+
+        elif file_name == 'Cargo.toml':
+            dep_info["dependencies"] = _parse_toml_deps(full_path)
+
+        elif file_name == 'go.mod':
+            deps = {}
+            with open(full_path, 'r', encoding='utf-8') as f:
+                in_require = False
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('require ('):
+                        in_require = True
+                        continue
+                    if in_require:
+                        if line == ')':
+                            break
+                        parts = line.split()
+                        if len(parts) >= 1:
+                            deps[parts[0]] = parts[1] if len(parts) > 1 else ''
+            dep_info["dependencies"] = deps
+
+        elif file_name == 'pom.xml':
+            deps = {}
+            import re as _re
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            for m in _re.finditer(r'<dependency>\s*<groupId>(.+?)</groupId>\s*<artifactId>(.+?)</artifactId>\s*<version>(.+?)</version>', content, _re.DOTALL):
+                deps[f"{m.group(1)}:{m.group(2)}"] = m.group(3)
+            dep_info["dependencies"] = deps
+
+        elif file_name in ('requirements.txt', 'Pipfile'):
+            deps = {}
+            with open(full_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        parts = re.split(r'[=~<>!]+', line, maxsplit=1)
+                        if len(parts) >= 1:
+                            deps[parts[0].strip()] = parts[1].strip() if len(parts) > 1 else ''
+            dep_info["dependencies"] = deps
+
+        elif file_name == 'pyproject.toml':
+            dep_info["dependencies"] = _parse_toml_deps(full_path)
+
+        elif file_name in ('build.gradle', 'build.gradle.kts'):
+            deps = {}
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            for m in re.finditer(r"(implementation|api|compileOnly|runtimeOnly)\s+['\"](.+?)['\"]", content):
+                deps[m.group(2)] = m.group(1)
+            dep_info["dependencies"] = deps
+
+        else:
+            # 通用文本解析 fallback
+            deps = {}
+            with open(full_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith(('#', '//', '/*')):
+                        parts = line.split()
+                        if len(parts) >= 1:
+                            deps[parts[0]] = parts[1] if len(parts) > 1 else ''
+            dep_info["dependencies"] = deps
+    except Exception as e:
+        logger.warning(f"[report] Failed to parse dependency file {rel_path}: {e}")
+        dep_info["error"] = str(e)
+
+    dep_info["count"] = len(dep_info.get("dependencies", {}))
+    return dep_info
+
+
+def _parse_toml_deps(full_path: str) -> Dict[str, str]:
+    """解析 TOML 格式依赖文件"""
+    deps = {}
+    try:
+        import tomllib
+        with open(full_path, 'rb') as f:
+            data = tomllib.load(f)
+        for section_key in ('dependencies', 'dev-dependencies', 'build-dependencies'):
+            if section_key in data:
+                section = data[section_key]
+                if isinstance(section, dict):
+                    for k, v in section.items():
+                        if isinstance(v, str):
+                            deps[k] = v
+                        elif isinstance(v, dict):
+                            deps[k] = v.get('version', '')
+                        else:
+                            deps[k] = str(v)
+    except ImportError:
+        # Python < 3.11 fallback
+        try:
+            import tomli as tomllib
+            with open(full_path, 'rb') as f:
+                data = tomllib.load(f)
+            for section_key in ('dependencies', 'dev-dependencies', 'build-dependencies'):
+                if section_key in data:
+                    section = data[section_key]
+                    if isinstance(section, dict):
+                        for k, v in section.items():
+                            deps[k] = str(v) if not isinstance(v, dict) else v.get('version', '')
+        except ImportError:
+            logger.warning("[report] tomllib/tomli not available, skipping TOML parsing")
+    return deps
+
+
+def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
+    """注册报告生成辅助方法"""
+    main_db = multi_db.main_db
+
+    @server.register("report.getReadmeContent")
+    def get_readme_content(project_id=None, projectId=None):
+        """获取 README.md 前 500 字符"""
+        pid = project_id or projectId
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
+        if not project:
+            raise ValueError(f"Project not found: {pid}")
+        root_path = project["root_path"]
+        for candidate in ('README.md', 'Readme.md', 'readme.md', 'README'):
+            readme_path = os.path.join(root_path, candidate)
+            if os.path.isfile(readme_path):
+                try:
+                    with open(readme_path, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read(5000)
+                    return {"path": candidate, "content": content[:500], "fullLength": len(content)}
+                except Exception as e:
+                    return {"path": candidate, "error": str(e)}
+        return {"path": None, "content": "", "error": "No README found"}
+
+    @server.register("report.extractDependencyFiles")
+    def extract_dependency_files(project_id=None, projectId=None):
+        """扫描项目根目录，提取所有已知的依赖管理文件"""
+        pid = project_id or projectId
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
+        if not project:
+            raise ValueError(f"Project not found: {pid}")
+        root_path = project["root_path"]
+        results = []
+        for fname in _DEPENDENCY_FILE_PATTERNS:
+            # 尝试根目录
+            parsed = _parse_dependency_file(root_path, fname, fname)
+            if parsed:
+                results.append(parsed)
+                continue
+            # 尝试子目录（如 build.gradle 可能在 app/ 下）
+            for dirpath, _, filenames in os.walk(root_path):
+                for fn in filenames:
+                    if fn == fname:
+                        rel = os.path.relpath(os.path.join(dirpath, fn), root_path)
+                        parsed = _parse_dependency_file(root_path, fname, rel)
+                        if parsed:
+                            results.append(parsed)
+                        break  # only first match per pattern
+        return {"dependencyFiles": results, "count": len(results)}
+
+    @server.register("report.getLevelCommunityDetail")
+    def get_level_community_detail(project_id=None, task_id=None, level="L2", edge_type="CALL",
+                                    projectId=None, taskId=None, edgeType=None):
+        """获取指定层级的社区完整信息（含节点路径和边详情）"""
+        pid = project_id or projectId
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'CALL'
+        project_db = multi_db.get_project_db(pid)
+        communities = project_db.fetchall(
+            """SELECT * FROM graph_doc
+               WHERE task_id = ? AND edge_type = ? AND comm_lv = ?
+               ORDER BY quality_score DESC""",
+            (tid, et, level)
+        )
+        result = []
+        for comm in communities:
+            node_list = json.loads(comm['node_list']) if isinstance(comm['node_list'], str) else comm['node_list']
+            edge_list = json.loads(comm['edge_list']) if comm.get('edge_list') and isinstance(comm['edge_list'], str) else comm.get('edge_list', [])
+
+            # 获取节点路径
+            nodes_with_paths = []
+            if isinstance(node_list, list):
+                for node in node_list[:50]:  # limit to 50
+                    if isinstance(node, dict):
+                        nid = node.get('id', '')
+                        file_row = project_db.fetchone(
+                            "SELECT file_path FROM source_files WHERE id = ?",
+                            (nid,)
+                        )
+                        nodes_with_paths.append({
+                            "id": nid or node.get('name', ''),
+                            "name": node.get('name', ''),
+                            "type": node.get('type', ''),
+                            "filePath": file_row['file_path'] if file_row else '?',
+                        })
+                    elif isinstance(node, str):
+                        nodes_with_paths.append({"id": node, "name": node, "type": "?", "filePath": "?"})
+
+            # 获取边的关系
+            edges_with_details = []
+            if isinstance(edge_list, list):
+                for edge in edge_list[:50]:
+                    if isinstance(edge, dict):
+                        edges_with_details.append({
+                            "source": edge.get('source', ''),
+                            "target": edge.get('target', ''),
+                            "type": edge.get('type', edge_type),
+                            "direction": "caller→callee" if edge.get('type', '').upper() == 'CALL' else "dependency",
+                        })
+                    elif isinstance(edge, str):
+                        edges_with_details.append({"source": edge, "target": "?", "type": edge_type})
+
+            result.append({
+                "communityId": comm['comm_id'],
+                "parentCommunityId": comm.get('parent_comm_id'),
+                "level": comm['comm_lv'],
+                "nodeCount": comm['node_count'],
+                "edgeCount": comm['edge_count'],
+                "qualityScore": comm.get('quality_score'),
+                "nodes": nodes_with_paths,
+                "edges": edges_with_details,
+            })
+        return {"communities": result, "count": len(result), "level": level, "taskId": task_id}
+
+    @server.register("report.saveFileSummaries")
+    def save_file_summaries(project_id=None, task_id=None, summaries=None,
+                            projectId=None, taskId=None):
+        """批量保存文件摘要到 file_summaries 表"""
+        pid = project_id or projectId
+        tid = task_id or taskId
+        project_db = multi_db.get_project_db(pid)
+        import uuid
+        now = datetime.now().isoformat()
+        saved = 0
+        for s in (summaries or []):
+            sid = f"fs-{uuid.uuid4().hex[:8]}"
+            summary_text = s.get('summary', '')[:100]
+            try:
+                project_db.execute(
+                    """INSERT OR REPLACE INTO file_summaries
+                       (id, project_id, task_id, file_path, summary, summary_len, source, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (sid, pid, tid, s['filePath'], summary_text, len(summary_text),
+                     s.get('source', 'llm'), now, now),
+                )
+                saved += 1
+            except Exception as e:
+                logger.warning(f"[report] Failed to save summary for {s.get('filePath')}: {e}")
+        project_db.commit()
+        return {"saved": saved}
+
+    @server.register("report.getFileSummaries")
+    def get_file_summaries(project_id=None, task_id=None, source='llm',
+                            projectId=None, taskId=None):
+        """获取文件摘要列表"""
+        pid = project_id or projectId
+        tid = task_id or taskId
+        project_db = multi_db.get_project_db(pid)
+        sql = "SELECT * FROM file_summaries WHERE project_id = ?"
+        params = [pid]
+        if tid:
+            sql += " AND task_id = ?"
+            params.append(tid)
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        sql += " ORDER BY created_at DESC"
+        rows = project_db.fetchall(sql, tuple(params))
+        return {"summaries": rows, "count": len(rows)}
+
+    # ==================== LLM 调用日志查询 ====================
+
+    @server.register("report.getCallLogs")
+    def get_call_logs(
+        session_id: str = None,
+        request_id: str = None,
+        template_id: str = None,
+        status: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        """查询 LLM 调用日志（llm_call_logs）"""
+        main_db = multi_db.main_db
+        sql = "SELECT * FROM llm_call_logs WHERE 1=1"
+        params = []
+        if session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        if request_id:
+            sql += " AND request_id = ?"
+            params.append(request_id)
+        if template_id:
+            sql += " AND template_id = ?"
+            params.append(template_id)
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = main_db.fetchall(sql, tuple(params))
+        return {"logs": rows, "count": len(rows)}
+
+    @server.register("report.getInteractionLogs")
+    def get_interaction_logs(
+        session_id: str = None,
+        request_id: str = None,
+        template_id: str = None,
+        limit: int = 100,
+        offset: int = 0,
+    ):
+        """查询报告交互日志（report_interaction_log）"""
+        main_db = multi_db.main_db
+        sql = "SELECT * FROM report_interaction_log WHERE 1=1"
+        params = []
+        if session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        if request_id:
+            sql += " AND request_id = ?"
+            params.append(request_id)
+        if template_id:
+            sql += " AND json_extract(meta_json, '$.template_id') = ?"
+            params.append(template_id)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = main_db.fetchall(sql, tuple(params))
+        return {"logs": rows, "count": len(rows)}
+
+    return server
 
 

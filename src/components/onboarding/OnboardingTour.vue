@@ -8,7 +8,9 @@ import {
   PlayCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useOnboardingStore } from '@/stores/onboarding'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('OT-003')
 const { t } = useI18n()
 const onboardingStore = useOnboardingStore()
 
@@ -111,6 +113,7 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div v-if="onboardingStore.isRunning" class="onboarding-overlay">
       <!-- Spotlight 遮罩 -->
       <div class="spotlight-backdrop"></div>

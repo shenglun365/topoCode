@@ -14,7 +14,9 @@ import {
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import type { Project, AnalysisTask } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-001')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
@@ -49,50 +51,26 @@ const typeMap: Record<string, string> = {
   architecture: '架构分析',
 }
 
-// 加载项目的已完成报告
-async function loadCompletedTasks(projectId: string) {
-  if (loadingProjects.value.has(projectId)) return
-  loadingProjects.value.add(projectId)
-  try {
-    await analysisStore.loadTasks(projectId)
-    const completed = analysisStore.tasks.filter(task => task.status === 'done')
+  // 加载项目的已完成报告
+  async function loadCompletedTasks(projectId: string) {
+    if (loadingProjects.value.has(projectId)) return
+    loadingProjects.value.add(projectId)
+    try {
+      await analysisStore.loadTasks(projectId)
+      const completed = analysisStore.tasks.filter(task => task.status === 'done')
 
-    // 将每个任务按报告类型拆分为多个报告项
-    const items: ReportItem[] = []
-    for (const task of completed) {
-      const taskName = task.name || `Task ${task.id.slice(0, 8)}`
-      let reportTypes: string[] = []
-      const raw = task.reportTypes || task.report_types
-      if (raw) {
-        try {
-          reportTypes = typeof raw === 'string' ? JSON.parse(raw) : raw
-        } catch {
-          reportTypes = []
-        }
-      }
-
-      if (reportTypes.length > 0) {
-        // 有报告类型：每个类型单独一行
-        for (const type of reportTypes) {
-          items.push({
-            taskId: task.id,
-            type,
-            typeName: typeMap[type] || `${type}分析`,
-            taskName,
-            updatedAt: task.updatedAt,
-          })
-        }
-      } else {
-        // 无报告类型：显示为全量分析
+      // 每个已完成任务显示一个"分析报告"入口
+      const items: ReportItem[] = []
+      for (const task of completed) {
+        const taskName = task.name || `Task ${task.id.slice(0, 8)}`
         items.push({
           taskId: task.id,
-          type: 'all',
-          typeName: '全量分析',
+          type: 'analysisReport',
+          typeName: '分析报告',
           taskName,
           updatedAt: task.updatedAt,
         })
       }
-    }
 
     reportItemsByProject.value.set(projectId, items)
   } catch (err) {
@@ -175,6 +153,7 @@ function cancelCreateTask() {
 
 <template>
   <div class="project-list">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 搜索框 -->
     <div class="project-list-search">
       <MagnifyingGlassIcon class="w-3.5 h-3.5 search-icon" />

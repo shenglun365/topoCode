@@ -5,7 +5,9 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import MarkdownIt from 'markdown-it'
 import type { FileTreeNode } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-009')
 const props = defineProps<{
   node: FileTreeNode
   rootPath: string
@@ -189,6 +191,7 @@ function handleClose() {
 
 <template>
   <div class="code-viewer">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 加载状态 -->
     <div v-if="loading" class="code-loading">
       <div class="loading-spinner"></div>

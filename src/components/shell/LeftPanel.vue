@@ -13,7 +13,9 @@ import { useAnalysisStore } from '@/stores/analysis'
 import FileTree from '@/components/project/FileTree.vue'
 import ProjectList from '@/components/project/ProjectList.vue'
 import type { FileTreeNode } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('SH-003')
 const { t } = useI18n()
 const router = useRouter()
 const panelStore = usePanelStore()
@@ -142,12 +144,20 @@ async function handleSelectReport(item: { taskId: string; type: string; taskName
   navigation.navigateTo('analysis')
   // 打开报告 tab
   const project = projectStore.selectedProject
-  projectStore.openReportTab({
-    taskId: item.taskId,
-    reportType: item.type,
-    taskName: item.taskName,
-    projectName: project?.name,
-  })
+  if (item.type === 'analysisReport') {
+    projectStore.openReportHomeTab({
+      taskId: item.taskId,
+      taskName: item.taskName,
+      projectName: project?.name,
+    })
+  } else {
+    projectStore.openReportTab({
+      taskId: item.taskId,
+      reportType: item.type,
+      taskName: item.taskName,
+      projectName: project?.name,
+    })
+  }
 }
 
 // 处理为项目创建任务（点击"无报告"）
@@ -195,6 +205,7 @@ loadPanelContent()
     :class="{ collapsed: panelStore.leftCollapsed }"
     :style="{ width: panelStore.leftCollapsed ? 0 : `${panelStore.leftWidth}px` }"
   >
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="panel-header">
       <span>{{ title }}</span>
       <div class="panel-header-actions">

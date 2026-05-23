@@ -4,7 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useStatusStore } from '@/stores/status'
 import { clearCache } from '@/utils/graphCache'
 import { TrashIcon } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('SH-006')
 const { t } = useI18n()
 const status = useStatusStore()
 const clearing = ref(false)
@@ -21,6 +23,7 @@ async function handleClearCache() {
 
 <template>
   <footer class="status-bar">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="status-item">
       <span
         class="status-dot"

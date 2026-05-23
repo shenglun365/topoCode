@@ -8,7 +8,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import type { TaskStatus } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-006')
 const { t } = useI18n()
 
 defineProps<{
@@ -36,6 +38,7 @@ function getStatusText(status: string): string {
 
 <template>
   <div class="task-status-card">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部 -->
     <div class="task-header">
       <div class="task-title">

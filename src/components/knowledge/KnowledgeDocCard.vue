@@ -10,7 +10,9 @@ import { StarIcon as StarSolidIcon } from '@heroicons/vue/24/solid'
 import { useI18n } from 'vue-i18n'
 import type { KnowledgeDoc } from '@/types'
 import { dimensionColors, formatTime } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('KN-001')
 const { t } = useI18n()
 
 defineProps<{
@@ -47,6 +49,7 @@ function getStatusText(status: string): string {
     class="kb-doc-card card card-clickable"
     @click="emit('select', doc)"
   >
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div style="display:flex; align-items:center; gap:10px;">
       <!-- 图标 -->
       <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">

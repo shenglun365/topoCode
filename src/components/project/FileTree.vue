@@ -6,7 +6,9 @@ import type { FileTreeNode as FileNodeType } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
 import { useDebugStore } from '@/stores/debug'
 import FileTreeNode from './FileTreeNode.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-008')
 const debug = useDebugStore()
 
 const props = defineProps<{
@@ -229,6 +231,7 @@ function clearSearch() {
 
 <template>
   <div class="file-tree-container">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 搜索框 -->
     <div class="file-tree-search">
       <MagnifyingGlassIcon class="w-3.5 h-3.5 search-icon" />

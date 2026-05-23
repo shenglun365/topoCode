@@ -14,7 +14,9 @@ import {
   SparklesIcon,
 } from '@heroicons/vue/24/outline'
 import { isLLMConfigured, explainSymbol } from '@/services/llmClient'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('RP-018')
 const { t } = useI18n()
 
 const props = defineProps<{
@@ -92,6 +94,7 @@ function handleOpenSource() {
 
 <template>
   <div class="symbol-detail-card">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部 -->
     <div class="card-header">
       <CodeBracketIcon class="w-4 h-4 type-icon" />

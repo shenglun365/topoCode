@@ -10,7 +10,9 @@ import { useI18n } from 'vue-i18n'
 import type { ChatMessage } from '@/utils/mock'
 import ContextCards from './ContextCards.vue'
 import TaskStatusCard from './TaskStatusCard.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-002')
 const { t } = useI18n()
 
 defineProps<{
@@ -38,6 +40,7 @@ function getContextIcon(type: string): any {
 
 <template>
   <div class="chat-message" :class="message.role">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头像 -->
     <div class="msg-avatar">
       <UserCircleIcon v-if="message.role === 'user'" class="w-6 h-6 text-blue-400" />

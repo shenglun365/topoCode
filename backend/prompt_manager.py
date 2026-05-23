@@ -533,6 +533,265 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             {"name": "codeContent", "type": "string", "description": "代码内容", "required": True},
         ]),
     },
+
+    # ===== 报告生成流水线模板 (report_pipeline) =====
+    {
+        "id": "report_project_summary",
+        "name": "报告-项目概要",
+        "mode": "chat",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个项目文档生成助手。请根据提供的项目信息生成项目概要。\n"
+            "输出 Markdown 格式，包含:\n"
+            "1. 项目名称和语言\n"
+            "2. 文件数量和目录结构\n"
+            "3. 主要技术栈\n"
+            "4. README 摘要\n"
+            "5. 依赖管理工具和库\n"
+            "用中文回答。"
+        ),
+        "user_prompt_template": (
+            "## 项目信息\n"
+            "- 项目名称: {projectName}\n"
+            "- 主要语言: {language}\n"
+            "- 文件总数: {fileCount}\n"
+            "- 根目录: {rootPath}\n\n"
+            "## 文件分布\n"
+            "{fileDistribution}\n\n"
+            "## README 摘要\n"
+            "{readmeContent}\n\n"
+            "## 依赖信息\n"
+            "{dependencySummary}\n\n"
+            "## 核心文件摘要\n"
+            "{fileSummaries}\n\n"
+            "请生成项目概要文档。"
+        ),
+        "variables_json": json.dumps([
+            {"name": "projectName", "type": "string", "description": "项目名称", "required": True},
+            {"name": "language", "type": "string", "description": "主要编程语言", "required": True},
+            {"name": "fileCount", "type": "string", "description": "文件总数", "required": True},
+            {"name": "rootPath", "type": "string", "description": "项目根路径", "required": False},
+            {"name": "fileDistribution", "type": "string", "description": "文件分布统计", "required": False},
+            {"name": "readmeContent", "type": "string", "description": "README 摘要", "required": False},
+            {"name": "dependencySummary", "type": "string", "description": "依赖管理信息", "required": False},
+            {"name": "fileSummaries", "type": "string", "description": "核心文件摘要", "required": False},
+        ]),
+    },
+    {
+        "id": "report_arch_decomposition",
+        "name": "报告-架构分解",
+        "mode": "chat",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个软件架构分析专家。请根据社区分析数据分解项目架构层次。\n"
+            "输出 Markdown 格式，包含:\n"
+            "1. 架构层次划分\n"
+            "2. 各层次的核心职责\n"
+            "3. Mermaid graph TD 架构图\n"
+            "用中文回答。Mermaid 代码放在 ```mermaid 代码块中。"
+        ),
+        "user_prompt_template": (
+            "## 社区分组数据\n"
+            "{communitySummary}\n\n"
+            "请根据以上社区分析数据:\n"
+            "1. 识别项目的主要架构层次（如：核心逻辑层、数据访问层、接口层等）\n"
+            "2. 将社区分组映射到各层次\n"
+            "3. 生成 Mermaid graph TD 架构图\n"
+            "4. 说明各层次之间的依赖关系"
+        ),
+        "variables_json": json.dumps([
+            {"name": "communitySummary", "type": "string", "description": "社区分组摘要", "required": True},
+        ]),
+    },
+    {
+        "id": "report_core_modules",
+        "name": "报告-核心模块说明",
+        "mode": "chat",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个代码分析专家。请根据社区节点和调用关系,详细说明核心模块的功能和职责。\n"
+            "输出 Markdown 格式，每个模块包含:\n"
+            "1. 模块名称和分类\n"
+            "2. 核心功能说明\n"
+            "3. 关键类/函数列表（表格形式）\n"
+            "4. 内部调用关系\n"
+            "用中文回答。"
+        ),
+        "user_prompt_template": (
+            "## 核心社区分组\n"
+            "{topCommunities}\n\n"
+            "请详细分析以上 {count} 个社区的功能:\n"
+            "1. 每个社区的业务/技术职责\n"
+            "2. 关键符号（类、函数）及其作用\n"
+            "3. 社区内部的高频调用关系模式"
+        ),
+        "variables_json": json.dumps([
+            {"name": "topCommunities", "type": "string", "description": "核心社区分组详情", "required": True},
+            {"name": "count", "type": "string", "description": "社区数量", "required": True},
+        ]),
+    },
+    {
+        "id": "report_dependency_analysis",
+        "name": "报告-依赖与调用分析",
+        "mode": "chat",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个依赖分析专家。请根据跨社区调用和依赖数据,分析模块间的耦合关系。\n"
+            "输出 Markdown 格式，包含:\n"
+            "1. 跨社区调用统计\n"
+            "2. 核心依赖链路\n"
+            "3. 循环依赖检测（如有）\n"
+            "4. 架构质量评估\n"
+            "用中文回答。"
+        ),
+        "user_prompt_template": (
+            "## 跨社区调用/依赖数据\n"
+            "{crossCommunityEdges}\n\n"
+            "请分析:\n"
+            "1. 哪些社区之间存在最多的交互（高耦合）\n"
+            "2. 是否存在单向依赖违反或循环依赖\n"
+            "3. 核心数据流向\n"
+            "4. 给出架构改进建议"
+        ),
+        "variables_json": json.dumps([
+            {"name": "crossCommunityEdges", "type": "string", "description": "跨社区边数据", "required": True},
+        ]),
+    },
+    {
+        "id": "report_final_assembly",
+        "name": "报告-最终整合",
+        "mode": "chat",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个技术文档编辑专家。请将多个分析片段整合为一份完整、连贯的架构分析报告。\n"
+            "输出为标准的 Markdown 文档，要求:\n"
+            "1. 保持各部分的逻辑衔接\n"
+            "2. 去除重复内容\n"
+            "3. 统一术语和风格\n"
+            "4. 生成的 Mermaid/PlantUML 代码块保留原始格式\n"
+            "5. 添加目录和章节编号"
+        ),
+        "user_prompt_template": (
+            "请将以下分析内容整合为一份完整的架构分析报告：\n\n"
+            "---\n"
+            "## 步骤1: 项目概要\n"
+            "{step1}\n\n"
+            "---\n"
+            "## 步骤2: 架构分解\n"
+            "{step2}\n\n"
+            "---\n"
+            "## 步骤3: 核心模块说明\n"
+            "{step3}\n\n"
+            "---\n"
+            "## 步骤4: 依赖与调用分析\n"
+            "{step4}\n\n"
+            "---\n"
+            "请整合以上内容为一份完整的 Markdown 报告，添加文档标题、目录和页码标记。"
+        ),
+        "variables_json": json.dumps([
+            {"name": "step1", "type": "string", "description": "项目概要步骤输出", "required": True},
+            {"name": "step2", "type": "string", "description": "架构分解步骤输出", "required": True},
+            {"name": "step3", "type": "string", "description": "核心模块说明步骤输出", "required": True},
+            {"name": "step4", "type": "string", "description": "依赖分析步骤输出", "required": True},
+        ]),
+    },
+
+    # ===== 文件摘要模板 (structured) =====
+    {
+        "id": "file_summarize",
+        "name": "文件摘要生成",
+        "mode": "structured",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个代码摘要专家。为提供的源码文件生成不超过 100 字的功能摘要。\n"
+            "返回 JSON 格式，包含: summary, keywords (最多 5 个标签)。\n"
+            "用中文回答。"
+        ),
+        "user_prompt_template": (
+            "## 文件: {filePath}\n"
+            "## 语言: {language}\n\n"
+            "```{language}\n{codeContent}\n```\n\n"
+            "请生成功能摘要（不超过 100 字）。"
+        ),
+        "output_schema_json": json.dumps({
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "maxLength": 100, "description": "功能摘要（不超过100字）"},
+                "keywords": {"type": "array", "items": {"type": "string"}, "maxItems": 5, "description": "关键标签"},
+            },
+            "required": ["summary"],
+        }),
+        "output_example": json.dumps({"summary": "处理HTTP请求的路由分发，支持路径参数匹配和中间件链", "keywords": ["路由", "HTTP", "中间件"]}),
+        "variables_json": json.dumps([
+            {"name": "filePath", "type": "string", "description": "文件路径", "required": True},
+            {"name": "language", "type": "string", "description": "编程语言", "required": True},
+            {"name": "codeContent", "type": "string", "description": "源代码", "required": True},
+        ]),
+    },
+
+    # ===== 社区分析模板 (structured — 返回名称+摘要) =====
+    {
+        "id": "community_analyze",
+        "name": "社区功能分析",
+        "mode": "structured",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个代码社区分析专家。请根据提供的社区结构信息，分析该社区的功能和架构含义。\n"
+            "返回 JSON 格式，包含 name 和 summary 两个字段。\n"
+            "用中文回答。\n\n"
+            "字段说明:\n"
+            "- name: 社区名称（根据功能概括，不超过 20 个字）\n"
+            "- summary: 社区功能说明（Markdown 格式，包含：核心功能说明、涉及的文件列表、内部调用关系）\n"
+        ),
+        "user_prompt_template": (
+            "## 社区信息\n"
+            "- 社区ID: {communityId}\n"
+            "- 层级: {level} (L0/L1/L2)\n"
+            "- 节点数: {nodeCount}\n"
+            "- 边数: {edgeCount}\n\n"
+            "## 节点列表（源码文件/符号）\n"
+            "{nodeListWithPaths}\n\n"
+            "## 边关系（调用/依赖）\n"
+            "{edgeListWithDetails}\n\n"
+            "{parentSummaries}\n\n"
+            "请分析这个社区，返回 JSON 格式的 name（≤20字）和 summary。"
+        ),
+        "output_schema_json": json.dumps({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "maxLength": 20, "description": "社区名称（不超过20个字）"},
+                "summary": {"type": "string", "description": "社区功能说明（Markdown格式）"},
+            },
+            "required": ["name", "summary"],
+        }),
+        "output_example": json.dumps({
+            "name": "HTTP路由处理",
+            "summary": "负责HTTP请求的路由分发和参数解析，包含路由注册、中间件链、路径匹配等功能。",
+        }),
+        "variables_json": json.dumps([
+            {"name": "communityId", "type": "string", "description": "社区ID", "required": True},
+            {"name": "level", "type": "string", "description": "层级 (L0/L1/L2)", "required": True},
+            {"name": "nodeCount", "type": "integer", "description": "节点数", "required": True},
+            {"name": "edgeCount", "type": "integer", "description": "边数", "required": True},
+            {"name": "nodeListWithPaths", "type": "string", "description": "节点列表（含源码路径）", "required": True},
+            {"name": "edgeListWithDetails", "type": "string", "description": "边关系列表", "required": True},
+            {"name": "parentSummaries", "type": "string", "description": "父社区摘要（用于聚合）", "required": False},
+        ]),
+    },
 ]
 
 # 内置模板 ID 集合

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('ST-008')
 const { t } = useI18n()
 </script>
 
 <template>
   <div class="about-page">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">{{ t('settings.aboutTopoCode') }}</h2>
 
     <div class="card" style="padding:20px; text-align:center; margin-bottom:16px;">

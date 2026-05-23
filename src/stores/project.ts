@@ -13,7 +13,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'subdoc' | 'groupManager'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager'
 
 export interface HomeTab {
   id: string
@@ -389,6 +389,32 @@ export const useProjectStore = defineStore('project', () => {
     return tab.id
   }
 
+  /** 打开报告首页 tab — 分析报告生成入口 */
+  function openReportHomeTab(params: {
+    taskId: string
+    taskName: string
+    projectName?: string
+  }) {
+    const pid = funcGroup.currentProjectId;
+    const existing = funcGroup.context.analysis.tabs.find(
+      t => t.kind === 'reportHome' && t.taskId === params.taskId
+    )
+    if (existing) {
+      funcGroup.setActiveTab('analysis', existing.id)
+      return existing.id
+    }
+    const title = `${i18n.global.t('report.analysisReport')} · ${params.taskName}`
+    const tab: HomeTab = {
+      id: `tab-reportHome-${params.taskId}-${Date.now()}`,
+      kind: 'reportHome',
+      title,
+      projectId: pid,
+      taskId: params.taskId,
+    }
+    funcGroup.openTab('analysis', tab)
+    return tab.id
+  }
+
   /** 关闭所有报告 tab */
   function closeAllReportTabs() {
     const ctx = funcGroup.context.analysis;
@@ -442,6 +468,7 @@ export const useProjectStore = defineStore('project', () => {
     openGroupManagerTab,
     closeGroupManagerTab,
     openReportTab,
+    openReportHomeTab,
     closeAllReportTabs,
     openSubDocTab,
     // 暴露 funcGroup 供其他功能组使用

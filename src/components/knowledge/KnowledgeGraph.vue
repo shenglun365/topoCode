@@ -12,7 +12,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { KnowledgeGraphNode, KnowledgeGraphEdge } from '@/utils/mock'
 import { mockGraphNodes, mockGraphEdges } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('KN-003')
 const { t } = useI18n()
 
 const viewMode = ref<'d3' | 'mermaid'>('d3')
@@ -71,6 +73,7 @@ const viewModes = [
 
 <template>
   <div class="knowledge-graph">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 视图切换 -->
     <div class="view-switcher">
       <button

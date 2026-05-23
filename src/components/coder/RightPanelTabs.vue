@@ -1,5 +1,6 @@
 <template>
   <div class="right-panel-tabs">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="tab-bar">
       <button
         v-for="tab in tabs"
@@ -127,7 +128,9 @@ import {
 import SpecCard from './SpecCard.vue'
 import type { SpecDoc } from './SpecCard.vue'
 import type { KnowledgeDoc, AgentConfigItem } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-004')
 const { t } = useI18n()
 
 const props = defineProps<{

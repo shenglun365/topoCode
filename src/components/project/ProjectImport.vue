@@ -1,5 +1,6 @@
 <template>
   <div class="project-import">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 默认视图 -->
     <div v-if="!selectedProject" class="default-view">
       <div class="page-header">
@@ -116,7 +117,9 @@ import ImportZone from './ImportZone.vue'
 import FileTree from './FileTree.vue'
 import TaskCard from '../analysis/TaskCard.vue'
 import type { ProjectMeta, AnalysisTask, TreeNode } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-003')
 const { t } = useI18n()
 
 const props = defineProps<{

@@ -7,7 +7,9 @@ import {
   BuildingOffice2Icon,
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-003')
 const { t } = useI18n()
 
 const props = defineProps<{
@@ -33,6 +35,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="chat-input-area">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 模式切换 -->
     <div class="coder-mode-switch">
       <div

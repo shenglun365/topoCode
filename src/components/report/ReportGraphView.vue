@@ -12,7 +12,9 @@ import { useAnimation } from '@/composables/useAnimation'
 import { computeCacheKey, getCachedTopoScript, cacheTopoScript } from '@/utils/graphCache'
 import { getNodeStyle, getEdgeStyle, getCommunityStyle, applyUserStyle } from '@/utils/nodeStyleMap'
 import type { QueryParams } from './ReportQueryPanel.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('RP-014')
 const { t } = useI18n()
 
 const props = defineProps<{
@@ -257,6 +259,7 @@ defineExpose({
 
 <template>
   <div class="report-graph-view">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-overlay">
       <div class="loading-spinner"></div>

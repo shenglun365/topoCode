@@ -7,7 +7,9 @@ import {
   ExclamationCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-004')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
@@ -133,6 +135,7 @@ function clearError() {
 
 <template>
   <div class="import-zone-wrapper">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div
       class="import-zone card"
       :class="{ 'drag-over': isDragging }"

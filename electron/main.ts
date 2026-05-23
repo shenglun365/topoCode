@@ -131,6 +131,9 @@ function setupIPC() {
   ipcMain.handle('system:get-app-data-path', () => {
     return app.getPath('userData')
   })
+  ipcMain.handle('env:get', (_, key: string) => {
+    return process.env[key] || null
+  })
 
   // ---- 存储 ----
   const store: Record<string, any> = {}

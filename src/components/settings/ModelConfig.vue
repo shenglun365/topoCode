@@ -14,7 +14,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
 import type { ModelConfigItem } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('ST-001')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -243,6 +245,7 @@ function onProviderChange(provider: string) {
 
 <template>
   <div class="model-config">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <h2 style="font-size:16px; font-weight:600; margin-bottom:4px;">{{ t('settings.aiModelConfig') }}</h2>
     <p class="text-muted" style="font-size:12px; margin-bottom:20px;">{{ t('settings.aiModelDesc') }}</p>
 

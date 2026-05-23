@@ -50,7 +50,18 @@ PROGRESS_INTERVAL = 5
 
 # ==================== 社区分析配置 ====================
 COMMUNITY_MIN_NODE_INCLUDE = 6    # INCLUDE 图最小节点数
-COMMUNITY_MIN_NODE_CALL = 20      # CALL 图最小节点数
+COMMUNITY_MIN_NODE_CALL = 12      # CALL 图最小节点数（原20→12，降低粒度）
+
+# 枢纽节点过滤：度 > max(HUB_MIN_DEGREE, total_nodes * HUB_DEGREE_RATIO) 时视为枢纽
+HUB_DEGREE_RATIO = 0.3            # 度超过总节点30%
+HUB_MIN_DEGREE = 50               # 至少50度才触发（小项目不误判）
+
+# 孤立节点：移除枢纽后，剩余度 ≤ ORPHAN_MAX_DEGREE 视为孤立
+ORPHAN_MAX_DEGREE = 1
+
+# 同文件内调用降权系数（备选方案）：设为 1.0 = 等同处理，< 1.0 = 降低影响力
+INTRAn_FILE_EDGE_WEIGHT = 1.0       # 正常值
+INTRAn_FILE_EDGE_FALLBACK_WEIGHT = 0.1  # 备选方案时降权
 
 # ==================== 日志配置 ====================
 LOG_DIR = os.environ.get("TOPOCODE_LOG_DIR", os.path.join(DB_DIR, "logs"))

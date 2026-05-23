@@ -13,7 +13,9 @@ import type { GroupNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('PR-006')
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
@@ -161,6 +163,7 @@ defineExpose({ loadGroups })
 
 <template>
   <div class="group-manager">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 工具栏（新建按钮） -->
     <div class="group-manager-toolbar">
       <div />

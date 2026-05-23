@@ -17,7 +17,9 @@ import {
 import { StarIcon as StarSolidIcon } from '@heroicons/vue/24/solid'
 import type { AnalysisTask } from '@/types'
 import { taskStatusBadge, taskStatusNames } from '@/utils/mock'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-001')
 const { t, locale } = useI18n()
 
 const localeStr = computed(() => locale.value === 'zh-CN' ? 'zh-CN' : 'en-US')
@@ -54,6 +56,7 @@ function getStatusIcon(status: string) {
     :class="{ 'card-clickable': true }"
     @click="emit('select', task)"
   >
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 头部 -->
     <div class="task-card-header">
       <div class="flex items-center gap-2">

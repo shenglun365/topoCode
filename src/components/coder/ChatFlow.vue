@@ -1,5 +1,6 @@
 <template>
   <div class="chat-flow">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <!-- 消息列表 -->
     <div ref="messageListRef" class="message-list" @scroll="handleScroll">
       <div v-if="messages.length === 0" class="empty-state">
@@ -107,7 +108,9 @@ import {
 } from '@heroicons/vue/24/outline'
 import ChatMessage from './ChatMessage.vue'
 import type { ChatMessage as ChatMessageType } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('CD-001')
 const { t } = useI18n()
 
 const props = defineProps<{

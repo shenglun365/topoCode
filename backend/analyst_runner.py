@@ -327,6 +327,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     # ==================== Step 5: 社区分析 ====================
     _log("Step 5: 社区分析开始")
     total_communities = 0
+    total_hubs = 0
+    total_orphans = 0
     best_call_community_id = None
     best_dep_community_id = None
 
@@ -344,10 +346,13 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
                 min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE,
             )
             total_communities += comm_result.get("community_count", 0)
+            total_hubs += comm_result.get("hub_count", 0)
+            total_orphans += comm_result.get("orphan_count", 0)
             best = analysis_store.get_best_community(task_id, "INCLUDE")
             if best:
                 best_dep_community_id = best["comm_id"]
-            _log(f"INCLUDE 社区分析完成: {comm_result.get('community_count', 0)} 个社区")
+            _log(f"INCLUDE 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
+                 f" (枢纽={total_hubs}, 孤立={total_orphans})")
         except Exception as e:
             _log(f"INCLUDE 社区分析失败: {e}")
 
@@ -361,10 +366,13 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
                 min_node_cnt=COMMUNITY_MIN_NODE_CALL,
             )
             total_communities += comm_result.get("community_count", 0)
+            total_hubs += comm_result.get("hub_count", 0)
+            total_orphans += comm_result.get("orphan_count", 0)
             best = analysis_store.get_best_community(task_id, "CALL")
             if best:
                 best_call_community_id = best["comm_id"]
-            _log(f"CALL 社区分析完成: {comm_result.get('community_count', 0)} 个社区")
+            _log(f"CALL 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
+                 f" (枢纽={total_hubs}, 孤立={total_orphans})")
         except Exception as e:
             _log(f"CALL 社区分析失败: {e}")
 
@@ -385,6 +393,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         "total_call_edges": total_call_edges,
         "total_dep_edges": total_dep_edges,
         "total_communities": total_communities,
+        "total_hubs": total_hubs,
+        "total_orphans": total_orphans,
         "language_stats": language_stats,
         "files_processed": processed,
         "skipped_files": skipped,
@@ -394,7 +404,10 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         "summary": (
             f"分析完成: {processed} 个文件, {total_ast_nodes} 个 AST 节点, "
             f"{total_call_edges} 条调用边, {total_dep_edges} 条依赖边, "
-            f"{total_communities} 个社区, 耗时 {duration_ms}ms"
+            f"{total_communities} 个社区"
+            f"{f', {total_hubs} 枢纽' if total_hubs else ''}"
+            f"{f', {total_orphans} 孤立' if total_orphans else ''}"
+            f", 耗时 {duration_ms}ms"
         ),
     }
 

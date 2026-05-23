@@ -1,5 +1,6 @@
 <template>
   <Teleport to="body">
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div v-if="visible" class="dialog-overlay" @click.self="close">
       <div class="dialog-container">
         <div class="dialog-header">
@@ -129,7 +130,9 @@ import {
   TargetIcon,
 } from '@heroicons/vue/24/outline'
 import type { Dimensions } from '@/types/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('AN-007')
 const { t } = useI18n()
 
 const props = defineProps<{
