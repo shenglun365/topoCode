@@ -108,6 +108,9 @@ function createRealIPC(): IPCAPI {
         const result = await api.project.updateMeta(id, meta)
         return adaptProject(result)
       },
+      getStorageStats: async (projectId: string) => {
+        return await api.project.getStorageStats(projectId)
+      },
     },
 
     // ==================== 分组管理 ====================
@@ -406,6 +409,13 @@ function createRealIPC(): IPCAPI {
       },
       set: async (key: string, val: any) => {
         return await api.system.set(key, val)
+      },
+    },
+
+    // ==================== 渲染服务 ====================
+    render: {
+      renderPlantuml: async (params: { code: string; format?: string; useRemote?: boolean }) => {
+        return await api.render.renderPlantuml(params)
       },
     },
   }

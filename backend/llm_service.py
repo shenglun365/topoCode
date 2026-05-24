@@ -1,8 +1,7 @@
 """LLM 后端服务 — 统一 LLM API 网关
 
-Phase 1: session.* RPC 方法 + LLMService 类骨架
-Phase 2: streaming_chat() + ZMQ PUB 推送
-Phase 3: 三模式路由 + Prompt 模板 + Tools Calling
+统一入口: llm.chat → streaming_chat() + ZMQ PUB 推送
+三模式路由: chat / tools / structured + Prompt 模板 + Tools Calling
 """
 
 import asyncio
@@ -24,167 +23,9 @@ logger = logging.getLogger(__name__)
 
 # ==================== 模型配置读取 ====================
 
-def _get_default_model(multi_db: MultiDBManager) -> Optional[Dict[str, Any]]:
-    """获取默认模型配置"""
-    return multi_db.main_db.fetchone("SELECT * FROM model_configs WHERE is_default = 1")
-
-
 def _get_model_by_id(multi_db: MultiDBManager, model_id: str) -> Optional[Dict[str, Any]]:
     """按 ID 获取模型配置"""
     return multi_db.main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (model_id,))
-
-
-# ==================== LLM API 调用 (v1 — 后续 Phase 2 重构为 streaming) ====================
-
-def _sync_call_ollama_chat(
-    model_config: Dict[str, Any],
-    messages: List[Dict[str, str]],
-) -> str:
-    """调用 Ollama /api/chat (同步)"""
-    base_url = model_config['url'].rstrip('/')
-    payload = {
-        'model': model_config['model'],
-        'messages': messages,
-        'stream': False,
-        'options': {},
-    }
-    if model_config.get('temperature') is not None:
-        payload['options']['temperature'] = model_config['temperature']
-    if model_config.get('max_tokens') is not None:
-        payload['options']['num_predict'] = model_config['max_tokens']
-
-    timeout = model_config.get('timeout', 300)  # default 300s
-    resp = requests.post(f'{base_url}/api/chat', json=payload, timeout=timeout)
-    if resp.status_code != 200:
-        raise RuntimeError(f'Ollama API error {resp.status_code}: {resp.text[:200]}')
-    data = resp.json()
-    return data.get('message', {}).get('content', '')
-
-
-def _sync_call_openai_chat(
-    model_config: Dict[str, Any],
-    messages: List[Dict[str, str]],
-) -> str:
-    """调用 OpenAI 兼容 /v1/chat/completions (同步)"""
-    base_url = model_config['url'].rstrip('/')
-    payload = {
-        'model': model_config['model'],
-        'messages': messages,
-        'stream': False,
-    }
-    if model_config.get('temperature') is not None:
-        payload['temperature'] = model_config['temperature']
-    if model_config.get('max_tokens') is not None:
-        payload['max_tokens'] = model_config['max_tokens']
-
-    headers = {'Content-Type': 'application/json'}
-    api_key = model_config.get('api_key', '')
-    if api_key:
-        headers['Authorization'] = f'Bearer {api_key}'
-
-    timeout = model_config.get('timeout', 300)
-    resp = requests.post(f'{base_url}/v1/chat/completions', json=payload, headers=headers, timeout=timeout)
-    if resp.status_code != 200:
-        raise RuntimeError(f'OpenAI API error {resp.status_code}: {resp.text[:200]}')
-    data = resp.json()
-    return data.get('choices', [{}])[0].get('message', {}).get('content', '')
-
-
-async def _call_llm(
-    model_config: Dict[str, Any],
-    messages: List[Dict[str, str]],
-) -> str:
-    """根据 provider 路由到对应 API (通过 to_thread 避免阻塞事件循环)"""
-    provider = model_config.get('provider', 'ollama')
-    if provider == 'ollama':
-        return await asyncio.to_thread(_sync_call_ollama_chat, model_config, messages)
-    elif provider in ('openai', 'custom', 'lm-studio'):
-        return await asyncio.to_thread(_sync_call_openai_chat, model_config, messages)
-    else:
-        raise RuntimeError(f'Unsupported provider: {provider}')
-
-
-# ==================== 业务方法 (v1 保留) ====================
-
-async def _summarize_code(
-    multi_db: MultiDBManager,
-    code: str,
-    model_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """压缩长代码为伪码"""
-    if not code or len(code.strip()) == 0:
-        raise ValueError('Code is empty')
-
-    if len(code) <= 500:
-        return {
-            'content': code,
-            'originalLength': len(code),
-            'summarizedLength': len(code),
-            'compressed': False,
-        }
-
-    if model_id:
-        model = _get_model_by_id(multi_db, model_id)
-    else:
-        model = _get_default_model(multi_db)
-    if not model:
-        raise ValueError('No LLM model configured')
-
-    system_prompt = (
-        '你是一个代码压缩助手。用户会提供一段较长的代码，请将其压缩为简洁的伪码，'
-        '保留核心逻辑和关键步骤。用中文回答。只输出伪码，不要额外解释。'
-    )
-    user_prompt = f'请将以下代码压缩为伪码（保留核心逻辑）：\n\n```\n{code}\n```\n\n只保留核心逻辑，用简洁的中文伪码表示。'
-
-    messages = [
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': user_prompt},
-    ]
-
-    content = await _call_llm(model, messages)
-    return {
-        'content': content,
-        'originalLength': len(code),
-        'summarizedLength': len(content),
-        'compressed': True,
-    }
-
-
-async def _explain_symbol(
-    multi_db: MultiDBManager,
-    symbol_name: str,
-    symbol_type: str,
-    code_snippet: str,
-    file_name: Optional[str] = None,
-    model_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """解释代码符号"""
-    if model_id:
-        model = _get_model_by_id(multi_db, model_id)
-    else:
-        model = _get_default_model(multi_db)
-    if not model:
-        raise ValueError('No LLM model configured')
-
-    system_prompt = (
-        '你是一个专业的代码分析助手。用户会提供一个代码符号（函数/类/方法/宏）及其代码片段。'
-        '请用简洁的语言解释：1. 这个符号的功能和作用 2. 关键参数和返回值 3. 在项目中可能的角色。'
-        '请用中文回答，保持简洁专业。'
-    )
-
-    parts = [f'## 符号信息\n- 名称: {symbol_name}\n- 类型: {symbol_type}']
-    if file_name:
-        parts.append(f'- 文件: {file_name}')
-    parts.append(f'\n## 代码片段\n```\n{code_snippet}\n```\n\n请解释这个代码符号。')
-    user_prompt = '\n'.join(parts)
-
-    messages = [
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': user_prompt},
-    ]
-
-    content = await _call_llm(model, messages)
-    return {'content': content}
 
 
 # ==================== Session 管理 (SQLite 持久化) ====================
@@ -196,7 +37,7 @@ def _make_id() -> str:
 # ==================== LLMService 类骨架 ====================
 
 class LLMService:
-    """统一 LLM 服务 (Phase 1: session 管理; Phase 2-3: streaming + tools + structured)"""
+    """统一 LLM 服务 (session 管理 + streaming_chat + tools + structured)"""
 
     def __init__(self, multi_db: MultiDBManager):
         self.multi_db = multi_db
@@ -368,7 +209,7 @@ class LLMService:
 
         return {'sessionId': session_id, 'metadata': existing, 'updatedAt': now}
 
-    # ==================== Streaming LLM (Phase 2) ====================
+    # ==================== Streaming LLM ====================
 
     async def streaming_chat(
         self,
@@ -381,18 +222,12 @@ class LLMService:
         template_id: Optional[str] = None,
         extra_meta: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """发起流式 LLM 请求，立即返回 requestId，chunks 通过 ZMQ PUB 推送
+        """发起流式 LLM 请求，立即返回 requestId，chunks 通过 ZMQ PUB 推送"""
+        from zmq_server import current_call_id
+        _cid = current_call_id.get()
+        if _cid:
+            logger.info(f"[{_cid}] streaming_chat session={session_id} model={model_id} mode={mode} template={template_id}")
 
-        Args:
-            session_id: 会话 ID
-            messages: 消息历史
-            model_id: 模型配置 ID
-            mode: chat | tools | structured
-            tools: tools 模式下可用的工具名列表
-            output_schema: structured 模式下的 JSON Schema
-            template_id: 使用的模板 ID（用于日志记录）
-            extra_meta: 额外元数据（如 pipeline_step, community_id 等，用于日志）
-        """
         if mode not in ('chat', 'tools', 'structured'):
             raise ValueError(f"Invalid mode: {mode}")
 
@@ -893,22 +728,6 @@ class LLMService:
         except Exception as e:
             logger.error(f"[LLMService] Failed to save interaction log: {e}")
 
-    def save_messages_batch(
-        self,
-        session_id: str,
-        messages: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """批量保存消息（用于 llm.chat 完成后一次性持久化 user + assistant + tool）"""
-        for msg in messages:
-            self.add_message(
-                session_id,
-                msg.get('role', 'user'),
-                msg.get('content', ''),
-                token_count=msg.get('tokenCount'),
-                metadata=msg.get('metadata'),
-            )
-        return {'success': True, 'count': len(messages)}
-
 
 # ==================== HTTP Streaming 实现 ====================
 
@@ -937,6 +756,22 @@ def _sync_stream_ollama(
 
     token_info = {}
     timeout = model_config.get('timeout', 300)
+
+    # 日志：提交给模型的最终请求
+    _log_payload = {
+        'provider': 'ollama',
+        'url': base_url + '/api/chat',
+        'model': payload['model'],
+        'mode': mode,
+        'temperature': payload.get('options', {}).get('temperature'),
+        'num_predict': payload.get('options', {}).get('num_predict'),
+        'messages': [
+            {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:200]}
+            for m in payload.get('messages', [])
+        ],
+    }
+    logger.info(f"[LLM_REQ] Ollama 请求: {json.dumps(_log_payload, ensure_ascii=False)}")
+
     try:
         resp = requests.post(f'{base_url}/api/chat', json=payload, stream=True, timeout=timeout)
         if resp.status_code != 200:
@@ -951,7 +786,6 @@ def _sync_stream_ollama(
             try:
                 data = _json.loads(line)
                 if data.get('done'):
-                    # 捕获 token 使用量
                     eval_count = data.get('eval_count')
                     prompt_eval_count = data.get('prompt_eval_count')
                     if eval_count is not None or prompt_eval_count is not None:
@@ -1012,6 +846,23 @@ def _sync_stream_openai(
 
     token_info = {}
     timeout = model_config.get('timeout', 300)
+
+    # 日志：提交给模型的最终请求
+    _log_payload = {
+        'provider': 'openai',
+        'url': base_url + '/v1/chat/completions',
+        'model': payload['model'],
+        'mode': mode,
+        'temperature': payload.get('temperature'),
+        'max_tokens': payload.get('max_tokens'),
+        'tools': list(payload.get('tools', [])) if payload.get('tools') else None,
+        'messages': [
+            {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:200]}
+            for m in payload.get('messages', [])
+        ],
+    }
+    logger.info(f"[LLM_REQ] OpenAI 请求: {json.dumps(_log_payload, ensure_ascii=False)}")
+
     try:
         resp = requests.post(
             f'{base_url}/v1/chat/completions',
@@ -1075,7 +926,10 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册 LLM 相关方法到 ZMQServer"""
 
     service = LLMService(multi_db)
-    service._server = server  # Phase 2: 用于 ZMQ PUB 推送
+    service._server = server  # 用于 ZMQ PUB 推送
+
+    from prompt_manager import PromptManager
+    pm = PromptManager(multi_db)
 
     # ==================== Session 管理 (v2) ====================
 
@@ -1162,14 +1016,12 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         output_schema: Optional[Dict[str, Any]] = None,
         outputSchema: Optional[Dict[str, Any]] = None,
     ):
-        """统一流式对话入口
+        """统一流式对话入口"""
+        from zmq_server import current_call_id
+        _cid = current_call_id.get()
+        if _cid:
+            logger.info(f"[{_cid}] llm.chat mode={mode} template={template_id or templateId}")
 
-        两种调用方式:
-          1. 直接传 messages: {sessionId, modelId, mode, messages}
-          2. 使用模板: {sessionId, modelId, templateId, variables}
-             → 后端渲染模板生成 messages
-        """
-        # 兼容 camelCase / snake_case
         session_id = session_id or sessionId
         model_id = model_id or modelId
         template_id = template_id or templateId
@@ -1177,10 +1029,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         if not session_id:
             raise ValueError("sessionId is required")
-        # 模板渲染优先
         if template_id:
-            from prompt_manager import PromptManager
-            pm = PromptManager(multi_db)
             rendered = pm.render(template_id, variables or {})
             messages = rendered['messages']
             if rendered.get('mode') and mode == 'chat':
@@ -1193,11 +1042,9 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not messages:
             raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
 
-        # 构造 extra_meta 用于日志
         extra_meta = {}
         if template_id:
             extra_meta['template_id'] = template_id
-        # 检查 variables 中是否有 pipeline_step / community_id 等
         if variables:
             for k in ('pipeline_step', 'community_id', 'community_level', 'batch_id', 'source'):
                 if k in variables:
@@ -1212,11 +1059,6 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     async def abort_chat(request_id: str):
         """中止流式调用"""
         return await service.abort_chat(request_id)
-
-    @server.register('session.saveMessages')
-    def save_messages_batch(session_id: str, messages: List[Dict[str, Any]]):
-        """批量保存消息"""
-        return service.save_messages_batch(session_id, messages)
 
     # ==================== 分析报告会话管理 (analysisSession) ====================
 
@@ -1295,7 +1137,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         main_db.conn.commit()
         return {'success': True}
 
-    # ==================== Prompt 模板管理 ====================
+    # ==================== Prompt 模板管理 (统一实例) ====================
 
     @server.register('promptTemplate.list')
     def list_templates(
@@ -1303,14 +1145,10 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         module_type: Optional[str] = None,
         category: Optional[str] = None,
     ):
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db)
         return {'templates': pm.list_templates(mode, module_type, category)}
 
     @server.register('promptTemplate.get')
     def get_template(template_id: str):
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db)
         return pm.get_template(template_id)
 
     @server.register('promptTemplate.create')
@@ -1327,8 +1165,6 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         output_example: Optional[str] = None,
         variables_json: Optional[str] = None,
     ):
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db)
         return pm.create_template(
             name, mode, module_type, category,
             system_prompt, user_prompt_template,
@@ -1338,38 +1174,14 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register('promptTemplate.update')
     def update_template(template_id: str, **kwargs):
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db)
         return pm.update_template(template_id, **kwargs)
 
     @server.register('promptTemplate.delete')
     def delete_template(template_id: str):
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db)
         return pm.delete_template(template_id)
 
     @server.register('promptTemplate.render')
     def render_template(template_id: str, variables: Dict[str, Any]):
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db)
-        return pm.preview(template_id, variables)
-
-    # ==================== LLM 推理 (v1 保留) ====================
-
-    @server.register('llm.summarizeCode')
-    async def summarize_code(code: str, model_id: Optional[str] = None):
-        return await _summarize_code(multi_db, code, model_id)
-
-    @server.register('llm.explainSymbol')
-    async def explain_symbol(
-        symbol_name: str,
-        symbol_type: str,
-        code_snippet: str,
-        file_name: Optional[str] = None,
-        model_id: Optional[str] = None,
-    ):
-        return await _explain_symbol(multi_db, symbol_name, symbol_type, code_snippet, file_name, model_id)
-
-    # ==================== 旧 chat.* 方法已移除 (替换为 session.*) ====================
+        return pm.render(template_id, variables)
 
     return server

@@ -18,11 +18,11 @@ const { t } = useI18n()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
 
-const props = defineProps<{ taskId: string }>()
+const props = defineProps<{ taskId: string; projectId?: string }>()
 const emit = defineEmits<{
-  completed: [summaries: Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string }>]
+  completed: [summaries: Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string; mermaid?: string; plantuml?: string }>]
   error: [message: string]
-  viewCommunityMD: [params: { communityId: string; name: string; summary: string }]
+  viewCommunityMD: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
 interface CommunitySummary {
@@ -36,6 +36,8 @@ interface CommunitySummary {
   status: 'pending' | 'queued' | 'running' | 'completed' | 'error'
   name?: string
   summary?: string
+  mermaid?: string
+  plantuml?: string
   error?: string
   selected: boolean
   parentId?: string
@@ -43,7 +45,7 @@ interface CommunitySummary {
 }
 
 const modelId = computed(() => settingsStore.models.find(m => m.isDefault)?.id)
-const pid = computed(() => projectStore.selectedProjectId)
+const pid = computed(() => props.projectId || projectStore.selectedProjectId)
 
 // 边缘类型配置
 const edgeTypeOptions = [
@@ -69,9 +71,8 @@ const paused = ref(false)
 const batchSize = ref(3)
 const loadError = ref<string | null>(null)
 
-// 排序状态
-interface SortRule { field: string; desc: boolean }
-const sortHistory = ref<SortRule[]>([])  // 按优先级排列
+// 项目上下文（项目概要），在 loadAll 中加载一次
+const projectContext = ref('')
 
 const analyzedCommIds = computed(() => {
   const ids = new Set<string>()
@@ -80,6 +81,26 @@ const analyzedCommIds = computed(() => {
   }
   return ids
 })
+
+// 排序状态
+interface SortRule { field: string; desc: boolean }
+const sortHistory = ref<SortRule[]>([])
+
+// 加载项目概要（从库中读取，非 LLM 原始内容）
+async function loadProjectContext() {
+  const pid = pid.value
+  if (!pid) return
+  try {
+    const result = await window.api.report.getProjectSummary({ projectId: pid })
+    if (result?.summary) {
+      projectContext.value = `## 项目概要\n${result.summary}`
+    } else {
+      projectContext.value = ''
+    }
+  } catch (e) {
+    console.warn('[CAP] loadProjectContext failed:', e)
+  }
+}
 
 function hasAnalysis(commId: string): boolean {
   return analyzedCommIds.value.has(commId)
@@ -154,6 +175,11 @@ function sortIcon(field: string): string {
   return s.desc ? `▼${idx + 1}` : `▲${idx + 1}`
 }
 
+/** 截短 communityId：去掉 comm-{hash}- 前缀 */
+function fmtCommId(id: string): string {
+  return id.replace(/^comm-[^-]+-/, '')
+}
+
 // 当边缘类型或层级变化时，刷新显示
 watch([selectedEdgeType, selectedLevel], () => {
   refreshDisplay()
@@ -174,9 +200,12 @@ async function loadAll() {
         .catch((e: any) => { console.warn('[CAP] listCommunityResults INCLUDE failed:', e); return { results: [] } }),
     ])
 
-    // 合并 LLM 结果到 map
+    // 加载项目上下文（README + 依赖摘要）
+    loadProjectContext()
+
+    // 合并 LLM 结果到 map (后端返回 snake_case)
     for (const r of [...(callResults?.results || []), ...(depResults?.results || [])]) {
-      llmResults.value.set(r.commId, r)
+      llmResults.value.set(r.comm_id, r)
     }
 
     // 处理 CALL 层级
@@ -196,10 +225,10 @@ async function loadAll() {
             selected: false,
             parentId: item.parentCommId ?? undefined,
           }
-          // 如果已有持久化结果，恢复状态
+          // 如果已有持久化结果且 name 是真正的 AI 名称（不是 communityId fallback），恢复状态
           const saved = llmResults.value.get(item.id)
-          if (saved) {
-            comm.name = saved.name || undefined
+          if (saved && saved.name && saved.name !== item.id) {
+            comm.name = saved.name
             comm.summary = saved.summary || undefined
             comm.status = 'completed'
           }
@@ -226,8 +255,8 @@ async function loadAll() {
             parentId: item.parentCommId ?? undefined,
           }
           const saved = llmResults.value.get(item.id)
-          if (saved) {
-            comm.name = saved.name || undefined
+          if (saved && saved.name && saved.name !== item.id) {
+            comm.name = saved.name
             comm.summary = saved.summary || undefined
             comm.status = 'completed'
           }
@@ -330,7 +359,10 @@ function statusLabel(status: string): string {
 }
 
 async function runTask(task: CommunitySummary): Promise<boolean> {
-  if (task.status === 'completed') return true
+  // 清除旧结果，支持重复执行
+  task.name = undefined
+  task.summary = undefined
+  task.error = undefined
   task.status = 'running'
 
   try {
@@ -346,8 +378,16 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
       return false
     }
 
-    const nodeListText = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).slice(0, 100).join('\n')
-    const edgeListText = community.edges.map((e: any) => `- ${e.source} → ${e.target}`).slice(0, 100).join('\n')
+    const nodeListText = community.nodes.map((n: any) => {
+      const ext = n.filePath && n.filePath !== '?' ? n.filePath.split('.').pop() : ''
+      const label = ext ? `${n.name}.${ext}` : n.name
+      return `- ${label}  (${n.filePath})`
+    }).slice(0, 100).join('\n')
+    const edgeListText = community.edges.map((e: any) => {
+      const src = e.sourceDisplay || e.source
+      const tgt = e.targetDisplay || e.target
+      return `- ${src} → ${tgt}`
+    }).slice(0, 100).join('\n')
 
     const sessionId = `comm-${props.taskId}-${task.communityId}-${Date.now()}`
     const chatResult = await window.api.llm.chat({
@@ -361,7 +401,7 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
         edgeCount: String(community.edgeCount),
         nodeListWithPaths: nodeListText,
         edgeListWithDetails: edgeListText,
-        parentSummaries: '',
+        parentSummaries: projectContext.value,
         source: 'community_analysis',
         community_id: task.communityId,
         community_level: task.level,
@@ -374,8 +414,10 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
         properties: {
           name: { type: 'string', maxLength: 20 },
           summary: { type: 'string' },
+          mermaid: { type: 'string' },
+          plantuml: { type: 'string' },
         },
-        required: ['name', 'summary'],
+        required: ['name', 'summary', 'mermaid'],
       },
     })
 
@@ -387,6 +429,8 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
           if (data.structured) {
             task.name = data.structured.name?.slice(0, 20) || task.communityId
             task.summary = data.structured.summary || ''
+            task.mermaid = data.structured.mermaid || ''
+            task.plantuml = data.structured.plantuml || ''
           } else {
             task.name = task.communityId
             task.summary = fullContent
@@ -416,7 +460,7 @@ async function analyzeSelected() {
     emit('error', t('report.llmNotConfigured'))
     return
   }
-  const selected = allCommunities.value.filter(t => t.selected && t.status !== 'completed')
+  const selected = allCommunities.value.filter(t => t.selected)
   if (selected.length === 0) return
 
   running.value = true
@@ -434,8 +478,8 @@ async function analyzeSelected() {
         t.status = 'error'
         t.error = r.reason?.message || String(r.reason)
       }
-      // 持久化结果
-      if (t.status === 'completed' || t.status === 'error') {
+      // 只持久化成功的结果，避免失败 tasks 以 communityId 为 name 误判为已完成
+      if (t.status === 'completed') {
         try {
           await window.api.analysis.saveCommunityResult({
             taskId: props.taskId,
@@ -444,6 +488,8 @@ async function analyzeSelected() {
             commId: t.communityId,
             name: t.name || t.communityId,
             summary: t.summary || '',
+            mermaid: t.mermaid || '',
+            plantuml: t.plantuml || '',
             modelId: modelId.value,
             templateId: 'community_analyze',
           })
@@ -457,18 +503,53 @@ async function analyzeSelected() {
   running.value = false
   emit('completed', allCommunities.value
     .filter(t => t.status === 'completed' && t.name)
-    .map(t => ({ communityId: t.communityId, level: t.level, edgeType: t.edgeType, name: t.name!, summary: t.summary! })))
+    .map(t => ({ communityId: t.communityId, level: t.level, edgeType: t.edgeType, name: t.name!, summary: t.summary!, mermaid: t.mermaid, plantuml: t.plantuml })))
 }
 
 function pauseResume() {
   paused.value = !paused.value
 }
 
-function retryTask(id: string) {
+async function retryTask(id: string) {
   const task = allCommunities.value.find(t => t.id === id)
   if (!task) return
   task.status = 'pending'
   task.error = undefined
+  task.selected = false
+  if (!modelId.value) {
+    emit('error', t('report.llmNotConfigured'))
+    return
+  }
+  task.status = 'running'
+  try {
+    await runTask(task)
+    if (task.status === 'completed') {
+      await window.api.analysis.saveCommunityResult({
+        taskId: props.taskId,
+        edgeType: task.edgeType,
+        commLv: task.level,
+        commId: task.communityId,
+        name: task.name || task.communityId,
+        summary: task.summary || '',
+        mermaid: task.mermaid || '',
+        plantuml: task.plantuml || '',
+        modelId: modelId.value,
+        templateId: 'community_analyze',
+      })
+      emit('completed', [{
+        communityId: task.communityId,
+        level: task.level,
+        edgeType: task.edgeType,
+        name: task.name || task.communityId,
+        summary: task.summary || '',
+        mermaid: task.mermaid || '',
+        plantuml: task.plantuml || '',
+      }])
+    }
+  } catch (e: any) {
+    task.status = 'error'
+    task.error = e.message || String(e)
+  }
 }
 
 onMounted(loadAll)
@@ -575,7 +656,10 @@ onMounted(loadAll)
                 {{ t('report.pipeline.parentComm') }}
                 <span class="sort-icon">{{ sortIcon('parentName') }}</span>
               </span>
-              <span class="clist-status">{{ t('common.status') }}</span>
+              <span class="clist-status sortable" @click="sortBy('status')">
+                {{ t('common.status') }}
+                <span class="sort-icon">{{ sortIcon('status') }}</span>
+              </span>
               <span class="clist-actions-col"></span>
             </div>
 
@@ -586,15 +670,15 @@ onMounted(loadAll)
               :class="['clist-row', `clist-${task.status}`]"
               @click="toggleSelect(task.id)"
             >
-              <span class="clist-check" @click.stop>
+              <span class="clist-check" @click.stop="toggleSelect(task.id)">
                 <input type="checkbox" :checked="task.selected" class="clist-cb" />
               </span>
               <span class="clist-id" :title="task.communityId">
-                <span class="id-text">{{ task.communityId.length > 24 ? task.communityId.slice(0, 24) + '…' : task.communityId }}</span>
+                <span class="id-text">{{ fmtCommId(task.communityId) }}</span>
                 <span
                   v-if="task.name && task.status === 'completed'"
                   class="id-name clickable"
-                  @click.stop="emit('viewCommunityMD', { communityId: task.communityId, name: task.name, summary: task.summary || '' })"
+                  @click.stop="emit('viewCommunityMD', { communityId: task.communityId, name: task.name, summary: task.summary || '', mermaid: task.mermaid, plantuml: task.plantuml })"
                 >{{ task.name }}</span>
                 <span v-else-if="task.name" class="id-name">{{ task.name }}</span>
               </span>
@@ -770,6 +854,9 @@ onMounted(loadAll)
 .sortable { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 2px; }
 .sortable:hover { color: var(--text-primary); }
 .sort-icon { font-size: 7px; color: var(--accent); font-family: var(--font-mono); }
+.clist-th .clist-nodes,
+.clist-th .clist-edges,
+.clist-th .clist-score { justify-content: flex-end; }
 
 .badge {
   font-size: 8px; padding: 1px 5px; border-radius: 4px; font-weight: 500; white-space: nowrap;

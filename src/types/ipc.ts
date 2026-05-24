@@ -382,6 +382,7 @@ export interface IPCAPI {
     initSampleData: () => Promise<{ project: Project }>
     clearSampleData: (id: string) => Promise<{ success: boolean }>
     checkPathValidity: (id: string) => Promise<{ pathValid: boolean; rootPath: string; needsResync: boolean }>
+    getStorageStats: (projectId: string) => Promise<{ projectId: string; dbSize: number; dbFileSize: number; walSize: number; shmSize: number; sourceSize: number }>
   }
 
   // 分组管理
@@ -444,6 +445,8 @@ export interface IPCAPI {
     // 报告生成辅助
     getReadmeContent: (params: { projectId: string }) => Promise<{ path: string | null; content: string; fullLength: number; error?: string }>
     extractDependencyFiles: (params: { projectId: string }) => Promise<{ dependencyFiles: Array<{ file: string; type: string; dependencies: Record<string, string>; count: number }>; count: number }>
+    generateProjectSummary: (params: { projectId: string }) => Promise<{ success: boolean; summary: string; generated_at: string }>
+    getProjectSummary: (params: { projectId: string }) => Promise<{ summary: string; generated_at: string | null }>
     getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) => Promise<{ communities: Array<{ communityId: string; parentCommunityId: string | null; level: string; nodeCount: number; edgeCount: number; qualityScore: number | null; nodes: Array<{ id: string; name: string; type: string; filePath: string }>; edges: Array<{ source: string; target: string; type: string; direction: string }> }>; count: number; level: string; taskId: string }>
     saveFileSummaries: (params: { projectId: string; taskId: string; summaries: Array<{ filePath: string; summary: string; source?: string }> }) => Promise<{ saved: number }>
     getFileSummaries: (params: { projectId: string; taskId?: string; source?: string }) => Promise<{ summaries: Array<{ id: string; project_id: string; task_id: string | null; file_path: string; summary: string; source: string; created_at: string }>; count: number }>
@@ -507,10 +510,9 @@ export interface IPCAPI {
     addMessage: (params: { sessionId: string; role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }) => Promise<{ id: string }>
     deleteMessage: (params: { messageId: string }) => Promise<{ success: boolean }>
     updateMeta: (params: { sessionId: string; metadata: Record<string, any> }) => Promise<{ sessionId: string; metadata: Record<string, any> }>
-    saveMessages: (params: { sessionId: string; messages: Array<{ role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }> }) => Promise<{ success: boolean }>
   }
 
-  // LLM 推理 (v2)
+  // LLM 推理 (v2 — 统一入口)
   llm: {
     chat: (params: {
       sessionId: string; modelId: string; mode?: 'chat' | 'tools' | 'structured'
@@ -518,8 +520,6 @@ export interface IPCAPI {
       variables?: Record<string, any>; tools?: string[]; outputSchema?: Record<string, any>
     }) => Promise<{ requestId: string; status: string }>
     abortChat: (params: { requestId: string }) => Promise<{ success: boolean }>
-    summarizeCode: (params: { code: string; modelId?: string }) => Promise<{ content: string }>
-    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) => Promise<{ content: string }>
     subscribe: (requestId: string, callbacks: {
       onChunk?: (data: { index: number; text: string }) => void
       onToolCall?: (data: { toolName: string; args: Record<string, any> }) => void
@@ -546,12 +546,18 @@ export interface IPCAPI {
     render: (params: { templateId: string; variables: Record<string, any> }) => Promise<{ messages: any[]; mode: string; tools: string[] | null; outputSchema: Record<string, any> | null }>
   }
 
+  // 渲染服务
+  render: {
+    renderPlantuml: (params: { code: string; format?: string; useRemote?: boolean }) => Promise<{ data: string; format: string; size: number }>
+  }
+
   // Electron 专用 (preload 暴露)
   window: {
     toggleLeftPanel: () => Promise<void>
     toggleRightPanel: () => Promise<void>
-    zoomIn: () => Promise<void>
-    zoomOut: () => Promise<void>
+    zoomIn: () => Promise<number>
+    zoomOut: () => Promise<number>
+    resetZoom: () => Promise<number>
     create: () => Promise<number | null>
     close: (windowId: number) => Promise<boolean>
     list: () => Promise<Array<{ id: number; title: string; isFocused: boolean }>>

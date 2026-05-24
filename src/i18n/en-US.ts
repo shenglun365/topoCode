@@ -255,6 +255,7 @@ export default {
       clearCache: 'Clear Cache',
       documentation: 'Documentation',
       about: 'About',
+      guide: 'Guide',
     },
     activityBar: {
       home: 'Home',
@@ -328,7 +329,7 @@ export default {
     synced: 'Synced',
     closeAllTabs: 'Close All',
     syncFailed: 'Sync Failed',
-    analysisComplete: 'Analysis Complete',
+    analysisComplete: 'Import Complete',
     analysisInProgress: 'Analysis in Progress 65%',
     noProjects: 'No projects',
     importHint: 'Drag project folder here or click to select',
@@ -337,6 +338,7 @@ export default {
     projectCount: 'Project Count',
     fileCount: 'File Count',
     totalSize: 'Total Size',
+    storageSize: 'Storage Size',
     languageDistribution: 'Language Distribution',
     recentProjects: 'Recent Projects',
     favoriteProjects: 'Favorite Projects',
@@ -471,6 +473,7 @@ export default {
     aiPanelHintDesc: 'Select a template or type a question, AI will analyze the code structure',
     mermaidRendering: 'Mermaid Rendering...',
     noReportContent: 'No report content yet',
+    taskNotFound: 'Task not found or has been deleted',
     sidebar: {
       aiChat: 'AI Chat',
       taskList: 'Task List',
@@ -503,7 +506,7 @@ export default {
       analyzed: 'analyzed',
       generationPipeline: 'Report Generation Pipeline',
       modelValidation: 'Model Validation',
-      preprocessing: 'Preprocessing',
+      preprocessing: 'Project Summary',
       extractReadmeDeps: 'Extract README & Dependencies',
       projectSummary: 'Project Summary',
       archDecomposition: 'Architecture Decomposition',
@@ -517,6 +520,10 @@ export default {
       extractReadme: 'Extract README',
       extractDeps: 'Extract Dependencies',
       startPreprocessing: 'Start Preprocessing',
+      generateProjectSummary: 'Generate Project Summary',
+      generateProjectSummaryHint: 'Analyze README and dependency files via AI to generate a project summary (≤500 chars)',
+      summaryGenerated: 'Project summary generated',
+      summaryGenerateFailed: 'Project summary generation failed',
       noProject: 'No project selected',
       noCommunityData: 'No community data yet. Run community detection first.',
     },
@@ -564,7 +571,7 @@ export default {
     taskResult: 'Result',
     taskReport: 'Report',
     noTasks: 'No tasks',
-    selectReportHint: 'Select an analysis report',
+    selectReportHint: 'Select a structural analysis',
     selectReportHintDesc: 'Click a report from the project list on the left to view',
     taskCount: 'Task Count',
     runningTasks: 'Running Tasks',
@@ -583,7 +590,7 @@ export default {
     security: 'Security',
     performance: 'Performance',
     createNewTask: 'Click "New Task" to start code analysis',
-    analysisReport: 'Analysis Report',
+    analysisReport: 'Structural Analysis',
     resultsDisplayHere: 'Analysis results will be displayed here',
 
     // Task operations
@@ -1342,5 +1349,37 @@ export default {
     codeTesterToolTool: 'Code Tester Tool Tool',
     codeDebuggerToolTool: 'Code Debugger Tool Tool',
     codeProfilerToolTool: 'Code Profiler Tool Tool',
+  },
+
+  // Onboarding Guide
+  onboarding: {
+    start: 'Start Guide',
+    skip: 'Skip',
+    steps: {
+      activityBar: {
+        title: 'Activity Bar',
+        description: 'The left activity bar lets you quickly switch between Projects, Analysis, Knowledge Base, AI Assistant, and other core modules.',
+      },
+      projectList: {
+        title: 'Project List',
+        description: 'All your imported projects are shown here. Click a project card to view its file structure and analysis tasks.',
+      },
+      importZone: {
+        title: 'Import Project',
+        description: 'Drag and drop a project folder here, or click the button to select a directory to import your code project.',
+      },
+      fileTree: {
+        title: 'File Tree',
+        description: 'Browse your project file structure. Supports lazy loading, search filtering, and right-click context menu.',
+      },
+      tabBar: {
+        title: 'Tab Bar',
+        description: 'Switch between file browsing, task lists, and other views. File previews can be pinned as independent tabs.',
+      },
+      statusBar: {
+        title: 'Status Bar',
+        description: 'The bottom status bar shows current project info, file statistics, backend connection status, and more.',
+      },
+    },
   },
 }

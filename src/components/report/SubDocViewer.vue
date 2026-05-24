@@ -4,9 +4,10 @@
  *
  * 默认 Markdown 预览模式, 支持切换到编辑模式.
  * 保存后回到预览模式.
+ * 自动提取并渲染 ```mermaid / ```plantuml 代码块.
  */
 
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PencilIcon,
@@ -20,7 +21,9 @@ const { showId, componentId } = useComponentId('RP-010')
 const { t } = useI18n()
 
 const props = defineProps<{
-  subDocId: string
+  subDocId?: string
+  initialContent?: string
+  initialTitle?: string
 }>()
 
 const emit = defineEmits<{
@@ -42,17 +45,117 @@ const editContent = ref('')
 const editTitle = ref('')
 const saving = ref(false)
 
+type DiagramLang = 'mermaid' | 'plantuml'
+
+type DiagramBlock = {
+  id: string
+  lang: DiagramLang
+  code: string
+  svg?: string
+  loading: boolean
+  error?: string
+}
+
+const diagramBlocks = ref<DiagramBlock[]>([])
+const activeDiagramTab = ref<DiagramLang>('mermaid')
+
+// 主线程直接渲染 mermaid（Worker 中 mermaid v11 无法访问 document）
+let mermaidApi: any = null
+async function ensureMermaid() {
+  if (mermaidApi) return
+  const mod = await import('mermaid')
+  mermaidApi = mod.default
+  mermaidApi.initialize({
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: 'dark',
+    fontFamily: 'var(--font-sans)',
+  })
+}
+
+async function renderAllDiagrams() {
+  if (!doc.value) return
+  const content = doc.value.content
+  diagramBlocks.value = extractDiagrams(content)
+  if (diagramBlocks.value.length === 0) return
+
+  // 决定默认 tab：优先选存在的
+  const hasMermaid = diagramBlocks.value.some(b => b.lang === 'mermaid')
+  const hasPlantuml = diagramBlocks.value.some(b => b.lang === 'plantuml')
+  if (hasPlantuml && !hasMermaid) activeDiagramTab.value = 'plantuml'
+  else activeDiagramTab.value = 'mermaid'
+
+  for (const block of diagramBlocks.value) {
+    block.loading = true
+    block.error = undefined
+    try {
+      let svg = ''
+      if (block.lang === 'mermaid') {
+        await ensureMermaid()
+        const id = `sd-${block.id}`
+        const result = await mermaidApi.render(id, block.code)
+        svg = result.svg
+      } else {
+        const result = await window.api.render.renderPlantuml({ code: block.code, format: 'svg' })
+        svg = atob(result.data)
+      }
+      block.svg = svg
+    } catch (e: any) {
+      block.error = e.message || 'Render failed'
+      console.error(`[SubDocViewer] ${block.lang} render error:`, e)
+    } finally {
+      block.loading = false
+    }
+  }
+}
+
+// 提取图表块
+function extractDiagrams(content: string): DiagramBlock[] {
+  const blocks: DiagramBlock[] = []
+  let idx = 0
+  const re = /```(mermaid|plantuml)\n([\s\S]*?)```/g
+  let m
+  while ((m = re.exec(content)) !== null) {
+    const code = m[2].trim()
+    if (code) {
+      blocks.push({ id: `diagram-${idx++}`, lang: m[1] as DiagramLang, code, loading: false })
+    }
+  }
+  return blocks
+}
+
 // 加载文档
 async function loadDoc() {
   loading.value = true
   try {
-    doc.value = await window.api.report.getSubDoc(props.subDocId)
-    editContent.value = doc.value.content
-    editTitle.value = doc.value.title
+    if (props.subDocId) {
+      doc.value = await window.api.report.getSubDoc(props.subDocId)
+    } else if (props.initialContent) {
+      doc.value = {
+        id: '',
+        title: props.initialTitle || '',
+        content: props.initialContent,
+        templateId: '',
+        createdAt: '',
+        updatedAt: '',
+      }
+    }
+    if (doc.value) {
+      editContent.value = doc.value.content
+      editTitle.value = doc.value.title
+      if (doc.value.content) {
+        diagramBlocks.value = extractDiagrams(doc.value.content)
+      }
+    }
   } catch (e) {
     console.error('[SubDocViewer] Failed to load doc:', e)
   } finally {
     loading.value = false
+  }
+  // 文档加载完成后渲染图表（等 DOM 就绪）
+  if (diagramBlocks.value.length > 0) {
+    await nextTick()
+    renderAllDiagrams()
   }
 }
 
@@ -93,7 +196,9 @@ async function saveEdit() {
 // 渲染 Markdown (简单处理, 实际项目可用 marked)
 const renderedContent = computed(() => {
   if (!doc.value) return ''
+  // 去掉图表块（plantuml 暂不渲染）
   let html = doc.value.content
+  html = html.replace(/```(?:mermaid|plantuml)\n[\s\S]*?```/g, '')
 
   // 简单 Markdown 处理
   html = html.replace(/^### (.*$)/gm, '<h3>$1</h3>')
@@ -106,6 +211,11 @@ const renderedContent = computed(() => {
 
   return html
 })
+
+// 是否有图表
+const hasDiagrams = computed(() => diagramBlocks.value.length > 0)
+const diagramLangs = computed(() => [...new Set(diagramBlocks.value.map(b => b.lang))] as DiagramLang[])
+const visibleDiagramBlocks = computed(() => diagramBlocks.value.filter(b => b.lang === activeDiagramTab.value))
 
 onMounted(() => {
   loadDoc()
@@ -164,6 +274,30 @@ watch(() => props.subDocId, () => {
         <span v-if="doc.updatedAt">{{ t('common.updated') }}: {{ doc.updatedAt }}</span>
       </div>
       <div class="doc-content" v-html="renderedContent"></div>
+
+      <!-- 结构图渲染区 -->
+      <div v-if="hasDiagrams" class="diagram-section">
+        <div class="diagram-tabs">
+          <button
+            v-for="lang in diagramLangs"
+            :key="lang"
+            :class="['diagram-tab', { active: activeDiagramTab === lang }]"
+            @click="activeDiagramTab = lang"
+          >{{ lang === 'mermaid' ? 'Mermaid' : 'PlantUML' }}</button>
+        </div>
+        <div
+          v-for="block in visibleDiagramBlocks"
+          :key="block.id"
+          class="diagram-block"
+        >
+          <div v-if="block.loading" class="diagram-loading">{{ t('report.mermaidRendering') }}</div>
+          <div v-else-if="block.error" class="diagram-error">
+            <div class="error-msg">{{ block.error }}</div>
+            <pre class="fallback-code"><code>{{ block.code }}</code></pre>
+          </div>
+          <div v-else-if="block.svg" class="diagram-svg" v-html="block.svg"></div>
+        </div>
+      </div>
     </div>
 
     <!-- 编辑模式 -->
@@ -278,6 +412,90 @@ watch(() => props.subDocId, () => {
 .doc-content :deep(strong) {
   font-weight: 600;
   color: var(--accent);
+}
+
+/* 结构图渲染区 */
+.diagram-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.diagram-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diagram-tab {
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.diagram-tab:hover {
+  color: var(--text-primary);
+}
+
+.diagram-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.diagram-block {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.diagram-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.diagram-error {
+  padding: 16px 20px;
+  color: var(--danger);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.error-msg {
+  margin-bottom: 8px;
+  color: var(--danger);
+}
+
+.fallback-code {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.diagram-svg {
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.diagram-svg :deep(svg) {
+  max-width: 100%;
+  height: auto;
 }
 
 .subdoc-edit {

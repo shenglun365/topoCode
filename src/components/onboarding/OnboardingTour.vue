@@ -5,7 +5,6 @@ import {
   ArrowRightIcon,
   ArrowLeftIcon,
   XMarkIcon,
-  PlayCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useComponentId } from '@/composables/useComponentId'
@@ -192,19 +191,6 @@ onUnmounted(() => {
       </transition>
     </div>
 
-    <!-- 入口按钮（未开始时显示） -->
-    <div
-      v-if="!onboardingStore.isCompleted && !onboardingStore.isRunning"
-      class="onboarding-entry"
-    >
-      <button
-        class="btn btn-ghost btn-sm"
-        @click="onboardingStore.start"
-      >
-        <PlayCircleIcon class="w-4 h-4" />
-        <span>{{ t('onboarding.start') }}</span>
-      </button>
-    </div>
   </Teleport>
 </template>
 
@@ -311,10 +297,4 @@ onUnmounted(() => {
   transform: translateY(8px);
 }
 
-.onboarding-entry {
-  position: fixed;
-  bottom: 40px;
-  right: 20px;
-  z-index: 9999;
-}
 </style>

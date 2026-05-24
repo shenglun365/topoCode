@@ -111,7 +111,7 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 "required": ["fromSymbolId", "toSymbolId", "taskId"]
             }
         }
-    }
+    },
     {
         "type": "function",
         "function": {

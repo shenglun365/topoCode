@@ -74,9 +74,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.runTask")
     async def run_task(task_id=None, taskId=None):
+        from zmq_server import current_call_id
+        _cid = current_call_id.get()
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
+        if _cid:
+            logger.info(f"[{_cid}] analysis.runTask task={tid}")
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -117,7 +121,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
         if not task:
-            raise ValueError(f"Task {tid} not found")
+            return None
         return task
 
     @server.register("analysis.getResults")
@@ -275,9 +279,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.reRunTask")
     async def re_run_task(task_id=None, taskId=None):
+        from zmq_server import current_call_id
+        _cid = current_call_id.get()
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
+        if _cid:
+            logger.info(f"[{_cid}] analysis.reRunTask task={tid}")
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -452,6 +460,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                 comm_lv=None, commLv=None, comm_id=None, commId=None,
                                 name=None, summary=None, mermaid=None, plantuml=None,
                                 model_id=None, modelId=None, template_id=None, templateId=None):
+        from zmq_server import current_call_id
+        _cid = current_call_id.get()
         tid = task_id or taskId
         et = edge_type or edgeType
         cl = comm_lv or commLv
@@ -465,11 +475,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError(f"Task {tid} not found")
         project_db = multi_db.get_project_db(task["project_id"])
         store = AnalysisStore(project_db)
-        store.bulk_insert_llm_results([{
+        # 校验 mermaid / plantuml, 不可解析的不入库
+        from plantuml_service import validate_mermaid, validate_plantuml
+        validated = {
             "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
-            "name": name, "summary": summary, "mermaid": mermaid, "plantuml": plantuml,
+            "name": name, "summary": summary,
+            "mermaid": mermaid if (mermaid and validate_mermaid(mermaid)) else None,
+            "plantuml": plantuml if (plantuml and validate_plantuml(plantuml)) else None,
             "model_id": mid, "template_id": tpid,
-        }])
+        }
+        store.bulk_insert_llm_results([validated])
         return {"success": True}
 
     @server.register("analysis.getCommunityResult")
@@ -532,7 +547,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
         if not task:
-            raise ValueError(f"Task {tid} not found")
+            return []
         project_id = task["project_id"]
 
         project_db = multi_db.get_project_db(project_id)
@@ -1166,7 +1181,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
         if not task:
-            raise ValueError(f"Task {tid} not found")
+            return {"levels": []}
         project_id = task["project_id"]
         project_db = multi_db.get_project_db(project_id)
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
@@ -24,6 +24,28 @@ const projectStore = useProjectStore()
 const props = defineProps<{
   project: Project
 }>()
+
+// 存储空间统计
+const storageStats = ref<{ dbSize: number; sourceSize: number } | null>(null)
+
+async function loadStorageStats() {
+  if (!window.api?.project?.getStorageStats) return
+  try {
+    const stats = await window.api.project.getStorageStats(props.project.id)
+    storageStats.value = stats
+  } catch (e) {
+    // 静默失败
+  }
+}
+
+onMounted(loadStorageStats)
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`
+}
 
 const emit = defineEmits<{
   select: [project: Project]
@@ -368,6 +390,7 @@ async function handleCheckChanges() {
 
     <div class="flex justify-between" style="font-size:11px; color:var(--text-muted);">
       <span>{{ project.fileCount }} {{ t('file.files') }}</span>
+      <span v-if="storageStats" :title="t('project.storageSize')">{{ formatBytes(storageStats.dbSize + storageStats.sourceSize) }}</span>
       <span>{{ formatTime(project.lastSync) }}</span>
     </div>
 

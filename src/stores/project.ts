@@ -30,6 +30,7 @@ export interface HomeTab {
   alias?: string  // 用户自定义别名
   // subdoc 类型
   subDocId?: string  // 子文档 ID
+  content?: string  // 内联内容（AI 分析结果等，无 subDocId 时使用）
   parentReportId?: string  // 父报告 tab ID
   hasUnsavedChanges?: boolean  // 未保存标记
 }
@@ -122,6 +123,16 @@ export const useProjectStore = defineStore('project', () => {
 
   async function clearProjectCache(id: string) {
     const result = await ipc.analysis.clearProjectCache(id)
+    // 清除前端缓存的旧任务数据，避免打开已删除任务的报告
+    const analysisStore = useAnalysisStore()
+    analysisStore.tasks = []
+    // 关闭该项目的所有分析 tab，清理已删除任务的引用
+    const funcGroup = useFuncGroupStore()
+    const ctx = funcGroup.context.analysis
+    const tabsToClose = ctx.tabs.filter(t => t.projectId === id)
+    for (const tab of tabsToClose) {
+      funcGroup.closeTab('analysis', tab.id)
+    }
     console.log('[ProjectStore] clearProjectCache result:', result)
     return result
   }
@@ -237,27 +248,33 @@ export const useProjectStore = defineStore('project', () => {
 
   /** 打开子文档 tab */
   function openSubDocTab(params: {
-    subDocId: string
+    subDocId?: string
     title: string
     taskId: string
+    content?: string
     parentReportId?: string
   }) {
     const pid = funcGroup.currentProjectId;
-    // 检查是否已打开
-    const existing = funcGroup.currentTabs.find(
-      t => t.kind === 'subdoc' && t.subDocId === params.subDocId
-    )
-    if (existing) {
-      funcGroup.setActiveTab('home', existing.id)
-      return existing.id
+    if (params.subDocId) {
+      const existing = funcGroup.currentTabs.find(
+        t => t.kind === 'subdoc' && t.subDocId === params.subDocId
+      )
+      if (existing) {
+        funcGroup.setActiveTab('home', existing.id)
+        return existing.id
+      }
     }
 
+    const tabId = params.subDocId
+      ? `tab-subdoc-${params.subDocId}`
+      : `tab-subdoc-inline-${Date.now()}`
     const tab: HomeTab = {
-      id: `tab-subdoc-${params.subDocId}`,
+      id: tabId,
       kind: 'subdoc',
       title: params.title,
       projectId: pid,
       subDocId: params.subDocId,
+      content: params.content,
       taskId: params.taskId,
       parentReportId: params.parentReportId,
       hasUnsavedChanges: false,
@@ -348,47 +365,6 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  /** 打开报告 tab — 相同 taskId+reportType 已存在时切换到已有 tab */
-  function openReportTab(params: {
-    taskId: string
-    reportType: string  // dependency | callChain
-    taskName: string
-    projectName?: string
-    alias?: string
-  }) {
-    const pid = funcGroup.currentProjectId;
-    // 检查是否已存在相同 taskId + reportType 的报告 tab（在 analysis 功能组中查找）
-    const existing = funcGroup.context.analysis.tabs.find(
-      t => t.kind === 'report' && t.taskId === params.taskId && t.reportType === params.reportType
-    )
-    if (existing) {
-      funcGroup.setActiveTab('analysis', existing.id)
-      return existing.id
-    }
-
-    // 报告类型映射
-    const typeMap: Record<string, string> = {
-      dependency: i18n.global.t('project.reportType.dependency'),
-      callChain: i18n.global.t('project.reportType.callChain'),
-      dataFlow: i18n.global.t('project.reportType.dataFlow'),
-      architecture: i18n.global.t('project.reportType.architecture'),
-    }
-    const typeLabel = typeMap[params.reportType] || params.reportType
-    const title = params.alias || `${typeLabel} · ${params.taskName}`
-
-    const tab: HomeTab = {
-      id: `tab-report-${params.taskId}-${params.reportType}-${Date.now()}`,
-      kind: 'report',
-      title,
-      projectId: pid,
-      taskId: params.taskId,
-      reportType: params.reportType,
-      alias: params.alias,
-    }
-    funcGroup.openTab('analysis', tab)
-    return tab.id
-  }
-
   /** 打开报告首页 tab — 分析报告生成入口 */
   function openReportHomeTab(params: {
     taskId: string
@@ -413,24 +389,6 @@ export const useProjectStore = defineStore('project', () => {
     }
     funcGroup.openTab('analysis', tab)
     return tab.id
-  }
-
-  /** 关闭所有报告 tab */
-  function closeAllReportTabs() {
-    const ctx = funcGroup.context.analysis;
-    const reportIds = ctx.tabs.filter(t => t.kind === 'report').map(t => t.id)
-    for (const id of reportIds) {
-      const idx = ctx.tabs.findIndex(t => t.id === id)
-      if (idx !== -1) ctx.tabs.splice(idx, 1)
-    }
-    // 如果当前激活的是报告 tab，重置
-    if (reportIds.includes(ctx.activeTabId || '')) {
-      if (ctx.tabs.length > 0) {
-        ctx.activeTabId = ctx.tabs[ctx.tabs.length - 1].id
-      } else {
-        ctx.activeTabId = undefined
-      }
-    }
   }
 
   return {
@@ -467,9 +425,7 @@ export const useProjectStore = defineStore('project', () => {
     openTaskCreateForm,
     openGroupManagerTab,
     closeGroupManagerTab,
-    openReportTab,
     openReportHomeTab,
-    closeAllReportTabs,
     openSubDocTab,
     // 暴露 funcGroup 供其他功能组使用
     funcGroup,

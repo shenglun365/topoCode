@@ -66,7 +66,7 @@ const typeMap: Record<string, string> = {
         items.push({
           taskId: task.id,
           type: 'analysisReport',
-          typeName: '分析报告',
+          typeName: '结构分析',
           taskName,
           updatedAt: task.updatedAt,
         })

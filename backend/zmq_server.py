@@ -1,6 +1,7 @@
 """ZeroMQ Server - ROUTER/DEALER + PUB 消息服务"""
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -14,8 +15,12 @@ import zmq
 import zmq.asyncio
 
 from sqlite_ctx import MultiDBManager
+from rpc_ids import get_rpc_id
 
 logger = logging.getLogger(__name__)
+
+# 当前请求的追踪 ID — 下游服务可读取此变量加入日志
+current_call_id: contextvars.ContextVar[str] = contextvars.ContextVar("current_call_id", default="")
 
 
 def check_port_available(port: int) -> bool:
@@ -27,6 +32,25 @@ def check_port_available(port: int) -> bool:
             return True
         except OSError:
             return False
+
+
+def _brief_params(params: dict, max_len: int = 200) -> str:
+    """将参数字典截断为短字符串用于日志，隐藏敏感字段。"""
+    if not params:
+        return "{}"
+    safe = {}
+    for k, v in params.items():
+        if k in ("api_key", "password", "secret", "token"):
+            safe[k] = "****"
+        elif isinstance(v, str) and len(v) > 60:
+            safe[k] = v[:60] + "..."
+        elif isinstance(v, (list, dict)):
+            s = json.dumps(v, ensure_ascii=False, default=str)
+            safe[k] = s[:60] + "..." if len(s) > 60 else s
+        else:
+            safe[k] = v
+    s = json.dumps(safe, ensure_ascii=False, default=str)
+    return s[:max_len] + "..." if len(s) > max_len else s
 
 
 class ZMQServer:
@@ -93,15 +117,19 @@ class ZMQServer:
 
     async def _process_request(self, frames):
         """处理请求并发送响应（独立任务，不受轮询超时限制）"""
+        call_id = uuid.uuid4().hex[:12]
+        token = current_call_id.set(call_id)
         try:
             request_id = frames[0].decode("utf-8")
             method_name = frames[1].decode("utf-8")
             params = json.loads(frames[2])
+            api_id = get_rpc_id(method_name)
 
-            logger.debug(f"Request: {method_name} ({request_id})")
+            logger.info(f"[{api_id}][{call_id}] → {method_name} {_brief_params(params)}")
 
             # 调用注册的方法
             if method_name not in self.methods:
+                logger.warning(f"[{api_id}][{call_id}] Method not found: {method_name}")
                 error = {"code": -32601, "message": f"Method not found: {method_name}"}
                 result = None
             else:
@@ -113,7 +141,7 @@ class ZMQServer:
                         result = await result
                     error = None
                 except Exception as e:
-                    logger.exception(f"Error in {method_name}: {e}")
+                    logger.exception(f"[{api_id}][{call_id}] Error in {method_name}: {e}")
                     result = None
                     error = {"code": -32000, "message": str(e)}
 
@@ -124,8 +152,15 @@ class ZMQServer:
                 json.dumps(error, default=str).encode("utf-8"),
             ])
 
+            if error:
+                logger.warning(f"[{api_id}][{call_id}] ← {method_name} error: {error.get('message', '')[:200]}")
+            else:
+                logger.info(f"[{api_id}][{call_id}] ← {method_name} ok")
+
         except Exception as e:
-            logger.exception("Error processing request")
+            logger.exception(f"[{call_id}] Error processing request")
+        finally:
+            current_call_id.reset(token)
 
     async def handle_request(self):
         """接收请求并派发到独立任务处理"""

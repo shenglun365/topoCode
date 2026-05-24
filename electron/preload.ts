@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
     toggleRightPanel: () => ipcRenderer.invoke('window:toggle-right-panel'),
     zoomIn: () => ipcRenderer.invoke('window:zoom-in'),
     zoomOut: () => ipcRenderer.invoke('window:zoom-out'),
+    resetZoom: () => ipcRenderer.invoke('window:zoom-reset'),
     create: () => ipcRenderer.invoke('window:create'),
     close: (windowId: number) => ipcRenderer.invoke('window:close', windowId),
     list: () => ipcRenderer.invoke('window:list'),
@@ -63,6 +64,7 @@ contextBridge.exposeInMainWorld('api', {
     clearSampleData: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.clearSampleData', params: { id } }),
     checkPathValidity: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.checkPathValidity', params: { id } }),
     updateMeta: (id: string, meta: Record<string, any>) => ipcRenderer.invoke('ipc:call', { method: 'project.updateMeta', params: { id, ...meta } }),
+    getStorageStats: (projectId: string) => ipcRenderer.invoke('ipc:call', { method: 'project.getStorageStats', params: { projectId } }),
   },
 
   // ==================== 分组管理 ====================
@@ -213,6 +215,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'report.getReadmeContent', params }),
     extractDependencyFiles: (params: { projectId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.extractDependencyFiles', params }),
+    generateProjectSummary: (params: { projectId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.generateProjectSummary', params }),
+    getProjectSummary: (params: { projectId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getProjectSummary', params }),
     getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getLevelCommunityDetail', params }),
     saveFileSummaries: (params: { projectId: string; taskId: string; summaries: any[] }) =>
@@ -303,11 +309,9 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'session.deleteMessage', params }),
     updateMeta: (params: { sessionId: string; metadata: Record<string, any> }) =>
       ipcRenderer.invoke('ipc:call', { method: 'session.updateMeta', params }),
-    saveMessages: (params: { sessionId: string; messages: Array<{ role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }> }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'session.saveMessages', params }),
   },
 
-  // ==================== LLM 推理 (v2) ====================
+  // ==================== LLM 推理 (v2 — 统一入口，所有业务方法使用 templateId) ====================
   llm: {
     chat: (params: {
       sessionId: string
@@ -322,10 +326,6 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'llm.chat', params }),
     abortChat: (params: { requestId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'llm.abortChat', params }),
-    summarizeCode: (params: { code: string; modelId?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'llm.summarizeCode', params }),
-    explainSymbol: (params: { symbolName: string; symbolType: string; codeSnippet: string; fileName?: string; modelId?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'llm.explainSymbol', params }),
     // 订阅流式事件 (requestId → callbacks → unsubscribe)
     subscribe: (requestId: string, callbacks: {
       onChunk?: (data: { index: number; text: string }) => void
@@ -370,6 +370,12 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.delete', params }),
     render: (params: { templateId: string; variables: Record<string, any> }) =>
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.render', params }),
+  },
+
+  // ==================== 渲染服务 ====================
+  render: {
+    renderPlantuml: (params: { code: string; format?: string; useRemote?: boolean }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'render.plantuml', params }),
   },
 
   // ==================== 文件系统 ====================

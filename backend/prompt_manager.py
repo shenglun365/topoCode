@@ -1,4 +1,4 @@
-"""Prompt 模板管理器 — 模板 CRUD + 渲染 + 10 个内置模板
+"""Prompt 模板管理器 — 模板 CRUD + 渲染 + 内置模板
 
 支持三种模式:
   - chat: 对话模式（完整文本流式输出）
@@ -22,7 +22,7 @@ def _make_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-# ==================== 10 个内置模板 ====================
+# ==================== 内置模板定义 ====================
 
 BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
     # ===== 对话模式 (chat) =====
@@ -187,14 +187,14 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
     # ===== 结构化输出模式 (structured) =====
     {
         "id": "community_name",
-        "name": "社区命名",
+        "name": "组件命名",
         "mode": "structured",
         "module_type": "project_analysis",
         "category": "命名",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个代码社区命名助手。根据提供的节点和边的统计信息，"
-            "为社区生成一个简洁的中文名称（不超过 10 个字）。返回 JSON 格式。"
+            "你是一个代码组件命名助手。根据提供的节点和边的统计信息，"
+            "为组件生成一个简洁的中文名称（不超过 10 个字）。返回 JSON 格式。"
         ),
         "user_prompt_template": (
             "节点数: {nodeCount}, 边数: {edgeCount}\n"
@@ -203,11 +203,11 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         "output_schema_json": json.dumps({
             "type": "object",
             "properties": {
-                "name": {"type": "string", "maxLength": 10, "description": "社区中文名称"},
+                "name": {"type": "string", "maxLength": 10, "description": "组件中文名称"},
                 "category": {
                     "type": "string",
                     "enum": ["核心逻辑", "数据访问", "接口定义", "配置管理", "测试", "工具类", "其他"],
-                    "description": "社区分类"
+                    "description": "组件分类"
                 },
                 "summary": {"type": "string", "maxLength": 30, "description": "一句话概述"},
             },
@@ -301,55 +301,48 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         ]),
     },
 
-    # ===== 前端迁移模板 (community / source_code) =====
+    # ===== 边解释模板 =====
     {
-        "id": "community_explain",
-        "name": "社区功能说明",
+        "id": "edge_explain",
+        "name": "边关系解释",
         "mode": "chat",
         "module_type": "project_analysis",
-        "category": "community",
+        "category": "source_code",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个专业的软件架构分析专家。用户会提供一个代码社区(由 Louvain 社区发现算法生成的代码模块分组)的结构信息。\n"
-            "请根据提供的节点和边关系,分析并解释:\n"
-            "1. 这个社区在整体架构中承担什么角色\n"
-            "2. 核心功能模块有哪些\n"
-            "3. 模块间的协作关系\n"
-            "4. 可能的设计模式或架构风格\n"
-            "请用中文回答,保持专业且易于理解。使用 Markdown 格式组织内容。"
+            "你是一个专业的代码分析助手。用户会提供一个代码中的调用关系或依赖关系。"
+            "请解释这个关系的含义和作用。用中文回答。"
         ),
         "user_prompt_template": (
-            "## 社区信息\n"
-            "- 社区ID: {commId}\n"
-            "- 节点数: {nodeCount}\n"
-            "- 边数: {edgeCount}\n"
-            "- 质量分数: {qualityScore}\n\n"
-            "## 节点列表(语法结构/文件)\n"
-            "{nodeList}\n\n"
-            "## 边关系(调用/依赖)\n"
-            "{edgeList}\n\n"
-            "{detailNodes}\n\n"
-            "请分析这个社区的功能和架构含义。"
+            "## 边信息\n"
+            "- 类型: {edgeTypeLabel}\n"
+            "- 源: {source}\n"
+            "- 目标: {target}\n"
+            "{callSite}"
+            "{includePath}"
+            "{isSystem}"
+            "\n请解释这个关系。"
         ),
         "variables_json": json.dumps([
-            {"name": "commId", "type": "string", "description": "社区ID", "required": True},
-            {"name": "nodeCount", "type": "integer", "description": "节点数", "required": True},
-            {"name": "edgeCount", "type": "integer", "description": "边数", "required": True},
-            {"name": "qualityScore", "type": "number", "description": "质量分数", "required": False},
-            {"name": "nodeList", "type": "string", "description": "节点列表", "required": True},
-            {"name": "edgeList", "type": "string", "description": "边关系列表", "required": True},
-            {"name": "detailNodes", "type": "string", "description": "详细节点信息", "required": False},
+            {"name": "edgeTypeLabel", "type": "string", "description": "边类型标签（调用关系/依赖关系）", "required": True},
+            {"name": "source", "type": "string", "description": "源节点名", "required": True},
+            {"name": "target", "type": "string", "description": "目标节点名", "required": True},
+            {"name": "callSite", "type": "string", "description": "调用位置信息（可选，含前导换行）", "required": False},
+            {"name": "includePath", "type": "string", "description": "包含路径信息（可选，含前导换行）", "required": False},
+            {"name": "isSystem", "type": "string", "description": "系统头文件标记（可选，含前导换行）", "required": False},
         ]),
     },
+
+    # ===== 前端迁移模板 (community / source_code) =====
     {
         "id": "community_architecture",
-        "name": "社区架构说明",
+        "name": "组件架构说明",
         "mode": "chat",
         "module_type": "project_analysis",
         "category": "community",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个软件架构师。请根据提供的代码社区结构信息,生成结构化的架构说明文档。\n"
+            "你是一个软件架构师。请根据提供的代码组件结构信息,生成结构化的架构说明文档。\n"
             "输出格式要求:\n"
             "- 使用 Markdown 标题层级组织\n"
             "- 包含: 概述、模块划分、核心流程、依赖关系、设计评价\n"
@@ -357,8 +350,8 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "- 使用 Mermaid 图表展示模块关系"
         ),
         "user_prompt_template": (
-            "## 社区结构数据\n"
-            "- 社区ID: {commId}\n"
+            "## 组件结构数据\n"
+            "- 组件ID: {commId}\n"
             "- 节点数: {nodeCount}\n"
             "- 边数: {edgeCount}\n\n"
             "## 节点列表\n"
@@ -369,7 +362,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "请生成结构化的架构说明文档。"
         ),
         "variables_json": json.dumps([
-            {"name": "commId", "type": "string", "description": "社区ID", "required": True},
+            {"name": "commId", "type": "string", "description": "组件ID", "required": True},
             {"name": "nodeCount", "type": "integer", "description": "节点数", "required": True},
             {"name": "edgeCount", "type": "integer", "description": "边数", "required": True},
             {"name": "nodeList", "type": "string", "description": "节点列表", "required": True},
@@ -385,7 +378,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         "category": "community",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个业务架构分析师。请根据提供的代码社区结构,分析:\n"
+            "你是一个业务架构分析师。请根据提供的代码组件结构,分析:\n"
             "1. 这段代码可能适配的业务场景\n"
             "2. 核心业务流程\n"
             "3. 可扩展性评估\n"
@@ -393,8 +386,8 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "用中文回答,结合软件工程最佳实践。"
         ),
         "user_prompt_template": (
-            "## 社区结构\n"
-            "- 社区ID: {commId}\n"
+            "## 组件结构\n"
+            "- 组件ID: {commId}\n"
             "- 节点数: {nodeCount}\n"
             "- 边数: {edgeCount}\n\n"
             "## 节点列表\n"
@@ -402,10 +395,10 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "## 边关系\n"
             "{edgeList}\n\n"
             "{detailNodes}\n\n"
-            "请分析这个社区适配的业务场景。"
+            "请分析这个组件适配的业务场景。"
         ),
         "variables_json": json.dumps([
-            {"name": "commId", "type": "string", "description": "社区ID", "required": True},
+            {"name": "commId", "type": "string", "description": "组件ID", "required": True},
             {"name": "nodeCount", "type": "integer", "description": "节点数", "required": True},
             {"name": "edgeCount", "type": "integer", "description": "边数", "required": True},
             {"name": "nodeList", "type": "string", "description": "节点列表", "required": True},
@@ -415,31 +408,31 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
     },
     {
         "id": "community_pseudocode",
-        "name": "社区伪代码生成",
+        "name": "组件伪代码生成",
         "mode": "chat",
         "module_type": "project_analysis",
         "category": "community",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个代码抽象专家。请根据提供的代码社区结构信息,生成该社区核心逻辑的伪代码。\n"
+            "你是一个代码抽象专家。请根据提供的代码组件结构信息,生成该组件核心逻辑的伪代码。\n"
             "要求:\n"
             "- 保留核心算法流程和关键判断逻辑\n"
             "- 用中文注释说明每个步骤\n"
             "- 忽略具体语法细节,关注逻辑结构"
         ),
         "user_prompt_template": (
-            "## 社区结构\n"
-            "- 社区ID: {commId}\n"
+            "## 组件结构\n"
+            "- 组件ID: {commId}\n"
             "- 节点数: {nodeCount}\n\n"
             "## 节点列表\n"
             "{nodeList}\n\n"
             "## 边关系\n"
             "{edgeList}\n\n"
             "{detailNodes}\n\n"
-            "请生成这个社区核心逻辑的伪代码。"
+            "请生成这个组件核心逻辑的伪代码。"
         ),
         "variables_json": json.dumps([
-            {"name": "commId", "type": "string", "description": "社区ID", "required": True},
+            {"name": "commId", "type": "string", "description": "组件ID", "required": True},
             {"name": "nodeCount", "type": "integer", "description": "节点数", "required": True},
             {"name": "nodeList", "type": "string", "description": "节点列表", "required": True},
             {"name": "edgeList", "type": "string", "description": "边关系列表", "required": True},
@@ -462,11 +455,12 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "用中文回答,保持简洁专业。"
         ),
         "user_prompt_template": (
-            "## 文件信息\n"
+            "## 代码信息\n"
             "- 文件路径: {filePath}\n"
             "- 文件名: {fileName}\n"
-            "- 语言: {language}\n\n"
-            "## 代码内容\n"
+            "- 语言: {language}\n"
+            "{symbolInfo}"
+            "\n## 代码内容\n"
             "```{language}\n"
             "{codeContent}\n"
             "```\n\n"
@@ -477,6 +471,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             {"name": "fileName", "type": "string", "description": "文件名", "required": True},
             {"name": "language", "type": "string", "description": "编程语言", "required": True},
             {"name": "codeContent", "type": "string", "description": "代码内容", "required": True},
+            {"name": "symbolInfo", "type": "string", "description": "符号信息（可选，含前导换行，如\"- 符号名: xxx\\n- 符号类型: function\"）", "required": False},
         ]),
     },
     {
@@ -587,7 +582,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         "category": "report_pipeline",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个软件架构分析专家。请根据社区分析数据分解项目架构层次。\n"
+            "你是一个软件架构分析专家。请根据组件分析数据分解项目架构层次。\n"
             "输出 Markdown 格式，包含:\n"
             "1. 架构层次划分\n"
             "2. 各层次的核心职责\n"
@@ -595,16 +590,16 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "用中文回答。Mermaid 代码放在 ```mermaid 代码块中。"
         ),
         "user_prompt_template": (
-            "## 社区分组数据\n"
+            "## 组件分组数据\n"
             "{communitySummary}\n\n"
-            "请根据以上社区分析数据:\n"
+            "请根据以上组件分析数据:\n"
             "1. 识别项目的主要架构层次（如：核心逻辑层、数据访问层、接口层等）\n"
-            "2. 将社区分组映射到各层次\n"
+            "2. 将组件分组映射到各层次\n"
             "3. 生成 Mermaid graph TD 架构图\n"
             "4. 说明各层次之间的依赖关系"
         ),
         "variables_json": json.dumps([
-            {"name": "communitySummary", "type": "string", "description": "社区分组摘要", "required": True},
+            {"name": "communitySummary", "type": "string", "description": "组件分组摘要", "required": True},
         ]),
     },
     {
@@ -615,7 +610,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         "category": "report_pipeline",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个代码分析专家。请根据社区节点和调用关系,详细说明核心模块的功能和职责。\n"
+            "你是一个代码分析专家。请根据组件节点和调用关系,详细说明核心模块的功能和职责。\n"
             "输出 Markdown 格式，每个模块包含:\n"
             "1. 模块名称和分类\n"
             "2. 核心功能说明\n"
@@ -624,16 +619,16 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "用中文回答。"
         ),
         "user_prompt_template": (
-            "## 核心社区分组\n"
+            "## 核心组件分组\n"
             "{topCommunities}\n\n"
-            "请详细分析以上 {count} 个社区的功能:\n"
-            "1. 每个社区的业务/技术职责\n"
+            "请详细分析以上 {count} 个组件的功能:\n"
+            "1. 每个组件的业务/技术职责\n"
             "2. 关键符号（类、函数）及其作用\n"
-            "3. 社区内部的高频调用关系模式"
+            "3. 组件内部的高频调用关系模式"
         ),
         "variables_json": json.dumps([
-            {"name": "topCommunities", "type": "string", "description": "核心社区分组详情", "required": True},
-            {"name": "count", "type": "string", "description": "社区数量", "required": True},
+            {"name": "topCommunities", "type": "string", "description": "核心组件分组详情", "required": True},
+            {"name": "count", "type": "string", "description": "组件数量", "required": True},
         ]),
     },
     {
@@ -644,25 +639,25 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         "category": "report_pipeline",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个依赖分析专家。请根据跨社区调用和依赖数据,分析模块间的耦合关系。\n"
+            "你是一个依赖分析专家。请根据跨组件调用和依赖数据,分析模块间的耦合关系。\n"
             "输出 Markdown 格式，包含:\n"
-            "1. 跨社区调用统计\n"
+            "1. 跨组件调用统计\n"
             "2. 核心依赖链路\n"
             "3. 循环依赖检测（如有）\n"
             "4. 架构质量评估\n"
             "用中文回答。"
         ),
         "user_prompt_template": (
-            "## 跨社区调用/依赖数据\n"
+            "## 跨组件调用/依赖数据\n"
             "{crossCommunityEdges}\n\n"
             "请分析:\n"
-            "1. 哪些社区之间存在最多的交互（高耦合）\n"
+            "1. 哪些组件之间存在最多的交互（高耦合）\n"
             "2. 是否存在单向依赖违反或循环依赖\n"
             "3. 核心数据流向\n"
             "4. 给出架构改进建议"
         ),
         "variables_json": json.dumps([
-            {"name": "crossCommunityEdges", "type": "string", "description": "跨社区边数据", "required": True},
+            {"name": "crossCommunityEdges", "type": "string", "description": "跨组件边数据", "required": True},
         ]),
     },
     {
@@ -741,25 +736,29 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         ]),
     },
 
-    # ===== 社区分析模板 (structured — 返回名称+摘要) =====
+    # ===== 组件分析模板 (structured — 返回名称+摘要+图表) =====
     {
         "id": "community_analyze",
-        "name": "社区功能分析",
+        "name": "组件功能分析",
         "mode": "structured",
         "module_type": "project_analysis",
         "category": "report_pipeline",
         "is_builtin": 1,
         "system_prompt": (
-            "你是一个代码社区分析专家。请根据提供的社区结构信息，分析该社区的功能和架构含义。\n"
-            "返回 JSON 格式，包含 name 和 summary 两个字段。\n"
+            "你是一个代码架构分析专家。请根据提供的模块结构信息，分析该模块的功能和架构含义。\n"
+            "注意：分析对象是代码中的一个功能模块（module/component），不是社交组件。\n"
+            "返回 JSON 格式，包含 name、summary、mermaid、plantuml 四个字段。\n"
             "用中文回答。\n\n"
             "字段说明:\n"
-            "- name: 社区名称（根据功能概括，不超过 20 个字）\n"
-            "- summary: 社区功能说明（Markdown 格式，包含：核心功能说明、涉及的文件列表、内部调用关系）\n"
+            "- name: 模块名称（根据功能概括，不超过 20 个字），格式如「XXX模块」或「XXX组件」\n"
+            "- summary: 模块功能说明（Markdown 格式，包含：核心功能说明、涉及的文件列表、内部调用关系）\n"
+            "- mermaid: 用 Mermaid 语法绘制的模块内文件依赖关系结构图（graph LR 或 flowchart），"
+            "展示节点间调用/依赖关系，节点标签用文件名或函数名\n"
+            "- plantuml: 用 PlantUML 语法绘制的同一关系图（可选，如不擅长可省略）\n"
         ),
         "user_prompt_template": (
-            "## 社区信息\n"
-            "- 社区ID: {communityId}\n"
+            "## 组件信息\n"
+            "- 组件ID: {communityId}\n"
             "- 层级: {level} (L0/L1/L2)\n"
             "- 节点数: {nodeCount}\n"
             "- 边数: {edgeCount}\n\n"
@@ -768,28 +767,32 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "## 边关系（调用/依赖）\n"
             "{edgeListWithDetails}\n\n"
             "{parentSummaries}\n\n"
-            "请分析这个社区，返回 JSON 格式的 name（≤20字）和 summary。"
+            "请分析这个组件，返回 JSON 格式的 name、summary、mermaid、plantuml。"
         ),
         "output_schema_json": json.dumps({
             "type": "object",
             "properties": {
-                "name": {"type": "string", "maxLength": 20, "description": "社区名称（不超过20个字）"},
-                "summary": {"type": "string", "description": "社区功能说明（Markdown格式）"},
+                "name": {"type": "string", "maxLength": 20, "description": "组件名称（不超过20个字）"},
+                "summary": {"type": "string", "description": "组件功能说明（Markdown格式，含核心功能、文件列表、调用关系）"},
+                "mermaid": {"type": "string", "description": "Mermaid 代码（graph LR 或 flowchart），展示组件内文件依赖关系"},
+                "plantuml": {"type": "string", "description": "PlantUML 代码，展示组件内文件依赖关系（可选）"},
             },
-            "required": ["name", "summary"],
+            "required": ["name", "summary", "mermaid"],
         }),
         "output_example": json.dumps({
             "name": "HTTP路由处理",
             "summary": "负责HTTP请求的路由分发和参数解析，包含路由注册、中间件链、路径匹配等功能。",
+            "mermaid": "graph LR\\n  A[router.js] --> B[handler.js]\\n  B --> C[middleware.js]",
+            "plantuml": "@startuml\\nfile router.js --> file handler.js\\n@enduml",
         }),
         "variables_json": json.dumps([
-            {"name": "communityId", "type": "string", "description": "社区ID", "required": True},
+            {"name": "communityId", "type": "string", "description": "组件ID", "required": True},
             {"name": "level", "type": "string", "description": "层级 (L0/L1/L2)", "required": True},
             {"name": "nodeCount", "type": "integer", "description": "节点数", "required": True},
             {"name": "edgeCount", "type": "integer", "description": "边数", "required": True},
-            {"name": "nodeListWithPaths", "type": "string", "description": "节点列表（含源码路径）", "required": True},
-            {"name": "edgeListWithDetails", "type": "string", "description": "边关系列表", "required": True},
-            {"name": "parentSummaries", "type": "string", "description": "父社区摘要（用于聚合）", "required": False},
+            {"name": "nodeListWithPaths", "type": "string", "description": "节点列表（含源码路径和扩展名）", "required": True},
+            {"name": "edgeListWithDetails", "type": "string", "description": "边关系列表（显示名已去前缀）", "required": True},
+            {"name": "parentSummaries", "type": "string", "description": "父组件摘要 + 项目上下文（README/依赖等）", "required": False},
         ]),
     },
 ]
@@ -1039,12 +1042,4 @@ class PromptManager:
                 result = result.replace(placeholder, str(val) if val is not None else '')
         return result
 
-    # ==================== 预览 ====================
 
-    def preview(
-        self,
-        template_id: str,
-        variables: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """预览渲染结果（不调用 LLM）"""
-        return self.render(template_id, variables)

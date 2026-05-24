@@ -144,20 +144,11 @@ async function handleSelectReport(item: { taskId: string; type: string; taskName
   navigation.navigateTo('analysis')
   // 打开报告 tab
   const project = projectStore.selectedProject
-  if (item.type === 'analysisReport') {
-    projectStore.openReportHomeTab({
-      taskId: item.taskId,
-      taskName: item.taskName,
-      projectName: project?.name,
-    })
-  } else {
-    projectStore.openReportTab({
-      taskId: item.taskId,
-      reportType: item.type,
-      taskName: item.taskName,
-      projectName: project?.name,
-    })
-  }
+  projectStore.openReportHomeTab({
+    taskId: item.taskId,
+    taskName: item.taskName,
+    projectName: project?.name,
+  })
 }
 
 // 处理为项目创建任务（点击"无报告"）

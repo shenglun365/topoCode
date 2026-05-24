@@ -400,6 +400,7 @@ class AnalysisStore:
             )
 
     def bulk_insert_llm_results(self, results: List[Dict]):
+        from plantuml_service import validate_mermaid, validate_plantuml
         db = self._db.conn
         db.executemany("""
             INSERT OR REPLACE INTO community_llm_results
@@ -408,8 +409,10 @@ class AnalysisStore:
         """, [
             (
                 r["task_id"], r["edge_type"], r["comm_lv"], r["comm_id"],
-                r.get("name"), r.get("summary"), r.get("mermaid"),
-                r.get("plantuml"), r.get("model_id"), r.get("template_id"),
+                r.get("name"), r.get("summary"),
+                r.get("mermaid") if validate_mermaid(r.get("mermaid")) else None,
+                r.get("plantuml") if validate_plantuml(r.get("plantuml")) else None,
+                r.get("model_id"), r.get("template_id"),
             )
             for r in results
         ])

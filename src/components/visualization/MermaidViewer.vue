@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Mermaid 查看器 - 在 Worker 中渲染 Mermaid 图表 */
 
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMermaidRender } from '@/composables/useMermaidRender'
 import {

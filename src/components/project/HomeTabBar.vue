@@ -19,6 +19,7 @@ function getTabIcon(tab: HomeTab) {
     case 'taskList': return ListBulletIcon
     case 'taskCreate': return PlusCircleIcon
     case 'report': return ChartBarIcon
+    case 'reportHome': return DocumentTextIcon
     case 'subdoc': return DocumentDuplicateIcon
     default: return DocumentTextIcon
   }

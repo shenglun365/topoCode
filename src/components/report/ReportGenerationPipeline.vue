@@ -7,11 +7,11 @@ import {
   XCircleIcon,
   ArrowPathIcon,
   SparklesIcon,
+  DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
 import { useProjectStore } from '@/stores/project'
 import PipelineTaskTree from './PipelineTaskTree.vue'
-import FileSummaryPreprocessor from './FileSummaryPreprocessor.vue'
 import CommunityAnalysisPipeline from './CommunityAnalysisPipeline.vue'
 import type { PipelineTaskNode } from '@/types/ipc'
 import { usePipelineStore } from '@/stores/pipeline'
@@ -30,68 +30,96 @@ const props = defineProps<{
 const emit = defineEmits<{
   generated: [content: string]
   close: []
-  viewCommunityMD: [params: { communityId: string; name: string; summary: string }]
+  communityResults: [summaries: Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string }>]
+  viewCommunityMD: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
-// ===== Pipeline Task Tree =====
-const rootTask = ref<PipelineTaskNode>({
-  id: 'root',
-  label: t('report.pipeline.generationPipeline'),
-  type: 'group',
-  status: 'pending',
-  progress: 0,
-  children: [
-    {
-      id: 'validation',
-      label: t('report.pipeline.modelValidation'),
-      type: 'step',
-      status: 'pending',
-      progress: 0,
-    },
-    {
-      id: 'preprocessing',
-      label: t('report.pipeline.preprocessing'),
-      type: 'group',
-      status: 'pending',
-      progress: 0,
-      children: [
-        { id: 'readme_deps', label: t('report.pipeline.extractReadmeDeps'), type: 'subtask', status: 'pending', progress: 0 },
-      ],
-    },
-    {
-      id: 'community_analysis',
-      label: t('report.pipeline.communityAnalysis'),
-      type: 'step',
-      status: 'pending',
-      progress: 0,
-    },
-    {
-      id: 'step1', label: t('report.pipeline.projectSummary'), type: 'step', status: 'pending', progress: 0,
-      templateId: 'report_project_summary', dependsOn: ['preprocessing'],
-    },
-    {
-      id: 'step2', label: t('report.pipeline.archDecomposition'), type: 'step', status: 'pending', progress: 0,
-      templateId: 'report_arch_decomposition', dependsOn: ['community_analysis', 'step1'],
-    },
-    {
-      id: 'step3', label: t('report.pipeline.coreModules'), type: 'step', status: 'pending', progress: 0,
-      templateId: 'report_core_modules', dependsOn: ['step2'],
-    },
-    {
-      id: 'step4', label: t('report.pipeline.dependencyAnalysis'), type: 'step', status: 'pending', progress: 0,
-      templateId: 'report_dependency_analysis', dependsOn: ['step3'],
-    },
-    {
-      id: 'step5', label: t('report.pipeline.finalAssembly'), type: 'step', status: 'pending', progress: 0,
-      templateId: 'report_final_assembly', dependsOn: ['step4'],
-    },
-  ],
-})
+function createInitialTree(): PipelineTaskNode {
+  return {
+    id: 'root',
+    label: t('report.pipeline.generationPipeline'),
+    type: 'group',
+    status: 'pending',
+    progress: 0,
+    children: [
+      {
+        id: 'validation',
+        label: t('report.pipeline.modelValidation'),
+        type: 'step',
+        status: 'pending',
+        progress: 0,
+      },
+      {
+        id: 'preprocessing',
+        label: t('report.pipeline.preprocessing'),
+        type: 'group',
+        status: 'pending',
+        progress: 0,
+        children: [
+          { id: 'readme_deps', label: t('report.pipeline.extractReadmeDeps'), type: 'subtask', status: 'pending', progress: 0 },
+          { id: 'project_summary_gen', label: t('report.pipeline.generateProjectSummary'), type: 'subtask', status: 'pending', progress: 0 },
+        ],
+      },
+      {
+        id: 'community_analysis',
+        label: t('report.pipeline.communityAnalysis'),
+        type: 'step',
+        status: 'pending',
+        progress: 0,
+      },
+      {
+        id: 'step1', label: t('report.pipeline.projectSummary'), type: 'step', status: 'pending', progress: 0,
+        templateId: 'report_project_summary', dependsOn: ['preprocessing'],
+      },
+      {
+        id: 'step2', label: t('report.pipeline.archDecomposition'), type: 'step', status: 'pending', progress: 0,
+        templateId: 'report_arch_decomposition', dependsOn: ['community_analysis', 'step1'],
+      },
+      {
+        id: 'step3', label: t('report.pipeline.coreModules'), type: 'step', status: 'pending', progress: 0,
+        templateId: 'report_core_modules', dependsOn: ['step2'],
+      },
+      {
+        id: 'step4', label: t('report.pipeline.dependencyAnalysis'), type: 'step', status: 'pending', progress: 0,
+        templateId: 'report_dependency_analysis', dependsOn: ['step3'],
+      },
+      {
+        id: 'step5', label: t('report.pipeline.finalAssembly'), type: 'step', status: 'pending', progress: 0,
+        templateId: 'report_final_assembly', dependsOn: ['step4'],
+      },
+    ],
+  }
+}
 
-const running = ref(false)
-const overallProgress = ref(0)
-const isPaused = ref(false)
-const stepOutputs = ref<Record<string, string>>({})
+function markOrphanRunningAsPending(node: PipelineTaskNode) {
+  if ((node.status === 'running' || node.status === 'queued') && node.id !== 'root') {
+    node.status = 'pending'
+  }
+  if (node.children) node.children.forEach(markOrphanRunningAsPending)
+}
+
+function buildTree(): PipelineTaskNode {
+  const saved = pipelineStore.getTaskState(props.taskId)
+  if (saved) {
+    const tree = JSON.parse(JSON.stringify(saved.rootTask))
+    markOrphanRunningAsPending(tree)
+    return tree
+  }
+  return createInitialTree()
+}
+
+const rootTask = ref<PipelineTaskNode>(buildTree())
+
+const saved = pipelineStore.getTaskState(props.taskId)
+const running = ref(saved?.running ?? false)
+const overallProgress = ref(saved?.progress ?? 0)
+const isPaused = ref(saved?.paused ?? false)
+const stepOutputs = ref<Record<string, string>>(saved?.stepOutputs || {})
+
+// 项目摘要生成状态
+const summaryGenerating = ref(false)
+const summaryResult = ref<string | null>(null)
+const summaryError = ref<string | null>(null)
 
 const allCompleted = computed(() => {
   return rootTask.value.children?.every(n => n.status === 'completed' || n.status === 'skipped')
@@ -131,10 +159,13 @@ function recalcProgress() {
 }
 
 function syncStore() {
-  pipelineStore.updateTask(rootTask.value)
-  pipelineStore.updateRunning(running.value)
-  pipelineStore.updatePaused(isPaused.value)
-  pipelineStore.updateProgress(overallProgress.value)
+  pipelineStore.updateTaskState(props.taskId, {
+    rootTask: JSON.parse(JSON.stringify(rootTask.value)),
+    running: running.value,
+    paused: isPaused.value,
+    progress: overallProgress.value,
+    stepOutputs: { ...stepOutputs.value },
+  })
 }
 
 // ===== Step execution =====
@@ -168,12 +199,30 @@ async function prepareStepVariables(stepId: string): Promise<Record<string, stri
 
   if (stepId === 'step2') {
     try {
-  const pid = props.projectId || projectStore.selectedProjectId
-      const l0Detail = pid ? await window.api.report.getLevelCommunityDetail({ projectId: pid, taskId: props.taskId, level: 'L0', edgeType: 'CALL' }) : null
+      const pid = props.projectId || projectStore.selectedProjectId
+      // 获取 LLM 结果为社区命名
+      const [callResults, depResults] = await Promise.all([
+        window.api.analysis.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
+        window.api.analysis.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
+      ])
+      const nameMap = new Map<string, string>()
+      const statusMap = new Map<string, string>()
+      for (const r of [...(callResults?.results || []), ...(depResults?.results || [])]) {
+        if (r.name && r.name !== r.comm_id) {
+          nameMap.set(r.comm_id, r.name)
+          statusMap.set(r.comm_id, 'completed')
+        }
+      }
+      const pid2 = pid
+      const l0Detail = pid2 ? await window.api.report.getLevelCommunityDetail({ projectId: pid2, taskId: props.taskId, level: 'L0', edgeType: 'CALL' }) : null
       if (l0Detail && l0Detail.communities.length > 0) {
-        const summaryLines = l0Detail.communities.map((c: any) =>
-          `- ${c.communityId}: ${c.nodeCount} nodes, ${c.edgeCount} edges (${c.nodes.map((n: any) => n.name).join(', ').slice(0, 200)})`
-        )
+        const summaryLines = l0Detail.communities.map((c: any) => {
+          const displayName = nameMap.get(c.communityId) || c.communityId
+          const st = statusMap.get(c.communityId) || 'pending'
+          const countLabel = `${c.nodeCount} nodes, ${c.edgeCount} edges`
+          const nodeSamples = c.nodes.map((n: any) => n.name).join(', ').slice(0, 200)
+          return `- [${st}] ${displayName}: ${countLabel} (${nodeSamples})`
+        })
         base.communitySummary = summaryLines.join('\n')
       } else {
         const levels = await window.api.analysis.getCascadeLevels(props.taskId, 'CALL')
@@ -365,12 +414,35 @@ function reset() {
     node.error = undefined
     if (node.children) node.children.forEach(resetNode)
   }
-  rootTask.value.children?.forEach(resetNode)
-  rootTask.value.status = 'pending'
-  rootTask.value.progress = 0
+  rootTask.value = createInitialTree()
   overallProgress.value = 0
   stepOutputs.value = {}
   syncStore()
+}
+
+// 手动触发: 生成项目摘要 (调用 LLM)
+async function generateProjectSummary() {
+  const pid = projectStore.selectedProjectId
+  if (!pid) return
+  summaryGenerating.value = true
+  summaryError.value = null
+  summaryResult.value = null
+  updateNodeStatus('project_summary_gen', 'running')
+  try {
+    const result = await window.api.report.generateProjectSummary({ projectId: pid })
+    if (result?.summary) {
+      summaryResult.value = result.summary
+      updateNodeStatus('project_summary_gen', 'completed')
+    } else {
+      throw new Error('Empty summary')
+    }
+  } catch (e: any) {
+    summaryError.value = e.message || String(e)
+    updateNodeStatus('project_summary_gen', 'error', summaryError.value!)
+  } finally {
+    summaryGenerating.value = false
+    recalcProgress()
+  }
 }
 
 onMounted(() => {
@@ -379,6 +451,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  syncStore()
   pipelineStore.unregisterControls()
 })
 </script>
@@ -397,6 +470,16 @@ onUnmounted(() => {
           <div class="progress-fill" :style="{ width: overallProgress + '%' }"></div>
         </div>
         <span class="progress-text">{{ overallProgress }}%</span>
+        <button
+          class="btn btn-xs btn-outline"
+          :disabled="summaryGenerating"
+          :title="t('report.pipeline.generateProjectSummaryHint')"
+          @click="generateProjectSummary"
+        >
+          <DocumentTextIcon v-if="!summaryGenerating" class="w-3 h-3" />
+          <span v-if="summaryGenerating" class="spinner-xs"></span>
+          <span>{{ summaryGenerating ? t('common.generating') : t('report.pipeline.generateProjectSummary') }}</span>
+        </button>
       </div>
     </div>
 
@@ -404,10 +487,9 @@ onUnmounted(() => {
       <PipelineTaskTree :node="rootTask" />
     </div>
 
-    <!-- Side sub-components: Preprocessor + Community Analysis -->
+    <!-- Side sub-components: Community Analysis -->
     <div class="pipeline-sub">
-      <FileSummaryPreprocessor :task-id="taskId" :project-id="projectId" />
-      <CommunityAnalysisPipeline :task-id="taskId" @view-community-md="(p: any) => emit('viewCommunityMD', p)" />
+      <CommunityAnalysisPipeline :task-id="taskId" :project-id="projectId" @completed="(s: any) => emit('communityResults', s)" @view-community-md="(p: any) => emit('viewCommunityMD', p)" />
     </div>
 
     <div class="pipeline-actions">

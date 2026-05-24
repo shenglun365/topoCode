@@ -583,6 +583,44 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         return {"success": True}
 
+    @server.register("project.getStorageStats")
+    def get_storage_stats(project_id: str = None, projectId: str = None):
+        """获取项目存储空间统计（DB 文件 + 源码文件）"""
+        pid = project_id or projectId
+        if not pid:
+            raise ValueError("project_id is required")
+
+        # 项目 DB 文件
+        db_path = os.path.join(multi_db.data_dir, f"{pid}.db")
+        db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+
+        # WAL / SHM 文件（SQLite WAL 模式）
+        wal_size = 0
+        shm_size = 0
+        for suffix, out in [("-wal", "wal_size"), ("-shm", "shm_size")]:
+            p = db_path + suffix
+            if os.path.exists(p):
+                locals()[out] = os.path.getsize(p)
+
+        # 源码文件大小之和
+        source_size = 0
+        try:
+            project_db = multi_db.get_project_db(pid)
+            if project_db:
+                row = project_db.fetchone("SELECT COALESCE(SUM(size), 0) FROM source_files")
+                source_size = row[0] if row else 0
+        except Exception:
+            pass
+
+        return {
+            "projectId": pid,
+            "dbSize": db_size + wal_size + shm_size,
+            "dbFileSize": db_size,
+            "walSize": wal_size,
+            "shmSize": shm_size,
+            "sourceSize": source_size,
+        }
+
     # ==================== 分组管理方法 ====================
 
     @server.register("group.list")
@@ -1193,15 +1231,17 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 except OSError:
                     size = 0
 
+                fname = rel_path.rsplit('/', 1)[-1].rsplit('.', 1)[0] if '.' in rel_path.rsplit('/', 1)[-1] else rel_path.rsplit('/', 1)[-1]
                 batch_records.append((
-                    file_id, rel_path, language, size, content_hash, parent_path
+                    file_id, rel_path, fname, language, size, content_hash, parent_path
                 ))
                 file_count += 1
 
             elif entry.is_dir():
                 dir_id = f"dir-{_simple_hash(rel_path)}"
+                dname = rel_path.rsplit('/', 1)[-1]
                 batch_records.append((
-                    dir_id, rel_path, "directory", 0, _simple_hash(rel_path), parent_path
+                    dir_id, rel_path, dname, "directory", 0, _simple_hash(rel_path), parent_path
                 ))
                 dir_count += 1
 
@@ -1231,8 +1271,8 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 chunk = batch_records[i:i + BATCH_SIZE]
                 project_db.executemany(
                     """INSERT OR REPLACE INTO source_files
-                       (id, file_path, language, size, content_hash, parent_path)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       (id, file_path, file_name, language, size, content_hash, parent_path)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     chunk,
                 )
                 batch_num = i // BATCH_SIZE + 1
@@ -1299,20 +1339,22 @@ def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str
                 language = lang_map.get(ext) or ""
                 size = int(entry.stat().st_size)
 
+                fname = rel_path.rsplit('/', 1)[-1].rsplit('.', 1)[0] if '.' in rel_path.rsplit('/', 1)[-1] else rel_path.rsplit('/', 1)[-1]
                 project_db.execute(
                     """INSERT OR REPLACE INTO source_files
-                       (id, file_path, language, size, content_hash, parent_path)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (file_id, rel_path, language, size, content_hash, parent_path),
+                       (id, file_path, file_name, language, size, content_hash, parent_path)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (file_id, rel_path, fname, language, size, content_hash, parent_path),
                 )
                 file_count += 1
             elif entry.is_dir():
                 dir_id = f"dir-{_simple_hash(rel_path)}"
+                dname = rel_path.rsplit('/', 1)[-1]
                 project_db.execute(
                     """INSERT OR REPLACE INTO source_files
-                       (id, file_path, language, size, content_hash, parent_path)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (dir_id, rel_path, "directory", 0, _simple_hash(rel_path), parent_path),
+                       (id, file_path, file_name, language, size, content_hash, parent_path)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (dir_id, rel_path, dname, "directory", 0, _simple_hash(rel_path), parent_path),
                 )
                 file_count += _scan_file_tree(project_db, root_path, entry.path, rel_path, gitignore)
     except PermissionError:
@@ -1650,6 +1692,90 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                     return {"path": candidate, "error": str(e)}
         return {"path": None, "content": "", "error": "No README found"}
 
+    @server.register("report.generateProjectSummary")
+    def generate_project_summary(project_id=None, projectId=None):
+        """调用 LLM 生成项目概要 (500字以内), 存入 projects.summary"""
+        pid = project_id or projectId
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
+        if not project:
+            raise ValueError(f"Project not found: {pid}")
+
+        # 收集 README + 依赖信息作为 LLM 输入
+        readme_result = self.get_readme_content(projectId=pid)
+        readme_text = readme_result.get("content", "") if readme_result else ""
+        deps_result = self.extract_dependency_files(projectId=pid)
+        deps_text = ""
+        if deps_result and deps_result.get("count", 0) > 0:
+            lines = []
+            for d in deps_result["dependencyFiles"]:
+                deps_list = ", ".join(list(d.get("dependencies", {}).keys())[:30])
+                lines.append(f"- {d['file']} ({d['type']}): {deps_list}")
+            deps_text = "\n".join(lines)
+
+        prompt = (
+            "你是一个代码架构分析专家。请根据以下项目的 README 和依赖信息，"
+            "生成一段 500 字以内的项目概要。\n\n"
+            "要求：\n"
+            "1. 只提取功能性、技术栈、需求场景等对架构分析有用的信息\n"
+            "2. 忽略无关的安装说明、贡献指南、许可信息等\n"
+            "3. 用中文回答，简洁扼要\n"
+            "4. 字数控制在 500 字以内\n\n"
+        )
+        if readme_text:
+            prompt += f"## README\n{readme_text}\n\n"
+        if deps_text:
+            prompt += f"## 依赖文件\n{deps_text}\n\n"
+        prompt += "请输出项目概要："
+
+        # 调用 LLM
+        from llm_service import LLMService
+        from prompt_manager import PromptManager
+        lm = LLMService(multi_db)
+        pm = PromptManager(multi_db)
+
+        # 查询可用的模型
+        models = main_db.fetchall(
+            "SELECT * FROM llm_models WHERE is_enabled = 1 ORDER BY sort_order ASC"
+        )
+        if not models:
+            raise ValueError("No enabled LLM model found")
+        model_id = models[0]["id"]
+
+        try:
+            result = lm.chat(
+                session_id=f"proj-summary-{pid}",
+                model_id=model_id,
+                messages=[{"role": "user", "content": prompt}],
+                mode="normal",
+            )
+            summary = (result.get("content") or "").strip()
+            if not summary:
+                raise ValueError("LLM returned empty summary")
+            if len(summary) > 2000:
+                summary = summary[:2000]
+        except Exception as e:
+            logger.error(f"[generateProjectSummary] LLM call failed: {e}")
+            raise RuntimeError(f"生成项目概要失败: {e}")
+
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        main_db.execute(
+            "UPDATE projects SET summary = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?",
+            (summary, now, now, pid)
+        )
+        return {"success": True, "summary": summary, "generated_at": now}
+
+    @server.register("report.getProjectSummary")
+    def get_project_summary(project_id=None, projectId=None):
+        """获取已生成的项目概要"""
+        pid = project_id or projectId
+        row = main_db.fetchone(
+            "SELECT summary, summary_generated_at FROM projects WHERE id = ?", (pid,)
+        )
+        if not row:
+            return {"summary": "", "generated_at": None}
+        return {"summary": row["summary"] or "", "generated_at": row["summary_generated_at"]}
+
     @server.register("report.extractDependencyFiles")
     def extract_dependency_files(project_id=None, projectId=None):
         """扫描项目根目录，提取所有已知的依赖管理文件"""
@@ -1677,7 +1803,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         return {"dependencyFiles": results, "count": len(results)}
 
     @server.register("report.getLevelCommunityDetail")
-    def get_level_community_detail(project_id=None, task_id=None, level="L2", edge_type="CALL",
+    def get_level_community_detail(project_id=None, task_id=None, level="L2", edge_type=None,
                                     projectId=None, taskId=None, edgeType=None):
         """获取指定层级的社区完整信息（含节点路径和边详情）"""
         pid = project_id or projectId
@@ -1690,6 +1816,59 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                ORDER BY quality_score DESC""",
             (tid, et, level)
         )
+
+        # 预加载 source_files 映射: id → {file_path, file_name}
+        all_source_files = project_db.fetchall("SELECT id, file_path, file_name FROM source_files")
+        sf_map = {row['id']: row for row in all_source_files}
+
+        import re
+
+        def _resolve_node(node_str: str) -> dict:
+            """解析 node 字符串，返回 {id, name, filePath, type}"""
+            node_str = str(node_str)
+
+            # CASE 1: file-UUID:symbol_name (CALL 边)
+            m = re.match(r'^([a-zA-Z0-9_-]+):(.+)$', node_str)
+            if m:
+                file_ref = m.group(1)
+                symbol = m.group(2)
+                sf = sf_map.get(file_ref)
+                if sf:
+                    return {
+                        "id": node_str,
+                        "name": symbol,
+                        "filePath": sf['file_path'],
+                        "type": "function",
+                    }
+                # file_ref 不在 source_files 中，但仍保留符号名
+                return {
+                    "id": node_str,
+                    "name": symbol,
+                    "filePath": "?",
+                    "type": "function",
+                }
+
+            # CASE 2: 纯 file-UUID（INCLUDE 边的 source，或 CALL 边中无函数名的引用）
+            sf = sf_map.get(node_str)
+            if sf:
+                name = sf['file_name']
+                if not name:
+                    name = sf['file_path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
+                return {
+                    "id": node_str,
+                    "name": name,
+                    "filePath": sf['file_path'],
+                    "type": "file",
+                }
+
+            # CASE 3: include_path 或其他未知格式
+            return {
+                "id": node_str,
+                "name": node_str,
+                "filePath": "?",
+                "type": "?",
+            }
+
         result = []
         for comm in communities:
             node_list = json.loads(comm['node_list']) if isinstance(comm['node_list'], str) else comm['node_list']
@@ -1701,39 +1880,69 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                 for node in node_list[:50]:  # limit to 50
                     if isinstance(node, dict):
                         nid = node.get('id', '')
-                        file_row = project_db.fetchone(
-                            "SELECT file_path FROM source_files WHERE id = ?",
-                            (nid,)
-                        )
+                        sf = sf_map.get(nid)
                         nodes_with_paths.append({
                             "id": nid or node.get('name', ''),
                             "name": node.get('name', ''),
                             "type": node.get('type', ''),
-                            "filePath": file_row['file_path'] if file_row else '?',
+                            "filePath": sf['file_path'] if sf else '?',
                         })
                     elif isinstance(node, str):
-                        nodes_with_paths.append({"id": node, "name": node, "type": "?", "filePath": "?"})
+                        nodes_with_paths.append(_resolve_node(node))
 
             # 获取边的关系
+            def _edge_display_name(node_str: str) -> str:
+                """将 node 字符串转换为可读名称:
+                   file-UUID → source_files.file_name
+                   file-UUID:symbol → symbol
+                   其他 → 原样返回
+                """
+                sf = sf_map.get(node_str)
+                if sf:
+                    name = sf['file_name']
+                    if not name:
+                        name = sf['file_path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
+                    return name
+                m = re.match(r'^([a-zA-Z0-9_-]+):(.+)$', node_str)
+                if m:
+                    return m.group(2)
+                return node_str
+
             edges_with_details = []
             if isinstance(edge_list, list):
                 for edge in edge_list[:50]:
                     if isinstance(edge, dict):
+                        source_raw = edge.get('source', '')
+                        target_raw = edge.get('target', '')
                         edges_with_details.append({
-                            "source": edge.get('source', ''),
-                            "target": edge.get('target', ''),
+                            "source": source_raw,
+                            "sourceDisplay": _edge_display_name(source_raw),
+                            "target": target_raw,
+                            "targetDisplay": _edge_display_name(target_raw),
                             "type": edge.get('type', edge_type),
                             "direction": "caller→callee" if edge.get('type', '').upper() == 'CALL' else "dependency",
                         })
                     elif isinstance(edge, str):
                         edges_with_details.append({"source": edge, "target": "?", "type": edge_type})
 
+            actual_node_count = len(nodes_with_paths)
+            actual_edge_count = len(edges_with_details)
+            if actual_node_count != comm['node_count']:
+                logger.warning(
+                    f"[report.getLevelCommunityDetail] node_count mismatch: "
+                    f"comm={comm['comm_id']} stored={comm['node_count']} actual={actual_node_count}"
+                )
+            if actual_edge_count != comm['edge_count']:
+                logger.warning(
+                    f"[report.getLevelCommunityDetail] edge_count mismatch: "
+                    f"comm={comm['comm_id']} stored={comm['edge_count']} actual={actual_edge_count}"
+                )
             result.append({
                 "communityId": comm['comm_id'],
                 "parentCommunityId": comm.get('parent_comm_id'),
                 "level": comm['comm_lv'],
-                "nodeCount": comm['node_count'],
-                "edgeCount": comm['edge_count'],
+                "nodeCount": actual_node_count,
+                "edgeCount": actual_edge_count,
                 "qualityScore": comm.get('quality_score'),
                 "nodes": nodes_with_paths,
                 "edges": edges_with_details,

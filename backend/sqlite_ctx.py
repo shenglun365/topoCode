@@ -844,6 +844,8 @@ class MultiDBManager:
                 ("favorite", "INTEGER DEFAULT 0"),
                 ("pinned", "INTEGER DEFAULT 0"),
                 ("sort_order", "INTEGER DEFAULT 0"),
+                ("summary", "TEXT DEFAULT ''"),
+                ("summary_generated_at", "TEXT"),
             ],
         }
         for table, columns in columns_to_add.items():

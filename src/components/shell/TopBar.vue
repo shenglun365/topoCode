@@ -8,12 +8,14 @@ import {
   SunIcon,
   PlusIcon,
   Squares2X2Icon,
-  WrenchScrewdriverIcon,
+  QuestionMarkCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useThemeStore } from '@/stores/theme'
 import { useWindowStore } from '@/stores/window'
 import { useProjectStore } from '@/stores/project'
+import { useOnboardingStore } from '@/stores/onboarding'
+import { useStatusStore } from '@/stores/status'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-005')
@@ -22,6 +24,8 @@ const panelStore = usePanelStore()
 const themeStore = useThemeStore()
 const windowStore = useWindowStore()
 const projectStore = useProjectStore()
+const onboardingStore = useOnboardingStore()
+const statusStore = useStatusStore()
 
 async function handleFileImport() {
   closeMenu()
@@ -57,15 +61,17 @@ const menus = {
     { label: t('shell.topBar.toggleLeftPanel'), shortcut: 'Ctrl+B' },
     { label: t('shell.topBar.toggleRightPanel'), shortcut: 'Ctrl+J' },
     { divider: true },
-    { label: t('shell.topBar.zoomIn'), shortcut: 'Ctrl++' },
-    { label: t('shell.topBar.zoomOut'), shortcut: 'Ctrl+-' },
-    { label: t('shell.topBar.resetZoom'), shortcut: 'Ctrl+0' },
+    { label: t('shell.topBar.zoomIn'), shortcut: 'Ctrl++', action: 'zoomIn' },
+    { label: t('shell.topBar.zoomOut'), shortcut: 'Ctrl+-', action: 'zoomOut' },
+    { label: t('shell.topBar.resetZoom'), shortcut: 'Ctrl+0', action: 'resetZoom' },
   ],
   tools: [
     { label: t('shell.topBar.restartBackend'), shortcut: '' },
     { label: t('shell.topBar.clearCache'), shortcut: '' },
   ],
   help: [
+    { label: t('shell.topBar.guide'), shortcut: '', action: 'guide' },
+    { divider: true },
     { label: t('shell.topBar.documentation'), shortcut: '' },
     { label: t('shell.topBar.about'), shortcut: '' },
   ],
@@ -79,11 +85,21 @@ function closeMenu() {
   showMenu.value = null
 }
 
-function handleMenuItemClick(item: any) {
+async function handleMenuItemClick(item: any) {
+  closeMenu()
   if (item.action === 'import') {
-    handleFileImport()
-  } else {
-    closeMenu()
+    await handleFileImport()
+  } else if (item.action === 'guide') {
+    onboardingStore.start()
+  } else if (item.action === 'zoomIn') {
+    const pct = await window.api?.window.zoomIn()
+    if (pct) statusStore.setZoom(pct)
+  } else if (item.action === 'zoomOut') {
+    const pct = await window.api?.window.zoomOut()
+    if (pct) statusStore.setZoom(pct)
+  } else if (item.action === 'resetZoom') {
+    const pct = await window.api?.window.resetZoom()
+    if (pct) statusStore.setZoom(pct)
   }
 }
 </script>
@@ -167,8 +183,8 @@ function handleMenuItemClick(item: any) {
           <MoonIcon v-if="themeStore.theme === 'dark'" class="w-4 h-4" />
           <SunIcon v-else class="w-4 h-4" />
         </div>
-        <div class="icon-btn" :class="{ active: panelStore.debugMode }" @click="panelStore.toggleDebug()" :title="'DEBUG'">
-          <WrenchScrewdriverIcon class="w-4 h-4" />
+        <div class="icon-btn" @click="onboardingStore.start()" :title="t('shell.topBar.guide')">
+          <QuestionMarkCircleIcon class="w-4 h-4" />
         </div>
       </div>
     </div>

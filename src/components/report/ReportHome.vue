@@ -41,6 +41,8 @@ const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
 const communityDataCall = ref<any>(null)
 const communityDataInclude = ref<any>(null)
+const communityResultsCall = ref<Record<string, any>>({})
+const communityResultsInclude = ref<Record<string, any>>({})
 const fileStats = ref<any>(null)
 const showPipeline = ref(false)
 const generatedReport = ref<string | null>(null)
@@ -51,6 +53,7 @@ const project = computed(() => projectSummary.value || projectStore.selectedProj
 const task = computed(() => taskDetail.value)
 
 const commData = computed(() => commEdgeType.value === 'INCLUDE' ? communityDataInclude.value : communityDataCall.value)
+const commResults = computed(() => (commEdgeType.value === 'INCLUDE' ? communityResultsInclude : communityResultsCall).value)
 
 interface CommStats { count: number; maxNodes: number; minNodes: number; avgQuality: number }
 const commStats = computed<CommStats>(() => {
@@ -81,15 +84,28 @@ function formatCommId(item: { id: string; level?: string }): string {
   return `${level}-${num}`
 }
 
+function commName(item: { id: string }): string {
+  const result = commResults.value[item.id]
+  const raw = result?.name || result?.name_manual || ''
+  const name = raw && raw !== item.id ? raw : ''
+  if (name) return name.length > 10 ? name.slice(0, 10) + '…' : name
+  return formatCommId(item)
+}
+
 async function openCommunityDoc(item: any) {
   try {
+    const result = commResults.value[item.id]
+    if (result?.name || result?.summary) {
+      handleCommunityMD({ communityId: item.id, name: result.name || result.name_manual || formatCommId(item), summary: result.summary || '', mermaid: result.mermaid, plantuml: result.plantuml })
+      return
+    }
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
     if (!pid) return
-    const result = await window.api.report.getLevelCommunityDetail({
+    const detail = await window.api.report.getLevelCommunityDetail({
       projectId: pid, taskId: props.taskId,
       level: item.level || 'L0', edgeType: commEdgeType.value,
     })
-    const community = result.communities.find((c: any) => c.communityId === item.id)
+    const community = detail.communities.find((c: any) => c.communityId === item.id)
     if (!community) return
     const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
     const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
@@ -115,19 +131,34 @@ async function openCommunityDoc(item: any) {
   }
 }
 
-function handleCommunityMD(params: { communityId: string; name: string; summary: string }) {
-  const md = [
+function handleCommunityMD(params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }) {
+  const parts: string[] = [
     `# 社区: ${params.name}`,
     '',
     `**ID**: ${params.communityId}`,
     '',
     params.summary,
-  ].join('\n')
+  ]
+  if (params.mermaid) {
+    parts.push('', '```mermaid', params.mermaid, '```')
+  }
+  if (params.plantuml) {
+    parts.push('', '```plantuml', params.plantuml, '```')
+  }
   emit('open-md', {
     taskId: props.taskId,
-    content: md,
+    content: parts.join('\n'),
     title: params.name,
   })
+}
+
+async function reloadCommunityResults() {
+  const [resCall, resInclude] = await Promise.all([
+    window.api.analysis.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
+    window.api.analysis.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
+  ])
+  communityResultsCall.value = Object.fromEntries((resCall?.results || []).map((r: any) => [r.comm_id, r]))
+  communityResultsInclude.value = Object.fromEntries((resInclude?.results || []).map((r: any) => [r.comm_id, r]))
 }
 
 async function loadData() {
@@ -136,17 +167,25 @@ async function loadData() {
   projectSummary.value = projectStore.selectedProject
   try {
     taskDetail.value = await analysisStore.getTask(props.taskId)
+    if (!taskDetail.value) {
+      loadError.value = t('report.taskNotFound')
+      return
+    }
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
     if (pid) {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
       fileStats.value = await analysisStore.scanFileStats(pid)
     }
-    const [call, include] = await Promise.all([
+    const [call, include, resCall, resInclude] = await Promise.all([
       window.api.analysis.getCascadeLevels(props.taskId, 'CALL').catch(() => null),
       window.api.analysis.getCascadeLevels(props.taskId, 'INCLUDE').catch(() => null),
+      window.api.analysis.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
+      window.api.analysis.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
     ])
     communityDataCall.value = call
     communityDataInclude.value = include
+    communityResultsCall.value = Object.fromEntries((resCall?.results || []).map((r: any) => [r.comm_id, r]))
+    communityResultsInclude.value = Object.fromEntries((resInclude?.results || []).map((r: any) => [r.comm_id, r]))
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -183,6 +222,7 @@ function handleViewReport() {
 }
 
 function fileExtLabel(ext: string): string {
+  if (!ext) return t('analysis.noExtension')
   const labels: Record<string, string> = {
     typescript: 'TypeScript',
     javascript: 'JavaScript',
@@ -323,14 +363,15 @@ watch(() => props.taskId, loadData)
           <!-- L0 社区列表 -->
           <div class="community-items">
             <template v-if="commData.levels && commData.levels.length > 0">
-              <div
-                v-for="item in (commData.levels[0]?.items || [])"
-                :key="item.id"
-                class="community-chip"
-                :title="`${formatCommId(item)} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
-                @click="openCommunityDoc(item)"
-              >
-                <span class="chip-name">{{ formatCommId(item) }}</span>
+                <div
+                  v-for="item in (commData.levels[0]?.items || [])"
+                  :key="item.id"
+                  class="community-chip"
+                  :class="{ 'has-result': !!(commResults[item.id]?.name) && commResults[item.id]?.name !== item.id }"
+                  :title="`${item.id} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
+                  @click="openCommunityDoc(item)"
+                >
+                <span class="chip-name">{{ commName(item) }}</span>
                 <span class="chip-count">{{ item.nodeCount }}</span>
               </div>
             </template>
@@ -378,6 +419,7 @@ watch(() => props.taskId, loadData)
             :project-id="projectId"
             @generated="handleReportGenerated"
             @close="showPipeline = false"
+            @community-results="reloadCommunityResults"
             @view-community-md="handleCommunityMD"
           />
         </section>
@@ -571,6 +613,8 @@ watch(() => props.taskId, loadData)
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+.community-chip.has-result { border-color: var(--accent); }
+.community-chip.has-result .chip-name { color: var(--success); }
 
 .chip-name {
   color: var(--text-primary);

@@ -545,7 +545,7 @@ def _save_communities(task_id: str, edge_type: str, level: str,
     hierarchies = []
 
     for i, comm_nodes in enumerate(communities):
-        comm_id = f"comm-{task_id[:8]}-{level}-{i:04d}"
+        comm_id = f"comm-{task_id[:8]}-{edge_type[:4].lower()}-{level}-{i:04d}"
 
         # 计算社区内的边
         edge_list = []
@@ -630,7 +630,7 @@ def _save_special_nodes(task_id: str, edge_type: str,
             deg = len(neighbors)
             degrees[node] = deg
 
-            comm_id = f"hub-{task_id[:8]}-{node.replace(':', '_')[-20:]}"
+            comm_id = f"hub-{task_id[:8]}-{edge_type[:4].lower()}-{node.replace(':', '_')[-20:]}"
             comm_docs.append({
                 "task_id": task_id,
                 "edge_type": edge_type,
@@ -664,7 +664,7 @@ def _save_special_nodes(task_id: str, edge_type: str,
             deg = len(neighbors)
             degrees[node] = deg
 
-            comm_id = f"orph-{task_id[:8]}-{node.replace(':', '_')[-20:]}"
+            comm_id = f"orph-{task_id[:8]}-{edge_type[:4].lower()}-{node.replace(':', '_')[-20:]}"
             comm_docs.append({
                 "task_id": task_id,
                 "edge_type": edge_type,

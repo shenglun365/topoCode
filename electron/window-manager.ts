@@ -215,12 +215,19 @@ export class WindowManager {
       const win = this.getFocusedWindow()
       const zoom = win?.webContents.getZoomFactor() || 1
       win?.webContents.setZoomFactor(Math.min(2, zoom + 0.1))
+      return Math.round((win?.webContents.getZoomFactor() || 1) * 100)
     })
 
     ipcMain.handle('window:zoom-out', () => {
       const win = this.getFocusedWindow()
       const zoom = win?.webContents.getZoomFactor() || 1
       win?.webContents.setZoomFactor(Math.max(0.5, zoom - 0.1))
+      return Math.round((win?.webContents.getZoomFactor() || 1) * 100)
+    })
+
+    ipcMain.handle('window:zoom-reset', () => {
+      this.getFocusedWindow()?.webContents.setZoomFactor(1)
+      return 100
     })
 
     // ---- 广播消息 ----
