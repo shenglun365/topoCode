@@ -15,6 +15,11 @@ const props = defineProps<{
   depth?: number
 }>()
 
+const emit = defineEmits<{
+  action: [nodeId: string]
+  openCommunityAnalysis: []
+}>()
+
 const indent = computed(() => (props.depth || 0) * 16)
 
 const { showId, componentId } = useComponentId('RP-009')
@@ -33,18 +38,25 @@ function statusIcon(status: string) {
 <template>
   <div class="pipeline-task-node" :style="{ paddingLeft: indent + 'px' }">
     <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <div :class="['node-row', `node-${node.status}`]">
+    <div
+      :class="['node-row', `node-${node.status}`, { 'node-clickable': node.id === 'community_analysis' }]"
+      @click="node.id === 'community_analysis' ? emit('openCommunityAnalysis') : undefined"
+    >
       <Component :is="statusIcon(node.status)" :class="['node-icon', `icon-${node.status}`]" />
       <div class="node-body">
         <div class="node-header">
           <span class="node-label">{{ node.label }}</span>
-          <span v-if="node.type === 'group' && node.children" class="node-progress-text">
-            {{ node.progress }}%
+          <span class="node-header-right">
+            <span v-if="node.type === 'group' && node.children" class="node-progress-text">
+              {{ node.progress }}%
+            </span>
+            <slot name="actions" :node="node" />
           </span>
         </div>
         <div v-if="node.type === 'group' && node.children" class="node-progress-bar">
           <div class="progress-fill" :style="{ width: node.progress + '%' }"></div>
         </div>
+        <slot name="content" :node="node" />
         <div v-if="node.error" class="node-error">{{ node.error }}</div>
       </div>
     </div>
@@ -54,7 +66,16 @@ function statusIcon(status: string) {
         :key="child.id"
         :node="child"
         :depth="(depth || 0) + 1"
-      />
+        @action="emit('action', $event)"
+        @open-community-analysis="emit('openCommunityAnalysis')"
+      >
+        <template #actions="{ node: childNode }">
+          <slot name="actions" :node="childNode" />
+        </template>
+        <template #content="{ node: childNode }">
+          <slot name="content" :node="childNode" />
+        </template>
+      </PipelineTaskTree>
     </div>
   </div>
 </template>
@@ -77,6 +98,8 @@ function statusIcon(status: string) {
 .node-row:hover {
   background: var(--bg-tertiary);
 }
+
+.node-clickable { cursor: pointer; }
 
 .node-icon {
   width: 14px;
@@ -101,6 +124,13 @@ function statusIcon(status: string) {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+}
+
+.node-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .node-label {

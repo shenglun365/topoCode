@@ -268,6 +268,7 @@ export interface PipelineTaskNode {
 /** 流水线控制函数 */
 export interface PipelineControlFunctions {
   runAll: () => Promise<void>
+  runNode: (nodeId: string) => Promise<void>
   pause: () => void
   resume: () => void
   reset: () => void

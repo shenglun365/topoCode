@@ -28,6 +28,10 @@ networkx>=3.0
 # HTTP 客户端 (PlantUML 远程渲染)
 requests>=2.31.0
 
+# Web 服务 (浏览器端文档浏览)
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
 # 工具库
 pydantic>=2.0.0
 pydantic-settings>=2.0.0

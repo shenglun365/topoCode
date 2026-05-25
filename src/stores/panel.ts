@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { PanelState } from '@/types'
+
+export type RightTab = 'ai' | 'detail'
 
 export const usePanelStore = defineStore('panel', () => {
   // State
@@ -9,6 +10,7 @@ export const usePanelStore = defineStore('panel', () => {
   const leftWidth = ref(240)
   const rightWidth = ref(280)
   const debugMode = ref(false)
+  const rightTab = ref<RightTab>('ai')
 
   // Actions
   function toggleLeft() {
@@ -25,6 +27,10 @@ export const usePanelStore = defineStore('panel', () => {
 
   function setRightCollapsed(collapsed: boolean) {
     rightCollapsed.value = collapsed
+  }
+
+  function setRightTab(tab: RightTab) {
+    rightTab.value = tab
   }
 
   function setLeftWidth(width: number) {
@@ -52,10 +58,12 @@ export const usePanelStore = defineStore('panel', () => {
     leftWidth,
     rightWidth,
     debugMode,
+    rightTab,
     toggleLeft,
     setLeftCollapsed,
     toggleRight,
     setRightCollapsed,
+    setRightTab,
     setLeftWidth,
     setRightWidth,
     resetPanels,

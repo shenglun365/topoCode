@@ -4,11 +4,15 @@ import type { Project, AnalysisTask, KnowledgeDoc } from '@/types'
 /** 语言 badge 颜色映射 */
 export const languageBadge: Record<string, string> = {
   Python: 'badge-green',
-  Go: 'badge-yellow',
+  Go: 'badge-cyan',
   JavaScript: 'badge-blue',
   TypeScript: 'badge-blue',
   Java: 'badge-red',
-  Rust: 'badge-gray',
+  Rust: 'badge-orange',
+  HTML: 'badge-orange',
+  C: 'badge-blue',
+  'C++': 'badge-purple',
+  Vue: 'badge-emerald',
 }
 
 /** Mock 项目列表 */

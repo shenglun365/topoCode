@@ -225,6 +225,26 @@ html, body {
   color: var(--text-muted);
 }
 
+.badge-orange {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #f59e0b;
+}
+
+.badge-purple {
+  background: color-mix(in srgb, #a855f7 15%, transparent);
+  color: #a855f7;
+}
+
+.badge-cyan {
+  background: color-mix(in srgb, #06b6d4 15%, transparent);
+  color: #06b6d4;
+}
+
+.badge-emerald {
+  background: color-mix(in srgb, #10b981 15%, transparent);
+  color: #10b981;
+}
+
 /* --- 输入框 --- */
 .input {
   width: 100%;

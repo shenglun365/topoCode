@@ -16,6 +16,7 @@ import {
   StarIcon,
   Squares2X2Icon,
   ArchiveBoxXMarkIcon,
+  PlusIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
@@ -165,6 +166,17 @@ function onTaskListCreateTask(taskId?: string) {
   projectStore.openTaskCreateForm(taskId)
 }
 
+async function handleImportProject() {
+  if (projectStore.importing) return
+  if (window.api && window.api.dialog) {
+    const path = await window.api.dialog.openDirectory()
+    if (path) {
+      await projectStore.importProject(path)
+      await projectStore.loadProjects()
+    }
+  }
+}
+
 onMounted(async () => {
   await projectStore.loadProjects()
 })
@@ -242,9 +254,8 @@ async function confirmClearCache() {
           <p class="text-muted" style="font-size:12px;">{{ t('project.subtitle') }}</p>
         </div>
 
-        <div v-if="projectStore.projects.length > 0">
         <!-- 筛选按钮 + 搜索 -->
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
+        <div v-if="projectStore.projects.length > 0" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
           <div style="display:flex; gap:4px; align-items:center;">
             <button
               :class="['btn', 'btn-sm', filterMode === 'all' ? 'btn-primary' : 'btn-ghost']"
@@ -289,7 +300,7 @@ async function confirmClearCache() {
           </div>
         </div>
 
-        <!-- 项目卡片网格 -->
+        <!-- 项目卡片网格（始终显示，导入卡片自动排在末尾） -->
         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
           <ProjectCard
             v-for="project in pagedProjects"
@@ -298,9 +309,39 @@ async function confirmClearCache() {
             @select="projectStore.selectProject(project.id)"
           />
           <!-- 无匹配结果 -->
-          <div v-if="pagedProjects.length === 0" style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">
-            {{ searchQuery ? t('project.noMatch') : t('project.noFavorites') }}
+          <div v-if="pagedProjects.length === 0 && !searchQuery" style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">
+            {{ t('project.noFavorites') }}
           </div>
+          <div v-else-if="pagedProjects.length === 0 && searchQuery" style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">
+            {{ t('project.noMatch') }}
+          </div>
+          <!-- 导入项目卡片（始终在网格末尾） -->
+        <div
+          class="import-card card"
+          :class="{ 'importing': projectStore.importing }"
+          @click="handleImportProject"
+        >
+          <div class="import-card-body" v-if="!projectStore.importing">
+            <PlusIcon class="w-8 h-8 import-card-icon" />
+            <span class="import-card-label">{{ t('project.importProject') }}</span>
+            <span class="import-card-hint">{{ t('project.importDirHint') }}</span>
+          </div>
+          <div class="import-card-body" v-else>
+            <div class="import-card-progress">
+              <div class="import-card-spinner"></div>
+              <span class="import-card-label">{{ t('project.importing') }}</span>
+              <span class="import-card-percent">{{ projectStore.importProgress }}%</span>
+              <div class="progress-bar" style="width:80%; margin-top:8px;">
+                <div
+                  class="progress-bar-fill bg-accent"
+                  :style="{ width: (projectStore.importProgress || 0) + '%' }"
+                ></div>
+              </div>
+              <span class="import-card-hint" v-if="projectStore.importStatus === 'scan'">{{ t('project.importScanning') }}</span>
+              <span class="import-card-hint" v-else-if="projectStore.importStatus === 'write'">{{ t('project.importWriting') }}</span>
+            </div>
+          </div>
+        </div>
         </div>
 
         <!-- 分页控件 -->
@@ -328,7 +369,6 @@ async function confirmClearCache() {
             </button>
           </div>
         </div>
-      </div>
 
       <!-- 快速开始（无项目时显示提示） -->
         <div v-if="projectStore.projects.length === 0" class="quick-start-empty">
@@ -568,5 +608,92 @@ async function confirmClearCache() {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.import-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  user-select: none;
+}
+
+.import-card:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.import-card.importing {
+  cursor: default;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.import-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-card-body .import-card-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
+.import-card-icon {
+  color: var(--text-muted);
+  transition: color 0.2s;
+}
+
+.import-card:hover .import-card-icon {
+  color: var(--accent);
+}
+
+.import-card-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.import-card:hover .import-card-label {
+  color: var(--accent);
+}
+
+.import-card-percent {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.import-card-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.import-card-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.import-card-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

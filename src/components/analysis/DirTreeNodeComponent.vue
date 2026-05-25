@@ -23,19 +23,25 @@ const checkboxRef = ref<HTMLInputElement | null>(null)
 
 /**
  * 获取目录的三级状态：unchecked / checked / indeterminate
+ * 使用 prefix 匹配和 glob 模式，不枚举子目录
  */
 function getCheckboxState(node: DirTreeNode): 'checked' | 'unchecked' | 'indeterminate' {
-  const isSelected = props.selectedScopes.includes(node.path)
+  // 精确路径匹配
+  if (props.selectedScopes.includes(node.path)) return 'checked'
+  // glob 模式匹配 (dir/* / dir/**)
+  if (isPathGlobSelected(node.path)) return 'checked'
   
   if (!node.children || node.children.length === 0) {
-    return isSelected ? 'checked' : 'unchecked'
+    return 'unchecked'
   }
   
-  // 检查子节点
-  const checkedCount = node.children.filter(child => {
+  // 子节点中是否有任何被选中或间接匹配
+  let checkedCount = 0
+  for (const child of node.children) {
     const state = getCheckboxState(child)
-    return state === 'checked'
-  }).length
+    if (state === 'checked') checkedCount++
+    else if (state === 'indeterminate') return 'indeterminate'
+  }
   
   if (checkedCount === 0) return 'unchecked'
   if (checkedCount === node.children.length) return 'checked'
@@ -43,31 +49,41 @@ function getCheckboxState(node: DirTreeNode): 'checked' | 'unchecked' | 'indeter
 }
 
 /**
- * 获取所有子目录的路径
+ * 检查路径是否被任何已选 glob scope 匹配
  */
-function getAllChildPaths(node: DirTreeNode): string[] {
-  const paths: string[] = []
-  if (node.children) {
-    for (const child of node.children) {
-      paths.push(child.path)
-      paths.push(...getAllChildPaths(child))
+function isPathGlobSelected(path: string): boolean {
+  for (const s of props.selectedScopes) {
+    if (s.endsWith('/*') || s.endsWith('/**')) {
+      const prefix = s.slice(0, -2)  // "dir/*" → "dir"
+      if (path === prefix) return true
+      if (path.startsWith(prefix + '/')) return true
     }
   }
-  return paths
+  return false
 }
 
 function handleClick() {
   const currentState = getCheckboxState(props.node)
-  const childPaths = getAllChildPaths(props.node)
   
   if (currentState === 'checked') {
-    // 取消当前节点和所有子节点
-    const filtered = props.selectedScopes.filter(p => p !== props.node.path && !childPaths.includes(p))
-    emit('toggle', { ...props.node, __action: 'deselect', __paths: [props.node.path, ...childPaths] as any })
+    // 取消当前节点 — 移除精确路径和通配符模式
+    const globPattern = props.node.path + '/*'
+    const filtered = props.selectedScopes.filter(p => 
+      p !== props.node.path && p !== globPattern && !p.startsWith(props.node.path + '/')
+    )
+    emit('toggle', {
+      ...props.node,
+      __action: 'deselect',
+      __paths: [props.node.path, globPattern] as any,
+    })
   } else {
-    // 选中当前节点和所有子节点
-    const newPaths = [props.node.path, ...childPaths]
-    emit('toggle', { ...props.node, __action: 'select', __paths: newPaths as any })
+    // 选中当前节点 — 只添加 dir/* 一个 glob 模式，不枚举子目录
+    const globPattern = props.node.path + '/*'
+    emit('toggle', {
+      ...props.node,
+      __action: 'select',
+      __paths: [globPattern] as any,
+    })
   }
 }
 

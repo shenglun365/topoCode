@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
@@ -12,11 +12,13 @@ import {
   ClockIcon,
   FunnelIcon,
 } from '@heroicons/vue/24/outline'
+import { usePipelineStore } from '@/stores/pipeline'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
+const pipelineStore = usePipelineStore()
 
 const props = defineProps<{ taskId: string; projectId?: string }>()
 const emit = defineEmits<{
@@ -70,9 +72,33 @@ const running = ref(false)
 const paused = ref(false)
 const batchSize = ref(3)
 const loadError = ref<string | null>(null)
+const runError = ref<string | null>(null)
+
+const searchQuery = ref('')
+const currentPage = ref(1)
+const pageSize = 100
 
 // 项目上下文（项目概要），在 loadAll 中加载一次
 const projectContext = ref('')
+
+const searchedCommunities = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return displayCommunities.value
+  return displayCommunities.value.filter(c => {
+    const id = fmtCommId(c.communityId).toLowerCase()
+    const name = (c.name || '').toLowerCase()
+    const pName = (c.parentName || '').toLowerCase()
+    return id.includes(q) || name.includes(q) || pName.includes(q)
+  })
+})
+
+const totalPages = computed(() => Math.max(1, Math.ceil(searchedCommunities.value.length / pageSize)))
+const pagedCommunities = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return searchedCommunities.value.slice(start, start + pageSize)
+})
+
+watch(searchQuery, () => { currentPage.value = 1 })
 
 const analyzedCommIds = computed(() => {
   const ids = new Set<string>()
@@ -117,7 +143,7 @@ function lookupName(commId: string): string | undefined {
   return llmResults.value.get(commId)?.name || llmResults.value.get(commId)?.nameManual
 }
 
-const selectedCount = computed(() => displayCommunities.value.filter(t => t.selected).length)
+const selectedCount = computed(() => searchedCommunities.value.filter(t => t.selected).length)
 const completedCount = computed(() => allCommunities.value.filter(t => t.status === 'completed').length)
 const errorCount = computed(() => allCommunities.value.filter(t => t.status === 'error').length)
 const totalCount = computed(() => allCommunities.value.length)
@@ -126,7 +152,7 @@ const overallProgress = computed(() => {
   return totalCount.value > 0 ? Math.round((done / totalCount.value) * 100) : 0
 })
 
-// 当前显示的社区（含排序 + L1/L2 过滤）
+// 当前显示的组件（含排序 + L1/L2 过滤）
 const displayCommunities = computed(() => {
   let list = allCommunities.value.filter(c => c.edgeType === selectedEdgeType.value && c.level === selectedLevel.value)
   // L1: 只显示父 L0 有分析结果的; L2: 只显示父 L1 有分析结果的
@@ -331,7 +357,7 @@ function toggleSelect(id: string) {
 }
 
 function selectAllInCurrentView(sel: boolean) {
-  for (const t of displayCommunities.value) {
+  for (const t of searchedCommunities.value) {
     t.selected = sel
   }
 }
@@ -373,14 +399,26 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
   task.status = 'running'
 
   try {
+    if (!pid.value) {
+      console.warn('[CAP] pid is empty, cannot get level detail')
+      task.status = 'skipped'
+      return false
+    }
     const result = await window.api.report.getLevelCommunityDetail({
-      projectId: pid.value!,
+      projectId: pid.value,
       taskId: props.taskId,
       level: task.level,
       edgeType: task.edgeType,
     })
-    const community = result.communities.find(c => c.communityId === task.communityId)
+    const commList = result?.communities
+    if (!Array.isArray(commList) || commList.length === 0) {
+      console.warn('[CAP] getLevelCommunityDetail returned no communities for level=', task.level, 'edgeType=', task.edgeType, 'result=', result)
+      task.status = 'skipped'
+      return false
+    }
+    const community = commList.find(c => c.communityId === task.communityId)
     if (!community) {
+      console.warn('[CAP] community id mismatch; looking for', task.communityId, 'available ids:', commList.map(c => c.communityId))
       task.status = 'skipped'
       return false
     }
@@ -463,12 +501,15 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
 }
 
 async function analyzeSelected() {
+  runError.value = null
   if (!modelId.value) {
+    runError.value = t('report.llmNotConfigured')
     emit('error', t('report.llmNotConfigured'))
     return
   }
   const selected = allCommunities.value.filter(t => t.selected)
   if (selected.length === 0) return
+  if (running.value) return
 
   running.value = true
   paused.value = false
@@ -505,6 +546,8 @@ async function analyzeSelected() {
         }
       }
     }
+    saveState()
+    syncProgress()
   }
 
   running.value = false
@@ -557,9 +600,80 @@ async function retryTask(id: string) {
     task.status = 'error'
     task.error = e.message || String(e)
   }
+  saveState()
+  syncProgress()
 }
 
-onMounted(loadAll)
+function syncProgress() {
+  const calc = (edgeType: 'INCLUDE' | 'CALL') => {
+    const items = allCommunities.value.filter(c => c.edgeType === edgeType && c.level === 'L0')
+    return {
+      total: items.length,
+      completed: items.filter(c => c.status === 'completed').length,
+      running: items.filter(c => c.status === 'running' || c.status === 'queued').length,
+    }
+  }
+  pipelineStore.updateCommunityProgress(props.taskId, 'INCLUDE', calc('INCLUDE'))
+  pipelineStore.updateCommunityProgress(props.taskId, 'CALL', calc('CALL'))
+}
+
+const CAP_STATE_KEY = 'cap_communities'
+
+function saveState() {
+  const state = pipelineStore.getTaskState(props.taskId)
+  if (!state) return
+  const snapshot = allCommunities.value.map(c => ({
+    id: c.id, communityId: c.communityId, level: c.level, edgeType: c.edgeType,
+    nodeCount: c.nodeCount, edgeCount: c.edgeCount, qualityScore: c.qualityScore,
+    status: c.status, selected: c.selected, parentId: c.parentId,
+    name: c.name, summary: c.summary, error: c.error, mermaid: c.mermaid, plantuml: c.plantuml,
+  }))
+  state.stepOutputs[CAP_STATE_KEY] = JSON.stringify(snapshot)
+  state.communityProgress = {
+    INCLUDE: { total: 0, completed: 0, running: 0 },
+    CALL: { total: 0, completed: 0, running: 0 },
+  }
+  syncProgress()
+}
+
+function restoreState() {
+  const state = pipelineStore.getTaskState(props.taskId)
+  if (!state?.stepOutputs?.[CAP_STATE_KEY]) return false
+  try {
+    const snapshot = JSON.parse(state.stepOutputs[CAP_STATE_KEY]) as CommunitySummary[]
+    if (!Array.isArray(snapshot) || snapshot.length === 0) return false
+    allCommunities.value = snapshot
+    return true
+  } catch { return false }
+}
+
+function afterLoadMergePending() {
+  const state = pipelineStore.getTaskState(props.taskId)
+  if (!state?.stepOutputs?.[CAP_STATE_KEY]) return
+  try {
+    const saved = JSON.parse(state.stepOutputs[CAP_STATE_KEY]) as CommunitySummary[]
+    if (!Array.isArray(saved)) return
+    const pendingMap = new Map(saved.filter(c => c.status === 'running' || c.status === 'queued').map(c => [c.communityId, c.status]))
+    for (const c of allCommunities.value) {
+      const s = pendingMap.get(c.communityId)
+      if (s && c.status === 'pending') c.status = s
+    }
+  } catch {}
+}
+
+onMounted(async () => {
+  pipelineStore.ensureTaskState(props.taskId, {
+    id: 'root', label: '报告生成流水线', type: 'group', status: 'pending', progress: 0, children: [],
+  } as PipelineTaskNode)
+  await loadAll()
+  afterLoadMergePending()
+  syncProgress()
+})
+
+onUnmounted(() => {
+  saveState()
+  syncProgress()
+})
 </script>
 
 <template>
@@ -597,40 +711,36 @@ onMounted(loadAll)
         </button>
       </div>
 
-      <!-- 层级选择 -->
+      <!-- 层级选择（固定 L0） -->
       <div class="lv-selector">
         <span class="lv-label">{{ t('report.pipeline.granularity') }}:</span>
         <div class="lv-radio-group">
-          <label
-            v-for="lv in availableLevels"
-            :key="lv.lv"
-            :class="['lv-radio', { active: selectedLevel === lv.lv }]"
-          >
-            <input
-              type="radio"
-              :value="lv.lv"
-              :checked="selectedLevel === lv.lv"
-              @change="selectedLevel = lv.lv"
-            />
-            <span class="lv-text">{{ lv.lv }}</span>
-            <span class="lv-count" :title="`${lv.analyzed} / ${lv.count} ${t('report.pipeline.analyzed')}`">{{ lv.analyzed }}/{{ lv.count }}</span>
+          <label class="lv-radio active">
+            <span class="lv-text">L0</span>
           </label>
-        </div>
-        <div v-if="availableLevels.length === 0" class="lv-empty">
-          {{ t('report.pipeline.noLevels') }}
         </div>
       </div>
 
-      <!-- 社区列表 -->
+      <!-- 组件搜索 -->
+      <div class="clist-search">
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="搜索组件名称/ID..."
+          class="search-input"
+        />
+      </div>
+
+      <!-- 组件列表 -->
       <div class="cap-tasklist">
-        <div v-if="displayCommunities.length === 0" class="cap-empty">
+        <div v-if="searchedCommunities.length === 0" class="cap-empty">
           {{ t('report.pipeline.noCommunities') }}
         </div>
 
         <template v-else>
           <div class="clist-header">
             <span class="clist-title">
-              {{ selectedLevel }} ({{ displayCommunities.length }})
+              {{ selectedLevel }} ({{ searchedCommunities.length }})
               <span class="clist-edge-tag">{{ selectedEdgeType }}</span>
             </span>
             <div class="clist-actions">
@@ -672,7 +782,7 @@ onMounted(loadAll)
 
             <!-- 行 -->
             <div
-              v-for="task in displayCommunities"
+              v-for="task in pagedCommunities"
               :key="task.id"
               :class="['clist-row', `clist-${task.status}`]"
               @click="toggleSelect(task.id)"
@@ -715,10 +825,24 @@ onMounted(loadAll)
               </span>
             </div>
           </div>
+
+          <!-- 分页 -->
+          <div v-if="totalPages > 1" class="clist-pagination">
+            <button class="btn btn-ghost btn-xs" :disabled="currentPage <= 1" @click="currentPage--">
+              上一页
+            </button>
+            <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
+            <button class="btn btn-ghost btn-xs" :disabled="currentPage >= totalPages" @click="currentPage++">
+              下一页
+            </button>
+          </div>
         </template>
       </div>
 
-      <!-- 底部操作栏 -->
+      <!-- 错误提示 -->
+      <div v-if="runError" class="cap-run-error">{{ runError }}</div>
+
+      <!-- 组件批操作 -->
       <div class="cap-bottom">
         <div class="cap-batch">
           <span class="batch-label">{{ t('report.pipeline.batchSize') }}:</span>
@@ -727,21 +851,13 @@ onMounted(loadAll)
           </select>
         </div>
         <div class="cap-bottom-actions">
-          <button v-if="running" class="btn btn-sm" :class="paused ? 'btn-primary' : 'btn-warning'" @click="pauseResume">
-            {{ paused ? t('report.pipeline.resume') : t('report.pipeline.pause') }}
-          </button>
           <button
-            v-else
             class="btn btn-primary btn-sm"
             @click="analyzeSelected"
-            :disabled="selectedCount === 0"
+            :disabled="selectedCount === 0 || running"
           >
             <PlayIcon class="w-3 h-3" />
             {{ t('report.pipeline.analyzeSelected', { n: selectedCount }) }}
-          </button>
-          <button v-if="errorCount > 0" class="btn btn-ghost btn-sm" @click="selectAllCompletedErrors">
-            <ArrowPathIcon class="w-3 h-3" />
-            {{ t('report.pipeline.retryAll') }}
           </button>
         </div>
       </div>
@@ -775,6 +891,7 @@ onMounted(loadAll)
 .progress-text { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); min-width: 24px; }
 .cap-loading { padding: 20px; text-align: center; color: var(--text-muted); }
 .cap-error { padding: 20px; text-align: center; color: var(--error); font-size: 11px; }
+.cap-run-error { padding: 6px 12px; background: color-mix(in srgb, var(--error) 10%, transparent); color: var(--error); font-size: 11px; border-bottom: 1px solid var(--border); }
 
 /* Edge type tabs */
 .et-tabs {
@@ -874,6 +991,22 @@ onMounted(loadAll)
 .badge-muted { background: var(--bg-tertiary); color: var(--text-muted); }
 
 .clist-actions-col { display: flex; justify-content: center; }
+
+/* Search */
+.clist-search { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.search-input {
+  width: 100%; padding: 4px 8px; font-size: 11px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); outline: none;
+  box-sizing: border-box;
+}
+.search-input:focus { border-color: var(--accent); }
+
+/* Pagination */
+.clist-pagination {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 6px 12px; border-top: 1px solid var(--border);
+}
+.page-info { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
 
 /* Bottom bar */
 .cap-bottom {

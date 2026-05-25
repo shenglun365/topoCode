@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { XMarkIcon, ChatBubbleLeftIcon, ListBulletIcon } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
@@ -19,9 +19,6 @@ const projectStore = useProjectStore()
 
 const codeIndexRef = ref<InstanceType<typeof CodeIndexPanel> | null>(null)
 
-type RightTab = 'ai' | 'detail'
-const rightTab = ref<RightTab>('ai')
-
 const panelTitleKeys: Record<string, string> = {
   home: 'ai.assistantTitle',
   analysis: 'shell.rightPanel.taskDetail',
@@ -31,7 +28,7 @@ const panelTitleKeys: Record<string, string> = {
 }
 
 const isAnalysisReport = computed(() =>
-  navigation.currentPage === 'analysis' && projectStore.activeTab?.kind === 'reportHome'
+  navigation.currentPage === 'analysis' && ['reportHome', 'componentAnalysis'].includes(projectStore.activeTab?.kind || '')
 )
 
 // 是否显示代码索引面板（分析页面 + 旧报告 tab）
@@ -42,12 +39,12 @@ const showCodeIndex = computed(() => {
 
 // 是否显示 AI 助手面板（首页 或 分析页面报告首页 AI tab）
 const showAIAssistant = computed(() => {
-  return navigation.currentPage === 'home' || (isAnalysisReport.value && rightTab.value === 'ai')
+  return navigation.currentPage === 'home' || (isAnalysisReport.value && panelStore.rightTab === 'ai')
 })
 
 // 是否显示任务列表面板（分析页面报告首页 detail tab）
 const showTaskList = computed(() => {
-  return isAnalysisReport.value && rightTab.value === 'detail'
+  return isAnalysisReport.value && panelStore.rightTab === 'detail'
 })
 
 const title = computed(() => {
@@ -55,7 +52,7 @@ const title = computed(() => {
     return t('report.codeIndex')
   }
   if (isAnalysisReport.value) {
-    return rightTab.value === 'ai' ? t('ai.assistantTitle') : t('report.taskList')
+    return panelStore.rightTab === 'ai' ? t('ai.assistantTitle') : t('report.sidebar.taskList')
   }
   if (showAIAssistant.value) {
     return t('ai.assistantTitle')
@@ -64,14 +61,6 @@ const title = computed(() => {
     return t('ai.assistantTitle')
   }
   return t(panelTitleKeys[navigation.currentPage] || 'common.detail')
-})
-
-// 进入分析报告 tab 时自动打开右侧栏
-watch(() => projectStore.activeTab?.kind, (kind) => {
-  if (kind === 'reportHome') {
-    panelStore.setRightCollapsed(false)
-    rightTab.value = 'ai'
-  }
 })
 
 defineExpose({
@@ -97,18 +86,18 @@ defineExpose({
     <!-- Tab 切换栏（分析报告首页） -->
     <div v-if="isAnalysisReport" class="right-tab-bar">
       <button
-        :class="['right-tab', { active: rightTab === 'ai' }]"
-        @click="rightTab = 'ai'"
+        :class="['right-tab', { active: panelStore.rightTab === 'ai' }]"
+        @click="panelStore.setRightTab('ai')"
       >
         <ChatBubbleLeftIcon class="w-3.5 h-3.5" />
         <span>{{ t('ai.assistantTitle') }}</span>
       </button>
       <button
-        :class="['right-tab', { active: rightTab === 'detail' }]"
-        @click="rightTab = 'detail'"
+        :class="['right-tab', { active: panelStore.rightTab === 'detail' }]"
+        @click="panelStore.setRightTab('detail')"
       >
         <ListBulletIcon class="w-3.5 h-3.5" />
-        <span>{{ t('report.taskList') }}</span>
+        <span>{{ t('report.sidebar.taskList') }}</span>
       </button>
     </div>
     <div class="panel-body">
@@ -122,10 +111,10 @@ defineExpose({
       />
 
       <!-- 任务列表面板（分析报告首页 detail tab） -->
-      <ReportTaskListPanel v-else-if="showTaskList" />
+      <ReportTaskListPanel v-else-if="showTaskList" :task-id="projectStore.activeTab?.taskId || ''" :task-name="projectStore.activeTab?.title" />
 
-      <!-- 符号索引（预留） -->
-      <div v-else-if="projectStore.viewMode === 'project' && projectStore.activeTab" class="symbols-panel">
+      <!-- 符号索引（预留，排除分析页面） -->
+      <div v-else-if="navigation.currentPage !== 'analysis' && projectStore.viewMode === 'project' && projectStore.activeTab" class="symbols-panel">
         <div class="symbols-empty">
           <div class="icon">🔍</div>
           <div class="title">{{ t('shell.rightPanel.symbols') }}</div>

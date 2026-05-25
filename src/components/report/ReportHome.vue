@@ -11,7 +11,9 @@ import {
   ExclamationTriangleIcon,
   Cog6ToothIcon,
   HashtagIcon,
+  ListBulletIcon,
 } from '@heroicons/vue/24/outline'
+import { usePanelStore } from '@/stores/panel'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useSettingsStore } from '@/stores/settings'
@@ -21,6 +23,7 @@ import ReportMDViewer from './ReportMDViewer.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
+const panelStore = usePanelStore()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
 const settingsStore = useSettingsStore()
@@ -44,9 +47,11 @@ const communityDataInclude = ref<any>(null)
 const communityResultsCall = ref<Record<string, any>>({})
 const communityResultsInclude = ref<Record<string, any>>({})
 const fileStats = ref<any>(null)
-const showPipeline = ref(false)
 const generatedReport = ref<string | null>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
+const communitySearch = ref('')
+const communityPage = ref(1)
+const communityPageSize = 100
 
 const hasModel = computed(() => settingsStore.models.some(m => m.isDefault))
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
@@ -69,6 +74,25 @@ const commStats = computed<CommStats>(() => {
     avgQuality: quals.length ? (quals.reduce((a: number, b: number) => a + b, 0) / quals.length) : 0,
   }
 })
+
+const communityItems = computed(() => {
+  const items = commData.value?.levels?.[0]?.items || []
+  const q = communitySearch.value.trim().toLowerCase()
+  if (!q) return items
+  return items.filter((item: any) => {
+    const id = item.id.toLowerCase()
+    const name = (commResults.value[item.id]?.name || '').toLowerCase()
+    return id.includes(q) || name.includes(q)
+  })
+})
+
+const communityTotalPages = computed(() => Math.max(1, Math.ceil(communityItems.value.length / communityPageSize)))
+const pagedCommunityItems = computed(() => {
+  const start = (communityPage.value - 1) * communityPageSize
+  return communityItems.value.slice(start, start + communityPageSize)
+})
+
+watch(communitySearch, () => { communityPage.value = 1 })
 
 const { showId, componentId } = useComponentId('RP-001')
 
@@ -194,12 +218,9 @@ async function loadData() {
   }
 }
 
-function handleGenerateReport() {
-  if (!hasModel.value) {
-    // Navigate to settings - this would be handled by parent
-    // For now, just show the pipeline inline
-  }
-  showPipeline.value = true
+function openTaskList() {
+  panelStore.setRightCollapsed(false)
+  panelStore.setRightTab('detail')
 }
 
 function handleReportGenerated(content: string) {
@@ -358,24 +379,42 @@ watch(() => props.taskId, loadData)
             </span>
             <span class="comm-stat">{{ t('report.communityMaxNodes') }}: {{ commStats.maxNodes }}</span>
             <span class="comm-stat">{{ t('report.communityMinNodes') }}: {{ commStats.minNodes }}</span>
-            <span class="comm-stat">{{ t('report.communityAvgQuality') }}: {{ commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-' }}</span>
+            <span class="comm-stat quality-stat" :title="'质量分反映社区内聚度，分值越高组件间区分度越好。平均约 ' + (commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-')">
+              {{ t('report.communityAvgQuality') }}: {{ commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-' }}
+              <span class="quality-hint">ⓘ</span>
+            </span>
+          </div>
+          <!-- 社区搜索 -->
+          <div class="comm-search">
+            <input
+              v-model="communitySearch"
+              type="text"
+              placeholder="搜索组件名称/ID..."
+              class="comm-search-input"
+            />
           </div>
           <!-- L0 社区列表 -->
           <div class="community-items">
-            <template v-if="commData.levels && commData.levels.length > 0">
-                <div
-                  v-for="item in (commData.levels[0]?.items || [])"
-                  :key="item.id"
-                  class="community-chip"
-                  :class="{ 'has-result': !!(commResults[item.id]?.name) && commResults[item.id]?.name !== item.id }"
-                  :title="`${item.id} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
-                  @click="openCommunityDoc(item)"
-                >
+            <template v-if="pagedCommunityItems.length > 0">
+              <div
+                v-for="item in pagedCommunityItems"
+                :key="item.id"
+                class="community-chip"
+                :class="{ 'has-result': !!(commResults[item.id]?.name) && commResults[item.id]?.name !== item.id }"
+                :title="`${item.id} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
+                @click="openCommunityDoc(item)"
+              >
                 <span class="chip-name">{{ commName(item) }}</span>
                 <span class="chip-count">{{ item.nodeCount }}</span>
               </div>
             </template>
             <div v-else class="comm-empty">{{ t('report.pipeline.noCommunities') }}</div>
+          </div>
+          <!-- 组件分页 -->
+          <div v-if="communityTotalPages > 1" class="comm-pagination">
+            <button class="btn btn-ghost btn-xs" :disabled="communityPage <= 1" @click="communityPage--">上一页</button>
+            <span class="comm-page-info">{{ communityPage }} / {{ communityTotalPages }}</span>
+            <button class="btn btn-ghost btn-xs" :disabled="communityPage >= communityTotalPages" @click="communityPage++">下一页</button>
           </div>
         </section>
 
@@ -395,12 +434,10 @@ watch(() => props.taskId, loadData)
           <div class="actions-row">
             <button
               class="btn btn-primary"
-              @click="handleGenerateReport"
-              :disabled="showPipeline"
-              :title="!hasModel ? t('report.llmNotConfigured') : ''"
+              @click="openTaskList"
             >
-              <SparklesIcon class="w-4 h-4" />
-              <span>{{ t('report.startGeneration') }}</span>
+              <ListBulletIcon class="w-4 h-4" />
+              <span>{{ t('report.openTaskList') }}</span>
             </button>
             <button
               v-if="generatedReport"
@@ -412,16 +449,17 @@ watch(() => props.taskId, loadData)
             </button>
           </div>
 
-          <!-- 生成流水线 -->
-          <ReportGenerationPipeline
-            v-if="showPipeline"
-            :task-id="taskId"
-            :project-id="projectId"
-            @generated="handleReportGenerated"
-            @close="showPipeline = false"
-            @community-results="reloadCommunityResults"
-            @view-community-md="handleCommunityMD"
-          />
+          <!-- 生成流水线（隐藏，后台同步） -->
+          <div style="display:none">
+            <ReportGenerationPipeline
+              :task-id="taskId"
+              :project-id="projectId"
+              @generated="handleReportGenerated"
+              @close="() => {}"
+              @community-results="reloadCommunityResults"
+              @view-community-md="handleCommunityMD"
+            />
+          </div>
         </section>
       </div>
     </template>
@@ -633,6 +671,26 @@ watch(() => props.taskId, loadData)
 .comm-empty {
   font-size: 10px; color: var(--text-muted); padding: 4px 0;
 }
+
+/* Community search */
+.comm-search { margin-bottom: 8px; }
+.comm-search-input {
+  width: 100%; padding: 4px 8px; font-size: 11px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); outline: none;
+  box-sizing: border-box;
+}
+.comm-search-input:focus { border-color: var(--accent); }
+
+/* Quality hint */
+.quality-stat { cursor: help; position: relative; }
+.quality-hint { font-size: 9px; color: var(--text-muted); margin-left: 2px; }
+
+/* Community pagination */
+.comm-pagination {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border);
+}
+.comm-page-info { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
 
 .model-warning {
   display: flex;

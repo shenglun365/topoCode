@@ -66,21 +66,32 @@ function getAllChildPaths(node: DirTreeNode): string[] {
 }
 
 /**
- * 切换目录选择（支持三级状态）
+ * 切换目录选择（使用 glob 模式，不枚举子目录）
  */
 function handleDirToggle(node: DirTreeNode) {
-  // Check if this is a synthetic event with __action
   const action = (node as any).__action
-  const paths = (node as any).__paths
+  let paths = (node as any).__paths
   
   if (action === 'select') {
     const existing = new Set(selectedScopes.value)
     for (const p of paths) {
+      // 清除该路径下已存在的精确子路径，避免冗余
+      for (const ep of [...existing]) {
+        if (ep.startsWith(p.replace('/*', '') + '/')) existing.delete(ep)
+      }
       existing.add(p)
     }
     selectedScopes.value = Array.from(existing)
   } else if (action === 'deselect') {
-    selectedScopes.value = selectedScopes.value.filter(p => !paths.includes(p))
+    // 移除路径及其所有子路径和 glob 模式
+    const removeSet = new Set(paths)
+    selectedScopes.value = selectedScopes.value.filter(p => {
+      for (const r of removeSet) {
+        const prefix = r.replace('/*', '')
+        if (p === prefix || p.startsWith(prefix + '/') || p === r) return false
+      }
+      return true
+    })
   } else {
     // Legacy: single node toggle
     const idx = selectedScopes.value.indexOf(node.path)
@@ -105,17 +116,42 @@ function handleDirExpand(dir: string) {
   }
 }
 
-// 从目录树中收集所有路径
+// 通配符作用域输入
+const globScopeInput = ref('')
+
+function addGlobScope() {
+  const val = globScopeInput.value.trim()
+  if (!val) return
+  if (!selectedScopes.value.includes(val)) {
+    selectedScopes.value.push(val)
+    emitSelectedScopes()
+  }
+  globScopeInput.value = ''
+}
+
+function removeScopeByPath(path: string) {
+  const idx = selectedScopes.value.indexOf(path)
+  if (idx >= 0) {
+    selectedScopes.value.splice(idx, 1)
+    emitSelectedScopes()
+  }
+}
+
+// 从目录树中收集所有顶层路径（使用 glob 模式，不递归子目录避免字符串爆炸）
 function collectAllDirPaths(): string[] {
-  const allPaths: string[] = []
-  function collect(nodes: DirTreeNode[]) {
+  if (!stats.value?.directories) return []
+  const paths: string[] = []
+  function collect(nodes: DirTreeNode[], isRoot: boolean) {
     for (const node of nodes) {
-      allPaths.push(node.path)
-      if (node.children) collect(node.children)
+      if (isRoot) {
+        // 顶层目录使用 glob 模式
+        paths.push(node.path + '/*')
+      }
+      if (node.children) collect(node.children, false)
     }
   }
-  if (stats.value?.directories) collect(stats.value.directories)
-  return allPaths
+  collect(stats.value.directories, true)
+  return paths
 }
 
 // Select all directories
@@ -130,7 +166,14 @@ function invertDirs() {
   if (!stats.value?.directories) return
   const allPaths = collectAllDirPaths()
   const selected = new Set(selectedScopes.value)
-  selectedScopes.value = allPaths.filter(p => !selected.has(p))
+  // 清除所有已选目录（包括精确路径和子路径）
+  const toggled = []
+  for (const p of allPaths) {
+    const prefix = p.replace('/*', '')
+    const anySelected = [...selected].some(s => s === prefix || s === p || s.startsWith(prefix + '/'))
+    if (!anySelected) toggled.push(p)
+  }
+  selectedScopes.value = toggled
   emitSelectedScopes()
 }
 
@@ -298,6 +341,31 @@ loadStats().then(() => { initialLoadDone = true })
 
       <div class="selection-count">
         {{ t('analysis.selectedCount', { count: selectedScopes.length, total: stats?.totalDirs || 0 }) }}
+      </div>
+
+      <!-- 通配符作用域输入 -->
+      <div class="glob-scope-row">
+        <input
+          v-model="globScopeInput"
+          class="stats-input glob-scope-input"
+          :placeholder="t('analysis.globScopePlaceholder')"
+          @keydown.enter="addGlobScope"
+        />
+        <button class="text-btn" @click="addGlobScope" :disabled="!globScopeInput.trim()">
+          +
+        </button>
+      </div>
+      <div v-if="selectedScopes.some(s => s.includes('*') || s.includes('?'))" class="glob-scope-tags">
+        <span
+          v-for="(s, i) in selectedScopes.filter(s => s.includes('*') || s.includes('?'))"
+          :key="s"
+          class="glob-tag"
+        >
+          <code>{{ s }}</code>
+          <button class="tag-remove" @click="removeScopeByPath(s)">
+            <XMarkIcon class="w-3 h-3" />
+          </button>
+        </span>
       </div>
     </div>
 
@@ -502,6 +570,39 @@ loadStats().then(() => { initialLoadDone = true })
   color: var(--text-muted);
   padding: 8px;
   text-align: center;
+}
+
+.glob-scope-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.glob-scope-input {
+  flex: 1;
+}
+
+.glob-scope-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.glob-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.glob-tag code {
+  font-family: monospace;
+  font-size: 11px;
 }
 
 .stats-input {

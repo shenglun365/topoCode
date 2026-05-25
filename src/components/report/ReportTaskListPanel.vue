@@ -1,203 +1,159 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  PlayIcon,
-  PauseIcon,
-  StopIcon,
-  ArrowPathIcon,
-  TrashIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  ClockIcon,
-  SparklesIcon,
-} from '@heroicons/vue/24/outline'
-import { usePipelineStore } from '@/stores/pipeline'
+import { PlayIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import { usePipelineStore, type EdgeProgress } from '@/stores/pipeline'
+import { useProjectStore } from '@/stores/project'
+import { useFuncGroupStore } from '@/stores/funcGroup'
+import PipelineTaskTree from './PipelineTaskTree.vue'
 import type { PipelineTaskNode } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const store = usePipelineStore()
-const containerRef = ref<HTMLElement | null>(null)
+const projectStore = useProjectStore()
+const funcGroup = useFuncGroupStore()
 
-const containerWidth = ref(320)
+const props = defineProps<{ taskId: string; taskName?: string }>()
 
-const { showId, componentId } = useComponentId('RP-005')
+const projectId = computed(() => projectStore.selectedProjectId || '')
 
-function updateWidth() {
-  if (containerRef.value) {
-    containerWidth.value = containerRef.value.clientWidth
-  }
-}
+const state = computed(() => store.getTaskState(props.taskId))
 
-onMounted(() => {
-  updateWidth()
-  window.addEventListener('resize', updateWidth)
-})
-onUnmounted(() => {
-  window.removeEventListener('resize', updateWidth)
-})
+const rootTask = computed<PipelineTaskNode | null>(() => state.value?.rootTask ?? null)
+const progress = computed(() => state.value?.progress ?? 0)
 
-const maxNameLen = computed(() => {
-  const w = containerWidth.value
-  if (w < 250) return 10
-  if (w < 300) return 14
-  if (w < 350) return 18
-  if (w < 400) return 24
-  return 30
-})
-
-const leafTasks = computed(() => {
-  const result: { node: PipelineTaskNode; depth: number }[] = []
-  function walk(nodes: PipelineTaskNode[] | undefined, depth: number) {
-    if (!nodes) return
-    for (const n of nodes) {
-      if (n.children && n.children.length > 0) {
-        walk(n.children, depth + 1)
-      } else {
-        result.push({ node: n, depth })
-      }
+const leaves = computed(() => {
+  if (!rootTask.value) return []
+  const result: PipelineTaskNode[] = []
+  function walk(n: PipelineTaskNode) {
+    if (n.children && n.children.length > 0) {
+      n.children.forEach(walk)
+    } else {
+      result.push(n)
     }
   }
-  if (store.rootTask?.children) walk(store.rootTask.children, 0)
+  walk(rootTask.value)
   return result
 })
 
-function truncate(name: string): string {
-  if (name.length <= maxNameLen.value) return name
-  return name.slice(0, maxNameLen.value) + '…'
-}
-
-function statusIcon(status: string) {
-  switch (status) {
-    case 'completed': return CheckCircleIcon
-    case 'running': case 'queued': return ClockIcon
-    case 'error': return XCircleIcon
-    default: return ClockIcon
-  }
-}
-
-function statusClass(status: string): string {
-  switch (status) {
-    case 'completed': return 'task-completed'
-    case 'running': case 'queued': return 'task-running'
-    case 'error': return 'task-error'
-    default: return 'task-pending'
-  }
-}
+const totalCount = computed(() => leaves.value.length)
+const completedCount = computed(() => leaves.value.filter(n => n.status === 'completed' || n.status === 'skipped').length)
 
 const ctrl = computed(() => store.controls)
 
-function handleRunAll() { ctrl.value?.runAll() }
-function handlePause() { ctrl.value?.pause() }
-function handleResume() { ctrl.value?.resume() }
-function handleStop() { ctrl.value?.stop() }
-function handleReset() { ctrl.value?.reset() }
-function handleRetryTask(nodeId: string) {
-  const update = (node: PipelineTaskNode): boolean => {
-    if (node.id === nodeId) {
-      node.status = 'pending'
-      node.error = undefined
-      return true
-    }
-    if (node.children) for (const c of node.children) if (update(c)) return true
-    return false
-  }
-  if (store.rootTask) update(store.rootTask)
+const communityProgress = computed(() => store.getTaskState(props.taskId)?.communityProgress)
+
+const includeProgress = computed(() => {
+  const p = communityProgress.value?.INCLUDE
+  if (!p || p.total === 0) return null
+  return { ...p, pct: Math.round((p.completed / p.total) * 100) }
+})
+
+const callProgress = computed(() => {
+  const p = communityProgress.value?.CALL
+  if (!p || p.total === 0) return null
+  return { ...p, pct: Math.round((p.completed / p.total) * 100) }
+})
+
+function handleRunNode(nodeId: string) {
+  ctrl.value?.runNode(nodeId)
 }
-function handleCancelTask(nodeId: string) {
-  const update = (node: PipelineTaskNode): boolean => {
-    if (node.id === nodeId) {
-      if (node.status === 'running' || node.status === 'queued') {
-        node.status = 'skipped'
-      }
-      return true
-    }
-    if (node.children) for (const c of node.children) if (update(c)) return true
-    return false
+
+function openCommunityAnalysis() {
+  const ctx = funcGroup.context.analysis
+  const existing = ctx.tabs.find(
+    t => t.kind === 'componentAnalysis' && (t as any).taskId === props.taskId
+  )
+  if (existing) {
+    funcGroup.setActiveTab('analysis', existing.id)
+    return
   }
-  if (store.rootTask) update(store.rootTask)
+  funcGroup.openTab('analysis', {
+    id: `comp-analysis-${props.taskId}-${Date.now()}`,
+    kind: 'componentAnalysis',
+    title: t('report.pipeline.communityAnalysis'),
+    taskId: props.taskId,
+    projectId: projectId.value,
+  })
 }
+
+const { showId, componentId } = useComponentId('RP-005')
 </script>
 
 <template>
-  <div ref="containerRef" class="task-list-panel">
+  <div class="task-list-panel">
     <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <!-- 空状态 -->
-    <div v-if="!store.rootTask" class="tl-empty">
+    <div v-if="!rootTask" class="tl-empty">
       <SparklesIcon class="w-8 h-8" />
       <span>{{ t('report.taskList.empty') }}</span>
     </div>
 
     <template v-else>
-      <!-- 全局进度 -->
       <div class="tl-header">
+        <div v-if="taskName" class="tl-task-name">{{ taskName }}</div>
         <div class="tl-progress-row">
           <span class="tl-progress-label">{{ t('report.taskList.progress') }}:</span>
-          <span class="tl-progress-text">{{ store.completedCount }}/{{ store.totalCount }}</span>
+          <span class="tl-progress-text">{{ completedCount }}/{{ totalCount }}</span>
         </div>
         <div class="tl-progress-bar">
-          <div class="tl-progress-fill" :style="{ width: store.progress + '%' }"></div>
+          <div class="tl-progress-fill" :style="{ width: progress + '%' }"></div>
         </div>
       </div>
 
-      <!-- 全局操作 -->
-      <div class="tl-global-actions">
-        <button v-if="!store.running && store.progress === 0" class="btn btn-primary btn-xs" @click="handleRunAll">
-          <PlayIcon class="w-3 h-3" /> {{ t('report.taskList.startAll') }}
-        </button>
-        <template v-if="store.running">
-          <button v-if="!store.paused" class="btn btn-warning btn-xs" @click="handlePause">
-            <PauseIcon class="w-3 h-3" /> {{ t('common.pause') }}
-          </button>
-          <button v-else class="btn btn-primary btn-xs" @click="handleResume">
-            <PlayIcon class="w-3 h-3" /> {{ t('common.resume') }}
-          </button>
-          <button class="btn btn-ghost btn-xs" @click="handleStop">
-            <StopIcon class="w-3 h-3" /> {{ t('report.taskList.stop') }}
-          </button>
-        </template>
-        <template v-if="store.progress > 0 && !store.running">
-          <button class="btn btn-ghost btn-xs" @click="handleReset">
-            <ArrowPathIcon class="w-3 h-3" /> {{ t('common.reset') }}
-          </button>
-        </template>
-      </div>
-
-      <!-- 任务列表 -->
-      <div class="tl-tasks">
-        <div
-          v-for="{ node, depth } in leafTasks"
-          :key="node.id"
-          :class="['tl-task-row', statusClass(node.status)]"
-          :style="{ paddingLeft: (8 + depth * 12) + 'px' }"
+      <div class="tl-tree">
+        <PipelineTaskTree
+          :node="rootTask"
+          @action="handleRunNode"
+          @open-community-analysis="openCommunityAnalysis"
         >
-          <Component :is="statusIcon(node.status)" class="tl-task-icon" />
-          <span class="tl-task-name" :title="node.label">
-            {{ truncate(node.label) }}
-          </span>
-          <span v-if="node.status === 'running' && node.progress > 0" class="tl-task-progress">
-            {{ node.progress }}%
-          </span>
-          <div class="tl-task-actions">
+          <template #actions="{ node }">
             <button
-              v-if="node.status === 'error'"
-              class="btn btn-ghost btn-xs"
-              @click.stop="handleRetryTask(node.id)"
-              :title="t('common.retry')"
+              v-if="(!node.children || node.children.length === 0) && !['community_analysis', 'validation'].includes(node.id)"
+              class="btn btn-xs btn-ghost task-step-btn"
+              :title="node.status === 'completed' ? t('common.retry') : t('common.start')"
+              @click.stop="handleRunNode(node.id)"
             >
-              <ArrowPathIcon class="w-2.5 h-2.5" />
+              <PlayIcon v-if="node.status !== 'completed' && node.status !== 'error'" class="w-2.5 h-2.5" />
+              <ArrowPathIcon v-else class="w-2.5 h-2.5" />
             </button>
             <button
-              v-if="node.status === 'running' || node.status === 'queued'"
-              class="btn btn-ghost btn-xs"
-              @click.stop="handleCancelTask(node.id)"
-              :title="t('report.taskList.cancel')"
+              v-if="node.id === 'validation'"
+              class="btn btn-xs btn-ghost task-step-btn"
+              :title="node.status === 'error' ? t('common.retry') : t('report.pipeline.testConnection')"
+              @click.stop="handleRunNode(node.id)"
             >
-              <StopIcon class="w-2.5 h-2.5" />
+              <PlayIcon v-if="node.status !== 'completed' && node.status !== 'error'" class="w-2.5 h-2.5" />
+              <ArrowPathIcon v-else class="w-2.5 h-2.5" />
             </button>
-          </div>
-        </div>
+          </template>
+          <template #content="{ node }">
+            <div v-if="node.id === 'community_analysis'" class="ca-monitor">
+              <div v-if="includeProgress" class="ca-row">
+                <span class="ca-label">依赖分组</span>
+                <div class="ca-bar"><div class="ca-fill" :style="{ width: includeProgress.pct + '%' }"></div></div>
+                <span class="ca-text">
+                  <template v-if="includeProgress.running > 0">
+                    {{ includeProgress.completed }}/{{ includeProgress.total }}
+                    <span class="ca-running">+{{ includeProgress.running }}</span>
+                  </template>
+                  <template v-else>{{ includeProgress.completed }}/{{ includeProgress.total }}</template>
+                </span>
+              </div>
+              <div v-if="callProgress" class="ca-row">
+                <span class="ca-label">调用分组</span>
+                <div class="ca-bar"><div class="ca-fill" :style="{ width: callProgress.pct + '%' }"></div></div>
+                <span class="ca-text">
+                  <template v-if="callProgress.running > 0">
+                    {{ callProgress.completed }}/{{ callProgress.total }}
+                    <span class="ca-running">+{{ callProgress.running }}</span>
+                  </template>
+                  <template v-else>{{ callProgress.completed }}/{{ callProgress.total }}</template>
+                </span>
+              </div>
+            </div>
+          </template>
+        </PipelineTaskTree>
       </div>
     </template>
   </div>
@@ -228,14 +184,27 @@ function handleCancelTask(nodeId: string) {
   border-bottom: 1px solid var(--border);
 }
 
+.tl-task-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tl-progress-row {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 4px;
 }
 
-.tl-progress-label { color: var(--text-muted); font-size: 10px; }
-.tl-progress-text { color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; }
+.tl-progress-label { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.tl-progress-text { color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
 
 .tl-progress-bar {
   height: 4px;
@@ -251,66 +220,57 @@ function handleCancelTask(nodeId: string) {
   transition: width 0.3s;
 }
 
-.tl-global-actions {
-  display: flex;
-  gap: 4px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.tl-tasks {
+.tl-tree {
   flex: 1;
   overflow-y: auto;
   padding: 4px 0;
 }
 
-.tl-task-row {
+.task-step-btn {
+  padding: 1px 4px;
+  opacity: 0.5;
+}
+.task-step-btn:hover { opacity: 1; }
+
+.ca-monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 0 2px;
+}
+.ca-row {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 8px;
-  cursor: default;
-  transition: background 0.1s;
-}
-
-.tl-task-row:hover { background: var(--bg-tertiary); }
-
-.tl-task-icon { width: 12px; height: 12px; flex-shrink: 0; }
-.task-completed .tl-task-icon { color: var(--success); }
-.task-running .tl-task-icon { color: var(--accent); animation: pulse 1.5s infinite; }
-.task-error .tl-task-icon { color: var(--error); }
-.task-pending .tl-task-icon { color: var(--text-muted); }
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.tl-task-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
-  font-size: 10px;
-  min-width: 0;
-}
-
-.tl-task-progress {
   font-size: 9px;
+}
+.ca-label {
   color: var(--text-muted);
+  white-space: nowrap;
+  width: 52px;
+  flex-shrink: 0;
+}
+.ca-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ca-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.ca-text {
+  color: var(--text-secondary);
   font-family: var(--font-mono);
-  flex-shrink: 0;
+  white-space: nowrap;
+  min-width: 36px;
+  text-align: right;
 }
-
-.tl-task-actions {
-  display: flex;
-  gap: 2px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
+.ca-running {
+  color: var(--accent);
 }
-
-.tl-task-row:hover .tl-task-actions { opacity: 1; }
 </style>

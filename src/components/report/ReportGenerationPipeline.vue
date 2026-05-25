@@ -7,7 +7,6 @@ import {
   XCircleIcon,
   ArrowPathIcon,
   SparklesIcon,
-  DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
 import { useProjectStore } from '@/stores/project'
@@ -50,15 +49,11 @@ function createInitialTree(): PipelineTaskNode {
         progress: 0,
       },
       {
-        id: 'preprocessing',
+        id: 'project_summary',
         label: t('report.pipeline.preprocessing'),
-        type: 'group',
+        type: 'step',
         status: 'pending',
         progress: 0,
-        children: [
-          { id: 'readme_deps', label: t('report.pipeline.extractReadmeDeps'), type: 'subtask', status: 'pending', progress: 0 },
-          { id: 'project_summary_gen', label: t('report.pipeline.generateProjectSummary'), type: 'subtask', status: 'pending', progress: 0 },
-        ],
       },
       {
         id: 'community_analysis',
@@ -69,7 +64,7 @@ function createInitialTree(): PipelineTaskNode {
       },
       {
         id: 'step1', label: t('report.pipeline.projectSummary'), type: 'step', status: 'pending', progress: 0,
-        templateId: 'report_project_summary', dependsOn: ['preprocessing'],
+        templateId: 'report_project_summary', dependsOn: ['project_summary'],
       },
       {
         id: 'step2', label: t('report.pipeline.archDecomposition'), type: 'step', status: 'pending', progress: 0,
@@ -117,9 +112,6 @@ const isPaused = ref(saved?.paused ?? false)
 const stepOutputs = ref<Record<string, string>>(saved?.stepOutputs || {})
 
 // 项目摘要生成状态
-const summaryGenerating = ref(false)
-const summaryResult = ref<string | null>(null)
-const summaryError = ref<string | null>(null)
 
 const allCompleted = computed(() => {
   return rootTask.value.children?.every(n => n.status === 'completed' || n.status === 'skipped')
@@ -159,12 +151,14 @@ function recalcProgress() {
 }
 
 function syncStore() {
+  const existing = pipelineStore.getTaskState(props.taskId)
   pipelineStore.updateTaskState(props.taskId, {
     rootTask: JSON.parse(JSON.stringify(rootTask.value)),
     running: running.value,
     paused: isPaused.value,
     progress: overallProgress.value,
     stepOutputs: { ...stepOutputs.value },
+    communityProgress: existing?.communityProgress,
   })
 }
 
@@ -332,22 +326,21 @@ async function runAll() {
   }
   updateNodeStatus('validation', 'completed')
 
-  // Phase 1: Preprocessing (README + deps only — no LLM for source files)
-  updateNodeStatus('preprocessing', 'running')
-  updateNodeStatus('readme_deps', 'running')
+  // Phase 1: Project summary (read README, extract deps, generate summary)
+  updateNodeStatus('project_summary', 'running')
   const pid = projectStore.selectedProjectId
   if (pid) {
     try {
       await window.api.report.getReadmeContent({ projectId: pid })
       await window.api.report.extractDependencyFiles({ projectId: pid })
-      updateNodeStatus('readme_deps', 'completed')
+      const result = await window.api.report.generateProjectSummary({ projectId: pid })
+      updateNodeStatus('project_summary', result?.summary ? 'completed' : 'error')
     } catch (e: any) {
-      updateNodeStatus('readme_deps', 'skipped', e.message)
+      updateNodeStatus('project_summary', 'error', e.message)
     }
   } else {
-    updateNodeStatus('readme_deps', 'skipped')
+    updateNodeStatus('project_summary', 'skipped')
   }
-  updateNodeStatus('preprocessing', 'completed')
   recalcProgress()
 
   // Phase 2: Community analysis — mark as offering (user runs via separate UI)
@@ -420,42 +413,87 @@ function reset() {
   syncStore()
 }
 
-// 手动触发: 生成项目摘要 (调用 LLM)
-async function generateProjectSummary() {
+// 进入任务列表时校验项目摘要是否已存在
+async function checkExistingSummary() {
   const pid = props.projectId || projectStore.selectedProjectId
-  console.log('[RP-002] generateProjectSummary called, pid:', pid, 'props.projectId:', props.projectId, 'store.selectedProjectId:', projectStore.selectedProjectId)
-  if (!pid) {
-    console.warn('[RP-002] generateProjectSummary aborted: no projectId')
-    return
-  }
-  summaryGenerating.value = true
-  summaryError.value = null
-  summaryResult.value = null
-  updateNodeStatus('project_summary_gen', 'running')
+  if (!pid) return
   try {
-    console.log('[RP-002] invoking window.api.report.generateProjectSummary...')
-    const result = await window.api.report.generateProjectSummary({ projectId: pid })
-    console.log('[RP-002] generateProjectSummary result:', result)
+    const result = await window.api.report.getProjectSummary({ projectId: pid })
     if (result?.summary) {
-      summaryResult.value = result.summary
-      updateNodeStatus('project_summary_gen', 'completed')
-    } else {
-      console.warn('[RP-002] generateProjectSummary empty result')
-      throw new Error('Empty summary')
+      const node = rootTask.value.children?.find(n => n.id === 'project_summary')
+      if (node && node.status === 'pending') {
+        node.status = 'completed'
+        recalcProgress()
+        syncStore()
+      }
     }
-  } catch (e: any) {
-    console.error('[RP-002] generateProjectSummary error:', e)
-    summaryError.value = e.message || String(e)
-    updateNodeStatus('project_summary_gen', 'error', summaryError.value!)
-  } finally {
-    summaryGenerating.value = false
-    recalcProgress()
+  } catch (e) {
+    // 摘要不存在，保持 pending 状态
   }
+}
+
+async function runNode(nodeId: string) {
+  const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
+    if (node.id === nodeId) return node
+    if (node.children) for (const c of node.children) { const r = find(c); if (r) return r }
+    return undefined
+  }
+  const node = find(rootTask.value)
+  if (!node) return
+
+  running.value = true
+  isPaused.value = false
+
+  if (nodeId === 'validation') {
+    const mid = settingsStore.models.find(m => m.isDefault)?.id
+    if (!mid) {
+      node.status = 'error'
+      node.error = t('report.llmNotConfigured')
+    } else {
+      try {
+        node.status = 'running'
+        await window.api.settings.testModel(mid)
+        node.status = 'completed'
+      } catch (e: any) {
+        node.status = 'error'
+        node.error = e.message || 'Connection failed'
+      }
+    }
+    recalcProgress()
+  } else if (nodeId === 'project_summary') {
+    const pid = projectStore.selectedProjectId
+    if (!pid) { node.status = 'skipped'; recalcProgress(); syncStore(); return }
+    try {
+      node.status = 'running'
+      await window.api.report.getReadmeContent({ projectId: pid })
+      await window.api.report.extractDependencyFiles({ projectId: pid })
+      const result = await window.api.report.generateProjectSummary({ projectId: pid })
+      node.status = result?.summary ? 'completed' : 'error'
+      if (!result?.summary) node.error = 'Empty summary'
+    } catch (e: any) { node.status = 'error'; node.error = e.message }
+    recalcProgress()
+  } else if (nodeId === 'community_analysis') {
+    node.status = 'running'
+    try {
+      const levels = await window.api.analysis.getCascadeLevels(props.taskId, 'CALL')
+      node.status = (levels?.levels?.length) ? 'completed' : 'skipped'
+    } catch { node.status = 'skipped' }
+    recalcProgress()
+  } else if (['step1','step2','step3','step4','step5'].includes(nodeId)) {
+    node.status = 'pending'
+    node.error = undefined
+    await runStep(node)
+  }
+
+  running.value = false
+  recalcProgress()
+  syncStore()
 }
 
 onMounted(() => {
   syncStore()
-  pipelineStore.registerControls({ runAll, pause, resume, reset, stop })
+  pipelineStore.registerControls({ runAll, runNode, pause, resume, reset, stop })
+  checkExistingSummary()
 })
 
 onUnmounted(() => {
@@ -478,16 +516,6 @@ onUnmounted(() => {
           <div class="progress-fill" :style="{ width: overallProgress + '%' }"></div>
         </div>
         <span class="progress-text">{{ overallProgress }}%</span>
-        <button
-          class="btn btn-xs btn-outline"
-          :disabled="summaryGenerating"
-          :title="t('report.pipeline.generateProjectSummaryHint')"
-          @click="generateProjectSummary"
-        >
-          <DocumentTextIcon v-if="!summaryGenerating" class="w-3 h-3" />
-          <span v-if="summaryGenerating" class="spinner-xs"></span>
-          <span>{{ summaryGenerating ? t('common.generating') : t('report.pipeline.generateProjectSummary') }}</span>
-        </button>
       </div>
     </div>
 

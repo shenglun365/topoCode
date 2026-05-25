@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated } from 'vue'
+import { computed, onActivated, onDeactivated, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChartBarIcon } from '@heroicons/vue/24/outline'
+import { ChartBarIcon, ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
+import CommunityAnalysisPipeline from '@/components/report/CommunityAnalysisPipeline.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-002')
@@ -21,7 +22,7 @@ const activeTab = computed(() => {
   return ctx.tabs.find(t => t.id === ctx.activeTabId) || null;
 })
 const reportTabs = computed(() => {
-  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome');
+  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome' || t.kind === 'componentAnalysis');
 })
 
 function onTabUpdate(tabId: string | null) {
@@ -34,6 +35,7 @@ function onTabClose(tabId: string) {
 
 const isReportHomeTab = computed(() => activeTab.value?.kind === 'reportHome')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
+const isComponentAnalysisTab = computed(() => activeTab.value?.kind === 'componentAnalysis')
 
 /* ===== 状态持久化 ===== */
 function saveAnalysisState() {
@@ -54,6 +56,23 @@ onDeactivated(() => {
 
 // 子文档“返回报告”按钮：切换到所属报告的 reportHome tab
 function goToReportHome() {
+  const tab = activeTab.value
+  if (!tab) return
+  const taskId = (tab as any).taskId
+  if (!taskId) {
+    onTabClose(tab.id)
+    return
+  }
+  const homeTab = analysisContext.value.tabs.find(t => t.kind === 'reportHome' && (t as any).taskId === taskId)
+  if (homeTab) {
+    funcGroup.setActiveTab('analysis', homeTab.id)
+  } else {
+    onTabClose(tab.id)
+  }
+}
+
+// 组件 AI 分析“返回”按钮：切换到对应的 reportHome tab
+function goBackFromCompAnalysis() {
   const tab = activeTab.value
   if (!tab) return
   const taskId = (tab as any).taskId
@@ -116,6 +135,24 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
       />
     </template>
 
+    <template v-else-if="isComponentAnalysisTab && activeTab">
+      <div class="comp-analysis-container">
+        <div class="comp-analysis-header">
+          <button class="btn btn-ghost btn-sm" @click="goBackFromCompAnalysis">
+            <ArrowLeftIcon class="w-3.5 h-3.5" />
+            <span>{{ t('common.back') }}</span>
+          </button>
+          <span class="comp-analysis-title">{{ activeTab.title }}</span>
+        </div>
+        <div class="comp-analysis-body">
+          <CommunityAnalysisPipeline
+            :task-id="activeTab.taskId!"
+            :project-id="activeTab.projectId || projectStore.selectedProjectId || ''"
+          />
+        </div>
+      </div>
+    </template>
+
     <template v-else>
       <div class="analysis-empty">
         <ChartBarIcon class="w-16 h-16" />
@@ -152,6 +189,34 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
 
 .analysis-empty .desc {
   font-size: 12px;
+}
+
+.comp-analysis-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.comp-analysis-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
+.comp-analysis-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.comp-analysis-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
 }
 
 </style>

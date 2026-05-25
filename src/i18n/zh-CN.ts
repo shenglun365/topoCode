@@ -331,6 +331,10 @@ export default {
     syncFailed: '同步失败',
     analysisComplete: '导入完成',
     analysisInProgress: '分析中 65%',
+    importing: '导入中...',
+    importDirHint: '支持本地源码目录导入',
+    importScanning: '正在扫描文件...',
+    importWriting: '正在写入数据...',
     noProjects: '暂无项目',
     importHint: '拖拽项目文件夹到此处或点击选择',
     selectFolder: '选择文件夹',
@@ -490,7 +494,7 @@ export default {
     projectSummary: '项目概要',
     taskSummary: '任务概要',
     fileDistribution: '文件分布',
-    communitySummary: '社区概要',
+    communitySummary: '组件概要',
     generateReport: '生成报告',
     startGeneration: '开始生成',
     viewReport: '查看报告',
@@ -507,9 +511,10 @@ export default {
       aiChat: 'AI 聊天',
       taskList: '任务列表',
     },
+    openTaskList: '打开任务列表',
     // 任务列表面板
     taskList: {
-      empty: '暂无任务，点击"开始生成"启动',
+      empty: '暂无任务，展开流水线后显示',
       progress: '进度',
       startAll: '开始全部',
       stop: '终止',
@@ -517,7 +522,7 @@ export default {
     },
     // 流水线
     pipeline: {
-      communityAnalysis: '社区 AI 分析',
+      communityAnalysis: '组件 AI 分析',
       batchSize: '批大小',
       analyzeSelected: '分析选中 ({n})',
       pause: '暂停',
@@ -528,7 +533,7 @@ export default {
       granularity: '粒度',
       noLevels: '该边缘类型无可用层级',
       noCommunities: '该层级无社区数据',
-      communityId: '社区 ID',
+      communityId: '组件 ID',
       nodes: '节点',
       edges: '边',
       quality: '质量分',
@@ -557,6 +562,7 @@ export default {
       summaryGenerateFailed: '项目摘要生成失败',
       noProject: '未选择项目',
       noCommunityData: '暂无社区数据，请先完成社区检测分析',
+      testConnection: '测试连接',
     },
     you: '你',
     ai: 'AI',
@@ -664,6 +670,7 @@ export default {
     stringMatch: '字符串匹配',
     regexMatch: '正则表达式',
     patternPlaceholder: '输入匹配模式，如 src/** 或 ^lib/.*\\.py$',
+    globScopePlaceholder: '通配符路径，如 src/*/test 回车添加',
     totalFiles: '共 {total} 文件 / {dirs} 目录',
 
     // TaskCreateForm

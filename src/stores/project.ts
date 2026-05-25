@@ -13,7 +13,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager' | 'componentAnalysis'
 
 export interface HomeTab {
   id: string
@@ -40,6 +40,9 @@ export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([])
   const loading = ref(false)
   const selectedFile = ref<FileTreeNode | null>(null)
+  const importProgress = ref<number | null>(null)
+  const importing = ref(false)
+  const importStatus = ref<'scan' | 'write' | 'done' | ''>('')
 
   // 委托给 funcGroup store（首页功能组）
   const funcGroup = useFuncGroupStore()
@@ -73,8 +76,27 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  // 导入进度监听器
+  let importProgressCleanup: (() => void) | null = null
+
+  function initImportListener() {
+    if (importProgressCleanup) return
+    importProgressCleanup = window.api.on('event:project.import.progress', (data: any) => {
+      importProgress.value = data.progress
+      importStatus.value = data.phase || ''
+      if (data.progress >= 100) {
+        importing.value = false
+        importProgress.value = null
+        importStatus.value = ''
+      }
+    })
+  }
+
   async function importProject(path: string) {
-    loading.value = true
+    initImportListener()
+    importing.value = true
+    importProgress.value = 0
+    importStatus.value = 'scan'
     try {
       // ipc.project.import() 已通过 adaptProject 完成 snake→camel 转换
       const project = await ipc.project.import(path)
@@ -82,13 +104,21 @@ export const useProjectStore = defineStore('project', () => {
       projects.value.push(project)
       return project
     } finally {
-      loading.value = false
+      // 等待 backend 发布 100% 事件后再重置
+      setTimeout(() => {
+        if (importProgress.value !== 100) {
+          importing.value = false
+          importProgress.value = null
+          importStatus.value = ''
+        }
+      }, 3000)
     }
   }
 
   async function selectProject(id: string) {
-    // 委托给 funcGroup store（首页功能组）
+    // 委托给 funcGroup store（首页+分析功能组）
     funcGroup.selectProject('home', id)
+    funcGroup.selectProject('analysis', id)
     if (selectedProjectId.value !== id) {
       selectedFile.value = null
     }
@@ -107,6 +137,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function deselectProject() {
     funcGroup.deselectProject('home')
+    funcGroup.deselectProject('analysis')
     selectedFile.value = null
   }
 
@@ -405,6 +436,9 @@ export const useProjectStore = defineStore('project', () => {
     currentProjectTabs,
     loadProjects,
     importProject,
+    importProgress,
+    importing,
+    importStatus,
     selectProject,
     deselectProject,
     removeProject,

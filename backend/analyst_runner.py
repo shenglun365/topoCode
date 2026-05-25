@@ -151,6 +151,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     scopes = task.get("scopes") or []
     extensions = task.get("extensions") or []
     exclude_dirs = task.get("exclude_dirs") or []
+    pattern_type = task.get("pattern_type")
+    pattern = task.get("pattern")
     report_types = task.get("report_types") or []
 
     # 获取项目根路径
@@ -164,6 +166,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         scopes=scopes,
         extensions=extensions,
         exclude_dirs=exclude_dirs,
+        pattern_type=pattern_type,
+        pattern=pattern,
     )
     total = len(files)
     logger.info(f"[PARSE] 共 {total} 个文件待分析")

@@ -71,6 +71,7 @@ export class PythonBridge {
         // 读取端口配置 (从 Electron store)
         const dealerPort = 5671  // TODO: 从 store 读取
         const pubPort = 5680
+        const httpPort = 3456    // Web 服务端口
 
         // 启动前检查端口占用 — 如果有残留 Python 进程占用端口，先清理
         this.checkAndKillPortOccupant(dealerPort)
@@ -80,7 +81,7 @@ export class PythonBridge {
           ? join(process.resourcesPath, 'backend')
           : join(__dirname, '../../backend')
 
-        this.process = spawn(python, [this.pythonScript, this.dbPath], {
+        this.process = spawn(python, [this.pythonScript, this.dbPath, '--http-port', String(httpPort)], {
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,

@@ -208,7 +208,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         # 单次遍历：同时完成语言检测和文件扫描
         logger.info(f"[import] 开始扫描文件...")
         scan_t0 = time.time()
-        file_count, language = await _scan_and_import(project_db, path, gitignore)
+        file_count, language = await _scan_and_import(project_db, path, gitignore, server, project_id)
         scan_elapsed = time.time() - scan_t0
         logger.info(f"[import] 扫描完成: {file_count} 个文件, 主语言={language}, 耗时 {scan_elapsed:.2f}s")
 
@@ -227,6 +227,12 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "last_sync": now,
         })
 
+        server.publish("project", "import.progress", {
+            "path": path,
+            "progress": 100,
+            "fileCount": file_count,
+            "phase": "done",
+        })
         total_elapsed = time.time() - t0
         logger.info(f"[import] ===== 导入完成: {project_id}, {file_count} 文件, 总耗时 {total_elapsed:.2f}s =====")
 
@@ -1143,7 +1149,7 @@ def register_render_methods(server: ZMQServer, multi_db: MultiDBManager):
 
 # ==================== 辅助函数 ====================
 
-async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParser | None = None) -> tuple:
+async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParser | None = None, server=None, project_id: str = "") -> tuple:
     """
     单次遍历完成语言检测 + 文件扫描 + 事务批量写入
     返回 (file_count, primary_language)
@@ -1197,7 +1203,16 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
             if file_count % 500 == 0 and file_count > 0:
                 await asyncio.sleep(0)
                 elapsed = time.time() - scan_t0
-                logger.info(f"[import] 扫描进度: {file_count} 文件, {dir_count} 目录, {ignored_count} 忽略, 耗时 {elapsed:.1f}s")
+                progress_pct = min(int(file_count / total_estimate * 100), 99)
+                logger.info(f"[import] 扫描进度: {file_count}/{total_estimate} ({progress_pct}%), {dir_count} 目录, {ignored_count} 忽略, 耗时 {elapsed:.1f}s")
+                if server and project_id:
+                    server.publish("project", "import.progress", {
+                        "path": root_path,
+                        "progress": progress_pct,
+                        "fileCount": file_count,
+                        "totalEstimate": total_estimate,
+                        "phase": "scan",
+                    })
 
             rel_path = os.path.relpath(entry.path, root_path)
 
@@ -1248,6 +1263,19 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 # 递归扫描子目录
                 await _scan_dir(entry.path, rel_path)
 
+    # 快速统计总文件数（用于进度百分比）
+    total_estimate = 0
+    logger.info(f"[import] 快速估算文件总数...")
+    try:
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            total_estimate += len(filenames)
+    except Exception:
+        total_estimate = 0
+    if total_estimate > 0:
+        logger.info(f"[import] 估算总文件数: {total_estimate}")
+    else:
+        total_estimate = 1  # 避免除零
+
     # 执行扫描
     logger.info(f"[import] 开始递归扫描目录: {root_path}")
     await _scan_dir(root_path)
@@ -1278,6 +1306,17 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 batch_num = i // BATCH_SIZE + 1
                 elapsed = time.time() - write_t0
                 logger.info(f"[import] 写入进度: 批次 {batch_num}/{num_batches}, 已写入 {min(i + BATCH_SIZE, len(batch_records))}/{len(batch_records)}, 耗时 {elapsed:.2f}s")
+                if server and project_id:
+                    write_pct = int(batch_num / num_batches * 10) + 90  # 90→100
+                    server.publish("project", "import.progress", {
+                        "path": root_path,
+                        "progress": min(write_pct, 99),
+                        "fileCount": file_count,
+                        "totalEstimate": total_estimate,
+                        "phase": "write",
+                        "batch": batch_num,
+                        "totalBatches": num_batches,
+                    })
             project_db.execute("COMMIT")
             write_elapsed = time.time() - write_t0
             logger.info(f"[import] 批量写入完成, 总耗时 {write_elapsed:.2f}s")

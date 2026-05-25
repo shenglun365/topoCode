@@ -179,6 +179,9 @@ app.whenReady().then(async () => {
         data: event.data,
       }
       windowManager.broadcast('zmq:event', payload)
+    } else if (event.topic === 'project' || event.topic === 'task') {
+      // 项目/任务事件（如 import.progress, syncing, task.progress 等）转发到渲染进程
+      windowManager.broadcast(`event:${event.topic}.${event.eventType}`, event.data)
     }
   })
 

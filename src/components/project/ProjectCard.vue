@@ -566,6 +566,9 @@ function languageBadge(lang: string): string {
     Rust: 'badge-orange',
     Java: 'badge-red',
     Vue: 'badge-emerald',
+    HTML: 'badge-orange',
+    C: 'badge-blue',
+    'C++': 'badge-purple',
   }
   return map[lang] || 'badge-gray'
 }

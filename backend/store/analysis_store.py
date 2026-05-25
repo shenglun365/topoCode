@@ -5,6 +5,7 @@ AnalysisStore — 项目库 CRUD 操作
 """
 import json
 import logging
+import re
 from typing import Optional, List, Dict
 
 from config import BATCH_INSERT_SIZE
@@ -52,16 +53,31 @@ class AnalysisStore:
         """
         获取源文件列表（应用过滤条件）
 
+        scopes 支持 glob 通配符: *, ?, ** （含 * 或 ? 时按 glob 匹配，否则按前缀匹配）
+        pattern_type: 'glob' | 'regex' | None
+        pattern: 匹配 file_path 的 glob/regex 模式
+
         Returns:
             [{"id", "file_path", "file_name", "language", "size", ...}, ...]
         """
         conditions = ["language != 'directory'"]
         params = []
 
+        wildcard_scopes = []
         if scopes:
-            or_clauses = " OR ".join(["file_path LIKE ?"] * len(scopes))
-            conditions.append(f"({or_clauses})")
-            params.extend([f"{s}%" if not s.endswith("%") else s for s in scopes])
+            scope_conditions = []
+            for s in scopes:
+                if '*' in s or '?' in s:
+                    wildcard_scopes.append(s)
+                    # LIKE 粗略预过滤（通配符转 %），缩小结果集
+                    like_pat = s.replace('**', '%').replace('*', '%').replace('?', '_')
+                    scope_conditions.append("file_path LIKE ?")
+                    params.append(like_pat)
+                else:
+                    scope_conditions.append("file_path LIKE ?")
+                    params.append(f"{s}%" if not s.endswith("%") else s)
+            if scope_conditions:
+                conditions.append(f"({' OR '.join(scope_conditions)})")
 
         if extensions:
             ext_clauses = " OR ".join(["language = ?"] * len(extensions))
@@ -73,12 +89,39 @@ class AnalysisStore:
                 conditions.append("file_path NOT LIKE ?")
                 params.append(f"%{d}%")
 
+        # pattern 过滤（glob/regex）— 先执行 SQL 获取初集，再后过滤
+        use_pattern = pattern and pattern_type in ('glob', 'regex')
+
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = self._db.execute(
             f"SELECT * FROM source_files WHERE {where}",
             params,
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+
+        # 通配符 scope 后过滤（fnmatch 精确匹配）
+        if wildcard_scopes:
+            import fnmatch
+            def _matches_any_scope(file_path: str) -> bool:
+                for ws in wildcard_scopes:
+                    if fnmatch.fnmatch(file_path, ws):
+                        return True
+                return False
+            result = [f for f in result if _matches_any_scope(f.get("file_path", ""))]
+
+        # pattern 后过滤
+        if use_pattern:
+            if pattern_type == 'glob':
+                import fnmatch
+                result = [f for f in result if fnmatch.fnmatch(f.get("file_path", ""), pattern)]
+            elif pattern_type == 'regex':
+                try:
+                    prog = re.compile(pattern)
+                    result = [f for f in result if prog.search(f.get("file_path", ""))]
+                except re.error:
+                    pass  # 无效正则，忽略
+
+        return result
 
     def get_file_by_path(self, file_path: str) -> Optional[Dict]:
         row = self._db.execute(
