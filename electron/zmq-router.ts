@@ -83,6 +83,7 @@ export class ZMQRouter extends EventEmitter {
 
   /** 发送 RPC 请求 */
   async call<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
+    console.log(`[ZMQ] call -> ${method}`, params)
     const requestId = `req-${++this.requestCounter}`
 
     return new Promise<T>((resolve, reject) => {

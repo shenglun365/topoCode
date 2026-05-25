@@ -581,6 +581,17 @@ class LLMService:
 
         return {'success': True, 'data': data}
 
+    async def sync_chat(
+        self,
+        messages: List[Dict[str, str]],
+        model_id: str,
+    ) -> str:
+        """同步非流式调用 LLM，直接返回文本内容"""
+        model = _get_model_by_id(self.multi_db, model_id)
+        if not model:
+            raise ValueError(f"Model not found: {model_id}")
+        return await self._sync_call_for_retry(model, messages, 'chat', None, None)
+
     async def _sync_call_for_retry(
         self,
         model: Dict[str, Any],
@@ -766,7 +777,7 @@ def _sync_stream_ollama(
         'temperature': payload.get('options', {}).get('temperature'),
         'num_predict': payload.get('options', {}).get('num_predict'),
         'messages': [
-            {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:200]}
+            {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:3000]}
             for m in payload.get('messages', [])
         ],
     }
@@ -857,7 +868,7 @@ def _sync_stream_openai(
         'max_tokens': payload.get('max_tokens'),
         'tools': list(payload.get('tools', [])) if payload.get('tools') else None,
         'messages': [
-            {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:200]}
+            {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:3000]}
             for m in payload.get('messages', [])
         ],
     }

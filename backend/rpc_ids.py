@@ -107,6 +107,8 @@ RPC_IDS: dict[str, str] = {
     "report.getSubDoc":             "API-080",
     "report.updateSubDoc":          "API-081",
     "report.deleteSubDoc":          "API-082",
+    "report.generateProjectSummary": "API-106",
+    "report.getProjectSummary":      "API-107",
 
     # ── session ───────────────────────────────────────────────
     "session.list":                 "API-083",

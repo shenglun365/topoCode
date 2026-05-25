@@ -88,14 +88,21 @@ const sortHistory = ref<SortRule[]>([])
 
 // 加载项目概要（从库中读取，非 LLM 原始内容）
 async function loadProjectContext() {
-  const pid = pid.value
-  if (!pid) return
+  const projectId = pid.value
+  console.log('[CAP] loadProjectContext: projectId=', projectId, 'props.projectId=', props.projectId, 'store.selectedProjectId=', projectStore.selectedProjectId)
+  if (!projectId) {
+    console.warn('[CAP] loadProjectContext: pid is empty, skipping')
+    return
+  }
   try {
-    const result = await window.api.report.getProjectSummary({ projectId: pid })
+    const result = await window.api.report.getProjectSummary({ projectId })
+    console.log('[CAP] loadProjectContext: result.summary_exists=', !!result?.summary, 'summary_len=', result?.summary?.length)
     if (result?.summary) {
       projectContext.value = `## 项目概要\n${result.summary}`
+      console.log('[CAP] loadProjectContext: summary loaded, len=', result.summary.length)
     } else {
       projectContext.value = ''
+      console.warn('[CAP] loadProjectContext: summary is empty in DB')
     }
   } catch (e) {
     console.warn('[CAP] loadProjectContext failed:', e)

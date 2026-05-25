@@ -422,21 +422,29 @@ function reset() {
 
 // 手动触发: 生成项目摘要 (调用 LLM)
 async function generateProjectSummary() {
-  const pid = projectStore.selectedProjectId
-  if (!pid) return
+  const pid = props.projectId || projectStore.selectedProjectId
+  console.log('[RP-002] generateProjectSummary called, pid:', pid, 'props.projectId:', props.projectId, 'store.selectedProjectId:', projectStore.selectedProjectId)
+  if (!pid) {
+    console.warn('[RP-002] generateProjectSummary aborted: no projectId')
+    return
+  }
   summaryGenerating.value = true
   summaryError.value = null
   summaryResult.value = null
   updateNodeStatus('project_summary_gen', 'running')
   try {
+    console.log('[RP-002] invoking window.api.report.generateProjectSummary...')
     const result = await window.api.report.generateProjectSummary({ projectId: pid })
+    console.log('[RP-002] generateProjectSummary result:', result)
     if (result?.summary) {
       summaryResult.value = result.summary
       updateNodeStatus('project_summary_gen', 'completed')
     } else {
+      console.warn('[RP-002] generateProjectSummary empty result')
       throw new Error('Empty summary')
     }
   } catch (e: any) {
+    console.error('[RP-002] generateProjectSummary error:', e)
     summaryError.value = e.message || String(e)
     updateNodeStatus('project_summary_gen', 'error', summaryError.value!)
   } finally {

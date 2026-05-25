@@ -37,6 +37,7 @@ def get_language_config(lang: str) -> LanguageConfig:
         "python": "parsers.code_parser.lang_python",
         "javascript": "parsers.code_parser.lang_js",
         "typescript": "parsers.code_parser.lang_ts",
+        "tsx": "parsers.code_parser.lang_ts",
     }
 
     if lang not in mapping:

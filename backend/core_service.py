@@ -1693,17 +1693,21 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         return {"path": None, "content": "", "error": "No README found"}
 
     @server.register("report.generateProjectSummary")
-    def generate_project_summary(project_id=None, projectId=None):
+    async def generate_project_summary(project_id=None, projectId=None):
         """调用 LLM 生成项目概要 (500字以内), 存入 projects.summary"""
         pid = project_id or projectId
+        logger.info(f"[generateProjectSummary] ENTRY pid={pid}")
         project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
         if not project:
+            logger.warning(f"[generateProjectSummary] Project not found: {pid}")
             raise ValueError(f"Project not found: {pid}")
 
         # 收集 README + 依赖信息作为 LLM 输入
-        readme_result = self.get_readme_content(projectId=pid)
+        logger.info(f"[generateProjectSummary] fetching README for {pid}")
+        readme_result = get_readme_content(projectId=pid)
         readme_text = readme_result.get("content", "") if readme_result else ""
-        deps_result = self.extract_dependency_files(projectId=pid)
+        logger.info(f"[generateProjectSummary] README length={len(readme_text)}")
+        deps_result = extract_dependency_files(projectId=pid)
         deps_text = ""
         if deps_result and deps_result.get("count", 0) > 0:
             lines = []
@@ -1711,6 +1715,9 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                 deps_list = ", ".join(list(d.get("dependencies", {}).keys())[:30])
                 lines.append(f"- {d['file']} ({d['type']}): {deps_list}")
             deps_text = "\n".join(lines)
+            logger.info(f"[generateProjectSummary] dep files count={deps_result.get('count')}, text_len={len(deps_text)}")
+        else:
+            logger.info(f"[generateProjectSummary] no dep files found")
 
         prompt = (
             "你是一个代码架构分析专家。请根据以下项目的 README 和依赖信息，"
@@ -1726,33 +1733,34 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         if deps_text:
             prompt += f"## 依赖文件\n{deps_text}\n\n"
         prompt += "请输出项目概要："
+        logger.info(f"[generateProjectSummary] prompt built, total_len={len(prompt)}")
 
         # 调用 LLM
         from llm_service import LLMService
-        from prompt_manager import PromptManager
         lm = LLMService(multi_db)
-        pm = PromptManager(multi_db)
 
-        # 查询可用的模型
         models = main_db.fetchall(
-            "SELECT * FROM llm_models WHERE is_enabled = 1 ORDER BY sort_order ASC"
+            "SELECT * FROM model_configs ORDER BY is_default DESC, name"
         )
         if not models:
-            raise ValueError("No enabled LLM model found")
+            raise ValueError("No LLM model found")
         model_id = models[0]["id"]
+        logger.info(f"[generateProjectSummary] using model_id={model_id} model_name={models[0].get('name')}")
 
         try:
-            result = lm.chat(
-                session_id=f"proj-summary-{pid}",
-                model_id=model_id,
+            summary = await lm.sync_chat(
                 messages=[{"role": "user", "content": prompt}],
-                mode="normal",
+                model_id=model_id,
             )
-            summary = (result.get("content") or "").strip()
+            raw_len = len(summary or "")
+            logger.info(f"[generateProjectSummary] LLM response received, raw_len={raw_len}")
+            summary = (summary or "").strip()
             if not summary:
                 raise ValueError("LLM returned empty summary")
             if len(summary) > 2000:
                 summary = summary[:2000]
+                logger.info(f"[generateProjectSummary] summary truncated to 2000 chars")
+            logger.info(f"[generateProjectSummary] summary final_len={len(summary)}, preview={summary[:120]!r}")
         except Exception as e:
             logger.error(f"[generateProjectSummary] LLM call failed: {e}")
             raise RuntimeError(f"生成项目概要失败: {e}")
@@ -1763,12 +1771,14 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
             "UPDATE projects SET summary = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?",
             (summary, now, now, pid)
         )
+        logger.info(f"[generateProjectSummary] DB write OK, pid={pid}, summary_len={len(summary)}, generated_at={now}")
         return {"success": True, "summary": summary, "generated_at": now}
 
     @server.register("report.getProjectSummary")
     def get_project_summary(project_id=None, projectId=None):
         """获取已生成的项目概要"""
         pid = project_id or projectId
+        logger.info(f"[getProjectSummary] ENTRY pid={pid}")
         row = main_db.fetchone(
             "SELECT summary, summary_generated_at FROM projects WHERE id = ?", (pid,)
         )
