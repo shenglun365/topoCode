@@ -57,6 +57,15 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         pattern_type = pattern_type or patternType
 
         store = TaskStore(multi_db.main_db)
+
+        # 重复校验：同一项目下相同名称的任务正在排队或执行中时阻止创建
+        existing = store.list_tasks(pid)
+        for t in existing:
+            if t["name"] == name and t["status"] in ("pending", "queued", "running"):
+                raise RuntimeError(
+                    f"Task '{name}' already exists (status={t['status']}), duplicate not allowed"
+                )
+
         task = store.create_task({
             "project_id": pid,
             "type": type or "full",
@@ -86,8 +95,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         task = store.get_task(tid)
         if not task:
             raise ValueError(f"Task {tid} not found")
-        if task["status"] == "running":
-            raise RuntimeError(f"Task {tid} is already running")
+        if task["status"] in ("running", "queued"):
+            raise RuntimeError(f"Task {tid} is already {task['status']}")
 
         # 创建运行记录
         run = store.create_run(tid, {
@@ -291,8 +300,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         task = store.get_task(tid)
         if not task:
             raise ValueError(f"Task {tid} not found")
-        if task["status"] == "running":
-            raise RuntimeError(f"Task {tid} is already running")
+        if task["status"] in ("running", "queued"):
+            raise RuntimeError(f"Task {tid} is already {task['status']}")
 
         # 复用当前配置创建新运行
         run = store.create_run(tid, {
@@ -1292,12 +1301,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     @server.register("report.createSubDoc")
     def create_sub_doc(task_id=None, taskId=None, edge_type=None, edgeType=None,
                        comm_id=None, commId=None, title=None, content=None,
-                       template_id=None, templateId=None):
+                       template_id=None, templateId=None,
+                       id=None, docId=None):
         """创建分析报告子文档"""
         tid = task_id or taskId
         et = edge_type or edgeType or 'CALL'
         cid = comm_id or commId
         tpl = template_id or templateId
+        provided_id = id or docId
 
         if not tid or not title or not content:
             raise ValueError("task_id, title, and content are required")
@@ -1309,7 +1320,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_id = task["project_id"]
         project_db = multi_db.get_project_db(project_id)
 
-        doc_id = f"subdoc-{uuid.uuid4().hex[:12]}"
+        doc_id = provided_id or f"subdoc-{uuid.uuid4().hex[:12]}"
         now = time.strftime('%Y-%m-%d %H:%M:%S')
 
         project_db.execute(
@@ -1358,6 +1369,23 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             for row in rows
         ]
 
+    def _find_subdoc_project(multi_db, sub_doc_id):
+        """在 projects 表中遍历查找子文档所属项目 ID"""
+        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
+        for proj in projects:
+            pid = proj["id"]
+            try:
+                pdb = multi_db.get_project_db(pid)
+                row = pdb.fetchone(
+                    "SELECT id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at FROM report_subdocs WHERE id=?",
+                    (sub_doc_id,)
+                )
+                if row:
+                    return pid, row
+            except Exception:
+                continue
+        return None, None
+
     @server.register("report.getSubDoc")
     def get_sub_doc(sub_doc_id=None, subDocId=None):
         """获取子文档内容"""
@@ -1365,24 +1393,19 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not sid:
             raise ValueError("sub_doc_id is required")
 
-        # 从所有项目库中查找
-        for proj_db in multi_db.project_dbs.values():
-            row = proj_db.execute(
-                "SELECT id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at FROM report_subdocs WHERE id=?",
-                (sid,)
-            ).fetchone()
-            if row:
-                return {
-                    'id': row[0],
-                    'task_id': row[1],
-                    'edge_type': row[2],
-                    'comm_id': row[3],
-                    'title': row[4],
-                    'content': row[5],
-                    'template_id': row[6],
-                    'created_at': row[7],
-                    'updated_at': row[8],
-                }
+        pid, row = _find_subdoc_project(multi_db, sid)
+        if row:
+            return {
+                'id': row['id'],
+                'task_id': row['task_id'],
+                'edge_type': row['edge_type'],
+                'comm_id': row['comm_id'],
+                'title': row['title'],
+                'content': row['content'],
+                'template_id': row['template_id'],
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at'],
+            }
 
         raise ValueError(f"SubDoc {sid} not found")
 
@@ -1393,24 +1416,22 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not sid:
             raise ValueError("sub_doc_id is required")
 
-        for proj_db in multi_db.project_dbs.values():
-            row = proj_db.execute(
-                "SELECT id FROM report_subdocs WHERE id=?", (sid,)
-            ).fetchone()
-            if row:
-                now = time.strftime('%Y-%m-%d %H:%M:%S')
-                if content is not None:
-                    proj_db.execute(
-                        "UPDATE report_subdocs SET content=?, updated_at=? WHERE id=?",
-                        (content, now, sid)
-                    )
-                if title is not None:
-                    proj_db.execute(
-                        "UPDATE report_subdocs SET title=?, updated_at=? WHERE id=?",
-                        (title, now, sid)
-                    )
-                proj_db.commit()
-                return {'ok': True}
+        pid, _ = _find_subdoc_project(multi_db, sid)
+        if pid:
+            pdb = multi_db.get_project_db(pid)
+            now = time.strftime('%Y-%m-%d %H:%M:%S')
+            if content is not None:
+                pdb.execute(
+                    "UPDATE report_subdocs SET content=?, updated_at=? WHERE id=?",
+                    (content, now, sid)
+                )
+            if title is not None:
+                pdb.execute(
+                    "UPDATE report_subdocs SET title=?, updated_at=? WHERE id=?",
+                    (title, now, sid)
+                )
+            pdb.commit()
+            return {'ok': True}
 
         raise ValueError(f"SubDoc {sid} not found")
 
@@ -1421,16 +1442,63 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not sid:
             raise ValueError("sub_doc_id is required")
 
-        for proj_db in multi_db.project_dbs.values():
-            row = proj_db.execute(
-                "SELECT id FROM report_subdocs WHERE id=?", (sid,)
-            ).fetchone()
-            if row:
-                proj_db.execute("DELETE FROM report_subdocs WHERE id=?", (sid,))
-                proj_db.commit()
-                return {'ok': True}
+        pid, _ = _find_subdoc_project(multi_db, sid)
+        if pid:
+            pdb = multi_db.get_project_db(pid)
+            pdb.execute("DELETE FROM report_subdocs WHERE id=?", (sid,))
+            pdb.commit()
+            return {'ok': True}
 
         raise ValueError(f"SubDoc {sid} not found")
+
+    @server.register("report.savePipelineState")
+    def save_pipeline_state(task_id=None, taskId=None, state_json=None, stateJson=None):
+        """保存 pipeline 运行状态到 report_subdocs"""
+        tid = task_id or taskId
+        raw = state_json or stateJson
+        if not tid:
+            raise ValueError("task_id is required")
+        if not raw:
+            raise ValueError("state_json is required")
+        if isinstance(raw, dict):
+            raw = json.dumps(raw)
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pdb = multi_db.get_project_db(task["project_id"])
+
+        doc_id = f"pipeline-state-{tid}"
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        pdb.execute(
+            "INSERT OR REPLACE INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, created_at, updated_at) VALUES (?, ?, '', '__pipeline_state__', ?, ?, ?, ?)",
+            (doc_id, tid, 'Pipeline State', raw, now, now)
+        )
+        pdb.commit()
+        return {'ok': True, 'id': doc_id}
+
+    @server.register("report.loadPipelineState")
+    def load_pipeline_state(task_id=None, taskId=None):
+        """从 report_subdocs 恢复 pipeline 运行状态"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pdb = multi_db.get_project_db(task["project_id"])
+
+        row = pdb.execute(
+            "SELECT content FROM report_subdocs WHERE id=?",
+            (f"pipeline-state-{tid}",)
+        ).fetchone()
+
+        if row:
+            return {'state': json.loads(row[0]) if row[0] else None}
+        return {'state': None}
 
     logger.info("[task_manager] 所有 analysis.* 方法已注册")
 

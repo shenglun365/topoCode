@@ -2,12 +2,14 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '@/stores/project'
+import { useReportStore } from '@/stores/report'
 import PipelineTaskTree from './PipelineTaskTree.vue'
 import type { PipelineTaskNode } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
+const reportStore = useReportStore()
 
 const props = defineProps<{
   taskId: string
@@ -82,7 +84,7 @@ async function run() {
   updateNodeStatus('readme', 'running')
   updateNodeStatus('deps', 'running')
   try {
-    const existing = await window.api.report.getFileSummaries({ projectId: pid, taskId: props.taskId })
+    const existing = await reportStore.getFileSummaries({ projectId: pid, taskId: props.taskId })
     if (existing.count > 0) {
       updateNodeStatus('readme', 'completed')
       updateNodeStatus('deps', 'completed')
@@ -101,7 +103,7 @@ async function run() {
   updateNodeStatus('readme', 'running')
   updateNodeStatus('deps', 'pending')
   try {
-    const readmeResult = await window.api.report.getReadmeContent({ projectId: pid })
+    const readmeResult = await reportStore.getReadmeContent(pid)
     if (readmeResult.content) {
       summaries.push({ filePath: 'README.md', summary: readmeResult.content, source: 'readme' })
     }
@@ -114,7 +116,7 @@ async function run() {
   // Step B: Extract dependency files (package.json, Cargo.toml, etc.)
   updateNodeStatus('deps', 'running')
   try {
-    const depResult = await window.api.report.extractDependencyFiles({ projectId: pid })
+    const depResult = await reportStore.extractDependencyFiles(pid)
     for (const df of depResult.dependencyFiles) {
       const depSummary = `${df.type} (${df.count} packages)`
       summaries.push({ filePath: df.file, summary: depSummary, source: 'dep_file' })
@@ -128,7 +130,7 @@ async function run() {
   // Save summaries for project-level info
   if (summaries.length > 0) {
     try {
-      await window.api.report.saveFileSummaries({ projectId: pid, taskId: props.taskId, summaries })
+      await reportStore.saveFileSummaries({ projectId: pid, taskId: props.taskId, summaries })
     } catch (e) {
       console.warn('[FileSummaryPreprocessor] save failed:', e)
     }

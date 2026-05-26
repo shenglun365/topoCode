@@ -448,6 +448,8 @@ export interface IPCAPI {
     extractDependencyFiles: (params: { projectId: string }) => Promise<{ dependencyFiles: Array<{ file: string; type: string; dependencies: Record<string, string>; count: number }>; count: number }>
     generateProjectSummary: (params: { projectId: string }) => Promise<{ success: boolean; summary: string; generated_at: string }>
     getProjectSummary: (params: { projectId: string }) => Promise<{ summary: string; generated_at: string | null }>
+    savePipelineState: (params: { taskId: string; stateJson: string }) => Promise<{ ok: boolean; id: string }>
+    loadPipelineState: (params: { taskId: string }) => Promise<{ state: Record<string, any> | null }>
     getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) => Promise<{ communities: Array<{ communityId: string; parentCommunityId: string | null; level: string; nodeCount: number; edgeCount: number; qualityScore: number | null; nodes: Array<{ id: string; name: string; type: string; filePath: string }>; edges: Array<{ source: string; target: string; type: string; direction: string }> }>; count: number; level: string; taskId: string }>
     saveFileSummaries: (params: { projectId: string; taskId: string; summaries: Array<{ filePath: string; summary: string; source?: string }> }) => Promise<{ saved: number }>
     getFileSummaries: (params: { projectId: string; taskId?: string; source?: string }) => Promise<{ summaries: Array<{ id: string; project_id: string; task_id: string | null; file_path: string; summary: string; source: string; created_at: string }>; count: number }>

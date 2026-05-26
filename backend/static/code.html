@@ -45,7 +45,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
-const projectId = params.get('projectId') || '';
+const projectId = params.get('project_id') || params.get('projectId') || '';
 const filePath = params.get('path') || '';
 
 document.getElementById('filePath').textContent = filePath || 'No file specified';
@@ -57,7 +57,7 @@ async function load() {
   }
   document.getElementById('codeContainer').innerHTML = '<div class="loading">Loading file...</div>';
   try {
-    const url = `/api/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`;
+    const url = `/api/file?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`;
     const resp = await fetch(url);
     if (!resp.ok) {
       const err = await resp.text().catch(() => `HTTP ${resp.status}`);

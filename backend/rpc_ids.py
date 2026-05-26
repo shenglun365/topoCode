@@ -138,6 +138,10 @@ RPC_IDS: dict[str, str] = {
     # ── system ────────────────────────────────────────────────
     "system.exportProject":         "API-104",
     "system.importProject":         "API-105",
+
+    # ── pipeline ───────────────────────────────────────────────
+    "report.savePipelineState":      "API-108",
+    "report.loadPipelineState":      "API-109",
 }
 
 

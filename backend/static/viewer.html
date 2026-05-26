@@ -77,11 +77,17 @@ mermaid.initialize({ startOnLoad: false, theme: (window.matchMedia('(prefers-col
 const params = new URLSearchParams(location.search);
 const taskId = params.get('taskId') || '';
 const docId = params.get('docId') || '';
+const communityId = params.get('communityId') || '';
+const edgeType = params.get('edgeType') || 'CALL';
 
 let zoomLevel = 1;
 let diagrams = [];
 
 async function load() {
+  if (communityId && taskId) {
+    await loadCommunityDoc(taskId, communityId, edgeType);
+    return;
+  }
   if (!docId && !taskId) {
     document.getElementById('content').innerHTML = '<p>No document specified. Use ?taskId=... or ?docId=...</p>';
     return;
@@ -94,6 +100,22 @@ async function load() {
 }
 
 let projectId = '';
+let currentTaskId = '';
+
+async function loadCommunityDoc(tid, cid, et) {
+  document.getElementById('content').innerHTML = '<div class="loading">Loading community document...</div>';
+  try {
+    const resp = await fetch(`/api/community-doc?taskId=${encodeURIComponent(tid)}&communityId=${encodeURIComponent(cid)}&edgeType=${encodeURIComponent(et)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const doc = await resp.json();
+    projectId = doc.projectId || '';
+    currentTaskId = doc.taskId || '';
+    document.getElementById('docTitle').textContent = doc.title || 'Untitled';
+    renderContent(doc.content || '');
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="error-msg">Failed to load community document: ${e.message}</div>`;
+  }
+}
 
 async function loadDoc(id) {
   document.getElementById('content').innerHTML = '<div class="loading">Loading document...</div>';
@@ -102,6 +124,7 @@ async function loadDoc(id) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const doc = await resp.json();
     projectId = doc.projectId || '';
+    currentTaskId = doc.taskId || '';
     document.getElementById('docTitle').textContent = doc.title || 'Untitled';
     renderContent(doc.content || '');
   } catch (e) {
@@ -142,16 +165,49 @@ function escapeHtml(str) {
 }
 
 function renderContent(markdown) {
+  // Normalize: ensure blank line before headings (LLM output often lacks them)
+  markdown = markdown.replace(/([^\n])\n(?=#{1,6}\s)/g, '$1\n\n');
   const html = marked.parse(markdown, { breaks: true, gfm: true });
   document.getElementById('content').innerHTML = html;
 
-  // Detect file paths and turn them into links
-  document.querySelectorAll('#content p, #content li, #content td').forEach(el => {
+  // Handle anchor scroll: content loaded async, scroll manually
+  if (location.hash) {
+    const target = decodeURIComponent(location.hash.slice(1));
+    let el = document.getElementById(target) || document.querySelector(`[name="${target}"]`);
+    if (!el) {
+      // marked may generate different IDs (e.g. "4--模块详细分析" vs "4-模块详细分析")
+      document.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+        const slug = h.textContent.trim().toLowerCase().replace(/[^\w\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '');
+        if (slug === target) el = h;
+      });
+    }
+    if (el) setTimeout(() => el.scrollIntoView(), 100);
+  }
+
+  // Convert ##community: links to community doc pages
+  document.querySelectorAll('#content a[href^="##community:"]').forEach(a => {
+    if (currentTaskId) {
+      const href = a.getAttribute('href');
+      const parts = href.replace('##community:', '').split(':');
+      if (parts.length === 2) {
+        a.href = `/doc?taskId=${encodeURIComponent(currentTaskId)}&communityId=${encodeURIComponent(parts[1])}&edgeType=${encodeURIComponent(parts[0])}`;
+        a.target = '_blank';
+        a.className = 'file-link';
+      } else {
+        a.replaceWith(document.createTextNode(a.textContent));
+      }
+    } else {
+      a.replaceWith(document.createTextNode(a.textContent));
+    }
+  });
+
+  // Detect file paths and turn them into links (skip table cells to avoid corrupting structured data)
+  document.querySelectorAll('#content p, #content li').forEach(el => {
     el.innerHTML = el.innerHTML.replace(
       /\b([\w./-]+\.[a-z]{1,4})\b(?!["'\]])/gi,
       (m) => {
         if (m.startsWith('http') || m.startsWith('#')) return m;
-        return `<a href="/code?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(m)}" target="_blank" class="file-link">${m}</a>`;
+        return `<a href="/code?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(m)}" target="_blank" class="file-link">${m}</a>`;
       }
     );
   });

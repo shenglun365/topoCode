@@ -701,6 +701,59 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         ]),
     },
 
+    # ===== 整体架构分析模板（替代 step1~step5） =====
+    {
+        "id": "report_overall_architecture",
+        "name": "报告-整体架构分析",
+        "mode": "chat",
+        "module_type": "project_analysis",
+        "category": "report_pipeline",
+        "is_builtin": 1,
+        "system_prompt": (
+            "你是一个软件架构分析专家。请根据提供的项目信息和 L0 组件数据，生成一份完整的架构分析文档。\n"
+            "输出 Markdown 格式，要求：\n"
+            "1. 按社区名称分模块编写文档，**每个模块标题标注社区 ID**（如 `## 模块名称 (community: xxx)`）\n"
+            "2. 每个模块包含：核心职责、关键文件/函数列表（表格）、主要逻辑说明\n"
+            "3. 生成**依赖关系图**：用 Mermaid graph LR 展示所有 L0 组件之间的 INCLUDE 依赖，节点 label 使用社区名称\n"
+            "4. 生成**调用关系图**：用 Mermaid graph LR 展示所有 L0 组件之间的 CALL 调用，节点 label 使用社区名称\n"
+            "5. 依赖图和调用图分开为两个独立的 ```mermaid 代码块\n"
+            "6. 文档开头添加目录和项目概要\n"
+            "用中文回答。Mermaid 代码放在 ```mermaid 代码块中。"
+        ),
+        "user_prompt_template": (
+            "## 项目概要\n"
+            "- 项目名称: {projectName}\n"
+            "- 主要语言: {language}\n"
+            "- 文件总数: {fileCount}\n"
+            "- 项目根路径: {rootPath}\n\n"
+            "### README 摘要\n"
+            "{readmeContent}\n\n"
+            "### 依赖信息\n"
+            "{dependencySummary}\n\n"
+            "## 社区命名映射\n"
+            "以下为社区 ID 对应的可读名称（AI 分析命名）：\n"
+            "{communityNameMap}\n\n"
+            "## L0 调用分析数据 (CALL)\n"
+            "以下为 L0 层级的所有组件（社区）的调用关系数据：\n"
+            "{callCommunityDetail}\n\n"
+            "## L0 依赖分析数据 (INCLUDE)\n"
+            "以下为 L0 层级的所有组件（社区）的依赖关系数据：\n"
+            "{includeCommunityDetail}\n\n"
+            "请生成一份完整的架构分析文档。"
+        ),
+        "variables_json": json.dumps([
+            {"name": "projectName", "type": "string", "description": "项目名称", "required": True},
+            {"name": "language", "type": "string", "description": "主要编程语言", "required": True},
+            {"name": "fileCount", "type": "string", "description": "文件总数", "required": True},
+            {"name": "rootPath", "type": "string", "description": "项目根路径", "required": False},
+            {"name": "readmeContent", "type": "string", "description": "README 摘要", "required": False},
+            {"name": "dependencySummary", "type": "string", "description": "依赖信息", "required": False},
+            {"name": "communityNameMap", "type": "string", "description": "社区 ID→名称映射", "required": True},
+            {"name": "callCommunityDetail", "type": "string", "description": "L0 调用分析社区详情", "required": True},
+            {"name": "includeCommunityDetail", "type": "string", "description": "L0 依赖分析社区详情", "required": True},
+        ]),
+    },
+
     # ===== 文件摘要模板 (structured) =====
     {
         "id": "file_summarize",

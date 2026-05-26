@@ -410,7 +410,7 @@ export const useProjectStore = defineStore('project', () => {
       funcGroup.setActiveTab('analysis', existing.id)
       return existing.id
     }
-    const title = `${i18n.global.t('report.analysisReport')} · ${params.taskName}`
+    const title = `${i18n.global.t('analysis.analysisReport')} · ${params.taskName}`
     const tab: HomeTab = {
       id: `tab-reportHome-${params.taskId}-${Date.now()}`,
       kind: 'reportHome',

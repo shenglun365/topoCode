@@ -219,6 +219,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'report.generateProjectSummary', params }),
     getProjectSummary: (params: { projectId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getProjectSummary', params }),
+    savePipelineState: (params: { taskId: string; stateJson: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.savePipelineState', params }),
+    loadPipelineState: (params: { taskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.loadPipelineState', params }),
     getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getLevelCommunityDetail', params }),
     saveFileSummaries: (params: { projectId: string; taskId: string; summaries: any[] }) =>
@@ -229,6 +233,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'report.getCallLogs', params }),
     getInteractionLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getInteractionLogs', params }),
+    saveOverallDoc: (params: { taskId: string; title: string; content: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.saveOverallDoc', params }),
   },
 
   // ==================== 设置配置 ====================

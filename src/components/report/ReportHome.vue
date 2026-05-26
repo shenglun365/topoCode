@@ -18,6 +18,8 @@ import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useSettingsStore } from '@/stores/settings'
 import { useFuncGroupStore } from '@/stores/funcGroup'
+import { usePipelineStore } from '@/stores/pipeline'
+import { useReportStore } from '@/stores/report'
 import { ipc } from '@/services/ipc'
 import ReportGenerationPipeline from './ReportGenerationPipeline.vue'
 import ReportMDViewer from './ReportMDViewer.vue'
@@ -29,6 +31,8 @@ const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
 const settingsStore = useSettingsStore()
 const funcGroup = useFuncGroupStore()
+const pipelineStore = usePipelineStore()
+const reportStore = useReportStore()
 
 const props = defineProps<{
   taskId: string
@@ -42,14 +46,10 @@ const emit = defineEmits<{
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
+const showNoReportDialog = ref(false)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
-const communityDataCall = ref<any>(null)
-const communityDataInclude = ref<any>(null)
-const communityResultsCall = ref<Record<string, any>>({})
-const communityResultsInclude = ref<Record<string, any>>({})
 const fileStats = ref<any>(null)
-const generatedReport = ref<string | null>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
 const communitySearch = ref('')
 const communityPage = ref(1)
@@ -59,18 +59,27 @@ const hasModel = computed(() => settingsStore.models.some(m => m.isDefault))
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
 const task = computed(() => taskDetail.value)
 
-const commData = computed(() => commEdgeType.value === 'INCLUDE' ? communityDataInclude.value : communityDataCall.value)
-const commResults = computed(() => (commEdgeType.value === 'INCLUDE' ? communityResultsInclude : communityResultsCall).value)
+const communityAnalysisProgress = computed(() => {
+  const items = reportStore.getCommunityData(props.taskId, 'CALL')?.levels?.[0]?.items || []
+  if (items.length === 0) return 0
+  const results = reportStore.getCommunityResults(props.taskId, 'CALL')
+  const done = items.filter((item: any) => !!results[item.id]?.name).length
+  return Math.round((done / items.length) * 100)
+})
 
-interface CommStats { count: number; maxNodes: number; minNodes: number; avgQuality: number }
-const commStats = computed<CommStats>(() => {
-  const levels = commData.value?.levels
-  if (!levels) return { count: 0, maxNodes: 0, minNodes: 0, avgQuality: 0 }
-  const all = levels.flatMap((lv: any) => lv.items || [])
-  const nodes = all.map((i: any) => i.nodeCount || 0)
-  const quals = all.filter((i: any) => i.qualityScore != null).map((i: any) => i.qualityScore)
+const hasArchitectureReport = computed(() => {
+  if (reportStore.generatedReports[props.taskId]) return true
+  const state = pipelineStore.getTaskState(props.taskId)
+  if (state?.stepOutputs?.overall_architecture) return true
+  return !!reportStore.dbReportExists[props.taskId]
+})
+
+const commStats = computed(() => {
+  const items = communityItems.value
+  const nodes = items.map((item: any) => item.nodeCount || 0)
+  const quals = items.map((item: any) => item.qualityScore).filter((q: any) => q != null)
   return {
-    count: all.length,
+    count: items.length,
     maxNodes: nodes.length ? Math.max(...nodes) : 0,
     minNodes: nodes.length ? Math.min(...nodes) : 0,
     avgQuality: quals.length ? (quals.reduce((a: number, b: number) => a + b, 0) / quals.length) : 0,
@@ -93,6 +102,10 @@ const pagedCommunityItems = computed(() => {
   const start = (communityPage.value - 1) * communityPageSize
   return communityItems.value.slice(start, start + communityPageSize)
 })
+
+const commData = computed(() => reportStore.getCommunityData(props.taskId, commEdgeType.value))
+const commResults = computed(() => reportStore.getCommunityResults(props.taskId, commEdgeType.value))
+const generatedReport = computed(() => reportStore.generatedReports[props.taskId])
 
 watch(communitySearch, () => { communityPage.value = 1 })
 
@@ -127,7 +140,7 @@ async function openCommunityDoc(item: any) {
     }
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
     if (!pid) return
-    const detail = await window.api.report.getLevelCommunityDetail({
+    const detail = await reportStore.getLevelCommunityDetail({
       projectId: pid, taskId: props.taskId,
       level: item.level || 'L0', edgeType: commEdgeType.value,
     })
@@ -178,15 +191,6 @@ function handleCommunityMD(params: { communityId: string; name: string; summary:
   })
 }
 
-async function reloadCommunityResults() {
-  const [resCall, resInclude] = await Promise.all([
-    window.api.analysis.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
-    window.api.analysis.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
-  ])
-  communityResultsCall.value = Object.fromEntries((resCall?.results || []).map((r: any) => [r.comm_id, r]))
-  communityResultsInclude.value = Object.fromEntries((resInclude?.results || []).map((r: any) => [r.comm_id, r]))
-}
-
 async function loadData() {
   loading.value = true
   loadError.value = null
@@ -202,16 +206,8 @@ async function loadData() {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
       fileStats.value = await analysisStore.scanFileStats(pid)
     }
-    const [call, include, resCall, resInclude] = await Promise.all([
-      window.api.analysis.getCascadeLevels(props.taskId, 'CALL').catch(() => null),
-      window.api.analysis.getCascadeLevels(props.taskId, 'INCLUDE').catch(() => null),
-      window.api.analysis.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
-      window.api.analysis.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
-    ])
-    communityDataCall.value = call
-    communityDataInclude.value = include
-    communityResultsCall.value = Object.fromEntries((resCall?.results || []).map((r: any) => [r.comm_id, r]))
-    communityResultsInclude.value = Object.fromEntries((resInclude?.results || []).map((r: any) => [r.comm_id, r]))
+    await reportStore.loadCommunityData(props.taskId)
+    await reportStore.checkReportExists(props.taskId)
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -243,23 +239,117 @@ function openCommunityAnalysis() {
   })
 }
 
-function handleReportGenerated(content: string) {
-  generatedReport.value = content
-  emit('open-md', {
-    taskId: props.taskId,
-    content,
-    title: `${taskDetail.value?.name || '报告'} · 完整架构分析`,
-  })
+async function handleReportGenerated(content: string) {
+  reportStore.setGeneratedReport(props.taskId, content)
+  try {
+    await ipc.report.saveOverallDoc({
+      taskId: props.taskId,
+      title: t('report.pipeline.overallArchitecture'),
+      content,
+    })
+  } catch (e) {
+    console.warn('[ReportHome] saveOverallDoc on generated failed:', e)
+  }
 }
 
 function handleViewReport() {
-  if (generatedReport.value) {
+  const content = reportStore.generatedReports[props.taskId]
+  if (content) {
     emit('open-md', {
       taskId: props.taskId,
-      content: generatedReport.value,
+      content,
       title: `${taskDetail.value?.name || '报告'} · 完整架构分析`,
     })
   }
+}
+
+function escapeTbl(val: any): string {
+  return String(val ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\n/g, ' ')
+    .replace(/^### /gm, '')
+    .replace(/^- /gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/`(.*?)`/g, '$1')
+    .trim()
+}
+
+function buildCommunityAppendix(): string {
+  const parts: string[] = ['## 组件附录', '']
+  const edges: { key: string; label: string; data: any; results: any }[] = [
+    { key: 'CALL', label: '调用', data: reportStore.getCommunityData(props.taskId, 'CALL'), results: reportStore.getCommunityResults(props.taskId, 'CALL') },
+    { key: 'INCLUDE', label: '依赖', data: reportStore.getCommunityData(props.taskId, 'INCLUDE'), results: reportStore.getCommunityResults(props.taskId, 'INCLUDE') },
+  ]
+  let hasItems = false
+  parts.push('| 类型 | 名称 |')
+  parts.push('|------|------|')
+  for (const et of edges) {
+    const items = et.data?.levels?.[0]?.items || []
+    for (const item of items) {
+      hasItems = true
+      const result = et.results[item.id]
+      const name = escapeTbl(result?.name || result?.name_manual || item.id)
+      parts.push(`| ${et.label} | [${name}](##community:${et.key}:${item.id}) |`)
+    }
+  }
+  if (!hasItems) {
+    parts.push('| - | （暂无组件数据） |')
+  }
+  parts.push('')
+  return parts.join('\n')
+}
+
+async function openOverallArchitecture() {
+  const state = pipelineStore.getTaskState(props.taskId)
+  let content = reportStore.generatedReports[props.taskId] || state?.stepOutputs?.overall_architecture
+  if (!content) {
+    try {
+      const docs = await ipc.report.listSubDocs({ taskId: props.taskId, commId: 'overall' })
+      if (docs?.length) {
+        const doc = await ipc.report.getSubDoc(docs[0].id)
+        content = doc.content
+      }
+    } catch (e) {
+      console.warn('[ReportHome] DB fetch for overall doc failed:', e)
+    }
+  }
+  if (!content) {
+    showNoReportDialog.value = true
+    return
+  }
+  // 避免重复追加附录
+  if (!content.includes('## 组件附录')) {
+    content = content + '\n\n---\n\n' + buildCommunityAppendix()
+  }
+  let docId = ''
+  try {
+    const result = await ipc.report.saveOverallDoc({
+      taskId: props.taskId,
+      title: t('report.pipeline.overallArchitecture'),
+      content,
+    })
+    docId = result.id
+  } catch (e) {
+    console.warn('[ReportHome] saveOverallDoc failed:', e)
+  }
+  const tabId = `tab-overall-arch-${props.taskId}`
+  const ctx = funcGroup.context.analysis
+  const existing = ctx.tabs.find(t => t.id === tabId)
+  if (existing) {
+    funcGroup.setActiveTab('analysis', existing.id)
+    return
+  }
+  funcGroup.openTab('analysis', {
+    id: tabId,
+    kind: 'subdoc',
+    title: t('report.pipeline.overallArchitecture'),
+    content,
+    taskId: props.taskId,
+    projectId: projectId.value,
+    subDocId: docId,
+    hasUnsavedChanges: false,
+  })
 }
 
 function fileExtLabel(ext: string): string {
@@ -515,11 +605,26 @@ watch(() => props.taskId, loadData)
               <span>{{ t('report.openTaskList') }}</span>
             </button>
             <button
-              class="btn btn-secondary"
+              class="btn btn-secondary comp-analysis-btn"
               @click="openCommunityAnalysis"
             >
+              <span
+                class="comp-analysis-progress"
+                :style="{ width: communityAnalysisProgress + '%' }"
+              />
               <SparklesIcon class="w-4 h-4" />
               <span>{{ t('report.pipeline.communityAnalysis') }}</span>
+              <span
+                v-if="communityAnalysisProgress > 0"
+                class="comp-analysis-pct"
+              >{{ communityAnalysisProgress }}%</span>
+            </button>
+            <button
+              :class="['btn', hasArchitectureReport ? 'btn-has-result' : 'btn-secondary']"
+              @click="openOverallArchitecture"
+            >
+              <DocumentTextIcon class="w-4 h-4" />
+              <span>{{ t('report.viewOverallArchitecture') }}</span>
             </button>
             <button
               v-if="generatedReport"
@@ -534,15 +639,33 @@ watch(() => props.taskId, loadData)
           <!-- 生成流水线（隐藏，后台同步） -->
           <div style="display:none">
             <ReportGenerationPipeline
-              :task-id="taskId"
-              :project-id="projectId"
+              :task-id="props.taskId"
+              :project-id="props.projectId"
               @generated="handleReportGenerated"
-              @close="() => {}"
-              @community-results="reloadCommunityResults"
               @view-community-md="handleCommunityMD"
             />
           </div>
         </section>
+      </div>
+
+      <!-- 生成报告提示弹窗 -->
+      <div
+        v-if="showNoReportDialog"
+        class="dialog-overlay"
+        @click.self="showNoReportDialog = false"
+      >
+        <div class="dialog-content">
+          <ExclamationTriangleIcon class="w-5 h-5 dialog-warning-icon" />
+          <p class="dialog-message">{{ t('report.noArchitectureReport') }}</p>
+          <div class="dialog-actions">
+            <button
+              class="btn btn-primary btn-sm"
+              @click="showNoReportDialog = false"
+            >
+              {{ t('common.confirm') }}
+            </button>
+          </div>
+        </div>
       </div>
     </template>
   </div>
@@ -791,5 +914,87 @@ watch(() => props.taskId, loadData)
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+/* DOM dialog */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  min-width: 300px;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+
+.dialog-warning-icon {
+  color: var(--warning);
+}
+
+.dialog-message {
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Component analysis button with progress bar */
+.comp-analysis-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.comp-analysis-progress {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, #74eca0 22%, transparent);
+  transition: width 0.4s ease;
+  pointer-events: none;
+}
+
+.comp-analysis-btn :deep(.btn-content),
+.comp-analysis-btn > *:not(.comp-analysis-progress) {
+  position: relative;
+  z-index: 1;
+}
+
+.comp-analysis-pct {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  position: relative;
+  z-index: 1;
+}
+
+/* Overall architecture button: light green when content available */
+.btn-has-result {
+  background: color-mix(in srgb, #74eca0 18%, transparent);
+  border-color: color-mix(in srgb, #74eca0 30%, transparent);
+  color: var(--text-primary);
+}
+
+.btn-has-result:hover {
+  background: color-mix(in srgb, #74eca0 28%, transparent);
+  border-color: color-mix(in srgb, #74eca0 40%, transparent);
 }
 </style>

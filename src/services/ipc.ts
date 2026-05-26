@@ -294,6 +294,36 @@ function createRealIPC(): IPCAPI {
       deleteSubDoc: async (subDocId: string) => {
         return await api.report.deleteSubDoc(subDocId)
       },
+      saveOverallDoc: async (params: { taskId: string; title: string; content: string }) => {
+        return await api.report.saveOverallDoc(params)
+      },
+      savePipelineState: async (params: { taskId: string; stateJson: string }) => {
+        return await api.report.savePipelineState(params)
+      },
+      loadPipelineState: async (params: { taskId: string }) => {
+        return await api.report.loadPipelineState(params)
+      },
+      getReadmeContent: async (params: { projectId: string }) => {
+        return await api.report.getReadmeContent(params)
+      },
+      extractDependencyFiles: async (params: { projectId: string }) => {
+        return await api.report.extractDependencyFiles(params)
+      },
+      generateProjectSummary: async (params: { projectId: string }) => {
+        return await api.report.generateProjectSummary(params)
+      },
+      getProjectSummary: async (params: { projectId: string }) => {
+        return await api.report.getProjectSummary(params)
+      },
+      getLevelCommunityDetail: async (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) => {
+        return await api.report.getLevelCommunityDetail(params)
+      },
+      saveFileSummaries: async (params: { projectId: string; taskId: string; summaries: any[] }) => {
+        return await api.report.saveFileSummaries(params)
+      },
+      getFileSummaries: async (params: { projectId: string; taskId?: string; source?: string }) => {
+        return await api.report.getFileSummaries(params)
+      },
     },
 
     // ==================== 知识库 ====================

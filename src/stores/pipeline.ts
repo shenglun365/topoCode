@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { ipc } from '@/services/ipc'
 import type { PipelineTaskNode, PipelineControlFunctions } from '@/types/ipc'
 
 export interface EdgeProgress {
@@ -8,7 +9,7 @@ export interface EdgeProgress {
   running: number
 }
 
-interface PipelineTabState {
+export interface PipelineTabState {
   rootTask: PipelineTaskNode
   running: boolean
   paused: boolean
@@ -57,6 +58,32 @@ export const usePipelineStore = defineStore('pipeline', () => {
   function registerControls(fns: PipelineControlFunctions) { controls.value = fns }
   function unregisterControls() { controls.value = null }
 
+  // === Phase 2: DB persistence ===
+
+  async function saveStateToDb(taskId: string) {
+    const state = byTaskId.value[taskId]
+    if (!state) return
+    try {
+      await ipc.report.savePipelineState({ taskId, stateJson: JSON.stringify(state) })
+    } catch (e) {
+      console.warn('[pipelineStore] saveStateToDb failed:', e)
+    }
+  }
+
+  async function loadStateFromDb(taskId: string): Promise<PipelineTabState | null> {
+    try {
+      const result = await ipc.report.loadPipelineState({ taskId })
+      if (result?.state) {
+        const s = result.state as PipelineTabState
+        byTaskId.value = { ...byTaskId.value, [taskId]: s }
+        return s
+      }
+    } catch (e) {
+      console.warn('[pipelineStore] loadStateFromDb failed:', e)
+    }
+    return null
+  }
+
   function reset() {
     byTaskId.value = {}
     controls.value = null
@@ -69,5 +96,6 @@ export const usePipelineStore = defineStore('pipeline', () => {
     getTaskState, updateTaskState, removeTaskState,
     updateCommunityProgress, ensureTaskState,
     registerControls, unregisterControls, reset,
+    saveStateToDb, loadStateFromDb,
   }
 })

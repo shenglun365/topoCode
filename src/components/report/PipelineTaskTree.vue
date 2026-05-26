@@ -69,12 +69,12 @@ function statusIcon(status: string) {
           </span>
         </div>
         <div
-          v-if="node.type === 'group' && node.children"
+          v-if="(node.type === 'group' && node.children) || node.status === 'running' || node.status === 'completed'"
           class="node-progress-bar"
         >
           <div
-            class="progress-fill"
-            :style="{ width: node.progress + '%' }"
+            :class="['progress-fill', { 'progress-indeterminate': node.status === 'running' && !node.children }]"
+            :style="(node.type === 'group' || !node.children) ? { width: (node.status === 'completed' ? 100 : (node.progress || 0)) + '%' } : {}"
           />
         </div>
         <slot
@@ -197,6 +197,16 @@ function statusIcon(status: string) {
   background: var(--accent);
   border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+.progress-indeterminate {
+  width: 40% !important;
+  animation: progressIndeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes progressIndeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
 }
 
 .node-error {

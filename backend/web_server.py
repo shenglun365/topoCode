@@ -134,32 +134,6 @@ async def get_doc(doc_id: str):
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        # 先在 main_db.sub_docs 查找（旧版文档，表可能不存在）
-        try:
-            doc = multi_db.main_db.fetchone(
-                "SELECT id, task_id, title, content, created_at, updated_at FROM sub_docs WHERE id = ?",
-                (doc_id,),
-            )
-            if doc:
-                project_id = ""
-                task = multi_db.main_db.fetchone(
-                    "SELECT project_id FROM tasks WHERE id = ?", (doc["task_id"],)
-                )
-                if task:
-                    project_id = task["project_id"]
-                logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
-                return {
-                    "id": doc["id"],
-                    "taskId": doc["task_id"],
-                    "projectId": project_id,
-                    "title": doc["title"],
-                    "content": doc["content"],
-                    "createdAt": doc["created_at"],
-                    "updatedAt": doc["updated_at"],
-                }
-        except Exception:
-            pass
-
         # 遍历项目库查找 report_subdocs
         projects = multi_db.main_db.fetchall("SELECT id FROM projects")
         for proj in projects:
@@ -192,24 +166,79 @@ async def get_doc(doc_id: str):
         raise HTTPException(500, str(e))
 
 
-@app.get("/api/task-docs")
-async def list_task_docs(task_id: str = Query(...)):
+@app.get("/api/community-doc")
+async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None),
+                            community_id: str = Query(None), communityId: str = Query(None),
+                            edge_type: str = Query(None), edgeType: str = Query(None)):
+    tid = task_id or taskId
+    cid = community_id or communityId
+    et = edge_type or edgeType or 'CALL'
+    if not tid or not cid:
+        raise HTTPException(422, "task_id/taskId and community_id/communityId are required")
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        docs = multi_db.main_db.fetchall(
-            "SELECT id, task_id, title, created_at FROM sub_docs WHERE task_id = ? ORDER BY created_at",
-            (task_id,),
+        task = multi_db.main_db.fetchone(
+            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
         )
-        return [
-            {
-                "id": d["id"],
-                "taskId": d["task_id"],
-                "title": d["title"],
-                "createdAt": d["created_at"],
-            }
-            for d in docs
-        ]
+        if not task:
+            raise HTTPException(404, "Task not found")
+        pid = task["project_id"]
+        pdb = multi_db.get_project_db(pid)
+        row = pdb.fetchone(
+            "SELECT name, summary, mermaid, plantuml FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv='L0' AND comm_id=?",
+            (tid, et, cid)
+        )
+        if not row:
+            raise HTTPException(404, "Community result not found")
+        name = row.get("name") or cid
+        parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "", row.get("summary") or ""]
+        if row.get("mermaid"):
+            parts.extend(["", "```mermaid", row["mermaid"], "```"])
+        if row.get("plantuml"):
+            parts.extend(["", "```plantuml", row["plantuml"], "```"])
+        return {
+            "id": f"community-{tid}-{et}-{cid}",
+            "taskId": tid,
+            "projectId": pid,
+            "title": name,
+            "content": "\n".join(parts),
+            "createdAt": "",
+            "updatedAt": "",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/task-docs")
+async def list_task_docs(task_id: str = Query(None), taskId: str = Query(None)):
+    tid = task_id or taskId
+    if not tid:
+        raise HTTPException(422, "task_id or taskId is required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        result = []
+        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
+        for proj in projects:
+            try:
+                pdb = multi_db.get_project_db(proj["id"])
+                docs = pdb.fetchall(
+                    "SELECT id, task_id, title, created_at FROM report_subdocs WHERE task_id = ? ORDER BY created_at",
+                    (tid,),
+                )
+                for d in docs:
+                    result.append({
+                        "id": d["id"],
+                        "taskId": d["task_id"],
+                        "title": d["title"],
+                        "createdAt": d["created_at"],
+                    })
+            except Exception:
+                continue
+        return result
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -312,9 +341,12 @@ async def index():
 
 
 @app.get("/doc", response_class=HTMLResponse)
-async def view_doc(task_id: str = Query(""), doc_id: str = Query("")):
+async def view_doc(task_id: str = Query(None), doc_id: str = Query(None),
+                   taskId: str = Query(None), docId: str = Query(None)):
+    tid = task_id or taskId or ''
+    did = doc_id or docId or ''
     viewer_path = os.path.join(STATIC_DIR, "viewer.html")
-    logger.info(f"=== Document viewer URL: http://127.0.0.1:{http_port}/doc?docId={doc_id}&taskId={task_id} ===")
+    logger.info(f"=== Document viewer URL: http://127.0.0.1:{http_port}/doc?docId={did}&taskId={tid} ===")
     if os.path.isfile(viewer_path):
         return FileResponse(viewer_path)
     return HTMLResponse("viewer.html not found", status_code=404)

@@ -14,17 +14,18 @@ import {
   FunnelIcon,
 } from '@heroicons/vue/24/outline'
 import { usePipelineStore } from '@/stores/pipeline'
+import { useReportStore } from '@/stores/report'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
 const pipelineStore = usePipelineStore()
+const reportStore = useReportStore()
 
 const props = defineProps<{ taskId: string; projectId?: string }>()
 const emit = defineEmits<{
   completed: [summaries: Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string; mermaid?: string; plantuml?: string }>]
-  error: [message: string]
   viewCommunityMD: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
@@ -122,7 +123,7 @@ async function loadProjectContext() {
     return
   }
   try {
-    const result = await window.api.report.getProjectSummary({ projectId })
+    const result = await reportStore.getProjectSummary(projectId)
     console.log('[CAP] loadProjectContext: result.summary_exists=', !!result?.summary, 'summary_len=', result?.summary?.length)
     if (result?.summary) {
       projectContext.value = `## 项目概要\n${result.summary}`
@@ -224,13 +225,13 @@ async function loadAll() {
   loadError.value = null
   try {
     const [callLevels, depLevels, callResults, depResults] = await Promise.all([
-      window.api.analysis.getCascadeLevels(props.taskId, 'CALL')
+      reportStore.getCascadeLevels(props.taskId, 'CALL')
         .catch((e: any) => { console.warn('[CAP] getCascadeLevels CALL failed:', e); return null }),
-      window.api.analysis.getCascadeLevels(props.taskId, 'INCLUDE')
+      reportStore.getCascadeLevels(props.taskId, 'INCLUDE')
         .catch((e: any) => { console.warn('[CAP] getCascadeLevels INCLUDE failed:', e); return null }),
-      window.api.analysis.listCommunityResults(props.taskId, 'CALL')
+      reportStore.listCommunityResults(props.taskId, 'CALL')
         .catch((e: any) => { console.warn('[CAP] listCommunityResults CALL failed:', e); return { results: [] } }),
-      window.api.analysis.listCommunityResults(props.taskId, 'INCLUDE')
+      reportStore.listCommunityResults(props.taskId, 'INCLUDE')
         .catch((e: any) => { console.warn('[CAP] listCommunityResults INCLUDE failed:', e); return { results: [] } }),
     ])
 
@@ -406,7 +407,7 @@ async function runTask(task: CommunitySummary): Promise<boolean> {
       task.status = 'skipped'
       return false
     }
-    const result = await window.api.report.getLevelCommunityDetail({
+    const result = await reportStore.getLevelCommunityDetail({
       projectId: pid.value,
       taskId: props.taskId,
       level: task.level,
@@ -506,7 +507,6 @@ async function analyzeSelected() {
   runError.value = null
   if (!modelId.value) {
     runError.value = t('report.llmNotConfigured')
-    emit('error', t('report.llmNotConfigured'))
     return
   }
   const selected = allCommunities.value.filter(t => t.selected)
@@ -531,7 +531,7 @@ async function analyzeSelected() {
       // 只持久化成功的结果，避免失败 tasks 以 communityId 为 name 误判为已完成
       if (t.status === 'completed') {
         try {
-          await window.api.analysis.saveCommunityResult({
+          await reportStore.saveCommunityResult({
             taskId: props.taskId,
             edgeType: t.edgeType,
             commLv: t.level,
@@ -542,6 +542,14 @@ async function analyzeSelected() {
             plantuml: t.plantuml || '',
             modelId: modelId.value,
             templateId: 'community_analyze',
+          })
+          // 同步到共享 store
+          reportStore.updateCommunityResult(props.taskId, t.edgeType, t.communityId, {
+            comm_id: t.communityId,
+            name: t.name,
+            summary: t.summary,
+            mermaid: t.mermaid,
+            plantuml: t.plantuml,
           })
         } catch (e) {
           console.warn('[CommunityAnalysisPipeline] save failed:', e)
@@ -580,7 +588,7 @@ async function retryTask(id: string) {
   try {
     await runTask(task)
     if (task.status === 'completed') {
-      await window.api.analysis.saveCommunityResult({
+      await reportStore.saveCommunityResult({
         taskId: props.taskId,
         edgeType: task.edgeType,
         commLv: task.level,

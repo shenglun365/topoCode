@@ -54,7 +54,7 @@ onDeactivated(() => {
   saveAnalysisState();
 })
 
-// 子文档“返回报告”按钮：切换到所属报告的 reportHome tab
+// 子文档“返回报告”按钮：切换到所属报告的 reportHome/reportTree tab
 function goToReportHome() {
   const tab = activeTab.value
   if (!tab) return
@@ -103,6 +103,41 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
   })
 }
 
+async function openCommunityDetail(payload: { taskId: string; communityId: string; edgeType: string }) {
+  const { taskId, communityId, edgeType } = payload
+  const pid = projectStore.selectedProjectId
+  if (!pid) return
+  try {
+    const detail = await window.api.report.getLevelCommunityDetail({
+      projectId: pid, taskId,
+      level: 'L0', edgeType,
+    })
+    const community = detail.communities.find((c: any) => c.communityId === communityId)
+    if (!community) return
+    const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
+    const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
+    const md = [
+      `# 社区: ${communityId}`,
+      '',
+      `**层级**: L0 | **边缘类型**: ${edgeType}`,
+      `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
+      '',
+      '## 节点列表',
+      nodeLines || '（空）',
+      '',
+      '## 边列表',
+      edgeLines || '（空）',
+    ].join('\n')
+    handleOpenMD({
+      taskId,
+      content: md,
+      title: communityId,
+    })
+  } catch (e) {
+    console.error('[AnalysisPage] openCommunityDetail error:', e)
+  }
+}
+
 </script>
 
 <template>
@@ -136,6 +171,7 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
         :initial-title="activeTab.title"
         :task-id="activeTab.taskId"
         @close="goToReportHome"
+        @navigate-community="openCommunityDetail"
       />
     </template>
 

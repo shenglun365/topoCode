@@ -162,7 +162,7 @@ const { showId, componentId } = useComponentId('RP-005')
                 v-if="includeProgress"
                 class="ca-row"
               >
-                <span class="ca-label">依赖分组</span>
+                <span class="ca-label">{{ t('report.pipeline.groupInclude') }}</span>
                 <div class="ca-bar">
                   <div
                     class="ca-fill"
@@ -181,7 +181,7 @@ const { showId, componentId } = useComponentId('RP-005')
                 v-if="callProgress"
                 class="ca-row"
               >
-                <span class="ca-label">调用分组</span>
+                <span class="ca-label">{{ t('report.pipeline.groupCall') }}</span>
                 <div class="ca-bar">
                   <div
                     class="ca-fill"

@@ -404,7 +404,9 @@ class AnalysisStore:
         self._db.execute(
             "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
         )
-        self._safe_delete_llm_results(task_id)
+        self._db.execute(
+            "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
+        )
         logger.info(f"[AnalysisStore] clear_task_data: task_id={task_id}")
 
     def clear_communities_for_task(self, task_id: str, edge_type: str):
@@ -420,27 +422,18 @@ class AnalysisStore:
             "DELETE FROM community_hierarchy WHERE task_id = ? AND edge_type = ?",
             (task_id, edge_type)
         )
-        self._safe_delete_llm_results(task_id, edge_type)
+        if edge_type:
+            self._db.execute(
+                "DELETE FROM community_llm_results WHERE task_id = ? AND edge_type = ?",
+                (task_id, edge_type)
+            )
+        else:
+            self._db.execute(
+                "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
+            )
         logger.info(
             f"[AnalysisStore] clear_communities_for_task: task_id={task_id}, edge_type={edge_type}"
         )
-
-    def _safe_delete_llm_results(self, task_id: str, edge_type: str = None):
-        """安全删除 community_llm_results，兼容旧数据库未建表的情况"""
-        try:
-            if edge_type:
-                self._db.execute(
-                    "DELETE FROM community_llm_results WHERE task_id = ? AND edge_type = ?",
-                    (task_id, edge_type)
-                )
-            else:
-                self._db.execute(
-                    "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
-                )
-        except Exception as e:
-            logger.warning(
-                f"[AnalysisStore] 清理 community_llm_results 失败（表可能不存在）: {e}"
-            )
 
     def bulk_insert_llm_results(self, results: List[Dict]):
         from plantuml_service import validate_mermaid, validate_plantuml

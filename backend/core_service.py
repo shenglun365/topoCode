@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 from sqlite_ctx import SQLiteContext, MultiDBManager
 from zmq_server import ZMQServer
+from report_tree_service import save_overall_doc as _save_overall_doc
 
 
 
@@ -2101,6 +2102,16 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         params.extend([limit, offset])
         rows = main_db.fetchall(sql, tuple(params))
         return {"logs": rows, "count": len(rows)}
+
+    # ==================== 报告文档持久化 ====================
+
+    @server.register("report.saveOverallDoc")
+    def save_overall_doc(task_id=None, title=None, content=None, taskId=None):
+        """保存或更新整体架构文档到 report_subdocs"""
+        tid = task_id or taskId
+        if not tid or not title or not content:
+            raise ValueError("taskId, title, and content are required")
+        return _save_overall_doc(multi_db, tid, title, content)
 
     return server
 
