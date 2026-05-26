@@ -110,7 +110,10 @@ function updateIndeterminate() {
 
 <template>
   <div class="dir-tree-node">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       class="dir-item"
       :style="{ paddingLeft: `${depth * 16 + 8}px` }"
@@ -125,7 +128,10 @@ function updateIndeterminate() {
         }"
         @click.stop="handleExpand"
       >
-        <ChevronRightIcon v-if="node.children && node.children.length > 0" class="w-3 h-3" />
+        <ChevronRightIcon
+          v-if="node.children && node.children.length > 0"
+          class="w-3 h-3"
+        />
       </div>
       
       <!-- Checkbox -->
@@ -134,10 +140,13 @@ function updateIndeterminate() {
         type="checkbox"
         :checked="getCheckboxState(node) === 'checked'"
         @click.stop="handleClick"
-      />
+      >
       
       <!-- Directory name -->
-      <span class="dir-name" :title="node.path">{{ node.name }}</span>
+      <span
+        class="dir-name"
+        :title="node.path"
+      >{{ node.name }}</span>
     </div>
     
     <!-- Children -->

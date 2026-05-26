@@ -43,7 +43,10 @@ function scrollToBottom() {
 
 <template>
   <div class="page-coder">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- Session Tab 栏 -->
     <SessionTabBar
       :sessions="chatStore.sessions"
@@ -68,32 +71,49 @@ function scrollToBottom() {
         />
 
         <!-- 正在输入 -->
-        <div v-if="chatStore.isTyping" class="chat-message assistant">
+        <div
+          v-if="chatStore.isTyping"
+          class="chat-message assistant"
+        >
           <div class="msg-avatar">
             <ChatBubbleLeftRightIcon class="w-6 h-6 text-accent" />
           </div>
           <div class="msg-body">
             <div class="msg-bubble typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
+              <span />
+              <span />
+              <span />
             </div>
           </div>
         </div>
 
         <!-- 空状态 -->
-        <div v-if="chatStore.activeSession.messages.length === 0" class="empty-state">
+        <div
+          v-if="chatStore.activeSession.messages.length === 0"
+          class="empty-state"
+        >
           <ChatBubbleLeftRightIcon class="icon" />
-          <div class="title">{{ t('coder.newChat') }}</div>
-          <div class="desc">{{ t('coder.startDescribe') }}</div>
+          <div class="title">
+            {{ t('coder.newChat') }}
+          </div>
+          <div class="desc">
+            {{ t('coder.startDescribe') }}
+          </div>
         </div>
       </template>
 
       <!-- 无会话 -->
-      <div v-else class="empty-state">
+      <div
+        v-else
+        class="empty-state"
+      >
         <ChatBubbleLeftRightIcon class="icon" />
-        <div class="title">{{ t('coder.noChat') }}</div>
-        <div class="desc">{{ t('coder.clickPlusNewChat') }}</div>
+        <div class="title">
+          {{ t('coder.noChat') }}
+        </div>
+        <div class="desc">
+          {{ t('coder.clickPlusNewChat') }}
+        </div>
       </div>
     </div>
 

@@ -56,13 +56,19 @@ function getStatusIcon(status: string) {
     :class="{ 'card-clickable': true }"
     @click="emit('select', task)"
   >
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部 -->
     <div class="task-card-header">
       <div class="flex items-center gap-2">
         <ChartBarIcon class="w-4 h-4 text-accent" />
         <span class="task-card-title">{{ task.name }}</span>
-        <span :class="`badge ${taskStatusBadge[task.status]}`" style="font-size:8px;">
+        <span
+          :class="`badge ${taskStatusBadge[task.status]}`"
+          style="font-size:8px;"
+        >
           {{ taskStatusNames[task.status] }}
         </span>
       </div>
@@ -73,8 +79,14 @@ function getStatusIcon(status: string) {
           :title="task.favorite ? t('common.unfavorite') : t('common.favorite')"
           @click.stop="emit('toggleFavorite', task.id)"
         >
-          <StarSolidIcon v-if="task.favorite" class="w-3.5 h-3.5 text-yellow-400" />
-          <StarIcon v-else class="w-3.5 h-3.5" />
+          <StarSolidIcon
+            v-if="task.favorite"
+            class="w-3.5 h-3.5 text-yellow-400"
+          />
+          <StarIcon
+            v-else
+            class="w-3.5 h-3.5"
+          />
         </button>
         <button
           class="icon-btn task-action-btn"
@@ -109,12 +121,15 @@ function getStatusIcon(status: string) {
       </div>
 
       <!-- 进度条 (进行中) -->
-      <div v-if="task.status === 'running'" class="mt-2">
+      <div
+        v-if="task.status === 'running'"
+        class="mt-2"
+      >
         <div class="progress-bar">
           <div
             class="progress-bar-fill"
             :style="{ width: `${task.progress || 0}%` }"
-          ></div>
+          />
         </div>
         <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
           {{ task.current || 0 }}/{{ task.total || 0 }} {{ t('common.file') }}
@@ -122,24 +137,37 @@ function getStatusIcon(status: string) {
       </div>
 
       <!-- 错误信息 -->
-      <div v-if="task.status === 'error'" class="text-error" style="font-size:10px; margin-top:4px;">
+      <div
+        v-if="task.status === 'error'"
+        class="text-error"
+        style="font-size:10px; margin-top:4px;"
+      >
         ⚠ {{ task.error }}
       </div>
 
       <!-- 完成信息 -->
-      <div v-if="task.status === 'done'" style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+      <div
+        v-if="task.status === 'done'"
+        style="font-size:10px; color:var(--text-muted); margin-top:4px;"
+      >
         {{ t('common.completed') }} {{ new Date(task.updatedAt).toLocaleString(localeStr.value) }}
       </div>
 
       <!-- 依赖信息 -->
-      <div v-if="task.status === 'pending'" style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+      <div
+        v-if="task.status === 'pending'"
+        style="font-size:10px; color:var(--text-muted); margin-top:4px;"
+      >
         {{ t('common.pending') }}
       </div>
     </div>
 
     <!-- 展开详情 -->
-    <div v-if="expanded" class="task-card-detail">
-      <div class="divider"></div>
+    <div
+      v-if="expanded"
+      class="task-card-detail"
+    >
+      <div class="divider" />
       <div style="padding-top:8px; font-size:10px; color:var(--text-secondary);">
         <div style="margin-bottom:4px;">
           {{ t('common.type') }}: <code style="font-size:10px;">{{ task.type }}</code>
@@ -174,7 +202,10 @@ function getStatusIcon(status: string) {
             <ArrowPathIcon class="w-3 h-3" />
             <span>{{ t('common.retry') }}</span>
           </button>
-          <button class="btn btn-ghost btn-sm" @click.stop="">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click.stop=""
+          >
             <PencilIcon class="w-3 h-3" />
             <span>{{ t('common.edit') }}</span>
           </button>

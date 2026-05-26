@@ -1,6 +1,9 @@
 <template>
   <div class="right-panel-tabs">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="tab-bar">
       <button
         v-for="tab in tabs"
@@ -9,19 +12,33 @@
         :class="{ active: activeTab === tab.key }"
         @click="emit('tab-change', { tab: tab.key })"
       >
-        <component :is="tab.icon" class="w-4 h-4" />
+        <component
+          :is="tab.icon"
+          class="w-4 h-4"
+        />
         <span class="tab-label">{{ tab.label }}</span>
       </button>
     </div>
 
     <div class="tab-content">
       <!-- 代码解析 Tab -->
-      <div v-if="activeTab === 'code'" class="code-parse-tab">
-        <div v-if="!selectedFile" class="empty-state">
+      <div
+        v-if="activeTab === 'code'"
+        class="code-parse-tab"
+      >
+        <div
+          v-if="!selectedFile"
+          class="empty-state"
+        >
           <CodeBracketIcon class="w-12 h-12 empty-icon" />
-          <p class="empty-text">{{ t('coder.selectFileToParse') }}</p>
+          <p class="empty-text">
+            {{ t('coder.selectFileToParse') }}
+          </p>
         </div>
-        <div v-else class="file-tree-preview">
+        <div
+          v-else
+          class="file-tree-preview"
+        >
           <div class="file-header">
             <DocumentTextIcon class="w-4 h-4" />
             <span class="file-name">{{ selectedFile }}</span>
@@ -40,12 +57,23 @@
       </div>
 
       <!-- 知识库 Tab -->
-      <div v-else-if="activeTab === 'knowledge'" class="knowledge-tab">
-        <div v-if="knowledgeDocs.length === 0" class="empty-state">
+      <div
+        v-else-if="activeTab === 'knowledge'"
+        class="knowledge-tab"
+      >
+        <div
+          v-if="knowledgeDocs.length === 0"
+          class="empty-state"
+        >
           <BookOpenIcon class="w-12 h-12 empty-icon" />
-          <p class="empty-text">{{ t('coder.noRelatedKnowledge') }}</p>
+          <p class="empty-text">
+            {{ t('coder.noRelatedKnowledge') }}
+          </p>
         </div>
-        <div v-else class="knowledge-list">
+        <div
+          v-else
+          class="knowledge-list"
+        >
           <div
             v-for="doc in knowledgeDocs"
             :key="doc.id"
@@ -62,12 +90,23 @@
       </div>
 
       <!-- Spec Tab -->
-      <div v-else-if="activeTab === 'spec'" class="spec-tab">
-        <div v-if="specs.length === 0" class="empty-state">
+      <div
+        v-else-if="activeTab === 'spec'"
+        class="spec-tab"
+      >
+        <div
+          v-if="specs.length === 0"
+          class="empty-state"
+        >
           <DocumentTextIcon class="w-12 h-12 empty-icon" />
-          <p class="empty-text">{{ t('coder.noSpecs') }}</p>
+          <p class="empty-text">
+            {{ t('coder.noSpecs') }}
+          </p>
         </div>
-        <div v-else class="spec-list">
+        <div
+          v-else
+          class="spec-list"
+        >
           <SpecCard
             v-for="spec in specs"
             :key="spec.id"
@@ -79,7 +118,10 @@
       </div>
 
       <!-- 任务配置 Tab -->
-      <div v-else-if="activeTab === 'task'" class="task-config-tab">
+      <div
+        v-else-if="activeTab === 'task'"
+        class="task-config-tab"
+      >
         <div class="config-form">
           <div class="form-group">
             <label class="form-label">{{ t('coder.taskName') }}</label>
@@ -88,26 +130,47 @@
               type="text"
               class="form-input"
               :placeholder="t('coder.taskNamePlaceholder')"
-            />
+            >
           </div>
           <div class="form-group">
             <label class="form-label">{{ t('coder.taskType') }}</label>
-            <select v-model="taskConfig.type" class="form-select">
-              <option value="analysis">{{ t('coder.taskTypeAnalysis') }}</option>
-              <option value="design">{{ t('coder.taskTypeDesign') }}</option>
-              <option value="refactor">{{ t('coder.taskTypeRefactor') }}</option>
+            <select
+              v-model="taskConfig.type"
+              class="form-select"
+            >
+              <option value="analysis">
+                {{ t('coder.taskTypeAnalysis') }}
+              </option>
+              <option value="design">
+                {{ t('coder.taskTypeDesign') }}
+              </option>
+              <option value="refactor">
+                {{ t('coder.taskTypeRefactor') }}
+              </option>
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">{{ t('coder.agentSelect') }}</label>
-            <select v-model="taskConfig.agent" class="form-select">
-              <option value="">{{ t('coder.defaultAgent') }}</option>
-              <option v-for="agent in agents" :key="agent.id" :value="agent.id">
+            <select
+              v-model="taskConfig.agent"
+              class="form-select"
+            >
+              <option value="">
+                {{ t('coder.defaultAgent') }}
+              </option>
+              <option
+                v-for="agent in agents"
+                :key="agent.id"
+                :value="agent.id"
+              >
                 {{ agent.name }}
               </option>
             </select>
           </div>
-          <button class="submit-btn" @click="submitConfig">
+          <button
+            class="submit-btn"
+            @click="submitConfig"
+          >
             {{ t('coder.submitTask') }}
           </button>
         </div>

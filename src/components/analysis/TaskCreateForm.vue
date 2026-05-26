@@ -252,11 +252,18 @@ function viewLogs() {
 
 <template>
   <div class="task-create-form">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- Header bar -->
     <div class="form-header">
       <div class="header-left">
-        <button v-if="!isNewTask" class="icon-btn" @click="handleCancel">
+        <button
+          v-if="!isNewTask"
+          class="icon-btn"
+          @click="handleCancel"
+        >
           <ArrowLeftIcon class="w-4 h-4" />
         </button>
         <h2 class="form-title">
@@ -266,7 +273,10 @@ function viewLogs() {
       <div class="header-right">
         <!-- View mode actions -->
         <template v-if="isViewMode && task">
-          <button class="btn btn-ghost" @click="viewLogs">
+          <button
+            class="btn btn-ghost"
+            @click="viewLogs"
+          >
             <DocumentTextIcon class="w-4 h-4" />
             <span>{{ t('analysis.viewLogs') }}</span>
           </button>
@@ -288,15 +298,21 @@ function viewLogs() {
         </template>
         <!-- Edit mode actions -->
         <template v-else>
-          <button class="btn btn-ghost" @click="handleCancel">
+          <button
+            class="btn btn-ghost"
+            @click="handleCancel"
+          >
             {{ t('analysis.cancel') }}
           </button>
           <button
             class="btn btn-primary"
-            @click="onSaveClick"
             :disabled="loading || !taskName.trim()"
+            @click="onSaveClick"
           >
-            <SparklesIcon v-if="!loading" class="w-4 h-4" />
+            <SparklesIcon
+              v-if="!loading"
+              class="w-4 h-4"
+            />
             <span>{{ isNewTask ? t('analysis.saveConfig') : t('analysis.confirmChange') }}</span>
           </button>
         </template>
@@ -333,8 +349,11 @@ function viewLogs() {
             v-model="taskName"
             class="form-input"
             :placeholder="t('analysis.taskNamePlaceholder')"
-          />
-          <div v-else class="form-value">
+          >
+          <div
+            v-else
+            class="form-value"
+          >
             {{ task?.name || '-' }}
             <span class="form-id">{{ task?.id }}</span>
           </div>
@@ -343,18 +362,40 @@ function viewLogs() {
         <!-- Directory scope (view mode shows tags) -->
         <div class="form-section">
           <label class="form-label">{{ t('analysis.directoryScope') }}</label>
-          <div v-if="isViewMode" class="form-tags">
-            <span v-if="selectedScopes.length === 0" class="empty-tag">{{ t('analysis.allDirectories') }}</span>
-            <span v-else v-for="s in selectedScopes" :key="s" class="form-tag">{{ s }}</span>
+          <div
+            v-if="isViewMode"
+            class="form-tags"
+          >
+            <span
+              v-if="selectedScopes.length === 0"
+              class="empty-tag"
+            >{{ t('analysis.allDirectories') }}</span>
+            <span
+              v-for="s in selectedScopes"
+              v-else
+              :key="s"
+              class="form-tag"
+            >{{ s }}</span>
           </div>
         </div>
 
         <!-- Selected extensions -->
         <div class="form-section">
           <label class="form-label">{{ t('analysis.fileExtensions') }}</label>
-          <div v-if="isViewMode" class="form-tags">
-            <span v-if="selectedExtensions.length === 0" class="empty-tag">{{ t('analysis.allFiles') }}</span>
-            <span v-else v-for="ext in selectedExtensions" :key="ext" class="form-tag">{{ ext }}</span>
+          <div
+            v-if="isViewMode"
+            class="form-tags"
+          >
+            <span
+              v-if="selectedExtensions.length === 0"
+              class="empty-tag"
+            >{{ t('analysis.allFiles') }}</span>
+            <span
+              v-for="ext in selectedExtensions"
+              v-else
+              :key="ext"
+              class="form-tag"
+            >{{ ext }}</span>
           </div>
         </div>
 
@@ -366,38 +407,64 @@ function viewLogs() {
             v-model="excludeDirs"
             class="form-input"
             :placeholder="t('analysis.excludeDirsPlaceholder')"
-          />
-          <div v-else class="form-tags">
-            <span v-for="d in (task?.excludeDirs || [])" :key="d" class="form-tag">{{ d }}</span>
-            <span v-if="!task?.excludeDirs?.length" class="empty-tag">-</span>
+          >
+          <div
+            v-else
+            class="form-tags"
+          >
+            <span
+              v-for="d in (task?.excludeDirs || [])"
+              :key="d"
+              class="form-tag"
+            >{{ d }}</span>
+            <span
+              v-if="!task?.excludeDirs?.length"
+              class="empty-tag"
+            >-</span>
           </div>
         </div>
 
         <!-- Report types -->
         <div class="form-section">
           <label class="form-label">{{ t('analysis.reportTypes') }}</label>
-          <div v-if="isEditMode || isNewTask" class="checkbox-group">
+          <div
+            v-if="isEditMode || isNewTask"
+            class="checkbox-group"
+          >
             <label
               v-for="opt in reportTypeOptions"
               :key="opt.value"
               class="checkbox-item"
             >
               <input
+                v-model="reportTypes"
                 type="checkbox"
                 :value="opt.value"
-                v-model="reportTypes"
-              />
+              >
               <span>{{ opt.label }}</span>
             </label>
           </div>
-          <div v-else class="form-tags">
-            <span v-for="r in (task?.reportTypes || [])" :key="r" class="form-tag">{{ r }}</span>
-            <span v-if="!task?.reportTypes?.length" class="empty-tag">-</span>
+          <div
+            v-else
+            class="form-tags"
+          >
+            <span
+              v-for="r in (task?.reportTypes || [])"
+              :key="r"
+              class="form-tag"
+            >{{ r }}</span>
+            <span
+              v-if="!task?.reportTypes?.length"
+              class="empty-tag"
+            >-</span>
           </div>
         </div>
 
         <!-- Task metadata (view mode only) -->
-        <div v-if="isViewMode && task" class="form-metadata">
+        <div
+          v-if="isViewMode && task"
+          class="form-metadata"
+        >
           <div class="metadata-row">
             <ClockIcon class="w-4 h-4" />
             <span>{{ t('analysis.createdAt') }}: {{ task.createdAt }}</span>

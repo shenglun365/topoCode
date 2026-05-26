@@ -22,7 +22,10 @@ function copyLogs() {
 
 <template>
   <div class="debug-panel">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="debug-section">
       <div class="debug-section-title">
         <WrenchScrewdriverIcon class="w-3.5 h-3.5" />
@@ -58,15 +61,23 @@ function copyLogs() {
       </div>
     </div>
 
-    <div class="debug-section" v-if="projectStore.selectedProject">
-      <div class="debug-section-title">{{ t('shell.rightPanel.projectInfo') }}</div>
+    <div
+      v-if="projectStore.selectedProject"
+      class="debug-section"
+    >
+      <div class="debug-section-title">
+        {{ t('shell.rightPanel.projectInfo') }}
+      </div>
       <div class="debug-row">
         <span class="debug-label">name</span>
         <span class="debug-value">{{ projectStore.selectedProject.name }}</span>
       </div>
       <div class="debug-row">
         <span class="debug-label">rootPath</span>
-        <span class="debug-value" :title="projectStore.selectedProject.rootPath">{{ projectStore.selectedProject.rootPath }}</span>
+        <span
+          class="debug-value"
+          :title="projectStore.selectedProject.rootPath"
+        >{{ projectStore.selectedProject.rootPath }}</span>
       </div>
       <div class="debug-row">
         <span class="debug-label">importedAt</span>
@@ -78,19 +89,39 @@ function copyLogs() {
       <div class="debug-section-title">
         <span>{{ t('shell.rightPanel.eventLog') }}</span>
         <div class="debug-actions">
-          <button class="debug-action-btn" @click="copyLogs()" :title="t('shell.rightPanel.copyLogs')">
-            <CheckIcon v-if="copied" class="w-3 h-3" />
-            <DocumentDuplicateIcon v-else class="w-3 h-3" />
+          <button
+            class="debug-action-btn"
+            :title="t('shell.rightPanel.copyLogs')"
+            @click="copyLogs()"
+          >
+            <CheckIcon
+              v-if="copied"
+              class="w-3 h-3"
+            />
+            <DocumentDuplicateIcon
+              v-else
+              class="w-3 h-3"
+            />
           </button>
-          <button class="debug-action-btn" @click="debugStore.clear()" :title="t('common.clear')">
+          <button
+            class="debug-action-btn"
+            :title="t('common.clear')"
+            @click="debugStore.clear()"
+          >
             <TrashIcon class="w-3 h-3" />
           </button>
         </div>
       </div>
-      <div v-if="debugStore.logs.length === 0" class="debug-empty">
+      <div
+        v-if="debugStore.logs.length === 0"
+        class="debug-empty"
+      >
         {{ t('shell.rightPanel.noEvents') }}
       </div>
-      <div v-else class="debug-log-list">
+      <div
+        v-else
+        class="debug-log-list"
+      >
         <div
           v-for="(log, idx) in debugStore.logs"
           :key="idx"

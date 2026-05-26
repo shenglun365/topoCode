@@ -1,6 +1,12 @@
 <template>
-  <span class="status-dot" :class="`status-${status}`">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span></span>
+  <span
+    class="status-dot"
+    :class="`status-${status}`"
+  >
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span></span>
 </template>
 
 <script setup lang="ts">import { useComponentId } from '@/composables/useComponentId'

@@ -1,15 +1,32 @@
 <template>
   <div class="chat-flow">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 消息列表 -->
-    <div ref="messageListRef" class="message-list" @scroll="handleScroll">
-      <div v-if="messages.length === 0" class="empty-state">
+    <div
+      ref="messageListRef"
+      class="message-list"
+      @scroll="handleScroll"
+    >
+      <div
+        v-if="messages.length === 0"
+        class="empty-state"
+      >
         <ChatBubbleLeftRightIcon class="w-16 h-16 empty-icon" />
-        <p class="empty-text">{{ t('coder.noMessages') }}</p>
-        <p class="empty-hint">{{ t('coder.startConversation') }}</p>
+        <p class="empty-text">
+          {{ t('coder.noMessages') }}
+        </p>
+        <p class="empty-hint">
+          {{ t('coder.startConversation') }}
+        </p>
       </div>
 
-      <div v-else class="message-container">
+      <div
+        v-else
+        class="message-container"
+      >
         <div
           v-for="message in messages"
           :key="message.id"
@@ -23,11 +40,14 @@
         </div>
 
         <!-- 加载指示器 -->
-        <div v-if="loading" class="loading-indicator">
+        <div
+          v-if="loading"
+          class="loading-indicator"
+        >
           <div class="loading-dots">
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
+            <span class="dot" />
+            <span class="dot" />
+            <span class="dot" />
           </div>
           <span class="loading-text">{{ t('coder.thinking') }}</span>
         </div>
@@ -60,25 +80,28 @@
         :placeholder="t('coder.inputPlaceholder')"
         rows="1"
         @keydown.enter.exact.prevent="sendMessage"
-      ></textarea>
+      />
       <div class="input-actions">
-        <button class="action-btn" :title="t('coder.attachFile')">
+        <button
+          class="action-btn"
+          :title="t('coder.attachFile')"
+        >
           <PaperClipIcon class="w-5 h-5" />
         </button>
         <button
           v-if="loading"
           class="action-btn stop-btn"
-          @click="stopGeneration"
           :title="t('coder.stop')"
+          @click="stopGeneration"
         >
           <StopIcon class="w-5 h-5" />
         </button>
         <button
           v-else
           class="action-btn send-btn"
-          @click="sendMessage"
           :disabled="!canSend"
           :title="t('coder.send')"
+          @click="sendMessage"
         >
           <PaperAirplaneIcon class="w-5 h-5" />
         </button>
@@ -86,7 +109,10 @@
       <div class="model-info">
         <span class="model-label">{{ t('coder.model') }}:</span>
         <span class="model-name">{{ currentModel }}</span>
-        <button class="model-settings-btn" @click="openModelSettings">
+        <button
+          class="model-settings-btn"
+          @click="openModelSettings"
+        >
           <Cog6ToothIcon class="w-4 h-4" />
         </button>
       </div>

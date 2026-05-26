@@ -43,7 +43,10 @@ const tabs = [
 
 <template>
   <div class="page-user">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 顶部 Tab 切换 -->
     <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
       <div
@@ -53,10 +56,13 @@ const tabs = [
         :class="{ active: settingsStore.activeTab === tab.id }"
         @click="settingsStore.setActiveTab(tab.id)"
       >
-        <component :is="tab.icon" class="w-4 h-4" />
+        <component
+          :is="tab.icon"
+          class="w-4 h-4"
+        />
         <span>{{ t(tab.key) }}</span>
       </div>
-      <div style="flex:1;"></div>
+      <div style="flex:1;" />
 
       <div style="display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text-muted);">
         <span
@@ -64,9 +70,13 @@ const tabs = [
           :style="{
             backgroundColor: settingsStore.backendStatus === 'connected' ? 'var(--success)' : 'var(--error)',
           }"
-        ></span>
+        />
         <span>{{ t('settings.pythonBackend') }}</span>
-        <button class="btn btn-ghost btn-sm" style="padding:2px 6px; font-size:10px;" @click="settingsStore.restartBackend()">
+        <button
+          class="btn btn-ghost btn-sm"
+          style="padding:2px 6px; font-size:10px;"
+          @click="settingsStore.restartBackend()"
+        >
           <ArrowPathIcon class="w-3 h-3" />
           <span>{{ t('common.restart') }}</span>
         </button>
@@ -80,10 +90,17 @@ const tabs = [
       <SkillManager v-else-if="settingsStore.activeTab === 'skills'" />
       <GeneralSettings v-else-if="settingsStore.activeTab === 'general'" />
       <ThemeManager v-else-if="settingsStore.activeTab === 'theme'" />
-      <div v-else-if="settingsStore.activeTab === 'plugins'" class="empty-state">
+      <div
+        v-else-if="settingsStore.activeTab === 'plugins'"
+        class="empty-state"
+      >
         <PuzzlePieceIcon class="icon" />
-        <div class="title">{{ t('settings.plugins') }}</div>
-        <div class="desc">{{ t('settings.pluginsComingSoon') }}</div>
+        <div class="title">
+          {{ t('settings.plugins') }}
+        </div>
+        <div class="desc">
+          {{ t('settings.pluginsComingSoon') }}
+        </div>
       </div>
       <AboutPage v-else-if="settingsStore.activeTab === 'about'" />
     </div>

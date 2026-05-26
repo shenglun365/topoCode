@@ -390,6 +390,7 @@ contextBridge.exposeInMainWorld('api', {
     getAppDataPath: () => ipcRenderer.invoke('system:get-app-data-path'),
     get: (key: string) => ipcRenderer.invoke('store:get', key),
     set: (key: string, val: any) => ipcRenderer.invoke('store:set', key, val),
+    getHttpPort: () => ipcRenderer.invoke('system:get-http-port'),
   },
 
   // ==================== 事件订阅 ====================

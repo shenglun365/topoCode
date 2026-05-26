@@ -94,27 +94,45 @@ function handleOpenSource() {
 
 <template>
   <div class="symbol-detail-card">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部 -->
     <div class="card-header">
       <CodeBracketIcon class="w-4 h-4 type-icon" />
       <span class="type-badge">{{ typeLabel }}</span>
       <span class="symbol-name">{{ name }}</span>
-      <span v-if="className" class="class-prefix">{{ className }}::</span>
+      <span
+        v-if="className"
+        class="class-prefix"
+      >{{ className }}::</span>
     </div>
 
     <!-- 文件信息 -->
-    <div class="file-info" @click="handleOpenSource">
+    <div
+      class="file-info"
+      @click="handleOpenSource"
+    >
       <DocumentTextIcon class="w-3.5 h-3.5" />
-      <span class="file-path" :title="filePath">{{ filePath }}</span>
+      <span
+        class="file-path"
+        :title="filePath"
+      >{{ filePath }}</span>
       <span class="line-range">{{ startLine }}-{{ endLine }}</span>
     </div>
 
     <!-- 代码抽样 -->
-    <div v-if="codeSnippet" class="code-section">
+    <div
+      v-if="codeSnippet"
+      class="code-section"
+    >
       <div class="code-header">
         <span>{{ t('common.code') }}</span>
-        <span v-if="needsSummarize" class="summarize-hint">{{ t('report.needsSummarize') }}</span>
+        <span
+          v-if="needsSummarize"
+          class="summarize-hint"
+        >{{ t('report.needsSummarize') }}</span>
       </div>
       <pre class="code-block"><code>{{ displayCode }}</code></pre>
     </div>
@@ -131,16 +149,27 @@ function handleOpenSource() {
         <span>{{ t('report.aiExplain') }}</span>
       </button>
 
-      <div v-if="aiLoading" class="ai-loading">
-        <span class="spinner"></span>
+      <div
+        v-if="aiLoading"
+        class="ai-loading"
+      >
+        <span class="spinner" />
         <span>{{ t('report.aiExplainLoading') }}</span>
       </div>
 
-      <div v-if="aiContent" class="ai-content">
-        <div class="ai-text">{{ aiContent }}</div>
+      <div
+        v-if="aiContent"
+        class="ai-content"
+      >
+        <div class="ai-text">
+          {{ aiContent }}
+        </div>
       </div>
 
-      <div v-if="aiError" class="ai-error">
+      <div
+        v-if="aiError"
+        class="ai-error"
+      >
         {{ aiError }}
       </div>
     </div>

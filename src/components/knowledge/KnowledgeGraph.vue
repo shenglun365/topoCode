@@ -73,7 +73,10 @@ const viewModes = [
 
 <template>
   <div class="knowledge-graph">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 视图切换 -->
     <div class="view-switcher">
       <button
@@ -83,7 +86,10 @@ const viewModes = [
         :class="{ active: viewMode === mode.id }"
         @click="viewMode = mode.id"
       >
-        <component :is="mode.icon" class="w-4 h-4" />
+        <component
+          :is="mode.icon"
+          class="w-4 h-4"
+        />
         <span>{{ mode.label }}</span>
       </button>
 

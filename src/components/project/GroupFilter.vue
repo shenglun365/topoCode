@@ -158,7 +158,10 @@ defineExpose({ loadGroups })
 
 <template>
   <div class="group-filter">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <button
       class="group-filter-btn"
       :class="{ active: selectedIds.length > 0 }"
@@ -166,8 +169,14 @@ defineExpose({ loadGroups })
     >
       <FunnelIcon class="w-3.5 h-3.5" />
       <span>{{ t('group.filter') }}</span>
-      <span v-if="selectedIds.length > 0" class="group-filter-count">{{ selectedIds.length }}</span>
-      <ChevronDownIcon class="w-3 h-3 filter-chevron" :class="{ open: isOpen }" />
+      <span
+        v-if="selectedIds.length > 0"
+        class="group-filter-count"
+      >{{ selectedIds.length }}</span>
+      <ChevronDownIcon
+        class="w-3 h-3 filter-chevron"
+        :class="{ open: isOpen }"
+      />
     </button>
 
     <div
@@ -183,7 +192,7 @@ defineExpose({ loadGroups })
           v-model="searchQuery"
           :placeholder="t('group.searchPlaceholder')"
           type="text"
-        />
+        >
         <button
           class="group-filter-settings"
           @click.stop="handleOpenGroupManager"
@@ -196,8 +205,8 @@ defineExpose({ loadGroups })
       <div class="group-filter-tree">
         <div
           v-for="group in groups"
-          :key="group.id"
           v-if="matchesSearch(group)"
+          :key="group.id"
         >
           <div
             class="group-tree-item"
@@ -211,18 +220,27 @@ defineExpose({ loadGroups })
             >
               <ChevronRightIcon class="w-3 h-3 expand-open" />
             </span>
-            <span v-else class="tree-expand tree-expand-placeholder" />
-            <span class="tree-checkbox" :class="{ checked: isSelected(group) }">
+            <span
+              v-else
+              class="tree-expand tree-expand-placeholder"
+            />
+            <span
+              class="tree-checkbox"
+              :class="{ checked: isSelected(group) }"
+            >
               {{ isSelected(group) ? '✓' : '' }}
             </span>
-            <span class="tree-label" :style="{ paddingLeft: renderIndent(group.depth) }">{{ group.name }}</span>
+            <span
+              class="tree-label"
+              :style="{ paddingLeft: renderIndent(group.depth) }"
+            >{{ group.name }}</span>
           </div>
           <!-- 子节点 -->
           <div v-if="isExpanded(group) && group.children && group.children.length > 0">
             <div
               v-for="child in group.children"
-              :key="child.id"
               v-if="matchesSearch(child)"
+              :key="child.id"
             >
               <div
                 class="group-tree-item"
@@ -230,17 +248,23 @@ defineExpose({ loadGroups })
                 @click="toggleSelect(child.id)"
               >
                 <span class="tree-expand tree-expand-placeholder" />
-                <span class="tree-checkbox" :class="{ checked: isSelected(child) }">
+                <span
+                  class="tree-checkbox"
+                  :class="{ checked: isSelected(child) }"
+                >
                   {{ isSelected(child) ? '✓' : '' }}
                 </span>
-                <span class="tree-label" :style="{ paddingLeft: renderIndent(child.depth) }">{{ child.name }}</span>
+                <span
+                  class="tree-label"
+                  :style="{ paddingLeft: renderIndent(child.depth) }"
+                >{{ child.name }}</span>
               </div>
               <!-- 递归渲染更深层级 -->
               <div v-if="child.children && child.children.length > 0">
                 <div
                   v-for="gc in child.children"
-                  :key="gc.id"
                   v-if="matchesSearch(gc)"
+                  :key="gc.id"
                 >
                   <div
                     class="group-tree-item"
@@ -248,10 +272,16 @@ defineExpose({ loadGroups })
                     @click="toggleSelect(gc.id)"
                   >
                     <span class="tree-expand tree-expand-placeholder" />
-                    <span class="tree-checkbox" :class="{ checked: isSelected(gc) }">
+                    <span
+                      class="tree-checkbox"
+                      :class="{ checked: isSelected(gc) }"
+                    >
                       {{ isSelected(gc) ? '✓' : '' }}
                     </span>
-                    <span class="tree-label" :style="{ paddingLeft: renderIndent(gc.depth) }">{{ gc.name }}</span>
+                    <span
+                      class="tree-label"
+                      :style="{ paddingLeft: renderIndent(gc.depth) }"
+                    >{{ gc.name }}</span>
                   </div>
                 </div>
               </div>
@@ -263,13 +293,33 @@ defineExpose({ loadGroups })
       <!-- 底部操作 -->
       <div class="group-filter-footer">
         <div class="group-filter-footer-left">
-          <button class="group-filter-action" @click="selectAll">{{ t('group.selectAll') }}</button>
-          <button class="group-filter-action" @click="clearAll">{{ t('group.clearAll') }}</button>
+          <button
+            class="group-filter-action"
+            @click="selectAll"
+          >
+            {{ t('group.selectAll') }}
+          </button>
+          <button
+            class="group-filter-action"
+            @click="clearAll"
+          >
+            {{ t('group.clearAll') }}
+          </button>
           <span class="group-filter-selected">{{ pendingSelectedIds.length }} {{ t('group.selected') }}</span>
         </div>
         <div class="group-filter-footer-right">
-          <button class="group-filter-cancel" @click="cancelFilter">{{ t('common.cancel') }}</button>
-          <button class="group-filter-ok" @click="confirmFilter">{{ t('common.ok') }}</button>
+          <button
+            class="group-filter-cancel"
+            @click="cancelFilter"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="group-filter-ok"
+            @click="confirmFilter"
+          >
+            {{ t('common.ok') }}
+          </button>
         </div>
       </div>
     </div>

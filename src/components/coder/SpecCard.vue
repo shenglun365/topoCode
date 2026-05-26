@@ -1,20 +1,37 @@
 <template>
-  <div class="spec-card" :class="statusClass">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <div
+    class="spec-card"
+    :class="statusClass"
+  >
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="spec-header">
       <div class="spec-title-area">
         <DocumentTextIcon class="w-5 h-5 spec-icon" />
-        <h3 class="spec-title">{{ spec.title }}</h3>
+        <h3 class="spec-title">
+          {{ spec.title }}
+        </h3>
       </div>
-      <span class="status-badge" :class="status">{{ statusText }}</span>
+      <span
+        class="status-badge"
+        :class="status"
+      >{{ statusText }}</span>
     </div>
 
-    <p class="spec-summary">{{ spec.summary }}</p>
+    <p class="spec-summary">
+      {{ spec.summary }}
+    </p>
 
     <div class="spec-sections">
       <span class="sections-label">{{ t('coder.specSections') }}:</span>
       <div class="section-tags">
-        <span v-for="section in spec.sections" :key="section" class="section-tag">
+        <span
+          v-for="section in spec.sections"
+          :key="section"
+          class="section-tag"
+        >
           {{ section }}
         </span>
       </div>
@@ -25,11 +42,17 @@
     </div>
 
     <div class="spec-actions">
-      <button class="action-btn view-btn" @click="emit('view', { specId: spec.id })">
+      <button
+        class="action-btn view-btn"
+        @click="emit('view', { specId: spec.id })"
+      >
         <EyeIcon class="w-4 h-4" />
         {{ t('common.view') }}
       </button>
-      <button class="action-btn edit-btn" @click="emit('edit', { specId: spec.id })">
+      <button
+        class="action-btn edit-btn"
+        @click="emit('edit', { specId: spec.id })"
+      >
         <PencilIcon class="w-4 h-4" />
         {{ t('common.edit') }}
       </button>

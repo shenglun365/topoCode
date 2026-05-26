@@ -143,10 +143,21 @@ function handleRun() { if (!running.value) run() }
 
 <template>
   <div class="file-summary-preprocessor">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <PipelineTaskTree :node="rootNode" />
-    <div v-if="rootNode.error && !running" class="preproc-error">{{ rootNode.error }}</div>
-    <div v-if="!running" class="preproc-actions">
+    <div
+      v-if="rootNode.error && !running"
+      class="preproc-error"
+    >
+      {{ rootNode.error }}
+    </div>
+    <div
+      v-if="!running"
+      class="preproc-actions"
+    >
       <button
         v-if="rootNode.status === 'pending' || rootNode.status === 'completed' || rootNode.status === 'error'"
         class="btn btn-primary btn-xs"

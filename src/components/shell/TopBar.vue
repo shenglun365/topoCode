@@ -106,7 +106,10 @@ async function handleMenuItemClick(item: any) {
 
 <template>
   <div class="app-top">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="app-row1">
       <!-- 产品 Logo -->
       <div class="menu-bar-logo">
@@ -131,14 +134,20 @@ async function handleMenuItemClick(item: any) {
             class="menu-dropdown show"
             @click.stop
           >
-            <template v-for="(menuItem, idx) in menuItems" :key="idx">
+            <template
+              v-for="(menuItem, idx) in menuItems"
+              :key="idx"
+            >
               <div
                 v-if="!menuItem.divider"
                 class="menu-dropdown-item"
                 @click="handleMenuItemClick(menuItem)"
               >
                 <span>{{ menuItem.label }}</span>
-                <span v-if="menuItem.shortcut" class="shortcut">{{ menuItem.shortcut }}</span>
+                <span
+                  v-if="menuItem.shortcut"
+                  class="shortcut"
+                >{{ menuItem.shortcut }}</span>
               </div>
               <div
                 v-else
@@ -150,7 +159,7 @@ async function handleMenuItemClick(item: any) {
       </div>
 
       <!-- 占位 -->
-      <div style="flex:1;"></div>
+      <div style="flex:1;" />
 
       <!-- 右侧工具 -->
       <div class="tab-bar-actions">
@@ -159,31 +168,53 @@ async function handleMenuItemClick(item: any) {
           <button
             class="icon-btn"
             :class="{ disabled: !windowStore.canCreateMore }"
-            @click="windowStore.createNewWindow()"
             :title="t('window.newWindow')"
+            @click="windowStore.createNewWindow()"
           >
             <PlusIcon class="w-4 h-4" />
           </button>
           <button
             class="icon-btn"
-            @click="windowStore.refresh()"
             :title="t('window.windowCount')"
+            @click="windowStore.refresh()"
           >
             <Squares2X2Icon class="w-4 h-4" />
             <span class="window-count-badge">{{ windowStore.windowCount }}</span>
           </button>
         </div>
-        <div class="icon-btn" @click="panelStore.toggleLeft()" :title="t('shell.topBar.toggleLeftPanel')">
+        <div
+          class="icon-btn"
+          :title="t('shell.topBar.toggleLeftPanel')"
+          @click="panelStore.toggleLeft()"
+        >
           <Bars3Icon class="w-4 h-4" />
         </div>
-        <div class="icon-btn" @click="panelStore.toggleRight()" :title="t('shell.topBar.toggleRightPanel')">
+        <div
+          class="icon-btn"
+          :title="t('shell.topBar.toggleRightPanel')"
+          @click="panelStore.toggleRight()"
+        >
           <ArrowRightOnRectangleIcon class="w-4 h-4" />
         </div>
-        <div class="icon-btn" @click="themeStore.toggleTheme()" :title="`${t('shell.topBar.toggleTheme')} (${themeStore.theme === 'dark' ? t('settings.darkMode') : t('settings.lightMode')})`">
-          <MoonIcon v-if="themeStore.theme === 'dark'" class="w-4 h-4" />
-          <SunIcon v-else class="w-4 h-4" />
+        <div
+          class="icon-btn"
+          :title="`${t('shell.topBar.toggleTheme')} (${themeStore.theme === 'dark' ? t('settings.darkMode') : t('settings.lightMode')})`"
+          @click="themeStore.toggleTheme()"
+        >
+          <MoonIcon
+            v-if="themeStore.theme === 'dark'"
+            class="w-4 h-4"
+          />
+          <SunIcon
+            v-else
+            class="w-4 h-4"
+          />
         </div>
-        <div class="icon-btn" @click="onboardingStore.start()" :title="t('shell.topBar.guide')">
+        <div
+          class="icon-btn"
+          :title="t('shell.topBar.guide')"
+          @click="onboardingStore.start()"
+        >
           <QuestionMarkCircleIcon class="w-4 h-4" />
         </div>
       </div>

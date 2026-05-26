@@ -1,16 +1,31 @@
 <template>
   <div class="project-import">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 默认视图 -->
-    <div v-if="!selectedProject" class="default-view">
+    <div
+      v-if="!selectedProject"
+      class="default-view"
+    >
       <div class="page-header">
-        <h1 class="page-title">{{ t('home.welcome') }}</h1>
-        <p class="page-subtitle">{{ t('home.subtitle') }}</p>
+        <h1 class="page-title">
+          {{ t('home.welcome') }}
+        </h1>
+        <p class="page-subtitle">
+          {{ t('home.subtitle') }}
+        </p>
       </div>
 
       <!-- 项目卡片网格 -->
-      <div v-if="projects.length > 0" class="project-section">
-        <h2 class="section-title">{{ t('home.recentProjects') }}</h2>
+      <div
+        v-if="projects.length > 0"
+        class="project-section"
+      >
+        <h2 class="section-title">
+          {{ t('home.recentProjects') }}
+        </h2>
         <div class="project-grid">
           <ProjectCard
             v-for="project in projects"
@@ -25,28 +40,51 @@
       <ImportZone @import="importProject" />
 
       <!-- 快速入门 -->
-      <div v-if="projects.length === 0" class="quick-start">
-        <h2 class="section-title">{{ t('home.quickStart') }}</h2>
+      <div
+        v-if="projects.length === 0"
+        class="quick-start"
+      >
+        <h2 class="section-title">
+          {{ t('home.quickStart') }}
+        </h2>
         <div class="quick-steps">
           <div class="step-item">
-            <div class="step-number">1</div>
+            <div class="step-number">
+              1
+            </div>
             <div class="step-content">
-              <h3 class="step-title">{{ t('home.step1Title') }}</h3>
-              <p class="step-desc">{{ t('home.step1Desc') }}</p>
+              <h3 class="step-title">
+                {{ t('home.step1Title') }}
+              </h3>
+              <p class="step-desc">
+                {{ t('home.step1Desc') }}
+              </p>
             </div>
           </div>
           <div class="step-item">
-            <div class="step-number">2</div>
+            <div class="step-number">
+              2
+            </div>
             <div class="step-content">
-              <h3 class="step-title">{{ t('home.step2Title') }}</h3>
-              <p class="step-desc">{{ t('home.step2Desc') }}</p>
+              <h3 class="step-title">
+                {{ t('home.step2Title') }}
+              </h3>
+              <p class="step-desc">
+                {{ t('home.step2Desc') }}
+              </p>
             </div>
           </div>
           <div class="step-item">
-            <div class="step-number">3</div>
+            <div class="step-number">
+              3
+            </div>
             <div class="step-content">
-              <h3 class="step-title">{{ t('home.step3Title') }}</h3>
-              <p class="step-desc">{{ t('home.step3Desc') }}</p>
+              <h3 class="step-title">
+                {{ t('home.step3Title') }}
+              </h3>
+              <p class="step-desc">
+                {{ t('home.step3Desc') }}
+              </p>
             </div>
           </div>
         </div>
@@ -54,20 +92,34 @@
     </div>
 
     <!-- 项目视图 -->
-    <div v-else class="project-view">
+    <div
+      v-else
+      class="project-view"
+    >
       <div class="project-title-bar">
-        <button class="back-btn" @click="deselectProject">
+        <button
+          class="back-btn"
+          @click="deselectProject"
+        >
           <ArrowLeftIcon class="w-4 h-4" />
           {{ t('home.back') }}
         </button>
         <div class="project-info">
-          <h2 class="project-name">{{ selectedProjectName }}</h2>
-          <span class="project-status" :class="selectedProjectStatus">
+          <h2 class="project-name">
+            {{ selectedProjectName }}
+          </h2>
+          <span
+            class="project-status"
+            :class="selectedProjectStatus"
+          >
             {{ statusText }}
           </span>
         </div>
         <div class="project-actions">
-          <button class="action-btn" @click="toggleViewMode">
+          <button
+            class="action-btn"
+            @click="toggleViewMode"
+          >
             <ArrowPathIcon class="w-4 h-4" />
             {{ viewMode === 'files' ? t('home.tasks') : t('home.files') }}
           </button>
@@ -75,7 +127,10 @@
       </div>
 
       <!-- 文件树视图 -->
-      <div v-if="viewMode === 'files'" class="view-content">
+      <div
+        v-if="viewMode === 'files'"
+        class="view-content"
+      >
         <FileTree
           v-if="selectedProjectData"
           :root="selectedProjectData"
@@ -85,12 +140,23 @@
       </div>
 
       <!-- 任务列表视图 -->
-      <div v-else class="view-content">
-        <div v-if="tasks.length === 0" class="empty-state">
+      <div
+        v-else
+        class="view-content"
+      >
+        <div
+          v-if="tasks.length === 0"
+          class="empty-state"
+        >
           <QueueListIcon class="w-12 h-12 empty-icon" />
-          <p class="empty-text">{{ t('home.noTasks') }}</p>
+          <p class="empty-text">
+            {{ t('home.noTasks') }}
+          </p>
         </div>
-        <div v-else class="task-list">
+        <div
+          v-else
+          class="task-list"
+        >
           <TaskCard
             v-for="task in tasks"
             :key="task.id"

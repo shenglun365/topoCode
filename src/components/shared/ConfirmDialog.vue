@@ -64,30 +64,48 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <Teleport to="body">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       v-if="props.visible"
       class="confirm-dialog-overlay"
-      @click.self="handleCancel"
-      @keydown="handleKeydown"
       role="dialog"
       aria-modal="true"
+      @click.self="handleCancel"
+      @keydown="handleKeydown"
     >
-      <div class="confirm-dialog-card" :class="variantClass">
+      <div
+        class="confirm-dialog-card"
+        :class="variantClass"
+      >
         <div class="confirm-dialog-icon">
-          <component :is="IconComponent" class="w-8 h-8" />
+          <component
+            :is="IconComponent"
+            class="w-8 h-8"
+          />
         </div>
-        <div class="confirm-dialog-title">{{ title }}</div>
+        <div class="confirm-dialog-title">
+          {{ title }}
+        </div>
         <div class="confirm-dialog-message">
           <slot name="message">
-            <span v-html="message"></span>
+            <span v-html="message" />
           </slot>
         </div>
         <div class="confirm-dialog-actions">
-          <button class="btn btn-ghost" @click="handleCancel">
+          <button
+            class="btn btn-ghost"
+            @click="handleCancel"
+          >
             {{ cancelLabel }}
           </button>
-          <button class="btn btn-primary" @click="handleConfirm" :class="{ 'btn-danger': variant === 'danger', 'btn-warning': variant === 'warning' }">
+          <button
+            class="btn btn-primary"
+            :class="{ 'btn-danger': variant === 'danger', 'btn-warning': variant === 'warning' }"
+            @click="handleConfirm"
+          >
             {{ confirmLabel }}
           </button>
         </div>

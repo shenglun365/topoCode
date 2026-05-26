@@ -135,7 +135,10 @@ function clearError() {
 
 <template>
   <div class="import-zone-wrapper">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       class="import-zone card"
       :class="{ 'drag-over': isDragging }"
@@ -150,24 +153,42 @@ function clearError() {
       <div style="font-size:14px; font-weight:500; margin-bottom:6px;">
         {{ t('file.dragDrop') }}
       </div>
-      <div class="text-muted" style="font-size:12px; margin-bottom:16px;">{{ t('common.or') }}</div>
-      <button class="btn btn-primary" :disabled="projectStore.loading" @click="onSelectFolder">
+      <div
+        class="text-muted"
+        style="font-size:12px; margin-bottom:16px;"
+      >
+        {{ t('common.or') }}
+      </div>
+      <button
+        class="btn btn-primary"
+        :disabled="projectStore.loading"
+        @click="onSelectFolder"
+      >
         <FolderPlusIcon class="w-4 h-4" />
         <span>{{ t('file.selectFolder') }}</span>
       </button>
-      <div class="text-muted" style="font-size:10px; margin-top:12px;">
+      <div
+        class="text-muted"
+        style="font-size:10px; margin-top:12px;"
+      >
         {{ t('file.supportedFormats') }}
       </div>
     </div>
 
     <!-- 加载状态 -->
-    <div v-if="projectStore.loading" class="import-loading">
-      <div class="loading-spinner"></div>
+    <div
+      v-if="projectStore.loading"
+      class="import-loading"
+    >
+      <div class="loading-spinner" />
       <span class="text-muted">{{ t('import.loading') }}</span>
     </div>
 
     <!-- 错误提示 -->
-    <div v-if="importError" class="import-error">
+    <div
+      v-if="importError"
+      class="import-error"
+    >
       <ExclamationCircleIcon class="w-4 h-4" />
       <span>{{ importError }}</span>
     </div>

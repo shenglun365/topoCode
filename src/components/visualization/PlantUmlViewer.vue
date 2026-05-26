@@ -76,31 +76,61 @@ function refresh() {
 
 <template>
   <div class="plantuml-viewer">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 工具栏 -->
-    <div v-if="showToolbar" class="viewer-toolbar">
+    <div
+      v-if="showToolbar"
+      class="viewer-toolbar"
+    >
       <div class="toolbar-left">
         <span class="toolbar-label">PlantUML</span>
-        <span v-if="loading" class="toolbar-status">{{ t('render.rendering') }}</span>
-        <span v-else-if="error" class="toolbar-status error">
+        <span
+          v-if="loading"
+          class="toolbar-status"
+        >{{ t('render.rendering') }}</span>
+        <span
+          v-else-if="error"
+          class="toolbar-status error"
+        >
           <ExclamationTriangleIcon class="w-3 h-3" />
           {{ error }}
         </span>
-        <span v-else-if="imageData" class="toolbar-status success">{{ t('render.renderComplete') }}</span>
+        <span
+          v-else-if="imageData"
+          class="toolbar-status success"
+        >{{ t('render.renderComplete') }}</span>
       </div>
 
       <div class="toolbar-right">
-        <button v-if="props.editable" class="btn btn-ghost btn-sm" @click="toggleView">
-          <component :is="viewMode === 'preview' ? CodeBracketIcon : EyeIcon" class="w-4 h-4" />
+        <button
+          v-if="props.editable"
+          class="btn btn-ghost btn-sm"
+          @click="toggleView"
+        >
+          <component
+            :is="viewMode === 'preview' ? CodeBracketIcon : EyeIcon"
+            class="w-4 h-4"
+          />
         </button>
 
-        <button class="btn btn-ghost btn-sm" @click="refresh" :disabled="loading">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="loading"
+          @click="refresh"
+        >
           <ArrowPathIcon class="w-4 h-4" />
         </button>
 
-        <div class="divider-vertical"></div>
+        <div class="divider-vertical" />
 
-        <button class="btn btn-ghost btn-sm" @click="exportImage()" :disabled="!imageData">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!imageData"
+          @click="exportImage()"
+        >
           <ArrowDownTrayIcon class="w-4 h-4" />
           <span>{{ props.format.toUpperCase() }}</span>
         </button>
@@ -110,46 +140,84 @@ function refresh() {
     <!-- 内容区 -->
     <div class="viewer-content">
       <!-- 编辑器 -->
-      <div v-if="viewMode === 'editor' && props.editable" class="editor-pane">
+      <div
+        v-if="viewMode === 'editor' && props.editable"
+        class="editor-pane"
+      >
         <textarea
           v-model="editorCode"
           class="plantuml-editor"
           spellcheck="false"
           :placeholder="t('render.inputPlantUmlSyntax')"
-        ></textarea>
+        />
         <div class="editor-actions">
-          <button class="btn btn-secondary btn-sm" @click="applyEdit" :disabled="loading">
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="loading"
+            @click="applyEdit"
+          >
             {{ t('render.applyAndRender') }}
           </button>
         </div>
       </div>
 
       <!-- 预览 -->
-      <div v-else class="preview-pane">
+      <div
+        v-else
+        class="preview-pane"
+      >
         <!-- 加载中 -->
-        <div v-if="loading && !imageData" class="render-loading">
-          <div class="loading-spinner"></div>
+        <div
+          v-if="loading && !imageData"
+          class="render-loading"
+        >
+          <div class="loading-spinner" />
           <span>{{ t('render.rendering') }}</span>
         </div>
 
         <!-- 错误 -->
-        <div v-else-if="error && !imageData" class="render-error">
+        <div
+          v-else-if="error && !imageData"
+          class="render-error"
+        >
           <ExclamationTriangleIcon class="icon" />
-          <div class="title">{{ t('render.renderFailed') }}</div>
-          <div class="desc">{{ error }}</div>
-          <button class="btn btn-secondary btn-sm" @click="refresh">{{ t('common.retry') }}</button>
+          <div class="title">
+            {{ t('render.renderFailed') }}
+          </div>
+          <div class="desc">
+            {{ error }}
+          </div>
+          <button
+            class="btn btn-secondary btn-sm"
+            @click="refresh"
+          >
+            {{ t('common.retry') }}
+          </button>
         </div>
 
         <!-- 渲染结果 -->
-        <div v-else-if="imageData" class="render-result">
-          <img :src="imageData" :alt="props.format" />
+        <div
+          v-else-if="imageData"
+          class="render-result"
+        >
+          <img
+            :src="imageData"
+            :alt="props.format"
+          >
         </div>
 
         <!-- 空状态 -->
-        <div v-else class="empty-state">
+        <div
+          v-else
+          class="empty-state"
+        >
           <CodeBracketIcon class="icon" />
-          <div class="title">{{ t('render.waitingForInput') }}</div>
-          <div class="desc">{{ t('render.inputPlantUml') }}</div>
+          <div class="title">
+            {{ t('render.waitingForInput') }}
+          </div>
+          <div class="desc">
+            {{ t('render.inputPlantUml') }}
+          </div>
         </div>
       </div>
     </div>

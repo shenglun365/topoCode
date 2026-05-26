@@ -191,34 +191,58 @@ function handleClose() {
 
 <template>
   <div class="code-viewer">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 加载状态 -->
-    <div v-if="loading" class="code-loading">
-      <div class="loading-spinner"></div>
+    <div
+      v-if="loading"
+      class="code-loading"
+    >
+      <div class="loading-spinner" />
       <span>{{ t('file.loading') }}</span>
     </div>
 
     <!-- 错误状态 -->
-    <div v-else-if="error" class="code-error">
+    <div
+      v-else-if="error"
+      class="code-error"
+    >
       <span>{{ error }}</span>
     </div>
 
     <!-- Markdown 渲染 -->
-    <div v-else-if="isMarkdown" class="markdown-container">
-      <div class="markdown-body" v-html="markdownHtml"></div>
+    <div
+      v-else-if="isMarkdown"
+      class="markdown-container"
+    >
+      <div
+        class="markdown-body"
+        v-html="markdownHtml"
+      />
     </div>
 
     <!-- 代码内容 -->
-    <div v-else class="code-container">
+    <div
+      v-else
+      class="code-container"
+    >
       <div
         v-for="line in visibleData"
         :key="line.number"
         class="code-line"
       >
         <span class="line-number">{{ line.number }}</span>
-        <span class="line-content" v-html="line.html"></span>
+        <span
+          class="line-content"
+          v-html="line.html"
+        />
       </div>
-      <div v-if="truncated" class="code-truncated">
+      <div
+        v-if="truncated"
+        class="code-truncated"
+      >
         <span>{{ t('preview.truncated', { max: MAX_LINES, total: totalLines }) }}</span>
       </div>
     </div>

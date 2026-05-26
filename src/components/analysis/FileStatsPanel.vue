@@ -310,20 +310,39 @@ loadStats().then(() => { initialLoadDone = true })
 
 <template>
   <div class="file-stats-panel">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- Directory tree with checkboxes -->
     <div class="stats-section">
       <div class="section-header">
         <span class="stats-label">{{ t('analysis.directoryScope') }}</span>
         <div class="section-actions">
-          <button class="text-btn" @click="selectAllDirs">{{ t('analysis.selectAll') }}</button>
+          <button
+            class="text-btn"
+            @click="selectAllDirs"
+          >
+            {{ t('analysis.selectAll') }}
+          </button>
           <span class="divider">/</span>
-          <button class="text-btn" @click="invertDirs">{{ t('analysis.invertSelection') }}</button>
+          <button
+            class="text-btn"
+            @click="invertDirs"
+          >
+            {{ t('analysis.invertSelection') }}
+          </button>
         </div>
       </div>
 
-      <div class="dir-tree" ref="dirTreeRef">
-        <div v-if="!stats?.directories || stats.directories.length === 0" class="empty-hint">
+      <div
+        ref="dirTreeRef"
+        class="dir-tree"
+      >
+        <div
+          v-if="!stats?.directories || stats.directories.length === 0"
+          class="empty-hint"
+        >
           {{ t('analysis.noDirectories') }}
         </div>
         <template v-else>
@@ -350,19 +369,29 @@ loadStats().then(() => { initialLoadDone = true })
           class="stats-input glob-scope-input"
           :placeholder="t('analysis.globScopePlaceholder')"
           @keydown.enter="addGlobScope"
-        />
-        <button class="text-btn" @click="addGlobScope" :disabled="!globScopeInput.trim()">
+        >
+        <button
+          class="text-btn"
+          :disabled="!globScopeInput.trim()"
+          @click="addGlobScope"
+        >
           +
         </button>
       </div>
-      <div v-if="selectedScopes.some(s => s.includes('*') || s.includes('?'))" class="glob-scope-tags">
+      <div
+        v-if="selectedScopes.some(s => s.includes('*') || s.includes('?'))"
+        class="glob-scope-tags"
+      >
         <span
           v-for="(s, i) in selectedScopes.filter(s => s.includes('*') || s.includes('?'))"
           :key="s"
           class="glob-tag"
         >
           <code>{{ s }}</code>
-          <button class="tag-remove" @click="removeScopeByPath(s)">
+          <button
+            class="tag-remove"
+            @click="removeScopeByPath(s)"
+          >
             <XMarkIcon class="w-3 h-3" />
           </button>
         </span>
@@ -379,7 +408,7 @@ loadStats().then(() => { initialLoadDone = true })
             value="all"
             :checked="patternType === 'all'"
             @change="emit('update:patternType', 'all')"
-          />
+          >
           <span>{{ t('analysis.allFiles') }}</span>
         </label>
         <label class="radio-item">
@@ -388,7 +417,7 @@ loadStats().then(() => { initialLoadDone = true })
             value="glob"
             :checked="patternType === 'glob'"
             @change="emit('update:patternType', 'glob')"
-          />
+          >
           <span>{{ t('analysis.stringMatch') }}</span>
         </label>
         <label class="radio-item">
@@ -397,42 +426,64 @@ loadStats().then(() => { initialLoadDone = true })
             value="regex"
             :checked="patternType === 'regex'"
             @change="emit('update:patternType', 'regex')"
-          />
+          >
           <span>{{ t('analysis.regexMatch') }}</span>
         </label>
       </div>
     </div>
 
     <!-- Pattern input -->
-    <div v-if="patternType !== 'all'" class="stats-section">
+    <div
+      v-if="patternType !== 'all'"
+      class="stats-section"
+    >
       <input
         class="stats-input"
         :value="pattern"
-        @input="emit('update:pattern', ($event.target as HTMLInputElement).value)"
         :placeholder="t('analysis.patternPlaceholder')"
-      />
+        @input="emit('update:pattern', ($event.target as HTMLInputElement).value)"
+      >
     </div>
 
     <!-- Loading state -->
-    <div v-if="loading" class="stats-loading">
-      <div class="loading-spinner"></div>
+    <div
+      v-if="loading"
+      class="stats-loading"
+    >
+      <div class="loading-spinner" />
       <span>{{ t('file.loading') }}</span>
     </div>
 
     <!-- Error state -->
-    <div v-else-if="error" class="stats-error">
+    <div
+      v-else-if="error"
+      class="stats-error"
+    >
       <span>{{ error }}</span>
     </div>
 
     <!-- File distribution (clickable bars) -->
-    <div v-else-if="stats && stats.extensions && Object.keys(stats.extensions).length > 0" class="stats-results">
+    <div
+      v-else-if="stats && stats.extensions && Object.keys(stats.extensions).length > 0"
+      class="stats-results"
+    >
       <div class="section-header">
         <DocumentTextIcon class="w-4 h-4" />
         <span>{{ t('analysis.fileDistribution') }}</span>
         <div class="section-actions">
-          <button class="text-btn" @click="selectAllExtensions">{{ t('analysis.selectAll') }}</button>
+          <button
+            class="text-btn"
+            @click="selectAllExtensions"
+          >
+            {{ t('analysis.selectAll') }}
+          </button>
           <span class="divider">/</span>
-          <button class="text-btn" @click="invertExtensions">{{ t('analysis.invertSelection') }}</button>
+          <button
+            class="text-btn"
+            @click="invertExtensions"
+          >
+            {{ t('analysis.invertSelection') }}
+          </button>
         </div>
       </div>
 
@@ -463,7 +514,10 @@ loadStats().then(() => { initialLoadDone = true })
       </div>
 
       <!-- Selected extensions as tags -->
-      <div v-if="selectedExtensions.length > 0" class="selected-tags">
+      <div
+        v-if="selectedExtensions.length > 0"
+        class="selected-tags"
+      >
         <span class="tags-label">{{ t('analysis.selectedExtensions') }}:</span>
         <div class="tag-list">
           <span
@@ -472,7 +526,10 @@ loadStats().then(() => { initialLoadDone = true })
             class="tag-chip"
           >
             {{ formatExtension(ext) }}
-            <button class="tag-remove" @click="removeExtension(ext)">
+            <button
+              class="tag-remove"
+              @click="removeExtension(ext)"
+            >
               <XMarkIcon class="w-3 h-3" />
             </button>
           </span>
@@ -485,7 +542,10 @@ loadStats().then(() => { initialLoadDone = true })
     </div>
 
     <!-- Empty state -->
-    <div v-else-if="stats && stats.totalFiles === 0" class="stats-empty">
+    <div
+      v-else-if="stats && stats.totalFiles === 0"
+      class="stats-empty"
+    >
       <span>{{ t('file.noFiles') }}</span>
     </div>
   </div>

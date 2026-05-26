@@ -163,11 +163,17 @@ defineExpose({ loadGroups })
 
 <template>
   <div class="group-manager">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 工具栏（新建按钮） -->
     <div class="group-manager-toolbar">
       <div />
-      <button class="btn-primary-sm" @click="startCreate">
+      <button
+        class="btn-primary-sm"
+        @click="startCreate"
+      >
         <PlusIcon class="w-3.5 h-3.5" />
         <span>{{ t('group.newGroup') }}</span>
       </button>
@@ -175,27 +181,51 @@ defineExpose({ loadGroups })
 
     <!-- 分组树 -->
     <div class="group-manager-tree">
-      <div v-if="loading" class="group-manager-empty">{{ t('common.loading') }}</div>
-      <div v-else-if="groups.length === 0" class="group-manager-empty">
+      <div
+        v-if="loading"
+        class="group-manager-empty"
+      >
+        {{ t('common.loading') }}
+      </div>
+      <div
+        v-else-if="groups.length === 0"
+        class="group-manager-empty"
+      >
         <FolderIcon class="w-8 h-8 text-muted" />
         <p>{{ t('group.emptyHint') }}</p>
-        <p class="group-manager-hint">{{ t('group.depthHint') }}</p>
+        <p class="group-manager-hint">
+          {{ t('group.depthHint') }}
+        </p>
       </div>
       <div v-else>
         <div
           v-for="group in groups"
           :key="group.id"
         >
-          <div class="group-tree-node" @click="startEdit(group)">
-            <span class="group-tree-indent" :style="{ width: group.depth * 16 + 'px' }" />
+          <div
+            class="group-tree-node"
+            @click="startEdit(group)"
+          >
+            <span
+              class="group-tree-indent"
+              :style="{ width: group.depth * 16 + 'px' }"
+            />
             <FolderIcon class="w-4 h-4 group-icon" />
             <span class="group-name">{{ group.name }}</span>
             <span class="group-count">{{ getProjectCount(group.id) }}</span>
             <div class="group-actions">
-              <button class="group-action-btn" @click.stop="startEdit(group)" :title="t('common.edit')">
+              <button
+                class="group-action-btn"
+                :title="t('common.edit')"
+                @click.stop="startEdit(group)"
+              >
                 <PencilIcon class="w-3.5 h-3.5" />
               </button>
-              <button class="group-action-btn group-action-danger" @click.stop="startDelete(group)" :title="t('common.delete')">
+              <button
+                class="group-action-btn group-action-danger"
+                :title="t('common.delete')"
+                @click.stop="startDelete(group)"
+              >
                 <TrashIcon class="w-3.5 h-3.5" />
               </button>
             </div>
@@ -206,16 +236,30 @@ defineExpose({ loadGroups })
               v-for="child in group.children"
               :key="child.id"
             >
-              <div class="group-tree-node" @click="startEdit(child)">
-                <span class="group-tree-indent" :style="{ width: child.depth * 16 + 'px' }" />
+              <div
+                class="group-tree-node"
+                @click="startEdit(child)"
+              >
+                <span
+                  class="group-tree-indent"
+                  :style="{ width: child.depth * 16 + 'px' }"
+                />
                 <FolderIcon class="w-4 h-4 group-icon" />
                 <span class="group-name">{{ child.name }}</span>
                 <span class="group-count">{{ getProjectCount(child.id) }}</span>
                 <div class="group-actions">
-                  <button class="group-action-btn" @click.stop="startEdit(child)" :title="t('common.edit')">
+                  <button
+                    class="group-action-btn"
+                    :title="t('common.edit')"
+                    @click.stop="startEdit(child)"
+                  >
                     <PencilIcon class="w-3.5 h-3.5" />
                   </button>
-                  <button class="group-action-btn group-action-danger" @click.stop="startDelete(child)" :title="t('common.delete')">
+                  <button
+                    class="group-action-btn group-action-danger"
+                    :title="t('common.delete')"
+                    @click.stop="startDelete(child)"
+                  >
                     <TrashIcon class="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -228,15 +272,26 @@ defineExpose({ loadGroups })
                   class="group-tree-node"
                   @click="startEdit(gc)"
                 >
-                  <span class="group-tree-indent" :style="{ width: gc.depth * 16 + 'px' }" />
+                  <span
+                    class="group-tree-indent"
+                    :style="{ width: gc.depth * 16 + 'px' }"
+                  />
                   <FolderIcon class="w-4 h-4 group-icon" />
                   <span class="group-name">{{ gc.name }}</span>
                   <span class="group-count">{{ getProjectCount(gc.id) }}</span>
                   <div class="group-actions">
-                    <button class="group-action-btn" @click.stop="startEdit(gc)" :title="t('common.edit')">
+                    <button
+                      class="group-action-btn"
+                      :title="t('common.edit')"
+                      @click.stop="startEdit(gc)"
+                    >
                       <PencilIcon class="w-3.5 h-3.5" />
                     </button>
-                    <button class="group-action-btn group-action-danger" @click.stop="startDelete(gc)" :title="t('common.delete')">
+                    <button
+                      class="group-action-btn group-action-danger"
+                      :title="t('common.delete')"
+                      @click.stop="startDelete(gc)"
+                    >
                       <TrashIcon class="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -249,40 +304,93 @@ defineExpose({ loadGroups })
     </div>
 
     <!-- 创建分组对话框 -->
-    <div v-if="showCreateDialog" class="dialog-overlay" @click="showCreateDialog = false">
-      <div class="dialog-content" @click.stop>
+    <div
+      v-if="showCreateDialog"
+      class="dialog-overlay"
+      @click="showCreateDialog = false"
+    >
+      <div
+        class="dialog-content"
+        @click.stop
+      >
         <h3>{{ t('group.newGroup') }}</h3>
         <div class="dialog-field">
           <label>{{ t('group.groupName') }}</label>
-          <input v-model="newName" :placeholder="t('group.namePlaceholder')" type="text" @keyup.enter="confirmCreate" autofocus />
+          <input
+            v-model="newName"
+            :placeholder="t('group.namePlaceholder')"
+            type="text"
+            autofocus
+            @keyup.enter="confirmCreate"
+          >
         </div>
         <div class="dialog-field">
           <label>{{ t('group.parentGroup') }}</label>
           <select v-model="selectedParentId">
-            <option :value="null">{{ t('group.noParent') }}</option>
-            <option v-for="g in flatGroups" :key="g.id" :value="g.id" :disabled="g.depth >= 3">
+            <option :value="null">
+              {{ t('group.noParent') }}
+            </option>
+            <option
+              v-for="g in flatGroups"
+              :key="g.id"
+              :value="g.id"
+              :disabled="g.depth >= 3"
+            >
               {{ '  '.repeat(g.depth) }}{{ g.name }}
             </option>
           </select>
         </div>
         <div class="dialog-footer">
-          <button class="btn-secondary-sm" @click="showCreateDialog = false">{{ t('common.cancel') }}</button>
-          <button class="btn-primary-sm" @click="confirmCreate">{{ t('common.create') }}</button>
+          <button
+            class="btn-secondary-sm"
+            @click="showCreateDialog = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="btn-primary-sm"
+            @click="confirmCreate"
+          >
+            {{ t('common.create') }}
+          </button>
         </div>
       </div>
     </div>
 
     <!-- 编辑分组对话框 -->
-    <div v-if="showEditDialog" class="dialog-overlay" @click="showEditDialog = false">
-      <div class="dialog-content" @click.stop>
+    <div
+      v-if="showEditDialog"
+      class="dialog-overlay"
+      @click="showEditDialog = false"
+    >
+      <div
+        class="dialog-content"
+        @click.stop
+      >
         <h3>{{ t('common.edit') }}</h3>
         <div class="dialog-field">
           <label>{{ t('group.groupName') }}</label>
-          <input v-model="editName" :placeholder="t('group.namePlaceholder')" type="text" @keyup.enter="confirmEdit" autofocus />
+          <input
+            v-model="editName"
+            :placeholder="t('group.namePlaceholder')"
+            type="text"
+            autofocus
+            @keyup.enter="confirmEdit"
+          >
         </div>
         <div class="dialog-footer">
-          <button class="btn-secondary-sm" @click="showEditDialog = false">{{ t('common.cancel') }}</button>
-          <button class="btn-primary-sm" @click="confirmEdit">{{ t('common.save') }}</button>
+          <button
+            class="btn-secondary-sm"
+            @click="showEditDialog = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="btn-primary-sm"
+            @click="confirmEdit"
+          >
+            {{ t('common.save') }}
+          </button>
         </div>
       </div>
     </div>
@@ -296,15 +404,27 @@ defineExpose({ loadGroups })
     />
 
     <!-- 层级深度警告 -->
-    <div v-if="showDepthWarning" class="dialog-overlay" @click="showDepthWarning = false">
-      <div class="dialog-content" @click.stop>
+    <div
+      v-if="showDepthWarning"
+      class="dialog-overlay"
+      @click="showDepthWarning = false"
+    >
+      <div
+        class="dialog-content"
+        @click.stop
+      >
         <div class="dialog-warning">
           <ExclamationTriangleIcon class="w-8 h-8" />
           <h3>{{ t('group.depthLimit') }}</h3>
           <p>{{ t('group.depthHint') }}</p>
         </div>
         <div class="dialog-footer">
-          <button class="btn-primary-sm" @click="showDepthWarning = false">{{ t('common.close') }}</button>
+          <button
+            class="btn-primary-sm"
+            @click="showDepthWarning = false"
+          >
+            {{ t('common.close') }}
+          </button>
         </div>
       </div>
     </div>

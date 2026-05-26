@@ -44,12 +44,20 @@ const dimensions = [
 
 <template>
   <div class="category-manager">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部 -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <div>
-        <h2 style="font-size:16px; font-weight:600;">{{ t('knowledge.categories') }}</h2>
-        <p class="text-muted" style="font-size:12px; margin-top:4px;">
+        <h2 style="font-size:16px; font-weight:600;">
+          {{ t('knowledge.categories') }}
+        </h2>
+        <p
+          class="text-muted"
+          style="font-size:12px; margin-top:4px;"
+        >
           {{ t('knowledge.filterByDimension') }}
         </p>
       </div>
@@ -69,9 +77,15 @@ const dimensions = [
       <!-- 维度头部 -->
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <div style="display:flex; align-items:center; gap:8px;">
-          <component :is="dim.icon" class="w-5 h-5 text-accent" />
+          <component
+            :is="dim.icon"
+            class="w-5 h-5 text-accent"
+          />
           <span style="font-size:13px; font-weight:600;">{{ dim.name() }}</span>
-          <span class="badge badge-blue" style="font-size:9px;">{{ dim.tags.length }} {{ t('common.tag') }}</span>
+          <span
+            class="badge badge-blue"
+            style="font-size:9px;"
+          >{{ dim.tags.length }} {{ t('common.tag') }}</span>
         </div>
         <div style="display:flex; gap:4px;">
           <button class="btn btn-ghost btn-sm">

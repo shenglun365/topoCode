@@ -189,11 +189,19 @@ function getConfigSummary(task: AnalysisTask): string {
 
 <template>
   <div class="task-list-panel">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 标题栏 -->
     <div class="panel-header">
-      <h2 class="panel-title">{{ t('analysis.taskList') }}</h2>
-      <button class="btn btn-primary btn-sm" @click="emit('createTask')">
+      <h2 class="panel-title">
+        {{ t('analysis.taskList') }}
+      </h2>
+      <button
+        class="btn btn-primary btn-sm"
+        @click="emit('createTask')"
+      >
         <PlusIcon class="w-4 h-4" />
         <span>{{ t('analysis.newTask') }}</span>
       </button>
@@ -205,32 +213,47 @@ function getConfigSummary(task: AnalysisTask): string {
         <span class="stat-label">{{ t('analysis.total') }}</span>
         <span class="stat-value">{{ analysisStore.tasks.length }}</span>
       </span>
-      <span class="stat-divider"></span>
+      <span class="stat-divider" />
       <span class="stat-item">
-        <span class="stat-dot" style="background: var(--accent)"></span>
+        <span
+          class="stat-dot"
+          style="background: var(--accent)"
+        />
         <span class="stat-label">{{ t('analysis.running') }}</span>
         <span class="stat-value">{{ analysisStore.taskStats.running }}</span>
       </span>
-      <span class="stat-divider"></span>
+      <span class="stat-divider" />
       <span class="stat-item">
-        <span class="stat-dot" style="background: var(--success)"></span>
+        <span
+          class="stat-dot"
+          style="background: var(--success)"
+        />
         <span class="stat-label">{{ t('analysis.done') }}</span>
         <span class="stat-value">{{ analysisStore.taskStats.done }}</span>
       </span>
-      <span class="stat-divider"></span>
+      <span class="stat-divider" />
       <span class="stat-item">
-        <span class="stat-dot" style="background: var(--error)"></span>
+        <span
+          class="stat-dot"
+          style="background: var(--error)"
+        />
         <span class="stat-label">{{ t('analysis.error') }}</span>
         <span class="stat-value">{{ analysisStore.taskStats.error }}</span>
       </span>
     </div>
 
     <!-- 任务列表 -->
-    <div v-if="analysisStore.tasks.length === 0" class="empty-state">
+    <div
+      v-if="analysisStore.tasks.length === 0"
+      class="empty-state"
+    >
       <span>{{ t('analysis.noTasks') }}</span>
     </div>
 
-    <div v-else class="task-cards">
+    <div
+      v-else
+      class="task-cards"
+    >
       <div
         v-for="task in analysisStore.tasks"
         :key="task.id"
@@ -239,18 +262,33 @@ function getConfigSummary(task: AnalysisTask): string {
         <!-- 第一行: 名称/状态/进度 -->
         <div class="task-card-header">
           <div class="task-name-group">
-            <span class="status-dot" :style="{ background: getStatusColor(task.status) }"></span>
+            <span
+              class="status-dot"
+              :style="{ background: getStatusColor(task.status) }"
+            />
             <span class="task-name">{{ task.name }}</span>
             <span class="task-type-badge">{{ task.type }}</span>
           </div>
           <div class="task-progress-group">
-            <span class="task-status" :style="{ color: getStatusColor(task.status) }">
+            <span
+              class="task-status"
+              :style="{ color: getStatusColor(task.status) }"
+            >
               {{ getStatusLabel(task.status) }}
             </span>
-            <div v-if="task.status === 'running'" class="task-progress-bar">
-              <div class="task-progress-fill" :style="{ width: `${task.progress || 0}%` }"></div>
+            <div
+              v-if="task.status === 'running'"
+              class="task-progress-bar"
+            >
+              <div
+                class="task-progress-fill"
+                :style="{ width: `${task.progress || 0}%` }"
+              />
             </div>
-            <span v-if="task.progress != null" class="task-progress-text">{{ task.progress }}%</span>
+            <span
+              v-if="task.progress != null"
+              class="task-progress-text"
+            >{{ task.progress }}%</span>
           </div>
         </div>
 
@@ -260,14 +298,21 @@ function getConfigSummary(task: AnalysisTask): string {
         </div>
 
         <!-- 错误信息 -->
-        <div v-if="task.error" class="task-error">
+        <div
+          v-if="task.error"
+          class="task-error"
+        >
           <ExclamationTriangleIcon class="w-3.5 h-3.5" />
           <span>{{ task.error }}</span>
         </div>
 
         <!-- 第三行: 操作按钮 -->
         <div class="task-card-actions">
-          <button class="btn btn-ghost btn-xs" @click="onViewDetail(task)" :title="t('analysis.viewDetail')">
+          <button
+            class="btn btn-ghost btn-xs"
+            :title="t('analysis.viewDetail')"
+            @click="onViewDetail(task)"
+          >
             <EyeIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.viewDetail') }}</span>
           </button>
@@ -275,8 +320,8 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status === 'running'"
             class="btn btn-ghost btn-xs btn-warning"
-            @click="onStopTask(task.id)"
             :title="t('analysis.stopTask')"
+            @click="onStopTask(task.id)"
           >
             <StopIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.stopTask') }}</span>
@@ -285,8 +330,8 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status === 'error'"
             class="btn btn-ghost btn-xs"
-            @click="onRerunTask(task.id)"
             :title="t('analysis.retryTask')"
+            @click="onRerunTask(task.id)"
           >
             <ArrowPathIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.retryTask') }}</span>
@@ -295,8 +340,8 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status === 'pending'"
             class="btn btn-ghost btn-xs btn-primary"
-            @click="onRunTask(task.id)"
             :title="t('analysis.runTask')"
+            @click="onRunTask(task.id)"
           >
             <PlayIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.runTask') }}</span>
@@ -305,8 +350,8 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status !== 'running' && task.status !== 'pending'"
             class="btn btn-ghost btn-xs"
-            @click="onRerunTask(task.id)"
             :title="t('analysis.rerunTask')"
+            @click="onRerunTask(task.id)"
           >
             <ArrowPathIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.rerunTask') }}</span>
@@ -315,8 +360,8 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status !== 'running'"
             class="btn btn-ghost btn-xs"
-            @click="onEditTask(task.id)"
             :title="t('analysis.editTask')"
+            @click="onEditTask(task.id)"
           >
             <PencilIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.editTask') }}</span>
@@ -325,8 +370,8 @@ function getConfigSummary(task: AnalysisTask): string {
           <button
             v-if="task.status !== 'running'"
             class="btn btn-ghost btn-xs btn-danger"
-            @click="onDeleteTask(task.id)"
             :title="t('analysis.deleteTask')"
+            @click="onDeleteTask(task.id)"
           >
             <TrashIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.deleteTask') }}</span>
@@ -345,15 +390,29 @@ function getConfigSummary(task: AnalysisTask): string {
 
     <!-- 删除确认对话框 -->
     <Teleport to="body">
-      <div v-if="deleteConfirm" class="dialog-overlay" @click.self="cancelDelete">
+      <div
+        v-if="deleteConfirm"
+        class="dialog-overlay"
+        @click.self="cancelDelete"
+      >
         <div class="confirm-dialog">
           <div class="confirm-title">
             <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
             <span>{{ t('analysis.confirmDelete') }}</span>
           </div>
           <div class="confirm-actions">
-            <button class="btn btn-ghost" @click="cancelDelete">{{ t('analysis.deleteCancelled') }}</button>
-            <button class="btn btn-danger" @click="confirmDelete">{{ t('analysis.deleteConfirmed') }}</button>
+            <button
+              class="btn btn-ghost"
+              @click="cancelDelete"
+            >
+              {{ t('analysis.deleteCancelled') }}
+            </button>
+            <button
+              class="btn btn-danger"
+              @click="confirmDelete"
+            >
+              {{ t('analysis.deleteConfirmed') }}
+            </button>
           </div>
         </div>
       </div>

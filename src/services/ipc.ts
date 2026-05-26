@@ -410,6 +410,9 @@ function createRealIPC(): IPCAPI {
       set: async (key: string, val: any) => {
         return await api.system.set(key, val)
       },
+      getHttpPort: async () => {
+        return await api.system.getHttpPort()
+      },
     },
 
     // ==================== 渲染服务 ====================

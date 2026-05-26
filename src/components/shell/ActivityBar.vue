@@ -47,7 +47,10 @@ function navigateTo(page: PageType) {
 
 <template>
   <nav class="activity-bar">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       v-for="activity in activities"
       :key="activity.page"
@@ -56,10 +59,13 @@ function navigateTo(page: PageType) {
       :title="t(activity.key)"
       @click="navigateTo(activity.page)"
     >
-      <component :is="iconMap[activity.page]" class="w-5 h-5" />
+      <component
+        :is="iconMap[activity.page]"
+        class="w-5 h-5"
+      />
     </div>
 
-    <div class="activity-spacer"></div>
+    <div class="activity-spacer" />
 
     <div
       v-for="activity in bottomActivities"
@@ -69,7 +75,10 @@ function navigateTo(page: PageType) {
       :title="t(activity.key)"
       @click="navigateTo(activity.page)"
     >
-      <component :is="iconMap[activity.page]" class="w-5 h-5" />
+      <component
+        :is="iconMap[activity.page]"
+        class="w-5 h-5"
+      />
     </div>
   </nav>
 </template>

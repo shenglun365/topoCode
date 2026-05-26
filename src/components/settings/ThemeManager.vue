@@ -148,7 +148,10 @@ onMounted(() => {
 
 <template>
   <div class="theme-manager">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部 -->
     <div class="manager-header">
       <div class="header-left">
@@ -156,14 +159,23 @@ onMounted(() => {
           <PaintBrushIcon class="w-5 h-5" />
           <span>{{ t('theme.themeManagement') }}</span>
         </h3>
-        <p class="manager-desc">{{ t('theme.themeDesc') }}</p>
+        <p class="manager-desc">
+          {{ t('theme.themeDesc') }}
+        </p>
       </div>
       <div class="header-right">
-        <button class="btn btn-ghost btn-sm" @click="showImportDialog = true" :title="t('theme.importTheme')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('theme.importTheme')"
+          @click="showImportDialog = true"
+        >
           <ArrowUpTrayIcon class="w-4 h-4" />
           <span>{{ t('common.import') }}</span>
         </button>
-        <button class="btn btn-primary btn-sm" @click="handleCreate">
+        <button
+          class="btn btn-primary btn-sm"
+          @click="handleCreate"
+        >
           <PlusIcon class="w-4 h-4" />
           <span>{{ t('theme.newTheme') }}</span>
         </button>
@@ -172,7 +184,9 @@ onMounted(() => {
 
     <!-- 内置主题 -->
     <div class="theme-section">
-      <h4 class="section-title">{{ t('theme.builtInThemes') }}</h4>
+      <h4 class="section-title">
+        {{ t('theme.builtInThemes') }}
+      </h4>
       <div class="theme-grid">
         <div
           v-for="theme in builtInThemes"
@@ -182,7 +196,10 @@ onMounted(() => {
           @click="handleSwitch(theme)"
         >
           <!-- 激活指示器 -->
-          <div v-if="themeStore.activeThemeId === theme.id" class="active-indicator">
+          <div
+            v-if="themeStore.activeThemeId === theme.id"
+            class="active-indicator"
+          >
             <CheckCircleSolid class="w-4 h-4 text-white" />
           </div>
 
@@ -198,19 +215,35 @@ onMounted(() => {
 
           <!-- 主题信息 -->
           <div class="theme-info">
-            <div class="theme-name">{{ theme.name }}</div>
-            <div class="theme-desc">{{ theme.description || t('theme.builtInTheme') }}</div>
+            <div class="theme-name">
+              {{ theme.name }}
+            </div>
+            <div class="theme-desc">
+              {{ theme.description || t('theme.builtInTheme') }}
+            </div>
           </div>
 
           <!-- 操作按钮 -->
           <div class="theme-actions">
-            <button class="action-btn" @click.stop="handlePreview(theme)" :title="t('theme.preview')">
+            <button
+              class="action-btn"
+              :title="t('theme.preview')"
+              @click.stop="handlePreview(theme)"
+            >
               <PaintBrushIcon class="w-4 h-4" />
             </button>
-            <button class="action-btn" @click.stop="handleExport(theme)" :title="t('common.export')">
+            <button
+              class="action-btn"
+              :title="t('common.export')"
+              @click.stop="handleExport(theme)"
+            >
               <ArrowDownTrayIcon class="w-4 h-4" />
             </button>
-            <button class="action-btn" @click.stop="handleDuplicate(theme)" :title="t('common.duplicate')">
+            <button
+              class="action-btn"
+              :title="t('common.duplicate')"
+              @click.stop="handleDuplicate(theme)"
+            >
               <ClipboardDocumentIcon class="w-4 h-4" />
             </button>
           </div>
@@ -221,16 +254,30 @@ onMounted(() => {
     <!-- 自定义主题 -->
     <div class="theme-section">
       <div class="section-header">
-        <h4 class="section-title">{{ t('theme.customThemes') }} ({{ customThemes.length }})</h4>
+        <h4 class="section-title">
+          {{ t('theme.customThemes') }} ({{ customThemes.length }})
+        </h4>
       </div>
 
-      <div v-if="customThemes.length === 0" class="empty-state">
-        <div class="empty-icon">🎨</div>
-        <div class="empty-text">{{ t('theme.noCustomThemes') }}</div>
-        <div class="empty-hint">{{ t('theme.noCustomThemesHint') }}</div>
+      <div
+        v-if="customThemes.length === 0"
+        class="empty-state"
+      >
+        <div class="empty-icon">
+          🎨
+        </div>
+        <div class="empty-text">
+          {{ t('theme.noCustomThemes') }}
+        </div>
+        <div class="empty-hint">
+          {{ t('theme.noCustomThemesHint') }}
+        </div>
       </div>
 
-      <div v-else class="theme-grid">
+      <div
+        v-else
+        class="theme-grid"
+      >
         <div
           v-for="theme in customThemes"
           :key="theme.id"
@@ -239,7 +286,10 @@ onMounted(() => {
           @click="handleSwitch(theme)"
         >
           <!-- 激活指示器 -->
-          <div v-if="themeStore.activeThemeId === theme.id" class="active-indicator">
+          <div
+            v-if="themeStore.activeThemeId === theme.id"
+            class="active-indicator"
+          >
             <CheckCircleSolid class="w-4 h-4 text-white" />
           </div>
 
@@ -255,26 +305,52 @@ onMounted(() => {
 
           <!-- 主题信息 -->
           <div class="theme-info">
-            <div class="theme-name">{{ theme.name }}</div>
-            <div class="theme-desc">{{ theme.description || t('theme.customTheme') }}</div>
-            <div class="theme-time">{{ new Date(theme.updatedAt).toLocaleDateString() }}</div>
+            <div class="theme-name">
+              {{ theme.name }}
+            </div>
+            <div class="theme-desc">
+              {{ theme.description || t('theme.customTheme') }}
+            </div>
+            <div class="theme-time">
+              {{ new Date(theme.updatedAt).toLocaleDateString() }}
+            </div>
           </div>
 
           <!-- 操作按钮 -->
           <div class="theme-actions">
-            <button class="action-btn" @click.stop="handlePreview(theme)" :title="t('theme.preview')">
+            <button
+              class="action-btn"
+              :title="t('theme.preview')"
+              @click.stop="handlePreview(theme)"
+            >
               <PaintBrushIcon class="w-4 h-4" />
             </button>
-            <button class="action-btn" @click.stop="handleEdit(theme)" :title="t('common.edit')">
+            <button
+              class="action-btn"
+              :title="t('common.edit')"
+              @click.stop="handleEdit(theme)"
+            >
               <PencilIcon class="w-4 h-4" />
             </button>
-            <button class="action-btn" @click.stop="handleExport(theme)" :title="t('common.export')">
+            <button
+              class="action-btn"
+              :title="t('common.export')"
+              @click.stop="handleExport(theme)"
+            >
               <ArrowDownTrayIcon class="w-4 h-4" />
             </button>
-            <button class="action-btn" @click.stop="handleDuplicate(theme)" :title="t('common.duplicate')">
+            <button
+              class="action-btn"
+              :title="t('common.duplicate')"
+              @click.stop="handleDuplicate(theme)"
+            >
               <ClipboardDocumentIcon class="w-4 h-4" />
             </button>
-            <button class="action-btn danger" @click.stop="handleDelete(theme)" :title="t('common.delete')">
+            <button
+              class="action-btn danger"
+              :title="t('common.delete')"
+              @click.stop="handleDelete(theme)"
+            >
               <TrashIcon class="w-4 h-4" />
             </button>
           </div>
@@ -283,8 +359,15 @@ onMounted(() => {
     </div>
 
     <!-- 主题编辑器弹窗 -->
-    <div v-if="showEditor" class="modal-overlay" @click="handleEditorCancel">
-      <div class="modal-content editor-modal" @click.stop>
+    <div
+      v-if="showEditor"
+      class="modal-overlay"
+      @click="handleEditorCancel"
+    >
+      <div
+        class="modal-content editor-modal"
+        @click.stop
+      >
         <ThemeEditor
           :theme="editingTheme"
           :mode="editorMode"
@@ -295,13 +378,28 @@ onMounted(() => {
     </div>
 
     <!-- 预览弹窗 -->
-    <div v-if="showPreview && previewTheme" class="modal-overlay" @click="handlePreviewCancel">
-      <div class="modal-content preview-modal" @click.stop>
+    <div
+      v-if="showPreview && previewTheme"
+      class="modal-overlay"
+      @click="handlePreviewCancel"
+    >
+      <div
+        class="modal-content preview-modal"
+        @click.stop
+      >
         <div class="preview-header">
           <h3>{{ t('theme.previewTheme') }}: {{ previewTheme.name }}</h3>
           <div class="preview-actions">
-            <button class="btn btn-secondary btn-sm" @click="handlePreviewCancel">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary btn-sm" @click="handlePreviewApply">
+            <button
+              class="btn btn-secondary btn-sm"
+              @click="handlePreviewCancel"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              class="btn btn-primary btn-sm"
+              @click="handlePreviewApply"
+            >
               <CheckCircleIcon class="w-4 h-4" />
               <span>{{ t('theme.applyThisTheme') }}</span>
             </button>
@@ -309,14 +407,23 @@ onMounted(() => {
         </div>
 
         <!-- 预览内容 -->
-        <div class="preview-content" :style="getPreviewStyle(previewTheme)">
+        <div
+          class="preview-content"
+          :style="getPreviewStyle(previewTheme)"
+        >
           <div class="preview-card">
             <h4>{{ t('theme.themePreview') }}</h4>
             <p>{{ t('theme.previewContent') }}</p>
             <div class="preview-buttons">
-              <button class="preview-btn primary">{{ t('theme.primaryButton') }}</button>
-              <button class="preview-btn secondary">{{ t('theme.secondaryButton') }}</button>
-              <button class="preview-btn ghost">{{ t('theme.ghostButton') }}</button>
+              <button class="preview-btn primary">
+                {{ t('theme.primaryButton') }}
+              </button>
+              <button class="preview-btn secondary">
+                {{ t('theme.secondaryButton') }}
+              </button>
+              <button class="preview-btn ghost">
+                {{ t('theme.ghostButton') }}
+              </button>
             </div>
             <div class="preview-tags">
               <span class="preview-tag success">{{ t('common.success') }}</span>
@@ -329,14 +436,28 @@ onMounted(() => {
     </div>
 
     <!-- 导入对话框 -->
-    <div v-if="showImportDialog" class="modal-overlay" @click="showImportDialog = false">
-      <div class="modal-content import-modal" @click.stop>
+    <div
+      v-if="showImportDialog"
+      class="modal-overlay"
+      @click="showImportDialog = false"
+    >
+      <div
+        class="modal-content import-modal"
+        @click.stop
+      >
         <div class="import-header">
           <h3>{{ t('theme.importTheme') }}</h3>
-          <button class="btn btn-ghost btn-sm" @click="showImportDialog = false">✕</button>
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="showImportDialog = false"
+          >
+            ✕
+          </button>
         </div>
         <div class="import-body">
-          <p class="import-hint">{{ t('theme.pasteThemeJson') }}</p>
+          <p class="import-hint">
+            {{ t('theme.pasteThemeJson') }}
+          </p>
           <textarea
             v-model="importJson"
             class="import-textarea"
@@ -344,8 +465,16 @@ onMounted(() => {
             rows="8"
           />
           <div class="import-actions">
-            <button class="btn btn-secondary" @click="showImportDialog = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" @click="handleImport">
+            <button
+              class="btn btn-secondary"
+              @click="showImportDialog = false"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              class="btn btn-primary"
+              @click="handleImport"
+            >
               <ArrowUpTrayIcon class="w-4 h-4" />
               <span>{{ t('common.import') }}</span>
             </button>

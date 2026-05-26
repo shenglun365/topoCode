@@ -1,9 +1,16 @@
 <template>
   <div class="dimension-filter">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="filter-header">
       <span class="filter-title">{{ t('knowledge.dimensionFilter') }}</span>
-      <button v-if="hasSelection" class="clear-btn" @click="clearAll">
+      <button
+        v-if="hasSelection"
+        class="clear-btn"
+        @click="clearAll"
+      >
         <XMarkIcon class="w-3.5 h-3.5" />
         {{ t('knowledge.clearFilters') }}
       </button>
@@ -12,7 +19,10 @@
     <div class="filter-dimensions">
       <!-- 开发生命周期 -->
       <div class="dimension-item">
-        <button class="dimension-header" @click="toggleDimension('lifecycle')">
+        <button
+          class="dimension-header"
+          @click="toggleDimension('lifecycle')"
+        >
           <div class="dimension-icon lifecycle">
             <ArrowPathIcon class="w-4 h-4" />
           </div>
@@ -20,7 +30,10 @@
           <span class="dimension-count">{{ dimensions.lifecycle.length }}</span>
           <ChevronRightIcon :class="['dimension-arrow', { expanded: expandedDimensions.lifecycle }]" />
         </button>
-        <div v-if="expandedDimensions.lifecycle" class="dimension-tags">
+        <div
+          v-if="expandedDimensions.lifecycle"
+          class="dimension-tags"
+        >
           <button
             v-for="tag in dimensions.lifecycle"
             :key="tag"
@@ -28,7 +41,10 @@
             :class="{ selected: isSelected('lifecycle', tag) }"
             @click="toggleTag('lifecycle', tag)"
           >
-            <CheckIcon v-if="isSelected('lifecycle', tag)" class="w-3 h-3" />
+            <CheckIcon
+              v-if="isSelected('lifecycle', tag)"
+              class="w-3 h-3"
+            />
             {{ tag }}
           </button>
         </div>
@@ -36,7 +52,10 @@
 
       <!-- 技术栈工具链 -->
       <div class="dimension-item">
-        <button class="dimension-header" @click="toggleDimension('techStack')">
+        <button
+          class="dimension-header"
+          @click="toggleDimension('techStack')"
+        >
           <div class="dimension-icon tech">
             <WrenchScrewdriverIcon class="w-4 h-4" />
           </div>
@@ -44,7 +63,10 @@
           <span class="dimension-count">{{ dimensions.techStack.length }}</span>
           <ChevronRightIcon :class="['dimension-arrow', { expanded: expandedDimensions.techStack }]" />
         </button>
-        <div v-if="expandedDimensions.techStack" class="dimension-tags">
+        <div
+          v-if="expandedDimensions.techStack"
+          class="dimension-tags"
+        >
           <button
             v-for="tag in dimensions.techStack"
             :key="tag"
@@ -52,7 +74,10 @@
             :class="{ selected: isSelected('techStack', tag) }"
             @click="toggleTag('techStack', tag)"
           >
-            <CheckIcon v-if="isSelected('techStack', tag)" class="w-3 h-3" />
+            <CheckIcon
+              v-if="isSelected('techStack', tag)"
+              class="w-3 h-3"
+            />
             {{ tag }}
           </button>
         </div>
@@ -60,7 +85,10 @@
 
       <!-- 抽象层级 -->
       <div class="dimension-item">
-        <button class="dimension-header" @click="toggleDimension('abstraction')">
+        <button
+          class="dimension-header"
+          @click="toggleDimension('abstraction')"
+        >
           <div class="dimension-icon abstraction">
             <Square3Stack3DIcon class="w-4 h-4" />
           </div>
@@ -68,7 +96,10 @@
           <span class="dimension-count">{{ dimensions.abstraction.length }}</span>
           <ChevronRightIcon :class="['dimension-arrow', { expanded: expandedDimensions.abstraction }]" />
         </button>
-        <div v-if="expandedDimensions.abstraction" class="dimension-tags">
+        <div
+          v-if="expandedDimensions.abstraction"
+          class="dimension-tags"
+        >
           <button
             v-for="tag in dimensions.abstraction"
             :key="tag"
@@ -76,7 +107,10 @@
             :class="{ selected: isSelected('abstraction', tag) }"
             @click="toggleTag('abstraction', tag)"
           >
-            <CheckIcon v-if="isSelected('abstraction', tag)" class="w-3 h-3" />
+            <CheckIcon
+              v-if="isSelected('abstraction', tag)"
+              class="w-3 h-3"
+            />
             {{ tag }}
           </button>
         </div>
@@ -84,7 +118,10 @@
 
       <!-- 知识属性 -->
       <div class="dimension-item">
-        <button class="dimension-header" @click="toggleDimension('purpose')">
+        <button
+          class="dimension-header"
+          @click="toggleDimension('purpose')"
+        >
           <div class="dimension-icon purpose">
             <TargetIcon class="w-4 h-4" />
           </div>
@@ -92,7 +129,10 @@
           <span class="dimension-count">{{ dimensions.purpose.length }}</span>
           <ChevronRightIcon :class="['dimension-arrow', { expanded: expandedDimensions.purpose }]" />
         </button>
-        <div v-if="expandedDimensions.purpose" class="dimension-tags">
+        <div
+          v-if="expandedDimensions.purpose"
+          class="dimension-tags"
+        >
           <button
             v-for="tag in dimensions.purpose"
             :key="tag"
@@ -100,7 +140,10 @@
             :class="{ selected: isSelected('purpose', tag) }"
             @click="toggleTag('purpose', tag)"
           >
-            <CheckIcon v-if="isSelected('purpose', tag)" class="w-3 h-3" />
+            <CheckIcon
+              v-if="isSelected('purpose', tag)"
+              class="w-3 h-3"
+            />
             {{ tag }}
           </button>
         </div>

@@ -34,7 +34,10 @@ function getModeColor(mode: string): string {
 
 <template>
   <div class="session-tabs-bar">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- Tab 列表 -->
     <div class="session-tabs">
       <div

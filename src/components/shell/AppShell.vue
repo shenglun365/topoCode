@@ -44,7 +44,10 @@ watch(
 
 <template>
   <div class="app-shell">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 顶部菜单栏 -->
     <TopBar />
 
@@ -61,7 +64,10 @@ watch(
         <div class="content-body">
           <router-view v-slot="{ Component }">
             <keep-alive :include="['CoderPage']">
-              <component :is="Component" :key="route.name" />
+              <component
+                :is="Component"
+                :key="route.name"
+              />
             </keep-alive>
           </router-view>
         </div>

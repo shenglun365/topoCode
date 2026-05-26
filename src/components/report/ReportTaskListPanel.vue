@@ -83,21 +83,35 @@ const { showId, componentId } = useComponentId('RP-005')
 
 <template>
   <div class="task-list-panel">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <div v-if="!rootTask" class="tl-empty">
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
+    <div
+      v-if="!rootTask"
+      class="tl-empty"
+    >
       <SparklesIcon class="w-8 h-8" />
       <span>{{ t('report.taskList.empty') }}</span>
     </div>
 
     <template v-else>
       <div class="tl-header">
-        <div v-if="taskName" class="tl-task-name">{{ taskName }}</div>
+        <div
+          v-if="taskName"
+          class="tl-task-name"
+        >
+          {{ taskName }}
+        </div>
         <div class="tl-progress-row">
           <span class="tl-progress-label">{{ t('report.taskList.progress') }}:</span>
           <span class="tl-progress-text">{{ completedCount }}/{{ totalCount }}</span>
         </div>
         <div class="tl-progress-bar">
-          <div class="tl-progress-fill" :style="{ width: progress + '%' }"></div>
+          <div
+            class="tl-progress-fill"
+            :style="{ width: progress + '%' }"
+          />
         </div>
       </div>
 
@@ -114,8 +128,14 @@ const { showId, componentId } = useComponentId('RP-005')
               :title="node.status === 'completed' ? t('common.retry') : t('common.start')"
               @click.stop="handleRunNode(node.id)"
             >
-              <PlayIcon v-if="node.status !== 'completed' && node.status !== 'error'" class="w-2.5 h-2.5" />
-              <ArrowPathIcon v-else class="w-2.5 h-2.5" />
+              <PlayIcon
+                v-if="node.status !== 'completed' && node.status !== 'error'"
+                class="w-2.5 h-2.5"
+              />
+              <ArrowPathIcon
+                v-else
+                class="w-2.5 h-2.5"
+              />
             </button>
             <button
               v-if="node.id === 'validation'"
@@ -123,15 +143,32 @@ const { showId, componentId } = useComponentId('RP-005')
               :title="node.status === 'error' ? t('common.retry') : t('report.pipeline.testConnection')"
               @click.stop="handleRunNode(node.id)"
             >
-              <PlayIcon v-if="node.status !== 'completed' && node.status !== 'error'" class="w-2.5 h-2.5" />
-              <ArrowPathIcon v-else class="w-2.5 h-2.5" />
+              <PlayIcon
+                v-if="node.status !== 'completed' && node.status !== 'error'"
+                class="w-2.5 h-2.5"
+              />
+              <ArrowPathIcon
+                v-else
+                class="w-2.5 h-2.5"
+              />
             </button>
           </template>
           <template #content="{ node }">
-            <div v-if="node.id === 'community_analysis'" class="ca-monitor">
-              <div v-if="includeProgress" class="ca-row">
+            <div
+              v-if="node.id === 'community_analysis'"
+              class="ca-monitor"
+            >
+              <div
+                v-if="includeProgress"
+                class="ca-row"
+              >
                 <span class="ca-label">依赖分组</span>
-                <div class="ca-bar"><div class="ca-fill" :style="{ width: includeProgress.pct + '%' }"></div></div>
+                <div class="ca-bar">
+                  <div
+                    class="ca-fill"
+                    :style="{ width: includeProgress.pct + '%' }"
+                  />
+                </div>
                 <span class="ca-text">
                   <template v-if="includeProgress.running > 0">
                     {{ includeProgress.completed }}/{{ includeProgress.total }}
@@ -140,9 +177,17 @@ const { showId, componentId } = useComponentId('RP-005')
                   <template v-else>{{ includeProgress.completed }}/{{ includeProgress.total }}</template>
                 </span>
               </div>
-              <div v-if="callProgress" class="ca-row">
+              <div
+                v-if="callProgress"
+                class="ca-row"
+              >
                 <span class="ca-label">调用分组</span>
-                <div class="ca-bar"><div class="ca-fill" :style="{ width: callProgress.pct + '%' }"></div></div>
+                <div class="ca-bar">
+                  <div
+                    class="ca-fill"
+                    :style="{ width: callProgress.pct + '%' }"
+                  />
+                </div>
                 <span class="ca-text">
                   <template v-if="callProgress.running > 0">
                     {{ callProgress.completed }}/{{ callProgress.total }}

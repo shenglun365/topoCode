@@ -153,7 +153,10 @@ function cancelCreateTask() {
 
 <template>
   <div class="project-list">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 搜索框 -->
     <div class="project-list-search">
       <MagnifyingGlassIcon class="w-3.5 h-3.5 search-icon" />
@@ -162,22 +165,35 @@ function cancelCreateTask() {
         type="text"
         :placeholder="t('project.searchProjects')"
         class="search-input"
-      />
+      >
     </div>
 
     <!-- 空状态 -->
-    <div v-if="projectStore.projects.length === 0" class="empty-state">
+    <div
+      v-if="projectStore.projects.length === 0"
+      class="empty-state"
+    >
       <FolderIcon class="w-8 h-8 empty-icon" />
-      <div class="empty-title">{{ t('project.noProjects') }}</div>
-      <div class="empty-desc">{{ t('project.importFirst') }}</div>
-      <button class="btn btn-primary btn-sm" @click="emit('importProject')">
+      <div class="empty-title">
+        {{ t('project.noProjects') }}
+      </div>
+      <div class="empty-desc">
+        {{ t('project.importFirst') }}
+      </div>
+      <button
+        class="btn btn-primary btn-sm"
+        @click="emit('importProject')"
+      >
         <SparklesIcon class="w-4 h-4" />
         <span>{{ t('project.importProject') }}</span>
       </button>
     </div>
 
     <!-- 项目列表 -->
-    <div v-else class="project-items">
+    <div
+      v-else
+      class="project-items"
+    >
       <div
         v-for="project in filteredProjects"
         :key="project.id"
@@ -210,7 +226,7 @@ function cancelCreateTask() {
             v-if="loadingProjects.has(project.id)"
             class="report-loading"
           >
-            <div class="loading-spinner"></div>
+            <div class="loading-spinner" />
           </div>
           <div
             v-else-if="(reportItemsByProject.get(project.id) || []).length === 0"
@@ -221,36 +237,56 @@ function cancelCreateTask() {
             <span class="report-name">{{ t('project.noCompletedReports') }}</span>
           </div>
           <div
-            v-else
             v-for="item in reportItemsByProject.get(project.id)"
+            v-else
             :key="`${item.taskId}-${item.type}`"
             class="report-item"
             @click="emit('selectReport', item, project.id)"
           >
             <DocumentTextIcon class="w-3.5 h-3.5 report-icon" />
-            <span class="report-name" :title="formatReportName(item)">{{ formatReportName(item) }}</span>
+            <span
+              class="report-name"
+              :title="formatReportName(item)"
+            >{{ formatReportName(item) }}</span>
             <span class="report-time">{{ formatCompletedTime(item.updatedAt) }}</span>
           </div>
         </div>
       </div>
 
       <!-- 无匹配结果 -->
-      <div v-if="filteredProjects.length === 0" class="no-match">
+      <div
+        v-if="filteredProjects.length === 0"
+        class="no-match"
+      >
         {{ t('project.noMatch') }}
       </div>
     </div>
 
     <!-- 确认创建任务对话框 -->
     <Teleport to="body">
-      <div v-if="pendingCreateProject" class="dialog-overlay" @click.self="cancelCreateTask">
+      <div
+        v-if="pendingCreateProject"
+        class="dialog-overlay"
+        @click.self="cancelCreateTask"
+      >
         <div class="confirm-dialog">
           <div class="confirm-title">
             <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
             <span>{{ t('project.confirmCreateTask', { name: pendingCreateProject.name }) }}</span>
           </div>
           <div class="confirm-actions">
-            <button class="btn btn-ghost" @click="cancelCreateTask">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary" @click="confirmCreateTask">{{ t('common.confirm') }}</button>
+            <button
+              class="btn btn-ghost"
+              @click="cancelCreateTask"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              class="btn btn-primary"
+              @click="confirmCreateTask"
+            >
+              {{ t('common.confirm') }}
+            </button>
           </div>
         </div>
       </div>

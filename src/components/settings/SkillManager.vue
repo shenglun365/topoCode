@@ -14,10 +14,20 @@ async function toggleSkill(id: string, enabled: boolean) {
 
 <template>
   <div class="skill-manager">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div style="margin-bottom:16px;">
-      <h2 style="font-size:16px; font-weight:600; margin-bottom:2px;">{{ t('settings.skillManagement') }}</h2>
-      <p class="text-muted" style="font-size:12px;">{{ t('settings.skillDesc') }}</p>
+      <h2 style="font-size:16px; font-weight:600; margin-bottom:2px;">
+        {{ t('settings.skillManagement') }}
+      </h2>
+      <p
+        class="text-muted"
+        style="font-size:12px;"
+      >
+        {{ t('settings.skillDesc') }}
+      </p>
     </div>
 
     <!-- SKILL 列表 -->
@@ -29,16 +39,26 @@ async function toggleSkill(id: string, enabled: boolean) {
     >
       <div style="display:flex; justify-content:space-between; align-items:flex-start;">
         <div style="flex:1;">
-          <div style="font-size:13px; font-weight:500; margin-bottom:4px;">{{ skill.name }}</div>
-          <div class="text-muted" style="font-size:11px;">{{ skill.description }}</div>
+          <div style="font-size:13px; font-weight:500; margin-bottom:4px;">
+            {{ skill.name }}
+          </div>
+          <div
+            class="text-muted"
+            style="font-size:11px;"
+          >
+            {{ skill.description }}
+          </div>
         </div>
-        <label class="toggle" style="flex-shrink:0; margin-left:12px;">
+        <label
+          class="toggle"
+          style="flex-shrink:0; margin-left:12px;"
+        >
           <input
             type="checkbox"
             :checked="skill.enabled"
             @change="toggleSkill(skill.id, !skill.enabled)"
           >
-          <span class="toggle-slider"></span>
+          <span class="toggle-slider" />
         </label>
       </div>
     </div>

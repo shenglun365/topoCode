@@ -111,42 +111,80 @@ function exportSvg() {
 
 <template>
   <div class="d3-force-graph">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 工具栏 -->
-    <div v-if="showToolbar" class="graph-toolbar">
+    <div
+      v-if="showToolbar"
+      class="graph-toolbar"
+    >
       <div class="toolbar-left">
         <span class="toolbar-label">{{ t('visualization.forceDirected') }}</span>
-        <span v-if="loading" class="toolbar-status">
+        <span
+          v-if="loading"
+          class="toolbar-status"
+        >
           {{ t('render.layoutComputing') }} {{ progress }}%
         </span>
-        <span v-else-if="error" class="toolbar-status error">
+        <span
+          v-else-if="error"
+          class="toolbar-status error"
+        >
           {{ error }}
         </span>
-        <span v-else class="toolbar-status">
+        <span
+          v-else
+          class="toolbar-status"
+        >
           {{ nodes.length }} {{ t('visualization.nodes') }} / {{ edges.length }} {{ t('visualization.edges') }}
         </span>
       </div>
 
       <div class="toolbar-right">
-        <button class="btn btn-ghost btn-sm" @click="zoomIn" :title="t('common.zoomIn')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('common.zoomIn')"
+          @click="zoomIn"
+        >
           <MagnifyingGlassPlusIcon class="w-4 h-4" />
         </button>
-        <button class="btn btn-ghost btn-sm" @click="zoomOut" :title="t('common.zoomOut')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('common.zoomOut')"
+          @click="zoomOut"
+        >
           <MagnifyingGlassMinusIcon class="w-4 h-4" />
         </button>
-        <button class="btn btn-ghost btn-sm" @click="resetView" :title="t('visualization.resetView')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('visualization.resetView')"
+          @click="resetView"
+        >
           <MagnifyingGlassIcon class="w-4 h-4" />
         </button>
-        <div class="divider-vertical"></div>
-        <button class="btn btn-ghost btn-sm" @click="exportSvg" :disabled="!nodes.length" :title="t('visualization.exportSvg')">
+        <div class="divider-vertical" />
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!nodes.length"
+          :title="t('visualization.exportSvg')"
+          @click="exportSvg"
+        >
           <ArrowDownTrayIcon class="w-4 h-4" />
         </button>
       </div>
     </div>
 
     <!-- 进度条 -->
-    <div v-if="loading" class="progress-bar">
-      <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
+    <div
+      v-if="loading"
+      class="progress-bar"
+    >
+      <div
+        class="progress-fill"
+        :style="{ width: `${progress}%` }"
+      />
     </div>
 
     <!-- SVG 画布 -->
@@ -159,21 +197,38 @@ function exportSvg() {
       @mouseleave="onmouseup"
     >
       <!-- 加载中 -->
-      <div v-if="loading && !nodes.length" class="render-loading">
-        <div class="loading-spinner"></div>
+      <div
+        v-if="loading && !nodes.length"
+        class="render-loading"
+      >
+        <div class="loading-spinner" />
         <span>{{ t('render.layoutComputing') }} {{ progress }}%</span>
       </div>
 
       <!-- 错误 -->
-      <div v-else-if="error" class="render-error">
-        <div class="title">{{ t('render.layoutFailed') }}</div>
-        <div class="desc">{{ error }}</div>
+      <div
+        v-else-if="error"
+        class="render-error"
+      >
+        <div class="title">
+          {{ t('render.layoutFailed') }}
+        </div>
+        <div class="desc">
+          {{ error }}
+        </div>
       </div>
 
       <!-- 空状态 -->
-      <div v-else-if="!nodes.length" class="empty-state">
-        <div class="title">{{ t('common.waiting') }}</div>
-        <div class="desc">{{ t('render.waitingGraphData') }}</div>
+      <div
+        v-else-if="!nodes.length"
+        class="empty-state"
+      >
+        <div class="title">
+          {{ t('common.waiting') }}
+        </div>
+        <div class="desc">
+          {{ t('render.waitingGraphData') }}
+        </div>
       </div>
 
       <!-- 图谱 -->
@@ -185,24 +240,53 @@ function exportSvg() {
         :viewBox="`0 0 ${width} ${height}`"
       >
         <defs>
-          <marker id="d3-arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="var(--text-muted)" opacity="0.6" />
+          <marker
+            id="d3-arrow"
+            markerWidth="10"
+            markerHeight="7"
+            refX="10"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon
+              points="0 0, 10 3.5, 0 7"
+              fill="var(--text-muted)"
+              opacity="0.6"
+            />
           </marker>
-          <pattern id="d3-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--border)" stroke-width="0.5" opacity="0.2"/>
+          <pattern
+            id="d3-grid"
+            width="40"
+            height="40"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 40 0 L 0 0 0 40"
+              fill="none"
+              stroke="var(--border)"
+              stroke-width="0.5"
+              opacity="0.2"
+            />
           </pattern>
           <filter id="d3-glow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feGaussianBlur
+              stdDeviation="3"
+              result="coloredBlur"
+            />
             <feMerge>
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
         </defs>
 
         <g :transform="`translate(${translate.x}, ${translate.y}) scale(${scale})`">
           <!-- 网格 -->
-          <rect width="100%" height="100%" fill="url(#d3-grid)" />
+          <rect
+            width="100%"
+            height="100%"
+            fill="url(#d3-grid)"
+          />
 
           <!-- 边 -->
           <g class="d3-edges">
@@ -230,7 +314,11 @@ function exportSvg() {
               @click.stop
             >
               <!-- 外圈光晕 -->
-              <circle r="24" :fill="getNodeColor(node)" opacity="0.1" />
+              <circle
+                r="24"
+                :fill="getNodeColor(node)"
+                opacity="0.1"
+              />
               <!-- 内圈 -->
               <circle
                 r="18"

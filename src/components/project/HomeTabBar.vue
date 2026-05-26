@@ -28,7 +28,10 @@ function getTabIcon(tab: HomeTab) {
 
 <template>
   <div class="home-tab-bar">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       v-for="tab in tabs"
       :key="tab.id"
@@ -36,7 +39,10 @@ function getTabIcon(tab: HomeTab) {
       :class="{ active: activeTabId === tab.id }"
       @click="emit('update:activeTabId', tab.id)"
     >
-      <component :is="getTabIcon(tab)" class="w-3.5 h-3.5 tab-icon" />
+      <component
+        :is="getTabIcon(tab)"
+        class="w-3.5 h-3.5 tab-icon"
+      />
       <span class="tab-title">{{ tab.title }}</span>
       <button
         class="tab-close-btn"

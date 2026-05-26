@@ -13,6 +13,7 @@ import {
   PencilIcon,
   DocumentArrowDownIcon,
   ArrowLeftIcon,
+  GlobeAltIcon,
 } from '@heroicons/vue/24/outline'
 import { useComponentId } from '@/composables/useComponentId'
 const { showId, componentId } = useComponentId('RP-010')
@@ -24,6 +25,7 @@ const props = defineProps<{
   subDocId?: string
   initialContent?: string
   initialTitle?: string
+  taskId?: string
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +46,7 @@ const doc = ref<{
 const editContent = ref('')
 const editTitle = ref('')
 const saving = ref(false)
+const httpPort = ref(3456)
 
 type DiagramLang = 'mermaid' | 'plantuml'
 
@@ -193,6 +196,38 @@ async function saveEdit() {
   }
 }
 
+const canOpenInBrowser = computed(() => !!(doc.value?.id || props.subDocId || (doc.value?.content && props.taskId)))
+
+async function openInBrowser() {
+  console.log('[SubDocViewer] openInBrowser clicked, subDocId prop:', props.subDocId, 'doc.id:', doc.value?.id, 'httpPort:', httpPort.value, 'taskId:', props.taskId)
+  let docId = doc.value?.id || props.subDocId
+  if (!docId && doc.value?.content && props.taskId) {
+    console.log('[SubDocViewer] no docId, creating subdoc first')
+    try {
+      const result = await window.api.report.createSubDoc({
+        taskId: props.taskId,
+        title: doc.value.title || props.initialTitle || '',
+        content: doc.value.content,
+      })
+      docId = result.id || result.subDocId
+      doc.value.id = docId
+      console.log('[SubDocViewer] subdoc created, id:', docId)
+    } catch (e: any) {
+      console.error('[SubDocViewer] failed to create subdoc:', e)
+      return
+    }
+  }
+  if (!docId) {
+    console.warn('[SubDocViewer] openInBrowser aborted: no docId available')
+    return
+  }
+  const url = `http://127.0.0.1:${httpPort.value}/doc?docId=${docId}`
+  console.log('[SubDocViewer] openInBrowser url:', url)
+  window.api.shell.openExternal(url)
+    .then(() => console.log('[SubDocViewer] openExternal success'))
+    .catch((err: any) => console.error('[SubDocViewer] openExternal error:', err))
+}
+
 // 渲染 Markdown (简单处理, 实际项目可用 marked)
 const renderedContent = computed(() => {
   if (!doc.value) return ''
@@ -217,8 +252,13 @@ const hasDiagrams = computed(() => diagramBlocks.value.length > 0)
 const diagramLangs = computed(() => [...new Set(diagramBlocks.value.map(b => b.lang))] as DiagramLang[])
 const visibleDiagramBlocks = computed(() => diagramBlocks.value.filter(b => b.lang === activeDiagramTab.value))
 
-onMounted(() => {
+onMounted(async () => {
   loadDoc()
+  try {
+    httpPort.value = await window.api.system.getHttpPort()
+  } catch (e) {
+    // 默认 3456
+  }
 })
 
 // 监听 subDocId 变化，切换 tab 时重新加载数据
@@ -229,16 +269,28 @@ watch(() => props.subDocId, () => {
 
 <template>
   <div class="subdoc-viewer">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 加载状态 -->
-    <div v-if="loading" class="loading-state">
+    <div
+      v-if="loading"
+      class="loading-state"
+    >
       <span class="text-muted">{{ t('common.loading') }}</span>
     </div>
 
     <!-- 工具栏 -->
-    <div v-else class="subdoc-toolbar">
+    <div
+      v-else
+      class="subdoc-toolbar"
+    >
       <div class="toolbar-left">
-        <button class="btn btn-ghost btn-sm" @click="emit('close')">
+        <button
+          class="btn btn-ghost btn-sm"
+          @click="emit('close')"
+        >
           <ArrowLeftIcon class="w-4 h-4" />
           <span>{{ t('report.backToReport') }}</span>
         </button>
@@ -246,67 +298,108 @@ watch(() => props.subDocId, () => {
       </div>
       <div class="toolbar-right">
         <template v-if="!editing">
-          <button class="btn btn-ghost btn-sm" @click="startEdit">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="openInBrowser"
+          >
+            <GlobeAltIcon class="w-4 h-4" />
+            <span>{{ t('report.openInBrowser') }}</span>
+          </button>
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="startEdit"
+          >
             <PencilIcon class="w-4 h-4" />
             <span>{{ t('common.edit') }}</span>
           </button>
         </template>
         <template v-else>
-          <button class="btn btn-ghost btn-sm" @click="cancelEdit">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="cancelEdit"
+          >
             {{ t('common.cancel') }}
           </button>
           <button
-            class="btn btn-primary btn-sm"
-            @click="saveEdit"
-            :disabled="saving"
+            v-if="!editing && canOpenInBrowser"
+            class="btn btn-ghost btn-sm"
+            @click="openInBrowser"
           >
-            <DocumentArrowDownIcon class="w-4 h-4" />
-            <span>{{ saving ? t('common.saving') : t('common.save') }}</span>
+            <GlobeAltIcon class="w-4 h-4" />
+            <span>{{ t('report.openInBrowser') }}</span>
           </button>
         </template>
       </div>
     </div>
 
     <!-- 预览模式 -->
-    <div v-if="!editing && doc" class="subdoc-preview">
+    <div
+      v-if="!editing && doc"
+      class="subdoc-preview"
+    >
       <div class="doc-meta">
         <span>{{ t('common.created') }}: {{ doc.createdAt }}</span>
         <span v-if="doc.updatedAt">{{ t('common.updated') }}: {{ doc.updatedAt }}</span>
       </div>
-      <div class="doc-content" v-html="renderedContent"></div>
+      <div
+        class="doc-content"
+        v-html="renderedContent"
+      />
 
       <!-- 结构图渲染区 -->
-      <div v-if="hasDiagrams" class="diagram-section">
+      <div
+        v-if="hasDiagrams"
+        class="diagram-section"
+      >
         <div class="diagram-tabs">
           <button
             v-for="lang in diagramLangs"
             :key="lang"
             :class="['diagram-tab', { active: activeDiagramTab === lang }]"
             @click="activeDiagramTab = lang"
-          >{{ lang === 'mermaid' ? 'Mermaid' : 'PlantUML' }}</button>
+          >
+            {{ lang === 'mermaid' ? 'Mermaid' : 'PlantUML' }}
+          </button>
         </div>
         <div
           v-for="block in visibleDiagramBlocks"
           :key="block.id"
           class="diagram-block"
         >
-          <div v-if="block.loading" class="diagram-loading">{{ t('report.mermaidRendering') }}</div>
-          <div v-else-if="block.error" class="diagram-error">
-            <div class="error-msg">{{ block.error }}</div>
+          <div
+            v-if="block.loading"
+            class="diagram-loading"
+          >
+            {{ t('report.mermaidRendering') }}
+          </div>
+          <div
+            v-else-if="block.error"
+            class="diagram-error"
+          >
+            <div class="error-msg">
+              {{ block.error }}
+            </div>
             <pre class="fallback-code"><code>{{ block.code }}</code></pre>
           </div>
-          <div v-else-if="block.svg" class="diagram-svg" v-html="block.svg"></div>
+          <div
+            v-else-if="block.svg"
+            class="diagram-svg"
+            v-html="block.svg"
+          />
         </div>
       </div>
     </div>
 
     <!-- 编辑模式 -->
-    <div v-if="editing" class="subdoc-edit">
+    <div
+      v-if="editing"
+      class="subdoc-edit"
+    >
       <input
         v-model="editTitle"
         class="edit-title"
         :placeholder="t('report.docTitlePlaceholder')"
-      />
+      >
       <textarea
         v-model="editContent"
         class="edit-content"

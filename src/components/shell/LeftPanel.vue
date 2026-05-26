@@ -196,14 +196,25 @@ loadPanelContent()
     :class="{ collapsed: panelStore.leftCollapsed }"
     :style="{ width: panelStore.leftCollapsed ? 0 : `${panelStore.leftWidth}px` }"
   >
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="panel-header">
       <span>{{ title }}</span>
       <div class="panel-header-actions">
-        <div class="icon-btn" :title="t('common.refresh')" @click="loadFileTree">
+        <div
+          class="icon-btn"
+          :title="t('common.refresh')"
+          @click="loadFileTree"
+        >
           <ArrowPathIcon class="w-3.5 h-3.5" />
         </div>
-        <div class="icon-btn" @click="panelStore.toggleLeft()" :title="t('common.collapse')">
+        <div
+          class="icon-btn"
+          :title="t('common.collapse')"
+          @click="panelStore.toggleLeft()"
+        >
           <ChevronRightIcon class="w-3.5 h-3.5" />
         </div>
       </div>
@@ -220,14 +231,26 @@ loadPanelContent()
 
       <!-- 项目文件树 -->
       <template v-else-if="projectStore.viewMode === 'project'">
-        <div v-if="fileTreeLoading" class="empty-state">
-          <div class="loading-spinner"></div>
+        <div
+          v-if="fileTreeLoading"
+          class="empty-state"
+        >
+          <div class="loading-spinner" />
           <span class="text-muted">{{ t('file.loading') }}</span>
         </div>
-        <div v-else-if="fileTreeNodes.length === 0" class="empty-state">
-          <div style="font-size:11px; color:var(--text-muted);">{{ t('file.noFiles') }}</div>
+        <div
+          v-else-if="fileTreeNodes.length === 0"
+          class="empty-state"
+        >
+          <div style="font-size:11px; color:var(--text-muted);">
+            {{ t('file.noFiles') }}
+          </div>
         </div>
-        <FileTree v-else :nodes="fileTreeNodes" @select="onFileSelect" />
+        <FileTree
+          v-else
+          :nodes="fileTreeNodes"
+          @select="onFileSelect"
+        />
       </template>
 
       <!-- 动态内容插槽 -->
@@ -235,9 +258,15 @@ loadPanelContent()
         <slot :page="panelContent">
           <!-- 默认空状态 -->
           <div class="empty-state">
-            <div class="icon">📋</div>
-            <div class="title">{{ title }}</div>
-            <div class="desc">{{ t('shell.leftPanel.dynamicContent') }}</div>
+            <div class="icon">
+              📋
+            </div>
+            <div class="title">
+              {{ title }}
+            </div>
+            <div class="desc">
+              {{ t('shell.leftPanel.dynamicContent') }}
+            </div>
           </div>
         </slot>
       </template>

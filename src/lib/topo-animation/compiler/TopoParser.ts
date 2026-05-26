@@ -286,8 +286,8 @@ export class TopoParser {
     this.advance(); // skip 'animate' or 'sequence'
 
     let name = 'default';
-    let autoPlay = false;
-    let loop = false;
+    const autoPlay = false;
+    const loop = false;
     const steps: AnimationStepNode[] = [];
 
     // 可选名称

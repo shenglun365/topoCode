@@ -112,10 +112,16 @@ onUnmounted(() => {
 
 <template>
   <Teleport to="body">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <div v-if="onboardingStore.isRunning" class="onboarding-overlay">
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
+    <div
+      v-if="onboardingStore.isRunning"
+      class="onboarding-overlay"
+    >
       <!-- Spotlight 遮罩 -->
-      <div class="spotlight-backdrop"></div>
+      <div class="spotlight-backdrop" />
 
       <!-- Spotlight 高亮区域 -->
       <transition name="spotlight">
@@ -129,7 +135,7 @@ onUnmounted(() => {
             height: spotlightPosition.height + 'px',
           }"
         >
-          <div class="spotlight-border"></div>
+          <div class="spotlight-border" />
         </div>
       </transition>
 
@@ -145,13 +151,20 @@ onUnmounted(() => {
         >
           <!-- 进度条 -->
           <div class="dialog-progress">
-            <div class="dialog-progress-fill" :style="{ width: progress + '%' }"></div>
+            <div
+              class="dialog-progress-fill"
+              :style="{ width: progress + '%' }"
+            />
           </div>
 
           <!-- 内容 -->
           <div class="dialog-content">
-            <h3 class="dialog-title">{{ currentStep.title }}</h3>
-            <p class="dialog-description">{{ currentStep.description }}</p>
+            <h3 class="dialog-title">
+              {{ currentStep.title }}
+            </h3>
+            <p class="dialog-description">
+              {{ currentStep.description }}
+            </p>
           </div>
 
           <!-- 步骤指示器 -->
@@ -171,7 +184,7 @@ onUnmounted(() => {
               <ArrowLeftIcon class="w-4 h-4" />
               <span>{{ t('common.back') }}</span>
             </button>
-            <div class="flex-1"></div>
+            <div class="flex-1" />
             <button
               class="btn btn-ghost btn-sm"
               @click="onboardingStore.skip"
@@ -190,7 +203,6 @@ onUnmounted(() => {
         </div>
       </transition>
     </div>
-
   </Teleport>
 </template>
 

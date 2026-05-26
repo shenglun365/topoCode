@@ -17,6 +17,7 @@ import { usePanelStore } from '@/stores/panel'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useSettingsStore } from '@/stores/settings'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import { ipc } from '@/services/ipc'
 import ReportGenerationPipeline from './ReportGenerationPipeline.vue'
 import ReportMDViewer from './ReportMDViewer.vue'
@@ -27,6 +28,7 @@ const panelStore = usePanelStore()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
 const settingsStore = useSettingsStore()
+const funcGroup = useFuncGroupStore()
 
 const props = defineProps<{
   taskId: string
@@ -223,6 +225,24 @@ function openTaskList() {
   panelStore.setRightTab('detail')
 }
 
+function openCommunityAnalysis() {
+  const ctx = funcGroup.context.analysis
+  const existing = ctx.tabs.find(
+    t => t.kind === 'componentAnalysis' && (t as any).taskId === props.taskId
+  )
+  if (existing) {
+    funcGroup.setActiveTab('analysis', existing.id)
+    return
+  }
+  funcGroup.openTab('analysis', {
+    id: `comp-analysis-${props.taskId}-${Date.now()}`,
+    kind: 'componentAnalysis',
+    title: t('report.pipeline.communityAnalysis'),
+    taskId: props.taskId,
+    projectId: projectId.value,
+  })
+}
+
 function handleReportGenerated(content: string) {
   generatedReport.value = content
   emit('open-md', {
@@ -267,18 +287,29 @@ watch(() => props.taskId, loadData)
 
 <template>
   <div class="report-home">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <template v-if="loading">
       <div class="loading-state">
-        <div class="loading-spinner"></div>
+        <div class="loading-spinner" />
         <span>{{ t('common.loading') }}</span>
       </div>
     </template>
 
-    <div v-else-if="loadError" class="load-error">
+    <div
+      v-else-if="loadError"
+      class="load-error"
+    >
       <ExclamationTriangleIcon class="w-4 h-4" />
       <span>{{ loadError }}</span>
-      <button class="btn btn-ghost btn-xs" @click="loadData">{{ t('common.retry') }}</button>
+      <button
+        class="btn btn-ghost btn-xs"
+        @click="loadData"
+      >
+        {{ t('common.retry') }}
+      </button>
     </div>
 
     <template v-else>
@@ -304,7 +335,10 @@ watch(() => props.taskId, loadData)
             </div>
             <div class="summary-card">
               <span class="card-label">{{ t('project.projectPath') }}</span>
-              <span class="card-value card-path" :title="project?.rootPath || project?.path || ''">{{ truncatePath(project?.rootPath || project?.path) }}</span>
+              <span
+                class="card-value card-path"
+                :title="project?.rootPath || project?.path || ''"
+              >{{ truncatePath(project?.rootPath || project?.path) }}</span>
             </div>
           </div>
         </section>
@@ -326,7 +360,10 @@ watch(() => props.taskId, loadData)
             </div>
             <div class="summary-card">
               <span class="card-label">{{ t('analysis.taskStatus') }}</span>
-              <span class="card-value status-badge" :class="task?.status">{{ task?.status }}</span>
+              <span
+                class="card-value status-badge"
+                :class="task?.status"
+              >{{ task?.status }}</span>
             </div>
             <div class="summary-card">
               <span class="card-label">{{ t('analysis.createdAt') }}</span>
@@ -334,8 +371,13 @@ watch(() => props.taskId, loadData)
             </div>
           </div>
 
-          <div v-if="fileStats" class="file-distribution">
-            <div class="dist-title">{{ t('report.fileDistribution') }}</div>
+          <div
+            v-if="fileStats"
+            class="file-distribution"
+          >
+            <div class="dist-title">
+              {{ t('report.fileDistribution') }}
+            </div>
             <div class="dist-bars">
               <div
                 v-for="(count, ext) in fileStats.extensions"
@@ -347,7 +389,7 @@ watch(() => props.taskId, loadData)
                   <div
                     class="dist-bar-fill"
                     :style="{ width: (count / fileStats.totalFiles * 100) + '%' }"
-                  ></div>
+                  />
                 </div>
                 <span class="dist-count">{{ count }}</span>
               </div>
@@ -356,7 +398,10 @@ watch(() => props.taskId, loadData)
         </section>
 
         <!-- 社区概要 -->
-        <section v-if="commData" class="home-section">
+        <section
+          v-if="commData"
+          class="home-section"
+        >
           <div class="section-header">
             <RectangleGroupIcon class="w-4 h-4" />
             <span>{{ t('report.communitySummary') }}</span>
@@ -366,11 +411,15 @@ watch(() => props.taskId, loadData)
             <button
               :class="['comm-et-tab', { active: commEdgeType === 'INCLUDE' }]"
               @click="commEdgeType = 'INCLUDE'"
-            >{{ t('report.pipeline.edgeInclude') }}</button>
+            >
+              {{ t('report.pipeline.edgeInclude') }}
+            </button>
             <button
               :class="['comm-et-tab', { active: commEdgeType === 'CALL' }]"
               @click="commEdgeType = 'CALL'"
-            >{{ t('report.pipeline.edgeCall') }}</button>
+            >
+              {{ t('report.pipeline.edgeCall') }}
+            </button>
           </div>
           <!-- L0统计 -->
           <div class="comm-stats">
@@ -379,7 +428,10 @@ watch(() => props.taskId, loadData)
             </span>
             <span class="comm-stat">{{ t('report.communityMaxNodes') }}: {{ commStats.maxNodes }}</span>
             <span class="comm-stat">{{ t('report.communityMinNodes') }}: {{ commStats.minNodes }}</span>
-            <span class="comm-stat quality-stat" :title="'质量分反映社区内聚度，分值越高组件间区分度越好。平均约 ' + (commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-')">
+            <span
+              class="comm-stat quality-stat"
+              :title="'质量分反映社区内聚度，分值越高组件间区分度越好。平均约 ' + (commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-')"
+            >
               {{ t('report.communityAvgQuality') }}: {{ commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-' }}
               <span class="quality-hint">ⓘ</span>
             </span>
@@ -391,7 +443,7 @@ watch(() => props.taskId, loadData)
               type="text"
               placeholder="搜索组件名称/ID..."
               class="comm-search-input"
-            />
+            >
           </div>
           <!-- L0 社区列表 -->
           <div class="community-items">
@@ -408,13 +460,33 @@ watch(() => props.taskId, loadData)
                 <span class="chip-count">{{ item.nodeCount }}</span>
               </div>
             </template>
-            <div v-else class="comm-empty">{{ t('report.pipeline.noCommunities') }}</div>
+            <div
+              v-else
+              class="comm-empty"
+            >
+              {{ t('report.pipeline.noCommunities') }}
+            </div>
           </div>
           <!-- 组件分页 -->
-          <div v-if="communityTotalPages > 1" class="comm-pagination">
-            <button class="btn btn-ghost btn-xs" :disabled="communityPage <= 1" @click="communityPage--">上一页</button>
+          <div
+            v-if="communityTotalPages > 1"
+            class="comm-pagination"
+          >
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="communityPage <= 1"
+              @click="communityPage--"
+            >
+              上一页
+            </button>
             <span class="comm-page-info">{{ communityPage }} / {{ communityTotalPages }}</span>
-            <button class="btn btn-ghost btn-xs" :disabled="communityPage >= communityTotalPages" @click="communityPage++">下一页</button>
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="communityPage >= communityTotalPages"
+              @click="communityPage++"
+            >
+              下一页
+            </button>
           </div>
         </section>
 
@@ -426,7 +498,10 @@ watch(() => props.taskId, loadData)
           </div>
 
           <!-- LLM API 校验提示 -->
-          <div v-if="!hasModel" class="model-warning">
+          <div
+            v-if="!hasModel"
+            class="model-warning"
+          >
             <ExclamationTriangleIcon class="w-4 h-4" />
             <span>{{ t('report.llmNotConfigured') }}</span>
           </div>
@@ -438,6 +513,13 @@ watch(() => props.taskId, loadData)
             >
               <ListBulletIcon class="w-4 h-4" />
               <span>{{ t('report.openTaskList') }}</span>
+            </button>
+            <button
+              class="btn btn-secondary"
+              @click="openCommunityAnalysis"
+            >
+              <SparklesIcon class="w-4 h-4" />
+              <span>{{ t('report.pipeline.communityAnalysis') }}</span>
             </button>
             <button
               v-if="generatedReport"

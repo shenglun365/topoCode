@@ -23,7 +23,10 @@ async function handleClearCache() {
 
 <template>
   <footer class="status-bar">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="status-item">
       <span
         class="status-dot"
@@ -31,23 +34,32 @@ async function handleClearCache() {
           'error': status.backend.status === 'error',
           'warning': status.backend.status === 'stopped',
         }"
-      ></span>
+      />
       <span>
         {{ status.backend.status === 'running' ? t('shell.statusBar.pythonBackend') : t('shell.statusBar.backendDisconnected') }}
       </span>
     </div>
 
-    <div v-if="status.astStatus" class="status-item">
+    <div
+      v-if="status.astStatus"
+      class="status-item"
+    >
       <span>{{ status.astStatus }}</span>
     </div>
 
-    <div v-if="status.gitBranch" class="status-item">
+    <div
+      v-if="status.gitBranch"
+      class="status-item"
+    >
       <span>{{ t('shell.statusBar.branch') }}: {{ status.gitBranch }}</span>
     </div>
 
-    <div class="status-spacer"></div>
+    <div class="status-spacer" />
 
-    <div v-if="status.aiModel" class="status-item">
+    <div
+      v-if="status.aiModel"
+      class="status-item"
+    >
       <span>AI: {{ status.aiModel }}</span>
     </div>
 
@@ -62,8 +74,8 @@ async function handleClearCache() {
     <button
       class="cache-clear-btn"
       :disabled="clearing"
-      @click="handleClearCache"
       :title="t('report.clearCache')"
+      @click="handleClearCache"
     >
       <TrashIcon class="w-3.5 h-3.5" />
     </button>

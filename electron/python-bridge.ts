@@ -7,6 +7,8 @@ import { existsSync } from 'fs'
 
 // CommonJS: __dirname is a global in CommonJS modules
 
+export const HTTP_PORT = 3456
+
 export interface BackendStatus {
   status: 'stopped' | 'starting' | 'running' | 'error'
   pid?: number
@@ -71,7 +73,7 @@ export class PythonBridge {
         // 读取端口配置 (从 Electron store)
         const dealerPort = 5671  // TODO: 从 store 读取
         const pubPort = 5680
-        const httpPort = 3456    // Web 服务端口
+        const httpPort = HTTP_PORT
 
         // 启动前检查端口占用 — 如果有残留 Python 进程占用端口，先清理
         this.checkAndKillPortOccupant(dealerPort)

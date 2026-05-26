@@ -130,7 +130,10 @@ function handleSave(docId: string, content: string) {
 
 <template>
   <div class="page-knowledge">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 文档编辑器模式 -->
     <KnowledgeDocEditor
       v-if="showEditor && knowledgeStore.selectedDoc"
@@ -175,7 +178,7 @@ function handleSave(docId: string, content: string) {
           <PlayCircleIcon class="w-4 h-4" />
           <span>{{ t('knowledge.animation') }}</span>
         </div>
-        <div style="flex:1;"></div>
+        <div style="flex:1;" />
         <div style="display:flex; gap:4px; align-items:center;">
           <button class="btn btn-ghost btn-sm">
             <ArrowDownTrayIcon class="w-4 h-4" />
@@ -224,11 +227,21 @@ function handleSave(docId: string, content: string) {
                   :value="knowledgeStore.filter.sortBy"
                   @change="knowledgeStore.setSortBy(($event.target as HTMLSelectElement).value)"
                 >
-                  <option value="updated-desc">{{ t('knowledge.sortUpdatedDesc') }}</option>
-                  <option value="updated-asc">{{ t('knowledge.sortUpdatedAsc') }}</option>
-                  <option value="created-desc">{{ t('knowledge.sortCreatedDesc') }}</option>
-                  <option value="created-asc">{{ t('knowledge.sortCreatedAsc') }}</option>
-                  <option value="name-asc">{{ t('knowledge.sortNameAsc') }}</option>
+                  <option value="updated-desc">
+                    {{ t('knowledge.sortUpdatedDesc') }}
+                  </option>
+                  <option value="updated-asc">
+                    {{ t('knowledge.sortUpdatedAsc') }}
+                  </option>
+                  <option value="created-desc">
+                    {{ t('knowledge.sortCreatedDesc') }}
+                  </option>
+                  <option value="created-asc">
+                    {{ t('knowledge.sortCreatedAsc') }}
+                  </option>
+                  <option value="name-asc">
+                    {{ t('knowledge.sortNameAsc') }}
+                  </option>
                 </select>
                 <button class="btn btn-primary btn-sm">
                   <PlusIcon class="w-4 h-4" />
@@ -245,14 +258,20 @@ function handleSave(docId: string, content: string) {
             <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
               <!-- 维度1 -->
               <div class="kb-dim-filter-group">
-                <div class="kb-dim-filter-toggle" @click="toggleFilter('lifecycle')">
+                <div
+                  class="kb-dim-filter-toggle"
+                  @click="toggleFilter('lifecycle')"
+                >
                   <ChevronRightIcon
                     class="w-3 h-3"
                     :class="{ 'transform rotate-90': expandedFilters.lifecycle }"
                   />
                   <span>{{ t('knowledge.lifecycle') }}</span>
                 </div>
-                <div v-if="expandedFilters.lifecycle" class="kb-dim-filter-options">
+                <div
+                  v-if="expandedFilters.lifecycle"
+                  class="kb-dim-filter-options"
+                >
                   <label
                     v-for="tag in knowledgeDimensions.lifecycle"
                     :key="tag"
@@ -271,14 +290,20 @@ function handleSave(docId: string, content: string) {
 
               <!-- 维度2 -->
               <div class="kb-dim-filter-group">
-                <div class="kb-dim-filter-toggle" @click="toggleFilter('techStack')">
+                <div
+                  class="kb-dim-filter-toggle"
+                  @click="toggleFilter('techStack')"
+                >
                   <ChevronRightIcon
                     class="w-3 h-3"
                     :class="{ 'transform rotate-90': expandedFilters.techStack }"
                   />
                   <span>{{ t('knowledge.techStack') }}</span>
                 </div>
-                <div v-if="expandedFilters.techStack" class="kb-dim-filter-options">
+                <div
+                  v-if="expandedFilters.techStack"
+                  class="kb-dim-filter-options"
+                >
                   <label
                     v-for="tag in knowledgeDimensions.techStack"
                     :key="tag"
@@ -297,14 +322,20 @@ function handleSave(docId: string, content: string) {
 
               <!-- 维度3 -->
               <div class="kb-dim-filter-group">
-                <div class="kb-dim-filter-toggle" @click="toggleFilter('abstraction')">
+                <div
+                  class="kb-dim-filter-toggle"
+                  @click="toggleFilter('abstraction')"
+                >
                   <ChevronRightIcon
                     class="w-3 h-3"
                     :class="{ 'transform rotate-90': expandedFilters.abstraction }"
                   />
                   <span>{{ t('knowledge.abstractionLevel') }}</span>
                 </div>
-                <div v-if="expandedFilters.abstraction" class="kb-dim-filter-options">
+                <div
+                  v-if="expandedFilters.abstraction"
+                  class="kb-dim-filter-options"
+                >
                   <label
                     v-for="tag in knowledgeDimensions.abstraction"
                     :key="tag"
@@ -323,14 +354,20 @@ function handleSave(docId: string, content: string) {
 
               <!-- 维度4 -->
               <div class="kb-dim-filter-group">
-                <div class="kb-dim-filter-toggle" @click="toggleFilter('purpose')">
+                <div
+                  class="kb-dim-filter-toggle"
+                  @click="toggleFilter('purpose')"
+                >
                   <ChevronRightIcon
                     class="w-3 h-3"
                     :class="{ 'transform rotate-90': expandedFilters.purpose }"
                   />
                   <span>{{ t('knowledge.knowledgeAttribute') }}</span>
                 </div>
-                <div v-if="expandedFilters.purpose" class="kb-dim-filter-options">
+                <div
+                  v-if="expandedFilters.purpose"
+                  class="kb-dim-filter-options"
+                >
                   <label
                     v-for="tag in knowledgeDimensions.purpose"
                     :key="tag"
@@ -373,19 +410,44 @@ function handleSave(docId: string, content: string) {
           </div>
 
           <!-- 空状态 -->
-          <div v-if="knowledgeStore.filteredDocs.length === 0" class="empty-state">
+          <div
+            v-if="knowledgeStore.filteredDocs.length === 0"
+            class="empty-state"
+          >
             <LightBulbIcon class="icon" />
-            <div class="title">{{ t('knowledge.noDocuments') }}</div>
-            <div class="desc">{{ t('knowledge.addDocumentHint') }}</div>
+            <div class="title">
+              {{ t('knowledge.noDocuments') }}
+            </div>
+            <div class="desc">
+              {{ t('knowledge.addDocumentHint') }}
+            </div>
           </div>
 
           <!-- 分页 -->
-          <div v-if="knowledgeStore.filteredDocs.length > 0" style="display:flex; justify-content:center; align-items:center; gap:8px; margin-top:16px; padding:12px; font-size:11px; color:var(--text-muted);">
+          <div
+            v-if="knowledgeStore.filteredDocs.length > 0"
+            style="display:flex; justify-content:center; align-items:center; gap:8px; margin-top:16px; padding:12px; font-size:11px; color:var(--text-muted);"
+          >
             <span>{{ t('knowledge.totalItems', { count: knowledgeStore.filteredDocs.length }) }}</span>
-            <div class="divider-vertical"></div>
-            <button class="btn btn-ghost btn-sm" disabled>‹ {{ t('common.prev') }}</button>
-            <button class="btn btn-ghost btn-sm" style="background:var(--bg-active);">1</button>
-            <button class="btn btn-ghost btn-sm" disabled>{{ t('common.next') }} ›</button>
+            <div class="divider-vertical" />
+            <button
+              class="btn btn-ghost btn-sm"
+              disabled
+            >
+              ‹ {{ t('common.prev') }}
+            </button>
+            <button
+              class="btn btn-ghost btn-sm"
+              style="background:var(--bg-active);"
+            >
+              1
+            </button>
+            <button
+              class="btn btn-ghost btn-sm"
+              disabled
+            >
+              {{ t('common.next') }} ›
+            </button>
           </div>
         </div>
 
@@ -405,7 +467,7 @@ function handleSave(docId: string, content: string) {
               v-model="animSource"
               style="flex:1; padding:12px; font-size:12px; font-family:'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; line-height:1.6; resize:none; border:none; outline:none; background:var(--bg-primary); color:var(--text-secondary);"
               spellcheck="false"
-            ></textarea>
+            />
           </div>
           <!-- 右侧: 预览 -->
           <div style="flex:1; display:flex; flex-direction:column;">

@@ -4,7 +4,7 @@ import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { windowManager } from './window-manager'
-import { pythonBridge } from './python-bridge'
+import { pythonBridge, HTTP_PORT } from './python-bridge'
 import { zmqRouter } from './zmq-router'
 
 // 开发环境设置
@@ -124,12 +124,16 @@ function setupIPC() {
 
   // ---- 外部链接 ----
   ipcMain.handle('shell:open-external', async (_, url: string) => {
+    console.log(`[open-external] ${url}`)
     await shell.openExternal(url)
   })
 
   // ---- 系统 ----
   ipcMain.handle('system:get-app-data-path', () => {
     return app.getPath('userData')
+  })
+  ipcMain.handle('system:get-http-port', () => {
+    return HTTP_PORT
   })
   ipcMain.handle('env:get', (_, key: string) => {
     return process.env[key] || null

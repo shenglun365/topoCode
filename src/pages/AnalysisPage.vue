@@ -107,12 +107,15 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
 
 <template>
   <div class="page-analysis">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- ===== 公共 Tab 栏 — 显示所有报告类型 ===== -->
     <HomeTabBar
       :tabs="reportTabs"
       :active-tab-id="analysisContext.activeTabId"
-      @update:activeTabId="onTabUpdate"
+      @update:active-tab-id="onTabUpdate"
       @close="onTabClose"
     />
 
@@ -131,6 +134,7 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
         :sub-doc-id="activeTab.subDocId"
         :initial-content="activeTab.content"
         :initial-title="activeTab.title"
+        :task-id="activeTab.taskId"
         @close="goToReportHome"
       />
     </template>
@@ -138,7 +142,10 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
     <template v-else-if="isComponentAnalysisTab && activeTab">
       <div class="comp-analysis-container">
         <div class="comp-analysis-header">
-          <button class="btn btn-ghost btn-sm" @click="goBackFromCompAnalysis">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="goBackFromCompAnalysis"
+          >
             <ArrowLeftIcon class="w-3.5 h-3.5" />
             <span>{{ t('common.back') }}</span>
           </button>
@@ -156,8 +163,12 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
     <template v-else>
       <div class="analysis-empty">
         <ChartBarIcon class="w-16 h-16" />
-        <div class="title">{{ t('analysis.selectReportHint') }}</div>
-        <div class="desc">{{ t('analysis.selectReportHintDesc') }}</div>
+        <div class="title">
+          {{ t('analysis.selectReportHint') }}
+        </div>
+        <div class="desc">
+          {{ t('analysis.selectReportHintDesc') }}
+        </div>
       </div>
     </template>
   </div>

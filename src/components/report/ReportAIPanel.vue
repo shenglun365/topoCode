@@ -275,7 +275,10 @@ initSession()
 
 <template>
   <div class="report-ai-panel">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 预制指令 -->
     <div class="preset-bar">
       <span class="preset-label">{{ t('report.presetActions') }}</span>
@@ -284,8 +287,8 @@ initSession()
           v-for="tpl in templateOptions.slice(0, 4)"
           :key="tpl.id"
           class="preset-btn"
-          @click="sendPresetAction(tpl.id)"
           :disabled="streaming"
+          @click="sendPresetAction(tpl.id)"
         >
           <SparklesIcon class="w-3 h-3" />
           <span>{{ tpl.name }}</span>
@@ -295,9 +298,16 @@ initSession()
 
     <!-- 消息列表 -->
     <div class="ai-panel-messages">
-      <div v-if="messages.length === 0" class="empty-chat">
-        <div class="empty-title">{{ t('report.aiPanelHint') }}</div>
-        <div class="empty-desc">{{ t('report.aiPanelHintDesc') }}</div>
+      <div
+        v-if="messages.length === 0"
+        class="empty-chat"
+      >
+        <div class="empty-title">
+          {{ t('report.aiPanelHint') }}
+        </div>
+        <div class="empty-desc">
+          {{ t('report.aiPanelHintDesc') }}
+        </div>
       </div>
 
       <div
@@ -315,12 +325,22 @@ initSession()
         </div>
         <div class="msg-body">
           <template v-if="msg.isStreaming">
-            <div v-if="msg.content" class="msg-text">{{ msg.content }}</div>
+            <div
+              v-if="msg.content"
+              class="msg-text"
+            >
+              {{ msg.content }}
+            </div>
             <div class="streaming-indicator">
-              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span class="dot" /><span class="dot" /><span class="dot" />
             </div>
           </template>
-          <div v-else class="msg-text">{{ msg.content }}</div>
+          <div
+            v-else
+            class="msg-text"
+          >
+            {{ msg.content }}
+          </div>
         </div>
       </div>
     </div>
@@ -338,11 +358,11 @@ initSession()
         />
         <button
           class="send-btn"
-          @click="sendMessage"
           :disabled="streaming || !userInput.trim()"
+          @click="sendMessage"
         >
           <template v-if="streaming">
-            <span class="send-spinner"></span>
+            <span class="send-spinner" />
           </template>
           <template v-else>
             <PaperAirplaneIcon class="w-4 h-4" />
@@ -350,8 +370,8 @@ initSession()
         </button>
         <button
           class="clear-btn"
-          @click="clearChat"
           :title="t('common.clear')"
+          @click="clearChat"
         >
           <TrashIcon class="w-4 h-4" />
         </button>

@@ -102,19 +102,37 @@ defineExpose({ play, pause, stop })
 
 <template>
   <div class="animation-stage">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 工具栏 -->
-    <div v-if="showToolbar" class="stage-toolbar">
+    <div
+      v-if="showToolbar"
+      class="stage-toolbar"
+    >
       <div class="toolbar-left">
         <span class="toolbar-label">{{ t('animation.animationStage') }}</span>
-        <span v-if="playing" class="toolbar-status">
+        <span
+          v-if="playing"
+          class="toolbar-status"
+        >
           {{ t('animation.animationPlaying') }} {{ currentStep + 1 }}/{{ totalSteps }}
         </span>
-        <span v-else-if="totalSteps > 0 && !playing" class="toolbar-status">
+        <span
+          v-else-if="totalSteps > 0 && !playing"
+          class="toolbar-status"
+        >
           {{ t('animation.animationPaused') }}
         </span>
-        <span v-else-if="error" class="toolbar-status error">{{ error }}</span>
-        <span v-else class="toolbar-status">{{ t('animation.animationWaiting') }}</span>
+        <span
+          v-else-if="error"
+          class="toolbar-status error"
+        >{{ error }}</span>
+        <span
+          v-else
+          class="toolbar-status"
+        >{{ t('animation.animationWaiting') }}</span>
       </div>
 
       <div class="toolbar-right">
@@ -122,16 +140,16 @@ defineExpose({ play, pause, stop })
           v-if="!playing"
           class="btn btn-ghost btn-sm"
           :disabled="!loaded"
-          @click="play"
           :title="t('animation.play')"
+          @click="play"
         >
           <PlayIcon class="w-4 h-4" />
         </button>
         <button
           v-else
           class="btn btn-ghost btn-sm"
-          @click="pause"
           :title="t('animation.pause')"
+          @click="pause"
         >
           <PauseIcon class="w-4 h-4" />
         </button>
@@ -139,8 +157,8 @@ defineExpose({ play, pause, stop })
         <button
           class="btn btn-ghost btn-sm"
           :disabled="!loaded"
-          @click="stop"
           :title="t('animation.stop')"
+          @click="stop"
         >
           <StopIcon class="w-4 h-4" />
         </button>
@@ -148,8 +166,8 @@ defineExpose({ play, pause, stop })
         <button
           class="btn btn-ghost btn-sm"
           :disabled="!loaded"
-          @click="() => { stop(); play() }"
           :title="t('animation.replay')"
+          @click="() => { stop(); play() }"
         >
           <ArrowPathIcon class="w-4 h-4" />
         </button>
@@ -165,17 +183,40 @@ defineExpose({ play, pause, stop })
       <div
         class="progress-fill"
         :style="{ width: `${progress}%` }"
-      ></div>
+      />
     </div>
 
     <!-- 动画舞台 (发动机渲染区域) -->
-    <div ref="stageRef" class="stage-content">
+    <div
+      ref="stageRef"
+      class="stage-content"
+    >
       <!-- 空状态 -->
-      <div v-if="!source || !loaded" class="empty-state">
-        <div class="title">{{ t('animation.animationStage') }}</div>
-        <div v-if="!source" class="desc">{{ t('animation.sequenceHint') }}</div>
-        <div v-else-if="error" class="desc error">{{ error }}</div>
-        <div v-if="!source" class="hint">{{ t('animation.supportedEffects') }}</div>
+      <div
+        v-if="!source || !loaded"
+        class="empty-state"
+      >
+        <div class="title">
+          {{ t('animation.animationStage') }}
+        </div>
+        <div
+          v-if="!source"
+          class="desc"
+        >
+          {{ t('animation.sequenceHint') }}
+        </div>
+        <div
+          v-else-if="error"
+          class="desc error"
+        >
+          {{ error }}
+        </div>
+        <div
+          v-if="!source"
+          class="hint"
+        >
+          {{ t('animation.supportedEffects') }}
+        </div>
       </div>
     </div>
   </div>

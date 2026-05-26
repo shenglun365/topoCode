@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # 在 start_http_server 中注入
 multi_db = None
 plantuml_cache_db: Optional[sqlite3.Connection] = None
+http_port = 3456
 
 app = FastAPI(title="TopoOne Web Viewer")
 
@@ -133,28 +134,58 @@ async def get_doc(doc_id: str):
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        subdocs = multi_db.main_db.fetchall(
-            "SELECT id, task_id, title, content, created_at, updated_at FROM sub_docs WHERE id = ?",
-            (doc_id,),
-        )
-        if not subdocs:
-            raise HTTPException(404, "Document not found")
-        doc = subdocs[0]
-        project_id = ""
-        task = multi_db.main_db.fetchone(
-            "SELECT project_id FROM tasks WHERE id = ?", (doc["task_id"],)
-        )
-        if task:
-            project_id = task["project_id"]
-        return {
-            "id": doc["id"],
-            "taskId": doc["task_id"],
-            "projectId": project_id,
-            "title": doc["title"],
-            "content": doc["content"],
-            "createdAt": doc["created_at"],
-            "updatedAt": doc["updated_at"],
-        }
+        # 先在 main_db.sub_docs 查找（旧版文档，表可能不存在）
+        try:
+            doc = multi_db.main_db.fetchone(
+                "SELECT id, task_id, title, content, created_at, updated_at FROM sub_docs WHERE id = ?",
+                (doc_id,),
+            )
+            if doc:
+                project_id = ""
+                task = multi_db.main_db.fetchone(
+                    "SELECT project_id FROM tasks WHERE id = ?", (doc["task_id"],)
+                )
+                if task:
+                    project_id = task["project_id"]
+                logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
+                return {
+                    "id": doc["id"],
+                    "taskId": doc["task_id"],
+                    "projectId": project_id,
+                    "title": doc["title"],
+                    "content": doc["content"],
+                    "createdAt": doc["created_at"],
+                    "updatedAt": doc["updated_at"],
+                }
+        except Exception:
+            pass
+
+        # 遍历项目库查找 report_subdocs
+        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
+        for proj in projects:
+            pid = proj["id"]
+            try:
+                pdb = multi_db.get_project_db(pid)
+                doc = pdb.fetchone(
+                    "SELECT id, task_id, title, content, created_at, updated_at FROM report_subdocs WHERE id = ?",
+                    (doc_id,),
+                )
+                if doc:
+                    project_id = pid
+                    logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
+                    return {
+                        "id": doc["id"],
+                        "taskId": doc["task_id"],
+                        "projectId": project_id,
+                        "title": doc["title"],
+                        "content": doc["content"],
+                        "createdAt": doc["created_at"],
+                        "updatedAt": doc["updated_at"],
+                    }
+            except Exception:
+                continue
+
+        raise HTTPException(404, "Document not found")
     except HTTPException:
         raise
     except Exception as e:
@@ -283,6 +314,7 @@ async def index():
 @app.get("/doc", response_class=HTMLResponse)
 async def view_doc(task_id: str = Query(""), doc_id: str = Query("")):
     viewer_path = os.path.join(STATIC_DIR, "viewer.html")
+    logger.info(f"=== Document viewer URL: http://127.0.0.1:{http_port}/doc?docId={doc_id}&taskId={task_id} ===")
     if os.path.isfile(viewer_path):
         return FileResponse(viewer_path)
     return HTMLResponse("viewer.html not found", status_code=404)
@@ -306,11 +338,12 @@ def create_app(multi_db_instance) -> FastAPI:
 
 
 async def start_http_server(multi_db_instance, port: int = 3456, cache_path: str = None):
-    global multi_db
+    global multi_db, http_port
+    http_port = port
     multi_db = multi_db_instance
     if cache_path:
         _init_cache_db(cache_path)
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
     server = uvicorn.Server(config)
-    logger.info(f"Web server starting on http://127.0.0.1:{port}")
+    logger.info(f"Web server starting on http://0.0.0.0:{port}")
     await server.serve()

@@ -72,45 +72,89 @@ function toggleView() {
 
 <template>
   <div class="mermaid-viewer">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 工具栏 -->
-    <div v-if="showToolbar" class="viewer-toolbar">
+    <div
+      v-if="showToolbar"
+      class="viewer-toolbar"
+    >
       <div class="toolbar-left">
         <span class="toolbar-label">Mermaid</span>
-        <span v-if="loading" class="toolbar-status">
+        <span
+          v-if="loading"
+          class="toolbar-status"
+        >
           {{ t('render.rendering') }} {{ progress }}%
         </span>
-        <span v-else-if="error" class="toolbar-status error">
+        <span
+          v-else-if="error"
+          class="toolbar-status error"
+        >
           <ExclamationTriangleIcon class="w-3 h-3" />
           {{ error }}
         </span>
-        <span v-else-if="svg" class="toolbar-status success">
+        <span
+          v-else-if="svg"
+          class="toolbar-status success"
+        >
           {{ t('render.renderComplete') }}
         </span>
       </div>
 
       <div class="toolbar-right">
         <!-- 进度条 -->
-        <div v-if="loading" class="progress-bar">
-          <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
+        <div
+          v-if="loading"
+          class="progress-bar"
+        >
+          <div
+            class="progress-fill"
+            :style="{ width: `${progress}%` }"
+          />
         </div>
 
-        <button v-if="props.editable" class="btn btn-ghost btn-sm" @click="toggleView" :title="t('visualization.toggleView')">
-          <component :is="viewMode === 'preview' ? CodeBracketIcon : EyeIcon" class="w-4 h-4" />
+        <button
+          v-if="props.editable"
+          class="btn btn-ghost btn-sm"
+          :title="t('visualization.toggleView')"
+          @click="toggleView"
+        >
+          <component
+            :is="viewMode === 'preview' ? CodeBracketIcon : EyeIcon"
+            class="w-4 h-4"
+          />
         </button>
 
-        <button class="btn btn-ghost btn-sm" @click="refresh" :disabled="loading" :title="t('common.refresh')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="loading"
+          :title="t('common.refresh')"
+          @click="refresh"
+        >
           <ArrowPathIcon class="w-4 h-4" />
         </button>
 
-        <div class="divider-vertical"></div>
+        <div class="divider-vertical" />
 
-        <button class="btn btn-ghost btn-sm" @click="exportSvg()" :disabled="!svg" :title="t('visualization.exportSvg')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!svg"
+          :title="t('visualization.exportSvg')"
+          @click="exportSvg()"
+        >
           <ArrowDownTrayIcon class="w-4 h-4" />
           <span>SVG</span>
         </button>
 
-        <button class="btn btn-ghost btn-sm" @click="exportPng()" :disabled="!svg" :title="t('visualization.exportPng')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!svg"
+          :title="t('visualization.exportPng')"
+          @click="exportPng()"
+        >
           <ArrowDownTrayIcon class="w-4 h-4" />
           <span>PNG</span>
         </button>
@@ -120,44 +164,80 @@ function toggleView() {
     <!-- 内容区 -->
     <div class="viewer-content">
       <!-- 编辑器模式 -->
-      <div v-if="viewMode === 'editor' && props.editable" class="editor-pane">
+      <div
+        v-if="viewMode === 'editor' && props.editable"
+        class="editor-pane"
+      >
         <textarea
           v-model="editorCode"
           class="mermaid-editor"
           spellcheck="false"
           :placeholder="t('render.inputMermaidSyntax')"
-        ></textarea>
+        />
         <div class="editor-actions">
-          <button class="btn btn-secondary btn-sm" @click="applyEdit" :disabled="loading">
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="loading"
+            @click="applyEdit"
+          >
             {{ t('render.applyAndRender') }}
           </button>
         </div>
       </div>
 
       <!-- 预览模式 -->
-      <div v-else class="preview-pane">
+      <div
+        v-else
+        class="preview-pane"
+      >
         <!-- 加载中 -->
-        <div v-if="loading && !svg" class="render-loading">
-          <div class="loading-spinner"></div>
+        <div
+          v-if="loading && !svg"
+          class="render-loading"
+        >
+          <div class="loading-spinner" />
           <span>{{ t('render.rendering') }} {{ progress }}%</span>
         </div>
 
         <!-- 错误状态 -->
-        <div v-else-if="error && !svg" class="render-error">
+        <div
+          v-else-if="error && !svg"
+          class="render-error"
+        >
           <ExclamationTriangleIcon class="icon" />
-          <div class="title">{{ t('render.renderFailed') }}</div>
-          <div class="desc">{{ error }}</div>
-          <button class="btn btn-secondary btn-sm" @click="refresh">{{ t('common.retry') }}</button>
+          <div class="title">
+            {{ t('render.renderFailed') }}
+          </div>
+          <div class="desc">
+            {{ error }}
+          </div>
+          <button
+            class="btn btn-secondary btn-sm"
+            @click="refresh"
+          >
+            {{ t('common.retry') }}
+          </button>
         </div>
 
         <!-- 渲染结果 -->
-        <div v-else-if="svg" class="render-result" v-html="svg"></div>
+        <div
+          v-else-if="svg"
+          class="render-result"
+          v-html="svg"
+        />
 
         <!-- 空状态 -->
-        <div v-else class="empty-state">
+        <div
+          v-else
+          class="empty-state"
+        >
           <CodeBracketIcon class="icon" />
-          <div class="title">{{ t('common.waiting') }}</div>
-          <div class="desc">{{ t('render.inputMermaidToRender') }}</div>
+          <div class="title">
+            {{ t('common.waiting') }}
+          </div>
+          <div class="desc">
+            {{ t('render.inputMermaidToRender') }}
+          </div>
         </div>
       </div>
     </div>

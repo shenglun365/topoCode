@@ -255,7 +255,7 @@ class RenderManager {
     const error = ref<string | null>(null)
     const progress = ref(0)
 
-    let cancelled = false
+    const cancelled = false
 
     watch(data, async (newData) => {
       if (cancelled || !newData) {

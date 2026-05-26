@@ -226,17 +226,28 @@ async function confirmClearCache() {
 
 <template>
   <div class="page-home">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 默认视图: 项目列表 + 导入 -->
     <div
       v-if="projectStore.viewMode === 'default'"
       class="home-default-view"
     >
       <!-- 分组管理（覆盖整个默认视图） -->
-      <div v-if="projectStore.activeTab?.kind === 'groupManager'" class="group-manager-panel">
+      <div
+        v-if="projectStore.activeTab?.kind === 'groupManager'"
+        class="group-manager-panel"
+      >
         <div class="group-manager-header">
-          <h3 style="font-size:14px; font-weight:600; margin:0;">{{ t('group.manager') }}</h3>
-          <button class="btn btn-ghost btn-sm" @click="projectStore.closeTab(projectStore.activeTabId!)">
+          <h3 style="font-size:14px; font-weight:600; margin:0;">
+            {{ t('group.manager') }}
+          </h3>
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="projectStore.closeTab(projectStore.activeTabId!)"
+          >
             <XMarkIcon class="w-4 h-4" />
             <span>{{ t('common.close') }}</span>
           </button>
@@ -250,12 +261,22 @@ async function confirmClearCache() {
       <template v-else>
         <!-- 页面标题 -->
         <div style="margin-bottom:24px;">
-          <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">TopoCode</h1>
-          <p class="text-muted" style="font-size:12px;">{{ t('project.subtitle') }}</p>
+          <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">
+            TopoCode
+          </h1>
+          <p
+            class="text-muted"
+            style="font-size:12px;"
+          >
+            {{ t('project.subtitle') }}
+          </p>
         </div>
 
         <!-- 筛选按钮 + 搜索 -->
-        <div v-if="projectStore.projects.length > 0" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
+        <div
+          v-if="projectStore.projects.length > 0"
+          style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;"
+        >
           <div style="display:flex; gap:4px; align-items:center;">
             <button
               :class="['btn', 'btn-sm', filterMode === 'all' ? 'btn-primary' : 'btn-ghost']"
@@ -263,7 +284,10 @@ async function confirmClearCache() {
             >
               <Squares2X2Icon class="w-3.5 h-3.5" />
               <span>{{ t('project.allProjects') }}</span>
-              <span class="badge badge-gray" style="font-size:9px; margin-left:2px;">{{ projectStore.projects.length }}</span>
+              <span
+                class="badge badge-gray"
+                style="font-size:9px; margin-left:2px;"
+              >{{ projectStore.projects.length }}</span>
             </button>
             <button
               :class="['btn', 'btn-sm', filterMode === 'favorites' ? 'btn-primary' : 'btn-ghost']"
@@ -271,22 +295,37 @@ async function confirmClearCache() {
             >
               <StarIcon class="w-3.5 h-3.5" />
               <span>{{ t('project.myFavorites') }}</span>
-              <span class="badge badge-yellow" style="font-size:9px; margin-left:2px;">{{ projectStore.projects.filter(p => p.favorite).length }}</span>
+              <span
+                class="badge badge-yellow"
+                style="font-size:9px; margin-left:2px;"
+              >{{ projectStore.projects.filter(p => p.favorite).length }}</span>
             </button>
             <!-- 分组筛选 -->
-            <GroupFilter ref="groupFilterRef" @change="selectedGroupIds = $event" />
+            <GroupFilter
+              ref="groupFilterRef"
+              @change="selectedGroupIds = $event"
+            />
           </div>
           <div style="display:flex; gap:4px; align-items:center;">
             <!-- 每页数量选择 -->
-            <span class="text-muted" style="font-size:10px; white-space:nowrap;">{{ t('project.pageSize') }}</span>
+            <span
+              class="text-muted"
+              style="font-size:10px; white-space:nowrap;"
+            >{{ t('project.pageSize') }}</span>
             <select
               :value="pageSize"
-              @change="settingsStore.setProjectPageSize(Number(($event.target as HTMLSelectElement).value))"
               style="padding:2px 4px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); outline:none;"
+              @change="settingsStore.setProjectPageSize(Number(($event.target as HTMLSelectElement).value))"
             >
-              <option value="20">20</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
+              <option value="20">
+                20
+              </option>
+              <option value="50">
+                50
+              </option>
+              <option value="100">
+                100
+              </option>
             </select>
             <!-- 复合搜索输入框 -->
             <div style="position:relative;">
@@ -295,7 +334,7 @@ async function confirmClearCache() {
                 v-model="searchQuery"
                 :placeholder="t('project.searchProjects')"
                 style="padding:3px 6px 3px 24px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); width:160px; outline:none;"
-              />
+              >
             </div>
           </div>
         </div>
@@ -309,44 +348,71 @@ async function confirmClearCache() {
             @select="projectStore.selectProject(project.id)"
           />
           <!-- 无匹配结果 -->
-          <div v-if="pagedProjects.length === 0 && !searchQuery" style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">
+          <div
+            v-if="pagedProjects.length === 0 && !searchQuery"
+            style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
+          >
             {{ t('project.noFavorites') }}
           </div>
-          <div v-else-if="pagedProjects.length === 0 && searchQuery" style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">
+          <div
+            v-else-if="pagedProjects.length === 0 && searchQuery"
+            style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
+          >
             {{ t('project.noMatch') }}
           </div>
           <!-- 导入项目卡片（始终在网格末尾） -->
-        <div
-          class="import-card card"
-          :class="{ 'importing': projectStore.importing }"
-          @click="handleImportProject"
-        >
-          <div class="import-card-body" v-if="!projectStore.importing">
-            <PlusIcon class="w-8 h-8 import-card-icon" />
-            <span class="import-card-label">{{ t('project.importProject') }}</span>
-            <span class="import-card-hint">{{ t('project.importDirHint') }}</span>
-          </div>
-          <div class="import-card-body" v-else>
-            <div class="import-card-progress">
-              <div class="import-card-spinner"></div>
-              <span class="import-card-label">{{ t('project.importing') }}</span>
-              <span class="import-card-percent">{{ projectStore.importProgress }}%</span>
-              <div class="progress-bar" style="width:80%; margin-top:8px;">
+          <div
+            class="import-card card"
+            :class="{ 'importing': projectStore.importing }"
+            @click="handleImportProject"
+          >
+            <div
+              v-if="!projectStore.importing"
+              class="import-card-body"
+            >
+              <PlusIcon class="w-8 h-8 import-card-icon" />
+              <span class="import-card-label">{{ t('project.importProject') }}</span>
+              <span class="import-card-hint">{{ t('project.importDirHint') }}</span>
+            </div>
+            <div
+              v-else
+              class="import-card-body"
+            >
+              <div class="import-card-progress">
+                <div class="import-card-spinner" />
+                <span class="import-card-label">{{ t('project.importing') }}</span>
+                <span class="import-card-percent">{{ projectStore.importProgress }}%</span>
                 <div
-                  class="progress-bar-fill bg-accent"
-                  :style="{ width: (projectStore.importProgress || 0) + '%' }"
-                ></div>
+                  class="progress-bar"
+                  style="width:80%; margin-top:8px;"
+                >
+                  <div
+                    class="progress-bar-fill bg-accent"
+                    :style="{ width: (projectStore.importProgress || 0) + '%' }"
+                  />
+                </div>
+                <span
+                  v-if="projectStore.importStatus === 'scan'"
+                  class="import-card-hint"
+                >{{ t('project.importScanning') }}</span>
+                <span
+                  v-else-if="projectStore.importStatus === 'write'"
+                  class="import-card-hint"
+                >{{ t('project.importWriting') }}</span>
               </div>
-              <span class="import-card-hint" v-if="projectStore.importStatus === 'scan'">{{ t('project.importScanning') }}</span>
-              <span class="import-card-hint" v-else-if="projectStore.importStatus === 'write'">{{ t('project.importWriting') }}</span>
             </div>
           </div>
         </div>
-        </div>
 
         <!-- 分页控件 -->
-        <div v-if="totalPages > 1" class="pagination-bar">
-          <span class="text-muted" style="font-size:11px;">
+        <div
+          v-if="totalPages > 1"
+          class="pagination-bar"
+        >
+          <span
+            class="text-muted"
+            style="font-size:11px;"
+          >
             {{ t('project.showing') }} {{ pageRange.start }}-{{ pageRange.end }} / {{ pageRange.total }}
           </span>
           <div class="pagination-buttons">
@@ -370,12 +436,27 @@ async function confirmClearCache() {
           </div>
         </div>
 
-      <!-- 快速开始（无项目时显示提示） -->
-        <div v-if="projectStore.projects.length === 0" class="quick-start-empty">
+        <!-- 快速开始（无项目时显示提示） -->
+        <div
+          v-if="projectStore.projects.length === 0"
+          class="quick-start-empty"
+        >
           <RocketLaunchIcon class="w-12 h-12 text-accent" />
-          <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">{{ t('project.quickStart') }}</h2>
-          <p class="text-muted" style="font-size:12px; margin-bottom:16px;">{{ t('project.quickStartDesc') }}</p>
-          <p class="text-muted" style="font-size:11px;">{{ t('project.menuImportHint') }}</p>
+          <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">
+            {{ t('project.quickStart') }}
+          </h2>
+          <p
+            class="text-muted"
+            style="font-size:12px; margin-bottom:16px;"
+          >
+            {{ t('project.quickStartDesc') }}
+          </p>
+          <p
+            class="text-muted"
+            style="font-size:11px;"
+          >
+            {{ t('project.menuImportHint') }}
+          </p>
         </div>
       </template>
     </div>
@@ -389,21 +470,39 @@ async function confirmClearCache() {
       <div style="display:flex; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); gap:12px;">
         <FolderIcon class="w-4 h-4 text-accent" />
         <span style="font-size:13px; font-weight:600;">{{ projectStore.selectedProject?.name }}</span>
-        <span class="badge badge-green" style="font-size:8px;">{{ t('project.synced') }}</span>
-        <div style="flex:1;"></div>
-        <button class="btn btn-ghost btn-sm" v-if="projectStore.tabs.length > 0" @click="projectStore.closeAllTabs()" :title="t('project.closeAllTabs')">
+        <span
+          class="badge badge-green"
+          style="font-size:8px;"
+        >{{ t('project.synced') }}</span>
+        <div style="flex:1;" />
+        <button
+          v-if="projectStore.tabs.length > 0"
+          class="btn btn-ghost btn-sm"
+          :title="t('project.closeAllTabs')"
+          @click="projectStore.closeAllTabs()"
+        >
           <XCircleIcon class="w-4 h-4" />
           <span>{{ t('project.closeAllTabs') }}</span>
         </button>
-        <button class="btn btn-ghost btn-sm" @click="projectStore.openTaskListTab()" :title="t('analysis.taskList')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('analysis.taskList')"
+          @click="projectStore.openTaskListTab()"
+        >
           <WrenchScrewdriverIcon class="w-4 h-4" />
           <span>{{ t('analysis.taskList') }}</span>
         </button>
-        <button class="btn btn-ghost btn-sm" @click="showMenu">
+        <button
+          class="btn btn-ghost btn-sm"
+          @click="showMenu"
+        >
           <Cog6ToothIcon class="w-4 h-4" />
           <span>{{ t('common.settings') }}</span>
         </button>
-        <button class="btn btn-ghost btn-sm" @click="projectStore.deselectProject()">
+        <button
+          class="btn btn-ghost btn-sm"
+          @click="projectStore.deselectProject()"
+        >
           {{ t('common.back') }}
         </button>
       </div>
@@ -413,14 +512,17 @@ async function confirmClearCache() {
         v-if="projectStore.currentProjectTabs.length > 0"
         :tabs="projectStore.currentProjectTabs"
         :active-tab-id="projectStore.activeTabId"
-        @update:activeTabId="onTabUpdate"
+        @update:active-tab-id="onTabUpdate"
         @close="onTabClose"
       />
 
       <!-- 内容区 -->
       <div class="home-tab-content">
         <!-- 代码视图 -->
-        <div v-if="projectStore.activeTab?.kind === 'file'" class="code-viewer-full">
+        <div
+          v-if="projectStore.activeTab?.kind === 'file'"
+          class="code-viewer-full"
+        >
           <CodeViewer
             :node="projectStore.activeTab.node!"
             :root-path="projectStore.selectedProject?.rootPath || projectStore.selectedProject?.path || ''"
@@ -429,7 +531,10 @@ async function confirmClearCache() {
         </div>
 
         <!-- 任务列表 -->
-        <div v-else-if="projectStore.activeTab?.kind === 'taskList'" class="task-list-panel">
+        <div
+          v-else-if="projectStore.activeTab?.kind === 'taskList'"
+          class="task-list-panel"
+        >
           <TaskListPanel
             :project-id="projectStore.selectedProjectId!"
             @create-task="onTaskListCreateTask"
@@ -437,7 +542,10 @@ async function confirmClearCache() {
         </div>
 
         <!-- 新建/编辑任务 -->
-        <div v-else-if="projectStore.activeTab?.kind === 'taskCreate'" class="task-create-form">
+        <div
+          v-else-if="projectStore.activeTab?.kind === 'taskCreate'"
+          class="task-create-form"
+        >
           <TaskCreateForm
             :project-id="projectStore.selectedProjectId!"
             :task-id="projectStore.activeTab.taskId"
@@ -447,15 +555,25 @@ async function confirmClearCache() {
         </div>
 
         <!-- 分组管理 -->
-        <div v-else-if="projectStore.activeTab?.kind === 'groupManager'" class="group-manager-panel">
+        <div
+          v-else-if="projectStore.activeTab?.kind === 'groupManager'"
+          class="group-manager-panel"
+        >
           <GroupManager />
         </div>
 
         <!-- 空状态 -->
-        <div v-else class="empty-state centered">
+        <div
+          v-else
+          class="empty-state centered"
+        >
           <DocumentTextIcon class="w-12 h-12 text-accent" />
-          <div class="title">{{ t('file.selectFile') }}</div>
-          <div class="desc">{{ t('file.selectFileDesc') }}</div>
+          <div class="title">
+            {{ t('file.selectFile') }}
+          </div>
+          <div class="desc">
+            {{ t('file.selectFileDesc') }}
+          </div>
         </div>
       </div>
     </div>
@@ -484,7 +602,7 @@ async function confirmClearCache() {
       v-if="menuVisible"
       class="context-menu-backdrop"
       @click="hideMenu"
-    ></div>
+    />
 
     <ConfirmDialog
       v-if="showClearCacheConfirm"

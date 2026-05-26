@@ -74,17 +74,27 @@ defineExpose({
     :class="{ collapsed: panelStore.rightCollapsed }"
     :style="{ width: panelStore.rightCollapsed ? 0 : `${panelStore.rightWidth}px` }"
   >
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="panel-header">
       <span>{{ title }}</span>
       <div class="panel-header-actions">
-        <div class="icon-btn" @click="panelStore.toggleRight()" :title="t('common.close')">
+        <div
+          class="icon-btn"
+          :title="t('common.close')"
+          @click="panelStore.toggleRight()"
+        >
           <XMarkIcon class="w-3.5 h-3.5" />
         </div>
       </div>
     </div>
     <!-- Tab 切换栏（分析报告首页） -->
-    <div v-if="isAnalysisReport" class="right-tab-bar">
+    <div
+      v-if="isAnalysisReport"
+      class="right-tab-bar"
+    >
       <button
         :class="['right-tab', { active: panelStore.rightTab === 'ai' }]"
         @click="panelStore.setRightTab('ai')"
@@ -111,14 +121,27 @@ defineExpose({
       />
 
       <!-- 任务列表面板（分析报告首页 detail tab） -->
-      <ReportTaskListPanel v-else-if="showTaskList" :task-id="projectStore.activeTab?.taskId || ''" :task-name="projectStore.activeTab?.title" />
+      <ReportTaskListPanel
+        v-else-if="showTaskList"
+        :task-id="projectStore.activeTab?.taskId || ''"
+        :task-name="projectStore.activeTab?.title"
+      />
 
       <!-- 符号索引（预留，排除分析页面） -->
-      <div v-else-if="navigation.currentPage !== 'analysis' && projectStore.viewMode === 'project' && projectStore.activeTab" class="symbols-panel">
+      <div
+        v-else-if="navigation.currentPage !== 'analysis' && projectStore.viewMode === 'project' && projectStore.activeTab"
+        class="symbols-panel"
+      >
         <div class="symbols-empty">
-          <div class="icon">🔍</div>
-          <div class="title">{{ t('shell.rightPanel.symbols') }}</div>
-          <div class="desc">{{ t('shell.rightPanel.symbolsPending') }}</div>
+          <div class="icon">
+            🔍
+          </div>
+          <div class="title">
+            {{ t('shell.rightPanel.symbols') }}
+          </div>
+          <div class="desc">
+            {{ t('shell.rightPanel.symbolsPending') }}
+          </div>
         </div>
       </div>
 
@@ -129,9 +152,15 @@ defineExpose({
       <template v-else>
         <slot :page="navigation.currentPage">
           <div class="empty-state">
-            <div class="icon">📌</div>
-            <div class="title">{{ t('shell.rightPanel.nodeDetail') }}</div>
-            <div class="desc">{{ t('shell.rightPanel.clickNodeToView') }}</div>
+            <div class="icon">
+              📌
+            </div>
+            <div class="title">
+              {{ t('shell.rightPanel.nodeDetail') }}
+            </div>
+            <div class="desc">
+              {{ t('shell.rightPanel.clickNodeToView') }}
+            </div>
           </div>
         </slot>
       </template>

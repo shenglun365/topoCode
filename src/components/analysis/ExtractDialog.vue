@@ -1,11 +1,23 @@
 <template>
   <Teleport to="body">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <div v-if="visible" class="dialog-overlay" @click.self="close">
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
+    <div
+      v-if="visible"
+      class="dialog-overlay"
+      @click.self="close"
+    >
       <div class="dialog-container">
         <div class="dialog-header">
-          <h2 class="dialog-title">{{ t('analysis.extractKnowledge') }}</h2>
-          <button class="close-btn" @click="close">
+          <h2 class="dialog-title">
+            {{ t('analysis.extractKnowledge') }}
+          </h2>
+          <button
+            class="close-btn"
+            @click="close"
+          >
             <XMarkIcon class="w-5 h-5" />
           </button>
         </div>
@@ -19,7 +31,7 @@
               type="text"
               class="form-input"
               :placeholder="t('analysis.titlePlaceholder')"
-            />
+            >
           </div>
 
           <!-- 四维标签 -->
@@ -30,36 +42,80 @@
                 <span class="dimension-icon lifecycle">
                   <ArrowPathIcon class="w-4 h-4" />
                 </span>
-                <select v-model="formData.dimensions.lifecycle" class="form-select">
-                  <option value="">{{ t('analysis.selectLifecycle') }}</option>
-                  <option v-for="tag in dimensions.lifecycle" :key="tag" :value="tag">{{ tag }}</option>
+                <select
+                  v-model="formData.dimensions.lifecycle"
+                  class="form-select"
+                >
+                  <option value="">
+                    {{ t('analysis.selectLifecycle') }}
+                  </option>
+                  <option
+                    v-for="tag in dimensions.lifecycle"
+                    :key="tag"
+                    :value="tag"
+                  >
+                    {{ tag }}
+                  </option>
                 </select>
               </div>
               <div class="dimension-row">
                 <span class="dimension-icon tech">
                   <WrenchScrewdriverIcon class="w-4 h-4" />
                 </span>
-                <select v-model="formData.dimensions.techStack" class="form-select">
-                  <option value="">{{ t('analysis.selectTechStack') }}</option>
-                  <option v-for="tag in dimensions.techStack" :key="tag" :value="tag">{{ tag }}</option>
+                <select
+                  v-model="formData.dimensions.techStack"
+                  class="form-select"
+                >
+                  <option value="">
+                    {{ t('analysis.selectTechStack') }}
+                  </option>
+                  <option
+                    v-for="tag in dimensions.techStack"
+                    :key="tag"
+                    :value="tag"
+                  >
+                    {{ tag }}
+                  </option>
                 </select>
               </div>
               <div class="dimension-row">
                 <span class="dimension-icon abstraction">
                   <Square3Stack3DIcon class="w-4 h-4" />
                 </span>
-                <select v-model="formData.dimensions.abstraction" class="form-select">
-                  <option value="">{{ t('analysis.selectAbstraction') }}</option>
-                  <option v-for="tag in dimensions.abstraction" :key="tag" :value="tag">{{ tag }}</option>
+                <select
+                  v-model="formData.dimensions.abstraction"
+                  class="form-select"
+                >
+                  <option value="">
+                    {{ t('analysis.selectAbstraction') }}
+                  </option>
+                  <option
+                    v-for="tag in dimensions.abstraction"
+                    :key="tag"
+                    :value="tag"
+                  >
+                    {{ tag }}
+                  </option>
                 </select>
               </div>
               <div class="dimension-row">
                 <span class="dimension-icon purpose">
                   <TargetIcon class="w-4 h-4" />
                 </span>
-                <select v-model="formData.dimensions.purpose" class="form-select">
-                  <option value="">{{ t('analysis.selectPurpose') }}</option>
-                  <option v-for="tag in dimensions.purpose" :key="tag" :value="tag">{{ tag }}</option>
+                <select
+                  v-model="formData.dimensions.purpose"
+                  class="form-select"
+                >
+                  <option value="">
+                    {{ t('analysis.selectPurpose') }}
+                  </option>
+                  <option
+                    v-for="tag in dimensions.purpose"
+                    :key="tag"
+                    :value="tag"
+                  >
+                    {{ tag }}
+                  </option>
                 </select>
               </div>
             </div>
@@ -70,27 +126,45 @@
             <label class="form-label">{{ t('analysis.contentSelect') }}</label>
             <div class="content-checkboxes">
               <label class="checkbox-item">
-                <input type="checkbox" v-model="formData.content.summary" />
+                <input
+                  v-model="formData.content.summary"
+                  type="checkbox"
+                >
                 <span class="checkbox-label">{{ t('analysis.summary') }}</span>
               </label>
               <label class="checkbox-item">
-                <input type="checkbox" v-model="formData.content.ast" />
+                <input
+                  v-model="formData.content.ast"
+                  type="checkbox"
+                >
                 <span class="checkbox-label">{{ t('analysis.ast') }}</span>
               </label>
               <label class="checkbox-item">
-                <input type="checkbox" v-model="formData.content.callChain" />
+                <input
+                  v-model="formData.content.callChain"
+                  type="checkbox"
+                >
                 <span class="checkbox-label">{{ t('analysis.callChain') }}</span>
               </label>
               <label class="checkbox-item">
-                <input type="checkbox" v-model="formData.content.dependency" />
+                <input
+                  v-model="formData.content.dependency"
+                  type="checkbox"
+                >
                 <span class="checkbox-label">{{ t('analysis.dependency') }}</span>
               </label>
               <label class="checkbox-item">
-                <input type="checkbox" v-model="formData.content.dataFlow" />
+                <input
+                  v-model="formData.content.dataFlow"
+                  type="checkbox"
+                >
                 <span class="checkbox-label">{{ t('analysis.extractDataFlow') }}</span>
               </label>
               <label class="checkbox-item">
-                <input type="checkbox" v-model="formData.content.logs" />
+                <input
+                  v-model="formData.content.logs"
+                  type="checkbox"
+                >
                 <span class="checkbox-label">{{ t('analysis.logs') }}</span>
               </label>
             </div>
@@ -104,13 +178,22 @@
               class="form-textarea"
               :placeholder="t('analysis.notesPlaceholder')"
               rows="3"
-            ></textarea>
+            />
           </div>
         </div>
 
         <div class="dialog-footer">
-          <button class="btn-cancel" @click="close">{{ t('common.cancel') }}</button>
-          <button class="btn-confirm" @click="confirmExtract" :disabled="!canExtract">
+          <button
+            class="btn-cancel"
+            @click="close"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="btn-confirm"
+            :disabled="!canExtract"
+            @click="confirmExtract"
+          >
             {{ t('analysis.confirmExtract') }}
           </button>
         </div>

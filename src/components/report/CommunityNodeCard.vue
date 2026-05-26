@@ -60,7 +60,10 @@ async function handleAIExplain() {
 
 <template>
   <div class="community-card">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="card-header">
       <Squares2X2Icon class="w-4 h-4 type-icon" />
       <span class="comm-id">{{ commId }}</span>
@@ -81,7 +84,10 @@ async function handleAIExplain() {
       </div>
     </div>
 
-    <div v-if="description" class="comm-desc">
+    <div
+      v-if="description"
+      class="comm-desc"
+    >
       {{ description }}
     </div>
 
@@ -96,12 +102,25 @@ async function handleAIExplain() {
         <SparklesIcon class="w-4 h-4" />
         <span>{{ t('report.aiExplain') }}</span>
       </button>
-      <div v-if="aiLoading" class="ai-loading">
-        <span class="spinner"></span>
+      <div
+        v-if="aiLoading"
+        class="ai-loading"
+      >
+        <span class="spinner" />
         <span>{{ t('report.aiExplainLoading') }}</span>
       </div>
-      <div v-if="aiContent" class="ai-content">{{ aiContent }}</div>
-      <div v-if="aiError" class="ai-error">{{ aiError }}</div>
+      <div
+        v-if="aiContent"
+        class="ai-content"
+      >
+        {{ aiContent }}
+      </div>
+      <div
+        v-if="aiError"
+        class="ai-error"
+      >
+        {{ aiError }}
+      </div>
     </div>
   </div>
 </template>

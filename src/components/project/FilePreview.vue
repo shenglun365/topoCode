@@ -112,13 +112,19 @@ watch(() => props.node.path, () => {
 
 <template>
   <div class="file-preview">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 标题栏 -->
     <div class="preview-header">
       <div class="preview-title">
         <DocumentIcon class="w-4 h-4" />
         <span class="title-text">{{ node.name }}</span>
-        <span v-if="node.language" class="badge badge-gray">{{ node.language }}</span>
+        <span
+          v-if="node.language"
+          class="badge badge-gray"
+        >{{ node.language }}</span>
       </div>
       <div class="preview-actions">
         <button
@@ -141,25 +147,37 @@ watch(() => props.node.path, () => {
     <!-- 内容区 -->
     <div class="preview-content">
       <!-- 加载中 -->
-      <div v-if="loading" class="preview-loading">
-        <div class="loading-spinner"></div>
+      <div
+        v-if="loading"
+        class="preview-loading"
+      >
+        <div class="loading-spinner" />
         <span class="text-muted">{{ t('common.loading') }}</span>
       </div>
 
       <!-- 错误 -->
-      <div v-else-if="error" class="preview-error">
+      <div
+        v-else-if="error"
+        class="preview-error"
+      >
         <ExclamationTriangleIcon class="w-5 h-5" />
         <span>{{ error }}</span>
       </div>
 
       <!-- 二进制文件 -->
-      <div v-else-if="isBinary" class="preview-binary">
+      <div
+        v-else-if="isBinary"
+        class="preview-binary"
+      >
         <DocumentIcon class="w-8 h-8" />
         <span class="text-muted">{{ t('preview.binaryFile') }}</span>
       </div>
 
       <!-- 代码内容 -->
-      <div v-else class="code-view">
+      <div
+        v-else
+        class="code-view"
+      >
         <div class="code-lines">
           <div
             v-for="(line, idx) in highlightedLines"
@@ -174,12 +192,21 @@ watch(() => props.node.path, () => {
     </div>
 
     <!-- 状态栏 -->
-    <div v-if="!loading && !error && !isBinary" class="preview-footer">
+    <div
+      v-if="!loading && !error && !isBinary"
+      class="preview-footer"
+    >
       <span class="text-muted">{{ lineCount }} {{ t('common.lines') }}</span>
-      <span class="text-muted" v-if="node.size">
+      <span
+        v-if="node.size"
+        class="text-muted"
+      >
         {{ node.size > 1024 * 1024 ? `${(node.size / 1024 / 1024).toFixed(1)}MB` : node.size > 1024 ? `${(node.size / 1024).toFixed(1)}KB` : `${node.size}B` }}
       </span>
-      <span class="text-muted" v-if="node.path">{{ node.path }}</span>
+      <span
+        v-if="node.path"
+        class="text-muted"
+      >{{ node.path }}</span>
     </div>
   </div>
 </template>

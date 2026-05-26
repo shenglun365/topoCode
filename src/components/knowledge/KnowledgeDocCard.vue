@@ -49,7 +49,10 @@ function getStatusText(status: string): string {
     class="kb-doc-card card card-clickable"
     @click="emit('select', doc)"
   >
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div style="display:flex; align-items:center; gap:10px;">
       <!-- 图标 -->
       <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
@@ -63,12 +66,26 @@ function getStatusText(status: string): string {
           <span style="font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
             {{ doc.title }}
           </span>
-          <span class="badge badge-blue" style="font-size:8px;">{{ t('knowledge.documents') }}</span>
-          <span :class="`badge ${getStatusBadge(doc.status)}`" style="font-size:8px;">
+          <span
+            class="badge badge-blue"
+            style="font-size:8px;"
+          >{{ t('knowledge.documents') }}</span>
+          <span
+            :class="`badge ${getStatusBadge(doc.status)}`"
+            style="font-size:8px;"
+          >
             {{ getStatusText(doc.status) }}
           </span>
-          <span v-if="doc.favorite" class="badge badge-yellow" style="font-size:8px;">⭐</span>
-          <span v-if="doc.pinned" class="badge badge-gray" style="font-size:8px;">📌</span>
+          <span
+            v-if="doc.favorite"
+            class="badge badge-yellow"
+            style="font-size:8px;"
+          >⭐</span>
+          <span
+            v-if="doc.pinned"
+            class="badge badge-gray"
+            style="font-size:8px;"
+          >📌</span>
         </div>
         <div style="font-size:10px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ doc.description }}
@@ -119,8 +136,14 @@ function getStatusText(status: string): string {
           :title="doc.favorite ? t('common.unfavorite') : t('common.favorite')"
           @click.stop="emit('toggleFavorite', doc.id)"
         >
-          <StarSolidIcon v-if="doc.favorite" class="w-3.5 h-3.5 text-yellow-400" />
-          <StarIcon v-else class="w-3.5 h-3.5" />
+          <StarSolidIcon
+            v-if="doc.favorite"
+            class="w-3.5 h-3.5 text-yellow-400"
+          />
+          <StarIcon
+            v-else
+            class="w-3.5 h-3.5"
+          />
         </button>
         <button
           class="btn btn-ghost btn-sm"
@@ -129,7 +152,10 @@ function getStatusText(status: string): string {
         >
           <PaperClipIcon class="w-3.5 h-3.5" />
         </button>
-        <button class="btn btn-ghost btn-sm" :title="t('common.more')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('common.more')"
+        >
           <EllipsisVerticalIcon class="w-3.5 h-3.5" />
         </button>
       </div>

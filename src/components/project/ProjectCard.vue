@@ -342,21 +342,45 @@ async function handleCheckChanges() {
     @click="emit('select', project)"
     @contextmenu="showMenu"
   >
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部: 名称 + 语言 + 菜单按钮 -->
-    <div class="flex justify-between items-center" style="margin-bottom:8px;">
-      <div class="flex items-center gap-2" style="min-width:0;">
+    <div
+      class="flex justify-between items-center"
+      style="margin-bottom:8px;"
+    >
+      <div
+        class="flex items-center gap-2"
+        style="min-width:0;"
+      >
         <!-- 置顶/收藏标识 -->
-        <span v-if="project.pinned" class="badge badge-pinned shrink-0">{{ t('project.pinnedBadge') }}</span>
-        <StarIcon v-if="project.favorite" class="w-3.5 h-3.5 text-yellow-400 shrink-0" :title="t('project.favorited')" />
+        <span
+          v-if="project.pinned"
+          class="badge badge-pinned shrink-0"
+        >{{ t('project.pinnedBadge') }}</span>
+        <StarIcon
+          v-if="project.favorite"
+          class="w-3.5 h-3.5 text-yellow-400 shrink-0"
+          :title="t('project.favorited')"
+        />
         <FolderIcon class="w-4 h-4 text-accent shrink-0" />
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
         </span>
         <!-- 分组 badge -->
-        <span v-if="project.group" class="badge badge-purple" style="font-size:8px;">{{ project.group }}</span>
+        <span
+          v-if="project.group"
+          class="badge badge-purple"
+          style="font-size:8px;"
+        >{{ project.group }}</span>
         <!-- 示例 badge -->
-        <span v-if="isSample" class="badge badge-blue" style="font-size:8px;">{{ t('common.new') }}</span>
+        <span
+          v-if="isSample"
+          class="badge badge-blue"
+          style="font-size:8px;"
+        >{{ t('common.new') }}</span>
         <!-- 状态提示 -->
         <ExclamationTriangleIcon
           v-if="project.needsResync"
@@ -384,30 +408,48 @@ async function handleCheckChanges() {
     </div>
 
     <!-- 路径 -->
-    <div class="text-muted font-mono" style="font-size:11px; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+    <div
+      class="text-muted font-mono"
+      style="font-size:11px; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+    >
       {{ project.rootPath || project.path }}
     </div>
 
-    <div class="flex justify-between" style="font-size:11px; color:var(--text-muted);">
+    <div
+      class="flex justify-between"
+      style="font-size:11px; color:var(--text-muted);"
+    >
       <span>{{ project.fileCount }} {{ t('file.files') }}</span>
-      <span v-if="storageStats" :title="t('project.storageSize')">{{ formatBytes(storageStats.dbSize + storageStats.sourceSize) }}</span>
+      <span
+        v-if="storageStats"
+        :title="t('project.storageSize')"
+      >{{ formatBytes(storageStats.dbSize + storageStats.sourceSize) }}</span>
       <span>{{ formatTime(project.lastSync) }}</span>
     </div>
 
     <!-- 进度条 -->
-    <div class="progress-bar" style="margin-top:8px;">
+    <div
+      class="progress-bar"
+      style="margin-top:8px;"
+    >
       <div
         class="progress-bar-fill"
         :style="{ width: project.status === 'synced' ? '100%' : '65%' }"
         :class="{ 'bg-success': project.status === 'synced' }"
-      ></div>
+      />
     </div>
 
-    <div class="flex justify-between items-center" style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+    <div
+      class="flex justify-between items-center"
+      style="font-size:10px; color:var(--text-muted); margin-top:4px;"
+    >
       <span>
         {{ project.status === 'synced' ? t('project.analysisComplete') : t('project.analysisInProgress') }}
       </span>
-      <span :class="`badge ${getStatusBadge(project.status)}`" style="font-size:8px;">
+      <span
+        :class="`badge ${getStatusBadge(project.status)}`"
+        style="font-size:8px;"
+      >
         {{ getStatusText(project.status) }}
       </span>
     </div>
@@ -422,31 +464,46 @@ async function handleCheckChanges() {
         @mouseleave="hideMenu"
       >
         <!-- 收藏/置顶 -->
-        <div class="context-menu-item" @click="toggleFavorite">
+        <div
+          class="context-menu-item"
+          @click="toggleFavorite"
+        >
           <StarIcon :class="['w-4 h-4', project.favorite ? 'text-yellow-400' : '']" />
           <span>{{ project.favorite ? t('project.unfavorite') : t('project.favorite') }}</span>
         </div>
-        <div class="context-menu-item" @click="togglePinned">
+        <div
+          class="context-menu-item"
+          @click="togglePinned"
+        >
           <span class="menu-icon-text">{{ project.pinned ? '✕' : '↑' }}</span>
           <span>{{ project.pinned ? t('project.unpin') : t('project.pin') }}</span>
         </div>
-        <div class="context-menu-divider"></div>
+        <div class="context-menu-divider" />
         <!-- 修改信息 -->
-        <div class="context-menu-item" @click="startEditInfo">
+        <div
+          class="context-menu-item"
+          @click="startEditInfo"
+        >
           <PencilIcon class="w-4 h-4" />
           <span>{{ t('project.editInfo') }}</span>
         </div>
         <!-- 修改路径 -->
-        <div class="context-menu-item" @click="handleChangePath">
+        <div
+          class="context-menu-item"
+          @click="handleChangePath"
+        >
           <PencilIcon class="w-4 h-4" />
           <span>{{ t('project.changePath') }}</span>
         </div>
         <!-- 检查变更 -->
-        <div class="context-menu-item" @click="handleCheckChanges">
+        <div
+          class="context-menu-item"
+          @click="handleCheckChanges"
+        >
           <MagnifyingGlassIcon class="w-4 h-4" />
           <span>{{ t('project.checkChanges') }}</span>
         </div>
-        <div class="context-menu-divider"></div>
+        <div class="context-menu-divider" />
         <!-- 清除缓存 -->
         <div
           v-if="!isSample"
@@ -456,7 +513,7 @@ async function handleCheckChanges() {
           <ArchiveBoxXMarkIcon class="w-4 h-4" />
           <span>{{ t('project.clearCache') }}</span>
         </div>
-        <div class="context-menu-divider"></div>
+        <div class="context-menu-divider" />
         <!-- 删除 -->
         <div
           v-if="!isSample"
@@ -474,7 +531,7 @@ async function handleCheckChanges() {
       v-if="menuVisible"
       class="context-menu-backdrop"
       @click="hideMenu"
-    ></div>
+    />
 
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
@@ -510,13 +567,16 @@ async function handleCheckChanges() {
               v-model="editNameInput"
               class="edit-info-input"
               :placeholder="t('project.projectNamePlaceholder')"
-              @keydown.enter="confirmEditInfo"
               autofocus
-            />
+              @keydown.enter="confirmEditInfo"
+            >
           </div>
           <div class="edit-info-field">
             <label class="edit-info-label">{{ t('project.editGroups') }}</label>
-            <div v-if="allGroups.length === 0" class="edit-info-no-groups">
+            <div
+              v-if="allGroups.length === 0"
+              class="edit-info-no-groups"
+            >
               <span class="text-muted">{{ t('project.noGroupsAvailable') }}</span>
               <button
                 class="edit-info-set-groups-btn"
@@ -525,7 +585,10 @@ async function handleCheckChanges() {
                 {{ t('group.setGroups') }}
               </button>
             </div>
-            <div v-else class="edit-info-group-list">
+            <div
+              v-else
+              class="edit-info-group-list"
+            >
               <label
                 v-for="group in flattenGroups(allGroups)"
                 :key="group.id"
@@ -535,7 +598,7 @@ async function handleCheckChanges() {
                   type="checkbox"
                   :checked="selectedGroupIds.includes(group.id)"
                   @change="toggleGroupSelect(group.id)"
-                />
+                >
                 <span :style="{ paddingLeft: (group.depth || 0) * 12 + 'px' }">{{ group.name }}</span>
               </label>
             </div>

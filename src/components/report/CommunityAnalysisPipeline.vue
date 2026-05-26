@@ -5,6 +5,7 @@ import { useProjectStore } from '@/stores/project'
 import { useSettingsStore } from '@/stores/settings'
 import {
   PlayIcon,
+  StopIcon,
   PauseIcon,
   ArrowPathIcon,
   CheckCircleIcon,
@@ -352,6 +353,7 @@ function switchEdgeType(type: string) {
 }
 
 function toggleSelect(id: string) {
+  if (running.value) return
   const task = allCommunities.value.find(t => t.id === id)
   if (task) task.selected = !task.selected
 }
@@ -560,6 +562,10 @@ function pauseResume() {
   paused.value = !paused.value
 }
 
+function stopAnalysis() {
+  paused.value = true
+}
+
 async function retryTask(id: string) {
   const task = allCommunities.value.find(t => t.id === id)
   if (!task) return
@@ -678,7 +684,10 @@ onUnmounted(() => {
 
 <template>
   <div class="community-analysis-pipeline">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- Header -->
     <div class="cap-header">
       <div class="cap-title-row">
@@ -687,16 +696,31 @@ onUnmounted(() => {
         <span class="cap-stats">{{ completedCount }}/{{ totalCount }}</span>
       </div>
       <div class="cap-progress">
-        <div class="progress-bar"><div class="progress-fill" :style="{ width: overallProgress + '%' }"></div></div>
+        <div class="progress-bar">
+          <div
+            class="progress-fill"
+            :style="{ width: overallProgress + '%' }"
+          />
+        </div>
         <span class="progress-text">{{ overallProgress }}%</span>
       </div>
     </div>
 
     <!-- Loading -->
-    <div v-if="loading" class="cap-loading">{{ t('common.loading') }}...</div>
+    <div
+      v-if="loading"
+      class="cap-loading"
+    >
+      {{ t('common.loading') }}...
+    </div>
 
     <!-- Error -->
-    <div v-else-if="loadError" class="cap-error">{{ loadError }}</div>
+    <div
+      v-else-if="loadError"
+      class="cap-error"
+    >
+      {{ loadError }}
+    </div>
 
     <template v-else>
       <!-- 边缘类型切换 -->
@@ -728,12 +752,15 @@ onUnmounted(() => {
           type="text"
           placeholder="搜索组件名称/ID..."
           class="search-input"
-        />
+        >
       </div>
 
       <!-- 组件列表 -->
       <div class="cap-tasklist">
-        <div v-if="searchedCommunities.length === 0" class="cap-empty">
+        <div
+          v-if="searchedCommunities.length === 0"
+          class="cap-empty"
+        >
           {{ t('report.pipeline.noCommunities') }}
         </div>
 
@@ -744,40 +771,70 @@ onUnmounted(() => {
               <span class="clist-edge-tag">{{ selectedEdgeType }}</span>
             </span>
             <div class="clist-actions">
-              <button class="btn btn-ghost btn-xs" @click="selectAllInCurrentView(true)">{{ t('common.selectAll') }}</button>
-              <button class="btn btn-ghost btn-xs" @click="selectAllInCurrentView(false)">{{ t('common.deselectAll') }}</button>
+              <button
+                class="btn btn-ghost btn-xs"
+                :disabled="running"
+                @click="selectAllInCurrentView(true)"
+              >
+                {{ t('common.selectAll') }}
+              </button>
+              <button
+                class="btn btn-ghost btn-xs"
+                :disabled="running"
+                @click="selectAllInCurrentView(false)"
+              >
+                {{ t('common.deselectAll') }}
+              </button>
             </div>
           </div>
 
           <div class="clist-table">
             <!-- 表头 -->
             <div class="clist-row clist-th">
-              <span class="clist-check"></span>
-              <span class="clist-id sortable" @click="sortBy('name')">
+              <span class="clist-check" />
+              <span
+                class="clist-id sortable"
+                @click="sortBy('name')"
+              >
                 {{ t('report.pipeline.communityId') }}
                 <span class="sort-icon">{{ sortIcon('name') }}</span>
               </span>
-              <span class="clist-nodes sortable" @click="sortBy('nodeCount')">
+              <span
+                class="clist-nodes sortable"
+                @click="sortBy('nodeCount')"
+              >
                 {{ t('report.pipeline.nodes') }}
                 <span class="sort-icon">{{ sortIcon('nodeCount') }}</span>
               </span>
-              <span class="clist-edges sortable" @click="sortBy('edgeCount')">
+              <span
+                class="clist-edges sortable"
+                @click="sortBy('edgeCount')"
+              >
                 {{ t('report.pipeline.edges') }}
                 <span class="sort-icon">{{ sortIcon('edgeCount') }}</span>
               </span>
-              <span class="clist-score sortable" @click="sortBy('qualityScore')">
+              <span
+                class="clist-score sortable"
+                @click="sortBy('qualityScore')"
+              >
                 {{ t('report.pipeline.quality') }}
                 <span class="sort-icon">{{ sortIcon('qualityScore') }}</span>
               </span>
-              <span class="clist-parent sortable" @click="sortBy('parentName')">
+              <span
+                class="clist-parent sortable"
+                @click="sortBy('parentName')"
+              >
                 {{ t('report.pipeline.parentComm') }}
                 <span class="sort-icon">{{ sortIcon('parentName') }}</span>
               </span>
-              <span class="clist-status sortable" @click="sortBy('status')">
+              <span
+                class="clist-status sortable"
+                @click="sortBy('status')"
+              >
                 {{ t('common.status') }}
                 <span class="sort-icon">{{ sortIcon('status') }}</span>
               </span>
-              <span class="clist-actions-col"></span>
+              <span class="clist-actions-col" />
             </div>
 
             <!-- 行 -->
@@ -787,38 +844,72 @@ onUnmounted(() => {
               :class="['clist-row', `clist-${task.status}`]"
               @click="toggleSelect(task.id)"
             >
-              <span class="clist-check" @click.stop="toggleSelect(task.id)">
-                <input type="checkbox" :checked="task.selected" class="clist-cb" />
+              <span
+                class="clist-check"
+                @click.stop="toggleSelect(task.id)"
+              >
+                <input
+                  type="checkbox"
+                  :checked="task.selected"
+                  class="clist-cb"
+                >
               </span>
-              <span class="clist-id" :title="task.communityId">
+              <span
+                class="clist-id"
+                :title="task.communityId"
+              >
                 <span class="id-text">{{ fmtCommId(task.communityId) }}</span>
                 <span
                   v-if="task.name && task.status === 'completed'"
                   class="id-name clickable"
                   @click.stop="emit('viewCommunityMD', { communityId: task.communityId, name: task.name, summary: task.summary || '', mermaid: task.mermaid, plantuml: task.plantuml })"
                 >{{ task.name }}</span>
-                <span v-else-if="task.name" class="id-name">{{ task.name }}</span>
+                <span
+                  v-else-if="task.name"
+                  class="id-name"
+                >{{ task.name }}</span>
               </span>
               <span class="clist-nodes">{{ task.nodeCount }}</span>
               <span class="clist-edges">{{ task.edgeCount }}</span>
               <span class="clist-score">
-                <span v-if="task.qualityScore != null" class="score-val">{{ task.qualityScore.toFixed(3) }}</span>
-                <span v-else class="score-na">—</span>
+                <span
+                  v-if="task.qualityScore != null"
+                  class="score-val"
+                >{{ task.qualityScore.toFixed(3) }}</span>
+                <span
+                  v-else
+                  class="score-na"
+                >—</span>
               </span>
-              <span class="clist-parent" :title="task.parentName || task.parentId">
-                <span v-if="task.parentName" class="parent-name">{{ task.parentName }}</span>
-                <span v-else-if="task.parentId" class="parent-id">{{ task.parentId.length > 12 ? task.parentId.slice(0,12)+'…' : task.parentId }}</span>
-                <span v-else class="parent-na">—</span>
+              <span
+                class="clist-parent"
+                :title="task.parentName || task.parentId"
+              >
+                <span
+                  v-if="task.parentName"
+                  class="parent-name"
+                >{{ task.parentName }}</span>
+                <span
+                  v-else-if="task.parentId"
+                  class="parent-id"
+                >{{ task.parentId.length > 12 ? task.parentId.slice(0,12)+'…' : task.parentId }}</span>
+                <span
+                  v-else
+                  class="parent-na"
+                >—</span>
               </span>
               <span class="clist-status">
                 <span :class="['badge', statusBadgeClass(task.status)]">{{ statusLabel(task.status) }}</span>
               </span>
-              <span class="clist-actions-col" @click.stop>
+              <span
+                class="clist-actions-col"
+                @click.stop
+              >
                 <button
                   v-if="task.status === 'error'"
                   class="btn btn-ghost btn-xs"
-                  @click="retryTask(task.id)"
                   :title="t('common.retry')"
+                  @click="retryTask(task.id)"
                 >
                   <ArrowPathIcon class="w-3 h-3" />
                 </button>
@@ -827,12 +918,23 @@ onUnmounted(() => {
           </div>
 
           <!-- 分页 -->
-          <div v-if="totalPages > 1" class="clist-pagination">
-            <button class="btn btn-ghost btn-xs" :disabled="currentPage <= 1" @click="currentPage--">
+          <div
+            v-if="totalPages > 1"
+            class="clist-pagination"
+          >
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="currentPage <= 1"
+              @click="currentPage--"
+            >
               上一页
             </button>
             <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
-            <button class="btn btn-ghost btn-xs" :disabled="currentPage >= totalPages" @click="currentPage++">
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="currentPage >= totalPages"
+              @click="currentPage++"
+            >
               下一页
             </button>
           </div>
@@ -840,21 +942,44 @@ onUnmounted(() => {
       </div>
 
       <!-- 错误提示 -->
-      <div v-if="runError" class="cap-run-error">{{ runError }}</div>
+      <div
+        v-if="runError"
+        class="cap-run-error"
+      >
+        {{ runError }}
+      </div>
 
       <!-- 组件批操作 -->
       <div class="cap-bottom">
         <div class="cap-batch">
           <span class="batch-label">{{ t('report.pipeline.batchSize') }}:</span>
-          <select v-model.number="batchSize" class="batch-select" :disabled="running">
-            <option v-for="n in [1,2,3,5,10]" :key="n" :value="n">{{ n }}</option>
+          <select
+            v-model.number="batchSize"
+            class="batch-select"
+            :disabled="running"
+          >
+            <option
+              v-for="n in [1,2,3,5,10]"
+              :key="n"
+              :value="n"
+            >
+              {{ n }}
+            </option>
           </select>
         </div>
         <div class="cap-bottom-actions">
           <button
+            v-if="running"
+            class="btn btn-error btn-sm"
+            @click="stopAnalysis"
+          >
+            <StopIcon class="w-3 h-3" />
+            {{ t('common.stop') }}
+          </button>
+          <button
             class="btn btn-primary btn-sm"
-            @click="analyzeSelected"
             :disabled="selectedCount === 0 || running"
+            @click="analyzeSelected"
           >
             <PlayIcon class="w-3 h-3" />
             {{ t('report.pipeline.analyzeSelected', { n: selectedCount }) }}

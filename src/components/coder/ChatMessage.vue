@@ -39,12 +39,24 @@ function getContextIcon(type: string): any {
 </script>
 
 <template>
-  <div class="chat-message" :class="message.role">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <div
+    class="chat-message"
+    :class="message.role"
+  >
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头像 -->
     <div class="msg-avatar">
-      <UserCircleIcon v-if="message.role === 'user'" class="w-6 h-6 text-blue-400" />
-      <CpuChipIcon v-else class="w-6 h-6 text-accent" />
+      <UserCircleIcon
+        v-if="message.role === 'user'"
+        class="w-6 h-6 text-blue-400"
+      />
+      <CpuChipIcon
+        v-else
+        class="w-6 h-6 text-accent"
+      />
     </div>
 
     <!-- 消息体 -->
@@ -52,13 +64,22 @@ function getContextIcon(type: string): any {
       <!-- 消息气泡 -->
       <div class="msg-bubble">
         <!-- 文本内容 -->
-        <div class="msg-content" v-html="message.content.replace(/\n/g, '<br>')"></div>
+        <div
+          class="msg-content"
+          v-html="message.content.replace(/\n/g, '<br>')"
+        />
 
         <!-- 上下文检索卡片 -->
-        <ContextCards v-if="message.contextCards" :cards="message.contextCards" />
+        <ContextCards
+          v-if="message.contextCards"
+          :cards="message.contextCards"
+        />
 
         <!-- Spec 摘要卡片 -->
-        <div v-if="message.specSummary" class="spec-summary-card">
+        <div
+          v-if="message.specSummary"
+          class="spec-summary-card"
+        >
           <div class="spec-meta">
             <span class="badge badge-green">{{ t('coder.draft') }}</span>
             <span style="font-size:10px; color:var(--text-muted);">
@@ -66,41 +87,63 @@ function getContextIcon(type: string): any {
             </span>
           </div>
           <div class="spec-section">
-            <div class="spec-label">📁 {{ t('coder.targetFile') }}</div>
-            <div class="spec-value font-mono">{{ message.specSummary.targetFile }}</div>
+            <div class="spec-label">
+              📁 {{ t('coder.targetFile') }}
+            </div>
+            <div class="spec-value font-mono">
+              {{ message.specSummary.targetFile }}
+            </div>
           </div>
           <div class="spec-section">
-            <div class="spec-label">🔧 {{ t('coder.dependencies') }}</div>
+            <div class="spec-label">
+              🔧 {{ t('coder.dependencies') }}
+            </div>
             <div
               v-for="dep in message.specSummary.dependencies"
               :key="dep"
               class="spec-value font-mono"
-            >{{ dep }}</div>
+            >
+              {{ dep }}
+            </div>
           </div>
           <div class="spec-section">
-            <div class="spec-label">🔒 {{ t('coder.constraints') }}</div>
+            <div class="spec-label">
+              🔒 {{ t('coder.constraints') }}
+            </div>
             <div
               v-for="constraint in message.specSummary.constraints"
               :key="constraint"
               class="spec-value"
-            >{{ constraint }}</div>
+            >
+              {{ constraint }}
+            </div>
           </div>
           <div class="spec-section">
-            <div class="spec-label">📐 {{ t('coder.functionSignature') }}</div>
+            <div class="spec-label">
+              📐 {{ t('coder.functionSignature') }}
+            </div>
             <div
               v-for="sig in message.specSummary.functionSignatures"
               :key="sig"
               class="spec-value font-mono"
-            >{{ sig }}</div>
+            >
+              {{ sig }}
+            </div>
           </div>
         </div>
 
         <!-- 任务状态卡片 -->
-        <TaskStatusCard v-if="message.taskStatus" :task="message.taskStatus" />
+        <TaskStatusCard
+          v-if="message.taskStatus"
+          :task="message.taskStatus"
+        />
       </div>
 
       <!-- 操作按钮 -->
-      <div v-if="message.actions && message.actions.length > 0" class="msg-actions">
+      <div
+        v-if="message.actions && message.actions.length > 0"
+        class="msg-actions"
+      >
         <button
           v-for="action in message.actions"
           :key="action"

@@ -38,7 +38,10 @@ function getStatusText(status: string): string {
 
 <template>
   <div class="task-status-card">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部 -->
     <div class="task-header">
       <div class="task-title">
@@ -79,15 +82,26 @@ function getStatusText(status: string): string {
     </div>
 
     <!-- 校验结果 -->
-    <div v-if="task.validations.length > 0" class="task-validation">
-      <div class="validation-title">{{ t('coder.designContract') }}</div>
+    <div
+      v-if="task.validations.length > 0"
+      class="task-validation"
+    >
+      <div class="validation-title">
+        {{ t('coder.designContract') }}
+      </div>
       <div
         v-for="(item, idx) in task.validations"
         :key="idx"
         class="validation-row"
       >
-        <CheckCircleIcon v-if="item.passed" class="w-4 h-4 text-success" />
-        <XCircleIcon v-else class="w-4 h-4 text-error" />
+        <CheckCircleIcon
+          v-if="item.passed"
+          class="w-4 h-4 text-success"
+        />
+        <XCircleIcon
+          v-else
+          class="w-4 h-4 text-error"
+        />
         <span>{{ item.label }}</span>
       </div>
     </div>

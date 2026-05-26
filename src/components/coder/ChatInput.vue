@@ -35,7 +35,10 @@ function handleKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="chat-input-area">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 模式切换 -->
     <div class="coder-mode-switch">
       <div
@@ -65,9 +68,12 @@ function handleKeydown(e: KeyboardEvent) {
         rows="3"
         @input="emit('input', ($event.target as HTMLTextAreaElement).value)"
         @keydown="handleKeydown"
-      ></textarea>
+      />
       <div class="coder-input-actions">
-        <button class="btn btn-ghost btn-sm icon-btn" :title="t('coder.attachFile')">
+        <button
+          class="btn btn-ghost btn-sm icon-btn"
+          :title="t('coder.attachFile')"
+        >
           <PaperClipIcon class="w-4 h-4" />
         </button>
         <button

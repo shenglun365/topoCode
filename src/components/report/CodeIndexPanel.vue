@@ -201,7 +201,10 @@ defineExpose({
 
 <template>
   <div class="code-index-panel">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 操作按钮（标题由 RightPanel 的 panel-header 渲染） -->
     <div class="panel-actions">
       <div class="header-actions">
@@ -225,14 +228,17 @@ defineExpose({
 
     <!-- 消息列表 -->
     <div class="code-index-messages">
-      <div v-if="messages.length === 0" class="empty-state">
+      <div
+        v-if="messages.length === 0"
+        class="empty-state"
+      >
         <span>{{ t('report.noSelectedNode') }}</span>
       </div>
 
       <div
         v-for="msg in messages"
-        :key="msg.id"
         :id="msg.id"
+        :key="msg.id"
         class="index-message"
         :class="{ selected: selectedIds.has(msg.id) }"
       >
@@ -240,14 +246,16 @@ defineExpose({
         <input
           type="checkbox"
           :checked="selectedIds.has(msg.id)"
-          @change="toggleSelect(msg.id)"
           class="msg-checkbox"
-        />
+          @change="toggleSelect(msg.id)"
+        >
 
         <!-- 消息内容 -->
         <div class="msg-content">
           <!-- 时间戳 -->
-          <div class="msg-time">{{ new Date(msg.timestamp).toLocaleTimeString() }}</div>
+          <div class="msg-time">
+            {{ new Date(msg.timestamp).toLocaleTimeString() }}
+          </div>
 
           <!-- 节点详情 -->
           <SymbolDetailCard

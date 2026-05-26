@@ -44,12 +44,20 @@ const tabLabels = computed(() => {
 
 <template>
   <div class="task-report">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 报告头部 -->
     <div class="report-header">
       <div class="flex items-center gap-2">
-        <h3 style="font-size:14px; font-weight:600;">{{ task.name }}</h3>
-        <span class="badge badge-green" style="font-size:8px;">{{ t('common.completed') }}</span>
+        <h3 style="font-size:14px; font-weight:600;">
+          {{ task.name }}
+        </h3>
+        <span
+          class="badge badge-green"
+          style="font-size:8px;"
+        >{{ t('common.completed') }}</span>
       </div>
       <div class="flex gap-2">
         <button class="btn btn-ghost btn-sm">
@@ -72,7 +80,10 @@ const tabLabels = computed(() => {
         :class="{ active: activeTab === tab.id }"
         @click="activeTab = tab.id"
       >
-        <component :is="tab.icon" class="w-4 h-4" />
+        <component
+          :is="tab.icon"
+          class="w-4 h-4"
+        />
         <span>{{ tab.label }}</span>
       </div>
     </div>
@@ -80,39 +91,80 @@ const tabLabels = computed(() => {
     <!-- Tab 内容 -->
     <div class="report-content">
       <!-- AST 视图 -->
-      <div v-if="activeTab === 'ast'" class="empty-state">
+      <div
+        v-if="activeTab === 'ast'"
+        class="empty-state"
+      >
         <CodeBracketIcon class="icon" />
-        <div class="title">{{ t('analysis.astAnalysis') }}</div>
-        <div class="desc">{{ t('analysis.resultsDisplayHere') }}</div>
+        <div class="title">
+          {{ t('analysis.astAnalysis') }}
+        </div>
+        <div class="desc">
+          {{ t('analysis.resultsDisplayHere') }}
+        </div>
       </div>
 
       <!-- 调用链视图 -->
-      <div v-else-if="activeTab === 'call-chain'" class="empty-state">
+      <div
+        v-else-if="activeTab === 'call-chain'"
+        class="empty-state"
+      >
         <CpuChipIcon class="icon" />
-        <div class="title">{{ t('analysis.callGraph') }}</div>
-        <div class="desc">{{ t('analysis.resultsDisplayHere') }}</div>
+        <div class="title">
+          {{ t('analysis.callGraph') }}
+        </div>
+        <div class="desc">
+          {{ t('analysis.resultsDisplayHere') }}
+        </div>
       </div>
 
       <!-- 依赖视图 -->
-      <div v-else-if="activeTab === 'dependency'" class="empty-state">
+      <div
+        v-else-if="activeTab === 'dependency'"
+        class="empty-state"
+      >
         <CubeIcon class="icon" />
-        <div class="title">{{ t('analysis.dependencyAnalysis') }}</div>
-        <div class="desc">{{ t('analysis.resultsDisplayHere') }}</div>
+        <div class="title">
+          {{ t('analysis.dependencyAnalysis') }}
+        </div>
+        <div class="desc">
+          {{ t('analysis.resultsDisplayHere') }}
+        </div>
       </div>
 
       <!-- 数据流视图 -->
-      <div v-else-if="activeTab === 'dataflow'" class="empty-state">
+      <div
+        v-else-if="activeTab === 'dataflow'"
+        class="empty-state"
+      >
         <CircleStackIcon class="icon" />
-        <div class="title">{{ t('analysis.dataFlow') }}</div>
-        <div class="desc">{{ t('analysis.resultsDisplayHere') }}</div>
+        <div class="title">
+          {{ t('analysis.dataFlow') }}
+        </div>
+        <div class="desc">
+          {{ t('analysis.resultsDisplayHere') }}
+        </div>
       </div>
 
-      <div v-else-if="activeTab === 'log'" class="log-view">
-        <div class="log-line">[INFO] 2026-05-01 09:00:00 - {{ t('analysis.startParsing') }}</div>
-        <div class="log-line">[INFO] 2026-05-01 09:00:01 - {{ t('analysis.scanningDir') }}: /home/cuser/topoCodeProj/topoOne-ui</div>
-        <div class="log-line">[INFO] 2026-05-01 09:00:02 - {{ t('analysis.filesFound') }} 128, {{ t('analysis.languagesFound') }} 3</div>
-        <div class="log-line">[INFO] 2026-05-01 09:00:05 - {{ t('analysis.parsingComplete') }}: 128/128</div>
-        <div class="log-line success">[SUCCESS] 2026-05-01 09:30:00 - {{ t('analysis.analysisComplete') }}, {{ t('analysis.timeElapsed') }} 30s</div>
+      <div
+        v-else-if="activeTab === 'log'"
+        class="log-view"
+      >
+        <div class="log-line">
+          [INFO] 2026-05-01 09:00:00 - {{ t('analysis.startParsing') }}
+        </div>
+        <div class="log-line">
+          [INFO] 2026-05-01 09:00:01 - {{ t('analysis.scanningDir') }}: /home/cuser/topoCodeProj/topoOne-ui
+        </div>
+        <div class="log-line">
+          [INFO] 2026-05-01 09:00:02 - {{ t('analysis.filesFound') }} 128, {{ t('analysis.languagesFound') }} 3
+        </div>
+        <div class="log-line">
+          [INFO] 2026-05-01 09:00:05 - {{ t('analysis.parsingComplete') }}: 128/128
+        </div>
+        <div class="log-line success">
+          [SUCCESS] 2026-05-01 09:30:00 - {{ t('analysis.analysisComplete') }}, {{ t('analysis.timeElapsed') }} 30s
+        </div>
       </div>
     </div>
   </div>

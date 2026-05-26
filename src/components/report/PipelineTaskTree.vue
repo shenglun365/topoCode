@@ -36,31 +36,63 @@ function statusIcon(status: string) {
 </script>
 
 <template>
-  <div class="pipeline-task-node" :style="{ paddingLeft: indent + 'px' }">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <div
+    class="pipeline-task-node"
+    :style="{ paddingLeft: indent + 'px' }"
+  >
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       :class="['node-row', `node-${node.status}`, { 'node-clickable': node.id === 'community_analysis' }]"
       @click="node.id === 'community_analysis' ? emit('openCommunityAnalysis') : undefined"
     >
-      <Component :is="statusIcon(node.status)" :class="['node-icon', `icon-${node.status}`]" />
+      <Component
+        :is="statusIcon(node.status)"
+        :class="['node-icon', `icon-${node.status}`]"
+      />
       <div class="node-body">
         <div class="node-header">
           <span class="node-label">{{ node.label }}</span>
           <span class="node-header-right">
-            <span v-if="node.type === 'group' && node.children" class="node-progress-text">
+            <span
+              v-if="node.type === 'group' && node.children"
+              class="node-progress-text"
+            >
               {{ node.progress }}%
             </span>
-            <slot name="actions" :node="node" />
+            <slot
+              name="actions"
+              :node="node"
+            />
           </span>
         </div>
-        <div v-if="node.type === 'group' && node.children" class="node-progress-bar">
-          <div class="progress-fill" :style="{ width: node.progress + '%' }"></div>
+        <div
+          v-if="node.type === 'group' && node.children"
+          class="node-progress-bar"
+        >
+          <div
+            class="progress-fill"
+            :style="{ width: node.progress + '%' }"
+          />
         </div>
-        <slot name="content" :node="node" />
-        <div v-if="node.error" class="node-error">{{ node.error }}</div>
+        <slot
+          name="content"
+          :node="node"
+        />
+        <div
+          v-if="node.error"
+          class="node-error"
+        >
+          {{ node.error }}
+        </div>
       </div>
     </div>
-    <div v-if="node.children && node.children.length > 0" class="node-children">
+    <div
+      v-if="node.children && node.children.length > 0"
+      class="node-children"
+    >
       <PipelineTaskTree
         v-for="child in node.children"
         :key="child.id"
@@ -70,10 +102,16 @@ function statusIcon(status: string) {
         @open-community-analysis="emit('openCommunityAnalysis')"
       >
         <template #actions="{ node: childNode }">
-          <slot name="actions" :node="childNode" />
+          <slot
+            name="actions"
+            :node="childNode"
+          />
         </template>
         <template #content="{ node: childNode }">
-          <slot name="content" :node="childNode" />
+          <slot
+            name="content"
+            :node="childNode"
+          />
         </template>
       </PipelineTaskTree>
     </div>

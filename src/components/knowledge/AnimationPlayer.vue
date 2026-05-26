@@ -123,14 +123,25 @@ function stepBackward() {
 
 <template>
   <div class="animation-player">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 控制栏 -->
     <div class="player-controls">
       <div class="control-buttons">
-        <button class="control-btn" :title="t('animation.step') + ' ←'" @click="stepBackward">
+        <button
+          class="control-btn"
+          :title="t('animation.step') + ' ←'"
+          @click="stepBackward"
+        >
           <BackwardIcon class="w-5 h-5" />
         </button>
-        <button class="control-btn" :title="t('animation.step') + ' →'" @click="stepForward">
+        <button
+          class="control-btn"
+          :title="t('animation.step') + ' →'"
+          @click="stepForward"
+        >
           <ForwardIcon class="w-5 h-5" />
         </button>
       </div>
@@ -140,17 +151,29 @@ function stepBackward() {
           <div
             class="progress-fill"
             :style="{ width: `${progress}%` }"
-          ></div>
+          />
         </div>
         <span class="progress-text">{{ progress }}%</span>
       </div>
 
       <div class="speed-control">
-        <select v-model="localSpeed" class="speed-select" @change="changeSpeed">
-          <option :value="0.5">0.5x</option>
-          <option :value="1">1x</option>
-          <option :value="1.5">1.5x</option>
-          <option :value="2">2x</option>
+        <select
+          v-model="localSpeed"
+          class="speed-select"
+          @change="changeSpeed"
+        >
+          <option :value="0.5">
+            0.5x
+          </option>
+          <option :value="1">
+            1x
+          </option>
+          <option :value="1.5">
+            1.5x
+          </option>
+          <option :value="2">
+            2x
+          </option>
         </select>
       </div>
     </div>
@@ -169,7 +192,7 @@ function stepBackward() {
             v-if="highlightLine >= 0 && playing"
             class="code-highlight"
             :style="{ top: `${highlightLine * 24}px` }"
-          ></div>
+          />
         </div>
       </div>
 
@@ -181,7 +204,9 @@ function stepBackward() {
         </div>
         <div class="viz-container">
           <div class="step-info">
-            <p class="step-description">{{ stepDescription }}</p>
+            <p class="step-description">
+              {{ stepDescription }}
+            </p>
             <div class="state-vars">
               <span
                 v-for="(value, key) in stepVars"
@@ -202,8 +227,14 @@ function stepBackward() {
       <span class="step-number">
         {{ currentStep || 0 }} / {{ totalSteps || 0 }}
       </span>
-      <span v-if="playing" class="step-status playing">▶ {{ t('animation.animationPlaying') }}</span>
-      <span v-else class="step-status">{{ t('animation.animationStopped') }}</span>
+      <span
+        v-if="playing"
+        class="step-status playing"
+      >▶ {{ t('animation.animationPlaying') }}</span>
+      <span
+        v-else
+        class="step-status"
+      >{{ t('animation.animationStopped') }}</span>
     </div>
   </div>
 </template>

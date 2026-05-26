@@ -1,9 +1,16 @@
 <template>
   <div class="plugin-manager">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="plugin-header">
-      <h2 class="plugin-title">{{ t('settings.plugins') }}</h2>
-      <p class="plugin-desc">{{ t('settings.pluginsDesc') }}</p>
+      <h2 class="plugin-title">
+        {{ t('settings.plugins') }}
+      </h2>
+      <p class="plugin-desc">
+        {{ t('settings.pluginsDesc') }}
+      </p>
     </div>
 
     <div class="plugin-list">
@@ -18,7 +25,9 @@
         </div>
 
         <div class="plugin-info">
-          <h3 class="plugin-name">{{ plugin.name }}</h3>
+          <h3 class="plugin-name">
+            {{ plugin.name }}
+          </h3>
           <div class="plugin-meta">
             <span class="plugin-version">v{{ plugin.version }}</span>
             <span class="plugin-engine">{{ plugin.engine }}</span>
@@ -30,20 +39,29 @@
           <span class="status-text">{{ statusText(plugin.status) }}</span>
         </div>
 
-        <div v-if="plugin.status === 'loading'" class="plugin-progress">
+        <div
+          v-if="plugin.status === 'loading'"
+          class="plugin-progress"
+        >
           <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: `${plugin.progress || 0}%` }"></div>
+            <div
+              class="progress-fill"
+              :style="{ width: `${plugin.progress || 0}%` }"
+            />
           </div>
           <span class="progress-text">{{ plugin.progress || 0 }}%</span>
         </div>
 
         <div class="plugin-actions">
-          <div v-if="plugin.status === 'loaded'" class="toggle-switch">
+          <div
+            v-if="plugin.status === 'loaded'"
+            class="toggle-switch"
+          >
             <input
               type="checkbox"
               :checked="plugin.enabled"
               @change="togglePlugin(plugin.id, ($event.target as HTMLInputElement).checked)"
-            />
+            >
           </div>
 
           <button

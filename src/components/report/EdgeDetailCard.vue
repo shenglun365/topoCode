@@ -63,7 +63,10 @@ async function handleAIExplain() {
 
 <template>
   <div class="edge-detail-card">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="card-header">
       <span class="edge-type-badge">{{ edgeType === 'CALL' ? '调用关系' : '依赖关系' }}</span>
     </div>
@@ -78,15 +81,24 @@ async function handleAIExplain() {
       </div>
     </div>
 
-    <div v-if="callSiteNode" class="edge-meta">
+    <div
+      v-if="callSiteNode"
+      class="edge-meta"
+    >
       <span class="meta-label">调用位置:</span>
       <span class="meta-value">{{ callSiteNode }}</span>
     </div>
-    <div v-if="includePath" class="edge-meta">
+    <div
+      v-if="includePath"
+      class="edge-meta"
+    >
       <span class="meta-label">包含路径:</span>
       <span class="meta-value">{{ includePath }}</span>
     </div>
-    <div v-if="isSystem !== undefined" class="edge-meta">
+    <div
+      v-if="isSystem !== undefined"
+      class="edge-meta"
+    >
       <span class="meta-label">系统头文件:</span>
       <span class="meta-value">{{ isSystem ? '是' : '否' }}</span>
     </div>
@@ -102,12 +114,25 @@ async function handleAIExplain() {
         <SparklesIcon class="w-4 h-4" />
         <span>{{ t('report.aiExplain') }}</span>
       </button>
-      <div v-if="aiLoading" class="ai-loading">
-        <span class="spinner"></span>
+      <div
+        v-if="aiLoading"
+        class="ai-loading"
+      >
+        <span class="spinner" />
         <span>{{ t('report.aiExplainLoading') }}</span>
       </div>
-      <div v-if="aiContent" class="ai-content">{{ aiContent }}</div>
-      <div v-if="aiError" class="ai-error">{{ aiError }}</div>
+      <div
+        v-if="aiContent"
+        class="ai-content"
+      >
+        {{ aiContent }}
+      </div>
+      <div
+        v-if="aiError"
+        class="ai-error"
+      >
+        {{ aiError }}
+      </div>
     </div>
   </div>
 </template>

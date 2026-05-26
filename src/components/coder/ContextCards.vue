@@ -37,21 +37,34 @@ function getColor(type: string): string {
 
 <template>
   <div class="context-cards">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       v-for="card in cards"
       :key="card.id"
       class="context-card card"
     >
       <!-- 图标 -->
-      <div class="ctx-icon" :class="getColor(card.type)">
-        <component :is="getIcon(card.type)" class="w-5 h-5" />
+      <div
+        class="ctx-icon"
+        :class="getColor(card.type)"
+      >
+        <component
+          :is="getIcon(card.type)"
+          class="w-5 h-5"
+        />
       </div>
 
       <!-- 信息 -->
       <div class="ctx-info">
-        <div class="ctx-title">{{ card.title }}</div>
-        <div class="ctx-desc">{{ card.description }}</div>
+        <div class="ctx-title">
+          {{ card.title }}
+        </div>
+        <div class="ctx-desc">
+          {{ card.description }}
+        </div>
       </div>
 
       <!-- 打开按钮 -->

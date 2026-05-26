@@ -119,7 +119,10 @@ function handleDblClick() {
 
 <template>
   <div class="file-tree-node">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div
       class="tree-item"
       :class="{ 'tree-item-compressed': node.compressedPath }"
@@ -135,10 +138,16 @@ function handleDblClick() {
       >
         <ChevronRightIcon class="w-3 h-3" />
       </div>
-      <div v-else class="tree-arrow-empty"></div>
+      <div
+        v-else
+        class="tree-arrow-empty"
+      />
 
       <!-- 图标 -->
-      <component :is="icon" :class="['w-4 h-4', iconColor, 'shrink-0']" />
+      <component
+        :is="icon"
+        :class="['w-4 h-4', iconColor, 'shrink-0']"
+      />
 
       <!-- 名称（压缩节点显示 a/b/c 格式） -->
       <span
@@ -146,8 +155,14 @@ function handleDblClick() {
         class="tree-name-compressed"
         :title="node.compressedPath"
       >
-        <template v-for="(part, idx) in node.compressedPath.split('/')" :key="idx">
-          <span v-if="idx > 0" class="tree-name-separator">/</span>
+        <template
+          v-for="(part, idx) in node.compressedPath.split('/')"
+          :key="idx"
+        >
+          <span
+            v-if="idx > 0"
+            class="tree-name-separator"
+          >/</span>
           <span class="tree-name-part">{{ part }}</span>
         </template>
       </span>
@@ -164,9 +179,24 @@ function handleDblClick() {
         v-if="node.type === 'directory' && isLoading"
         class="loading-indicator"
       >
-        <svg class="w-3 h-3 loading-spin" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        <svg
+          class="w-3 h-3 loading-spin"
+          viewBox="0 0 24 24"
+        >
+          <circle
+            class="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            stroke-width="4"
+            fill="none"
+          />
+          <path
+            class="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+          />
         </svg>
       </span>
 

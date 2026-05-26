@@ -231,7 +231,10 @@ function clearSearch() {
 
 <template>
   <div class="file-tree-container">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 搜索框 -->
     <div class="file-tree-search">
       <MagnifyingGlassIcon class="w-3.5 h-3.5 search-icon" />
@@ -240,7 +243,7 @@ function clearSearch() {
         type="text"
         class="search-input"
         :placeholder="t('file.searchFiles')"
-      />
+      >
       <button
         v-if="searchQuery"
         class="search-clear"
@@ -252,7 +255,10 @@ function clearSearch() {
 
     <!-- 文件树 -->
     <div class="file-tree">
-      <div v-if="isSearching && filteredNodes.length === 0" class="no-results">
+      <div
+        v-if="isSearching && filteredNodes.length === 0"
+        class="no-results"
+      >
         {{ t('common.noResults') }}
       </div>
       <template v-else>

@@ -504,16 +504,28 @@ onUnmounted(() => {
 
 <template>
   <div class="report-pipeline">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="pipeline-header">
       <div class="pipeline-title-row">
         <span class="pipeline-title">{{ t('report.generationPipeline') }}</span>
-        <span v-if="running" class="pipeline-badge running">{{ t('common.running') }}</span>
-        <span v-else-if="allCompleted" class="pipeline-badge completed">{{ t('common.completed') }}</span>
+        <span
+          v-if="running"
+          class="pipeline-badge running"
+        >{{ t('common.running') }}</span>
+        <span
+          v-else-if="allCompleted"
+          class="pipeline-badge completed"
+        >{{ t('common.completed') }}</span>
       </div>
       <div class="pipeline-progress">
         <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: overallProgress + '%' }"></div>
+          <div
+            class="progress-fill"
+            :style="{ width: overallProgress + '%' }"
+          />
         </div>
         <span class="progress-text">{{ overallProgress }}%</span>
       </div>
@@ -525,15 +537,20 @@ onUnmounted(() => {
 
     <!-- Side sub-components: Community Analysis -->
     <div class="pipeline-sub">
-      <CommunityAnalysisPipeline :task-id="taskId" :project-id="projectId" @completed="(s: any) => emit('communityResults', s)" @view-community-md="(p: any) => emit('viewCommunityMD', p)" />
+      <CommunityAnalysisPipeline
+        :task-id="taskId"
+        :project-id="projectId"
+        @completed="(s: any) => emit('communityResults', s)"
+        @view-community-md="(p: any) => emit('viewCommunityMD', p)"
+      />
     </div>
 
     <div class="pipeline-actions">
       <button
         v-if="!running && !allCompleted"
         class="btn btn-primary btn-xs"
-        @click="runAll"
         :disabled="rootTask.status === 'running'"
+        @click="runAll"
       >
         <SparklesIcon class="w-3 h-3" />
         <span>{{ t('report.pipeline.startAll') }}</span>

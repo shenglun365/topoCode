@@ -245,25 +245,49 @@ function onProviderChange(provider: string) {
 
 <template>
   <div class="model-config">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <h2 style="font-size:16px; font-weight:600; margin-bottom:4px;">{{ t('settings.aiModelConfig') }}</h2>
-    <p class="text-muted" style="font-size:12px; margin-bottom:20px;">{{ t('settings.aiModelDesc') }}</p>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
+    <h2 style="font-size:16px; font-weight:600; margin-bottom:4px;">
+      {{ t('settings.aiModelConfig') }}
+    </h2>
+    <p
+      class="text-muted"
+      style="font-size:12px; margin-bottom:20px;"
+    >
+      {{ t('settings.aiModelDesc') }}
+    </p>
 
     <!-- 当前使用 -->
-    <div class="card" style="margin-bottom:16px; border-left:3px solid var(--accent);">
+    <div
+      class="card"
+      style="margin-bottom:16px; border-left:3px solid var(--accent);"
+    >
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">{{ t('settings.currentlyUsing') }}</div>
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:2px;">
+            {{ t('settings.currentlyUsing') }}
+          </div>
           <div style="font-size:14px; font-weight:600;">
             {{ defaultModel?.name || t('settings.notConfigured') }}
           </div>
-          <div class="text-muted" style="font-size:11px;">
+          <div
+            class="text-muted"
+            style="font-size:11px;"
+          >
             {{ defaultModel?.url }}
           </div>
         </div>
-        <div v-if="defaultModel" style="display:flex; align-items:center; gap:8px;">
+        <div
+          v-if="defaultModel"
+          style="display:flex; align-items:center; gap:8px;"
+        >
           <span class="badge badge-green">● {{ t('settings.connected') }}</span>
-          <span v-if="defaultModel.latency" style="font-size:10px; color:var(--text-muted);">
+          <span
+            v-if="defaultModel.latency"
+            style="font-size:10px; color:var(--text-muted);"
+          >
             {{ t('settings.latency') }} {{ defaultModel.latency }}ms
           </span>
         </div>
@@ -273,17 +297,27 @@ function onProviderChange(provider: string) {
     <!-- 配置列表 -->
     <div style="margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-        <h3 style="font-size:13px; font-weight:600;">{{ t('settings.savedConfigs') }}</h3>
-        <button class="btn btn-primary btn-sm" @click="openAddDialog">
+        <h3 style="font-size:13px; font-weight:600;">
+          {{ t('settings.savedConfigs') }}
+        </h3>
+        <button
+          class="btn btn-primary btn-sm"
+          @click="openAddDialog"
+        >
           <PlusIcon class="w-4 h-4" />
           <span>{{ t('settings.addConfig') }}</span>
         </button>
       </div>
 
       <!-- 空状态 -->
-      <div v-if="settingsStore.models.length === 0" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+      <div
+        v-if="settingsStore.models.length === 0"
+        style="text-align:center; padding:40px 20px; color:var(--text-muted);"
+      >
         <p>{{ t('settings.noModelsYet') }}</p>
-        <p style="font-size:12px;">{{ t('settings.addFirstModel') }}</p>
+        <p style="font-size:12px;">
+          {{ t('settings.addFirstModel') }}
+        </p>
       </div>
 
       <!-- 配置项 -->
@@ -305,19 +339,34 @@ function onProviderChange(provider: string) {
           <div style="flex:1;">
             <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
               <span style="font-size:12px; font-weight:500;">{{ config.name }}</span>
-              <span v-if="config.isDefault" class="badge badge-blue" style="font-size:8px;">{{ t('common.default') }}</span>
+              <span
+                v-if="config.isDefault"
+                class="badge badge-blue"
+                style="font-size:8px;"
+              >{{ t('common.default') }}</span>
             </div>
             <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">
               {{ config.url }} / {{ config.model }}
             </div>
             <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
-              <span :class="`badge ${config.type === 'local' ? 'badge-green' : 'badge-yellow'}`" style="font-size:9px;">
+              <span
+                :class="`badge ${config.type === 'local' ? 'badge-green' : 'badge-yellow'}`"
+                style="font-size:9px;"
+              >
                 {{ config.type === 'local' ? t('settings.local') : t('settings.cloud') }}
               </span>
-              <span v-if="config.temperature !== undefined" class="badge badge-gray" style="font-size:9px;">
+              <span
+                v-if="config.temperature !== undefined"
+                class="badge badge-gray"
+                style="font-size:9px;"
+              >
                 {{ t('settings.modelTemperature') }}: {{ config.temperature }}
               </span>
-              <span v-if="config.maxTokens !== undefined" class="badge badge-gray" style="font-size:9px;">
+              <span
+                v-if="config.maxTokens !== undefined"
+                class="badge badge-gray"
+                style="font-size:9px;"
+              >
                 {{ t('settings.modelMaxTokens') }}: {{ config.maxTokens }}
               </span>
             </div>
@@ -331,7 +380,10 @@ function onProviderChange(provider: string) {
             :disabled="testingId === config.id"
             @click="testModel(config.id)"
           >
-            <ArrowPathIcon class="w-3 h-3" :class="{ 'animate-spin': testingId === config.id }" />
+            <ArrowPathIcon
+              class="w-3 h-3"
+              :class="{ 'animate-spin': testingId === config.id }"
+            />
             <span>{{ testingId === config.id ? t('settings.testing') : t('settings.testConnection') }}</span>
           </button>
           <button
@@ -341,11 +393,14 @@ function onProviderChange(provider: string) {
           >
             {{ t('settings.setDefault') }}
           </button>
-          <button class="btn btn-ghost btn-sm" @click="openEditDialog(config)">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="openEditDialog(config)"
+          >
             <PencilIcon class="w-3 h-3" />
             <span>{{ t('common.edit') }}</span>
           </button>
-          <div style="flex:1;"></div>
+          <div style="flex:1;" />
           <button
             class="btn btn-ghost btn-sm"
             style="color:var(--error);"
@@ -360,7 +415,10 @@ function onProviderChange(provider: string) {
   </div>
 
   <!-- 添加/编辑对话框 -->
-  <div v-if="showDialog" class="modal-overlay">
+  <div
+    v-if="showDialog"
+    class="modal-overlay"
+  >
     <div class="modal">
       <div class="modal-header">
         <h3>{{ editMode ? `${t('common.edit')} - ${form.name}` : t('settings.addConfig') }}</h3>
@@ -369,77 +427,165 @@ function onProviderChange(provider: string) {
         <div class="form-grid">
           <div class="form-field">
             <label class="field-label">{{ t('settings.modelName') }}</label>
-            <input v-model="form.name" class="field-input" :placeholder="t('settings.modelName')" />
+            <input
+              v-model="form.name"
+              class="field-input"
+              :placeholder="t('settings.modelName')"
+            >
           </div>
 
           <div class="form-field">
             <label class="field-label">{{ t('settings.provider') }}</label>
-            <select v-model="form.provider" class="field-input" @change="onProviderChange((($event.target) as HTMLSelectElement).value)">
-              <option value="ollama">Ollama</option>
-              <option value="openai">OpenAI</option>
-              <option value="lm-studio">LM-Studio</option>
-              <option value="custom">Custom</option>
+            <select
+              v-model="form.provider"
+              class="field-input"
+              @change="onProviderChange((($event.target) as HTMLSelectElement).value)"
+            >
+              <option value="ollama">
+                Ollama
+              </option>
+              <option value="openai">
+                OpenAI
+              </option>
+              <option value="lm-studio">
+                LM-Studio
+              </option>
+              <option value="custom">
+                Custom
+              </option>
             </select>
           </div>
 
           <div class="form-field">
             <label class="field-label">{{ t('settings.model') }}</label>
-            <input v-model="form.model" class="field-input" placeholder="qwen2.5-coder:7b" />
+            <input
+              v-model="form.model"
+              class="field-input"
+              placeholder="qwen2.5-coder:7b"
+            >
           </div>
 
           <div class="form-field">
             <label class="field-label">{{ t('settings.baseUrl') }}</label>
-            <input v-model="form.url" class="field-input" placeholder="http://localhost:11434" />
+            <input
+              v-model="form.url"
+              class="field-input"
+              placeholder="http://localhost:11434"
+            >
           </div>
 
-          <div v-if="form.provider === 'openai' || form.provider === 'custom'" class="form-field">
+          <div
+            v-if="form.provider === 'openai' || form.provider === 'custom'"
+            class="form-field"
+          >
             <label class="field-label">{{ t('settings.apiKey') }}</label>
-            <input v-model="form.apiKey" class="field-input" type="password" :placeholder="t('settings.apiKeyPlaceholder')" />
+            <input
+              v-model="form.apiKey"
+              class="field-input"
+              type="password"
+              :placeholder="t('settings.apiKeyPlaceholder')"
+            >
           </div>
 
           <div class="form-field">
             <label class="field-label">{{ t('settings.modelTemperature') }}</label>
-            <input v-model.number="form.temperature" type="number" step="0.1" min="0" max="2" class="field-input" />
+            <input
+              v-model.number="form.temperature"
+              type="number"
+              step="0.1"
+              min="0"
+              max="2"
+              class="field-input"
+            >
           </div>
 
           <div class="form-field">
             <label class="field-label">{{ t('settings.modelMaxTokens') }}</label>
-            <input v-model.number="form.maxTokens" type="number" step="256" min="256" class="field-input" />
+            <input
+              v-model.number="form.maxTokens"
+              type="number"
+              step="256"
+              min="256"
+              class="field-input"
+            >
           </div>
 
-          <div v-if="!editMode" class="form-field">
+          <div
+            v-if="!editMode"
+            class="form-field"
+          >
             <label class="field-label">{{ t('settings.type') }}</label>
-            <select v-model="form.type" class="field-input">
-              <option value="local">{{ t('settings.local') }}</option>
-              <option value="cloud">{{ t('settings.cloud') }}</option>
+            <select
+              v-model="form.type"
+              class="field-input"
+            >
+              <option value="local">
+                {{ t('settings.local') }}
+              </option>
+              <option value="cloud">
+                {{ t('settings.cloud') }}
+              </option>
             </select>
           </div>
 
-          <div v-if="!editMode" class="form-field form-field-toggle">
+          <div
+            v-if="!editMode"
+            class="form-field form-field-toggle"
+          >
             <label class="field-label">{{ t('settings.setDefault') }}</label>
             <label class="toggle">
-              <input type="checkbox" v-model="form.isDefault">
-              <span class="toggle-slider"></span>
+              <input
+                v-model="form.isDefault"
+                type="checkbox"
+              >
+              <span class="toggle-slider" />
             </label>
           </div>
         </div>
 
         <!-- 测试结果 -->
-        <div v-if="dialogTestResult" class="test-result" :class="dialogTestResult">
-          <CheckCircleIcon v-if="dialogTestResult === 'success'" class="w-4 h-4" />
-          <XCircleIcon v-else class="w-4 h-4" />
+        <div
+          v-if="dialogTestResult"
+          class="test-result"
+          :class="dialogTestResult"
+        >
+          <CheckCircleIcon
+            v-if="dialogTestResult === 'success'"
+            class="w-4 h-4"
+          />
+          <XCircleIcon
+            v-else
+            class="w-4 h-4"
+          />
           <span v-if="dialogTestResult === 'success'">{{ t('settings.connected') }}</span>
           <span v-else>{{ t('settings.testFailed') }}</span>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost btn-test" :disabled="dialogTesting" @click="testCurrentForm">
-          <ArrowPathIcon class="w-4 h-4" :class="{ 'animate-spin': dialogTesting }" />
+        <button
+          class="btn btn-ghost btn-test"
+          :disabled="dialogTesting"
+          @click="testCurrentForm"
+        >
+          <ArrowPathIcon
+            class="w-4 h-4"
+            :class="{ 'animate-spin': dialogTesting }"
+          />
           <span>{{ dialogTesting ? t('settings.testing') : t('settings.testConnection') }}</span>
         </button>
-        <div style="flex:1;"></div>
-        <button class="btn btn-ghost" @click="showDialog = false">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" @click="saveModel">{{ t('common.save') }}</button>
+        <div style="flex:1;" />
+        <button
+          class="btn btn-ghost"
+          @click="showDialog = false"
+        >
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          class="btn btn-primary"
+          @click="saveModel"
+        >
+          {{ t('common.save') }}
+        </button>
       </div>
     </div>
   </div>

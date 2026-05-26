@@ -215,19 +215,37 @@ function formatRunStatusColor(status: string): string {
 
 <template>
   <Teleport to="body">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-    <div v-if="visible" class="dialog-overlay" @click.self="handleClose" role="dialog" aria-modal="true">
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
+    <div
+      v-if="visible"
+      class="dialog-overlay"
+      role="dialog"
+      aria-modal="true"
+      @click.self="handleClose"
+    >
       <div class="task-detail-dialog">
         <!-- 标题栏 -->
         <div class="dialog-header">
           <div class="dialog-title">
-            <span class="status-dot" :style="{ background: statusColor }"></span>
+            <span
+              class="status-dot"
+              :style="{ background: statusColor }"
+            />
             <span>{{ task.name }}</span>
-            <span class="status-badge" :style="{ background: statusColor + '22', color: statusColor }">
+            <span
+              class="status-badge"
+              :style="{ background: statusColor + '22', color: statusColor }"
+            >
               {{ statusLabel }}
             </span>
           </div>
-          <button class="dialog-close-btn" @click="handleClose">
+          <button
+            class="dialog-close-btn"
+            @click="handleClose"
+          >
             <XMarkIcon class="w-4 h-4" />
           </button>
         </div>
@@ -236,7 +254,9 @@ function formatRunStatusColor(status: string): string {
         <div class="dialog-body">
           <!-- 基本信息 -->
           <div class="detail-section">
-            <h3 class="section-title">{{ t('analysis.basicInfo') }}</h3>
+            <h3 class="section-title">
+              {{ t('analysis.basicInfo') }}
+            </h3>
             <div class="info-grid">
               <div class="info-row">
                 <span class="info-label">{{ t('analysis.taskId') }}</span>
@@ -245,24 +265,39 @@ function formatRunStatusColor(status: string): string {
               <div class="info-row">
                 <span class="info-label">{{ t('analysis.status') }}</span>
                 <span class="info-value">
-                  <span class="status-dot" :style="{ background: statusColor }"></span>
+                  <span
+                    class="status-dot"
+                    :style="{ background: statusColor }"
+                  />
                   {{ statusLabel }}
                 </span>
               </div>
-              <div class="info-row" v-if="task.progress != null">
+              <div
+                v-if="task.progress != null"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.progress') }}</span>
                 <span class="info-value">
                   <div class="progress-bar-inline">
-                    <div class="progress-fill" :style="{ width: `${task.progress}%` }"></div>
+                    <div
+                      class="progress-fill"
+                      :style="{ width: `${task.progress}%` }"
+                    />
                   </div>
                   {{ task.progress }}% ({{ task.current || 0 }}/{{ task.total || 0 }})
                 </span>
               </div>
-              <div class="info-row" v-if="task.createdAt">
+              <div
+                v-if="task.createdAt"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.createdAt') }}</span>
                 <span class="info-value">{{ task.createdAt }}</span>
               </div>
-              <div class="info-row" v-if="task.updatedAt">
+              <div
+                v-if="task.updatedAt"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.updatedAt') }}</span>
                 <span class="info-value">{{ task.updatedAt }}</span>
               </div>
@@ -270,28 +305,52 @@ function formatRunStatusColor(status: string): string {
           </div>
 
           <!-- 分析配置 -->
-          <div class="detail-section" v-if="task.scope || safeScopes.length || safeExtensions.length || safeExcludeDirs.length || safeReportTypes.length">
-            <h3 class="section-title">{{ t('analysis.taskConfig') }}</h3>
+          <div
+            v-if="task.scope || safeScopes.length || safeExtensions.length || safeExcludeDirs.length || safeReportTypes.length"
+            class="detail-section"
+          >
+            <h3 class="section-title">
+              {{ t('analysis.taskConfig') }}
+            </h3>
             <div class="info-grid">
-              <div class="info-row" v-if="safeReportTypes.length">
+              <div
+                v-if="safeReportTypes.length"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.reportTypes') }}</span>
                 <span class="info-value">{{ safeReportTypes.join(', ') }}</span>
               </div>
-              <div class="info-row" v-if="safeScopes.length">
+              <div
+                v-if="safeScopes.length"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.directoryScopes') }}</span>
                 <span class="info-value scopes-list">
-                  <span v-for="s in safeScopes" :key="s" class="scope-tag">{{ s }}</span>
+                  <span
+                    v-for="s in safeScopes"
+                    :key="s"
+                    class="scope-tag"
+                  >{{ s }}</span>
                 </span>
               </div>
-              <div class="info-row" v-if="task.scope">
+              <div
+                v-if="task.scope"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.analysisRoot') }}</span>
                 <span class="info-value">{{ task.scope }}</span>
               </div>
-              <div class="info-row" v-if="safeExtensions.length">
+              <div
+                v-if="safeExtensions.length"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.fileExtensions') }}</span>
                 <span class="info-value">{{ safeExtensions.join(', ') }}</span>
               </div>
-              <div class="info-row" v-if="safeExcludeDirs.length">
+              <div
+                v-if="safeExcludeDirs.length"
+                class="info-row"
+              >
                 <span class="info-label">{{ t('analysis.excludeDirs') }}</span>
                 <span class="info-value">{{ safeExcludeDirs.join(', ') }}</span>
               </div>
@@ -299,10 +358,16 @@ function formatRunStatusColor(status: string): string {
           </div>
 
           <!-- 文件分布 -->
-          <div class="detail-section" v-if="totalFiles > 0">
+          <div
+            v-if="totalFiles > 0"
+            class="detail-section"
+          >
             <h3 class="section-title">
               {{ t('analysis.fileDistribution') }}
-              <span v-if="loadingDistribution" class="distribution-loading">{{ t('common.loading') }}...</span>
+              <span
+                v-if="loadingDistribution"
+                class="distribution-loading"
+              >{{ t('common.loading') }}...</span>
             </h3>
             <div class="distribution-summary">
               <span class="distribution-total">{{ t('analysis.totalFilesCount', { count: totalFiles }) }}</span>
@@ -318,7 +383,7 @@ function formatRunStatusColor(status: string): string {
                   <div
                     class="distribution-bar-fill"
                     :style="{ width: `${(count / totalFiles) * 100}%` }"
-                  ></div>
+                  />
                 </div>
                 <span class="distribution-count">{{ count }}</span>
               </div>
@@ -326,8 +391,13 @@ function formatRunStatusColor(status: string): string {
           </div>
 
           <!-- 运行历史 -->
-          <div class="detail-section" v-if="taskRuns.length > 0">
-            <h3 class="section-title">{{ t('analysis.runHistory') }}</h3>
+          <div
+            v-if="taskRuns.length > 0"
+            class="detail-section"
+          >
+            <h3 class="section-title">
+              {{ t('analysis.runHistory') }}
+            </h3>
             <div class="runs-table">
               <div class="runs-table-header">
                 <span class="runs-col">#</span>
@@ -345,7 +415,10 @@ function formatRunStatusColor(status: string): string {
               >
                 <span class="runs-col">{{ run.runNumber }}</span>
                 <span class="runs-col">
-                  <span class="status-dot" :style="{ background: formatRunStatusColor(run.status) }"></span>
+                  <span
+                    class="status-dot"
+                    :style="{ background: formatRunStatusColor(run.status) }"
+                  />
                   {{ formatRunStatus(run.status) }}
                 </span>
                 <span class="runs-col">{{ run.startedAt }}</span>
@@ -356,34 +429,56 @@ function formatRunStatusColor(status: string): string {
           </div>
 
           <!-- 错误信息 -->
-          <div class="detail-section" v-if="task.error">
-            <h3 class="section-title">{{ t('analysis.error') }}</h3>
-            <div class="error-message">{{ task.error }}</div>
+          <div
+            v-if="task.error"
+            class="detail-section"
+          >
+            <h3 class="section-title">
+              {{ t('analysis.error') }}
+            </h3>
+            <div class="error-message">
+              {{ task.error }}
+            </div>
           </div>
 
           <!-- 执行日志 -->
           <div class="detail-section">
             <div class="logs-header">
-              <h3 class="section-title">{{ t('analysis.executionLogs') }}</h3>
+              <h3 class="section-title">
+                {{ t('analysis.executionLogs') }}
+              </h3>
               <select
                 v-if="taskRuns.length > 1"
                 v-model="selectedRunId"
-                @change="handleSelectRun(($event.target as HTMLSelectElement).value)"
                 class="run-select"
+                @change="handleSelectRun(($event.target as HTMLSelectElement).value)"
               >
-                <option v-for="run in taskRuns" :key="run.id" :value="run.id">
+                <option
+                  v-for="run in taskRuns"
+                  :key="run.id"
+                  :value="run.id"
+                >
                   Run #{{ run.runNumber }} ({{ formatRunStatus(run.status) }})
                 </option>
               </select>
             </div>
-            <div v-if="loadingLogs" class="logs-loading">
-              <div class="loading-spinner"></div>
+            <div
+              v-if="loadingLogs"
+              class="logs-loading"
+            >
+              <div class="loading-spinner" />
             </div>
-            <div v-else-if="logs.length === 0" class="logs-empty">
+            <div
+              v-else-if="logs.length === 0"
+              class="logs-empty"
+            >
               <ClockIcon class="w-4 h-4" />
               <span>{{ t('analysis.noLogs') }}</span>
             </div>
-            <div v-else class="logs-container">
+            <div
+              v-else
+              class="logs-container"
+            >
               <div
                 v-for="(log, idx) in logs"
                 :key="idx"
@@ -398,7 +493,10 @@ function formatRunStatusColor(status: string): string {
 
         <!-- 底部按钮 -->
         <div class="dialog-footer">
-          <button class="btn btn-ghost" @click="handleClose">
+          <button
+            class="btn btn-ghost"
+            @click="handleClose"
+          >
             {{ t('common.close') }}
           </button>
         </div>

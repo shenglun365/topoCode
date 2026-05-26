@@ -184,21 +184,38 @@ function applyPreset(presetColors: ThemeColors) {
 
 <template>
   <div class="theme-editor">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 头部操作 -->
     <div class="editor-header">
       <div class="header-left">
-        <h3 class="editor-title">{{ mode === 'create' ? t('theme.createNewTheme') : t('theme.editTheme') }}</h3>
+        <h3 class="editor-title">
+          {{ mode === 'create' ? t('theme.createNewTheme') : t('theme.editTheme') }}
+        </h3>
       </div>
       <div class="header-right">
-        <button class="btn btn-ghost btn-sm" @click="previewMode = !previewMode" :title="previewMode ? t('theme.closePreview') : t('theme.livePreview')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="previewMode ? t('theme.closePreview') : t('theme.livePreview')"
+          @click="previewMode = !previewMode"
+        >
           <EyeIcon class="w-4 h-4" />
           <span>{{ previewMode ? t('theme.closePreview') : t('theme.preview') }}</span>
         </button>
-        <button class="btn btn-ghost btn-sm" @click="handleReset" :title="t('common.reset')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('common.reset')"
+          @click="handleReset"
+        >
           <ArrowPathIcon class="w-4 h-4" />
         </button>
-        <button class="btn btn-ghost btn-sm" @click="handleCancel" :title="t('common.cancel')">
+        <button
+          class="btn btn-ghost btn-sm"
+          :title="t('common.cancel')"
+          @click="handleCancel"
+        >
           <XMarkIcon class="w-4 h-4" />
         </button>
       </div>
@@ -207,22 +224,34 @@ function applyPreset(presetColors: ThemeColors) {
     <div class="editor-body">
       <!-- 基本信息 -->
       <div class="editor-section">
-        <h4 class="section-title">{{ t('theme.basicInfo') }}</h4>
+        <h4 class="section-title">
+          {{ t('theme.basicInfo') }}
+        </h4>
         <div class="form-grid">
           <div class="form-item">
             <label class="form-label">{{ t('theme.themeName') }}</label>
-            <input v-model="name" class="form-input" :placeholder="t('theme.myTheme')" />
+            <input
+              v-model="name"
+              class="form-input"
+              :placeholder="t('theme.myTheme')"
+            >
           </div>
           <div class="form-item">
             <label class="form-label">{{ t('common.description') }}</label>
-            <input v-model="description" class="form-input" :placeholder="t('theme.optionalDesc')" />
+            <input
+              v-model="description"
+              class="form-input"
+              :placeholder="t('theme.optionalDesc')"
+            >
           </div>
         </div>
       </div>
 
       <!-- 预设主题 -->
       <div class="editor-section">
-        <h4 class="section-title">{{ t('theme.presetThemes') }}</h4>
+        <h4 class="section-title">
+          {{ t('theme.presetThemes') }}
+        </h4>
         <div class="preset-grid">
           <button
             v-for="preset in presets"
@@ -231,7 +260,8 @@ function applyPreset(presetColors: ThemeColors) {
             @click="applyPreset(preset.colors)"
           >
             <div class="preset-colors">
-              <span v-for="(color, i) in [preset.colors.bgPrimary, preset.colors.accent, preset.colors.success, preset.colors.error]"
+              <span
+                v-for="(color, i) in [preset.colors.bgPrimary, preset.colors.accent, preset.colors.success, preset.colors.error]"
                 :key="i"
                 class="preset-swatch"
                 :style="{ background: color }"
@@ -244,25 +274,37 @@ function applyPreset(presetColors: ThemeColors) {
 
       <!-- 颜色配置 -->
       <div class="editor-section">
-        <h4 class="section-title">{{ t('theme.colorConfig') }}</h4>
-        <div v-for="group in colorGroups" :key="group.label" class="color-group">
-          <h5 class="group-label">{{ typeof group.label === 'function' ? group.label() : group.label }}</h5>
+        <h4 class="section-title">
+          {{ t('theme.colorConfig') }}
+        </h4>
+        <div
+          v-for="group in colorGroups"
+          :key="group.label"
+          class="color-group"
+        >
+          <h5 class="group-label">
+            {{ typeof group.label === 'function' ? group.label() : group.label }}
+          </h5>
           <div class="color-grid">
-            <div v-for="field in group.fields" :key="field.key" class="color-item">
+            <div
+              v-for="field in group.fields"
+              :key="field.key"
+              class="color-item"
+            >
               <label class="color-label">{{ typeof field.label === 'function' ? field.label() : field.label }}</label>
               <div class="color-input-wrap">
                 <input
                   type="color"
                   :value="colors[field.key]"
-                  @input="colors[field.key] = ($event.target as HTMLInputElement).value"
                   class="color-picker"
-                />
+                  @input="colors[field.key] = ($event.target as HTMLInputElement).value"
+                >
                 <input
                   v-model="colors[field.key]"
                   class="color-text"
                   :placeholder="colors[field.key]"
                   spellcheck="false"
-                />
+                >
               </div>
             </div>
           </div>
@@ -271,23 +313,41 @@ function applyPreset(presetColors: ThemeColors) {
 
       <!-- 字体配置 -->
       <div class="editor-section">
-        <h4 class="section-title">{{ t('theme.fontConfig') }}</h4>
+        <h4 class="section-title">
+          {{ t('theme.fontConfig') }}
+        </h4>
         <div class="form-grid">
           <div class="form-item">
             <label class="form-label">{{ t('theme.sansFont') }}</label>
-            <input v-model="fonts.fontSans" class="form-input" placeholder="'Segoe UI', sans-serif" />
+            <input
+              v-model="fonts.fontSans"
+              class="form-input"
+              placeholder="'Segoe UI', sans-serif"
+            >
           </div>
           <div class="form-item">
             <label class="form-label">{{ t('theme.monoFont') }}</label>
-            <input v-model="fonts.fontMono" class="form-input" placeholder="'Fira Code', monospace" />
+            <input
+              v-model="fonts.fontMono"
+              class="form-input"
+              placeholder="'Fira Code', monospace"
+            >
           </div>
         </div>
       </div>
 
       <!-- 底部操作 -->
       <div class="editor-footer">
-        <button class="btn btn-secondary" @click="handleCancel">{{ t('common.cancel') }}</button>
-        <button class="btn btn-primary" @click="handleSave">
+        <button
+          class="btn btn-secondary"
+          @click="handleCancel"
+        >
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          class="btn btn-primary"
+          @click="handleSave"
+        >
           <PencilIcon class="w-4 h-4" />
           <span>{{ mode === 'create' ? t('theme.createTheme') : t('theme.saveChanges') }}</span>
         </button>

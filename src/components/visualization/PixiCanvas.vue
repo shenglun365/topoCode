@@ -65,29 +65,52 @@ function refresh() {
 
 <template>
   <div class="pixi-canvas-container">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 工具栏 -->
-    <div v-if="showToolbar" class="canvas-toolbar">
+    <div
+      v-if="showToolbar"
+      class="canvas-toolbar"
+    >
       <div class="toolbar-left">
         <span class="toolbar-label">PIXI.js WebGL</span>
-        <span v-if="!isReady" class="toolbar-status">{{ t('render.initializing') }}</span>
-        <span v-else class="toolbar-status">
+        <span
+          v-if="!isReady"
+          class="toolbar-status"
+        >{{ t('render.initializing') }}</span>
+        <span
+          v-else
+          class="toolbar-status"
+        >
           {{ nodeCount }} {{ t('visualization.nodes') }} / {{ edges.length }} {{ t('visualization.edges') }}
         </span>
       </div>
 
       <div class="toolbar-right">
-        <span v-if="showFps && isReady" class="fps-badge">
+        <span
+          v-if="showFps && isReady"
+          class="fps-badge"
+        >
           {{ fps }} FPS
         </span>
 
-        <button class="btn btn-ghost btn-sm" @click="refresh" :disabled="!isReady">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!isReady"
+          @click="refresh"
+        >
           <ArrowPathIcon class="w-4 h-4" />
         </button>
 
-        <div class="divider-vertical"></div>
+        <div class="divider-vertical" />
 
-        <button class="btn btn-ghost btn-sm" @click="exportPng()" :disabled="!isReady">
+        <button
+          class="btn btn-ghost btn-sm"
+          :disabled="!isReady"
+          @click="exportPng()"
+        >
           <ArrowDownTrayIcon class="w-4 h-4" />
           <span>PNG</span>
         </button>
@@ -96,18 +119,31 @@ function refresh() {
 
     <!-- Canvas 容器 -->
     <div class="canvas-wrapper">
-      <canvas ref="canvasRef" class="pixi-canvas"></canvas>
+      <canvas
+        ref="canvasRef"
+        class="pixi-canvas"
+      />
 
       <!-- 未初始化提示 -->
-      <div v-if="!isReady" class="canvas-overlay">
-        <div class="loading-spinner"></div>
+      <div
+        v-if="!isReady"
+        class="canvas-overlay"
+      >
+        <div class="loading-spinner" />
         <span>{{ t('render.webglInitializing') }}</span>
       </div>
 
       <!-- 空状态 -->
-      <div v-else-if="!nodes.length" class="canvas-overlay empty">
-        <div class="title">{{ t('common.waiting') }}</div>
-        <div class="desc">{{ t('render.waitingWebglGraphData') }}</div>
+      <div
+        v-else-if="!nodes.length"
+        class="canvas-overlay empty"
+      >
+        <div class="title">
+          {{ t('common.waiting') }}
+        </div>
+        <div class="desc">
+          {{ t('render.waitingWebglGraphData') }}
+        </div>
       </div>
     </div>
   </div>

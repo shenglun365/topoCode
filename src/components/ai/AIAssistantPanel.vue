@@ -116,13 +116,26 @@ watch(llmConfigured, (val) => {
 
 <template>
   <div class="ai-assistant-panel">
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <!-- 未配置状态 -->
-    <div v-if="!llmConfigured" class="ai-empty-state">
+    <div
+      v-if="!llmConfigured"
+      class="ai-empty-state"
+    >
       <SparklesIcon class="w-10 h-10 text-accent" />
-      <div class="ai-empty-title">{{ t('ai.assistantTitle') }}</div>
-      <div class="ai-empty-desc">{{ t('ai.assistantNotConfigured') }}</div>
-      <router-link to="/user#llm" class="ai-config-link">
+      <div class="ai-empty-title">
+        {{ t('ai.assistantTitle') }}
+      </div>
+      <div class="ai-empty-desc">
+        {{ t('ai.assistantNotConfigured') }}
+      </div>
+      <router-link
+        to="/user#llm"
+        class="ai-config-link"
+      >
         {{ t('ai.goConfigure') }}
       </router-link>
     </div>
@@ -130,13 +143,19 @@ watch(llmConfigured, (val) => {
     <!-- 对话区域 -->
     <template v-else>
       <!-- 消息列表 -->
-      <div ref="scrollRef" class="ai-messages">
+      <div
+        ref="scrollRef"
+        class="ai-messages"
+      >
         <div
           v-for="msg in messages"
           :key="msg.id"
           :class="['ai-message', `ai-message-${msg.role}`]"
         >
-          <div class="ai-message-bubble" v-html="msg.content"></div>
+          <div
+            class="ai-message-bubble"
+            v-html="msg.content"
+          />
         </div>
       </div>
 
@@ -154,8 +173,8 @@ watch(llmConfigured, (val) => {
           <button
             v-if="messages.length > 0"
             class="ai-action-btn"
-            @click="clearChat"
             :title="t('ai.clearChat')"
+            @click="clearChat"
           >
             <TrashIcon class="w-4 h-4" />
           </button>
