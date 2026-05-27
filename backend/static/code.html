@@ -60,6 +60,22 @@ async function load() {
     const url = `/api/file?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`;
     const resp = await fetch(url);
     if (!resp.ok) {
+      if (resp.status === 404) {
+        const body = await resp.json().catch(() => null);
+        if (body && body.detail && body.detail.alternatives && body.detail.alternatives.length > 0) {
+          const alts = body.detail.alternatives;
+          let html = `<div class="error-msg">File not found: <strong>${filePath}</strong></div>`;
+          html += '<div style="padding:12px;font-size:13px">';
+          html += 'Did you mean one of these files?<ul style="margin:8px 0 0 16px">';
+          for (const a of alts) {
+            const p = a.file_path;
+            html += `<li><a href="/code?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(p)}" style="color:#3b82f6;text-decoration:none">${p}</a> <span style="color:#888;font-size:11px">(${a.language || '?'})</span></li>`;
+          }
+          html += '</ul></div>';
+          document.getElementById('codeContainer').innerHTML = html;
+          return;
+        }
+      }
       const err = await resp.text().catch(() => `HTTP ${resp.status}`);
       throw new Error(err);
     }

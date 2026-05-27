@@ -7,8 +7,12 @@
 */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project, FileTreeNode, AnalysisTask } from '@/types/ipc'
+import { useAnalysisStore } from '@/stores/analysis'
+import { useFuncGroupStore } from '@/stores/funcGroup'
+import { useReportStore } from '@/stores/report'
+import { useSettingsStore } from '@/stores/settings'
 import { ipc } from '@/services/ipc'
+
 import { useAnalysisStore } from '@/stores/analysis'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import i18n from '@/i18n'
@@ -157,6 +161,8 @@ export const useProjectStore = defineStore('project', () => {
     // 清除前端缓存的旧任务数据，避免打开已删除任务的报告
     const analysisStore = useAnalysisStore()
     analysisStore.tasks = []
+    const reportStore = useReportStore()
+    reportStore.tasks = {}
     // 关闭该项目的所有分析 tab，清理已删除任务的引用
     const funcGroup = useFuncGroupStore()
     const ctx = funcGroup.context.analysis

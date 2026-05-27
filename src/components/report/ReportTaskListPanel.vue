@@ -2,7 +2,8 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PlayIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
-import { usePipelineStore, type EdgeProgress } from '@/stores/pipeline'
+import { useSettingsStore } from '@/stores/settings'
+import { useReportStore } from '@/stores/report'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import PipelineTaskTree from './PipelineTaskTree.vue'
@@ -10,7 +11,8 @@ import type { PipelineTaskNode } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
-const store = usePipelineStore()
+const settingsStore = useSettingsStore()
+const reportStore = useReportStore()
 const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
 
@@ -18,10 +20,10 @@ const props = defineProps<{ taskId: string; taskName?: string }>()
 
 const projectId = computed(() => projectStore.selectedProjectId || '')
 
-const state = computed(() => store.getTaskState(props.taskId))
+const taskState = computed(() => reportStore.tasks[props.taskId])
 
-const rootTask = computed<PipelineTaskNode | null>(() => state.value?.rootTask ?? null)
-const progress = computed(() => state.value?.progress ?? 0)
+const rootTask = computed<PipelineTaskNode | null>(() => taskState.value?.pipelineRootTask ?? null)
+const progress = computed(() => taskState.value?.pipelineProgress ?? 0)
 
 const leaves = computed(() => {
   if (!rootTask.value) return []
@@ -40,24 +42,84 @@ const leaves = computed(() => {
 const totalCount = computed(() => leaves.value.length)
 const completedCount = computed(() => leaves.value.filter(n => n.status === 'completed' || n.status === 'skipped').length)
 
-const ctrl = computed(() => store.controls)
+// Community progress from reportStore (L0 only — LLM analysis targets root communities)
+const communityList = computed(() => taskState.value?.communities || [])
+const includeCommunities = computed(() => communityList.value.filter(c => c.edgeType === 'INCLUDE' && c.level === 'L0'))
+const callCommunities = computed(() => communityList.value.filter(c => c.edgeType === 'CALL' && c.level === 'L0'))
 
-const communityProgress = computed(() => store.getTaskState(props.taskId)?.communityProgress)
-
-const includeProgress = computed(() => {
-  const p = communityProgress.value?.INCLUDE
-  if (!p || p.total === 0) return null
-  return { ...p, pct: Math.round((p.completed / p.total) * 100) }
+interface CommProgress { total: number; completed: number; running: number }
+const includeProgress = computed<CommProgress | null>(() => {
+  const list = includeCommunities.value
+  if (!list.length) return null
+  return {
+    total: list.length,
+    completed: list.filter(c => c.status === 'completed').length,
+    running: list.filter(c => c.status === 'running' || c.status === 'queued').length,
+  }
 })
-
-const callProgress = computed(() => {
-  const p = communityProgress.value?.CALL
-  if (!p || p.total === 0) return null
-  return { ...p, pct: Math.round((p.completed / p.total) * 100) }
+const callProgress = computed<CommProgress | null>(() => {
+  const list = callCommunities.value
+  if (!list.length) return null
+  return {
+    total: list.length,
+    completed: list.filter(c => c.status === 'completed').length,
+    running: list.filter(c => c.status === 'running' || c.status === 'queued').length,
+  }
 })
 
 function handleRunNode(nodeId: string) {
-  ctrl.value?.runNode(nodeId)
+  if (nodeId === 'overall_architecture') {
+    // 整体架构分析需 ReportGenerationPipeline 挂载（在 reportHome tab 中），先导航再发信号
+    const ctx = funcGroup.context.analysis
+    const homeTab = ctx.tabs.find(t => t.kind === 'reportHome' && (t as any).taskId === props.taskId)
+    if (homeTab) {
+      funcGroup.setActiveTab('analysis', homeTab.id)
+    }
+    reportStore.setPendingStepRun(props.taskId, nodeId)
+    return
+  }
+  // 其他步骤（validation/project_summary/community_analysis）直接执行，不依赖组件挂载
+  const root = reportStore.tasks[props.taskId]?.pipelineRootTask
+  const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
+    if (node.id === nodeId) return node
+    if (node.children) for (const c of node.children) { const r = find(c); if (r) return r }
+    return undefined
+  }
+  const node = root ? find(root) : undefined
+  if (!node) return
+
+  reportStore.setPipelineRunning(props.taskId, true)
+  reportStore.setPipelinePaused(props.taskId, false)
+
+  if (nodeId === 'validation') {
+    node.status = 'running'
+    const mid = settingsStore.models.find(m => m.isDefault)?.id
+    if (!mid) { node.status = 'error'; node.error = t('report.llmNotConfigured') }
+    else {
+      settingsStore.testModel(mid).then(() => { node.status = 'completed' }).catch((e: any) => { node.status = 'error'; node.error = e.message })
+    }
+  } else if (nodeId === 'project_summary') {
+    const pid = projectStore.selectedProjectId
+    if (!pid) { node.status = 'skipped'; reportStore.recalcProgress(props.taskId); return }
+    node.status = 'running'
+    Promise.all([
+      reportStore.getReadmeContent(pid).catch(() => null),
+      reportStore.extractDependencyFiles(pid).catch(() => null),
+    ]).then(() => {
+      reportStore.generateProjectSummary(pid).then(r => {
+        node.status = r?.summary ? 'completed' : 'error'
+        if (!r?.summary) node.error = 'Empty summary'
+      }).catch((e: any) => { node.status = 'error'; node.error = e.message })
+    })
+  } else if (nodeId === 'community_analysis') {
+    node.status = 'running'
+    reportStore.getCascadeLevels(props.taskId, 'CALL').then(levels => {
+      node.status = (levels?.levels?.length) ? 'completed' : 'skipped'
+    }).catch(() => { node.status = 'skipped' })
+  }
+
+  reportStore.setPipelineRunning(props.taskId, false)
+  reportStore.recalcProgress(props.taskId)
 }
 
 function openCommunityAnalysis() {
@@ -118,7 +180,6 @@ const { showId, componentId } = useComponentId('RP-005')
       <div class="tl-tree">
         <PipelineTaskTree
           :node="rootTask"
-          @action="handleRunNode"
           @open-community-analysis="openCommunityAnalysis"
         >
           <template #actions="{ node }">
@@ -166,7 +227,7 @@ const { showId, componentId } = useComponentId('RP-005')
                 <div class="ca-bar">
                   <div
                     class="ca-fill"
-                    :style="{ width: includeProgress.pct + '%' }"
+                    :style="{ width: Math.round((includeProgress.completed / includeProgress.total) * 100) + '%' }"
                   />
                 </div>
                 <span class="ca-text">
@@ -185,7 +246,7 @@ const { showId, componentId } = useComponentId('RP-005')
                 <div class="ca-bar">
                   <div
                     class="ca-fill"
-                    :style="{ width: callProgress.pct + '%' }"
+                    :style="{ width: Math.round((callProgress.completed / callProgress.total) * 100) + '%' }"
                   />
                 </div>
                 <span class="ca-text">

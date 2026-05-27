@@ -5,7 +5,7 @@ Community Analysis — 社区分析（纯内存 + SQLite 写入）
 递归分层分析，结果写入 graph_doc + community_hierarchy 表。
 
 改进：
-- Louvain 使用标准 ΔQ 公式（先移出节点再计算）
+- Louvain 使用 NetworkX community_louvain（标准实现，支持多级聚合）
 - 枢纽节点过滤（degree > total_nodes * 0.3 或 > 50）
 - 孤立节点标记（移除枢纽后 degree ≤ 1）
 - 质量分使用模块度而非图密度
@@ -17,6 +17,9 @@ import json
 import logging
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Optional
+
+import networkx as nx
+from community import community_louvain
 
 from config import (
     HUB_DEGREE_RATIO, HUB_MIN_DEGREE, ORPHAN_MAX_DEGREE,
@@ -365,109 +368,43 @@ def _build_sub_graph(graph: Dict[str, Set[str]], nodes: Set[str]) -> Dict[str, S
     return dict(sub)
 
 
-# ==================== Louvain 社区检测（标准版）====================
+# ==================== Louvain 社区检测（NetworkX 标准实现）====================
 
 def _detect_communities(graph: Dict[str, Set[str]],
                         nodes: Set[str]) -> List[Set[str]]:
     """
-    社区检测 — Louvain 算法（标准 ΔQ 公式）
+    社区检测 — 基于 NetworkX community_louvain（标准 Louvain + 多级聚合）。
 
-    使用贪心模块化优化，返回社区列表（每个社区是节点集合）。
-    与简化版的关键区别：先移出节点再计算 ΔQ，避免 Σ_tot 包含节点自身。
+    使用 networkx 构建图 + community_louvain.best_partition() 执行标准 Louvain，
+    返回社区列表（每个社区是节点集合），过滤掉单节点社区。
     """
     if not nodes:
         return []
 
-    # 初始化：每个节点一个社区
-    communities = {node: {node} for node in nodes}
-    node_to_comm = {node: node for node in nodes}
+    # 构建 NetworkX 图
+    G = nx.Graph()
+    node_set = set(nodes)
 
-    # 计算度
-    degrees = {}
     for node in nodes:
-        deg = len(graph.get(node, set()))
-        degrees[node] = deg
-    m = sum(degrees.values()) / 2  # 边数
-    if m == 0:
-        return [comm for comm in communities.values() if len(comm) >= 2] or [{n} for n in nodes]
+        if node in graph:
+            for neighbor in graph[node]:
+                if neighbor in node_set:
+                    G.add_edge(node, neighbor)
 
-    improved = True
-    max_iterations = 100
-    iteration = 0
+    if G.number_of_nodes() == 0:
+        return []
 
-    while improved and iteration < max_iterations:
-        improved = False
-        iteration += 1
+    # 标准 Louvain（多级聚合）
+    partition = community_louvain.best_partition(G)
 
-        for node in nodes:
-            if node not in graph:
-                continue
-
-            current_comm_id = node_to_comm[node]
-
-            # 先移出节点（置为孤立）
-            communities[current_comm_id].discard(node)
-            if not communities[current_comm_id]:
-                del communities[current_comm_id]
-
-            # 收集邻居的社区（排除移出后的空社区）
-            neighbor_comm_ids = set()
-            for neighbor in graph.get(node, set()):
-                nc = node_to_comm.get(neighbor)
-                if nc is not None and nc != current_comm_id:
-                    # 检查该社区是否还存在（可能已因移出而删除）
-                    if nc in communities and len(communities[nc]) > 0:
-                        neighbor_comm_ids.add(nc)
-
-            # 原社区若仍有成员，也加入候选
-            if current_comm_id in communities and len(communities[current_comm_id]) > 0:
-                neighbor_comm_ids.add(current_comm_id)
-
-            # 没有候选社区 → 放回原社区（重建）
-            if not neighbor_comm_ids:
-                if current_comm_id not in communities:
-                    communities[current_comm_id] = set()
-                communities[current_comm_id].add(node)
-                node_to_comm[node] = current_comm_id
-                continue
-
-            # 计算每个候选社区的 ΔQ，选最优
-            best_comm_id = current_comm_id
-            best_delta = 0.0
-            ki = degrees.get(node, 0)
-
-            for comm_id in neighbor_comm_ids:
-                if comm_id not in communities:
-                    continue
-
-                # 节点到社区的边数
-                ki_in = 0
-                for neighbor in graph.get(node, set()):
-                    if node_to_comm.get(neighbor) == comm_id:
-                        ki_in += 1
-
-                # 社区总度（不含节点自身，因为已移除）
-                sigma_tot = sum(degrees.get(n, 0) for n in communities[comm_id])
-
-                # 标准 ΔQ = ki_in/m - sigma_tot * ki / (2m²)
-                delta = ki_in / m - (sigma_tot * ki) / (2 * m * m)
-
-                if delta > best_delta:
-                    best_delta = delta
-                    best_comm_id = comm_id
-
-            # 移入最优社区
-            if best_comm_id not in communities:
-                communities[best_comm_id] = set()
-            communities[best_comm_id].add(node)
-            node_to_comm[node] = best_comm_id
-
-            if best_comm_id != current_comm_id:
-                improved = True
+    # 按社区分组
+    comm_map: Dict[int, Set[str]] = {}
+    for node, cid in partition.items():
+        comm_map.setdefault(cid, set()).add(node)
 
     # 过滤单节点社区
-    result = [comm for comm in communities.values() if len(comm) >= 2]
-    return result if result else [{node} for node in nodes]
+    result = [comm for comm in comm_map.values() if len(comm) >= 2]
+    return result if result else [{node} for node in G.nodes()]
 
 
 # ==================== 模块度计算 ====================

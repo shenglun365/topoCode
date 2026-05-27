@@ -258,7 +258,12 @@ async def get_file(project_id: str = Query(...), path: str = Query(...)):
         if not full_path.startswith(os.path.normpath(root_path)):
             raise HTTPException(403, "Path outside project root")
         if not os.path.isfile(full_path):
-            raise HTTPException(404, "File not found")
+            # 文件不存在时，在 source_files 中查找同名文件作为备选
+            alt = _find_file_alternatives(project_id, path)
+            raise HTTPException(status_code=404, detail={
+                "message": "File not found",
+                "alternatives": alt,
+            })
         size = os.path.getsize(full_path)
         max_bytes = 500 * 1024
         max_lines = 1000
@@ -331,6 +336,51 @@ async def clear_plantuml_cache():
     _clear_plantuml_cache()
     return {"status": "ok"}
 
+
+def _find_file_alternatives(project_id: str, path: str) -> list:
+    """在项目 source_files 中查找匹配文件，返回备选路径列表（模糊匹配文件名）"""
+    basename = os.path.basename(path)
+    if not basename:
+        return []
+    try:
+        project_db = multi_db.get_project_db(project_id)
+        seen = set()
+        results = []
+        def add(row):
+            fp = row[0]
+            if fp not in seen:
+                seen.add(fp)
+                results.append({"file_path": fp, "file_name": row[1], "language": row[2]})
+
+        # 1. 精确文件名匹配 file_path LIKE %/ioport.h
+        for row in project_db.execute(
+            "SELECT file_path, file_name, language FROM source_files WHERE file_path LIKE ?",
+            (f"%/{basename}",),
+        ).fetchall():
+            add(row)
+
+        if not results:
+            # 2. 去掉扩展名匹配 file_name（如 ioport.h → ioport）
+            name_no_ext = os.path.splitext(basename)[0]
+            if name_no_ext:
+                for row in project_db.execute(
+                    "SELECT file_path, file_name, language FROM source_files WHERE file_name = ?",
+                    (name_no_ext,),
+                ).fetchall():
+                    add(row)
+
+        if not results:
+            # 3. 最宽松：file_name 模糊 LIKE（basename 截断前 8 字符）
+            short = basename[:8].replace(".", "_")
+            for row in project_db.execute(
+                "SELECT file_path, file_name, language FROM source_files WHERE file_name LIKE ?",
+                (f"%{short}%",),
+            ).fetchall():
+                add(row)
+
+        return results
+    except Exception:
+        return []
 
 # ==================== 静态页面 ====================
 

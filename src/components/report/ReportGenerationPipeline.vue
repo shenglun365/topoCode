@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   CheckCircleIcon,
@@ -13,15 +13,12 @@ import { useProjectStore } from '@/stores/project'
 import PipelineTaskTree from './PipelineTaskTree.vue'
 import CommunityAnalysisPipeline from './CommunityAnalysisPipeline.vue'
 import type { PipelineTaskNode } from '@/types/ipc'
-import type { PipelineTabState } from '@/stores/pipeline'
-import { usePipelineStore } from '@/stores/pipeline'
 import { useReportStore } from '@/stores/report'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const projectStore = useProjectStore()
-const pipelineStore = usePipelineStore()
 const reportStore = useReportStore()
 
 const props = defineProps<{
@@ -77,86 +74,17 @@ function createInitialTree(): PipelineTaskNode {
   }
 }
 
-function markOrphanRunningAsPending(node: PipelineTaskNode) {
-  if ((node.status === 'running' || node.status === 'queued') && node.id !== 'root') {
-    node.status = 'pending'
-  }
-  if (node.children) node.children.forEach(markOrphanRunningAsPending)
-}
+const taskState = computed(() => reportStore.tasks[props.taskId])
+const rootTask = computed(() => taskState.value?.pipelineRootTask ?? createInitialTree())
+const running = computed(() => taskState.value?.pipelineRunning ?? false)
+const isPaused = computed(() => taskState.value?.pipelinePaused ?? false)
+const overallProgress = computed(() => taskState.value?.pipelineProgress ?? 0)
+const errorLogs = computed(() => taskState.value?.errorLogs ?? [])
 
-function restoreTree(state: PipelineTabState): PipelineTaskNode {
-  const tree = JSON.parse(JSON.stringify(state.rootTask))
-  markOrphanRunningAsPending(tree)
-  return tree
-}
-
-const rootTask = ref<PipelineTaskNode>(createInitialTree())
-
-const saved = pipelineStore.getTaskState(props.taskId)
-const running = ref(saved?.running ?? false)
-const overallProgress = ref(saved?.progress ?? 0)
-const isPaused = ref(saved?.paused ?? false)
-const stepOutputs = ref<Record<string, string>>(saved?.stepOutputs || {})
-
-// 流水线错误日志（内存，不持久化）
-const errorLogs = ref<string[]>([])
-function pushError(msg: string) {
-  const ts = new Date().toLocaleTimeString()
-  errorLogs.value = [`[${ts}] ${msg}`, ...errorLogs.value].slice(0, 50)
-}
-function clearErrorLogs() { errorLogs.value = [] }
-
-// 项目摘要生成状态
-
-const allCompleted = computed(() => {
-  return rootTask.value.children?.every(n => n.status === 'completed' || n.status === 'skipped')
-})
-const hasError = computed(() => rootTask.value.children?.some(n => n.status === 'error'))
-
-function updateNodeStatus(nodeId: string, status: PipelineTaskNode['status'], error?: string) {
-  const update = (node: PipelineTaskNode): boolean => {
-    if (node.id === nodeId) {
-      node.status = status
-      if (error) node.error = error
-      return true
-    }
-    if (node.children) {
-      for (const c of node.children) {
-        if (update(c)) return true
-      }
-    }
-    return false
-  }
-  update(rootTask.value)
-  recalcProgress()
-}
+const allCompleted = computed(() => reportStore.allPipelineStepsCompleted(props.taskId))
+const hasError = computed(() => reportStore.hasPipelineError(props.taskId))
 
 const { showId, componentId } = useComponentId('RP-002')
-
-function recalcProgress() {
-  const flatten = (node: PipelineTaskNode): PipelineTaskNode[] => {
-    if (!node.children) return [node]
-    return [node, ...node.children.flatMap(flatten)]
-  }
-  const all = flatten(rootTask.value)
-  const leaves = all.filter(n => !n.children || n.children.length === 0)
-  const done = leaves.filter(n => n.status === 'completed' || n.status === 'skipped').length
-  overallProgress.value = leaves.length > 0 ? Math.round((done / leaves.length) * 100) : 0
-  syncStore()
-}
-
-function syncStore() {
-  const existing = pipelineStore.getTaskState(props.taskId)
-  pipelineStore.updateTaskState(props.taskId, {
-    rootTask: JSON.parse(JSON.stringify(rootTask.value)),
-    running: running.value,
-    paused: isPaused.value,
-    progress: overallProgress.value,
-    stepOutputs: { ...stepOutputs.value },
-    communityProgress: existing?.communityProgress,
-  })
-  pipelineStore.saveStateToDb(props.taskId)
-}
 
 // ===== Step execution =====
 async function prepareStepVariables(stepId: string): Promise<Record<string, string>> {
@@ -261,13 +189,13 @@ async function runStep(step: PipelineTaskNode) {
   if (!modelId) {
     step.status = 'error'
     step.error = t('report.llmNotConfigured')
-    pushError(`${step.label || step.id}: ${t('report.llmNotConfigured')}`)
+    reportStore.pushError(props.taskId, `${step.label || step.id}: ${t('report.llmNotConfigured')}`)
     return
   }
 
   try {
     const variables = await prepareStepVariables(step.id)
-    variables.pipeline_step = step.id  // 用于日志追踪
+    variables.pipeline_step = step.id
     const sessionId = `pipeline-${props.taskId}-${step.id}-${Date.now()}`
     const result = await window.api.llm.chat({
       sessionId,
@@ -280,8 +208,8 @@ async function runStep(step: PipelineTaskNode) {
     if (result.status === 'error') {
       step.status = 'error'
       step.error = result.error || 'LLM request failed'
-      pushError(`${step.label || step.id}: ${step.error}`)
-      recalcProgress()
+      reportStore.pushError(props.taskId, `${step.label || step.id}: ${step.error}`)
+      reportStore.recalcProgress(props.taskId)
       return
     }
 
@@ -290,18 +218,18 @@ async function runStep(step: PipelineTaskNode) {
       const unsubscribe = window.api.llm.subscribe(result.requestId, {
         onChunk(data: { text: string }) { fullContent += data.text },
         onDone() {
-          // 检查响应内容是否为错误信息（模型 API 报错可能以文本形式返回）
           const trimmed = fullContent.trim()
           const isError = !trimmed || trimmed.length < 20 ||
             /^(error|错误|failed|失败|\[error\]|\[ERROR\])/i.test(trimmed)
           if (isError) {
             step.status = 'error'
             step.error = trimmed || (result as any).error || 'LLM returned empty response'
-            pushError(`${step.label || step.id}: ${step.error}`)
+            reportStore.pushError(props.taskId, `${step.label || step.id}: ${step.error}`)
           } else {
-            step.output = fullContent
-            stepOutputs.value[step.id] = fullContent
             step.status = 'completed'
+            if (step.id === 'overall_architecture') {
+              reportStore.setGeneratedReport(props.taskId, fullContent)
+            }
           }
           unsubscribe()
           resolve()
@@ -309,7 +237,7 @@ async function runStep(step: PipelineTaskNode) {
         onError(errData: { message: string }) {
           step.status = 'error'
           step.error = errData.message
-          pushError(`${step.label || step.id}: ${errData.message}`)
+          reportStore.pushError(props.taskId, `${step.label || step.id}: ${errData.message}`)
           unsubscribe()
           reject(new Error(errData.message))
         },
@@ -319,124 +247,103 @@ async function runStep(step: PipelineTaskNode) {
     step.status = 'error'
     const msg = e.message || String(e)
     step.error = msg
-    pushError(`${step.label || step.id}: ${msg}`)
+    reportStore.pushError(props.taskId, `${step.label || step.id}: ${msg}`)
   }
-  recalcProgress()
+  reportStore.recalcProgress(props.taskId)
 }
 
 async function runAll() {
   if (running.value) return
   if (allCompleted.value) {
-    const resetNode = (node: PipelineTaskNode) => {
-      node.status = 'pending'
-      node.progress = 0
-      node.error = undefined
-      if (node.children) node.children.forEach(resetNode)
-    }
-    rootTask.value = createInitialTree()
-    overallProgress.value = 0
-    stepOutputs.value = {}
+    reportStore.initPipeline(props.taskId, createInitialTree())
   }
-  running.value = true
-  isPaused.value = false
-  overallProgress.value = 0
-  rootTask.value.status = 'running'
+  reportStore.setPipelineRunning(props.taskId, true)
+  reportStore.setPipelinePaused(props.taskId, false)
+  const root = reportStore.tasks[props.taskId].pipelineRootTask!
+  root.status = 'running'
+  reportStore.recalcProgress(props.taskId)
 
   // Phase 0: Model validation
-  updateNodeStatus('validation', 'running')
+  reportStore.updateNodeStatus(props.taskId, 'validation', 'running')
   const modelId = settingsStore.models.find(m => m.isDefault)?.id
   if (!modelId) {
-    updateNodeStatus('validation', 'error', t('report.llmNotConfigured'))
-    running.value = false
-    rootTask.value.status = 'error'
+    reportStore.updateNodeStatus(props.taskId, 'validation', 'error', t('report.llmNotConfigured'))
+    reportStore.setPipelineRunning(props.taskId, false)
+    root.status = 'error'
     return
   }
-  updateNodeStatus('validation', 'completed')
+  reportStore.updateNodeStatus(props.taskId, 'validation', 'completed')
 
-  // Phase 1: Project summary (read README, extract deps, generate summary)
-  updateNodeStatus('project_summary', 'running')
+  // Phase 1: Project summary
+  reportStore.updateNodeStatus(props.taskId, 'project_summary', 'running')
   const pid = projectStore.selectedProjectId
   if (pid) {
     try {
       await reportStore.getReadmeContent(pid)
       await reportStore.extractDependencyFiles(pid)
       const result = await reportStore.generateProjectSummary(pid)
-      updateNodeStatus('project_summary', result?.summary ? 'completed' : 'error')
+      reportStore.updateNodeStatus(props.taskId, 'project_summary', result?.summary ? 'completed' : 'error')
     } catch (e: any) {
-      updateNodeStatus('project_summary', 'error', e.message)
-      pushError(`project_summary: ${e.message}`)
+      reportStore.updateNodeStatus(props.taskId, 'project_summary', 'error', e.message)
+      reportStore.pushError(props.taskId, `project_summary: ${e.message}`)
     }
   } else {
-    updateNodeStatus('project_summary', 'skipped')
+    reportStore.updateNodeStatus(props.taskId, 'project_summary', 'skipped')
   }
-  recalcProgress()
 
-  // Phase 2: Community analysis — mark as offering (user runs via separate UI)
-  // We just check the data exists
-  updateNodeStatus('community_analysis', 'running')
+  // Phase 2: Community analysis
+  reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'running')
   try {
     const levels = await reportStore.getCascadeLevels(props.taskId, 'CALL')
     if (levels?.levels?.length) {
-      updateNodeStatus('community_analysis', 'completed')
+      reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'completed')
     } else {
-      updateNodeStatus('community_analysis', 'skipped', 'No community data')
+      reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'skipped', 'No community data')
     }
   } catch (e) {
-    updateNodeStatus('community_analysis', 'skipped')
+    reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'skipped')
   }
-  recalcProgress()
 
   // Phase 3: 整体架构分析（单次 LLM 调用）
-  const archStep = rootTask.value.children?.find(n => n.id === 'overall_architecture')
-  if (archStep && !isPaused.value) {
+  const archStep = root.children?.find(n => n.id === 'overall_architecture')
+  if (archStep && !reportStore.tasks[props.taskId]?.pipelinePaused) {
     await runStep(archStep)
   }
 
-  running.value = false
-  rootTask.value.status = allCompleted.value ? 'completed' : 'error'
-  recalcProgress()
+  reportStore.setPipelineRunning(props.taskId, false)
+  root.status = allCompleted.value ? 'completed' : 'error'
+  reportStore.recalcProgress(props.taskId)
 
-  if (allCompleted.value && stepOutputs.value.overall_architecture) {
-    reportStore.setGeneratedReport(props.taskId, stepOutputs.value.overall_architecture)
-    emit('generated', stepOutputs.value.overall_architecture)
+  if (allCompleted.value && reportStore.generatedReports[props.taskId]) {
+    emit('generated', reportStore.generatedReports[props.taskId])
   }
 }
 
 function pause() {
-  isPaused.value = true
-  running.value = false
-  syncStore()
-}
-
-function resume() {
-  isPaused.value = false
-  running.value = true
-  syncStore()
+  reportStore.setPipelinePaused(props.taskId, true)
+  reportStore.setPipelineRunning(props.taskId, false)
 }
 
 function stop() {
-  isPaused.value = true
-  running.value = false
-  const markSkipped = (node: PipelineTaskNode) => {
-    if (node.status === 'running' || node.status === 'queued') node.status = 'skipped'
-    if (node.children) node.children.forEach(markSkipped)
+  reportStore.stopPipeline(props.taskId)
+  const root = reportStore.tasks[props.taskId]?.pipelineRootTask
+  if (root) {
+    const markSkipped = (node: PipelineTaskNode) => {
+      if (node.status === 'running' || node.status === 'queued') node.status = 'skipped'
+      if (node.children) node.children.forEach(markSkipped)
+    }
+    root.children?.forEach(markSkipped)
+    root.status = 'skipped'
   }
-  rootTask.value.children?.forEach(markSkipped)
-  rootTask.value.status = 'skipped'
-  recalcProgress()
+  reportStore.recalcProgress(props.taskId)
 }
 
 function reset() {
-  const resetNode = (node: PipelineTaskNode) => {
-    node.status = 'pending'
-    node.progress = 0
-    node.error = undefined
-    if (node.children) node.children.forEach(resetNode)
-  }
-  rootTask.value = createInitialTree()
-  overallProgress.value = 0
-  stepOutputs.value = {}
-  syncStore()
+  reportStore.resetPipeline(props.taskId)
+}
+
+function clearErrorLogs() {
+  reportStore.clearErrorLogs(props.taskId)
 }
 
 // 进入任务列表时校验项目摘要是否已存在
@@ -446,30 +353,30 @@ async function checkExistingSummary() {
   try {
     const result = await reportStore.getProjectSummary(pid)
     if (result?.summary) {
-      const node = rootTask.value.children?.find(n => n.id === 'project_summary')
+      const node = reportStore.tasks[props.taskId]?.pipelineRootTask?.children?.find(n => n.id === 'project_summary')
       if (node && node.status === 'pending') {
         node.status = 'completed'
-        recalcProgress()
-        syncStore()
+        reportStore.recalcProgress(props.taskId)
       }
     }
   } catch (e) {
-    // 摘要不存在，保持 pending 状态
   }
 }
 
 async function runNode(nodeId: string) {
   if (running.value) return
+  const root = reportStore.tasks[props.taskId]?.pipelineRootTask
+  if (!root) return
   const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
     if (node.id === nodeId) return node
     if (node.children) for (const c of node.children) { const r = find(c); if (r) return r }
     return undefined
   }
-  const node = find(rootTask.value)
+  const node = find(root)
   if (!node) return
 
-  running.value = true
-  isPaused.value = false
+  reportStore.setPipelineRunning(props.taskId, true)
+  reportStore.setPipelinePaused(props.taskId, false)
 
   if (nodeId === 'validation') {
     const mid = settingsStore.models.find(m => m.isDefault)?.id
@@ -486,10 +393,10 @@ async function runNode(nodeId: string) {
         node.error = e.message || 'Connection failed'
       }
     }
-    recalcProgress()
+    reportStore.recalcProgress(props.taskId)
   } else if (nodeId === 'project_summary') {
     const pid = projectStore.selectedProjectId
-    if (!pid) { node.status = 'skipped'; recalcProgress(); syncStore(); return }
+    if (!pid) { node.status = 'skipped'; reportStore.recalcProgress(props.taskId); return }
     try {
       node.status = 'running'
       await reportStore.getReadmeContent(pid)
@@ -498,48 +405,36 @@ async function runNode(nodeId: string) {
       node.status = result?.summary ? 'completed' : 'error'
       if (!result?.summary) node.error = 'Empty summary'
     } catch (e: any) { node.status = 'error'; node.error = e.message }
-    recalcProgress()
+    reportStore.recalcProgress(props.taskId)
   } else if (nodeId === 'community_analysis') {
     node.status = 'running'
     try {
       const levels = await reportStore.getCascadeLevels(props.taskId, 'CALL')
       node.status = (levels?.levels?.length) ? 'completed' : 'skipped'
     } catch { node.status = 'skipped' }
-    recalcProgress()
+    reportStore.recalcProgress(props.taskId)
   } else if (nodeId === 'overall_architecture') {
     node.status = 'pending'
     node.error = undefined
     await runStep(node)
   }
 
-  running.value = false
-  recalcProgress()
-  syncStore()
+  reportStore.setPipelineRunning(props.taskId, false)
+  reportStore.recalcProgress(props.taskId)
 }
 
-async function restoreFromDb() {
-  const saved = pipelineStore.getTaskState(props.taskId)
-  if (saved) return
-  const dbState = await pipelineStore.loadStateFromDb(props.taskId)
-  if (dbState) {
-    rootTask.value = dbState.rootTask ? restoreTree(dbState) : createInitialTree()
-    running.value = false
-    overallProgress.value = dbState.progress ?? 0
-    isPaused.value = false
-    stepOutputs.value = dbState.stepOutputs || {}
+watch(() => reportStore.tasks[props.taskId]?.pendingStepRun, (nodeId) => {
+  if (nodeId && !running.value) {
+    runNode(nodeId)
+    reportStore.setPendingStepRun(props.taskId, null)
   }
-}
+}, { immediate: true })
 
 onMounted(() => {
-  restoreFromDb()
-  syncStore()
-  pipelineStore.registerControls({ runAll, runNode, pause, resume, reset, stop })
+  if (!reportStore.tasks[props.taskId]?.pipelineRootTask) {
+    reportStore.initPipeline(props.taskId, createInitialTree())
+  }
   checkExistingSummary()
-})
-
-onUnmounted(() => {
-  syncStore()
-  pipelineStore.unregisterControls()
 })
 </script>
 

@@ -212,9 +212,21 @@ function renderContent(markdown) {
     );
   });
 
+  // Normalize diagram code (sync with SubDocViewer.vue normalizeDiagramCode)
+  function normalizeMermaid(code) {
+    return code
+      .replace(/\b([A-Za-z_]\w*)\s+\[/g, '$1[')
+      .replace(/(\bsubgraph\s+\w+(?:\.\w+)*)\s+(\[)/g, '$1$2')
+      .replace(/\[([^\]\[]*?)\(([^()]*)\)([^\]\[]*?)\]/g, '[$1$2$3]')
+      .replace(/^\s*style\s+.*$/gm, '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/:::\w+/g, '')
+      .replace(/[ \t]+$/gm, '');
+  }
+
   // Render Mermaid
   document.querySelectorAll('pre code.language-mermaid').forEach(pre => {
-    const code = pre.textContent;
+    let code = normalizeMermaid(pre.textContent);
     const container = document.createElement('div');
     container.className = 'mermaid-container';
     const mermaidDiv = document.createElement('div');
@@ -228,7 +240,7 @@ function renderContent(markdown) {
     try { mermaid.run({ nodes: diagrams }); } catch(e) { console.warn('Mermaid error:', e); }
   }
 
-  // Render PlantUML
+  // Render PlantUML (走后端 plantuml_service.py 完整链路)
   document.querySelectorAll('pre code.language-plantuml').forEach(pre => {
     const code = pre.textContent;
     const container = document.createElement('div');

@@ -799,7 +799,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
         "is_builtin": 1,
         "system_prompt": (
             "你是一个代码架构分析专家。请根据提供的模块结构信息，分析该模块的功能和架构含义。\n"
-            "注意：分析对象是代码中的一个功能模块（module/component），不是社交组件。\n"
+            "注意：分析对象是代码中的一个功能模块（module/component）。\n"
             "返回 JSON 格式，包含 name、summary、mermaid、plantuml 四个字段。\n"
             "用中文回答。\n\n"
             "字段说明:\n"
@@ -868,15 +868,18 @@ class PromptManager:
         self._init_builtins()
 
     def _init_builtins(self):
-        """确保内置模板已插入数据库"""
+        """确保内置模板已插入数据库，代码变更时同步更新"""
         main_db = self.multi_db.main_db
         for tmpl in BUILTIN_TEMPLATES:
             existing = main_db.fetchone(
-                "SELECT id FROM llm_prompt_templates WHERE id = ?", (tmpl["id"],)
+                "SELECT id, system_prompt, user_prompt_template, output_schema_json, tools_json FROM llm_prompt_templates WHERE id = ?", (tmpl["id"],)
             )
             if not existing:
                 self._insert_template(tmpl)
                 logger.info(f"[PromptManager] Builtin template '{tmpl['name']}' inserted")
+            elif self._template_changed(tmpl, existing):
+                self._update_template(tmpl)
+                logger.info(f"[PromptManager] Builtin template '{tmpl['name']}' updated")
 
     def _insert_template(self, data: Dict[str, Any]):
         main_db = self.multi_db.main_db
@@ -897,6 +900,40 @@ class PromptManager:
                 data.get("output_schema_json"), data.get("output_example"),
                 data.get("variables_json"),
                 _now(), _now(),
+            ),
+        )
+        main_db.commit()
+
+    def _template_changed(self, code_tmpl: Dict[str, Any], db_row: Dict[str, Any]) -> bool:
+        """检查内置模板在代码中是否已变更"""
+        fields = ['system_prompt', 'user_prompt_template', 'output_schema_json', 'tools_json']
+        for f in fields:
+            code_val = (code_tmpl.get(f) or '').strip()
+            db_val = (db_row.get(f) or '').strip()
+            if code_val != db_val:
+                return True
+        return False
+
+    def _update_template(self, tmpl: Dict[str, Any]):
+        """用代码版本覆盖数据库中同 ID 的内置模板"""
+        main_db = self.multi_db.main_db
+        main_db.execute(
+            """UPDATE llm_prompt_templates SET
+               name=?, mode=?, module_type=?, category=?, is_builtin=?,
+               system_prompt=?, user_prompt_template=?,
+               tools_json=?, tool_strategy=?,
+               output_schema_json=?, output_example=?,
+               variables_json=?, updated_at=?
+               WHERE id=?""",
+            (
+                tmpl["name"], tmpl["mode"],
+                tmpl.get("module_type"), tmpl.get("category", "general"),
+                tmpl.get("is_builtin", 0),
+                tmpl.get("system_prompt"), tmpl.get("user_prompt_template"),
+                tmpl.get("tools_json"), tmpl.get("tool_strategy"),
+                tmpl.get("output_schema_json"), tmpl.get("output_example"),
+                tmpl.get("variables_json"),
+                _now(), tmpl["id"],
             ),
         )
         main_db.commit()

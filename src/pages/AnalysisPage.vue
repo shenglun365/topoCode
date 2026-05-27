@@ -108,29 +108,47 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   const pid = projectStore.selectedProjectId
   if (!pid) return
   try {
-    const detail = await window.api.report.getLevelCommunityDetail({
-      projectId: pid, taskId,
-      level: 'L0', edgeType,
-    })
-    const community = detail.communities.find((c: any) => c.communityId === communityId)
-    if (!community) return
-    const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
-    const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
-    const md = [
-      `# 社区: ${communityId}`,
-      '',
-      `**层级**: L0 | **边缘类型**: ${edgeType}`,
-      `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
-      '',
-      '## 节点列表',
-      nodeLines || '（空）',
-      '',
-      '## 边列表',
-      edgeLines || '（空）',
-    ].join('\n')
+    const llmResult = await window.api.analysis.getCommunityResult({
+      taskId, edgeType, commLv: 'L0', commId: communityId,
+    }).catch(() => null)
+    const parts: string[] = []
+    if (llmResult?.name || llmResult?.summary) {
+      parts.push(`# 社区: ${llmResult.name || communityId}`)
+      parts.push('')
+      parts.push(`**ID**: ${communityId}`)
+      parts.push('')
+      parts.push(llmResult.summary || '')
+      if (llmResult.mermaid) {
+        parts.push('', '```mermaid', llmResult.mermaid, '```')
+      }
+      if (llmResult.plantuml) {
+        parts.push('', '```plantuml', llmResult.plantuml, '```')
+      }
+    } else {
+      const detail = await window.api.report.getLevelCommunityDetail({
+        projectId: pid, taskId,
+        level: 'L0', edgeType,
+      })
+      const community = detail.communities.find((c: any) => c.communityId === communityId)
+      if (!community) return
+      const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
+      const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
+      parts.push(
+        `# 社区: ${communityId}`,
+        '',
+        `**层级**: L0 | **边缘类型**: ${edgeType}`,
+        `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
+        '',
+        '## 节点列表',
+        nodeLines || '（空）',
+        '',
+        '## 边列表',
+        edgeLines || '（空）',
+      )
+    }
     handleOpenMD({
       taskId,
-      content: md,
+      content: parts.join('\n'),
       title: communityId,
     })
   } catch (e) {

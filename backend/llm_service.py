@@ -458,10 +458,10 @@ class LLMService:
                                 'success': False,
                             },
                         })
-            elif mode != 'structured':
+            else:
                 self._publish('llm', 'done', {
                     'requestId': request_id,
-                    'content': full_content,
+                    'content': full_content or '',
                 })
 
             # ===== 计算延迟 =====

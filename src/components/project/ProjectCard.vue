@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
@@ -59,6 +59,8 @@ const menuPosition = ref({ x: 0, y: 0 })
 const showDeleteConfirm = ref(false)
 const showClearCacheConfirm = ref(false)
 const isClearingCache = ref(false)
+const clearCacheTimedOut = ref(false)
+const clearCacheTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 // 修改信息弹窗
 const showEditDialog = ref(false)
@@ -298,6 +300,10 @@ async function handleClearCache() {
 async function confirmClearCache() {
   showClearCacheConfirm.value = false
   isClearingCache.value = true
+  clearCacheTimedOut.value = false
+  clearCacheTimer.value = setTimeout(() => {
+    clearCacheTimedOut.value = true
+  }, 15000)
   try {
     const result = await projectStore.clearProjectCache(props.project.id)
     console.group(`${t('project.clearCache')} 完成`)
@@ -312,9 +318,28 @@ async function confirmClearCache() {
   } catch (err: any) {
     console.error('Failed to clear cache:', err)
   } finally {
+    if (clearCacheTimer.value) {
+      clearTimeout(clearCacheTimer.value)
+      clearCacheTimer.value = null
+    }
     isClearingCache.value = false
   }
 }
+
+function closeClearCacheOverlay() {
+  if (clearCacheTimer.value) {
+    clearTimeout(clearCacheTimer.value)
+    clearCacheTimer.value = null
+  }
+  isClearingCache.value = false
+}
+
+onUnmounted(() => {
+  if (clearCacheTimer.value) {
+    clearTimeout(clearCacheTimer.value)
+    clearCacheTimer.value = null
+  }
+})
 
 async function handleCheckChanges() {
   hideMenu()
@@ -551,6 +576,27 @@ async function handleCheckChanges() {
       :confirm-label="t('project.clearCache')"
       @confirm="confirmClearCache"
     />
+
+    <!-- 清除缓存处理中遮罩 -->
+    <Teleport to="body">
+      <div
+        v-if="isClearingCache"
+        class="cache-processing-overlay"
+      >
+        <div class="cache-processing-card">
+          <div class="cache-processing-spinner" />
+          <div class="cache-processing-title">{{ t('project.clearingCache') }}</div>
+          <div class="cache-processing-message">{{ t('project.clearingCacheHint') }}</div>
+          <button
+            v-if="clearCacheTimedOut"
+            class="btn btn-primary"
+            @click="closeClearCacheOverlay"
+          >
+            {{ t('common.close') }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 修改信息弹窗 -->
     <ConfirmDialog
@@ -843,5 +889,44 @@ function languageBadge(lang: string): string {
   height: 16px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.cache-processing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cache-processing-card {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  padding: 32px 40px;
+  text-align: center;
+  min-width: 280px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.cache-processing-spinner {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 16px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.cache-processing-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.cache-processing-message {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
 }
 </style>

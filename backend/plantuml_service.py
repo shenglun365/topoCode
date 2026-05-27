@@ -133,8 +133,10 @@ def _convert_mindmaps(code: str) -> str:
 
 
 def _sanitize_mermaid(code: str) -> str:
-    """修复 LLM 输出的常见 Mermaid 语法错误"""
+    """修复 LLM 输出的常见 Mermaid 语法错误（与前端 normalizeDiagramCode 保持同步）"""
     import re
+    # Call_0 [Label] → Call_0[Label]（节点 ID 后误加空格）
+    code = re.sub(r'\b([A-Za-z_]\w*)\s+\[', r'\1[', code)
     # subgraph Name [Label] → subgraph Name[Label] (LLM 误加空格)
     code = re.sub(
         r'(\bsubgraph\s+\w+(?:\.\w+)*)\s+(\[)',
@@ -150,6 +152,12 @@ def _sanitize_mermaid(code: str) -> str:
     )
     # 剥离 style 指令行 (graph TD 不支持, 此版本为弃用语法)
     code = re.sub(r'^\s*style\s+.*$', '', code, flags=re.MULTILINE)
+    # 节点括号内残留 <br> 标签（LLM 有时混入 HTML）
+    code = re.sub(r'<br\s*\/?>', ' ', code, flags=re.IGNORECASE)
+    # 剥离 Mermaid 特有语法: A[Label]:::className → A[Label]（PlantUML 中非法）
+    code = re.sub(r':::\w+', '', code)
+    # 行尾多余空格: "subgraph ID[Label] \n" → "subgraph ID[Label]\n"
+    code = re.sub(r'[ \t]+$', '', code, flags=re.MULTILINE)
     return code
 
 

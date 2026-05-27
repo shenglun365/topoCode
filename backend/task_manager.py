@@ -167,6 +167,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             project_db.execute("DELETE FROM graph_node WHERE task_id = ?", (tid,))
             project_db.execute("DELETE FROM graph_doc WHERE task_id = ?", (tid,))
             project_db.execute("DELETE FROM community_hierarchy WHERE task_id = ?", (tid,))
+            project_db.execute("DELETE FROM community_llm_results WHERE task_id = ?", (tid,))
             project_db.commit()
             logger.info(f"[analysis.deleteTask] Cleared analysis data for task {tid} in project {project_id}")
         except Exception as e:
@@ -196,6 +197,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         deleted_tables = {}
         tables_to_clear = [
             "base_node", "graph_node", "graph_doc", "community_hierarchy",
+            "community_llm_results",
             "ast_data", "dependencies", "call_chains", "components", "ai_qa"
         ]
         for table in tables_to_clear:

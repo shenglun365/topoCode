@@ -7,7 +7,7 @@
  * 自动提取并渲染 ```mermaid / ```plantuml 代码块.
  */
 
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PencilIcon,
@@ -93,21 +93,52 @@ function injectDiagram(block: DiagramBlock) {
   }
 }
 
+/**
+ * 标准化 LLM 生成的图表代码，统一规则应用于应用内预览与 web 浏览。
+ * 规则与 backend/plantuml_service.py _sanitize_mermaid / render_plantuml 保持一致。
+ */
+function normalizeDiagramCode(lang: string, code: string): string {
+  if (lang === 'mermaid') {
+    // 1. Call_0 [Label] → Call_0[Label]（节点 ID 后误加空格）
+    code = code.replace(/\b([A-Za-z_]\w*)\s+\[/g, '$1[')
+    // 2. subgraph Name [Label] → subgraph Name[Label]
+    code = code.replace(/(\bsubgraph\s+\w+(?:\.\w+)*)\s+(\[)/g, '$1$2')
+    // 3. 删除节点标签内嵌套括号: A[ip.h (path.c)] → A[ip.h path.c]
+    code = code.replace(/\[([^\]\[]*?)\(([^()]*)\)([^\]\[]*?)\]/g, '[$1$2$3]')
+    // 4. 剥离 style 指令行（graph TD 不支持）
+    code = code.replace(/^\s*style\s+.*$/gm, '')
+    // 5. 节点括号内残留 <br> 标签（LLM 有时混入 HTML）
+    code = code.replace(/<br\s*\/?>/gi, ' ')
+    // 6. 剥离 Mermaid 特有语法: A[Label]:::className → A[Label]（PlantUML 中非法）
+    code = code.replace(/:::\w+/g, '')
+    // 7. 行尾多余空格: "subgraph ID[Label] \n" → "subgraph ID[Label]\n"（否则 Mermaid 误将空格当下一个 token）
+    code = code.replace(/[ \t]+$/gm, '')
+    return code
+  }
+  if (lang === 'plantuml') {
+    // PlantUML 走后端 plantuml_service.py 完整链路（encode_plantuml → _sanitize_plantuml）
+    // 前端仅做空白符清理
+    return code
+  }
+  return code
+}
+
 async function renderAllDiagrams() {
   if (diagramBlocks.value.length === 0) return
 
   for (const block of diagramBlocks.value) {
     block.loading = true
     block.error = undefined
+    const cleaned = normalizeDiagramCode(block.lang, block.code)
     try {
       let svg = ''
       if (block.lang === 'mermaid') {
         await ensureMermaid()
         const id = `sd-${block.id}`
-        const result = await mermaidApi.render(id, block.code)
+        const result = await mermaidApi.render(id, cleaned)
         svg = result.svg
       } else {
-        const result = await window.api.render.renderPlantuml({ code: block.code, format: 'svg' })
+        const result = await window.api.render.renderPlantuml({ code: cleaned, format: 'svg' })
         svg = atob(result.data)
       }
       block.svg = svg
@@ -264,10 +295,40 @@ const renderedContent = computed(() => {
   // 组件导航链接: [text](##community:edgeType:communityId)
   html = html.replace(/\[([^\]]+)\]\(##community:([^:]+):([^)]+)\)/g, '<a href="#" class="community-link" data-edge-type="$2" data-community-id="$3">$1</a>')
 
-  // 简单 Markdown 处理
-  html = html.replace(/^### (.*$)/gm, '<h3>$1</h3>')
-  html = html.replace(/^## (.*$)/gm, '<h2>$1</h2>')
-  html = html.replace(/^# (.*$)/gm, '<h1>$1</h1>')
+  // 从文档中提取 TOC 锚点映射：[链接文本] → 锚点 ID
+  const tocAnchorMap = new Map<string, string>()
+  html.replace(/\[([^\]]+)\]\(#([^)]+)\)/g, (_m: string, text: string, id: string) => {
+    tocAnchorMap.set(text.trim(), id)
+    return _m
+  })
+
+  // 根据 TOC 链接文本为标题查找匹配的锚点 ID
+  function findAnchor(headingText: string): string | undefined {
+    // 优先精确匹配
+    if (tocAnchorMap.has(headingText)) return tocAnchorMap.get(headingText)
+    // 按括号内社区 ID 匹配（如 comm-bea7b173-call-L0-0000）
+    const commMatch = headingText.match(/\(([^)]+)\)$/)
+    if (commMatch) {
+      const commId = commMatch[1].toLowerCase()
+      for (const [tocText, anchorId] of tocAnchorMap) {
+        if (tocText.toLowerCase().includes(commId)) return anchorId
+      }
+    }
+    return undefined
+  }
+
+  html = html.replace(/^### (.*$)/gm, (_m: string, t: string) => {
+    const id = findAnchor(t) || ''
+    return id ? `<h3 id="${id}">${t}</h3>` : `<h3>${t}</h3>`
+  })
+  html = html.replace(/^## (.*$)/gm, (_m: string, t: string) => {
+    const id = findAnchor(t) || ''
+    return id ? `<h2 id="${id}">${t}</h2>` : `<h2>${t}</h2>`
+  })
+  html = html.replace(/^# (.*$)/gm, (_m: string, t: string) => {
+    const id = findAnchor(t) || ''
+    return id ? `<h1 id="${id}">${t}</h1>` : `<h1>${t}</h1>`
+  })
   html = html.replace(/^---+\s*$/gm, '<hr>')
   html = html.replace(/^\*\s+/gm, '• ')
   html = html.replace(/^\-\s+/gm, '• ')
@@ -292,6 +353,20 @@ function onDocContentClick(e: MouseEvent) {
 // 是否有图表
 const hasDiagrams = computed(() => diagramBlocks.value.length > 0)
 
+// 哈希滚动画板：当 TOC 锚点 ID 不在 DOM 中时，按标题文本模糊查找
+function scrollToHash(targetId: string) {
+  const el = document.getElementById(targetId)
+  if (el) { el.scrollIntoView(); return }
+  // fallback: 用目标 ID 做分隔符匹配标题文本
+  const targetStr = targetId.replace(/[-]+/g, ' ').toLowerCase()
+  document.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+    const slug = h.textContent!.trim().toLowerCase().replace(/[^\w\u4e00-\u9fff]+/g, ' ')
+    if (slug === targetStr) {
+      h.scrollIntoView()
+    }
+  })
+}
+
 onMounted(async () => {
   loadDoc()
   try {
@@ -305,6 +380,22 @@ onMounted(async () => {
 watch(() => props.subDocId, () => {
   loadDoc()
 })
+
+// TOC 锚点回退：文档加载后如果哈希未匹配，尝试文本匹配
+watch(loading, (v) => {
+  if (!v && location.hash) {
+    nextTick(() => scrollToHash(decodeURIComponent(location.hash.slice(1))))
+  }
+})
+
+// 监听 hashchange，拦截用户点击 TOC 链接
+function onHashChange() {
+  if (location.hash) {
+    scrollToHash(decodeURIComponent(location.hash.slice(1)))
+  }
+}
+onMounted(() => window.addEventListener('hashchange', onHashChange))
+onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
 </script>
 
 <template>

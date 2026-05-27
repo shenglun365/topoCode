@@ -17,6 +17,7 @@ tree-sitter-java==0.23.5
 
 # 图计算 (调用链/依赖图/知识图谱)
 networkx>=3.0
+python-louvain>=0.16
 
 # 向量数据库 (可选 - P3)
 # chromadb>=0.4.0

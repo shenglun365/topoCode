@@ -34,7 +34,8 @@ try {
   }
 
   // 比对 requirements.txt 的哈希，未变化则跳过安装
-  const markerFile = path.join(backendDir, '.pip-installed')
+  // 标记文件放在项目 build/ 目录下，避免被构建输出清理
+  const markerFile = path.join(rootDir, 'build', '.pip-cache-installed')
   const reqHash = crypto.createHash('sha256').update(fs.readFileSync(requirementsFile)).digest('hex')
   if (fs.existsSync(markerFile)) {
     const prevHash = fs.readFileSync(markerFile, 'utf8').trim()
@@ -45,8 +46,8 @@ try {
   }
 
   execSync(
-    `pip3 install --target "${backendDir}" --upgrade -r "${requirementsFile}"`,
-    { stdio: 'inherit' }
+    `pip3 install --target "${backendDir}" -r "${requirementsFile}"`,
+    { stdio: 'inherit', timeout: 300000 }
   )
   // 写入当前哈希作为标记
   fs.writeFileSync(markerFile, reqHash)

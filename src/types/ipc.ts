@@ -428,7 +428,8 @@ export interface IPCAPI {
     getCommunityResult: (params: { taskId: string; edgeType: string; commLv: string; commId: string }) => Promise<any>
     listCommunityResults: (taskId: string, edgeType: string) => Promise<{ results: Array<{
       id: number; taskId: string; edgeType: string; commLv: string; commId: string;
-      name: string | null; summary: string | null; nameManual: string | null;
+      name: string | null; summary: string | null; mermaid: string | null; plantuml: string | null;
+      nameManual: string | null;
     }> }>
     updateCommunityName: (params: { taskId: string; edgeType: string; commLv: string; commId: string; name: string }) => Promise<{ success: boolean }>
     onProgress: (cb: (data: TaskProgressEvent) => void) => void

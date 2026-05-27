@@ -7,9 +7,7 @@ import {
   FolderIcon,
   RectangleGroupIcon,
   SparklesIcon,
-  ArrowPathIcon,
   ExclamationTriangleIcon,
-  Cog6ToothIcon,
   HashtagIcon,
   ListBulletIcon,
 } from '@heroicons/vue/24/outline'
@@ -18,11 +16,10 @@ import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useSettingsStore } from '@/stores/settings'
 import { useFuncGroupStore } from '@/stores/funcGroup'
-import { usePipelineStore } from '@/stores/pipeline'
-import { useReportStore } from '@/stores/report'
+
+import { useReportStore, type CommunityItem } from '@/stores/report'
 import { ipc } from '@/services/ipc'
 import ReportGenerationPipeline from './ReportGenerationPipeline.vue'
-import ReportMDViewer from './ReportMDViewer.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
@@ -31,7 +28,6 @@ const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
 const settingsStore = useSettingsStore()
 const funcGroup = useFuncGroupStore()
-const pipelineStore = usePipelineStore()
 const reportStore = useReportStore()
 
 const props = defineProps<{
@@ -59,40 +55,41 @@ const hasModel = computed(() => settingsStore.models.some(m => m.isDefault))
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
 const task = computed(() => taskDetail.value)
 
+const runtimeCommunities = computed(() => {
+  const coms = reportStore.tasks[props.taskId]?.communities || []
+  return coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
+})
+
 const communityAnalysisProgress = computed(() => {
-  const items = reportStore.getCommunityData(props.taskId, 'CALL')?.levels?.[0]?.items || []
-  if (items.length === 0) return 0
-  const results = reportStore.getCommunityResults(props.taskId, 'CALL')
-  const done = items.filter((item: any) => !!results[item.id]?.name).length
-  return Math.round((done / items.length) * 100)
+  const allL0 = (reportStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0')
+  if (allL0.length === 0) return 0
+  const done = allL0.filter(c => c.status === 'completed').length
+  return Math.round((done / allL0.length) * 100)
 })
 
 const hasArchitectureReport = computed(() => {
   if (reportStore.generatedReports[props.taskId]) return true
-  const state = pipelineStore.getTaskState(props.taskId)
-  if (state?.stepOutputs?.overall_architecture) return true
   return !!reportStore.dbReportExists[props.taskId]
 })
 
 const commStats = computed(() => {
   const items = communityItems.value
-  const nodes = items.map((item: any) => item.nodeCount || 0)
-  const quals = items.map((item: any) => item.qualityScore).filter((q: any) => q != null)
+  const nodes = items.map(c => c.nodeCount || 0)
+  const quals = items.map(c => c.qualityScore).filter((q): q is number => q != null)
   return {
     count: items.length,
     maxNodes: nodes.length ? Math.max(...nodes) : 0,
     minNodes: nodes.length ? Math.min(...nodes) : 0,
-    avgQuality: quals.length ? (quals.reduce((a: number, b: number) => a + b, 0) / quals.length) : 0,
+    avgQuality: quals.length ? (quals.reduce((a, b) => a + b, 0) / quals.length) : 0,
   }
 })
 
 const communityItems = computed(() => {
-  const items = commData.value?.levels?.[0]?.items || []
   const q = communitySearch.value.trim().toLowerCase()
-  if (!q) return items
-  return items.filter((item: any) => {
-    const id = item.id.toLowerCase()
-    const name = (commResults.value[item.id]?.name || '').toLowerCase()
+  if (!q) return runtimeCommunities.value
+  return runtimeCommunities.value.filter(c => {
+    const id = c.communityId.toLowerCase()
+    const name = (c.name || '').toLowerCase()
     return id.includes(q) || name.includes(q)
   })
 })
@@ -102,10 +99,6 @@ const pagedCommunityItems = computed(() => {
   const start = (communityPage.value - 1) * communityPageSize
   return communityItems.value.slice(start, start + communityPageSize)
 })
-
-const commData = computed(() => reportStore.getCommunityData(props.taskId, commEdgeType.value))
-const commResults = computed(() => reportStore.getCommunityResults(props.taskId, commEdgeType.value))
-const generatedReport = computed(() => reportStore.generatedReports[props.taskId])
 
 watch(communitySearch, () => { communityPage.value = 1 })
 
@@ -123,19 +116,16 @@ function formatCommId(item: { id: string; level?: string }): string {
   return `${level}-${num}`
 }
 
-function commName(item: { id: string }): string {
-  const result = commResults.value[item.id]
-  const raw = result?.name || result?.name_manual || ''
-  const name = raw && raw !== item.id ? raw : ''
+function commName(item: CommunityItem): string {
+  const name = item.name && item.name !== item.communityId ? item.name : ''
   if (name) return name.length > 10 ? name.slice(0, 10) + '…' : name
   return formatCommId(item)
 }
 
-async function openCommunityDoc(item: any) {
+async function openCommunityDoc(item: CommunityItem) {
   try {
-    const result = commResults.value[item.id]
-    if (result?.name || result?.summary) {
-      handleCommunityMD({ communityId: item.id, name: result.name || result.name_manual || formatCommId(item), summary: result.summary || '', mermaid: result.mermaid, plantuml: result.plantuml })
+    if (item.name || item.summary) {
+      handleCommunityMD({ communityId: item.communityId, name: item.name || formatCommId(item), summary: item.summary || '', mermaid: item.mermaid, plantuml: item.plantuml })
       return
     }
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
@@ -144,12 +134,12 @@ async function openCommunityDoc(item: any) {
       projectId: pid, taskId: props.taskId,
       level: item.level || 'L0', edgeType: commEdgeType.value,
     })
-    const community = detail.communities.find((c: any) => c.communityId === item.id)
+    const community = detail.communities.find((c: any) => c.communityId === item.communityId)
     if (!community) return
     const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
     const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
     const md = [
-      `# 社区: ${item.id}`,
+      `# 社区: ${item.communityId}`,
       '',
       `**层级**: ${item.level || 'L0'} | **边缘类型**: ${commEdgeType.value}`,
       `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
@@ -206,7 +196,7 @@ async function loadData() {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
       fileStats.value = await analysisStore.scanFileStats(pid)
     }
-    await reportStore.loadCommunityData(props.taskId)
+    await reportStore.loadCommunities(props.taskId, pid || '')
     await reportStore.checkReportExists(props.taskId)
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
@@ -252,17 +242,6 @@ async function handleReportGenerated(content: string) {
   }
 }
 
-function handleViewReport() {
-  const content = reportStore.generatedReports[props.taskId]
-  if (content) {
-    emit('open-md', {
-      taskId: props.taskId,
-      content,
-      title: `${taskDetail.value?.name || '报告'} · 完整架构分析`,
-    })
-  }
-}
-
 function escapeTbl(val: any): string {
   return String(val ?? '')
     .replace(/\|/g, '\\|')
@@ -277,20 +256,20 @@ function escapeTbl(val: any): string {
 
 function buildCommunityAppendix(): string {
   const parts: string[] = ['## 组件附录', '']
-  const edges: { key: string; label: string; data: any; results: any }[] = [
-    { key: 'CALL', label: '调用', data: reportStore.getCommunityData(props.taskId, 'CALL'), results: reportStore.getCommunityResults(props.taskId, 'CALL') },
-    { key: 'INCLUDE', label: '依赖', data: reportStore.getCommunityData(props.taskId, 'INCLUDE'), results: reportStore.getCommunityResults(props.taskId, 'INCLUDE') },
+  const edges: { key: 'CALL' | 'INCLUDE'; label: string }[] = [
+    { key: 'CALL', label: '调用' },
+    { key: 'INCLUDE', label: '依赖' },
   ]
+  const coms = reportStore.tasks[props.taskId]?.communities || []
   let hasItems = false
   parts.push('| 类型 | 名称 |')
   parts.push('|------|------|')
   for (const et of edges) {
-    const items = et.data?.levels?.[0]?.items || []
+    const items = coms.filter(c => c.level === 'L0' && c.edgeType === et.key)
     for (const item of items) {
       hasItems = true
-      const result = et.results[item.id]
-      const name = escapeTbl(result?.name || result?.name_manual || item.id)
-      parts.push(`| ${et.label} | [${name}](##community:${et.key}:${item.id}) |`)
+      const name = escapeTbl(item.name || item.communityId)
+      parts.push(`| ${et.label} | [${name}](##community:${et.key}:${item.communityId}) |`)
     }
   }
   if (!hasItems) {
@@ -301,8 +280,7 @@ function buildCommunityAppendix(): string {
 }
 
 async function openOverallArchitecture() {
-  const state = pipelineStore.getTaskState(props.taskId)
-  let content = reportStore.generatedReports[props.taskId] || state?.stepOutputs?.overall_architecture
+  let content = reportStore.generatedReports[props.taskId]
   if (!content) {
     try {
       const docs = await ipc.report.listSubDocs({ taskId: props.taskId, commId: 'overall' })
@@ -489,7 +467,7 @@ watch(() => props.taskId, loadData)
 
         <!-- 社区概要 -->
         <section
-          v-if="commData"
+          v-if="runtimeCommunities.length > 0"
           class="home-section"
         >
           <div class="section-header">
@@ -542,8 +520,8 @@ watch(() => props.taskId, loadData)
                 v-for="item in pagedCommunityItems"
                 :key="item.id"
                 class="community-chip"
-                :class="{ 'has-result': !!(commResults[item.id]?.name) && commResults[item.id]?.name !== item.id }"
-                :title="`${item.id} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
+                :class="{ 'has-result': item.status === 'completed' && !!(item.name) && item.name !== item.communityId }"
+                :title="`${item.communityId} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
                 @click="openCommunityDoc(item)"
               >
                 <span class="chip-name">{{ commName(item) }}</span>
@@ -626,14 +604,7 @@ watch(() => props.taskId, loadData)
               <DocumentTextIcon class="w-4 h-4" />
               <span>{{ t('report.viewOverallArchitecture') }}</span>
             </button>
-            <button
-              v-if="generatedReport"
-              class="btn btn-secondary"
-              @click="handleViewReport"
-            >
-              <DocumentTextIcon class="w-4 h-4" />
-              <span>{{ t('report.viewReport') }}</span>
-            </button>
+
           </div>
 
           <!-- 生成流水线（隐藏，后台同步） -->
