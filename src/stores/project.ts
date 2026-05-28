@@ -10,6 +10,7 @@ import { ref, computed } from 'vue'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import { useReportStore } from '@/stores/report'
+import { useDebugStore } from '@/stores/debug'
 import { useSettingsStore } from '@/stores/settings'
 import { ipc } from '@/services/ipc'
 
@@ -37,6 +38,10 @@ export interface HomeTab {
   content?: string  // 内联内容（AI 分析结果等，无 subDocId 时使用）
   parentReportId?: string  // 父报告 tab ID
   hasUnsavedChanges?: boolean  // 未保存标记
+  // child-analysis / subdoc parent context
+  parentLevel?: string
+  parentCommId?: string
+  parentEdgeType?: string
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -192,7 +197,7 @@ export const useProjectStore = defineStore('project', () => {
     console.log('[ProjectStore] getFileTree result:', JSON.stringify(result).substring(0, 200))
     // 记录到 debug store
     try {
-      const debugStore = (await import('@/stores/debug')).useDebugStore()
+      const debugStore = useDebugStore()
       debugStore.log('projectStore', `[getFileTree] id=${id} fromPath="${fromPath}" → ${result.length} nodes`)
       if (result.length > 0) {
         debugStore.log('projectStore', `  → nodes: ${result.map((n: any) => `${n.type}:${n.name}`).join(', ')}`)

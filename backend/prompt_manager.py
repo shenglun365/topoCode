@@ -739,7 +739,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "## L0 依赖分析数据 (INCLUDE)\n"
             "以下为 L0 层级的所有组件（社区）的依赖关系数据：\n"
             "{includeCommunityDetail}\n\n"
-            "请生成一份完整的架构分析文档。"
+             "{userAdditionalPrompt}\n\n请生成一份完整的架构分析文档。"
         ),
         "variables_json": json.dumps([
             {"name": "projectName", "type": "string", "description": "项目名称", "required": True},
@@ -751,6 +751,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             {"name": "communityNameMap", "type": "string", "description": "社区 ID→名称映射", "required": True},
             {"name": "callCommunityDetail", "type": "string", "description": "L0 调用分析社区详情", "required": True},
             {"name": "includeCommunityDetail", "type": "string", "description": "L0 依赖分析社区详情", "required": True},
+            {"name": "userAdditionalPrompt", "type": "string", "description": "用户补充提示词", "required": False},
         ]),
     },
 
@@ -820,7 +821,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             "## 边关系（调用/依赖）\n"
             "{edgeListWithDetails}\n\n"
             "{parentSummaries}\n\n"
-            "请分析这个组件，返回 JSON 格式的 name、summary、mermaid、plantuml。"
+             "{userAdditionalPrompt}\n\n请分析这个组件，返回 JSON 格式的 name、summary、mermaid、plantuml。"
         ),
         "output_schema_json": json.dumps({
             "type": "object",
@@ -846,6 +847,7 @@ BUILTIN_TEMPLATES: List[Dict[str, Any]] = [
             {"name": "nodeListWithPaths", "type": "string", "description": "节点列表（含源码路径和扩展名）", "required": True},
             {"name": "edgeListWithDetails", "type": "string", "description": "边关系列表（显示名已去前缀）", "required": True},
             {"name": "parentSummaries", "type": "string", "description": "父组件摘要 + 项目上下文（README/依赖等）", "required": False},
+            {"name": "userAdditionalPrompt", "type": "string", "description": "用户补充提示词", "required": False},
         ]),
     },
 ]

@@ -1259,7 +1259,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(project_id)
 
         rows = project_db.execute(
-            """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
+            """SELECT DISTINCT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
                FROM community_hierarchy h
                LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
                WHERE h.task_id=? AND h.edge_type=?

@@ -10,13 +10,15 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  PencilIcon,
   DocumentArrowDownIcon,
   ArrowLeftIcon,
   GlobeAltIcon,
+  SparklesIcon,
+  XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useComponentId } from '@/composables/useComponentId'
 import { useReportStore } from '@/stores/report'
+import ChildSection from '@/components/report/ChildSection.vue'
 const { showId, componentId } = useComponentId('RP-010')
 
 const reportStore = useReportStore()
@@ -29,16 +31,22 @@ const props = defineProps<{
   initialContent?: string
   initialTitle?: string
   taskId?: string
+  parentLevel?: string
+  parentCommId?: string
+  parentEdgeType?: string
+  projectId?: string
+  regenerationType?: 'community' | 'overall'
 }>()
 
 const emit = defineEmits<{
   'close': []
   'navigate-community': [payload: { taskId: string; communityId: string; edgeType: string }]
+  'open-child-analysis': [payload: { taskId: string; parentLevel: string; parentCommId: string; edgeType: string; projectId?: string }]
+  'view-child-md': [payload: { taskId: string; communityId: string; level: string; edgeType: string; parentLevel: string; parentCommId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
 // 状态
 const loading = ref(true)
-const editing = ref(false)
 const doc = ref<{
   id: string
   title: string
@@ -47,10 +55,13 @@ const doc = ref<{
   createdAt: string
   updatedAt: string
 } | null>(null)
-const editContent = ref('')
-const editTitle = ref('')
-const saving = ref(false)
 const httpPort = ref(3456)
+
+// 重新生成
+const showRegenDialog = ref(false)
+const regenPrompt = ref('')
+const regenLoading = ref(false)
+const regenError = ref('')
 
 type DiagramLang = 'mermaid' | 'plantuml'
 
@@ -210,8 +221,6 @@ async function loadDoc() {
       }
     }
     if (doc.value) {
-      editContent.value = doc.value.content
-      editTitle.value = doc.value.title
       if (doc.value.content) {
         diagramBlocks.value = extractDiagrams(doc.value.content)
       }
@@ -229,40 +238,60 @@ async function loadDoc() {
 }
 
 // 进入编辑模式
-function startEdit() {
-  editing.value = true
-  editContent.value = doc.value?.content || ''
-  editTitle.value = doc.value?.title || ''
+const canOpenInBrowser = computed(() => !!(doc.value?.id || props.subDocId || (doc.value?.content && props.taskId)))
+
+const canRegenerate = computed(() => !!props.regenerationType && !!props.taskId && !!props.projectId)
+
+function openRegenDialog() {
+  regenPrompt.value = ''
+  regenError.value = ''
+  showRegenDialog.value = true
 }
 
-// 取消编辑
-function cancelEdit() {
-  editing.value = false
-  editContent.value = doc.value?.content || ''
-  editTitle.value = doc.value?.title || ''
+function closeRegenDialog() {
+  showRegenDialog.value = false
+  regenLoading.value = false
+  regenError.value = ''
 }
 
-// 保存
-async function saveEdit() {
-  if (!doc.value) return
-  saving.value = true
+async function submitRegen() {
+  if (!props.taskId || !props.projectId || !props.regenerationType) return
+  regenLoading.value = true
+  regenError.value = ''
+
   try {
-    await reportStore.updateSubDoc({
-      subDocId: doc.value.id,
-      title: editTitle.value,
-      content: editContent.value,
-    })
-    doc.value.content = editContent.value
-    doc.value.title = editTitle.value
-    editing.value = false
-  } catch (e) {
-    console.error('[SubDocViewer] Failed to save:', e)
+    let result: { success: boolean; content?: string; error?: string }
+    if (props.regenerationType === 'community') {
+      if (!props.parentCommId || !props.parentLevel || !props.parentEdgeType) {
+        throw new Error('Missing community context for regeneration')
+      }
+      result = await reportStore.regenerateCommunityDoc(
+        props.taskId, props.parentCommId, props.parentLevel, props.parentEdgeType,
+        props.projectId, regenPrompt.value,
+      )
+    } else {
+      result = await reportStore.regenerateOverallDoc(
+        props.taskId, props.projectId, regenPrompt.value,
+      )
+    }
+
+    if (result.success && result.content) {
+      if (doc.value) {
+        doc.value.content = result.content
+        diagramBlocks.value = extractDiagrams(result.content)
+        await nextTick()
+        renderAllDiagrams()
+      }
+      closeRegenDialog()
+    } else {
+      regenError.value = result.error || 'Unknown error'
+    }
+  } catch (e: any) {
+    regenError.value = e.message || String(e)
   } finally {
-    saving.value = false
+    regenLoading.value = false
   }
 }
-
-const canOpenInBrowser = computed(() => !!(doc.value?.id || props.subDocId || (doc.value?.content && props.taskId)))
 
 async function openInBrowser() {
   console.log('[SubDocViewer] openInBrowser clicked, subDocId prop:', props.subDocId, 'doc.id:', doc.value?.id, 'httpPort:', httpPort.value, 'taskId:', props.taskId)
@@ -456,44 +485,27 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
         <span class="doc-title">{{ doc?.title }}</span>
       </div>
       <div class="toolbar-right">
-        <template v-if="!editing">
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="openInBrowser"
-          >
-            <GlobeAltIcon class="w-4 h-4" />
-            <span>{{ t('settings.openInBrowser') }}</span>
-          </button>
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="startEdit"
-          >
-            <PencilIcon class="w-4 h-4" />
-            <span>{{ t('common.edit') }}</span>
-          </button>
-        </template>
-        <template v-else>
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="cancelEdit"
-          >
-            {{ t('common.cancel') }}
-          </button>
-          <button
-            v-if="!editing && canOpenInBrowser"
-            class="btn btn-ghost btn-sm"
-            @click="openInBrowser"
-          >
-            <GlobeAltIcon class="w-4 h-4" />
-            <span>{{ t('settings.openInBrowser') }}</span>
-          </button>
-        </template>
+        <button
+          class="btn btn-ghost btn-sm"
+          @click="openInBrowser"
+        >
+          <GlobeAltIcon class="w-4 h-4" />
+          <span>{{ t('settings.openInBrowser') }}</span>
+        </button>
+        <button
+          v-if="canRegenerate"
+          class="btn btn-ghost btn-sm"
+          @click="openRegenDialog"
+        >
+          <SparklesIcon class="w-3.5 h-3.5" />
+          <span>{{ t('report.regenerate') }}</span>
+        </button>
       </div>
     </div>
 
     <!-- 预览模式 -->
     <div
-      v-if="!editing && doc"
+      v-if="doc"
       class="subdoc-preview"
     >
       <div class="doc-meta">
@@ -506,24 +518,76 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
         @click.prevent="onDocContentClick"
       />
 
+      <ChildSection
+        v-if="props.parentLevel && props.parentCommId && props.parentEdgeType"
+        :task-id="props.taskId || ''"
+        :parent-level="props.parentLevel"
+        :parent-comm-id="props.parentCommId"
+        :edge-type="props.parentEdgeType"
+        :project-id="props.projectId"
+        @open-child-analysis="(p: any) => emit('open-child-analysis', p)"
+        @viewCommunityMD="(p: any) => { console.log('[SubDocViewer] ChildSection viewCommunityMD received', p); emit('view-child-md', { ...p, taskId: props.taskId || '' }) }"
+      />
+
     </div>
 
-    <!-- 编辑模式 -->
-    <div
-      v-if="editing"
-      class="subdoc-edit"
-    >
-      <input
-        v-model="editTitle"
-        class="edit-title"
-        :placeholder="t('report.docTitlePlaceholder')"
+    <!-- 重新生成对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showRegenDialog"
+        class="regen-overlay"
+        @click.self="!regenLoading && closeRegenDialog()"
       >
-      <textarea
-        v-model="editContent"
-        class="edit-content"
-        :placeholder="t('report.docContentPlaceholder')"
-      />
-    </div>
+        <div class="regen-dialog">
+          <div class="regen-dialog-header">
+            <span class="regen-dialog-title">{{ t('report.regenerate') }}</span>
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="regenLoading"
+              @click="closeRegenDialog"
+            >
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="regen-dialog-body">
+            <label class="regen-label">{{ t('report.regenPrompt') }}</label>
+            <textarea
+              v-model="regenPrompt"
+              class="regen-textarea"
+              :placeholder="t('report.regenPromptPlaceholder')"
+              :disabled="regenLoading"
+              rows="5"
+            />
+            <div
+              v-if="regenError"
+              class="regen-error"
+            >
+              <span class="regen-error-text">{{ regenError }}</span>
+            </div>
+          </div>
+          <div class="regen-dialog-footer">
+            <button
+              class="btn btn-ghost btn-sm"
+              :disabled="regenLoading"
+              @click="closeRegenDialog"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              v-if="!regenLoading"
+              class="btn btn-primary btn-sm"
+              @click="submitRegen"
+            >
+              <SparklesIcon class="w-3.5 h-3.5" />
+              {{ t('report.regenerateSubmit') }}
+            </button>
+            <template v-else>
+              <span class="regen-loading-text">{{ t('common.processing') }}...</span>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -683,26 +747,88 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
   outline: none;
 }
 
-.edit-title:focus {
-  border-color: var(--accent);
+/* 重新生成对话框 */
+.regen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
 }
-
-.edit-content {
-  flex: 1;
-  padding: 10px 12px;
+.regen-dialog {
+  width: 480px;
+  max-width: 90vw;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+}
+.regen-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.regen-dialog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.regen-dialog-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.regen-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.regen-textarea {
+  width: 100%;
+  padding: 8px 10px;
   font-size: 12px;
   font-family: var(--font-mono);
-  line-height: 1.6;
+  line-height: 1.5;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   outline: none;
-  resize: none;
+  resize: vertical;
+  box-sizing: border-box;
+  min-height: 80px;
 }
-
-.edit-content:focus {
+.regen-textarea:focus {
   border-color: var(--accent);
+}
+.regen-error {
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+  border-radius: 4px;
+}
+.regen-error-text {
+  font-size: 11px;
+  color: var(--error);
+}
+.regen-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.regen-loading-text {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* 表格样式 */

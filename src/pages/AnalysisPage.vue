@@ -8,6 +8,7 @@ import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
 import CommunityAnalysisPipeline from '@/components/report/CommunityAnalysisPipeline.vue'
+import ChildAnalysisPanel from '@/components/report/ChildAnalysisPanel.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-002')
@@ -22,7 +23,7 @@ const activeTab = computed(() => {
   return ctx.tabs.find(t => t.id === ctx.activeTabId) || null;
 })
 const reportTabs = computed(() => {
-  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome' || t.kind === 'componentAnalysis');
+  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome' || t.kind === 'componentAnalysis' || t.kind === 'childAnalysis');
 })
 
 function onTabUpdate(tabId: string | null) {
@@ -36,6 +37,7 @@ function onTabClose(tabId: string) {
 const isReportHomeTab = computed(() => activeTab.value?.kind === 'reportHome')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
 const isComponentAnalysisTab = computed(() => activeTab.value?.kind === 'componentAnalysis')
+const isChildAnalysisTab = computed(() => activeTab.value?.kind === 'childAnalysis')
 
 /* ===== 状态持久化 ===== */
 function saveAnalysisState() {
@@ -88,8 +90,29 @@ function goBackFromCompAnalysis() {
   }
 }
 
+// 子层级分析“返回”按钮
+function goBackFromChildAnalysis() {
+  const tab = activeTab.value
+  if (!tab) return
+  const taskId = tab.taskId
+  const parentCommId = tab.parentCommId
+  if (!taskId || !parentCommId) {
+    onTabClose(tab.id)
+    return
+  }
+  const parentTab = analysisContext.value.tabs.find(t =>
+    (t.kind === 'subdoc' && t.parentCommId === parentCommId && t.taskId === taskId) ||
+    (t.kind === 'reportHome' && t.taskId === taskId)
+  )
+  if (parentTab) {
+    funcGroup.setActiveTab('analysis', parentTab.id)
+  } else {
+    onTabClose(tab.id)
+  }
+}
+
 // 处理报告首页的 open-md 事件（在 analysis 上下文中打开 inline 子文档 tab）
-function handleOpenMD(params: { taskId: string; content: string; title: string }) {
+function handleOpenMD(params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string; regenerationType?: 'community' | 'overall' }) {
   const hash = params.title.slice(0, 20).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
   const id = `tab-subdoc-inline-${params.taskId}-${hash}`
   funcGroup.openTab('analysis', {
@@ -100,6 +123,51 @@ function handleOpenMD(params: { taskId: string; content: string; title: string }
     taskId: params.taskId,
     projectId: projectStore.selectedProjectId || undefined,
     hasUnsavedChanges: false,
+    parentLevel: params.parentLevel,
+    parentCommId: params.parentCommId,
+    parentEdgeType: params.parentEdgeType,
+    regenerationType: params.regenerationType,
+  })
+}
+
+function handleViewChildCommunityMD(params: { taskId?: string; communityId: string; level: string; edgeType: string; parentLevel?: string; parentCommId?: string; name: string; summary: string; mermaid?: string; plantuml?: string }) {
+  console.log(`[AnalysisPage] handleViewChildCommunityMD`, params)
+  const parts: string[] = [
+    `# 社区: ${params.name}`,
+    '',
+    `**ID**: ${params.communityId}`,
+    '',
+    params.summary,
+  ]
+  if (params.mermaid) {
+    parts.push('', '```mermaid', params.mermaid, '```')
+  }
+  if (params.plantuml) {
+    parts.push('', '```plantuml', params.plantuml, '```')
+  }
+  handleOpenMD({
+    taskId: params.taskId || activeTab.value?.taskId || '',
+    content: parts.join('\n'),
+    title: params.name,
+    parentLevel: params.parentLevel,
+    parentCommId: params.parentCommId,
+    parentEdgeType: params.edgeType,
+    regenerationType: 'community',
+  })
+}
+
+function handleOpenChildAnalysis(params: { taskId: string; parentLevel: string; parentCommId: string; edgeType: string; projectId?: string }) {
+  const tabId = `child-analysis|${params.taskId}|${params.parentLevel}|${params.parentCommId}|${params.edgeType}`
+  const childLevel = `L${parseInt(params.parentLevel[1]) + 1}`
+  funcGroup.openTab('analysis', {
+    id: tabId,
+    kind: 'childAnalysis',
+    title: `${childLevel} ${t('report.pipeline.communityAnalysis')} - ${params.parentCommId}`,
+    taskId: params.taskId,
+    projectId: params.projectId || projectStore.selectedProjectId || undefined,
+    parentLevel: params.parentLevel,
+    parentCommId: params.parentCommId,
+    parentEdgeType: params.edgeType,
   })
 }
 
@@ -188,8 +256,15 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         :initial-content="activeTab.content"
         :initial-title="activeTab.title"
         :task-id="activeTab.taskId"
+        :parent-level="activeTab.parentLevel"
+        :parent-comm-id="activeTab.parentCommId"
+        :parent-edge-type="activeTab.parentEdgeType"
+        :project-id="activeTab.projectId"
+        :regeneration-type="activeTab.regenerationType as 'community' | 'overall' | undefined"
         @close="goToReportHome"
         @navigate-community="openCommunityDetail"
+        @open-child-analysis="handleOpenChildAnalysis"
+        @view-child-md="handleViewChildCommunityMD"
       />
     </template>
 
@@ -209,6 +284,31 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
           <CommunityAnalysisPipeline
             :task-id="activeTab.taskId!"
             :project-id="activeTab.projectId || projectStore.selectedProjectId || ''"
+          />
+        </div>
+      </div>
+    </template>
+
+    <template v-else-if="isChildAnalysisTab && activeTab">
+      <div class="comp-analysis-container">
+        <div class="comp-analysis-header">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="goBackFromChildAnalysis"
+          >
+            <ArrowLeftIcon class="w-3.5 h-3.5" />
+            <span>{{ t('common.back') }}</span>
+          </button>
+          <span class="comp-analysis-title">{{ activeTab.title }}</span>
+        </div>
+        <div class="comp-analysis-body">
+          <ChildAnalysisPanel
+            :task-id="activeTab.taskId!"
+            :parent-level="activeTab.parentLevel || 'L0'"
+            :parent-comm-id="activeTab.parentCommId || ''"
+            :edge-type="activeTab.parentEdgeType || 'CALL'"
+            :project-id="activeTab.projectId || projectStore.selectedProjectId || ''"
+            @view-community-md="handleViewChildCommunityMD"
           />
         </div>
       </div>

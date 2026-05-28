@@ -37,7 +37,7 @@ const props = defineProps<{
 const projectId = computed(() => projectStore.selectedProjectId || taskDetail.value?.projectId || '')
 
 const emit = defineEmits<{
-  'open-md': [params: { taskId: string; content: string; title: string }]
+  'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string; regenerationType?: 'community' | 'overall' }]
 }>()
 
 const loading = ref(true)
@@ -130,7 +130,7 @@ function commName(item: CommunityItem): string {
 async function openCommunityDoc(item: CommunityItem) {
   try {
     if (item.name || item.summary) {
-      handleCommunityMD({ communityId: item.communityId, name: item.name || formatCommId(item), summary: item.summary || '', mermaid: item.mermaid, plantuml: item.plantuml })
+      handleCommunityMD({ communityId: item.communityId, name: item.name || formatCommId(item), summary: item.summary || '', mermaid: item.mermaid, plantuml: item.plantuml, parentLevel: item.level, parentCommId: item.communityId, parentEdgeType: commEdgeType.value })
       return
     }
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
@@ -159,13 +159,17 @@ async function openCommunityDoc(item: CommunityItem) {
       taskId: props.taskId,
       content: md,
       title: formatCommId(item),
+      parentLevel: item.level,
+      parentCommId: item.communityId,
+      parentEdgeType: commEdgeType.value,
+      regenerationType: 'community',
     })
   } catch (e) {
     console.error('[ReportHome] openCommunityDoc error:', e)
   }
 }
 
-function handleCommunityMD(params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }) {
+function handleCommunityMD(params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }) {
   const parts: string[] = [
     `# 社区: ${params.name}`,
     '',
@@ -183,6 +187,10 @@ function handleCommunityMD(params: { communityId: string; name: string; summary:
     taskId: props.taskId,
     content: parts.join('\n'),
     title: params.name,
+    parentLevel: params.parentLevel,
+    parentCommId: params.parentCommId,
+    parentEdgeType: params.parentEdgeType,
+    regenerationType: 'community',
   })
 }
 
@@ -335,6 +343,7 @@ async function openOverallArchitecture() {
     projectId: projectId.value,
     subDocId: docId,
     hasUnsavedChanges: false,
+    regenerationType: 'overall',
   })
 }
 

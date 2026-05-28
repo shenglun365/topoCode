@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
 import type { PipelineTaskNode } from '@/types/ipc'
+import { useSettingsStore } from '@/stores/settings'
+import { useProjectStore } from '@/stores/project'
 
 export interface CommunityItem {
   id: string
@@ -21,6 +23,16 @@ export interface CommunityItem {
   error?: string
 }
 
+export interface ChildAnalysisState {
+  running: boolean
+  paused: boolean
+  communities: CommunityItem[]
+  errorLogs: string[]
+  level: string
+  parentCommId: string
+  edgeType: string
+}
+
 interface ReportTaskRuntime {
   pipelineRunning: boolean
   pipelinePaused: boolean
@@ -33,6 +45,7 @@ interface ReportTaskRuntime {
   projectContext: string
   llmResults: Record<string, any>
   errorLogs: string[]
+  analysisStates: Record<string, ChildAnalysisState>
 }
 
 export const useReportStore = defineStore('report', () => {
@@ -57,6 +70,7 @@ export const useReportStore = defineStore('report', () => {
         projectContext: '',
         llmResults: {},
         errorLogs: [],
+        analysisStates: {},
       }
     }
     return tasks.value[taskId]
@@ -394,6 +408,27 @@ export const useReportStore = defineStore('report', () => {
       }).slice(0, 100).join('\n')
 
       const t = ensureTask(taskId)
+      // For child-level analysis (L1+), fetch parent community context
+      let parentContext = ''
+      const levelNum = parseInt(community.level?.[1] || '')
+      if (levelNum > 0 && community.parentId) {
+        const parentLv = `L${levelNum - 1}`
+        try {
+          const parentResult = await window.api.analysis.getCommunityResult({
+            taskId,
+            edgeType: community.edgeType,
+            commLv: parentLv,
+            commId: community.parentId,
+          })
+          if (parentResult?.name || parentResult?.summary) {
+            const pName = parentResult.name_manual || parentResult.name || community.parentId
+            const pSummary = parentResult.summary || ''
+            parentContext = `\n\n## 所属父组件\n### ${pName}\n${pSummary}`
+          }
+        } catch (e) {
+          console.warn(`[reportStore] runTask parent context fetch failed:`, e)
+        }
+      }
       const sessionId = `comm-${taskId}-${community.communityId}-${Date.now()}`
       console.log(`[reportStore] runTask LLM chat START sessionId=${sessionId} modelId=${modelId}`)
       const chatResult = await window.api.llm.chat({
@@ -407,7 +442,7 @@ export const useReportStore = defineStore('report', () => {
           edgeCount: String(detail.edgeCount),
           nodeListWithPaths: nodeListText,
           edgeListWithDetails: edgeListText,
-          parentSummaries: t.projectContext,
+          parentSummaries: parentContext ? `${t.projectContext}\n${parentContext}` : t.projectContext,
           source: 'community_analysis',
           community_id: community.communityId,
           community_level: community.level,
@@ -508,6 +543,427 @@ export const useReportStore = defineStore('report', () => {
       community.status = 'error'
       community.error = e.message || String(e)
       return false
+    }
+  }
+
+  // ============================================================
+  // === Child Level (L1/L2/L3/L4) Analysis Actions            ===
+  // ============================================================
+
+  function buildChildStateKey(parentLevel: string, parentCommId: string, edgeType: string): string {
+    return `${parentLevel}|${parentCommId}|${edgeType}`
+  }
+
+  function ensureChildState(taskId: string, parentLevel: string, parentCommId: string, edgeType: string): ChildAnalysisState {
+    const t = ensureTask(taskId)
+    const key = buildChildStateKey(parentLevel, parentCommId, edgeType)
+    if (!t.analysisStates[key]) {
+      t.analysisStates[key] = {
+        running: false,
+        paused: false,
+        communities: [],
+        errorLogs: [],
+        level: `L${parseInt(parentLevel[1]) + 1}`,
+        parentCommId,
+        edgeType,
+      }
+    }
+    return t.analysisStates[key]
+  }
+
+  async function loadChildCommunities(taskId: string, parentLevel: string, parentCommId: string, edgeType: string) {
+    const state = ensureChildState(taskId, parentLevel, parentCommId, edgeType)
+    const childLevel = state.level
+    console.log(`[reportStore] loadChildCommunities ENTRY taskId=${taskId} parentLevel=${parentLevel} parentCommId=${parentCommId} edgeType=${edgeType} childLevel=${childLevel}`)
+    try {
+      const [levels, results] = await Promise.all([
+        getCascadeLevels(taskId, edgeType).catch(() => null),
+        listCommunityResults(taskId, edgeType).catch(() => ({ results: [] })),
+      ])
+      const llmMap: Record<string, any> = {}
+      for (const r of (results?.results || [])) {
+        llmMap[r.comm_id] = r
+      }
+      const communities: CommunityItem[] = []
+      const seenIds = new Set<string>()
+      if (levels?.levels) {
+        for (const lv of levels.levels) {
+          if (lv.lv !== childLevel || !lv.items) continue
+          for (const item of lv.items) {
+            if (item.parentCommId !== parentCommId) continue
+            if (seenIds.has(item.id)) continue
+            seenIds.add(item.id)
+            const comm: CommunityItem = {
+              id: `${edgeType}-${item.id}`,
+              communityId: item.id,
+              level: lv.lv,
+              edgeType,
+              nodeCount: item.nodeCount || 0,
+              edgeCount: item.edgeCount || 0,
+              qualityScore: item.qualityScore ?? null,
+              status: 'pending',
+              selected: false,
+              parentId: item.parentCommId ?? undefined,
+            }
+            const saved = llmMap[item.id]
+            if (saved) {
+              comm.name = saved.name || item.id
+              comm.summary = saved.summary || undefined
+              comm.mermaid = saved.mermaid || undefined
+              comm.plantuml = saved.plantuml || undefined
+              comm.status = 'completed'
+            }
+            communities.push(comm)
+          }
+        }
+      }
+      state.communities = communities
+      console.log(`[reportStore] loadChildCommunities DONE childLevel=${childLevel} count=${communities.length}`)
+    } catch (e) {
+      console.error('[reportStore] loadChildCommunities error:', e)
+    }
+  }
+
+  async function analyzeChildSelected(taskId: string, stateKey: string, modelId: string, batchSize: number, projectId: string): Promise<any[]> {
+    const t = tasks.value[taskId]
+    if (!t) return []
+    const state = t.analysisStates[stateKey]
+    if (!state || state.running || state.paused) return []
+    const selected = state.communities.filter(c => c.selected)
+    if (selected.length === 0) return []
+    console.log(`[reportStore] analyzeChildSelected START stateKey=${stateKey} selected=${selected.length} batchSize=${batchSize}`)
+    state.running = true
+    state.paused = false
+    for (let i = 0; i < selected.length; i += batchSize) {
+      if (state.paused) break
+      const batch = selected.slice(i, i + batchSize)
+      batch.forEach(c => { c.status = 'queued' })
+      const results = await Promise.allSettled(batch.map(c => runTask(taskId, c, modelId, projectId)))
+      for (let idx = 0; idx < batch.length; idx++) {
+        const c = batch[idx]
+        const r = results[idx]
+        if (r.status === 'rejected') {
+          c.status = 'error'
+          c.error = r.reason?.message || String(r.reason)
+        }
+        if (c.status === 'completed') {
+          c.selected = false
+          try {
+            await saveCommunityResult({
+              taskId, edgeType: c.edgeType, commLv: c.level, commId: c.communityId,
+              name: c.name || c.communityId, summary: c.summary || '',
+              mermaid: c.mermaid || '', plantuml: c.plantuml || '',
+              modelId, templateId: 'community_analyze',
+            })
+            if (t.llmResults) t.llmResults[c.communityId] = { comm_id: c.communityId, name: c.name, summary: c.summary }
+          } catch (e) {
+            console.warn('[reportStore] analyzeChildSelected save failed:', e)
+          }
+        }
+      }
+    }
+    state.running = false
+    console.log(`[reportStore] analyzeChildSelected DONE stateKey=${stateKey}`)
+    return state.communities
+      .filter(c => c.status === 'completed' && c.name)
+      .map(c => ({
+        communityId: c.communityId, level: c.level, edgeType: c.edgeType,
+        name: c.name!, summary: c.summary!, mermaid: c.mermaid, plantuml: c.plantuml,
+      }))
+  }
+
+  function toggleChildSelect(taskId: string, stateKey: string, commId: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    const state = t.analysisStates[stateKey]
+    if (!state || state.running) return
+    const comm = state.communities.find(c => c.communityId === commId)
+    if (comm) comm.selected = !comm.selected
+  }
+
+  function selectChildIncomplete(taskId: string, stateKey: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    const state = t.analysisStates[stateKey]
+    if (!state) return
+    for (const c of state.communities) {
+      if (c.status !== 'completed') c.selected = true
+    }
+  }
+
+  function deselectAllChild(taskId: string, stateKey: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    const state = t.analysisStates[stateKey]
+    if (!state) return
+    for (const c of state.communities) {
+      c.selected = false
+    }
+  }
+
+  async function retryChildTask(taskId: string, stateKey: string, commId: string, modelId: string, projectId: string): Promise<boolean> {
+    const t = tasks.value[taskId]
+    if (!t) return false
+    const state = t.analysisStates[stateKey]
+    if (!state) return false
+    const community = state.communities.find(c => c.communityId === commId)
+    if (!community) return false
+    community.status = 'pending'
+    community.error = undefined
+    community.selected = false
+    community.name = undefined
+    community.summary = undefined
+    community.status = 'running'
+    try {
+      const ok = await runTask(taskId, community, modelId, projectId)
+      if (ok && community.status === 'completed') {
+        await saveCommunityResult({
+          taskId, edgeType: community.edgeType, commLv: community.level, commId: community.communityId,
+          name: community.name || community.communityId, summary: community.summary || '',
+          mermaid: community.mermaid || '', plantuml: community.plantuml || '',
+          modelId, templateId: 'community_analyze',
+        })
+      }
+      return ok
+    } catch (e: any) {
+      community.status = 'error'
+      community.error = e.message || String(e)
+      return false
+    }
+  }
+
+  function stopChildAnalysis(taskId: string, stateKey: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    const state = t.analysisStates[stateKey]
+    if (state) {
+      state.paused = true
+      state.running = false
+    }
+  }
+
+  function pushChildError(taskId: string, stateKey: string, msg: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    const state = t.analysisStates[stateKey]
+    if (!state) return
+    state.errorLogs.unshift(msg)
+    if (state.errorLogs.length > 50) state.errorLogs.length = 50
+  }
+
+  function clearChildErrorLogs(taskId: string, stateKey: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    const state = t.analysisStates[stateKey]
+    if (state) state.errorLogs = []
+  }
+
+  // ============================================================
+  // === Regeneration Methods                                  ===
+  // ============================================================
+
+  async function regenerateCommunityDoc(taskId: string, communityId: string, level: string, edgeType: string, projectId: string, additionalPrompt: string): Promise<{ success: boolean; content?: string; error?: string }> {
+    try {
+      const result = await getLevelCommunityDetail({ projectId, taskId, level, edgeType })
+      const commList = result?.communities
+      if (!Array.isArray(commList) || commList.length === 0) return { success: false, error: 'No community detail found' }
+      const detail = commList.find((c: any) => c.communityId === communityId)
+      if (!detail) return { success: false, error: `Community ${communityId} not found in detail` }
+      const nodeListText = detail.nodes.map((n: any) => {
+        const ext = n.filePath && n.filePath !== '?' ? n.filePath.split('.').pop() : ''
+        const label = ext ? `${n.name}.${ext}` : n.name
+        return `- ${label}  (${n.filePath})`
+      }).slice(0, 100).join('\n')
+      const edgeListText = detail.edges.map((e: any) => {
+        return `- ${e.sourceDisplay || e.source} → ${e.targetDisplay || e.target}`
+      }).slice(0, 100).join('\n')
+
+      const t = ensureTask(taskId)
+      // Project context
+      let parentSummaries = t.projectContext
+      // For child-level (L1+), fetch parent context
+      const levelNum = parseInt(level?.[1] || '')
+      if (levelNum > 0) {
+        const parentLv = `L${levelNum - 1}`
+        try {
+          const parentResult = await window.api.analysis.getCommunityResult({ taskId, edgeType, commLv: parentLv, commId: communityId })
+          if (parentResult?.name || parentResult?.summary) {
+            const pName = parentResult.name_manual || parentResult.name || communityId
+            const pSummary = parentResult.summary || ''
+            parentSummaries = parentSummaries
+              ? `${parentSummaries}\n\n## 所属父组件\n### ${pName}\n${pSummary}`
+              : `## 所属父组件\n### ${pName}\n${pSummary}`
+          }
+        } catch { /* skip parent context */ }
+      }
+
+      const modelId = useSettingsStore().models.find((m: any) => m.isDefault)?.id
+      if (!modelId) return { success: false, error: 'No default model configured' }
+
+      const sessionId = `regen-${taskId}-${communityId}-${Date.now()}`
+      const chatResult = await window.api.llm.chat({
+        sessionId, modelId,
+        templateId: 'community_analyze',
+        variables: {
+          communityId, level,
+          nodeCount: String(detail.nodeCount), edgeCount: String(detail.edgeCount),
+          nodeListWithPaths: nodeListText, edgeListWithDetails: edgeListText,
+          parentSummaries,
+          userAdditionalPrompt: additionalPrompt || '',
+        },
+        mode: 'structured',
+        outputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', maxLength: 20 },
+            summary: { type: 'string' },
+            mermaid: { type: 'string' },
+            plantuml: { type: 'string' },
+          },
+          required: ['name', 'summary', 'mermaid'],
+        },
+      })
+      let fullContent = ''
+      const parsed = await new Promise<{ name: string; summary: string; mermaid?: string; plantuml?: string } | null>((resolve, reject) => {
+        const unsubscribe = window.api.llm.subscribe(chatResult.requestId, {
+          onChunk(data: { text: string }) { fullContent += data.text },
+          onDone(data: { content: string; structured?: Record<string, any> }) {
+            unsubscribe()
+            const trimmed = (data.structured?.summary || fullContent || '').trim()
+            if (!trimmed || trimmed.length < 20) {
+              reject(new Error('LLM returned empty or too short response'))
+              return
+            }
+            if (data.structured) {
+              resolve({
+                name: (data.structured.name || '').slice(0, 20) || communityId,
+                summary: data.structured.summary || '',
+                mermaid: data.structured.mermaid || '',
+                plantuml: data.structured.plantuml || '',
+              })
+            } else {
+              resolve({ name: communityId, summary: fullContent })
+            }
+          },
+          onError(errData: { message: string }) {
+            unsubscribe()
+            reject(new Error(errData.message))
+          },
+        })
+      })
+      if (!parsed) return { success: false, error: 'Failed to parse LLM response' }
+
+      // Save result
+      await saveCommunityResult({
+        taskId, edgeType, commLv: level, commId: communityId,
+        name: parsed.name, summary: parsed.summary,
+        mermaid: parsed.mermaid || '', plantuml: parsed.plantuml || '',
+        modelId, templateId: 'community_analyze',
+      })
+
+      // Build MD content
+      const parts: string[] = [
+        `# 社区: ${parsed.name}`,
+        '', `**ID**: ${communityId}`, '',
+        parsed.summary,
+      ]
+      if (parsed.mermaid) parts.push('', '```mermaid', parsed.mermaid, '```')
+      if (parsed.plantuml) parts.push('', '```plantuml', parsed.plantuml, '```')
+      return { success: true, content: parts.join('\n') }
+    } catch (e: any) {
+      return { success: false, error: e.message || String(e) }
+    }
+  }
+
+  async function regenerateOverallDoc(taskId: string, projectId: string, additionalPrompt: string): Promise<{ success: boolean; content?: string; error?: string }> {
+    try {
+      const project = useProjectStore().projects.find((p: any) => p.id === projectId)
+      if (!project) return { success: false, error: 'Project not found' }
+
+      const t = ensureTask(taskId)
+      const modelId = useSettingsStore().models.find((m: any) => m.isDefault)?.id
+      if (!modelId) return { success: false, error: 'No default model configured' }
+
+      // Gather community name map + details (same as prepareStepVariables in ReportGenerationPipeline)
+      const [callResults, depResults] = await Promise.all([
+        listCommunityResults(taskId, 'CALL').catch(() => ({ results: [] })),
+        listCommunityResults(taskId, 'INCLUDE').catch(() => ({ results: [] })),
+      ])
+      const nameMap: string[] = []
+      const allResults = [...(callResults?.results || []), ...(depResults?.results || [])]
+      for (const r of allResults) {
+        if (r.comm_lv === 'L0' && (r.name || r.name_manual)) {
+          nameMap.push(`- ${r.comm_id}: ${r.name_manual || r.name}`)
+        }
+      }
+      // Also add communities without LLM results (use ID as name)
+      const [callLevels, depLevels] = await Promise.all([
+        getCascadeLevels(taskId, 'CALL').catch(() => null),
+        getCascadeLevels(taskId, 'INCLUDE').catch(() => null),
+      ])
+      const l0Ids = new Set<string>()
+      for (const lv of [...(callLevels?.levels || []), ...(depLevels?.levels || [])]) {
+        if (lv.lv === 'L0') for (const item of lv.items) l0Ids.add(item.id)
+      }
+      for (const id of l0Ids) {
+        if (!nameMap.some(l => l.includes(id))) nameMap.push(`- ${id}: ${id}`)
+      }
+
+      const [callDetail, depDetail] = await Promise.all([
+        getLevelCommunityDetail({ projectId, taskId, level: 'L0', edgeType: 'CALL' }).catch(() => null),
+        getLevelCommunityDetail({ projectId, taskId, level: 'L0', edgeType: 'INCLUDE' }).catch(() => null),
+      ])
+
+      function formatCommunityDetail(detail: any, edgeType: string): string {
+        if (!detail?.communities) return '（无数据）'
+        return detail.communities.map((c: any) => {
+          const nodes = (c.nodes || []).slice(0, 20).map((n: any) => `  - ${n.name} (${n.filePath})`).join('\n')
+          const edges = (c.edges || []).slice(0, 20).map((e: any) => `  - ${e.sourceDisplay || e.source} → ${e.targetDisplay || e.target}`).join('\n')
+          return `### ${c.communityId}\n- 节点数: ${c.nodeCount}, 边数: ${c.edgeCount}\n#### 节点\n${nodes}\n#### 边\n${edges}`
+        }).join('\n\n')
+      }
+
+      const sessionId = `regen-overall-${taskId}-${Date.now()}`
+      const chatResult = await window.api.llm.chat({
+        sessionId, modelId,
+        templateId: 'report_overall_architecture',
+        variables: {
+          projectName: project.name || '',
+          language: project.language || '',
+          fileCount: String(project.fileCount || 0),
+          rootPath: project.rootPath || '',
+          readmeContent: t.projectContext || '',
+          dependencySummary: '',
+          communityNameMap: nameMap.join('\n') || '（无命名映射）',
+          callCommunityDetail: formatCommunityDetail(callDetail, 'CALL'),
+          includeCommunityDetail: formatCommunityDetail(depDetail, 'INCLUDE'),
+          userAdditionalPrompt: additionalPrompt || '',
+        },
+        mode: 'chat',
+      })
+      let fullContent = ''
+      await new Promise<void>((resolve, reject) => {
+        const unsubscribe = window.api.llm.subscribe(chatResult.requestId, {
+          onChunk(data: { text: string }) { fullContent += data.text },
+          onDone() { unsubscribe(); resolve() },
+          onError(errData: { message: string }) { unsubscribe(); reject(new Error(errData.message)) },
+        })
+      })
+      if (!fullContent || fullContent.trim().length < 50) {
+        return { success: false, error: 'LLM returned empty or too short response' }
+      }
+
+      // Save to report_subdocs
+      const docId = `overall-${taskId}`
+      const existing = await getSubDoc(docId).catch(() => null)
+      if (existing) {
+        await updateSubDoc({ subDocId: docId, title: '整体架构分析', content: fullContent })
+      } else {
+        await createSubDoc({ taskId, title: '整体架构分析', content: fullContent })
+      }
+      return { success: true, content: fullContent }
+    } catch (e: any) {
+      return { success: false, error: e.message || String(e) }
     }
   }
 
@@ -725,6 +1181,16 @@ export const useReportStore = defineStore('report', () => {
     stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
+
+    // Child level actions
+    buildChildStateKey, ensureChildState,
+    loadChildCommunities, analyzeChildSelected,
+    toggleChildSelect, selectChildIncomplete, deselectAllChild,
+    retryChildTask, stopChildAnalysis,
+    pushChildError, clearChildErrorLogs,
+
+    // Regeneration actions
+    regenerateCommunityDoc, regenerateOverallDoc,
 
     // Pipeline actions
     initPipeline, updateNodeStatus, recalcProgress,
