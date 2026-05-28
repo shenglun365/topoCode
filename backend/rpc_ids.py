@@ -14,6 +14,8 @@ RPC_IDS: dict[str, str] = {
     "analysis.updateTask":          "API-006",
     "analysis.deleteTask":          "API-007",
     "analysis.clearProjectCache":   "API-008",
+    "analysis.getClearCacheCounts": "API-008a",
+    "analysis.clearProjectCacheTable": "API-008b",
     "analysis.stopTask":            "API-009",
     "analysis.reRunTask":           "API-010",
     "analysis.getTaskRuns":         "API-011",

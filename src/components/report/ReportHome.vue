@@ -45,7 +45,6 @@ const loadError = ref<string | null>(null)
 const showNoReportDialog = ref(false)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
-const fileStats = ref<any>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
 const communitySearch = ref('')
 const communityPage = ref(1)
@@ -57,14 +56,18 @@ const task = computed(() => taskDetail.value)
 
 const runtimeCommunities = computed(() => {
   const coms = reportStore.tasks[props.taskId]?.communities || []
-  return coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
+  const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
+  console.log(`[RP-001] runtimeCommunities edgeType=${commEdgeType.value} total=${coms.length} filtered=${filtered.length} completed=${filtered.filter(c=>c.status==='completed').length}`)
+  return filtered
 })
 
 const communityAnalysisProgress = computed(() => {
   const allL0 = (reportStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0')
   if (allL0.length === 0) return 0
   const done = allL0.filter(c => c.status === 'completed').length
-  return Math.round((done / allL0.length) * 100)
+  const pct = Math.round((done / allL0.length) * 100)
+  console.log(`[RP-001] communityAnalysisProgress allL0=${allL0.length} done=${done} pct=${pct}`)
+  return pct
 })
 
 const hasArchitectureReport = computed(() => {
@@ -76,12 +79,14 @@ const commStats = computed(() => {
   const items = communityItems.value
   const nodes = items.map(c => c.nodeCount || 0)
   const quals = items.map(c => c.qualityScore).filter((q): q is number => q != null)
-  return {
+  const stats = {
     count: items.length,
     maxNodes: nodes.length ? Math.max(...nodes) : 0,
     minNodes: nodes.length ? Math.min(...nodes) : 0,
     avgQuality: quals.length ? (quals.reduce((a, b) => a + b, 0) / quals.length) : 0,
   }
+  console.log(`[RP-001] commStats count=${stats.count} maxNodes=${stats.maxNodes} minNodes=${stats.minNodes} avgQuality=${stats.avgQuality}`)
+  return stats
 })
 
 const communityItems = computed(() => {
@@ -182,22 +187,25 @@ function handleCommunityMD(params: { communityId: string; name: string; summary:
 }
 
 async function loadData() {
+  console.log(`[RP-001] loadData ENTRY taskId=${props.taskId}`)
   loading.value = true
   loadError.value = null
   projectSummary.value = projectStore.selectedProject
   try {
     taskDetail.value = await analysisStore.getTask(props.taskId)
     if (!taskDetail.value) {
+      console.log(`[RP-001] loadData task not found taskId=${props.taskId}`)
       loadError.value = t('report.taskNotFound')
       return
     }
+    console.log(`[RP-001] loadData task found name=${taskDetail.value.name} type=${taskDetail.value.type}`)
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
     if (pid) {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
-      fileStats.value = await analysisStore.scanFileStats(pid)
     }
     await reportStore.loadCommunities(props.taskId, pid || '')
     await reportStore.checkReportExists(props.taskId)
+    console.log(`[RP-001] loadData DONE communities=${(reportStore.tasks[props.taskId]?.communities || []).length}`)
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -330,25 +338,6 @@ async function openOverallArchitecture() {
   })
 }
 
-function fileExtLabel(ext: string): string {
-  if (!ext) return t('analysis.noExtension')
-  const labels: Record<string, string> = {
-    typescript: 'TypeScript',
-    javascript: 'JavaScript',
-    python: 'Python',
-    go: 'Go',
-    rust: 'Rust',
-    java: 'Java',
-    vue: 'Vue',
-    html: 'HTML',
-    css: 'CSS',
-    json: 'JSON',
-    markdown: 'Markdown',
-    yaml: 'YAML',
-  }
-  return labels[ext] || ext
-}
-
 onMounted(loadData)
 watch(() => props.taskId, loadData)
 </script>
@@ -439,27 +428,38 @@ watch(() => props.taskId, loadData)
             </div>
           </div>
 
-          <div
-            v-if="fileStats"
-            class="file-distribution"
-          >
+          <div class="file-distribution">
             <div class="dist-title">
-              {{ t('report.fileDistribution') }}
+              {{ t('report.analysisScope') }}
             </div>
-            <div class="dist-bars">
-              <div
-                v-for="(count, ext) in fileStats.extensions"
-                :key="ext"
-                class="dist-bar-row"
-              >
-                <span class="dist-label">{{ fileExtLabel(ext) }}</span>
-                <div class="dist-bar-track">
-                  <div
-                    class="dist-bar-fill"
-                    :style="{ width: (count / fileStats.totalFiles * 100) + '%' }"
-                  />
+            <div class="scope-content">
+              <div class="scope-row">
+                <span class="scope-label">{{ t('analysis.fileType') }}</span>
+                <div class="scope-tags">
+                  <span
+                    v-if="!taskDetail?.extensions?.length"
+                    class="scope-tag scope-tag-all"
+                  >{{ t('analysis.allFiles') }}</span>
+                  <span
+                    v-for="ext in (taskDetail?.extensions || [])"
+                    :key="ext"
+                    class="scope-tag"
+                  >{{ ext }}</span>
                 </div>
-                <span class="dist-count">{{ count }}</span>
+              </div>
+              <div class="scope-row">
+                <span class="scope-label">{{ t('analysis.directoryScope') }}</span>
+                <div class="scope-tags">
+                  <span
+                    v-if="!taskDetail?.scopes?.length"
+                    class="scope-tag scope-tag-all"
+                  >{{ t('analysis.allDirectories') }}</span>
+                  <span
+                    v-for="s in (taskDetail?.scopes || [])"
+                    :key="s"
+                    class="scope-tag"
+                  >{{ s }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -740,49 +740,50 @@ watch(() => props.taskId, loadData)
   font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
-.dist-bars {
+.scope-content {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.dist-bar-row {
+.scope-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   font-size: 11px;
 }
 
-.dist-label {
-  width: 80px;
+.scope-label {
   flex-shrink: 0;
-  color: var(--text-secondary);
-  text-align: right;
-}
-
-.dist-bar-track {
-  flex: 1;
-  height: 14px;
-  background: var(--bg-tertiary);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.dist-bar-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-
-.dist-count {
-  width: 40px;
+  width: 56px;
   color: var(--text-muted);
+  padding-top: 2px;
+}
+
+.scope-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.scope-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.scope-tag-all {
+  font-family: inherit;
+  color: var(--text-muted);
 }
 
 .comm-et-tabs {

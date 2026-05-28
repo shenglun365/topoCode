@@ -184,11 +184,8 @@ export class PythonBridge {
 
   /** 获取当前状态 */
   getStatus(): BackendStatus {
-    // 检查进程是否还在运行
     if (this.status.status === 'running' && this.process) {
-      try {
-        this.process.kill(0) // 发送信号 0 检查进程是否存在
-      } catch {
+      if (this.process.exitCode !== null) {
         this.status = { status: 'stopped' }
         this.notify()
       }
@@ -217,23 +214,39 @@ export class PythonBridge {
   private checkAndKillPortOccupant(port: number): void {
     try {
       const { execSync } = require('child_process')
-      // Linux: 用 fuser 查找占用端口的进程
+      const myPid = this.process?.pid
+      const electronPid = process.pid
       if (process.platform === 'linux') {
-        const pids = execSync(`fuser ${port}/tcp 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
-        if (pids) {
-          console.warn(`[PythonBridge] Port ${port} occupied, killing: ${pids}`)
-          execSync(`fuser -k ${port}/tcp 2>/dev/null`, { stdio: ['pipe', 'pipe', 'ignore'] })
-          // 短暂等待端口释放
-          const start = Date.now()
-          while (Date.now() - start < 300) { /* busy-wait 300ms */ }
+        const output = execSync(`fuser ${port}/tcp 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+        if (output) {
+          const pids = output.split(/\s+/).filter(Boolean).map(Number)
+          const foreignPids = pids.filter((pid: number) => pid !== myPid && pid !== electronPid)
+          if (foreignPids.length > 0) {
+            console.warn(`[PythonBridge] Port ${port} occupied by foreign process(es), killing: ${foreignPids.join(', ')}`)
+            foreignPids.forEach((pid: number) => {
+              try { execSync(`kill -9 ${pid}`, { stdio: ['pipe', 'pipe', 'ignore'] }) } catch {}
+            })
+            const start = Date.now()
+            while (Date.now() - start < 300) { /* busy-wait 300ms */ }
+          } else {
+            console.log(`[PythonBridge] Port ${port} held by our own backend (PID ${myPid}), skipping kill`)
+          }
         }
       } else if (process.platform === 'darwin') {
-        const output = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
+        const output = execSync(`lsof -ti:${port} 2>/dev/null`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }).trim()
         if (output) {
-          console.warn(`[PythonBridge] Port ${port} occupied, killing: ${output}`)
-          execSync(`kill -9 ${output}`, { stdio: ['pipe', 'pipe', 'ignore'] })
-          const start = Date.now()
-          while (Date.now() - start < 300) { /* busy-wait 300ms */ }
+          const pids = output.split('\n').filter(Boolean).map(Number)
+          const foreignPids = pids.filter((pid: number) => pid !== myPid && pid !== electronPid)
+          if (foreignPids.length > 0) {
+            console.warn(`[PythonBridge] Port ${port} occupied by foreign process(es), killing: ${foreignPids.join(', ')}`)
+            foreignPids.forEach((pid: number) => {
+              try { execSync(`kill -9 ${pid}`, { stdio: ['pipe', 'pipe', 'ignore'] }) } catch {}
+            })
+            const start = Date.now()
+            while (Date.now() - start < 300) { /* busy-wait 300ms */ }
+          } else {
+            console.log(`[PythonBridge] Port ${port} held by our own backend (PID ${myPid}), skipping kill`)
+          }
         }
       }
     } catch {

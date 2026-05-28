@@ -177,6 +177,12 @@ function createRealIPC(): IPCAPI {
       clearProjectCache: async (projectId: string) => {
         return await api.analysis.clearProjectCache(projectId)
       },
+      getClearCacheCounts: async (projectId: string) => {
+        return await api.analysis.getClearCacheCounts(projectId)
+      },
+      clearProjectCacheTable: async (projectId: string, table: string) => {
+        return await api.analysis.clearProjectCacheTable(projectId, table)
+      },
       reRunTask: async (taskId: string) => {
         return await api.analysis.reRunTask(taskId)
       },
@@ -232,7 +238,9 @@ function createRealIPC(): IPCAPI {
         return await api.analysis.getQueryStats(params)
       },
       saveCommunityResult: async (params: any) => {
-        return await api.analysis.saveCommunityResult(params)
+        // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
+        const safe = JSON.parse(JSON.stringify(params))
+        return await api.analysis.saveCommunityResult(safe)
       },
       getCommunityResult: async (params: any) => {
         return await api.analysis.getCommunityResult(params)

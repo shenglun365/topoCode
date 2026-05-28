@@ -90,17 +90,28 @@ function lookupName(commId: string): string | undefined {
   return taskState.value.llmResults[commId]?.name || taskState.value.llmResults[commId]?.nameManual
 }
 
-const selectedCount = computed(() => communities.value.filter(t => t.selected).length)
+const selectedCount = computed(() => {
+  const n = communities.value.filter(t => t.selected).length
+  console.log(`[CommunityAI] selectedCount=${n}`)
+  return n
+})
 const completedCount = computed(() => communities.value.filter(t => t.status === 'completed').length)
 const errorCount = computed(() => communities.value.filter(t => t.status === 'error').length)
-const totalCount = computed(() => communities.value.length)
+const totalCount = computed(() => {
+  const n = communities.value.length
+  console.log(`[CommunityAI] totalCount=${n} completed=${communities.value.filter(t => t.status === 'completed').length} error=${communities.value.filter(t => t.status === 'error').length} pending=${communities.value.filter(t => t.status === 'pending').length} running=${communities.value.filter(t => t.status === 'running').length}`)
+  return n
+})
 const overallProgress = computed(() => {
   const done = completedCount.value + errorCount.value
-  return totalCount.value > 0 ? Math.round((done / totalCount.value) * 100) : 0
+  const pct = totalCount.value > 0 ? Math.round((done / totalCount.value) * 100) : 0
+  console.log(`[CommunityAI] overallProgress done=${done} total=${totalCount.value} pct=${pct}`)
+  return pct
 })
 
 const displayCommunities = computed(() => {
   let list = communities.value.filter(c => c.edgeType === selectedEdgeType.value && c.level === selectedLevel.value)
+  console.log(`[CommunityAI] displayCommunities edgeType=${selectedEdgeType.value} level=${selectedLevel.value} all=${communities.value.length} filtered=${list.length}`)
   if (selectedLevel.value === 'L1') {
     list = list.filter(c => hasAnalysis(c.parentId || ''))
   } else if (selectedLevel.value === 'L2') {
@@ -165,6 +176,7 @@ function updateAvailableLevels() {
       const items = communities.value.filter(c => c.edgeType === edge && c.level === lv)
       return { lv, count: items.length, analyzed: items.filter(c => c.status === 'completed').length }
     })
+  console.log(`[CommunityAI] updateAvailableLevels edge=${edge} lvs=${availableLevels.value.map(l=>l.lv+'('+l.count+'/'+l.analyzed+')').join(',')}`)
   if (!lvSet.has(selectedLevel.value) && availableLevels.value.length > 0) {
     selectedLevel.value = availableLevels.value[0].lv
   }
@@ -182,11 +194,6 @@ function switchEdgeType(type: string) {
 function toggleSelect(id: string) {
   if (taskState.value?.communityRunning) return
   reportStore.toggleSelect(props.taskId, id)
-}
-
-function selectAllInCurrentView(sel: boolean) {
-  const ids = searchedCommunities.value.map(c => c.id)
-  reportStore.selectAll(props.taskId, ids, sel)
 }
 
 function statusBadgeClass(status: string): string {
@@ -209,9 +216,17 @@ function statusLabel(status: string): string {
 }
 
 async function startAnalysis() {
-  if (!modelId.value) return
-  if (!pid.value) return
+  console.log(`[CommunityAI] startAnalysis ENTER modelId=${modelId.value} batchSize=${batchSize.value} selectedCount=${selectedCount.value} running=${taskState.value?.communityRunning}`)
+  if (!modelId.value) {
+    console.log(`[CommunityAI] startAnalysis SKIP no modelId`)
+    return
+  }
+  if (!pid.value) {
+    console.log(`[CommunityAI] startAnalysis SKIP no pid`)
+    return
+  }
   const results = await reportStore.analyzeSelected(props.taskId, modelId.value, batchSize.value, pid.value)
+  console.log(`[CommunityAI] startAnalysis DONE results=${results.length}`)
   if (results.length > 0) {
     emit('completed', results)
   }
@@ -235,11 +250,13 @@ async function retryTask(id: string) {
 }
 
 onMounted(async () => {
+  console.log(`[CommunityAI] onMounted ENTRY taskId=${props.taskId} projectId=${props.projectId}`)
   loading.value = true
   loadError.value = null
   try {
     await reportStore.loadCommunities(props.taskId, pid.value!)
     updateAvailableLevels()
+    console.log(`[CommunityAI] onMounted availableLevels=${availableLevels.value.map(l=>l.lv+'('+l.count+')').join(',')} selectedEdgeType=${selectedEdgeType.value} selectedLevel=${selectedLevel.value}`)
     if (availableLevels.value.length === 0) {
       selectedEdgeType.value = 'INCLUDE'
       selectedLevel.value = 'L0'
@@ -249,6 +266,7 @@ onMounted(async () => {
     loadError.value = e?.message || String(e)
   } finally {
     loading.value = false
+    console.log(`[CommunityAI] onMounted DONE taskState.communities=${taskState.value?.communities?.length ?? 0}`)
   }
 })
 </script>
@@ -307,9 +325,6 @@ onMounted(async () => {
               <span class="clist-edge-tag">{{ selectedEdgeType }}</span>
             </span>
             <div class="clist-actions">
-              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="selectAllInCurrentView(true)">
-                {{ t('common.selectAll') }}
-              </button>
               <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="reportStore.selectIncomplete(props.taskId)">
                 {{ t('common.selectIncomplete') }}
               </button>

@@ -243,6 +243,54 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "deletedTables": deleted_tables,
         }
 
+    @server.register("analysis.getClearCacheCounts")
+    def get_clear_cache_counts(project_id=None, projectId=None):
+        project_id = project_id or projectId
+        if not project_id:
+            raise ValueError("project_id is required")
+        project_db = multi_db.get_project_db(project_id)
+        tables = [
+            "ast_data", "dependencies", "call_chains", "community_hierarchy",
+            "community_llm_results", "graph_node", "graph_doc", "base_node",
+            "components", "ai_qa",
+        ]
+        counts = {}
+        for table in tables:
+            try:
+                row = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                if row and row[0] > 0:
+                    counts[table] = row[0]
+            except Exception:
+                pass
+        task_store = TaskStore(multi_db.main_db)
+        tasks = task_store.list_tasks(project_id)
+        if tasks:
+            counts["tasks"] = len(tasks)
+        return {"projectId": project_id, "counts": counts}
+
+    @server.register("analysis.clearProjectCacheTable")
+    def clear_project_cache_table(project_id=None, projectId=None, table=None):
+        project_id = project_id or projectId
+        if not project_id or not table:
+            raise ValueError("project_id and table are required")
+        project_db = multi_db.get_project_db(project_id)
+        if table == "tasks":
+            task_store = TaskStore(multi_db.main_db)
+            tasks = task_store.list_tasks(project_id)
+            count = len(tasks)
+            for task in tasks:
+                task_store.delete_task(task["id"])
+        else:
+            try:
+                row = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                count = row[0] if row else 0
+                if count > 0:
+                    project_db.execute(f"DELETE FROM {table}")
+            except Exception as e:
+                raise ValueError(f"Failed to clear table {table}: {e}")
+        project_db.commit()
+        return {"table": table, "deleted": count}
+
     @server.register("analysis.stopTask")
     def stop_task(task_id=None, taskId=None):
         tid = task_id or taskId
@@ -479,23 +527,31 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         cid = comm_id or commId
         mid = model_id or modelId
         tpid = template_id or templateId
+        logger.info("[analysis.saveCommunityResult] ENTRY task_id=%s edge_type=%s comm_lv=%s comm_id=%s name=%s",
+                     tid, et, cl, cid, name)
         if not tid or not et or not cl or not cid:
+            logger.error("[analysis.saveCommunityResult] missing required fields")
             raise ValueError("task_id, edge_type, comm_lv, comm_id are required")
         task = TaskStore(multi_db.main_db).get_task(tid)
         if not task:
+            logger.error("[analysis.saveCommunityResult] task not found task_id=%s", tid)
             raise ValueError(f"Task {tid} not found")
         project_db = multi_db.get_project_db(task["project_id"])
         store = AnalysisStore(project_db)
-        # 校验 mermaid / plantuml, 不可解析的不入库
         from plantuml_service import validate_mermaid, validate_plantuml
+        has_mermaid = bool(mermaid and validate_mermaid(mermaid))
+        has_plantuml = bool(plantuml and validate_plantuml(plantuml))
+        logger.info("[analysis.saveCommunityResult] validated name=%s summary_len=%d mermaid=%s plantuml=%s model_id=%s template_id=%s",
+                     name, len(summary or ''), has_mermaid, has_plantuml, mid, tpid)
         validated = {
             "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
             "name": name, "summary": summary,
-            "mermaid": mermaid if (mermaid and validate_mermaid(mermaid)) else None,
-            "plantuml": plantuml if (plantuml and validate_plantuml(plantuml)) else None,
+            "mermaid": mermaid if has_mermaid else None,
+            "plantuml": plantuml if has_plantuml else None,
             "model_id": mid, "template_id": tpid,
         }
         store.bulk_insert_llm_results([validated])
+        logger.info("[analysis.saveCommunityResult] DONE task_id=%s comm_id=%s", tid, cid)
         return {"success": True}
 
     @server.register("analysis.getCommunityResult")
@@ -518,14 +574,19 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     def list_community_results(task_id=None, taskId=None, edge_type=None, edgeType=None):
         tid = task_id or taskId
         et = edge_type or edgeType
+        logger.info("[analysis.listCommunityResults] ENTRY task_id=%s edge_type=%s", tid, et)
         if not tid or not et:
+            logger.error("[analysis.listCommunityResults] missing required fields")
             raise ValueError("task_id and edge_type are required")
         task = TaskStore(multi_db.main_db).get_task(tid)
         if not task:
+            logger.error("[analysis.listCommunityResults] task not found task_id=%s", tid)
             raise ValueError(f"Task {tid} not found")
         project_db = multi_db.get_project_db(task["project_id"])
         store = AnalysisStore(project_db)
-        return {"results": store.list_llm_results(tid, et)}
+        results = store.list_llm_results(tid, et)
+        logger.info("[analysis.listCommunityResults] DONE task_id=%s edge_type=%s results=%d", tid, et, len(results))
+        return {"results": results}
 
     @server.register("analysis.updateCommunityName")
     def update_community_name(task_id=None, taskId=None, edge_type=None, edgeType=None,
@@ -1180,23 +1241,23 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.getCascadeLevels")
     def get_cascade_levels(task_id=None, taskId=None, edge_type=None, edgeType=None):
-        """获取级联社区层级结构, 用于级联查询组件
+        """获取级联社区层级结构
         返回格式: {levels: [{lv: 'L0', items: [{id, label, nodeCount, parentCommId}]}]}
-        前端按 parentCommId 过滤各级选项
         """
         tid = task_id or taskId
         et = edge_type or edgeType or 'CALL'
         if not tid:
             raise ValueError("task_id is required")
+        logger.info("[analysis.getCascadeLevels] ENTRY task_id=%s edge_type=%s", tid, et)
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
         if not task:
+            logger.warning("[analysis.getCascadeLevels] task not found task_id=%s", tid)
             return {"levels": []}
         project_id = task["project_id"]
         project_db = multi_db.get_project_db(project_id)
 
-        # 查询所有层级的社区（含 edge_count）
         rows = project_db.execute(
             """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
                FROM community_hierarchy h
@@ -1205,8 +1266,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                ORDER BY h.comm_lv, h.comm_id""",
             (tid, et)
         ).fetchall()
+        logger.info("[analysis.getCascadeLevels] query returned %d rows task_id=%s edge_type=%s", len(rows), tid, et)
 
-        # 按层级分组
         levels_dict: dict[str, list] = {}
         for row in rows:
             lv, comm_id, parent_id, node_count, quality, edge_count = row
@@ -1227,6 +1288,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 'lv': lv,
                 'items': levels_dict[lv],
             })
+        logger.info("[analysis.getCascadeLevels] DONE task_id=%s edge_type=%s levels=%s total_items=%d",
+                     tid, et, sorted(levels_dict.keys()),
+                     sum(len(v) for v in levels_dict.values()))
 
         return {'levels': result}
 

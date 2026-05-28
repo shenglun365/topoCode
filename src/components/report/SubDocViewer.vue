@@ -69,14 +69,21 @@ const diagramBlocks = ref<DiagramBlock[]>([])
 let mermaidApi: any = null
 async function ensureMermaid() {
   if (mermaidApi) return
-  const mod = await import('mermaid')
-  mermaidApi = mod.default
-  mermaidApi.initialize({
-    startOnLoad: false,
-    securityLevel: 'loose',
-    theme: 'dark',
-    fontFamily: 'var(--font-sans)',
-  })
+  console.log('[SubDocViewer] ensureMermaid importing...')
+  try {
+    const mod = await import('mermaid')
+    mermaidApi = mod.default
+    console.log('[SubDocViewer] ensureMermaid import OK, has render:', typeof mermaidApi?.render, 'has initialize:', typeof mermaidApi?.initialize)
+    mermaidApi.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'dark',
+      fontFamily: 'var(--font-sans)',
+    })
+  } catch (e) {
+    console.error('[SubDocViewer] ensureMermaid FAILED:', e)
+    throw e
+  }
 }
 
 function escapeHtml(s: string): string {
@@ -85,11 +92,16 @@ function escapeHtml(s: string): string {
 
 function injectDiagram(block: DiagramBlock) {
   const el = document.getElementById(`inline-${block.id}`)
-  if (!el) return
+  if (!el) {
+    console.warn(`[SubDocViewer] injectDiagram: placeholder NOT FOUND for id=inline-${block.id}. DOM ready?`, !!document.getElementById(`inline-${block.id}`))
+    return
+  }
   if (block.svg) {
     el.innerHTML = block.svg
+    console.log(`[SubDocViewer] injectDiagram OK id=${block.id} svgLen=${block.svg.length}`)
   } else if (block.error) {
     el.innerHTML = `<div class="diagram-error">${escapeHtml(block.error)}</div><pre class="fallback-code"><code>${escapeHtml(block.code)}</code></pre>`
+    console.log(`[SubDocViewer] injectDiagram ERROR id=${block.id}`)
   }
 }
 
@@ -124,33 +136,45 @@ function normalizeDiagramCode(lang: string, code: string): string {
 }
 
 async function renderAllDiagrams() {
-  if (diagramBlocks.value.length === 0) return
+  if (diagramBlocks.value.length === 0) {
+    console.log('[SubDocViewer] renderAllDiagrams: no diagram blocks to render')
+    return
+  }
+  console.log(`[SubDocViewer] renderAllDiagrams START count=${diagramBlocks.value.length}`)
 
   for (const block of diagramBlocks.value) {
     block.loading = true
     block.error = undefined
     const cleaned = normalizeDiagramCode(block.lang, block.code)
+    console.log(`[SubDocViewer] rendering ${block.lang} id=${block.id} codeLen=${block.code.length}`)
     try {
       let svg = ''
       if (block.lang === 'mermaid') {
+        console.time(`mermaid-${block.id}`)
         await ensureMermaid()
         const id = `sd-${block.id}`
         const result = await mermaidApi.render(id, cleaned)
         svg = result.svg
+        console.timeEnd(`mermaid-${block.id}`)
+        console.log(`[SubDocViewer] mermaid render OK id=${block.id} svgLen=${svg.length}`)
       } else {
+        console.time(`plantuml-${block.id}`)
         const result = await window.api.render.renderPlantuml({ code: cleaned, format: 'svg' })
         svg = atob(result.data)
+        console.timeEnd(`plantuml-${block.id}`)
+        console.log(`[SubDocViewer] plantuml render OK id=${block.id} svgLen=${svg.length}`)
       }
       block.svg = svg
       injectDiagram(block)
     } catch (e: any) {
       block.error = e.message || 'Render failed'
+      console.error(`[SubDocViewer] ${block.lang} render ERROR id=${block.id}:`, e.message)
       injectDiagram(block)
-      console.error(`[SubDocViewer] ${block.lang} render error:`, e)
     } finally {
       block.loading = false
     }
   }
+  console.log(`[SubDocViewer] renderAllDiagrams DONE`)
 }
 
 // 提取图表块
@@ -165,6 +189,7 @@ function extractDiagrams(content: string): DiagramBlock[] {
       blocks.push({ id: `diagram-${idx++}`, lang: m[1] as DiagramLang, code, loading: false })
     }
   }
+  console.log(`[SubDocViewer] extractDiagrams found ${blocks.length} diagrams in ${content.length} chars of content`)
   return blocks
 }
 
@@ -275,12 +300,15 @@ const renderedContent = computed(() => {
   // 图表块替换为占位容器（内联渲染）
   let html = doc.value.content
   let diagIdx = 0
+  let placeholderCount = 0
   html = html.replace(/```(mermaid|plantuml)\n([\s\S]*?)```/g, (match, lang) => {
     const blk = diagramBlocks.value[diagIdx]
     const id = blk ? blk.id : `diagram-${diagIdx}`
     diagIdx++
+    placeholderCount++
     return `<div class="diagram-placeholder" id="inline-${id}" data-lang="${lang}"><div class="diagram-loading">${lang === 'mermaid' ? 'Mermaid' : 'PlantUML'} 渲染中...</div></div>`
   })
+  if (placeholderCount > 0) console.log(`[SubDocViewer] renderedContent created ${placeholderCount} placeholders (diagramBlocks=${diagramBlocks.value.length})`)
 
   // GFM 表格支持（兼容缩进表格）
   html = html.replace(/^\s*\|(.+)\|\n\s*\|[-:| ]+\|\n((?:\s*\|.+\|\n?)*)/gm, (match, headerRow, bodyRows) => {

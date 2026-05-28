@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
@@ -31,6 +31,7 @@ import CodeViewer from '@/components/code/CodeViewer.vue'
 import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
 import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
 import { useComponentId } from '@/composables/useComponentId'
+import ClearCacheDialog from '@/components/project/ClearCacheDialog.vue'
 
 const { showId, componentId } = useComponentId('PG-001')
 const { t } = useI18n()
@@ -184,10 +185,7 @@ onMounted(async () => {
 // ===== 项目设置菜单（清除缓存） =====
 const menuVisible = ref(false)
 const menuPosition = ref({ x: 0, y: 0 })
-const showClearCacheConfirm = ref(false)
-const isClearingCache = ref(false)
-const clearCacheTimedOut = ref(false)
-const clearCacheTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const showClearCacheDialog = ref(false)
 const selectedProject = computed(() => projectStore.selectedProject)
 const isSample = computed(() => !!selectedProject.value?.isSample)
 
@@ -212,45 +210,13 @@ function hideMenu() {
 
 async function handleClearCache() {
   hideMenu()
-  showClearCacheConfirm.value = true
+  showClearCacheDialog.value = true
 }
 
-async function confirmClearCache() {
-  if (!selectedProject.value) return
-  showClearCacheConfirm.value = false
-  isClearingCache.value = true
-  clearCacheTimedOut.value = false
-  clearCacheTimer.value = setTimeout(() => {
-    clearCacheTimedOut.value = true
-  }, 15000)
-  try {
-    await projectStore.clearProjectCache(selectedProject.value.id)
-    await projectStore.loadProjects()
-  } catch (err: any) {
-    console.error('Failed to clear cache:', err)
-  } finally {
-    if (clearCacheTimer.value) {
-      clearTimeout(clearCacheTimer.value)
-      clearCacheTimer.value = null
-    }
-    isClearingCache.value = false
-  }
+function onClearCacheDone() {
+  showClearCacheDialog.value = false
+  projectStore.loadProjects()
 }
-
-function closeClearCacheOverlay() {
-  if (clearCacheTimer.value) {
-    clearTimeout(clearCacheTimer.value)
-    clearCacheTimer.value = null
-  }
-  isClearingCache.value = false
-}
-
-onUnmounted(() => {
-  if (clearCacheTimer.value) {
-    clearTimeout(clearCacheTimer.value)
-    clearCacheTimer.value = null
-  }
-})
 </script>
 
 <template>
@@ -633,35 +599,11 @@ onUnmounted(() => {
       @click="hideMenu"
     />
 
-    <ConfirmDialog
-      v-if="showClearCacheConfirm"
-      :title="t('common.confirm')"
-      :message="t('project.clearCacheConfirm')"
-      :confirm-label="t('project.clearCache')"
-      variant="warning"
-      @cancel="showClearCacheConfirm = false"
-      @confirm="confirmClearCache"
+    <ClearCacheDialog
+      v-if="showClearCacheDialog"
+      :project-id="selectedProject?.id || ''"
+      @close="onClearCacheDone"
     />
-
-    <Teleport to="body">
-      <div
-        v-if="isClearingCache"
-        class="cache-processing-overlay"
-      >
-        <div class="cache-processing-card">
-          <div class="cache-processing-spinner" />
-          <div class="cache-processing-title">{{ t('project.clearingCache') }}</div>
-          <div class="cache-processing-message">{{ t('project.clearingCacheHint') }}</div>
-          <button
-            v-if="clearCacheTimedOut"
-            class="btn btn-primary"
-            @click="closeClearCacheOverlay"
-          >
-            {{ t('common.close') }}
-          </button>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -864,15 +806,7 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
-.cache-processing-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+
 .cache-processing-card {
   background: var(--bg-primary);
   border-radius: 12px;

@@ -408,6 +408,8 @@ export interface IPCAPI {
     deleteTask: (taskId: string) => Promise<void>
     stopTask: (taskId: string) => Promise<void>
     clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number; deletedTables: Record<string, number> }>
+    getClearCacheCounts: (projectId: string) => Promise<{ projectId: string; counts: Record<string, number> }>
+    clearProjectCacheTable: (projectId: string, table: string) => Promise<{ table: string; deleted: number }>
     reRunTask: (taskId: string) => Promise<AnalysisTask>
     getTaskLogs: (params: { taskId: string; runId?: string }) => Promise<TaskLogsResult>
     getTaskRuns: (taskId: string) => Promise<TaskRun[]>

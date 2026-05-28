@@ -107,6 +107,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.stopTask', params: { taskId } }),
     clearProjectCache: (projectId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.clearProjectCache', params: { projectId } }),
+    getClearCacheCounts: (projectId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getClearCacheCounts', params: { projectId } }),
+    clearProjectCacheTable: (projectId: string, table: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.clearProjectCacheTable', params: { projectId, table } }),
     reRunTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.reRunTask', params: { taskId } }),
     getTaskLogs: (params: { taskId: string; runId?: string }) =>
@@ -146,7 +150,11 @@ contextBridge.exposeInMainWorld('api', {
       taskId: string; edgeType: string; commLv: string; commId: string;
       name?: string; summary?: string; mermaid?: string; plantuml?: string;
       modelId?: string; templateId?: string;
-    }) => ipcRenderer.invoke('ipc:call', { method: 'analysis.saveCommunityResult', params }),
+    }) => {
+      // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
+      const safe = JSON.parse(JSON.stringify(params))
+      return ipcRenderer.invoke('ipc:call', { method: 'analysis.saveCommunityResult', params: safe })
+    },
     getCommunityResult: (params: { taskId: string; edgeType: string; commLv: string; commId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityResult', params }),
     listCommunityResults: (taskId: string, edgeType: string) =>

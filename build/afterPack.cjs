@@ -33,24 +33,20 @@ try {
     process.exit(0)
   }
 
-  // 比对 requirements.txt 的哈希，未变化则跳过安装
-  // 标记文件放在项目 build/ 目录下，避免被构建输出清理
-  const markerFile = path.join(rootDir, 'build', '.pip-cache-installed')
-  const reqHash = crypto.createHash('sha256').update(fs.readFileSync(requirementsFile)).digest('hex')
-  if (fs.existsSync(markerFile)) {
-    const prevHash = fs.readFileSync(markerFile, 'utf8').trim()
-    if (prevHash === reqHash) {
-      console.log('[afterPack] Python dependencies unchanged, skipping install')
-      process.exit(0)
-    }
+  // 检查包是否实际已安装（验证关键包 uvicorn 是否存在）
+  const uvicornDir = path.join(backendDir, 'uvicorn')
+  if (fs.existsSync(uvicornDir)) {
+    console.log('[afterPack] Python packages already installed, skipping')
+    process.exit(0)
   }
+
+  // 安装前清理 __pycache__，避免 pip 告警
+  execSync(`find "${backendDir}" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null`, { stdio: 'ignore' })
 
   execSync(
     `pip3 install --target "${backendDir}" -r "${requirementsFile}"`,
     { stdio: 'inherit', timeout: 300000 }
   )
-  // 写入当前哈希作为标记
-  fs.writeFileSync(markerFile, reqHash)
   console.log('[afterPack] Python dependencies installed successfully')
 } catch (error) {
   console.error('[afterPack] Failed to install Python dependencies:', error.message)

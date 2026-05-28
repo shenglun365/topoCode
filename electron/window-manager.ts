@@ -6,7 +6,7 @@ import { pythonBridge, BackendStatus } from './python-bridge'
 import { zmqRouter } from './zmq-router'
 
 // 最大窗口数
-const MAX_WINDOWS = 3
+const MAX_WINDOWS = 1
 
 // 后端保活超时（秒）- 最后一个窗口关闭后等待多久才停止后端
 const BACKEND_KEEPALIVE_TIMEOUT = 60
@@ -112,6 +112,16 @@ export class WindowManager {
     }
     // 清除保活定时器
     this.clearBackendKeepalive()
+  }
+
+  /** 后端健康检查（由定时器调用） */
+  async healthCheck(): Promise<boolean> {
+    try {
+      const status = pythonBridge.getStatus()
+      return status.status === 'running'
+    } catch {
+      return false
+    }
   }
 
   /** 启动后端保活定时器 */

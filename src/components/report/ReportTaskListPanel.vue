@@ -39,46 +39,63 @@ const leaves = computed(() => {
   return result
 })
 
-const totalCount = computed(() => leaves.value.length)
-const completedCount = computed(() => leaves.value.filter(n => n.status === 'completed' || n.status === 'skipped').length)
+const totalCount = computed(() => {
+  const n = leaves.value.length
+  return n
+})
+const completedCount = computed(() => {
+  const n = leaves.value.filter(n => n.status === 'completed' || n.status === 'skipped').length
+  console.log(`[SH-004] pipeline progress total=${totalCount.value} completed=${n} pct=${totalCount.value > 0 ? Math.round(n / totalCount.value * 100) : 0}`)
+  return n
+})
 
 // Community progress from reportStore (L0 only — LLM analysis targets root communities)
-const communityList = computed(() => taskState.value?.communities || [])
-const includeCommunities = computed(() => communityList.value.filter(c => c.edgeType === 'INCLUDE' && c.level === 'L0'))
-const callCommunities = computed(() => communityList.value.filter(c => c.edgeType === 'CALL' && c.level === 'L0'))
+const communityList = computed(() => {
+  const list = taskState.value?.communities || []
+  console.log(`[SH-004] communityList total=${list.length}`)
+  return list
+})
+const includeCommunities = computed(() => {
+  const list = communityList.value.filter(c => c.edgeType === 'INCLUDE' && c.level === 'L0')
+  return list
+})
+const callCommunities = computed(() => {
+  const list = communityList.value.filter(c => c.edgeType === 'CALL' && c.level === 'L0')
+  return list
+})
 
 interface CommProgress { total: number; completed: number; running: number }
 const includeProgress = computed<CommProgress | null>(() => {
   const list = includeCommunities.value
   if (!list.length) return null
-  return {
-    total: list.length,
-    completed: list.filter(c => c.status === 'completed').length,
-    running: list.filter(c => c.status === 'running' || c.status === 'queued').length,
-  }
+  const total = list.length
+  const completed = list.filter(c => c.status === 'completed').length
+  const running = list.filter(c => c.status === 'running' || c.status === 'queued').length
+  console.log(`[SH-004] includeProgress total=${total} completed=${completed} running=${running}`)
+  return { total, completed, running }
 })
 const callProgress = computed<CommProgress | null>(() => {
   const list = callCommunities.value
   if (!list.length) return null
-  return {
-    total: list.length,
-    completed: list.filter(c => c.status === 'completed').length,
-    running: list.filter(c => c.status === 'running' || c.status === 'queued').length,
-  }
+  const total = list.length
+  const completed = list.filter(c => c.status === 'completed').length
+  const running = list.filter(c => c.status === 'running' || c.status === 'queued').length
+  console.log(`[SH-004] callProgress total=${total} completed=${completed} running=${running}`)
+  return { total, completed, running }
 })
 
 function handleRunNode(nodeId: string) {
+  console.log(`[SH-004] handleRunNode ENTER nodeId=${nodeId}`)
   if (nodeId === 'overall_architecture') {
-    // 整体架构分析需 ReportGenerationPipeline 挂载（在 reportHome tab 中），先导航再发信号
     const ctx = funcGroup.context.analysis
     const homeTab = ctx.tabs.find(t => t.kind === 'reportHome' && (t as any).taskId === props.taskId)
     if (homeTab) {
       funcGroup.setActiveTab('analysis', homeTab.id)
     }
     reportStore.setPendingStepRun(props.taskId, nodeId)
+    console.log(`[SH-004] handleRunNode overall_architecture: navigating to reportHome`)
     return
   }
-  // 其他步骤（validation/project_summary/community_analysis）直接执行，不依赖组件挂载
   const root = reportStore.tasks[props.taskId]?.pipelineRootTask
   const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
     if (node.id === nodeId) return node
@@ -86,7 +103,10 @@ function handleRunNode(nodeId: string) {
     return undefined
   }
   const node = root ? find(root) : undefined
-  if (!node) return
+  if (!node) {
+    console.log(`[SH-004] handleRunNode node not found: ${nodeId}`)
+    return
+  }
 
   reportStore.setPipelineRunning(props.taskId, true)
   reportStore.setPipelinePaused(props.taskId, false)

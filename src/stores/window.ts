@@ -10,7 +10,7 @@ export interface WindowInfo {
 export const useWindowStore = defineStore('window', () => {
   const windows = ref<WindowInfo[]>([])
   const currentWindowId = ref(0)
-  const maxWindows = ref(3)
+  const maxWindows = ref(1)
 
   const windowCount = computed(() => windows.value.length)
   const canCreateMore = computed(() => windowCount.value < maxWindows.value)

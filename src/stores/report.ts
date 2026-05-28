@@ -110,6 +110,15 @@ export const useReportStore = defineStore('report', () => {
     name?: string; summary?: string; mermaid?: string; plantuml?: string;
     modelId?: string; templateId?: string;
   }) {
+    try {
+      JSON.stringify(params)
+    } catch (e) {
+      console.error(`[reportStore] saveCommunityResult params NOT JSON-serializable:`, e, JSON.stringify(Object.keys(params)), `mermaidLen=${(params.mermaid||'').length} plantumlLen=${(params.plantuml||'').length} summaryLen=${(params.summary||'').length}`)
+      for (const [k, v] of Object.entries(params)) {
+        try { JSON.stringify(v) } catch (e2) { console.error(`[reportStore] saveCommunityResult field ${k} not serializable:`, typeof v, e2) }
+      }
+      return { success: false }
+    }
     return await ipc.analysis.saveCommunityResult(params)
   }
 
@@ -157,6 +166,7 @@ export const useReportStore = defineStore('report', () => {
 
   async function loadCommunities(taskId: string, projectId: string) {
     const t = ensureTask(taskId)
+    console.log(`[reportStore] loadCommunities ENTRY taskId=${taskId} projectId=${projectId} existingCommunities=${t.communities.length}`)
     try {
       const [callLevels, depLevels, callResults, depResults] = await Promise.all([
         getCascadeLevels(taskId, 'CALL').catch(() => null),
@@ -164,10 +174,12 @@ export const useReportStore = defineStore('report', () => {
         listCommunityResults(taskId, 'CALL').catch(() => ({ results: [] })),
         listCommunityResults(taskId, 'INCLUDE').catch(() => ({ results: [] })),
       ])
+      console.log(`[reportStore] loadCommunities IPC results: callLevels=${callLevels?.levels?.length ?? 'null'} depLevels=${depLevels?.levels?.length ?? 'null'} callResults=${callResults?.results?.length ?? 0} depResults=${depResults?.results?.length ?? 0}`)
       const llmMap: Record<string, any> = {}
       for (const r of [...(callResults?.results || []), ...(depResults?.results || [])]) {
         llmMap[r.comm_id] = r
       }
+      console.log(`[reportStore] loadCommunities llmMap keys=${Object.keys(llmMap).length}`)
       const communities: CommunityItem[] = []
       if (callLevels?.levels) {
         for (const lv of callLevels.levels) {
@@ -221,27 +233,38 @@ export const useReportStore = defineStore('report', () => {
           }
         }
       }
-      // 合并：保留旧数组的 selected/error/name，status 优先用旧值中的 error，再从 llmMap 推断
-      const oldCommMap = new Map<string, CommunityItem>()
-      for (const c of (t.communities || [])) oldCommMap.set(c.id, c)
-      for (const c of communities) {
-        const old = oldCommMap.get(c.id)
-        if (old) {
-          c.selected = old.selected
-          if (old.status === 'error') c.status = 'error'
-          c.error = old.error
-          if (old.name && old.name !== old.communityId) {
-            c.name = old.name
-            c.summary = old.summary || c.summary
+      // 合并到现有数组，保留对象的引用不变（避免 analyzerSelected 中已捕获的引用失效）
+      const savedIds = getSelections(taskId)
+      const newCommMap = new Map(communities.map(c => [c.id, c]))
+      let mergedExisting = 0, mergedNew = 0
+      for (const existing of t.communities) {
+        const newData = newCommMap.get(existing.id)
+        if (newData) {
+          // 保留运行中的状态，不覆盖
+          if (existing.status === 'error' || existing.status === 'running' || existing.status === 'queued') {
+            console.log(`[reportStore] loadCommunities preserve existing id=${existing.id} status=${existing.status}`)
+            existing.selected = savedIds.includes(existing.id)
+            newCommMap.delete(existing.id)
+            continue
           }
-          if (old.mermaid) c.mermaid = old.mermaid
-          if (old.plantuml) c.plantuml = old.plantuml
+          const saved = llmMap[existing.communityId]
+          if (saved) {
+            existing.status = 'completed'
+            existing.name = saved.name || existing.communityId
+            existing.summary = saved.summary || undefined
+            existing.mermaid = saved.mermaid || undefined
+            existing.plantuml = saved.plantuml || undefined
+          } else {
+            existing.status = 'pending'
+          }
+          console.log(`[reportStore] loadCommunities merge existing id=${existing.id} edgeType=${existing.edgeType} level=${existing.level} status=${existing.status} selected=${savedIds.includes(existing.id)}`)
+          existing.selected = savedIds.includes(existing.id)
+          newCommMap.delete(existing.id)
+          mergedExisting++
         }
       }
-      // 从 llmMap 确定 status / name / summary（覆盖 pending 状态）
-      const savedIds = getSelections(taskId)
-      for (const c of communities) {
-        if (c.status === 'error') continue
+      // 新增的社区（旧数组中没有的）
+      for (const c of Array.from(newCommMap.values())) {
         const saved = llmMap[c.communityId]
         if (saved) {
           c.status = 'completed'
@@ -249,13 +272,14 @@ export const useReportStore = defineStore('report', () => {
           c.summary = saved.summary || undefined
           c.mermaid = saved.mermaid || undefined
           c.plantuml = saved.plantuml || undefined
-        } else {
-          c.status = 'pending'
         }
-        if (savedIds.includes(c.id)) c.selected = true
+        c.selected = savedIds.includes(c.id)
+        console.log(`[reportStore] loadCommunities add new id=${c.id} edgeType=${c.edgeType} level=${c.level} status=${c.status} selected=${c.selected}`)
+        t.communities.push(c)
+        mergedNew++
       }
-      t.communities = communities
       t.llmResults = llmMap
+      console.log(`[reportStore] loadCommunities DONE mergedExisting=${mergedExisting} mergedNew=${mergedNew} total=${t.communities.length} savedIds=${savedIds.length}`)
       // Load project context
       loadProjectContext(taskId, projectId)
     } catch (e) {
@@ -278,9 +302,16 @@ export const useReportStore = defineStore('report', () => {
 
   async function analyzeSelected(taskId: string, modelId: string, batchSize: number, projectId: string): Promise<Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string; mermaid?: string; plantuml?: string }>> {
     const t = ensureTask(taskId)
-    if (t.communityRunning || t.communityPaused) return []
+    if (t.communityRunning || t.communityPaused) {
+      console.log(`[reportStore] analyzeSelected SKIP running=${t.communityRunning} paused=${t.communityPaused}`)
+      return []
+    }
     const selected = t.communities.filter(c => c.selected)
-    if (selected.length === 0) return []
+    if (selected.length === 0) {
+      console.log(`[reportStore] analyzeSelected SKIP no selected communities`)
+      return []
+    }
+    console.log(`[reportStore] analyzeSelected START taskId=${taskId} selected=${selected.length} batchSize=${batchSize} modelId=${modelId}`)
 
     t.communityRunning = true
     t.communityPaused = false
@@ -288,6 +319,7 @@ export const useReportStore = defineStore('report', () => {
     for (let i = 0; i < selected.length; i += batchSize) {
       if (t.communityPaused) break
       const batch = selected.slice(i, i + batchSize)
+      console.log(`[reportStore] analyzeSelected batch ${i / batchSize + 1}/${Math.ceil(selected.length / batchSize)} ids=${batch.map(c => c.communityId).join(',')}`)
       batch.forEach(c => { c.status = 'queued' })
       const results = await Promise.allSettled(batch.map(c => runTask(taskId, c, modelId, projectId)))
       for (let idx = 0; idx < batch.length; idx++) {
@@ -296,8 +328,10 @@ export const useReportStore = defineStore('report', () => {
         if (r.status === 'rejected') {
           c.status = 'error'
           c.error = r.reason?.message || String(r.reason)
+          console.log(`[reportStore] analyzeSelected REJECTED id=${c.communityId} error=${c.error}`)
         }
         if (c.status === 'completed') {
+          console.log(`[reportStore] analyzeSelected COMPLETED id=${c.communityId} name=${c.name}`)
           c.selected = false
           try {
             await saveCommunityResult({
@@ -307,6 +341,7 @@ export const useReportStore = defineStore('report', () => {
               modelId, templateId: 'community_analyze',
             })
             t.llmResults[c.communityId] = { comm_id: c.communityId, name: c.name, summary: c.summary }
+            console.log(`[reportStore] analyzeSelected saved to DB id=${c.communityId}`)
           } catch (e) {
             console.warn('[reportStore] saveCommunityResult failed:', e)
           }
@@ -315,6 +350,7 @@ export const useReportStore = defineStore('report', () => {
     }
 
     t.communityRunning = false
+    console.log(`[reportStore] analyzeSelected DONE final completed=${t.communities.filter(c => c.status === 'completed').length} error=${t.communities.filter(c => c.status === 'error').length}`)
     syncSelections(taskId)
     return t.communities
       .filter(c => c.status === 'completed' && c.name)
@@ -326,22 +362,28 @@ export const useReportStore = defineStore('report', () => {
 
   async function runTask(taskId: string, community: CommunityItem, modelId: string, projectId: string): Promise<boolean> {
     community.status = 'running'
+    console.log(`[reportStore] runTask START id=${community.communityId} edgeType=${community.edgeType} level=${community.level} modelId=${modelId}`)
     try {
       if (!projectId) {
+        console.log(`[reportStore] runTask SKIP no projectId`)
         community.status = 'skipped'
         return false
       }
       const result = await getLevelCommunityDetail({ projectId, taskId, level: community.level, edgeType: community.edgeType })
       const commList = result?.communities
+      console.log(`[reportStore] runTask getLevelCommunityDetail returned ${commList?.length ?? 0} communities`)
       if (!Array.isArray(commList) || commList.length === 0) {
+        console.log(`[reportStore] runTask SKIP no communities in detail`)
         community.status = 'skipped'
         return false
       }
       const detail = commList.find((c: any) => c.communityId === community.communityId)
       if (!detail) {
+        console.log(`[reportStore] runTask SKIP community ${community.communityId} not found in level detail (found ids=${commList.map((c:any)=>c.communityId).join(',')})`)
         community.status = 'skipped'
         return false
       }
+      console.log(`[reportStore] runTask detail found nodeCount=${detail.nodeCount} edgeCount=${detail.edgeCount}`)
       const nodeListText = detail.nodes.map((n: any) => {
         const ext = n.filePath && n.filePath !== '?' ? n.filePath.split('.').pop() : ''
         const label = ext ? `${n.name}.${ext}` : n.name
@@ -353,6 +395,7 @@ export const useReportStore = defineStore('report', () => {
 
       const t = ensureTask(taskId)
       const sessionId = `comm-${taskId}-${community.communityId}-${Date.now()}`
+      console.log(`[reportStore] runTask LLM chat START sessionId=${sessionId} modelId=${modelId}`)
       const chatResult = await window.api.llm.chat({
         sessionId,
         modelId,
@@ -383,6 +426,7 @@ export const useReportStore = defineStore('report', () => {
           required: ['name', 'summary', 'mermaid'],
         },
       })
+      console.log(`[reportStore] runTask LLM chat response requestId=${chatResult.requestId}`)
       let fullContent = ''
       await new Promise<void>((resolve, reject) => {
         const unsubscribe = window.api.llm.subscribe(chatResult.requestId, {
@@ -391,19 +435,23 @@ export const useReportStore = defineStore('report', () => {
             const trimmed = (data.structured?.summary || fullContent || '').trim()
             const isError = !trimmed || trimmed.length < 20 ||
               /^(error|错误|failed|失败|\[error\]|\[ERROR\])/i.test(trimmed)
+            console.log(`[reportStore] runTask LLM onDone id=${community.communityId} trimmedLen=${trimmed.length} isError=${isError} hasStructured=${!!data.structured}`)
             if (isError) {
               community.status = 'error'
               community.error = trimmed || (chatResult as any).error || 'LLM returned empty response'
+              console.log(`[reportStore] runTask LLM ERROR id=${community.communityId} error=${community.error}`)
             } else if (data.structured) {
               community.name = data.structured.name?.slice(0, 20) || community.communityId
               community.summary = data.structured.summary || ''
               community.mermaid = data.structured.mermaid || ''
               community.plantuml = data.structured.plantuml || ''
               community.status = 'completed'
+              console.log(`[reportStore] runTask LLM SUCCESS id=${community.communityId} name=${community.name} summaryLen=${community.summary.length}`)
             } else {
               community.status = 'completed'
               community.name = community.communityId
               community.summary = fullContent
+              console.log(`[reportStore] runTask LLM FALLBACK (no structured) id=${community.communityId}`)
             }
             unsubscribe()
             resolve()
@@ -411,6 +459,7 @@ export const useReportStore = defineStore('report', () => {
           onError(errData: { message: string }) {
             community.status = 'error'
             community.error = errData.message
+            console.log(`[reportStore] runTask LLM onError id=${community.communityId} msg=${errData.message}`)
             unsubscribe()
             reject(new Error(errData.message))
           },
@@ -464,30 +513,40 @@ export const useReportStore = defineStore('report', () => {
 
   function toggleSelect(taskId: string, id: string) {
     const t = tasks.value[taskId]
-    if (!t || t.communityRunning) return
+    if (!t || t.communityRunning) {
+      console.log(`[reportStore] toggleSelect SKIP taskId=${taskId} id=${id} running=${t?.communityRunning}`)
+      return
+    }
     const community = t.communities.find(c => c.id === id)
     if (community) {
       community.selected = !community.selected
+      console.log(`[reportStore] toggleSelect id=${id} edgeType=${community.edgeType} level=${community.level} newSelected=${community.selected}`)
       syncSelections(taskId)
+    } else {
+      console.log(`[reportStore] toggleSelect NOT FOUND id=${id}`)
     }
   }
 
   function selectAll(taskId: string, ids: string[], selected: boolean) {
     const t = tasks.value[taskId]
     if (!t) return
+    let count = 0
     for (const c of t.communities) {
-      if (ids.includes(c.id)) c.selected = selected
+      if (ids.includes(c.id)) { c.selected = selected; count++ }
     }
+    console.log(`[reportStore] selectAll taskId=${taskId} ids=${ids.length} selected=${selected} matched=${count} totalSelectedNow=${t.communities.filter(c=>c.selected).length}`)
     syncSelections(taskId)
   }
 
   function selectIncomplete(taskId: string) {
     const t = tasks.value[taskId]
     if (!t) return
+    let count = 0
     for (const c of t.communities) {
       if (c.level !== 'L0') continue
-      if (c.status !== 'completed') c.selected = true
+      if (c.status !== 'completed') { c.selected = true; count++ }
     }
+    console.log(`[reportStore] selectIncomplete taskId=${taskId} selected=${count} totalSelectedNow=${t.communities.filter(c=>c.selected).length}`)
     syncSelections(taskId)
   }
 
@@ -497,6 +556,7 @@ export const useReportStore = defineStore('report', () => {
     for (const c of t.communities) {
       c.selected = false
     }
+    console.log(`[reportStore] deselectAll taskId=${taskId} totalSelectedNow=${t.communities.filter(c=>c.selected).length}`)
     syncSelections(taskId)
   }
 
@@ -504,6 +564,7 @@ export const useReportStore = defineStore('report', () => {
     const t = tasks.value[taskId]
     if (!t) return
     const ids = t.communities.filter(c => c.selected).map(c => c.id)
+    console.log(`[reportStore] syncSelections taskId=${taskId} selectedIds=[${ids.join(',')}]`)
     setSelections(taskId, ids)
   }
 
@@ -577,7 +638,11 @@ export const useReportStore = defineStore('report', () => {
     const all = flatten(t.pipelineRootTask)
     const leaves = all.filter(n => !n.children || n.children.length === 0)
     const done = leaves.filter(n => n.status === 'completed' || n.status === 'skipped')
+    const oldProgress = t.pipelineProgress
     t.pipelineProgress = all.length > 0 ? Math.round((done.length / all.length) * 100) : 0
+    if (t.pipelineProgress !== oldProgress) {
+      console.log(`[reportStore] recalcProgress taskId=${taskId} leaves=${all.length} done=${done.length} progress=${oldProgress}->${t.pipelineProgress}`)
+    }
   }
 
   function setPipelineRunning(taskId: string, val: boolean) {

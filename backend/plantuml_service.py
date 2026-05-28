@@ -372,9 +372,14 @@ def _sanitize_plantuml(code: str) -> str:
             r"(\b(?:package|rectangle|component|node|folder|frame|cloud|database|storage)\s+)'([^']*)'",
             r'\1"\2"', line
         )
+        # 活动图/序列图关键字行 → 注释(LLM 混入组件图)
+        line = re.sub(
+            r'^\s*(?:decision|enddecision|else|endif|while|endwhile|repeat|repeatwhile|fork|endfork|split|endsplit|detach|stop|kill|action)\b.*$',
+            lambda m: f"' {m.group(0).strip()}", line
+        )
         # strip LLM-hallucinated keywords: file, client, server, module, driver...
         line = re.sub(
-            r'\b(?:file|client|server|module|driver|library|tool|helper|utility|util|subsystem|dot)\s+',
+            r'\b(?:file|client|server|module|driver|library|tool|helper|utility|util|subsystem|dot|decision|enddecision)\s+',
             '', line
         )
         # node → rectangle (node 不是 PlantUML 关键字)

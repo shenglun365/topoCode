@@ -438,6 +438,8 @@ class AnalysisStore:
     def bulk_insert_llm_results(self, results: List[Dict]):
         from plantuml_service import validate_mermaid, validate_plantuml
         db = self._db.conn
+        logger.info("[AnalysisStore] bulk_insert_llm_results ENTRY count=%d first=%s",
+                     len(results), results[0].get('comm_id') if results else 'none')
         db.executemany("""
             INSERT OR REPLACE INTO community_llm_results
                 (task_id, edge_type, comm_lv, comm_id, name, summary, mermaid, plantuml, model_id, template_id)
@@ -453,19 +455,24 @@ class AnalysisStore:
             for r in results
         ])
         self._db.commit()
+        logger.info("[AnalysisStore] bulk_insert_llm_results DONE count=%d", len(results))
 
     def list_llm_results(self, task_id: str, edge_type: str) -> List[Dict]:
+        logger.info("[AnalysisStore] list_llm_results ENTRY task_id=%s edge_type=%s", task_id, edge_type)
         rows = self._db.execute(
             "SELECT * FROM community_llm_results WHERE task_id=? AND edge_type=? ORDER BY comm_lv, comm_id",
             (task_id, edge_type)
         ).fetchall()
+        logger.info("[AnalysisStore] list_llm_results DONE task_id=%s edge_type=%s rows=%d", task_id, edge_type, len(rows))
         return [dict(r) for r in rows]
 
     def get_llm_result(self, task_id: str, edge_type: str, comm_lv: str, comm_id: str) -> Optional[Dict]:
+        logger.info("[AnalysisStore] get_llm_result task_id=%s edge_type=%s comm_lv=%s comm_id=%s", task_id, edge_type, comm_lv, comm_id)
         row = self._db.execute(
             "SELECT * FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv=? AND comm_id=?",
             (task_id, edge_type, comm_lv, comm_id)
         ).fetchone()
+        logger.info("[AnalysisStore] get_llm_result found=%s", row is not None)
         return dict(row) if row else None
 
     def update_community_name(self, task_id: str, edge_type: str, comm_lv: str, comm_id: str, name: str):

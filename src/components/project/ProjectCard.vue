@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
@@ -15,6 +15,7 @@ import type { Project, GroupNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
+import ClearCacheDialog from './ClearCacheDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-002')
@@ -57,10 +58,7 @@ const menuPosition = ref({ x: 0, y: 0 })
 
 // 确认弹窗状态
 const showDeleteConfirm = ref(false)
-const showClearCacheConfirm = ref(false)
-const isClearingCache = ref(false)
-const clearCacheTimedOut = ref(false)
-const clearCacheTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const showClearCacheDialog = ref(false)
 
 // 修改信息弹窗
 const showEditDialog = ref(false)
@@ -294,52 +292,13 @@ async function confirmDelete() {
 
 async function handleClearCache() {
   hideMenu()
-  showClearCacheConfirm.value = true
+  showClearCacheDialog.value = true
 }
 
-async function confirmClearCache() {
-  showClearCacheConfirm.value = false
-  isClearingCache.value = true
-  clearCacheTimedOut.value = false
-  clearCacheTimer.value = setTimeout(() => {
-    clearCacheTimedOut.value = true
-  }, 15000)
-  try {
-    const result = await projectStore.clearProjectCache(props.project.id)
-    console.group(`${t('project.clearCache')} 完成`)
-    console.log(`  删除 ${result.deletedTasks} 个分析任务`)
-    console.log(`  保留 ${result.fileCount} 个源文件`)
-    if (result.deletedTables) {
-      for (const [table, count] of Object.entries(result.deletedTables)) {
-        console.log(`  [${table}] 删除 ${count} 条记录`)
-      }
-    }
-    console.groupEnd()
-  } catch (err: any) {
-    console.error('Failed to clear cache:', err)
-  } finally {
-    if (clearCacheTimer.value) {
-      clearTimeout(clearCacheTimer.value)
-      clearCacheTimer.value = null
-    }
-    isClearingCache.value = false
-  }
+async function onClearCacheDone() {
+  showClearCacheDialog.value = false
+  await projectStore.loadProjects()
 }
-
-function closeClearCacheOverlay() {
-  if (clearCacheTimer.value) {
-    clearTimeout(clearCacheTimer.value)
-    clearCacheTimer.value = null
-  }
-  isClearingCache.value = false
-}
-
-onUnmounted(() => {
-  if (clearCacheTimer.value) {
-    clearTimeout(clearCacheTimer.value)
-    clearCacheTimer.value = null
-  }
-})
 
 async function handleCheckChanges() {
   hideMenu()
@@ -567,36 +526,12 @@ async function handleCheckChanges() {
       @confirm="confirmDelete"
     />
 
-    <!-- 清除缓存确认弹窗 -->
-    <ConfirmDialog
-      v-model:visible="showClearCacheConfirm"
-      :title="t('project.clearCache')"
-      :message="t('project.clearCacheConfirm').replace('{name}', project.name)"
-      variant="warning"
-      :confirm-label="t('project.clearCache')"
-      @confirm="confirmClearCache"
+    <!-- 清除缓存 - 选择数据项弹窗 -->
+    <ClearCacheDialog
+      v-if="showClearCacheDialog"
+      :project-id="project.id"
+      @close="onClearCacheDone"
     />
-
-    <!-- 清除缓存处理中遮罩 -->
-    <Teleport to="body">
-      <div
-        v-if="isClearingCache"
-        class="cache-processing-overlay"
-      >
-        <div class="cache-processing-card">
-          <div class="cache-processing-spinner" />
-          <div class="cache-processing-title">{{ t('project.clearingCache') }}</div>
-          <div class="cache-processing-message">{{ t('project.clearingCacheHint') }}</div>
-          <button
-            v-if="clearCacheTimedOut"
-            class="btn btn-primary"
-            @click="closeClearCacheOverlay"
-          >
-            {{ t('common.close') }}
-          </button>
-        </div>
-      </div>
-    </Teleport>
 
     <!-- 修改信息弹窗 -->
     <ConfirmDialog
@@ -891,15 +826,7 @@ function languageBadge(lang: string): string {
   font-weight: 700;
 }
 
-.cache-processing-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+
 .cache-processing-card {
   background: var(--bg-primary);
   border-radius: 12px;

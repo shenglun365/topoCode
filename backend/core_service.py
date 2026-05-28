@@ -1859,6 +1859,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         pid = project_id or projectId
         tid = task_id or taskId
         et = edge_type or edgeType or 'CALL'
+        logger.info("[report.getLevelCommunityDetail] ENTRY task_id=%s level=%s edge_type=%s project_id=%s", tid, level, et, pid)
         project_db = multi_db.get_project_db(pid)
         communities = project_db.fetchall(
             """SELECT * FROM graph_doc
@@ -1866,6 +1867,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                ORDER BY quality_score DESC""",
             (tid, et, level)
         )
+        logger.info("[report.getLevelCommunityDetail] graph_doc query returned %d communities", len(communities))
 
         # 预加载 source_files 映射: id → {file_path, file_name}
         all_source_files = project_db.fetchall("SELECT id, file_path, file_name FROM source_files")
@@ -1997,6 +1999,10 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                 "nodes": nodes_with_paths,
                 "edges": edges_with_details,
             })
+        logger.info("[report.getLevelCommunityDetail] DONE task_id=%s level=%s edge_type=%s communities=%d total_nodes=%d total_edges=%d",
+                     tid, level, et, len(result),
+                     sum(c.get('nodeCount', 0) for c in result),
+                     sum(c.get('edgeCount', 0) for c in result))
         return {"communities": result, "count": len(result), "level": level, "taskId": task_id}
 
     @server.register("report.saveFileSummaries")
