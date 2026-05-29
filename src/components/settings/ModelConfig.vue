@@ -29,6 +29,14 @@ const testingId = ref<string | null>(null)
 const dialogTesting = ref(false)
 const dialogTestResult = ref<'success' | 'error' | null>(null)
 
+const showDeleteConfirm = ref(false)
+const deleteTargetId = ref('')
+const showTestResult = ref(false)
+const testResultMessage = ref('')
+const testResultType = ref<'success' | 'error'>('success')
+const showValidationAlert = ref(false)
+const validationMessage = ref('')
+
 const form = ref({
   name: '',
   provider: 'ollama' as ModelConfigItem['provider'],
@@ -111,7 +119,8 @@ function openEditDialog(config: ModelConfigItem) {
 
 async function saveModel() {
   if (!form.value.name || !form.value.model || !form.value.url) {
-    alert(t('settings.fillRequired'))
+    validationMessage.value = t('settings.fillRequired')
+    showValidationAlert.value = true
     return
   }
 
@@ -119,8 +128,12 @@ async function saveModel() {
     await settingsStore.updateModel({
       id: editingId.value,
       name: form.value.name,
+      provider: form.value.provider,
+      model: form.value.model,
+      url: form.value.url,
       temperature: form.value.temperature,
       maxTokens: form.value.maxTokens,
+      apiKey: form.value.apiKey || undefined,
     })
   } else {
     const addParams: {
@@ -157,9 +170,14 @@ async function saveModel() {
 }
 
 async function removeModel(id: string) {
-  if (confirm(t('settings.confirmDeleteModel'))) {
-    await settingsStore.removeModel(id)
-  }
+  deleteTargetId.value = id
+  showDeleteConfirm.value = true
+}
+
+async function confirmDelete() {
+  await settingsStore.removeModel(deleteTargetId.value)
+  showDeleteConfirm.value = false
+  deleteTargetId.value = ''
 }
 
 async function testModel(id: string) {
@@ -167,14 +185,18 @@ async function testModel(id: string) {
   try {
     const result = await settingsStore.testModel(id)
     if (result.status === 'connected') {
-      alert(`${t('settings.connected')} - ${t('settings.latency')} ${result.latency}ms`)
+      testResultType.value = 'success'
+      testResultMessage.value = `${t('settings.connected')} - ${t('settings.latency')} ${result.latency}ms`
     } else {
-      alert(`${t('settings.testFailed')}: ${result.error || 'Unknown error'}`)
+      testResultType.value = 'error'
+      testResultMessage.value = `${t('settings.testFailed')}: ${result.error || 'Unknown error'}`
     }
   } catch (err: any) {
-    alert(`${t('settings.testFailed')}: ${err.message}`)
+    testResultType.value = 'error'
+    testResultMessage.value = `${t('settings.testFailed')}: ${err.message}`
   } finally {
     testingId.value = null
+    showTestResult.value = true
   }
 }
 
@@ -197,7 +219,7 @@ async function testCurrentForm() {
     // 如果是编辑已有模型，直接用其 ID；否则先保存再测试
     if (editingId.value) {
       const result = await window.api.settings.testModel(editingId.value)
-      dialogTestResult.value = result.status === 'ok' ? 'success' : 'error'
+      dialogTestResult.value = result.status === 'connected' ? 'success' : 'error'
     } else {
       // 新建场景：先保存再测试
       const saved = await window.api.settings.addModel({
@@ -210,7 +232,7 @@ async function testCurrentForm() {
         maxTokens: form.value.maxTokens,
       })
       const result = await window.api.settings.testModel(saved.id)
-      dialogTestResult.value = result.status === 'ok' ? 'success' : 'error'
+      dialogTestResult.value = result.status === 'connected' ? 'success' : 'error'
       // 清理临时记录（用户可以选择正式保存）
       newModelId.value = saved.id
     }
@@ -283,7 +305,9 @@ function onProviderChange(provider: string) {
           v-if="defaultModel"
           style="display:flex; align-items:center; gap:8px;"
         >
-          <span class="badge badge-green">● {{ t('settings.connected') }}</span>
+          <span
+            :class="`badge ${getStatusBadge(defaultModel.status)}`"
+          >● {{ getStatusText(defaultModel.status) }}</span>
           <span
             v-if="defaultModel.latency"
             style="font-size:10px; color:var(--text-muted);"
@@ -589,6 +613,62 @@ function onProviderChange(provider: string) {
       </div>
     </div>
   </div>
+
+  <!-- 删除确认弹窗 -->
+  <Teleport to="body">
+    <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
+      <div class="modal" style="width:400px;">
+        <div class="modal-header">
+          <h3>{{ t('common.confirm') }}</h3>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px; color:var(--text-primary);">{{ t('settings.confirmDeleteModel') }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" @click="showDeleteConfirm = false">{{ t('common.cancel') }}</button>
+          <button class="btn btn-primary" style="background:var(--error);border-color:var(--error);" @click="confirmDelete">{{ t('common.delete') }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 测试结果弹窗 -->
+  <Teleport to="body">
+    <div v-if="showTestResult" class="modal-overlay" @click.self="showTestResult = false">
+      <div class="modal" style="width:400px;">
+        <div class="modal-header">
+          <h3>{{ testResultType === 'success' ? t('settings.testConnection') : t('settings.testFailed') }}</h3>
+        </div>
+        <div class="modal-body">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <svg v-if="testResultType === 'success'" class="w-6 h-6" style="color:var(--success);flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            <svg v-else class="w-6 h-6" style="color:var(--error);flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            <span style="font-size:13px; color:var(--text-primary);">{{ testResultMessage }}</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" @click="showTestResult = false">{{ t('common.confirm') }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 验证提示弹窗 -->
+  <Teleport to="body">
+    <div v-if="showValidationAlert" class="modal-overlay" @click.self="showValidationAlert = false">
+      <div class="modal" style="width:380px;">
+        <div class="modal-header">
+          <h3>{{ t('common.info') }}</h3>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px; color:var(--text-primary);">{{ validationMessage }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" @click="showValidationAlert = false">{{ t('common.confirm') }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>

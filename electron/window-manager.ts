@@ -224,14 +224,14 @@ export class WindowManager {
     ipcMain.handle('window:zoom-in', () => {
       const win = this.getFocusedWindow()
       const zoom = win?.webContents.getZoomFactor() || 1
-      win?.webContents.setZoomFactor(Math.min(2, zoom + 0.1))
+      win?.webContents.setZoomFactor(Math.min(3, zoom + 0.1))
       return Math.round((win?.webContents.getZoomFactor() || 1) * 100)
     })
 
     ipcMain.handle('window:zoom-out', () => {
       const win = this.getFocusedWindow()
       const zoom = win?.webContents.getZoomFactor() || 1
-      win?.webContents.setZoomFactor(Math.max(0.5, zoom - 0.1))
+      win?.webContents.setZoomFactor(Math.max(0.33, zoom - 0.1))
       return Math.round((win?.webContents.getZoomFactor() || 1) * 100)
     })
 
@@ -243,6 +243,12 @@ export class WindowManager {
     // ---- 广播消息 ----
     ipcMain.handle('window:broadcast', (_, channel: string, data: any) => {
       this.broadcast(channel, data)
+      return true
+    })
+
+    // ---- 应用退出 ----
+    ipcMain.handle('app:quit', () => {
+      app.quit()
       return true
     })
 
@@ -272,6 +278,16 @@ export class WindowManager {
     // 订阅后端状态变更
     pythonBridge.onStatusChange((status: BackendStatus) => {
       this.broadcast('event:backend.status', status)
+    })
+
+    // ---- 内存限制 ----
+    ipcMain.handle('backend:getMemoryLimit', () => {
+      return pythonBridge.memoryLimit
+    })
+
+    ipcMain.handle('backend:setMemoryLimit', (_, limit: number) => {
+      pythonBridge.memoryLimit = limit
+      return true
     })
   }
 

@@ -52,6 +52,16 @@ export const useChatStore = defineStore('chat', () => {
     sessions.value.filter(s => s.status === 'running')
   )
 
+  async function clearAllSessions() {
+    try {
+      await api().session.clearAll()
+      sessions.value = []
+      activeSessionId.value = null
+    } catch (e) {
+      console.warn('[ChatStore] Failed to clear sessions:', e)
+    }
+  }
+
   // 获取当前默认模型 ID
   const modelId = computed(() => {
     const settingsStore = useSettingsStore()
@@ -71,7 +81,9 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const result = await api().session.list({ moduleType: 'ai_assistant' })
       if (result && result.sessions) {
-        sessions.value = result.sessions.map((s: any) => ({
+        // 只保留最近 10 个会话，避免历史积压
+        const recent = result.sessions.slice(0, 10)
+        sessions.value = recent.map((s: any) => ({
           id: s.id,
           title: s.title,
           mode: 'chat',
@@ -306,6 +318,7 @@ export const useChatStore = defineStore('chat', () => {
     modelId,
     modelConfig,
     loadSessions,
+    clearAllSessions,
     createSession,
     closeSession,
     switchSession,

@@ -5,6 +5,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 // ==================== API 定义 ====================
 
 contextBridge.exposeInMainWorld('api', {
+  // ==================== 应用控制 ====================
+  app: {
+    quit: () => ipcRenderer.invoke('app:quit'),
+  },
+
   // ==================== 窗口控制 ====================
   window: {
     toggleLeftPanel: () => ipcRenderer.invoke('window:toggle-left-panel'),
@@ -298,6 +303,8 @@ contextBridge.exposeInMainWorld('api', {
     getStatus: () => ipcRenderer.invoke('ipc:call', { method: 'backend.getStatus', params: {} }),
     ping: () => ipcRenderer.invoke('ipc:call', { method: 'backend.ping', params: {} }),
     testPort: (port: number) => ipcRenderer.invoke('ipc:call', { method: 'backend.testPort', params: { port } }),
+    getMemoryLimit: () => ipcRenderer.invoke('backend:getMemoryLimit'),
+    setMemoryLimit: (limit: number) => ipcRenderer.invoke('backend:setMemoryLimit', limit),
 
     // 事件订阅
     onStatusChange: (callback: (data: any) => void) => {
@@ -323,7 +330,9 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'session.deleteMessage', params }),
     updateMeta: (params: { sessionId: string; metadata: Record<string, any> }) =>
       ipcRenderer.invoke('ipc:call', { method: 'session.updateMeta', params }),
-  },
+    clearAll: () =>
+      ipcRenderer.invoke('ipc:call', { method: 'session.clearAll', params: {} }),
+    },
 
   // ==================== LLM 推理 (v2 — 统一入口，所有业务方法使用 templateId) ====================
   llm: {
@@ -366,12 +375,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // ==================== Prompt 模板 ====================
   promptTemplate: {
-    list: (params?: { mode?: string; moduleType?: string; category?: string }) =>
+    list: (params?: { mode?: string; moduleType?: string; category?: string; locale?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.list', params: params || {} }),
-    get: (params: { templateId: string }) =>
+    get: (params: { templateId: string; locale?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.get', params }),
     create: (params: {
-      name: string; mode: string; moduleType?: string; category?: string
+      name: string; mode: string; moduleType?: string; category?: string; locale?: string
       systemPrompt?: string; userPromptTemplate?: string
       toolsJson?: string; toolStrategy?: string
       outputSchemaJson?: string; outputExample?: string
@@ -382,8 +391,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.update', params }),
     delete: (params: { templateId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.delete', params }),
-    render: (params: { templateId: string; variables: Record<string, any> }) =>
+    render: (params: { templateId: string; variables: Record<string, any>; locale?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.render', params }),
+    restoreDefaults: (params?: { locale?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.restoreDefaults', params: params || {} }),
+    getDefaultLocale: () =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.getDefaultLocale', params: {} }),
+    setDefaultLocale: (params: { locale: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'promptTemplate.setDefaultLocale', params }),
   },
 
   // ==================== 渲染服务 ====================

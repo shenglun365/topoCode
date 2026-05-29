@@ -48,6 +48,15 @@ interface ReportTaskRuntime {
   analysisStates: Record<string, ChildAnalysisState>
 }
 
+function normalizeDiagramField(val: any): string {
+  if (!val) return ''
+  if (typeof val === 'string') return val
+  if (typeof val === 'object') {
+    return val.content || val.code || JSON.stringify(val) || ''
+  }
+  return String(val)
+}
+
 export const useReportStore = defineStore('report', () => {
   const generatedReports = ref<Record<string, string>>({})
   const dbReportExists = ref<Record<string, boolean>>({})
@@ -468,7 +477,8 @@ export const useReportStore = defineStore('report', () => {
           onChunk(data: { text: string }) { fullContent += data.text },
           onDone(data: { content: string; structured?: Record<string, any> }) {
             const trimmed = (data.structured?.summary || fullContent || '').trim()
-            const isError = !trimmed || trimmed.length < 20 ||
+            const hasValidName = !!data.structured?.name
+            const isError = !trimmed || (!hasValidName && trimmed.length < 5) || trimmed.length < 1 ||
               /^(error|错误|failed|失败|\[error\]|\[ERROR\])/i.test(trimmed)
             console.log(`[reportStore] runTask LLM onDone id=${community.communityId} trimmedLen=${trimmed.length} isError=${isError} hasStructured=${!!data.structured}`)
             if (isError) {
@@ -478,10 +488,10 @@ export const useReportStore = defineStore('report', () => {
             } else if (data.structured) {
               community.name = data.structured.name?.slice(0, 20) || community.communityId
               community.summary = data.structured.summary || ''
-              community.mermaid = data.structured.mermaid || ''
-              community.plantuml = data.structured.plantuml || ''
+              community.mermaid = normalizeDiagramField(data.structured.mermaid)
+              community.plantuml = normalizeDiagramField(data.structured.plantuml)
               community.status = 'completed'
-              console.log(`[reportStore] runTask LLM SUCCESS id=${community.communityId} name=${community.name} summaryLen=${community.summary.length}`)
+              console.log(`[reportStore] runTask LLM SUCCESS id=${community.communityId} name=${community.name} summaryLen=${community.summary.length} mermaidType=${typeof data.structured.mermaid} plantumlType=${typeof data.structured.plantuml}`)
             } else {
               community.status = 'completed'
               community.name = community.communityId
@@ -583,6 +593,11 @@ export const useReportStore = defineStore('report', () => {
       const llmMap: Record<string, any> = {}
       for (const r of (results?.results || [])) {
         llmMap[r.comm_id] = r
+      }
+      // 诊断：打印前3个 L1 结果的 mermaid/plantuml 状态
+      const l1Results = (results?.results || []).filter((r: any) => r.comm_lv === childLevel).slice(0, 3)
+      for (const r of l1Results) {
+        console.log(`[reportStore] loadChildCommunities LLM result id=${r.comm_id} name=${r.name} mermaidLen=${(r.mermaid||'').length} plantumlLen=${(r.plantuml||'').length}`)
       }
       const communities: CommunityItem[] = []
       const seenIds = new Set<string>()
@@ -830,7 +845,8 @@ export const useReportStore = defineStore('report', () => {
           onDone(data: { content: string; structured?: Record<string, any> }) {
             unsubscribe()
             const trimmed = (data.structured?.summary || fullContent || '').trim()
-            if (!trimmed || trimmed.length < 20) {
+            const hasValidName = !!data.structured?.name
+            if (!trimmed || (!hasValidName && trimmed.length < 5) || trimmed.length < 1) {
               reject(new Error('LLM returned empty or too short response'))
               return
             }
@@ -838,8 +854,8 @@ export const useReportStore = defineStore('report', () => {
               resolve({
                 name: (data.structured.name || '').slice(0, 20) || communityId,
                 summary: data.structured.summary || '',
-                mermaid: data.structured.mermaid || '',
-                plantuml: data.structured.plantuml || '',
+                mermaid: normalizeDiagramField(data.structured.mermaid),
+                plantuml: normalizeDiagramField(data.structured.plantuml),
               })
             } else {
               resolve({ name: communityId, summary: fullContent })
@@ -870,6 +886,73 @@ export const useReportStore = defineStore('report', () => {
       if (parsed.mermaid) parts.push('', '```mermaid', parsed.mermaid, '```')
       if (parsed.plantuml) parts.push('', '```plantuml', parsed.plantuml, '```')
       return { success: true, content: parts.join('\n') }
+    } catch (e: any) {
+      return { success: false, error: e.message || String(e) }
+    }
+  }
+
+  async function regenerateCommunityDiagram(taskId: string, communityId: string, level: string, edgeType: string, projectId: string, existingCode: string, userInstruction: string, diagramType: 'mermaid' | 'plantuml'): Promise<{ success: boolean; code?: string; error?: string }> {
+    const templateId = diagramType === 'mermaid' ? 'diagram_regenerate_mermaid' : 'diagram_regenerate_plantuml'
+    try {
+      const modelId = useSettingsStore().models.find((m: any) => m.isDefault)?.id
+      if (!modelId) return { success: false, error: 'No default model configured' }
+      const sessionId = `regen-${diagramType}-${taskId}-${communityId}-${Date.now()}`
+      const chatResult = await window.api.llm.chat({
+        sessionId, modelId,
+        templateId,
+        variables: {
+          existingCode: existingCode || '（无现有代码）',
+          userInstruction: userInstruction || '请重新生成',
+        },
+        mode: 'structured',
+        outputSchema: {
+          type: 'object',
+          properties: { code: { type: 'string' } },
+          required: ['code'],
+        },
+      })
+      let fullContent = ''
+      function extractDiagramCode(structured: Record<string, any> | undefined, fallback: string): string {
+        if (!structured) {
+          // 无结构化输出 → 从纯文本中提取 ```mermaid/```plantuml 代码块
+          const m = fallback.match(/```(?:\w+)?\n([\s\S]*?)```/)
+          return m ? m[1].trim() : fallback.trim()
+        }
+        // 尝试各种可能字段名
+        return structured.code || structured.content || structured.diagram ||
+               structured.mermaid || structured.plantuml ||
+               structured.result || structured.output || ''
+      }
+      const parsed = await new Promise<{ code: string } | null>((resolve, reject) => {
+        const unsubscribe = window.api.llm.subscribe(chatResult.requestId, {
+          onChunk(data: { text: string }) { fullContent += data.text },
+          onDone(data: { content: string; structured?: Record<string, any> }) {
+            unsubscribe()
+            const rawCode = extractDiagramCode(data.structured, data.content || fullContent)
+            if (rawCode) {
+              resolve({ code: rawCode })
+            } else {
+              reject(new Error('LLM did not return valid diagram code'))
+            }
+          },
+          onError(errData: { message: string }) {
+            unsubscribe()
+            reject(new Error(errData.message))
+          },
+        })
+      })
+      if (!parsed) return { success: false, error: 'Failed to parse LLM response' }
+      // Update in DB: fetch current result, replace diagram, save back
+      const current = await window.api.analysis.getCommunityResult({ taskId, edgeType, commLv: level, commId: communityId })
+      await saveCommunityResult({
+        taskId, edgeType, commLv: level, commId: communityId,
+        name: current?.name || communityId,
+        summary: current?.summary || '',
+        mermaid: diagramType === 'mermaid' ? parsed.code : (current?.mermaid || ''),
+        plantuml: diagramType === 'plantuml' ? parsed.code : (current?.plantuml || ''),
+        modelId, templateId,
+      })
+      return { success: true, code: parsed.code }
     } catch (e: any) {
       return { success: false, error: e.message || String(e) }
     }
@@ -1190,7 +1273,7 @@ export const useReportStore = defineStore('report', () => {
     pushChildError, clearChildErrorLogs,
 
     // Regeneration actions
-    regenerateCommunityDoc, regenerateOverallDoc,
+    regenerateCommunityDoc, regenerateOverallDoc, regenerateCommunityDiagram,
 
     // Pipeline actions
     initPipeline, updateNodeStatus, recalcProgress,

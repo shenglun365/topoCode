@@ -6,7 +6,6 @@ import {
   FolderIcon,
   ChartBarIcon,
   LightBulbIcon,
-  ChatBubbleLeftRightIcon,
   Cog6ToothIcon,
 } from '@heroicons/vue/24/outline'
 import { useNavigationStore } from '@/stores/navigation'
@@ -22,7 +21,6 @@ const iconMap = {
   home: FolderIcon,
   analysis: ChartBarIcon,
   knowledge: LightBulbIcon,
-  coder: ChatBubbleLeftRightIcon,
   user: Cog6ToothIcon,
 }
 
@@ -30,7 +28,6 @@ const activities = [
   { page: 'home' as PageType, key: 'nav.home' },
   { page: 'analysis' as PageType, key: 'nav.analysis' },
   { page: 'knowledge' as PageType, key: 'nav.knowledge' },
-  { page: 'coder' as PageType, key: 'nav.coder' },
 ]
 
 const bottomActivities = [

@@ -538,16 +538,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError(f"Task {tid} not found")
         project_db = multi_db.get_project_db(task["project_id"])
         store = AnalysisStore(project_db)
-        from plantuml_service import validate_mermaid, validate_plantuml
-        has_mermaid = bool(mermaid and validate_mermaid(mermaid))
-        has_plantuml = bool(plantuml and validate_plantuml(plantuml))
-        logger.info("[analysis.saveCommunityResult] validated name=%s summary_len=%d mermaid=%s plantuml=%s model_id=%s template_id=%s",
-                     name, len(summary or ''), has_mermaid, has_plantuml, mid, tpid)
+        logger.info("[analysis.saveCommunityResult] validated name=%s summary_len=%d mermaid_len=%d plantuml_len=%d model_id=%s template_id=%s",
+                     name, len(summary or ''), len(mermaid or ''), len(plantuml or ''), mid, tpid)
         validated = {
             "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
             "name": name, "summary": summary,
-            "mermaid": mermaid if has_mermaid else None,
-            "plantuml": plantuml if has_plantuml else None,
+            "mermaid": mermaid, "plantuml": plantuml,
             "model_id": mid, "template_id": tpid,
         }
         store.bulk_insert_llm_results([validated])

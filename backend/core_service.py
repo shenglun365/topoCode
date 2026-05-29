@@ -913,12 +913,17 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         if kwargs.get("isDefault"):
             main_db.execute("UPDATE model_configs SET is_default = 0")
 
+        # 统一 URL 格式：去掉末尾的 /v1（兼容用户输入 https://xxx/v1 的情况）
+        clean_url = url.rstrip('/')
+        if clean_url.endswith('/v1'):
+            clean_url = clean_url[:-3]
+
         data = {
             "id": model_id,
             "name": name,
             "provider": provider,
             "model": model,
-            "url": url,
+            "url": clean_url,
             "type": type,
             "status": "offline",
             "is_default": 1 if kwargs.get("isDefault") else 0,
@@ -935,7 +940,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.updateModel")
     def update_model(id: str, **kwargs):
-        allowed = {"name", "temperature", "maxTokens", "url", "isDefault"}
+        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model"}
         data = {}
         for k, v in kwargs.items():
             if k == "isDefault":
@@ -944,6 +949,13 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 data["is_default"] = 1 if v else 0
             elif k == "maxTokens":
                 data["max_tokens"] = v
+            elif k == "apiKey":
+                data["api_key"] = v
+            elif k == "url":
+                clean_url = v.rstrip('/')
+                if clean_url.endswith('/v1'):
+                    clean_url = clean_url[:-3]
+                data["url"] = clean_url
             elif k in allowed:
                 data[k] = v
         data["updated_at"] = datetime.now().isoformat()
@@ -965,21 +977,27 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         import requests as req
         start = __import__('time').time()
         try:
+            base = model['url'].rstrip('/')
+            # 兼容旧数据中 URL 末尾带 /v1 的情况
+            if base.endswith('/v1'):
+                base = base[:-3]
             if model.get('provider') == 'ollama':
-                resp = req.post(f"{model['url'].rstrip('/')}/api/tags", timeout=10)
+                resp = req.post(f"{base}/api/tags", timeout=10)
                 if resp.status_code != 200:
                     return {"status": "error", "latency": 0, "error": f"Ollama API {resp.status_code}"}
             else:
                 headers = {'Content-Type': 'application/json'}
                 if model.get('api_key'):
                     headers['Authorization'] = f"Bearer {model['api_key']}"
-                resp = req.post(f"{model['url'].rstrip('/')}/v1/models", headers=headers, timeout=10)
+                resp = req.get(f"{base}/v1/models", headers=headers, timeout=10)
                 if resp.status_code != 200:
                     return {"status": "error", "latency": 0, "error": f"API {resp.status_code}"}
             latency = int((__import__('time').time() - start) * 1000)
-            model['status'] = 'connected'
-            model['latency'] = latency
-            main_db.update("model_configs", {"status": "connected", "latency": latency}, "id = ?", (id,))
+            # 只更新 status，不写入 latency 字段（表结构可能不含该列）
+            try:
+                main_db.update("model_configs", {"status": "connected"}, "id = ?", (id,))
+            except Exception:
+                pass
             return {"status": "connected", "latency": latency, "model": model["model"]}
         except Exception as e:
             model['status'] = 'error'
@@ -1135,6 +1153,9 @@ def register_render_methods(server: ZMQServer, multi_db: MultiDBManager):
                 "size": len(data),
             }
         except Exception as e:
+            msg = str(e)
+            if 'PlantUML render failed:' in msg:
+                raise  # 保持 _render_remote 的详细错误
             raise RuntimeError(f"PlantUML render failed: {e}")
 
     @server.register("render.testPlantuml")

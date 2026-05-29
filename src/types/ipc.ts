@@ -475,8 +475,8 @@ export interface IPCAPI {
   // 设置配置
   settings: {
     getModels: () => Promise<ModelConfigItem[]>
-    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number }) => Promise<ModelConfigItem>
-    updateModel: (params: { id: string; name?: string; temperature?: number; maxTokens?: number }) => Promise<ModelConfigItem>
+    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; apiKey?: string }) => Promise<ModelConfigItem>
+    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; isDefault?: boolean; apiKey?: string }) => Promise<ModelConfigItem>
     removeModel: (id: string) => Promise<void>
     testModel: (id: string) => Promise<{ status: string; latency: number; model: string }>
     getAgents: () => Promise<AgentConfigItem[]>
@@ -496,6 +496,8 @@ export interface IPCAPI {
     stop: () => Promise<void>
     restart: () => Promise<void>
     getStatus: () => Promise<BackendStatus>
+    getMemoryLimit: () => Promise<number>
+    setMemoryLimit: (limit: number) => Promise<void>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void
   }
 
@@ -517,6 +519,7 @@ export interface IPCAPI {
     addMessage: (params: { sessionId: string; role: string; content: string; tokenCount?: number; metadata?: Record<string, any> }) => Promise<{ id: string }>
     deleteMessage: (params: { messageId: string }) => Promise<{ success: boolean }>
     updateMeta: (params: { sessionId: string; metadata: Record<string, any> }) => Promise<{ sessionId: string; metadata: Record<string, any> }>
+    clearAll: () => Promise<{ success: boolean; count: number }>
   }
 
   // LLM 推理 (v2 — 统一入口)
@@ -545,12 +548,15 @@ export interface IPCAPI {
 
   // Prompt 模板
   promptTemplate: {
-    list: (params?: { mode?: string; moduleType?: string; category?: string }) => Promise<{ templates: Array<{ id: string; name: string; mode: string; module_type: string | null; category: string; is_builtin: number }> }>
-    get: (params: { templateId: string }) => Promise<Record<string, any>>
-    create: (params: { name: string; mode: string; moduleType?: string; category?: string; systemPrompt?: string; userPromptTemplate?: string; toolsJson?: string; toolStrategy?: string; outputSchemaJson?: string; outputExample?: string; variablesJson?: string }) => Promise<Record<string, any>>
+    list: (params?: { mode?: string; moduleType?: string; category?: string; locale?: string }) => Promise<{ templates: Array<{ id: string; name: string; mode: string; module_type: string | null; category: string; is_builtin: number; locale: string; base_id?: string }> }>
+    get: (params: { templateId: string; locale?: string }) => Promise<Record<string, any>>
+    create: (params: { name: string; mode: string; moduleType?: string; category?: string; locale?: string; systemPrompt?: string; userPromptTemplate?: string; toolsJson?: string; toolStrategy?: string; outputSchemaJson?: string; outputExample?: string; variablesJson?: string }) => Promise<Record<string, any>>
     update: (params: { templateId: string;[key: string]: any }) => Promise<Record<string, any>>
     delete: (params: { templateId: string }) => Promise<{ success: boolean }>
-    render: (params: { templateId: string; variables: Record<string, any> }) => Promise<{ messages: any[]; mode: string; tools: string[] | null; outputSchema: Record<string, any> | null }>
+    render: (params: { templateId: string; variables: Record<string, any>; locale?: string }) => Promise<{ messages: any[]; mode: string; tools: string[] | null; outputSchema: Record<string, any> | null }>
+    restoreDefaults: (params?: { locale?: string }) => Promise<{ success: boolean; count: number }>
+    getDefaultLocale: () => Promise<{ locale: string }>
+    setDefaultLocale: (params: { locale: string }) => Promise<{ success: boolean; locale: string }>
   }
 
   // 渲染服务
@@ -559,6 +565,9 @@ export interface IPCAPI {
   }
 
   // Electron 专用 (preload 暴露)
+  app: {
+    quit: () => Promise<void>
+  }
   window: {
     toggleLeftPanel: () => Promise<void>
     toggleRightPanel: () => Promise<void>

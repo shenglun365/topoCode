@@ -1,31 +1,127 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  Bars3Icon,
-  ArrowRightOnRectangleIcon,
+  ArrowRightStartOnRectangleIcon,
+  ArrowLeftEndOnRectangleIcon,
+  ArrowRightEndOnRectangleIcon,
+  ArrowLeftStartOnRectangleIcon,
   MoonIcon,
   SunIcon,
-  PlusIcon,
-  Squares2X2Icon,
   QuestionMarkCircleIcon,
+  XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useThemeStore } from '@/stores/theme'
-import { useWindowStore } from '@/stores/window'
 import { useProjectStore } from '@/stores/project'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useStatusStore } from '@/stores/status'
+import { useNavigationStore } from '@/stores/navigation'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-005')
 const { t } = useI18n()
+const router = useRouter()
 const panelStore = usePanelStore()
 const themeStore = useThemeStore()
-const windowStore = useWindowStore()
 const projectStore = useProjectStore()
 const onboardingStore = useOnboardingStore()
 const statusStore = useStatusStore()
+const navigation = useNavigationStore()
+
+// ── 配置 ──
+const DOCS_URL = 'https://opencode.ai'
+
+// ── 菜单 ──
+const showMenu = ref<string | null>(null)
+let menuTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearMenuTimer() {
+  if (menuTimer) { clearTimeout(menuTimer); menuTimer = null }
+}
+
+function toggleMenu(key: string) {
+  clearMenuTimer()
+  showMenu.value = showMenu.value === key ? null : key
+}
+
+function closeMenu() {
+  showMenu.value = null
+}
+
+function onMenuMouseEnter(key: string) {
+  clearMenuTimer()
+}
+
+function onMenuMouseLeave(key: string) {
+  clearMenuTimer()
+  menuTimer = setTimeout(() => { closeMenu() }, 500)
+}
+
+function onDropdownMouseEnter() {
+  clearMenuTimer()
+}
+
+function onDropdownMouseLeave() {
+  clearMenuTimer()
+  menuTimer = setTimeout(() => { closeMenu() }, 500)
+}
+
+// ── 弹窗 ──
+const showAbout = ref(false)
+const showExitConfirm = ref(false)
+
+const menus: Record<string, { label: string; shortcut?: string; action?: string }[]> = {
+  file: [
+    { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O', action: 'import' },
+    { label: t('shell.topBar.goHome'), shortcut: '' },
+    { divider: true } as any,
+    { label: t('shell.topBar.exit'), shortcut: 'Ctrl+Q', action: 'exit' },
+  ],
+  view: [
+    { label: t('shell.topBar.toggleLeftPanel'), shortcut: 'Ctrl+B', action: 'toggleLeft' },
+    { label: t('shell.topBar.toggleRightPanel'), shortcut: 'Ctrl+J', action: 'toggleRight' },
+    { divider: true } as any,
+    { label: t('shell.topBar.zoomIn'), shortcut: 'Ctrl++', action: 'zoomIn' },
+    { label: t('shell.topBar.zoomOut'), shortcut: 'Ctrl+-', action: 'zoomOut' },
+    { label: t('shell.topBar.resetZoom'), shortcut: 'Ctrl+0', action: 'resetZoom' },
+  ],
+  help: [
+    { label: t('shell.topBar.documentation'), shortcut: '', action: 'docs' },
+    { divider: true } as any,
+    { label: t('shell.topBar.about'), shortcut: '', action: 'about' },
+  ],
+}
+
+async function handleMenuItemClick(item: any) {
+  closeMenu()
+  if (item.action === 'import') {
+    await handleFileImport()
+  } else if (item.action === 'goHome') {
+    router.push('/home')
+    navigation.navigateTo('home')
+  } else if (item.action === 'exit') {
+    handleExit()
+  } else if (item.action === 'toggleLeft') {
+    panelStore.toggleLeft()
+  } else if (item.action === 'toggleRight') {
+    panelStore.toggleRight()
+  } else if (item.action === 'zoomIn') {
+    const pct = await window.api?.window.zoomIn()
+    if (pct) statusStore.setZoom(pct)
+  } else if (item.action === 'zoomOut') {
+    const pct = await window.api?.window.zoomOut()
+    if (pct) statusStore.setZoom(pct)
+  } else if (item.action === 'resetZoom') {
+    const pct = await window.api?.window.resetZoom()
+    if (pct) statusStore.setZoom(pct)
+  } else if (item.action === 'docs') {
+    window.open(DOCS_URL, '_blank')
+  } else if (item.action === 'about') {
+    showAbout.value = true
+  }
+}
 
 async function handleFileImport() {
   closeMenu()
@@ -37,79 +133,23 @@ async function handleFileImport() {
   }
 }
 
+async function handleExit() {
+  showExitConfirm.value = true
+}
+
+async function confirmExit() {
+  showExitConfirm.value = false
+  await window.api?.app.quit()
+}
+
 onMounted(() => {
-  windowStore.init()
+  // 窗口 zoom 限制在 preload 中处理
 })
-
-const showMenu = ref<string | null>(null)
-
-const menus = {
-  file: [
-    { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O', action: 'import' },
-    { label: t('shell.topBar.closeProject'), shortcut: '' },
-    { divider: true },
-    { label: t('shell.topBar.exit'), shortcut: 'Ctrl+Q' },
-  ],
-  edit: [
-    { label: t('shell.topBar.undo'), shortcut: 'Ctrl+Z' },
-    { label: t('shell.topBar.redo'), shortcut: 'Ctrl+Shift+Z' },
-    { divider: true },
-    { label: t('shell.topBar.find'), shortcut: 'Ctrl+F' },
-    { label: t('shell.topBar.replace'), shortcut: 'Ctrl+H' },
-  ],
-  view: [
-    { label: t('shell.topBar.toggleLeftPanel'), shortcut: 'Ctrl+B' },
-    { label: t('shell.topBar.toggleRightPanel'), shortcut: 'Ctrl+J' },
-    { divider: true },
-    { label: t('shell.topBar.zoomIn'), shortcut: 'Ctrl++', action: 'zoomIn' },
-    { label: t('shell.topBar.zoomOut'), shortcut: 'Ctrl+-', action: 'zoomOut' },
-    { label: t('shell.topBar.resetZoom'), shortcut: 'Ctrl+0', action: 'resetZoom' },
-  ],
-  tools: [
-    { label: t('shell.topBar.restartBackend'), shortcut: '' },
-    { label: t('shell.topBar.clearCache'), shortcut: '' },
-  ],
-  help: [
-    { label: t('shell.topBar.guide'), shortcut: '', action: 'guide' },
-    { divider: true },
-    { label: t('shell.topBar.documentation'), shortcut: '' },
-    { label: t('shell.topBar.about'), shortcut: '' },
-  ],
-}
-
-function toggleMenu(menu: string) {
-  showMenu.value = showMenu.value === menu ? null : menu
-}
-
-function closeMenu() {
-  showMenu.value = null
-}
-
-async function handleMenuItemClick(item: any) {
-  closeMenu()
-  if (item.action === 'import') {
-    await handleFileImport()
-  } else if (item.action === 'guide') {
-    onboardingStore.start()
-  } else if (item.action === 'zoomIn') {
-    const pct = await window.api?.window.zoomIn()
-    if (pct) statusStore.setZoom(pct)
-  } else if (item.action === 'zoomOut') {
-    const pct = await window.api?.window.zoomOut()
-    if (pct) statusStore.setZoom(pct)
-  } else if (item.action === 'resetZoom') {
-    const pct = await window.api?.window.resetZoom()
-    if (pct) statusStore.setZoom(pct)
-  }
-}
 </script>
 
 <template>
   <div class="app-top">
-    <span
-      v-if="showId"
-      class="cmp-id"
-    >{{ componentId }}</span>
+    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
     <div class="app-row1">
       <!-- 产品 Logo -->
       <div class="menu-bar-logo">
@@ -125,34 +165,29 @@ async function handleMenuItemClick(item: any) {
           class="menu-item"
           :class="{ active: showMenu === key }"
           @click="toggleMenu(key)"
+          @mouseenter="onMenuMouseEnter(key)"
+          @mouseleave="onMenuMouseLeave(key)"
         >
-          <span>{{ key === 'file' ? t('shell.topBar.file') : key === 'edit' ? t('shell.topBar.edit') : key === 'view' ? t('shell.topBar.view') : key === 'tools' ? t('shell.topBar.tools') : t('shell.topBar.help') }}</span>
+          <span>{{ key === 'file' ? t('shell.topBar.file') : key === 'view' ? t('shell.topBar.view') : t('shell.topBar.help') }}</span>
 
           <!-- 下拉菜单 -->
           <div
             v-if="showMenu === key"
             class="menu-dropdown show"
             @click.stop
+            @mouseenter="onDropdownMouseEnter"
+            @mouseleave="onDropdownMouseLeave"
           >
-            <template
-              v-for="(menuItem, idx) in menuItems"
-              :key="idx"
-            >
+            <template v-for="(menuItem, idx) in menuItems" :key="idx">
               <div
                 v-if="!menuItem.divider"
                 class="menu-dropdown-item"
                 @click="handleMenuItemClick(menuItem)"
               >
                 <span>{{ menuItem.label }}</span>
-                <span
-                  v-if="menuItem.shortcut"
-                  class="shortcut"
-                >{{ menuItem.shortcut }}</span>
+                <span v-if="menuItem.shortcut" class="shortcut">{{ menuItem.shortcut }}</span>
               </div>
-              <div
-                v-else
-                class="menu-dropdown-divider"
-              />
+              <div v-else class="menu-dropdown-divider" />
             </template>
           </div>
         </div>
@@ -163,52 +198,31 @@ async function handleMenuItemClick(item: any) {
 
       <!-- 右侧工具 -->
       <div class="tab-bar-actions">
-        <!-- 窗口管理 -->
-        <div class="window-manager">
-          <button
-            class="icon-btn"
-            :class="{ disabled: !windowStore.canCreateMore }"
-            :title="t('window.newWindow')"
-            @click="windowStore.createNewWindow()"
-          >
-            <PlusIcon class="w-4 h-4" />
-          </button>
-          <button
-            class="icon-btn"
-            :title="t('window.windowCount')"
-            @click="windowStore.refresh()"
-          >
-            <Squares2X2Icon class="w-4 h-4" />
-            <span class="window-count-badge">{{ windowStore.windowCount }}</span>
-          </button>
-        </div>
         <div
           class="icon-btn"
+          :class="{ active: !panelStore.leftCollapsed }"
           :title="t('shell.topBar.toggleLeftPanel')"
           @click="panelStore.toggleLeft()"
         >
-          <Bars3Icon class="w-4 h-4" />
+          <ArrowLeftEndOnRectangleIcon v-if="!panelStore.leftCollapsed" class="w-4 h-4" />
+          <ArrowRightStartOnRectangleIcon v-else class="w-4 h-4" />
         </div>
         <div
           class="icon-btn"
+          :class="{ active: !panelStore.rightCollapsed }"
           :title="t('shell.topBar.toggleRightPanel')"
           @click="panelStore.toggleRight()"
         >
-          <ArrowRightOnRectangleIcon class="w-4 h-4" />
+          <ArrowRightEndOnRectangleIcon v-if="!panelStore.rightCollapsed" class="w-4 h-4" />
+          <ArrowLeftStartOnRectangleIcon v-else class="w-4 h-4" />
         </div>
         <div
           class="icon-btn"
           :title="`${t('shell.topBar.toggleTheme')} (${themeStore.theme === 'dark' ? t('settings.darkMode') : t('settings.lightMode')})`"
           @click="themeStore.toggleTheme()"
         >
-          <MoonIcon
-            v-if="themeStore.theme === 'dark'"
-            class="w-4 h-4"
-          />
-          <SunIcon
-            v-else
-            class="w-4 h-4"
-          />
+          <MoonIcon v-if="themeStore.theme === 'dark'" class="w-4 h-4" />
+          <SunIcon v-else class="w-4 h-4" />
         </div>
         <div
           class="icon-btn"
@@ -219,6 +233,58 @@ async function handleMenuItemClick(item: any) {
         </div>
       </div>
     </div>
+
+    <!-- 关于弹窗 -->
+    <Teleport to="body">
+      <div v-if="showAbout" class="modal-overlay" @click.self="showAbout = false">
+        <div class="modal about-modal">
+          <div class="modal-header">
+            <span class="modal-title">{{ t('shell.topBar.about') }}</span>
+            <button class="btn btn-ghost btn-xs" @click="showAbout = false">
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="modal-body about-body">
+            <div class="about-icon">◆</div>
+            <div class="about-name">TopoCode</div>
+            <div class="about-version">v1.0.0</div>
+<div class="about-desc">{{ t('settings.aboutTagline') }}</div>
+<div class="about-section">
+              <span class="about-label">作者</span>
+              <span>TopoCode Team</span>
+            </div>
+            <div class="about-section">
+              <span class="about-label">联系方式</span>
+              <a href="mailto:support@opencode.ai">support@opencode.ai</a>
+            </div>
+            <button class="btn btn-ghost btn-sm" @click="window.open(DOCS_URL, '_blank'); showAbout = false">
+              检查版本升级
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 退出确认弹窗 -->
+    <Teleport to="body">
+      <div v-if="showExitConfirm" class="modal-overlay" @click.self="showExitConfirm = false">
+        <div class="modal" style="width:400px;">
+          <div class="modal-header">
+            <span class="modal-title">{{ t('common.confirm') }}</span>
+            <button class="btn btn-ghost btn-xs" @click="showExitConfirm = false">
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <p style="font-size:13px;color:var(--text-primary);">{{ t('shell.topBar.exitConfirm') }}</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost btn-sm" @click="showExitConfirm = false">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary btn-sm" style="background:var(--error);border-color:var(--error);" @click="confirmExit">{{ t('common.confirm') }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -354,39 +420,97 @@ async function handleMenuItemClick(item: any) {
   color: var(--text-primary);
 }
 
-.window-manager {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-right: 4px;
-  padding-right: 8px;
-  border-right: 1px solid var(--border);
-}
-
-.window-count-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 14px;
-  height: 14px;
-  font-size: 9px;
-  font-weight: 600;
+.tab-bar-actions .icon-btn.active {
   color: var(--accent);
   background: var(--bg-tertiary);
-  border-radius: 7px;
+}
+
+/* 关于弹窗 */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 4px;
+  z-index: 9999;
 }
 
-.icon-btn.disabled {
-  opacity: 0.4;
-  pointer-events: none;
+.modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 8px);
+  max-width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
-.icon-btn.active {
+.about-modal {
+  width: 380px;
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.about-icon {
+  font-size: 36px;
   color: var(--accent);
-  background: var(--bg-tertiary);
+}
+
+.about-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.about-version {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.about-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.about-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.about-label {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 </style>

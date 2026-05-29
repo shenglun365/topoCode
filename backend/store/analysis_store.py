@@ -440,20 +440,28 @@ class AnalysisStore:
         db = self._db.conn
         logger.info("[AnalysisStore] bulk_insert_llm_results ENTRY count=%d first=%s",
                      len(results), results[0].get('comm_id') if results else 'none')
+        insert_rows = []
+        for r in results:
+            mermaid = r.get("mermaid")
+            plantuml = r.get("plantuml")
+            if mermaid and not validate_mermaid(mermaid):
+                logger.warning("[AnalysisStore] mermaid validation failed for comm_id=%s comm_lv=%s len=%d",
+                               r.get("comm_id"), r.get("comm_lv"), len(mermaid))
+            if plantuml and not validate_plantuml(plantuml):
+                logger.warning("[AnalysisStore] plantuml validation failed for comm_id=%s comm_lv=%s len=%d",
+                               r.get("comm_id"), r.get("comm_lv"), len(plantuml))
+            insert_rows.append((
+                r["task_id"], r["edge_type"], r["comm_lv"], r["comm_id"],
+                r.get("name"), r.get("summary"),
+                mermaid if validate_mermaid(mermaid) else None,
+                plantuml if validate_plantuml(plantuml) else None,
+                r.get("model_id"), r.get("template_id"),
+            ))
         db.executemany("""
             INSERT OR REPLACE INTO community_llm_results
                 (task_id, edge_type, comm_lv, comm_id, name, summary, mermaid, plantuml, model_id, template_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            (
-                r["task_id"], r["edge_type"], r["comm_lv"], r["comm_id"],
-                r.get("name"), r.get("summary"),
-                r.get("mermaid") if validate_mermaid(r.get("mermaid")) else None,
-                r.get("plantuml") if validate_plantuml(r.get("plantuml")) else None,
-                r.get("model_id"), r.get("template_id"),
-            )
-            for r in results
-        ])
+        """, insert_rows)
         self._db.commit()
         logger.info("[AnalysisStore] bulk_insert_llm_results DONE count=%d", len(results))
 

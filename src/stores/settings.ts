@@ -12,7 +12,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const agents = ref<AgentConfigItem[]>([])
   const skills = ref<SkillConfigItem[]>([])
   const bindings = ref<Record<string, string>>({})
-  const activeTab = ref<'ai' | 'agents' | 'skills' | 'general' | 'theme' | 'plugins' | 'about'>('ai')
+  const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about'>('ai')
   const loading = ref(false)
   const locale = ref<SupportedLocale>('zh-CN')
 
@@ -39,6 +39,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const kbHttpServer = ref(false)
   const kbHttpPort = ref(3000)
   const backendStatus = ref<'connected' | 'disconnected'>('disconnected')
+  const pythonMemoryLimit = ref(4096)
+  const memoryLimitPending = ref(false)
 
   // ZMQ 端口设置
   const zmqDealerPort = ref(5671)
@@ -86,19 +88,42 @@ export const useSettingsStore = defineStore('settings', () => {
     temperature?: number
     maxTokens?: number
   }) {
-    const model = await ipc.settings.addModel(params)
+    const raw = await ipc.settings.addModel(params)
+    const model = normalizeModel(raw)
     models.value.push(model)
     return model
+  }
+
+  function normalizeModel(raw: any): ModelConfigItem {
+    return {
+      id: raw.id,
+      name: raw.name,
+      provider: raw.provider,
+      model: raw.model,
+      url: raw.url,
+      type: raw.type,
+      status: raw.status,
+      isDefault: raw.isDefault ?? Boolean(raw.is_default ?? false),
+      temperature: raw.temperature,
+      maxTokens: raw.maxTokens ?? raw.max_tokens,
+      apiKey: raw.apiKey || raw.api_key || '',
+      latency: raw.latency,
+    }
   }
 
   async function updateModel(params: {
     id: string
     name?: string
+    provider?: string
+    model?: string
+    url?: string
     temperature?: number
     maxTokens?: number
     isDefault?: boolean
+    apiKey?: string
   }) {
-    const model = await ipc.settings.updateModel(params)
+    const raw = await ipc.settings.updateModel(params)
+    const model = normalizeModel(raw)
     const idx = models.value.findIndex(m => m.id === params.id)
     if (idx >= 0) models.value[idx] = model
     // 如果设为默认，清除其他模型的默认标记
@@ -117,7 +142,14 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function testModel(id: string) {
-    return await ipc.settings.testModel(id)
+    const result = await ipc.settings.testModel(id)
+    if (result && result.status) {
+      const idx = models.value.findIndex(m => m.id === id)
+      if (idx >= 0) {
+        models.value[idx] = { ...models.value[idx], status: result.status, latency: result.latency }
+      }
+    }
+    return result
   }
 
   async function addAgent(params: { name: string; path: string; args: string }) {
@@ -165,13 +197,32 @@ export const useSettingsStore = defineStore('settings', () => {
     activeTab.value = tab
   }
 
+  async function setPythonMemoryLimit(limit: number) {
+    pythonMemoryLimit.value = limit
+    memoryLimitPending.value = true
+    try {
+      await window.api.backend.setMemoryLimit(limit)
+    } catch (_) {}
+  }
+
+  async function loadPythonMemoryLimit() {
+    try {
+      const limit = await window.api.backend.getMemoryLimit()
+      if (typeof limit === 'number' && limit > 0) pythonMemoryLimit.value = limit
+      memoryLimitPending.value = false
+    } catch (_) {}
+  }
+
   // Restart backend
-  function restartBackend() {
-    // TODO: implement backend restart via IPC
-    backendStatus.value = 'disconnected'
-    setTimeout(() => {
-      backendStatus.value = 'connected'
-    }, 2000)
+  async function restartBackend() {
+    try {
+      const result = await ipc.backend.restart()
+      const ok = result?.status === 'restarting'
+      backendStatus.value = ok ? 'connected' : 'disconnected'
+      if (ok) memoryLimitPending.value = false
+    } catch {
+      backendStatus.value = 'disconnected'
+    }
   }
 
   // 测试端口可用性
@@ -230,5 +281,9 @@ export const useSettingsStore = defineStore('settings', () => {
     updateBindings,
     setActiveTab,
     restartBackend,
+    pythonMemoryLimit,
+    memoryLimitPending,
+    setPythonMemoryLimit,
+    loadPythonMemoryLimit,
   }
 })

@@ -127,17 +127,33 @@ def main():
     # 支持命令行参数
     data_dir = None
     http_port = None
+    memory_limit = None
     args = sys.argv[1:]
     i = 0
     while i < len(args):
         if args[i] == "--http-port" and i + 1 < len(args):
             http_port = int(args[i + 1])
             i += 2
+        elif args[i] == "--memory-limit" and i + 1 < len(args):
+            memory_limit = int(args[i + 1])
+            i += 2
         elif not args[i].startswith("--"):
             data_dir = args[i]
             i += 1
         else:
             i += 1
+
+    # 设置进程内存上限 (MB)
+    if memory_limit and memory_limit > 0:
+        try:
+            import resource
+            limit_bytes = memory_limit * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+            logger.info(f"Memory limit set to {memory_limit} MB")
+        except ImportError:
+            logger.warning("resource module not available, memory limit not set")
+        except Exception as e:
+            logger.warning(f"Failed to set memory limit: {e}")
 
     app = BackendApp(data_dir, http_port=http_port)
 

@@ -15,6 +15,7 @@ import {
   GlobeAltIcon,
   SparklesIcon,
   XMarkIcon,
+  ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
 import { useComponentId } from '@/composables/useComponentId'
 import { useReportStore } from '@/stores/report'
@@ -59,19 +60,152 @@ const httpPort = ref(3456)
 
 // 重新生成
 const showRegenDialog = ref(false)
+const regenMode = ref<'full' | 'mermaid' | 'plantuml'>('full')
+const regenSubMode = ref<'ai' | 'manual'>('ai')
 const regenPrompt = ref('')
+const regenManualCode = ref('')
 const regenLoading = ref(false)
 const regenError = ref('')
 
-type DiagramLang = 'mermaid' | 'plantuml'
+const canRegenerate = computed(() => !!props.regenerationType && !!props.taskId && !!props.projectId)
 
-type DiagramBlock = {
-  id: string
-  lang: DiagramLang
-  code: string
-  svg?: string
-  loading: boolean
-  error?: string
+const existingMermaid = computed(() => {
+  if (!doc.value?.content) return ''
+  const m = doc.value.content.match(/```mermaid\n([\s\S]*?)```/)
+  return m ? m[1].trim() : ''
+})
+
+const existingPlantuml = computed(() => {
+  if (!doc.value?.content) return ''
+  const m = doc.value.content.match(/```plantuml\n([\s\S]*?)```/)
+  return m ? m[1].trim() : ''
+})
+
+const existingDiagramCode = computed(() => {
+  if (regenMode.value === 'mermaid') return existingMermaid.value
+  if (regenMode.value === 'plantuml') return existingPlantuml.value
+  return ''
+})
+
+watch(regenSubMode, (val) => {
+  if (val === 'manual' && !regenManualCode.value) {
+    regenManualCode.value = existingDiagramCode.value
+  }
+})
+
+function openRegenDialog(mode?: 'full' | 'mermaid' | 'plantuml') {
+  regenMode.value = mode || 'full'
+  regenSubMode.value = 'ai'
+  regenPrompt.value = ''
+  regenManualCode.value = ''
+  regenError.value = ''
+  showRegenDialog.value = true
+}
+
+function closeRegenDialog() {
+  showRegenDialog.value = false
+  regenLoading.value = false
+  regenError.value = ''
+}
+
+async function submitRegen() {
+  if (!props.taskId || !props.projectId) return
+  if (props.regenerationType === 'community' && (!props.parentCommId || !props.parentLevel || !props.parentEdgeType)) {
+    regenError.value = 'Missing community context for regeneration'
+    return
+  }
+  regenLoading.value = true
+  regenError.value = ''
+
+  try {
+    if (regenMode.value === 'mermaid' || regenMode.value === 'plantuml') {
+      if (regenSubMode.value === 'manual') {
+        // 手动输入模式：直接保存用户填入的代码
+        if (!regenManualCode.value.trim()) {
+          regenError.value = 'Please enter diagram code'
+          regenLoading.value = false
+          return
+        }
+        const current = await window.api.analysis.getCommunityResult({
+          taskId: props.taskId, edgeType: props.parentEdgeType,
+          commLv: props.parentLevel, commId: props.parentCommId,
+        }).catch(() => null)
+        const code = regenManualCode.value.trim()
+        await reportStore.saveCommunityResult({
+          taskId: props.taskId, edgeType: props.parentEdgeType,
+          commLv: props.parentLevel, commId: props.parentCommId,
+          name: current?.name || props.parentCommId,
+          summary: current?.summary || '',
+          mermaid: regenMode.value === 'mermaid' ? code : (current?.mermaid || ''),
+          plantuml: regenMode.value === 'plantuml' ? code : (current?.plantuml || ''),
+          modelId: current?.model_id,
+          templateId: current?.template_id || 'community_analyze',
+        })
+        await loadDoc()
+        closeRegenDialog()
+        return
+      }
+
+      if (!props.parentCommId || !props.parentLevel || !props.parentEdgeType || !props.taskId) {
+        throw new Error('Missing community context for diagram regeneration')
+      }
+      const existing = regenMode.value === 'mermaid' ? existingMermaid.value : existingPlantuml.value
+      if (!existing) {
+        regenError.value = `No existing ${regenMode.value} code found in document`
+        regenLoading.value = false
+        return
+      }
+      const result = await reportStore.regenerateCommunityDiagram(
+        props.taskId, props.parentCommId, props.parentLevel, props.parentEdgeType,
+        props.projectId, existing, regenPrompt.value, regenMode.value,
+      )
+      if (result.success && result.code) {
+        // Replace diagram code in doc content
+        if (doc.value) {
+          const lang = regenMode.value === 'mermaid' ? 'mermaid' : 'plantuml'
+          const oldBlock = `\`\`\`${lang}\n${existing}\`\`\``
+          const newBlock = `\`\`\`${lang}\n${result.code}\`\`\``
+          doc.value.content = doc.value.content.replace(oldBlock, newBlock)
+          diagramBlocks.value = extractDiagrams(doc.value.content)
+          await nextTick()
+          renderAllDiagrams()
+        }
+        closeRegenDialog()
+      } else {
+        regenError.value = result.error || 'Unknown error'
+      }
+      return
+    }
+
+    // Full document regeneration
+    let result: { success: boolean; content?: string; error?: string }
+    if (props.regenerationType === 'community') {
+      result = await reportStore.regenerateCommunityDoc(
+        props.taskId, props.parentCommId!, props.parentLevel!, props.parentEdgeType!,
+        props.projectId, regenPrompt.value,
+      )
+    } else {
+      result = await reportStore.regenerateOverallDoc(
+        props.taskId, props.projectId, regenPrompt.value,
+      )
+    }
+
+    if (result.success && result.content) {
+      if (doc.value) {
+        doc.value.content = result.content
+        diagramBlocks.value = extractDiagrams(result.content)
+        await nextTick()
+        renderAllDiagrams()
+      }
+      closeRegenDialog()
+    } else {
+      regenError.value = result.error || 'Unknown error'
+    }
+  } catch (e: any) {
+    regenError.value = e.message || String(e)
+  } finally {
+    regenLoading.value = false
+  }
 }
 
 const diagramBlocks = ref<DiagramBlock[]>([])
@@ -80,11 +214,9 @@ const diagramBlocks = ref<DiagramBlock[]>([])
 let mermaidApi: any = null
 async function ensureMermaid() {
   if (mermaidApi) return
-  console.log('[SubDocViewer] ensureMermaid importing...')
   try {
     const mod = await import('mermaid')
     mermaidApi = mod.default
-    console.log('[SubDocViewer] ensureMermaid import OK, has render:', typeof mermaidApi?.render, 'has initialize:', typeof mermaidApi?.initialize)
     mermaidApi.initialize({
       startOnLoad: false,
       securityLevel: 'loose',
@@ -104,15 +236,13 @@ function escapeHtml(s: string): string {
 function injectDiagram(block: DiagramBlock) {
   const el = document.getElementById(`inline-${block.id}`)
   if (!el) {
-    console.warn(`[SubDocViewer] injectDiagram: placeholder NOT FOUND for id=inline-${block.id}. DOM ready?`, !!document.getElementById(`inline-${block.id}`))
+    console.warn(`[SubDocViewer] injectDiagram: placeholder NOT FOUND id=inline-${block.id}`)
     return
   }
   if (block.svg) {
     el.innerHTML = block.svg
-    console.log(`[SubDocViewer] injectDiagram OK id=${block.id} svgLen=${block.svg.length}`)
   } else if (block.error) {
     el.innerHTML = `<div class="diagram-error">${escapeHtml(block.error)}</div><pre class="fallback-code"><code>${escapeHtml(block.code)}</code></pre>`
-    console.log(`[SubDocViewer] injectDiagram ERROR id=${block.id}`)
   }
 }
 
@@ -147,33 +277,22 @@ function normalizeDiagramCode(lang: string, code: string): string {
 }
 
 async function renderAllDiagrams() {
-  if (diagramBlocks.value.length === 0) {
-    console.log('[SubDocViewer] renderAllDiagrams: no diagram blocks to render')
-    return
-  }
-  console.log(`[SubDocViewer] renderAllDiagrams START count=${diagramBlocks.value.length}`)
+  if (diagramBlocks.value.length === 0) return
 
   for (const block of diagramBlocks.value) {
     block.loading = true
     block.error = undefined
     const cleaned = normalizeDiagramCode(block.lang, block.code)
-    console.log(`[SubDocViewer] rendering ${block.lang} id=${block.id} codeLen=${block.code.length}`)
     try {
       let svg = ''
       if (block.lang === 'mermaid') {
-        console.time(`mermaid-${block.id}`)
         await ensureMermaid()
         const id = `sd-${block.id}`
         const result = await mermaidApi.render(id, cleaned)
         svg = result.svg
-        console.timeEnd(`mermaid-${block.id}`)
-        console.log(`[SubDocViewer] mermaid render OK id=${block.id} svgLen=${svg.length}`)
       } else {
-        console.time(`plantuml-${block.id}`)
         const result = await window.api.render.renderPlantuml({ code: cleaned, format: 'svg' })
         svg = atob(result.data)
-        console.timeEnd(`plantuml-${block.id}`)
-        console.log(`[SubDocViewer] plantuml render OK id=${block.id} svgLen=${svg.length}`)
       }
       block.svg = svg
       injectDiagram(block)
@@ -185,7 +304,6 @@ async function renderAllDiagrams() {
       block.loading = false
     }
   }
-  console.log(`[SubDocViewer] renderAllDiagrams DONE`)
 }
 
 // 提取图表块
@@ -200,7 +318,6 @@ function extractDiagrams(content: string): DiagramBlock[] {
       blocks.push({ id: `diagram-${idx++}`, lang: m[1] as DiagramLang, code, loading: false })
     }
   }
-  console.log(`[SubDocViewer] extractDiagrams found ${blocks.length} diagrams in ${content.length} chars of content`)
   return blocks
 }
 
@@ -208,16 +325,43 @@ function extractDiagrams(content: string): DiagramBlock[] {
 async function loadDoc() {
   loading.value = true
   try {
-    if (props.subDocId) {
-      doc.value = await reportStore.getSubDoc(props.subDocId)
-    } else if (props.initialContent) {
-      doc.value = {
-        id: '',
-        title: props.initialTitle || '',
-        content: props.initialContent,
-        templateId: '',
-        createdAt: '',
-        updatedAt: '',
+    // 社区文档：从 DB 重新读取 LLM 结果并构建内容
+    if (props.regenerationType === 'community' && props.taskId && props.parentCommId && props.parentEdgeType && props.parentLevel) {
+      const result = await window.api.analysis.getCommunityResult({
+        taskId: props.taskId,
+        edgeType: props.parentEdgeType,
+        commLv: props.parentLevel,
+        commId: props.parentCommId,
+      }).catch(() => null)
+      if (result?.name || result?.summary) {
+        const parts: string[] = [
+          `# 社区: ${result.name || props.parentCommId}`,
+          '',
+          `**ID**: ${props.parentCommId}`,
+          '',
+          result.summary || '',
+        ]
+        if (result.mermaid) parts.push('', '```mermaid', result.mermaid, '```')
+        if (result.plantuml) parts.push('', '```plantuml', result.plantuml, '```')
+        doc.value = {
+          id: '', title: result.name || props.initialTitle || '',
+          content: parts.join('\n'),
+          templateId: '', createdAt: '', updatedAt: '',
+        }
+      }
+    }
+    if (!doc.value) {
+      if (props.subDocId) {
+        doc.value = await reportStore.getSubDoc(props.subDocId)
+      } else if (props.initialContent) {
+        doc.value = {
+          id: '',
+          title: props.initialTitle || '',
+          content: props.initialContent,
+          templateId: '',
+          createdAt: '',
+          updatedAt: '',
+        }
       }
     }
     if (doc.value) {
@@ -239,59 +383,6 @@ async function loadDoc() {
 
 // 进入编辑模式
 const canOpenInBrowser = computed(() => !!(doc.value?.id || props.subDocId || (doc.value?.content && props.taskId)))
-
-const canRegenerate = computed(() => !!props.regenerationType && !!props.taskId && !!props.projectId)
-
-function openRegenDialog() {
-  regenPrompt.value = ''
-  regenError.value = ''
-  showRegenDialog.value = true
-}
-
-function closeRegenDialog() {
-  showRegenDialog.value = false
-  regenLoading.value = false
-  regenError.value = ''
-}
-
-async function submitRegen() {
-  if (!props.taskId || !props.projectId || !props.regenerationType) return
-  regenLoading.value = true
-  regenError.value = ''
-
-  try {
-    let result: { success: boolean; content?: string; error?: string }
-    if (props.regenerationType === 'community') {
-      if (!props.parentCommId || !props.parentLevel || !props.parentEdgeType) {
-        throw new Error('Missing community context for regeneration')
-      }
-      result = await reportStore.regenerateCommunityDoc(
-        props.taskId, props.parentCommId, props.parentLevel, props.parentEdgeType,
-        props.projectId, regenPrompt.value,
-      )
-    } else {
-      result = await reportStore.regenerateOverallDoc(
-        props.taskId, props.projectId, regenPrompt.value,
-      )
-    }
-
-    if (result.success && result.content) {
-      if (doc.value) {
-        doc.value.content = result.content
-        diagramBlocks.value = extractDiagrams(result.content)
-        await nextTick()
-        renderAllDiagrams()
-      }
-      closeRegenDialog()
-    } else {
-      regenError.value = result.error || 'Unknown error'
-    }
-  } catch (e: any) {
-    regenError.value = e.message || String(e)
-  } finally {
-    regenLoading.value = false
-  }
-}
 
 async function openInBrowser() {
   console.log('[SubDocViewer] openInBrowser clicked, subDocId prop:', props.subDocId, 'doc.id:', doc.value?.id, 'httpPort:', httpPort.value, 'taskId:', props.taskId)
@@ -337,8 +428,6 @@ const renderedContent = computed(() => {
     placeholderCount++
     return `<div class="diagram-placeholder" id="inline-${id}" data-lang="${lang}"><div class="diagram-loading">${lang === 'mermaid' ? 'Mermaid' : 'PlantUML'} 渲染中...</div></div>`
   })
-  if (placeholderCount > 0) console.log(`[SubDocViewer] renderedContent created ${placeholderCount} placeholders (diagramBlocks=${diagramBlocks.value.length})`)
-
   // GFM 表格支持（兼容缩进表格）
   html = html.replace(/^\s*\|(.+)\|\n\s*\|[-:| ]+\|\n((?:\s*\|.+\|\n?)*)/gm, (match, headerRow, bodyRows) => {
     const headers = headerRow.split('|').map((h: string) => h.trim()).filter((h: string) => h)
@@ -487,6 +576,13 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
       <div class="toolbar-right">
         <button
           class="btn btn-ghost btn-sm"
+          @click="loadDoc"
+        >
+          <ArrowPathIcon class="w-3.5 h-3.5" />
+          <span>{{ t('common.refresh') }}</span>
+        </button>
+        <button
+          class="btn btn-ghost btn-sm"
           @click="openInBrowser"
         >
           <GlobeAltIcon class="w-4 h-4" />
@@ -495,7 +591,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
         <button
           v-if="canRegenerate"
           class="btn btn-ghost btn-sm"
-          @click="openRegenDialog"
+          @click="openRegenDialog()"
         >
           <SparklesIcon class="w-3.5 h-3.5" />
           <span>{{ t('report.regenerate') }}</span>
@@ -526,7 +622,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
         :edge-type="props.parentEdgeType"
         :project-id="props.projectId"
         @open-child-analysis="(p: any) => emit('open-child-analysis', p)"
-        @viewCommunityMD="(p: any) => { console.log('[SubDocViewer] ChildSection viewCommunityMD received', p); emit('view-child-md', { ...p, taskId: props.taskId || '' }) }"
+        @viewCommunityMD="(p: any) => emit('view-child-md', { ...p, taskId: props.taskId || '' })"
       />
 
     </div>
@@ -536,7 +632,6 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
       <div
         v-if="showRegenDialog"
         class="regen-overlay"
-        @click.self="!regenLoading && closeRegenDialog()"
       >
         <div class="regen-dialog">
           <div class="regen-dialog-header">
@@ -550,14 +645,64 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
             </button>
           </div>
           <div class="regen-dialog-body">
-            <label class="regen-label">{{ t('report.regenPrompt') }}</label>
-            <textarea
-              v-model="regenPrompt"
-              class="regen-textarea"
-              :placeholder="t('report.regenPromptPlaceholder')"
-              :disabled="regenLoading"
-              rows="5"
-            />
+            <div class="regen-mode-selector">
+              <label
+                :class="['regen-mode-option', { active: regenMode === 'full' }]"
+                @click="regenMode = 'full'"
+              >
+                <input type="radio" name="regenMode" value="full" v-model="regenMode">
+                <span class="regen-mode-label">{{ t('report.regenModeFull') }}</span>
+              </label>
+              <label
+                v-if="existingMermaid"
+                :class="['regen-mode-option', { active: regenMode === 'mermaid' }]"
+                @click="regenMode = 'mermaid'"
+              >
+                <input type="radio" name="regenMode" value="mermaid" v-model="regenMode">
+                <span class="regen-mode-label">Mermaid</span>
+              </label>
+              <label
+                v-if="existingPlantuml"
+                :class="['regen-mode-option', { active: regenMode === 'plantuml' }]"
+                @click="regenMode = 'plantuml'"
+              >
+                <input type="radio" name="regenMode" value="plantuml" v-model="regenMode">
+                <span class="regen-mode-label">PlantUML</span>
+              </label>
+            </div>
+            <template v-if="regenMode !== 'full'">
+              <div class="regen-submode-toggle">
+                <button
+                  :class="['regen-submode-btn', { active: regenSubMode === 'ai' }]"
+                  :disabled="regenLoading"
+                  @click="regenSubMode = 'ai'"
+                >AI {{ t('report.regenerate') }}</button>
+                <button
+                  :class="['regen-submode-btn', { active: regenSubMode === 'manual' }]"
+                  :disabled="regenLoading"
+                  @click="regenSubMode = 'manual'"
+                >{{ t('common.manual') }}</button>
+              </div>
+            </template>
+            <template v-if="regenSubMode === 'manual' && regenMode !== 'full'">
+              <label class="regen-label">{{ regenMode === 'mermaid' ? 'Mermaid' : 'PlantUML' }} {{ t('report.regenCodeLabel') }}</label>
+              <textarea
+                v-model="regenManualCode"
+                class="regen-textarea code-input"
+                :disabled="regenLoading"
+                rows="10"
+              />
+            </template>
+            <template v-else>
+              <label class="regen-label">{{ t('report.regenPrompt') }}</label>
+              <textarea
+                v-model="regenPrompt"
+                class="regen-textarea"
+                :placeholder="regenMode === 'full' ? t('report.regenPromptPlaceholder') : t('report.regenDiagramPromptPlaceholder')"
+                :disabled="regenLoading"
+                rows="5"
+              />
+            </template>
             <div
               v-if="regenError"
               class="regen-error"
@@ -579,7 +724,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
               @click="submitRegen"
             >
               <SparklesIcon class="w-3.5 h-3.5" />
-              {{ t('report.regenerateSubmit') }}
+              {{ regenSubMode === 'manual' && regenMode !== 'full' ? t('common.save') : (regenMode === 'full' ? t('report.regenerateSubmit') : (regenMode === 'mermaid' ? t('report.regenMermaidSubmit') : t('report.regenPlantumlSubmit'))) }}
             </button>
             <template v-else>
               <span class="regen-loading-text">{{ t('common.processing') }}...</span>
@@ -790,6 +935,68 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
   font-weight: 500;
   color: var(--text-secondary);
 }
+.regen-mode-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.regen-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  transition: all 0.15s;
+}
+.regen-mode-option:hover {
+  border-color: var(--accent);
+}
+.regen-mode-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.regen-submode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.regen-submode-btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.regen-submode-btn:hover {
+  border-color: var(--accent);
+}
+.regen-submode-btn.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.regen-submode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.regen-mode-option input[type="radio"] {
+  accent-color: var(--accent);
+}
+.regen-mode-label {
+  font-size: 11px;
+  font-weight: 500;
+}
 .regen-textarea {
   width: 100%;
   padding: 8px 10px;
@@ -807,6 +1014,10 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
 }
 .regen-textarea:focus {
   border-color: var(--accent);
+}
+.regen-textarea.code-input {
+  font-size: 11px;
+  min-height: 160px;
 }
 .regen-error {
   padding: 6px 10px;

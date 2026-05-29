@@ -20,6 +20,7 @@ export class PythonBridge {
   private process: ChildProcess | null = null
   private status: BackendStatus = { status: 'stopped' }
   private listeners: Array<(status: BackendStatus) => void> = []
+  public memoryLimit: number = 4096
 
   // Python 脚本路径
   private get pythonScript(): string {
@@ -83,7 +84,12 @@ export class PythonBridge {
           ? join(process.resourcesPath, 'backend')
           : join(__dirname, '../../backend')
 
-        this.process = spawn(python, [this.pythonScript, this.dbPath, '--http-port', String(httpPort)], {
+        const memoryLimit = this.memoryLimit || 4096
+        this.process = spawn(python, [
+          this.pythonScript, this.dbPath,
+          '--http-port', String(httpPort),
+          '--memory-limit', String(memoryLimit),
+        ], {
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,

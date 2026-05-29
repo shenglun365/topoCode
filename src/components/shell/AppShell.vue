@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TopBar from './TopBar.vue'
 import ActivityBar from './ActivityBar.vue'
@@ -9,12 +9,14 @@ import StatusBar from './StatusBar.vue'
 import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
 import { useNavigationStore } from '@/stores/navigation'
 import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
+import { useStatusStore } from '@/stores/status'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-001')
 const route = useRoute()
 const navigation = useNavigationStore()
 const funcGroup = useFuncGroupStore()
+const statusStore = useStatusStore()
 
 // 路由 path 到功能组 ID 的映射
 const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
@@ -28,6 +30,24 @@ const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
 // 当前功能组
 const currentFuncGroup = computed(() => {
     return routeToFuncGroupMap[route.path] || 'home';
+})
+
+// 是否在设置页面（隐藏左右侧栏）
+const isSettingsPage = computed(() => route.path === '/user')
+
+// 初始化后端状态监听
+onMounted(async () => {
+  try {
+    const st = await window.api.backend.getStatus()
+    if (st) statusStore.setBackendStatus(st)
+  } catch (_) {}
+  // 每 5 秒轮询后端状态
+  setInterval(async () => {
+    try {
+      const st = await window.api.backend.getStatus()
+      if (st) statusStore.setBackendStatus(st)
+    } catch (_) {}
+  }, 5000)
 })
 
 // 同步路由切换和功能组切换
@@ -56,8 +76,8 @@ watch(
       <!-- 活动栏 -->
       <ActivityBar />
 
-      <!-- 左侧面板 -->
-      <LeftPanel />
+      <!-- 左侧面板（设置页隐藏） -->
+      <LeftPanel v-show="!isSettingsPage" />
 
       <!-- 主内容区 -->
       <main class="content-area">
@@ -73,8 +93,8 @@ watch(
         </div>
       </main>
 
-      <!-- 右侧面板 -->
-      <RightPanel />
+      <!-- 右侧面板（设置页隐藏） -->
+      <RightPanel v-show="!isSettingsPage" />
     </div>
 
     <!-- 底部状态栏 -->

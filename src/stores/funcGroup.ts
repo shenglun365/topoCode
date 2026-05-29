@@ -120,6 +120,15 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
         context.value[group].activeTabId = tabId || undefined;
     }
 
+    function moveTab(group: FuncGroupId, fromIdx: number, toIdx: number) {
+        const ctx = context.value[group];
+        if (fromIdx < 0 || fromIdx >= ctx.tabs.length) return;
+        if (toIdx < 0 || toIdx >= ctx.tabs.length) return;
+        if (fromIdx === toIdx) return;
+        const [tab] = ctx.tabs.splice(fromIdx, 1);
+        ctx.tabs.splice(toIdx, 0, tab);
+    }
+
     function closeAllTabs(group: FuncGroupId) {
         context.value[group].tabs = [];
         context.value[group].activeTabId = undefined;
@@ -147,6 +156,7 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
         deselectProject,
         openTab,
         closeTab,
+        moveTab,
         setActiveTab,
         closeAllTabs,
         saveExtraState,

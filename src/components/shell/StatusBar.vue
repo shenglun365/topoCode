@@ -1,23 +1,33 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStatusStore } from '@/stores/status'
-import { clearCache } from '@/utils/graphCache'
-import { TrashIcon } from '@heroicons/vue/24/outline'
+import { useSettingsStore } from '@/stores/settings'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-006')
 const { t } = useI18n()
 const status = useStatusStore()
-const clearing = ref(false)
+const settings = useSettingsStore()
+const testing = ref(false)
 
-async function handleClearCache() {
-  clearing.value = true
+const defaultModel = computed(() => settings.models.find(m => m.isDefault) || settings.models[0] || null)
+const modelStatusClass = computed(() => {
+  const m = defaultModel.value
+  if (!m) return 'status-stopped'
+  if (m.status === 'connected') return 'status-running'
+  if (m.status === 'error') return 'status-error'
+  return 'status-stopped'
+})
+
+async function testModelStatus() {
+  const m = defaultModel.value
+  if (!m || m.status === 'connected' || testing.value) return
+  testing.value = true
   try {
-    await clearCache()
-  } finally {
-    clearing.value = false
-  }
+    await settings.testModel(m.id)
+  } catch (_) {}
+  testing.value = false
 }
 </script>
 
@@ -30,14 +40,25 @@ async function handleClearCache() {
     <div class="status-item">
       <span
         class="status-dot"
-        :class="{
-          'error': status.backend.status === 'error',
-          'warning': status.backend.status === 'stopped',
-        }"
+        :class="'status-' + status.backend.status"
       />
       <span>
-        {{ status.backend.status === 'running' ? t('shell.statusBar.pythonBackend') : t('shell.statusBar.backendDisconnected') }}
+        {{ status.backend.status === 'running' ? t('shell.statusBar.pythonBackend') : status.backend.status === 'restarting' ? t('shell.statusBar.backendRestarting') : t('shell.statusBar.backendDisconnected') }}
       </span>
+    </div>
+
+    <div
+      v-if="defaultModel"
+      class="status-item status-model"
+      :class="{ clickable: defaultModel.status !== 'connected', testing }"
+      :title="defaultModel.status !== 'connected' ? t('shell.statusBar.testModel') : ''"
+      @click="testModelStatus"
+    >
+      <span
+        class="status-dot"
+        :class="modelStatusClass"
+      />
+      <span>{{ testing ? t('shell.statusBar.testing') : defaultModel.name }}</span>
     </div>
 
     <div
@@ -71,14 +92,6 @@ async function handleClearCache() {
       <span>Zoom: {{ status.zoom }}%</span>
     </div>
 
-    <button
-      class="cache-clear-btn"
-      :disabled="clearing"
-      :title="t('report.clearCache')"
-      @click="handleClearCache"
-    >
-      <TrashIcon class="w-3.5 h-3.5" />
-    </button>
   </footer>
 </template>
 
@@ -106,6 +119,16 @@ async function handleClearCache() {
 .status-item:hover {
   color: var(--text-primary);
 }
+.status-item.status-model.clickable {
+  cursor: pointer;
+}
+.status-item.status-model.clickable:hover {
+  color: var(--accent);
+}
+.status-item.status-model.testing {
+  opacity: 0.6;
+  pointer-events: none;
+}
 
 .status-spacer {
   flex: 1;
@@ -115,36 +138,25 @@ async function handleClearCache() {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+}
+.status-dot.status-running {
   background: var(--success);
+  box-shadow: 0 0 4px var(--success);
 }
-
-.status-dot.error {
+.status-dot.status-stopped {
+  background: var(--text-muted);
+}
+.status-dot.status-error {
   background: var(--error);
+  box-shadow: 0 0 4px var(--error);
 }
-
-.status-dot.warning {
+.status-dot.status-restarting {
   background: var(--warning);
+  animation: status-blink 0.8s ease-in-out infinite;
+}
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
-.cache-clear-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-radius: 3px;
-  transition: color 0.15s;
-}
-
-.cache-clear-btn:hover {
-  color: var(--text-primary);
-}
-
-.cache-clear-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
 </style>

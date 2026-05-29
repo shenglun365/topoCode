@@ -127,24 +127,6 @@ defineExpose({
         :task-name="projectStore.activeTab?.title"
       />
 
-      <!-- 符号索引（预留，排除分析页面） -->
-      <div
-        v-else-if="navigation.currentPage !== 'analysis' && projectStore.viewMode === 'project' && projectStore.activeTab"
-        class="symbols-panel"
-      >
-        <div class="symbols-empty">
-          <div class="icon">
-            🔍
-          </div>
-          <div class="title">
-            {{ t('shell.rightPanel.symbols') }}
-          </div>
-          <div class="desc">
-            {{ t('shell.rightPanel.symbolsPending') }}
-          </div>
-        </div>
-      </div>
-
       <!-- AI 助手面板 -->
       <AIAssistantPanel v-else-if="showAIAssistant || (projectStore.viewMode === 'project' && projectStore.activeTab)" />
 

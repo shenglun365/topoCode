@@ -39,6 +39,12 @@ function scrollToBottom() {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
   }
 }
+
+function clearSessions() {
+  if (confirm('确认清除所有历史会话？此操作不可恢复。')) {
+    chatStore.clearAllSessions()
+  }
+}
 </script>
 
 <template>
@@ -55,6 +61,16 @@ function scrollToBottom() {
       @close="chatStore.closeSession"
       @create="chatStore.createSession"
     />
+    <div
+      v-if="chatStore.sessions.length > 0"
+      class="clear-sessions-bar"
+    >
+      <button
+        class="btn btn-ghost btn-xs"
+        style="color:var(--text-muted);font-size:11px;"
+        @click="clearSessions"
+      >清除所有历史会话</button>
+    </div>
 
     <!-- 对话流 -->
     <div
@@ -142,6 +158,14 @@ function scrollToBottom() {
   flex: 1;
   overflow-y: auto;
   padding: 16px 0;
+}
+
+.clear-sessions-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
 }
 
 .typing-indicator {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   SunIcon,
@@ -9,12 +10,30 @@ import {
   GlobeAltIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
+import { useStatusStore } from '@/stores/status'
 import type { SupportedLocale } from '@/i18n'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('ST-004')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const statusStore = useStatusStore()
+
+const memoryLimitStatusClass = computed(() => {
+  if (statusStore.backend.status !== 'running') return 'status-dot-error'
+  if (settingsStore.memoryLimitPending) return 'status-dot-warning'
+  return 'status-dot-ok'
+})
+
+const memoryLimitStatusText = computed(() => {
+  if (statusStore.backend.status !== 'running') return t('common.disconnected')
+  if (settingsStore.memoryLimitPending) return t('settings.memoryLimitPending')
+  return t('settings.memoryLimitActive')
+})
+
+onMounted(() => {
+  settingsStore.loadPythonMemoryLimit()
+})
 
 const languages = [
   { value: 'zh-CN' as SupportedLocale, key: 'settings.simplifiedChinese' },
@@ -251,7 +270,7 @@ const languages = [
       </div>
     </div>
 
-    <!-- 后端状态 -->
+    <!-- 后端内存限制 -->
     <div style="margin-top:16px;">
       <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">
         {{ t('settings.pythonBackend') }}
@@ -260,16 +279,35 @@ const languages = [
         class="card"
         style="padding:14px;"
       >
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label">{{ t('settings.memoryLimit') }}</label>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <input
+              type="range"
+              min="4096"
+              max="8192"
+              step="1024"
+              :value="settingsStore.pythonMemoryLimit"
+              style="flex:1;"
+              @input="settingsStore.setPythonMemoryLimit(Number(($event.target as HTMLInputElement).value))"
+            >
+            <span style="font-size:12px; font-family:var(--font-mono); min-width:70px; text-align:right;">
+              {{ settingsStore.pythonMemoryLimit }} MB
+            </span>
+          </div>
+          <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+            {{ t('settings.memoryLimitHint') }}
+          </div>
+        </div>
+
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="display:flex; align-items:center; gap:8px;">
             <span
               class="status-dot"
-              :style="{
-                backgroundColor: settingsStore.backendStatus === 'connected' ? 'var(--success)' : 'var(--error)',
-              }"
+              :class="memoryLimitStatusClass"
             />
             <span style="font-size:12px;">
-              {{ settingsStore.backendStatus === 'connected' ? t('common.connected') : t('common.disconnected') }}
+              {{ memoryLimitStatusText }}
             </span>
           </div>
           <button
@@ -306,5 +344,27 @@ const languages = [
   height: 8px;
   border-radius: 50%;
   display: inline-block;
+}
+.status-dot-ok {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--success);
+  box-shadow: 0 0 4px var(--success);
+}
+.status-dot-warning {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--warning);
+}
+.status-dot-error {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--error);
 }
 </style>

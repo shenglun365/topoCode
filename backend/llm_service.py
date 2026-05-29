@@ -97,6 +97,16 @@ class LLMService:
             'updatedAt': now,
         }
 
+    def clear_all_sessions(self) -> Dict[str, Any]:
+        """清除所有 AI 助手会话"""
+        sessions_db = self.multi_db.sessions_db
+        sessions_db.execute("PRAGMA foreign_keys = ON")
+        # 删除所有非 analysis 关联的会话（analysis_sessions 的外键会级联）
+        count = sessions_db.execute("DELETE FROM llm_sessions WHERE module_type = 'ai_assistant'").rowcount
+        sessions_db.commit()
+        logger.info(f"[LLMService] Cleared {count} AI assistant sessions")
+        return {'success': True, 'count': count}
+
     def delete_session(self, session_id: str) -> Dict[str, Any]:
         """删除会话 (级联删除消息)"""
         sessions_db = self.multi_db.sessions_db
@@ -633,15 +643,21 @@ class LLMService:
             headers = {'Content-Type': 'application/json'}
             if model.get('api_key'):
                 headers['Authorization'] = f"Bearer {model['api_key']}"
+            chat_base = model['url'].rstrip('/')
+            if chat_base.endswith('/v1'):
+                chat_base = chat_base[:-3]
             resp = await asyncio.to_thread(
                 lambda: requests.post(
-                    f"{model['url'].rstrip('/')}/v1/chat/completions",
+                    f"{chat_base}/v1/chat/completions",
                     json=payload, headers=headers,
                     timeout=model.get('timeout', 300),
                 )
             )
             data = resp.json()
             return data.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+    # 分析报告重跑/重新生成等操作不写入会话记录
+    _ANALYSIS_SESSION_PREFIXES = ('comm-', 'regen-', 'pipeline-')
 
     def _save_stream_messages(
         self,
@@ -661,6 +677,14 @@ class LLMService:
     ):
         """保存流式完成后的消息到 SQLite（完整日志）"""
         try:
+            # 分析报告相关操作：跳过会话和消息保存，仅记录调用日志
+            if any(session_id.startswith(p) for p in self._ANALYSIS_SESSION_PREFIXES):
+                logger.debug(f"[LLMService] Skip session save for analysis session: {session_id}")
+                return self._save_call_log(self.multi_db.main_db, session_id, messages,
+                                           full_content, model, request_id, template_id,
+                                           extra_meta, tool_calls_recorded, latency_ms,
+                                           status, error_message, token_data)
+
             # 确保 session 存在（内联 session 自动创建）
             sessions_db = self.multi_db.sessions_db
             existing = sessions_db.fetchone(
@@ -682,15 +706,26 @@ class LLMService:
                 self.add_message(session_id, 'assistant', full_content)
                 logger.debug(f"[LLMService] Messages saved for session={session_id}")
 
-            # 记录调用日志（llm_call_logs 在主库）— 完整字段
-            main_db = self.multi_db.main_db
+            # 记录调用日志
+            self._save_call_log(self.multi_db.main_db, session_id, messages,
+                                full_content, model, request_id, template_id,
+                                extra_meta, tool_calls_recorded, latency_ms,
+                                status, error_message, token_data)
+        except Exception as e:
+            logger.error(f"[LLMService] Failed to save messages: {e}")
+
+    def _save_call_log(self, main_db, session_id, messages, full_content, model,
+                       request_id, template_id, extra_meta, tool_calls_recorded,
+                       latency_ms, status, error_message, token_data):
+        """记录 LLM 调用日志（llm_call_logs）"""
+        try:
             log_id = _make_id()
             now = datetime.now().isoformat()
             messages_json = json.dumps([
                 {k: v for k, v in m.items() if k in ('role', 'content')}
                 for m in messages
             ], ensure_ascii=False, default=str)
-            response_content = full_content[:100000] if full_content else None  # 截断避免 DB 过大
+            response_content = full_content[:100000] if full_content else None
             tool_calls_json = json.dumps(tool_calls_recorded or [], ensure_ascii=False, default=str)
             token_data = token_data or {}
             main_db.execute(
@@ -709,7 +744,7 @@ class LLMService:
             )
             main_db.commit()
         except Exception as e:
-            logger.error(f"[LLMService] Failed to save messages: {e}")
+            logger.error(f"[LLMService] Failed to save call log: {e}")
 
     def _save_interaction_log(
         self,
@@ -754,6 +789,8 @@ def _sync_stream_ollama(
     """
     import json as _json
     base_url = model_config['url'].rstrip('/')
+    if base_url.endswith('/v1'):
+        base_url = base_url[:-3]
     payload = {
         'model': model_config['model'],
         'messages': messages,
@@ -832,6 +869,8 @@ def _sync_stream_openai(
     """
     import json as _json
     base_url = model_config['url'].rstrip('/')
+    if base_url.endswith('/v1'):
+        base_url = base_url[:-3]
     payload = {
         'model': model_config['model'],
         'messages': messages,
@@ -972,6 +1011,10 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register('session.delete')
     def delete_session(session_id: str = None, sessionId: str = None):
         return service.delete_session(session_id or sessionId)
+
+    @server.register('session.clearAll')
+    def clear_all_sessions():
+        return service.clear_all_sessions()
 
     @server.register('session.getMessages')
     def get_messages(
@@ -1155,12 +1198,13 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         mode: Optional[str] = None,
         module_type: Optional[str] = None,
         category: Optional[str] = None,
+        locale: Optional[str] = None,
     ):
-        return {'templates': pm.list_templates(mode, module_type, category)}
+        return {'templates': pm.list_templates(mode, module_type, category, locale)}
 
     @server.register('promptTemplate.get')
-    def get_template(template_id: str):
-        return pm.get_template(template_id)
+    def get_template(template_id: str, locale: Optional[str] = None):
+        return pm.get_template(template_id, locale)
 
     @server.register('promptTemplate.create')
     def create_template(
@@ -1168,6 +1212,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         mode: str,
         module_type: Optional[str] = None,
         category: str = 'general',
+        locale: str = 'zh-CN',
         system_prompt: Optional[str] = None,
         user_prompt_template: Optional[str] = None,
         tools_json: Optional[str] = None,
@@ -1177,7 +1222,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         variables_json: Optional[str] = None,
     ):
         return pm.create_template(
-            name, mode, module_type, category,
+            name, mode, module_type, category, locale,
             system_prompt, user_prompt_template,
             tools_json, tool_strategy,
             output_schema_json, output_example, variables_json,
@@ -1192,7 +1237,19 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         return pm.delete_template(template_id)
 
     @server.register('promptTemplate.render')
-    def render_template(template_id: str, variables: Dict[str, Any]):
-        return pm.render(template_id, variables)
+    def render_template(template_id: str, variables: Dict[str, Any], locale: Optional[str] = None):
+        return pm.render(template_id, variables, locale)
+
+    @server.register('promptTemplate.restoreDefaults')
+    def restore_defaults(locale: Optional[str] = None):
+        return pm.restore_defaults(locale)
+
+    @server.register('promptTemplate.getDefaultLocale')
+    def get_default_locale():
+        return {'locale': pm.get_default_locale()}
+
+    @server.register('promptTemplate.setDefaultLocale')
+    def set_default_locale(locale: str):
+        return pm.set_default_locale(locale)
 
     return server

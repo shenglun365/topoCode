@@ -91,6 +91,9 @@ RPC_IDS: dict[str, str] = {
     "promptTemplate.update":        "API-066",
     "promptTemplate.delete":        "API-067",
     "promptTemplate.render":        "API-068",
+    "promptTemplate.restoreDefaults": "API-120",
+    "promptTemplate.getDefaultLocale": "API-122",
+    "promptTemplate.setDefaultLocale": "API-123",
 
     # ── render ────────────────────────────────────────────────
     "render.plantuml":              "API-069",
@@ -120,6 +123,7 @@ RPC_IDS: dict[str, str] = {
     "session.addMessage":           "API-087",
     "session.deleteMessage":        "API-088",
     "session.updateMeta":           "API-089",
+    "session.clearAll":             "API-124",
 
     # ── settings ──────────────────────────────────────────────
     "settings.getModels":           "API-090",
