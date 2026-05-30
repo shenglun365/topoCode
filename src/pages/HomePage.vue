@@ -1,42 +1,28 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
-  FolderIcon,
-  Cog6ToothIcon,
-  DocumentTextIcon,
   RocketLaunchIcon,
-  XCircleIcon,
-  XMarkIcon,
-  LightBulbIcon,
-  CodeBracketIcon,
-  ChatBubbleLeftRightIcon,
-  WrenchScrewdriverIcon,
   MagnifyingGlassIcon,
   StarIcon,
   Squares2X2Icon,
-  ArchiveBoxXMarkIcon,
   PlusIcon,
+  XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
-import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
-import { useAnalysisStore } from '@/stores/analysis'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useSettingsStore } from '@/stores/settings'
+import { useNavigationStore } from '@/stores/navigation'
 import ProjectCard from '@/components/project/ProjectCard.vue'
 import GroupFilter from '@/components/project/GroupFilter.vue'
 import GroupManager from '@/components/project/GroupManager.vue'
-import HomeTabBar from '@/components/project/HomeTabBar.vue'
-import CodeViewer from '@/components/code/CodeViewer.vue'
-import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
-import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
 import { useComponentId } from '@/composables/useComponentId'
-import ClearCacheDialog from '@/components/project/ClearCacheDialog.vue'
-
 const { showId, componentId } = useComponentId('PG-001')
 const { t } = useI18n()
+const router = useRouter()
+const navigation = useNavigationStore()
 const projectStore = useProjectStore()
-const analysisStore = useAnalysisStore()
 const onboardingStore = useOnboardingStore()
 const settingsStore = useSettingsStore()
 
@@ -140,31 +126,10 @@ const pageRange = computed(() => {
 watch(filterMode, () => { currentPage.value = 1 })
 watch(searchQuery, () => { currentPage.value = 1 })
 
-function onTabUpdate(tabId: string | null) {
-  projectStore.setActiveTab(tabId)
-}
-
-function onTabClose(tabId: string) {
-  projectStore.closeTab(tabId)
-}
-
-function onCloseCodeViewer() {
-  if (projectStore.activeTabId) {
-    projectStore.closeTab(projectStore.activeTabId)
-  }
-  projectStore.openTaskListTab()
-}
-
-function onTaskCreated(taskId: string) {
-  // 关闭新建任务 tab，切换回任务列表
-  if (projectStore.activeTabId) {
-    projectStore.closeTab(projectStore.activeTabId)
-  }
-  projectStore.openTaskListTab()
-}
-
-function onTaskListCreateTask(taskId?: string) {
-  projectStore.openTaskCreateForm(taskId)
+function handleSelectProject(id: string) {
+  projectStore.selectProject(id)
+  router.push('/code')
+  navigation.navigateTo('code')
 }
 
 async function handleImportProject() {
@@ -181,42 +146,6 @@ async function handleImportProject() {
 onMounted(async () => {
   await projectStore.loadProjects()
 })
-
-// ===== 项目设置菜单（清除缓存） =====
-const menuVisible = ref(false)
-const menuPosition = ref({ x: 0, y: 0 })
-const showClearCacheDialog = ref(false)
-const selectedProject = computed(() => projectStore.selectedProject)
-const isSample = computed(() => !!selectedProject.value?.isSample)
-
-function showMenu(e: MouseEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  menuVisible.value = true
-  const menuW = 160
-  const menuH = 44
-  let x = e.clientX
-  let y = e.clientY
-  if (x + menuW > window.innerWidth) x = window.innerWidth - menuW - 8
-  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 8
-  if (x < 4) x = 4
-  if (y < 4) y = 4
-  menuPosition.value = { x, y }
-}
-
-function hideMenu() {
-  menuVisible.value = false
-}
-
-async function handleClearCache() {
-  hideMenu()
-  showClearCacheDialog.value = true
-}
-
-function onClearCacheDone() {
-  showClearCacheDialog.value = false
-  projectStore.loadProjects()
-}
 </script>
 
 <template>
@@ -225,385 +154,230 @@ function onClearCacheDone() {
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
-    <!-- 默认视图: 项目列表 + 导入 -->
+    <!-- 分组管理（覆盖整个默认视图） -->
     <div
-      v-if="projectStore.viewMode === 'default'"
-      class="home-default-view"
+      v-if="projectStore.activeTab?.kind === 'groupManager'"
+      class="group-manager-panel"
     >
-      <!-- 分组管理（覆盖整个默认视图） -->
-      <div
-        v-if="projectStore.activeTab?.kind === 'groupManager'"
-        class="group-manager-panel"
-      >
-        <div class="group-manager-header">
-          <h3 style="font-size:14px; font-weight:600; margin:0;">
-            {{ t('group.manager') }}
-          </h3>
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="projectStore.closeTab(projectStore.activeTabId!)"
-          >
-            <XMarkIcon class="w-4 h-4" />
-            <span>{{ t('common.close') }}</span>
-          </button>
-        </div>
-        <div class="group-manager-body">
-          <GroupManager />
-        </div>
+      <div class="group-manager-header">
+        <h3 style="font-size:14px; font-weight:600; margin:0;">
+          {{ t('group.manager') }}
+        </h3>
+        <button
+          class="btn btn-ghost btn-sm"
+          @click="projectStore.closeTab(projectStore.activeTabId!)"
+        >
+          <XMarkIcon class="w-4 h-4" />
+          <span>{{ t('common.close') }}</span>
+        </button>
+      </div>
+      <div class="group-manager-body">
+        <GroupManager />
+      </div>
+    </div>
+
+    <!-- 项目列表 -->
+    <template v-else>
+      <!-- 页面标题 -->
+      <div style="margin-bottom:24px;">
+        <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">
+          TopoCode
+        </h1>
+        <p
+          class="text-muted"
+          style="font-size:12px;"
+        >
+          {{ t('project.subtitle') }}
+        </p>
       </div>
 
-      <!-- 项目列表 -->
-      <template v-else>
-        <!-- 页面标题 -->
-        <div style="margin-bottom:24px;">
-          <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">
-            TopoCode
-          </h1>
-          <p
-            class="text-muted"
-            style="font-size:12px;"
+      <!-- 筛选按钮 + 搜索 -->
+      <div
+        v-if="projectStore.projects.length > 0"
+        style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;"
+      >
+        <div style="display:flex; gap:4px; align-items:center;">
+          <button
+            :class="['btn', 'btn-sm', filterMode === 'all' ? 'btn-primary' : 'btn-ghost']"
+            @click="filterMode = 'all'"
           >
-            {{ t('project.subtitle') }}
-          </p>
-        </div>
-
-        <!-- 筛选按钮 + 搜索 -->
-        <div
-          v-if="projectStore.projects.length > 0"
-          style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;"
-        >
-          <div style="display:flex; gap:4px; align-items:center;">
-            <button
-              :class="['btn', 'btn-sm', filterMode === 'all' ? 'btn-primary' : 'btn-ghost']"
-              @click="filterMode = 'all'"
-            >
-              <Squares2X2Icon class="w-3.5 h-3.5" />
-              <span>{{ t('project.allProjects') }}</span>
-              <span
-                class="badge badge-gray"
-                style="font-size:9px; margin-left:2px;"
-              >{{ projectStore.projects.length }}</span>
-            </button>
-            <button
-              :class="['btn', 'btn-sm', filterMode === 'favorites' ? 'btn-primary' : 'btn-ghost']"
-              @click="filterMode = 'favorites'"
-            >
-              <StarIcon class="w-3.5 h-3.5" />
-              <span>{{ t('project.myFavorites') }}</span>
-              <span
-                class="badge badge-yellow"
-                style="font-size:9px; margin-left:2px;"
-              >{{ projectStore.projects.filter(p => p.favorite).length }}</span>
-            </button>
-            <!-- 分组筛选 -->
-            <GroupFilter
-              ref="groupFilterRef"
-              @change="selectedGroupIds = $event"
-            />
-          </div>
-          <div style="display:flex; gap:4px; align-items:center;">
-            <!-- 每页数量选择 -->
+            <Squares2X2Icon class="w-3.5 h-3.5" />
+            <span>{{ t('project.allProjects') }}</span>
             <span
-              class="text-muted"
-              style="font-size:10px; white-space:nowrap;"
-            >{{ t('project.pageSize') }}</span>
-            <select
-              :value="pageSize"
-              style="padding:2px 4px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); outline:none;"
-              @change="settingsStore.setProjectPageSize(Number(($event.target as HTMLSelectElement).value))"
-            >
-              <option value="20">
-                20
-              </option>
-              <option value="50">
-                50
-              </option>
-              <option value="100">
-                100
-              </option>
-            </select>
-            <!-- 复合搜索输入框 -->
-            <div style="position:relative;">
-              <MagnifyingGlassIcon class="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
-              <input
-                v-model="searchQuery"
-                :placeholder="t('project.searchProjects')"
-                style="padding:3px 6px 3px 24px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); width:160px; outline:none;"
-              >
-            </div>
-          </div>
-        </div>
-
-        <!-- 项目卡片网格（始终显示，导入卡片自动排在末尾） -->
-        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
-          <ProjectCard
-            v-for="project in pagedProjects"
-            :key="project.id"
-            :project="project"
-            @select="projectStore.selectProject(project.id)"
+              class="badge badge-gray"
+              style="font-size:9px; margin-left:2px;"
+            >{{ projectStore.projects.length }}</span>
+          </button>
+          <button
+            :class="['btn', 'btn-sm', filterMode === 'favorites' ? 'btn-primary' : 'btn-ghost']"
+            @click="filterMode = 'favorites'"
+          >
+            <StarIcon class="w-3.5 h-3.5" />
+            <span>{{ t('project.myFavorites') }}</span>
+            <span
+              class="badge badge-yellow"
+              style="font-size:9px; margin-left:2px;"
+            >{{ projectStore.projects.filter(p => p.favorite).length }}</span>
+          </button>
+          <!-- 分组筛选 -->
+          <GroupFilter
+            ref="groupFilterRef"
+            @change="selectedGroupIds = $event"
           />
-          <!-- 无匹配结果 -->
-          <div
-            v-if="pagedProjects.length === 0 && !searchQuery"
-            style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
-          >
-            {{ t('project.noFavorites') }}
-          </div>
-          <div
-            v-else-if="pagedProjects.length === 0 && searchQuery"
-            style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
-          >
-            {{ t('project.noMatch') }}
-          </div>
-          <!-- 导入项目卡片（始终在网格末尾） -->
-          <div
-            class="import-card card"
-            :class="{ 'importing': projectStore.importing }"
-            @click="handleImportProject"
-          >
-            <div
-              v-if="!projectStore.importing"
-              class="import-card-body"
-            >
-              <PlusIcon class="w-8 h-8 import-card-icon" />
-              <span class="import-card-label">{{ t('project.importProject') }}</span>
-              <span class="import-card-hint">{{ t('project.importDirHint') }}</span>
-            </div>
-            <div
-              v-else
-              class="import-card-body"
-            >
-              <div class="import-card-progress">
-                <div class="import-card-spinner" />
-                <span class="import-card-label">{{ t('project.importing') }}</span>
-                <span class="import-card-percent">{{ projectStore.importProgress }}%</span>
-                <div
-                  class="progress-bar"
-                  style="width:80%; margin-top:8px;"
-                >
-                  <div
-                    class="progress-bar-fill bg-accent"
-                    :style="{ width: (projectStore.importProgress || 0) + '%' }"
-                  />
-                </div>
-                <span
-                  v-if="projectStore.importStatus === 'scan'"
-                  class="import-card-hint"
-                >{{ t('project.importScanning') }}</span>
-                <span
-                  v-else-if="projectStore.importStatus === 'write'"
-                  class="import-card-hint"
-                >{{ t('project.importWriting') }}</span>
-              </div>
-            </div>
-          </div>
         </div>
-
-        <!-- 分页控件 -->
-        <div
-          v-if="totalPages > 1"
-          class="pagination-bar"
-        >
+        <div style="display:flex; gap:4px; align-items:center;">
+          <!-- 每页数量选择 -->
           <span
             class="text-muted"
-            style="font-size:11px;"
+            style="font-size:10px; white-space:nowrap;"
+          >{{ t('project.pageSize') }}</span>
+          <select
+            :value="pageSize"
+            style="padding:2px 4px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); outline:none;"
+            @change="settingsStore.setProjectPageSize(Number(($event.target as HTMLSelectElement).value))"
           >
-            {{ t('project.showing') }} {{ pageRange.start }}-{{ pageRange.end }} / {{ pageRange.total }}
-          </span>
-          <div class="pagination-buttons">
-            <button
-              class="btn btn-ghost btn-sm"
-              :disabled="currentPage === 1"
-              @click="currentPage--"
+            <option value="20">
+              20
+            </option>
+            <option value="50">
+              50
+            </option>
+            <option value="100">
+              100
+            </option>
+          </select>
+          <!-- 复合搜索输入框 -->
+          <div style="position:relative;">
+            <MagnifyingGlassIcon class="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              v-model="searchQuery"
+              :placeholder="t('project.searchProjects')"
+              style="padding:3px 6px 3px 24px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); width:160px; outline:none;"
             >
-              {{ t('project.prevPage') }}
-            </button>
-            <span style="font-size:11px; padding:0 8px;">
-              {{ currentPage }} / {{ totalPages }}
-            </span>
-            <button
-              class="btn btn-ghost btn-sm"
-              :disabled="currentPage === totalPages"
-              @click="currentPage++"
-            >
-              {{ t('project.nextPage') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 快速开始（无项目时显示提示） -->
-        <div
-          v-if="projectStore.projects.length === 0"
-          class="quick-start-empty"
-        >
-          <RocketLaunchIcon class="w-12 h-12 text-accent" />
-          <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">
-            {{ t('project.quickStart') }}
-          </h2>
-          <p
-            class="text-muted"
-            style="font-size:12px; margin-bottom:16px;"
-          >
-            {{ t('project.quickStartDesc') }}
-          </p>
-          <p
-            class="text-muted"
-            style="font-size:11px;"
-          >
-            {{ t('project.menuImportHint') }}
-          </p>
-        </div>
-      </template>
-    </div>
-
-    <!-- 项目视图 -->
-    <div
-      v-else
-      class="home-project-view"
-    >
-      <!-- 项目标题栏 -->
-      <div style="display:flex; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); gap:12px;">
-        <FolderIcon class="w-4 h-4 text-accent" />
-        <span style="font-size:13px; font-weight:600;">{{ projectStore.selectedProject?.name }}</span>
-        <span
-          class="badge badge-green"
-          style="font-size:8px;"
-        >{{ t('project.synced') }}</span>
-        <div style="flex:1;" />
-        <button
-          v-if="projectStore.tabs.length > 0"
-          class="btn btn-ghost btn-sm"
-          :title="t('project.closeAllTabs')"
-          @click="projectStore.closeAllTabs()"
-        >
-          <XCircleIcon class="w-4 h-4" />
-          <span>{{ t('project.closeAllTabs') }}</span>
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          :title="t('analysis.taskList')"
-          @click="projectStore.openTaskListTab()"
-        >
-          <WrenchScrewdriverIcon class="w-4 h-4" />
-          <span>{{ t('analysis.taskList') }}</span>
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          @click="showMenu"
-        >
-          <Cog6ToothIcon class="w-4 h-4" />
-          <span>{{ t('common.settings') }}</span>
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          @click="projectStore.deselectProject()"
-        >
-          {{ t('common.back') }}
-        </button>
-      </div>
-
-      <!-- Tab 栏 -->
-      <HomeTabBar
-        v-if="projectStore.currentProjectTabs.length > 0"
-        :tabs="projectStore.currentProjectTabs"
-        :active-tab-id="projectStore.activeTabId"
-        @update:active-tab-id="onTabUpdate"
-        @close="onTabClose"
-      />
-
-      <!-- 内容区 -->
-      <div class="home-tab-content">
-        <!-- 代码视图 -->
-        <div
-          v-if="projectStore.activeTab?.kind === 'file'"
-          class="code-viewer-full"
-        >
-          <CodeViewer
-            :node="projectStore.activeTab.node!"
-            :root-path="projectStore.selectedProject?.rootPath || projectStore.selectedProject?.path || ''"
-            @close="onCloseCodeViewer"
-          />
-        </div>
-
-        <!-- 任务列表 -->
-        <div
-          v-else-if="projectStore.activeTab?.kind === 'taskList'"
-          class="task-list-panel"
-        >
-          <TaskListPanel
-            :project-id="projectStore.selectedProjectId!"
-            @create-task="onTaskListCreateTask"
-          />
-        </div>
-
-        <!-- 新建/编辑任务 -->
-        <div
-          v-else-if="projectStore.activeTab?.kind === 'taskCreate'"
-          class="task-create-form"
-        >
-          <TaskCreateForm
-            :project-id="projectStore.selectedProjectId!"
-            :task-id="projectStore.activeTab.taskId"
-            @created="onTaskCreated"
-            @cancelled="onCloseCodeViewer"
-          />
-        </div>
-
-        <!-- 分组管理 -->
-        <div
-          v-else-if="projectStore.activeTab?.kind === 'groupManager'"
-          class="group-manager-panel"
-        >
-          <GroupManager />
-        </div>
-
-        <!-- 空状态 -->
-        <div
-          v-else
-          class="empty-state centered"
-        >
-          <DocumentTextIcon class="w-12 h-12 text-accent" />
-          <div class="title">
-            {{ t('file.selectFile') }}
-          </div>
-          <div class="desc">
-            {{ t('file.selectFileDesc') }}
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- 清除缓存菜单 -->
-    <Teleport to="body">
+      <!-- 项目卡片网格（始终显示，导入卡片自动排在末尾） -->
+      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
+        <ProjectCard
+          v-for="project in pagedProjects"
+          :key="project.id"
+          :project="project"
+          @select="handleSelectProject(project.id)"
+        />
+        <!-- 无匹配结果 -->
+        <div
+          v-if="pagedProjects.length === 0 && !searchQuery"
+          style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
+        >
+          {{ t('project.noFavorites') }}
+        </div>
+        <div
+          v-else-if="pagedProjects.length === 0 && searchQuery"
+          style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
+        >
+          {{ t('project.noMatch') }}
+        </div>
+        <!-- 导入项目卡片（始终在网格末尾） -->
+        <div
+          class="import-card card"
+          :class="{ 'importing': projectStore.importing }"
+          @click="handleImportProject"
+        >
+          <div
+            v-if="!projectStore.importing"
+            class="import-card-body"
+          >
+            <PlusIcon class="w-8 h-8 import-card-icon" />
+            <span class="import-card-label">{{ t('project.importProject') }}</span>
+            <span class="import-card-hint">{{ t('project.importDirHint') }}</span>
+          </div>
+          <div
+            v-else
+            class="import-card-body"
+          >
+            <div class="import-card-progress">
+              <div class="import-card-spinner" />
+              <span class="import-card-label">{{ t('project.importing') }}</span>
+              <span class="import-card-percent">{{ projectStore.importProgress }}%</span>
+              <div
+                class="progress-bar"
+                style="width:80%; margin-top:8px;"
+              >
+                <div
+                  class="progress-bar-fill bg-accent"
+                  :style="{ width: (projectStore.importProgress || 0) + '%' }"
+                />
+              </div>
+              <span
+                v-if="projectStore.importStatus === 'scan'"
+                class="import-card-hint"
+              >{{ t('project.importScanning') }}</span>
+              <span
+                v-else-if="projectStore.importStatus === 'write'"
+                class="import-card-hint"
+              >{{ t('project.importWriting') }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分页控件 -->
       <div
-        v-if="menuVisible"
-        class="context-menu"
-        :style="{ left: menuPosition.x + 'px', top: menuPosition.y + 'px' }"
-        @click.stop
-        @mouseleave="hideMenu"
+        v-if="totalPages > 1"
+        class="pagination-bar"
       >
-        <div
-          v-if="!isSample"
-          class="context-menu-item context-menu-item-warning"
-          @click="handleClearCache"
+        <span
+          class="text-muted"
+          style="font-size:11px;"
         >
-          <ArchiveBoxXMarkIcon class="w-4 h-4" />
-          <span>{{ t('project.clearCache') }}</span>
+          {{ t('project.showing') }} {{ pageRange.start }}-{{ pageRange.end }} / {{ pageRange.total }}
+        </span>
+        <div class="pagination-buttons">
+          <button
+            class="btn btn-ghost btn-sm"
+            :disabled="currentPage === 1"
+            @click="currentPage--"
+          >
+            {{ t('project.prevPage') }}
+          </button>
+          <span style="font-size:11px; padding:0 8px;">
+            {{ currentPage }} / {{ totalPages }}
+          </span>
+          <button
+            class="btn btn-ghost btn-sm"
+            :disabled="currentPage === totalPages"
+            @click="currentPage++"
+          >
+            {{ t('project.nextPage') }}
+          </button>
         </div>
       </div>
-    </Teleport>
 
-    <div
-      v-if="menuVisible"
-      class="context-menu-backdrop"
-      @click="hideMenu"
-    />
-
-    <ClearCacheDialog
-      v-if="showClearCacheDialog"
-      :project-id="selectedProject?.id || ''"
-      @close="onClearCacheDone"
-    />
+      <!-- 快速开始（无项目时显示提示） -->
+      <div
+        v-if="projectStore.projects.length === 0"
+        class="quick-start-empty"
+      >
+        <RocketLaunchIcon class="w-12 h-12 text-accent" />
+        <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">
+          {{ t('project.quickStart') }}
+        </h2>
+        <p
+          class="text-muted"
+          style="font-size:12px; margin-bottom:16px;"
+        >
+          {{ t('project.quickStartDesc') }}
+        </p>
+        <p
+          class="text-muted"
+          style="font-size:11px;"
+        >
+          {{ t('project.menuImportHint') }}
+        </p>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -613,41 +387,14 @@ function onClearCacheDone() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.home-default-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
   padding: 32px;
   overflow: auto;
 }
 
-.home-project-view {
+.group-manager-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
-}
-
-.home-tab-content {
-  flex: 1;
-  overflow: auto;
-  display: flex;
-}
-
-.code-viewer-full {
-  flex: 1;
-  overflow: hidden;
-}
-
-.task-list-panel,
-.task-create-form,
-.group-manager-panel {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .group-manager-header {
@@ -664,45 +411,12 @@ function onClearCacheDone() {
   overflow: hidden;
 }
 
-.empty-state.centered {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-
-.task-list-view {
-  height: 100%;
-  overflow: auto;
-}
-
 .quick-start-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 40px 20px;
   text-align: center;
-}
-
-.quick-start-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  width: 100%;
-  max-width: 600px;
-}
-
-.quick-start-card {
-  padding: 20px;
-  cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-
-.quick-start-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .pagination-bar {
@@ -804,35 +518,5 @@ function onClearCacheDone() {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-
-.cache-processing-card {
-  background: var(--bg-primary);
-  border-radius: 12px;
-  padding: 32px 40px;
-  text-align: center;
-  min-width: 280px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
-.cache-processing-spinner {
-  width: 32px;
-  height: 32px;
-  margin: 0 auto 16px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-.cache-processing-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-}
-.cache-processing-message {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-bottom: 16px;
 }
 </style>

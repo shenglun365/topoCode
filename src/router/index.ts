@@ -13,6 +13,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '项目导入' },
   },
   {
+    path: '/code',
+    name: 'Code',
+    component: () => import('@/pages/CodePage.vue'),
+    meta: { title: '代码解析' },
+  },
+  {
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/pages/AnalysisPage.vue'),

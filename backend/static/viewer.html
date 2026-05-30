@@ -49,21 +49,38 @@
   .diagram-wrapper { transform-origin: top left; transition: none; }
   .loading { text-align: center; padding: 40px; color: #999; }
   .error-msg { color: #ef4444; padding: 12px; border: 1px solid #ef4444; border-radius: 6px; margin: 12px 0; }
+  .zoom-label { font-size: 10px; color: var(--text-muted, #999); writing-mode: vertical-rl; letter-spacing: 1px; }
+  .toc-float { position: fixed; top: 100px; right: 16px; z-index: 200; display: flex; flex-direction: column; align-items: flex-end; }
+  .toc-toggle { width: 32px; height: 32px; border: 1px solid var(--border); background: var(--bg); border-radius: 6px; cursor: pointer; font-size: 16px; color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .toc-toggle:hover { background: var(--bg-code); }
+  .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; max-width: 280px; max-height: 60vh; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.15); font-size: 12px; }
+  .toc-panel.open { display: block; }
+  .toc-panel .toc-title { font-weight: 600; font-size: 12px; margin-bottom: 6px; white-space: nowrap; }
+  .toc-panel ul { list-style: none; padding: 0; margin: 0; }
+  .toc-panel li { padding: 2px 0; }
+  .toc-panel a { color: var(--accent); text-decoration: none; }
+  .toc-panel a:hover { text-decoration: underline; }
+  .toc-panel .no-doc { color: #999; font-family: monospace; font-size: 11px; }
   @media (max-width: 640px) { .canvas-controls { flex-wrap: wrap; width: 90%; } }
 </style>
 </head>
 <body>
 <div class="header">
   <span class="title" id="docTitle">Loading...</span>
-  <a href="/" id="backLink">← Back to list</a>
+  <a href="/" id="backLink">← 返回列表</a>
 </div>
 <div class="zoom-controls" id="zoomControls">
+  <span class="zoom-label" id="zoomLabel">图大小缩放</span>
   <button id="zoomOut" title="Zoom out">−</button>
   <span class="zoom-pct" id="zoomPct">100%</span>
   <button id="zoomIn" title="Zoom in">+</button>
   <button id="zoomReset" title="Reset">⟲</button>
 </div>
 <div class="content" id="content"></div>
+<div class="toc-float" id="tocFloat">
+  <button class="toc-toggle" id="tocToggle" title="子组件目录">☰</button>
+  <div class="toc-panel" id="tocPanel"></div>
+</div>
 <div class="canvas-controls" id="canvasControls">
   <label>Width: <input type="range" id="canvasW" min="50" max="100" value="100"> <span class="val" id="canvasWVal">100%</span></label>
   <label>Height: <input type="range" id="canvasH" min="200" max="1200" step="50" value="600"> <span class="val" id="canvasHVal">600px</span></label>
@@ -82,8 +99,46 @@ const edgeType = params.get('edgeType') || 'CALL';
 
 let zoomLevel = 1;
 let diagrams = [];
+let templateLocale = 'zh-CN';
+
+const LOCALE_TEXT = {
+  'zh-CN': {
+    back: '← 返回列表',
+    tocTitle: '子组件目录',
+    noDoc: '未解析',
+    zoomLabel: '图大小缩放',
+    noParams: 'No document specified. Use ?taskId=... or ?docId=...',
+  },
+  'en-US': {
+    back: '← Back to List',
+    tocTitle: 'Sub-Components',
+    noDoc: 'unresolved',
+    zoomLabel: 'Zoom',
+    noParams: 'No document specified. Use ?taskId=... or ?docId=...',
+  },
+}
+
+function _(key) {
+  const m = LOCALE_TEXT[templateLocale] || LOCALE_TEXT['zh-CN']
+  return m[key] || key
+}
+
+// 启动时获取模板语言
+(async function initLocale() {
+  try {
+    const resp = await fetch('/api/template-locale')
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.locale === 'en-US' || data.locale === 'zh-CN') templateLocale = data.locale
+    }
+  } catch {}
+  document.getElementById('backLink').textContent = _('back')
+  document.getElementById('zoomLabel').textContent = _('zoomLabel')
+  document.getElementById('tocToggle').title = _('tocTitle')
+})()
 
 async function load() {
+  console.log('[Viewer] load params:', { taskId, docId, communityId, edgeType });
   if (communityId && taskId) {
     await loadCommunityDoc(taskId, communityId, edgeType);
     return;
@@ -101,6 +156,18 @@ async function load() {
 
 let projectId = '';
 let currentTaskId = '';
+let currentCommunityId = '';
+let currentEdgeType = 'CALL';
+
+function updateBackLink(tid, cid) {
+  const bl = document.getElementById('backLink');
+  if (tid) {
+    // 优先指向整体架构分析文档
+    bl.href = `/doc?taskId=${encodeURIComponent(tid)}&docId=overall-${encodeURIComponent(tid)}`;
+  } else {
+    bl.href = '/';
+  }
+}
 
 async function loadCommunityDoc(tid, cid, et) {
   document.getElementById('content').innerHTML = '<div class="loading">Loading community document...</div>';
@@ -109,9 +176,14 @@ async function loadCommunityDoc(tid, cid, et) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const doc = await resp.json();
     projectId = doc.projectId || '';
-    currentTaskId = doc.taskId || '';
+    currentTaskId = doc.taskId || tid;
+    currentCommunityId = cid;
+    currentEdgeType = et;
     document.getElementById('docTitle').textContent = doc.title || 'Untitled';
+    updateBackLink(currentTaskId, cid);
     renderContent(doc.content || '');
+    // 加载子组件目录
+    buildCommunityToc(currentTaskId, cid, et);
   } catch (e) {
     document.getElementById('content').innerHTML = `<div class="error-msg">Failed to load community document: ${e.message}</div>`;
   }
@@ -119,40 +191,80 @@ async function loadCommunityDoc(tid, cid, et) {
 
 async function loadDoc(id) {
   document.getElementById('content').innerHTML = '<div class="loading">Loading document...</div>';
+  // 从 URL 参数获取 taskId（可能浏览器访问时只传了 docId）
+  const tidFromUrl = params.get('taskId') || params.get('taskId') || '';
+  currentTaskId = tidFromUrl;
+  updateBackLink(currentTaskId, '');
   try {
-    const resp = await fetch(`/api/docs/${id}`);
+    const resp = await fetch(`/api/docs/${encodeURIComponent(id)}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const doc = await resp.json();
     projectId = doc.projectId || '';
-    currentTaskId = doc.taskId || '';
+    currentTaskId = doc.taskId || tidFromUrl;
     document.getElementById('docTitle').textContent = doc.title || 'Untitled';
     renderContent(doc.content || '');
   } catch (e) {
     document.getElementById('content').innerHTML = `<div class="error-msg">Failed to load document: ${e.message}</div>`;
+  }
+  // 主文档下展示 L0 社区目录
+  if (currentTaskId) {
+    buildCommunityToc(currentTaskId, '', 'INCLUDE');
+  }
+}
+
+async function buildCommunityToc(tid, parentCid, et) {
+  try {
+    console.log('[TOC] Fetching children for task=', tid, 'parent=', parentCid, 'edgeType=', et);
+    const resp = await fetch(`/api/community-children?taskId=${encodeURIComponent(tid)}&parentCommId=${encodeURIComponent(parentCid)}&edgeType=${encodeURIComponent(et)}`);
+    if (!resp.ok) {
+      console.warn('[TOC] API error:', resp.status);
+      return;
+    }
+    const children = await resp.json();
+    console.log('[TOC] Received children:', children);
+    if (!children || children.length === 0) {
+      console.log('[TOC] No children found');
+      return;
+    }
+
+    // 收集各级别数量
+    const levelCounts = {};
+    children.forEach(c => { levelCounts[c.commLv] = (levelCounts[c.commLv] || 0) + 1; });
+    const levelSummary = Object.keys(levelCounts).sort().map(lv => `${lv}: ${levelCounts[lv]}`).join(', ');
+    let html = `<div class="toc-title">${_('tocTitle')} (${levelSummary})</div><ul>`;
+    for (const child of children) {
+      const childEt = child.edgeType || et;
+      const levelClass = 'toc-level-' + (child.commLv === 'L0' ? '1' : child.commLv === 'L1' ? '2' : '3');
+      if (child.hasDoc) {
+        html += `<li class="${levelClass}"><a href="/doc?taskId=${encodeURIComponent(tid)}&communityId=${encodeURIComponent(child.commId)}&edgeType=${encodeURIComponent(childEt)}">${escapeHtml(child.name || child.commId)}</a></li>`;
+      } else {
+        html += `<li class="${levelClass}"><span class="no-doc">${escapeHtml(child.commId)} (${_('noDoc')})</span></li>`;
+      }
+    }
+    html += '</ul>';
+
+    const panel = document.getElementById('tocPanel');
+    panel.innerHTML = html;
+    panel.classList.add('open');
+    document.getElementById('tocToggle').textContent = '✕';
+  } catch (e) {
+    // 静默失败，不阻塞主内容
   }
 }
 
 async function loadTaskDocs(tid) {
   document.getElementById('content').innerHTML = '<div class="loading">Loading documents...</div>';
   try {
-    const resp = await fetch(`/api/task-docs?taskId=${tid}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const docs = await resp.json();
-    if (docs.length === 0) {
-      document.getElementById('content').innerHTML = '<p>No documents found for this task.</p>';
-      return;
-    }
     if (docId) {
+      currentTaskId = tid;
+      updateBackLink(tid, '');
       await loadDoc(docId);
       return;
     }
-    document.getElementById('docTitle').textContent = `Task: ${tid}`;
-    let html = '<h1>Documents</h1><ul>';
-    for (const d of docs) {
-      html += `<li><a href="/doc?taskId=${tid}&docId=${d.id}">${d.title}</a></li>`;
-    }
-    html += '</ul>';
-    document.getElementById('content').innerHTML = html;
+    // 默认跳转到整体架构分析文档
+    currentTaskId = tid;
+    updateBackLink(tid, '');
+    await loadDoc(`overall-${tid}`);
   } catch (e) {
     document.getElementById('content').innerHTML = `<div class="error-msg">${e.message}</div>`;
   }
@@ -311,6 +423,14 @@ document.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.key === '=') { e.preventDefault(); setZoom(zoomLevel + 0.25); }
   if (e.ctrlKey && e.key === '-') { e.preventDefault(); setZoom(zoomLevel - 0.25); }
   if (e.ctrlKey && e.key === '0') { e.preventDefault(); setZoom(1); }
+});
+
+// TOC toggle
+document.getElementById('tocToggle').addEventListener('click', () => {
+  const panel = document.getElementById('tocPanel');
+  const btn = document.getElementById('tocToggle');
+  panel.classList.toggle('open');
+  btn.textContent = panel.classList.contains('open') ? '✕' : '☰';
 });
 
 load();

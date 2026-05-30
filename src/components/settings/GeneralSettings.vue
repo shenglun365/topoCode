@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  SunIcon,
-  MoonIcon,
-  ComputerDesktopIcon,
   ArrowPathIcon,
-  LinkIcon,
   GlobeAltIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings'
@@ -35,10 +31,57 @@ onMounted(() => {
   settingsStore.loadPythonMemoryLimit()
 })
 
+// 字体大小实时生效
+watch(() => settingsStore.fontSize, (val) => {
+  document.documentElement.style.fontSize = val + 'px'
+})
+onMounted(() => {
+  document.documentElement.style.fontSize = settingsStore.fontSize + 'px'
+})
+
 const languages = [
   { value: 'zh-CN' as SupportedLocale, key: 'settings.simplifiedChinese' },
   { value: 'en-US' as SupportedLocale, key: 'settings.english' },
 ]
+
+// HTTP 服务 IP 设置
+const localIps = ref<string[]>([])
+const showRestartHint = ref(false)
+
+async function detectLocalIps() {
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [] })
+    pc.createDataChannel('')
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        const ip = e.candidate.candidate.split(' ')[4]
+        if (ip && !localIps.value.includes(ip) && ip !== '127.0.0.1') {
+          localIps.value.push(ip)
+        }
+      }
+    }
+    setTimeout(() => pc.close(), 2000)
+  } catch {}
+}
+
+onMounted(() => { detectLocalIps() })
+
+
+
+function onBindIpChange(val: string) {
+  statusStore.httpHost = val
+  showRestartHint.value = true
+}
+
+async function applyHttpConfigAndRestart() {
+  await settingsStore.restartBackend()
+  showRestartHint.value = false
+}
+
+function openHttpPage() {
+  const ip = statusStore.httpHost === '0.0.0.0' ? '127.0.0.1' : statusStore.httpHost
+  window.open(`http://${ip}:${statusStore.httpPort}`, '_blank')
+}
 </script>
 
 <template>
@@ -50,25 +93,6 @@ const languages = [
     <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">
       {{ t('settings.generalSettings') }}
     </h2>
-
-    <!-- 主题 -->
-    <div class="form-group">
-      <label class="form-label">{{ t('settings.themeMode') }}</label>
-      <div style="display:flex; gap:8px;">
-        <button class="btn btn-ghost btn-sm">
-          <SunIcon class="w-4 h-4" />
-          <span>{{ t('settings.lightMode') }}</span>
-        </button>
-        <button class="btn btn-primary btn-sm">
-          <MoonIcon class="w-4 h-4" />
-          <span>{{ t('settings.darkMode') }}</span>
-        </button>
-        <button class="btn btn-ghost btn-sm">
-          <ComputerDesktopIcon class="w-4 h-4" />
-          <span>{{ t('settings.systemMode') }}</span>
-        </button>
-      </div>
-    </div>
 
     <!-- 语言 -->
     <div class="form-group">
@@ -108,30 +132,6 @@ const languages = [
       </div>
     </div>
 
-    <!-- 自动保存间隔 -->
-    <div class="form-group">
-      <label class="form-label">{{ t('settings.autoSaveInterval') }}</label>
-      <select
-        class="select"
-        style="width:120px;"
-        :value="settingsStore.autoSaveInterval"
-        @change="settingsStore.autoSaveInterval = Number(($event.target as HTMLSelectElement).value)"
-      >
-        <option :value="30">
-          {{ t('common.seconds', { value: 30 }) }}
-        </option>
-        <option :value="60">
-          {{ t('common.seconds', { value: 60 }) }}
-        </option>
-        <option :value="300">
-          {{ t('common.minutes', { value: 5 }) }}
-        </option>
-        <option :value="0">
-          {{ t('common.off') }}
-        </option>
-      </select>
-    </div>
-
     <div class="divider" />
 
     <!-- 本地 HTTP 服务 -->
@@ -143,54 +143,51 @@ const languages = [
         class="card"
         style="padding:14px;"
       >
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <div>
-            <div style="font-size:12px; font-weight:500;">
-              {{ t('settings.kbDocAccess') }}
-            </div>
-            <div
-              class="text-muted"
-              style="font-size:10px;"
-            >
-              {{ t('settings.kbDocAccessHint') }}
-            </div>
-          </div>
-          <label class="toggle">
-            <input
-              v-model="settingsStore.kbHttpServer"
-              type="checkbox"
-            >
-            <span class="toggle-slider" />
-          </label>
+        <div style="font-size:12px; font-weight:500; margin-bottom:10px;">
+          {{ t('settings.kbDocAccess') }}
         </div>
         <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <span style="font-size:11px; color:var(--text-muted);">{{ t('settings.bindIp') }}:</span>
+          <select
+            class="input"
+            style="width:150px; padding:4px 8px; font-size:11px;"
+            :value="statusStore.httpHost"
+            @change="onBindIpChange(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="127.0.0.1">localhost (127.0.0.1)</option>
+            <option value="0.0.0.0">0.0.0.0</option>
+            <option
+              v-for="ip in localIps"
+              :key="ip"
+              :value="ip"
+            >{{ ip }}</option>
+          </select>
           <span style="font-size:11px; color:var(--text-muted);">{{ t('settings.port') }}:</span>
           <input
             type="number"
             class="input"
-            :value="settingsStore.kbHttpPort"
             style="width:80px; padding:4px 8px; font-size:11px;"
-            @input="settingsStore.kbHttpPort = Number(($event.target as HTMLInputElement).value)"
+            :value="statusStore.httpPort"
+            @change="statusStore.httpPort = Number(($event.target as HTMLInputElement).value) || statusStore.httpPort; showRestartHint = true"
           >
-          <span style="font-size:11px; color:var(--text-muted);">{{ t('settings.address') }}:</span>
-          <span style="font-size:11px; font-family:var(--font-mono); color:var(--accent);">
-            http://localhost:{{ settingsStore.kbHttpPort }}
-          </span>
         </div>
-        <div style="display:flex; gap:4px;">
-          <button class="btn btn-ghost btn-sm">
-            <LinkIcon class="w-3 h-3" />
-            <span>{{ t('settings.testConnection') }}</span>
-          </button>
-          <button class="btn btn-ghost btn-sm">
+        <div style="display:flex; gap:4px; align-items:center;">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="openHttpPage"
+          >
             <GlobeAltIcon class="w-3 h-3" />
             <span>{{ t('settings.openInBrowser') }}</span>
           </button>
-        </div>
-        <div style="margin-top:8px; padding:8px; background:var(--bg-primary); border-radius:var(--radius-sm); font-size:10px; color:var(--text-muted);">
-          <strong>{{ t('settings.availableUriPaths') }}:</strong><br>
-          /kb/docs/&lt;{{ t('settings.docId') }}&gt; — {{ t('settings.openDocBrowse') }}<br>
-          /kb/docs/&lt;{{ t('settings.docId') }}&gt;/edit — {{ t('settings.openDocEdit') }}
+          <div style="flex:1;" />
+          <button
+            v-if="showRestartHint"
+            class="btn btn-primary btn-sm"
+            @click="applyHttpConfigAndRestart"
+          >
+            <ArrowPathIcon class="w-3 h-3" />
+            <span>{{ t('common.restart') }}</span>
+          </button>
         </div>
       </div>
     </div>

@@ -242,7 +242,16 @@ function injectDiagram(block: DiagramBlock) {
   if (block.svg) {
     el.innerHTML = block.svg
   } else if (block.error) {
-    el.innerHTML = `<div class="diagram-error">${escapeHtml(block.error)}</div><pre class="fallback-code"><code>${escapeHtml(block.code)}</code></pre>`
+    const escapedCode = escapeHtml(block.code)
+    const escapedError = escapeHtml(block.error)
+    el.innerHTML = `<div class="fallback-diagram">
+      <div class="fallback-diagram-header">
+        <span class="fallback-diagram-lang">${escapeHtml(block.lang.toUpperCase())}</span>
+        <button class="fallback-diagram-copy" onclick="navigator.clipboard.writeText(this.parentElement.parentElement.querySelector('code').textContent)">📋 复制代码</button>
+      </div>
+      <pre class="fallback-code"><code>${escapedCode}</code></pre>
+      <div class="diagram-error">${escapedError}</div>
+    </div>`
   }
 }
 
@@ -854,17 +863,56 @@ onUnmounted(() => window.removeEventListener('hashchange', onHashChange))
   color: var(--danger);
   font-size: 12px;
   font-family: var(--font-mono);
+  padding: 8px 12px;
+  border-radius: 0 0 6px 6px;
+  background: rgba(var(--danger-rgb, 239, 68, 68), 0.08);
+  border-top: 1px solid rgba(var(--danger-rgb, 239, 68, 68), 0.2);
 }
 
 .doc-content :deep(.diagram-placeholder .fallback-code) {
-  margin: 8px 0 0;
+  margin: 0;
   padding: 8px 12px;
   background: var(--bg-primary);
-  border-radius: 4px;
   overflow-x: auto;
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-primary);
+}
+
+.doc-content :deep(.diagram-placeholder .fallback-diagram) {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.doc-content :deep(.diagram-placeholder .fallback-diagram-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.doc-content :deep(.fallback-diagram-lang) {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.doc-content :deep(.fallback-diagram-copy) {
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.doc-content :deep(.fallback-diagram-copy:hover) {
+  background: var(--bg-hover);
 }
 
 .doc-content :deep(.diagram-placeholder svg) {

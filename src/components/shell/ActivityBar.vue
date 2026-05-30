@@ -3,9 +3,10 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
+  HomeIcon,
   FolderIcon,
-  ChartBarIcon,
   LightBulbIcon,
+  BookOpenIcon,
   Cog6ToothIcon,
 } from '@heroicons/vue/24/outline'
 import { useNavigationStore } from '@/stores/navigation'
@@ -18,16 +19,18 @@ const router = useRouter()
 const navigation = useNavigationStore()
 
 const iconMap = {
-  home: FolderIcon,
-  analysis: ChartBarIcon,
-  knowledge: LightBulbIcon,
+  home: HomeIcon,
+  code: FolderIcon,
+  analysis: LightBulbIcon,
+  knowledge: BookOpenIcon,
   user: Cog6ToothIcon,
 }
 
 const activities = [
   { page: 'home' as PageType, key: 'nav.home' },
+  { page: 'code' as PageType, key: 'nav.code' },
   { page: 'analysis' as PageType, key: 'nav.analysis' },
-  { page: 'knowledge' as PageType, key: 'nav.knowledge' },
+  // { page: 'knowledge' as PageType, key: 'nav.knowledge' },
 ]
 
 const bottomActivities = [

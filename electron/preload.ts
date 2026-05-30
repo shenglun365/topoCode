@@ -295,16 +295,30 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'settings.updateBindings', params }),
   },
 
+  // ==================== 模型用量统计 ====================
+  model: {
+    getUsageStats: (modelId?: string, startDate?: string, endDate?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'model.getUsageStats', params: { model_id: modelId, start_date: startDate, end_date: endDate } }),
+    deleteUsageStats: (id: number) =>
+      ipcRenderer.invoke('ipc:call', { method: 'model.deleteUsageStats', params: { id } }),
+    deleteUsageStatsBatch: (ids: number[]) =>
+      ipcRenderer.invoke('ipc:call', { method: 'model.deleteUsageStatsBatch', params: { ids } }),
+    deleteUsageStatsByCondition: (params: { modelId?: string; startDate?: string; endDate?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'model.deleteUsageStatsByCondition', params: { model_id: params.modelId, start_date: params.startDate, end_date: params.endDate } }),
+  },
+
   // ==================== 后端管理 ====================
   backend: {
     start: () => ipcRenderer.invoke('ipc:call', { method: 'backend.start', params: {} }),
     stop: () => ipcRenderer.invoke('ipc:call', { method: 'backend.stop', params: {} }),
-    restart: () => ipcRenderer.invoke('ipc:call', { method: 'backend.restart', params: {} }),
+    restart: () => ipcRenderer.invoke('backend:restart'),
     getStatus: () => ipcRenderer.invoke('ipc:call', { method: 'backend.getStatus', params: {} }),
     ping: () => ipcRenderer.invoke('ipc:call', { method: 'backend.ping', params: {} }),
     testPort: (port: number) => ipcRenderer.invoke('ipc:call', { method: 'backend.testPort', params: { port } }),
     getMemoryLimit: () => ipcRenderer.invoke('backend:getMemoryLimit'),
     setMemoryLimit: (limit: number) => ipcRenderer.invoke('backend:setMemoryLimit', limit),
+    getHttpConfig: () => ipcRenderer.invoke('backend:getHttpConfig'),
+    setHttpConfig: (config: { host: string; port: number }) => ipcRenderer.invoke('backend:setHttpConfig', config),
 
     // 事件订阅
     onStatusChange: (callback: (data: any) => void) => {

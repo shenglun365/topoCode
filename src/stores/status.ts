@@ -12,6 +12,8 @@ export const useStatusStore = defineStore('status', () => {
   const aiModel = ref('')
   const encoding = ref('UTF-8')
   const zoom = ref(100)
+  const httpPort = ref(3456)
+  const httpHost = ref('127.0.0.1')
 
   // Getters
   const statusBar = reactive<StatusBarState>({
@@ -24,11 +26,15 @@ export const useStatusStore = defineStore('status', () => {
   })
 
   // Actions
-  function setBackendStatus(status: BackendStatus) {
+  function setBackendStatus(status: BackendStatus, skipHttpConfig = false) {
     backend.status = status.status
     backend.pid = status.pid
     backend.port = status.port
     backend.error = status.error
+    if (!skipHttpConfig) {
+      if (status.httpPort) httpPort.value = status.httpPort
+      if (status.httpHost) httpHost.value = status.httpHost
+    }
   }
 
   function setAstStatus(status: string) {
@@ -70,5 +76,7 @@ export const useStatusStore = defineStore('status', () => {
     setZoom,
     zoomIn,
     zoomOut,
+    httpPort,
+    httpHost,
   }
 })

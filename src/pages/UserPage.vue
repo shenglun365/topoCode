@@ -34,7 +34,9 @@ async function handleRestart() {
 }
 
 onMounted(async () => {
-  await settingsStore.loadSettings()
+  if (settingsStore.models.length === 0) {
+    await settingsStore.loadSettings()
+  }
   themeStore.init()
   // 获取后端状态
   try {

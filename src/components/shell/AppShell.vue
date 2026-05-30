@@ -21,6 +21,7 @@ const statusStore = useStatusStore()
 // 路由 path 到功能组 ID 的映射
 const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
     '/home': 'home',
+    '/code': 'home',
     '/analysis': 'analysis',
     '/knowledge': 'knowledge',
     '/coder': 'coder',
@@ -32,8 +33,8 @@ const currentFuncGroup = computed(() => {
     return routeToFuncGroupMap[route.path] || 'home';
 })
 
-// 是否在设置页面（隐藏左右侧栏）
-const isSettingsPage = computed(() => route.path === '/user')
+// 是否隐藏左右侧栏（首页、设置页）
+const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user')
 
 // 初始化后端状态监听
 onMounted(async () => {
@@ -41,11 +42,11 @@ onMounted(async () => {
     const st = await window.api.backend.getStatus()
     if (st) statusStore.setBackendStatus(st)
   } catch (_) {}
-  // 每 5 秒轮询后端状态
+  // 每 5 秒轮询后端状态（不覆盖 HTTP 配置）
   setInterval(async () => {
     try {
       const st = await window.api.backend.getStatus()
-      if (st) statusStore.setBackendStatus(st)
+      if (st) statusStore.setBackendStatus(st, true)
     } catch (_) {}
   }, 5000)
 })

@@ -74,7 +74,9 @@ class LLMService:
     ) -> Dict[str, Any]:
         """创建会话"""
         sessions_db = self.multi_db.sessions_db
-        session_id = _make_id()
+        # AI 助手会话前缀 ai-，不持久化消息（仅保留调用日志）
+        prefix = 'ai-' if module_type == 'ai_assistant' else ''
+        session_id = prefix + _make_id()
         now = datetime.now().isoformat()
         meta_json = json.dumps(metadata) if metadata else None
 
@@ -293,6 +295,21 @@ class LLMService:
         _error_msg = None
         _tool_calls_recorded = []
         _token_data = {}
+        try:
+            model_id = model.get('id') if isinstance(model, dict) else None
+            if model_id:
+                self._check_usage_limits(model_id)
+        except Exception as e:
+            _status = 'error'
+            _error_msg = str(e)
+            _latency_ms = int((time.monotonic() - _start_time) * 1000)
+            logger.error(f"[LLMService] Usage limit exceeded: requestId={request_id}, error={e}")
+            self._publish('llm', 'error', {
+                'requestId': request_id,
+                'message': str(e),
+                'code': 'usage_limit_exceeded',
+            })
+            return
         try:
             full_content = ""
             chunk_queue: queue.Queue = queue.Queue()
@@ -600,6 +617,7 @@ class LLMService:
         model = _get_model_by_id(self.multi_db, model_id)
         if not model:
             raise ValueError(f"Model not found: {model_id}")
+        self._check_usage_limits(model_id)
         return await self._sync_call_for_retry(model, messages, 'chat', None, None)
 
     async def _sync_call_for_retry(
@@ -657,7 +675,7 @@ class LLMService:
             return data.get('choices', [{}])[0].get('message', {}).get('content', '')
 
     # 分析报告重跑/重新生成等操作不写入会话记录
-    _ANALYSIS_SESSION_PREFIXES = ('comm-', 'regen-', 'pipeline-')
+    _ANALYSIS_SESSION_PREFIXES = ('comm-', 'regen-', 'pipeline-', 'ai-')
 
     def _save_stream_messages(
         self,
@@ -677,13 +695,10 @@ class LLMService:
     ):
         """保存流式完成后的消息到 SQLite（完整日志）"""
         try:
-            # 分析报告相关操作：跳过会话和消息保存，仅记录调用日志
+            # AI 助手和分析报告会话：跳过所有持久化
             if any(session_id.startswith(p) for p in self._ANALYSIS_SESSION_PREFIXES):
-                logger.debug(f"[LLMService] Skip session save for analysis session: {session_id}")
-                return self._save_call_log(self.multi_db.main_db, session_id, messages,
-                                           full_content, model, request_id, template_id,
-                                           extra_meta, tool_calls_recorded, latency_ms,
-                                           status, error_message, token_data)
+                logger.debug(f"[LLMService] Skip persistence for session: {session_id}")
+                return
 
             # 确保 session 存在（内联 session 自动创建）
             sessions_db = self.multi_db.sessions_db
@@ -728,6 +743,15 @@ class LLMService:
             response_content = full_content[:100000] if full_content else None
             tool_calls_json = json.dumps(tool_calls_recorded or [], ensure_ascii=False, default=str)
             token_data = token_data or {}
+            # 当 API 未返回 token 用量时，按字符数估算
+            if not token_data.get('total_tokens'):
+                prompt_chars = sum(len(m.get('content', '')) for m in messages if m.get('content'))
+                completion_chars = len(full_content or '')
+                estimated_prompt = max(1, int(prompt_chars / 3.5))
+                estimated_completion = max(1, int(completion_chars / 3.5))
+                token_data['prompt_tokens'] = token_data.get('prompt_tokens') or estimated_prompt
+                token_data['completion_tokens'] = token_data.get('completion_tokens') or estimated_completion
+                token_data['total_tokens'] = token_data.get('total_tokens') or (estimated_prompt + estimated_completion)
             main_db.execute(
                 """INSERT INTO llm_call_logs
                    (id, session_id, request_id, model_id, provider, model_name, mode,
@@ -745,6 +769,84 @@ class LLMService:
             main_db.commit()
         except Exception as e:
             logger.error(f"[LLMService] Failed to save call log: {e}")
+
+        # 记录每日用量（仅成功/错误的实际调用，且 model_id 有效）
+        try:
+            model_id = model.get('id') if isinstance(model, dict) else None
+            if model_id and status in ('success', 'error'):
+                self._record_usage(model_id, token_data or {})
+        except Exception as e:
+            logger.warning(f"[LLMService] Failed to record usage: {e}")
+
+    def _check_usage_limits(self, model_id: str):
+        """检查模型每日用量是否超限，超限则抛出 UsageLimitExceeded"""
+        if not model_id:
+            return
+        main_db = self.multi_db.main_db
+        self._ensure_usage_table()
+        limits = main_db.fetchone(
+            "SELECT max_requests_per_day, max_tokens_per_day FROM model_configs WHERE id = ?",
+            (model_id,)
+        )
+        if not limits:
+            return
+        max_req = limits.get('max_requests_per_day', 0) or 0
+        max_tok = limits.get('max_tokens_per_day', 0) or 0
+        if max_req == 0 and max_tok == 0:
+            return
+        today = datetime.now().strftime('%Y-%m-%d')
+        usage = main_db.fetchone(
+            "SELECT request_count, total_tokens FROM model_daily_usage WHERE model_id = ? AND date = ?",
+            (model_id, today)
+        )
+        req_count = usage['request_count'] if usage else 0
+        tok_count = usage['total_tokens'] if usage else 0
+        if max_req > 0 and req_count >= max_req:
+            raise Exception(f"UsageLimitExceeded: Daily request limit reached ({req_count}/{max_req})")
+        if max_tok > 0 and tok_count >= max_tok:
+            raise Exception(f"UsageLimitExceeded: Daily token limit reached ({tok_count}/{max_tok})")
+
+    def _ensure_usage_table(self):
+        try:
+            main_db = self.multi_db.main_db
+            main_db.execute("SELECT 1 FROM model_daily_usage LIMIT 1")
+        except Exception:
+            main_db.execute("""CREATE TABLE IF NOT EXISTS model_daily_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id TEXT NOT NULL REFERENCES model_configs(id) ON DELETE CASCADE,
+                date TEXT NOT NULL,
+                request_count INTEGER DEFAULT 0,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(model_id, date)
+            )""")
+            main_db.execute("CREATE INDEX IF NOT EXISTS idx_mdu_model ON model_daily_usage(model_id)")
+            main_db.execute("CREATE INDEX IF NOT EXISTS idx_mdu_date ON model_daily_usage(date)")
+
+    def _record_usage(self, model_id: str, token_data: dict):
+        """记录模型每日用量（INSERT OR REPLACE 累加）"""
+        if not model_id:
+            return
+        main_db = self.multi_db.main_db
+        self._ensure_usage_table()
+        today = datetime.now().strftime('%Y-%m-%d')
+        prompt = token_data.get('prompt_tokens') or 0
+        completion = token_data.get('completion_tokens') or 0
+        total = token_data.get('total_tokens') or 0
+        main_db.execute(
+            """INSERT INTO model_daily_usage (model_id, date, request_count, prompt_tokens, completion_tokens, total_tokens, created_at, updated_at)
+               VALUES (?, ?, 1, ?, ?, ?, datetime('now'), datetime('now'))
+               ON CONFLICT(model_id, date) DO UPDATE SET
+                 request_count = request_count + 1,
+                 prompt_tokens = prompt_tokens + ?,
+                 completion_tokens = completion_tokens + ?,
+                 total_tokens = total_tokens + ?,
+                 updated_at = datetime('now')""",
+            (model_id, today, prompt, completion, total, prompt, completion, total)
+        )
 
     def _save_interaction_log(
         self,
@@ -1199,8 +1301,10 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         module_type: Optional[str] = None,
         category: Optional[str] = None,
         locale: Optional[str] = None,
+        moduleType: Optional[str] = None,
     ):
-        return {'templates': pm.list_templates(mode, module_type, category, locale)}
+        mt = module_type or moduleType
+        return {'templates': pm.list_templates(mode, mt, category, locale)}
 
     @server.register('promptTemplate.get')
     def get_template(template_id: str, locale: Optional[str] = None):

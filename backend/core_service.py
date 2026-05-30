@@ -940,7 +940,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.updateModel")
     def update_model(id: str, **kwargs):
-        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model"}
+        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "maxRequestsPerDay", "maxTokensPerDay"}
         data = {}
         for k, v in kwargs.items():
             if k == "isDefault":
@@ -949,6 +949,10 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 data["is_default"] = 1 if v else 0
             elif k == "maxTokens":
                 data["max_tokens"] = v
+            elif k == "maxRequestsPerDay":
+                data["max_requests_per_day"] = int(v) if v else 0
+            elif k == "maxTokensPerDay":
+                data["max_tokens_per_day"] = int(v) if v else 0
             elif k == "apiKey":
                 data["api_key"] = v
             elif k == "url":
@@ -1093,6 +1097,82 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             )
         return bindings
 
+    # ==================== 模型用量统计 ====================
+
+    # 确保 model_daily_usage 表存在（兼容旧版本升级）
+    def _ensure_usage_table():
+        try:
+            main_db.execute("SELECT 1 FROM model_daily_usage LIMIT 1")
+        except Exception:
+            main_db.execute("""CREATE TABLE IF NOT EXISTS model_daily_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id TEXT NOT NULL REFERENCES model_configs(id) ON DELETE CASCADE,
+                date TEXT NOT NULL,
+                request_count INTEGER DEFAULT 0,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(model_id, date)
+            )""")
+            main_db.execute("CREATE INDEX IF NOT EXISTS idx_mdu_model ON model_daily_usage(model_id)")
+            main_db.execute("CREATE INDEX IF NOT EXISTS idx_mdu_date ON model_daily_usage(date)")
+
+    @server.register("model.getUsageStats")
+    def get_usage_stats(model_id: str = None, start_date: str = None, end_date: str = None):
+        _ensure_usage_table()
+        sql = "SELECT d.*, m.name AS model_name FROM model_daily_usage d JOIN model_configs m ON d.model_id = m.id WHERE 1=1"
+        params = []
+        if model_id:
+            sql += " AND d.model_id = ?"
+            params.append(model_id)
+        if start_date:
+            sql += " AND d.date >= ?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND d.date <= ?"
+            params.append(end_date)
+        sql += " ORDER BY d.date DESC, m.name"
+        rows = main_db.fetchall(sql, tuple(params))
+        for row in rows:
+            row["modelId"] = row.pop("model_id")
+            row["requestCount"] = row.pop("request_count")
+            row["promptTokens"] = row.pop("prompt_tokens")
+            row["completionTokens"] = row.pop("completion_tokens")
+            row["totalTokens"] = row.pop("total_tokens")
+            row["modelName"] = row.pop("model_name")
+        return rows
+
+    @server.register("model.deleteUsageStats")
+    def delete_usage_stats(id: int):
+        _ensure_usage_table()
+        main_db.delete("model_daily_usage", "id = ?", (id,))
+
+    @server.register("model.deleteUsageStatsBatch")
+    def delete_usage_stats_batch(ids: list):
+        _ensure_usage_table()
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        main_db.execute(f"DELETE FROM model_daily_usage WHERE id IN ({placeholders})", tuple(ids))
+
+    @server.register("model.deleteUsageStatsByCondition")
+    def delete_usage_stats_by_condition(model_id: str = None, start_date: str = None, end_date: str = None):
+        _ensure_usage_table()
+        sql = "DELETE FROM model_daily_usage WHERE 1=1"
+        params = []
+        if model_id:
+            sql += " AND model_id = ?"
+            params.append(model_id)
+        if start_date:
+            sql += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND date <= ?"
+            params.append(end_date)
+        main_db.execute(sql, tuple(params))
+
     return server
 
 
@@ -1116,7 +1196,9 @@ def register_backend_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("backend.getStatus")
     def get_status():
-        return {"status": "running", "pid": os.getpid(), "port": 5671}
+        http_port = getattr(multi_db, 'http_port', None)
+        http_host = getattr(multi_db, 'http_host', None)
+        return {"status": "running", "pid": os.getpid(), "port": 5671, "httpPort": http_port, "httpHost": http_host}
 
     @server.register("backend.ping")
     def ping():

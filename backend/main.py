@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class BackendApp:
     """后端应用"""
 
-    def __init__(self, data_dir: str = None, http_port: int = None):
+    def __init__(self, data_dir: str = None, http_port: int = None, http_host: str = None):
         # 数据目录
         if data_dir is None:
             if os.name == "nt":  # Windows
@@ -44,6 +44,7 @@ class BackendApp:
         os.makedirs(data_dir, exist_ok=True)
         self.data_dir = data_dir
         self.http_port = http_port
+        self.http_host = http_host or '127.0.0.1'
 
         # 多数据库管理器
         self.multi_db = MultiDBManager(data_dir)
@@ -94,13 +95,15 @@ class BackendApp:
         self._setup_signals()  # 必须在 asyncio 事件循环中注册
         web_task = None
         if self.http_port:
+            self.multi_db.http_port = self.http_port
+            self.multi_db.http_host = self.http_host
             try:
                 from web_server import start_http_server
                 cache_path = os.path.join(self.data_dir, "plantuml_cache.db")
                 web_task = asyncio.create_task(
-                    start_http_server(self.multi_db, port=self.http_port, cache_path=cache_path)
+                    start_http_server(self.multi_db, port=self.http_port, host=self.http_host, cache_path=cache_path)
                 )
-                logger.info(f"Web server started on http://127.0.0.1:{self.http_port}")
+                logger.info(f"Web server started on http://{self.http_host}:{self.http_port}")
             except Exception as e:
                 logger.warning(f"Failed to start web server: {e}")
         try:
@@ -127,12 +130,16 @@ def main():
     # 支持命令行参数
     data_dir = None
     http_port = None
+    http_host = None
     memory_limit = None
     args = sys.argv[1:]
     i = 0
     while i < len(args):
         if args[i] == "--http-port" and i + 1 < len(args):
             http_port = int(args[i + 1])
+            i += 2
+        elif args[i] == "--http-host" and i + 1 < len(args):
+            http_host = args[i + 1]
             i += 2
         elif args[i] == "--memory-limit" and i + 1 < len(args):
             memory_limit = int(args[i + 1])
@@ -156,6 +163,8 @@ def main():
             logger.warning(f"Failed to set memory limit: {e}")
 
     app = BackendApp(data_dir, http_port=http_port)
+    if http_host:
+        app.http_host = http_host
 
     # 如果是 stdio 模式 (调试用)
     if "--stdio" in sys.argv:

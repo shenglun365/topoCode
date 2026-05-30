@@ -1,9 +1,10 @@
 /** Settings Store - 设置配置管理 */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ModelConfigItem, AgentConfigItem, SkillConfigItem } from '@/types/ipc'
+import type { ModelConfigItem, AgentConfigItem, SkillConfigItem, UsageStatItem } from '@/types/ipc'
 import type { SupportedLocale } from '@/i18n'
 import { ipc } from '@/services/ipc'
+import { useStatusStore } from '@/stores/status'
 import i18n from '@/i18n'
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -15,6 +16,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about'>('ai')
   const loading = ref(false)
   const locale = ref<SupportedLocale>('zh-CN')
+  const usageStats = ref<UsageStatItem[]>([])
+  const usageStatsLoading = ref(false)
 
   // General settings
   const fontSize = ref(14)
@@ -36,8 +39,8 @@ export const useSettingsStore = defineStore('settings', () => {
       localStorage.setItem('projectPageSize', String(size))
     }
   }
-  const kbHttpServer = ref(false)
-  const kbHttpPort = ref(3000)
+
+
   const backendStatus = ref<'connected' | 'disconnected'>('disconnected')
   const pythonMemoryLimit = ref(4096)
   const memoryLimitPending = ref(false)
@@ -70,7 +73,8 @@ export const useSettingsStore = defineStore('settings', () => {
   async function loadSettings() {
     loading.value = true
     try {
-      models.value = await ipc.settings.getModels()
+      const rawModels = await ipc.settings.getModels()
+      models.value = rawModels.map(normalizeModel)
       agents.value = await ipc.settings.getAgents()
       skills.value = await ipc.settings.getSkills()
       bindings.value = await ipc.settings.getBindings()
@@ -87,6 +91,7 @@ export const useSettingsStore = defineStore('settings', () => {
     type: string
     temperature?: number
     maxTokens?: number
+    isDefault?: boolean
   }) {
     const raw = await ipc.settings.addModel(params)
     const model = normalizeModel(raw)
@@ -108,6 +113,8 @@ export const useSettingsStore = defineStore('settings', () => {
       maxTokens: raw.maxTokens ?? raw.max_tokens,
       apiKey: raw.apiKey || raw.api_key || '',
       latency: raw.latency,
+      maxRequestsPerDay: raw.maxRequestsPerDay ?? raw.max_requests_per_day ?? 0,
+      maxTokensPerDay: raw.maxTokensPerDay ?? raw.max_tokens_per_day ?? 0,
     }
   }
 
@@ -141,7 +148,21 @@ export const useSettingsStore = defineStore('settings', () => {
     if (idx >= 0) models.value.splice(idx, 1)
   }
 
+  async function waitBackendReady(maxWait = 8000): Promise<boolean> {
+    const start = Date.now()
+    while (Date.now() - start < maxWait) {
+      try {
+        const st = await ipc.backend.getStatus()
+        if (st?.status === 'running') return true
+      } catch {}
+      await new Promise(r => setTimeout(r, 500))
+    }
+    return false
+  }
+
   async function testModel(id: string) {
+    // 等待后端就绪后再测试，避免启动过程中误判
+    await waitBackendReady()
     const result = await ipc.settings.testModel(id)
     if (result && result.status) {
       const idx = models.value.findIndex(m => m.id === id)
@@ -216,10 +237,18 @@ export const useSettingsStore = defineStore('settings', () => {
   // Restart backend
   async function restartBackend() {
     try {
+      // 保存 HTTP 配置后重启
+      try {
+        const st = useStatusStore()
+        await ipc.backend.setHttpConfig?.({ host: st.httpHost, port: st.httpPort })
+      } catch {}
       const result = await ipc.backend.restart()
-      const ok = result?.status === 'restarting'
+      const ok = result?.status === 'running'
       backendStatus.value = ok ? 'connected' : 'disconnected'
-      if (ok) memoryLimitPending.value = false
+      if (ok) {
+        memoryLimitPending.value = false
+        useStatusStore().setBackendStatus(result)
+      }
     } catch {
       backendStatus.value = 'disconnected'
     }
@@ -246,6 +275,32 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+    // ==================== 模型用量统计 ====================
+
+    async function loadUsageStats(modelId?: string, startDate?: string, endDate?: string) {
+      usageStatsLoading.value = true
+      try {
+        usageStats.value = await ipc.model.getUsageStats(modelId, startDate, endDate)
+      } finally {
+        usageStatsLoading.value = false
+      }
+    }
+
+    async function deleteUsageStat(id: number) {
+      await ipc.model.deleteUsageStats(id)
+      usageStats.value = usageStats.value.filter(s => s.id !== id)
+    }
+
+    async function deleteUsageStatsBatch(ids: number[]) {
+      await ipc.model.deleteUsageStatsBatch(ids)
+      usageStats.value = usageStats.value.filter(s => !ids.includes(s.id))
+    }
+
+    async function deleteUsageStatsByCondition(params: { modelId?: string; startDate?: string; endDate?: string }) {
+      await ipc.model.deleteUsageStatsByCondition(params)
+      await loadUsageStats()
+    }
+
   return {
     models,
     agents,
@@ -263,8 +318,7 @@ export const useSettingsStore = defineStore('settings', () => {
     autoSaveInterval,
     projectPageSize,
     setProjectPageSize,
-    kbHttpServer,
-    kbHttpPort,
+
     backendStatus,
     initLocale,
     setLocale,
@@ -285,5 +339,11 @@ export const useSettingsStore = defineStore('settings', () => {
     memoryLimitPending,
     setPythonMemoryLimit,
     loadPythonMemoryLimit,
+    usageStats,
+    usageStatsLoading,
+    loadUsageStats,
+    deleteUsageStat,
+    deleteUsageStatsBatch,
+    deleteUsageStatsByCondition,
   }
 })

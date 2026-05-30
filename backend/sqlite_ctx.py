@@ -698,6 +698,24 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_llm_res_task ON community_llm_results(task_id);
     CREATE INDEX IF NOT EXISTS idx_llm_res_type ON community_llm_results(task_id, edge_type);
+
+    -- ============================================
+    -- model_daily_usage — 模型每日用量统计
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS model_daily_usage (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_id         TEXT    NOT NULL REFERENCES model_configs(id) ON DELETE CASCADE,
+        date             TEXT    NOT NULL,
+        request_count    INTEGER DEFAULT 0,
+        prompt_tokens    INTEGER DEFAULT 0,
+        completion_tokens INTEGER DEFAULT 0,
+        total_tokens     INTEGER DEFAULT 0,
+        created_at       TEXT DEFAULT (datetime('now')),
+        updated_at       TEXT DEFAULT (datetime('now')),
+        UNIQUE(model_id, date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdu_model ON model_daily_usage(model_id);
+    CREATE INDEX IF NOT EXISTS idx_mdu_date  ON model_daily_usage(date);
 """
 
 
@@ -812,6 +830,8 @@ class MultiDBManager:
             ],
             "model_configs": [
                 ("context_window", "INTEGER DEFAULT 8192"),
+                ("max_requests_per_day", "INTEGER DEFAULT 0"),
+                ("max_tokens_per_day", "INTEGER DEFAULT 0"),
             ],
             "task_config_history": [
                 ("scopes", "TEXT"),

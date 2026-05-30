@@ -38,6 +38,15 @@ const loading = ref(false)
 const filterLocale = ref(settingsStore.locale || 'zh-CN')
 const filterMode = ref('')
 
+// 只显示这 5 组模板（中英文各一条）
+const VISIBLE_TEMPLATE_IDS = new Set([
+  'report_overall_architecture',
+  'community_analyze',
+  'community_name',
+  'diagram_regenerate_mermaid',
+  'diagram_regenerate_plantuml',
+])
+
 const editDialog = ref(false)
 const editing = ref<Partial<TemplateItem>>({})
 const editMode = ref<'edit' | 'create'>('create')
@@ -53,7 +62,12 @@ async function loadTemplates() {
       locale: filterLocale.value === 'all' ? undefined : filterLocale.value,
       mode: filterMode.value || undefined,
     })
-    templates.value = (res.templates || []) as TemplateItem[]
+    // 只保留允许的模板，其余隐藏但保留在数据库中
+    const allTmpls = (res.templates || []) as TemplateItem[]
+    templates.value = allTmpls.filter(t => {
+      const baseId = (t as any).base_id || t.id.replace(/__.*$/, '')
+      return VISIBLE_TEMPLATE_IDS.has(baseId)
+    })
   } catch (e) {
     console.error('[TemplateManager] Failed to load templates:', e)
   } finally {

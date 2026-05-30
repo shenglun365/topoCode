@@ -21,6 +21,8 @@ export class PythonBridge {
   private status: BackendStatus = { status: 'stopped' }
   private listeners: Array<(status: BackendStatus) => void> = []
   public memoryLimit: number = 4096
+  public httpHost: string = '127.0.0.1'
+  public httpPort: number = 3456
 
   // Python 脚本路径
   private get pythonScript(): string {
@@ -74,7 +76,8 @@ export class PythonBridge {
         // 读取端口配置 (从 Electron store)
         const dealerPort = 5671  // TODO: 从 store 读取
         const pubPort = 5680
-        const httpPort = HTTP_PORT
+        const httpPort = this.httpPort || HTTP_PORT
+        const httpHost = this.httpHost || '0.0.0.0'
 
         // 启动前检查端口占用 — 如果有残留 Python 进程占用端口，先清理
         this.checkAndKillPortOccupant(dealerPort)
@@ -88,6 +91,7 @@ export class PythonBridge {
         this.process = spawn(python, [
           this.pythonScript, this.dbPath,
           '--http-port', String(httpPort),
+          '--http-host', String(httpHost),
           '--memory-limit', String(memoryLimit),
         ], {
           stdio: ['ignore', 'pipe', 'pipe'],

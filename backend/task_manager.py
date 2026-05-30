@@ -1385,6 +1385,19 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         doc_id = provided_id or f"subdoc-{uuid.uuid4().hex[:12]}"
         now = time.strftime('%Y-%m-%d %H:%M:%S')
 
+        # 清理同一 (task_id, edge_type, comm_id) 的旧子文档
+        if tid and et:
+            if cid:
+                project_db.execute(
+                    "DELETE FROM report_subdocs WHERE task_id=? AND edge_type=? AND comm_id=? AND id!=?",
+                    (tid, et, cid, doc_id)
+                )
+            else:
+                project_db.execute(
+                    "DELETE FROM report_subdocs WHERE task_id=? AND edge_type=? AND comm_id IS NULL AND id!=?",
+                    (tid, et, doc_id)
+                )
+
         project_db.execute(
             "INSERT INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc_id, tid, et, cid, title, content, tpl, now, now)

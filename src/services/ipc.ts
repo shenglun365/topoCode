@@ -405,6 +405,22 @@ function createRealIPC(): IPCAPI {
       },
     },
 
+    // ==================== 模型用量统计 ====================
+    model: {
+      getUsageStats: async (modelId?: string, startDate?: string, endDate?: string) => {
+        return await api.model.getUsageStats(modelId, startDate, endDate)
+      },
+      deleteUsageStats: async (id: number) => {
+        return await api.model.deleteUsageStats(id)
+      },
+      deleteUsageStatsBatch: async (ids: number[]) => {
+        return await api.model.deleteUsageStatsBatch(ids)
+      },
+      deleteUsageStatsByCondition: async (params: { modelId?: string; startDate?: string; endDate?: string }) => {
+        return await api.model.deleteUsageStatsByCondition(params)
+      },
+    },
+
     // ==================== 后端管理 ====================
     backend: {
       start: async () => {
@@ -431,6 +447,12 @@ function createRealIPC(): IPCAPI {
         } else {
           backendStatusCbs.push(cb)
         }
+      },
+      getHttpConfig: async () => {
+        return await api.backend.getHttpConfig()
+      },
+      setHttpConfig: async (config: { host: string; port: number }) => {
+        return await api.backend.setHttpConfig(config)
       },
     },
 

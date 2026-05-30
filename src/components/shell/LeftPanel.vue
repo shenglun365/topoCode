@@ -59,6 +59,10 @@ onMounted(() => {
   if (navigation.currentPage === 'home' && !projectStore.selectedProjectId) {
     panelStore.setLeftCollapsed(true)
   }
+  // 代码解析页：无项目时折叠
+  if (navigation.currentPage === 'code' && !projectStore.selectedProjectId) {
+    panelStore.setLeftCollapsed(true)
+  }
   // 分析页面：默认展开左侧面板
   if (navigation.currentPage === 'analysis') {
     panelStore.setLeftCollapsed(false)
@@ -69,7 +73,7 @@ onMounted(() => {
 watch(() => navigation.currentPage, (page) => {
   if (page === 'analysis') {
     panelStore.setLeftCollapsed(false)
-  } else if (page === 'home' && !projectStore.selectedProjectId) {
+  } else if ((page === 'home' || page === 'code') && !projectStore.selectedProjectId) {
     panelStore.setLeftCollapsed(true)
   }
 })
@@ -82,6 +86,7 @@ onBeforeUnmount(() => {
 
 const panelTitleKeys: Record<string, string> = {
   home: 'nav.projects',
+  code: 'nav.explorer',
   analysis: 'nav.projects',
   knowledge: 'nav.knowledge',
   coder: 'nav.chat',
@@ -99,12 +104,11 @@ const panelContent = ref('')
 const fileTreeNodes = ref<FileTreeNode[]>([])
 const fileTreeLoading = ref(false)
 
-// 监听项目选择，加载文件树 + 自动折叠/展开（仅首页生效）
+// 监听项目选择，加载文件树 + 自动折叠/展开
 watch(
   () => projectStore.selectedProjectId,
   async (newId) => {
-    // 仅首页：无项目时自动折叠，选中项目时自动展开
-    if (navigation.currentPage === 'home') {
+    if (navigation.currentPage === 'home' || navigation.currentPage === 'code') {
       if (newId) {
         panelStore.setLeftCollapsed(false)
       } else {
@@ -156,9 +160,9 @@ function handleCreateTaskForProject(project: any) {
   // 选中项目并打开任务列表
   projectStore.selectProject(project.id)
   projectStore.openTaskListTab()
-  // 切换到首页项目视图
-  router.push('/home')
-  navigation.navigateTo('home')
+  // 切换到代码解析项目视图
+  router.push('/code')
+  navigation.navigateTo('code')
 }
 
 // 处理导入项目
@@ -172,6 +176,9 @@ function loadPanelContent() {
   switch (navigation.currentPage) {
     case 'home':
       panelContent.value = 'home'
+      break
+    case 'code':
+      panelContent.value = 'code'
       break
     case 'analysis':
       panelContent.value = 'analysis'

@@ -289,6 +289,17 @@ export class WindowManager {
       pythonBridge.memoryLimit = limit
       return true
     })
+
+    // ---- HTTP 服务配置 ----
+    ipcMain.handle('backend:getHttpConfig', () => {
+      return { host: pythonBridge.httpHost, port: pythonBridge.httpPort }
+    })
+
+    ipcMain.handle('backend:setHttpConfig', (_, config: { host: string; port: number }) => {
+      pythonBridge.httpHost = config.host
+      pythonBridge.httpPort = config.port
+      return true
+    })
   }
 
   /** 清理资源 */

@@ -298,6 +298,20 @@ export interface ModelConfigItem {
   maxTokens?: number
   latency?: number
   apiKey?: string
+  maxRequestsPerDay?: number
+  maxTokensPerDay?: number
+}
+
+/** 模型每日用量统计 */
+export interface UsageStatItem {
+  id: number
+  modelId: string
+  modelName: string
+  date: string
+  requestCount: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
 }
 
 /** Agent 配置 */
@@ -475,8 +489,8 @@ export interface IPCAPI {
   // 设置配置
   settings: {
     getModels: () => Promise<ModelConfigItem[]>
-    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; apiKey?: string }) => Promise<ModelConfigItem>
-    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; isDefault?: boolean; apiKey?: string }) => Promise<ModelConfigItem>
+    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; apiKey?: string; isDefault?: boolean }) => Promise<ModelConfigItem>
+    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; isDefault?: boolean; apiKey?: string; maxRequestsPerDay?: number; maxTokensPerDay?: number }) => Promise<ModelConfigItem>
     removeModel: (id: string) => Promise<void>
     testModel: (id: string) => Promise<{ status: string; latency: number; model: string }>
     getAgents: () => Promise<AgentConfigItem[]>
@@ -490,14 +504,24 @@ export interface IPCAPI {
     updateBindings: (params: { bindings: Record<string, string> }) => Promise<Record<string, string>>
   }
 
+  // 模型用量统计
+  model: {
+    getUsageStats: (modelId?: string, startDate?: string, endDate?: string) => Promise<UsageStatItem[]>
+    deleteUsageStats: (id: number) => Promise<void>
+    deleteUsageStatsBatch: (ids: number[]) => Promise<void>
+    deleteUsageStatsByCondition: (params: { modelId?: string; startDate?: string; endDate?: string }) => Promise<void>
+  }
+
   // 后端管理
   backend: {
     start: () => Promise<void>
     stop: () => Promise<void>
-    restart: () => Promise<void>
+    restart: () => Promise<BackendStatus>
     getStatus: () => Promise<BackendStatus>
     getMemoryLimit: () => Promise<number>
     setMemoryLimit: (limit: number) => Promise<void>
+    getHttpConfig: () => Promise<{ host: string; port: number }>
+    setHttpConfig: (config: { host: string; port: number }) => Promise<void>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void
   }
 

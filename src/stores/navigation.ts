@@ -19,6 +19,7 @@ export const useNavigationStore = defineStore('navigation', () => {
   function updateBreadcrumbs(page: PageType) {
     const pageNames: Record<PageType, string> = {
       home: '项目导入',
+      code: '代码解析',
       analysis: '代码分析',
       knowledge: '知识库',
       coder: 'AI 助手',

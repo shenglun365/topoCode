@@ -125,8 +125,9 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function selectProject(id: string) {
-    // 委托给 funcGroup store（首页+分析功能组）
+    // 委托给 funcGroup store（首页+代码解析+分析功能组）
     funcGroup.selectProject('home', id)
+    funcGroup.selectProject('code', id)
     funcGroup.selectProject('analysis', id)
     if (selectedProjectId.value !== id) {
       selectedFile.value = null
@@ -146,6 +147,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function deselectProject() {
     funcGroup.deselectProject('home')
+    funcGroup.deselectProject('code')
     funcGroup.deselectProject('analysis')
     selectedFile.value = null
   }

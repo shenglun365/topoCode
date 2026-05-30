@@ -186,7 +186,7 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
         pid = task["project_id"]
         pdb = multi_db.get_project_db(pid)
         row = pdb.fetchone(
-            "SELECT name, summary, mermaid, plantuml FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv='L0' AND comm_id=?",
+            "SELECT name, summary, mermaid, plantuml, comm_lv FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_id=?",
             (tid, et, cid)
         )
         if not row:
@@ -238,6 +238,86 @@ async def list_task_docs(task_id: str = Query(None), taskId: str = Query(None)):
                     })
             except Exception:
                 continue
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/community-children")
+async def get_community_children(task_id: str = Query(None), taskId: str = Query(None),
+                                 parent_comm_id: str = Query(None), parentCommId: str = Query(None),
+                                 edge_type: str = Query(None), edgeType: str = Query(None)):
+    tid = task_id or taskId
+    pid = parent_comm_id or parentCommId
+    et = (edge_type or edgeType or 'CALL').upper()
+    if not tid:
+        raise HTTPException(422, "task_id/taskId is required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        logger.info(f"[community-children] task={tid} parent={pid} edgeType={et}")
+        # 先在主库查找该任务所属项目
+        task_row = multi_db.main_db.fetchone(
+            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
+        )
+        if not task_row:
+            logger.info(f"[community-children] Task not found in main DB: {tid}")
+            return []
+        project_id = task_row["project_id"]
+        logger.info(f"[community-children] Task {tid} belongs to project {project_id}")
+        try:
+            pdb = multi_db.get_project_db(project_id)
+        except Exception as e:
+            logger.warning(f"[community-children] Failed to get project DB: {e}")
+            return []
+        # 查询子社区：pid 为空时查顶级（parent_comm_id IS NULL），否则查指定父级
+        # 先用指定 edge_type，若无数据则尝试 CALL / INCLUDE / DEPENDENCY
+        fallback_types = ['CALL', 'INCLUDE', 'DEPENDENCY']
+        if et and et in fallback_types:
+            fallback_types.remove(et)
+        for attempt_et in ([et] if et else []) + fallback_types:
+            if pid:
+                rows = pdb.fetchall(
+                    """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                              h.edge_type,
+                              r.name AS llm_name
+                       FROM community_hierarchy h
+                       LEFT JOIN community_llm_results r
+                         ON r.task_id = h.task_id AND r.edge_type = h.edge_type
+                         AND r.comm_lv = h.comm_lv AND r.comm_id = h.comm_id
+                       WHERE h.task_id = ? AND h.edge_type = ? AND h.parent_comm_id = ?
+                       ORDER BY h.comm_lv, h.comm_id""",
+                    (tid, attempt_et, pid)
+                )
+            else:
+                rows = pdb.fetchall(
+                    """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                              h.edge_type,
+                              r.name AS llm_name
+                       FROM community_hierarchy h
+                       LEFT JOIN community_llm_results r
+                         ON r.task_id = h.task_id AND r.edge_type = h.edge_type
+                         AND r.comm_lv = h.comm_lv AND r.comm_id = h.comm_id
+                       WHERE h.task_id = ? AND h.edge_type = ? AND h.parent_comm_id IS NULL
+                       ORDER BY h.comm_lv, h.comm_id""",
+                    (tid, attempt_et)
+                )
+            if rows:
+                break
+        result = []
+        for row in rows if rows else []:
+            level = row["comm_lv"]
+            edge = row.get("edge_type", attempt_et)
+            result.append({
+                "commId": row["comm_id"],
+                "commLv": level,
+                "parentCommId": row["parent_comm_id"],
+                "name": row["llm_name"] or "",
+                "hasDoc": bool(row["llm_name"]),
+                "nodeCount": row["node_count"] or 0,
+                "edgeType": edge,
+            })
+        logger.info(f"[community-children] Found {len(result)} children for task={tid} parent={pid} (query edgeType={attempt_et}, levels={set(r['commLv'] for r in result)})")
         return result
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -331,6 +411,20 @@ async def render_plantuml(code: str = Query(...)):
         raise HTTPException(500, f"PlantUML render failed: {e}")
 
 
+@app.get("/api/template-locale")
+async def get_template_locale():
+    """获取默认模板语言"""
+    if not multi_db:
+        return {"locale": "zh-CN"}
+    try:
+        row = multi_db.main_db.fetchone(
+            "SELECT value FROM context_store WHERE key='default_template_locale'"
+        )
+        return {"locale": row["value"] if row else "zh-CN"}
+    except Exception:
+        return {"locale": "zh-CN"}
+
+
 @app.get("/api/plantuml/clear-cache")
 async def clear_plantuml_cache():
     _clear_plantuml_cache()
@@ -386,8 +480,150 @@ def _find_file_alternatives(project_id: str, path: str) -> list:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    return await list_docs_html()
+async def index(search: str = Query(None), page: int = Query(1), page_size: int = Query(50)):
+    if not multi_db:
+        return HTMLResponse('<html><body><h1>TopoCode</h1><p>Backend not ready</p></body></html>')
+    try:
+        ps = max(10, min(200, page_size))
+        offset = (max(1, page) - 1) * ps
+        q = search or ''
+
+        # 查所有任务，按项目分组
+        all_tasks = multi_db.main_db.fetchall(
+            "SELECT t.id, t.name, t.status, t.project_id, p.name AS project_name "
+            "FROM analysis_tasks t JOIN projects p ON t.project_id = p.id "
+            "WHERE (? = '' OR t.name LIKE ? OR p.name LIKE ?) "
+            "ORDER BY t.project_id, t.created_at DESC",
+            (q, f'%{q}%', f'%{q}%')
+        )
+
+        # 按项目分组，优先排有文档的
+        projects_map = {}
+        for t in all_tasks:
+            pid = t["project_id"]
+            if pid not in projects_map:
+                projects_map[pid] = {"name": t["project_name"], "tasks": [], "has_doc": False}
+            has_ov = False
+            try:
+                pdb = multi_db.get_project_db(pid)
+                doc = pdb.fetchone("SELECT id FROM report_subdocs WHERE id=?", (f"overall-{t['id']}",))
+                has_ov = doc is not None
+            except Exception:
+                pass
+            projects_map[pid]["tasks"].append({"id": t["id"], "name": t["name"], "status": t["status"], "hasDoc": has_ov})
+            if has_ov:
+                projects_map[pid]["has_doc"] = True
+
+        # 排序：有文档的靠前，其余按项目名
+        proj_list = sorted(projects_map.values(), key=lambda x: (not x["has_doc"], x["name"]))
+
+        # 分页：所有任务扁平化后分页
+        flat_tasks = []
+        for proj in proj_list:
+            for t in proj["tasks"]:
+                flat_tasks.append((proj["name"], t))
+        total = len(flat_tasks)
+        page_tasks = flat_tasks[offset:offset + ps]
+        total_pages = max(1, (total + ps - 1) // ps)
+
+        def esc(s):
+            return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+        html = """<!DOCTYPE html><html lang="zh-CN"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TopoCode - Documents</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f5;color:#333;font-size:14px;line-height:1.6;padding:24px}
+  .container{max-width:800px;margin:0 auto}
+  h1{font-size:20px;margin-bottom:16px;color:#111}
+  .toolbar{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+  .toolbar input{padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:13px;flex:1;min-width:160px;outline:none}
+  .toolbar input:focus{border-color:#2563eb}
+  .toolbar select{padding:6px 8px;border:1px solid #d0d0d0;border-radius:6px;font-size:12px}
+  .toolbar .info{font-size:12px;color:#999}
+  .project{background:#fff;border-radius:8px;border:1px solid #e0e0e0;margin-bottom:10px;overflow:hidden}
+  .project-header{padding:10px 14px;font-weight:600;font-size:13px;background:#fafafa;border-bottom:1px solid #e0e0e0;cursor:pointer;display:flex;align-items:center;gap:8px}
+  .project-header:hover{background:#f0f0f0}
+  .project-header .arrow{transition:transform .2s;font-size:10px}
+  .project-header .arrow.open{transform:rotate(90deg)}
+  .task-item{padding:8px 14px 8px 32px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px}
+  .task-item:last-child{border-bottom:none}
+  .task-item a{color:#2563eb;text-decoration:none;font-size:13px}
+  .task-item a:hover{text-decoration:underline}
+  .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .status-dot.done{background:#22c55e}
+  .status-dot.pending{background:#f59e0b}
+  .empty{padding:20px;color:#999;font-size:13px;text-align:center}
+  .pagination{display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap}
+  .pagination a,.pagination span{padding:4px 10px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px;text-decoration:none;color:#333}
+  .pagination a:hover{background:#f0f0f0}
+  .pagination .active{background:#2563eb;color:#fff;border-color:#2563eb}
+  @media(prefers-color-scheme:dark){
+    body{background:#1a1a2e;color:#e0e0e0}
+    h1{color:#fff}
+    .project{background:#16213e;border-color:#333}
+    .project-header{background:#1a1a2e;border-color:#333}
+    .project-header:hover{background:#222}
+    .task-item{border-color:#2a2a3e}
+    .task-item a{color:#60a5fa}
+    .toolbar input,.toolbar select{background:#222;border-color:#444;color:#e0e0e0}
+    .pagination a,.pagination span{background:#222;border-color:#444;color:#e0e0e0}
+    .pagination .active{background:#2563eb;border-color:#2563eb}
+  }
+</style></head><body>
+<div class="container">
+<h1>📄 TopoCode Documents</h1>
+<div class="toolbar">
+  <form method="get" action="/" style="display:flex;gap:8px;flex:1;align-items:center">
+    <input type="text" name="search" placeholder="搜索项目/任务..." value="''' + esc(q) + '">
+    <button type="submit" style="padding:6px 14px;border:1px solid #d0d0d0;border-radius:6px;background:#fff;cursor:pointer;font-size:12px">搜索</button>
+  </form>
+  <select onchange="location.href='/?search='+encodeURIComponent(\'' + esc(q) + '\')+'&page=1&page_size='+this.value">
+    <option value="50"' + (' selected' if ps == 50 else '') + '>50条/页</option>
+    <option value="100"' + (' selected' if ps == 100 else '') + '>100条/页</option>
+    <option value="200"' + (' selected' if ps == 200 else '') + '>200条/页</option>
+  </select>
+  <span class="info">共 ' + str(total) + ' 条</span>
+</div>"""
+
+        last_proj = None
+        shown = 0
+        for proj_name, t in page_tasks:
+            shown += 1
+            if proj_name != last_proj:
+                if last_proj is not None:
+                    html += '</div></div>'
+                html += f'<div class="project"><div class="project-header" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.arrow\').classList.toggle(\'open\')"><span class="arrow">▶</span> {esc(proj_name)}</div><div class="project-tasks open">'
+                last_proj = proj_name
+            dot_class = 'done' if t["hasDoc"] else 'pending'
+            if t["hasDoc"]:
+                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span style="font-size:11px;color:#999">已生成</span></div>'
+            else:
+                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span style="color:#999;font-size:13px">{esc(t["name"])}</span><span style="font-size:11px;color:#999">未生成</span></div>'
+        if last_proj is not None:
+            html += '</div></div>'
+        if total == 0:
+            html += '<div class="empty">暂无匹配结果</div>'
+
+        # 分页
+        if total_pages > 1:
+            html += '<div class="pagination">'
+            base_q = f'search={esc(q)}&page_size={ps}' if q else f'page_size={ps}'
+            if page > 1:
+                html += f'<a href="/?{base_q}&page={page-1}">‹</a>'
+            for pn in range(max(1, page - 3), min(total_pages, page + 3) + 1):
+                cls = 'active' if pn == page else ''
+                html += f'<a class="{cls}" href="/?{base_q}&page={pn}">{pn}</a>'
+            if page < total_pages:
+                html += f'<a href="/?{base_q}&page={page+1}">›</a>'
+            html += '</div>'
+
+        html += '</div></body></html>'
+        return HTMLResponse(html)
+    except Exception as e:
+        return HTMLResponse(f"<html><body><h1>Error</h1><p>{e}</p></body></html>")
 
 
 @app.get("/doc", response_class=HTMLResponse)
@@ -419,13 +655,13 @@ def create_app(multi_db_instance) -> FastAPI:
 # ==================== 启动入口 ====================
 
 
-async def start_http_server(multi_db_instance, port: int = 3456, cache_path: str = None):
+async def start_http_server(multi_db_instance, port: int = 3456, host: str = '127.0.0.1', cache_path: str = None):
     global multi_db, http_port
     http_port = port
     multi_db = multi_db_instance
     if cache_path:
         _init_cache_db(cache_path)
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
-    logger.info(f"Web server starting on http://0.0.0.0:{port}")
+    logger.info(f"Web server starting on http://{host}:{port}")
     await server.serve()
