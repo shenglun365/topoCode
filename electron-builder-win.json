@@ -1,5 +1,9 @@
 {
   "electronDist": null,
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
   "files": [
     "dist/**/*",
     "dist-electron/**/*",

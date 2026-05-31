@@ -81,8 +81,8 @@ watch(
         <span class="backend-error-msg">{{ statusStore.backend.error }}</span>
       </template>
       <template v-else>
-        <span>⏳ 后端启动超时</span>
-        <span class="backend-error-msg">Python 进程启动后未响应，请检查日志</span>
+        <span>⏳ 尚未检测到后端服务，请等待 3~5 秒</span>
+        <span class="backend-error-msg">如长时间未响应，请查看日志：%APPDATA%/topoone-ui/logs/ （Win） / ~/Library/Application Support/topoone-ui/logs/ （Mac） / ~/.config/topoone-ui/logs/ （Linux）</span>
       </template>
     </div>
 

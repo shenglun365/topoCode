@@ -28,8 +28,8 @@ export class PythonBridge {
   private get pythonScript(): string {
     const isDev = !app.isPackaged
     if (isDev) {
-      // 开发环境: 从项目根目录查找
-      const devPath = join(__dirname, '../../backend/main.py')
+      // 开发环境: dist-electron/ -> 项目根目录 -> backend/main.py
+      const devPath = join(__dirname, '../backend/main.py')
       if (existsSync(devPath)) return devPath
     }
 
@@ -38,7 +38,7 @@ export class PythonBridge {
     if (existsSync(prodPath)) return prodPath
 
     // 回退到开发路径
-    return join(__dirname, '../../backend/main.py')
+    return join(__dirname, '../backend/main.py')
   }
 
   // 数据库路径
@@ -118,7 +118,7 @@ export class PythonBridge {
         // 设置 PYTHONPATH，让 Python 能找到 backend/ 目录下的依赖包
         const backendDir = app.isPackaged
           ? join(process.resourcesPath, 'backend')
-          : join(__dirname, '../../backend')
+          : join(__dirname, '../backend')
 
         const memoryLimit = this.memoryLimit || 4096
         console.error('[PythonBridge] Spawning:', python, this.pythonScript)
