@@ -11,7 +11,6 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
-import { useOnboardingStore } from '@/stores/onboarding'
 import { useSettingsStore } from '@/stores/settings'
 import { useNavigationStore } from '@/stores/navigation'
 import ProjectCard from '@/components/project/ProjectCard.vue'
@@ -23,7 +22,6 @@ const { t } = useI18n()
 const router = useRouter()
 const navigation = useNavigationStore()
 const projectStore = useProjectStore()
-const onboardingStore = useOnboardingStore()
 const settingsStore = useSettingsStore()
 
 // 筛选模式: all | favorites

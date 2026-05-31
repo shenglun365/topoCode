@@ -18,6 +18,7 @@ tree-sitter-java==0.23.5
 # 图计算 (调用链/依赖图/知识图谱)
 networkx==3.4.2
 python-louvain==0.16
+numpy>=1.24,<3.0
 
 # HTTP 客户端 (PlantUML 远程渲染)
 requests==2.34.2

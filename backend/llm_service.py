@@ -618,7 +618,22 @@ class LLMService:
         if not model:
             raise ValueError(f"Model not found: {model_id}")
         self._check_usage_limits(model_id)
-        return await self._sync_call_for_retry(model, messages, 'chat', None, None)
+        content = await self._sync_call_for_retry(model, messages, 'chat', None, None)
+        # 记录用量统计
+        try:
+            if model.get('id'):
+                # sync_chat 拿不到 token 数据，按字符估算
+                prompt_chars = sum(len(m.get('content', '')) for m in messages if m.get('content'))
+                completion_chars = len(content or '')
+                token_data = {
+                    'prompt_tokens': max(1, int(prompt_chars / 3.5)),
+                    'completion_tokens': max(1, int(completion_chars / 3.5)),
+                    'total_tokens': max(1, int((prompt_chars + completion_chars) / 3.5)),
+                }
+                self._record_usage(model['id'], token_data)
+        except Exception as e:
+            logger.warning(f"[LLMService] Failed to record usage: {e}")
+        return content
 
     async def _sync_call_for_retry(
         self,
@@ -694,8 +709,16 @@ class LLMService:
         token_data: Optional[Dict[str, Any]] = None,
     ):
         """保存流式完成后的消息到 SQLite（完整日志）"""
+        # 先记录用量统计（所有会话类型都记录，包括分析报告）
         try:
-            # AI 助手和分析报告会话：跳过所有持久化
+            model_obj = model if isinstance(model, dict) else None
+            if model_obj and model_obj.get('id') and status in ('success', 'error'):
+                self._record_usage(model_obj.get('id'), token_data or {})
+        except Exception as e:
+            logger.warning(f"[LLMService] Failed to record usage: {e}")
+
+        try:
+            # AI 助手和分析报告会话：跳过消息持久化
             if any(session_id.startswith(p) for p in self._ANALYSIS_SESSION_PREFIXES):
                 logger.debug(f"[LLMService] Skip persistence for session: {session_id}")
                 return

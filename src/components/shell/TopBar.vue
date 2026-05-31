@@ -9,7 +9,8 @@ import {
   ArrowLeftStartOnRectangleIcon,
   MoonIcon,
   SunIcon,
-  QuestionMarkCircleIcon,
+  MinusIcon,
+  Square2StackIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
@@ -32,6 +33,30 @@ const navigation = useNavigationStore()
 
 // ── 配置 ──
 const DOCS_URL = 'https://opencode.ai'
+
+// ── 无边框窗口控制 ──
+const isMaximized = ref(false)
+
+onMounted(async () => {
+  try {
+    isMaximized.value = await window.api?.window.isMaximized() || false
+  } catch {}
+})
+
+async function onMinimize() {
+  await window.api?.window.minimize()
+}
+
+async function onMaximize() {
+  await window.api?.window.maximize()
+  try {
+    isMaximized.value = await window.api?.window.isMaximized() || false
+  } catch {}
+}
+
+async function onClose() {
+  await window.api?.window.close()
+}
 
 // ── 菜单 ──
 const showMenu = ref<string | null>(null)
@@ -224,12 +249,27 @@ onMounted(() => {
           <MoonIcon v-if="themeStore.theme === 'dark'" class="w-4 h-4" />
           <SunIcon v-else class="w-4 h-4" />
         </div>
+        <!-- 新手引导入口（暂时隐藏）
         <div
           class="icon-btn"
           :title="t('shell.topBar.guide')"
           @click="onboardingStore.start()"
         >
           <QuestionMarkCircleIcon class="w-4 h-4" />
+        </div>
+        -->
+      </div>
+
+      <!-- 窗口控制（无边框窗口） -->
+      <div class="window-controls">
+        <div class="win-btn" @click="onMinimize" :title="t('common.minimize')">
+          <MinusIcon class="w-3.5 h-3.5" />
+        </div>
+        <div class="win-btn" @click="onMaximize" :title="t(isMaximized ? 'common.restore' : 'common.maximize')">
+          <Square2StackIcon class="w-3.5 h-3.5" />
+        </div>
+        <div class="win-btn win-btn-close" @click="onClose" :title="t('common.close')">
+          <XMarkIcon class="w-3.5 h-3.5" />
         </div>
       </div>
     </div>
@@ -303,6 +343,7 @@ onMounted(() => {
   align-items: center;
   padding: 0 8px;
   gap: 8px;
+  -webkit-app-region: drag;
 }
 
 .menu-bar-logo {
@@ -512,5 +553,40 @@ onMounted(() => {
 .about-label {
   font-weight: 600;
   color: var(--text-primary);
+}
+</style>
+
+<!-- 无边框窗口拖拽（unscoped） -->
+<style>
+.app-row1 { -webkit-app-region: drag; }
+.app-row1 button,
+.app-row1 .icon-btn,
+.app-row1 .menu-item,
+.app-row1 .window-controls,
+.app-row1 .win-btn { -webkit-app-region: no-drag; }
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin-right: -8px;
+}
+.win-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.win-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.win-btn-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 </style>

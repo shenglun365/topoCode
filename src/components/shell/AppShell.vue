@@ -42,7 +42,7 @@ onMounted(async () => {
     const st = await window.api.backend.getStatus()
     if (st) statusStore.setBackendStatus(st)
   } catch (_) {}
-  // 每 5 秒轮询后端状态（不覆盖 HTTP 配置）
+  // 每 5 秒轮询本地 PythonBridge 状态（不经过 ZMQ，避免挂死）
   setInterval(async () => {
     try {
       const st = await window.api.backend.getStatus()
@@ -69,6 +69,23 @@ watch(
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
+
+    <!-- 后端状态提示条 -->
+    <div
+      v-if="statusStore.backend.status === 'error' || (statusStore.backend.status === 'starting' && Date.now() > 15000)"
+      class="backend-error-banner"
+      :class="{ 'banner-warning': statusStore.backend.status === 'starting' }"
+    >
+      <template v-if="statusStore.backend.status === 'error'">
+        <span>⚠ 后端服务异常</span>
+        <span class="backend-error-msg">{{ statusStore.backend.error }}</span>
+      </template>
+      <template v-else>
+        <span>⏳ 尚未检测到后端服务，请等待 3~5 秒</span>
+        <span class="backend-error-msg">如长时间未响应，请查看日志：%APPDATA%/topoone-ui/logs/ （Win） / ~/Library/Application Support/topoone-ui/logs/ （Mac） / ~/.config/topoone-ui/logs/ （Linux）</span>
+      </template>
+    </div>
+
     <!-- 顶部菜单栏 -->
     <TopBar />
 
@@ -133,5 +150,23 @@ watch(
   flex: 1;
   overflow: auto;
   position: relative;
+}
+
+.backend-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: #e81123;
+  color: #fff;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.backend-error-banner.banner-warning {
+  background: #d4941e;
+}
+.backend-error-msg {
+  opacity: 0.85;
+  font-family: monospace;
 }
 </style>

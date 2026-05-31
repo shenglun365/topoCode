@@ -34,9 +34,9 @@ class BackendApp:
     def __init__(self, data_dir: str = None, http_port: int = None, http_host: str = None):
         # 数据目录
         if data_dir is None:
-            if os.name == "nt":  # Windows
+            if sys.platform == "win32":  # Windows
                 data_dir = os.path.join(os.environ.get("APPDATA", ""), "TopoOne")
-            elif os.name == "darwin":  # macOS
+            elif sys.platform == "darwin":  # macOS
                 data_dir = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "TopoOne")
             else:  # Linux
                 data_dir = os.path.join(os.path.expanduser("~"), ".topoone")
@@ -57,19 +57,23 @@ class BackendApp:
 
     def _setup_signals(self):
         """设置信号处理 - 在 asyncio 事件循环中注册"""
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
 
-        def _handle_signal():
-            logger.info("Received shutdown signal, stopping server...")
-            self.server.stop()
-            # stop() 关闭 socket → recv_multipart 抛异常 → run() 自然返回
-            # 不需要 loop.stop()，让 asyncio.run() 正常退出
+            def _handle_signal():
+                logger.info("Received shutdown signal, stopping server...")
+                self.server.stop()
 
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, _handle_signal)
-            except (NotImplementedError, ValueError):
-                signal.signal(sig, lambda s, f: _handle_signal())
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, _handle_signal)
+                except (NotImplementedError, ValueError):
+                    try:
+                        signal.signal(sig, _handle_signal)
+                    except (ValueError, OSError):
+                        logger.warning(f"Signal {sig} not supported on this platform")
+        except Exception as e:
+            logger.warning(f"Failed to setup signal handlers: {e}")
 
     def _signal_handler(self, signum, frame):
         """信号处理 (兼容旧版)"""
@@ -127,6 +131,8 @@ class BackendApp:
 
 def main():
     """主入口"""
+    print("[TopoOne Backend] Starting...", flush=True)
+
     # 支持命令行参数
     data_dir = None
     http_port = None

@@ -600,6 +600,9 @@ export interface IPCAPI {
     resetZoom: () => Promise<number>
     create: () => Promise<number | null>
     close: (windowId: number) => Promise<boolean>
+    minimize: () => Promise<boolean>
+    maximize: () => Promise<boolean>
+    isMaximized: () => Promise<boolean>
     list: () => Promise<Array<{ id: number; title: string; isFocused: boolean }>>
     focus: (windowId: number) => Promise<boolean>
     getCount: () => Promise<number>

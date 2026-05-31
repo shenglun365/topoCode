@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowRightIcon,
@@ -12,8 +13,9 @@ import { useComponentId } from '@/composables/useComponentId'
 const { showId, componentId } = useComponentId('OT-003')
 const { t } = useI18n()
 const onboardingStore = useOnboardingStore()
+const router = useRouter()
+const route = useRoute()
 
-const spotlightRect = ref<DOMRect | null>(null)
 const spotlightPosition = ref({ x: 0, y: 0, width: 0, height: 0 })
 const dialogPosition = ref({ x: 0, y: 0 })
 const highlightVisible = ref(false)
@@ -23,18 +25,25 @@ const progress = computed(() => ((onboardingStore.currentStep + 1) / onboardingS
 
 // 定位 spotlight
 async function updateSpotlight() {
-  if (!currentStep.value) return
+  if (!currentStep.value) { console.log('[Onboarding] No current step'); return }
 
   const el = document.querySelector(currentStep.value.target)
+  console.log('[Onboarding] updateSpotlight step=', currentStep.value.id, 'target=', currentStep.value.target, 'found=', !!el, 'route=', route.path)
   if (!el) {
-    // 如果目标元素不存在（例如还没导入项目），跳过
-    onboardingStore.next()
+    highlightVisible.value = false
+    // 目标不存在时自动跳到下一步，但不推送路由（避免干扰用户操作）
+    console.log('[Onboarding] Target not found, advance silently')
+    if (onboardingStore.currentStep < onboardingStore.steps.length - 1) {
+      onboardingStore.currentStep++
+      nextTick(() => updateSpotlight())
+    } else {
+      onboardingStore.complete()
+    }
     return
   }
 
   await nextTick()
   const rect = el.getBoundingClientRect()
-  spotlightRect.value = rect
   spotlightPosition.value = {
     x: rect.left,
     y: rect.top,
@@ -49,61 +58,60 @@ async function updateSpotlight() {
 
   switch (currentStep.value.position) {
     case 'right':
-      dialogPosition.value = {
-        x: rect.right + padding,
-        y: rect.top,
-      }
+      dialogPosition.value = { x: rect.right + padding, y: rect.top }
       break
     case 'left':
-      dialogPosition.value = {
-        x: rect.left - dialogWidth - padding,
-        y: rect.top,
-      }
+      dialogPosition.value = { x: rect.left - dialogWidth - padding, y: rect.top }
       break
     case 'bottom':
-      dialogPosition.value = {
-        x: rect.left + rect.width / 2 - dialogWidth / 2,
-        y: rect.bottom + padding,
-      }
+      dialogPosition.value = { x: rect.left + rect.width / 2 - dialogWidth / 2, y: rect.bottom + padding }
       break
     case 'top':
-      dialogPosition.value = {
-        x: rect.left + rect.width / 2 - dialogWidth / 2,
-        y: rect.top - dialogHeight - padding,
-      }
+      dialogPosition.value = { x: rect.left + rect.width / 2 - dialogWidth / 2, y: rect.top - dialogHeight - padding }
       break
   }
 
-  // 确保对话框不超出视口
   dialogPosition.value.x = Math.max(8, Math.min(dialogPosition.value.x, window.innerWidth - dialogWidth - 8))
   dialogPosition.value.y = Math.max(8, Math.min(dialogPosition.value.y, window.innerHeight - dialogHeight - 8))
 
   highlightVisible.value = true
+  console.log('[Onboarding] Spotlight shown for', currentStep.value.id)
 }
+
+// 监听路由变化 → 通知 store → 定位 spotlight
+watch(() => route.path, () => {
+  if (!onboardingStore.isRunning) return
+  console.log('[Onboarding] Route changed to', route.path)
+  onboardingStore.onRouteChanged()
+  nextTick(() => updateSpotlight())
+})
 
 // 监听步骤变化
 watch(() => onboardingStore.currentStep, () => {
+  if (!onboardingStore.isRunning) return  // 不运行时忽略步骤变化
+  console.log('[Onboarding] Step changed to', onboardingStore.currentStep, currentStep.value?.id, 'routeNeeded=', currentStep.value?.route, 'currentRoute=', route.path)
   highlightVisible.value = false
-  nextTick(() => updateSpotlight())
+  const step = currentStep.value
+  if (step?.route && step.route !== route.path) {
+    console.log('[Onboarding] Pushing route', step.route)
+    router.push(step.route)
+  } else {
+    nextTick(() => updateSpotlight())
+  }
 }, { immediate: true })
 
 // 键盘事件
 function handleKeydown(e: KeyboardEvent) {
   if (!onboardingStore.isRunning) return
-
-  if (e.key === 'Escape') {
-    onboardingStore.skip()
-  } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
-    onboardingStore.next()
-  } else if (e.key === 'ArrowLeft') {
-    onboardingStore.prev()
-  }
+  if (e.key === 'Escape') onboardingStore.skip()
+  else if (e.key === 'ArrowRight' || e.key === 'Enter') onboardingStore.next()
+  else if (e.key === 'ArrowLeft') onboardingStore.prev()
 }
 
-// 启动时添加事件监听
-if (onboardingStore.isRunning) {
+onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
-}
+  console.log('[Onboarding] Mounted, isRunning=', onboardingStore.isRunning, 'currentStep=', onboardingStore.currentStep, 'route=', route.path)
+})
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)

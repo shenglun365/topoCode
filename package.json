@@ -6,7 +6,7 @@
   "description": "TopoCode - 源码架构分析与学习工具",
   "main": "./dist-electron/main.js",
   "author": "TopoCodeProj Team",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
@@ -18,10 +18,10 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
-    "package": "npm run build && electron-builder --dir && node build/afterPack.cjs",
+    "package": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:linux": "npm run build && electron-builder --linux",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist:win": "npm run build && electron-builder --win --config electron-builder-win.json",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:all": "npm run build && electron-builder --linux --win --mac"
   },
@@ -130,6 +130,7 @@
     "extraMetadata": {
       "main": "dist-electron/main.js"
     },
+    "afterPack": "./build/afterPack.cjs",
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.icns",
@@ -156,16 +157,10 @@
       "background": "build/dmg-bg.png"
     },
     "win": {
-      "icon": "build/icon.ico",
+      "icon": null,
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
           "arch": [
             "x64"
           ]
@@ -175,9 +170,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
+      "installerIcon": null,
+      "uninstallerIcon": null,
+      "installerHeaderIcon": null,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TopoCode UI"

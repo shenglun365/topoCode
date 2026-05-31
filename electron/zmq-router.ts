@@ -92,7 +92,7 @@ export class ZMQRouter extends EventEmitter {
         'project.import': 300000,    // 300s — 大项目导入（数千文件扫描 + 批量写入）
         'analysis.runTask': 600000,  // 600s — 分析任务（AST 解析 + 符号 + 调用图 + 依赖图 + 社区）
       }
-      const timeout = timeoutMap[method] || 120000  // 默认 120s
+      const timeout = timeoutMap[method] || 30000  // 默认 30s
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(requestId)

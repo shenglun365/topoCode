@@ -108,7 +108,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         })
 
         # 更新任务状态
-        store.update_task_status(tid, "running", progress=0)
+        store.update_task_status(tid, "running", progress=0, error="")
 
         # 后台启动
         start_time = time.time()
@@ -362,7 +362,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "report_types": task.get("report_types", []),
         })
 
-        store.update_task_status(tid, "running", progress=0)
+        store.update_task_status(tid, "running", progress=0, error="")
 
         start_time = time.time()
         asyncio.create_task(_execute_task(server, multi_db, tid, run["id"], start_time))

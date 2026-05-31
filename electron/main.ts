@@ -28,14 +28,21 @@ function ensureLogDir(): void {
 }
 
 function getLogFilePath(): string {
-  const now = new Date()
-  const dateStr = now.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  return join(LOG_DIR, `${dateStr}_electron.log`)
+  return LOG_FILE
 }
+
+// 应用启动时生成一次日志文件名，同一次启动所有日志写入同一文件
+const launchTime = new Date()
+const LOG_FILE = (() => {
+  const dateStr = launchTime.toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  ensureLogDir()
+  return join(LOG_DIR, `${dateStr}_electron.log`)
+})()
 
 function writeLog(level: string, source: string, message: string, data?: unknown): void {
   if (!isDevEnv) {
-    return // 生产环境不写日志文件
+    // 生产环境只写错误日志，避免文件过大
+    if (level !== 'ERROR') return
   }
   try {
     ensureLogDir()

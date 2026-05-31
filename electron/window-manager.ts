@@ -53,7 +53,7 @@ export class WindowManager {
       height: 900,
       minWidth: 1000,
       minHeight: 700,
-      frame: true,
+      frame: false,
       backgroundColor: '#1e1e2e',
       show: options?.show ?? true,
       webPreferences: {
@@ -179,12 +179,42 @@ export class WindowManager {
       return this.createWindow()?.id ?? null
     })
 
-    ipcMain.handle('window:close', (_, windowId: number) => {
-      const win = this.windows.get(windowId)
+    ipcMain.handle('window:close', (event, windowId?: number) => {
+      let win: BrowserWindow | null
+      if (windowId) {
+        win = this.windows.get(windowId) || null
+      } else {
+        win = BrowserWindow.fromWebContents(event.sender)
+      }
       if (win && !win.isDestroyed()) {
         win.close()
       }
       return true
+    })
+
+    ipcMain.handle('window:minimize', (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) {
+        win.minimize()
+      }
+      return true
+    })
+
+    ipcMain.handle('window:maximize', (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) {
+        if (win.isMaximized()) {
+          win.unmaximize()
+        } else {
+          win.maximize()
+        }
+      }
+      return true
+    })
+
+    ipcMain.handle('window:isMaximized', (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return win && !win.isDestroyed() ? win.isMaximized() : false
     })
 
     ipcMain.handle('window:list', () => {

@@ -21,6 +21,9 @@ export default {
     reset: 'Reset',
     close: 'Close',
     closeAll: 'Close All',
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    restore: 'Restore',
     open: 'Open',
     copy: 'Copy',
     paste: 'Paste',
@@ -997,8 +1000,9 @@ export default {
     licenseInfo: 'License Info',
     aboutTopoCode: 'About TopoCode',
     aboutTagline: 'Source code architecture analysis and learning tool',
+    pythonEnv: 'Python Environment',
     license: 'License',
-    licenseText: 'This software is released under the MIT License, free to use, modify and distribute',
+    licenseText: 'This software is released under the Apache-2.0 License, free to use, modify and distribute',
     os: 'Operating System',
     simplifiedChinese: '简体中文',
     english: 'English',
@@ -1478,29 +1482,37 @@ export default {
     start: 'Start Guide',
     skip: 'Skip',
     steps: {
-      activityBar: {
-        title: 'Activity Bar',
-        description: 'The left activity bar lets you quickly switch between Projects, Analysis, Knowledge Base, AI Assistant, and other core modules.',
-      },
-      projectList: {
-        title: 'Project List',
-        description: 'All your imported projects are shown here. Click a project card to view its file structure and analysis tasks.',
-      },
-      importZone: {
+      importProject: {
         title: 'Import Project',
-        description: 'Drag and drop a project folder here, or click the button to select a directory to import your code project.',
+        description: 'Click + to import your code project from a local directory. Supports multi-project management and grouping.',
       },
-      fileTree: {
-        title: 'File Tree',
-        description: 'Browse your project file structure. Supports lazy loading, search filtering, and right-click context menu.',
+      codeBrowse: {
+        title: 'Code Browser',
+        description: 'Browse source code in the file tree on the left. The code viewer on the right supports syntax highlighting.',
       },
-      tabBar: {
-        title: 'Tab Bar',
-        description: 'Switch between file browsing, task lists, and other views. File previews can be pinned as independent tabs.',
+      createTask: {
+        title: 'Create Analysis Task',
+        description: 'Select analysis scope (language/directory) and create a structural analysis task for dependency or call chain analysis.',
       },
-      statusBar: {
-        title: 'Status Bar',
-        description: 'The bottom status bar shows current project info, file statistics, backend connection status, and more.',
+      viewReport: {
+        title: 'View Report',
+        description: 'After analysis, view architecture documents with component hierarchy and dependency graphs. Supports web preview.',
+      },
+      aiAnalysis: {
+        title: 'AI Component Analysis',
+        description: 'Run AI analysis on each component to generate descriptions and diagrams. Supports regeneration and manual editing.',
+      },
+      modelConfig: {
+        title: 'Model Configuration',
+        description: 'Configure AI models (Ollama/OpenAI/LM Studio), set usage limits, and view usage statistics.',
+      },
+      templateManager: {
+        title: 'Template Management',
+        description: 'Manage report template language and content. Supports Chinese/English templates and restore defaults.',
+      },
+      webViewer: {
+        title: 'Web Viewer',
+        description: 'Local HTTP service provides browser-based document viewing with project/task index and community navigation.',
       },
     },
   },

@@ -18,7 +18,10 @@ contextBridge.exposeInMainWorld('api', {
     zoomOut: () => ipcRenderer.invoke('window:zoom-out'),
     resetZoom: () => ipcRenderer.invoke('window:zoom-reset'),
     create: () => ipcRenderer.invoke('window:create'),
-    close: (windowId: number) => ipcRenderer.invoke('window:close', windowId),
+    close: (windowId?: number) => ipcRenderer.invoke('window:close', windowId),
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    maximize: () => ipcRenderer.invoke('window:maximize'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
     list: () => ipcRenderer.invoke('window:list'),
     focus: (windowId: number) => ipcRenderer.invoke('window:focus', windowId),
     getCount: () => ipcRenderer.invoke('window:getCount'),
@@ -312,7 +315,8 @@ contextBridge.exposeInMainWorld('api', {
     start: () => ipcRenderer.invoke('ipc:call', { method: 'backend.start', params: {} }),
     stop: () => ipcRenderer.invoke('ipc:call', { method: 'backend.stop', params: {} }),
     restart: () => ipcRenderer.invoke('backend:restart'),
-    getStatus: () => ipcRenderer.invoke('ipc:call', { method: 'backend.getStatus', params: {} }),
+    getStatus: () => ipcRenderer.invoke('backend:getStatus'),  // 本地 PythonBridge 状态（不通过 ZMQ）
+    getZmqStatus: () => ipcRenderer.invoke('ipc:call', { method: 'backend.getStatus', params: {} }),  // ZMQ Python 后端状态
     ping: () => ipcRenderer.invoke('ipc:call', { method: 'backend.ping', params: {} }),
     testPort: (port: number) => ipcRenderer.invoke('ipc:call', { method: 'backend.testPort', params: { port } }),
     getMemoryLimit: () => ipcRenderer.invoke('backend:getMemoryLimit'),
