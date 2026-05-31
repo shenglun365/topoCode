@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TopoOne Code Viewer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljsTheme">
+<style>
+  :root { --bg: #fff; --text: #333; --border: #ddd; --line-num: #999; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1a2e; --text: #e0e0e0; --border: #333; --line-num: #666; }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace; background: var(--bg); color: var(--text); font-size: 13px; }
+  .header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 100; }
+  .header a { color: #3b82f6; text-decoration: none; font-size: 12px; }
+  .header a:hover { text-decoration: underline; }
+  .header .path { flex: 1; font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .code-container { padding: 0; }
+  .code-container pre { margin: 0; padding: 8px 0; overflow-x: auto; }
+  .code-container code { font-family: "Fira Code", "JetBrains Mono", "Cascadia Code", monospace; font-size: 13px; line-height: 1.5; }
+  .hljs { background: transparent !important; padding: 0 !important; }
+  .line-numbers { display: flex; }
+  .line-nums { text-align: right; padding: 8px 12px 8px 16px; color: var(--line-num); user-select: none; border-right: 1px solid var(--border); font-family: monospace; font-size: 12px; line-height: 1.5; min-width: 40px; }
+  .line-code { padding: 8px 16px; overflow-x: auto; flex: 1; }
+  .line-code pre { padding: 0; margin: 0; }
+  .truncated-msg { padding: 8px 16px; background: #fff3cd; color: #856404; font-size: 12px; border-bottom: 1px solid #ffc107; }
+  .loading { padding: 40px; text-align: center; color: #999; }
+  .error-msg { color: #ef4444; padding: 12px; border: 1px solid #ef4444; border-radius: 6px; margin: 12px; }
+  @media (prefers-color-scheme: dark) {
+    .truncated-msg { background: #3d2e00; color: #ffc107; border-color: #665500; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <a href="javascript:history.back()" id="backLink">← Back</a>
+  <span class="path" id="filePath">Loading...</span>
+</div>
+<div id="truncatedMsg" class="truncated-msg" style="display:none"></div>
+<div class="code-container" id="codeContainer">
+  <div class="loading">Loading file...</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const projectId = params.get('project_id') || params.get('projectId') || '';
+const filePath = params.get('path') || '';
+
+document.getElementById('filePath').textContent = filePath || 'No file specified';
+
+async function load() {
+  if (!filePath) {
+    document.getElementById('codeContainer').innerHTML = '<div class="error-msg">No file path specified. Use ?path=...</div>';
+    return;
+  }
+  document.getElementById('codeContainer').innerHTML = '<div class="loading">Loading file...</div>';
+  try {
+    const url = `/api/file?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      if (resp.status === 404) {
+        const body = await resp.json().catch(() => null);
+        if (body && body.detail && body.detail.alternatives && body.detail.alternatives.length > 0) {
+          const alts = body.detail.alternatives;
+          let html = `<div class="error-msg">File not found: <strong>${filePath}</strong></div>`;
+          html += '<div style="padding:12px;font-size:13px">';
+          html += 'Did you mean one of these files?<ul style="margin:8px 0 0 16px">';
+          for (const a of alts) {
+            const p = a.file_path;
+            html += `<li><a href="/code?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(p)}" style="color:#3b82f6;text-decoration:none">${p}</a> <span style="color:#888;font-size:11px">(${a.language || '?'})</span></li>`;
+          }
+          html += '</ul></div>';
+          document.getElementById('codeContainer').innerHTML = html;
+          return;
+        }
+      }
+      const err = await resp.text().catch(() => `HTTP ${resp.status}`);
+      throw new Error(err);
+    }
+    const data = await resp.json();
+    document.getElementById('filePath').textContent = data.path || filePath;
+    if (data.truncated) {
+      document.getElementById('truncatedMsg').style.display = 'block';
+      document.getElementById('truncatedMsg').textContent = `File truncated: showing first 1000 lines / 500KB. Original size: ${(data.size / 1024).toFixed(1)}KB.`;
+    }
+    renderCode(data.content, data.language);
+  } catch (e) {
+    document.getElementById('codeContainer').innerHTML = `<div class="error-msg">Failed to load file: ${e.message}</div>`;
+  }
+}
+
+function renderCode(content, language) {
+  const lines = content.split('\n');
+  let lineNums = '';
+  let codeHtml = '';
+  for (let i = 0; i < lines.length; i++) {
+    lineNums += (i + 1) + '\n';
+  }
+  const code = document.createElement('code');
+  code.textContent = content;
+  if (language) code.className = `language-${language}`;
+  try { hljs.highlightElement(code); } catch(e) { /* fallback */ }
+  const codeContent = code.innerHTML;
+  document.getElementById('codeContainer').innerHTML = `
+    <div class="line-numbers">
+      <div class="line-nums"><pre>${lineNums}</pre></div>
+      <div class="line-code"><pre><code class="language-${language}">${codeContent}</code></pre></div>
+    </div>
+  `;
+}
+
+load();
+</script>
+</body>
+</html>

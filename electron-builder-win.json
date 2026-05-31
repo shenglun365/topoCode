@@ -1,0 +1,29 @@
+{
+  "electronDist": null,
+  "files": [
+    "dist/**/*",
+    "dist-electron/**/*",
+    "backend/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": "backend",
+      "to": "backend",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "icon": null
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "installerIcon": null,
+    "uninstallerIcon": null,
+    "installerHeaderIcon": null,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "TopoCode UI"
+  },
+  "afterPack": "./build/afterPack.cjs"
+}

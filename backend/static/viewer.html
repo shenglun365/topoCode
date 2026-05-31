@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TopoOne Document Viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root { --bg: #fff; --text: #333; --border: #ddd; --accent: #3b82f6; --bg-code: #f5f5f5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1a1a2e; --text: #e0e0e0; --border: #333; --accent: #60a5fa; --bg-code: #16213e; }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; }
+  .header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 100; }
+  .header .title { font-weight: 600; font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .header a:hover { text-decoration: underline; }
+  .content { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+  .content h1 { font-size: 1.6em; margin: 0.6em 0 0.3em; }
+  .content h2 { font-size: 1.3em; margin: 0.5em 0 0.25em; }
+  .content h3 { font-size: 1.1em; margin: 0.4em 0 0.2em; }
+  .content p { margin: 0.5em 0; }
+  .content code { background: var(--bg-code); padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  .content pre { background: var(--bg-code); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+  .content pre code { background: none; padding: 0; }
+  .content blockquote { border-left: 3px solid var(--accent); padding-left: 12px; margin: 0.5em 0; color: #666; }
+  .content ul, .content ol { padding-left: 24px; margin: 0.4em 0; }
+  .content a { color: var(--accent); }
+  .content a.file-link { border-bottom: 1px dashed var(--accent); text-decoration: none; }
+  .content a.file-link:hover { border-bottom-style: solid; }
+  .content table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+  .content th, .content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .content th { background: var(--bg-code); }
+  .mermaid-container { background: var(--bg); padding: 12px; border-radius: 6px; border: 1px solid var(--border); margin: 12px 0; overflow: hidden; }
+  .plantuml-container { background: var(--bg); padding: 12px; border-radius: 6px; border: 1px solid var(--border); margin: 12px 0; text-align: center; }
+  .plantuml-container img { max-width: 100%; height: auto; }
+  .zoom-controls { position: fixed; top: 48px; right: 16px; display: flex; gap: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px; z-index: 200; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .zoom-controls button { width: 28px; height: 28px; border: 1px solid var(--border); background: var(--bg); border-radius: 4px; cursor: pointer; font-size: 14px; color: var(--text); display: flex; align-items: center; justify-content: center; }
+  .zoom-controls button:hover { background: var(--bg-code); }
+  .zoom-controls .zoom-pct { width: 44px; font-size: 11px; text-align: center; line-height: 28px; }
+  .canvas-controls { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 16px; z-index: 200; box-shadow: 0 2px 12px rgba(0,0,0,0.15); align-items: center; font-size: 12px; }
+  .canvas-controls label { display: flex; align-items: center; gap: 6px; color: var(--text); }
+  .canvas-controls input[type="range"] { width: 80px; }
+  .canvas-controls .val { font-family: monospace; font-size: 11px; min-width: 36px; }
+  .canvas-controls button { border: 1px solid var(--border); background: var(--bg); border-radius: 4px; padding: 2px 8px; cursor: pointer; color: var(--text); font-size: 11px; }
+  .canvas-controls button:hover { background: var(--bg-code); }
+  .diagram-wrapper { transform-origin: top left; transition: none; }
+  .loading { text-align: center; padding: 40px; color: #999; }
+  .error-msg { color: #ef4444; padding: 12px; border: 1px solid #ef4444; border-radius: 6px; margin: 12px 0; }
+  .zoom-label { font-size: 10px; color: var(--text-muted, #999); writing-mode: vertical-rl; letter-spacing: 1px; }
+  .toc-float { position: fixed; top: 100px; right: 16px; z-index: 200; display: flex; flex-direction: column; align-items: flex-end; }
+  .toc-toggle { width: 32px; height: 32px; border: 1px solid var(--border); background: var(--bg); border-radius: 6px; cursor: pointer; font-size: 16px; color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .toc-toggle:hover { background: var(--bg-code); }
+  .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; max-width: 280px; max-height: 60vh; overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.15); font-size: 12px; }
+  .toc-panel.open { display: block; }
+  .toc-panel .toc-title { font-weight: 600; font-size: 12px; margin-bottom: 6px; white-space: nowrap; }
+  .toc-panel ul { list-style: none; padding: 0; margin: 0; }
+  .toc-panel li { padding: 2px 0; }
+  .toc-panel a { color: var(--accent); text-decoration: none; }
+  .toc-panel a:hover { text-decoration: underline; }
+  .toc-panel .no-doc { color: #999; font-family: monospace; font-size: 11px; }
+  @media (max-width: 640px) { .canvas-controls { flex-wrap: wrap; width: 90%; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <span class="title" id="docTitle">Loading...</span>
+  <a href="/" id="backLink">← 返回列表</a>
+</div>
+<div class="zoom-controls" id="zoomControls">
+  <span class="zoom-label" id="zoomLabel">图大小缩放</span>
+  <button id="zoomOut" title="Zoom out">−</button>
+  <span class="zoom-pct" id="zoomPct">100%</span>
+  <button id="zoomIn" title="Zoom in">+</button>
+  <button id="zoomReset" title="Reset">⟲</button>
+</div>
+<div class="content" id="content"></div>
+<div class="toc-float" id="tocFloat">
+  <button class="toc-toggle" id="tocToggle" title="子组件目录">☰</button>
+  <div class="toc-panel" id="tocPanel"></div>
+</div>
+<div class="canvas-controls" id="canvasControls">
+  <label>Width: <input type="range" id="canvasW" min="50" max="100" value="100"> <span class="val" id="canvasWVal">100%</span></label>
+  <label>Height: <input type="range" id="canvasH" min="200" max="1200" step="50" value="600"> <span class="val" id="canvasHVal">600px</span></label>
+  <button id="fitBtn">Fit</button>
+  <button id="originalBtn">Original</button>
+</div>
+
+<script>
+mermaid.initialize({ startOnLoad: false, theme: (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default') });
+
+const params = new URLSearchParams(location.search);
+const taskId = params.get('taskId') || '';
+const docId = params.get('docId') || '';
+const communityId = params.get('communityId') || '';
+const edgeType = params.get('edgeType') || 'CALL';
+
+let zoomLevel = 1;
+let diagrams = [];
+let templateLocale = 'zh-CN';
+
+const LOCALE_TEXT = {
+  'zh-CN': {
+    back: '← 返回列表',
+    tocTitle: '子组件目录',
+    noDoc: '未解析',
+    zoomLabel: '图大小缩放',
+    noParams: 'No document specified. Use ?taskId=... or ?docId=...',
+  },
+  'en-US': {
+    back: '← Back to List',
+    tocTitle: 'Sub-Components',
+    noDoc: 'unresolved',
+    zoomLabel: 'Zoom',
+    noParams: 'No document specified. Use ?taskId=... or ?docId=...',
+  },
+}
+
+function _(key) {
+  const m = LOCALE_TEXT[templateLocale] || LOCALE_TEXT['zh-CN']
+  return m[key] || key
+}
+
+// 启动时获取模板语言
+(async function initLocale() {
+  try {
+    const resp = await fetch('/api/template-locale')
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.locale === 'en-US' || data.locale === 'zh-CN') templateLocale = data.locale
+    }
+  } catch {}
+  document.getElementById('backLink').textContent = _('back')
+  document.getElementById('zoomLabel').textContent = _('zoomLabel')
+  document.getElementById('tocToggle').title = _('tocTitle')
+})()
+
+async function load() {
+  console.log('[Viewer] load params:', { taskId, docId, communityId, edgeType });
+  if (communityId && taskId) {
+    await loadCommunityDoc(taskId, communityId, edgeType);
+    return;
+  }
+  if (!docId && !taskId) {
+    document.getElementById('content').innerHTML = '<p>No document specified. Use ?taskId=... or ?docId=...</p>';
+    return;
+  }
+  if (docId) {
+    await loadDoc(docId);
+  } else if (taskId) {
+    await loadTaskDocs(taskId);
+  }
+}
+
+let projectId = '';
+let currentTaskId = '';
+let currentCommunityId = '';
+let currentEdgeType = 'CALL';
+
+function updateBackLink(tid, cid) {
+  const bl = document.getElementById('backLink');
+  if (tid) {
+    // 优先指向整体架构分析文档
+    bl.href = `/doc?taskId=${encodeURIComponent(tid)}&docId=overall-${encodeURIComponent(tid)}`;
+  } else {
+    bl.href = '/';
+  }
+}
+
+async function loadCommunityDoc(tid, cid, et) {
+  document.getElementById('content').innerHTML = '<div class="loading">Loading community document...</div>';
+  try {
+    const resp = await fetch(`/api/community-doc?taskId=${encodeURIComponent(tid)}&communityId=${encodeURIComponent(cid)}&edgeType=${encodeURIComponent(et)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const doc = await resp.json();
+    projectId = doc.projectId || '';
+    currentTaskId = doc.taskId || tid;
+    currentCommunityId = cid;
+    currentEdgeType = et;
+    document.getElementById('docTitle').textContent = doc.title || 'Untitled';
+    updateBackLink(currentTaskId, cid);
+    renderContent(doc.content || '');
+    // 加载子组件目录
+    buildCommunityToc(currentTaskId, cid, et);
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="error-msg">Failed to load community document: ${e.message}</div>`;
+  }
+}
+
+async function loadDoc(id) {
+  document.getElementById('content').innerHTML = '<div class="loading">Loading document...</div>';
+  // 从 URL 参数获取 taskId（可能浏览器访问时只传了 docId）
+  const tidFromUrl = params.get('taskId') || params.get('taskId') || '';
+  currentTaskId = tidFromUrl;
+  updateBackLink(currentTaskId, '');
+  try {
+    const resp = await fetch(`/api/docs/${encodeURIComponent(id)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const doc = await resp.json();
+    projectId = doc.projectId || '';
+    currentTaskId = doc.taskId || tidFromUrl;
+    document.getElementById('docTitle').textContent = doc.title || 'Untitled';
+    renderContent(doc.content || '');
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="error-msg">Failed to load document: ${e.message}</div>`;
+  }
+  // 主文档下展示 L0 社区目录
+  if (currentTaskId) {
+    buildCommunityToc(currentTaskId, '', 'INCLUDE');
+  }
+}
+
+async function buildCommunityToc(tid, parentCid, et) {
+  try {
+    console.log('[TOC] Fetching children for task=', tid, 'parent=', parentCid, 'edgeType=', et);
+    const resp = await fetch(`/api/community-children?taskId=${encodeURIComponent(tid)}&parentCommId=${encodeURIComponent(parentCid)}&edgeType=${encodeURIComponent(et)}`);
+    if (!resp.ok) {
+      console.warn('[TOC] API error:', resp.status);
+      return;
+    }
+    const children = await resp.json();
+    console.log('[TOC] Received children:', children);
+    if (!children || children.length === 0) {
+      console.log('[TOC] No children found');
+      return;
+    }
+
+    // 收集各级别数量
+    const levelCounts = {};
+    children.forEach(c => { levelCounts[c.commLv] = (levelCounts[c.commLv] || 0) + 1; });
+    const levelSummary = Object.keys(levelCounts).sort().map(lv => `${lv}: ${levelCounts[lv]}`).join(', ');
+    let html = `<div class="toc-title">${_('tocTitle')} (${levelSummary})</div><ul>`;
+    for (const child of children) {
+      const childEt = child.edgeType || et;
+      const levelClass = 'toc-level-' + (child.commLv === 'L0' ? '1' : child.commLv === 'L1' ? '2' : '3');
+      if (child.hasDoc) {
+        html += `<li class="${levelClass}"><a href="/doc?taskId=${encodeURIComponent(tid)}&communityId=${encodeURIComponent(child.commId)}&edgeType=${encodeURIComponent(childEt)}">${escapeHtml(child.name || child.commId)}</a></li>`;
+      } else {
+        html += `<li class="${levelClass}"><span class="no-doc">${escapeHtml(child.commId)} (${_('noDoc')})</span></li>`;
+      }
+    }
+    html += '</ul>';
+
+    const panel = document.getElementById('tocPanel');
+    panel.innerHTML = html;
+    panel.classList.add('open');
+    document.getElementById('tocToggle').textContent = '✕';
+  } catch (e) {
+    // 静默失败，不阻塞主内容
+  }
+}
+
+async function loadTaskDocs(tid) {
+  document.getElementById('content').innerHTML = '<div class="loading">Loading documents...</div>';
+  try {
+    if (docId) {
+      currentTaskId = tid;
+      updateBackLink(tid, '');
+      await loadDoc(docId);
+      return;
+    }
+    // 默认跳转到整体架构分析文档
+    currentTaskId = tid;
+    updateBackLink(tid, '');
+    await loadDoc(`overall-${tid}`);
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderContent(markdown) {
+  // Normalize: ensure blank line before headings (LLM output often lacks them)
+  markdown = markdown.replace(/([^\n])\n(?=#{1,6}\s)/g, '$1\n\n');
+  const html = marked.parse(markdown, { breaks: true, gfm: true });
+  document.getElementById('content').innerHTML = html;
+
+  // Handle anchor scroll: content loaded async, scroll manually
+  if (location.hash) {
+    const target = decodeURIComponent(location.hash.slice(1));
+    let el = document.getElementById(target) || document.querySelector(`[name="${target}"]`);
+    if (!el) {
+      // marked may generate different IDs (e.g. "4--模块详细分析" vs "4-模块详细分析")
+      document.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(h => {
+        const slug = h.textContent.trim().toLowerCase().replace(/[^\w\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '');
+        if (slug === target) el = h;
+      });
+    }
+    if (el) setTimeout(() => el.scrollIntoView(), 100);
+  }
+
+  // Convert ##community: links to community doc pages
+  document.querySelectorAll('#content a[href^="##community:"]').forEach(a => {
+    if (currentTaskId) {
+      const href = a.getAttribute('href');
+      const parts = href.replace('##community:', '').split(':');
+      if (parts.length === 2) {
+        a.href = `/doc?taskId=${encodeURIComponent(currentTaskId)}&communityId=${encodeURIComponent(parts[1])}&edgeType=${encodeURIComponent(parts[0])}`;
+        a.target = '_blank';
+        a.className = 'file-link';
+      } else {
+        a.replaceWith(document.createTextNode(a.textContent));
+      }
+    } else {
+      a.replaceWith(document.createTextNode(a.textContent));
+    }
+  });
+
+  // Detect file paths and turn them into links (skip table cells to avoid corrupting structured data)
+  document.querySelectorAll('#content p, #content li').forEach(el => {
+    el.innerHTML = el.innerHTML.replace(
+      /\b([\w./-]+\.[a-z]{1,4})\b(?!["'\]])/gi,
+      (m) => {
+        if (m.startsWith('http') || m.startsWith('#')) return m;
+        return `<a href="/code?project_id=${encodeURIComponent(projectId)}&path=${encodeURIComponent(m)}" target="_blank" class="file-link">${m}</a>`;
+      }
+    );
+  });
+
+  // Normalize diagram code (sync with SubDocViewer.vue normalizeDiagramCode)
+  function normalizeMermaid(code) {
+    return code
+      .replace(/\b([A-Za-z_]\w*)\s+\[/g, '$1[')
+      .replace(/(\bsubgraph\s+\w+(?:\.\w+)*)\s+(\[)/g, '$1$2')
+      .replace(/\[([^\]\[]*?)\(([^()]*)\)([^\]\[]*?)\]/g, '[$1$2$3]')
+      .replace(/^\s*style\s+.*$/gm, '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/:::\w+/g, '')
+      .replace(/[ \t]+$/gm, '');
+  }
+
+  // Render Mermaid
+  document.querySelectorAll('pre code.language-mermaid').forEach(pre => {
+    let code = normalizeMermaid(pre.textContent);
+    const container = document.createElement('div');
+    container.className = 'mermaid-container';
+    const mermaidDiv = document.createElement('div');
+    mermaidDiv.className = 'mermaid';
+    mermaidDiv.textContent = code;
+    container.appendChild(mermaidDiv);
+    pre.parentNode.replaceWith(container);
+    diagrams.push(mermaidDiv);
+  });
+  if (diagrams.length > 0) {
+    try { mermaid.run({ nodes: diagrams }); } catch(e) { console.warn('Mermaid error:', e); }
+  }
+
+  // Render PlantUML (走后端 plantuml_service.py 完整链路)
+  document.querySelectorAll('pre code.language-plantuml').forEach(pre => {
+    const code = pre.textContent;
+    const container = document.createElement('div');
+    container.className = 'plantuml-container';
+    container.innerHTML = '<div class="loading">Rendering PlantUML...</div>';
+    pre.parentNode.replaceWith(container);
+    fetch(`/api/plantuml?code=${encodeURIComponent(code)}`)
+      .then(r => r.text())
+      .then(svg => { container.innerHTML = svg; })
+      .catch(e => { container.innerHTML = `<div class="error-msg">PlantUML error: ${e.message}</div>`; });
+  });
+}
+
+// Zoom controls
+document.getElementById('zoomIn').addEventListener('click', () => setZoom(zoomLevel + 0.25));
+document.getElementById('zoomOut').addEventListener('click', () => setZoom(zoomLevel - 0.25));
+document.getElementById('zoomReset').addEventListener('click', () => setZoom(1));
+
+function setZoom(level) {
+  zoomLevel = Math.max(0.25, Math.min(5, level));
+  document.getElementById('zoomPct').textContent = Math.round(zoomLevel * 100) + '%';
+  document.querySelectorAll('.mermaid-container, .plantuml-container').forEach(el => {
+    el.style.transform = `scale(${zoomLevel})`;
+    el.style.transformOrigin = 'top left';
+    el.style.marginBottom = `${(zoomLevel - 1) * 300}px`;
+  });
+}
+
+// Canvas controls
+document.getElementById('canvasW').addEventListener('input', (e) => {
+  const v = e.target.value;
+  document.getElementById('canvasWVal').textContent = v + '%';
+  document.querySelectorAll('.mermaid-container, .plantuml-container').forEach(el => {
+    el.style.width = v + '%';
+  });
+});
+
+document.getElementById('canvasH').addEventListener('input', (e) => {
+  const v = e.target.value;
+  document.getElementById('canvasHVal').textContent = v + 'px';
+  document.querySelectorAll('.mermaid-container, .plantuml-container').forEach(el => {
+    el.style.maxHeight = v + 'px';
+  });
+});
+
+document.getElementById('fitBtn').addEventListener('click', () => {
+  document.getElementById('canvasW').value = 100;
+  document.getElementById('canvasWVal').textContent = '100%';
+  document.getElementById('canvasH').value = 600;
+  document.getElementById('canvasHVal').textContent = '600px';
+  document.querySelectorAll('.mermaid-container, .plantuml-container').forEach(el => {
+    el.style.width = '100%';
+    el.style.maxHeight = '600px';
+  });
+});
+
+document.getElementById('originalBtn').addEventListener('click', () => {
+  document.getElementById('canvasW').value = 100;
+  document.getElementById('canvasWVal').textContent = '100%';
+  document.querySelectorAll('.mermaid-container, .plantuml-container').forEach(el => {
+    el.style.width = '';
+    el.style.maxHeight = '';
+  });
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key === '=') { e.preventDefault(); setZoom(zoomLevel + 0.25); }
+  if (e.ctrlKey && e.key === '-') { e.preventDefault(); setZoom(zoomLevel - 0.25); }
+  if (e.ctrlKey && e.key === '0') { e.preventDefault(); setZoom(1); }
+});
+
+// TOC toggle
+document.getElementById('tocToggle').addEventListener('click', () => {
+  const panel = document.getElementById('tocPanel');
+  const btn = document.getElementById('tocToggle');
+  panel.classList.toggle('open');
+  btn.textContent = panel.classList.contains('open') ? '✕' : '☰';
+});
+
+load();
+</script>
+</body>
+</html>
