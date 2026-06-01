@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>使用文档 — TopoCode</title>
+  <meta name="description" content="TopoCode 使用文档 — 源码架构分析与学习工具">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["'Segoe UI'", 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ["'JetBrains Mono'", "'Fira Code'", "'Cascadia Code'", 'monospace'],
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: #ffffff; color: #1f2328;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::selection { background: #0969da22; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f6f8fa; }
+    ::-webkit-scrollbar-thumb { background: #d0d7de; border-radius: 3px; }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .doc-content h2 {
+      font-size: 1.75rem; font-weight: 700; margin-top: 3rem; margin-bottom: 1rem;
+      padding-bottom: 0.5rem; border-bottom: 1px solid #d0d7de;
+    }
+    .doc-content h3 { font-size: 1.25rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.75rem; }
+    .doc-content h4 { font-size: 1.05rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; color: #656d76; }
+    .doc-content p { margin-bottom: 1rem; line-height: 1.7; color: #1f2328; }
+    .doc-content ul, .doc-content ol { margin-bottom: 1rem; padding-left: 1.5rem; }
+    .doc-content li { margin-bottom: 0.35rem; line-height: 1.6; color: #1f2328; }
+    .doc-content table {
+      width: 100%; border-collapse: collapse; margin-bottom: 1.25rem;
+      font-size: 0.9rem;
+    }
+    .doc-content th {
+      background: #f6f8fa; font-weight: 600; text-align: left;
+      padding: 10px 12px; border: 1px solid #d0d7de;
+    }
+    .doc-content td { padding: 10px 12px; border: 1px solid #d0d7de; vertical-align: top; }
+    .doc-content tr:nth-child(even) td { background: #f6f8fa; }
+    .doc-content pre {
+      background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 8px;
+      padding: 16px 20px; overflow-x: auto; margin-bottom: 1.25rem;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .doc-content code {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      background: #f6f8fa; padding: 2px 6px; border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .doc-content pre code { background: none; padding: 0; }
+    .doc-content blockquote {
+      border-left: 4px solid #0969da; padding: 12px 16px; margin-bottom: 1rem;
+      background: #f6f8fa; border-radius: 0 8px 8px 0; color: #656d76;
+    }
+    .doc-content a { color: #0969da; text-decoration: none; }
+    .doc-content a:hover { text-decoration: underline; }
+    .doc-content hr { border: none; height: 1px; background: #d0d7de; margin: 2rem 0; }
+    .doc-content strong { font-weight: 600; }
+
+    .toc-link {
+      display: block; padding: 4px 0; color: #656d76; text-decoration: none;
+      font-size: 0.875rem; transition: color 0.15s;
+    }
+    .toc-link:hover { color: #0969da; }
+    .toc-link.h2 { font-weight: 500; }
+    .toc-link.h3 { padding-left: 1rem; font-size: 0.8rem; }
+
+    .screenshot-box {
+      background: linear-gradient(135deg, #f6f8fa 0%, #ffffff 100%);
+      border: 1px solid #d0d7de; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      color: #afb8c1; font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem; padding: 40px 20px; margin-bottom: 1rem;
+      position: relative; overflow: hidden;
+    }
+    .screenshot-box::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(circle at 30% 40%, rgba(9,105,218,0.04) 0%, transparent 60%);
+    }
+
+    .lang-content { display: none; }
+    .lang-content.active { display: block; }
+
+    .lang-btn {
+      padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent;
+      background: transparent; color: #656d76; font-family: inherit;
+    }
+    .lang-btn:hover { color: #1f2328; border-color: #d0d7de; }
+    .lang-btn.active { color: #0969da; border-color: #0969da; background: rgba(9,105,218,0.06); }
+
+    @media (max-width: 768px) {
+      .toc-desktop { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<script>
+function switchLang(l) {
+  document.querySelectorAll('.lang-content').forEach(el => el.classList.remove('active'))
+  document.querySelectorAll('.lang-content.lang-' + l).forEach(el => el.classList.add('active'))
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === l)
+  })
+  document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en'
+}
+</script>
+
+<!-- NAV -->
+<nav class="glass fixed top-0 left-0 right-0 z-50 border-b border-[#d0d7de]">
+  <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+    <a href="index.html" class="flex items-center gap-3 text-lg font-bold tracking-tight text-[#1f2328] no-underline">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect x="2" y="2" width="24" height="24" rx="6" stroke="#0969da" stroke-width="2.5" fill="none"/>
+        <path d="M8 14L12 10L16 14L20 10" stroke="#8250df" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <path d="M8 18L12 14L16 18L20 14" stroke="#1a7f37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      TopoCode
+    </a>
+
+    <div class="flex items-center gap-3">
+      <a href="index.html" class="text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline">首页</a>
+      <a href="index.html#features" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline">功能</a>
+      <div class="flex items-center gap-1 border-l border-[#d0d7de] ml-2 pl-3">
+        <button class="lang-btn active" data-lang="zh" onclick="switchLang('zh')">中文</button>
+        <button class="lang-btn" data-lang="en" onclick="switchLang('en')">English</button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-6xl mx-auto px-6 pt-24 pb-16">
+  <div class="flex gap-8">
+
+    <!-- TOC Sidebar -->
+    <aside class="toc-desktop w-56 shrink-0">
+      <div class="sticky top-24">
+        <div class="lang-content lang-zh active">
+          <p class="text-xs font-semibold text-[#656d76] uppercase tracking-wider mb-3">目录</p>
+          <a href="#zh-intro" class="toc-link h2">产品简介</a>
+          <a href="#zh-install" class="toc-link h2">安装与启动</a>
+          <a href="#zh-interface" class="toc-link h2">界面总览</a>
+          <a href="#zh-project" class="toc-link h2">项目管理</a>
+          <a href="#zh-parsing" class="toc-link h2">代码解析</a>
+          <a href="#zh-analysis" class="toc-link h2">代码分析</a>
+          <a href="#zh-ai" class="toc-link h2">AI 助手</a>
+          <a href="#zh-knowledge" class="toc-link h2">知识库</a>
+          <a href="#zh-settings" class="toc-link h2">设置与配置</a>
+          <a href="#zh-faq" class="toc-link h2">FAQ</a>
+        </div>
+        <div class="lang-content lang-en">
+          <p class="text-xs font-semibold text-[#656d76] uppercase tracking-wider mb-3">Contents</p>
+          <a href="#en-intro" class="toc-link h2">Introduction</a>
+          <a href="#en-install" class="toc-link h2">Installation</a>
+          <a href="#en-interface" class="toc-link h2">Interface</a>
+          <a href="#en-project" class="toc-link h2">Project Mgmt</a>
+          <a href="#en-parsing" class="toc-link h2">Code Parsing</a>
+          <a href="#en-analysis" class="toc-link h2">Code Analysis</a>
+          <a href="#en-ai" class="toc-link h2">AI Assistant</a>
+          <a href="#en-knowledge" class="toc-link h2">Knowledge Base</a>
+          <a href="#en-settings" class="toc-link h2">Settings</a>
+          <a href="#en-faq" class="toc-link h2">FAQ</a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="doc-content flex-1 min-w-0">
+
+      <!-- ==================== CHINESE ==================== -->
+      <div class="lang-content lang-zh active">
+
+        <h1 id="zh-top" class="text-4xl font-bold mb-2">TopoCode 使用文档</h1>
+        <p class="text-[#656d76] mb-8">版本: 0.1.0 beta | 源码架构分析与学习工具</p>
+
+        <h2 id="zh-intro">一、产品简介</h2>
+        <p>TopoCode 是一款面向开发者的<strong>源码架构分析与学习工具</strong>。它能自动解析项目源码结构，生成多层级的组件依赖图、调用关系分析和架构分析报告，并支持 AI 辅助分析。</p>
+
+        <h3>核心能力</h3>
+        <table>
+          <thead><tr><th>能力</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><strong>多语言解析</strong></td><td>基于 Tree-sitter AST 解析，支持 11 种语言（C、C++、C#、Java、JS、TS、Python、Go、Rust、PHP、Swift）</td></tr>
+            <tr><td><strong>架构分析</strong></td><td>符号提取 → 调用图 → 依赖图 → Louvain 社区发现</td></tr>
+            <tr><td><strong>AI 报告生成</strong></td><td>基于 LLM 的组件分析、架构文档自动生成</td></tr>
+            <tr><td><strong>可视化</strong></td><td>D3.js 力导向图、Mermaid/PlantUML 图表、Pixi.js 渲染</td></tr>
+            <tr><td><strong>知识管理</strong> (待开发)</td><td>知识图谱、多维分类、TopoScript 动画演示</td></tr>
+            <tr><td><strong>多项目</strong></td><td>项目分组、任务管理、分析报告管理</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="zh-install">二、安装与启动</h2>
+        <h3>环境要求</h3>
+        <table>
+          <thead><tr><th>依赖</th><th>版本要求</th></tr></thead>
+          <tbody>
+            <tr><td>Node.js</td><td>&gt;= 18</td></tr>
+            <tr><td>npm</td><td>&gt;= 9</td></tr>
+            <tr><td>Python</td><td>&gt;= 3.10</td></tr>
+            <tr><td>系统</td><td>Windows / macOS / Linux</td></tr>
+          </tbody>
+        </table>
+
+        <h3>从源码安装</h3>
+        <pre><code># 1. 克隆仓库
+git clone https://github.com/topocode/topoone-ui.git
+cd topoone-ui
+
+# 2. 安装前端依赖
+npm install
+
+# 3. 创建 Python 虚拟环境并安装后端依赖
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+pip install -r backend/requirements.txt
+
+# 4. 构建并打包
+npm run build
+npm run package</code></pre>
+
+        <h3>开发模式运行</h3>
+        <pre><code># 终端 1：启动前端开发服务器
+npm run dev:vite
+
+# 终端 2：启动 Python 后端
+source .venv/bin/activate
+python backend/main.py --http-port 3456
+
+# 或者一键启动（Electron + 后端）
+npm run dev</code></pre>
+
+        <h3>获取安装包</h3>
+        <pre><code>npm run dist:linux   # Linux (.AppImage/.deb/.rpm)
+npm run dist:mac     # macOS (.dmg/.zip)
+npm run dist:win     # Windows (.exe NSIS 安装包)</code></pre>
+
+        <h2 id="zh-interface">三、界面总览</h2>
+        <p>TopoCode 采用 VS Code 风格的 IDE 布局。</p>
+
+        <img src="images/screenshot-interface-layout.png" alt="界面总览布局" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>布局元素</h3>
+        <table>
+          <thead><tr><th>区域</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Activity Bar</strong></td><td>左侧导航栏：首页(项目)、代码、分析、知识库、设置</td></tr>
+            <tr><td><strong>Top Bar</strong></td><td>菜单栏 + 主题切换 + 导入按钮 + 缩放</td></tr>
+            <tr><td><strong>Left Panel</strong></td><td>项目列表、文件树</td></tr>
+            <tr><td><strong>Content Area</strong></td><td>各页面主内容（由路由切换）</td></tr>
+            <tr><td><strong>Right Panel</strong></td><td>AI 助手、代码索引、报告任务列表、调试面板</td></tr>
+            <tr><td><strong>Status Bar</strong></td><td>后端连接状态、AST 就绪状态、Git 分支、AI 模型</td></tr>
+          </tbody>
+        </table>
+
+        <img src="images/screenshot-status-bar.png" alt="底部状态栏" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>页面路由</h3>
+        <table>
+          <thead><tr><th>路由</th><th>页面</th><th>功能</th></tr></thead>
+          <tbody>
+            <tr><td><code>/home</code></td><td>项目导入</td><td>项目管理、分组、文件树、任务创建</td></tr>
+            <tr><td><code>/code</code></td><td>代码解析</td><td>任务创建、文件统计、代码预览</td></tr>
+            <tr><td><code>/analysis</code></td><td>代码分析</td><td>分析报告、社区图谱、AI 分析</td></tr>
+            <tr><td><code>/knowledge</code></td><td>知识库 (待开发)</td><td>知识图谱、文档管理、动画播放</td></tr>
+            <tr><td><code>/coder</code></td><td>AI 助手 (待开发)</td><td>多会话聊天、代码问答</td></tr>
+            <tr><td><code>/user</code></td><td>设置</td><td>模型配置、主题编辑、通用设置</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="zh-project">四、项目管理</h2>
+        <h3>4.1 项目列表</h3>
+        <img src="images/screenshot-home-project-list.png" alt="项目列表卡片网格" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>4.2 导入项目</h3>
+        <img src="images/screenshot-home-project-import.png" alt="拖拽导入区" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ol>
+          <li>点击 TopBar 的 <strong>导入</strong> 按钮，或使用拖拽到 <code>ImportZone</code></li>
+          <li>选择本地源码目录</li>
+          <li>系统自动检测项目语言和文件结构</li>
+        </ol>
+
+        <h3>4.3 项目分组管理</h3>
+        <img src="images/screenshot-home-project-groups-1.png" alt="分组列表与管理器" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+<img src="images/screenshot-home-project-groups-2.png" alt="拖拽分组操作" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+<img src="images/screenshot-home-project-groups-3.png" alt="分组项目管理" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+<img src="images/screenshot-home-project-groups.png" alt="完整分组视图" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <p>通过 <code>GroupManager</code> 创建树形分组（M:N 关系），便于组织多个项目。</p>
+
+        <h3>4.4 文件树浏览</h3>
+        <img src="images/screenshot-home-file-tree.png" alt="文件树" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ul>
+          <li>左侧面板展示项目文件树，支持懒加载、搜索、筛选</li>
+          <li>点击文件可在 <code>FilePreview</code> 中查看高亮代码</li>
+          <li><code>FileStatsPanel</code> 展示各语言行数统计</li>
+        </ul>
+
+        <h3>4.5 项目管理操作</h3>
+        <table>
+          <thead><tr><th>操作</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>收藏</td><td>星标项目，快速访问</td></tr>
+            <tr><td>固定</td><td>固定在列表顶部</td></tr>
+            <tr><td>清除缓存</td><td>选择性清除分析缓存数据</td></tr>
+            <tr><td>删除</td><td>移除项目（不影响源文件）</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="zh-parsing">五、代码解析</h2>
+        <h3>5.1 创建分析任务</h3>
+        <img src="images/screenshot-code-task-create.png" alt="任务创建表单" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <table>
+          <thead><tr><th>配置项</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>范围</td><td>选择要分析的文件/目录</td></tr>
+            <tr><td>扩展名</td><td>限定文件类型（如 <code>.py, .js</code>）</td></tr>
+            <tr><td>排除目录</td><td>跳过无需分析的目录（如 <code>node_modules</code>）</td></tr>
+            <tr><td>报告类型</td><td>选择要生成的分析报告类型</td></tr>
+          </tbody>
+        </table>
+
+        <h3>5.2 任务列表</h3>
+        <img src="images/screenshot-code-task-list.png" alt="任务列表" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>5.3 分析管道</h3>
+        <p>系统自动执行 <strong>6 步分析管道</strong>：</p>
+        <pre><code>Step 1: AST 解析      → Tree-sitter 解析语法树
+Step 2: 符号提取      → 提取函数、类等全局符号
+Step 3: 调用图提取    → 函数调用关系分析
+Step 4: 依赖图提取    → 模块/文件依赖关系分析
+Step 5: 社区发现      → Louvain 算法检测功能模块
+Step 6: 结果汇总      → 汇总分析结果</code></pre>
+
+        <h3>5.4 任务详情</h3>
+        <img src="images/screenshot-code-task-detail.png" alt="任务详情" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ul>
+          <li><strong>AST 视图</strong>：语法树结构</li>
+          <li><strong>调用链</strong>：函数间调用关系</li>
+          <li><strong>依赖图</strong>：模块/文件依赖关系</li>
+          <li><strong>社区结果</strong>：Louvain 算法划分的功能模块</li>
+          <li><strong>执行日志</strong>：每一步的执行日志</li>
+        </ul>
+
+        <h3>5.5 文件统计</h3>
+        <img src="images/screenshot-code-file-stats.png" alt="文件统计面板" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h2 id="zh-analysis">六、代码分析</h2>
+        <h3>6.1 报告生成管道</h3>
+        <img src="images/screenshot-analysis-report-pipeline.png" alt="报告生成管道" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <pre><code>Step 0: 文件摘要预处理  → 提取 README/依赖文件，生成文件摘要
+Step 1-5: 架构分析     → LLM 逐层分析架构
+社区 AI 分析           → 对每个社区进行 AI 解读
+整体架构文档           → 生成全局架构报告</code></pre>
+
+        <h3>6.2 社区分析</h3>
+        <img src="images/screenshot-analysis-community-graph.png" alt="社区图谱" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ul>
+          <li><strong>多层级</strong>：支持 L0/L1 等多层级社区展开</li>
+          <li><strong>边类型</strong>：支持 <code>call</code> 和 <code>include</code> 两种关联</li>
+          <li><strong>AI 解读</strong>：LLM 自动生成功能描述和架构说明</li>
+          <li><strong>图表渲染</strong>：为每个社区生成 Mermaid/PlantUML 图</li>
+        </ul>
+
+        <h3>6.3 子文档查看</h3>
+        <img src="images/screenshot-analysis-subdoc-viewer.png" alt="子文档查看器" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ul>
+          <li>Markdown 文档渲染</li>
+          <li>Mermaid 图表内联渲染</li>
+          <li>PlantUML 图表内联渲染</li>
+          <li>社区链接跳转</li>
+          <li>编辑/保存</li>
+        </ul>
+
+        <h3>6.4 Mermaid 图表渲染</h3>
+        <img src="images/screenshot-analysis-mermaid-diagram.png" alt="Mermaid 图表" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>6.5 浏览器端查看</h3>
+        <p>启动后端后，可通过浏览器访问 <code>http://localhost:3456</code> 查看架构文档、社区目录和代码。</p>
+
+        <h2 id="zh-ai">七、AI 助手</h2>
+        <div class="bg-[#fff8c5] border border-[#d4a72c] text-[#1f2328] rounded-lg px-4 py-3 mb-6 text-sm">⚠️ AI 助手功能当前处于<strong>待开发</strong>状态，尚未在 v0.1.0 beta 中提供。以下为规划功能。</div>
+        <h3>7.1 会话管理</h3>
+        <img src="images/screenshot-ai-chat-sessions.png" alt="AI 助手会话" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ul>
+          <li><strong>多会话</strong>：创建多个独立对话</li>
+          <li><strong>会话切换</strong>：通过 Tab 栏快速切换</li>
+          <li><strong>会话删除/清空</strong>：管理会话历史</li>
+        </ul>
+
+        <h3>7.2 对话界面</h3>
+        <img src="images/screenshot-ai-chat-messages.png" alt="AI 对话" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <table>
+          <thead><tr><th>模式</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><strong>聊天 (Chat)</strong></td><td>自由对话，代码问答</td></tr>
+            <tr><td><strong>工具调用 (Tools)</strong></td><td>调用分析工具（PlantUML 渲染等）</td></tr>
+            <tr><td><strong>结构化输出</strong></td><td>按模板生成结构化报告</td></tr>
+          </tbody>
+        </table>
+
+        <h3>7.3 LLM 配置</h3>
+        <p>兼容 Ollama、LM Studio 和 OpenAI 兼容 API。首次使用需在设置页面配置模型。</p>
+
+        <h2 id="zh-knowledge">八、知识库</h2>
+        <div class="bg-[#fff8c5] border border-[#d4a72c] text-[#1f2328] rounded-lg px-4 py-3 mb-6 text-sm">⚠️ 知识库功能当前处于<strong>待开发</strong>状态，尚未在 v0.1.0 beta 中提供。以下为规划功能。</div>
+        <h3>8.1 知识图谱</h3>
+        <img src="images/screenshot-knowledge-graph.png" alt="知识图谱" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>8.2 知识文档管理</h3>
+        <img src="images/screenshot-knowledge-docs.png" alt="知识文档" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>8.3 分类管理</h3>
+        <table>
+          <thead><tr><th>维度</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>生命周期</td><td>需求/设计/开发/测试/部署/运维</td></tr>
+            <tr><td>技术栈</td><td>前端/后端/数据库/基础设施</td></tr>
+            <tr><td>抽象层</td><td>架构/组件/模块/函数</td></tr>
+            <tr><td>用途</td><td>业务/技术/管理/学习</td></tr>
+          </tbody>
+        </table>
+
+        <h3>8.4 TopoScript 动画</h3>
+        <img src="images/screenshot-knowledge-animation.png" alt="动画播放器" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <p>内置 TopoScript 动画引擎：脚本编排、步骤同步、SVG/Canvas 双渲染、导出为 HTML/图片。</p>
+
+        <h2 id="zh-settings">九、设置与配置</h2>
+        <h3>9.1 模型配置</h3>
+        <img src="images/screenshot-settings-models.png" alt="模型配置" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <table>
+          <thead><tr><th>功能</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>添加模型</td><td>配置名称、提供商、API 地址、密钥</td></tr>
+            <tr><td>测试连接</td><td>验证模型是否可达</td></tr>
+            <tr><td>默认模型</td><td>设置 AI 助手的默认模型</td></tr>
+            <tr><td>使用统计</td><td>查看各模型调用情况</td></tr>
+          </tbody>
+        </table>
+
+        <h3>9.2 主题系统</h3>
+        <img src="images/screenshot-settings-themes.png" alt="主题管理器" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <p>基于 Catppuccin Mocha 色彩体系，支持预设主题、自定义编辑器、导入/导出。</p>
+
+        <h3>9.3 通用设置</h3>
+        <img src="images/screenshot-settings-general.png" alt="通用设置" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <table>
+          <thead><tr><th>设置项</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>语言</td><td>中文 / English</td></tr>
+            <tr><td>字体大小</td><td>实时生效</td></tr>
+            <tr><td>自动保存</td><td>自动保存间隔</td></tr>
+            <tr><td>分页大小</td><td>项目列表每页数量</td></tr>
+            <tr><td>ZMQ 端口</td><td>DEALER / PUB 端口配置</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="zh-faq">十、FAQ</h2>
+        <h4>Q: 支持哪些编程语言？</h4>
+        <p>目前支持 11 种语言：C、C++、C#、Java、JavaScript、TypeScript、Python、Go、Rust、PHP、Swift。</p>
+
+        <h4>Q: 分析时后端未启动？</h4>
+        <p>确保 Python 后端已启动。Status Bar 右下角显示后端连接状态（绿色=已连接，红色=异常）。</p>
+
+        <h4>Q: 如何配置 AI 模型？</h4>
+        <p>进入设置页面 → 模型配置 → 添加模型。推荐使用 Ollama 或兼容 OpenAI API 的服务。</p>
+
+        <h4>Q: 分析报告如何导出？</h4>
+        <p>报告生成后可通过 <code>SubDocViewer</code> 查看，或通过浏览器访问 <code>http://localhost:3456</code> 查看在线版本。</p>
+
+        <h4>Q: 如何清除分析缓存？</h4>
+        <p>在项目卡片上点击右键 → 清除缓存，可选择按表清除。</p>
+
+        <hr>
+        <p class="text-[#656d76] text-sm">遇到问题？请访问 <a href="https://github.com/topocode/topoone-ui/issues">GitHub Issues</a> 提交反馈。</p>
+      </div>
+
+      <!-- ==================== ENGLISH ==================== -->
+      <div class="lang-content lang-en">
+
+        <h1 id="en-top" class="text-4xl font-bold mb-2">TopoCode Usage Guide</h1>
+        <p class="text-[#656d76] mb-8">Version: v0.1.0 beta | Source Code Architecture Analysis & Learning Tool</p>
+
+        <h2 id="en-intro">1. Introduction</h2>
+        <p>TopoCode is a <strong>source code architecture analysis and learning tool</strong> for developers. It automatically parses project source code, generates multi-level component dependency graphs, call chain analysis, and architecture analysis reports with AI assistance.</p>
+
+        <h3>Core Capabilities</h3>
+        <table>
+          <thead><tr><th>Capability</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Multi-language Parsing</strong></td><td>Tree-sitter AST parsing, supports 11 languages (C, C++, C#, Java, JS, TS, Python, Go, Rust, PHP, Swift)</td></tr>
+            <tr><td><strong>Architecture Analysis</strong></td><td>Symbol extraction → Call graph → Dependency graph → Louvain community detection</td></tr>
+            <tr><td><strong>AI Report Generation</strong></td><td>LLM-powered component analysis, automated architecture document generation</td></tr>
+            <tr><td><strong>Visualization</strong></td><td>D3.js force graphs, Mermaid/PlantUML diagrams, Pixi.js rendering</td></tr>
+            <tr><td><strong>Knowledge Management</strong> (Planned)</td><td>Knowledge graphs, multi-dimensional classification, TopoScript animation</td></tr>
+            <tr><td><strong>Multi-project</strong></td><td>Project grouping, task management, analysis report management</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="en-install">2. Installation &amp; Setup</h2>
+        <h3>Requirements</h3>
+        <table>
+          <thead><tr><th>Dependency</th><th>Version</th></tr></thead>
+          <tbody>
+            <tr><td>Node.js</td><td>&gt;= 18</td></tr>
+            <tr><td>npm</td><td>&gt;= 9</td></tr>
+            <tr><td>Python</td><td>&gt;= 3.10</td></tr>
+            <tr><td>OS</td><td>Windows / macOS / Linux</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Install from Source</h3>
+        <pre><code># 1. Clone the repository
+git clone https://github.com/topocode/topoone-ui.git
+cd topoone-ui
+
+# 2. Install frontend dependencies
+npm install
+
+# 3. Create Python virtual environment and install backend deps
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+
+# 4. Build and package
+npm run build
+npm run package</code></pre>
+
+        <h3>Development Mode</h3>
+        <pre><code># Terminal 1: Frontend dev server
+npm run dev:vite
+
+# Terminal 2: Python backend
+source .venv/bin/activate
+python backend/main.py --http-port 3456
+
+# Or all-in-one (Electron + backend auto-start)
+npm run dev</code></pre>
+
+        <h3>Build Distributables</h3>
+        <pre><code>npm run dist:linux   # Linux (.AppImage/.deb/.rpm)
+npm run dist:mac     # macOS (.dmg/.zip)
+npm run dist:win     # Windows (.exe)</code></pre>
+
+        <h2 id="en-interface">3. Interface Overview</h2>
+        <p>TopoCode features a VS Code-style IDE layout.</p>
+        <img src="images/screenshot-interface-layout.png" alt="Interface layout overview" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>Layout Elements</h3>
+        <table>
+          <thead><tr><th>Area</th><th>Function</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Activity Bar</strong></td><td>Left navigation: Home, Code, Analysis, Knowledge, Settings</td></tr>
+            <tr><td><strong>Top Bar</strong></td><td>Menu bar, theme switcher, import, zoom</td></tr>
+            <tr><td><strong>Left Panel</strong></td><td>Project list, file tree</td></tr>
+            <tr><td><strong>Content Area</strong></td><td>Main page content (routed)</td></tr>
+            <tr><td><strong>Right Panel</strong></td><td>AI assistant, code index, reports, debug</td></tr>
+            <tr><td><strong>Status Bar</strong></td><td>Backend status, AST, Git branch, AI model</td></tr>
+          </tbody>
+        </table>
+
+        <img src="images/screenshot-status-bar.png" alt="Status bar" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>Routes</h3>
+        <table>
+          <thead><tr><th>Route</th><th>Page</th><th>Function</th></tr></thead>
+          <tbody>
+            <tr><td><code>/home</code></td><td>Project Import</td><td>Project management, groups, file tree, tasks</td></tr>
+            <tr><td><code>/code</code></td><td>Code Parsing</td><td>Task creation, file stats, code preview</td></tr>
+            <tr><td><code>/analysis</code></td><td>Code Analysis</td><td>Reports, community graph, AI analysis</td></tr>
+            <tr><td><code>/knowledge</code></td><td>Knowledge Base (Planned)</td><td>Knowledge graph, documents, animation</td></tr>
+            <tr><td><code>/coder</code></td><td>AI Assistant (Planned)</td><td>Multi-session chat, code Q&amp;A</td></tr>
+            <tr><td><code>/user</code></td><td>Settings</td><td>Models, themes, general settings</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="en-project">4. Project Management</h2>
+        <h3>4.1 Project List</h3>
+        <img src="images/screenshot-home-project-list.png" alt="Project list cards" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>4.2 Import a Project</h3>
+        <img src="images/screenshot-home-project-import.png" alt="Import zone" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>4.3 Project Groups</h3>
+        <img src="images/screenshot-home-project-groups-1.png" alt="Group list and manager" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+<img src="images/screenshot-home-project-groups-2.png" alt="Drag-and-drop grouping" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+<img src="images/screenshot-home-project-groups-3.png" alt="Group project management" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+<img src="images/screenshot-home-project-groups.png" alt="Full group view" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>4.4 File Tree</h3>
+        <img src="images/screenshot-home-file-tree.png" alt="File tree" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h2 id="en-parsing">5. Code Parsing</h2>
+        <h3>5.1 Create Task</h3>
+        <img src="images/screenshot-code-task-create.png" alt="Task creation form" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>5.2 Task List</h3>
+        <img src="images/screenshot-code-task-list.png" alt="Task list" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>5.3 Analysis Pipeline</h3>
+        <pre><code>Step 1: AST Parsing        → Tree-sitter syntax tree
+Step 2: Symbol Extraction  → Extract functions, classes
+Step 3: Call Graph         → Function call relationships
+Step 4: Dependency Graph   → Module/file dependencies
+Step 5: Community Detection → Louvain algorithm
+Step 6: Result Summary     → Aggregate results</code></pre>
+
+        <h3>5.4 Task Detail</h3>
+        <img src="images/screenshot-code-task-detail.png" alt="Task detail dialog" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>5.5 File Statistics</h3>
+        <img src="images/screenshot-code-file-stats.png" alt="File statistics panel" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h2 id="en-analysis">6. Code Analysis</h2>
+        <h3>6.1 Report Pipeline</h3>
+        <img src="images/screenshot-analysis-report-pipeline.png" alt="Report generation pipeline" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>6.2 Community Analysis</h3>
+        <img src="images/screenshot-analysis-community-graph.png" alt="Community graph" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <ul>
+          <li><strong>Multi-level</strong>: L0/L1 expansion</li>
+          <li><strong>Edge types</strong>: <code>call</code> and <code>include</code></li>
+          <li><strong>AI interpretation</strong>: LLM-generated descriptions</li>
+          <li><strong>Diagram rendering</strong>: Mermaid/PlantUML per community</li>
+        </ul>
+
+        <h3>6.3 Sub-document Viewer</h3>
+        <img src="images/screenshot-analysis-subdoc-viewer.png" alt="Sub-doc viewer" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>6.4 Mermaid Diagrams</h3>
+        <img src="images/screenshot-analysis-mermaid-diagram.png" alt="Mermaid diagram" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h2 id="en-ai">7. AI Assistant</h2>
+        <div class="bg-[#fff8c5] border border-[#d4a72c] text-[#1f2328] rounded-lg px-4 py-3 mb-6 text-sm">⚠️ AI Assistant is currently <strong>under development</strong> and not available in v0.1.0 beta. The following describes planned features.</div>
+        <h3>7.1 Session Management</h3>
+        <img src="images/screenshot-ai-chat-sessions.png" alt="AI sessions" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>7.2 Chat Interface</h3>
+        <img src="images/screenshot-ai-chat-messages.png" alt="AI chat messages" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+        <table>
+          <thead><tr><th>Mode</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Chat</strong></td><td>Free conversation, code Q&amp;A</td></tr>
+            <tr><td><strong>Tools</strong></td><td>Invoke analysis tools (PlantUML, etc.)</td></tr>
+            <tr><td><strong>Structured</strong></td><td>Generate structured reports from templates</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="en-knowledge">8. Knowledge Base</h2>
+        <div class="bg-[#fff8c5] border border-[#d4a72c] text-[#1f2328] rounded-lg px-4 py-3 mb-6 text-sm">⚠️ Knowledge Base is currently <strong>under development</strong> and not available in v0.1.0 beta. The following describes planned features.</div>
+        <h3>8.1 Knowledge Graph</h3>
+        <img src="images/screenshot-knowledge-graph.png" alt="Knowledge graph" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>8.2 Document Management</h3>
+        <img src="images/screenshot-knowledge-docs.png" alt="Knowledge documents" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>8.3 TopoScript Animation</h3>
+        <img src="images/screenshot-knowledge-animation.png" alt="Animation player" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h2 id="en-settings">9. Settings &amp; Configuration</h2>
+        <h3>9.1 Model Configuration</h3>
+        <img src="images/screenshot-settings-models.png" alt="Model config" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>9.2 Theme System</h3>
+        <img src="images/screenshot-settings-themes.png" alt="Theme manager" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h3>9.3 General Settings</h3>
+        <img src="images/screenshot-settings-general.png" alt="General settings" class="w-full rounded-lg border border-[#d0d7de] shadow-sm my-4" onerror="this.style.display='none'">
+
+        <h2 id="en-faq">10. FAQ</h2>
+        <h4>Q: Which languages are supported?</h4>
+        <p>11 languages: C, C++, C#, Java, JavaScript, TypeScript, Python, Go, Rust, PHP, Swift.</p>
+
+        <h4>Q: Backend not running?</h4>
+        <p>Check the Status Bar for connection status (green = connected, red = error).</p>
+
+        <h4>Q: How to configure an AI model?</h4>
+        <p>Go to Settings → Model Configuration → Add Model. Use Ollama or OpenAI-compatible API.</p>
+
+        <h4>Q: How to export analysis reports?</h4>
+        <p>View in <code>SubDocViewer</code> or via browser at <code>http://localhost:3456</code>.</p>
+
+        <hr>
+        <p class="text-[#656d76] text-sm">Found an issue? Report it on <a href="https://github.com/topocode/topoone-ui/issues">GitHub Issues</a>.</p>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer class="py-8 px-6 border-t border-[#d0d7de]">
+  <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <div class="flex items-center gap-2 text-sm text-[#656d76]">
+      <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
+        <rect x="2" y="2" width="24" height="24" rx="6" stroke="#656d76" stroke-width="2.5" fill="none"/>
+        <path d="M8 14L12 10L16 14L20 10" stroke="#656d76" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <path d="M8 18L12 14L16 18L20 14" stroke="#656d76" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      TopoCode &copy; 2026
+    </div>
+    <div class="flex items-center gap-6 text-sm text-[#656d76]">
+      <span>Apache-2.0 License</span>
+      <a href="index.html" class="hover:text-[#1f2328] transition no-underline text-[#656d76]">首页</a>
+      <a data-i18n-href="nav.docsUrl" class="hover:text-[#1f2328] transition no-underline text-[#656d76]">使用文档</a>
+      <a href="mailto:topocode@163.com" class="hover:text-[#1f2328] transition no-underline text-[#656d76]">topocode@163.com</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
