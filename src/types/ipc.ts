@@ -522,6 +522,8 @@ export interface IPCAPI {
     setMemoryLimit: (limit: number) => Promise<void>
     getHttpConfig: () => Promise<{ host: string; port: number }>
     setHttpConfig: (config: { host: string; port: number }) => Promise<void>
+    testPort: (port: number) => Promise<PortTestResult>
+    ping: () => Promise<PingResult>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void
   }
 
@@ -626,10 +628,73 @@ export interface IPCAPI {
 
 // ==================== Window 扩展 ====================
 
+/* ====== IPC Service 边界类型 ====== */
+
+export interface SuccessResponse { success: boolean }
+export interface BackendActionResult { status: string; pid?: number; port?: number; error?: string }
+export interface PingResult { ok: boolean; timestamp?: string }
+export interface PortTestResult { available: boolean }
+export interface HttpConfigDTO { host: string; port: number }
+
+export interface SubDocDTO { id: string; taskId: string; title: string; content: string; createdAt?: string; updatedAt?: string }
+export interface SubDocCreateResponse { id: string; subDocId?: string }
+export interface SubDocUpdateResponse { success: boolean }
+export interface SubDocDeleteResponse { success: boolean }
+export interface SaveOverallDocResponse { success: boolean; id?: string }
+export interface PipelineStateData { stateJson?: string }
+export interface PipelineStateResponse { success: boolean; data?: PipelineStateData }
+export interface ReadmeContentResponse { content: string }
+export interface DependencyFilesResult { files: string[] }
+export interface ProjectSummaryResponse { summary?: string }
+export interface ProjectSummaryData { summary: string; projectId: string }
+export interface LevelCommunityDetailResult { communities?: Array<Record<string, unknown>> }
+export interface SaveFileSummariesResponse { success: boolean }
+export interface FileSummariesResult { summaries: Array<Record<string, unknown>> }
+
+export interface ModelTestResult { success: boolean; status?: string; latency?: number }
+export interface AgentDetectResult { status: string; version?: string }
+export interface BindingsDTO { [key: string]: string }
+
+export interface PluginInfoDTO { id: string; name: string; version?: string; enabled: boolean; description?: string; loaded?: boolean; platforms?: string[] }
+export interface ModuleRegistryItemDTO { id: string; name: string; version: string; description?: string; size_kb?: number; platforms?: string[] }
+export interface InstalledModuleDTO { name: string; version: string; enabled: boolean }
+
+export interface RunTaskResult { success: boolean }
+export interface ClearCacheResult { success: boolean }
+export interface ClearCacheTableResult { success: boolean }
+export interface ClearCacheCountsResult { counts: Record<string, number> }
+export interface CommunityGraphResult { nodes: unknown[]; edges: unknown[] }
+export interface CascadeLevelsResult { levels: Array<Record<string, unknown>> }
+export interface QueryStatsResult { stats: Record<string, unknown> }
+export interface SymbolDetail { name: string; filePath: string; line: number }
+export interface ListCommunityResultsResponse { results: Array<Record<string, unknown>> }
+export interface SaveCommunityResultResponse { success: boolean }
+export interface UpdateCommunityNameResponse { success: boolean }
+
+export interface ProjectStorageStats { fileCount: number; totalSize: number }
+export interface PathValidityResult { valid: boolean; error?: string }
+export interface FileChangesResult { changed: boolean; files?: string[] }
+export interface UpdatePathResult { success: boolean }
+export interface DimensionsResult { dimensions: string[] }
+
+export interface ProjectMeta { name?: string; favorite?: number; pinned?: number }
+export interface TreeNode { id: string; name: string; children?: TreeNode[] }
+export interface UsageStatDTO { id: number; modelId: string; modelName: string; date: string; requestCount: number; promptTokens: number; completionTokens: number; totalTokens: number }
+
 declare global {
   interface Window {
     api?: IPCAPI
   }
 }
+
+// ==================== DTO type aliases for service layer ====================
+export type ModelConfigDTO = ModelConfigItem
+export type AgentConfigDTO = AgentConfigItem
+export type SkillConfigDTO = SkillConfigItem
+export type AnalysisTaskDTO = AnalysisTask
+export type AnalysisResultsDTO = AnalysisResult
+export type TaskRunDTO = TaskRun
+export type ScanOptionsDTO = ScanOptions
+export type TaskConfigUpdateDTO = TaskConfigUpdate
 
 export {}

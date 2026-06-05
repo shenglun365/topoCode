@@ -32,3 +32,9 @@ npm-debug.log*
 # python
 *.pyc
 
+# Build artifacts
+build/render-worker-bundled.js
+build/*-bundled*
+dist-plugins/
+dist-modules/
+tmp-module-build/

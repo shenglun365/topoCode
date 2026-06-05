@@ -11,7 +11,8 @@ import {
   DocumentTextIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import { useThemeStore } from '@/stores/theme'
 import { useStatusStore } from '@/stores/status'
 import ModelConfig from '@/components/settings/ModelConfig.vue'
@@ -24,6 +25,7 @@ import { useComponentId } from '@/composables/useComponentId'
 const { showId, componentId } = useComponentId('PG-005')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const modelConfigStore = useModelConfigStore()
 const themeStore = useThemeStore()
 const statusStore = useStatusStore()
 const showRestartConfirm = ref(false)
@@ -34,14 +36,14 @@ async function handleRestart() {
 }
 
 onMounted(async () => {
-  if (settingsStore.models.length === 0) {
-    await settingsStore.loadSettings()
+  if (modelConfigStore.models.length === 0) {
+    await (settingsStore as any).loadSettings()
   }
   themeStore.init()
   // 获取后端状态
   try {
-    const st = await window.api.backend.getStatus()
-    statusStore.setBackendStatus(st)
+    const st = await window.api?.backend.getStatus()
+    if (st) statusStore.setBackendStatus(st as any)
   } catch (_) {}
 })
 

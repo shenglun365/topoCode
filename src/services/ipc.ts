@@ -17,6 +17,8 @@ import type {
   TaskCompleteEvent,
   TaskErrorEvent,
   BackendStatusEvent,
+  TaskConfigUpdate,
+  ScanOptions,
 } from '@/types/ipc'
 
 /**
@@ -49,10 +51,10 @@ function adaptProjectList(list: any[]): Project[] {
  * Electron 环境: 通过 window.api 调用 ZeroMQ → Python 后端
  * 浏览器环境: 不可用 (需 Electron 运行)
  */
-export const ipc: IPCAPI = createRealIPC()
+export const ipc: IPCAPI = createRealIPC() as unknown as IPCAPI
 
-function createRealIPC(): IPCAPI {
-  const api = typeof window !== 'undefined' ? (window as any).api : null
+function createRealIPC() {
+  const api: any = typeof window !== 'undefined' ? (window as any).api : null
 
   if (!api) {
     console.warn('[IPC] window.api not available - running in browser without Electron')
@@ -302,9 +304,6 @@ function createRealIPC(): IPCAPI {
       deleteSubDoc: async (subDocId: string) => {
         return await api.report.deleteSubDoc(subDocId)
       },
-      saveOverallDoc: async (params: { taskId: string; title: string; content: string }) => {
-        return await api.report.saveOverallDoc(params)
-      },
       savePipelineState: async (params: { taskId: string; stateJson: string }) => {
         return await api.report.savePipelineState(params)
       },
@@ -332,7 +331,13 @@ function createRealIPC(): IPCAPI {
       getFileSummaries: async (params: { projectId: string; taskId?: string; source?: string }) => {
         return await api.report.getFileSummaries(params)
       },
-    },
+      getCallLogs: async (params: any) => {
+        return await api.report.getCallLogs(params)
+      },
+      getInteractionLogs: async (params: any) => {
+        return await api.report.getInteractionLogs(params)
+      },
+    } as IPCAPI['report'],
 
     // ==================== 知识库 ====================
     knowledge: {
@@ -435,11 +440,17 @@ function createRealIPC(): IPCAPI {
       getStatus: async () => {
         return await api.backend.getStatus()
       },
+      getMemoryLimit: async () => {
+        return await (api.backend as any).getMemoryLimit()
+      },
+      setMemoryLimit: async (limit: number) => {
+        await (api.backend as any).setMemoryLimit(limit)
+      },
       ping: async () => {
-        return await api.backend.ping()
+        return await (api.backend as any).ping()
       },
       testPort: async (port: number) => {
-        return await api.backend.testPort(port)
+        return await (api.backend as any).testPort(port)
       },
       onStatusChange: (cb: (data: BackendStatusEvent) => void) => {
         if (api.backend.onStatusChange) {

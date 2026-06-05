@@ -11,7 +11,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
 import { useNavigationStore } from '@/stores/navigation'
 import ProjectCard from '@/components/project/ProjectCard.vue'
 import GroupFilter from '@/components/project/GroupFilter.vue'

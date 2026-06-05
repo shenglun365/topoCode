@@ -8,7 +8,7 @@ import { resolve } from 'path'
 import { mkdirSync, writeFileSync } from 'fs'
 
 const entry = resolve('src/workers/render-worker.ts')
-const outdir = 'src/workers'
+const outdir = 'build'
 const outfile = resolve(outdir, 'render-worker-bundled.js')
 
 async function main() {

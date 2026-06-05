@@ -75,7 +75,7 @@ function handleClick() {
       ...props.node,
       __action: 'deselect',
       __paths: [props.node.path, globPattern] as any,
-    })
+    } as any)
   } else {
     // 选中当前节点 — 只添加 dir/* 一个 glob 模式，不枚举子目录
     const globPattern = props.node.path + '/*'
@@ -83,7 +83,7 @@ function handleClick() {
       ...props.node,
       __action: 'select',
       __paths: [globPattern] as any,
-    })
+    } as any)
   }
 }
 

@@ -44,19 +44,19 @@ const safeExtensions = computed(() => {
   return Array.isArray(data) ? data : JSON.parse(data)
 })
 const safeReportTypes = computed(() => {
-  const data = props.task.reportTypes || props.task.report_types
+  const data = props.task.reportTypes || props.task.reportTypes
   if (!data) return []
   return Array.isArray(data) ? data : JSON.parse(data)
 })
 const safeExcludeDirs = computed(() => {
-  const data = props.task.excludeDirs || props.task.exclude_dirs
+  const data = props.task.excludeDirs || props.task.excludeDirs
   if (!data) return []
   return Array.isArray(data) ? data : JSON.parse(data)
 })
 const safeScopes = computed(() => {
   const data = props.task.scopes
   if (!data) return []
-  return Array.isArray(data) ? data : (data.split?.(',') || [])
+  return Array.isArray(data) ? data : ((data as string).split?.(',') || [])
 })
 
 // 文件分布数据

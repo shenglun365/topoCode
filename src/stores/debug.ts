@@ -22,15 +22,19 @@ export const useDebugStore = defineStore('debug', () => {
     [LogLevel.NONE]: 'NONE',
   }
 
-  // 注册到统一日志系统
-  addLogHandler((entry: LogEntry) => {
-    if (entry.level >= filterLevel.value) {
-      logs.value.unshift(entry as DebugLog)
-      if (logs.value.length > maxLogs) {
-        logs.value = logs.value.slice(0, maxLogs)
+  let _initialized = false
+  function init() {
+    if (_initialized) return
+    _initialized = true
+    addLogHandler((entry: LogEntry) => {
+      if (entry.level >= filterLevel.value) {
+        logs.value.unshift(entry as DebugLog)
+        if (logs.value.length > maxLogs) {
+          logs.value = logs.value.slice(0, maxLogs)
+        }
       }
-    }
-  })
+    })
+  }
 
   // 向后兼容的 log 方法
   function log(source: string, message: string) {
@@ -72,5 +76,6 @@ export const useDebugStore = defineStore('debug', () => {
     setFilterLevel,
     getLogger,
     levelNames,
+    init,
   }
 })

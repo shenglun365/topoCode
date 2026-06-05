@@ -8,18 +8,24 @@ import {
   ArrowPathIcon,
   SparklesIcon,
 } from '@heroicons/vue/24/outline'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import { useProjectStore } from '@/stores/project'
 import PipelineTaskTree from './PipelineTaskTree.vue'
 import CommunityAnalysisPipeline from './CommunityAnalysisPipeline.vue'
 import type { PipelineTaskNode } from '@/types/ipc'
-import { useReportStore } from '@/stores/report'
+import { useReportStore } from '@/stores/report-store'
+import { usePipelineStore } from '@/stores/pipeline-store'
+import { useCommunityStore } from '@/stores/community-store'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const modelConfigStore = useModelConfigStore()
 const projectStore = useProjectStore()
 const reportStore = useReportStore()
+const pipelineStore = usePipelineStore()
+const communityStore = useCommunityStore()
 
 const props = defineProps<{
   taskId: string
@@ -74,15 +80,15 @@ function createInitialTree(): PipelineTaskNode {
   }
 }
 
-const taskState = computed(() => reportStore.tasks[props.taskId])
+const taskState = computed(() => pipelineStore.tasks[props.taskId])
 const rootTask = computed(() => taskState.value?.pipelineRootTask ?? createInitialTree())
 const running = computed(() => taskState.value?.pipelineRunning ?? false)
 const isPaused = computed(() => taskState.value?.pipelinePaused ?? false)
 const overallProgress = computed(() => taskState.value?.pipelineProgress ?? 0)
 const errorLogs = computed(() => taskState.value?.errorLogs ?? [])
 
-const allCompleted = computed(() => reportStore.allPipelineStepsCompleted(props.taskId))
-const hasError = computed(() => reportStore.hasPipelineError(props.taskId))
+const allCompleted = computed(() => pipelineStore.allPipelineStepsCompleted(props.taskId))
+const hasError = computed(() => pipelineStore.hasPipelineError(props.taskId))
 
 const { showId, componentId } = useComponentId('RP-002')
 
@@ -99,7 +105,7 @@ async function prepareStepVariables(stepId: string): Promise<Record<string, stri
         base.projectName = project.name || ''
         base.language = project.language || ''
         base.fileCount = String(project.fileCount || 0)
-        base.rootPath = project.rootPath || project.path || ''
+        base.rootPath = (project as any).rootPath || project.path || ''
       } else {
         base.projectName = t('report.pipeline.unknown')
       }
@@ -116,13 +122,13 @@ async function prepareStepVariables(stepId: string): Promise<Record<string, stri
 
       // 3. 社区命名映射 (合并 CALL + INCLUDE)
       const [callResults, depResults] = await Promise.all([
-        reportStore.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
-        reportStore.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
+        communityStore.listCommunityResults(props.taskId, 'CALL').catch(() => ({ results: [] })),
+        communityStore.listCommunityResults(props.taskId, 'INCLUDE').catch(() => ({ results: [] })),
       ])
       const nameMap = new Map<string, string>()
       for (const r of [...(callResults?.results || []), ...(depResults?.results || [])]) {
-        if (r.name && r.name !== r.comm_id) {
-          nameMap.set(r.comm_id, r.name)
+        if (r.name && r.name !== r.commId) {
+          nameMap.set(r.commId, r.name)
         }
       }
       base.communityNameMap = nameMap.size > 0
@@ -185,11 +191,11 @@ async function runStep(step: PipelineTaskNode) {
 
   step.status = 'running'
 
-  const modelId = settingsStore.models.find(m => m.isDefault)?.id
+  const modelId = modelConfigStore.models.find(m => m.isDefault)?.id
   if (!modelId) {
     step.status = 'error'
     step.error = t('report.llmNotConfigured')
-    reportStore.pushError(props.taskId, `${step.label || step.id}: ${t('report.llmNotConfigured')}`)
+    pipelineStore.pushError(props.taskId, `${step.label || step.id}: ${t('report.llmNotConfigured')}`)
     return
   }
 
@@ -197,7 +203,7 @@ async function runStep(step: PipelineTaskNode) {
     const variables = await prepareStepVariables(step.id)
     variables.pipeline_step = step.id
     const sessionId = `pipeline-${props.taskId}-${step.id}-${Date.now()}`
-    const result = await window.api.llm.chat({
+    const result: any = await window.api!.llm.chat({
       sessionId,
       modelId,
       templateId: step.templateId,
@@ -208,14 +214,14 @@ async function runStep(step: PipelineTaskNode) {
     if (result.status === 'error') {
       step.status = 'error'
       step.error = result.error || 'LLM request failed'
-      reportStore.pushError(props.taskId, `${step.label || step.id}: ${step.error}`)
-      reportStore.recalcProgress(props.taskId)
+      pipelineStore.pushError(props.taskId, `${step.label || step.id}: ${step.error}`)
+      pipelineStore.recalcProgress(props.taskId)
       return
     }
 
     let fullContent = ''
     await new Promise<void>((resolve, reject) => {
-      const unsubscribe = window.api.llm.subscribe(result.requestId, {
+      const unsubscribe = window.api!.llm.subscribe(result.requestId, {
         onChunk(data: { text: string }) { fullContent += data.text },
         onDone() {
           const trimmed = fullContent.trim()
@@ -224,7 +230,7 @@ async function runStep(step: PipelineTaskNode) {
           if (isError) {
             step.status = 'error'
             step.error = trimmed || (result as any).error || 'LLM returned empty response'
-            reportStore.pushError(props.taskId, `${step.label || step.id}: ${step.error}`)
+            pipelineStore.pushError(props.taskId, `${step.label || step.id}: ${step.error}`)
           } else {
             step.status = 'completed'
             if (step.id === 'overall_architecture') {
@@ -237,7 +243,7 @@ async function runStep(step: PipelineTaskNode) {
         onError(errData: { message: string }) {
           step.status = 'error'
           step.error = errData.message
-          reportStore.pushError(props.taskId, `${step.label || step.id}: ${errData.message}`)
+          pipelineStore.pushError(props.taskId, `${step.label || step.id}: ${errData.message}`)
           unsubscribe()
           reject(new Error(errData.message))
         },
@@ -247,72 +253,72 @@ async function runStep(step: PipelineTaskNode) {
     step.status = 'error'
     const msg = e.message || String(e)
     step.error = msg
-    reportStore.pushError(props.taskId, `${step.label || step.id}: ${msg}`)
+    pipelineStore.pushError(props.taskId, `${step.label || step.id}: ${msg}`)
   }
-  reportStore.recalcProgress(props.taskId)
+  pipelineStore.recalcProgress(props.taskId)
 }
 
 async function runAll() {
   if (running.value) return
   if (allCompleted.value) {
-    reportStore.initPipeline(props.taskId, createInitialTree())
+    pipelineStore.initPipeline(props.taskId, createInitialTree())
   }
-  reportStore.setPipelineRunning(props.taskId, true)
-  reportStore.setPipelinePaused(props.taskId, false)
-  const root = reportStore.tasks[props.taskId].pipelineRootTask!
+  pipelineStore.setPipelineRunning(props.taskId, true)
+  pipelineStore.setPipelinePaused(props.taskId, false)
+  const root = pipelineStore.tasks[props.taskId].pipelineRootTask!
   root.status = 'running'
-  reportStore.recalcProgress(props.taskId)
+  pipelineStore.recalcProgress(props.taskId)
 
   // Phase 0: Model validation
-  reportStore.updateNodeStatus(props.taskId, 'validation', 'running')
-  const modelId = settingsStore.models.find(m => m.isDefault)?.id
+  pipelineStore.updateNodeStatus(props.taskId, 'validation', 'running')
+  const modelId = modelConfigStore.models.find(m => m.isDefault)?.id
   if (!modelId) {
-    reportStore.updateNodeStatus(props.taskId, 'validation', 'error', t('report.llmNotConfigured'))
-    reportStore.setPipelineRunning(props.taskId, false)
+    pipelineStore.updateNodeStatus(props.taskId, 'validation', 'error', t('report.llmNotConfigured'))
+    pipelineStore.setPipelineRunning(props.taskId, false)
     root.status = 'error'
     return
   }
-  reportStore.updateNodeStatus(props.taskId, 'validation', 'completed')
+  pipelineStore.updateNodeStatus(props.taskId, 'validation', 'completed')
 
   // Phase 1: Project summary
-  reportStore.updateNodeStatus(props.taskId, 'project_summary', 'running')
+  pipelineStore.updateNodeStatus(props.taskId, 'project_summary', 'running')
   const pid = projectStore.selectedProjectId
   if (pid) {
     try {
       await reportStore.getReadmeContent(pid)
       await reportStore.extractDependencyFiles(pid)
       const result = await reportStore.generateProjectSummary(pid)
-      reportStore.updateNodeStatus(props.taskId, 'project_summary', result?.summary ? 'completed' : 'error')
+      pipelineStore.updateNodeStatus(props.taskId, 'project_summary', result?.summary ? 'completed' : 'error')
     } catch (e: any) {
-      reportStore.updateNodeStatus(props.taskId, 'project_summary', 'error', e.message)
-      reportStore.pushError(props.taskId, `project_summary: ${e.message}`)
+      pipelineStore.updateNodeStatus(props.taskId, 'project_summary', 'error', e.message)
+      pipelineStore.pushError(props.taskId, `project_summary: ${e.message}`)
     }
   } else {
-    reportStore.updateNodeStatus(props.taskId, 'project_summary', 'skipped')
+    pipelineStore.updateNodeStatus(props.taskId, 'project_summary', 'skipped')
   }
 
   // Phase 2: Community analysis
-  reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'running')
+  pipelineStore.updateNodeStatus(props.taskId, 'community_analysis', 'running')
   try {
-    const levels = await reportStore.getCascadeLevels(props.taskId, 'CALL')
+    const levels = await communityStore.getCascadeLevels(props.taskId, 'CALL')
     if (levels?.levels?.length) {
-      reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'completed')
+      pipelineStore.updateNodeStatus(props.taskId, 'community_analysis', 'completed')
     } else {
-      reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'skipped', 'No community data')
+      pipelineStore.updateNodeStatus(props.taskId, 'community_analysis', 'skipped', 'No community data')
     }
   } catch (e) {
-    reportStore.updateNodeStatus(props.taskId, 'community_analysis', 'skipped')
+    pipelineStore.updateNodeStatus(props.taskId, 'community_analysis', 'skipped')
   }
 
   // Phase 3: 整体架构分析（单次 LLM 调用）
   const archStep = root.children?.find(n => n.id === 'overall_architecture')
-  if (archStep && !reportStore.tasks[props.taskId]?.pipelinePaused) {
+  if (archStep && !pipelineStore.tasks[props.taskId]?.pipelinePaused) {
     await runStep(archStep)
   }
 
-  reportStore.setPipelineRunning(props.taskId, false)
+  pipelineStore.setPipelineRunning(props.taskId, false)
   root.status = allCompleted.value ? 'completed' : 'error'
-  reportStore.recalcProgress(props.taskId)
+  pipelineStore.recalcProgress(props.taskId)
 
   if (allCompleted.value && reportStore.generatedReports[props.taskId]) {
     emit('generated', reportStore.generatedReports[props.taskId])
@@ -320,52 +326,73 @@ async function runAll() {
 }
 
 function pause() {
-  reportStore.setPipelinePaused(props.taskId, true)
-  reportStore.setPipelineRunning(props.taskId, false)
+  pipelineStore.setPipelinePaused(props.taskId, true)
+  pipelineStore.setPipelineRunning(props.taskId, false)
 }
 
 function stop() {
-  reportStore.stopPipeline(props.taskId)
-  const root = reportStore.tasks[props.taskId]?.pipelineRootTask
+  pipelineStore.stopPipeline(props.taskId)
+  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
   if (root) {
     const markSkipped = (node: PipelineTaskNode) => {
-      if (node.status === 'running' || node.status === 'queued') node.status = 'skipped'
+      if (node.status === 'running') node.status = 'skipped'
       if (node.children) node.children.forEach(markSkipped)
     }
     root.children?.forEach(markSkipped)
     root.status = 'skipped'
   }
-  reportStore.recalcProgress(props.taskId)
+  pipelineStore.recalcProgress(props.taskId)
 }
 
 function reset() {
-  reportStore.resetPipeline(props.taskId)
+  pipelineStore.resetPipeline(props.taskId)
 }
 
 function clearErrorLogs() {
-  reportStore.clearErrorLogs(props.taskId)
+  pipelineStore.clearErrorLogs(props.taskId)
 }
 
 // 进入任务列表时校验项目摘要是否已存在
-async function checkExistingSummary() {
+async function checkInitialState() {
   const pid = props.projectId || projectStore.selectedProjectId
-  if (!pid) return
-  try {
-    const result = await reportStore.getProjectSummary(pid)
-    if (result?.summary) {
-      const node = reportStore.tasks[props.taskId]?.pipelineRootTask?.children?.find(n => n.id === 'project_summary')
-      if (node && node.status === 'pending') {
-        node.status = 'completed'
-        reportStore.recalcProgress(props.taskId)
-      }
-    }
-  } catch (e) {
+  if (!pipelineStore.tasks[props.taskId]?.pipelineRootTask) return
+
+  const setNodeStatus = (id: string, status: string, error?: string) => {
+    const node = pipelineStore.tasks[props.taskId]?.pipelineRootTask?.children?.find(n => n.id === id)
+    if (node && node.status === 'pending') pipelineStore.updateNodeStatus(props.taskId, id, status as any, error)
   }
+
+  // 模型验证：检查是否有已连接的默认模型
+  const defaultModel = modelConfigStore.models.find(m => m.isDefault)
+  if (defaultModel?.status === 'connected') setNodeStatus('validation', 'completed')
+  else if (defaultModel) setNodeStatus('validation', 'error', t('report.modelNotConnected'))
+  else if (modelConfigStore.models.length > 0) setNodeStatus('validation', 'error', t('report.llmNotConfigured'))
+
+  // 项目概要：检查是否已有概要数据
+  if (pid) {
+    try {
+      const result = await reportStore.getProjectSummary(pid)
+      if (result?.summary) setNodeStatus('project_summary', 'completed')
+      else setNodeStatus('project_summary', 'pending')
+    } catch { setNodeStatus('project_summary', 'error') }
+  }
+
+  // 社区分析：检查是否有已完成的分析
+  const communities = communityStore.tasks[props.taskId]?.communities
+  if (communities?.some(c => c.status === 'completed')) setNodeStatus('community_analysis', 'completed')
+  else if (communities?.some(c => c.status === 'error')) setNodeStatus('community_analysis', 'error', 'Some communities failed')
+
+  // 整体架构：检查是否已生成报告
+  const archExists = reportStore.generatedReports[props.taskId] || reportStore.dbReportExists[props.taskId]
+  if (archExists) setNodeStatus('overall_architecture', 'completed')
+  else if (pid) reportStore.checkReportExists(props.taskId).then(() => {
+    if (reportStore.dbReportExists[props.taskId]) setNodeStatus('overall_architecture', 'completed')
+  })
 }
 
 async function runNode(nodeId: string) {
   if (running.value) return
-  const root = reportStore.tasks[props.taskId]?.pipelineRootTask
+  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
   if (!root) return
   const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
     if (node.id === nodeId) return node
@@ -375,28 +402,28 @@ async function runNode(nodeId: string) {
   const node = find(root)
   if (!node) return
 
-  reportStore.setPipelineRunning(props.taskId, true)
-  reportStore.setPipelinePaused(props.taskId, false)
+  pipelineStore.setPipelineRunning(props.taskId, true)
+  pipelineStore.setPipelinePaused(props.taskId, false)
 
   if (nodeId === 'validation') {
-    const mid = settingsStore.models.find(m => m.isDefault)?.id
+    const mid = modelConfigStore.models.find(m => m.isDefault)?.id
     if (!mid) {
       node.status = 'error'
       node.error = t('report.llmNotConfigured')
     } else {
       try {
         node.status = 'running'
-        await settingsStore.testModel(mid)
+        await modelConfigStore.testModel(mid)
         node.status = 'completed'
       } catch (e: any) {
         node.status = 'error'
         node.error = e.message || 'Connection failed'
       }
     }
-    reportStore.recalcProgress(props.taskId)
+    pipelineStore.recalcProgress(props.taskId)
   } else if (nodeId === 'project_summary') {
     const pid = projectStore.selectedProjectId
-    if (!pid) { node.status = 'skipped'; reportStore.recalcProgress(props.taskId); return }
+    if (!pid) { node.status = 'skipped'; pipelineStore.recalcProgress(props.taskId); return }
     try {
       node.status = 'running'
       await reportStore.getReadmeContent(pid)
@@ -405,36 +432,36 @@ async function runNode(nodeId: string) {
       node.status = result?.summary ? 'completed' : 'error'
       if (!result?.summary) node.error = 'Empty summary'
     } catch (e: any) { node.status = 'error'; node.error = e.message }
-    reportStore.recalcProgress(props.taskId)
+    pipelineStore.recalcProgress(props.taskId)
   } else if (nodeId === 'community_analysis') {
     node.status = 'running'
     try {
-      const levels = await reportStore.getCascadeLevels(props.taskId, 'CALL')
+      const levels = await communityStore.getCascadeLevels(props.taskId, 'CALL')
       node.status = (levels?.levels?.length) ? 'completed' : 'skipped'
     } catch { node.status = 'skipped' }
-    reportStore.recalcProgress(props.taskId)
+    pipelineStore.recalcProgress(props.taskId)
   } else if (nodeId === 'overall_architecture') {
     node.status = 'pending'
     node.error = undefined
     await runStep(node)
   }
 
-  reportStore.setPipelineRunning(props.taskId, false)
-  reportStore.recalcProgress(props.taskId)
+  pipelineStore.setPipelineRunning(props.taskId, false)
+  pipelineStore.recalcProgress(props.taskId)
 }
 
-watch(() => reportStore.tasks[props.taskId]?.pendingStepRun, (nodeId) => {
+watch(() => pipelineStore.tasks[props.taskId]?.pendingStepRun, (nodeId) => {
   if (nodeId && !running.value) {
     runNode(nodeId)
-    reportStore.setPendingStepRun(props.taskId, null)
+    pipelineStore.setPendingStepRun(props.taskId, null)
   }
 }, { immediate: true })
 
 onMounted(() => {
-  if (!reportStore.tasks[props.taskId]?.pipelineRootTask) {
-    reportStore.initPipeline(props.taskId, createInitialTree())
+  if (!pipelineStore.tasks[props.taskId]?.pipelineRootTask) {
+    pipelineStore.initPipeline(props.taskId, createInitialTree())
   }
-  checkExistingSummary()
+  checkInitialState()
 })
 </script>
 

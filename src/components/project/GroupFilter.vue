@@ -99,7 +99,7 @@ function collectAllIds(nodeList: GroupNode[]): string[] {
 }
 
 function isExpanded(node: GroupNode): boolean {
-  return node.children && node.children.length > 0 && expandedIds.value.has(node.id)
+  return !!(node.children && node.children.length > 0 && expandedIds.value.has(node.id))
 }
 
 function isSelected(node: GroupNode): boolean {
@@ -203,91 +203,85 @@ defineExpose({ loadGroups })
 
       <!-- 分组树 -->
       <div class="group-filter-tree">
-        <div
-          v-for="group in groups"
-          v-if="matchesSearch(group)"
-          :key="group.id"
-        >
-          <div
-            class="group-tree-item"
-            :class="{ selected: isSelected(group) }"
-            @click="toggleSelect(group.id)"
-          >
-            <span
-              v-if="isExpanded(group)"
-              class="tree-expand"
-              @click.stop="toggleExpand(group.id)"
-            >
-              <ChevronRightIcon class="w-3 h-3 expand-open" />
-            </span>
-            <span
-              v-else
-              class="tree-expand tree-expand-placeholder"
-            />
-            <span
-              class="tree-checkbox"
-              :class="{ checked: isSelected(group) }"
-            >
-              {{ isSelected(group) ? '✓' : '' }}
-            </span>
-            <span
-              class="tree-label"
-              :style="{ paddingLeft: renderIndent(group.depth) }"
-            >{{ group.name }}</span>
-          </div>
-          <!-- 子节点 -->
-          <div v-if="isExpanded(group) && group.children && group.children.length > 0">
+        <template v-for="group in groups" :key="group.id">
+          <div v-if="matchesSearch(group)">
             <div
-              v-for="child in group.children"
-              v-if="matchesSearch(child)"
-              :key="child.id"
+              class="group-tree-item"
+              :class="{ selected: isSelected(group) }"
+              @click="toggleSelect(group.id)"
             >
-              <div
-                class="group-tree-item"
-                :class="{ selected: isSelected(child) }"
-                @click="toggleSelect(child.id)"
+              <span
+                v-if="isExpanded(group)"
+                class="tree-expand"
+                @click.stop="toggleExpand(group.id)"
               >
-                <span class="tree-expand tree-expand-placeholder" />
-                <span
-                  class="tree-checkbox"
-                  :class="{ checked: isSelected(child) }"
-                >
-                  {{ isSelected(child) ? '✓' : '' }}
-                </span>
-                <span
-                  class="tree-label"
-                  :style="{ paddingLeft: renderIndent(child.depth) }"
-                >{{ child.name }}</span>
-              </div>
-              <!-- 递归渲染更深层级 -->
-              <div v-if="child.children && child.children.length > 0">
-                <div
-                  v-for="gc in child.children"
-                  v-if="matchesSearch(gc)"
-                  :key="gc.id"
-                >
+                <ChevronRightIcon class="w-3 h-3 expand-open" />
+              </span>
+              <span
+                v-else
+                class="tree-expand tree-expand-placeholder"
+              />
+              <span
+                class="tree-checkbox"
+                :class="{ checked: isSelected(group) }"
+              >
+                {{ isSelected(group) ? '✓' : '' }}
+              </span>
+              <span
+                class="tree-label"
+                :style="{ paddingLeft: renderIndent(group.depth) }"
+              >{{ group.name }}</span>
+            </div>
+            <!-- 子节点 -->
+            <div v-if="isExpanded(group) && group.children && group.children.length > 0">
+              <template v-for="child in group.children" :key="child.id">
+                <div v-if="matchesSearch(child)">
                   <div
                     class="group-tree-item"
-                    :class="{ selected: isSelected(gc) }"
-                    @click="toggleSelect(gc.id)"
+                    :class="{ selected: isSelected(child) }"
+                    @click="toggleSelect(child.id)"
                   >
                     <span class="tree-expand tree-expand-placeholder" />
                     <span
                       class="tree-checkbox"
-                      :class="{ checked: isSelected(gc) }"
+                      :class="{ checked: isSelected(child) }"
                     >
-                      {{ isSelected(gc) ? '✓' : '' }}
+                      {{ isSelected(child) ? '✓' : '' }}
                     </span>
                     <span
                       class="tree-label"
-                      :style="{ paddingLeft: renderIndent(gc.depth) }"
-                    >{{ gc.name }}</span>
+                      :style="{ paddingLeft: renderIndent(child.depth) }"
+                    >{{ child.name }}</span>
+                  </div>
+                  <!-- 递归渲染更深层级 -->
+                  <div v-if="child.children && child.children.length > 0">
+                    <template v-for="gc in child.children" :key="gc.id">
+                      <div v-if="matchesSearch(gc)">
+                        <div
+                          class="group-tree-item"
+                          :class="{ selected: isSelected(gc) }"
+                          @click="toggleSelect(gc.id)"
+                        >
+                          <span class="tree-expand tree-expand-placeholder" />
+                          <span
+                            class="tree-checkbox"
+                            :class="{ checked: isSelected(gc) }"
+                          >
+                            {{ isSelected(gc) ? '✓' : '' }}
+                          </span>
+                          <span
+                            class="tree-label"
+                            :style="{ paddingLeft: renderIndent(gc.depth) }"
+                          >{{ gc.name }}</span>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </div>
-              </div>
+              </template>
             </div>
           </div>
-        </div>
+        </template>
       </div>
 
       <!-- 底部操作 -->

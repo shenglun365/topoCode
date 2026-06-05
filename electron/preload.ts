@@ -39,9 +39,13 @@ contextBridge.exposeInMainWorld('api', {
     openDirectory: () => ipcRenderer.invoke('dialog:open-directory'),
   },
 
-  // ==================== 环境变量 ====================
+  // ==================== 环境变量 (白名单) ====================
   env: {
-    get: (key: string) => ipcRenderer.invoke('env:get', key),
+    get: (key: string) => {
+      const ALLOWED = new Set(['TOPCODE_UI_DEBUG', 'TOPOCODE_LOG_LEVEL', 'VITE_LOG_LEVEL'])
+      if (!ALLOWED.has(key)) return null
+      return ipcRenderer.invoke('env:get', key)
+    },
     TOPOCODE_LOG_LEVEL: process.env.TOPOCODE_LOG_LEVEL || null,
     VITE_LOG_LEVEL: process.env.VITE_LOG_LEVEL || null,
     TOPCODE_UI_DEBUG: process.env.TOPCODE_UI_DEBUG || null,
@@ -425,6 +429,16 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'render.plantuml', params }),
   },
 
+  // ==================== 插件管理 ====================
+  plugin: {
+    list: () => ipcRenderer.invoke('ipc:call', { method: 'plugin.list', params: {} }),
+    get: (name: string) => ipcRenderer.invoke('ipc:call', { method: 'plugin.get', params: { name } }),
+    load: (name: string) => ipcRenderer.invoke('ipc:call', { method: 'plugin.load', params: { name } }),
+    unload: (name: string) => ipcRenderer.invoke('ipc:call', { method: 'plugin.unload', params: { name } }),
+    reload: (name: string) => ipcRenderer.invoke('ipc:call', { method: 'plugin.reload', params: { name } }),
+    install: (name: string) => ipcRenderer.invoke('ipc:call', { method: 'plugin.install', params: { name } }),
+  },
+
   // ==================== 文件系统 ====================
   fs: {
     addAllowedDir: (dirPath: string) => ipcRenderer.invoke('fs:add-allowed-dir', dirPath),
@@ -441,13 +455,58 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // ==================== 事件订阅 ====================
+  // 使用 on() 返回的清理函数取消订阅，不要直接使用 removeListener
   on: (channel: string, callback: (...args: any[]) => void) => {
     const listener = (_: any, ...args: any[]) => callback(...args)
     ipcRenderer.on(channel, listener)
     return () => ipcRenderer.removeListener(channel, listener)
   },
-  removeListener: (channel: string, callback: (...args: any[]) => void) => {
-    ipcRenderer.removeListener(channel, callback)
+
+  // ==================== Auto-update ====================
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onStatus: (cb: (info: any) => void) => {
+      const listener = (_: any, info: any) => cb(info)
+      ipcRenderer.on('update:status', listener)
+      return () => ipcRenderer.removeListener('update:status', listener)
+    },
+  },
+
+  // ==================== 模块管理（远程下载） ====================
+  module: {
+    listRegistry: (registryUrl?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'module.listRegistry', params: { registry_url: registryUrl } }),
+    getInstalled: () =>
+      ipcRenderer.invoke('ipc:call', { method: 'module.getInstalled', params: {} }),
+    install: (name: string, registryUrl?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'module.install', params: { name, registry_url: registryUrl } }),
+    uninstall: (name: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'module.uninstall', params: { name } }),
+    update: (name: string, registryUrl?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'module.update', params: { name, registry_url: registryUrl } }),
+    search: (query: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'module.search', params: { query } }),
+  },
+
+  // ==================== MCP Server 管理 ====================
+  mcp: {
+    call: (method: string, params: Record<string, unknown>) =>
+      ipcRenderer.invoke('mcp:call', method, params),
+    listTools: () =>
+      ipcRenderer.invoke('mcp:list-tools'),
+    listPrompts: () =>
+      ipcRenderer.invoke('mcp:list-prompts'),
+    start: (projectRoot: string, zmqPort?: number, logLevel?: string) =>
+      ipcRenderer.invoke('mcp:start', projectRoot, zmqPort, logLevel),
+    stop: () =>
+      ipcRenderer.invoke('mcp:stop'),
+    onStatusChange: (cb: (s: any) => void) => {
+      const listener = (_: any, status: any) => cb(status)
+      ipcRenderer.on('mcp:status', listener)
+      return () => ipcRenderer.removeListener('mcp:status', listener)
+    },
   },
 
   // ==================== 日志系统 ====================

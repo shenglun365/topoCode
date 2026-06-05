@@ -1,0 +1,15 @@
+{
+  "id": "reports",
+  "name": "文档预览服务",
+  "version": "1.0.0",
+  "description": "FastAPI HTTP 服务，支持文档浏览、PlantUML 渲染",
+  "entry": "plugin_entry",
+  "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
+  "dependencies": {
+    "python": [
+      "fastapi==0.136.3",
+      "uvicorn==0.48.0"
+    ]
+  },
+  "size_mb": 5
+}

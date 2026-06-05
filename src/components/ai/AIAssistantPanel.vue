@@ -12,7 +12,7 @@ import {
   SparklesIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useComponentId } from '@/composables/useComponentId'
 

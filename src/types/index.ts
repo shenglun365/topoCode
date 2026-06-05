@@ -55,7 +55,7 @@ export interface CustomTheme {
 
 /** 后端状态 */
 export interface BackendStatus {
-  status: 'running' | 'stopped' | 'error';
+  status: 'running' | 'stopped' | 'error' | 'restarting' | 'starting';
   pid?: number;
   port?: number;
   error?: string;
@@ -97,15 +97,23 @@ export interface AnalysisTask {
 export interface KnowledgeDoc {
   id: string;
   title: string;
+  description?: string;
+  projectId?: string;
   content: string;
   type: 'project' | 'document';
-  dimensions: {
+  dimensions?: {
     lifecycle?: string[];
     techstack?: string[];
     abstraction?: string[];
     attribute?: string[];
   };
-  status: 'draft' | 'pending' | 'approved';
+  tags?: {
+    lifecycle: string[];
+    techStack: string[];
+    abstraction: string[];
+    purpose: string[];
+  };
+  status: 'draft' | 'pending' | 'reviewed' | 'approved';
   favorite?: boolean;
   pinned?: boolean;
   createdAt: string;

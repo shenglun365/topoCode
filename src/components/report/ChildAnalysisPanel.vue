@@ -2,18 +2,22 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '@/stores/project'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import {
   PlayIcon,
   StopIcon,
   ArrowPathIcon,
 } from '@heroicons/vue/24/outline'
-import { useReportStore } from '@/stores/report'
+import { useChildAnalysisStore } from '@/stores/child-analysis-store'
+import { useCommunityStore } from '@/stores/community-store'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
-const reportStore = useReportStore()
+const modelConfigStore = useModelConfigStore()
+const childAnalysisStore = useChildAnalysisStore()
+const communityStore = useCommunityStore()
 
 const props = defineProps<{
   taskId: string
@@ -37,13 +41,13 @@ const emit = defineEmits<{
   }]
 }>()
 
-const stateKey = computed(() => reportStore.buildChildStateKey(props.parentLevel, props.parentCommId, props.edgeType))
+const stateKey = computed(() => childAnalysisStore.buildChildStateKey(props.parentLevel, props.parentCommId, props.edgeType))
 const childLevel = computed(() => `L${parseInt(props.parentLevel[1]) + 1}`)
 
-const modelId = computed(() => settingsStore.models.find(m => m.isDefault)?.id)
+const modelId = computed(() => modelConfigStore.models.find(m => m.isDefault)?.id)
 const pid = computed(() => props.projectId || projectStore.selectedProjectId)
 
-const childState = computed(() => reportStore.tasks[props.taskId]?.analysisStates[stateKey.value])
+const childState = computed(() => communityStore.tasks[props.taskId]?.analysisStates[stateKey.value])
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
@@ -91,7 +95,7 @@ function fmtCommId(id: string): string {
 }
 
 function toggleSelect(commId: string) {
-  reportStore.toggleChildSelect(props.taskId, stateKey.value, commId)
+  childAnalysisStore.toggleChildSelect(props.taskId, stateKey.value, commId)
 }
 
 function statusBadgeClass(status: string): string {
@@ -115,16 +119,16 @@ function statusLabel(status: string): string {
 
 async function startAnalysis() {
   if (!modelId.value || !pid.value) return
-  await reportStore.analyzeChildSelected(props.taskId, stateKey.value, modelId.value, batchSize.value, pid.value)
+  await childAnalysisStore.analyzeChildSelected(props.taskId, stateKey.value, modelId.value, batchSize.value, pid.value)
 }
 
 async function retryTask(commId: string) {
   if (!modelId.value || !pid.value) return
-  await reportStore.retryChildTask(props.taskId, stateKey.value, commId, modelId.value, pid.value)
+  await childAnalysisStore.retryChildTask(props.taskId, stateKey.value, commId, modelId.value, pid.value)
 }
 
 function stopAnalysis() {
-  reportStore.stopChildAnalysis(props.taskId, stateKey.value)
+  childAnalysisStore.stopChildAnalysis(props.taskId, stateKey.value)
 }
 
 function viewMD(community: any) {
@@ -145,7 +149,7 @@ onMounted(async () => {
   loading.value = true
   loadError.value = null
   try {
-    await reportStore.loadChildCommunities(props.taskId, props.parentLevel, props.parentCommId, props.edgeType)
+    await childAnalysisStore.loadChildCommunities(props.taskId, props.parentLevel, props.parentCommId, props.edgeType)
   } catch (e: any) {
     loadError.value = e?.message || String(e)
   } finally {
@@ -187,10 +191,10 @@ onMounted(async () => {
               {{ childLevel }} ({{ searchedCommunities.length }})
             </span>
             <div class="clist-actions">
-              <button class="btn btn-ghost btn-xs" :disabled="isRunning" @click="reportStore.selectChildIncomplete(props.taskId, stateKey)">
+              <button class="btn btn-ghost btn-xs" :disabled="isRunning" @click="childAnalysisStore.selectChildIncomplete(props.taskId, stateKey)">
                 {{ t('common.selectIncomplete') }}
               </button>
-              <button class="btn btn-ghost btn-xs" :disabled="isRunning" @click="reportStore.deselectAllChild(props.taskId, stateKey)">
+              <button class="btn btn-ghost btn-xs" :disabled="isRunning" @click="childAnalysisStore.deselectAllChild(props.taskId, stateKey)">
                 {{ t('common.reset') }}
               </button>
             </div>
@@ -258,7 +262,7 @@ onMounted(async () => {
       <div v-if="errorLogs.length > 0" class="cap-error-logs">
         <div class="error-log-header">
           <span class="error-log-title">{{ t('common.error') }} ({{ errorLogs.length }})</span>
-          <button class="btn btn-ghost btn-xs" @click="reportStore.clearChildErrorLogs(props.taskId, stateKey)">{{ t('common.clear') }}</button>
+          <button class="btn btn-ghost btn-xs" @click="childAnalysisStore.clearChildErrorLogs(props.taskId, stateKey)">{{ t('common.clear') }}</button>
         </div>
         <div v-for="(msg, i) in errorLogs.slice(0, 10)" :key="i" class="error-log-item">{{ msg }}</div>
       </div>

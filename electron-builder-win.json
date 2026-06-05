@@ -7,17 +7,30 @@
   "files": [
     "dist/**/*",
     "dist-electron/**/*",
-    "backend/**/*"
+    "backend-core/**/*"
   ],
   "extraResources": [
     {
-      "from": "backend",
-      "to": "backend",
+      "from": "backend-core",
+      "to": "backend-core",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "dist-plugins",
+      "to": "plugins",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "dist-modules",
+      "to": "modules",
       "filter": ["**/*"]
     }
   ],
   "win": {
     "icon": null
+  },
+  "linux": {
+    "target": ["AppImage", "deb"]
   },
   "nsis": {
     "oneClick": false,

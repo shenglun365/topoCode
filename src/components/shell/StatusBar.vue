@@ -2,16 +2,18 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useStatusStore } from '@/stores/status'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-006')
 const { t } = useI18n()
 const status = useStatusStore()
 const settings = useSettingsStore()
+const modelConfigStore = useModelConfigStore()
 const testing = ref(false)
 
-const defaultModel = computed(() => settings.models.find(m => m.isDefault) || settings.models[0] || null)
+const defaultModel = computed(() => modelConfigStore.models.find(m => m.isDefault) || modelConfigStore.models[0] || null)
 const modelStatusClass = computed(() => {
   const m = defaultModel.value
   if (!m) return 'status-stopped'
@@ -25,7 +27,7 @@ async function testModelStatus() {
   if (!m || m.status === 'connected' || testing.value) return
   testing.value = true
   try {
-    await settings.testModel(m.id)
+    await modelConfigStore.testModel(m.id)
   } catch (_) {}
   testing.value = false
 }

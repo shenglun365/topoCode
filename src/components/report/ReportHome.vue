@@ -14,20 +14,26 @@ import {
 import { usePanelStore } from '@/stores/panel'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
-import { useSettingsStore } from '@/stores/settings'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 
-import { useReportStore, type CommunityItem } from '@/stores/report'
+import { useReportStore } from '@/stores/report-store'
+import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
 import ReportGenerationPipeline from './ReportGenerationPipeline.vue'
+import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
+import TaskSummaryCard from '@/components/home/TaskSummaryCard.vue'
+import ActionsBar from '@/components/home/ActionsBar.vue'
+import CommunitySection from '@/components/report/CommunitySection.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
-const settingsStore = useSettingsStore()
+const modelConfigStore = useModelConfigStore()
 const funcGroup = useFuncGroupStore()
+const communityStore = useCommunityStore()
 const reportStore = useReportStore()
 
 const props = defineProps<{
@@ -46,23 +52,25 @@ const showNoReportDialog = ref(false)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
-const communitySearch = ref('')
-const communityPage = ref(1)
-const communityPageSize = 100
 
-const hasModel = computed(() => settingsStore.models.some(m => m.isDefault))
+const hasModel = computed(() => modelConfigStore.models.some(m => m.isDefault))
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
 const task = computed(() => taskDetail.value)
 
-const runtimeCommunities = computed(() => {
-  const coms = reportStore.tasks[props.taskId]?.communities || []
-  const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
+const hasAnyCommunity = computed(() => {
+  const coms = communityStore.tasks[props.taskId]?.communities || []
+  return coms.length > 0
+})
+
+  const runtimeCommunities = computed(() => {
+    const coms = communityStore.tasks[props.taskId]?.communities || []
+    const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
   console.log(`[RP-001] runtimeCommunities edgeType=${commEdgeType.value} total=${coms.length} filtered=${filtered.length} completed=${filtered.filter(c=>c.status==='completed').length}`)
   return filtered
 })
 
-const communityAnalysisProgress = computed(() => {
-  const allL0 = (reportStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0')
+  const communityAnalysisProgress = computed(() => {
+    const allL0 = (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0')
   if (allL0.length === 0) return 0
   const done = allL0.filter(c => c.status === 'completed').length
   const pct = Math.round((done / allL0.length) * 100)
@@ -75,37 +83,7 @@ const hasArchitectureReport = computed(() => {
   return !!reportStore.dbReportExists[props.taskId]
 })
 
-const commStats = computed(() => {
-  const items = communityItems.value
-  const nodes = items.map(c => c.nodeCount || 0)
-  const quals = items.map(c => c.qualityScore).filter((q): q is number => q != null)
-  const stats = {
-    count: items.length,
-    maxNodes: nodes.length ? Math.max(...nodes) : 0,
-    minNodes: nodes.length ? Math.min(...nodes) : 0,
-    avgQuality: quals.length ? (quals.reduce((a, b) => a + b, 0) / quals.length) : 0,
-  }
-  console.log(`[RP-001] commStats count=${stats.count} maxNodes=${stats.maxNodes} minNodes=${stats.minNodes} avgQuality=${stats.avgQuality}`)
-  return stats
-})
 
-const communityItems = computed(() => {
-  const q = communitySearch.value.trim().toLowerCase()
-  if (!q) return runtimeCommunities.value
-  return runtimeCommunities.value.filter(c => {
-    const id = c.communityId.toLowerCase()
-    const name = (c.name || '').toLowerCase()
-    return id.includes(q) || name.includes(q)
-  })
-})
-
-const communityTotalPages = computed(() => Math.max(1, Math.ceil(communityItems.value.length / communityPageSize)))
-const pagedCommunityItems = computed(() => {
-  const start = (communityPage.value - 1) * communityPageSize
-  return communityItems.value.slice(start, start + communityPageSize)
-})
-
-watch(communitySearch, () => { communityPage.value = 1 })
 
 const { showId, componentId } = useComponentId('RP-001')
 
@@ -164,7 +142,7 @@ async function openCommunityDoc(item: CommunityItem) {
       parentEdgeType: commEdgeType.value,
       regenerationType: 'community',
     })
-  } catch (e) {
+  } catch (e: any) {
     console.error('[ReportHome] openCommunityDoc error:', e)
   }
 }
@@ -211,9 +189,9 @@ async function loadData() {
     if (pid) {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
     }
-    await reportStore.loadCommunities(props.taskId, pid || '')
+    await communityStore.loadCommunities(props.taskId, pid || '')
     await reportStore.checkReportExists(props.taskId)
-    console.log(`[RP-001] loadData DONE communities=${(reportStore.tasks[props.taskId]?.communities || []).length}`)
+    console.log(`[RP-001] loadData DONE communities=${(communityStore.tasks[props.taskId]?.communities || []).length}`)
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -248,12 +226,12 @@ function openCommunityAnalysis() {
 async function handleReportGenerated(content: string) {
   reportStore.setGeneratedReport(props.taskId, content)
   try {
-    await ipc.report.saveOverallDoc({
+    await (ipc.report as any).saveOverallDoc({
       taskId: props.taskId,
       title: t('report.pipeline.overallArchitecture'),
       content,
     })
-  } catch (e) {
+  } catch (e: any) {
     console.warn('[ReportHome] saveOverallDoc on generated failed:', e)
   }
 }
@@ -276,7 +254,7 @@ function buildCommunityAppendix(): string {
     { key: 'CALL', label: '调用' },
     { key: 'INCLUDE', label: '依赖' },
   ]
-  const coms = reportStore.tasks[props.taskId]?.communities || []
+  const coms = communityStore.tasks[props.taskId]?.communities || []
   let hasItems = false
   parts.push('| 类型 | 名称 |')
   parts.push('|------|------|')
@@ -304,7 +282,7 @@ async function openOverallArchitecture() {
         const doc = await ipc.report.getSubDoc(docs[0].id)
         content = doc.content
       }
-    } catch (e) {
+    } catch (e: any) {
       console.warn('[ReportHome] DB fetch for overall doc failed:', e)
     }
   }
@@ -318,13 +296,13 @@ async function openOverallArchitecture() {
   }
   let docId = ''
   try {
-    const result = await ipc.report.saveOverallDoc({
+    const result: any = await (ipc.report as any).saveOverallDoc({
       taskId: props.taskId,
       title: t('report.pipeline.overallArchitecture'),
       content,
     })
     docId = result.id
-  } catch (e) {
+  } catch (e: any) {
     console.warn('[ReportHome] saveOverallDoc failed:', e)
   }
   const tabId = `tab-overall-arch-${props.taskId}`
@@ -380,34 +358,12 @@ watch(() => props.taskId, loadData)
 
     <template v-else>
       <div class="report-home-scroll">
-        <!-- 项目概要 -->
-        <section class="home-section">
-          <div class="section-header">
-            <FolderIcon class="w-4 h-4" />
-            <span>{{ t('report.projectSummary') }}</span>
-          </div>
-          <div class="summary-cards">
-            <div class="summary-card">
-              <span class="card-label">{{ t('project.projectName') }}</span>
-              <span class="card-value">{{ project?.name || '-' }}</span>
-            </div>
-            <div class="summary-card">
-              <span class="card-label">{{ t('project.projectLanguage') }}</span>
-              <span class="card-value">{{ project?.language || '-' }}</span>
-            </div>
-            <div class="summary-card">
-              <span class="card-label">{{ t('project.fileCount') }}</span>
-              <span class="card-value">{{ project?.fileCount || 0 }}</span>
-            </div>
-            <div class="summary-card">
-              <span class="card-label">{{ t('project.projectPath') }}</span>
-              <span
-                class="card-value card-path"
-                :title="project?.rootPath || project?.path || ''"
-              >{{ truncatePath(project?.rootPath || project?.path) }}</span>
-            </div>
-          </div>
-        </section>
+        <ProjectSummaryCard
+          :project-name="project?.name || '-'"
+          :language="project?.language || '-'"
+          :file-count="project?.fileCount || 0"
+          :root-path="project?.rootPath || project?.path || '-'"
+        />
 
         <!-- 任务概要 -->
         <section class="home-section">
@@ -474,98 +430,13 @@ watch(() => props.taskId, loadData)
           </div>
         </section>
 
-        <!-- 社区概要 -->
-        <section
-          v-if="runtimeCommunities.length > 0"
-          class="home-section"
-        >
-          <div class="section-header">
-            <RectangleGroupIcon class="w-4 h-4" />
-            <span>{{ t('report.communitySummary') }}</span>
-          </div>
-          <!-- 边类型切换 -->
-          <div class="comm-et-tabs">
-            <button
-              :class="['comm-et-tab', { active: commEdgeType === 'INCLUDE' }]"
-              @click="commEdgeType = 'INCLUDE'"
-            >
-              {{ t('report.pipeline.edgeInclude') }}
-            </button>
-            <button
-              :class="['comm-et-tab', { active: commEdgeType === 'CALL' }]"
-              @click="commEdgeType = 'CALL'"
-            >
-              {{ t('report.pipeline.edgeCall') }}
-            </button>
-          </div>
-          <!-- L0统计 -->
-          <div class="comm-stats">
-            <span class="comm-stat">
-              <HashtagIcon class="w-3 h-3" /> {{ commStats.count }}
-            </span>
-            <span class="comm-stat">{{ t('report.communityMaxNodes') }}: {{ commStats.maxNodes }}</span>
-            <span class="comm-stat">{{ t('report.communityMinNodes') }}: {{ commStats.minNodes }}</span>
-            <span
-              class="comm-stat quality-stat"
-              :title="'质量分反映社区内聚度，分值越高组件间区分度越好。平均约 ' + (commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-')"
-            >
-              {{ t('report.communityAvgQuality') }}: {{ commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-' }}
-              <span class="quality-hint">ⓘ</span>
-            </span>
-          </div>
-          <!-- 社区搜索 -->
-          <div class="comm-search">
-            <input
-              v-model="communitySearch"
-              type="text"
-              placeholder="搜索组件名称/ID..."
-              class="comm-search-input"
-            >
-          </div>
-          <!-- L0 社区列表 -->
-          <div class="community-items">
-            <template v-if="pagedCommunityItems.length > 0">
-              <div
-                v-for="item in pagedCommunityItems"
-                :key="item.id"
-                class="community-chip"
-                :class="{ 'has-result': item.status === 'completed' && !!(item.name) && item.name !== item.communityId }"
-                :title="`${item.communityId} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
-                @click="openCommunityDoc(item)"
-              >
-                <span class="chip-name">{{ commName(item) }}</span>
-                <span class="chip-count">{{ item.nodeCount }}</span>
-              </div>
-            </template>
-            <div
-              v-else
-              class="comm-empty"
-            >
-              {{ t('report.pipeline.noCommunities') }}
-            </div>
-          </div>
-          <!-- 组件分页 -->
-          <div
-            v-if="communityTotalPages > 1"
-            class="comm-pagination"
-          >
-            <button
-              class="btn btn-ghost btn-xs"
-              :disabled="communityPage <= 1"
-              @click="communityPage--"
-            >
-              上一页
-            </button>
-            <span class="comm-page-info">{{ communityPage }} / {{ communityTotalPages }}</span>
-            <button
-              class="btn btn-ghost btn-xs"
-              :disabled="communityPage >= communityTotalPages"
-              @click="communityPage++"
-            >
-              下一页
-            </button>
-          </div>
-        </section>
+        <CommunitySection
+          v-if="hasAnyCommunity"
+          :communities="runtimeCommunities"
+          :edge-type="commEdgeType"
+          @update:edge-type="commEdgeType = $event"
+          @select-community="(item: any) => openCommunityDoc(item)"
+        />
 
         <!-- 操作区 -->
         <section class="home-section actions-section">
@@ -620,7 +491,7 @@ watch(() => props.taskId, loadData)
           <div style="display:none">
             <ReportGenerationPipeline
               :task-id="props.taskId"
-              :project-id="props.projectId"
+              :project-id="projectId"
               @generated="handleReportGenerated"
               @view-community-md="handleCommunityMD"
             />

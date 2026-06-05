@@ -6,6 +6,10 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { windowManager } from './window-manager'
 import { pythonBridge, HTTP_PORT } from './python-bridge'
 import { zmqRouter } from './zmq-router'
+import { MCPManager } from './mcp-manager'
+import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
+
+const mcpManager = new MCPManager()
 
 // 开发环境设置
 const isDev = !app.isPackaged
@@ -116,8 +120,11 @@ function setupIPC() {
     const fs = await import('node:fs')
     const path = await import('node:path')
     const resolved = path.resolve(filePath)
-    // 安全检查：只允许读取已授权的项目目录
-    const isAllowed = Array.from(allowedDirs).some(dir => resolved.startsWith(dir))
+    // 安全检查：使用 path.relative 检测路径逃逸，防止 startsWith 绕过 (如 /allowedDir/../../etc)
+    const isAllowed = Array.from(allowedDirs).some(dir => {
+      const relative = path.relative(dir, resolved)
+      return !relative.startsWith('..') && !path.isAbsolute(relative)
+    })
     if (!isAllowed) {
       throw new Error(`Access denied: ${resolved} is not in allowed directories`)
     }
@@ -126,11 +133,19 @@ function setupIPC() {
     if (stat.isDirectory()) {
       throw new Error(`Cannot read directory: ${resolved}`)
     }
+    // 限制文件大小 (10MB)，防止大文件阻塞主线程
+    if (stat.size > 10 * 1024 * 1024) {
+      throw new Error(`File too large: ${resolved} (${stat.size} bytes > 10MB)`)
+    }
     return fs.readFileSync(resolved, 'utf-8')
   })
 
-  // ---- 外部链接 ----
+  // ---- 外部链接 (仅允许 http/https) ----
   ipcMain.handle('shell:open-external', async (_, url: string) => {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Blocked: only http/https URLs allowed, got ${parsed.protocol}`)
+    }
     console.log(`[open-external] ${url}`)
     await shell.openExternal(url)
   })
@@ -143,6 +158,8 @@ function setupIPC() {
     return HTTP_PORT
   })
   ipcMain.handle('env:get', (_, key: string) => {
+    const ALLOWED = ['TOPCODE_UI_DEBUG', 'TOPOCODE_LOG_LEVEL', 'VITE_LOG_LEVEL']
+    if (!ALLOWED.includes(key)) return null
     return process.env[key] || null
   })
 
@@ -158,6 +175,17 @@ function setupIPC() {
     return true
   })
 
+  // ---- MCP Server 管理 ----
+  ipcMain.handle('mcp:start', async (_, projectRoot: string, zmqPort?: number, logLevel?: string) => {
+    await mcpManager.start(projectRoot, zmqPort || 0, logLevel || 'WARN')
+  })
+  ipcMain.handle('mcp:stop', async () => {
+    mcpManager.stop()
+  })
+  mcpManager.onStatusChange((status: any) => {
+    windowManager.broadcast('mcp:status', status)
+  })
+
   // ---- ZeroMQ RPC 调用 ----
   ipcMain.handle('ipc:call', async (_, { method, params }: { method: string; params: Record<string, any> }) => {
     console.log(`[Main] ipc:call -> ${method}`, params)
@@ -171,6 +199,20 @@ function setupIPC() {
       console.error(`[Main] ipc:call error (${method}):`, error.message)
       throw new Error(`IPC call failed: ${error.message}`)
     }
+  })
+
+  // ---- Auto-update ----
+  ipcMain.handle('update:check', () => {
+    checkForUpdates(true)
+    return true
+  })
+  ipcMain.handle('update:download', () => {
+    downloadUpdate()
+    return true
+  })
+  ipcMain.handle('update:install', () => {
+    quitAndInstall()
+    return true
   })
 }
 
@@ -201,6 +243,28 @@ app.whenReady().then(async () => {
 
   // 创建第一个窗口
   windowManager.createWindow()
+
+  // 初始化 auto-updater
+  const win = windowManager.getMainWindow()
+  if (win) {
+    initUpdater(win)
+  }
+
+  // 定期健康检查（每 30s 探测一次 ZMQ 连通性）
+  // 有正在处理中的请求时跳过检查，避免 ping 超时导致重连中断长操作
+  setInterval(async () => {
+    if (zmqRouter.pendingCount > 0) return
+    const healthy = await zmqRouter.ping()
+    if (!healthy) {
+      console.warn('[Main] Backend health check failed, attempting reconnect...')
+      try {
+        await zmqRouter.close()
+        await zmqRouter.connect()
+      } catch (e: any) {
+        console.error('[Main] Reconnect failed:', (e as Error).message)
+      }
+    }
+  }, 30000)
 
   // macOS: 点击 dock 重新打开窗口
   app.on('activate', () => {

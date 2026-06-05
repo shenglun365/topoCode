@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useReportStore } from '@/stores/report'
+import { useCommunityStore } from '@/stores/community-store'
+import { useChildAnalysisStore } from '@/stores/child-analysis-store'
 
 const { t } = useI18n()
-const reportStore = useReportStore()
+const communityStore = useCommunityStore()
+const childStore = useChildAnalysisStore()
 
 const props = defineProps<{
   taskId: string
@@ -21,17 +23,17 @@ const childLevel = computed(() => `L${parseInt(props.parentLevel[1]) + 1}`)
 const loading = ref(true)
 const error = ref<string | null>(null)
 
-const stateKey = computed(() => reportStore.buildChildStateKey(props.parentLevel, props.parentCommId, props.edgeType))
+const stateKey = computed(() => childStore.buildChildStateKey(props.parentLevel, props.parentCommId, props.edgeType))
 const communities = computed(() => {
-  const state = reportStore.tasks[props.taskId]?.analysisStates[stateKey.value]
-  return state?.communities || []
+  const t = communityStore.tasks[props.taskId]
+  return t ? t.analysisStates?.[stateKey.value]?.communities || [] : []
 })
 
 onMounted(async () => {
   loading.value = true
   error.value = null
   try {
-    await reportStore.loadChildCommunities(props.taskId, props.parentLevel, props.parentCommId, props.edgeType)
+    await childStore.loadChildCommunities(props.taskId, props.parentLevel, props.parentCommId, props.edgeType)
   } catch (e: any) {
     error.value = e?.message || String(e)
   } finally {

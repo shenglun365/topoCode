@@ -95,32 +95,32 @@ function getStatusText(status: string): string {
       <!-- 四维标签 -->
       <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
         <span
-          v-if="doc.tags.lifecycle.length > 0"
+          v-if="doc.tags?.lifecycle?.length"
           :class="`badge ${dimensionColors.lifecycle}`"
           style="font-size:8px;"
         >
-          {{ doc.tags.lifecycle[0] }}
+          {{ doc.tags?.lifecycle?.[0] }}
         </span>
         <span
-          v-if="doc.tags.techStack.length > 0"
+          v-if="doc.tags?.techStack?.length"
           :class="`badge ${dimensionColors.techStack}`"
           style="font-size:8px;"
         >
-          {{ doc.tags.techStack[0] }}
+          {{ doc.tags?.techStack?.[0] }}
         </span>
         <span
-          v-if="doc.tags.abstraction.length > 0"
+          v-if="doc.tags?.abstraction?.length"
           :class="`badge ${dimensionColors.abstraction}`"
           style="font-size:8px;"
         >
-          {{ doc.tags.abstraction[0] }}
+          {{ doc.tags?.abstraction?.[0] }}
         </span>
         <span
-          v-if="doc.tags.purpose.length > 0"
+          v-if="doc.tags?.purpose?.length"
           :class="`badge ${dimensionColors.purpose}`"
           style="font-size:8px;"
         >
-          {{ doc.tags.purpose[0] }}
+          {{ doc.tags?.purpose?.[0] }}
         </span>
       </div>
 

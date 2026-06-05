@@ -133,9 +133,7 @@
       >
         <FileTree
           v-if="selectedProjectData"
-          :root="selectedProjectData"
-          :expanded="{}"
-          @toggle="handleToggle"
+          :nodes="selectedProjectData.fileTree || []"
         />
       </div>
 
@@ -182,19 +180,20 @@ import ProjectCard from './ProjectCard.vue'
 import ImportZone from './ImportZone.vue'
 import FileTree from './FileTree.vue'
 import TaskCard from '../analysis/TaskCard.vue'
-import type { ProjectMeta, AnalysisTask, TreeNode } from '@/types/ipc'
+import type { Project, TreeNode } from '@/types/ipc'
+import type { AnalysisTask } from '@/types'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-003')
 const { t } = useI18n()
 
-const props = defineProps<{
-  projects: ProjectMeta[]
+const props = withDefaults(defineProps<{
+  projects: Project[]
   selectedProject: string | null
   viewMode: 'files' | 'tasks'
   tasks?: AnalysisTask[]
   fileTree?: TreeNode
-}>()
+}>(), { tasks: () => [] })
 
 const emit = defineEmits<{
   select: [projectId: string]
@@ -207,7 +206,7 @@ const emit = defineEmits<{
 
 const localViewMode = ref<'files' | 'tasks'>(props.viewMode)
 
-const selectedProjectData = computed(() => {
+const selectedProjectData = computed((): Project | undefined => {
   return props.projects.find(p => p.id === props.selectedProject)
 })
 
@@ -216,7 +215,7 @@ const selectedProjectName = computed(() => {
 })
 
 const selectedProjectStatus = computed(() => {
-  return selectedProjectData.value?.syncStatus || 'synced'
+  return selectedProjectData.value?.status || 'synced'
 })
 
 const statusText = computed(() => {
@@ -228,8 +227,8 @@ const statusText = computed(() => {
   }[status] || status
 })
 
-function selectProject(projectId: string) {
-  emit('select', projectId)
+function selectProject(project: Project) {
+  emit('select', project.id)
 }
 
 function deselectProject() {
@@ -243,10 +242,6 @@ function importProject(path: string) {
 function toggleViewMode() {
   localViewMode.value = localViewMode.value === 'files' ? 'tasks' : 'files'
   emit('switch-view', localViewMode.value)
-}
-
-function handleToggle(nodeId: string) {
-  // 处理文件树展开/折叠
 }
 
 function runTask(taskId: string) {

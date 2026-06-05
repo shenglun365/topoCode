@@ -176,7 +176,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   const pid = projectStore.selectedProjectId
   if (!pid) return
   try {
-    const llmResult = await window.api.analysis.getCommunityResult({
+    const llmResult = await window.api!.analysis.getCommunityResult({
       taskId, edgeType, commLv: 'L0', commId: communityId,
     }).catch(() => null)
     const parts: string[] = []
@@ -193,7 +193,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         parts.push('', '```plantuml', llmResult.plantuml, '```')
       }
     } else {
-      const detail = await window.api.report.getLevelCommunityDetail({
+      const detail = await window.api!.report.getLevelCommunityDetail({
         projectId: pid, taskId,
         level: 'L0', edgeType,
       })
@@ -219,7 +219,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       content: parts.join('\n'),
       title: communityId,
     })
-  } catch (e) {
+  } catch (e: any) {
     console.error('[AnalysisPage] openCommunityDetail error:', e)
   }
 }
@@ -235,7 +235,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
     <!-- ===== 公共 Tab 栏 — 显示所有报告类型 ===== -->
     <HomeTabBar
       :tabs="reportTabs"
-      :active-tab-id="analysisContext.activeTabId"
+      :active-tab-id="analysisContext.activeTabId ?? null"
       @update:active-tab-id="onTabUpdate"
       @close="onTabClose"
     />

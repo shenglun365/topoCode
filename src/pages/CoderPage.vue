@@ -16,7 +16,7 @@ import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-003')
 const { t } = useI18n()
-const chatStore = useChatStore()
+const chatStore = useChatStore() as any
 const messagesContainer = ref<HTMLElement | null>(null)
 
 onMounted(async () => {

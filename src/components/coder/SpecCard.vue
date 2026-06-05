@@ -44,14 +44,14 @@
     <div class="spec-actions">
       <button
         class="action-btn view-btn"
-        @click="emit('view', { specId: spec.id })"
+        @click="emit('view', spec.id)"
       >
         <EyeIcon class="w-4 h-4" />
         {{ t('common.view') }}
       </button>
       <button
         class="action-btn edit-btn"
-        @click="emit('edit', { specId: spec.id })"
+        @click="emit('edit', spec.id)"
       >
         <PencilIcon class="w-4 h-4" />
         {{ t('common.edit') }}
@@ -92,17 +92,18 @@ const emit = defineEmits<{
   edit: [specId: string]
 }>()
 
+const status = props.spec.status
 const statusClass = {
   draft: 'status-draft',
   reviewed: 'status-reviewed',
   approved: 'status-approved',
-}[props.spec.status]
+}[status]
 
 const statusText = {
   draft: t('coder.specDraft'),
   reviewed: t('coder.specReviewed'),
   approved: t('coder.specApproved'),
-}[props.spec.status]
+}[status]
 
 function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date

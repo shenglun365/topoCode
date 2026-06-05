@@ -1,461 +1,0 @@
-数据库目录: /home/cuser/.config/topoone-ui/topoone.db
-
-======================================================================
-  AST 诊断报告: proj-c5e1fff5
-======================================================================
-项目路径: /home/cuser/soft/spring-framework-6.0.11
-待分析文件: 8040
-支持的 tree-sitter 语言: c, cpp, go, java, javascript, python, tsx, typescript
-筛选语言: java
-  进度: 50/8040 (0%) | 22.5 file/s | ETA 355s  进度: 100/8040 (1%) | 23.0 file/s | ETA 345s  进度: 150/8040 (1%) | 24.4 file/s | ETA 323s  进度: 200/8040 (2%) | 24.5 file/s | ETA 320s  进度: 250/8040 (3%) | 26.8 file/s | ETA 291s  进度: 300/8040 (3%) | 26.8 file/s | ETA 288s  进度: 350/8040 (4%) | 27.1 file/s | ETA 283s  进度: 400/8040 (4%) | 25.5 file/s | ETA 300s  进度: 450/8040 (5%) | 21.5 file/s | ETA 353s  进度: 500/8040 (6%) | 19.4 file/s | ETA 389s  进度: 550/8040 (6%) | 18.8 file/s | ETA 397s  进度: 600/8040 (7%) | 19.2 file/s | ETA 387s  进度: 650/8040 (8%) | 19.1 file/s | ETA 386s  进度: 700/8040 (8%) | 19.9 file/s | ETA 369s  进度: 750/8040 (9%) | 20.3 file/s | ETA 359s  进度: 800/8040 (9%) | 20.6 file/s | ETA 351s  进度: 850/8040 (10%) | 21.2 file/s | ETA 340s  进度: 900/8040 (11%) | 22.0 file/s | ETA 324s  进度: 950/8040 (11%) | 22.7 file/s | ETA 312s  进度: 1000/8040 (12%) | 23.0 file/s | ETA 306s  进度: 1050/8040 (13%) | 23.4 file/s | ETA 299s  进度: 1100/8040 (13%) | 24.1 file/s | ETA 288s  进度: 1150/8040 (14%) | 24.5 file/s | ETA 282s  进度: 1200/8040 (14%) | 25.3 file/s | ETA 271s  进度: 1250/8040 (15%) | 26.1 file/s | ETA 260s  进度: 1300/8040 (16%) | 25.8 file/s | ETA 262s  进度: 1350/8040 (16%) | 25.6 file/s | ETA 261s  进度: 1400/8040 (17%) | 25.8 file/s | ETA 258s  进度: 1450/8040 (18%) | 26.3 file/s | ETA 250s  进度: 1500/8040 (18%) | 26.1 file/s | ETA 251s  进度: 1550/8040 (19%) | 25.0 file/s | ETA 259s  进度: 1600/8040 (19%) | 25.0 file/s | ETA 257s  进度: 1650/8040 (20%) | 23.7 file/s | ETA 270s  进度: 1700/8040 (21%) | 23.6 file/s | ETA 269s  进度: 1750/8040 (21%) | 21.5 file/s | ETA 293s  进度: 1800/8040 (22%) | 21.6 file/s | ETA 289s  进度: 1850/8040 (23%) | 21.3 file/s | ETA 290s  进度: 1900/8040 (23%) | 21.4 file/s | ETA 287s  进度: 1950/8040 (24%) | 21.5 file/s | ETA 284s  进度: 2000/8040 (24%) | 21.7 file/s | ETA 278s  进度: 2050/8040 (25%) | 21.9 file/s | ETA 273s  进度: 2100/8040 (26%) | 22.1 file/s | ETA 269s  进度: 2150/8040 (26%) | 22.2 file/s | ETA 266s  进度: 2200/8040 (27%) | 22.6 file/s | ETA 259s  进度: 2250/8040 (27%) | 22.7 file/s | ETA 255s  进度: 2300/8040 (28%) | 23.0 file/s | ETA 249s  进度: 2350/8040 (29%) | 23.4 file/s | ETA 243s  进度: 2400/8040 (29%) | 23.8 file/s | ETA 237s  进度: 2450/8040 (30%) | 23.1 file/s | ETA 242s  进度: 2500/8040 (31%) | 23.3 file/s | ETA 238s  进度: 2550/8040 (31%) | 22.5 file/s | ETA 244s  进度: 2600/8040 (32%) | 19.4 file/s | ETA 280s  进度: 2650/8040 (32%) | 18.6 file/s | ETA 289s  进度: 2700/8040 (33%) | 18.8 file/s | ETA 284s  进度: 2750/8040 (34%) | 18.6 file/s | ETA 284s  进度: 2800/8040 (34%) | 18.4 file/s | ETA 284s  进度: 2850/8040 (35%) | 18.5 file/s | ETA 281s  进度: 2900/8040 (36%) | 18.4 file/s | ETA 279s  进度: 2950/8040 (36%) | 18.6 file/s | ETA 274s  进度: 3000/8040 (37%) | 18.8 file/s | ETA 268s  进度: 3050/8040 (37%) | 19.0 file/s | ETA 262s  进度: 3100/8040 (38%) | 19.2 file/s | ETA 257s  进度: 3150/8040 (39%) | 19.1 file/s | ETA 256s  进度: 3200/8040 (39%) | 19.2 file/s | ETA 252s  进度: 3250/8040 (40%) | 19.3 file/s | ETA 249s  进度: 3300/8040 (41%) | 19.5 file/s | ETA 243s  进度: 3350/8040 (41%) | 19.3 file/s | ETA 243s  进度: 3400/8040 (42%) | 17.9 file/s | ETA 260s  进度: 3450/8040 (42%) | 17.9 file/s | ETA 257s  进度: 3500/8040 (43%) | 17.8 file/s | ETA 255s  进度: 3550/8040 (44%) | 17.9 file/s | ETA 251s  进度: 3600/8040 (44%) | 17.8 file/s | ETA 249s  进度: 3650/8040 (45%) | 17.9 file/s | ETA 245s  进度: 3700/8040 (46%) | 18.0 file/s | ETA 241s  进度: 3750/8040 (46%) | 17.6 file/s | ETA 244s  进度: 3800/8040 (47%) | 17.3 file/s | ETA 245s  进度: 3850/8040 (47%) | 17.5 file/s | ETA 239s  进度: 3900/8040 (48%) | 17.5 file/s | ETA 236s  进度: 3950/8040 (49%) | 17.7 file/s | ETA 232s  进度: 4000/8040 (49%) | 17.8 file/s | ETA 227s  进度: 4050/8040 (50%) | 17.1 file/s | ETA 233s  进度: 4100/8040 (50%) | 16.3 file/s | ETA 242s  进度: 4150/8040 (51%) | 14.8 file/s | ETA 262s  进度: 4200/8040 (52%) | 14.9 file/s | ETA 257s  进度: 4250/8040 (52%) | 15.1 file/s | ETA 251s  进度: 4300/8040 (53%) | 15.2 file/s | ETA 246s  进度: 4350/8040 (54%) | 15.2 file/s | ETA 242s  进度: 4400/8040 (54%) | 15.4 file/s | ETA 237s  进度: 4450/8040 (55%) | 15.4 file/s | ETA 233s  进度: 4500/8040 (55%) | 15.5 file/s | ETA 228s  进度: 4550/8040 (56%) | 15.2 file/s | ETA 230s  进度: 4600/8040 (57%) | 15.2 file/s | ETA 227s  进度: 4650/8040 (57%) | 15.3 file/s | ETA 222s  进度: 4700/8040 (58%) | 15.4 file/s | ETA 217s  进度: 4750/8040 (59%) | 15.4 file/s | ETA 213s  进度: 4800/8040 (59%) | 15.3 file/s | ETA 212s  进度: 4850/8040 (60%) | 15.4 file/s | ETA 207s  进度: 4900/8040 (60%) | 15.5 file/s | ETA 203s  进度: 4950/8040 (61%) | 15.6 file/s | ETA 198s  进度: 5000/8040 (62%) | 15.7 file/s | ETA 194s  进度: 5050/8040 (62%) | 15.7 file/s | ETA 190s  进度: 5100/8040 (63%) | 15.8 file/s | ETA 186s  进度: 5150/8040 (64%) | 15.9 file/s | ETA 181s  进度: 5200/8040 (64%) | 16.1 file/s | ETA 177s  进度: 5250/8040 (65%) | 16.2 file/s | ETA 173s  进度: 5300/8040 (65%) | 16.3 file/s | ETA 168s  进度: 5350/8040 (66%) | 16.4 file/s | ETA 164s  进度: 5400/8040 (67%) | 16.6 file/s | ETA 159s  进度: 5450/8040 (67%) | 16.7 file/s | ETA 155s  进度: 5500/8040 (68%) | 16.9 file/s | ETA 151s  进度: 5550/8040 (69%) | 16.9 file/s | ETA 147s  进度: 5600/8040 (69%) | 17.0 file/s | ETA 144s  进度: 5650/8040 (70%) | 17.0 file/s | ETA 141s  进度: 5700/8040 (70%) | 17.0 file/s | ETA 137s  进度: 5750/8040 (71%) | 17.0 file/s | ETA 134s  进度: 5800/8040 (72%) | 17.2 file/s | ETA 131s  进度: 5850/8040 (72%) | 17.3 file/s | ETA 127s  进度: 5900/8040 (73%) | 17.4 file/s | ETA 123s  进度: 5950/8040 (74%) | 17.4 file/s | ETA 120s  进度: 6000/8040 (74%) | 17.5 file/s | ETA 117s  进度: 6050/8040 (75%) | 17.6 file/s | ETA 113s  进度: 6100/8040 (75%) | 17.6 file/s | ETA 110s  进度: 6150/8040 (76%) | 17.1 file/s | ETA 110s  进度: 6200/8040 (77%) | 15.9 file/s | ETA 115s  进度: 6250/8040 (77%) | 15.9 file/s | ETA 113s  进度: 6300/8040 (78%) | 15.9 file/s | ETA 109s  进度: 6350/8040 (78%) | 16.0 file/s | ETA 106s  进度: 6400/8040 (79%) | 16.0 file/s | ETA 103s  进度: 6450/8040 (80%) | 16.1 file/s | ETA 99s  进度: 6500/8040 (80%) | 16.0 file/s | ETA 96s  进度: 6550/8040 (81%) | 16.1 file/s | ETA 93s  进度: 6600/8040 (82%) | 16.2 file/s | ETA 89s  进度: 6650/8040 (82%) | 16.2 file/s | ETA 86s  进度: 6700/8040 (83%) | 16.2 file/s | ETA 83s  进度: 6750/8040 (83%) | 16.3 file/s | ETA 79s  进度: 6800/8040 (84%) | 15.8 file/s | ETA 79s  进度: 6850/8040 (85%) | 15.8 file/s | ETA 75s  进度: 6900/8040 (85%) | 15.8 file/s | ETA 72s  进度: 6950/8040 (86%) | 15.7 file/s | ETA 69s  进度: 7000/8040 (87%) | 15.7 file/s | ETA 66s  进度: 7050/8040 (87%) | 15.7 file/s | ETA 63s  进度: 7100/8040 (88%) | 15.8 file/s | ETA 60s  进度: 7150/8040 (88%) | 15.6 file/s | ETA 57s  进度: 7200/8040 (89%) | 15.6 file/s | ETA 54s  进度: 7250/8040 (90%) | 15.7 file/s | ETA 50s  进度: 7300/8040 (90%) | 15.8 file/s | ETA 47s  进度: 7350/8040 (91%) | 15.9 file/s | ETA 44s  进度: 7400/8040 (92%) | 15.9 file/s | ETA 40s  进度: 7450/8040 (92%) | 16.0 file/s | ETA 37s  进度: 7500/8040 (93%) | 16.0 file/s | ETA 34s  进度: 7550/8040 (93%) | 16.1 file/s | ETA 30s  进度: 7600/8040 (94%) | 16.1 file/s | ETA 27s  进度: 7650/8040 (95%) | 16.2 file/s | ETA 24s  进度: 7700/8040 (95%) | 16.3 file/s | ETA 21s  进度: 7750/8040 (96%) | 16.4 file/s | ETA 18s  进度: 7800/8040 (97%) | 16.4 file/s | ETA 15s  进度: 7850/8040 (97%) | 16.5 file/s | ETA 12s  进度: 7900/8040 (98%) | 16.3 file/s | ETA 9s  进度: 7950/8040 (98%) | 14.5 file/s | ETA 6s  进度: 8000/8040 (99%) | 14.5 file/s | ETA 3s  进度: 8040/8040 (100%) | 14.5 file/s | ETA 0s
-
---- 文件统计 ---
-  总计: 8040 | 成功: 8040 | 失败: 0 | 跳过: 0
-
---- 按语言分布 ---
-  java            文件: 8040  成功: 8040  失败:    0  节点:  8656675
-
---- AST 节点类型 Top 500（全部语言聚合） ---
-  节点类型                                             数量       占比
-  ---------------------------------------- ---------- --------
-  identifier                                  1555054   17.96%
-  .                                            697303    8.06%
-  (                                            571648    6.60%
-  )                                            571648    6.60%
-  argument_list                                430489    4.97%
-  method_invocation                            382998    4.42%
-  ;                                            376800    4.35%
-  type_identifier                              314225    3.63%
-  scoped_identifier                            294034    3.40%
-  "                                            221886    2.56%
-  expression_statement                         154198    1.78%
-  ,                                            137964    1.59%
-  {                                            134439    1.55%
-  }                                            134439    1.55%
-  modifiers                                    119090    1.38%
-  string_fragment                              113598    1.31%
-  string_literal                               111152    1.28%
-  block                                        108868    1.26%
-  =                                            101892    1.18%
-  field_access                                  88574    1.02%
-  variable_declarator                           86246    1.00%
-  formal_parameters                             83125    0.96%
-  import_declaration                            75345    0.87%
-  import                                        75345    0.87%
-  method_declaration                            73566    0.85%
-  @                                             73451    0.85%
-  this                                          64511    0.75%
-  local_variable_declaration                    63395    0.73%
-  marker_annotation                             62714    0.72%
-  formal_parameter                              59993    0.69%
-  public                                        56277    0.65%
-  new                                           47000    0.54%
-  object_creation_expression                    44568    0.51%
-  <                                             43915    0.51%
-  >                                             43506    0.50%
-  binary_expression                             42856    0.50%
-  class                                         41493    0.48%
-  block_comment                                 41411    0.48%
-  type_arguments                                40388    0.47%
-  generic_type                                  40294    0.47%
-  return_statement                              39637    0.46%
-  return                                        39637    0.46%
-  void_type                                     38282    0.44%
-  parenthesized_expression                      32023    0.37%
-  decimal_integer_literal                       31368    0.36%
-  class_literal                                 28622    0.33%
-  throws                                        28548    0.33%
-  assignment_expression                         26011    0.30%
-  private                                       25657    0.30%
-  if_statement                                  23703    0.27%
-  if                                            23703    0.27%
-  null_literal                                  21481    0.25%
-  field_declaration                             20646    0.24%
-  static                                        20342    0.23%
-  line_comment                                  15979    0.18%
-  +                                             15606    0.18%
-  integral_type                                 15305    0.18%
-  ?                                             14811    0.17%
-  final                                         14763    0.17%
-  class_body                                    14102    0.16%
-  class_declaration                             12871    0.15%
-  [                                             12820    0.15%
-  ]                                             12820    0.15%
-  wildcard                                      11418    0.13%
-  int                                           10825    0.13%
-  annotation                                    10737    0.12%
-  annotation_argument_list                      10737    0.12%
-  !=                                             9451    0.11%
-  boolean_type                                   9292    0.11%
-  ->                                             8723    0.10%
-  dimensions                                     8710    0.10%
-  lambda_expression                              8141    0.09%
-  program                                        8040    0.09%
-  package_declaration                            8040    0.09%
-  package                                        8040    0.09%
-  escape_sequence                                7980    0.09%
-  array_type                                     7317    0.08%
-  protected                                      7248    0.08%
-  cast_expression                                7163    0.08%
-  :                                              7071    0.08%
-  ==                                             6770    0.08%
-  constructor_declaration                        6098    0.07%
-  constructor_body                               6098    0.07%
-  extends                                        6071    0.07%
-  scoped_type_identifier                         6019    0.07%
-  true                                           5855    0.07%
-  else                                           5669    0.07%
-  unary_expression                               5597    0.06%
-  false                                          5077    0.06%
-  throw_statement                                4821    0.06%
-  throw                                          4821    0.06%
-  &&                                             4109    0.05%
-  !                                              4108    0.05%
-  instanceof_expression                          3924    0.05%
-  instanceof                                     3924    0.05%
-  type_list                                      3900    0.05%
-  element_value_pair                             3899    0.05%
-  superclass                                     3746    0.04%
-  super_interfaces                               3515    0.04%
-  implements                                     3515    0.04%
-  for                                            3446    0.04%
-  ternary_expression                             3393    0.04%
-  super                                          3385    0.04%
-  array_access                                   3107    0.04%
-  try                                            2939    0.03%
-  try_statement                                  2783    0.03%
-  catch_clause                                   2708    0.03%
-  catch                                          2708    0.03%
-  catch_formal_parameter                         2708    0.03%
-  catch_type                                     2708    0.03%
-  explicit_constructor_invocation                2621    0.03%
-  enhanced_for_statement                         2420    0.03%
-  type_parameter                                 2417    0.03%
-  array_creation_expression                      2286    0.03%
-  -                                              2236    0.03%
-  type_parameters                                2223    0.03%
-  ||                                             2209    0.03%
-  byte                                           2204    0.03%
-  method_reference                               2171    0.03%
-  ::                                             2171    0.03%
-  character_literal                              2160    0.02%
-  switch_label                                   1839    0.02%
-  update_expression                              1804    0.02%
-  spread_parameter                               1714    0.02%
-  ...                                            1714    0.02%
-  multiline_string_fragment                      1704    0.02%
-  case                                           1702    0.02%
-  ++                                             1664    0.02%
-  array_initializer                              1572    0.02%
-  long                                           1535    0.02%
-  interface_declaration                          1511    0.02%
-  interface                                      1511    0.02%
-  interface_body                                 1511    0.02%
-  abstract                                       1483    0.02%
-  default                                        1451    0.02%
-  switch_block_statement_group                   1257    0.01%
-  element_value_array_initializer                1124    0.01%
-  decimal_floating_point_literal                 1070    0.01%
-  annotation_type_element_declaration            1040    0.01%
-  for_statement                                  1026    0.01%
-  dimensions_expr                                 906    0.01%
-  annotation_type_declaration                     817    0.01%
-  @interface                                      817    0.01%
-  annotation_type_body                            817    0.01%
-  inferred_parameters                             761    0.01%
-  enum_constant                                   720    0.01%
-  type_bound                                      594    0.01%
-  switch_rule                                     582    0.01%
-  while                                           556    0.01%
-  char                                            545    0.01%
-  break_statement                                 519    0.01%
-  break                                           519    0.01%
-  while_statement                                 515    0.01%
-  finally_clause                                  499    0.01%
-  finally                                         499    0.01%
-  floating_point_type                             472    0.01%
-  synchronized                                    470    0.01%
-  +=                                              468    0.01%
-  hex_integer_literal                             436    0.01%
-  *                                               433    0.01%
-  constant_declaration                            427    0.00%
-  """                                             418    0.00%
-  synchronized_statement                          401    0.00%
-  extends_interfaces                              381    0.00%
-  >=                                              328    0.00%
-  &                                               326    0.00%
-  volatile                                        306    0.00%
-  |                                               261    0.00%
-  float                                           259    0.00%
-  double                                          213    0.00%
-  switch_expression                               201    0.00%
-  switch                                          201    0.00%
-  switch_block                                    201    0.00%
-  short                                           196    0.00%
-  resource                                        159    0.00%
-  <=                                              157    0.00%
-  try_with_resources_statement                    156    0.00%
-  resource_specification                          156    0.00%
-  enum_declaration                                146    0.00%
-  enum                                            146    0.00%
-  enum_body                                       146    0.00%
-  static_initializer                              140    0.00%
-  --                                              140    0.00%
-  continue_statement                              130    0.00%
-  continue                                        130    0.00%
-  /                                               111    0.00%
-  <<                                              106    0.00%
-  |=                                               91    0.00%
-  transient                                        90    0.00%
-  enum_body_declarations                           61    0.00%
-  >>>                                              42    0.00%
-  do_statement                                     41    0.00%
-  do                                               41    0.00%
-  %                                                33    0.00%
-  record_declaration                               31    0.00%
-  record                                           31    0.00%
-  ~                                                30    0.00%
-  >>                                               29    0.00%
-  ^                                                27    0.00%
-  yield_statement                                  18    0.00%
-  yield                                            18    0.00%
-  -=                                               15    0.00%
-  &=                                               11    0.00%
-  permits                                           8    0.00%
-  sealed                                            6    0.00%
-  ^=                                                6    0.00%
-  *=                                                5    0.00%
-  octal_integer_literal                             4    0.00%
-  <<=                                               3    0.00%
-  annotated_type                                    3    0.00%
-  >>=                                               2    0.00%
-  assert_statement                                  1    0.00%
-  assert                                            1    0.00%
-  labeled_statement                                 1    0.00%
-  ---------------------------------------- ---------- --------
-  TOTAL                                       8656675  100.00%
-
---- 重要节点类型 Top 500（按语言配置过滤） ---
-  节点类型                                             数量       占比
-  ---------------------------------------- ---------- --------
-  identifier                                  1555054   17.96%
-  ignore..                                     697303    8.06%
-  ignore.(                                     571648    6.60%
-  ignore.)                                     571648    6.60%
-  ignore.argument_list                         430489    4.97%
-  method_invocation                            382998    4.42%
-  ignore.;                                     376800    4.35%
-  type_identifier                              314225    3.63%
-  ignore.scoped_identifier                     294034    3.40%
-  ignore."                                     221886    2.56%
-  expression_statement                         154198    1.78%
-  ignore.,                                     137964    1.59%
-  ignore.{                                     134439    1.55%
-  ignore.}                                     134439    1.55%
-  modifiers                                    119090    1.38%
-  ignore.string_fragment                       113598    1.31%
-  string_literal                               111152    1.28%
-  block                                        108868    1.26%
-  ignore.=                                     101892    1.18%
-  field_access                                  88574    1.02%
-  variable_declarator                           86246    1.00%
-  ignore.formal_parameters                      83125    0.96%
-  import_declaration                            75345    0.87%
-  ignore.import                                 75345    0.87%
-  method_declaration                            73566    0.85%
-  ignore.@                                      73451    0.85%
-  this                                          64511    0.75%
-  ignore.local_variable_declaration             63395    0.73%
-  marker_annotation                             62714    0.72%
-  formal_parameter                              59993    0.69%
-  public                                        56277    0.65%
-  ignore.new                                    47000    0.54%
-  object_creation_expression                    44568    0.51%
-  ignore.<                                      43915    0.51%
-  ignore.>                                      43506    0.50%
-  binary_expression                             42856    0.50%
-  ignore.class                                  41493    0.48%
-  ignore.block_comment                          41411    0.48%
-  type_arguments                                40388    0.47%
-  generic_type                                  40294    0.47%
-  return_statement                              39637    0.46%
-  ignore.return                                 39637    0.46%
-  void_type                                     38282    0.44%
-  parenthesized_expression                      32023    0.37%
-  decimal_integer_literal                       31368    0.36%
-  ignore.class_literal                          28622    0.33%
-  ignore.throws                                 28548    0.33%
-  assignment_expression                         26011    0.30%
-  private                                       25657    0.30%
-  if_statement                                  23703    0.27%
-  ignore.if                                     23703    0.27%
-  null_literal                                  21481    0.25%
-  field_declaration                             20646    0.24%
-  static                                        20342    0.23%
-  ignore.line_comment                           15979    0.18%
-  ignore.+                                      15606    0.18%
-  integral_type                                 15305    0.18%
-  ignore.?                                      14811    0.17%
-  final                                         14763    0.17%
-  class_body                                    14102    0.16%
-  class_declaration                             12871    0.15%
-  ignore.[                                      12820    0.15%
-  ignore.]                                      12820    0.15%
-  wildcard                                      11418    0.13%
-  ignore.int                                    10825    0.13%
-  annotation                                    10737    0.12%
-  ignore.annotation_argument_list               10737    0.12%
-  ignore.!=                                      9451    0.11%
-  boolean_type                                   9292    0.11%
-  ignore.->                                      8723    0.10%
-  ignore.dimensions                              8710    0.10%
-  lambda_expression                              8141    0.09%
-  program                                        8040    0.09%
-  package_declaration                            8040    0.09%
-  ignore.package                                 8040    0.09%
-  ignore.escape_sequence                         7980    0.09%
-  array_type                                     7317    0.08%
-  protected                                      7248    0.08%
-  cast_expression                                7163    0.08%
-  ignore.:                                       7071    0.08%
-  ignore.==                                      6770    0.08%
-  constructor_declaration                        6098    0.07%
-  ignore.constructor_body                        6098    0.07%
-  ignore.extends                                 6071    0.07%
-  ignore.scoped_type_identifier                  6019    0.07%
-  ignore.true                                    5855    0.07%
-  ignore.else                                    5669    0.07%
-  unary_expression                               5597    0.06%
-  ignore.false                                   5077    0.06%
-  throw_statement                                4821    0.06%
-  ignore.throw                                   4821    0.06%
-  ignore.&&                                      4109    0.05%
-  ignore.!                                       4108    0.05%
-  instanceof_expression                          3924    0.05%
-  ignore.instanceof                              3924    0.05%
-  ignore.type_list                               3900    0.05%
-  ignore.element_value_pair                      3899    0.05%
-  ignore.superclass                              3746    0.04%
-  super_interfaces                               3515    0.04%
-  ignore.implements                              3515    0.04%
-  ignore.for                                     3446    0.04%
-  ternary_expression                             3393    0.04%
-  super                                          3385    0.04%
-  array_access                                   3107    0.04%
-  ignore.try                                     2939    0.03%
-  try_statement                                  2783    0.03%
-  catch_clause                                   2708    0.03%
-  ignore.catch                                   2708    0.03%
-  ignore.catch_formal_parameter                  2708    0.03%
-  ignore.catch_type                              2708    0.03%
-  ignore.explicit_constructor_invocation         2621    0.03%
-  enhanced_for_statement                         2420    0.03%
-  type_parameter                                 2417    0.03%
-  array_creation_expression                      2286    0.03%
-  ignore.-                                       2236    0.03%
-  type_parameters                                2223    0.03%
-  ignore.||                                      2209    0.03%
-  ignore.byte                                    2204    0.03%
-  method_reference                               2171    0.03%
-  ignore.::                                      2171    0.03%
-  character_literal                              2160    0.02%
-  switch_label                                   1839    0.02%
-  update_expression                              1804    0.02%
-  spread_parameter                               1714    0.02%
-  ignore....                                     1714    0.02%
-  ignore.multiline_string_fragment               1704    0.02%
-  ignore.case                                    1702    0.02%
-  ignore.++                                      1664    0.02%
-  ignore.array_initializer                       1572    0.02%
-  ignore.long                                    1535    0.02%
-  interface_declaration                          1511    0.02%
-  ignore.interface                               1511    0.02%
-  interface_body                                 1511    0.02%
-  abstract                                       1483    0.02%
-  ignore.default                                 1451    0.02%
-  switch_block_statement_group                   1257    0.01%
-  ignore.element_value_array_initializer         1124    0.01%
-  decimal_floating_point_literal                 1070    0.01%
-  annotation_type_element_declaration            1040    0.01%
-  for_statement                                  1026    0.01%
-  ignore.dimensions_expr                          906    0.01%
-  annotation_type_declaration                     817    0.01%
-  ignore.@interface                               817    0.01%
-  annotation_type_body                            817    0.01%
-  ignore.inferred_parameters                      761    0.01%
-  enum_constant                                   720    0.01%
-  type_bound                                      594    0.01%
-  ignore.switch_rule                              582    0.01%
-  ignore.while                                    556    0.01%
-  ignore.char                                     545    0.01%
-  break_statement                                 519    0.01%
-  ignore.break                                    519    0.01%
-  while_statement                                 515    0.01%
-  finally_clause                                  499    0.01%
-  ignore.finally                                  499    0.01%
-  floating_point_type                             472    0.01%
-  synchronized                                    470    0.01%
-  ignore.+=                                       468    0.01%
-  hex_integer_literal                             436    0.01%
-  ignore.*                                        433    0.01%
-  ignore.constant_declaration                     427    0.00%
-  ignore."""                                      418    0.00%
-  synchronized_statement                          401    0.00%
-  extends_interfaces                              381    0.00%
-  ignore.>=                                       328    0.00%
-  ignore.&                                        326    0.00%
-  volatile                                        306    0.00%
-  ignore.|                                        261    0.00%
-  ignore.float                                    259    0.00%
-  ignore.double                                   213    0.00%
-  ignore.switch_expression                        201    0.00%
-  ignore.switch                                   201    0.00%
-  switch_block                                    201    0.00%
-  ignore.short                                    196    0.00%
-  resource                                        159    0.00%
-  ignore.<=                                       157    0.00%
-  try_with_resources_statement                    156    0.00%
-  ignore.resource_specification                   156    0.00%
-  enum_declaration                                146    0.00%
-  ignore.enum                                     146    0.00%
-  enum_body                                       146    0.00%
-  static_initializer                              140    0.00%
-  ignore.--                                       140    0.00%
-  continue_statement                              130    0.00%
-  ignore.continue                                 130    0.00%
-  ignore./                                        111    0.00%
-  ignore.<<                                       106    0.00%
-  ignore.|=                                        91    0.00%
-  transient                                        90    0.00%
-  ignore.enum_body_declarations                    61    0.00%
-  ignore.>>>                                       42    0.00%
-  do_statement                                     41    0.00%
-  ignore.do                                        41    0.00%
-  ignore.%                                         33    0.00%
-  record_declaration                               31    0.00%
-  ignore.record                                    31    0.00%
-  ignore.~                                         30    0.00%
-  ignore.>>                                        29    0.00%
-  ignore.^                                         27    0.00%
-  ignore.yield_statement                           18    0.00%
-  ignore.yield                                     18    0.00%
-  ignore.-=                                        15    0.00%
-  ignore.&=                                        11    0.00%
-  permits                                           8    0.00%
-  ignore.sealed                                     6    0.00%
-  ignore.^=                                         6    0.00%
-  ignore.*=                                         5    0.00%
-  octal_integer_literal                             4    0.00%
-  ignore.<<=                                        3    0.00%
-  ignore.annotated_type                             3    0.00%
-  ignore.>>=                                        2    0.00%
-  ignore.assert_statement                           1    0.00%
-  ignore.assert                                     1    0.00%
-  ignore.labeled_statement                          1    0.00%
-  ---------------------------------------- ---------- --------
-  TOTAL                                       8656675  100.00%
-
-======================================================================
-  分析完成
-======================================================================
-

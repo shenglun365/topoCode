@@ -7,12 +7,12 @@ import type {
   RenderRequest,
   RenderResponse,
   RenderProgress,
+  RenderType,
   MermaidData,
   D3LayoutData,
   D3HierarchyData,
   MermaidResult,
   D3LayoutResult,
-  D3HierarchyResult,
 } from './types'
 
 // ==================== Mermaid 渲染器 ====================
@@ -142,12 +142,12 @@ async function computeD3Hierarchy(data: D3HierarchyData): Promise<any> {
 // ==================== Worker 消息分发 ====================
 
 function postProgress(type: string, progress: number, phase: string): void {
-  const msg: RenderProgress = {
+  const msg = {
     id: '', // 由主线程填充
-    type,
+    type: type as RenderType,
     progress,
     phase,
-  }
+  } as RenderProgress
   // @ts-ignore - self 在 Worker 环境中
   self.postMessage(msg)
 }
@@ -156,7 +156,7 @@ function postProgress(type: string, progress: number, phase: string): void {
 self.onmessage = async (e: MessageEvent<RenderRequest>) => {
   const { id, type, data, options } = e.data
 
-  const response: RenderResponse = { id, type }
+  const response = { id, type } as RenderResponse
 
   try {
     switch (type) {

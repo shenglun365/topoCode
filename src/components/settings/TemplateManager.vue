@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
 import { useComponentId } from '@/composables/useComponentId'
 import {
   PencilSquareIcon,
@@ -35,7 +35,7 @@ interface TemplateItem {
 
 const templates = ref<TemplateItem[]>([])
 const loading = ref(false)
-const filterLocale = ref(settingsStore.locale || 'zh-CN')
+const filterLocale = ref<string>(settingsStore.locale || 'zh-CN')
 const filterMode = ref('')
 
 // 只显示这 5 组模板（中英文各一条）
@@ -58,7 +58,7 @@ const restoreLoading = ref(false)
 async function loadTemplates() {
   loading.value = true
   try {
-    const res = await window.api.promptTemplate.list({
+    const res = await window.api!.promptTemplate.list({
       locale: filterLocale.value === 'all' ? undefined : filterLocale.value,
       mode: filterMode.value || undefined,
     })
@@ -68,7 +68,7 @@ async function loadTemplates() {
       const baseId = (t as any).base_id || t.id.replace(/__.*$/, '')
       return VISIBLE_TEMPLATE_IDS.has(baseId)
     })
-  } catch (e) {
+  } catch (e: any) {
     console.error('[TemplateManager] Failed to load templates:', e)
   } finally {
     loading.value = false
@@ -101,8 +101,8 @@ async function saveTemplate() {
   if (!editing.value.name?.trim()) return
   try {
     if (editMode.value === 'create') {
-      await window.api.promptTemplate.create({
-        name: editing.value.name!,
+      await window.api!.promptTemplate.create({
+        name: editing.value.name || '',
         mode: editing.value.mode || 'chat',
         moduleType: editing.value.module_type || undefined,
         category: editing.value.category || 'general',
@@ -116,7 +116,7 @@ async function saveTemplate() {
         variablesJson: editing.value.variables_json,
       })
     } else {
-      const params: Record<string, any> = { templateId: editing.value.id }
+      const params: Record<string, any> & { templateId: string } = { templateId: editing.value.id || '' }
       if (editing.value.name !== undefined) params.name = editing.value.name
       if (editing.value.system_prompt !== undefined) params.system_prompt = editing.value.system_prompt
       if (editing.value.user_prompt_template !== undefined) params.user_prompt_template = editing.value.user_prompt_template
@@ -127,7 +127,7 @@ async function saveTemplate() {
       if (editing.value.output_schema_json !== undefined) params.output_schema_json = editing.value.output_schema_json
       if (editing.value.output_example !== undefined) params.output_example = editing.value.output_example
       if (editing.value.variables_json !== undefined) params.variables_json = editing.value.variables_json
-      await window.api.promptTemplate.update(params)
+      await window.api!.promptTemplate.update(params)
     }
     editDialog.value = false
     await loadTemplates()
@@ -141,7 +141,7 @@ async function restoreDefaults() {
   restoreLoading.value = true
   try {
     const locale = filterLocale.value === 'all' ? undefined : filterLocale.value
-    await window.api.promptTemplate.restoreDefaults({ locale })
+    await window.api!.promptTemplate.restoreDefaults({ locale })
     restoreDialog.value = false
     await loadTemplates()
   } catch (e: any) {
@@ -169,14 +169,14 @@ const defaultTemplateLocale = ref('zh-CN')
 
 async function loadDefaultLocale() {
   try {
-    const res = await window.api.promptTemplate.getDefaultLocale()
+    const res = await window.api!.promptTemplate.getDefaultLocale()
     if (res?.locale) defaultTemplateLocale.value = res.locale
-  } catch (_) {}
+  } catch (_: any) {}
 }
 
 async function setDefaultTemplateLocale(locale: string) {
   try {
-    await window.api.promptTemplate.setDefaultLocale({ locale })
+    await window.api!.promptTemplate.setDefaultLocale({ locale })
     defaultTemplateLocale.value = locale
   } catch (e: any) {
     console.error('[TemplateManager] Failed to set default locale:', e)

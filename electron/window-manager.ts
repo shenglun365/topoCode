@@ -1,50 +1,30 @@
-/** 多窗口管理器 - 单后端共享 + 保活机制 */
+/** 单窗口管理器 - 单后端共享 + 保活机制 */
 
 import { BrowserWindow, app, ipcMain } from 'electron'
 import { join } from 'path'
 import { pythonBridge, BackendStatus } from './python-bridge'
-import { zmqRouter } from './zmq-router'
 
-// 最大窗口数
-const MAX_WINDOWS = 1
-
-// 后端保活超时（秒）- 最后一个窗口关闭后等待多久才停止后端
+// 后端保活超时（秒）
 const BACKEND_KEEPALIVE_TIMEOUT = 60
 
 export class WindowManager {
-  private windows: Map<number, BrowserWindow> = new Map()
+  private mainWindow: BrowserWindow | null = null
   private backendKeepaliveTimer: NodeJS.Timeout | null = null
   private isQuitting = false
 
-  /** 获取所有窗口 */
-  getWindows(): BrowserWindow[] {
-    return Array.from(this.windows.values())
-  }
-
-  /** 获取窗口数量 */
-  getWindowCount(): number {
-    return this.windows.size
-  }
-
-  /** 获取主窗口（第一个创建的窗口） */
   getMainWindow(): BrowserWindow | null {
-    const first = this.windows.keys().next().value
-    return first ? this.windows.get(first) ?? null : null
+    return this.mainWindow
   }
 
-  /** 获取聚焦窗口 */
   getFocusedWindow(): BrowserWindow | null {
-    return BrowserWindow.getFocusedWindow() && this.windows.has(BrowserWindow.getFocusedWindow()!.id)
-      ? BrowserWindow.getFocusedWindow()!
-      : null
+    return this.mainWindow && !this.mainWindow.isDestroyed() ? this.mainWindow : null
   }
 
-  /** 创建新窗口 */
-  createWindow(options?: { show?: boolean }): BrowserWindow | null {
-    // 检查窗口数量限制
-    if (this.windows.size >= MAX_WINDOWS) {
-      console.log('[WindowManager] Max windows reached')
-      return null
+  /** 创建主窗口 */
+  createWindow(options?: { show?: boolean }): BrowserWindow {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.focus()
+      return this.mainWindow
     }
 
     const isDev = !app.isPackaged
@@ -64,78 +44,49 @@ export class WindowManager {
       },
     })
 
-    // 加载页面
     if (isDev) {
       win.loadURL('http://localhost:5173')
-      if (options?.show) {
-        win.webContents.openDevTools()
-      }
+      if (options?.show) win.webContents.openDevTools()
     } else {
       win.loadFile(join(__dirname, '..', 'dist', 'index.html'))
     }
 
-    // 配置中文字体
     this.configureFonts(win)
 
-    // 注册窗口
-    this.windows.set(win.id, win)
-    console.log(`[WindowManager] Window ${win.id} created (${this.windows.size}/${MAX_WINDOWS})`)
+    this.mainWindow = win
+    console.log(`[WindowManager] Main window created`)
 
-    // 窗口关闭事件
     win.on('closed', () => {
-      this.windows.delete(win.id)
-      console.log(`[WindowManager] Window ${win.id} closed (${this.windows.size}/${MAX_WINDOWS})`)
-
-      // 如果所有窗口都关闭了，启动保活定时器
-      if (this.windows.size === 0 && !this.isQuitting) {
-        this.startBackendKeepalive()
-      }
+      this.mainWindow = null
+      if (!this.isQuitting) this.startBackendKeepalive()
     })
 
-    // 窗口聚焦时广播
-    win.on('focus', () => {
-      this.broadcast('window:focus', { windowId: win.id })
-    })
-
-    // 启动后端（如果还没启动）
     this.ensureBackendRunning()
-
     return win
   }
 
-  /** 确保后端运行 */
   private async ensureBackendRunning(): Promise<void> {
     const status = pythonBridge.getStatus()
-    if (status.status !== 'running') {
+    if (status.status !== 'running' && status.status !== 'starting') {
       console.log('[WindowManager] Starting backend...')
-      await pythonBridge.start()
+      pythonBridge.start().then(s => {
+        this.broadcastStatus(s)
+      })
     }
-    // 清除保活定时器
     this.clearBackendKeepalive()
   }
 
-  /** 后端健康检查（由定时器调用） */
-  async healthCheck(): Promise<boolean> {
-    try {
-      const status = pythonBridge.getStatus()
-      return status.status === 'running'
-    } catch {
-      return false
-    }
-  }
-
-  /** 启动后端保活定时器 */
   private startBackendKeepalive(): void {
     this.clearBackendKeepalive()
     console.log(`[WindowManager] Backend keepalive: ${BACKEND_KEEPALIVE_TIMEOUT}s`)
     this.backendKeepaliveTimer = setTimeout(async () => {
       console.log('[WindowManager] Stopping backend (keepalive expired)')
-      await pythonBridge.stop()
+      const s = await pythonBridge.stop()
+      this.broadcastStatus(s)
       this.backendKeepaliveTimer = null
     }, BACKEND_KEEPALIVE_TIMEOUT * 1000)
   }
 
-  /** 清除保活定时器 */
   private clearBackendKeepalive(): void {
     if (this.backendKeepaliveTimer) {
       clearTimeout(this.backendKeepaliveTimer)
@@ -143,209 +94,147 @@ export class WindowManager {
     }
   }
 
-  /** 向所有窗口广播消息 */
+  private broadcastStatus(status: BackendStatus): void {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('event:backend.status', status)
+    }
+  }
+
+  /** 向主窗口广播事件 */
   broadcast(channel: string, data: any): void {
-    for (const win of this.windows.values()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send(channel, data)
-      }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send(channel, data)
     }
   }
 
-  /** 向指定窗口发送消息 */
-  sendTo(windowId: number, channel: string, data: any): void {
-    const win = this.windows.get(windowId)
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(channel, data)
-    }
+  /** 向主窗口发送事件（broadcast 别名） */
+  sendTo(_windowId: number, channel: string, data: any): void {
+    this.broadcast(channel, data)
   }
 
-  /** 配置中文字体 */
+  /** 获取窗口数量（始终返回 0 或 1） */
+  getWindowCount(): number {
+    return this.mainWindow && !this.mainWindow.isDestroyed() ? 1 : 0
+  }
+
   private configureFonts(win: BrowserWindow): void {
     win.webContents.insertCSS(`
-      * {
-        font-family: 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif !important;
-      }
-      code, pre, .font-mono {
-        font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Noto Sans Mono CJK SC', Consolas, monospace !important;
-      }
+      * { font-family: 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif !important; }
+      code, pre, .font-mono { font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Noto Sans Mono CJK SC', Consolas, monospace !important; }
     `)
   }
 
-  /** 设置 IPC 处理 */
   setupIPC(): void {
-    // ---- 窗口控制 ----
-    ipcMain.handle('window:create', () => {
-      return this.createWindow()?.id ?? null
-    })
-
-    ipcMain.handle('window:close', (event, windowId?: number) => {
-      let win: BrowserWindow | null
-      if (windowId) {
-        win = this.windows.get(windowId) || null
-      } else {
-        win = BrowserWindow.fromWebContents(event.sender)
-      }
-      if (win && !win.isDestroyed()) {
-        win.close()
-      }
+    ipcMain.handle('window:close', (event) => {
+      const win = this.getWindowFromEvent(event)
+      if (win) win.close()
       return true
     })
 
     ipcMain.handle('window:minimize', (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (win && !win.isDestroyed()) {
-        win.minimize()
-      }
+      this.getWindowFromEvent(event)?.minimize()
       return true
     })
 
     ipcMain.handle('window:maximize', (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (win && !win.isDestroyed()) {
-        if (win.isMaximized()) {
-          win.unmaximize()
-        } else {
-          win.maximize()
-        }
+      const win = this.getWindowFromEvent(event)
+      if (win) {
+        win.isMaximized() ? win.unmaximize() : win.maximize()
       }
       return true
     })
 
     ipcMain.handle('window:isMaximized', (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      return win && !win.isDestroyed() ? win.isMaximized() : false
-    })
-
-    ipcMain.handle('window:list', () => {
-      return Array.from(this.windows.entries()).map(([id, win]) => ({
-        id,
-        title: win.getTitle(),
-        isFocused: win.isFocused(),
-      }))
-    })
-
-    ipcMain.handle('window:focus', (_, windowId: number) => {
-      const win = this.windows.get(windowId)
-      if (win && !win.isDestroyed()) {
-        win.focus()
-      }
-      return true
-    })
-
-    ipcMain.handle('window:getCount', () => {
-      return this.windows.size
-    })
-
-    ipcMain.handle('window:getMaxCount', () => {
-      return MAX_WINDOWS
+      return this.getWindowFromEvent(event)?.isMaximized() ?? false
     })
 
     ipcMain.handle('window:toggle-left-panel', () => {
-      const win = this.getFocusedWindow()
-      win?.webContents.send('panel:toggle-left')
+      this.mainWindow?.webContents.send('panel:toggle-left')
     })
 
     ipcMain.handle('window:toggle-right-panel', () => {
-      const win = this.getFocusedWindow()
-      win?.webContents.send('panel:toggle-right')
+      this.mainWindow?.webContents.send('panel:toggle-right')
     })
 
     ipcMain.handle('window:zoom-in', () => {
-      const win = this.getFocusedWindow()
+      const win = this.mainWindow
       const zoom = win?.webContents.getZoomFactor() || 1
       win?.webContents.setZoomFactor(Math.min(3, zoom + 0.1))
       return Math.round((win?.webContents.getZoomFactor() || 1) * 100)
     })
 
     ipcMain.handle('window:zoom-out', () => {
-      const win = this.getFocusedWindow()
+      const win = this.mainWindow
       const zoom = win?.webContents.getZoomFactor() || 1
       win?.webContents.setZoomFactor(Math.max(0.33, zoom - 0.1))
       return Math.round((win?.webContents.getZoomFactor() || 1) * 100)
     })
 
     ipcMain.handle('window:zoom-reset', () => {
-      this.getFocusedWindow()?.webContents.setZoomFactor(1)
+      this.mainWindow?.webContents.setZoomFactor(1)
       return 100
     })
 
-    // ---- 广播消息 ----
-    ipcMain.handle('window:broadcast', (_, channel: string, data: any) => {
-      this.broadcast(channel, data)
-      return true
-    })
-
-    // ---- 应用退出 ----
     ipcMain.handle('app:quit', () => {
       app.quit()
       return true
     })
 
-    // ---- 后端管理 ----
     ipcMain.handle('backend:start', async () => {
-      const status = await pythonBridge.start()
-      this.broadcast('event:backend.status', status)
-      return status
+      const s = await pythonBridge.start()
+      this.broadcastStatus(s)
+      return s
     })
 
     ipcMain.handle('backend:stop', async () => {
-      const status = await pythonBridge.stop()
-      this.broadcast('event:backend.status', status)
-      return status
+      const s = await pythonBridge.stop()
+      this.broadcastStatus(s)
+      return s
     })
 
     ipcMain.handle('backend:restart', async () => {
-      const status = await pythonBridge.restart()
-      this.broadcast('event:backend.status', status)
-      return status
+      const s = await pythonBridge.restart()
+      this.broadcastStatus(s)
+      return s
     })
 
     ipcMain.handle('backend:getStatus', () => {
       return pythonBridge.getStatus()
     })
 
-    // 订阅后端状态变更
-    pythonBridge.onStatusChange((status: BackendStatus) => {
-      this.broadcast('event:backend.status', status)
-    })
-
-    // ---- 内存限制 ----
-    ipcMain.handle('backend:getMemoryLimit', () => {
-      return pythonBridge.memoryLimit
-    })
-
+    ipcMain.handle('backend:getMemoryLimit', () => pythonBridge.memoryLimit)
     ipcMain.handle('backend:setMemoryLimit', (_, limit: number) => {
       pythonBridge.memoryLimit = limit
       return true
     })
 
-    // ---- HTTP 服务配置 ----
     ipcMain.handle('backend:getHttpConfig', () => {
       return { host: pythonBridge.httpHost, port: pythonBridge.httpPort }
     })
-
     ipcMain.handle('backend:setHttpConfig', (_, config: { host: string; port: number }) => {
       pythonBridge.httpHost = config.host
       pythonBridge.httpPort = config.port
       return true
     })
+
+    pythonBridge.onStatusChange((status) => {
+      this.broadcastStatus(status)
+    })
   }
 
-  /** 清理资源 */
+  private getWindowFromEvent(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return win && !win.isDestroyed() ? win : this.mainWindow
+  }
+
   cleanup(): void {
     this.clearBackendKeepalive()
     this.isQuitting = true
-
-    // 关闭所有窗口
-    for (const win of this.windows.values()) {
-      if (!win.isDestroyed()) {
-        win.destroy()
-      }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.destroy()
     }
-    this.windows.clear()
+    this.mainWindow = null
   }
 }
 
-// 单例
 export const windowManager = new WindowManager()

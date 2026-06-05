@@ -17,8 +17,8 @@ const props = withDefaults(defineProps<{
 }>(), {
   visible: true,
   message: '',
-  confirmLabel: () => undefined,
-  cancelLabel: () => undefined,
+  confirmLabel: undefined,
+  cancelLabel: undefined,
   variant: 'danger',
 })
 

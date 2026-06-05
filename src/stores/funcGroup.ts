@@ -74,7 +74,7 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
             const activeTab = ctx.tabs.find(t => t.id === ctx.activeTabId);
             if (activeTab && activeTab.projectId !== projectId) {
                 const firstTab = ctx.tabs.find(t => t.projectId === projectId);
-                ctx.activeTabId = firstTab?.id || null;
+                ctx.activeTabId = firstTab?.id ?? undefined;
             }
         }
     }

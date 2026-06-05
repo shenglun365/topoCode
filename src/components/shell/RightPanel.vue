@@ -5,10 +5,7 @@ import { XMarkIcon, ChatBubbleLeftIcon, ListBulletIcon } from '@heroicons/vue/24
 import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
-import DebugPanel from '@/components/debug/DebugPanel.vue'
-import CodeIndexPanel from '@/components/report/CodeIndexPanel.vue'
-import AIAssistantPanel from '@/components/ai/AIAssistantPanel.vue'
-import ReportTaskListPanel from '@/components/report/ReportTaskListPanel.vue'
+import { RIGHT_PANEL_COMPONENTS } from './rightPanelRegistry'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-004')
@@ -16,8 +13,6 @@ const { t } = useI18n()
 const panelStore = usePanelStore()
 const navigation = useNavigationStore()
 const projectStore = useProjectStore()
-
-const codeIndexRef = ref<InstanceType<typeof CodeIndexPanel> | null>(null)
 
 const panelTitleKeys: Record<string, string> = {
   home: 'ai.assistantTitle',
@@ -63,8 +58,12 @@ const title = computed(() => {
   return t(panelTitleKeys[navigation.currentPage] || 'common.detail')
 })
 
-defineExpose({
-  codeIndexRef,
+const activePanelComponent = computed(() => {
+  if (panelStore.debugMode) return { component: RIGHT_PANEL_COMPONENTS.debug }
+  if (showCodeIndex.value) return { component: RIGHT_PANEL_COMPONENTS.codeIndex }
+  if (showTaskList.value) return { component: RIGHT_PANEL_COMPONENTS.taskList, props: { taskId: projectStore.activeTab?.taskId || '', taskName: projectStore.activeTab?.title } }
+  if (showAIAssistant.value || (projectStore.viewMode === 'project' && projectStore.activeTab)) return { component: RIGHT_PANEL_COMPONENTS.ai }
+  return null
 })
 </script>
 
@@ -111,41 +110,7 @@ defineExpose({
       </button>
     </div>
     <div class="panel-body">
-      <!-- DEBUG 面板 -->
-      <DebugPanel v-if="panelStore.debugMode" />
-
-      <!-- 代码索引面板（旧报告 tab） -->
-      <CodeIndexPanel
-        v-else-if="showCodeIndex"
-        ref="codeIndexRef"
-      />
-
-      <!-- 任务列表面板（分析报告首页 detail tab） -->
-      <ReportTaskListPanel
-        v-else-if="showTaskList"
-        :task-id="projectStore.activeTab?.taskId || ''"
-        :task-name="projectStore.activeTab?.title"
-      />
-
-      <!-- AI 助手面板 -->
-      <AIAssistantPanel v-else-if="showAIAssistant || (projectStore.viewMode === 'project' && projectStore.activeTab)" />
-
-      <!-- 动态内容插槽 -->
-      <template v-else>
-        <slot :page="navigation.currentPage">
-          <div class="empty-state">
-            <div class="icon">
-              📌
-            </div>
-            <div class="title">
-              {{ t('shell.rightPanel.nodeDetail') }}
-            </div>
-            <div class="desc">
-              {{ t('shell.rightPanel.clickNodeToView') }}
-            </div>
-          </div>
-        </slot>
-      </template>
+      <component :is="activePanelComponent?.component" v-bind="activePanelComponent?.props || {}" />
     </div>
   </aside>
 </template>

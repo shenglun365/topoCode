@@ -39,13 +39,13 @@ const isSettingsPage = computed(() => route.path === '/home' || route.path === '
 // 初始化后端状态监听
 onMounted(async () => {
   try {
-    const st = await window.api.backend.getStatus()
+    const st: any = await window.api!.backend.getStatus()
     if (st) statusStore.setBackendStatus(st)
   } catch (_) {}
   // 每 5 秒轮询本地 PythonBridge 状态（不经过 ZMQ，避免挂死）
   setInterval(async () => {
     try {
-      const st = await window.api.backend.getStatus()
+      const st: any = await window.api!.backend.getStatus()
       if (st) statusStore.setBackendStatus(st, true)
     } catch (_) {}
   }, 5000)

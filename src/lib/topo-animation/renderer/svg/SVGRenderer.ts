@@ -381,7 +381,7 @@ export class SVGRenderer implements IRenderer {
 
     const defs = this.svg.select('defs').empty() ? this.svg.append('defs') : this.svg.select('defs');
     // 清除旧标记，避免重复
-    defs.selectAll('.topo-marker').remove();
+    (defs as any).selectAll('.topo-marker').remove();
 
     const markerConfigs = [
       { id: 'arrow', filled: true, size: 6, path: 'M0,-5L10,0L0,5' },

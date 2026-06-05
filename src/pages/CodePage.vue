@@ -11,7 +11,7 @@ import {
 import { useProjectStore } from '@/stores/project'
 import { useNavigationStore } from '@/stores/navigation'
 import { useAnalysisStore } from '@/stores/analysis'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import CodeViewer from '@/components/code/CodeViewer.vue'
 import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
@@ -38,7 +38,7 @@ onMounted(() => {
 })
 
 function onTabUpdate(tabId: string | null) {
-  projectStore.setActiveTab(tabId)
+  projectStore.setActiveTab(tabId ?? '')
 }
 
 function onTabClose(tabId: string) {
@@ -194,7 +194,7 @@ function onClearCacheDone() {
       <HomeTabBar
         v-if="projectStore.currentProjectTabs.length > 0"
         :tabs="projectStore.currentProjectTabs"
-        :active-tab-id="projectStore.activeTabId"
+        :active-tab-id="projectStore.activeTabId ?? null"
         @update:active-tab-id="onTabUpdate"
         @close="onTabClose"
       />

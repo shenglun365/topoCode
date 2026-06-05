@@ -1,0 +1,10 @@
+{
+  "id": "llm-provider-lm-studio",
+  "name": "LM Studio LLM Provider",
+  "version": "1.0.0",
+  "description": "LM Studio API 兼容的聊天补全（OpenAI-compatible 接口）",
+  "entry": "plugin_entry",
+  "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
+  "dependencies": { "python": [] },
+  "size_mb": 0.05
+}

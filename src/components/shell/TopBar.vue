@@ -55,7 +55,7 @@ async function onMaximize() {
 }
 
 async function onClose() {
-  await window.api?.window.close()
+  await window.api?.window.close(undefined as any)
 }
 
 // ── 菜单 ──
@@ -97,7 +97,8 @@ function onDropdownMouseLeave() {
 const showAbout = ref(false)
 const showExitConfirm = ref(false)
 
-const menus: Record<string, { label: string; shortcut?: string; action?: string }[]> = {
+type MenuItem = { label?: string; shortcut?: string; action?: string; divider?: boolean }
+const menus: Record<string, MenuItem[]> = {
   file: [
     { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O', action: 'import' },
     { label: t('shell.topBar.goHome'), shortcut: '' },
@@ -146,6 +147,10 @@ async function handleMenuItemClick(item: any) {
   } else if (item.action === 'about') {
     showAbout.value = true
   }
+}
+
+function openDocs() {
+  window.open(DOCS_URL, '_blank')
 }
 
 async function handleFileImport() {
@@ -297,7 +302,7 @@ onMounted(() => {
               <span class="about-label">联系方式</span>
               <a href="mailto:support@opencode.ai">support@opencode.ai</a>
             </div>
-            <button class="btn btn-ghost btn-sm" @click="window.open(DOCS_URL, '_blank'); showAbout = false">
+            <button class="btn btn-ghost btn-sm" @click="openDocs(); showAbout = false">
               检查版本升级
             </button>
           </div>

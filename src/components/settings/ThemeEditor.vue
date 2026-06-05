@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /** 主题编辑器 - 颜色/字体配置 */
 
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CustomTheme, ThemeColors, ThemeFonts } from '@/types'
-import { useThemeStore } from '@/stores/theme'
 import {
   PencilIcon,
   XMarkIcon,
@@ -16,7 +15,6 @@ const { showId, componentId } = useComponentId('ST-006')
 
 
 const { t } = useI18n()
-const themeStore = useThemeStore()
 
 const props = defineProps<{
   theme?: CustomTheme | null
@@ -133,14 +131,6 @@ function handleCancel() {
   emit('cancel')
 }
 
-// 预设主题
-const presets = [
-  { name: 'Catppuccin Mocha', colors: BUILTIN_DARK_COLORS },
-  { name: 'Catppuccin Latte', colors: BUILTIN_LIGHT_COLORS },
-  { name: 'Nord', colors: NORD_COLORS },
-  { name: 'Gruvbox Dark', colors: GRUVBOX_COLORS },
-]
-
 const BUILTIN_DARK_COLORS: ThemeColors = {
   bgPrimary: '#1e1e2e', bgSecondary: '#181825', bgTertiary: '#313244',
   bgHover: '#45475a', bgActive: '#585b70',
@@ -176,6 +166,13 @@ const GRUVBOX_COLORS: ThemeColors = {
   success: '#b8bb26', warning: '#fabd2f', error: '#fb4934',
   border: '#504945', borderLight: '#3c3836',
 }
+
+const presets = [
+  { name: 'Catppuccin Mocha', colors: BUILTIN_DARK_COLORS },
+  { name: 'Catppuccin Latte', colors: BUILTIN_LIGHT_COLORS },
+  { name: 'Nord', colors: NORD_COLORS },
+  { name: 'Gruvbox Dark', colors: GRUVBOX_COLORS },
+]
 
 function applyPreset(presetColors: ThemeColors) {
   colors.value = { ...presetColors }

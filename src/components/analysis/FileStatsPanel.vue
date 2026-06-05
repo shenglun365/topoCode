@@ -87,7 +87,7 @@ function handleDirToggle(node: DirTreeNode) {
     const removeSet = new Set(paths)
     selectedScopes.value = selectedScopes.value.filter(p => {
       for (const r of removeSet) {
-        const prefix = r.replace('/*', '')
+        const prefix = (r as string).replace('/*', '')
         if (p === prefix || p.startsWith(prefix + '/') || p === r) return false
       }
       return true
@@ -167,7 +167,7 @@ function invertDirs() {
   const allPaths = collectAllDirPaths()
   const selected = new Set(selectedScopes.value)
   // 清除所有已选目录（包括精确路径和子路径）
-  const toggled = []
+  const toggled: string[] = []
   for (const p of allPaths) {
     const prefix = p.replace('/*', '')
     const anySelected = [...selected].some(s => s === prefix || s === p || s.startsWith(prefix + '/'))

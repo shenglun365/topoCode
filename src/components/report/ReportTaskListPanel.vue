@@ -2,8 +2,11 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PlayIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
-import { useSettingsStore } from '@/stores/settings'
-import { useReportStore } from '@/stores/report'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
+import { usePipelineStore } from '@/stores/pipeline-store'
+import { useCommunityStore } from '@/stores/community-store'
+import { useReportStore } from '@/stores/report-store'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import PipelineTaskTree from './PipelineTaskTree.vue'
@@ -12,6 +15,9 @@ import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const modelConfigStore = useModelConfigStore()
+const pipelineStore = usePipelineStore()
+const communityStore = useCommunityStore()
 const reportStore = useReportStore()
 const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
@@ -20,7 +26,7 @@ const props = defineProps<{ taskId: string; taskName?: string }>()
 
 const projectId = computed(() => projectStore.selectedProjectId || '')
 
-const taskState = computed(() => reportStore.tasks[props.taskId])
+const taskState = computed(() => pipelineStore.tasks[props.taskId])
 
 const rootTask = computed<PipelineTaskNode | null>(() => taskState.value?.pipelineRootTask ?? null)
 const progress = computed(() => taskState.value?.pipelineProgress ?? 0)
@@ -49,9 +55,10 @@ const completedCount = computed(() => {
   return n
 })
 
-// Community progress from reportStore (L0 only — LLM analysis targets root communities)
+// Community progress from communityStore (L0 only — LLM analysis targets root communities)
+const communityTaskState = computed(() => communityStore.tasks[props.taskId])
 const communityList = computed(() => {
-  const list = taskState.value?.communities || []
+  const list = communityTaskState.value?.communities || []
   console.log(`[SH-004] communityList total=${list.length}`)
   return list
 })
@@ -92,11 +99,11 @@ function handleRunNode(nodeId: string) {
     if (homeTab) {
       funcGroup.setActiveTab('analysis', homeTab.id)
     }
-    reportStore.setPendingStepRun(props.taskId, nodeId)
+    pipelineStore.setPendingStepRun(props.taskId, nodeId)
     console.log(`[SH-004] handleRunNode overall_architecture: navigating to reportHome`)
     return
   }
-  const root = reportStore.tasks[props.taskId]?.pipelineRootTask
+  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
   const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
     if (node.id === nodeId) return node
     if (node.children) for (const c of node.children) { const r = find(c); if (r) return r }
@@ -108,19 +115,19 @@ function handleRunNode(nodeId: string) {
     return
   }
 
-  reportStore.setPipelineRunning(props.taskId, true)
-  reportStore.setPipelinePaused(props.taskId, false)
+  pipelineStore.setPipelineRunning(props.taskId, true)
+  pipelineStore.setPipelinePaused(props.taskId, false)
 
   if (nodeId === 'validation') {
     node.status = 'running'
-    const mid = settingsStore.models.find(m => m.isDefault)?.id
+    const mid = modelConfigStore.models.find(m => m.isDefault)?.id
     if (!mid) { node.status = 'error'; node.error = t('report.llmNotConfigured') }
     else {
-      settingsStore.testModel(mid).then(() => { node.status = 'completed' }).catch((e: any) => { node.status = 'error'; node.error = e.message })
+      modelConfigStore.testModel(mid).then(() => { node.status = 'completed' }).catch((e: any) => { node.status = 'error'; node.error = e.message })
     }
   } else if (nodeId === 'project_summary') {
     const pid = projectStore.selectedProjectId
-    if (!pid) { node.status = 'skipped'; reportStore.recalcProgress(props.taskId); return }
+    if (!pid) { node.status = 'skipped'; pipelineStore.recalcProgress(props.taskId); return }
     node.status = 'running'
     Promise.all([
       reportStore.getReadmeContent(pid).catch(() => null),
@@ -133,13 +140,13 @@ function handleRunNode(nodeId: string) {
     })
   } else if (nodeId === 'community_analysis') {
     node.status = 'running'
-    reportStore.getCascadeLevels(props.taskId, 'CALL').then(levels => {
+    communityStore.getCascadeLevels(props.taskId, 'CALL').then(levels => {
       node.status = (levels?.levels?.length) ? 'completed' : 'skipped'
     }).catch(() => { node.status = 'skipped' })
   }
 
-  reportStore.setPipelineRunning(props.taskId, false)
-  reportStore.recalcProgress(props.taskId)
+  pipelineStore.setPipelineRunning(props.taskId, false)
+  pipelineStore.recalcProgress(props.taskId)
 }
 
 function openCommunityAnalysis() {

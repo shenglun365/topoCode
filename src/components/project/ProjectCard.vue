@@ -13,6 +13,9 @@ import {
 import { StarIcon } from '@heroicons/vue/24/solid'
 import type { Project, GroupNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
+import { getProjectStatusBadge } from '@/utils/statusBadge'
+import { languageBadge } from '@/utils/languageBadge'
+import ProjectContextMenu from './ProjectContextMenu.vue'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
 import ClearCacheDialog from './ClearCacheDialog.vue'
@@ -599,24 +602,6 @@ async function handleCheckChanges() {
     />
   </div>
 </template>
-
-<script lang="ts">
-function languageBadge(lang: string): string {
-  const map: Record<string, string> = {
-    TypeScript: 'badge-blue',
-    JavaScript: 'badge-yellow',
-    Python: 'badge-green',
-    Go: 'badge-cyan',
-    Rust: 'badge-orange',
-    Java: 'badge-red',
-    Vue: 'badge-emerald',
-    HTML: 'badge-orange',
-    C: 'badge-blue',
-    'C++': 'badge-purple',
-  }
-  return map[lang] || 'badge-gray'
-}
-</script>
 
 <style scoped>
 .project-card {

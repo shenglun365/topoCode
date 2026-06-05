@@ -1,8 +1,8 @@
-import { useSettingsStore } from '@/stores/settings'
+import { useModelConfigStore } from '@/stores/model-config-store'
 
 function getDefaultModelId(): string | null {
   try {
-    const store = useSettingsStore()
+    const store = useModelConfigStore()
     const defaultModel = store.models.find(m => m.isDefault)
     if (defaultModel) return defaultModel.id
     if (store.models.length > 0) return store.models[0].id

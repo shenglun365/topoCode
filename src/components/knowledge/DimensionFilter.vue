@@ -123,7 +123,7 @@
           @click="toggleDimension('purpose')"
         >
           <div class="dimension-icon purpose">
-            <TargetIcon class="w-4 h-4" />
+            <TagIcon class="w-4 h-4" />
           </div>
           <span class="dimension-name">{{ t('knowledge.purpose') }}</span>
           <span class="dimension-count">{{ dimensions.purpose.length }}</span>
@@ -159,7 +159,7 @@ import {
   ArrowPathIcon,
   WrenchScrewdriverIcon,
   Square3Stack3DIcon,
-  TargetIcon,
+  TagIcon,
   ChevronRightIcon,
   CheckIcon,
   XMarkIcon,

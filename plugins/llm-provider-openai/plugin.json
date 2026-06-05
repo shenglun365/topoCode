@@ -1,0 +1,10 @@
+{
+  "id": "llm-provider-openai",
+  "name": "OpenAI-compatible LLM Provider",
+  "version": "1.0.0",
+  "description": "OpenAI API 兼容的聊天补全（OpenAI、Groq、DeepSeek 等）",
+  "entry": "plugin_entry",
+  "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
+  "dependencies": { "python": [] },
+  "size_mb": 0.05
+}

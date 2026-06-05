@@ -1,0 +1,21 @@
+{
+  "id": "parsers",
+  "name": "语言解析器",
+  "version": "1.0.0",
+  "description": "11 种编程语言的 AST 解析、符号提取、调用图、依赖图",
+  "entry": "plugin_entry",
+  "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
+  "dependencies": {
+    "python": [
+      "tree-sitter==0.23.2",
+      "tree-sitter-c==0.23.4",
+      "tree-sitter-cpp==0.23.4",
+      "tree-sitter-python==0.23.6",
+      "tree-sitter-javascript==0.23.1",
+      "tree-sitter-typescript==0.23.2",
+      "tree-sitter-go==0.23.4",
+      "tree-sitter-java==0.23.5"
+    ]
+  },
+  "size_mb": 8
+}

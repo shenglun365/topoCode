@@ -2,19 +2,21 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '@/stores/project'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import {
   PlayIcon,
   StopIcon,
   ArrowPathIcon,
   FunnelIcon,
 } from '@heroicons/vue/24/outline'
-import { useReportStore } from '@/stores/report'
+import { useCommunityStore } from '@/stores/community-store'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
-const reportStore = useReportStore()
+const modelConfigStore = useModelConfigStore()
+const communityStore = useCommunityStore()
 
 const props = defineProps<{ taskId: string; projectId?: string }>()
 const emit = defineEmits<{
@@ -22,10 +24,10 @@ const emit = defineEmits<{
   viewCommunityMD: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
-const modelId = computed(() => settingsStore.models.find(m => m.isDefault)?.id)
+const modelId = computed(() => modelConfigStore.models.find(m => m.isDefault)?.id)
 const pid = computed(() => props.projectId || projectStore.selectedProjectId)
 
-const taskState = computed(() => reportStore.tasks[props.taskId])
+const taskState = computed(() => communityStore.tasks[props.taskId])
 
 // View preferences (local, not in store)
 const edgeTypeOptions = [
@@ -72,7 +74,7 @@ const analyzedCommIds = computed(() => {
   const ids = new Set<string>()
   if (taskState.value) {
     for (const [k, v] of Object.entries(taskState.value.llmResults)) {
-      if (v.name) ids.add(k)
+      if ((v as any).name) ids.add(k)
     }
   }
   return ids
@@ -193,7 +195,7 @@ function switchEdgeType(type: string) {
 
 function toggleSelect(id: string) {
   if (taskState.value?.communityRunning) return
-  reportStore.toggleSelect(props.taskId, id)
+  communityStore.toggleSelect(props.taskId, id)
 }
 
 function statusBadgeClass(status: string): string {
@@ -225,7 +227,7 @@ async function startAnalysis() {
     console.log(`[CommunityAI] startAnalysis SKIP no pid`)
     return
   }
-  const results = await reportStore.analyzeSelected(props.taskId, modelId.value, batchSize.value, pid.value)
+  const results = await communityStore.analyzeSelected(props.taskId, modelId.value, batchSize.value, pid.value)
   console.log(`[CommunityAI] startAnalysis DONE results=${results.length}`)
   if (results.length > 0) {
     emit('completed', results)
@@ -236,7 +238,7 @@ async function retryTask(id: string) {
   const community = communities.value.find(c => c.id === id)
   if (!community) return
   if (!modelId.value) return
-  const ok = await reportStore.retryTask(props.taskId, community.communityId, modelId.value, pid.value!)
+  const ok = await communityStore.retryTask(props.taskId, community.communityId, modelId.value, pid.value!)
   if (ok && taskState.value) {
     const c = taskState.value.communities.find(c => c.id === id)
     if (c && c.status === 'completed' && c.name) {
@@ -254,7 +256,7 @@ onMounted(async () => {
   loading.value = true
   loadError.value = null
   try {
-    await reportStore.loadCommunities(props.taskId, pid.value!)
+    await communityStore.loadCommunities(props.taskId, pid.value!)
     updateAvailableLevels()
     console.log(`[CommunityAI] onMounted availableLevels=${availableLevels.value.map(l=>l.lv+'('+l.count+')').join(',')} selectedEdgeType=${selectedEdgeType.value} selectedLevel=${selectedLevel.value}`)
     if (availableLevels.value.length === 0) {
@@ -325,10 +327,10 @@ onMounted(async () => {
               <span class="clist-edge-tag">{{ selectedEdgeType }}</span>
             </span>
             <div class="clist-actions">
-              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="reportStore.selectIncomplete(props.taskId)">
+              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="communityStore.selectIncomplete(props.taskId)">
                 {{ t('common.selectIncomplete') }}
               </button>
-              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="reportStore.deselectAll(props.taskId)">
+              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="communityStore.deselectAll(props.taskId)">
                 {{ t('common.reset') }}
               </button>
             </div>
@@ -416,30 +418,30 @@ onMounted(async () => {
           </div>
         </template>
       </div>
-
-      <div class="cap-bottom">
-        <div class="cap-batch">
-          <span class="batch-label">{{ t('report.pipeline.batchSize') }}:</span>
-          <select v-model.number="batchSize" class="batch-select" :disabled="taskState?.communityRunning">
-            <option v-for="n in [1,2,3,5,10]" :key="n" :value="n">{{ n }}</option>
-          </select>
-        </div>
-        <div class="cap-bottom-actions">
-          <button v-if="taskState?.communityRunning" class="btn btn-error btn-sm" @click="reportStore.stopAnalysis(props.taskId)">
-            <StopIcon class="w-3 h-3" />
-            {{ t('common.stop') }}
-          </button>
-          <button
-            class="btn btn-primary btn-sm"
-            :disabled="selectedCount === 0 || taskState?.communityRunning"
-            @click="startAnalysis"
-          >
-            <PlayIcon class="w-3 h-3" />
-            {{ t('report.pipeline.analyzeSelected', { n: selectedCount }) }}
-          </button>
-        </div>
-      </div>
     </template>
+
+    <div class="cap-bottom">
+      <div class="cap-batch">
+        <span class="batch-label">{{ t('report.pipeline.batchSize') }}:</span>
+        <select v-model.number="batchSize" class="batch-select" :disabled="taskState?.communityRunning">
+          <option v-for="n in [1,2,3,5,10]" :key="n" :value="n">{{ n }}</option>
+        </select>
+      </div>
+      <div class="cap-bottom-actions">
+        <button v-if="taskState?.communityRunning" class="btn btn-error btn-sm" @click="communityStore.stopAnalysis(props.taskId)">
+          <StopIcon class="w-3 h-3" />
+          {{ t('common.stop') }}
+        </button>
+        <button
+          class="btn btn-primary btn-sm"
+          :disabled="selectedCount === 0 || taskState?.communityRunning"
+          @click="startAnalysis"
+        >
+          <PlayIcon class="w-3 h-3" />
+          {{ t('report.pipeline.analyzeSelected', { n: selectedCount }) }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 

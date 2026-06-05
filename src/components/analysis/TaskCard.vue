@@ -150,7 +150,7 @@ function getStatusIcon(status: string) {
         v-if="task.status === 'done'"
         style="font-size:10px; color:var(--text-muted); margin-top:4px;"
       >
-        {{ t('common.completed') }} {{ new Date(task.updatedAt).toLocaleString(localeStr.value) }}
+        {{ t('common.completed') }} {{ new Date(task.updatedAt).toLocaleString(localeStr as unknown as string) }}
       </div>
 
       <!-- 依赖信息 -->
@@ -173,7 +173,7 @@ function getStatusIcon(status: string) {
           {{ t('common.type') }}: <code style="font-size:10px;">{{ task.type }}</code>
         </div>
         <div style="margin-bottom:8px;">
-          {{ t('common.create') }}: {{ new Date(task.createdAt).toLocaleString(localeStr.value) }}
+          {{ t('common.create') }}: {{ new Date(task.createdAt).toLocaleString(localeStr as unknown as string) }}
         </div>
 
         <!-- 操作按钮 -->

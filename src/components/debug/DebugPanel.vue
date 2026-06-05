@@ -3,7 +3,7 @@ import { useProjectStore } from '@/stores/project'
 import { useDebugStore } from '@/stores/debug'
 import { useI18n } from 'vue-i18n'
 import { WrenchScrewdriverIcon, TrashIcon, DocumentDuplicateIcon, CheckIcon } from '@heroicons/vue/24/outline'
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('OT-002')
@@ -11,6 +11,8 @@ const { t } = useI18n()
 const projectStore = useProjectStore()
 const debugStore = useDebugStore()
 const copied = ref(false)
+
+onMounted(() => { debugStore.init() })
 
 function copyLogs() {
   const text = debugStore.logs.map(l => `[${l.time}] ${l.source}: ${l.message}`).join('\n')
@@ -45,7 +47,7 @@ function copyLogs() {
       </div>
       <div class="debug-row">
         <span class="debug-label">activeTab.type</span>
-        <span class="debug-value">{{ projectStore.activeTab?.type || '(null)' }}</span>
+        <span class="debug-value">{{ (projectStore.activeTab as any)?.type || '(null)' }}</span>
       </div>
       <div class="debug-row">
         <span class="debug-label">projects.length</span>
@@ -81,7 +83,7 @@ function copyLogs() {
       </div>
       <div class="debug-row">
         <span class="debug-label">importedAt</span>
-        <span class="debug-value">{{ projectStore.selectedProject.importedAt }}</span>
+        <span class="debug-value">{{ (projectStore.selectedProject as any).importedAt }}</span>
       </div>
     </div>
 

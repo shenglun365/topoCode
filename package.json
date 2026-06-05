@@ -5,13 +5,19 @@
   "type": "module",
   "description": "TopoCode - 源码架构分析与学习工具",
   "main": "./dist-electron/main.js",
-  "author": "TopoCodeProj Team",
+  "author": {
+    "name": "TopoCodeProj Team",
+    "email": "topocode@163.com"
+  },
   "license": "Apache-2.0",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json && electron . --no-sandbox",
-    "build": "npm run build:worker && npm run build:electron && npm run build:vite",
+    "build": "npm run build:worker && npm run build:plugins && npm run build:module && npm run build:electron && npm run build:vite",
+    "build:plugins": "node build/bundle-plugin.mjs",
+    "build:module": "node build/bundle-module.mjs",
+    "build:module-registry": "node build/bundle-module.mjs --registry",
     "build:worker": "node build/bundle-worker.mjs",
     "build:electron": "tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json",
     "build:vite": "vite build",
@@ -33,6 +39,7 @@
     "axios": "1.15.2",
     "d3": "7.9.0",
     "dayjs": "1.11.13",
+    "electron-updater": "^6.3.9",
     "element-plus": "2.13.7",
     "events": "3.3.0",
     "highlight.js": "11.11.1",
@@ -53,6 +60,7 @@
   "devDependencies": {
     "@tailwindcss/forms": "0.5.11",
     "@tailwindcss/typography": "0.5.19",
+    "@testing-library/vue": "^8.1.0",
     "@types/d3": "7.4.3",
     "@types/highlight.js": "10.1.0",
     "@types/lodash-es": "4.17.12",
@@ -63,6 +71,7 @@
     "@typescript-eslint/parser": "6.21.0",
     "@vitejs/plugin-vue": "5.2.4",
     "@vitejs/plugin-vue-jsx": "4.2.0",
+    "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "0.8.1",
     "autoprefixer": "10.5.0",
     "concurrently": "9.2.1",
@@ -70,6 +79,7 @@
     "electron-builder": "25.1.8",
     "eslint": "8.57.1",
     "eslint-plugin-vue": "9.33.0",
+    "jsdom": "^29.1.1",
     "postcss": "8.5.14",
     "prettier": "3.8.3",
     "prettier-plugin-tailwindcss": "0.5.14",
@@ -78,7 +88,7 @@
     "typescript": "5.9.3",
     "vite": "5.4.21",
     "vitest": "4.1.5",
-    "vue-tsc": "1.8.27",
+    "vue-tsc": "2.2.12",
     "wait-on": "9.0.5"
   },
   "engines": {
@@ -116,12 +126,26 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "backend/**/*"
+      "backend-core/**/*"
     ],
     "extraResources": [
       {
-        "from": "backend",
-        "to": "backend",
+        "from": "backend-core",
+        "to": "backend-core",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "dist-plugins",
+        "to": "plugins",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "dist-modules",
+        "to": "modules",
         "filter": [
           "**/*"
         ]

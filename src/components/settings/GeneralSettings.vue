@@ -5,7 +5,7 @@ import {
   ArrowPathIcon,
   GlobeAltIcon,
 } from '@heroicons/vue/24/outline'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
 import { useStatusStore } from '@/stores/status'
 import type { SupportedLocale } from '@/i18n'
 import { useComponentId } from '@/composables/useComponentId'

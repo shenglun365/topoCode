@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '@/stores/project'
-import { useReportStore } from '@/stores/report'
+import { useReportStore } from '@/stores/report-store'
 import PipelineTaskTree from './PipelineTaskTree.vue'
 import type { PipelineTaskNode } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
@@ -90,7 +90,7 @@ async function run() {
       updateNodeStatus('deps', 'completed')
       running.value = false
       rootNode.value.status = 'completed'
-      emit('completed', existing.summaries)
+      emit('completed', existing.summaries as unknown as Array<{ filePath: string; summary: string; source: string }>)
       return
     }
   } catch {

@@ -7,12 +7,14 @@ import {
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const settingsStore = useSettingsStore()
+const modelConfigStore = useModelConfigStore()
 
 const props = defineProps<{
   taskId: string
@@ -41,14 +43,14 @@ async function initSession() {
 
   try {
     const pid = projectStore.selectedProjectId
-    const result = await window.api.analysisSession.list({
+    const result = await window.api!.analysisSession.list({
       projectId: pid,
       taskId: props.taskId,
       reportId: props.reportId,
     })
     if (result.sessions.length > 0) {
       sessionId.value = result.sessions[0].session_id
-      const msgResult = await window.api.session.getMessages({ sessionId: sessionId.value })
+      const msgResult = await window.api!.session.getMessages({ sessionId: sessionId.value })
       messages.value = (msgResult.messages || []).map((m: any) => ({
         id: m.id,
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -56,14 +58,14 @@ async function initSession() {
         timestamp: new Date(m.created_at).getTime(),
       }))
     } else {
-      const sess = await window.api.session.create({
+      const sess = await window.api!.session.create({
         moduleType: 'project_analysis',
         title: `报告分析 - ${props.taskId}`,
         projectId: pid,
         metadata: { taskId: props.taskId, reportId: props.reportId, source: 'report_analysis' },
       })
       sessionId.value = sess.id
-      await window.api.analysisSession.create({
+      await window.api!.analysisSession.create({
         projectId: pid,
         taskId: props.taskId,
         sessionId: sess.id,
@@ -76,7 +78,7 @@ async function initSession() {
   }
 
   try {
-    const tmplResult = await window.api.promptTemplate.list({
+    const tmplResult = await window.api!.promptTemplate.list({
       moduleType: 'project_analysis',
     })
     templateOptions.value = (tmplResult.templates || []).map((t: any) => ({
@@ -124,7 +126,7 @@ async function sendMessage() {
     isStreaming: true,
   })
 
-  const modelId = settingsStore.models.find(m => m.isDefault)?.id
+  const modelId = modelConfigStore.models.find(m => m.isDefault)?.id
   if (!modelId) {
     const msg = messages.value.find(m => m.id === msgId)
     if (msg) {
@@ -141,7 +143,7 @@ async function sendMessage() {
       .slice(-10)
       .map(m => ({ role: m.role, content: m.content }))
 
-    const result = await window.api.llm.chat({
+    const result = await window.api!.llm.chat({
       sessionId: sessionId.value,
       modelId,
       messages: history,
@@ -151,7 +153,7 @@ async function sendMessage() {
     let fullContent = ''
 
     await new Promise<void>((resolve, reject) => {
-      const unsubscribe = window.api.llm.subscribe(result.requestId, {
+      const unsubscribe = window.api!.llm.subscribe(result.requestId, {
         onChunk(data: { text: string }) {
           fullContent += data.text
           const msg = messages.value.find(m => m.id === msgId)
@@ -160,12 +162,12 @@ async function sendMessage() {
         onDone() {
           const msg = messages.value.find(m => m.id === msgId)
           if (msg) msg.isStreaming = false
-          window.api.session.addMessage({
+          window.api!.session.addMessage({
             sessionId: sessionId.value!,
             role: 'user',
             content: question,
           })
-          window.api.session.addMessage({
+          window.api!.session.addMessage({
             sessionId: sessionId.value!,
             role: 'assistant',
             content: fullContent,
@@ -211,11 +213,11 @@ async function sendPresetAction(templateId: string) {
     isStreaming: true,
   })
 
-  const modelId = settingsStore.models.find(m => m.isDefault)?.id
+  const modelId = modelConfigStore.models.find(m => m.isDefault)?.id
   if (!modelId) return
 
   try {
-    const result = await window.api.llm.chat({
+    const result = await window.api!.llm.chat({
       sessionId: sessionId.value!,
       modelId,
       templateId,
@@ -226,7 +228,7 @@ async function sendPresetAction(templateId: string) {
     let fullContent = ''
 
     await new Promise<void>((resolve, reject) => {
-      const unsubscribe = window.api.llm.subscribe(result.requestId, {
+      const unsubscribe = window.api!.llm.subscribe(result.requestId, {
         onChunk(data: { text: string }) {
           fullContent += data.text
           const msg = messages.value.find(m => m.id === msgId)

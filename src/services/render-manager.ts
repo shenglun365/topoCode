@@ -150,7 +150,7 @@ class RenderCache {
   set(key: string, result: RenderResult): void {
     if (this.cache.size >= this.maxSize) {
       // 淘汰最早的
-      const firstKey = this.cache.keys().next().value
+      const firstKey = this.cache.keys().next().value!
       this.cache.delete(firstKey)
     }
     this.cache.set(key, result)
@@ -288,7 +288,7 @@ class RenderManager {
   private async renderInBackend(type: RenderType, data: RenderData): Promise<RenderResult> {
     // 通过 IPC 调用 Python 后端
     if (typeof window !== 'undefined' && window.api) {
-      return window.api.backend.render({ type, data })
+      return (window.api as any).backend.render({ type, data })
     }
     throw new Error('Backend render not available (no window.api)')
   }
@@ -337,14 +337,4 @@ function simpleHash(str: string): string {
 
 export const renderManager = new RenderManager()
 
-// Window API 类型扩展
-declare global {
-  interface Window {
-    api?: {
-      backend?: {
-        render: (params: { type: string; data: any }) => Promise<any>
-        renderPlantuml: (params: { code: string; format: string; useRemote: boolean }) => Promise<any>
-      }
-    }
-  }
-}
+// Window API 类型扩展 (已定义于 types/window-api.ts)

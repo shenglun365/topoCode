@@ -15,13 +15,18 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
 } from '@heroicons/vue/24/outline'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useAgentUsageStore } from '@/stores/agent-usage-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 import type { ModelConfigItem } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
+import UsageStatsPanel from './UsageStatsPanel.vue'
 
 const { showId, componentId } = useComponentId('ST-001')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const agentUsageStore = useAgentUsageStore()
+const modelConfigStore = useModelConfigStore()
 
 // ==================== 对话框状态 ====================
 const showDialog = ref(false)
@@ -72,7 +77,7 @@ function todayStr(): string {
 
 function todayUsageForModel(modelId: string) {
   const today = todayStr()
-  return settingsStore.usageStats.find(s => s.modelId === modelId && s.date === today)
+  return agentUsageStore.usageStats.find(s => s.modelId === modelId && s.date === today)
 }
 
 function openUsageLimitDialog(config: ModelConfigItem) {
@@ -85,7 +90,7 @@ function openUsageLimitDialog(config: ModelConfigItem) {
 }
 
 async function saveUsageLimit() {
-  await settingsStore.updateModel({
+  await (modelConfigStore as any).updateModel({
     id: editLimitModelId.value,
     maxRequestsPerDay: usageLimitForm.value.maxRequestsPerDay,
     maxTokensPerDay: usageLimitForm.value.maxTokensPerDay,
@@ -99,24 +104,24 @@ async function initUsageStats() {
   startDate.setDate(startDate.getDate() - 30)
   const start = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`
   usageDateRange.value = { start, end }
-  await settingsStore.loadUsageStats(undefined, start, end)
+  await agentUsageStore.loadUsageStats(undefined, start, end)
 }
 
 function toggleSelectAll() {
-  if (selectedIds.value.length === settingsStore.usageStats.length) {
+  if (selectedIds.value.length === agentUsageStore.usageStats.length) {
     selectedIds.value = []
   } else {
-    selectedIds.value = settingsStore.usageStats.map(s => s.id)
+    selectedIds.value = agentUsageStore.usageStats.map(s => s.id)
   }
 }
 
 async function handleDeleteUsageStat(id: number) {
-  await settingsStore.deleteUsageStat(id)
+  await agentUsageStore.deleteUsageStat(id)
 }
 
 async function handleDeleteUsageStatsBatch() {
   if (selectedIds.value.length === 0) return
-  await settingsStore.deleteUsageStatsBatch(selectedIds.value)
+  await agentUsageStore.deleteUsageStatsBatch(selectedIds.value)
   selectedIds.value = []
 }
 
@@ -146,7 +151,7 @@ function setClearQuickRange(days: number | null) {
 }
 
 async function handleClearByCondition() {
-  await settingsStore.deleteUsageStatsByCondition({
+  await agentUsageStore.deleteUsageStatsByCondition({
     modelId: clearModelId.value || undefined,
     startDate: clearStartDate.value || undefined,
     endDate: clearEndDate.value || undefined,
@@ -155,11 +160,11 @@ async function handleClearByCondition() {
 }
 
 async function refreshUsageStats() {
-  await settingsStore.loadUsageStats(undefined, usageDateRange.value.start || undefined, usageDateRange.value.end || undefined)
+  await agentUsageStore.loadUsageStats(undefined, usageDateRange.value.start || undefined, usageDateRange.value.end || undefined)
 }
 
 // ==================== 计算属性 ====================
-const defaultModel = computed(() => settingsStore.models.find(m => m.isDefault) || null)
+const defaultModel = computed(() => modelConfigStore.models.find(m => m.isDefault) || null)
 
 // ==================== 工具函数 ====================
 function getProviderIcon(provider: string): any {
@@ -207,7 +212,7 @@ function openAddDialog() {
     type: 'local',
     temperature: 0.7,
     maxTokens: 4096,
-    isDefault: settingsStore.models.length === 0,
+    isDefault: modelConfigStore.models.length === 0,
     apiKey: '',
   }
   showDialog.value = true
@@ -239,7 +244,7 @@ async function saveModel() {
   }
 
   if (editMode.value && editingId.value) {
-    await settingsStore.updateModel({
+    await modelConfigStore.updateModel({
       id: editingId.value,
       name: form.value.name,
       provider: form.value.provider,
@@ -273,7 +278,7 @@ async function saveModel() {
     if (form.value.apiKey) addParams.apiKey = form.value.apiKey
     if (form.value.isDefault) addParams.isDefault = true
 
-    await settingsStore.addModel(addParams)
+    await modelConfigStore.addModel(addParams)
   }
 
   showDialog.value = false
@@ -285,7 +290,7 @@ async function removeModel(id: string) {
 }
 
 async function confirmDelete() {
-  await settingsStore.removeModel(deleteTargetId.value)
+  await modelConfigStore.removeModel(deleteTargetId.value)
   showDeleteConfirm.value = false
   deleteTargetId.value = ''
 }
@@ -293,7 +298,7 @@ async function confirmDelete() {
 async function testModel(id: string) {
   testingId.value = id
   try {
-    const result = await settingsStore.testModel(id)
+    const result = await modelConfigStore.testModel(id) as any
     if (result.status === 'connected') {
       testResultType.value = 'success'
       testResultMessage.value = `${t('settings.connected')} - ${t('settings.latency')} ${result.latency}ms`
@@ -311,7 +316,7 @@ async function testModel(id: string) {
 }
 
 async function setDefaultModel(id: string) {
-  await settingsStore.updateModel({ id, isDefault: true })
+  await modelConfigStore.updateModel({ id, isDefault: true })
 }
 
 // ==================== 弹窗内测试 ====================
@@ -328,11 +333,11 @@ async function testCurrentForm() {
     // v2: 先暂存配置到 DB，然后通过后端 API 测试连接
     // 如果是编辑已有模型，直接用其 ID；否则先保存再测试
     if (editingId.value) {
-      const result = await window.api.settings.testModel(editingId.value)
+      const result = await window.api!.settings.testModel(editingId.value)
       dialogTestResult.value = result.status === 'connected' ? 'success' : 'error'
     } else {
       // 新建场景：先保存再测试
-      const saved = await window.api.settings.addModel({
+      const saved = await window.api!.settings.addModel({
         name: form.value.name || form.value.model,
         provider: form.value.provider,
         model: form.value.model,
@@ -341,7 +346,7 @@ async function testCurrentForm() {
         temperature: form.value.temperature,
         maxTokens: form.value.maxTokens,
       })
-      const result = await window.api.settings.testModel(saved.id)
+      const result = await window.api!.settings.testModel(saved.id)
       dialogTestResult.value = result.status === 'connected' ? 'success' : 'error'
       // 清理临时记录（用户可以选择正式保存）
       newModelId.value = saved.id
@@ -450,7 +455,7 @@ initUsageStats()
 
           <!-- 空状态 -->
           <div
-            v-if="settingsStore.models.length === 0"
+            v-if="modelConfigStore.models.length === 0"
             style="text-align:center; padding:40px 20px; color:var(--text-muted);"
           >
             <p>{{ t('settings.noModelsYet') }}</p>
@@ -461,7 +466,7 @@ initUsageStats()
 
           <!-- 配置项 -->
           <div
-            v-for="config in settingsStore.models"
+            v-for="config in modelConfigStore.models"
             :key="config.id"
             class="card"
             style="padding:12px; margin-bottom:8px; position:relative;"
@@ -547,7 +552,7 @@ initUsageStats()
             <AdjustmentsHorizontalIcon class="w-3 h-3" />
             <span>{{ t('settings.usageLimit') }}</span>
           </button>
-          <div style="flex:1;" />
+          <span style="flex:1;"></span>
           <button
             class="btn btn-ghost btn-sm"
             style="color:var(--error);"
@@ -569,135 +574,10 @@ initUsageStats()
       </div>
     </div>
   </div>
-
-  <!-- ==================== 模型用量统计面板（右侧）==================== -->
-  <div style="flex:1; min-width:0;">
-    <div
-      class="card"
-      style="margin-bottom:16px;"
-    >
-      <div style="padding:12px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-          <h3 style="font-size:13px; font-weight:600;">
-            {{ t('settings.usageStats') }}
-            <span style="font-size:11px; color:var(--text-muted); font-weight:400;">({{ settingsStore.usageStats.length }})</span>
-          </h3>
-          <button
-            class="btn btn-ghost btn-sm"
-            style="color:var(--error);"
-            @click="openClearDialog"
-          >
-            <span>{{ t('settings.clearUsageHistory') }}</span>
-          </button>
-        </div>
-        <!-- 工具栏 -->
-        <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
-          <input
-            v-model="usageDateRange.start"
-            type="date"
-            class="field-input"
-            style="width:140px;"
-          />
-          <span style="font-size:11px; color:var(--text-muted);">~</span>
-          <input
-            v-model="usageDateRange.end"
-            type="date"
-            class="field-input"
-            style="width:140px;"
-          />
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="refreshUsageStats"
-          >
-            <ArrowPathIcon class="w-3 h-3" />
-          </button>
-        </div>
-
-        <!-- 空状态 -->
-        <div
-          v-if="settingsStore.usageStats.length === 0"
-          style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;"
-        >
-          {{ t('settings.noUsageData') }}
-        </div>
-
-        <!-- 表格 -->
-        <div
-          v-else
-          style="overflow-x:auto;"
-        >
-          <table style="width:100%; border-collapse:collapse; font-size:12px;">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border);">
-                <th style="padding:6px 8px; text-align:left; width:32px;">
-                  <input
-                    type="checkbox"
-                    :checked="selectedIds.length === settingsStore.usageStats.length"
-                    :indeterminate="selectedIds.length > 0 && selectedIds.length < settingsStore.usageStats.length"
-                    @change="toggleSelectAll"
-                  />
-                </th>
-                <th style="padding:6px 8px; text-align:left;">{{ t('settings.dateRange') }}</th>
-                <th style="padding:6px 8px; text-align:left;">{{ t('settings.modelName') }}</th>
-                <th style="padding:6px 8px; text-align:right;">{{ t('settings.requests') }}</th>
-                <th style="padding:6px 8px; text-align:right;">{{ t('settings.promptTokens') }}</th>
-                <th style="padding:6px 8px; text-align:right;">{{ t('settings.completionTokens') }}</th>
-                <th style="padding:6px 8px; text-align:right;">{{ t('settings.totalTokens') }}</th>
-                <th style="padding:6px 8px; text-align:center; width:60px;">{{ t('common.delete') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="stat in settingsStore.usageStats"
-                :key="stat.id"
-                style="border-bottom:1px solid var(--border);"
-                :style="{ background: selectedIds.includes(stat.id) ? 'var(--bg-hover)' : '' }"
-              >
-                <td style="padding:6px 8px;">
-                  <input
-                    type="checkbox"
-                    :checked="selectedIds.includes(stat.id)"
-                    @change="(e: any) => { if (e.target.checked) selectedIds.push(stat.id); else selectedIds = selectedIds.filter(id => id !== stat.id) }"
-                  />
-                </td>
-                <td style="padding:6px 8px;">{{ stat.date }}</td>
-                <td style="padding:6px 8px;">{{ stat.modelName }}</td>
-                <td style="padding:6px 8px; text-align:right; font-family:var(--font-mono);">{{ fmt(stat.requestCount) }}</td>
-                <td style="padding:6px 8px; text-align:right; font-family:var(--font-mono);">{{ fmt(stat.promptTokens) }}</td>
-                <td style="padding:6px 8px; text-align:right; font-family:var(--font-mono);">{{ fmt(stat.completionTokens) }}</td>
-                <td style="padding:6px 8px; text-align:right; font-family:var(--font-mono);">{{ fmt(stat.totalTokens) }}</td>
-                <td style="padding:6px 8px; text-align:center;">
-                  <button
-                    class="btn btn-ghost btn-sm"
-                    style="color:var(--error); padding:2px 6px;"
-                    @click="handleDeleteUsageStat(stat.id)"
-                  >
-                    <TrashIcon class="w-3 h-3" />
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <!-- 批量删除 -->
-          <div
-            v-if="selectedIds.length > 0"
-            style="margin-top:8px; display:flex; gap:8px; align-items:center;"
-          >
-            <span style="font-size:11px; color:var(--text-muted);">{{ t('project.selected') }}: {{ selectedIds.length }}</span>
-            <button
-              class="btn btn-primary btn-sm"
-              style="background:var(--error);border-color:var(--error);"
-              @click="handleDeleteUsageStatsBatch"
-            >
-              <TrashIcon class="w-3 h-3" />
-              <span>{{ t('common.delete') }} ({{ selectedIds.length }})</span>
-            </button>
-          </div>
-        </div>
-      </div>
-      </div>
-    </div>
+  <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+    <UsageStatsPanel style="flex:1; min-height:0;" />
+  </div>
+</div>
   </div>
 
   <!-- ==================== 用量限制编辑对话框 ==================== -->
@@ -740,57 +620,7 @@ initUsageStats()
     </div>
   </Teleport>
 
-  <!-- ==================== 按条件清除对话框 ==================== -->
-  <Teleport to="body">
-    <div v-if="showClearDialog" class="modal-overlay" @click.self="showClearDialog = false">
-      <div class="modal" style="width:420px;">
-        <div class="modal-header">
-          <h3>{{ t('settings.deleteUsageByCondition') }}</h3>
-        </div>
-        <div class="modal-body">
-          <div class="form-grid">
-            <div class="form-field">
-              <label class="field-label">{{ t('settings.selectModel') }}</label>
-              <select v-model="clearModelId" class="field-input">
-                <option value="">{{ t('settings.allModels') }}</option>
-                <option
-                  v-for="m in settingsStore.models"
-                  :key="m.id"
-                  :value="m.id"
-                >{{ m.name }}</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label class="field-label">{{ t('settings.dateRange') }} ({{ t('common.optional') }})</label>
-              <div style="display:flex; gap:8px; align-items:center;">
-                <input
-                  v-model="clearStartDate"
-                  type="date"
-                  class="field-input"
-                  style="flex:1;"
-                />
-                <span style="font-size:11px; color:var(--text-muted);">~</span>
-                <input
-                  v-model="clearEndDate"
-                  type="date"
-                  class="field-input"
-                  style="flex:1;"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showClearDialog = false">{{ t('common.cancel') }}</button>
-          <button class="btn btn-primary" style="background:var(--error);border-color:var(--error);" @click="handleClearByCondition">{{ t('common.delete') }}</button>
-          <div style="flex:1;" />
-          <button class="btn btn-ghost btn-sm" @click="setClearQuickRange(3)">{{ t('settings.lastThreeDays') }}</button>
-          <button class="btn btn-ghost btn-sm" @click="setClearQuickRange(7)">{{ t('settings.lastWeek') }}</button>
-          <button class="btn btn-ghost btn-sm" @click="setClearQuickRange(null)">{{ t('settings.allHistory') }}</button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+
 
   <!-- 添加/编辑对话框 -->
   <div
@@ -951,7 +781,7 @@ initUsageStats()
           />
           <span>{{ dialogTesting ? t('settings.testing') : t('settings.testConnection') }}</span>
         </button>
-        <div style="flex:1;" />
+        <span style="flex:1;"></span>
         <button
           class="btn btn-ghost"
           @click="showDialog = false"
@@ -1023,7 +853,6 @@ initUsageStats()
       </div>
     </div>
   </Teleport>
-</div>
 </template>
 
 <style scoped>

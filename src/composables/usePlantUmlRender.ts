@@ -29,7 +29,7 @@ export function usePlantUmlRender(
     try {
       // 通过 IPC 调用 Python 后端
       if (typeof window !== 'undefined' && window.api) {
-        const result = await window.api.backend.renderPlantuml({
+        const result = await (window.api as any).backend.renderPlantuml({
           code,
           format: options.format || 'svg',
           useRemote: options.useRemote !== false,
@@ -88,7 +88,7 @@ async function encodePlantUml(code: string): Promise<string> {
     // 手动编码
     const encoder = new TextEncoder()
     const data = encoder.encode(code)
-    const compressed = new Uint8Array(pako?.deflate(data) || deflateManual(data))
+    const compressed = new Uint8Array(deflateManual(data))
     return base64Encode(compressed)
   }
 }

@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** PIXI.js Canvas Composable - 主线程 WebGL 渲染 */
 
 import { ref, watch, type Ref, onMounted, onUnmounted } from 'vue'

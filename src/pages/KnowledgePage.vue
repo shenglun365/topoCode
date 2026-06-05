@@ -225,7 +225,7 @@ function handleSave(docId: string, content: string) {
                   class="select select-sm"
                   style="width:120px;"
                   :value="knowledgeStore.filter.sortBy"
-                  @change="knowledgeStore.setSortBy(($event.target as HTMLSelectElement).value)"
+                  @change="knowledgeStore.setSortBy(($event.target as HTMLSelectElement).value as 'updated-desc')"
                 >
                   <option value="updated-desc">
                     {{ t('knowledge.sortUpdatedDesc') }}

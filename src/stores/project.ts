@@ -9,16 +9,15 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useFuncGroupStore } from '@/stores/funcGroup'
-import { useReportStore } from '@/stores/report'
+import { useReportStore } from '@/stores/report-store'
 import { useDebugStore } from '@/stores/debug'
-import { useSettingsStore } from '@/stores/settings'
+import { useCommunityStore } from '@/stores/community-store'
+import { usePipelineStore } from '@/stores/pipeline-store'
 import { ipc } from '@/services/ipc'
-
-import { useAnalysisStore } from '@/stores/analysis'
-import { useFuncGroupStore } from '@/stores/funcGroup'
+import type { FileTreeNode, Project } from '@/types/ipc'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager' | 'componentAnalysis'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager' | 'componentAnalysis' | 'childAnalysis'
 
 export interface HomeTab {
   id: string
@@ -42,6 +41,7 @@ export interface HomeTab {
   parentLevel?: string
   parentCommId?: string
   parentEdgeType?: string
+  regenerationType?: 'community' | 'overall' | string
 }
 
 export const useProjectStore = defineStore('project', () => {
@@ -90,7 +90,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function initImportListener() {
     if (importProgressCleanup) return
-    importProgressCleanup = window.api.on('event:project.import.progress', (data: any) => {
+    importProgressCleanup = window.api!.on('event:project.import.progress', (data: any) => {
       importProgress.value = data.progress
       importStatus.value = data.phase || ''
       if (data.progress >= 100) {
@@ -136,7 +136,7 @@ export const useProjectStore = defineStore('project', () => {
     const project = projects.value.find(p => p.id === id)
     if (project && project.path) {
       try {
-        await window.api.fs.addAllowedDir(project.path)
+        await window.api!.fs.addAllowedDir(project.path)
       } catch (e) {
         console.warn('Failed to add allowed dir:', e)
       }
@@ -164,12 +164,19 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function clearProjectCache(id: string) {
-    const result = await ipc.analysis.clearProjectCache(id)
+    let result: any
+    try {
+      result = await ipc.analysis.clearProjectCache(id)
+    } catch (err) {
+      console.warn('[ProjectStore] clearProjectCache backend call failed, cleaning local cache anyway:', err)
+    }
     // 清除前端缓存的旧任务数据，避免打开已删除任务的报告
     const analysisStore = useAnalysisStore()
     analysisStore.tasks = []
-    const reportStore = useReportStore()
-    reportStore.tasks = {}
+    const communityStore = useCommunityStore()
+    const pipelineStore = usePipelineStore()
+    communityStore.clearTask(id)
+    pipelineStore.clearTask(id)
     // 关闭该项目的所有分析 tab，清理已删除任务的引用
     const funcGroup = useFuncGroupStore()
     const ctx = funcGroup.context.analysis
@@ -193,7 +200,7 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  async function getFileTree(id: string, fromPath: string = null) {
+  async function getFileTree(id: string, fromPath: string | null = null) {
     console.log('[ProjectStore] getFileTree id:', id, 'fromPath:', fromPath)
     const result = await ipc.project.getFileTree(id, fromPath)
     console.log('[ProjectStore] getFileTree result:', JSON.stringify(result).substring(0, 200))
@@ -217,8 +224,8 @@ export const useProjectStore = defineStore('project', () => {
     if (idx >= 0) {
       projects.value[idx] = {
         ...result.project,
-        rootPath: result.project.root_path || result.project.rootPath || '',
-        needsResync: result.project.needs_resync ?? result.project.needsResync ?? 0,
+        rootPath: (result.project as any).root_path || result.project.rootPath || '',
+        needsResync: (result.project as any).needs_resync ?? result.project.needsResync ?? 0,
       }
     }
     return result
@@ -242,8 +249,8 @@ export const useProjectStore = defineStore('project', () => {
     if (!result?.project) return null
     const project = {
       ...result.project,
-      rootPath: result.project.root_path || result.project.rootPath || '',
-      isSample: result.project.is_sample ?? result.project.isSample ?? 0,
+      rootPath: (result.project as any).root_path || result.project.rootPath || '',
+      isSample: result.project.isSample ?? 0,
     }
     projects.value.push(project)
     return project

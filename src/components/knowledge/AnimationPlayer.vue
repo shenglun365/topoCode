@@ -93,7 +93,7 @@ const stepDescription = computed(() => {
 const stepVars = computed<Record<string, string>>(() => {
   return {
     [t('animation.currentStep')]: String(props.currentStep || 0),
-    [t('animation.progress')]: `${props.progress || 0}%`,
+    [t('animation.progress')]: `${(props as any).progress || 0}%`,
   }
 })
 

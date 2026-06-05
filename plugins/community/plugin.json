@@ -1,0 +1,16 @@
+{
+  "id": "community",
+  "name": "社区分析",
+  "version": "1.0.0",
+  "description": "Louvain 社区检测、模块度计算、枢纽节点分析",
+  "entry": "plugin_entry",
+  "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
+  "dependencies": {
+    "python": [
+      "numpy>=1.24,<3.0",
+      "networkx==3.4.2",
+      "python-louvain==0.16"
+    ]
+  },
+  "size_mb": 25
+}

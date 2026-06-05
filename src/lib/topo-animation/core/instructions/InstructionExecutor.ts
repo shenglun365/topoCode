@@ -175,7 +175,7 @@ export class InstructionExecutor {
       // ==================== Group ====================
       case 'createGroup': {
         if (!delta.groups) delta.groups = { createOrUpdate: [] };
-        delta.groups.createOrUpdate.push({
+        delta.groups.createOrUpdate!.push({
           id: payload.groupId,
           nodeIds: payload.nodeIds,
           edgeIds: payload.edgeIds,
@@ -193,13 +193,13 @@ export class InstructionExecutor {
         if (payload.edgeIds) groupUpdate.edgeIds = payload.edgeIds;
         if (payload.label !== undefined) groupUpdate.label = payload.label;
         if (payload.style) groupUpdate.style = payload.style;
-        delta.groups.createOrUpdate.push(groupUpdate);
+        delta.groups!.createOrUpdate!.push(groupUpdate);
         break;
       }
 
       case 'removeGroup': {
         if (!delta.groups) delta.groups = { remove: [] };
-        delta.groups.remove.push(payload.groupId);
+        delta.groups!.remove!.push(payload.groupId);
         break;
       }
 

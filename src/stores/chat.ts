@@ -7,7 +7,8 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useModelConfigStore } from '@/stores/model-config-store'
 
 export interface ChatSession {
   id: string
@@ -65,14 +66,16 @@ export const useChatStore = defineStore('chat', () => {
   // 获取当前默认模型 ID
   const modelId = computed(() => {
     const settingsStore = useSettingsStore()
-    const defaultModel = settingsStore.models.find(m => m.isDefault)
-    return defaultModel?.id || settingsStore.models[0]?.id || null
+const modelConfigStore = useModelConfigStore()
+    const defaultModel = modelConfigStore.models.find(m => m.isDefault)
+    return defaultModel?.id || modelConfigStore.models[0]?.id || null
   })
 
   // 获取当前默认模型完整配置（用于 UI 展示）
   const modelConfig = computed(() => {
     const settingsStore = useSettingsStore()
-    return settingsStore.models.find(m => m.isDefault) || settingsStore.models[0] || null
+const modelConfigStore = useModelConfigStore()
+    return modelConfigStore.models.find(m => m.isDefault) || modelConfigStore.models[0] || null
   })
 
   // Actions

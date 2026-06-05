@@ -100,22 +100,22 @@ async function loadExistingTask() {
     } else if (loaded.scope) {
       selectedScopes.value = [loaded.scope]
     }
-    const excludeDirsData = loaded.excludeDirs || loaded.exclude_dirs
+    const taskAny = loaded as any
+    const excludeDirsData = taskAny.excludeDirs || taskAny.exclude_dirs
     if (excludeDirsData) {
       const dirs = Array.isArray(excludeDirsData) ? excludeDirsData : JSON.parse(excludeDirsData)
       excludeDirs.value = dirs.join(', ')
     }
-    const reportTypesData = loaded.reportTypes || loaded.report_types
+    const reportTypesData = taskAny.reportTypes || taskAny.report_types
     if (reportTypesData) {
       reportTypes.value = Array.isArray(reportTypesData) ? reportTypesData : JSON.parse(reportTypesData)
     }
-    // 恢复匹配模式（pattern_type 是 text 字段，无需 JSON 解析）
-    const pt = loaded.pattern_type
+    const pt = taskAny.pattern_type
     if (pt && ['all', 'glob', 'regex'].includes(pt)) {
       patternType.value = pt
     }
-    if (loaded.pattern) {
-      pattern.value = loaded.pattern
+    if (taskAny.pattern) {
+      pattern.value = taskAny.pattern
     }
   } catch (err) {
     logger.error('Failed to load task:', err)
@@ -193,7 +193,7 @@ async function handleSubmit() {
         reportTypes: reportTypes.value.length > 0 ? [...reportTypes.value] : undefined,
         patternType: patternType.value !== 'all' ? patternType.value : undefined,
         pattern: pattern.value || undefined,
-      })
+      } as any)
 
       isEditMode.value = false
       await loadExistingTask()

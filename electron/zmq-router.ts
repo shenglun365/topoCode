@@ -2,14 +2,16 @@
 
 import { EventEmitter } from 'events'
 
-// 动态导入 zeromq (仅在 Electron 环境中)
+// ZMQ 端口 — 优先从环境变量读取
+const ZMQ_DEALER_PORT = parseInt(process.env.ZMQ_DEALER_PORT || '5671', 10)
+const ZMQ_PUB_PORT = parseInt(process.env.ZMQ_PUB_PORT || '5680', 10)
+const ZMQ_HOST = process.env.ZMQ_BIND_HOST || '127.0.0.1'
+
 let ZMQ: any = null
 try {
-  // @ts-ignore - zeromq 仅在 Electron 环境中可用
   ZMQ = require('zeromq')
 } catch (e: any) {
   console.error('[ZMQRouter] zeromq load failed:', e.message)
-  process.exit(1)
 }
 
 export interface ZMQEvent {
@@ -24,75 +26,124 @@ export class ZMQRouter extends EventEmitter {
   private pendingRequests = new Map<string, { resolve: Function; reject: Function; timer: NodeJS.Timeout }>()
   private requestCounter = 0
   private connected = false
+  private reconnectTimer: NodeJS.Timeout | null = null
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 10
+  private shouldReconnect = true
 
   constructor() {
     super()
-    console.log('[ZMQRouter] initialized with zeromq')
+  }
+
+  get isConnected(): boolean {
+    return this.connected
+  }
+
+  get pendingCount(): number {
+    return this.pendingRequests.size
   }
 
   /** 连接到后端 */
   async connect(): Promise<void> {
-    try {
-      // DEALER socket - 连接 Python DEALER (RPC 请求/响应)
-      this.dealer = new ZMQ.Dealer()
-      await this.dealer.connect('tcp://127.0.0.1:5671')
-      console.log('[ZMQRouter] DEALER connected to tcp://127.0.0.1:5671')
+    if (!ZMQ) {
+      throw new Error('zeromq module not available')
+    }
 
-      // SUB socket - 订阅 Python PUB (事件推送)
+    this.shouldReconnect = true
+    this.reconnectAttempts = 0
+
+    try {
+      this.dealer = new ZMQ.Dealer()
+      await this.dealer.connect(`tcp://${ZMQ_HOST}:${ZMQ_DEALER_PORT}`)
+      console.log(`[ZMQRouter] DEALER connected to tcp://${ZMQ_HOST}:${ZMQ_DEALER_PORT}`)
+
       this.sub = new ZMQ.Subscriber()
-      await this.sub.connect('tcp://127.0.0.1:5680')
+      await this.sub.connect(`tcp://${ZMQ_HOST}:${ZMQ_PUB_PORT}`)
       this.sub.subscribe('task')
       this.sub.subscribe('project')
       this.sub.subscribe('backend')
       this.sub.subscribe('llm')
-      console.log('[ZMQRouter] SUB connected to tcp://127.0.0.1:5680')
+      console.log(`[ZMQRouter] SUB connected to tcp://${ZMQ_HOST}:${ZMQ_PUB_PORT}`)
 
       this.connected = true
+      this.reconnectAttempts = 0
       this.startListening()
-      console.log('[ZMQRouter] connected successfully')
     } catch (error) {
       console.error('[ZMQRouter] Connection failed:', error)
+      this.connected = false
+      this.scheduleReconnect()
       throw error
     }
+  }
+
+  /** 自动重连 (指数退避) */
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect || this.reconnectAttempts >= this.maxReconnectAttempts) return
+
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
+    this.reconnectAttempts++
+    console.log(`[ZMQRouter] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        await this.connect()
+        this.emit('reconnected')
+      } catch {
+        this.scheduleReconnect()
+      }
+    }, delay)
   }
 
   /** 开始监听 */
   private startListening(): void {
     if (!this.sub) return
 
-    // 监听事件推送
     ;(async () => {
-      for await (const [topic, eventType, data] of this.sub) {
-        const event: ZMQEvent = {
-          topic: topic.toString(),
-          eventType: eventType.toString(),
-          data: JSON.parse(data.toString()),
+      try {
+        for await (const [topic, eventType, data] of this.sub) {
+          const event: ZMQEvent = {
+            topic: topic.toString(),
+            eventType: eventType.toString(),
+            data: JSON.parse(data.toString()),
+          }
+          this.emit(`event:${event.topic}.${event.eventType}`, event.data)
+          this.emit('event', event)
         }
-        this.emit(`event:${event.topic}.${event.eventType}`, event.data)
-        this.emit('event', event)
+      } catch (err) {
+        console.error('[ZMQRouter] SUB listener error:', err)
+        this.connected = false
+        this.scheduleReconnect()
       }
-    })().catch(console.error)
+    })()
 
-    // 监听 DEALER 响应
     ;(async () => {
-      for await (const frames of this.dealer) {
-        this.handleResponse(frames)
+      try {
+        for await (const frames of this.dealer) {
+          this.handleResponse(frames)
+        }
+      } catch (err) {
+        console.error('[ZMQRouter] DEALER listener error:', err)
+        this.connected = false
+        this.scheduleReconnect()
       }
-    })().catch(console.error)
+    })()
   }
 
   /** 发送 RPC 请求 */
   async call<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
-    console.log(`[ZMQ] call -> ${method}`, params)
+    if (!this.connected || !this.dealer) {
+      throw new Error('ZMQ not connected')
+    }
+
     const requestId = `req-${++this.requestCounter}`
 
     return new Promise<T>((resolve, reject) => {
-      // 按方法类型设置不同超时
       const timeoutMap: Record<string, number> = {
-        'project.import': 300000,    // 300s — 大项目导入（数千文件扫描 + 批量写入）
-        'analysis.runTask': 600000,  // 600s — 分析任务（AST 解析 + 符号 + 调用图 + 依赖图 + 社区）
+        'project.import': 300000,
+        'analysis.runTask': 600000,
+        'analysis.clearProjectCacheTable': 120000,
       }
-      const timeout = timeoutMap[method] || 30000  // 默认 30s
+      const timeout = timeoutMap[method] || 30000
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(requestId)
@@ -101,12 +152,7 @@ export class ZMQRouter extends EventEmitter {
 
       this.pendingRequests.set(requestId, { resolve, reject, timer })
 
-      // 发送请求: [REQUEST_ID, METHOD, PARAMS_JSON]
-      this.dealer.send([
-        requestId,
-        method,
-        JSON.stringify(params),
-      ])
+      this.dealer.send([requestId, method, JSON.stringify(params)])
     })
   }
 
@@ -124,40 +170,46 @@ export class ZMQRouter extends EventEmitter {
     this.pendingRequests.delete(requestId)
     clearTimeout(pending.timer)
 
-    let result = null
-    try {
-      result = JSON.parse(resultStr)
-    } catch {
-      result = resultStr
-    }
+    let result: any = null
+    try { result = JSON.parse(resultStr) } catch { result = resultStr }
 
-    let error = null
-    try {
-      error = JSON.parse(errorStr)
-    } catch {
+    let error: any = null
+    try { error = JSON.parse(errorStr) } catch {
       if (errorStr && errorStr !== 'null') {
         error = { code: -32000, message: errorStr }
       }
     }
 
-    if (error) {
-      pending.reject(new Error(error.message))
-    } else {
-      pending.resolve(result)
+    if (error) pending.reject(new Error(error.message))
+    else pending.resolve(result)
+  }
+
+  /** 健康检查 ping */
+  async ping(timeout = 3000): Promise<boolean> {
+    try {
+      await Promise.race([
+        this.call('backend.ping', {}),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('ping timeout')), timeout)),
+      ])
+      return true
+    } catch {
+      return false
     }
   }
 
   /** 关闭连接 */
   async close(): Promise<void> {
-    if (this.dealer) {
-      this.dealer.close()
+    this.shouldReconnect = false
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
     }
-    if (this.sub) {
-      this.sub.close()
-    }
+
+    if (this.dealer) this.dealer.close()
+    if (this.sub) this.sub.close()
     this.connected = false
 
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timer)
       pending.reject(new Error('Connection closed'))
     }
@@ -165,5 +217,4 @@ export class ZMQRouter extends EventEmitter {
   }
 }
 
-// 单例
 export const zmqRouter = new ZMQRouter()
