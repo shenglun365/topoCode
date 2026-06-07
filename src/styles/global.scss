@@ -106,6 +106,13 @@ html, body {
   background: var(--accent-hover);
 }
 
+.btn-warning {
+  color: var(--warning);
+}
+.btn-warning:hover {
+  background: var(--warning)22;
+}
+
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -137,6 +144,12 @@ html, body {
 .btn-sm {
   padding: 4px 8px;
   font-size: 11px;
+}
+
+.btn-xs {
+  padding: 3px 8px;
+  font-size: 11px;
+  gap: 4px;
 }
 
 .btn-icon {

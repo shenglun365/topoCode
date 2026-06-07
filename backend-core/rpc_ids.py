@@ -82,7 +82,32 @@ RPC_IDS: dict[str, str] = {
     "project.getConfig":            "API-060",
     "project.setConfig":            "API-061",
     "project.clearSampleData":      "API-062",
-    "project.getStorageStats":      "API-106",
+    "project.getStorageStats":      "API-110",
+
+    # ── model ──────────────────────────────────────────────────
+    "model.getUsageStats":          "API-111",
+    "model.deleteUsageStats":       "API-112",
+    "model.deleteUsageStatsBatch":  "API-113",
+    "model.deleteUsageStatsByCondition": "API-114",
+
+    # ── plugin ─────────────────────────────────────────────────
+    "plugin.list":                  "API-115",
+    "plugin.get":                   "API-116",
+    "plugin.load":                  "API-117",
+    "plugin.unload":                "API-118",
+    "plugin.reload":                "API-119",
+    "plugin.install":               "API-121",
+
+    # ── module ─────────────────────────────────────────────────
+    "module.listRegistry":          "API-126",
+    "module.getInstalled":          "API-127",
+    "module.install":               "API-128",
+    "module.uninstall":             "API-129",
+    "module.update":                "API-130",
+    "module.search":                "API-131",
+
+    # ── mcp ────────────────────────────────────────────────────
+    "mcp.dispatch":                 "API-133",
 
     # ── promptTemplate ────────────────────────────────────────
     "promptTemplate.list":          "API-063",
@@ -114,6 +139,8 @@ RPC_IDS: dict[str, str] = {
     "report.deleteSubDoc":          "API-082",
     "report.generateProjectSummary": "API-106",
     "report.getProjectSummary":      "API-107",
+    "report.saveProjectSummary":     "API-125",
+    "report.saveOverallDoc":         "API-132",
 
     # ── session ───────────────────────────────────────────────
     "session.list":                 "API-083",

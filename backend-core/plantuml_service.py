@@ -38,55 +38,129 @@ def find_plantuml_jar() -> Optional[str]:
     return None
 
 
-def _convert_boxes(code: str) -> str:
-    return code
-
-
-def _convert_mindmaps(code: str) -> str:
-    return code
-
-
-def _sanitize_mermaid(code: str) -> str:
-    """最简化：仅处理行尾空格"""
-    import re
-    code = re.sub(r'[ \t]+$', '', code, flags=re.MULTILINE)
-    return code
-
-
-def _convert_mermaid(code: str) -> str:
-    """保留 Mermaid 代码原样，不做语法转换"""
-    return code
-
-
-def _expand_single_line_blocks(code: str) -> str:
-    return code
-
-
-def _flatten_blocks(code: str) -> str:
-    return code
-
-
 def _sanitize_plantuml(code: str) -> str:
-    """最简化：仅处理缩进空格和必需的基本格式，不做语法级转换"""
+    """修正 LLM 生成的常见 PlantUML 语法错误"""
     import re
     code = code.strip()
-    lines = code.split('\n')
-    result = []
-    for line in lines:
-        stripped = line.rstrip()
-        # package 'name' → package "name" (PlantUML 单引号是注释!)
-        stripped = re.sub(
-            r"(\b(?:package|rectangle|component|node|folder|frame|cloud|database|storage)\s+)'([^']*)'",
-            r'\1"\2"', stripped
+
+    # 1) 分离 @startuml 和标题: @startuml Title → @startuml\ntitle Title
+    #    但 @startuml 后紧跟 PlantUML 关键字时不分离
+    _PU_KEYWORDS = r'(?:component|package|rectangle|folder|frame|cloud|database|storage|actor|usecase|class|interface|enum|abstract|state|note|box|skin|left|right|title|hide|show|skinparam|!define|!include)'
+    code = re.sub(
+        r'^@startuml[ \t]+(?!' + _PU_KEYWORDS + r'\b)(\S.+)',
+        r'@startuml\ntitle \1', code, flags=re.MULTILINE
+    )
+
+    # 2) package 'name' → package "name" (单引号在 PlantUML 中是注释!)
+    code = re.sub(
+        r"(\b(?:package|rectangle|component|node|folder|frame|cloud|database|storage)\s+)'([^']*)'",
+        r'\1"\2"', code
+    )
+
+    # 3) @enduml 修正
+    code = re.sub(r'^@enduml?$', '@enduml', code, flags=re.MULTILINE)
+
+    # 4) module → package + 一行多定义拆分 (循环直到稳定)
+    for _ in range(5):
+        prev = code
+        # module "Name" { text } → package "Name" { ... }
+        code = re.sub(
+            r'^(\s*)module\s+"([^"]*)"\s*\{\s*([^}]*)\s*\}\s*$',
+            lambda m: _module_to_package(m.group(1), m.group(2), m.group(3)),
+            code, flags=re.MULTILINE
         )
-        # @enduml 修正
-        if stripped.strip() in ('enduml', '@endum'):
-            stripped = '@enduml'
-        result.append(stripped)
-    code = '\n'.join(result)
-    # @startuml Title → 分离为 @startuml + title Title
-    code = re.sub(r'^(@startuml)\s+(\S.+)', r'@startuml\ntitle \2', code, flags=re.MULTILINE)
+        # 一行多个定义 → 拆行
+        code = re.sub(
+            r'(?<=\S)[ \t]+(?=(?:component|package|rectangle|folder|module)\s+)',
+            '\n', code
+        )
+        if code == prev:
+            break
+
+    # 5) 容器花括号展开: package "Name" { text, text } → 多行子元素
+    #   匹配 <keyword> "Name" { text, text } (无 as alias)
+    code = re.sub(
+        r'^(\s*)(package|rectangle|folder|cloud)\s+"([^"]*)"\s*\{\s*([^}]+)\s*\}\s*$',
+        lambda m: _expand_container(m.group(1), m.group(2), m.group(3), m.group(4)),
+        code, flags=re.MULTILINE
+    )
+
+    # 6) 单行花括号展开: component "X" as x { text, text } → note
+    #    保留内含 PlantUML 关键字的情况
+    line_pat = re.compile(
+        r'^(\s*)(\w+)\s+"([^"]*)"\s+as\s+(\w+)\s*\{\s*([^}]*)\s*\}\s*$',
+        re.MULTILINE
+    )
+    def _expand_line(m: re.Match) -> str:
+        indent, kw, name, alias, content = m.groups()
+        content = content.strip()
+        if not content:
+            return f'{indent}{kw} "{name}" as {alias}'
+        # 含 PlantUML 关键字 → 保留原样 (缩进子元素)
+        if re.search(r'\b(?:component|package|rectangle|folder|note|class|interface)\b', content):
+            inner_indent = indent + '  '
+            inner = '\n'.join(f'{inner_indent}{x.strip()}' for x in content.split(',') if x.strip())
+            return f'{indent}{kw} "{name}" as {alias} {{\n{inner}\n{indent}}}'
+        items = [x.strip() for x in content.split(',') if x.strip()]
+        lines_out = [f'{indent}{kw} "{name}" as {alias}']
+        for item in items:
+            lines_out.append(f'{indent}note right of {alias}')
+            lines_out.append(f'{indent}  {item}')
+            lines_out.append(f'{indent}end note')
+        return '\n'.join(lines_out)
+    code = line_pat.sub(_expand_line, code)
+
+    # 7) 未定义别名存根: 收集所有引用的 alias 和已定义的 alias, 补充缺失
+    defined_aliases = set(re.findall(r'\bas\s+(\w+)', code))
+    referenced = set(re.findall(r'(\w+)\s*--[>-]', code))
+    referenced.update(re.findall(r'(\w+)\s*\.\.[>-]', code))
+    referenced.update(re.findall(r'--[>-]\s*(\w+)', code))
+    referenced.update(re.findall(r'\.\.[>-]\s*(\w+)', code))
+    missing = referenced - defined_aliases - {'@enduml'}
+    if missing:
+        stub = '\n' + '\n'.join(
+            f'component "{a}" as {a} #LightGray;line:gray'
+            for a in sorted(missing)
+        )
+        # 放在 @enduml 之前插入
+        if '@enduml' in code:
+            code = code.replace('@enduml', stub + '\n@enduml')
+        else:
+            code += stub
+
+    # 8) 清理多余空行
+    code = re.sub(r'\n{3,}', '\n\n', code)
     return code
+
+
+def _expand_container(indent: str, kw: str, name: str, content: str) -> str:
+    """展开 package/folder/rectangle { text, text } 为多行子元素"""
+    import re
+    content = content.strip()
+    # 含 PlantUML 关键字 → 保留原样, 只缩进
+    if re.search(r'\b(?:component|package|rectangle|folder|note|class|interface|enum)\b', content):
+        inner = '\n'.join(f'{indent}  {x.strip()}' for x in content.split(',') if x.strip())
+        return f'{indent}{kw} "{name}" {{\n{inner}\n{indent}}}'
+    items = [x.strip() for x in content.split(',') if x.strip()]
+    if not items:
+        return f'{indent}{kw} "{name}"'
+    lines = [f'{indent}{kw} "{name}" {{']
+    for item in items:
+        safe_alias = re.sub(r'[^a-zA-Z0-9_]', '_', item)
+        lines.append(f'{indent}  component "{item}" as {safe_alias}')
+    lines.append(f'{indent}}}')
+    return '\n'.join(lines)
+
+
+def _module_to_package(indent: str, name: str, content: str) -> str:
+    import re
+    items = [x.strip() for x in content.split(',') if x.strip()]
+    lines = [f'{indent}package "{name}" {{']
+    for item in items:
+        safe = re.sub(r'[^a-zA-Z0-9]', '_', item)
+        lines.append(f'{indent}  component "{item}" as {safe}')
+    lines.append(f'{indent}}}')
+    return '\n'.join(lines)
 
 
 def encode_plantuml(code: str) -> str:

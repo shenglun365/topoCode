@@ -239,6 +239,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'report.generateProjectSummary', params }),
     getProjectSummary: (params: { projectId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getProjectSummary', params }),
+    saveProjectSummary: (params: { projectId: string; summary: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.saveProjectSummary', params }),
     savePipelineState: (params: { taskId: string; stateJson: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.savePipelineState', params }),
     loadPipelineState: (params: { taskId: string }) =>

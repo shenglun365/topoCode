@@ -11,6 +11,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useChildAnalysisStore } from '@/stores/child-analysis-store'
 import { useCommunityStore } from '@/stores/community-store'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
@@ -28,7 +29,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  viewCommunityMD: [params: {
+  viewCommunityMd: [params: {
     communityId: string
     level: string
     edgeType: string
@@ -89,6 +90,7 @@ const overallProgress = computed(() => {
 const isRunning = computed(() => childState.value?.running || false)
 const isPaused = computed(() => childState.value?.paused || false)
 const errorLogs = computed(() => childState.value?.errorLogs || [])
+const { showId, componentId } = useComponentId('CA-001')
 
 function fmtCommId(id: string): string {
   return id.replace(/^comm-[^-]+-/, '')
@@ -132,7 +134,7 @@ function stopAnalysis() {
 }
 
 function viewMD(community: any) {
-  emit('viewCommunityMD', {
+  emit('viewCommunityMd', {
     communityId: community.communityId,
     level: community.level,
     edgeType: community.edgeType,
@@ -159,6 +161,7 @@ onMounted(async () => {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div class="child-analysis-panel">
     <div class="cap-header">
       <div class="cap-title-row">
@@ -357,7 +360,7 @@ onMounted(async () => {
 .id-name { color: var(--text-secondary); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .id-name.clickable { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
 .id-name.clickable:hover { color: var(--accent); }
-.clist-nodes, .clist-edges, .clist-score { text-align: right; font-family: var(--font-mono); color: var(--text-primary); }
+.clist-nodes, .clist-edges, .clist-score { text-align: right; justify-content: flex-end; font-family: var(--font-mono); color: var(--text-primary); }
 .score-val { color: var(--text-secondary); }
 .score-na { color: var(--text-muted); }
 .clist-status { display: flex; justify-content: center; }

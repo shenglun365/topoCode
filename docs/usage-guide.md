@@ -60,7 +60,7 @@ npm install
 # 3. Create Python virtual environment and install backend dependencies
 python3 -m venv .venv
 source .venv/bin/activate  # Linux/macOS
-pip install -r backend/requirements.txt
+pip install -r backend-core/requirements.txt
 
 # 4. Build and package
 npm run build
@@ -75,7 +75,7 @@ npm run dev:vite
 
 # Terminal 2: Start Python backend
 source .venv/bin/activate
-python backend/main.py --http-port 3456
+python backend-core/main.py --http-port 3456
 
 # Or all-in-one (Electron + backend auto-start)
 npm run dev
@@ -244,9 +244,7 @@ After completion, view results in `TaskDetailDialog`:
 
 ### 5.5 File Statistics
 
-![File Statistics](images/screenshot-code-file-stats.png)
-
-*File statistics panel: line count distribution by language, directory tree filtering*
+File statistics panel: line count distribution by language, directory tree filtering
 
 ---
 
@@ -316,9 +314,7 @@ Once the backend is running, visit `http://localhost:3456` in a browser to view:
 
 ### 7.1 Session Management
 
-![AI Chat Sessions](images/screenshot-ai-chat-sessions.png)
-
-*AI assistant: multi-session tab bar with streaming messages*
+AI assistant: multi-session tab bar with streaming messages
 
 - **Multi-session**: Create multiple independent conversations
 - **Session Switching**: Quick switch via tab bar
@@ -326,9 +322,7 @@ Once the backend is running, visit `http://localhost:3456` in a browser to view:
 
 ### 7.2 Chat Interface
 
-![AI Chat Messages](images/screenshot-ai-chat-messages.png)
-
-*AI chat: message bubbles, context cards, input area*
+AI chat: message bubbles, context cards, input area
 
 The AI assistant supports three interaction modes:
 
@@ -362,10 +356,6 @@ Configure a model in Settings before first use.
 
 ### 8.1 Knowledge Graph
 
-![Knowledge Graph](images/screenshot-knowledge-graph.png)
-
-*Knowledge graph: D3.js force-directed graph showing knowledge relationships*
-
 `KnowledgeGraph` visualizes knowledge relationships:
 
 - D3.js force-directed graph
@@ -373,9 +363,7 @@ Configure a model in Settings before first use.
 
 ### 8.2 Document Management
 
-![Knowledge Documents](images/screenshot-knowledge-docs.png)
-
-*Knowledge documents: cards with dimension tags, favorites, and pinning*
+Knowledge documents: cards with dimension tags, favorites, and pinning
 
 - **CRUD**: Create, edit, delete knowledge documents
 - **Dimension Classification**: Four dimensions (lifecycle, tech stack, abstraction, purpose)
@@ -393,10 +381,6 @@ Configure a model in Settings before first use.
 | Purpose | Business / Technical / Management / Learning |
 
 ### 8.4 TopoScript Animation
-
-![Animation Player](images/screenshot-knowledge-animation.png)
-
-*TopoScript animation player: step-by-step teaching demonstrations*
 
 The built-in **TopoScript** animation engine supports:
 
@@ -430,10 +414,6 @@ The built-in **TopoScript** animation engine supports:
 - **Skill Management**: Enable/disable analysis skills
 
 ### 9.3 Theme System
-
-![Theme Manager](images/screenshot-settings-themes.png)
-
-*Theme manager: preset themes list, custom theme editor*
 
 Built on the Catppuccin Mocha color system:
 

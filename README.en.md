@@ -1,180 +1,96 @@
-# TopoCode
+# TopoOne
 
-> Version: v0.1.0 beta | [中文](README.md)
+> [中文](README.md) | Source code architecture analysis & report generation tool
 
-Source code architecture analysis and learning tool. Automatically parse project source code structure, generate multi-level component dependency graphs, call chain analysis, architecture analysis reports, with AI-assisted analysis.
+Automatically parse project source code, generate multi-level component dependency graphs, call chain analysis, and AI-powered architecture analysis reports.
 
 ## Features
 
-- **Multi-language Source Parsing** — Tree-sitter based AST parsing, currently supports C/C++, Python, JavaScript/TypeScript, Go, Java, with more languages coming
-- **Architecture Analysis** — Component dependency analysis, call chain analysis, community detection (Louvain algorithm)
-- **AI-assisted Report Generation** — LLM-based component analysis, automated architecture document generation
-- **Visualization** — Inline Mermaid / PlantUML diagram rendering
-- **Web Document Preview** — Browse architecture documents and community directories via local HTTP service
-- **Multi-project Management** — Project grouping, task management, analysis report management
+- **Multi-language Parsing** — Tree-sitter based AST parsing (C/C++, Python, JavaScript/TypeScript, Go, Java, and more)
+- **Architecture Analysis** — Symbol extraction → Call graph → Dependency graph → Louvain community detection
+- **AI Analysis** — LLM-powered component naming/summary/diagrams, automated architecture document generation
+- **Visualization** — D3.js force-directed graphs, Mermaid / PlantUML rendering
+- **Report Generation** — Orchestrated pipeline: validation → summary → community analysis → overall architecture
+- **Sub-document Management** — Markdown preview/edit, per-community document viewing
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend Framework | Electron + Vue 3 + TypeScript + Vite |
+| Frontend | Electron + Vue 3 + TypeScript + Vite |
 | State Management | Pinia |
 | Visualization | D3.js, Mermaid, Pixi.js |
-| Backend Service | Python 3.10+, FastAPI, ZeroMQ |
+| Backend | Python 3.10+, ZeroMQ |
 | Source Parsing | Tree-sitter |
 | Graph Computing | NetworkX, python-louvain |
-| AI Integration | OpenAI / Ollama / LM Studio compatible API |
+| AI Integration | OpenAI / Ollama / LM Studio compatible |
 
 ## Requirements
 
-### General Dependencies
-
 - **Node.js** >= 18
 - **npm** >= 9
-- **Python** >= 3.10 (required for backend runtime)
+- **Python** >= 3.10
 
-### Platform Build Environments
-
-#### Linux (Native Build)
+## Quick Start
 
 ```bash
-# Build dependencies
-sudo apt install python3 python3-pip nodejs npm
-
-# Build & package
-npm run dist:linux
-```
-
-#### macOS (Native Build)
-
-```bash
-# Build dependencies
-brew install node python@3.12
-
-# Build & package
-npm run dist:mac
-```
-
-#### Windows (Native Build — run on Windows)
-
-```bash
-# Build dependencies
-# 1. Install Node.js >= 18 (https://nodejs.org)
-# 2. Install Python >= 3.10 (https://python.org)
-# 3. Install Visual Studio Build Tools (C++ build tools for native modules)
-#    Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-#    Install workload: "Desktop development with C++"
-
-# Build & package
-npm run dist:win
-```
-
-#### Windows (Cross-compile from Linux)
-
-To build Windows packages from Linux, additional Windows Electron runtime is required:
-
-```bash
-# 1. Download Windows Electron (match version in package.json)
-#    Current version: 33.4.11
-npx electron-download --version=33.4.11 --platform=win32 --arch=x64 -o ../electron-win
-
-# 2. Build & package
-npm run dist:win
-```
-
-During cross-compilation, the `afterPack` script will automatically download Windows Python wheels to the package directory.
-
-## Source Installation
-
-### Prerequisite: Python Virtual Environment (Recommended)
-
-Using a virtual environment isolates Python dependencies and avoids conflicts with system packages.
-
-```bash
-# Create virtual environment (in project root)
-python3 -m venv .venv
-
-# Activate virtual environment
-# Linux / macOS
-source .venv/bin/activate
-# Windows (cmd)
-.venv\Scripts\activate
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# Install backend dependencies
-pip install -r backend/requirements.txt
-```
-
-> Once the virtual environment is active, `findPython()` will automatically discover `.venv/bin/python` via PATH — no additional configuration needed.
-> Run `deactivate` to exit the virtual environment when done.
-
-### Installation Steps
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/topocode/topoone-ui.git
-cd topoone-ui
-
-# 2. Install frontend dependencies
+# 1. Install frontend dependencies
 npm install
 
-# 3. Build the frontend
-npm run build
+# 2. Create and activate Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
 
-# 4. Create and activate Python virtual environment (see above), then install dependencies
-pip install -r backend/requirements.txt
+# 3. Install backend dependencies
+pip install -r backend-core/requirements.txt
 
-# 5. Package the application (optional, directly generates executable)
-npm run package
-```
-
-## Development
-
-```bash
-# Frontend dev mode (hot reload)
-npm run dev:vite
-
-# Python backend debugging (ensure virtual environment is activated first)
-source .venv/bin/activate
-python backend/main.py --http-port 3456
-
-# Full app debugging (Electron + auto-start backend)
+# 4. Run in development mode
 npm run dev
+
+# 5. Package
+npm run dist:linux
+npm run dist:mac
+npm run dist:win
 ```
 
 ## Project Structure
 
 ```
 topoone-ui/
-├── src/                    # Frontend source code
-│   ├── components/         # Vue components
-│   ├── pages/              # Pages
-│   ├── stores/             # Pinia state management
-│   ├── services/           # IPC services
-│   ├── composables/        # Composition API
-│   ├── types/              # TypeScript type definitions
-│   └── i18n/               # Internationalization
-├── backend/                # Python backend
-│   ├── main.py             # Backend entry point
-│   ├── core_service.py     # Business logic
-│   ├── llm_service.py      # LLM calls
-│   ├── zmq_server.py       # ZMQ communication
-│   ├── web_server.py       # HTTP document service
-│   ├── plantuml_service.py # PlantUML rendering
-│   ├── static/             # Web static files
-│   └── config/             # Configuration files
+├── src/                    # Vue 3 frontend
+│   ├── components/         # Components (15 categories)
+│   ├── pages/              # Pages (6)
+│   ├── stores/             # Pinia stores (22)
+│   ├── services/           # IPC service layer
+│   ├── types/              # TypeScript types
+│   ├── i18n/               # Internationalization (zh-CN/en-US)
+│   ├── router/             # Vue Router
+│   └── styles/             # Global styles
+├── backend-core/           # Python backend
+│   ├── main.py             # Entry point + plugin discovery
+│   ├── zmq_server.py       # ZMQ RPC server
+│   ├── core_service.py     # Projects/groups/knowledge/settings
+│   ├── task_manager.py     # Analysis tasks + communities
+│   ├── llm_service.py      # LLM gateway + sessions
+│   ├── prompt_manager.py   # Prompt templates (3 modes)
+│   ├── analyst_runner.py   # 6-step parsing pipeline
+│   ├── report_tree_service.py # Report document persistence
+│   ├── sqlite_ctx.py       # SQLite connection manager (4 DBs)
+│   ├── config/             # Prompt template JSON
+│   ├── store/              # Database CRUD layer
+│   ├── providers/          # LLM provider implementations
+│   ├── change_tracker/     # Change tracking
+│   └── mcp_server/         # MCP protocol bridge
 ├── electron/               # Electron main process
-├── build/                  # Build scripts
-│   └── afterPack.cjs       # Post-pack Python dependency install
-├── website/                # Official website (static HTML)
+│   ├── main.ts             # IPC routing + window management
+│   ├── preload.ts          # contextBridge API exposure
+│   ├── zmq-router.ts       # ZMQ RPC + event subscription
+│   └── python-bridge.ts    # Python child process management
+├── plugins/                # Backend plugins
 ├── docs/                   # Documentation
-│   ├── 使用文档.md          # Usage documentation (Chinese)
-│   └── images/             # Screenshots for documentation
-├── electron-builder-win.json  # Windows cross-compile config
-└── package.json
+└── build/                  # Build scripts
 ```
 
 ## License
 
-Apache-2.0 License — see [LICENSE](LICENSE)
+Apache-2.0 License

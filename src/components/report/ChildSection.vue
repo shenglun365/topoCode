@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore } from '@/stores/community-store'
 import { useChildAnalysisStore } from '@/stores/child-analysis-store'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
@@ -16,7 +17,7 @@ const props = defineProps<{
   projectId?: string
 }>()
 
-const emit = defineEmits(['openChildAnalysis', 'viewCommunityMD'])
+const emit = defineEmits(['openChildAnalysis', 'viewCommunityMd'])
 
 const childLevel = computed(() => `L${parseInt(props.parentLevel[1]) + 1}`)
 
@@ -28,6 +29,7 @@ const communities = computed(() => {
   const t = communityStore.tasks[props.taskId]
   return t ? t.analysisStates?.[stateKey.value]?.communities || [] : []
 })
+const { showId, componentId } = useComponentId('CS-001')
 
 onMounted(async () => {
   loading.value = true
@@ -59,7 +61,7 @@ function viewMD(c: any) {
   console.log(`[ChildSection] viewMD clicked id=${c.communityId} status=${c.status} name=${c.name}`)
   if (c.status === 'completed' && c.name) {
     console.log(`[ChildSection] viewMD emitting viewCommunityMD`, { communityId: c.communityId, level: c.level, edgeType: c.edgeType, parentLevel: childLevel.value, parentCommId: c.communityId, name: c.name })
-    emit('viewCommunityMD', {
+    emit('viewCommunityMd', {
       communityId: c.communityId,
       level: c.level,
       edgeType: c.edgeType,
@@ -77,10 +79,11 @@ function viewMD(c: any) {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div class="child-section">
     <div class="child-section-header">
       <span class="child-section-title">{{ childLevel }} {{ t('report.pipeline.childAnalysis') }}</span>
-      <button class="btn btn-primary btn-xs" @click="openAnalysis">
+      <button v-if="communities.length > 0 || loading" class="btn btn-primary btn-xs" @click="openAnalysis">
         {{ t('report.pipeline.enterChildAnalysis', { level: childLevel }) }}
       </button>
     </div>

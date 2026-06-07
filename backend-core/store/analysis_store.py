@@ -397,6 +397,35 @@ class AnalysisStore:
             ])
         self._db.commit()
 
+    def delete_communities(self, task_id: str, edge_type: str, comm_ids: List[str]):
+        """批量删除指定社区（从 graph_doc + community_hierarchy）"""
+        if not comm_ids:
+            return
+        placeholders = ",".join("?" * len(comm_ids))
+        params = [task_id, edge_type] + comm_ids
+        self._db.execute(
+            f"DELETE FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_id IN ({placeholders})",
+            params,
+        )
+        self._db.execute(
+            f"DELETE FROM community_hierarchy WHERE task_id=? AND edge_type=? AND comm_id IN ({placeholders})",
+            params,
+        )
+        self._db.commit()
+        logger.info(f"[AnalysisStore] delete_communities: task_id={task_id} edge_type={edge_type} count={len(comm_ids)}")
+
+    def delete_community_llm_results(self, task_id: str, edge_type: str, comm_ids: List[str]):
+        """批量删除社区的 LLM 分析结果"""
+        if not comm_ids:
+            return
+        placeholders = ",".join("?" * len(comm_ids))
+        self._db.execute(
+            f"DELETE FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_id IN ({placeholders})",
+            [task_id, edge_type] + comm_ids,
+        )
+        self._db.commit()
+        logger.info(f"[AnalysisStore] delete_community_llm_results: task_id={task_id} edge_type={edge_type} count={len(comm_ids)}")
+
     # ==================== 清理 ====================
 
     def clear_task_data(self, task_id: str):

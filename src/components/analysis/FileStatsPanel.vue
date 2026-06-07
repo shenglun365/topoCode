@@ -45,6 +45,12 @@ const dirTreeRef = ref<HTMLElement | null>(null)
 // File type multi-select
 const selectedExtensions = ref<string[]>(props.selectedExtensions ? [...props.selectedExtensions] : [])
 
+const sortedExtensions = computed(() => {
+  if (!stats.value || !stats.value.extensions) return []
+  return Object.entries(stats.value.extensions)
+    .sort((a, b) => b[1] - a[1])
+})
+
 // Compute max count for bar chart
 const maxCount = computed(() => {
   if (!stats.value || !stats.value.extensions) return 1
@@ -489,7 +495,7 @@ loadStats().then(() => { initialLoadDone = true })
 
       <div class="stats-bars">
         <div
-          v-for="(count, ext) in stats.extensions"
+          v-for="[ext, count] in sortedExtensions"
           :key="ext || '__no_ext__'"
           class="stat-bar-row"
           :class="{ 'selected': selectedExtensions.includes(ext) }"

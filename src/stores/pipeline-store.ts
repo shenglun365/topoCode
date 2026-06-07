@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { PipelineTaskNode } from '@/types/ipc'
+import { ipc } from '@/services/ipc'
 
 /** 管道步骤权重配置 */
 export interface StepWeight {
@@ -70,6 +71,7 @@ export const usePipelineStore = defineStore('pipeline', () => {
     }
     walk(t.pipelineRootTask)
     recalcProgress(taskId)
+    saveState(taskId)
   }
 
   function recalcProgress(taskId: string) {
@@ -173,6 +175,34 @@ export const usePipelineStore = defineStore('pipeline', () => {
     const t = tasks.value[taskId]; if (t) t.errorLogs = []
   }
 
+  async function saveState(taskId: string) {
+    const t = tasks.value[taskId]
+    if (!t || !t.pipelineRootTask?.children) return
+    const snapshot = t.pipelineRootTask.children.map(n => ({ id: n.id, status: n.status, error: n.error }))
+    try {
+      await ipc.report.savePipelineState({ taskId, stateJson: JSON.stringify(snapshot) })
+    } catch { /* non-critical */ }
+  }
+
+  async function loadState(taskId: string) {
+    const t = tasks.value[taskId]
+    if (!t || !t.pipelineRootTask?.children) return
+    try {
+      const res = await ipc.report.loadPipelineState({ taskId })
+      if (!res.state) return
+      const snapshot = res.state as Array<{ id: string; status: string; error?: string }>
+      if (!Array.isArray(snapshot)) return
+      for (const s of snapshot) {
+        const node = t.pipelineRootTask.children.find(n => n.id === s.id)
+        if (node && node.status === 'pending') {
+          node.status = s.status as PipelineTaskNode['status']
+          node.error = s.error
+        }
+      }
+      recalcProgress(taskId)
+    } catch { /* non-critical */ }
+  }
+
   return {
     tasks,
     ensureTask,
@@ -181,6 +211,7 @@ export const usePipelineStore = defineStore('pipeline', () => {
     stopPipeline, pausePipeline, resetPipeline,
     allPipelineStepsCompleted, hasPipelineError, clearTask,
     pushError, clearErrorLogs,
+    saveState, loadState,
     setStepWeights, getStepWeight,
   }
 })

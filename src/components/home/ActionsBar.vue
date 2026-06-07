@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import {
   SparklesIcon, ExclamationTriangleIcon, ListBulletIcon, DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
 
 defineProps<{
   hasModel: boolean
@@ -17,9 +18,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { showId, componentId } = useComponentId('AC-001')
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <section class="home-section actions-section">
     <div class="section-header">
       <SparklesIcon class="w-4 h-4" />

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore } from '@/stores/community-store'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const reportStore = useReportStore()
@@ -37,6 +38,7 @@ const existingDiagramCode = computed(() => {
   if (regenMode.value === 'plantuml') return props.existingPlantuml
   return ''
 })
+const { showId, componentId } = useComponentId('SR-001')
 
 watch(regenSubMode, (val) => {
   if (val === 'manual' && !regenManualCode.value) {
@@ -134,6 +136,7 @@ async function submitRegen() {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <Teleport to="body">
     <div
       v-if="visible"
@@ -250,7 +253,54 @@ async function submitRegen() {
 </template>
 
 <style scoped>
-.dialog-error { background: color-mix(in srgb, var(--error) 10%, transparent); color: var(--error); padding: 8px 12px; border-radius: 6px; font-size: 11px; margin-bottom: 12px; }
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 80vh;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-body {
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.dialog-error { background: color-mix(in srgb, var(--error) 10%, transparent); color: var(--error); padding: 8px 12px; border-radius: 6px; font-size: 11px; }
+.form-field { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font-size: 11px; font-weight: 500; color: var(--text-secondary); }
 .field-textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); outline: none; resize: vertical; box-sizing: border-box; }
 .field-textarea:focus { border-color: var(--accent); }
 </style>

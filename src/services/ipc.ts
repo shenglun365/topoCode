@@ -310,6 +310,9 @@ function createRealIPC() {
       loadPipelineState: async (params: { taskId: string }) => {
         return await api.report.loadPipelineState(params)
       },
+      saveOverallDoc: async (params: { taskId: string; title: string; content: string }) => {
+        return await api.report.saveOverallDoc(params)
+      },
       getReadmeContent: async (params: { projectId: string }) => {
         return await api.report.getReadmeContent(params)
       },
@@ -321,6 +324,9 @@ function createRealIPC() {
       },
       getProjectSummary: async (params: { projectId: string }) => {
         return await api.report.getProjectSummary(params)
+      },
+      saveProjectSummary: async (params: { projectId: string; summary: string }) => {
+        return await api.report.saveProjectSummary(params)
       },
       getLevelCommunityDetail: async (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) => {
         return await api.report.getLevelCommunityDetail(params)

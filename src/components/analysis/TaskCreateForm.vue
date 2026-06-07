@@ -57,7 +57,6 @@ const manualExtensionInput = ref('')
 const reportTypeOptions = [
   { value: 'dependency', label: t('analysis.dependencyAnalysis') },
   { value: 'callChain', label: t('analysis.callChainAnalysis') },
-  { value: 'dataFlow', label: t('analysis.dataFlowAnalysis') },
 ]
 
 // Computed

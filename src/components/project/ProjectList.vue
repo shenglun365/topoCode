@@ -87,10 +87,7 @@ function toggleProject(project: Project) {
     expandedProjects.value.delete(id)
   } else {
     expandedProjects.value.add(id)
-    // 首次展开时加载任务
-    if (!reportItemsByProject.value.has(id)) {
-      loadCompletedTasks(id)
-    }
+    loadCompletedTasks(id)
   }
 }
 

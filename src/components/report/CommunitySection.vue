@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { HashtagIcon } from '@heroicons/vue/24/outline'
 import { formatCommunityId } from '@/utils/community'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 
@@ -62,6 +63,7 @@ const pagedCommunityItems = computed(() => {
   const start = (communityPage.value - 1) * communityPageSize
   return communityItems.value.slice(start, start + communityPageSize)
 })
+const { showId, componentId } = useComponentId('CM-001')
 
 watch(communitySearch, () => { communityPage.value = 1 })
 
@@ -80,6 +82,7 @@ function communityIdLabel(item: { communityId: string; level?: string }): string
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <section class="home-section">
     <div class="section-header">
       <svg

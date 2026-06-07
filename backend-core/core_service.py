@@ -2052,6 +2052,23 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
             return {"summary": "", "generated_at": None}
         return {"summary": row["summary"] or "", "generated_at": row["summary_generated_at"]}
 
+    @server.register("report.saveProjectSummary")
+    def save_project_summary(project_id=None, projectId=None, summary=None):
+        """手动保存项目概要（用户编辑或手动填写）"""
+        pid = project_id or projectId
+        if not pid:
+            raise ValueError("project_id is required")
+        if summary is None:
+            raise ValueError("summary is required")
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        main_db.execute(
+            "UPDATE projects SET summary = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?",
+            (summary, now, now, pid)
+        )
+        logger.info(f"[saveProjectSummary] DB write OK, pid={pid}, summary_len={len(summary)}")
+        return {"success": True, "summary": summary, "generated_at": now}
+
     @server.register("report.extractDependencyFiles")
     def extract_dependency_files(project_id=None, projectId=None):
         """扫描项目根目录，提取所有已知的依赖管理文件"""
@@ -2238,11 +2255,13 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         pid = project_id or projectId
         tid = task_id or taskId
         project_db = multi_db.get_project_db(pid)
-        import uuid
+        import hashlib
         now = datetime.now().isoformat()
         saved = 0
         for s in (summaries or []):
-            sid = f"fs-{uuid.uuid4().hex[:8]}"
+            fp = s.get('filePath', '')
+            raw = f'{pid}:{tid or ""}:{fp}'
+            sid = f"fs-{hashlib.md5(raw.encode()).hexdigest()[:12]}"
             summary_text = s.get('summary', '')[:100]
             try:
                 project_db.execute(

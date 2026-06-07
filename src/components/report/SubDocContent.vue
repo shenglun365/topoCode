@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useDiagramRenderer } from '@/composables/useDiagramRenderer'
 import ChildSection from './ChildSection.vue'
+import { useComponentId } from '@/composables/useComponentId'
 
 const props = defineProps<{
   content: string
@@ -10,7 +11,6 @@ const props = defineProps<{
   parentLevel?: string
   parentCommId?: string
   parentEdgeType?: string
-  children?: Array<{ taskId: string; level: string; communityId: string; edgeType: string; projectId?: string }>
 }>()
 
 const emit = defineEmits<{
@@ -90,6 +90,7 @@ const renderedContent = computed(() => {
 
   return html
 })
+const { showId, componentId } = useComponentId('SD-001')
 
 watch(() => props.content, (val) => {
   if (val) {
@@ -146,6 +147,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div
     v-if="loading"
     class="loading-state"
@@ -164,7 +166,7 @@ onUnmounted(() => {
     />
 
     <ChildSection
-      v-if="children && children.length > 0"
+      v-if="taskId && parentLevel && parentCommId && parentEdgeType"
       :task-id="taskId!"
       :parent-level="parentLevel!"
       :parent-comm-id="parentCommId!"

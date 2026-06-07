@@ -47,6 +47,9 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     """
     logger.info(f"[COMMUNITY] analyze_communities 入口: task_id={task_id}, edge_type={edge_type}, min_node_cnt={min_node_cnt}")
 
+    # 0. 清理旧数据，防止多次运行导致重复
+    analysis_store.clear_communities_for_task(task_id, edge_type)
+
     # 1. 从 SQLite 加载边数据
     if edge_type == "INCLUDE":
         edges = analysis_store.get_dep_edges(task_id)
@@ -182,6 +185,12 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         f"[COMMUNITY] {edge_type}{fallback_tag}: "
         f"共 {total_count} 个社区, 枢纽 {hub_saved} 个, 孤立 {orphan_saved} 个"
     )
+
+    # 7. 社区去重：父社区只有一个子社区时，对比节点相似度删除冗余子社区
+    deleted = _deduplicate_single_child_communities(task_id, edge_type, analysis_store)
+    if deleted:
+        total_count -= deleted
+        logger.info(f"[COMMUNITY] {edge_type}: 社区去重完成，已删除 {deleted} 个冗余子社区")
 
     return {
         "community_count": total_count,
@@ -482,7 +491,11 @@ def _save_communities(task_id: str, edge_type: str, level: str,
     hierarchies = []
 
     for i, comm_nodes in enumerate(communities):
-        comm_id = f"comm-{task_id[:8]}-{edge_type[:4].lower()}-{level}-{i:04d}"
+        if parent_comm_id:
+            parent_short = '-'.join(parent_comm_id.split('-')[-2:])
+            comm_id = f"comm-{task_id[:8]}-{edge_type[:4].lower()}-{level}-{parent_short}-{i:04d}"
+        else:
+            comm_id = f"comm-{task_id[:8]}-{edge_type[:4].lower()}-{level}-{i:04d}"
 
         # 计算社区内的边
         edge_list = []
@@ -643,3 +656,76 @@ def _get_sub_communities(task_id: str, edge_type: str, level: str,
             result[comm["comm_id"]] = set(node_list)
 
     return result
+
+
+# ==================== 社区去重：单子社区合并 ====================
+
+def _deduplicate_single_child_communities(task_id: str, edge_type: str,
+                                           analysis_store) -> int:
+    """
+    父社区只有一个子社区时，对比节点 Jaccard 相似度。
+    若相似度 > 90%，判定为冗余，删除子社区。
+    从最底层开始向上遍历，避免产生孤儿社区。
+    """
+    all_comms = analysis_store.get_communities(task_id, edge_type)
+    if not all_comms:
+        return 0
+
+    comm_map = {}
+    for c in all_comms:
+        comm_map[c["comm_id"]] = c
+
+    parent_children = defaultdict(list)
+    for c in all_comms:
+        parent_id = c.get("parent_comm_id")
+        lv = c.get("comm_lv", "")
+        if parent_id and lv not in ("HUB", "ORPHAN"):
+            parent_children[parent_id].append(c)
+
+    candidates = []
+    for parent_id, children in parent_children.items():
+        if len(children) != 1:
+            continue
+        parent = comm_map.get(parent_id)
+        if not parent or parent.get("comm_lv", "") in ("HUB", "ORPHAN"):
+            continue
+        candidates.append((parent, children[0]))
+
+    if not candidates:
+        return 0
+
+    candidates.sort(key=lambda x: x[1]["comm_lv"], reverse=True)
+
+    to_delete = []
+    for parent, child in candidates:
+        parent_nodes = parent.get("node_list", [])
+        child_nodes = child.get("node_list", [])
+        if isinstance(parent_nodes, str):
+            parent_nodes = json.loads(parent_nodes)
+        if isinstance(child_nodes, str):
+            child_nodes = json.loads(child_nodes)
+
+        parent_set = set(parent_nodes)
+        child_set = set(child_nodes)
+
+        if not parent_set or not child_set:
+            continue
+
+        intersection = parent_set & child_set
+        union = parent_set | child_set
+        similarity = len(intersection) / len(union)
+
+        logger.info(
+            f"[COMMUNITY] 社区去重: parent={parent['comm_id']}({parent['comm_lv']})"
+            f" child={child['comm_id']}({child['comm_lv']})"
+            f" similarity={similarity:.4f}"
+        )
+
+        if similarity > 0.9:
+            to_delete.append(child["comm_id"])
+
+    if to_delete:
+        analysis_store.delete_communities(task_id, edge_type, to_delete)
+        analysis_store.delete_community_llm_results(task_id, edge_type, to_delete)
+
+    return len(to_delete)

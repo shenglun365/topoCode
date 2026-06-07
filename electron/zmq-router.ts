@@ -142,6 +142,7 @@ export class ZMQRouter extends EventEmitter {
         'project.import': 300000,
         'analysis.runTask': 600000,
         'analysis.clearProjectCacheTable': 120000,
+        'report.generateProjectSummary': 120000,
       }
       const timeout = timeoutMap[method] || 30000
 

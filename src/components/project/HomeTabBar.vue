@@ -67,6 +67,20 @@ function onScroll() {
   updateScrollButtons()
 }
 
+function scrollActiveTabIntoView() {
+  const el = scrollRef.value
+  if (!el) return
+  const activeTab = el.querySelector<HTMLElement>('.home-tab.active')
+  if (!activeTab) return
+  const tabLeft = activeTab.offsetLeft
+  const tabRight = tabLeft + activeTab.offsetWidth
+  if (tabLeft < el.scrollLeft) {
+    el.scrollLeft = tabLeft
+  } else if (tabRight > el.scrollLeft + el.clientWidth) {
+    el.scrollLeft = tabRight - el.clientWidth
+  }
+}
+
 // ── 拖拽排序 ──
 const dragIdx = ref(-1)
 const dropTargetIdx = ref(-1)
@@ -104,9 +118,14 @@ function onDragEnd() {
   dropTargetIdx.value = -1
 }
 
+// ── 新 tab 或切换 tab 时，若不在可视区则自动滚入 ──
+watch(() => props.activeTabId, () => {
+  nextTick(() => scrollActiveTabIntoView())
+})
+
 // ── tab 增删时重新检测溢出 ──
 watch(() => props.tabs.length, () => {
-  nextTick(() => updateScrollButtons())
+  nextTick(() => { updateScrollButtons(); scrollActiveTabIntoView() })
 })
 
 onMounted(() => {

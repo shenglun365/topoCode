@@ -63,6 +63,10 @@ async function restartMCP() {
 </script>
 
 <template>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div
     :class="['setting-section', componentId]"
     :data-component-id="showId ? componentId : null"

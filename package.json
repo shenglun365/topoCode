@@ -12,6 +12,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:debug": "TOPCODE_UI_DEBUG=1 concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json && electron . --no-sandbox",
     "build": "npm run build:worker && npm run build:plugins && npm run build:module && npm run build:electron && npm run build:vite",

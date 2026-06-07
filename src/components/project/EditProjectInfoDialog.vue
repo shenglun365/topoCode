@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 
 const editNameInput = ref(props.projectName)
 const selectedGroupIds = ref<string[]>([])
+const { showId, componentId } = useComponentId('EP-001')
 
 watch(() => props.visible, (val) => {
   if (val) {
@@ -51,6 +53,7 @@ function handleConfirm() {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <Teleport to="body">
     <div
       v-if="visible"
@@ -126,6 +129,73 @@ function handleConfirm() {
 </template>
 
 <style scoped>
+.dialog {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 80vh;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dialog-body {
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.field-input {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.field-input:focus {
+  border-color: var(--accent);
+}
+
 .group-item {
   display: flex; align-items: center; gap: 6px; padding: 5px 8px;
   border-radius: 4px; cursor: pointer; font-size: 12px;

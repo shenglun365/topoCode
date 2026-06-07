@@ -209,7 +209,7 @@ export const useCommunityStore = defineStore('community', () => {
   async function analyzeSelected(taskId: string, modelId: string, batchSize: number, projectId: string) {
     const t = ensureTask(taskId)
     if (t.communityRunning || t.communityPaused) return []
-    const pending = t.communities.filter(c => c.selected && c.status !== 'completed')
+    const pending = t.communities.filter(c => c.selected)
     if (pending.length === 0) return []
 
     t.communityRunning = true
@@ -242,6 +242,12 @@ export const useCommunityStore = defineStore('community', () => {
     }
 
     t.communityRunning = false
+    // 已完成的组件取消选中，未完成的/失败的保持选中
+    for (const c of t.communities) {
+      if (c.selected && c.status === 'completed') {
+        c.selected = false
+      }
+    }
     syncSelections(taskId)
     return t.communities
       .filter(c => c.status === 'completed' && c.name)

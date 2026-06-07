@@ -731,6 +731,19 @@ function formatRunStatusColor(status: string): string {
   padding: 20px;
 }
 
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: task-detail-spin 0.6s linear infinite;
+}
+
+@keyframes task-detail-spin {
+  to { transform: rotate(360deg); }
+}
+
 .logs-empty {
   display: flex;
   align-items: center;

@@ -12,12 +12,15 @@ import { useI18n } from 'vue-i18n'
 import { DocumentArrowDownIcon } from '@heroicons/vue/24/outline'
 import { useComponentId } from '@/composables/useComponentId'
 import { useReportStore } from '@/stores/report-store'
+import { useCommunityStore } from '@/stores/community-store'
+import { ipc } from '@/services/ipc'
 import SubDocToolbar from './SubDocToolbar.vue'
 import SubDocRegenDialog from './SubDocRegenDialog.vue'
 import SubDocContent from './SubDocContent.vue'
 const { showId, componentId } = useComponentId('RP-010')
 
 const reportStore = useReportStore()
+const communityStore = useCommunityStore()
 
 
 const { t } = useI18n()
@@ -56,7 +59,7 @@ const httpPort = ref(3456)
 // 重新生成
 const showRegenDialog = ref(false)
 
-function handleRegenerated(payload: { content: string; mode: 'full' | 'mermaid' | 'plantuml' }) {
+async function handleRegenerated(payload: { content: string; mode: 'full' | 'mermaid' | 'plantuml' }) {
   if (!doc.value) return
   if (payload.mode === 'full') {
     doc.value.content = payload.content
@@ -70,6 +73,39 @@ function handleRegenerated(payload: { content: string; mode: 'full' | 'mermaid' 
     }
   }
   showRegenDialog.value = false
+  if (!props.taskId || !props.projectId) return
+  try {
+    if (props.regenerationType === 'overall') {
+      await ipc.report.saveOverallDoc({
+        taskId: props.taskId,
+        title: doc.value.title || t('report.pipeline.overallArchitecture'),
+        content: doc.value.content,
+      })
+    } else if (props.regenerationType === 'community') {
+      if (doc.value.id) {
+        await ipc.report.updateSubDoc({ subDocId: doc.value.id, content: doc.value.content })
+      }
+      if (props.parentCommId && props.parentLevel && props.parentEdgeType) {
+        const current =
+          await window.api?.analysis.getCommunityResult({
+            taskId: props.taskId, edgeType: props.parentEdgeType,
+            commLv: props.parentLevel, commId: props.parentCommId,
+          }).catch(() => null)
+        await communityStore.saveCommunityResult({
+          taskId: props.taskId, edgeType: props.parentEdgeType,
+          commLv: props.parentLevel, commId: props.parentCommId,
+          name: current?.name || props.parentCommId,
+          summary: payload.mode === 'full' ? doc.value.content : (current?.summary || ''),
+          mermaid: payload.mode === 'mermaid' ? payload.content : (current?.mermaid || ''),
+          plantuml: payload.mode === 'plantuml' ? payload.content : (current?.plantuml || ''),
+          modelId: current?.model_id,
+          templateId: current?.template_id || 'community_analyze',
+        })
+      }
+    }
+  } catch (e: any) {
+    console.warn('[SubDocViewer] saveAfterRegen failed:', e)
+  }
 }
 
 const canRegenerate = computed(() => !!props.regenerationType && !!props.taskId && !!props.projectId)

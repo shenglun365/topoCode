@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { CheckCircleIcon, XCircleIcon, ArrowPathIcon, InformationCircleIcon } from '@heroicons/vue/24/outline'
 import type { ModelConfigItem } from '@/types/ipc'
 import { PROVIDER_DEFAULT_URLS } from '@/constants/providers'
+import { useComponentId } from '@/composables/useComponentId'
 
 const props = withDefaults(defineProps<{
   show: boolean
@@ -75,6 +76,7 @@ const emptyModelCount = ref(0)
 const currentProviderMeta = computed(() =>
   providerOptions.find(p => p.value === form.value.provider)
 )
+const { showId, componentId } = useComponentId('MF-001')
 
 watch(() => props.show, (val) => {
   if (val) {
@@ -134,6 +136,7 @@ function close() {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div
     v-if="show"
     class="modal-overlay"

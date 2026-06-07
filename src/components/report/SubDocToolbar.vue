@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { ArrowLeftIcon, ArrowPathIcon, GlobeAltIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
 
 defineProps<{
   title: string
@@ -16,9 +17,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { showId, componentId } = useComponentId('ST-001')
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div class="subdoc-toolbar">
     <div class="toolbar-left">
       <button

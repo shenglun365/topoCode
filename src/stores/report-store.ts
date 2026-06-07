@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
+import { useModelConfigStore } from '@/stores/model-config-store'
 
 export const useReportStore = defineStore('report', () => {
   const generatedReports = ref<Record<string, string>>({})
@@ -35,6 +36,10 @@ export const useReportStore = defineStore('report', () => {
 
   async function getProjectSummary(projectId: string) {
     return await ipc.report.getProjectSummary({ projectId })
+  }
+
+  async function saveProjectSummary(projectId: string, summary: string) {
+    return await ipc.report.saveProjectSummary({ projectId, summary })
   }
 
   async function getLevelCommunityDetail(params: { projectId: string; taskId: string; level?: string; edgeType?: string }) {
@@ -74,10 +79,12 @@ export const useReportStore = defineStore('report', () => {
     try {
       if (!window.api) return { success: false, error: 'API not available' }
       const sessionId = `regen-diag-${taskId}-${parentCommId}-${Date.now()}`
+      const modelConfigStore = useModelConfigStore()
+      const modelId = modelConfigStore.models.find(m => m.isDefault)?.id || modelConfigStore.models[0]?.id || 'default'
       const chatResult = await window.api!.llm.chat({
         sessionId,
         templateId: 'regenerate_diagram',
-        modelId: 'default',
+        modelId,
         variables: {
           existing_diagram: _existing, user_prompt: prompt, diagram_type: mode,
           community_id: parentCommId, community_level: parentLevel, edge_type: parentEdgeType,
@@ -111,10 +118,12 @@ export const useReportStore = defineStore('report', () => {
     try {
       if (!window.api) return { success: false, error: 'API not available' }
       const sessionId = `regen-doc-${taskId}-${parentCommId}-${Date.now()}`
+      const modelConfigStore = useModelConfigStore()
+      const modelId = modelConfigStore.models.find(m => m.isDefault)?.id || modelConfigStore.models[0]?.id || 'default'
       const chatResult = await window.api!.llm.chat({
         sessionId,
         templateId: 'regenerate_community_doc',
-        modelId: 'default',
+        modelId,
         variables: {
           user_prompt: prompt,
           community_id: parentCommId, community_level: parentLevel, edge_type: parentEdgeType,
@@ -147,10 +156,12 @@ export const useReportStore = defineStore('report', () => {
     try {
       if (!window.api) return { success: false, error: 'API not available' }
       const sessionId = `regen-overall-${taskId}-${Date.now()}`
+      const modelConfigStore = useModelConfigStore()
+      const modelId = modelConfigStore.models.find(m => m.isDefault)?.id || modelConfigStore.models[0]?.id || 'default'
       const chatResult = await window.api!.llm.chat({
         sessionId,
         templateId: 'regenerate_overall_doc',
-        modelId: 'default',
+        modelId,
         variables: { user_prompt: prompt, task_id: taskId },
         mode: 'structured',
         outputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'] },
@@ -177,7 +188,7 @@ export const useReportStore = defineStore('report', () => {
   return {
     generatedReports, dbReportExists, loading,
     setGeneratedReport, checkReportExists,
-    getReadmeContent, extractDependencyFiles, generateProjectSummary, getProjectSummary,
+    getReadmeContent, extractDependencyFiles, generateProjectSummary, getProjectSummary, saveProjectSummary,
     getLevelCommunityDetail, updateCommunityName,
     getSubDoc, updateSubDoc, createSubDoc,
     getFileSummaries, saveFileSummaries,

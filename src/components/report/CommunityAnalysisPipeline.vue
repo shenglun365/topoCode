@@ -11,6 +11,7 @@ import {
   FunnelIcon,
 } from '@heroicons/vue/24/outline'
 import { useCommunityStore } from '@/stores/community-store'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
@@ -21,7 +22,7 @@ const communityStore = useCommunityStore()
 const props = defineProps<{ taskId: string; projectId?: string }>()
 const emit = defineEmits<{
   completed: [summaries: Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string; mermaid?: string; plantuml?: string }>]
-  viewCommunityMD: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
+  viewCommunityMd: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
 const modelId = computed(() => modelConfigStore.models.find(m => m.isDefault)?.id)
@@ -137,6 +138,7 @@ const displayCommunities = computed(() => {
   }
   return list
 })
+const { showId, componentId } = useComponentId('CP-001')
 
 function sortBy(field: string) {
   const idx = sortHistory.value.findIndex(s => s.field === field)
@@ -274,6 +276,7 @@ onMounted(async () => {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div class="community-analysis-pipeline">
     <div class="cap-header">
       <div class="cap-title-row">
@@ -380,7 +383,7 @@ onMounted(async () => {
                 <span
                   v-if="task.name && task.status === 'completed'"
                   class="id-name clickable"
-                  @click.stop="emit('viewCommunityMD', { communityId: task.communityId, name: task.name, summary: task.summary || '', mermaid: task.mermaid, plantuml: task.plantuml })"
+                  @click.stop="emit('viewCommunityMd', { communityId: task.communityId, name: task.name, summary: task.summary || '', mermaid: task.mermaid, plantuml: task.plantuml })"
                 >{{ task.name }}</span>
                 <span v-else-if="task.name" class="id-name">{{ task.name }}</span>
               </span>
@@ -528,7 +531,7 @@ onMounted(async () => {
 .id-name { color: var(--text-secondary); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .id-name.clickable { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
 .id-name.clickable:hover { color: var(--accent); }
-.clist-nodes, .clist-edges, .clist-score { text-align: right; font-family: var(--font-mono); color: var(--text-primary); }
+.clist-nodes, .clist-edges, .clist-score { text-align: right; justify-content: flex-end; font-family: var(--font-mono); color: var(--text-primary); }
 .score-val { color: var(--text-secondary); }
 .score-na { color: var(--text-muted); }
 .clist-parent { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }

@@ -11,7 +11,7 @@ import type { SupportedLocale } from '@/i18n'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('ST-004')
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 const settingsStore = useSettingsStore()
 const statusStore = useStatusStore()
 
@@ -47,6 +47,25 @@ const languages = [
 // HTTP 服务 IP 设置
 const localIps = ref<string[]>([])
 const showRestartHint = ref(false)
+
+const restartLabel = computed(() => {
+  if (settingsStore.restartState === 'restarting') return t('common.restarting')
+  if (settingsStore.restartState === 'success') return t('common.restartSuccess')
+  if (settingsStore.restartState === 'error') return t('common.restartFailed')
+  return t('common.restart')
+})
+
+const restartBtnClass = computed(() => {
+  if (settingsStore.restartState === 'restarting') return 'btn-ghost'
+  if (settingsStore.restartState === 'success') return 'btn-primary restart-ok'
+  if (settingsStore.restartState === 'error') return 'btn-primary restart-fail'
+  return 'btn-primary'
+})
+
+const restartBtnTitle = computed(() => {
+  if (settingsStore.restartState === 'error') return settingsStore.restartErrorMsg
+  return ''
+})
 
 async function detectLocalIps() {
   try {
@@ -180,14 +199,19 @@ function openHttpPage() {
             <span>{{ t('settings.openInBrowser') }}</span>
           </button>
           <div style="flex:1;" />
-          <button
-            v-if="showRestartHint"
-            class="btn btn-primary btn-sm"
-            @click="applyHttpConfigAndRestart"
-          >
-            <ArrowPathIcon class="w-3 h-3" />
-            <span>{{ t('common.restart') }}</span>
-          </button>
+          <template v-if="showRestartHint || settingsStore.restartState !== 'idle'">
+            <button
+              class="btn btn-sm"
+              :class="restartBtnClass"
+              :disabled="settingsStore.restartState === 'restarting'"
+              :title="restartBtnTitle"
+              @click="applyHttpConfigAndRestart"
+            >
+              <span v-if="settingsStore.restartState === 'restarting'" class="spinner" />
+              <ArrowPathIcon v-else class="w-3 h-3" />
+              <span>{{ restartLabel }}</span>
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -307,13 +331,19 @@ function openHttpPage() {
               {{ memoryLimitStatusText }}
             </span>
           </div>
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="settingsStore.restartBackend()"
-          >
-            <ArrowPathIcon class="w-3 h-3" />
-            <span>{{ t('common.restart') }}</span>
-          </button>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button
+              class="btn btn-sm"
+              :class="restartBtnClass"
+              :disabled="settingsStore.restartState === 'restarting'"
+              :title="restartBtnTitle"
+              @click="settingsStore.restartBackend()"
+            >
+              <span v-if="settingsStore.restartState === 'restarting'" class="spinner" />
+              <ArrowPathIcon v-else class="w-3 h-3" />
+              <span>{{ restartLabel }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -363,5 +393,24 @@ function openHttpPage() {
   border-radius: 50%;
   display: inline-block;
   background: var(--error);
+}
+
+.restart-ok { background: var(--success); color: #fff; }
+.restart-ok:hover { background: color-mix(in srgb, var(--success) 85%, #000); }
+.restart-fail { background: var(--error); color: #fff; }
+.restart-fail:hover { background: color-mix(in srgb, var(--error) 85%, #000); }
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

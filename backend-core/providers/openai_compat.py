@@ -43,8 +43,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         }
         if model_config.get('temperature') is not None:
             payload['temperature'] = model_config['temperature']
-        if model_config.get('max_tokens') is not None:
-            payload['max_tokens'] = model_config['max_tokens']
+        payload['max_tokens'] = model_config.get('max_tokens', 16384)
 
         if mode == 'tools' and tools:
             from tools_executor import get_tool_definitions
@@ -149,6 +148,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         }
         if model_config.get('temperature') is not None:
             payload['temperature'] = model_config['temperature']
+        payload['max_tokens'] = model_config.get('max_tokens', 16384)
         headers = {'Content-Type': 'application/json'}
         if model_config.get('api_key'):
             headers['Authorization'] = f"Bearer {model_config['api_key']}"

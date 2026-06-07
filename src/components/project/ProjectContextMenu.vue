@@ -2,8 +2,10 @@
 import { useI18n } from 'vue-i18n'
 import { PencilIcon, TrashIcon, MagnifyingGlassIcon, ArchiveBoxXMarkIcon } from '@heroicons/vue/24/outline'
 import { StarIcon } from '@heroicons/vue/24/solid'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
+const { showId, componentId } = useComponentId('PC-001')
 
 const props = defineProps<{
   visible: boolean
@@ -26,6 +28,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <Teleport to="body">
     <div
       v-if="visible"

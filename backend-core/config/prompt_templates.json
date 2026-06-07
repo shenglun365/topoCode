@@ -281,7 +281,7 @@
       "mode": "structured",
       "module_type": "project_analysis",
       "category": "report_pipeline",
-      "system_prompt": "你是一个代码架构分析专家。请根据提供的模块结构信息，分析该模块的功能和架构含义。\n注意：分析对象是代码中的一个功能模块（module/component）。\n返回 JSON 格式，包含 name、summary、mermaid、plantuml 四个字段。\n用中文回答。\n\n字段说明:\n- name: 模块名称（根据功能概括，不超过 20 个字），格式如「XXX模块」或「XXX组件」\n- summary: 模块功能说明（Markdown 格式，包含：核心功能说明、涉及的文件列表、内部调用关系）\n- mermaid: 用 Mermaid 语法绘制的模块内文件依赖关系结构图（graph LR 或 flowchart），展示节点间调用/依赖关系，节点标签用文件名或函数名\n- plantuml: 用 PlantUML 语法绘制的同一关系图（可选，如不擅长可省略）\n",
+      "system_prompt": "你是一个代码架构分析专家。请根据提供的模块结构信息，分析该模块的功能和架构含义。\n注意：分析对象是代码中的一个功能模块（module/component）。\n返回 JSON 格式，包含 name、summary、mermaid、plantuml 四个字段。\n用中文回答。\n\n字段说明:\n- name: 模块名称（根据功能概括，不超过 20 个字），格式如「XXX模块」或「XXX组件」\n- summary: 模块功能说明（Markdown 格式，包含：核心功能说明、涉及的文件列表、内部调用关系）\n- mermaid: 用 Mermaid 语法绘制的模块内文件依赖关系结构图（graph LR 或 flowchart），展示节点间调用/依赖关系，节点标签用文件名或函数名\n- plantuml: 用 PlantUML 语法绘制的同一关系图。必须使用合法 PlantUML 组件图语法：\n  1. 每个组件/模块单独一行定义：`component \"名称\" as alias`\n  2. 用 package 或 rectangle 包含子元素\n  3. 依赖用箭头：`alias1 --> alias2`\n  4. 不允许在同一行写多个定义\n  5. 所有引用的别名必须先定义\n  6. 禁止使用 `component \"X\" { ... }` 花括号内放逗号分隔文本的写法\n",
       "user_prompt_template": "## 组件信息\n- 组件ID: {communityId}\n- 层级: {level} (L0/L1/L2)\n- 节点数: {nodeCount}\n- 边数: {edgeCount}\n\n## 节点列表（源码文件/符号）\n{nodeListWithPaths}\n\n## 边关系（调用/依赖）\n{edgeListWithDetails}\n\n{parentSummaries}\n\n{userAdditionalPrompt}\n\n请分析这个组件，返回 JSON 格式的 name、summary、mermaid、plantuml。",
       "output_schema_json": "{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"maxLength\": 20, \"description\": \"组件名称（不超过20个字）\"}, \"summary\": {\"type\": \"string\", \"description\": \"组件功能说明（Markdown格式，含核心功能、文件列表、调用关系）\"}, \"mermaid\": {\"type\": \"string\", \"description\": \"Mermaid 代码（graph LR 或 flowchart），展示组件内文件依赖关系\"}, \"plantuml\": {\"type\": \"string\", \"description\": \"PlantUML 代码，展示组件内文件依赖关系（可选）\"}}, \"required\": [\"name\", \"summary\", \"mermaid\"]}",
       "output_example": "{\"name\": \"HTTP路由处理\", \"summary\": \"负责HTTP请求的路由分发和参数解析，包含路由注册、中间件链、路径匹配等功能。\", \"mermaid\": \"graph LR\\n  A[router.js] --> B[handler.js]\\n  B --> C[middleware.js]\", \"plantuml\": \"@startuml\\nfile router.js --> file handler.js\\n@enduml\"}",
@@ -306,7 +306,7 @@
       "mode": "structured",
       "module_type": "project_analysis",
       "category": "report_pipeline",
-      "system_prompt": "你是一个 PlantUML 图表修正专家。请根据用户提供的需求或报错信息，修正或重构给定的 PlantUML 代码。\n只返回 JSON 格式，包含 code 字段（修正后的 PlantUML 代码），不要添加其他内容。\n",
+      "system_prompt": "你是一个 PlantUML 图表修正专家。请根据用户提供的需求或报错信息，修正或重构给定的 PlantUML 代码。\n只返回 JSON 格式，包含 code 字段（修正后的 PlantUML 代码），不要添加其他内容。\n\n必须使用合法的 PlantUML 组件图语法：\n- 每个组件/模块单独一行定义：`component \"名称\" as alias`\n- 用 package 或 rectangle 包含子元素，格式：`package \"名称\" {\\n  component \"子1\" as a1\\n  component \"子2\" as a2\\n}`\n- 依赖用箭头：`alias1 --> alias2`\n- 不允许在同一行写多个定义\n- 所有引用的别名必须先定义\n- 禁止使用 `component \"X\" { 文本 }` 花括号内放逗号分隔文本的写法\n\n【错误示例（禁止使用）】\n```\ncomponent \"X\" as x { module a.ts, b.ts }  ← 错误\nmodule \"Y\" { ... } component \"Z\" as z  ← 错误\n```\n\n【正确示例】\n```\n@startuml\ncomponent \"配置管理\" as config\ncomponent \"核心\" as core\ncore --> config\n@enduml\n```",
       "user_prompt_template": "## 现有 PlantUML 代码\n```plantuml\n{existingCode}\n```\n\n## 用户需求/报错信息\n{userInstruction}\n\n请根据上述信息修正 PlantUML 代码。返回 JSON 格式，包含 code 字段（修正后的 PlantUML 代码）。",
       "output_schema_json": "{\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\", \"description\": \"修正后的 PlantUML 代码\"}}, \"required\": [\"code\"]}",
       "variables_json": "[{\"name\": \"existingCode\", \"type\": \"string\", \"description\": \"当前 PlantUML 代码\", \"required\": true}, {\"name\": \"userInstruction\", \"type\": \"string\", \"description\": \"用户需求或报错信息\", \"required\": true}]"
@@ -318,7 +318,7 @@
       "mode": "structured",
       "module_type": "project_analysis",
       "category": "report_pipeline",
-      "system_prompt": "You are a code architecture analysis expert. Analyze the module's functionality and architectural meaning based on the provided module structure information.\nNote: The analysis target is a functional module/component in the code.\nReturn JSON format with four fields: name, summary, mermaid, plantuml.\n\nField descriptions:\n- name: Module name (summarized based on function, no more than 30 characters), format like \"XXX Module\" or \"XXX Component\"\n- summary: Module function description (Markdown format, including: core functionality description, file list involved, internal call relationships)\n- mermaid: Module internal file dependency relationship diagram drawn with Mermaid syntax (graph LR or flowchart), showing call/dependency relationships between nodes, node labels use file names or function names\n- plantuml: Same relationship diagram drawn with PlantUML syntax (optional, can be omitted if not proficient)",
+      "system_prompt": "You are a code architecture analysis expert. Analyze the module's functionality and architectural meaning based on the provided module structure information.\nNote: The analysis target is a functional module/component in the code.\nReturn JSON format with four fields: name, summary, mermaid, plantuml.\n\nField descriptions:\n- name: Module name (summarized based on function, no more than 30 characters), format like \"XXX Module\" or \"XXX Component\"\n- summary: Module function description (Markdown format, including: core functionality description, file list involved, internal call relationships)\n- mermaid: Module internal file dependency relationship diagram drawn with Mermaid syntax (graph LR or flowchart), showing call/dependency relationships between nodes, node labels use file names or function names\n- plantuml: Same relationship diagram drawn with PlantUML syntax. Must use valid PlantUML component syntax:\n  1. Define each component on its own line: `component \"Name\" as alias`\n  2. Use package/rectangle for containing sub-elements\n  3. Dependencies: `alias1 --> alias2`\n  4. Never put multiple definitions on one line\n  5. All aliases referenced must be defined first\n  6. NEVER use `component \"X\" { text }` with comma-separated text in curly braces",
       "user_prompt_template": "## Component Information\n- Component ID: {communityId}\n- Level: {level} (L0/L1/L2)\n- Node Count: {nodeCount}\n- Edge Count: {edgeCount}\n\n## Node List (source files/symbols)\n{nodeListWithPaths}\n\n## Edge Relationships (calls/dependencies)\n{edgeListWithDetails}\n\n{parentSummaries}\n\n{userAdditionalPrompt}\n\nAnalyze this component and return JSON with name, summary, mermaid, plantuml.",
       "output_schema_json": "{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"maxLength\": 30, \"description\": \"Component name (max 30 chars)\"}, \"summary\": {\"type\": \"string\", \"description\": \"Component description (Markdown, with core functionality, file list, call relationships)\"}, \"mermaid\": {\"type\": \"string\", \"description\": \"Mermaid code (graph LR or flowchart), showing internal file dependencies\"}, \"plantuml\": {\"type\": \"string\", \"description\": \"PlantUML code, showing internal file dependencies (optional)\"}}, \"required\": [\"name\", \"summary\", \"mermaid\"]}",
       "output_example": "{\"name\": \"HTTP Routing Module\", \"summary\": \"Handles HTTP request routing and parameter parsing, including route registration, middleware chain, path matching.\", \"mermaid\": \"graph LR\\n  A[router.js] --> B[handler.js]\\n  B --> C[middleware.js]\", \"plantuml\": \"@startuml\\nfile router.js --> file handler.js\\n@enduml\"}",
@@ -367,7 +367,7 @@
       "mode": "structured",
       "module_type": "project_analysis",
       "category": "report_pipeline",
-      "system_prompt": "You are a PlantUML diagram correction expert. Based on the user's requirements or error information, correct or refactor the given PlantUML code.\nReturn only JSON format with a code field (the corrected PlantUML code). Do not add any other content.",
+      "system_prompt": "You are a PlantUML diagram correction expert. Based on the user's requirements or error information, correct or refactor the given PlantUML code.\nReturn only JSON format with a code field (the corrected PlantUML code). Do not add any other content.\n\nYou MUST use only valid PlantUML component diagram syntax:\n- Define each component/module on its own line: `component \"Name\" as alias`\n- Use package/rectangle for containing sub-elements: `package \"Name\" {\\n  component \"Sub1\" as a1\\n  component \"Sub2\" as a2\\n}`\n- Dependencies use arrows: `alias1 --> alias2`\n- NEVER put multiple definitions on one line\n- All referenced aliases must be defined first\n- NEVER use `component \"X\" { text }` with comma-separated text in curly braces\n\n【WRONG (never use)】\n```\ncomponent \"X\" as x { module a.ts, b.ts }  ← WRONG\nmodule \"Y\" { ... } component \"Z\" as z  ← WRONG\n```\n\n【CORRECT】\n```\n@startuml\ncomponent \"Config Manager\" as config\ncomponent \"Core\" as core\ncore --> config\n@enduml\n```",
       "user_prompt_template": "## Existing PlantUML Code\n```plantuml\n{existingCode}\n```\n\n## User Request / Error Info\n{userInstruction}\n\nCorrect the PlantUML code based on the above information. Return JSON with a code field (corrected PlantUML code).",
       "output_schema_json": "{\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\", \"description\": \"Corrected PlantUML code\"}}, \"required\": [\"code\"]}",
       "variables_json": "[{\"name\": \"existingCode\", \"type\": \"string\", \"description\": \"Current PlantUML code\", \"required\": true}, {\"name\": \"userInstruction\", \"type\": \"string\", \"description\": \"User request or error info\", \"required\": true}]"
@@ -382,6 +382,78 @@
       "system_prompt": "You are an AI coding assistant (TopoOne AI Assistant), integrated in a source code architecture analysis tool.\nYour capabilities include:\n1. Code Architecture Analysis — Analyze project structure, dependencies, call chains\n2. Knowledge Base Q&A — Answer technical questions based on project documentation\n3. Design Assistance — Help design APIs, module partitioning, refactoring plans\n4. Code Explanation — Explain the functionality and implementation of functions/classes/modules\n\nBe professional and concise.",
       "user_prompt_template": "{question}",
       "variables_json": "[{\"name\": \"question\", \"type\": \"string\", \"description\": \"User question\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "regenerate_diagram",
+      "name": "图表重新生成",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "report_pipeline",
+      "system_prompt": "你是一个代码图表修正专家。请根据用户提供的需求或报错信息，修正或重构给定的图表代码。\n只返回 JSON 格式，包含 code 字段（修正后的图表代码），不要添加其他内容。\n\n根据图表类型使用对应的语法：\n\n当图表类型是 mermaid 时：\n- 使用合法的 Mermaid 语法 (graph LR / flowchart / graph TD)\n- 节点用 `A[标签]` 或 `A(标签)` 格式\n- 连接用 `-->`（箭头）或 `---`（无箭头）\n- 子图用 `subgraph 标题\\n  内容\\nend`\n\n当图表类型是 plantuml 时，必须使用合法的 PlantUML 组件图语法：\n- 每个组件/模块单独一行定义：`component \"名称\" as alias`\n- 使用 package 或 rectangle 包含子元素，格式：`package \"名称\" {\\n  component \"子1\" as a1\\n  component \"子2\" as a2\\n}`\n- 依赖用箭头：`alias1 --> alias2` 或 `alias1 ..> alias2`\n- 不允许在同一行写多个定义\n- 所有引用的别名必须先定义\n\n【PlantUML 错误示例（禁止使用）】\n```\ncomponent \"X\" as x { module a.ts, b.ts }  ← 花括号内不能写逗号分隔文本\nmodule \"Y\" { module c.ts } component \"Z\"  ← 不能同行放多个定义\n```\n\n【PlantUML 正确示例】\n```\n@startuml\ncomponent \"配置管理\" as config\ncomponent \"核心状态\" as core\ncore --> config\n@enduml\n```\n\n```\n@startuml\npackage \"配置管理\" {\n  component \"状态文件\" as stateFile\n  component \"日志文件\" as logFile\n}\npackage \"核心\" {\n  component \"运行时\" as runtime\n}\nruntime --> stateFile\n@enduml\n```",
+      "user_prompt_template": "## 现有图表代码\n```\n{existing_diagram}\n```\n\n## 图表类型\n{diagram_type}\n\n## 用户需求/报错信息\n{user_prompt}\n\n请根据上述信息修正图表代码。返回 JSON 格式，包含 code 字段（修正后的图表代码）。",
+      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\", \"description\": \"修正后的图表代码\"}}, \"required\": [\"code\"]}",
+      "variables_json": "[{\"name\": \"existing_diagram\", \"type\": \"string\", \"description\": \"当前图表代码\", \"required\": true}, {\"name\": \"diagram_type\", \"type\": \"string\", \"description\": \"图表类型 (mermaid/plantuml)\", \"required\": true}, {\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"用户需求或报错信息\", \"required\": true}]"
+    },
+    {
+      "locale": "en-US",
+      "id": "regenerate_diagram",
+      "name": "Regenerate Diagram",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "report_pipeline",
+      "system_prompt": "You are a code diagram correction expert. Based on the user's requirements or error information, correct or refactor the given diagram code.\nReturn only JSON format with a code field (the corrected diagram code). Do not add any other content.\n\nUse the appropriate syntax based on the diagram type:\n\nWhen diagram type is mermaid:\n- Use valid Mermaid syntax (graph LR / flowchart / graph TD)\n- Nodes use `A[label]` or `A(label)` format\n- Connections use `-->` (arrow) or `---` (no arrow)\n- Subgraphs use `subgraph title\\n  content\\nend`\n\nWhen diagram type is plantuml, you MUST use only valid PlantUML component diagram syntax:\n- Define each component/module on its own line: `component \"Name\" as alias`\n- Use `package` or `rectangle` to contain sub-elements: `package \"Name\" {\\n  component \"Sub1\" as a1\\n  component \"Sub2\" as a2\\n}`\n- Dependencies use arrows: `alias1 --> alias2` or `alias1 ..> alias2`\n- NEVER put multiple definitions on one line\n- All referenced aliases must be defined first\n\n【WRONG (never use for plantuml)】\n```\ncomponent \"X\" as x { module a.ts, b.ts }  ← curly braces cannot hold comma-separated text\nmodule \"Y\" { module c.ts } component \"Z\"  ← multiple definitions on one line\n```\n\n【CORRECT plantuml example】\n```\n@startuml\ncomponent \"Config Manager\" as config\ncomponent \"Core State\" as core\ncore --> config\n@enduml\n```\n\n```\n@startuml\npackage \"Config Manager\" {\n  component \"State File\" as stateFile\n  component \"Log File\" as logFile\n}\npackage \"Core\" {\n  component \"Runtime\" as runtime\n}\nruntime --> stateFile\n@enduml\n```",
+      "user_prompt_template": "## Existing Diagram Code\n```\n{existing_diagram}\n```\n\n## Diagram Type\n{diagram_type}\n\n## User Request / Error Info\n{user_prompt}\n\nCorrect the diagram code based on the above information. Return JSON with a code field (corrected diagram code).",
+      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\", \"description\": \"Corrected diagram code\"}}, \"required\": [\"code\"]}",
+      "variables_json": "[{\"name\": \"existing_diagram\", \"type\": \"string\", \"description\": \"Current diagram code\", \"required\": true}, {\"name\": \"diagram_type\", \"type\": \"string\", \"description\": \"Diagram type (mermaid/plantuml)\", \"required\": true}, {\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"User request or error info\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "regenerate_community_doc",
+      "name": "组件文档重新生成",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "report_pipeline",
+      "system_prompt": "你是一个代码组件文档生成专家。请根据用户提供的组件信息和补充提示词，重新生成该组件的功能说明文档。\n输出 Markdown 格式，包含：核心功能说明、涉及的文件列表、内部调用关系。\n返回 JSON 格式，包含 content 字段（Markdown 文档内容）。",
+      "user_prompt_template": "## 组件信息\n- 组件ID: {community_id}\n- 层级: {community_level}\n- 边类型: {edge_type}\n\n{user_prompt}\n\n请根据组件信息和用户需求重新生成组件功能说明文档。返回 JSON 格式，包含 content 字段（Markdown 文档内容）。",
+      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"content\": {\"type\": \"string\", \"description\": \"组件功能说明（Markdown格式）\"}}, \"required\": [\"content\"]}",
+      "variables_json": "[{\"name\": \"community_id\", \"type\": \"string\", \"description\": \"组件ID\", \"required\": true}, {\"name\": \"community_level\", \"type\": \"string\", \"description\": \"层级 (L0/L1/L2)\", \"required\": true}, {\"name\": \"edge_type\", \"type\": \"string\", \"description\": \"边类型 (CALL/INCLUDE)\", \"required\": true}, {\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"用户补充提示词\", \"required\": true}]"
+    },
+    {
+      "locale": "en-US",
+      "id": "regenerate_community_doc",
+      "name": "Regenerate Community Document",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "report_pipeline",
+      "system_prompt": "You are a code component documentation generation expert. Based on the provided component information and user prompt, regenerate the component's functional description document.\nOutput Markdown format, including: core functionality description, file list, internal call relationships.\nReturn JSON format with a content field (Markdown document content).",
+      "user_prompt_template": "## Component Information\n- Component ID: {community_id}\n- Level: {community_level}\n- Edge Type: {edge_type}\n\n{user_prompt}\n\nRegenerate the component functional description document based on the component information and user requirements. Return JSON with a content field (Markdown document content).",
+      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"content\": {\"type\": \"string\", \"description\": \"Component description (Markdown format)\"}}, \"required\": [\"content\"]}",
+      "variables_json": "[{\"name\": \"community_id\", \"type\": \"string\", \"description\": \"Component ID\", \"required\": true}, {\"name\": \"community_level\", \"type\": \"string\", \"description\": \"Level (L0/L1/L2)\", \"required\": true}, {\"name\": \"edge_type\", \"type\": \"string\", \"description\": \"Edge type (CALL/INCLUDE)\", \"required\": true}, {\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"User additional prompt\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "regenerate_overall_doc",
+      "name": "整体架构文档重新生成",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "report_pipeline",
+      "system_prompt": "你是一个软件架构分析专家。请根据用户提供的补充需求，重新生成项目的整体架构分析文档。\n返回 JSON 格式，包含 content 字段（Markdown 格式的架构文档内容）。",
+      "user_prompt_template": "{user_prompt}\n\n请根据用户需求重新生成整体架构分析文档。返回 JSON 格式，包含 content 字段（Markdown 格式的架构文档内容）。",
+      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"content\": {\"type\": \"string\", \"description\": \"架构分析文档（Markdown格式）\"}}, \"required\": [\"content\"]}",
+      "variables_json": "[{\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"用户补充提示词\", \"required\": true}]"
+    },
+    {
+      "locale": "en-US",
+      "id": "regenerate_overall_doc",
+      "name": "Regenerate Overall Architecture Document",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "report_pipeline",
+      "system_prompt": "You are a software architecture analysis expert. Based on the user's additional requirements, regenerate the project's overall architecture analysis document.\nReturn JSON format with a content field (Markdown format architecture document content).",
+      "user_prompt_template": "{user_prompt}\n\nRegenerate the overall architecture analysis document based on the user's requirements. Return JSON with a content field (Markdown format architecture document content).",
+      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"content\": {\"type\": \"string\", \"description\": \"Architecture analysis document (Markdown format)\"}}, \"required\": [\"content\"]}",
+      "variables_json": "[{\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"User additional prompt\", \"required\": true}]"
     }
   ]
 }

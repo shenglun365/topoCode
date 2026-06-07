@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, onMounted } from 'vue'
+import { computed, watch, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   CheckCircleIcon,
@@ -35,7 +35,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   generated: [content: string]
   communityResults: [summaries: Array<{ communityId: string; level: string; edgeType: string; name: string; summary: string }>]
-  viewCommunityMD: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
+  viewCommunityMd: [params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
 function createInitialTree(): PipelineTaskNode {
@@ -91,6 +91,41 @@ const allCompleted = computed(() => pipelineStore.allPipelineStepsCompleted(prop
 const hasError = computed(() => pipelineStore.hasPipelineError(props.taskId))
 
 const { showId, componentId } = useComponentId('RP-002')
+
+const warnMap = reactive<Record<string, string>>({})
+
+function dependenciesMet(node: PipelineTaskNode): boolean {
+  if (!node.dependsOn || node.dependsOn.length === 0) return true
+  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
+  if (!root?.children) return false
+  return node.dependsOn.every(depId => {
+    const dep = root.children!.find(c => c.id === depId)
+    if (!dep) return false
+    if (dep.status === 'completed' || dep.status === 'skipped') {
+      // For community_analysis, also verify no pending communities in the actual store
+        if (dep.id === 'community_analysis') {
+        const communities = communityStore.tasks[props.taskId]?.communities?.filter(c => c.level === 'L0')
+        if (communities?.some(c => c.status === 'pending' || c.status === 'running' || c.status === 'queued')) return false
+      }
+      return true
+    }
+    return false
+  })
+}
+
+function handleStepClick(node: PipelineTaskNode) {
+  console.log('[RP-002] handleStepClick', node.id, 'depsMet=', dependenciesMet(node))
+  if (!dependenciesMet(node)) {
+    warnMap[node.id] = t('report.pipeline.prerequisitesNotMet')
+    console.log('[RP-002] warnMap set', node.id, '=', warnMap[node.id], 'keys=', Object.keys(warnMap))
+    setTimeout(() => {
+      console.log('[RP-002] warnMap delete', node.id)
+      delete warnMap[node.id]
+    }, 5000)
+    return
+  }
+  runNode(node.id)
+}
 
 // ===== Step execution =====
 async function prepareStepVariables(stepId: string): Promise<Record<string, string>> {
@@ -362,6 +397,9 @@ async function checkInitialState() {
     if (node && node.status === 'pending') pipelineStore.updateNodeStatus(props.taskId, id, status as any, error)
   }
 
+  // 从 DB 恢复已持久化的 pipeline 状态
+  await pipelineStore.loadState(props.taskId)
+
   // 模型验证：检查是否有已连接的默认模型
   const defaultModel = modelConfigStore.models.find(m => m.isDefault)
   if (defaultModel?.status === 'connected') setNodeStatus('validation', 'completed')
@@ -441,9 +479,18 @@ async function runNode(nodeId: string) {
     } catch { node.status = 'skipped' }
     pipelineStore.recalcProgress(props.taskId)
   } else if (nodeId === 'overall_architecture') {
-    node.status = 'pending'
-    node.error = undefined
-    await runStep(node)
+    if (!dependenciesMet(node)) {
+      node.status = 'error'
+      node.error = t('report.pipeline.prerequisitesNotMet')
+      pipelineStore.pushError(props.taskId, `${node.label || node.id}: ${node.error}`)
+    } else {
+      node.status = 'pending'
+      node.error = undefined
+      await runStep(node)
+      if ((node.status as string) === 'completed' && reportStore.generatedReports[props.taskId]) {
+        emit('generated', reportStore.generatedReports[props.taskId])
+      }
+    }
   }
 
   pipelineStore.setPipelineRunning(props.taskId, false)
@@ -500,10 +547,18 @@ onMounted(() => {
           <button
             v-if="node.type === 'step' && !running && (node.status === 'pending' || node.status === 'error' || node.status === 'completed')"
             class="btn btn-ghost btn-xs"
-            @click.stop="runNode(node.id)"
+            :class="{ 'opacity-40': !dependenciesMet(node) }"
+            :title="dependenciesMet(node) ? '' : t('report.pipeline.prerequisitesNotMet')"
+            @click.stop="handleStepClick(node)"
           >
             {{ node.status === 'completed' ? t('report.pipeline.reRun') : t('report.pipeline.run') }}
           </button>
+        </template>
+          <template #content="{ node }">
+          <div
+            v-if="node.id === 'overall_architecture' && warnMap[node.id]"
+            class="node-warning"
+          >{{ warnMap[node.id] }}</div>
         </template>
       </PipelineTaskTree>
     </div>
@@ -514,7 +569,7 @@ onMounted(() => {
         :task-id="taskId"
         :project-id="projectId"
         @completed="(s: any) => emit('communityResults', s)"
-        @view-community-md="(p: any) => emit('viewCommunityMD', p)"
+        @view-community-md="(p: any) => emit('viewCommunityMd', p)"
       />
     </div>
 
@@ -633,4 +688,13 @@ onMounted(() => {
   border-bottom: 1px solid var(--border);
 }
 .error-log-item:last-child { border-bottom: none; }
+
+.opacity-40 { opacity: 0.4; }
+
+.node-warning {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--warning);
+  line-height: 1.4;
+}
 </style>

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { TrashIcon, ArrowPathIcon } from '@heroicons/vue/24/outline'
 import { useModelConfigStore } from '@/stores/model-config-store'
 import { useAgentUsageStore } from '@/stores/agent-usage-store'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const modelConfigStore = useModelConfigStore()
@@ -54,6 +55,7 @@ const showClearDialog = ref(false)
 const clearModelId = ref('')
 const clearStartDate = ref('')
 const clearEndDate = ref('')
+const { showId, componentId } = useComponentId('US-001')
 
 function openClearDialog() {
   clearModelId.value = ''
@@ -96,6 +98,7 @@ onMounted(initUsageStats)
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <div class="card" style="display:flex; flex-direction:column; overflow:hidden;">
     <div style="padding:12px; display:flex; flex-direction:column; overflow:hidden;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">

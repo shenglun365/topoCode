@@ -654,7 +654,10 @@ class LLMService:
         provider_impl = get_provider(provider)
         if provider_impl is None:
             raise ValueError(f"Unknown LLM provider '{provider}'. Available: {list_providers()}")
-        return provider_impl.chat_sync(model, messages, mode, tools, output_schema)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, provider_impl.chat_sync, model, messages, mode, tools, output_schema
+        )
 
     # 分析报告重跑/重新生成等操作不写入会话记录
     _ANALYSIS_SESSION_PREFIXES = ('comm-', 'regen-', 'pipeline-', 'ai-')

@@ -105,6 +105,9 @@ function handleClearCache() {
 function onClearCacheDone() {
   showClearCacheDialog.value = false
   projectStore.loadProjects()
+  if (projectStore.selectedProjectId) {
+    analysisStore.loadTasks(projectStore.selectedProjectId)
+  }
 }
 </script>
 
@@ -180,7 +183,7 @@ function onClearCacheDone() {
           @click="showMenu"
         >
           <Cog6ToothIcon class="w-4 h-4" />
-          <span>{{ t('common.settings') }}</span>
+          <span>{{ t('project.projectSettings') }}</span>
         </button>
         <button
           class="btn btn-ghost btn-sm"

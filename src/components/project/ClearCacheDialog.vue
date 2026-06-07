@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ipc } from '@/services/ipc'
+import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 
@@ -44,6 +45,7 @@ const allChecked = computed({
 const totalCount = computed(() => items.value.reduce((s, i) => s + i.count, 0))
 const selectedCount = computed(() => items.value.filter(i => i.checked).length)
 const displayedItems = computed(() => items.value.filter(i => i.checked))
+const { showId, componentId } = useComponentId('CC-001')
 
 onMounted(async () => {
   try {
@@ -89,6 +91,7 @@ function cancel() {
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <Teleport to="body">
     <div class="ccd-overlay" @click.self="cancel">
       <div class="ccd-card">

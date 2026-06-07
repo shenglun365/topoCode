@@ -176,9 +176,17 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   const pid = projectStore.selectedProjectId
   if (!pid) return
   try {
-    const llmResult = await window.api!.analysis.getCommunityResult({
-      taskId, edgeType, commLv: 'L0', commId: communityId,
+    const allResp = await window.api!.analysis.listCommunityResults(taskId, edgeType)
+      .catch(() => ({ results: [] }))
+    const found: any = Array.isArray(allResp?.results)
+      ? allResp.results.find((r: any) => (r.commId || r.comm_id) === communityId)
+      : null
+    const communityLevel = found?.commLv || found?.comm_lv || 'L0'
+
+    const llmResult = found || await window.api!.analysis.getCommunityResult({
+      taskId, edgeType, commLv: communityLevel, commId: communityId,
     }).catch(() => null)
+
     const parts: string[] = []
     if (llmResult?.name || llmResult?.summary) {
       parts.push(`# 社区: ${llmResult.name || communityId}`)
@@ -195,7 +203,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
     } else {
       const detail = await window.api!.report.getLevelCommunityDetail({
         projectId: pid, taskId,
-        level: 'L0', edgeType,
+        level: communityLevel, edgeType,
       })
       const community = detail.communities.find((c: any) => c.communityId === communityId)
       if (!community) return
@@ -204,7 +212,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       parts.push(
         `# 社区: ${communityId}`,
         '',
-        `**层级**: L0 | **边缘类型**: ${edgeType}`,
+        `**层级**: ${communityLevel} | **边缘类型**: ${edgeType}`,
         `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
         '',
         '## 节点列表',
@@ -218,6 +226,10 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       taskId,
       content: parts.join('\n'),
       title: communityId,
+      parentLevel: communityLevel,
+      parentCommId: communityId,
+      parentEdgeType: edgeType,
+      regenerationType: 'community',
     })
   } catch (e: any) {
     console.error('[AnalysisPage] openCommunityDetail error:', e)

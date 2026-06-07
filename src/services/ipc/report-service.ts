@@ -22,6 +22,7 @@ export interface ReportService {
   extractDependencyFiles(params: { projectId: string }): Promise<DependencyFilesResult>
   generateProjectSummary(params: { projectId: string }): Promise<ProjectSummaryResponse>
   getProjectSummary(params: { projectId: string }): Promise<ProjectSummaryData>
+  saveProjectSummary(params: { projectId: string; summary: string }): Promise<ProjectSummaryResponse>
   getLevelCommunityDetail(params: {
     projectId: string; taskId: string; level?: string; edgeType?: string
   }): Promise<LevelCommunityDetailResult>
@@ -66,6 +67,9 @@ export function createReportService(api: any): ReportService {
     },
     getProjectSummary: async (params) => {
       return await api.report.getProjectSummary(params) as ProjectSummaryData
+    },
+    saveProjectSummary: async (params) => {
+      return await api.report.saveProjectSummary(params) as ProjectSummaryResponse
     },
     getLevelCommunityDetail: async (params) => {
       return await api.report.getLevelCommunityDetail(params) as LevelCommunityDetailResult

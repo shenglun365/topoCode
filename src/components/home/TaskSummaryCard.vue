@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { ChartBarIcon } from '@heroicons/vue/24/outline'
+import { useComponentId } from '@/composables/useComponentId'
 
 defineProps<{
   taskName: string
@@ -12,9 +13,11 @@ defineProps<{
 }>()
 
 const { t } = useI18n()
+const { showId, componentId } = useComponentId('TS-001')
 </script>
 
 <template>
+  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
   <section class="home-section">
     <div class="section-header">
       <ChartBarIcon class="w-4 h-4" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PlayIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -90,6 +90,32 @@ const callProgress = computed<CommProgress | null>(() => {
   console.log(`[SH-004] callProgress total=${total} completed=${completed} running=${running}`)
   return { total, completed, running }
 })
+
+const warnMap = reactive<Record<string, string>>({})
+
+function isStepEnabled(nodeId: string): boolean {
+  if (nodeId !== 'overall_architecture') return true
+  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
+  const caNode = root?.children?.find(c => c.id === 'community_analysis')
+  if (!caNode || (caNode.status !== 'completed' && caNode.status !== 'skipped')) return false
+  const communities = communityStore.tasks[props.taskId]?.communities?.filter(c => c.level === 'L0')
+  if (communities?.some(c => c.status === 'pending' || c.status === 'running' || c.status === 'queued')) return false
+  return true
+}
+
+function handleStepClick(nodeId: string) {
+  console.log('[SH-004] handleStepClick', nodeId, 'enabled=', isStepEnabled(nodeId))
+  if (nodeId === 'overall_architecture' && !isStepEnabled(nodeId)) {
+    warnMap[nodeId] = t('report.pipeline.prerequisitesNotMet')
+    console.log('[SH-004] warnMap set', nodeId, '=', warnMap[nodeId], 'keys=', Object.keys(warnMap))
+    setTimeout(() => {
+      console.log('[SH-004] warnMap delete', nodeId)
+      delete warnMap[nodeId]
+    }, 5000)
+    return
+  }
+  handleRunNode(nodeId)
+}
 
 function handleRunNode(nodeId: string) {
   console.log(`[SH-004] handleRunNode ENTER nodeId=${nodeId}`)
@@ -213,8 +239,9 @@ const { showId, componentId } = useComponentId('RP-005')
             <button
               v-if="(!node.children || node.children.length === 0) && !['community_analysis', 'validation'].includes(node.id)"
               class="btn btn-xs btn-ghost task-step-btn"
-              :title="node.status === 'completed' ? t('common.retry') : t('common.start')"
-              @click.stop="handleRunNode(node.id)"
+              :class="{ 'step-disabled': !isStepEnabled(node.id) }"
+              :title="isStepEnabled(node.id) ? (node.status === 'completed' ? t('common.retry') : t('common.start')) : t('report.pipeline.prerequisitesNotMet')"
+              @click.stop="handleStepClick(node.id)"
             >
               <PlayIcon
                 v-if="node.status !== 'completed' && node.status !== 'error'"
@@ -243,9 +270,21 @@ const { showId, componentId } = useComponentId('RP-005')
           </template>
           <template #content="{ node }">
             <div
+              v-if="node.id === 'overall_architecture' && warnMap[node.id]"
+              class="node-warning"
+            >{{ warnMap[node.id] }}</div>
+            <div
               v-if="node.id === 'community_analysis'"
               class="ca-monitor"
             >
+              <div
+                v-if="node.id === 'overall_architecture' && warnMap[node.id]"
+                class="node-warning"
+              >{{ warnMap[node.id] }}</div>
+              <div
+                v-if="node.id === 'overall_architecture'"
+                class="node-warning-debug"
+              >warnMap has key: {{ node.id in warnMap }}, value: {{ warnMap[node.id] || '(empty)' }}</div>
               <div
                 v-if="includeProgress"
                 class="ca-row"
@@ -405,5 +444,14 @@ const { showId, componentId } = useComponentId('RP-005')
 }
 .ca-running {
   color: var(--accent);
+}
+
+.step-disabled { opacity: 0.4; }
+
+.node-warning {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--warning);
+  line-height: 1.4;
 }
 </style>

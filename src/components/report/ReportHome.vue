@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon,
+  DocumentMagnifyingGlassIcon,
   ChartBarIcon,
   FolderIcon,
   RectangleGroupIcon,
@@ -10,6 +11,7 @@ import {
   ExclamationTriangleIcon,
   HashtagIcon,
   ListBulletIcon,
+  XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useProjectStore } from '@/stores/project'
@@ -52,6 +54,11 @@ const showNoReportDialog = ref(false)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
+const projectSummaryText = ref('')
+const projectSummaryDate = ref('')
+const showSummaryModal = ref(false)
+const editingSummary = ref(false)
+const editSummaryText = ref('')
 
 const hasModel = computed(() => modelConfigStore.models.some(m => m.isDefault))
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
@@ -188,6 +195,11 @@ async function loadData() {
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
     if (pid) {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
+      const ps = await reportStore.getProjectSummary(pid).catch(() => null)
+      if (ps?.summary) {
+        projectSummaryText.value = ps.summary
+        projectSummaryDate.value = ps.generated_at || ''
+      }
     }
     await communityStore.loadCommunities(props.taskId, pid || '')
     await reportStore.checkReportExists(props.taskId)
@@ -197,6 +209,36 @@ async function loadData() {
     loadError.value = e?.message || 'Failed to load data'
   } finally {
     loading.value = false
+  }
+}
+
+function openSummaryModal() {
+  editSummaryText.value = projectSummaryText.value
+  editingSummary.value = false
+  showSummaryModal.value = true
+}
+
+async function saveSummary() {
+  const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
+  if (!pid) return
+  try {
+    const result = await reportStore.saveProjectSummary(pid, editSummaryText.value)
+    if (result?.success) {
+      projectSummaryText.value = result.summary
+      projectSummaryDate.value = result.generated_at
+      showSummaryModal.value = false
+      editingSummary.value = false
+    }
+  } catch (e: any) {
+    console.error('[ReportHome] saveSummary error:', e)
+  }
+}
+
+function closeAllSubDocTabs() {
+  const ctx = funcGroup.context.analysis
+  const toClose = ctx.tabs.filter(t => t.kind === 'subdoc' && (t as any).taskId === props.taskId)
+  for (const tab of toClose) {
+    funcGroup.closeTab('analysis', tab.id)
   }
 }
 
@@ -226,7 +268,7 @@ function openCommunityAnalysis() {
 async function handleReportGenerated(content: string) {
   reportStore.setGeneratedReport(props.taskId, content)
   try {
-    await (ipc.report as any).saveOverallDoc({
+    await ipc.report.saveOverallDoc({
       taskId: props.taskId,
       title: t('report.pipeline.overallArchitecture'),
       content,
@@ -296,7 +338,7 @@ async function openOverallArchitecture() {
   }
   let docId = ''
   try {
-    const result: any = await (ipc.report as any).saveOverallDoc({
+    const result = await ipc.report.saveOverallDoc({
       taskId: props.taskId,
       title: t('report.pipeline.overallArchitecture'),
       content,
@@ -391,6 +433,21 @@ watch(() => props.taskId, loadData)
               <span class="card-label">{{ t('analysis.createdAt') }}</span>
               <span class="card-value">{{ task?.createdAt ? new Date(task.createdAt).toLocaleString() : '-' }}</span>
             </div>
+            <div
+              class="summary-card summary-card-wide clickable"
+              :class="{ 'summary-empty': !projectSummaryText }"
+              @click="openSummaryModal"
+            >
+              <span class="card-label">{{ t('report.aiSummary') }}</span>
+              <span
+                v-if="projectSummaryText"
+                class="card-value card-summary-preview"
+              >{{ projectSummaryText.slice(0, 100) }}{{ projectSummaryText.length > 100 ? '…' : '' }}</span>
+              <span
+                v-else
+                class="card-value card-summary-empty"
+              >{{ t('report.pipeline.generateProjectSummaryHint') }}</span>
+            </div>
           </div>
 
           <div class="file-distribution">
@@ -484,6 +541,14 @@ watch(() => props.taskId, loadData)
               <DocumentTextIcon class="w-4 h-4" />
               <span>{{ t('report.viewOverallArchitecture') }}</span>
             </button>
+            <button
+              class="btn btn-ghost"
+              title="关闭本报告所有文档页"
+              @click="closeAllSubDocTabs"
+            >
+              <XMarkIcon class="w-4 h-4" />
+              <span>{{ t('report.closeAllDocs') }}</span>
+            </button>
 
           </div>
 
@@ -515,6 +580,71 @@ watch(() => props.taskId, loadData)
             >
               {{ t('common.confirm') }}
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 项目摘要弹窗 -->
+      <div
+        v-if="showSummaryModal"
+        class="dialog-overlay"
+        @click.self="showSummaryModal = false"
+      >
+        <div class="dialog-content summary-dialog">
+          <div class="summary-dialog-header">
+            <DocumentMagnifyingGlassIcon class="w-5 h-5" />
+            <span>{{ t('report.aiSummary') }}</span>
+            <div class="summary-dialog-spacer" />
+            <button
+              v-if="!editingSummary"
+              class="btn btn-ghost btn-xs"
+              @click="editingSummary = true; editSummaryText = projectSummaryText"
+            >
+              {{ t('common.edit') }}
+            </button>
+            <button
+              class="icon-btn summary-dialog-close"
+              @click="showSummaryModal = false; editingSummary = false"
+            >
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+          <div
+            class="summary-dialog-body"
+            :class="{ 'summary-body-editing': editingSummary }"
+          >
+            <textarea
+              v-if="editingSummary"
+              v-model="editSummaryText"
+              class="summary-textarea"
+              :placeholder="t('report.pipeline.generateProjectSummaryHint')"
+            />
+            <template v-else>
+              {{ projectSummaryText || t('report.pipeline.generateProjectSummaryHint') }}
+            </template>
+          </div>
+          <div class="summary-dialog-footer">
+            <span
+              v-if="projectSummaryDate && !editingSummary"
+              class="summary-dialog-date"
+            >{{ projectSummaryDate }}</span>
+            <div
+              v-if="editingSummary"
+              class="summary-dialog-actions"
+            >
+              <button
+                class="btn btn-ghost btn-xs"
+                @click="editingSummary = false; editSummaryText = projectSummaryText"
+              >
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                class="btn btn-primary btn-xs"
+                @click="saveSummary"
+              >
+                {{ t('common.save') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -575,8 +705,8 @@ watch(() => props.taskId, loadData)
 
 .summary-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px 8px;
 }
 
 .summary-card {
@@ -848,5 +978,135 @@ watch(() => props.taskId, loadData)
 .btn-has-result:hover {
   background: color-mix(in srgb, #74eca0 28%, transparent);
   border-color: color-mix(in srgb, #74eca0 40%, transparent);
+}
+
+.summary-card-wide {
+  grid-column: 1 / -1;
+}
+
+.summary-card.clickable {
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.summary-card.clickable:hover {
+  border-color: var(--accent);
+}
+
+.summary-empty {
+  opacity: 0.6;
+}
+
+.card-summary-preview {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.card-summary-empty {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Project summary dialog */
+.summary-dialog {
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  align-items: stretch;
+}
+
+.summary-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.summary-dialog-spacer {
+  flex: 1;
+}
+
+.summary-dialog-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+}
+
+.summary-dialog-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.summary-dialog-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  min-height: 120px;
+}
+
+.summary-body-editing {
+  padding: 16px;
+}
+
+.summary-textarea {
+  width: 100%;
+  min-height: 280px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.7;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.summary-textarea:focus {
+  border-color: var(--accent);
+}
+
+.summary-dialog-footer {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  gap: 8px;
+}
+
+.summary-dialog-date {
+  flex: 1;
+}
+
+.summary-dialog-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
 }
 </style>
