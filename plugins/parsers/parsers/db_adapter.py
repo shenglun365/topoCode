@@ -35,91 +35,57 @@ class SQLiteAdapter:
         self._store = AnalysisStore(project_db)
         self._task_id = task_id
 
-    # ==================== base_node (AST 节点) ====================
+    # ==================== base_node (AST 节点, v2 已废弃) ====================
 
     def insert_nodes(self, nodes: List[Dict]):
-        """批量插入 AST 节点 → base_node"""
-        if not nodes:
-            return
-        self._store.bulk_insert_nodes(nodes)
-        logger.debug(f"Inserted {len(nodes)} nodes to base_node")
+        pass  # v2: base_node 已废弃
 
     def find_nodes(self, file_id: str = None, node_type: str = None) -> List[Dict]:
-        """查询 AST 节点"""
-        import json
-
-        def _deserialize(node: Dict) -> Dict:
-            if 'refs' in node and isinstance(node['refs'], str):
-                try:
-                    node['refs'] = json.loads(node['refs'])
-                except (json.JSONDecodeError, TypeError):
-                    node['refs'] = []
-            # def_node_id 写入时 str(list) 转成了 "[5]" 格式，需要反序列化回 list
-            if 'def_node_id' in node and isinstance(node['def_node_id'], str):
-                val = node['def_node_id']
-                if val and val.startswith('['):
-                    try:
-                        node['def_node_id'] = json.loads(val)
-                    except (json.JSONDecodeError, TypeError):
-                        node['def_node_id'] = []
-                elif not val:
-                    node['def_node_id'] = []
-            return node
-
-        if file_id:
-            return self._store.get_nodes_by_file(file_id)
-        elif node_type:
-            return self._store.get_nodes_by_type(node_type)
-        else:
-            # 返回所有节点 — 通过 SQL 直接查询
-            cursor = self._store._db.execute("SELECT * FROM base_node")
-            columns = [desc[0] for desc in cursor.description]
-            return [_deserialize(dict(zip(columns, row))) for row in cursor.fetchall()]
+        return []  # v2: base_node 已废弃
 
     def count_nodes(self, file_id: str = None) -> int:
-        """统计 AST 节点数"""
-        return self._store.count_nodes(file_id)
+        return 0  # v2: base_node 已废弃
 
     def delete_nodes_by_file(self, file_id: str):
-        """删除指定文件的 AST 节点"""
-        self._store.delete_nodes_by_file(file_id)
+        pass  # v2: base_node 已废弃
 
-    # ==================== graph_node (符号/调用边/依赖边) ====================
+    # ==================== graph_node (v2 新 API) ====================
 
     def insert_graph(self, records: List[Dict]):
-        """批量插入图数据 → graph_node"""
+        """批量插入图数据 → graph_node / graph_edge"""
         if not records:
             return
-        # 确保每条记录都有 task_id
         for r in records:
             r.setdefault('task_id', self._task_id)
-        self._store.bulk_insert_graph_nodes(records)
-        logger.debug(f"Inserted {len(records)} records to graph_node")
+        # 按 symbol_node_type 区分节点/边
+        nodes = [r for r in records if r.get('symbol_node_type') not in ('call_relation', 'dependence')]
+        edges = [r for r in records if r.get('symbol_node_type') in ('call_relation', 'dependence')]
+        if nodes:
+            self._store.bulk_insert_graph_nodes(nodes)
+        if edges:
+            edge_rows = []
+            for e in edges:
+                edge_rows.append({
+                    "id": _make_edge_id(e.get("caller_file_id", ""), e.get("callee_name", ""), e.get("symbol_node_type")),
+                    "task_id": e["task_id"],
+                    "source_id": e.get("caller_file_id", ""),
+                    "target_id": e.get("callee_file_id", ""),
+                    "kind": "calls" if e["symbol_node_type"] == "call_relation" else "imports",
+                    "provenance": "parser",
+                    "file_path": e.get("file_id", ""),
+                })
+            self._store.bulk_insert_edges(edge_rows)
 
-    def find_graph(self, symbol_node_type: str = None,
-                   caller_file_id: str = None,
-                   callee_name: str = None) -> List[Dict]:
-        """查询图数据"""
-        if symbol_node_type in ('function', 'class', 'macro', 'method'):
-            return self._store.get_symbols(self._task_id, symbol_node_type)
-        elif symbol_node_type == 'call_relation':
-            return self._store.get_call_edges(self._task_id)
-        elif symbol_node_type == 'dependence':
-            return self._store.get_dep_edges(self._task_id)
-        else:
-            # 通用查询
-            query = "SELECT * FROM graph_node WHERE task_id = ?"
-            params: List[Any] = [self._task_id]
-            if symbol_node_type:
-                query += " AND symbol_node_type = ?"
-                params.append(symbol_node_type)
-            cursor = self._store._db.execute(query, params)
-            columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    def find_graph(self, symbol_node_type: str = None) -> List[Dict]:
+        if symbol_node_type in ('call_relation',):
+            return self._store.get_graph_edges(self._task_id, "calls")
+        if symbol_node_type in ('dependence',):
+            return self._store.get_graph_edges(self._task_id, "imports")
+        return self._store.get_graph_nodes(self._task_id, symbol_node_type)
 
     def delete_graph_by_task(self):
-        """删除任务的所有图数据"""
-        self._store.delete_by_task(self._task_id)
+        self._store._db.execute("DELETE FROM graph_node WHERE task_id = ?", (self._task_id,))
+        self._store._db.execute("DELETE FROM graph_edge WHERE task_id = ?", (self._task_id,))
 
     # ==================== source_files (文件列表) ====================
 
@@ -179,3 +145,9 @@ class SQLiteAdapter:
     def clear_all(self):
         """清理任务的所有数据"""
         self._store.clear_task_data(self._task_id)
+
+
+def _make_edge_id(source: str, target: str, kind: str) -> str:
+    import hashlib
+    raw = f"{source}->{target}:{kind}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]

@@ -63,6 +63,7 @@ const restartBtnClass = computed(() => {
 })
 
 const restartBtnTitle = computed(() => {
+  if (settingsStore.hasRunningTasks) return t('common.restartBlockedTasksShort')
   if (settingsStore.restartState === 'error') return settingsStore.restartErrorMsg
   return ''
 })
@@ -203,7 +204,7 @@ function openHttpPage() {
             <button
               class="btn btn-sm"
               :class="restartBtnClass"
-              :disabled="settingsStore.restartState === 'restarting'"
+              :disabled="settingsStore.restartState === 'restarting' || settingsStore.hasRunningTasks"
               :title="restartBtnTitle"
               @click="applyHttpConfigAndRestart"
             >
@@ -335,7 +336,7 @@ function openHttpPage() {
             <button
               class="btn btn-sm"
               :class="restartBtnClass"
-              :disabled="settingsStore.restartState === 'restarting'"
+              :disabled="settingsStore.restartState === 'restarting' || settingsStore.hasRunningTasks"
               :title="restartBtnTitle"
               @click="settingsStore.restartBackend()"
             >

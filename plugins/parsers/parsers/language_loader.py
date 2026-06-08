@@ -74,6 +74,54 @@ try:
 except ImportError:
     pass
 
+try:
+    import tree_sitter_ruby as tsrb
+    _ts_modules['ruby'] = ('tsrb', getattr(tsrb, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_kotlin as tskt
+    _ts_modules['kotlin'] = ('tskt', getattr(tskt, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_php as tsphp
+    _ts_modules['php'] = ('tsphp', getattr(tsphp, 'language_php', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_dart_orchard as tsdart
+    _ts_modules['dart'] = ('tsdart', getattr(tsdart, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_scala as tsscala
+    _ts_modules['scala'] = ('tsscala', getattr(tsscala, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_lua as tslua
+    _ts_modules['lua'] = ('tslua', getattr(tslua, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_luau as tsluau
+    _ts_modules['luau'] = ('tsluau', getattr(tsluau, 'language', None))
+except ImportError:
+    pass
+
+try:
+    import tree_sitter_objc as tsobjc
+    _ts_modules['objc'] = ('tsobjc', getattr(tsobjc, 'language', None))
+except ImportError:
+    pass
+
 # ==================== 构建语言映射 ====================
 LANGUAGES: Dict[str, Language] = {}
 _PARSER_CACHE: Dict[str, Parser] = {}

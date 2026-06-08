@@ -160,7 +160,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not task:
             raise ValueError(f"Task {tid} not found")
 
-        # 清理项目库中的分析数据（保留 base_node AST 数据）
+        # 清理项目库中的分析数据（保留 graph_node AST 数据）
         project_id = task["project_id"]
         try:
             project_db = multi_db.get_project_db(project_id)
@@ -196,7 +196,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 清除所有分析相关表，记录每个表的删除数量
         deleted_tables = {}
         tables_to_clear = [
-            "base_node", "graph_node", "graph_doc", "community_hierarchy",
+            "graph_node", "graph_doc", "community_hierarchy",
             "community_llm_results",
             "ast_data", "dependencies", "call_chains", "components", "ai_qa"
         ]
@@ -251,7 +251,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(project_id)
         tables = [
             "ast_data", "dependencies", "call_chains", "community_hierarchy",
-            "community_llm_results", "graph_node", "graph_doc", "base_node",
+            "community_llm_results", "graph_node", "graph_doc",
             "components", "ai_qa",
         ]
         counts = {}
@@ -713,31 +713,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     pairs.append((nid, None))
 
             # 从 graph_node 批量查询节点元数据
-            # 构建 (file_id, func_name) → graph_node row 的映射
+            # 构建 (file_id, name) → graph_node row 的映射
             gn_rows = project_db.execute(
-                "SELECT id, caller_file_id, caller_func_name, callee_file_id, callee_name,"
-                "       file_id, func_name, class_name, method_name, symbol_node_type"
+                "SELECT id, kind, name, qualified_name, file_id"
                 " FROM graph_node WHERE task_id=?",
                 (tid,)
             ).fetchall()
 
-            # 构建两个索引: (file_id, func_name) → row
-            caller_index = {}  # (caller_file_id, caller_func_name) → row
-            callee_index = {}  # (callee_file_id, callee_name) → row
-            file_index = {}    # (file_id,) → row (for INCLUDE)
+            # 构建索引: (file_id, name) → row
+            name_index = {}  # (file_id, name) → row
             for row in gn_rows:
-                cfi = str(row['caller_file_id'] or '')
-                cfn = str(row['caller_func_name'] or '')
-                cai = str(row['callee_file_id'] or '')
-                can = str(row['callee_name'] or '')
                 fi = str(row['file_id'] or '')
-                fn = str(row['func_name'] or '')
-                if cfi and cfi != 'None' and cfn and cfn != 'None':
-                    caller_index[(cfi, cfn)] = row
-                if cai and cai != 'None' and can and can != 'None':
-                    callee_index[(cai, can)] = row
-                if fi and fi != 'None' and fn and fn != "None":
-                    file_index[(fi, fn)] = row
+                nm = str(row['name'] or '')
+                if fi and fi != 'None' and nm and nm != 'None':
+                    name_index[(fi, nm)] = row
 
             # 为每个 node_id 查询元数据
             for nid in all_node_ids:
@@ -751,18 +740,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     fh, fn_name = nid.split(':', 1)
                     fh, fn_name = fh.strip(), fn_name.strip()
 
-                    # 先按 caller 查找
-                    row = caller_index.get((fh, fn_name))
-                    if not row:
-                        # 再按 callee 查找
-                        row = callee_index.get((fh, fn_name))
-                    if not row:
-                        # 最后按 file+func 查找
-                        row = file_index.get((fh, fn_name))
+                    row = name_index.get((fh, fn_name))
 
                     if row:
                         graph_node_id = row['id']
-                        file_id = str(row['caller_file_id'] or row['file_id'] or fh)
+                        file_id = str(row['file_id'] or fh)
                         symbol_name = fn_name
                         # 构建实名标签
                         file_name = file_name_map.get(file_id, '')
@@ -770,8 +752,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                             label = f'{file_name}::{symbol_name}'
                         else:
                             label = f'{fh}::{symbol_name}'
-                        if row['class_name']:
-                            label = f'{row["class_name"]}.{symbol_name} ({file_name or fh})'
+                        if row['qualified_name']:
+                            label = f'{row["qualified_name"]} ({file_name or fh})'
                 else:
                     # 无冒号：裸 file_id（INCLUDE 类型或 file-hash）
                     fh = nid
@@ -1097,26 +1079,24 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 查询符号信息
         row = project_db.execute(
-            "SELECT symbol_node_type, func_name, class_name, method_name, macro_name, file_id FROM graph_node WHERE task_id=? AND id=?",
+            "SELECT kind, name, qualified_name, file_id FROM graph_node WHERE task_id=? AND id=?",
             (tid, sid)
         ).fetchone()
 
         if not row:
             # 尝试按名称搜索
             row = project_db.execute(
-                "SELECT symbol_node_type, func_name, class_name, method_name, macro_name, file_id FROM graph_node WHERE task_id=? AND (func_name=? OR class_name=? OR method_name=? OR macro_name=?)",
-                (tid, sid, sid, sid, sid)
+                "SELECT kind, name, qualified_name, file_id FROM graph_node WHERE task_id=? AND (name=? OR qualified_name=?)",
+                (tid, sid, sid)
             ).fetchone()
 
         if not row:
             return None
 
         symbol_type = row[0]
-        func_name = row[1]
-        class_name = row[2]
-        method_name = row[3]
-        macro_name = row[4]
-        file_id = row[5]
+        name = row[1]
+        qualified_name = row[2]
+        file_id = row[3]
 
         # 获取文件路径
         file_path = ''
@@ -1127,18 +1107,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             ).fetchone()
             file_path = file_row[0] if file_row else ''
 
-        # 查询 AST 节点获取行号
+        # 查询 graph_node 获取行号
         start_line = 1
         end_line = 20
         ast_row = project_db.execute(
-            "SELECT start, end FROM base_node WHERE file_id=? AND name=? LIMIT 1",
-            (file_id, func_name or method_name or class_name or macro_name)
+            "SELECT start_line, end_line FROM graph_node WHERE file_id=? AND name=? LIMIT 1",
+            (file_id, name or qualified_name)
         ).fetchone()
 
         if ast_row:
             try:
-                start_line = int(ast_row[0].split(',')[0])
-                end_line = int(ast_row[1].split(',')[0])
+                start_line = int(ast_row[0])
+                end_line = int(ast_row[1])
             except (ValueError, IndexError):
                 pass
 
@@ -1160,8 +1140,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return {
             'symbol_id': sid,
             'symbol_type': symbol_type,
-            'name': func_name or method_name or class_name or macro_name or sid,
-            'class_name': class_name,
+            'name': name or qualified_name or sid,
+            'class_name': '',
             'file_path': file_path,
             'start_line': start_line,
             'end_line': end_line,
@@ -1196,42 +1176,42 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 查询边的信息
         row = project_db.execute(
-            "SELECT symbol_node_type, caller_func_name, caller_file_id, callee_name, callee_file_id, call_site_node_id, include_path, is_system FROM graph_node WHERE task_id=? AND id=?",
+            "SELECT kind, source_id, target_id, provenance, line, col, file_path, metadata FROM graph_edge WHERE task_id=? AND id=?",
             (tid, eid)
         ).fetchone()
 
         if not row:
             # 尝试通过 source/target 查找
             row = project_db.execute(
-                "SELECT symbol_node_type, caller_func_name, caller_file_id, callee_name, callee_file_id, call_site_node_id, include_path, is_system FROM graph_node WHERE task_id=? AND (caller_func_name=? OR callee_name=?)",
+                "SELECT kind, source_id, target_id, provenance, line, col, file_path, metadata FROM graph_edge WHERE task_id=? AND (source_id=? OR target_id=?)",
                 (tid, source_id, target_id)
             ).fetchone()
 
         if not row:
             return None
 
-        symbol_type = row[0]
+        kind = row[0]
 
-        if symbol_type == 'call_relation':
+        if kind == 'calls':
             return {
                 'edge_id': eid,
                 'edge_type': 'CALL',
                 'source': {
-                    'name': row[1],  # caller_func_name
-                    'file_id': row[2],  # caller_file_id
+                    'name': row[1],  # source_id
+                    'file_id': row[1],  # source_id
                 },
                 'target': {
-                    'name': row[3],  # callee_name
-                    'file_id': row[4],  # callee_file_id
+                    'name': row[2],  # target_id
+                    'file_id': row[2],  # target_id
                 },
-                'call_site_node_id': row[5],
+                'call_site_node_id': None,
             }
-        elif symbol_type == 'dependence':
+        elif kind == 'imports':
             return {
                 'edge_id': eid,
                 'edge_type': 'DEPENDENCE',
                 'include_path': row[6],
-                'is_system': row[7],
+                'is_system': False,
             }
 
         return None

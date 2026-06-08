@@ -138,159 +138,155 @@ class AnalysisStore:
         return dict(row) if row else None
 
     # ==================== base_node ====================
+    # v2: base_node 已废弃，保留方法签名以兼容旧调用（空实现）
 
     def delete_nodes_by_file(self, file_id: str):
-        """删除指定文件的所有 AST 节点"""
-        self._db.execute(
-            "DELETE FROM base_node WHERE file_id = ?",
-            (file_id,),
-        )
+        pass
 
     def bulk_insert_nodes(self, nodes: List[Dict]):
-        """批量插入 AST 节点"""
-        db = self._db.conn
-        for i in range(0, len(nodes), BATCH_INSERT_SIZE):
-            batch = nodes[i:i + BATCH_INSERT_SIZE]
-            db.executemany("""
-                INSERT INTO base_node (
-                    file_id, node_id, scope_node_id, def_node_id,
-                    type, name, op, refs, start, end, content_size
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                (
-                    n["file_id"], n["node_id"], n.get("scope_node_id"),
-                    n.get("def_node_id"), n["type"], n.get("name"),
-                    n.get("op"),
-                    json.dumps(n["refs"]) if isinstance(n.get("refs"), list) else n.get("refs"),
-                    n["start"], n["end"], n.get("content_size"),
-                )
-                for n in batch
-            ])
-        self._db.commit()
+        pass
 
     def get_nodes_by_file(self, file_id: str) -> List[Dict]:
-        rows = self._db.execute(
-            "SELECT * FROM base_node WHERE file_id = ?",
-            (file_id,),
-        ).fetchall()
-        return [_deserialize_node(dict(r)) for r in rows]
+        return []
 
     def get_nodes_by_type(self, node_type: str) -> List[Dict]:
-        rows = self._db.execute(
-            "SELECT * FROM base_node WHERE type = ?",
-            (node_type,),
-        ).fetchall()
-        return [_deserialize_node(dict(r)) for r in rows]
+        return []
 
     def count_nodes(self, file_id: str = None) -> int:
-        if file_id:
+        return 0
+
+    def _ensure_file_record(self, file_path: str, language: str, task_id: str):
+        """确保 source_files 中存在此文件记录"""
+        import os
+        with self._db._lock:
             row = self._db.execute(
-                "SELECT COUNT(*) AS cnt FROM base_node WHERE file_id = ?",
-                (file_id,),
+                "SELECT id FROM source_files WHERE file_path = ?",
+                (file_path,),
             ).fetchone()
-        else:
-            row = self._db.execute(
-                "SELECT COUNT(*) AS cnt FROM base_node"
-            ).fetchone()
-        return row["cnt"]
+            if not row:
+                import uuid
+                fid = str(uuid.uuid4())[:16]
+                fname = os.path.basename(file_path)
+                self._db.execute(
+                    "INSERT INTO source_files (id, file_path, file_name, language) VALUES (?, ?, ?, ?)",
+                    (fid, file_path, fname, language),
+                )
+                self._db.commit()
 
-    # ==================== graph_node ====================
-
-    def delete_by_task(self, task_id: str):
-        """删除指定任务的所有图节点"""
-        self._db.execute(
-            "DELETE FROM graph_node WHERE task_id = ?",
-            (task_id,),
-        )
-
-    def delete_by_task_and_type(self, task_id: str, symbol_type: str):
-        self._db.execute(
-            "DELETE FROM graph_node WHERE task_id = ? AND symbol_node_type = ?",
-            (task_id, symbol_type),
-        )
+    # ==================== graph_node (v2 重设计) ====================
 
     def bulk_insert_graph_nodes(self, nodes: List[Dict]):
-        """批量插入图节点"""
+        """批量插入图节点（v2 schema）"""
         if not nodes:
             return
-        # 统计各类型数量
-        type_counts: Dict[str, int] = {}
-        task_ids = set()
-        for n in nodes:
-            t = n.get("symbol_node_type", "unknown")
-            type_counts[t] = type_counts.get(t, 0) + 1
-            task_ids.add(n.get("task_id", ""))
+        with self._db._lock:
+            db = self._db.conn
+            for i in range(0, len(nodes), BATCH_INSERT_SIZE):
+                batch = nodes[i:i + BATCH_INSERT_SIZE]
+                db.executemany("""
+                    INSERT OR REPLACE INTO graph_node (
+                        id, task_id, kind, name, qualified_name, file_path, file_id, language,
+                        start_line, start_col, end_line, end_col,
+                        signature, visibility, is_exported, is_async, is_static,
+                        docstring, decorators, type_parameters
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    (
+                        n["id"], n["task_id"], n["kind"], n["name"],
+                        n.get("qualified_name", ""), n.get("file_path", ""),
+                        n.get("file_id", ""), n.get("language", ""),
+                        n["start_line"], n["start_col"], n["end_line"], n["end_col"],
+                        n.get("signature", ""), n.get("visibility", ""),
+                        n.get("is_exported", 0), n.get("is_async", 0), n.get("is_static", 0),
+                        n.get("docstring", ""), n.get("decorators", ""), n.get("type_parameters", ""),
+                    )
+                    for n in batch
+                ])
+            self._db.commit()
 
-        db = self._db.conn
-        for i in range(0, len(nodes), BATCH_INSERT_SIZE):
-            batch = nodes[i:i + BATCH_INSERT_SIZE]
-            db.executemany("""
-                INSERT INTO graph_node (
-                    task_id, symbol_node_type, file_id,
-                    func_name, class_name, macro_name, method_name,
-                    caller_file_id, caller_func_name, caller_node_id,
-                    callee_name, callee_file_id, callee_node_id, callee_type,
-                    call_site_node_id, call_site_file_id,
-                    include_path, is_system, extra,
-                    name, kind, scope, target,
-                    start_line, start_col, end_line, end_col
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                (
-                    n["task_id"], n["symbol_node_type"], n.get("file_id"),
-                    n.get("func_name"), n.get("class_name"),
-                    n.get("macro_name"), n.get("method_name"),
-                    n.get("caller_file_id"), n.get("caller_func_name"),
-                    n.get("caller_node_id"), n.get("callee_name"),
-                    n.get("callee_file_id"), n.get("callee_node_id"),
-                    n.get("callee_type"), n.get("call_site_node_id"),
-                    n.get("call_site_file_id"), n.get("include_path"),
-                    n.get("is_system", 0),
-                    json.dumps(n["extra"]) if isinstance(n.get("extra"), dict) else n.get("extra"),
-                    n.get("name"), n.get("kind"), n.get("scope"), n.get("target"),
-                    n.get("start_line"), n.get("start_col"),
-                    n.get("end_line"), n.get("end_col"),
-                )
-                for n in batch
-            ])
-        self._db.commit()
-        logger.info(f"[AnalysisStore] bulk_insert_graph_nodes: task_id={list(task_ids)}, total={len(nodes)}, types={type_counts}")
+    def get_graph_nodes(self, task_id: str, kind: str = None) -> List[Dict]:
+        if kind:
+            rows = self._db.execute(
+                "SELECT * FROM graph_node WHERE task_id = ? AND kind = ?",
+                (task_id, kind),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM graph_node WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
-    def get_symbols(self, task_id: str, symbol_type: str = None) -> List[Dict]:
-        conditions = ["task_id = ?"]
-        params = [task_id]
-        if symbol_type:
-            conditions.append("symbol_node_type = ?")
-            params.append(symbol_type)
-        where = " AND ".join(conditions)
-        rows = self._db.execute(
-            f"SELECT * FROM graph_node WHERE {where}",
-            params,
-        ).fetchall()
-        result = [dict(r) for r in rows]
-        logger.info(f"[AnalysisStore] get_symbols: task_id={task_id}, type={symbol_type}, returned={len(result)}")
-        return result
-
-    def get_call_edges(self, task_id: str) -> List[Dict]:
-        return self.get_symbols(task_id, "call_relation")
-
-    def get_dep_edges(self, task_id: str) -> List[Dict]:
-        return self.get_symbols(task_id, "dependence")
-
-    def count_by_task_and_type(self, task_id: str, symbol_type: str = None) -> int:
-        if symbol_type:
+    def count_graph_nodes(self, task_id: str, kind: str = None) -> int:
+        if kind:
             row = self._db.execute(
-                "SELECT COUNT(*) AS cnt FROM graph_node "
-                "WHERE task_id = ? AND symbol_node_type = ?",
-                (task_id, symbol_type),
+                "SELECT COUNT(*) AS cnt FROM graph_node WHERE task_id = ? AND kind = ?",
+                (task_id, kind),
             ).fetchone()
         else:
             row = self._db.execute(
                 "SELECT COUNT(*) AS cnt FROM graph_node WHERE task_id = ?",
                 (task_id,),
             ).fetchone()
-        return row["cnt"]
+        return row["cnt"] if row else 0
+
+    # ==================== graph_edge (v2 新表) ====================
+
+    def bulk_insert_edges(self, edges: List[Dict]):
+        """批量插入关系边"""
+        if not edges:
+            return
+        with self._db._lock:
+            db = self._db.conn
+            for i in range(0, len(edges), BATCH_INSERT_SIZE):
+                batch = edges[i:i + BATCH_INSERT_SIZE]
+                db.executemany("""
+                    INSERT OR REPLACE INTO graph_edge (
+                        id, task_id, source_id, target_id, kind, provenance,
+                        line, col, file_path, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    (
+                        e["id"], e["task_id"], e["source_id"], e["target_id"],
+                        e["kind"], e.get("provenance", "parser"),
+                        e.get("line", 0), e.get("col", 0),
+                        e.get("file_path", ""), e.get("metadata", ""),
+                    )
+                    for e in batch
+                ])
+            self._db.commit()
+
+    def get_graph_edges(self, task_id: str, kind: str = None) -> List[Dict]:
+        if kind:
+            rows = self._db.execute(
+                "SELECT * FROM graph_edge WHERE task_id = ? AND kind = ?",
+                (task_id, kind),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM graph_edge WHERE task_id = ?",
+                (task_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ==================== 兼容旧 API ====================
+
+    def get_symbols(self, task_id: str, symbol_type: str = None) -> List[Dict]:
+        """兼容旧 API: 从 graph_node 查询，symbol_type → kind"""
+        if symbol_type in ("call_relation", "dependence"):
+            return self.get_graph_edges(task_id, "calls" if symbol_type == "call_relation" else "imports")
+        return self.get_graph_nodes(task_id, symbol_type)
+
+    def get_call_edges(self, task_id: str) -> List[Dict]:
+        return self.get_graph_edges(task_id, "calls")
+
+    def get_dep_edges(self, task_id: str) -> List[Dict]:
+        return self.get_graph_edges(task_id, "imports")
+
+    def count_by_task_and_type(self, task_id: str, symbol_type: str = None) -> int:
+        if symbol_type in ("call_relation", "dependence"):
+            return len(self.get_graph_edges(task_id, "calls" if symbol_type == "call_relation" else "imports"))
+        return self.count_graph_nodes(task_id, symbol_type)
 
     # ==================== graph_doc ====================
 
@@ -430,18 +426,23 @@ class AnalysisStore:
 
     def clear_task_data(self, task_id: str):
         """清理指定任务的所有分析数据（重运行时调用）"""
-        self._db.execute(
-            "DELETE FROM graph_node WHERE task_id = ?", (task_id,)
-        )
-        self._db.execute(
-            "DELETE FROM graph_doc WHERE task_id = ?", (task_id,)
-        )
-        self._db.execute(
-            "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
-        )
-        self._db.execute(
-            "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
-        )
+        with self._db._lock:
+            self._db.execute(
+                "DELETE FROM graph_node WHERE task_id = ?", (task_id,)
+            )
+            self._db.execute(
+                "DELETE FROM graph_edge WHERE task_id = ?", (task_id,)
+            )
+            self._db.execute(
+                "DELETE FROM graph_doc WHERE task_id = ?", (task_id,)
+            )
+            self._db.execute(
+                "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
+            )
+            self._db.execute(
+                "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
+            )
+            self._db.commit()
         logger.info(f"[AnalysisStore] clear_task_data: task_id={task_id}")
 
     def clear_communities_for_task(self, task_id: str, edge_type: str):

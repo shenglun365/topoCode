@@ -1,10 +1,15 @@
-"""Parsers plugin — 语言解析器
+"""Parsers plugin — 多语言语法分析引擎 (v2)
 
 由 analyst_runner 通过 lazy import 调用:
-  from parsers.parser import parse_file
-  from parsers.extract_global_symbols import extract_global_symbols
-  from parsers.extract_call_graph import extract_call_graph
-  from parsers.extract_dependency_graph import extract_dependency_graph
+  from parsers.core.walker import TreeSitterWalker
+  from parsers.core.resolver import ResolutionEngine
+  from parsers.core.emitter import GraphEmitter
+  from parsers.languages import EXTRACTORS
+
+架构:
+  core/       — 核心引擎 (walker, resolver, emitter, synthesis)
+  languages/  — 18 种语言提取器 (声明式 LanguageExtractor)
+  frameworks/ — 框架感知解析器 (Django, React, Spring, ...)
 
 无需注册 ZMQ methods。
 """

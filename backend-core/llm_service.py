@@ -466,7 +466,8 @@ class LLMService:
                             )
                         })
                         # 重新 stream
-                        retry_content = await self._sync_call_for_retry(model, messages, mode, tools, output_schema)
+                        retry_result = await self._sync_call_for_retry(model, messages, mode, tools, output_schema)
+                        retry_content = retry_result.get('content', '')
                         validated = self._validate_structured_output(retry_content, output_schema)
                         if validated.get('success'):
                             break
@@ -622,18 +623,20 @@ class LLMService:
         if not model:
             raise ValueError(f"Model not found: {model_id}")
         self._check_usage_limits(model_id)
-        content = await self._sync_call_for_retry(model, messages, 'chat', None, None)
-        # 记录用量统计
+        result = await self._sync_call_for_retry(model, messages, 'chat', None, None)
+        content = result.get('content', '')
+        # 记录用量统计（使用 API 返回的实际 token 数据）
         try:
             if model.get('id'):
-                # sync_chat 拿不到 token 数据，按字符估算
-                prompt_chars = sum(len(m.get('content', '')) for m in messages if m.get('content'))
-                completion_chars = len(content or '')
-                token_data = {
-                    'prompt_tokens': max(1, int(prompt_chars / 3.5)),
-                    'completion_tokens': max(1, int(completion_chars / 3.5)),
-                    'total_tokens': max(1, int((prompt_chars + completion_chars) / 3.5)),
-                }
+                token_data = result.get('usage', {}) or {}
+                if not token_data.get('total_tokens'):
+                    prompt_chars = sum(len(m.get('content', '')) for m in messages if m.get('content'))
+                    completion_chars = len(content or '')
+                    token_data = {
+                        'prompt_tokens': max(1, int(prompt_chars / 3.5)),
+                        'completion_tokens': max(1, int(completion_chars / 3.5)),
+                        'total_tokens': max(1, int((prompt_chars + completion_chars) / 3.5)),
+                    }
                 self._record_usage(model['id'], token_data)
         except Exception as e:
             logger.warning(f"[LLMService] Failed to record usage: {e}")
@@ -646,8 +649,10 @@ class LLMService:
         mode: str,
         tools: Optional[List[str]],
         output_schema: Optional[Dict[str, Any]],
-    ) -> str:
-        """结构化输出重试: 同步调用 LLM (非流式)"""
+    ) -> Dict[str, Any]:
+        """结构化输出重试: 同步调用 LLM (非流式)
+        Returns: {'content': str, 'usage': dict}
+        """
         from tools_executor import get_tool_definitions
 
         provider = model.get('provider', 'ollama')

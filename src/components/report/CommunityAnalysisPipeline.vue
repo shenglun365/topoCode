@@ -39,7 +39,19 @@ const selectedEdgeType = ref('INCLUDE')
 const selectedLevel = ref('L0')
 
 interface LevelInfo { lv: string; count: number; analyzed: number }
-const availableLevels = ref<LevelInfo[]>([])
+const availableLevels = computed(() => {
+  const edge = selectedEdgeType.value
+  const lvSet = new Set<string>()
+  for (const c of communities.value) {
+    if (c.edgeType === edge) lvSet.add(c.level)
+  }
+  return ['L0', 'L1', 'L2', 'L3', 'L4']
+    .filter(lv => lvSet.has(lv))
+    .map(lv => {
+      const items = communities.value.filter(c => c.edgeType === edge && c.level === lv)
+      return { lv, count: items.length, analyzed: items.filter(c => c.status === 'completed').length }
+    })
+})
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
@@ -93,33 +105,33 @@ function lookupName(commId: string): string | undefined {
   return taskState.value.llmResults[commId]?.name || taskState.value.llmResults[commId]?.nameManual
 }
 
+const selectableMap = computed(() => {
+  const map: Record<string, boolean> = {}
+  for (const c of communities.value) {
+    map[c.id] = c.level === 'L0' || hasAnalysis(c.parentId || '')
+  }
+  return map
+})
+
+function isSelectable(c: CommunityItem): boolean {
+  return selectableMap.value[c.id] ?? true
+}
+
 const selectedCount = computed(() => {
   const n = communities.value.filter(t => t.selected).length
-  console.log(`[CommunityAI] selectedCount=${n}`)
   return n
 })
 const completedCount = computed(() => communities.value.filter(t => t.status === 'completed').length)
 const errorCount = computed(() => communities.value.filter(t => t.status === 'error').length)
-const totalCount = computed(() => {
-  const n = communities.value.length
-  console.log(`[CommunityAI] totalCount=${n} completed=${communities.value.filter(t => t.status === 'completed').length} error=${communities.value.filter(t => t.status === 'error').length} pending=${communities.value.filter(t => t.status === 'pending').length} running=${communities.value.filter(t => t.status === 'running').length}`)
-  return n
-})
+const totalCount = computed(() => communities.value.length)
 const overallProgress = computed(() => {
   const done = completedCount.value + errorCount.value
   const pct = totalCount.value > 0 ? Math.round((done / totalCount.value) * 100) : 0
-  console.log(`[CommunityAI] overallProgress done=${done} total=${totalCount.value} pct=${pct}`)
   return pct
 })
 
 const displayCommunities = computed(() => {
   let list = communities.value.filter(c => c.edgeType === selectedEdgeType.value && c.level === selectedLevel.value)
-  console.log(`[CommunityAI] displayCommunities edgeType=${selectedEdgeType.value} level=${selectedLevel.value} all=${communities.value.length} filtered=${list.length}`)
-  if (selectedLevel.value === 'L1') {
-    list = list.filter(c => hasAnalysis(c.parentId || ''))
-  } else if (selectedLevel.value === 'L2') {
-    list = list.filter(c => hasAnalysis(c.parentId || ''))
-  }
   for (const c of list) {
     if (c.parentId) c.parentName = lookupName(c.parentId)
   }
@@ -166,38 +178,38 @@ function fmtCommId(id: string): string {
   return id.replace(/^comm-[^-]+-/, '')
 }
 
-watch([selectedEdgeType, selectedLevel], () => { refreshDisplay() })
-
-function updateAvailableLevels() {
-  const edge = selectedEdgeType.value
-  const lvSet = new Set<string>()
-  for (const c of communities.value) {
-    if (c.edgeType === edge) lvSet.add(c.level)
-  }
-  availableLevels.value = ['L0', 'L1', 'L2']
-    .filter(lv => lvSet.has(lv))
-    .map(lv => {
-      const items = communities.value.filter(c => c.edgeType === edge && c.level === lv)
-      return { lv, count: items.length, analyzed: items.filter(c => c.status === 'completed').length }
-    })
-  console.log(`[CommunityAI] updateAvailableLevels edge=${edge} lvs=${availableLevels.value.map(l=>l.lv+'('+l.count+'/'+l.analyzed+')').join(',')}`)
-  if (!lvSet.has(selectedLevel.value) && availableLevels.value.length > 0) {
+watch([selectedEdgeType, selectedLevel], () => {
+  if (!availableLevels.value.find(l => l.lv === selectedLevel.value) && availableLevels.value.length > 0) {
     selectedLevel.value = availableLevels.value[0].lv
   }
-}
-
-function refreshDisplay() { updateAvailableLevels() }
+})
 
 function switchEdgeType(type: string) {
   if (type === selectedEdgeType.value) return
   selectedEdgeType.value = type
-  updateAvailableLevels()
   if (availableLevels.value.length > 0) selectedLevel.value = availableLevels.value[0].lv
 }
 
 function toggleSelect(id: string) {
   if (taskState.value?.communityRunning) return
+  const c = communities.value.find(c => c.id === id)
+  if (c && !isSelectable(c)) return
   communityStore.toggleSelect(props.taskId, id)
+}
+
+function selectIncomplete() {
+  if (taskState.value?.communityRunning) return
+  for (const c of communities.value) {
+    if (c.level === selectedLevel.value && c.edgeType === selectedEdgeType.value && c.status !== 'completed' && isSelectable(c)) {
+      c.selected = true
+    }
+  }
+  communityStore.syncSelections(props.taskId)
+}
+
+function deselectAll() {
+  if (taskState.value?.communityRunning) return
+  communityStore.deselectAll(props.taskId)
 }
 
 function statusBadgeClass(status: string): string {
@@ -254,23 +266,18 @@ async function retryTask(id: string) {
 }
 
 onMounted(async () => {
-  console.log(`[CommunityAI] onMounted ENTRY taskId=${props.taskId} projectId=${props.projectId}`)
   loading.value = true
   loadError.value = null
   try {
     await communityStore.loadCommunities(props.taskId, pid.value!)
-    updateAvailableLevels()
-    console.log(`[CommunityAI] onMounted availableLevels=${availableLevels.value.map(l=>l.lv+'('+l.count+')').join(',')} selectedEdgeType=${selectedEdgeType.value} selectedLevel=${selectedLevel.value}`)
     if (availableLevels.value.length === 0) {
       selectedEdgeType.value = 'INCLUDE'
       selectedLevel.value = 'L0'
     }
   } catch (e: any) {
-    console.error('[CAP] load error:', e)
     loadError.value = e?.message || String(e)
   } finally {
     loading.value = false
-    console.log(`[CommunityAI] onMounted DONE taskState.communities=${taskState.value?.communities?.length ?? 0}`)
   }
 })
 </script>
@@ -310,8 +317,14 @@ onMounted(async () => {
       <div class="lv-selector">
         <span class="lv-label">{{ t('report.pipeline.granularity') }}:</span>
         <div class="lv-radio-group">
-          <label class="lv-radio active">
-            <span class="lv-text">L0</span>
+          <label
+            v-for="lv in availableLevels"
+            :key="lv.lv"
+            :class="['lv-radio', { active: selectedLevel === lv.lv }]"
+            @click="selectedLevel = lv.lv"
+          >
+            <span class="lv-text">{{ lv.lv }}</span>
+            <span class="lv-count">{{ lv.analyzed }}/{{ lv.count }}</span>
           </label>
         </div>
       </div>
@@ -330,10 +343,10 @@ onMounted(async () => {
               <span class="clist-edge-tag">{{ selectedEdgeType }}</span>
             </span>
             <div class="clist-actions">
-              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="communityStore.selectIncomplete(props.taskId)">
+              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="selectIncomplete">
                 {{ t('common.selectIncomplete') }}
               </button>
-              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="communityStore.deselectAll(props.taskId)">
+              <button class="btn btn-ghost btn-xs" :disabled="taskState?.communityRunning" @click="deselectAll">
                 {{ t('common.reset') }}
               </button>
             </div>
@@ -372,11 +385,11 @@ onMounted(async () => {
             <div
               v-for="task in pagedCommunities"
               :key="task.id"
-              :class="['clist-row', `clist-${task.status}`]"
-              @click="toggleSelect(task.id)"
+              :class="['clist-row', `clist-${task.status}`, { 'clist-disabled': !isSelectable(task) }]"
+              @click="isSelectable(task) && toggleSelect(task.id)"
             >
-              <span class="clist-check" @click.stop="toggleSelect(task.id)">
-                <input type="checkbox" :checked="task.selected" class="clist-cb">
+              <span class="clist-check" @click.stop="isSelectable(task) && toggleSelect(task.id)">
+                <input type="checkbox" :checked="task.selected" :disabled="!isSelectable(task)" class="clist-cb">
               </span>
               <span class="clist-id" :title="task.communityId">
                 <span class="id-text">{{ fmtCommId(task.communityId) }}</span>
@@ -498,6 +511,7 @@ onMounted(async () => {
 .lv-radio.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .lv-radio input { display: none; }
 .lv-text { font-size: 11px; font-weight: 600; color: var(--text-primary); }
+.lv-count { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
 .cap-tasklist { flex: 1; overflow-y: auto; max-height: 360px; }
 .cap-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 11px; }
 .clist-header {
@@ -519,6 +533,8 @@ onMounted(async () => {
   transition: background 0.1s;
 }
 .clist-row:hover { background: var(--bg-tertiary); }
+.clist-disabled { opacity: 0.45; cursor: default; }
+.clist-disabled:hover { background: transparent; }
 .clist-th {
   font-weight: 600; color: var(--text-muted); font-size: 9px; cursor: default;
   padding: 4px; border-bottom: 1px solid var(--border); margin-bottom: 2px;

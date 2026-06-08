@@ -21,7 +21,7 @@ class SQLiteContext:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def connect(self) -> sqlite3.Connection:
         """获取连接（懒加载 + 线程安全）"""
@@ -31,11 +31,16 @@ class SQLiteContext:
                     os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
                     self._conn = sqlite3.connect(
                         self.db_path,
-                        check_same_thread=False,  # 多线程共享
+                        check_same_thread=False,
                     )
                     self._conn.row_factory = sqlite3.Row
                     self._init_pragmas()
         return self._conn
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """获取底层连接（懒加载）"""
+        return self.connect()
 
     def _init_pragmas(self):
         """初始化 PRAGMA 设置"""
@@ -81,7 +86,7 @@ class MultiDBManager:
         os.makedirs(db_dir, exist_ok=True)
         self._main_db: Optional[SQLiteContext] = None
         self._cache: OrderedDict[str, SQLiteContext] = OrderedDict()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     @property
     def main_db(self) -> SQLiteContext:

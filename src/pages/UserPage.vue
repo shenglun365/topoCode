@@ -15,6 +15,7 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useModelConfigStore } from '@/stores/model-config-store'
 import { useThemeStore } from '@/stores/theme'
 import { useStatusStore } from '@/stores/status'
+import { useAnalysisStore } from '@/stores/analysis'
 import ModelConfig from '@/components/settings/ModelConfig.vue'
 import GeneralSettings from '@/components/settings/GeneralSettings.vue'
 import ThemeManager from '@/components/settings/ThemeManager.vue'
@@ -28,7 +29,10 @@ const settingsStore = useSettingsStore()
 const modelConfigStore = useModelConfigStore()
 const themeStore = useThemeStore()
 const statusStore = useStatusStore()
+const analysisStore = useAnalysisStore()
 const showRestartConfirm = ref(false)
+
+const runningTaskCount = computed(() => analysisStore.taskStats.running + analysisStore.taskStats.pending)
 
 async function handleRestart() {
   showRestartConfirm.value = false
@@ -117,10 +121,13 @@ const tabs = [
           </div>
           <div class="modal-body">
             <p style="font-size:13px;color:var(--text-primary);">确认重启 Python 后端服务？</p>
+            <p v-if="runningTaskCount > 0" style="font-size:12px;color:var(--warning);margin-top:8px;">
+              {{ t('common.restartBlockedTasks', { count: runningTaskCount }) }}
+            </p>
           </div>
           <div class="modal-footer">
             <button class="btn btn-ghost btn-sm" @click="showRestartConfirm = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary btn-sm" @click="handleRestart">确定</button>
+            <button :disabled="runningTaskCount > 0" class="btn btn-primary btn-sm" @click="handleRestart">确定</button>
           </div>
         </div>
       </div>

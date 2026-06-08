@@ -93,7 +93,7 @@ export default { report: {
   },
   // 流水线
   pipeline: {
-    communityAnalysis: '组件 AI 分析',
+    communityAnalysis: '组件 AI 分析（L0）',
     batchSize: '批大小',
     analyzeSelected: '分析选中 ({n})',
     pause: '暂停',

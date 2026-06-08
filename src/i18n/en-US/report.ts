@@ -87,7 +87,7 @@ export default { report: {
     cancel: 'Cancel',
   },
   pipeline: {
-    communityAnalysis: 'Component AI Analysis',
+    communityAnalysis: 'Component AI Analysis (L0)',
     batchSize: 'Batch',
     analyzeSelected: 'Analyze Selected ({n})',
     pause: 'Pause',

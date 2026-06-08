@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import type { SupportedLocale } from '@/i18n'
 import { ipc } from '@/services/ipc'
 import { useStatusStore } from '@/stores/status'
+import { useAnalysisStore } from '@/stores/analysis'
 import i18n from '@/i18n'
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -48,7 +49,19 @@ export const useSettingsStore = defineStore('settings', () => {
   const restartState = ref<'idle' | 'restarting' | 'success' | 'error'>('idle')
   const restartErrorMsg = ref('')
 
+  const hasRunningTasks = computed(() => {
+    const analysisStore = useAnalysisStore()
+    return analysisStore.taskStats.running + analysisStore.taskStats.pending > 0
+  })
+
   async function restartBackend() {
+    if (hasRunningTasks.value) {
+      restartState.value = 'error'
+      const count = useAnalysisStore().taskStats.running + useAnalysisStore().taskStats.pending
+      restartErrorMsg.value = i18n.global.t('common.restartBlockedTasks', { count })
+      setTimeout(() => { if (restartState.value !== 'restarting') restartState.value = 'idle' }, 4000)
+      return
+    }
     restartState.value = 'restarting'
     restartErrorMsg.value = ''
     try {
@@ -101,7 +114,7 @@ export const useSettingsStore = defineStore('settings', () => {
     backendStatus, pythonMemoryLimit, memoryLimitPending,
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
     setProjectPageSize, initLocale, setLocale, setActiveTab,
-    restartBackend, restartState, restartErrorMsg,
+    restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,
   }
 })

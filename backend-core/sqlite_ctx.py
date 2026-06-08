@@ -16,7 +16,7 @@ class SQLiteContext:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._connect()
 
     def _connect(self):
@@ -548,27 +548,8 @@ PROJECT_DB_TABLES_SQL = """
     );
 
     -- ============================================
-    -- base_node — AST 节点 (项目级通用)
-    -- file_id 为 TEXT 类型，引用 source_files.id
+    -- base_node — DEPRECATED (v2 保留以兼容旧数据)
     -- ============================================
-    CREATE TABLE IF NOT EXISTS base_node (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        file_id TEXT NOT NULL,
-        node_id TEXT NOT NULL,
-        scope_node_id TEXT,
-        def_node_id TEXT,
-        type TEXT NOT NULL,
-        name TEXT,
-        op TEXT,
-        refs TEXT,
-        start TEXT NOT NULL,
-        end TEXT NOT NULL,
-        content_size INTEGER,
-        FOREIGN KEY (file_id) REFERENCES source_files(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_base_node_file ON base_node(file_id);
-    CREATE INDEX IF NOT EXISTS idx_base_node_type ON base_node(type);
-    CREATE INDEX IF NOT EXISTS idx_base_node_name ON base_node(name);
 
     -- ============================================
     -- file_summaries — 文件摘要缓存 (项目级)
@@ -588,35 +569,57 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_file_summaries_file ON file_summaries(project_id, file_path);
 
     -- ============================================
-    -- graph_node — 符号 + 调用边 + 依赖边 (任务级)
+    -- graph_node — 符号节点 (任务级, v2 重设计)
     -- ============================================
     CREATE TABLE IF NOT EXISTS graph_node (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
-        symbol_node_type TEXT NOT NULL,
-        file_id TEXT,
-        func_name TEXT,
-        class_name TEXT,
-        macro_name TEXT,
-        method_name TEXT,
-        caller_file_id TEXT,
-        caller_func_name TEXT,
-        caller_node_id TEXT,
-        callee_name TEXT,
-        callee_file_id TEXT,
-        callee_node_id TEXT,
-        callee_type TEXT,
-        call_site_node_id TEXT,
-        call_site_file_id TEXT,
-        include_path TEXT,
-        is_system INTEGER DEFAULT 0,
-        extra TEXT,
-        FOREIGN KEY (file_id) REFERENCES source_files(id)
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        qualified_name TEXT NOT NULL DEFAULT '',
+        file_path TEXT NOT NULL DEFAULT '',
+        file_id TEXT DEFAULT '',
+        language TEXT DEFAULT '',
+        start_line INTEGER NOT NULL DEFAULT 0,
+        start_col INTEGER NOT NULL DEFAULT 0,
+        end_line INTEGER NOT NULL DEFAULT 0,
+        end_col INTEGER NOT NULL DEFAULT 0,
+        signature TEXT DEFAULT '',
+        visibility TEXT DEFAULT '',
+        is_exported INTEGER DEFAULT 0,
+        is_async INTEGER DEFAULT 0,
+        is_static INTEGER DEFAULT 0,
+        docstring TEXT DEFAULT '',
+        decorators TEXT DEFAULT '',
+        type_parameters TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_graph_task ON graph_node(task_id);
-    CREATE INDEX IF NOT EXISTS idx_graph_type ON graph_node(symbol_node_type);
-    CREATE INDEX IF NOT EXISTS idx_graph_caller ON graph_node(task_id, caller_file_id);
-    CREATE INDEX IF NOT EXISTS idx_graph_callee ON graph_node(callee_name);
+    CREATE INDEX IF NOT EXISTS idx_graph_node_task ON graph_node(task_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_node_kind ON graph_node(task_id, kind);
+    CREATE INDEX IF NOT EXISTS idx_graph_node_file ON graph_node(task_id, file_path);
+    CREATE INDEX IF NOT EXISTS idx_graph_node_name ON graph_node(task_id, name);
+    CREATE INDEX IF NOT EXISTS idx_graph_node_qname ON graph_node(task_id, qualified_name);
+
+    -- ============================================
+    -- graph_edge — 关系边 (任务级, v2 新增)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS graph_edge (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        provenance TEXT DEFAULT 'parser',
+        line INTEGER DEFAULT 0,
+        col INTEGER DEFAULT 0,
+        file_path TEXT DEFAULT '',
+        metadata TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_graph_edge_task ON graph_edge(task_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_edge_source ON graph_edge(source_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_edge_target ON graph_edge(target_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_edge_kind ON graph_edge(task_id, kind);
 
     -- ============================================
     -- graph_doc — 社区分析结果 (任务级，分层)
@@ -917,30 +920,42 @@ class MultiDBManager:
         return project_db
 
     def _migrate_project_db(self, project_db: SQLiteContext):
-        """迁移项目库表 - 添加新字段和新表"""
-        # 为 source_files 添加新字段
-        columns_to_add = [
-            ("file_name", "TEXT"),
-            ("hashcode", "TEXT"),
-            ("mtime", "REAL"),
-        ]
-        for col_name, col_type in columns_to_add:
-            try:
-                project_db.execute(f'ALTER TABLE source_files ADD COLUMN "{col_name}" {col_type}')
-            except Exception:
-                pass  # 列已存在，忽略
-
-        # 为 graph_node 补充新 Query 管线字段（如不存在则忽略）
+        """迁移项目库表 - v2 重设计: 重建 graph_node + 新增 graph_edge"""
+        # 为新版 graph_node 补充字段
         try:
             cursor = project_db.execute("PRAGMA table_info(graph_node)")
             graph_cols = {row[1] for row in cursor.fetchall()}
-            for col in ('name', 'kind', 'scope', 'target',
-                        'start_line', 'start_col', 'end_line', 'end_col'):
+            for col in ('kind', 'name', 'qualified_name', 'file_path', 'language',
+                        'start_line', 'start_col', 'end_line', 'end_col',
+                        'signature', 'visibility', 'is_exported', 'is_async', 'is_static',
+                        'docstring', 'decorators', 'type_parameters'):
                 if col not in graph_cols:
                     try:
                         project_db.execute(f'ALTER TABLE graph_node ADD COLUMN "{col}" TEXT')
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+        # 新建 graph_edge 表
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS graph_edge (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    provenance TEXT DEFAULT 'parser',
+                    line INTEGER DEFAULT 0,
+                    col INTEGER DEFAULT 0,
+                    file_path TEXT DEFAULT '',
+                    metadata TEXT DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_edge_task ON graph_edge(task_id)")
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_edge_kind ON graph_edge(task_id, kind)")
         except Exception:
             pass
 

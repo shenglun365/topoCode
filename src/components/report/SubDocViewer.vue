@@ -58,11 +58,17 @@ const httpPort = ref(3456)
 
 // 重新生成
 const showRegenDialog = ref(false)
+const saveError = ref('')
 
 async function handleRegenerated(payload: { content: string; mode: 'full' | 'mermaid' | 'plantuml' }) {
   if (!doc.value) return
   if (payload.mode === 'full') {
-    doc.value.content = payload.content
+    if (props.regenerationType === 'community' && props.parentCommId) {
+      const name = doc.value.title || props.parentCommId
+      doc.value.content = `# 社区: ${name}\n\n**ID**: ${props.parentCommId}\n\n${payload.content}`
+    } else {
+      doc.value.content = payload.content
+    }
   } else {
     const lang = payload.mode
     const existing = payload.mode === 'mermaid' ? existingMermaid.value : existingPlantuml.value
@@ -73,14 +79,35 @@ async function handleRegenerated(payload: { content: string; mode: 'full' | 'mer
     }
   }
   showRegenDialog.value = false
-  if (!props.taskId || !props.projectId) return
+  saveError.value = ''
+  if (!props.taskId || !props.projectId) {
+    saveError.value = t('report.saveFailedNoProject')
+    return
+  }
   try {
     if (props.regenerationType === 'overall') {
+      let finalContent = doc.value.content
+      if (props.taskId) {
+        const communities = communityStore.tasks[props.taskId]?.communities || []
+        const hasAppendix = finalContent.includes('## 组件附录')
+        if (!hasAppendix && communities.some(c => c.level === 'L0')) {
+          const appendixParts = ['', '---', '', '## 组件附录', '', '| 类型 | 名称 |', '|------|------|']
+          for (const et of ([{ key: 'CALL' as const, label: '调用' }, { key: 'INCLUDE' as const, label: '依赖' }])) {
+            for (const item of communities.filter(c => c.level === 'L0' && c.edgeType === et.key)) {
+              const name = (item.name || item.communityId).replace(/\|/g, '\\|').replace(/\n/g, ' ')
+              appendixParts.push(`| ${et.label} | [${name}](##community:${et.key}:${item.communityId}) |`)
+            }
+          }
+          appendixParts.push('')
+          finalContent += appendixParts.join('\n')
+        }
+      }
       await ipc.report.saveOverallDoc({
         taskId: props.taskId,
         title: doc.value.title || t('report.pipeline.overallArchitecture'),
-        content: doc.value.content,
+        content: finalContent,
       })
+      doc.value.content = finalContent
     } else if (props.regenerationType === 'community') {
       if (doc.value.id) {
         await ipc.report.updateSubDoc({ subDocId: doc.value.id, content: doc.value.content })
@@ -95,7 +122,7 @@ async function handleRegenerated(payload: { content: string; mode: 'full' | 'mer
           taskId: props.taskId, edgeType: props.parentEdgeType,
           commLv: props.parentLevel, commId: props.parentCommId,
           name: current?.name || props.parentCommId,
-          summary: payload.mode === 'full' ? doc.value.content : (current?.summary || ''),
+          summary: payload.mode === 'full' ? payload.content : (current?.summary || ''),
           mermaid: payload.mode === 'mermaid' ? payload.content : (current?.mermaid || ''),
           plantuml: payload.mode === 'plantuml' ? payload.content : (current?.plantuml || ''),
           modelId: current?.model_id,
@@ -104,7 +131,7 @@ async function handleRegenerated(payload: { content: string; mode: 'full' | 'mer
       }
     }
   } catch (e: any) {
-    console.warn('[SubDocViewer] saveAfterRegen failed:', e)
+    saveError.value = `${t('report.saveFailed')}: ${e.message || String(e)}`
   }
 }
 
@@ -235,6 +262,14 @@ watch(() => props.subDocId, () => {
       @open-browser="openInBrowser"
       @open-regen-dialog="showRegenDialog = true"
     />
+
+    <!-- 保存错误提示 -->
+    <div
+      v-if="saveError"
+      class="save-error-banner"
+    >
+      {{ saveError }}
+    </div>
 
     <!-- 预览模式 -->
     <div
@@ -644,5 +679,15 @@ watch(() => props.subDocId, () => {
 
 .doc-content :deep(td) {
   vertical-align: top;
+}
+
+.save-error-banner {
+  margin: 8px 12px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+  border-radius: 6px;
+  color: var(--error);
+  font-size: 12px;
 }
 </style>

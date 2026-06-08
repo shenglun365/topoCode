@@ -22,9 +22,8 @@ from config import (
 )
 
 # ==================== Feature Flag: 新 Query 分析管线 ====================
-# True = 使用 Tree-sitter Query 引擎 (.scm) 替代手写 DFS 遍历
-# False = 使用旧 parser.py (手写 AST 遍历写入 base_node)
-USE_NEW_PARSER = True
+# v2: 已全面切换到 TreeSitterWalker + ResolutionEngine，旧管线已移除
+USE_NEW_PARSER = True  # 固定为 True，保留以兼容旧引用
 
 # ==================== 线程池 ====================
 parse_executor = ThreadPoolExecutor(
@@ -52,6 +51,152 @@ def clear_stop_flag(task_id: str):
 def should_stop(task_id: str) -> bool:
     """检查是否应该停止"""
     return _stop_flags.get(task_id, False)
+
+
+def _edge_to_dict(edge):
+    """Convert Edge dataclass to plain dict"""
+    return {
+        "source": edge.source, "target": edge.target,
+        "kind": edge.kind.value if hasattr(edge.kind, 'value') else str(edge.kind),
+        "line": edge.line, "col": edge.col,
+        "file_path": edge.file_path,
+        "provenance": edge.provenance.value if hasattr(edge.provenance, 'value') else str(edge.provenance),
+        "metadata": edge.metadata,
+    }
+
+
+def _extract_import_dependencies(analysis_store, task_id: str, all_tables) -> list:
+    """从 graph_node 中 import 类型节点生成 imports 边 (依赖图)"""
+    from parsers.core.symbol_model import Edge
+    from parsers.core.node_types import EdgeKind, Provenance
+    import hashlib
+    from pathlib import Path
+
+    # 构建完整索引: file_path, stem, 路径后缀 → file_node_id
+    file_index: dict[str, str] = {}       # file_path → node_id
+    stem_index: dict[str, list[str]] = {} # stem → [node_id]
+    suffix_index: dict[str, str] = {}     # path_suffix → node_id
+
+    for table in all_tables:
+        for node in table.nodes:
+            if node.kind.value == "file":
+                fp = node.file_path
+                file_index[fp] = node.id
+                stem = Path(fp).stem
+                stem_index.setdefault(stem, []).append(node.id)
+
+                # 去扩展名的路径后缀用于模块匹配
+                fp_noext = os.path.splitext(fp)[0]
+                suffix_index[fp_noext] = node.id
+
+                # 也按路径分段建立后缀索引 (e.g. "core/walker" 匹配 "parsers/core/walker")
+                parts = fp_noext.split("/")
+                for i in range(len(parts)):
+                    key = "/".join(parts[i:])
+                    if key not in suffix_index:
+                        suffix_index[key] = node.id
+
+    # 读取所有 import 节点
+    import_nodes = analysis_store.get_graph_nodes(task_id, "import")
+    if not import_nodes:
+        return []
+
+    edges = []
+    for imp in import_nodes:
+        module_name = imp.get("name", "").strip()
+        source_file = imp.get("file_path", "")
+        source_id = imp.get("id", "")
+
+        if not module_name or not source_file:
+            continue
+
+        # 使用导入文件自身的 file node ID 作为 source（而非 import 节点 ID）
+        source_file_id = file_index.get(source_file)
+        if not source_file_id:
+            continue
+
+        source_dir = Path(source_file).parent.as_posix() if source_file else ""
+        target_id = None
+
+        # 1. 直接 file_path 匹配
+        if module_name in file_index:
+            target_id = file_index[module_name]
+        # 2. 相对路径: ./foo, ../bar
+        elif module_name.startswith("./") or module_name.startswith("../"):
+            candidate = os.path.normpath(os.path.join(source_dir, module_name))
+            target_id = file_index.get(candidate) or suffix_index.get(candidate)
+        # 3. 绝对模块路径: parsers.core.walker → 路径后缀匹配
+        elif not target_id:
+            mod_path = module_name.replace(".", "/")
+            target_id = suffix_index.get(mod_path)
+        # 4. stem 匹配 (fallback: os → os.py)
+        if not target_id:
+            stem = module_name.split("/")[-1].split(".")[-1]
+            ids = stem_index.get(stem, [])
+            if len(ids) == 1:
+                target_id = ids[0]
+
+        if target_id:
+            edge_id = hashlib.sha256(f"{source_file_id}->{target_id}:imports".encode()).hexdigest()[:16]
+            edges.append(Edge(
+                source=source_file_id, target=target_id,
+                kind=EdgeKind.IMPORTS,
+                provenance=Provenance.RESOLUTION,
+                file_path=source_file,
+                metadata={"module": module_name},
+            ))
+
+    return edges
+
+
+def _find_target_for_import(module_name: str, source_file: str, file_index: dict, all_tables) -> str | None:
+    """根据 import 模块名在项目中查找目标文件 node"""
+    import os
+    from pathlib import Path
+
+    source_dir = Path(source_file).parent.as_posix() if source_file else ""
+
+    # 直接匹配 file_path
+    if module_name in file_index:
+        return file_index[module_name]
+
+    # 相对路径导入: ./foo, ../bar
+    if module_name.startswith("./") or module_name.startswith("../"):
+        candidate = os.path.normpath(os.path.join(source_dir, module_name))
+        for table in all_tables:
+            for node in table.nodes:
+                if node.kind.value == "file":
+                    fp = node.file_path
+                    # 精确匹配规范路径
+                    if fp == candidate:
+                        return node.id
+                    # 补齐扩展名匹配
+                    fp_noext = os.path.splitext(fp)[0]
+                    if fp_noext == candidate:
+                        return node.id
+        return None
+
+    # 绝对模块路径: parsers.core.walker → parsers/core/walker
+    for ext in (".py", ".ts", ".tsx", ".js", ".jsx"):
+        candidate = module_name.replace(".", "/") + ext
+        for table in all_tables:
+            for node in table.nodes:
+                if node.kind.value == "file" and node.file_path == candidate:
+                    return node.id
+        # 也尝试匹配路径后缀
+        for table in all_tables:
+            for node in table.nodes:
+                if node.kind.value == "file" and node.file_path.endswith(candidate):
+                    return node.id
+
+    # 按文件名匹配 (fallback: import os → os.py, import react → react)
+    module_basename = module_name.split("/")[-1].split(".")[-1]
+    for table in all_tables:
+        for node in table.nodes:
+            if node.kind.value == "file" and Path(node.file_path).stem == module_basename:
+                return node.id
+
+    return None
 
 
 def is_task_executing(task_id: str) -> bool:
@@ -129,12 +274,12 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
 
     from store.task_store import TaskStore
     from store.analysis_store import AnalysisStore
-    from parsers.db_adapter import SQLiteAdapter
-    from parsers.parser import parse_file
-    from parsers.extract_global_symbols import extract_global_symbols
-    from parsers.extract_call_graph import extract_call_graph
-    from parsers.extract_dependency_graph import extract_dependency_graph
-    from parsers.parse_with_queries import parse_with_queries
+    from parsers.core.walker import TreeSitterWalker, _detect_language
+    from parsers.core.emitter import GraphEmitter
+    from parsers.core.resolver import ResolutionEngine
+    from parsers.core.symbol_model import FileSymbolTable
+    from parsers.languages import EXTRACTORS
+    from parsers.language_loader import get_parser
 
     # 社区分析插件（可选）
     try:
@@ -155,11 +300,11 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     project_id = task["project_id"]
     project_db = multi_db.get_project_db(project_id)
     analysis_store = AnalysisStore(project_db)
-    adapter = SQLiteAdapter(project_db, task_id)
+    emitter = GraphEmitter(analysis_store, task_id)
 
     # 调试日志：确认两个 store 是否共享连接
     logger.info(f"[PARSE] [DEBUG] task_id={task_id}, project_id={project_id}")
-    logger.info(f"[PARSE] [DEBUG] analysis_store._db id={id(analysis_store._db)}, adapter._store._db id={id(adapter._store._db)}, same={analysis_store._db is adapter._store._db}")
+    logger.info(f"[PARSE] [DEBUG] analysis_store._db id={id(analysis_store._db)}")
 
     # 解析配置字段（TaskStore.get_task 已通过 _parse_task_row 反序列化，无需再次 json.loads）
     scopes = task.get("scopes") or []
@@ -190,16 +335,7 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         logger.warning(f"[PARSE] 没有文件需要分析")
         return {"files_processed": 0, "skipped_files": 0}
 
-    # 3. 检查是否有旧报告（有则保留 base_node AST 数据，跳过重解析）
-    prev_report = task_store._db.execute(
-        "SELECT * FROM analysis_reports WHERE task_id = ?", (task_id,)
-    ).fetchone()
-    skip_ast = False
-    if prev_report:
-        skip_ast = True
-        logger.info(f"[PARSE] 存在旧报告，保留 base_node AST 数据，跳过重解析")
-
-    # 4. 清理旧数据（符号/调用图/依赖图/社区 — 总是重新计算）
+    # 3. 清理旧数据
     logger.info(f"[PARSE] 清理任务 {task_id} 的旧数据")
     analysis_store.clear_task_data(task_id)
 
@@ -220,150 +356,180 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         logs.append({"timestamp": datetime.utcnow().isoformat(), "message": msg})
         logger.info(f"[PARSE] {msg}")
 
-    # ==================== Step 1: AST 解析（并行） ====================
-    if skip_ast:
-        _log("Step 1: AST 解析跳过（保留已有 base_node 数据）")
-        processed = total  # 标记所有文件已处理
-    else:
-        _log(f"Step 1: AST 解析开始（并行，{PARSE_WORKERS} 个工作线程）")
-        total_ast_nodes = 0
+    # ==================== Step 1: AST 解析 + 符号提取 (并行) ====================
+    _log(f"Step 1: AST 解析开始 (并行, {PARSE_WORKERS} 个工作线程, 支持 {len(EXTRACTORS)} 种语言)")
 
-        # 构建所有文件的解析任务
-        all_tasks = []
-        for lang, file_list in files_by_lang.items():
-            for f in file_list:
-                abs_path = os.path.join(proj_path, f["file_path"]) if proj_path else f["file_path"]
-                all_tasks.append((lang, f, abs_path))
+    all_tables: list[FileSymbolTable] = []
 
-        _log(f"共 {len(all_tasks)} 个文件待解析")
-
-        def _parse_one(lang, f, abs_path):
-            """同步解析单个文件（在线程池中执行）"""
-            if should_stop(task_id):
-                return (lang, f, 'stopped')
-            try:
-                if USE_NEW_PARSER:
-                    result = parse_with_queries(
-                        source_file_path=abs_path,
-                        project_db=project_db,
-                        task_id=task_id,
-                        proj_path=proj_path,
-                    )
-                else:
-                    result = parse_file(
-                        source_file_path=abs_path,
-                        project_db=project_db,
-                        task_id=task_id,
-                        proj_path=proj_path,
-                    )
-                return (lang, f, result)
-            except Exception as e:
-                return (lang, f, f"error: {e}")
-
-        # 使用 ThreadPoolExecutor 并行解析（同步上下文）
-        with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as file_executor:
-            # 分批提交，每批最多 PARSE_WORKERS * 2 个任务
-            batch_size = PARSE_WORKERS * 2
-            for batch_start in range(0, len(all_tasks), batch_size):
-                if should_stop(task_id):
-                    _log("检测到停止标志，中断解析")
-                    break
-
-                batch = all_tasks[batch_start:batch_start + batch_size]
-                _log(f"提交批次 {(batch_start // batch_size) + 1}: {len(batch)} 个文件")
-
-                # 提交批次内所有任务
-                futures = {
-                    file_executor.submit(_parse_one, lang, f, abs_path): (lang, f)
-                    for lang, f, abs_path in batch
-                }
-
-                # 等待批次完成并收集结果
-                for future in concurrent.futures.as_completed(futures):
-                    if should_stop(task_id):
-                        _log("检测到停止标志，中断解析")
-                        break
-
-                    try:
-                        lang, f, node_count = future.result()
-                    except Exception as e:
-                        _log(f"解析任务异常: {e}")
-                        continue
-
-                    if node_count == 'stopped':
-                        continue
-                    elif str(node_count).startswith('error:'):
-                        _log(f"解析失败 {f['file_path']}: {node_count}")
-                        continue
-                    elif node_count == -1:
-                        skipped += 1
-                    else:
-                        processed += 1
-                        language_stats[lang] = language_stats.get(lang, 0) + 1
-
-                    # 文件级进度检查
-                    if processed % PROGRESS_INTERVAL == 0:
-                        _update_progress(server, multi_db, task_id, run_id, processed, total)
-
+    def _parse_one(lang, f, abs_path):
+        """同步解析单个文件（在线程池中执行）"""
         if should_stop(task_id):
-            _log("AST 解析被用户停止")
-            return {"files_processed": processed, "skipped_files": skipped, "stopped": True}
+            return ("stopped", None)
+        try:
+            lang_key = f.get("language", "")
+            if lang_key == "c_header":
+                lang_key = "c"
+            extractor = EXTRACTORS.get(lang_key)
+            if extractor is None:
+                return ("no_extractor", None)
 
-        _log(f"AST 解析完成 - 处理 {processed} 个文件，跳过 {skipped} 个")
+            parser = get_parser(lang_key)
+            if parser is None:
+                return ("no_parser", None)
 
-    # 统计 AST 节点总数
-    row = analysis_store.count_nodes()
-    total_ast_nodes = row if isinstance(row, int) else (row[0] if row else 0)
-    _log(f"AST 节点总数: {total_ast_nodes}")
+            if not os.path.exists(abs_path):
+                return ("file_missing", None)
 
-    # ==================== Step 2: 符号提取 ====================
-    _log("Step 2: 符号提取开始")
-    total_symbols = 0
-    try:
-        if USE_NEW_PARSER:
-            from parsers.extract_global_symbols import extract_graph_symbols
-            total_symbols = extract_graph_symbols(adapter)
-        else:
-            total_symbols = extract_global_symbols(adapter)
-        _log(f"符号提取完成: {total_symbols} 个符号")
-    except Exception as e:
-        _log(f"符号提取失败: {e}")
+            src_bytes = open(abs_path, "rb").read()
+            if len(src_bytes) > 500 * 1024:
+                return ("too_large", None)
 
-    # ==================== Step 3: 调用图提取 ====================
-    _log("Step 3: 调用图提取开始")
+            walker = TreeSitterWalker(abs_path, src_bytes, lang_key, extractor)
+            table = walker.extract()
+
+            rel_path = os.path.relpath(abs_path, proj_path)
+            table.file_path = rel_path
+            emitter.write_nodes(table)
+
+            return ("ok", table)
+        except Exception as e:
+            logger.exception(f"Parse error {abs_path}: {e}")
+            return ("error", None)
+
+    all_tasks = []
+    for lang, file_list in files_by_lang.items():
+        for f in file_list:
+            abs_path = os.path.join(proj_path, f["file_path"]) if proj_path else f["file_path"]
+            all_tasks.append((lang, f, abs_path))
+
+    _log(f"共 {len(all_tasks)} 个文件待解析")
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as file_executor:
+        batch_size = PARSE_WORKERS * 2
+        for batch_start in range(0, len(all_tasks), batch_size):
+            if should_stop(task_id):
+                _log("检测到停止标志，中断解析")
+                break
+
+            batch = all_tasks[batch_start:batch_start + batch_size]
+            futures = {
+                file_executor.submit(_parse_one, lang, f, abs_path): (lang, f)
+                for lang, f, abs_path in batch
+            }
+
+            for future in as_completed(futures):
+                if should_stop(task_id):
+                    break
+                try:
+                    status, table = future.result()
+                except Exception as e:
+                    _log(f"解析任务异常: {e}")
+                    continue
+
+                if status == "ok" and table:
+                    processed += 1
+                    all_tables.append(table)
+                elif status in ("no_extractor", "no_parser", "too_large", "file_missing"):
+                    skipped += 1
+                elif status == "stopped":
+                    pass
+
+                if processed % PROGRESS_INTERVAL == 0:
+                    _update_progress(server, multi_db, task_id, run_id, processed, total)
+
+    if should_stop(task_id):
+        _log("AST 解析被用户停止")
+        return {"files_processed": processed, "skipped_files": skipped, "stopped": True}
+
+    _log(f"AST 解析完成 - 处理 {processed} 个文件，跳过 {skipped} 个")
+
+    # 统计节点总数
+    total_ast_nodes = analysis_store.count_graph_nodes(task_id)
+    _log(f"节点总数: {total_ast_nodes}")
+
+    # ==================== Step 2: 跨文件引用解析 ====================
+    _log("Step 2: 跨文件引用解析开始")
     total_call_edges = 0
-    try:
-        if USE_NEW_PARSER:
-            from parsers.extract_call_graph import extract_call_edges_from_refs
-            call_edges = extract_call_edges_from_refs(adapter)
-        else:
-            call_edges = extract_call_graph(adapter)
-        total_call_edges = len(call_edges)
-        _log(f"调用图提取完成: {total_call_edges} 条调用边")
-    except Exception as e:
-        _log(f"调用图提取失败: {e}")
-
-    # ==================== Step 4: 依赖图提取 ====================
-    _log("Step 4: 依赖图提取开始")
     total_dep_edges = 0
-    try:
-        if USE_NEW_PARSER:
-            from parsers.parse_with_queries import extract_dep_edges_from_imports
-            dep_edges = extract_dep_edges_from_imports(adapter)
-        else:
-            dep_edges = extract_dependency_graph(adapter)
-        total_dep_edges = len(dep_edges)
-        _log(f"依赖图提取完成: {total_dep_edges} 条依赖边")
-    except Exception as e:
-        _log(f"依赖图提取失败: {e}")
+    total_extends_edges = 0
+    total_implements_edges = 0
+    total_type_of_edges = 0
 
-    # 调试日志：确认边是否写入数据库
+    try:
+        resolver = ResolutionEngine()
+        resolved_edges = resolver.resolve(all_tables)
+        emitter.write_edges(resolved_edges)
+
+        # 按类型统计
+        for e in resolved_edges:
+            if e.kind.value == "calls":
+                total_call_edges += 1
+            elif e.kind.value == "imports":
+                total_dep_edges += 1
+            elif e.kind.value == "extends":
+                total_extends_edges += 1
+            elif e.kind.value == "implements":
+                total_implements_edges += 1
+            elif e.kind.value in ("type_of", "returns"):
+                total_type_of_edges += 1
+
+        _log(f"引用解析完成: calls={total_call_edges}, imports={total_dep_edges}, "
+             f"extends={total_extends_edges}, implements={total_implements_edges}, "
+             f"type_refs={total_type_of_edges}")
+    except Exception as e:
+        _log(f"引用解析失败: {e}")
+
+    # 调试日志
     dep_check = analysis_store.get_dep_edges(task_id)
     call_check = analysis_store.get_call_edges(task_id)
-    _log(f"[DEBUG] 数据库验证: dep_edges_in_db={len(dep_check)}, call_edges_in_db={len(call_check)}")
+    _log(f"[DEBUG] 数据库验证: dep_edges={len(dep_check)}, call_edges={len(call_check)}")
 
-    # ==================== Step 5: 社区分析 ====================
-    _log("Step 5: 社区分析开始")
+    # Step 2.5: 从 import 节点生成依赖边 (imports edges)
+    _log("Step 2.5: 文件依赖提取开始")
+    try:
+        import_dep_edges = _extract_import_dependencies(analysis_store, task_id, all_tables)
+        if import_dep_edges:
+            emitter.write_edges(import_dep_edges)
+            total_dep_edges = len(import_dep_edges)
+            _log(f"文件依赖提取完成: {total_dep_edges} 条依赖边")
+    except Exception as e:
+        _log(f"文件依赖提取失败: {e}")
+
+    # ==================== Step 3: 框架感知 + 动态合成 ====================
+    _log("Step 3: 框架感知 + 动态合成开始")
+    total_framework_edges = 0
+    total_synthetic_edges = 0
+    framework_edges_list = []
+    try:
+        from parsers.frameworks import run_all as run_frameworks
+        framework_edges = run_frameworks(all_tables)
+        if framework_edges:
+            emitter.write_edges(framework_edges)
+            total_framework_edges = len(framework_edges)
+            framework_edges_list = framework_edges
+            _log(f"框架感知完成: {total_framework_edges} 条框架边")
+    except Exception as e:
+        _log(f"框架感知失败: {e}")
+
+    try:
+        from parsers.core.synthesis import DynamicSynthesizer
+        synthesizer = DynamicSynthesizer()
+        all_nodes = [n for t in all_tables for n in t.nodes]
+        # Convert Edge objects to dicts for synthesizer
+        all_edges_for_synth = [_edge_to_dict(e) for e in resolved_edges]
+        all_edges_for_synth += [_edge_to_dict(e) for e in framework_edges_list]
+        synthetic_edges = synthesizer.synthesize(all_nodes, all_edges_for_synth, all_tables)
+        if synthetic_edges:
+            emitter.write_edges(synthetic_edges)
+            total_synthetic_edges = len(synthetic_edges)
+            _log(f"动态合成完成: {total_synthetic_edges} 条合成边")
+    except Exception as e:
+        _log(f"动态合成失败: {e}")
+
+    # ==================== Step 4: 社区分析 ====================
+    _log("Step 4: 社区分析开始")
     total_communities = 0
     total_hubs = 0
     total_orphans = 0
@@ -418,13 +584,13 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         else:
             _log("社区分析插件未安装，跳过 CALL")
 
-    # ==================== Step 6: 结果汇总 ====================
-    _log("Step 6: 结果汇总")
+    # ==================== Step 5: 结果汇总 ====================
+    _log("Step 5: 结果汇总")
     duration_ms = int((time.time() - start_time) * 1000)
 
     # 统计总数
-    total_ast_nodes = analysis_store.count_nodes()
-    total_symbols = analysis_store.count_by_task_and_type(task_id)
+    total_ast_nodes = analysis_store.count_graph_nodes(task_id)
+    total_symbols = total_ast_nodes  # v2: 节点即符号
 
     report = {
         "id": str(uuid.uuid4()),
@@ -434,6 +600,11 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         "total_symbols": total_symbols,
         "total_call_edges": total_call_edges,
         "total_dep_edges": total_dep_edges,
+        "total_extends_edges": total_extends_edges,
+        "total_implements_edges": total_implements_edges,
+        "total_type_of_edges": total_type_of_edges,
+        "total_framework_edges": total_framework_edges,
+        "total_synthetic_edges": total_synthetic_edges,
         "total_communities": total_communities,
         "total_hubs": total_hubs,
         "total_orphans": total_orphans,
@@ -444,8 +615,9 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         "best_dep_community_id": best_dep_community_id,
         "logs": logs,
         "summary": (
-            f"分析完成: {processed} 个文件, {total_ast_nodes} 个 AST 节点, "
-            f"{total_call_edges} 条调用边, {total_dep_edges} 条依赖边, "
+            f"分析完成: {processed} 个文件, {total_ast_nodes} 个符号节点, "
+            f"{total_call_edges} 调用, {total_dep_edges} 依赖, "
+            f"{total_extends_edges} 继承, {total_implements_edges} 实现, "
             f"{total_communities} 个社区"
             f"{f', {total_hubs} 枢纽' if total_hubs else ''}"
             f"{f', {total_orphans} 孤立' if total_orphans else ''}"
@@ -584,7 +756,7 @@ def _save_analysis_snapshot(multi_db, task_id: str, task_store, result: dict):
         symbols_dict = {}
         try:
             rows = project_db.execute(
-                "SELECT * FROM graph_node WHERE task_id = ?", (task_id,)
+                "SELECT kind, name, start_line, file_path FROM graph_node WHERE task_id = ?", (task_id,)
             ).fetchall()
             for row in rows:
                 fp = row["file_path"]
@@ -593,7 +765,7 @@ def _save_analysis_snapshot(multi_db, task_id: str, task_store, result: dict):
                 symbols_dict[fp].append({
                     "name": row.get("name", ""),
                     "kind": row.get("kind", ""),
-                    "line": row.get("line", 0),
+                    "line": row.get("start_line", 0),
                 })
         except Exception:
             logger.warning("[SNAPSHOT] Failed to collect symbols", exc_info=True)

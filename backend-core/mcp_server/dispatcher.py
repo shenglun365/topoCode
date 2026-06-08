@@ -436,24 +436,24 @@ class ToolDispatcher:
 
     def _make_ref(self, file_path: str, line: int, character: int):
         """Find a reference at the given position."""
-        from parsers.symbol_model import Reference, RefKind, SourceLocation
+        from parsers.core.symbol_model import Node, UnresolvedReference, FileSymbolTable
+        from parsers.core.node_types import NodeKind
 
         for table in self._tables:
             if table.file_path != file_path:
                 continue
-            for ref in table.references:
-                loc = ref.location
-                if loc.start_line <= line <= loc.end_line:
+            for ref in table.unresolved_refs:
+                if ref.line == line:
                     return ref
-                # Also check for exact position match on symbols
-            for sym in table.symbols:
-                loc = sym.location
-                if loc.start_line == line and loc.start_col <= character < loc.end_col:
-                    return Reference(
-                        name=sym.name,
-                        kind=RefKind.IDENT,
-                        location=loc,
-                        scope=sym.scope,
+            for node in table.nodes:
+                if node.start_line == line and node.start_col <= character < node.end_col:
+                    return UnresolvedReference(
+                        from_node_id=node.id,
+                        reference_name=node.name,
+                        reference_kind=EdgeKind.REFERENCES,
+                        line=line,
+                        col=character,
+                        file_path=file_path,
                     )
         return None
 

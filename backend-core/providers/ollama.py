@@ -113,4 +113,17 @@ class OllamaProvider(BaseLLMProvider):
             timeout=model_config.get('timeout', 300),
         )
         data = resp.json()
-        return data.get('message', {}).get('content', '')
+        content = data.get('message', {}).get('content', '')
+        eval_count = data.get('eval_count')
+        prompt_eval_count = data.get('prompt_eval_count')
+        usage = {}
+        if eval_count is not None or prompt_eval_count is not None:
+            usage = {
+                'prompt_tokens': prompt_eval_count,
+                'completion_tokens': eval_count,
+                'total_tokens': (prompt_eval_count or 0) + (eval_count or 0),
+            }
+        return {
+            'content': content,
+            'usage': usage,
+        }

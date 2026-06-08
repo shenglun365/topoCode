@@ -141,7 +141,6 @@ async function submitRegen() {
     <div
       v-if="visible"
       class="dialog-overlay"
-      @click.self="emit('close')"
     >
       <div
         class="dialog"

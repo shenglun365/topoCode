@@ -31,5 +31,5 @@ class BaseLLMProvider(ABC):
         mode: str,
         tools: Optional[List[str]],
         output_schema: Optional[Dict[str, Any]],
-    ) -> str:
-        """非流式调用 LLM，返回完整文本"""
+    ) -> Dict[str, Any]:
+        """非流式调用 LLM，返回 {'content': str, 'usage': dict}"""

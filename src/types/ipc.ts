@@ -179,28 +179,92 @@ export interface TaskConfigUpdate {
   pattern?: string        // 匹配表达式
 }
 
-/** 分析结果 */
+/** 分析结果 (v2) */
 export interface AnalysisResult {
-  ast?: any
-  callChain?: CallChainItem[]
-  dependencies?: {
-    modules: string[]
-    files: string[]
-  }
-  dataflow?: DataFlowItem[]
+    /** 任务 ID */
+    id?: string
+    task_id?: string
+    run_id?: string
+
+    /** 节点统计 */
+    total_ast_nodes: number
+    total_symbols: number
+
+    /** 边统计 */
+    total_call_edges: number
+    total_dep_edges: number
+    total_extends_edges: number
+    total_implements_edges: number
+    total_type_of_edges: number
+    total_framework_edges: number
+    total_synthetic_edges: number
+
+    /** 社区统计 */
+    total_communities: number
+    total_hubs: number
+    total_orphans: number
+    best_call_community_id?: string
+    best_dep_community_id?: string
+
+    /** 文件处理 */
+    files_processed: number
+    skipped_files: number
+    language_stats: Record<string, number>
+
+    /** 日志 */
+    logs?: Array<{ timestamp: string; message: string }>
+    summary: string
 }
 
-export interface CallChainItem {
-  from: string
-  to: string
-  function: string
+/** 图节点 (v2) */
+export interface GraphNode {
+    id: string
+    task_id: string
+    kind: NodeKind
+    name: string
+    qualified_name: string
+    file_path: string
+    language: string
+    start_line: number
+    start_col: number
+    end_line: number
+    end_col: number
+    signature?: string
+    visibility?: 'public' | 'private' | 'protected' | 'internal'
+    is_exported: boolean
+    is_async: boolean
+    is_static: boolean
+    docstring?: string
+    decorators?: string[]
 }
 
-export interface DataFlowItem {
-  source: string
-  target: string
-  data: string
+/** 图边 (v2) */
+export interface GraphEdge {
+    id: string
+    task_id: string
+    source_id: string
+    target_id: string
+    kind: EdgeKind
+    provenance: 'parser' | 'resolution' | 'synthesizer' | 'framework'
+    line: number
+    col: number
+    file_path: string
+    metadata?: Record<string, unknown>
 }
+
+/** 节点类型 */
+export type NodeKind =
+    | 'file' | 'module' | 'class' | 'struct' | 'interface'
+    | 'trait' | 'protocol' | 'function' | 'method' | 'property'
+    | 'field' | 'variable' | 'constant' | 'enum' | 'enum_member'
+    | 'type_alias' | 'namespace' | 'parameter' | 'import' | 'export'
+    | 'route' | 'component'
+
+/** 边类型 */
+export type EdgeKind =
+    | 'contains' | 'calls' | 'imports' | 'exports' | 'extends'
+    | 'implements' | 'references' | 'type_of' | 'returns'
+    | 'instantiates' | 'overrides' | 'decorates' | 'callback'
 
 /** 知识文档 */
 export interface KnowledgeDoc {
@@ -665,10 +729,11 @@ export interface RunTaskResult { success: boolean }
 export interface ClearCacheResult { success: boolean }
 export interface ClearCacheTableResult { success: boolean }
 export interface ClearCacheCountsResult { counts: Record<string, number> }
-export interface CommunityGraphResult { nodes: unknown[]; edges: unknown[] }
+export interface CommunityGraphResult { nodes: GraphNode[]; edges: GraphEdge[] }
 export interface CascadeLevelsResult { levels: Array<Record<string, unknown>> }
 export interface QueryStatsResult { stats: Record<string, unknown> }
-export interface SymbolDetail { name: string; filePath: string; line: number }
+export interface SymbolDetail { id: string; name: string; kind: string; qualified_name: string; filePath: string; start_line: number; end_line: number; signature?: string; visibility?: string }
+export interface EdgeDetail { id: string; kind: string; source_id: string; target_id: string; provenance: string; sourceName?: string; targetName?: string }
 export interface ListCommunityResultsResponse { results: Array<Record<string, unknown>> }
 export interface SaveCommunityResultResponse { success: boolean }
 export interface UpdateCommunityNameResponse { success: boolean }

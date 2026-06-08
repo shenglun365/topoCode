@@ -75,6 +75,10 @@ class OpenAICompatProvider(BaseLLMProvider):
         }
         logger.info(f"[LLM_REQ] {self.PROVIDER_NAME} 请求: {_json.dumps(_log_payload, ensure_ascii=False)}")
 
+        full_content = ""
+        tool_calls_parts = []
+        usage_data = {}
+
         try:
             resp = requests.post(
                 f'{base_url}/v1/chat/completions',
@@ -82,11 +86,8 @@ class OpenAICompatProvider(BaseLLMProvider):
             )
             if resp.status_code != 200:
                 chunk_queue.put({'type': 'error', 'message': f'{self.PROVIDER_NAME} API error {resp.status_code}: {resp.text[:200]}'})
+                chunk_queue.put({'type': 'done', 'content': ''})
                 return token_info
-
-            full_content = ""
-            tool_calls_parts = []
-            usage_data = {}
 
             for line_bytes in resp.iter_lines():
                 if not line_bytes:
@@ -98,7 +99,6 @@ class OpenAICompatProvider(BaseLLMProvider):
                 if data_str == '[DONE]':
                     if tool_calls_parts:
                         chunk_queue.put({'type': 'tool_calls', 'data': ''.join(tool_calls_parts)})
-                    chunk_queue.put({'type': 'done', 'content': full_content})
                     break
                 try:
                     data = _json.loads(data_str)
@@ -126,8 +126,10 @@ class OpenAICompatProvider(BaseLLMProvider):
                 }
         except Exception as e:
             chunk_queue.put({'type': 'error', 'message': str(e)})
-        finally:
             chunk_queue.put({'type': 'done', 'content': ''})
+            return token_info
+
+        chunk_queue.put({'type': 'done', 'content': full_content})
         return token_info
 
     def chat_sync(
@@ -158,7 +160,16 @@ class OpenAICompatProvider(BaseLLMProvider):
             timeout=model_config.get('timeout', 300),
         )
         data = resp.json()
-        return data.get('choices', [{}])[0].get('message', {}).get('content', '')
+        content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+        usage = data.get('usage', {})
+        return {
+            'content': content,
+            'usage': {
+                'prompt_tokens': usage.get('prompt_tokens'),
+                'completion_tokens': usage.get('completion_tokens'),
+                'total_tokens': usage.get('total_tokens'),
+            },
+        }
 
 
 class OllamaProvider(OpenAICompatProvider):

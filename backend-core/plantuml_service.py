@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import subprocess
 from typing import Optional
 
@@ -40,7 +41,6 @@ def find_plantuml_jar() -> Optional[str]:
 
 def _sanitize_plantuml(code: str) -> str:
     """修正 LLM 生成的常见 PlantUML 语法错误"""
-    import re
     code = code.strip()
 
     # 1) 分离 @startuml 和标题: @startuml Title → @startuml\ntitle Title
@@ -51,7 +51,35 @@ def _sanitize_plantuml(code: str) -> str:
         r'@startuml\ntitle \1', code, flags=re.MULTILINE
     )
 
-    # 2) package 'name' → package "name" (单引号在 PlantUML 中是注释!)
+    # 2) [node] --> [node] → component 语法 (LLM 常输出 Mermaid 风格)
+    def _convert_mermaid_to_puml(code: str) -> str:
+        lines = code.split('\n')
+        out: list[str] = []
+        alias_map: dict[str, str] = {}
+        counter = 0
+        for line in lines:
+            m2 = re.match(r'^\s*\[([^\]]+)\]\s*-->\s*\[([^\]]+)\]\s*$', line)
+            if m2:
+                for n in (m2.group(1), m2.group(2)):
+                    if n not in alias_map:
+                        counter += 1; alias_map[n] = f'a{counter}'
+                        out.append(f'  component "{n}" as {alias_map[n]}')
+                out.append(f'  {alias_map[m2.group(1)]} --> {alias_map[m2.group(2)]}')
+                continue
+            # file X --> file Y 同一处理
+            m2 = re.match(r'^\s*file\s+(\S+)\s*-->\s*file\s+(\S+)\s*$', line)
+            if m2:
+                for n in (m2.group(1), m2.group(2)):
+                    if n not in alias_map:
+                        counter += 1; alias_map[n] = f'a{counter}'
+                        out.append(f'  component "{n}" as {alias_map[n]}')
+                out.append(f'  {alias_map[m2.group(1)]} --> {alias_map[m2.group(2)]}')
+                continue
+            out.append(line)
+        return '\n'.join(out)
+    code = _convert_mermaid_to_puml(code)
+
+    # 3) package 'name' → package "name" (单引号在 PlantUML 中是注释!)
     code = re.sub(
         r"(\b(?:package|rectangle|component|node|folder|frame|cloud|database|storage)\s+)'([^']*)'",
         r'\1"\2"', code

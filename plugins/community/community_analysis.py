@@ -67,9 +67,12 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         logger.info(f"[COMMUNITY] {edge_type}: 没有边数据，跳过")
         return {"community_count": 0, "levels": 0, "hub_count": 0, "orphan_count": 0}
 
-    # 2. 构建图 + 枢纽/孤立节点过滤
+    # 2. 构建 node_lookup (v2: source_id/target_id → file_path, name)
+    node_lookup = _build_node_lookup(analysis_store, task_id)
+
+    # 3. 构建图 + 枢纽/孤立节点过滤
     graph, edge_directions, hub_nodes, orphan_nodes = _build_graph(
-        edges, edge_type, filter_intra_file=False
+        edges, edge_type, filter_intra_file=False, node_lookup=node_lookup
     )
     all_nodes = set(graph.keys())
     for neighbors in graph.values():
@@ -125,6 +128,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         graph, edge_directions, hub_nodes, orphan_nodes = _build_graph(
             edges, edge_type, filter_intra_file=False,
             intra_file_weight=INTRAn_FILE_EDGE_FALLBACK_WEIGHT,
+            node_lookup=node_lookup,
         )
         # 再次过滤枢纽/孤立（可能已变化）
         graph, edge_directions, hub_nodes, orphan_nodes = _filter_hubs_and_orphans(
@@ -202,54 +206,90 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
 
 # ==================== 图构建 + 枢纽/孤立过滤 ====================
 
+def _build_node_lookup(analysis_store, task_id: str) -> dict:
+    """从 graph_node 表构建 node_id → (file_path, name) 映射 (v2)"""
+    lookup = {}
+    try:
+        nodes = analysis_store.get_graph_nodes(task_id)
+        for n in nodes:
+            nid = n.get("id", "")
+            if nid:
+                lookup[nid] = (n.get("file_path", ""), n.get("name", ""))
+    except Exception:
+        pass
+    return lookup
+
+
 def _build_graph(edges: List[Dict], edge_type: str, *,
                  filter_intra_file: bool = False,
-                 intra_file_weight: float = 1.0) -> Tuple[Dict, Dict, Set, Set]:
+                 intra_file_weight: float = 1.0,
+                 node_lookup: Dict[str, tuple] = None) -> Tuple[Dict, Dict, Set, Set]:
     """
     从边数据构建无向图（邻接表），含枢纽/孤立节点预过滤
 
     Args:
         edges: 边数据列表
         edge_type: "INCLUDE" 或 "CALL"
-        filter_intra_file: (deprecated) 是否过滤同文件内调用 — 改用 intra_file_weight
-        intra_file_weight: 同文件内调用权重（0.1=降权, 1.0=正常）
-
-    Returns:
-        (graph, edge_directions, hub_nodes, orphan_nodes)
-        graph: 无向邻接表 {node → set(neighbors)}（已过滤枢纽/孤立）
-        edge_directions: 有向边映射
-        hub_nodes: 被标记为枢纽的节点集合
-        orphan_nodes: 被标记为孤立的节点集合
+        node_lookup: {node_id → (file_path, name)} v2 schema 映射
     """
     if filter_intra_file:
-        intra_file_weight = 0.0  # 兼容旧调用
+        intra_file_weight = 0.0
+
+    # 构建 node_lookup (v2: 从 graph_node 查询)
+    if node_lookup is None:
+        node_lookup = {}
 
     graph = defaultdict(set)
     edge_directions = {}
     skipped = 0
-    intra_count = 0
 
     for edge in edges:
         if edge_type == "INCLUDE":
-            source = str(edge.get("file_id", ""))
-            target = edge.get("include_path", "")
+            # ── v2 schema: graph_edge (source_id, target_id) ──
+            source_id = edge.get("source_id", "")
+            target_id = edge.get("target_id", "")
+            if source_id and target_id:
+                src_info = node_lookup.get(source_id, ("", source_id))
+                tgt_info = node_lookup.get(target_id, ("", target_id))
+                source = src_info[1] if len(src_info) > 1 else source_id
+                target = tgt_info[1] if len(tgt_info) > 1 else target_id
+            else:
+                # 旧 schema fallback
+                source = str(edge.get("file_id", ""))
+                target = edge.get("include_path", "")
             if not source or not target:
                 skipped += 1
                 continue
             direction = "INCLUDE"
+
         elif edge_type == "CALL":
-            caller_file = str(edge.get("caller_file_id", ""))
-            callee_file = str(edge.get("callee_file_id", ""))
-            caller_func = edge.get("caller_func_name", "")
-            callee_name = edge.get("callee_name", "")
+            # ── v2 schema: graph_edge 表 (source_id, target_id) ──
+            source_id = edge.get("source_id", "")
+            target_id = edge.get("target_id", "")
 
-            if not callee_file or callee_file == "None":
-                skipped += 1
-                continue
+            if source_id and target_id:
+                src_info = node_lookup.get(source_id, ("", source_id))
+                tgt_info = node_lookup.get(target_id, ("", target_id))
 
-            source = f"{caller_file}:{caller_func}"
-            target = f"{callee_file}:{callee_name}"
-            if not source or not target or source == ":None" or target == ":None":
+                src_name = src_info[1] if len(src_info) > 1 else source_id
+                tgt_name = tgt_info[1] if len(tgt_info) > 1 else target_id
+
+                source = f"{src_name}"
+                target = f"{tgt_name}"
+            else:
+                # ── 旧 schema fallback: graph_node 表 ──
+                caller_file = str(edge.get("caller_file_id", ""))
+                callee_file = str(edge.get("callee_file_id", ""))
+                caller_func = edge.get("caller_func_name", "")
+                callee_name = edge.get("callee_name", "")
+
+                if not callee_file or callee_file == "None":
+                    skipped += 1
+                    continue
+                source = f"{caller_file}:{caller_func}"
+                target = f"{callee_file}:{callee_name}"
+
+            if not source or not target or source == ":" or target == ":":
                 skipped += 1
                 continue
 
