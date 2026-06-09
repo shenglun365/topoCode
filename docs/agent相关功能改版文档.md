@@ -1,9 +1,11 @@
 # Agent 相关功能改版设计文档
 
-> 版本: v4.3 | 日期: 2026-06-09 | 状态: 待评审
+> 版本: v5.2 | 日期: 2026-06-09 | 状态: 已完成 — 开发就绪
 > 
-> v4.3 更新: 新增架构学习/设计 Skills — 从"分析架构"到"理解为什么、怎么做"
-> v4.2 更新: 全文档审查对齐 — 修复 CLI/Tool 命名冲突、内外部边界澄清、章节结构优化
+> v5.2 更新: 分布式架构 — 云端内容管理/增强/订阅 + git 式节点模型
+> v5.1 更新: 认知层级扩展为 7 层 + 自底向上三层追问 + 产品价值场景表
+> v5.0 更新: 产品哲学重塑 — 以人为核心，提升认知层级而非信息量
+> v4.3 更新: 新增架构学习/设计 Skills
 > v4.1 更新: 明确 topocode 业务目标 — 架构驱动、质量优先，独立自足
 > v4.0 更新: 精简对外 MCP Tools — 聚焦社区/架构/时序/质量层
 > v3.0 更新: 内置 Agent 运行时 — topocode 自身具备 Agent 能力，不依赖第三方
@@ -11,34 +13,134 @@
 
 ---
 
+## 零、产品哲学 — 以人为核心
+
+### 0.1 核心价值锚点
+
+**topocode 存在的理由：提升人的认知层级，而非增加人的信息负担。**
+
+### 0.1.1 认知层级：自上而下的七层追问
+
+```
+                人的认知层级（自上而下）
+
+     目标级   ← 我要做什么？            topocode 帮人设定方向
+     必要性级 ← 我为什么做？            topocode 帮人判断问题和优先级
+     ──────────────────────────────────────────────
+     决策级   ← 我该怎么做？            topocode 基于事实给出建议
+     模式级   ← 这是什么模式？          topocode 识别架构模式
+     社区级   ← 哪些东西是一体的？       topocode 揭示子系统边界
+     ──────────────────────────────────────────────
+     符号级   ← 这个函数叫啥？           codegraph / IDE 的领域
+     文件级   ← 这个文件在哪？           IDE 基本能力
+```
+
+核心洞察：**多数工具停在符号/文件级（告诉你"有什么"），topocode 的价值在社区/模式/决策/必要/目标五级（帮你回答"为什么"和"怎么办"）。**
+
+### 0.1.2 解释深度：自底向上的三层追问
+
+认知层级解决"思考的维度"，还需要一个互补维度——**解释深度**，解决"理解的深度"。任何一层认知，都可以从三个深度追问：
+
+| 追问层 | 含义 | 对 auth 社区的例子 |
+|--------|------|-------------------|
+| **1. 干了什么** (功能) | 这个模块/子系统实现了什么功能 | "auth 社区实现了用户认证和授权，包含 authenticate、authorize、jwtVerify 三个核心函数，是系统安全边界" |
+| **2. 怎么干的** (逻辑) | 如何实现的：流程、协作、数据流 | "authenticate 解析 Bearer token → jwtVerify 验证签名 → 从 User 表加载角色 → authorize 检查权限。调用链跨 3 个文件，核心是 handler.ts 中的中间件模式" |
+| **3. 为什么这么干** (因果) | 为什么这样实现：技术选型、外部约束、历史原因、权衡 | "选择 JWT 而非 session 是因为系统需要无状态水平扩展，但引入了 token 撤销难的问题。authenticate 跨了 jwt-community 和 api-community 两个社区，是因为安全中间件必须在请求入口拦截——这是框架层定义的硬约束，不是设计选择" |
+
+**三层追问的核心价值**：第一层帮你"知道"，第二层帮你"理解"，第三层帮你"判断"——判断这个设计是精妙还是妥协，是主动选择还是被动继承。
+
+### 0.1.3 二维模型
+
+认知层级（自上而下）和解释深度（自底向上）构成完整的认知矩阵：
+
+```
+              目标级  ← 我要做什么？
+              必要性级 ← 我为什么做？       每一层都追问:
+              决策级  ← 我该怎么做？     ┌─────────────────┐
+              模式级  ← 这是什么模式？   │ 干了什么 (功能)   │
+              社区级  ← 哪些是一体的？   │ 怎么干的 (逻辑)   │
+              符号级 / 文件级            │ 为什么这么干 (因果)│
+                                        └─────────────────┘
+              认知层级 (自上而下 → 抽象)  解释深度 (自底向上 → 因果)
+```
+
+**这意味着每个 tool 和 Skill 的输出不只是"展示数据"，而是"展示数据 + 解释逻辑 + 揭示因果"。**
+
+**topocode 不做的事**：把 30,000 个符号列出来（信息轰炸）；告诉你 authenticate 在第 42 行（codegraph 已做到极致）。
+
+**topocode 要做的事**：告诉你"auth 子系统的中心节点是 authenticate，理解它就理解了系统 60% 的请求处理链路。它是表示层和安全层的桥梁——边界由 JWT 验证这个安全约束定义。选择 JWT 是因为无状态扩展需求，但带来了 token 撤销难的问题——这个权衡值得关注。"
+
+### 0.2 两个视角
+
+**以人为核心（学习视角）**：帮助人从"在这个项目里看不懂"到"能抽象理解架构"，再到"能自主设计架构"。提升学习效率、学习体验、设计效率和设计体验。
+
+**以事为核心（开发全流程视角）**：辅助人在设计、实现、迭代、重构各阶段做出高效高质量决策。感知变化、解读影响、给出建议——但决策权永远在人手里。
+
+### 0.3 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| **输出抽象，而非枚举** | 每个 tool 回答的不是"有哪些"，而是"意味着什么" |
+| **渐进披露** | 先给框架（3 层架构，12 个核心子系统），人需要时再展开具体模块 |
+| **教人，而非替代人** | 解释"为什么形成这个社区"，让人建立架构直觉，而非生成一个无人理解的"正确答案" |
+| **可知、可控** | 人对项目当前状况可知（community/arch_overview），对变更过程可控（diff/session/quality） |
+| **本地部署、私域知识** | 每个人的 topocode 积累的是他关心的项目、他的分析历史——形成私域核心竞争力 |
+
+### 0.4 与 codegraph 的关系
+
+| | codegraph | topocode |
+|---|---|---|
+| **认知层级** | 符号级 / 文件级 | 社区级 / 模式级 / 决策级 / 必要性级 / 目标级 |
+| **核心价值** | 信息效率 — 快速精准回答代码问题 | 认知升级 — 让人不再需要问那些问题 |
+| **输出特征** | "authenticate 在 handler.ts:42，被 15 个函数调用" | "authenticate 是 auth 的中心节点，它的角色、为什么这样设计、有什么权衡" |
+| **独立性** | — | topocode 完全自足，不假设 codegraph 存在 |
+
+**topocode 不追求替代 codegraph，两者是不同认知层级的工具。**
+
+### 0.5 产品价值：topocode 能帮使用者做什么
+
+| 使用场景 | 用户面临的问题 | topocode 的帮助 | 触及的认知层 |
+|---------|--------------|---------------|------------|
+| **接手陌生项目** | 几百个文件，不知从哪看起 | `community` + `arch_overview` → 3 分钟建立"地图感"，知道有哪些子系统、谁依赖谁 | 社区级、模式级 |
+| **准备重构** | 不知道改了核心模块会有什么连锁反应 | `quality_inspect` + `skill_recommend_refactor` → 识别风险点，给出具体解耦建议 | 决策级、必要性级 |
+| **审查 AI 生成的代码** | AI 改了代码但不确定质量和影响 | `session_summary` + `diff` → 对 AI 的工作成果可知、可控，知道哪些模块需要重点检查 | 决策级 |
+| **设计新模块** | 不确定新模块放在哪个子系统最合适 | `skill_validate_arch_impact` → 预测对现有架构的影响，推荐归属社区，评估风险 | 必要性级、决策级 |
+| **长期维护后复盘** | 迭代了 100 个版本，项目有没有在腐化 | `topocode_community` 历史对比 + `skill_detect_arch_drift` → 架构趋势可视化，及早发现腐化信号 | 必要性级、目标级 |
+| **向团队解释架构** | 需要让别人理解架构为什么是这样设计的 | `skill_explain_arch_pattern` + `topocode_architecture_overview` → 生成带因果解释的架构文档，不只展示结构，更解释缘由 | 模式级 |
+| **对比技术方案** | 重构方案 A 和 B 哪个更好 | `skill_compare_arch` + `skill_recommend_refactor` → 基于社区检测数据对比两个方案的架构影响 | 目标级、必要性级 |
+| **持续感知项目变化** | 每次发版后想知道架构是否朝好的方向演化 | `topocode_diff` + `skill_compare_arch` → 解读变化趋势，不只列差异 | 必要性级 |
+
+---
+
 ## 一、背景与目标
 
 ### 业务目标
 
-**topocode 的核心使命：以架构驱动开发，提升代码质量。**
+**topocode 的核心使命：提升人的架构认知水平，让人对软件现状和开发过程可知、可控。**
 
 ```
-           架构分析 ──▶ 架构学习 ──▶ 架构设计
-                          │
-                          ▼
-                    架构驱动开发
-                   /            \
-             提升质量 (首要)    兼顾效率 (次要)
+           架构分析 (基础能力)
+                │
+     ┌──────────┴──────────┐
+     ▼                     ▼
+ 以人为核心               以事为核心
+ (学习+设计效率)          (全流程决策辅助)
+     │                     │
+     ▼                     ▼
+ 提升认知层级            辅助高质量决策
+ (抽象 > 枚举)           (感知 > 解读 > 建议)
 ```
-
-- **做什么**：对代码库进行架构层面的分析（社区检测、依赖拓扑、层次化建模），帮助开发者理解、学习和设计系统架构
-- **首要价值**：提升代码质量 — 通过架构质量检查（循环依赖、Hub 过载、架构漂移）、变更影响评估、AI 会话追溯
-- **次要价值**：兼顾开发效率 — 通过批量自动化文档生成、智能问答缩短架构理解的时间成本
-- **不是做什么**：不是符号级代码搜索引擎，不追求替代 codegraph 或其他符号级工具
 
 ### 核心定位
 
 | 定位 | 说明 |
 |------|------|
-| **独立自足** | 不假设任何其他工具存在。只有 topocode 时，通过内置 Agent + Skills 完成全流程 |
-| **不替代 codegraph** | codegraph 在符号/文件级查询上已做到极致。topocode 聚焦架构/社区/时序/质量层 |
-| **架构驱动** | 所有工具和 Skill 的输出语言是"子系统/社区/模块/模式"，不是"函数/变量/文件" |
-| **质量优先** | 架构质量检查（topocode_quality_inspect）是一等公民，不是附加功能 |
+| **以人为核心** | 帮助人建立架构直觉、提升抽象思维，而非堆砌信息 |
+| **可知** | 通过社区/架构视图，让人对项目整体结构一目了然 |
+| **可控** | 通过 diff/quality/session 追踪，让人对变更影响心中有数 |
+| **本地私域** | 围绕每个人的项目积累分析历史、架构理解，打造私域核心竞争力 |
+| **独立自足** | 不假设任何外部工具存在，通过内置 Agent 完成全流程 |
+| **不替代 codegraph** | codegraph 做符号/文件级，topocode 做社区/模式/决策级
 
 ### 现有问题
 
@@ -351,15 +453,15 @@ skill_batch_analyze_communities(task_id):
 
 | 决策 | 理由 |
 |------|------|
-| **架构驱动，质量优先** | 所有功能围绕架构理解和质量保障展开。质量检查是一等公民，不是附加功能 |
-| **独立自足，不假设外部工具** | topocode 自身完成从分析到文档的全流程，不依赖 codegraph 或任何其他工具 |
-| **不追求替代 codegraph** | codegraph 在符号/文件级查询上已做到极致。topocode 聚焦架构/社区/时序/质量层 |
-| **双通道统一 Skills** | 同一套 Skills 既服务内置 Agent 也服务外部 MCP Agent；定义一次，两处可用 |
-| **对外仅 6 个 MCP Tools** | 每个 tool 输出架构洞察（社区/子系统/模式），不是符号/文件的列表 |
-| **现有模板全部 Skills 化** | 原子化 → Agent 可自主组合；消除 pipeline 硬编码 |
-| Agent 驱动编排，非前端 Pipeline | 前端代码量降低 76%；LLM 自主决策 > 硬编码流程 |
+| **以人为核心，提升认知层级** | 每个 tool 输出的是认知洞察（模式/角色/边界），不是数据列表 |
+| **输出抽象，渐进披露** | 先给框架（3 层架构），人需要时再展开；避免信息轰炸 |
+| **教人，而非替代人** | 解释"为什么"，让人建立架构直觉；决策权永远在人手里 |
+| **独立自足，不假设外部工具** | topocode 自身完成全流程，不依赖 codegraph 或任何其他工具 |
+| **不追求替代 codegraph** | 两者不同认知层级，topocode 不重复符号/文件级查询 |
+| **双通道统一 Skills** | 同一套 Skills 既服务内置 Agent 也服务外部 MCP Agent |
+| **对外仅 6 个 MCP Tools** | 每个 tool 帮人建立一种架构认知，而非堆砌功能 |
+| **现有模板全部 Skills 化** | 原子化 → Agent 自主组合；消除 pipeline 硬编码 |
 | MCP 保留 stdio 为主 | 对外部 agent 保持标准兼容 |
-| SERVER_INSTRUCTIONS 明确职责边界 | 告诉 Agent：topocode 负责什么，不负责什么；如果环境中有其他工具，如何避免混淆 |
 | Pipeline 模式保留作为离线选项 | 无 LLM 环境或需要确定性输出时使用 |
 
 ---
@@ -425,45 +527,47 @@ topocode session quality [id]        # 质量检查报告
 
 ---
 
-## 六、对外 MCP Tools（仅 topocode 独有能力）
+## 六、对外 MCP Tools（帮人建立架构认知）
 
-### 6.1 设计原则：不重复 codegraph
+### 6.1 设计原则：提升认知层级
 
-codegraph 在符号/文件级查询上已经做到极致（explore/search/callers/callees/impact/node/files/status）。
-topocode 不应重复这些能力，只提供 codegraph 做不到的：
+codegraph 回答"点"和"线"（符号在哪、谁调用谁），topocode 回答"面"和"体"（哪些是一体的、整体怎么组织的）。每个 tool 的目标不是返回数据，而是帮助人建立一种架构认知。
 
 ```
-codegraph 覆盖: 点(exact symbol) + 线(call/dep edge)
-topocode 覆盖:  面(community/sub-system) + 体(architecture) + 时(evolution/diff) + 质(quality)
-
-两者互补，Agent 按需组合使用。
+认知层级          topocode 的贡献
+───────────────────────────────────
+决策级  ← 我该怎么做？          diff/session_summary 解读变化含义
+模式级  ← 这是什么模式？        arch_overview 识别分层/微服务/管道
+社区级  ← 哪些东西是一体的？    community/community_detail 揭示模块边界
+───────────────────────────────────  ← topocode 的价值区间
+符号级  ← 这个函数叫啥？        (codegraph 的领域)
+文件级  ← 这个文件在哪？        (IDE 基本能力)
 ```
 
 ### 6.2 工具清单（仅 6 个）
 
-| # | Tool | 层级 | 说明 |
-|---|------|------|------|
-| 1 | `topocode_community` | **面** | 层次化社区结构 (L0~L5)、Hub/Orphan 节点 |
-| 2 | `topocode_community_detail` | **面** | 单社区深入：内部符号、子社区、出入依赖 |
-| 3 | `topocode_architecture_overview` | **体** | 项目架构总览：社区拓扑、关键依赖链、模式识别 |
-| 4 | `topocode_diff` | **时** | 版本级差异：架构变更、社区增减、Hub 迁移 |
-| 5 | `topocode_session_summary` | **时** | AI 会话变更摘要：改了哪些模块、影响哪些社区 |
-| 6 | `topocode_quality_inspect` | **质** | 基于社区结构的质量：循环依赖、Hub 过载、架构漂移 |
-
-**注意：以下能力由 codegraph 提供，topocode 不再重复：**
-`explore` `search` `callers` `callees` `impact` `node` `files` `status`
+| # | Tool | 帮人建立什么认知 | 不是做什么 |
+|---|------|----------------|-----------|
+| 1 | `topocode_community` | 系统由哪些子系统组成，它们怎么分层 | 不是列文件列表 |
+| 2 | `topocode_community_detail` | 一个子系统内部怎么组织的，谁在中心 | 不是列函数签名 |
+| 3 | `topocode_architecture_overview` | 整体架构模式是什么，关键依赖链 | 不是输出所有边 |
+| 4 | `topocode_diff` | 这次变更对架构意味着什么 | 不是 git diff |
+| 5 | `topocode_session_summary` | AI 改了哪些模块，有什么风险 | 不是 commit log |
+| 6 | `topocode_quality_inspect` | 哪里有架构风险，优先级是什么 | 不是 lint 报告 |
 
 ### 6.3 工具定义
 
+每个 tool 的输出遵循"干了什么 → 怎么干的 → 为什么这么干"三层结构。
+
 ```python
-# ── 1. 社区结构 ──
+# ── 1. 建立"子系统"认知 ──
 
 TOPocode_COMMUNITY = ToolDefinition(
     name="topocode_community",
     description=(
-        "查看项目的依赖社区和调用社区结构。返回 L0~L5 层次化社区、"
-        "每层节点数/边数、Hub 节点（高度中心性）、孤立节点。"
-        "这是 topocode 独有的高层架构视图，codegraph 不提供。"
+        "识别项目由哪些子系统构成（干了什么），标注每层的角色——"
+        "中心节点/桥接节点/边缘节点（怎么干的），"
+        "解释社区边界为何形成——依赖密度、框架约定还是历史遗留（为什么这么干）。"
     ),
     inputSchema={
         "type": "object",
@@ -471,52 +575,41 @@ TOPocode_COMMUNITY = ToolDefinition(
             "edge_type": {
                 "type": "string",
                 "enum": ["INCLUDE", "CALL"],
-                "description": "INCLUDE=依赖社区, CALL=调用社区",
+                "description": "INCLUDE=依赖关系视角, CALL=调用关系视角",
             },
-            "level": {
-                "type": "number",
-                "description": "社区层级 (0=顶层, 1-5=子社区), 默认 0",
-                "default": 0,
-            },
-            "min_node_count": {
-                "type": "number",
-                "description": "过滤小社区的最小节点数 (默认: INCLUDE=6, CALL=12)",
-            },
+            "level": {"type": "number", "default": 0},
         },
         "required": ["edge_type"],
     },
 )
 
-# ── 2. 社区详情 ──
+# ── 2. 建立"内部组织"认知 ──
 
 TOPocode_COMMUNITY_DETAIL = ToolDefinition(
     name="topocode_community_detail",
     description=(
-        "深入查看单个社区的结构：包含哪些文件/符号、内部调用关系、"
-        "子社区层次、入边/出边依赖、Hub 节点及其架构意义。"
+        "深入理解一个子系统（干了什么）：它的核心是什么（Hub 节点），"
+        "内部符号如何协作（怎么干的），"
+        "它的边界为何这样切分——是被框架约束还是被领域逻辑驱动（为什么这么干）。"
     ),
     inputSchema={
         "type": "object",
         "properties": {
-            "comm_id": {"type": "string", "required": True},
-            "include_hierarchy": {
-                "type": "boolean",
-                "description": "是否包含子社区详情",
-                "default": True,
-            },
+            "comm_id": {"type": "string"},
+            "include_hierarchy": {"type": "boolean", "default": True},
         },
         "required": ["comm_id"],
     },
 )
 
-# ── 3. 架构总览 ──
+# ── 3. 建立"整体模式"认知 ──
 
 TOPocode_ARCHITECTURE_OVERVIEW = ToolDefinition(
     name="topocode_architecture_overview",
     description=(
-        "项目架构总览：社区拓扑图、关键依赖链、Hub 节点架构意义、"
-        "架构模式识别（分层/微服务/模块化/单体等）、子系统边界。"
-        "这是 topocode 的核心价值输出，提供 codegraph 无法提供的架构洞察。"
+        "识别项目整体架构模式——分层/微服务/管道/事件驱动（干了什么），"
+        "分析关键依赖链和子系统角色分布（怎么干的），"
+        "解释这个模式的形成原因——技术选型、团队结构、还是业务需求驱动（为什么这么干）。"
     ),
     inputSchema={
         "type": "object",
@@ -524,76 +617,61 @@ TOPocode_ARCHITECTURE_OVERVIEW = ToolDefinition(
             "focus": {
                 "type": "string",
                 "enum": ["overview", "dependencies", "call_flow", "structure"],
-                "description": "架构分析焦点",
                 "default": "overview",
             },
         },
     },
 )
 
-# ── 4. 版本差异 ──
+# ── 4. 建立"变化含义"认知 ──
 
 TOPocode_DIFF = ToolDefinition(
     name="topocode_diff",
     description=(
-        "版本级差异分析。不仅列出变更文件，更分析："
-        "哪些社区受影响、新增/分裂/消失的社区、Hub 节点迁移、"
-        "依赖边增减、架构复杂度变化。"
+        "发现两个版本间架构的差异（干了什么），"
+        "分析差异分布在哪些社区、哪些依赖边增减（怎么干的），"
+        "解读变化趋势：架构是更清晰了还是更耦合了？这个变化是故意的还是无意的（为什么这么干）。"
     ),
     inputSchema={
         "type": "object",
         "properties": {
-            "from_commit": {"type": "string", "description": "基准版本 (默认: 上次快照)"},
-            "to_commit": {"type": "string", "description": "目标版本 (默认: 当前)"},
-            "scope": {
-                "type": "string",
-                "enum": ["files", "symbols", "communities", "full"],
-                "description": "分析粒度",
-                "default": "full",
-            },
+            "from_commit": {"type": "string"},
+            "to_commit": {"type": "string"},
+            "scope": {"type": "string", "enum": ["files", "communities", "full"], "default": "full"},
         },
     },
 )
 
-# ── 5. AI 会话摘要 ──
+# ── 5. 建立"AI 影响"认知 ──
 
 TOPocode_SESSION_SUMMARY = ToolDefinition(
     name="topocode_session_summary",
     description=(
-        "AI coding 会话的变更摘要。返回：改了哪些文件/符号、"
-        "影响哪些社区、新增/断裂的依赖关系、架构影响评估、质量问题清单。"
-        "用于追溯 AI agent 的工作成果和潜在风险。"
+        "列出 AI coding agent 的变更（干了什么），"
+        "分析变更在架构层面的分布和影响（怎么干的），"
+        "评估是否存在架构风险、是否引入了反模式（为什么这么干——以及是否需要关注）。"
     ),
     inputSchema={
         "type": "object",
         "properties": {
-            "session_id": {"type": "string", "description": "会话 ID (默认: 最近一次)"},
+            "session_id": {"type": "string"},
         },
     },
 )
 
-# ── 6. 质量检查 ──
+# ── 6. 建立"风险"认知 ──
 
 TOPocode_QUALITY_INSPECT = ToolDefinition(
     name="topocode_quality_inspect",
     description=(
-        "基于社区结构的代码质量检查。检测：循环依赖、Hub 节点过载风险、"
-        "架构漂移（社区边界与预期模式不符）、缺失测试的模块、"
-        "过度耦合的子系统。输出按严重度排序的问题清单。"
+        "识别架构风险点——循环依赖、Hub 过载、架构漂移（干了什么），"
+        "分析每个风险的形成机制和影响范围（怎么干的），"
+        "解释为什么这是问题——会带来什么后果，以及解决方向建议（为什么这么干——以及怎么办）。"
     ),
     inputSchema={
         "type": "object",
         "properties": {
-            "focus": {
-                "type": "string",
-                "enum": ["cyclic_deps", "hub_overload", "arch_drift", "test_gaps", "all"],
-                "description": "检查焦点",
-                "default": "all",
-            },
-            "community_id": {
-                "type": "string",
-                "description": "限定到特定社区 (默认: 全项目)",
-            },
+            "focus": {"type": "string", "enum": ["cyclic_deps", "hub_overload", "arch_drift", "test_gaps", "all"], "default": "all"},
         },
     },
 )
@@ -732,18 +810,16 @@ Skills 分为五类：对外架构洞察 Tools（6 个）、内部文档生成 S
        changes
 ```
 
-### 7.3 对外架构洞察 Tools（仅 6 个，与 codegraph 互补）
+### 7.3 对外架构洞察 Tools（帮人建立架构认知）
 
-| Tool | 层级 | 说明 |
-|------|------|------|
-| `topocode_community` | **面** | 层次化社区结构 (L0~L5)、Hub/Orphan |
-| `topocode_community_detail` | **面** | 单社区深入：内部符号、子社区、出入依赖 |
-| `topocode_architecture_overview` | **体** | 项目架构总览：社区拓扑、模式识别 |
-| `topocode_diff` | **时** | 版本级差异：架构变更、社区增减 |
-| `topocode_session_summary` | **时** | AI 会话变更摘要：模块级影响 |
-| `topocode_quality_inspect` | **质** | 质量检查：循环依赖、Hub 过载、架构漂移 |
-
-**codegraph 覆盖符号/文件级（explore/search/callers/callees/impact/node/files/status），topocode 不重复。**
+| Tool | 帮人建立什么认知 |
+|------|----------------|
+| `topocode_community` | 系统由哪些子系统构成，它们怎么分层 |
+| `topocode_community_detail` | 一个子系统内部怎么组织的，谁在中心 |
+| `topocode_architecture_overview` | 整体架构模式是什么 |
+| `topocode_diff` | 这次变更对架构意味着什么 |
+| `topocode_session_summary` | AI 改了哪些模块，有什么风险 |
+| `topocode_quality_inspect` | 哪里有架构风险，优先级是什么 |
 
 ### 7.4 内外部接口边界
 
@@ -1056,52 +1132,42 @@ Agent 决策:
 
 ```python
 SERVER_INSTRUCTIONS = """
-# topocode — 代码架构知识图谱 + 质量分析引擎
+# topocode — 架构认知工具
 
-topocode 是独立的代码分析工具，提供 **架构层、社区层、时序层** 的能力。
-它不依赖任何其他工具，可独立完成从分析到文档生成的全流程。
+topocode 是独立的架构认知工具。它的目标不是输出数据，而是帮助人建立架构理解。
+每个 tool 的设计遵循"渐进披露"原则：先给框架，人需要时再展开细节。
 
-> 如果当前环境中同时部署了其他工具（如 codegraph），以下指引帮助你
-> 避免混淆——topocode 不负责符号/文件级查询，那不是它的设计目标。
+## 建立架构认知的路径
 
-## 什么时候用 topocode
+1. **先看整体** → `topocode_community` + `topocode_architecture_overview`
+   了解系统由哪些子系统构成，整体是什么模式。这一步帮人建立"地图感"。
 
-- **理解项目架构** "有哪些子系统？怎么组织的？"
-  → topocode_community + topocode_architecture_overview
+2. **深入关注点** → `topocode_community_detail`
+   对感兴趣的子系统深入了解：它的核心是什么，怎么组织的。
 
-- **变更影响分析** "上次改动影响了哪些模块？"
-  → topocode_diff + topocode_session_summary
+3. **追踪变化** → `topocode_diff` / `topocode_session_summary`
+   理解变更对架构意味着什么，不只是变了什么文件。
 
-- **AI 工作追溯** "AI 改了啥？架构有变化吗？"
-  → topocode_session_summary
-
-- **代码质量评估** "有没有循环依赖？哪些模块缺少测试？"
-  → topocode_quality_inspect
-
-- **深入了解某个模块** "auth 子系统内部结构怎样？"
-  → topocode_community_detail("auth-community")
+4. **评估风险** → `topocode_quality_inspect`
+   知道应该先关注什么问题。
 
 ## 什么时候不应当用 topocode
 
-以下问题不是 topocode 的设计目标，即使尝试也不会有好的结果：
+以下问题的答案在符号级/文件级，不在 topocode 的认知层级：
 
-- 查找单个函数/类的定义位置
-- 查找某个函数的调用者/被调用者
-- 浏览文件目录结构
+- 查找单个函数的定义位置
+- 查找谁调用了某个函数
+- 浏览目录结构
 - 按名称搜索符号
 
-## 共存环境中避免混淆
+## 输出风格
 
-如果你在环境中同时看到 topocode 和其他代码分析工具（如 codegraph）：
+- 先给结论（"这个系统是 3 层架构，auth 是中心子系统"）
+- 再给依据（"因为 12 个社区形成了清晰的层次，auth 的度=15 是最高"）
+- 最后给路径（"想深入了解 auth → topocode_community_detail"）
 
-- **查函数/类/文件/调用链** → 使用其他工具（如果有）
-- **查子系统/架构/质量/时序** → 使用 topocode
-- **只有 topocode** → 通过内置的 Skills（skill_analyze_community 等）完成全部工作
-
-## 原则
-
-- topocode 的输入输出是社区/子系统的语言，不是符号/文件的列表
-- topocode 是独立的、自足的工具，不依赖其他工具协同
+- 不要输出原始数据列表，输出已经提炼过的认知洞察
+- 如果环境中也有 symbol 级工具（如 codegraph），让它们做它们擅长的事
 """
 ```
 
@@ -1196,24 +1262,39 @@ Skill("skill_batch_analyze_communities",
 
 ```python
 SERVER_INSTRUCTIONS = """
-# topocode — 内置 Agent 代码分析引擎
+# topocode 内置 Agent — 以人为本的架构认知引擎
 
-你是 topocode 的内置 Agent，可直接访问 AnalysisContext 和所有 Skills。
+你的目标不是输出更多数据，而是帮助人建立架构认知、做出更好决策。
+
+## 核心原则
+
+1. **输出抽象，而非枚举**
+   ❌ "auth 社区有 12 个节点、45 条边"
+   ✅ "auth 是业务层的中心子系统。它的核心是 authenticate（Hub 节点，度=15）。
+       它连接了表示层（接收请求）和安全层（JWT 验证），是系统的安全边界。"
+
+2. **渐进披露**
+   先给框架（3 层架构），人追问时再展开。不要一次性倾倒所有信息。
+
+3. **教人，而非替代人**
+   解释"为什么 auth 和 middleware 属于不同社区"（边界是由关注点分离定义的），
+   让人建立架构直觉。决策权永远在人手里。
 
 ## 批量任务指南
 
-| 用户意图 | 使用 Skill |
-|---------|-----------|
-| "分析整个项目" | `skill_batch_analyze_communities` |
-| "生成架构文档" | `skill_batch_generate_docs(scope="full")` |
-| "只看总览" | `skill_batch_generate_docs(scope="overview_only")` |
-| "分析某个模块" | `skill_analyze_community(comm_id)` |
+| 用户意图 | 使用 Skill | 注意 |
+|---------|-----------|------|
+| "分析整个项目" | `skill_batch_analyze_communities` | 完成后主动告诉人：系统的关键发现是什么，不是列举 42 个社区 |
+| "生成架构文档" | `skill_batch_generate_docs` | 文档要有"地图感"——人看完应该知道从哪里开始深入 |
+| "只看总览" | `skill_batch_generate_docs(scope="overview_only")` | 总览的目的是帮人选方向，不是展示完整信息 |
+| "这个模块怎么设计的" | `skill_explain_arch_pattern` | 重点是"为什么这样设计"，不是"有什么文件" |
+| "上次改动有什么影响" | `topocode_diff` + `skill_compare_arch` | 解读变化趋势，不只列变更清单 |
 
 ## 原则
 
-- **批量任务用批处理 Skill** — 不要逐个社区手动调用
-- **图单独生成** — 文本完成后，图用独立 session
-- 先用 batch 获取全貌，用户追问时再深入单个模块
+- 先告诉人最重要的洞察是什么，再提供支持细节
+- 批量任务用批处理 Skill，不要逐个社区手动调用
+- 图单独生成——文本完成后，图用独立 session
 - 失败自动重试，不需用户干预
 """
 ```
@@ -1869,7 +1950,7 @@ topocode 是独立工具，不依赖也不设计为与 codegraph 协同。但如
 - codegraph: `.codegraph/` 索引目录，`codegraph serve` MCP 服务
 - topocode: `.topocode/` 配置目录，`topocode serve` MCP 服务
 
-两者使用不同目录、不同工具前缀，不会相互干扰。Agent 环境中同时看到两套工具时，遵循一个简单规则：**查符号/文件用 codegraph（如果有），查架构/社区/质量用时序用 topocode**。topocode 自身完全自足，不假设 codegraph 一定存在。
+两者使用不同目录、不同工具前缀，不会相互干扰。两者也不在同一认知层级：codegraph 回答符号/文件级问题，topocode 回答社区/模式/决策级问题。topocode 自身完全自足，不假设 codegraph 一定存在。
 
 ### C. 向后兼容
 
@@ -1890,3 +1971,266 @@ topocode 是独立工具，不依赖也不设计为与 codegraph 协同。但如
 | 用户自定义指令 | P5 | 无 → `InstructionManager` 注入 system prompt |
 
 所有这些优化的目标一致：将 LLM 生成能力从硬编码的模板管道，转变为 Agent 可自主组合的 MCP Skills。
+
+---
+
+## 十四、分布式架构与云端服务
+
+### 14.1 核心类比：topocode 是架构领域的 git
+
+```
+git 模型:
+  本地:  git clone → 本地仓库 → commit/branch/diff/log
+  远程:  GitHub/GitLab → push/pull/fork/PR
+
+topocode 模型:
+  本地:  topocode init → 本地知识库 → analyze/diff/quality/session
+  云端:  topocode Cloud → 架构注册/基准对比/模式匹配/演化参照
+```
+
+**核心原则**：
+- 本地完全自足，离线 100% 可用（与 git 一样）
+- 云端是增强层，提供参照系和知识共享（与 GitHub 一样）
+- 不上传源码，只上传聚合指标（社区数/度分布/模式标签）
+
+### 14.2 整体架构
+
+```
+                    topocode 分布式架构
+
+      ┌───────────────────┐    ┌───────────────────┐
+      │    本地 topocode   │    │   本地 topocode    │
+      │    (开发者 A)      │    │    (开发者 B)      │
+      │                   │    │                   │
+      │  • 项目分析        │    │  • 项目分析        │
+      │  • 私域知识        │    │  • 私域知识        │
+      │  • Agent Runtime   │    │  • Agent Runtime   │
+      │  • 6 本地 Tools    │    │  • 6 本地 Tools    │
+      │  • 4 云端 Tools    │    │  • 4 云端 Tools    │
+      └────────┬──────────┘    └────────┬──────────┘
+               │                        │
+               │  MCP over TLS           │  MCP over TLS
+               │                        │
+               ▼                        ▼
+      ┌────────────────────────────────────────────────┐
+      │              topocode Cloud                    │
+      │                                                │
+      │  ┌──────────────┐  ┌──────────┐  ┌──────────┐ │
+      │  │   内容管理     │  │  内容增强  │  │ 内容订阅  │ │
+      │  │              │  │          │  │          │ │
+      │  │ • 架构注册库  │  │ • 基准对比 │  │ • API Key │ │
+      │  │ • 模式目录   │  │ • 相似搜索 │  │ • 分级访问 │ │
+      │  │ • 演化路径库  │  │ • 模式匹配 │  │ • 用量控制 │ │
+      │  │ • 指标基准库  │  │ • 演化参照 │  │ • 隐私控制 │ │
+      │  └──────────────┘  └──────────┘  └──────────┘ │
+      │                                                │
+      │  ┌──────────────────────────────────────────┐  │
+      │  │          OSS 分析流水线                    │  │
+      │  │  • 定期拉取高价值 OSS 仓库 → 全量分析      │  │
+      │  │  • commit 跟踪 → 架构演化记录              │  │
+      │  │  • 跨项目模式提取 → 模式目录更新            │  │
+      │  └──────────────────────────────────────────┘  │
+      └────────────────────────────────────────────────┘
+```
+
+### 14.3 云端三层服务
+
+#### 层一：内容管理
+
+**架构注册库** — 类似 npm registry，注册的是架构知识：
+
+```json
+{
+  "project": "django-rest-framework",
+  "analyzed_at": "2026-06-09",
+  "commit": "abc123",
+  "language": "python",
+  "framework": "django",
+
+  "communities_L0": { "count": 8, "patterns": ["layered", "plugin-based"] },
+  "communities_by_edge": { "INCLUDE": [...], "CALL": [...] },
+
+  "metrics": {
+    "hub_degree_median": 6,
+    "hub_degree_p95": 14,
+    "community_size_median": 12,
+    "coupling_density": 0.3,
+    "modularity_score": 0.72
+  },
+
+  "evolution_since_v1": {
+    "community_count_trend": "stable",
+    "hub_migration": ["auth_center → distributed"],
+    "arch_drift_score": 0.15
+  }
+}
+```
+
+**模式目录** — 跨项目提取的架构模式：
+
+```json
+{
+  "pattern": "middleware-authentication-hub",
+  "description": "安全中间件作为认证中心节点，连接表示层和业务层",
+  "found_in": ["django-rest-framework", "express-api", "spring-security"],
+  "typical_metrics": { "hub_degree": "8-14", "community_size": "8-20" },
+  "common_evolution": "随着项目增长，认证中心倾向于从单一 Hub 分裂为多个子角色",
+  "anti_pattern_when": "hub_degree > 20, 或跨了 >3 个社区边界"
+}
+```
+
+**演化路径库** — 跟踪同一项目多版本的架构变化：
+
+```
+spring-framework 演化路径:
+  v3.0 (2010): monolithic-layered (4 communities, modularity=0.45)
+  v4.0 (2014): modular-layered  (6 communities, modularity=0.61) ← 引入 DI 容器
+  v5.0 (2018): reactive-split   (9 communities, modularity=0.73) ← WebFlux 引入
+  v6.0 (2024): service-oriented (12 communities, modularity=0.78)
+
+→ 提取知识: Spring 每 4 年一次重大架构重构，每次社区数增加约 50%，模块化度稳步提升
+```
+
+**指标基准库** — 按语言/框架分组的统计基准：
+
+```json
+{
+  "python+django": {
+    "community_count_L0": { "p25": 4, "p50": 7, "p75": 12 },
+    "hub_degree": { "p50": 6, "p95": 14 },
+    "modularity_score": { "p50": 0.65, "p25": 0.52 },
+    "orphan_rate": { "p50": 0.15, "warning_threshold": 0.30 }
+  }
+}
+```
+
+#### 层二：内容增强（云端 MCP Tools）
+
+本地 topocode 通过这 4 个工具查询云端：
+
+```python
+# ── 1. 相似项目搜索 ──
+
+TOPocode_CLOUD_SEARCH = ToolDefinition(
+    name="topocode_cloud_search",
+    description=(
+        "在云端架构注册库中搜索与当前项目相似的开源项目。"
+        "按语言、框架、社区规模匹配。返回相似项目的架构特征和关键指标。"
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "language": {"type": "string"},
+            "framework": {"type": "string"},
+            "community_count_range": {"type": "string", "description": "例如 '5-15'"},
+        },
+        "required": ["language"],
+    },
+)
+
+# ── 2. 基准对比 ──
+
+TOPocode_CLOUD_BENCHMARK = ToolDefinition(
+    name="topocode_cloud_benchmark",
+    description=(
+        "将当前项目的架构指标与同类项目对比，给出偏差分析。"
+        "不是打分，是告诉你'你的指标在同类型项目中处于什么位置'。"
+        "例如：你的 auth 社区 degree=15，同类项目 median=8——处于异常区间。"
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string", "required": True},
+            "compare_against": {"type": "string", "description": "基准项目集 (默认: 同语言+同框架)"},
+        },
+        "required": ["project_id"],
+    },
+)
+
+# ── 3. 模式匹配 ──
+
+TOPocode_CLOUD_PATTERN_MATCH = ToolDefinition(
+    name="topocode_cloud_pattern_match",
+    description=(
+        "识别当前项目的架构模式，并查找与它属于同一模式的其他项目。"
+        "输出：该模式的定义、常见优势、常见陷阱、其他项目的演化路径。"
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string", "required": True},
+        },
+        "required": ["project_id"],
+    },
+)
+
+# ── 4. 演化参照 ──
+
+TOPocode_CLOUD_EVOLUTION_REF = ToolDefinition(
+    name="topocode_cloud_evolution_ref",
+    description=(
+        "查找同类项目在架构演化中出现过的类似变化，"
+        "提供'其他人遇到同样问题是怎么解决的'的参照。"
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "change_description": {"type": "string", "description": "当前面临的架构变更描述"},
+            "language": {"type": "string"},
+        },
+        "required": ["change_description"],
+    },
+)
+```
+
+#### 层三：内容订阅（鉴权）
+
+```
+服务分层:
+
+免费层 (默认)
+  ├─ topocode_cloud_search          # 基础搜索
+  ├─ topocode_cloud_benchmark       # 基础对比 (3 个项目)
+  └─ topocode_cloud_pattern_match   # 模式匹配
+
+高级层
+  ├─ 无限基准对比
+  ├─ topocode_cloud_evolution_ref   # 演化参照
+  ├─ 自定义项目集合对比
+  └─ 定期推送关注项目的架构变化
+```
+
+**鉴权配置：**
+
+```json
+// ~/.topocode/cloud.json
+{
+  "api_key": "tc_sk_xxx",
+  "endpoint": "https://cloud.topocode.dev",
+  "privacy": {
+    "upload_metrics": true,
+    "upload_patterns": false,
+    "allow_benchmark_contrib": false
+  }
+}
+```
+
+### 14.4 与本地能力的协作
+
+| 本地已有能力 | 云端增强后 | 认知层级提升 |
+|------------|-----------|------------|
+| `topocode_community` 告诉你有哪些子系统 | `cloud_benchmark` 告诉你"同类项目通常有多少子系统" | 社区级 → 必要性级 |
+| `topocode_quality_inspect` 告诉你哪里有风险 | `cloud_pattern_match` 告诉你"这个风险在业界产生过什么后果" | 决策级 → 目标级 |
+| `skill_recommend_refactor` 给出基于自身项目的建议 | `cloud_evolution_ref` 告诉你"其他项目面对同样问题时的解决方案和效果" | 决策级 → 目标级 |
+| `skill_compare_arch` 对比同一项目的历史版本 | `cloud_search` + `cloud_benchmark` 对比你的项目与业界同类项目 | 必要性级 → 目标级 |
+
+### 14.5 实施节奏
+
+| 阶段 | 内容 | 依赖 | 预估 |
+|------|------|------|------|
+| **P9.1** 种子知识库 | 预分析 20 个高价值 OSS 项目，提取架构快照+演化路径，建立模式目录 v1 | 本地分析管线已完成 | 2 天 |
+| **P9.2** 云端 MCP Tools | 4 个 cloud_* Tools 接入 MCP Server，本地可查询云端 | P9.1 | 1 天 |
+| **P9.3** 鉴权与分级 | API Key 认证、用量控制、隐私开关 | P9.2 | 1 天 |
+| **P9.4** 自动化流水线 | OSS 项目定期分析、commit 跟踪、模式库自动更新 | P9.1 + 基础设施 | 2 天 |
+
+P9 总计约 6 天，为 P1-P8 完成后的中远期规划。
