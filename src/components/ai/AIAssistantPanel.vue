@@ -1,22 +1,24 @@
 <script setup lang="ts">
 /**
- * AI 助手面板 — 右侧栏独立组件
+ * AI 助手面板 — 右侧栏 SH-004
  *
- * 轻量级对话界面，支持自由提问，不绑定报告 tab。
+ * 管理当前项目分析报告的对话 session。
+ * 支持自由提问和报告上下文相关的分析对话。
  */
 
 import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  PaperAirplaneIcon,
-  SparklesIcon,
-  TrashIcon,
+  PaperAirplaneIcon, SparklesIcon, TrashIcon,
+  DocumentTextIcon, ClockIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings-store'
+import { useProjectStore } from '@/stores/project'
+import { useAnalysisStore } from '@/stores/analysis'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useComponentId } from '@/composables/useComponentId'
 
-const { showId, componentId } = useComponentId('OT-001')
+const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
@@ -34,6 +36,19 @@ const streaming = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
 
 const llmConfigured = computed(() => isLLMConfigured())
+
+// Session management — bound to current analysis task
+const activeTaskId = ref<string | null>(null)
+const activeTaskName = ref<string>('')
+const hasAnalysisContext = computed(() => !!activeTaskId.value)
+
+function bindToTask(taskId: string | null, taskName: string = '') {
+  activeTaskId.value = taskId
+  activeTaskName.value = taskName
+  if (taskId) {
+    addMessage('system', t('ai.analysisSession', '当前分析会话: {name}', { name: taskName || taskId }))
+  }
+}
 
 function scrollToBottom() {
   nextTick(() => {

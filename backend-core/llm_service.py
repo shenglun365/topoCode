@@ -999,6 +999,11 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not messages:
             raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
 
+        # v2: inject user custom instructions
+        from instruction_manager import InstructionManager
+        im = InstructionManager()
+        messages = im.inject(messages, scope="all")
+
         extra_meta = {}
         if template_id:
             extra_meta['template_id'] = template_id

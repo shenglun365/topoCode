@@ -102,6 +102,12 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function importProject(path: string) {
+    // 检查重复导入
+    const existing = projects.value.find(
+      p => p.path === path || p.rootPath === path
+    )
+    if (existing) return null
+
     initImportListener()
     importing.value = true
     importProgress.value = 0

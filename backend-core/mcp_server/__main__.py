@@ -46,7 +46,7 @@ def main():
     else:
         logger.info("MCP Server using direct library calls (--zmq-dealer-port=0)")
 
-    data_dir = os.path.join(project_root, ".topo", "data")
+    data_dir = os.path.join(project_root, ".topocode", "data")
     snapshot_dir = os.path.join(data_dir, "snapshots")
     snapshot_store = SnapshotStore(os.path.join(snapshot_dir, "snapshots.db"))
     git_adapter = GitAdapter(project_root)

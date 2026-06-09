@@ -135,8 +135,12 @@ async function handleImportProject() {
   if (window.api && window.api.dialog) {
     const path = await window.api.dialog.openDirectory()
     if (path) {
-      await projectStore.importProject(path)
-      await projectStore.loadProjects()
+      const result = await projectStore.importProject(path)
+      if (result) {
+        await projectStore.loadProjects()
+      } else {
+        alert(t('import.error.duplicate'))
+      }
     }
   }
 }

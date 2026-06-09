@@ -653,7 +653,7 @@ initUsageStats()
                 Ollama
               </option>
               <option value="openai">
-                OpenAI
+                云端模型(OpenAI 格式)
               </option>
               <option value="lm-studio">
                 LM-Studio

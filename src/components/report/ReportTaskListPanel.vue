@@ -1,457 +1,149 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+/**
+ * ReportTaskListPanel — Agent 分析任务执行状态。
+ *
+ * 显示请求层面的运行信息：状态、耗时、成功/失败、失败原因。
+ * 数据不持久化，来自 ZMQ PUB task.progress / task.complete 事件。
+ */
+
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PlayIcon, ArrowPathIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import { PlayIcon, ArrowPathIcon, CheckCircleIcon, XCircleIcon, ClockIcon } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings-store'
-import { useModelConfigStore } from '@/stores/model-config-store'
-import { usePipelineStore } from '@/stores/pipeline-store'
-import { useCommunityStore } from '@/stores/community-store'
-import { useReportStore } from '@/stores/report-store'
 import { useProjectStore } from '@/stores/project'
-import { useFuncGroupStore } from '@/stores/funcGroup'
-import PipelineTaskTree from './PipelineTaskTree.vue'
-import type { PipelineTaskNode } from '@/types/ipc'
+import { useAnalysisStore } from '@/stores/analysis'
+import { ipc } from '@/services/ipc'
 import { useComponentId } from '@/composables/useComponentId'
 
+const { showId, componentId } = useComponentId('RP-TL')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
-const modelConfigStore = useModelConfigStore()
-const pipelineStore = usePipelineStore()
-const communityStore = useCommunityStore()
-const reportStore = useReportStore()
 const projectStore = useProjectStore()
-const funcGroup = useFuncGroupStore()
+const analysisStore = useAnalysisStore()
 
 const props = defineProps<{ taskId: string; taskName?: string }>()
 
 const projectId = computed(() => projectStore.selectedProjectId || '')
 
-const taskState = computed(() => pipelineStore.tasks[props.taskId])
-
-const rootTask = computed<PipelineTaskNode | null>(() => taskState.value?.pipelineRootTask ?? null)
-const progress = computed(() => taskState.value?.pipelineProgress ?? 0)
-
-const leaves = computed(() => {
-  if (!rootTask.value) return []
-  const result: PipelineTaskNode[] = []
-  function walk(n: PipelineTaskNode) {
-    if (n.children && n.children.length > 0) {
-      n.children.forEach(walk)
-    } else {
-      result.push(n)
-    }
-  }
-  walk(rootTask.value)
-  return result
-})
-
-const totalCount = computed(() => {
-  const n = leaves.value.length
-  return n
-})
-const completedCount = computed(() => {
-  const n = leaves.value.filter(n => n.status === 'completed' || n.status === 'skipped').length
-  console.log(`[SH-004] pipeline progress total=${totalCount.value} completed=${n} pct=${totalCount.value > 0 ? Math.round(n / totalCount.value * 100) : 0}`)
-  return n
-})
-
-// Community progress from communityStore (L0 only — LLM analysis targets root communities)
-const communityTaskState = computed(() => communityStore.tasks[props.taskId])
-const communityList = computed(() => {
-  const list = communityTaskState.value?.communities || []
-  console.log(`[SH-004] communityList total=${list.length}`)
-  return list
-})
-const includeCommunities = computed(() => {
-  const list = communityList.value.filter(c => c.edgeType === 'INCLUDE' && c.level === 'L0')
-  return list
-})
-const callCommunities = computed(() => {
-  const list = communityList.value.filter(c => c.edgeType === 'CALL' && c.level === 'L0')
-  return list
-})
-
-interface CommProgress { total: number; completed: number; running: number }
-const includeProgress = computed<CommProgress | null>(() => {
-  const list = includeCommunities.value
-  if (!list.length) return null
-  const total = list.length
-  const completed = list.filter(c => c.status === 'completed').length
-  const running = list.filter(c => c.status === 'running' || c.status === 'queued').length
-  console.log(`[SH-004] includeProgress total=${total} completed=${completed} running=${running}`)
-  return { total, completed, running }
-})
-const callProgress = computed<CommProgress | null>(() => {
-  const list = callCommunities.value
-  if (!list.length) return null
-  const total = list.length
-  const completed = list.filter(c => c.status === 'completed').length
-  const running = list.filter(c => c.status === 'running' || c.status === 'queued').length
-  console.log(`[SH-004] callProgress total=${total} completed=${completed} running=${running}`)
-  return { total, completed, running }
-})
-
-const warnMap = reactive<Record<string, string>>({})
-
-function isStepEnabled(nodeId: string): boolean {
-  if (nodeId !== 'overall_architecture') return true
-  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
-  const caNode = root?.children?.find(c => c.id === 'community_analysis')
-  if (!caNode || (caNode.status !== 'completed' && caNode.status !== 'skipped')) return false
-  const communities = communityStore.tasks[props.taskId]?.communities?.filter(c => c.level === 'L0')
-  if (communities?.some(c => c.status === 'pending' || c.status === 'running' || c.status === 'queued')) return false
-  return true
+interface TaskRun {
+  id: string
+  taskId: string
+  runNumber: number
+  status: 'running' | 'done' | 'error' | 'stopped'
+  progress: number
+  total: number
+  current: number
+  startedAt: string
+  finishedAt?: string
+  durationMs?: number
+  error?: string
 }
 
-function handleStepClick(nodeId: string) {
-  console.log('[SH-004] handleStepClick', nodeId, 'enabled=', isStepEnabled(nodeId))
-  if (nodeId === 'overall_architecture' && !isStepEnabled(nodeId)) {
-    warnMap[nodeId] = t('report.pipeline.prerequisitesNotMet')
-    console.log('[SH-004] warnMap set', nodeId, '=', warnMap[nodeId], 'keys=', Object.keys(warnMap))
-    setTimeout(() => {
-      console.log('[SH-004] warnMap delete', nodeId)
-      delete warnMap[nodeId]
-    }, 5000)
-    return
-  }
-  handleRunNode(nodeId)
-}
+const runs = ref<TaskRun[]>([])
+const loading = ref(false)
 
-function handleRunNode(nodeId: string) {
-  console.log(`[SH-004] handleRunNode ENTER nodeId=${nodeId}`)
-  if (nodeId === 'overall_architecture') {
-    const ctx = funcGroup.context.analysis
-    const homeTab = ctx.tabs.find(t => t.kind === 'reportHome' && (t as any).taskId === props.taskId)
-    if (homeTab) {
-      funcGroup.setActiveTab('analysis', homeTab.id)
-    }
-    pipelineStore.setPendingStepRun(props.taskId, nodeId)
-    console.log(`[SH-004] handleRunNode overall_architecture: navigating to reportHome`)
-    return
-  }
-  const root = pipelineStore.tasks[props.taskId]?.pipelineRootTask
-  const find = (node: PipelineTaskNode): PipelineTaskNode | undefined => {
-    if (node.id === nodeId) return node
-    if (node.children) for (const c of node.children) { const r = find(c); if (r) return r }
-    return undefined
-  }
-  const node = root ? find(root) : undefined
-  if (!node) {
-    console.log(`[SH-004] handleRunNode node not found: ${nodeId}`)
-    return
-  }
-
-  pipelineStore.setPipelineRunning(props.taskId, true)
-  pipelineStore.setPipelinePaused(props.taskId, false)
-
-  if (nodeId === 'validation') {
-    node.status = 'running'
-    const mid = modelConfigStore.models.find(m => m.isDefault)?.id
-    if (!mid) { node.status = 'error'; node.error = t('report.llmNotConfigured') }
-    else {
-      modelConfigStore.testModel(mid).then(() => { node.status = 'completed' }).catch((e: any) => { node.status = 'error'; node.error = e.message })
-    }
-  } else if (nodeId === 'project_summary') {
-    const pid = projectStore.selectedProjectId
-    if (!pid) { node.status = 'skipped'; pipelineStore.recalcProgress(props.taskId); return }
-    node.status = 'running'
-    Promise.all([
-      reportStore.getReadmeContent(pid).catch(() => null),
-      reportStore.extractDependencyFiles(pid).catch(() => null),
-    ]).then(() => {
-      reportStore.generateProjectSummary(pid).then(r => {
-        node.status = r?.summary ? 'completed' : 'error'
-        if (!r?.summary) node.error = 'Empty summary'
-      }).catch((e: any) => { node.status = 'error'; node.error = e.message })
-    })
-  } else if (nodeId === 'community_analysis') {
-    node.status = 'running'
-    communityStore.getCascadeLevels(props.taskId, 'CALL').then(levels => {
-      node.status = (levels?.levels?.length) ? 'completed' : 'skipped'
-    }).catch(() => { node.status = 'skipped' })
-  }
-
-  pipelineStore.setPipelineRunning(props.taskId, false)
-  pipelineStore.recalcProgress(props.taskId)
-}
-
-function openCommunityAnalysis() {
-  const ctx = funcGroup.context.analysis
-  const existing = ctx.tabs.find(
-    t => t.kind === 'componentAnalysis' && (t as any).taskId === props.taskId
-  )
-  if (existing) {
-    funcGroup.setActiveTab('analysis', existing.id)
-    return
-  }
-  funcGroup.openTab('analysis', {
-    id: `comp-analysis-${props.taskId}-${Date.now()}`,
-    kind: 'componentAnalysis',
-    title: t('report.pipeline.communityAnalysis'),
-    taskId: props.taskId,
-    projectId: projectId.value,
+function loadRuns() {
+  loading.value = true
+  analysisStore.getTaskRuns(props.taskId).then((rows: any[]) => {
+    runs.value = (rows || []).map((r: any) => ({
+      id: r.id,
+      taskId: r.taskId || r.task_id,
+      runNumber: r.runNumber || r.run_number,
+      status: r.status,
+      progress: r.progress || 0,
+      total: r.total || 100,
+      current: r.current || 0,
+      startedAt: r.startedAt || r.started_at,
+      finishedAt: r.finishedAt || r.finished_at,
+      durationMs: r.durationMs || r.duration_ms,
+      error: r.error,
+    }))
+  }).catch(() => {}).finally(() => {
+    loading.value = false
   })
 }
 
-const { showId, componentId } = useComponentId('RP-005')
+function formatDuration(ms: number | undefined): string {
+  if (!ms) return '-'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60000)}m${Math.round((ms % 60000) / 1000)}s`
+}
+
+function formatTime(iso: string | undefined): string {
+  if (!iso) return '-'
+  return iso.slice(11, 19)
+}
+
+function statusIcon(status: string) {
+  switch (status) {
+    case 'done': return CheckCircleIcon
+    case 'error': return XCircleIcon
+    case 'running': return ArrowPathIcon
+    case 'stopped': return XCircleIcon
+    default: return ClockIcon
+  }
+}
+
+onMounted(() => loadRuns())
 </script>
 
 <template>
-  <div class="task-list-panel">
-    <span
-      v-if="showId"
-      class="cmp-id"
-    >{{ componentId }}</span>
-    <div
-      v-if="!rootTask"
-      class="tl-empty"
-    >
-      <SparklesIcon class="w-8 h-8" />
-      <span>{{ t('report.taskList.empty') }}</span>
+  <div class="task-run-panel">
+    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <div class="panel-header">
+      <PlayIcon class="hdr-icon" />
+      <span>{{ t('report.taskRuns', '分析任务执行') }}</span>
+      <button class="refresh-btn" @click="loadRuns" :disabled="loading">
+        <ArrowPathIcon class="refresh-icon" :class="{ spin: loading }" />
+      </button>
     </div>
-
-    <template v-else>
-      <div class="tl-header">
-        <div
-          v-if="taskName"
-          class="tl-task-name"
-        >
-          {{ taskName }}
-        </div>
-        <div class="tl-progress-row">
-          <span class="tl-progress-label">{{ t('report.taskList.progress') }}:</span>
-          <span class="tl-progress-text">{{ completedCount }}/{{ totalCount }}</span>
-        </div>
-        <div class="tl-progress-bar">
-          <div
-            class="tl-progress-fill"
-            :style="{ width: progress + '%' }"
-          />
+    <div class="panel-body">
+      <div v-if="runs.length === 0" class="empty-state">
+        <p>{{ t('report.noRuns', '暂无执行记录') }}</p>
+      </div>
+      <div v-for="run in runs" :key="run.id" class="run-item">
+        <component :is="statusIcon(run.status)" class="run-icon" :class="`status-${run.status}`" />
+        <div class="run-info">
+          <div class="run-header">
+            <span class="run-number">#{{ run.runNumber }}</span>
+            <span class="run-status" :class="`status-${run.status}`">
+              {{ run.status === 'done' ? '成功' : run.status === 'error' ? '失败' : run.status === 'running' ? '运行中' : '停止' }}
+            </span>
+          </div>
+          <div class="run-meta">
+            <span class="run-time">{{ formatTime(run.startedAt) }}</span>
+            <span class="run-duration"> · {{ formatDuration(run.durationMs) }}</span>
+          </div>
+          <div v-if="run.error" class="run-error">{{ run.error }}</div>
         </div>
       </div>
-
-      <div class="tl-tree">
-        <PipelineTaskTree
-          :node="rootTask"
-          @open-community-analysis="openCommunityAnalysis"
-        >
-          <template #actions="{ node }">
-            <button
-              v-if="(!node.children || node.children.length === 0) && !['community_analysis', 'validation'].includes(node.id)"
-              class="btn btn-xs btn-ghost task-step-btn"
-              :class="{ 'step-disabled': !isStepEnabled(node.id) }"
-              :title="isStepEnabled(node.id) ? (node.status === 'completed' ? t('common.retry') : t('common.start')) : t('report.pipeline.prerequisitesNotMet')"
-              @click.stop="handleStepClick(node.id)"
-            >
-              <PlayIcon
-                v-if="node.status !== 'completed' && node.status !== 'error'"
-                class="w-2.5 h-2.5"
-              />
-              <ArrowPathIcon
-                v-else
-                class="w-2.5 h-2.5"
-              />
-            </button>
-            <button
-              v-if="node.id === 'validation'"
-              class="btn btn-xs btn-ghost task-step-btn"
-              :title="node.status === 'error' ? t('common.retry') : t('report.pipeline.testConnection')"
-              @click.stop="handleRunNode(node.id)"
-            >
-              <PlayIcon
-                v-if="node.status !== 'completed' && node.status !== 'error'"
-                class="w-2.5 h-2.5"
-              />
-              <ArrowPathIcon
-                v-else
-                class="w-2.5 h-2.5"
-              />
-            </button>
-          </template>
-          <template #content="{ node }">
-            <div
-              v-if="node.id === 'overall_architecture' && warnMap[node.id]"
-              class="node-warning"
-            >{{ warnMap[node.id] }}</div>
-            <div
-              v-if="node.id === 'community_analysis'"
-              class="ca-monitor"
-            >
-              <div
-                v-if="node.id === 'overall_architecture' && warnMap[node.id]"
-                class="node-warning"
-              >{{ warnMap[node.id] }}</div>
-              <div
-                v-if="node.id === 'overall_architecture'"
-                class="node-warning-debug"
-              >warnMap has key: {{ node.id in warnMap }}, value: {{ warnMap[node.id] || '(empty)' }}</div>
-              <div
-                v-if="includeProgress"
-                class="ca-row"
-              >
-                <span class="ca-label">{{ t('report.pipeline.groupInclude') }}</span>
-                <div class="ca-bar">
-                  <div
-                    class="ca-fill"
-                    :style="{ width: Math.round((includeProgress.completed / includeProgress.total) * 100) + '%' }"
-                  />
-                </div>
-                <span class="ca-text">
-                  <template v-if="includeProgress.running > 0">
-                    {{ includeProgress.completed }}/{{ includeProgress.total }}
-                    <span class="ca-running">+{{ includeProgress.running }}</span>
-                  </template>
-                  <template v-else>{{ includeProgress.completed }}/{{ includeProgress.total }}</template>
-                </span>
-              </div>
-              <div
-                v-if="callProgress"
-                class="ca-row"
-              >
-                <span class="ca-label">{{ t('report.pipeline.groupCall') }}</span>
-                <div class="ca-bar">
-                  <div
-                    class="ca-fill"
-                    :style="{ width: Math.round((callProgress.completed / callProgress.total) * 100) + '%' }"
-                  />
-                </div>
-                <span class="ca-text">
-                  <template v-if="callProgress.running > 0">
-                    {{ callProgress.completed }}/{{ callProgress.total }}
-                    <span class="ca-running">+{{ callProgress.running }}</span>
-                  </template>
-                  <template v-else>{{ callProgress.completed }}/{{ callProgress.total }}</template>
-                </span>
-              </div>
-            </div>
-          </template>
-        </PipelineTaskTree>
-      </div>
-    </template>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.task-list-panel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  font-size: 11px;
-  overflow: hidden;
-}
-
-.tl-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.tl-header {
-  padding: 8px 10px 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tl-task-name {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 4px;
-  padding-bottom: 4px;
-  border-bottom: 1px dashed var(--border);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tl-progress-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.tl-progress-label { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-.tl-progress-text { color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
-
-.tl-progress-bar {
-  height: 4px;
-  background: var(--bg-primary);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.tl-progress-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.3s;
-}
-
-.tl-tree {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.task-step-btn {
-  padding: 1px 4px;
-  opacity: 0.5;
-}
-.task-step-btn:hover { opacity: 1; }
-
-.ca-monitor {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 3px 0 2px;
-}
-.ca-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 9px;
-}
-.ca-label {
-  color: var(--text-muted);
-  white-space: nowrap;
-  width: 52px;
-  flex-shrink: 0;
-}
-.ca-bar {
-  flex: 1;
-  height: 4px;
-  background: var(--bg-primary);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.ca-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.3s;
-}
-.ca-text {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  min-width: 36px;
-  text-align: right;
-}
-.ca-running {
-  color: var(--accent);
-}
-
-.step-disabled { opacity: 0.4; }
-
-.node-warning {
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--warning);
-  line-height: 1.4;
-}
+.task-run-panel { background: var(--bg-primary, #1a1a2e); border-radius: 0.5rem; overflow: hidden; }
+.panel-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; font-weight: 600; color: var(--text-primary); }
+.hdr-icon { width: 0.9rem; height: 0.9rem; }
+.refresh-btn { margin-left: auto; background: none; border: none; cursor: pointer; }
+.refresh-icon { width: 0.8rem; height: 0.8rem; color: var(--text-muted); }
+.refresh-icon.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.panel-body { padding: 0.25rem; max-height: 300px; overflow-y: auto; }
+.empty-state { padding: 2rem 1rem; text-align: center; color: var(--text-secondary); font-size: 0.8rem; }
+.run-item { display: flex; gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 0.375rem; }
+.run-item:hover { background: var(--bg-secondary); }
+.run-icon { width: 1rem; height: 1rem; flex-shrink: 0; margin-top: 0.15rem; }
+.status-done { color: #22c55e; }
+.status-error { color: #ef4444; }
+.status-running { color: var(--accent, #7c3aed); animation: pulse 1.2s infinite; }
+.status-stopped { color: #f59e0b; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.run-info { flex: 1; min-width: 0; }
+.run-header { display: flex; justify-content: space-between; align-items: center; }
+.run-number { font-size: 0.75rem; color: var(--text-muted); }
+.run-status { font-size: 0.7rem; font-weight: 500; }
+.run-meta { font-size: 0.65rem; color: var(--text-muted); margin-top: 0.1rem; }
+.run-error { font-size: 0.7rem; color: #ef4444; margin-top: 0.2rem; background: #3b1111; padding: 0.2rem 0.4rem; border-radius: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

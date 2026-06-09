@@ -10,7 +10,7 @@ def find_db_dir():
     candidates = [
         os.environ.get('TOPOCODE_DB_DIR', ''),
         os.path.join(os.path.expanduser("~"), ".config", "topoone-ui", "topoone.db"),
-        os.path.join(os.path.expanduser("~"), ".topoone"),
+        os.path.join(os.path.expanduser("~"), ".topocode"),
         DB_DIR,
     ]
     for d in candidates:

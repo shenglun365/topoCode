@@ -203,7 +203,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         project_id = f"proj-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
         logger.info(f"[import] 创建项目库: {project_id}")
-        project_db = multi_db.init_project_db(project_id)
+        project_db = multi_db.init_project_db(project_id, project_root=os.path.abspath(path))
         logger.info(f"[import] 项目库创建完成, 耗时 {time.time() - t0:.2f}s")
 
         # 单次遍历：同时完成语言检测和文件扫描
@@ -484,7 +484,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("system.exportProject")
     def export_project(project_id: str, outputPath: str):
-        """导出项目库为 .topoone-archive (zip)"""
+        """导出项目库为 .topocode-archive (zip)"""
         project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
         if not project:
             raise ValueError(f"Project not found: {project_id}")
@@ -508,7 +508,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
                 json.dump(graph_data, f, ensure_ascii=False, indent=2)
 
             # 打包为 zip
-            archive_path = f"{outputPath}.topoone-archive" if not outputPath.endswith(".topoone-archive") else outputPath
+            archive_path = f"{outputPath}.topocode-archive" if not outputPath.endswith(".topocode-archive") else outputPath
             with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 for root, _, files in os.walk(temp_dir):
                     for file in files:
@@ -907,8 +907,19 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.addModel")
     def add_model(name: str, provider: str, model: str, url: str, type: str = "local", **kwargs):
-        model_id = f"model-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
+
+        # 去重: 同名 + 同 provider 的模型自动更新
+        existing = main_db.fetchone(
+            "SELECT id FROM model_configs WHERE name = ? AND provider = ?",
+            (name, provider),
+        )
+        if existing:
+            logger.info(f"[addModel] 模型已存在，自动更新: {existing['id']} ({name}/{provider})")
+            return update_model(existing["id"], **kwargs,
+                              name=name, provider=provider, model=model, url=url, type=type)
+
+        model_id = f"model-{uuid.uuid4().hex[:8]}"
 
         if kwargs.get("isDefault"):
             main_db.execute("UPDATE model_configs SET is_default = 0")

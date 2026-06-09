@@ -788,7 +788,7 @@ class MultiDBManager:
 
     def __init__(self, data_dir: str = None):
         if data_dir is None:
-            data_dir = os.path.join(os.path.expanduser("~"), ".topoone")
+            data_dir = os.path.join(os.path.expanduser("~"), ".topocode")
         self.data_dir = data_dir
         os.makedirs(self.data_dir, exist_ok=True)
 
@@ -911,9 +911,18 @@ class MultiDBManager:
         self.sessions_db.conn.executescript(SESSIONS_DB_TABLES_SQL)
         self.sessions_db.conn.commit()
 
-    def init_project_db(self, project_id: str):
+    def _project_db_path(self, project_id: str, project_root: str = None) -> str:
+        """获取项目数据库路径。优先使用项目根目录下的 .topocode/data/project.db。"""
+        if project_root and project_root.strip():
+            topo_dir = os.path.join(project_root, ".topocode", "data")
+            os.makedirs(topo_dir, exist_ok=True)
+            return os.path.join(topo_dir, "project.db")
+        # 回退到全局 data_dir
+        return os.path.join(self.data_dir, f"{project_id}.db")
+
+    def init_project_db(self, project_id: str, project_root: str = None):
         """创建并初始化项目库"""
-        db_path = os.path.join(self.data_dir, f"{project_id}.db")
+        db_path = self._project_db_path(project_id, project_root)
         project_db = SQLiteContext(db_path)
         project_db.conn.executescript(PROJECT_DB_TABLES_SQL)
         project_db.conn.commit()
@@ -1000,11 +1009,25 @@ class MultiDBManager:
             oldest_id, oldest_db = self._project_db_cache.popitem(last=False)
             oldest_db.close()
 
-        # 检查项目库文件是否存在
-        db_path = os.path.join(self.data_dir, f"{project_id}.db")
+        # 检查项目库文件是否存在 — 优先从项目根目录查找
+        try:
+            row = self.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            project_root = row["root_path"] if row else None
+        except Exception:
+            project_root = None
+
+        db_path = self._project_db_path(project_id, project_root)
+        if not os.path.exists(db_path) and project_root:
+            # 也检查旧路径 (全局 data_dir 下的)
+            old_path = os.path.join(self.data_dir, f"{project_id}.db")
+            if os.path.exists(old_path):
+                db_path = old_path
+
         if not os.path.exists(db_path):
             # 自动创建
-            project_db = self.init_project_db(project_id)
+            project_db = self.init_project_db(project_id, project_root)
             self._migrate_project_db(project_db)
         else:
             project_db = SQLiteContext(db_path)
@@ -1023,14 +1046,25 @@ class MultiDBManager:
     def delete_project_db(self, project_id: str):
         """关闭连接 + 删除项目库文件"""
         self.close_project_db(project_id)
-        db_path = os.path.join(self.data_dir, f"{project_id}.db")
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        # 也删除 -wal 和 -shm 文件
-        for suffix in ['-wal', '-shm']:
-            wal_path = db_path + suffix
-            if os.path.exists(wal_path):
-                os.remove(wal_path)
+        # 尝试从项目根目录和全局目录删除
+        try:
+            row = self.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            project_root = row["root_path"] if row else None
+        except Exception:
+            project_root = None
+        db_path = self._project_db_path(project_id, project_root)
+        # 也检查旧全局路径
+        global_path = os.path.join(self.data_dir, f"{project_id}.db")
+        for path in [db_path, global_path]:
+            if os.path.exists(path):
+                os.remove(path)
+            # 也删除 -wal 和 -shm 文件
+            for suffix in ['-wal', '-shm']:
+                wal_path = path + suffix
+                if os.path.exists(wal_path):
+                    os.remove(wal_path)
 
     def compute_md5(self, file_path: str) -> str:
         """计算文件的 MD5 哈希"""

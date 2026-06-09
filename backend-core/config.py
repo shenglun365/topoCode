@@ -15,10 +15,10 @@ ZMQ_PUB_PORT = int(os.environ.get("ZMQ_PUB_PORT", "5680"))
 RPC_TIMEOUT = int(os.environ.get("RPC_TIMEOUT", "30"))
 
 # ==================== SQLite 配置 ====================
-# 数据库文件存放目录 (可配置，默认 ~/.topoone)
+# 数据库文件存放目录 (可配置，默认 ~/.topocode)
 DB_DIR = os.environ.get(
     "TOPOCODE_DB_DIR",
-    os.path.join(os.path.expanduser("~"), ".topoone")
+    os.path.join(os.path.expanduser("~"), ".topocode")
 )
 
 # 主库文件名

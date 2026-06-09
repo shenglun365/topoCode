@@ -1,54 +1,73 @@
 """ToolDispatcher — dispatches MCP tools/call requests to handlers.
 
-Each tool maps to a handler method. Handlers use SimpleBinder + FileSymbolTable
-to resolve symbols and references from in-memory analysis data.
+v2 refactor: LSP-style tools replaced with architecture-cognition tools.
+Handlers use AnalysisContext to access graph_node / graph_edge / community data.
 """
 
 import json as json_mod
 import logging
 from typing import Any, Optional
 
-from .tools import CORE_TOOLS
+from .tools import CORE_TOOLS, get_deprecation_notice
 from .path_validator import PathValidator
 
 logger = logging.getLogger(__name__)
 
 
 class ToolDispatcher:
-    """Receives MCP tools/call requests, dispatches to corresponding handler.
+    """Receives MCP tools/call requests, dispatches to handlers.
 
-    When zmq_client is provided (ZMQ mode), calls are forwarded to the main
-    backend process. Otherwise, handlers run locally via direct library calls.
+    v2 tools: topocode_community, topocode_community_detail,
+               topocode_architecture_overview, topocode_diff,
+               topocode_session_summary, topocode_quality_inspect
     """
 
     def __init__(
         self,
         project_root: str,
-        tables: Optional[list] = None,
-        resolver: Optional[Any] = None,
+        context: Optional[Any] = None,
         snapshot_store: Optional[Any] = None,
         git_adapter: Optional[Any] = None,
         zmq_client: Optional[Any] = None,
     ):
+        """
+        Args:
+            project_root: project root path
+            context: AnalysisContext instance (v2, preferred over old tables/resolver)
+            snapshot_store: SnapshotStore for diff/version tools
+            git_adapter: GitAdapter for commit operations
+            zmq_client: ZMQ client for forwarding to main backend
+        """
         self.project_root = project_root
         self.path_validator = PathValidator(project_root)
-        self._tables = tables or []
-        self._resolver = resolver
+        self._ctx = context
         self._snapshot_store = snapshot_store
         self._git_adapter = git_adapter
         self._zmq_client = zmq_client
+
+        # v2 handlers (architecture-cognition)
         self._handlers = {
-            "get_definition": self._handle_definition,
-            "get_references": self._handle_references,
-            "get_symbol_info": self._handle_symbol_info,
-            "get_call_hierarchy": self._handle_call_hierarchy,
-            "get_file_symbols": self._handle_file_symbols,
-            "get_dependencies": self._handle_dependencies,
-            "search_symbol": self._handle_search_symbol,
-            "get_changes": self._handle_get_changes,
-            "get_version_history": self._handle_version_history,
-            "evaluate_change": self._handle_evaluate_change,
-            "track_symbol_history": self._handle_track_symbol_history,
+            "topocode_community": self._handle_community,
+            "topocode_community_detail": self._handle_community_detail,
+            "topocode_architecture_overview": self._handle_arch_overview,
+            "topocode_diff": self._handle_diff,
+            "topocode_session_summary": self._handle_session_summary,
+            "topocode_quality_inspect": self._handle_quality_inspect,
+        }
+
+        # Deprecated tool names → v2 redirect or deprecation notice
+        self._deprecated = {
+            "get_definition": self._deprecated_handler,
+            "get_references": self._deprecated_handler,
+            "get_symbol_info": self._deprecated_handler,
+            "get_call_hierarchy": self._deprecated_handler,
+            "get_file_symbols": self._deprecated_handler,
+            "get_dependencies": self._deprecated_handler,
+            "search_symbol": self._deprecated_handler,
+            "get_changes": self._handle_diff,  # redirect to v2
+            "evaluate_change": self._deprecated_handler,
+            "get_version_history": self._deprecated_handler,
+            "track_symbol_history": self._deprecated_handler,
         }
 
     # ---- dispatch ----
@@ -71,393 +90,203 @@ class ToolDispatcher:
         # Direct mode: local handlers
         handler = self._handlers.get(tool_name)
         if not handler:
+            handler = self._deprecated.get(tool_name)
+
+        if not handler:
             return {"error": f"Unknown tool: {tool_name}"}
 
         try:
-            if "file_path" in arguments:
-                self.path_validator.assert_valid(arguments["file_path"])
             result = handler(arguments)
             return {"content": [{"type": "text", "text": _json_dumps(result)}]}
         except Exception as e:
             logger.exception(f"Tool {tool_name} failed")
             return {"error": str(e)}
 
-    # ---- handlers ----
+    # ═══════════════════════════════════════════
+    # v2 Handlers
+    # ═══════════════════════════════════════════
 
-    def _handle_definition(self, args: dict) -> dict:
-        file_path = args["file_path"]
-        line = args["line"]
-        character = args["character"]
-        # Build a reference from the given position and resolve it
-        ref = self._make_ref(file_path, line, character)
-        if not ref:
-            return {"found": False, "error": "No symbol at position"}
+    def _handle_community(self, args: dict) -> dict:
+        if not self._ctx:
+            return {"error": "AnalysisContext not available. Run project analysis first."}
 
-        if self._resolver:
-            result = self._resolver.resolve(ref, file_path=file_path)
-            if result and result.target:
-                sym = result.target
-                return {
-                    "found": True,
-                    "file_path": sym.location.file_path,
-                    "line": sym.location.start_line,
-                    "character": sym.location.start_col,
-                    "symbol_name": sym.name,
-                    "symbol_kind": sym.kind.value,
-                    "scope": sym.scope,
-                    "confidence": result.confidence,
-                    "method": result.method,
-                }
-        return {"found": False}
+        edge_type = args.get("edge_type", "INCLUDE")
+        level = args.get("level", 0)
+        communities = self._ctx._store.get_communities(self._ctx._task_id, edge_type=edge_type)
 
-    def _handle_references(self, args: dict) -> dict:
-        file_path = args["file_path"]
-        line = args["line"]
-        character = args["character"]
-        max_results = args.get("max_results", 500)
-
-        ref = self._make_ref(file_path, line, character)
-        if not ref:
-            return {"found": False, "error": "No symbol at position"}
-
-        # Collect references from all tables
-        refs = []
-        for table in self._tables:
-            for r in table.references:
-                if r.name == ref.name and len(refs) < max_results:
-                    refs.append({
-                        "file_path": table.file_path,
-                        "line": r.location.start_line,
-                        "character": r.location.start_col,
-                        "end_line": r.location.end_line,
-                        "end_col": r.location.end_col,
-                        "kind": r.kind.value,
-                        "scope": r.scope,
-                    })
-
-        by_file = {}
-        for r in refs:
-            by_file.setdefault(r["file_path"], []).append(r)
+        filtered = [c for c in communities if c.get("comm_lv") == f"L{level}"]
+        if not filtered:
+            filtered = communities[:20]  # fallback
 
         return {
-            "symbol_name": ref.name,
-            "total_count": len(refs),
-            "truncated": len(refs) >= max_results,
-            "by_file": by_file,
-        }
-
-    def _handle_symbol_info(self, args: dict) -> dict:
-        file_path = args["file_path"]
-        line = args["line"]
-        character = args["character"]
-
-        for table in self._tables:
-            if table.file_path != file_path:
-                continue
-            for sym in table.symbols:
-                loc = sym.location
-                if loc.start_line <= line <= loc.end_line:
-                    return {
-                        "found": True,
-                        "name": sym.name,
-                        "kind": sym.kind.value,
-                        "scope": sym.scope,
-                        "file_path": table.file_path,
-                        "line": loc.start_line,
-                        "character": loc.start_col,
-                        "end_line": loc.end_line,
-                        "end_col": loc.end_col,
-                        "doc_comment": sym.doc_comment or "",
-                    }
-        return {"found": False}
-
-    def _handle_call_hierarchy(self, args: dict) -> dict:
-        return {
-            "info": "Call hierarchy requires full analysis pipeline. "
-                    "Run project analysis first.",
-            "incoming": [],
-            "outgoing": [],
-        }
-
-    def _handle_file_symbols(self, args: dict) -> dict:
-        file_path = args["file_path"]
-        kind_filter = args.get("kind_filter")
-
-        symbols = []
-        for table in self._tables:
-            if table.file_path != file_path:
-                continue
-            for sym in table.symbols:
-                if kind_filter and sym.kind.value not in kind_filter:
-                    continue
-                if sym.scope == "module" or not sym.scope.count("."):
-                    symbols.append({
-                        "name": sym.name,
-                        "kind": sym.kind.value,
-                        "scope": sym.scope,
-                        "line": sym.location.start_line,
-                        "character": sym.location.start_col,
-                    })
-        return {"file_path": file_path, "symbols": symbols}
-
-    def _handle_dependencies(self, args: dict) -> dict:
-        file_path = args["file_path"]
-        direction = args.get("direction", "both")
-
-        imports = []
-        imported_by = []
-
-        for table in self._tables:
-            if direction in ("imports", "both") and table.file_path == file_path:
-                for imp in table.imports:
-                    imports.append({
-                        "module": imp.module,
-                        "names": imp.imported_names,
-                        "is_default": imp.is_default,
-                    })
-            if direction in ("imported_by", "both"):
-                for imp in table.imports:
-                    if imp.resolved_file == file_path:
-                        imported_by.append(table.file_path)
-
-        return {
-            "file_path": file_path,
-            "imports": imports,
-            "imported_by": list(set(imported_by)),
-        }
-
-    def _handle_search_symbol(self, args: dict) -> dict:
-        query = args["query"].lower()
-        kind_filter = args.get("kind_filter", "all")
-        max_results = args.get("max_results", 20)
-
-        matches = []
-        for table in self._tables:
-            for sym in table.symbols:
-                if len(matches) >= max_results:
-                    break
-                if query not in sym.name.lower():
-                    continue
-                if kind_filter != "all" and sym.kind.value != kind_filter:
-                    continue
-                matches.append({
-                    "name": sym.name,
-                    "kind": sym.kind.value,
-                    "scope": sym.scope,
-                    "file_path": table.file_path,
-                    "line": sym.location.start_line,
-                })
-        return {"matches": matches, "total": len(matches), "truncated": len(matches) >= max_results}
-
-    # ---- Phase 7: Change Awareness handlers ----
-
-    def _handle_get_changes(self, args: dict) -> dict:
-        from_change = args.get("from_commit", "HEAD~1")
-        to_change = args.get("to_commit", "HEAD")
-        scope = args.get("scope", "summary")
-
-        if not self._snapshot_store or not self._git_adapter:
-            return {"error": "Change tracking requires SnapshotStore and GitAdapter. Run project analysis with snapshot enabled."}
-
-        git = self._git_adapter
-        store = self._snapshot_store
-
-        from_snapshot = store.get_snapshot(self.project_root, from_change)
-        to_snapshot = store.get_snapshot(self.project_root, to_change)
-
-        if not from_snapshot:
-            from_snapshot = self._make_empty_snapshot(from_change)
-        if not to_snapshot:
-            to_snapshot = self._make_empty_snapshot(to_change)
-
-        from change_tracker.diff_engine import DiffEngine
-        report = DiffEngine().compare(from_snapshot, to_snapshot)
-
-        from change_tracker.impact_analyzer import ImpactAnalyzer
-        impact = ImpactAnalyzer(self.project_root, self._resolver).analyze(report)
-
-        if scope == "files":
-            return {
-                "from_commit": from_change,
-                "to_commit": to_change,
-                "files": [
-                    {"file_path": f.file_path, "change_type": f.change_type.value}
-                    for f in report.files
-                ],
-                "summary": {
-                    "files_changed": report.summary.files_changed,
-                },
-            }
-
-        result = {
-            "from_commit": from_change,
-            "to_commit": to_change,
-            "summary": {
-                "files_changed": report.summary.files_changed,
-                "symbols_added": report.summary.symbols_added,
-                "symbols_modified": report.summary.symbols_modified,
-                "symbols_removed": report.summary.symbols_removed,
-                "risk_score": report.summary.risk_score,
-                "risk_level": report.summary.risk_level.value,
-            },
-            "dependencies": [
-                {"file_path": d.file_path, "dependency": d.dependency, "change_type": d.change_type.value}
-                for d in report.dependencies
-            ],
-            "impact": impact,
-        }
-
-        if scope in ("symbols", "full"):
-            result["files"] = [
+            "edge_type": edge_type,
+            "level": level,
+            "total": len(filtered),
+            "communities": [
                 {
-                    "file_path": f.file_path,
-                    "change_type": f.change_type.value,
-                    "symbols": [
-                        {
-                            "name": s.name,
-                            "kind": s.kind,
-                            "change_type": s.change_type.value,
-                            "risk": s.risk.value,
-                        }
-                        for s in f.symbols_changed
-                    ],
+                    "comm_id": c.get("comm_id"),
+                    "node_count": c.get("node_count"),
+                    "edge_count": c.get("edge_count"),
+                    "quality_score": c.get("quality_score"),
+                    "parent_comm_id": c.get("parent_comm_id"),
                 }
-                for f in report.files
-            ]
-
-        return result
-
-    def _handle_version_history(self, args: dict) -> dict:
-        max_count = args.get("max_count", 20)
-        only_analyzed = args.get("only_analyzed", False)
-
-        commits = []
-        if self._git_adapter:
-            commits = self._git_adapter.get_commit_history(max_count)
-
-        if self._snapshot_store:
-            snapshots = self._snapshot_store.list_snapshots(self.project_root, max_count)
-            snap_hashes = {s["commit_hash"] for s in snapshots}
-            for c in commits:
-                c["has_snapshot"] = c["hash"] in snap_hashes
-        else:
-            for c in commits:
-                c["has_snapshot"] = False
-
-        if only_analyzed:
-            commits = [c for c in commits if c.get("has_snapshot")]
-
-        return {"commits": commits}
-
-    def _handle_evaluate_change(self, args: dict) -> dict:
-        from_change = args.get("from_commit", "HEAD~1")
-        to_change = args.get("to_commit", "HEAD")
-        focus = args.get("focus", "overview")
-
-        if not self._snapshot_store or not self._git_adapter:
-            return {"error": "Change evaluation requires SnapshotStore and GitAdapter."}
-
-        store = self._snapshot_store
-        git = self._git_adapter
-
-        from_snapshot = store.get_snapshot(self.project_root, from_change)
-        to_snapshot = store.get_snapshot(self.project_root, to_change)
-
-        stats = git.get_diff_stats(from_change, to_change)
-        changed_files = git.get_changed_files(from_change, to_change)
-
-        eval_focus = focus
-        result = {
-            "from_commit": from_change,
-            "to_commit": to_change,
-            "focus": eval_focus,
-            "git_stats": stats,
-            "changed_files": changed_files,
-            "snapshots_available": from_snapshot is not None and to_snapshot is not None,
+                for c in filtered[:30]
+            ],
         }
 
-        if from_snapshot and to_snapshot:
-            from change_tracker.diff_engine import DiffEngine
-            report = DiffEngine().compare(from_snapshot, to_snapshot)
-            result["risk_level"] = report.summary.risk_level.value
-            result["risk_score"] = report.summary.risk_score
+    def _handle_community_detail(self, args: dict) -> dict:
+        if not self._ctx:
+            return {"error": "AnalysisContext not available."}
 
-            if eval_focus == "breaking":
-                breaking = any(
-                    sc.risk.value in ("high", "critical")
-                    for fc in report.files
-                    for sc in fc.symbols_changed
-                )
-                result["has_breaking_changes"] = breaking
-
-        return result
-
-    def _handle_track_symbol_history(self, args: dict) -> dict:
-        symbol_name = args.get("symbol_name", "")
-        file_path = args.get("file_path", "")
-        max_versions = args.get("max_versions", 10)
-
-        if not self._snapshot_store:
-            return {"error": "Symbol history tracking requires SnapshotStore."}
-
-        snapshots = self._snapshot_store.list_snapshots(self.project_root, max_versions)
-        history = []
-
-        for snap_info in snapshots:
-            snap = self._snapshot_store.get_snapshot(self.project_root, snap_info["commit_hash"])
-            if not snap:
-                continue
-            file_symbols = snap.symbols.get(file_path, [])
-            for sym in file_symbols:
-                if sym.get("name") == symbol_name:
-                    history.append({
-                        "commit": snap.commit_hash,
-                        "timestamp": snap.timestamp.isoformat(),
-                        "symbol": sym,
-                    })
-                    break
+        comm_id = args["comm_id"]
+        layer = self._ctx.get_community_layer(comm_id)
 
         return {
-            "symbol_name": symbol_name,
-            "file_path": file_path,
-            "history": history,
-            "versions_found": len(history),
+            "comm_id": comm_id,
+            "name": layer.name,
+            "what": layer.what,
+            "how": layer.how,
+            "why": layer.why,
+            "detail": {
+                "node_count": layer.detail.get("node_count"),
+                "edge_count": layer.detail.get("edge_count"),
+                "hubs": layer.detail.get("hubs", [])[:10],
+                "hub_names": layer.detail.get("hub_names", []),
+                "quality_score": layer.detail.get("quality_score"),
+            },
+            "children": layer.children[:20],
         }
 
-    def _make_empty_snapshot(self, commit_hash: str):
-        from datetime import datetime
-        from change_tracker.change_model import ProjectSnapshot
-        return ProjectSnapshot(
-            commit_hash=commit_hash,
-            timestamp=datetime.now(),
-        )
+    def _handle_arch_overview(self, args: dict) -> dict:
+        if not self._ctx:
+            return {"error": "AnalysisContext not available."}
 
-    # ---- helpers ----
+        focus = args.get("focus", "overview")
+        layer = self._ctx.get_project_layer()
 
-    def _make_ref(self, file_path: str, line: int, character: int):
-        """Find a reference at the given position."""
-        from parsers.core.symbol_model import Node, UnresolvedReference, FileSymbolTable
-        from parsers.core.node_types import NodeKind
+        include_comms = self._ctx._store.get_communities(self._ctx._task_id, edge_type="INCLUDE", comm_lv="L0")
+        call_comms = self._ctx._store.get_communities(self._ctx._task_id, edge_type="CALL", comm_lv="L0")
 
-        for table in self._tables:
-            if table.file_path != file_path:
-                continue
-            for ref in table.unresolved_refs:
-                if ref.line == line:
-                    return ref
-            for node in table.nodes:
-                if node.start_line == line and node.start_col <= character < node.end_col:
-                    return UnresolvedReference(
-                        from_node_id=node.id,
-                        reference_name=node.name,
-                        reference_kind=EdgeKind.REFERENCES,
-                        line=line,
-                        col=character,
-                        file_path=file_path,
-                    )
-        return None
+        return {
+            "focus": focus,
+            "what": layer.what,
+            "how": layer.how,
+            "why": layer.why,
+            "detail": layer.detail,
+            "include_communities": [
+                {"comm_id": c.get("comm_id"), "node_count": c.get("node_count"), "quality_score": c.get("quality_score")}
+                for c in include_comms[:15]
+            ],
+            "call_communities": [
+                {"comm_id": c.get("comm_id"), "node_count": c.get("node_count"), "quality_score": c.get("quality_score")}
+                for c in call_comms[:15]
+            ],
+        }
+
+    def _handle_diff(self, args: dict) -> dict:
+        from_change = args.get("from_commit", "HEAD~1")
+        to_change = args.get("to_commit", "HEAD")
+        scope = args.get("scope", "full")
+
+        if self._snapshot_store and self._git_adapter:
+            try:
+                from change_tracker.diff_engine import DiffEngine
+                from_snap = self._snapshot_store.get_snapshot(self.project_root, from_change)
+                to_snap = self._snapshot_store.get_snapshot(self.project_root, to_change)
+                if from_snap and to_snap:
+                    report = DiffEngine().compare(from_snap, to_snap)
+                    return {
+                        "from_commit": from_change,
+                        "to_commit": to_change,
+                        "scope": scope,
+                        "summary": {
+                            "files_changed": report.summary.files_changed,
+                            "symbols_added": report.summary.symbols_added,
+                            "symbols_modified": report.summary.symbols_modified,
+                            "symbols_removed": report.summary.symbols_removed,
+                            "risk_score": report.summary.risk_score,
+                        },
+                    }
+            except Exception as e:
+                logger.warning(f"diff failed: {e}")
+
+        return {
+            "from_commit": from_change,
+            "to_commit": to_change,
+            "note": "Full diff analysis requires snapshot data. Run project analysis with --snapshot enabled.",
+        }
+
+    def _handle_session_summary(self, args: dict) -> dict:
+        session_id = args.get("session_id", "")
+        try:
+            if self._ctx and self._ctx._store:
+                # Check for saved session data
+                summary = self._ctx.get_summary()
+                return {
+                    "session_id": session_id or "latest",
+                    "project_summary": summary,
+                    "note": "Session tracking requires ai_session_tracker module. Current output is project-level summary.",
+                }
+        except Exception as e:
+            logger.warning(f"session_summary failed: {e}")
+        return {"session_id": session_id or "latest", "note": "No session data available."}
+
+    def _handle_quality_inspect(self, args: dict) -> dict:
+        focus = args.get("focus", "all")
+        if not self._ctx:
+            return {"error": "AnalysisContext not available."}
+
+        issues = []
+        try:
+            include_comms = self._ctx._store.get_communities(self._ctx._task_id, edge_type="INCLUDE")
+            call_comms = self._ctx._store.get_communities(self._ctx._task_id, edge_type="CALL")
+
+            for comm in include_comms + call_comms:
+                node_count = comm.get("node_count", 0) or 0
+                if node_count > 100 and focus in ("hub_overload", "all"):
+                    issues.append({
+                        "type": "hub_overload",
+                        "severity": "MEDIUM",
+                        "community": comm.get("comm_id"),
+                        "node_count": node_count,
+                        "message": f"社区 {comm.get('comm_id')} 包含 {node_count} 个节点，考虑拆分。",
+                    })
+
+            # Check for orphan communities
+            small_comms = [c for c in include_comms if (c.get("node_count") or 0) < 3]
+            for c in small_comms[:5]:
+                if focus in ("test_gaps", "all"):
+                    issues.append({
+                        "type": "small_community",
+                        "severity": "LOW",
+                        "community": c.get("comm_id"),
+                        "node_count": c.get("node_count"),
+                        "message": f"社区 {c.get('comm_id')} 节点过少，可能缺少测试覆盖。",
+                    })
+        except Exception as e:
+            logger.warning(f"quality_inspect failed: {e}")
+
+        return {
+            "focus": focus,
+            "total_issues": len(issues),
+            "issues": issues[:20],
+        }
+
+    # ═══════════════════════════════════════════
+    # Deprecated
+    # ═══════════════════════════════════════════
+
+    def _deprecated_handler(self, args: dict) -> dict:
+        """Return deprecation notice for old tool names."""
+        # The tool_name is unfortunately not available here; we detect it heuristically
+        tool_name = args.get("_tool_name", "unknown")
+        notice = get_deprecation_notice(tool_name) or "This tool has been deprecated."
+        return {
+            "deprecated": True,
+            "tool": tool_name,
+            "message": f"This MCP tool is deprecated. {notice}",
+        }
 
 
 def _json_dumps(obj: Any) -> str:
-    import json
-    return json.dumps(obj, indent=2, default=str)
+    return json_mod.dumps(obj, indent=2, default=str)

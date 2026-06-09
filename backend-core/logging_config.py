@@ -7,7 +7,7 @@
 - 统一格式
 
 环境变量:
-  TOPOCODE_LOG_DIR=~/.topoone/logs
+  TOPOCODE_LOG_DIR=~/.topocode/logs
   TOPOCODE_LOG_LEVEL=DEBUG|INFO|WARN|ERROR
 """
 import logging

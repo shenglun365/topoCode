@@ -38,3 +38,6 @@ build/*-bundled*
 dist-plugins/
 dist-modules/
 tmp-module-build/
+
+# topocode project analysis cache
+.topocode/

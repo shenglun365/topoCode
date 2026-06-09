@@ -197,7 +197,7 @@ export const useReportStore = defineStore('report', () => {
       const modelConfigStore = useModelConfigStore()
       const modelId = modelConfigStore.models.find(m => m.isDefault)?.id || modelConfigStore.models[0]?.id || 'default'
 
-      // 构建完整上下文变量（与 ReportGenerationPipeline 的 prepareStepVariables 一致）
+      // 构建上下文变量（由后端 Agent Skills 驱动的文档生成）
       const variables: Record<string, string> = {
         userAdditionalPrompt: prompt,
       }

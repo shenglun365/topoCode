@@ -270,6 +270,89 @@ CREATE TABLE IF NOT EXISTS community_llm_results (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_res_task ON community_llm_results(task_id);
 CREATE INDEX IF NOT EXISTS idx_llm_res_type ON community_llm_results(task_id, edge_type);
+
+-- ============================================
+-- ai_sessions — AI 编码会话追踪
+-- ============================================
+CREATE TABLE IF NOT EXISTS ai_sessions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    task_id TEXT,
+    tag TEXT DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    status TEXT DEFAULT 'active',
+    file_snapshot TEXT,
+    summary_markdown TEXT,
+    quality_score REAL,
+    metadata TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ai_sessions_project ON ai_sessions(project_id, started_at DESC);
+
+-- ============================================
+-- ai_session_changes — 会话变更明细
+-- ============================================
+CREATE TABLE IF NOT EXISTS ai_session_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    symbol_name TEXT,
+    symbol_kind TEXT,
+    old_signature TEXT,
+    new_signature TEXT,
+    old_content TEXT,
+    new_content TEXT,
+    FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_changes_session ON ai_session_changes(session_id);
+
+-- ============================================
+-- ai_session_issues — 会话质量问题
+-- ============================================
+CREATE TABLE IF NOT EXISTS ai_session_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    file_path TEXT,
+    line_number INTEGER,
+    issue_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    suggestion TEXT,
+    FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_issues_session ON ai_session_issues(session_id, severity);
+
+-- ============================================
+-- cloud_api_config — 云端 API 配置
+-- ============================================
+CREATE TABLE IF NOT EXISTS cloud_api_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key TEXT,
+    endpoint TEXT DEFAULT 'https://cloud.topocode.dev',
+    enabled INTEGER DEFAULT 0,
+    privacy_upload_metrics INTEGER DEFAULT 0,
+    privacy_upload_patterns INTEGER DEFAULT 0,
+    privacy_allow_benchmark_contrib INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ============================================
+-- agent_instructions — 用户自定义 Agent 指令
+-- ============================================
+CREATE TABLE IF NOT EXISTS agent_instructions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    text TEXT NOT NULL,
+    scope TEXT DEFAULT 'all',
+    priority TEXT DEFAULT 'append',
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 

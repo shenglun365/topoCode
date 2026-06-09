@@ -1,4 +1,8 @@
 export default { import: {
+  error: {
+    duplicate: 'Project already exists',
+    failed: 'Import failed',
+  },
   dragDrop: 'Drag and drop files here',
   selectFolder: 'Select Folder',
   importing: 'Importing...',

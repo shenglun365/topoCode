@@ -7,12 +7,18 @@ import { useFuncGroupStore } from '@/stores/funcGroup'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
-import CommunityAnalysisPipeline from '@/components/report/CommunityAnalysisPipeline.vue'
 import ChildAnalysisPanel from '@/components/report/ChildAnalysisPanel.vue'
+import ChatView from '@/components/report/ChatView.vue'
+import ArchitectureExplorer from '@/components/report/ArchitectureExplorer.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-002')
 const { t } = useI18n()
+const showChatPanel = ref(false)
+
+function toggleChatPanel() {
+  showChatPanel.value = !showChatPanel.value
+}
 const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
 
@@ -254,12 +260,24 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
 
     <!-- ===== 报告首页（分析报告生成） / 子文档 / 空白状态 ===== -->
     <template v-if="isReportHomeTab && activeTab">
-      <ReportHome
-        :key="activeTab.id"
-        :task-id="activeTab.taskId!"
-        @open-md="handleOpenMD"
-      />
+      <div class="report-layout">
+        <div class="report-main">
+          <ReportHome
+            :key="activeTab.id"
+            :task-id="activeTab.taskId!"
+            @open-md="handleOpenMD"
+          />
+        </div>
+        <div class="report-sidebar">
+          <ArchitectureExplorer :task-id="activeTab.taskId!" :project-id="activeTab.projectId || projectStore.selectedProjectId || ''" />
+        </div>
+      </div>
     </template>
+
+    <!-- Agent 对话面板（浮动按钮触发） -->
+    <div class="chat-panel" v-if="showChatPanel">
+      <ChatView />
+    </div>
 
     <template v-else-if="isSubDocTab && activeTab">
       <SubDocViewer
@@ -293,10 +311,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
           <span class="comp-analysis-title">{{ activeTab.title }}</span>
         </div>
         <div class="comp-analysis-body">
-          <CommunityAnalysisPipeline
-            :task-id="activeTab.taskId!"
-            :project-id="activeTab.projectId || projectStore.selectedProjectId || ''"
-          />
+          <p class="text-gray-500 text-sm p-4">{{ t('analysis.communityAnalysisComingSoon') }}</p>
         </div>
       </div>
     </template>
@@ -396,4 +411,34 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   padding: 8px;
 }
 
+/* Report layout — main + sidebar */
+.report-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.report-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+.report-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border, #374151);
+  overflow-y: auto;
+}
+
+/* Chat panel (floating) */
+.chat-panel {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  width: 420px;
+  height: 520px;
+  z-index: 100;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
 </style>

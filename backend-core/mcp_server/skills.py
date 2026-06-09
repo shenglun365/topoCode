@@ -1,208 +1,240 @@
-"""5 个核心 Skill 定义 — 构建在 7 个核心 Tool 之上。
+"""Skills — 内置 Agent 可调用的技能定义。
 
-每个 Skill 组合多个 Tool 调用来完成更高层级的分析任务。
+所有 LLM 生成能力 Skills 化，Agent 自主组合。
+Skills 分为五类: 文档生成、图生成、架构学习/设计、批量编排、会话追踪。
 """
 
 from .dispatcher import ToolDispatcher
-from .skill_executor import SkillDefinition, SkillExecutor
+from .skill_executor import SkillDefinition, SkillExecutor, SkillStepDef
+
+
+def _call(dispatcher: ToolDispatcher, method: str):
+    """返回直接调用 dispatcher handler 的 lambda（sync）。"""
+    handler = getattr(dispatcher, method, None)
+    def _fn(args: dict) -> dict:
+        if handler:
+            return handler(args)
+        return {"error": f"Method not found: {method}"}
+    return _fn
 
 
 def register_core_skills(executor: SkillExecutor, dispatcher: ToolDispatcher) -> None:
-    context_steps = [
-        lambda args: dispatcher._handle_definition({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-        }),
-        lambda args: dispatcher._handle_references({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-            "max_results": args.get("max_results", 50),
-        }),
-    ]
+    """注册内置 Agent 可用的所有 Skills。"""
+
+    # ═══════════════════════════════════════
+    # 文档生成
+    # ═══════════════════════════════════════
 
     executor.register(SkillDefinition(
-        name="get_context_for_symbol",
-        description="获取符号的完整上下文：定义位置 + 所有引用",
-        steps=context_steps,
+        name="skill_generate_arch_overview",
+        description="生成项目架构总览文档: 整体结构、L0 社区、关键依赖",
+        steps=[
+            SkillStepDef(name="get_communities", fn=_call(dispatcher, "_handle_community")),
+            SkillStepDef(name="get_overview", fn=_call(dispatcher, "_handle_arch_overview")),
+        ],
         input_schema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "line": {"type": "integer"},
-                "character": {"type": "integer"},
-                "max_results": {"type": "integer", "default": 50},
+                "edge_type": {"type": "string", "default": "INCLUDE"},
+                "focus": {"type": "string", "default": "overview"},
             },
-            "required": ["file_path"],
         },
     ))
 
-    impact_steps = [
-        lambda args: dispatcher._handle_call_hierarchy({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-            "direction": "both",
-            "max_depth": args.get("max_depth", 3),
-        }),
-        lambda args: dispatcher._handle_dependencies({
-            "file_path": args["file_path"],
-            "direction": "both",
-        }),
-    ]
-
     executor.register(SkillDefinition(
-        name="get_impact_analysis",
-        description="变更影响分析：调用层级 + 依赖分析",
-        steps=impact_steps,
+        name="skill_analyze_community",
+        description="分析单个社区: 结构、Hub、角色、边界原因",
+        steps=[
+            SkillStepDef(name="get_detail", fn=_call(dispatcher, "_handle_community_detail")),
+        ],
         input_schema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "line": {"type": "integer"},
-                "character": {"type": "integer"},
-                "max_depth": {"type": "integer", "default": 3},
+                "comm_id": {"type": "string"},
             },
-            "required": ["file_path"],
+            "required": ["comm_id"],
         },
     ))
 
-    explain_steps = [
-        lambda args: dispatcher._handle_file_symbols({
-            "file_path": args["file_path"],
-        }),
-        lambda args: dispatcher._handle_dependencies({
-            "file_path": args["file_path"],
-            "direction": "imports",
-        }),
-    ]
+    # ═══════════════════════════════════════
+    # 图生成
+    # ═══════════════════════════════════════
 
     executor.register(SkillDefinition(
-        name="explain_code_block",
-        description="解释代码块：文件概览（符号 + 依赖）",
-        steps=explain_steps,
+        name="skill_fix_mermaid",
+        description="验证并修正 Mermaid 图语法",
+        steps=[],
         input_schema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
+                "code": {"type": "string"},
             },
-            "required": ["file_path"],
+            "required": ["code"],
         },
     ))
 
-    refactor_steps = [
-        lambda args: dispatcher._handle_definition({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-        }),
-        lambda args: dispatcher._handle_references({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-            "max_results": 200,
-        }),
-        lambda args: dispatcher._handle_call_hierarchy({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-            "direction": "both",
-            "max_depth": args.get("max_depth", 2),
-        }),
-    ]
-
     executor.register(SkillDefinition(
-        name="prepare_refactor",
-        description="重构准备：定义 + 引用 + 调用层级（三层上下文）",
-        steps=refactor_steps,
+        name="skill_fix_plantuml",
+        description="验证并修正 PlantUML 图语法",
+        steps=[],
         input_schema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "line": {"type": "integer"},
-                "character": {"type": "integer"},
-                "max_depth": {"type": "integer", "default": 2},
+                "code": {"type": "string"},
             },
-            "required": ["file_path"],
+            "required": ["code"],
         },
     ))
 
-    docstring_steps = [
-        lambda args: dispatcher._handle_symbol_info({
-            "file_path": args["file_path"],
-            "line": args.get("line", 1),
-            "character": args.get("character", 0),
-        }),
-    ]
-
     executor.register(SkillDefinition(
-        name="generate_docstring",
-        description="为符号生成文档注释：获取符号信息 + 上下文",
-        steps=docstring_steps,
+        name="skill_fix_diagram",
+        description="通用图验证+修正: 语法检查 → 自动修正 → 再验证 (最多2轮)",
+        steps=[
+            SkillStepDef(name="validate", fn=_call(dispatcher, "_handle_quality_inspect")),
+        ],
         input_schema={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "line": {"type": "integer"},
-                "character": {"type": "integer"},
+                "code": {"type": "string"},
+                "type": {"type": "string", "enum": ["mermaid", "plantuml"]},
             },
-            "required": ["file_path"],
+            "required": ["code", "type"],
         },
     ))
 
-    assess_merge_steps = [
-        lambda args: dispatcher._handle_get_changes({
-            "from_commit": args.get("from_commit", "HEAD~1"),
-            "to_commit": args.get("to_commit", "HEAD"),
-            "scope": "full",
-        }),
-        lambda args: dispatcher._handle_version_history({
-            "max_count": 5,
-        }),
-    ]
+    # ═══════════════════════════════════════
+    # 架构学习/设计 (P0)
+    # ═══════════════════════════════════════
 
     executor.register(SkillDefinition(
-        name="assess_merge_impact",
-        description="评估合并影响：变更报告 + 版本历史分析",
-        steps=assess_merge_steps,
+        name="skill_explain_arch_pattern",
+        description="解释社区检测结果背后的成因: 为什么这些符号形成一个社区、边界由什么决定、在整体中的角色",
+        steps=[
+            SkillStepDef(name="get_detail", fn=_call(dispatcher, "_handle_community_detail")),
+            SkillStepDef(name="get_overview", fn=_call(dispatcher, "_handle_arch_overview")),
+        ],
         input_schema={
             "type": "object",
             "properties": {
-                "from_commit": {"type": "string", "description": "Base commit hash"},
-                "to_commit": {"type": "string", "description": "Target commit hash"},
+                "comm_id": {"type": "string"},
             },
-            "required": [],
+            "required": ["comm_id"],
         },
     ))
 
-    review_refactor_steps = [
-        lambda args: dispatcher._handle_get_changes({
-            "from_commit": args.get("from_commit", "HEAD~1"),
-            "to_commit": args.get("to_commit", "HEAD"),
-            "scope": "full",
-        }),
-        lambda args: dispatcher._handle_evaluate_change({
-            "from_commit": args.get("from_commit", "HEAD~1"),
-            "to_commit": args.get("to_commit", "HEAD"),
-            "focus": args.get("focus", "overview"),
-        }),
-    ]
-
     executor.register(SkillDefinition(
-        name="review_refactoring",
-        description="审查重构：变更报告 + 语义评估",
-        steps=review_refactor_steps,
+        name="skill_compare_arch",
+        description="对比两个版本的架构差异，分析演化趋势和环境方向",
+        steps=[
+            SkillStepDef(name="get_diff", fn=_call(dispatcher, "_handle_diff")),
+        ],
         input_schema={
             "type": "object",
             "properties": {
-                "from_commit": {"type": "string", "description": "Base commit hash"},
-                "to_commit": {"type": "string", "description": "Target commit hash"},
-                "focus": {
-                    "type": "string", "enum": ["overview", "breaking", "refactoring", "security"],
-                    "default": "overview",
-                },
+                "from_commit": {"type": "string"},
+                "to_commit": {"type": "string"},
             },
-            "required": [],
+            "required": ["from_commit"],
+        },
+    ))
+
+    executor.register(SkillDefinition(
+        name="skill_recommend_refactor",
+        description="基于架构分析给出具体重构建议: Hub过载/循环依赖/边界问题",
+        steps=[
+            SkillStepDef(name="inspect", fn=_call(dispatcher, "_handle_quality_inspect")),
+        ],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "community_id": {"type": "string"},
+                "max_suggestions": {"type": "number", "default": 5},
+            },
+        },
+    ))
+
+    # ═══════════════════════════════════════
+    # 架构学习/设计 (P1)
+    # ═══════════════════════════════════════
+
+    executor.register(SkillDefinition(
+        name="skill_validate_arch_impact",
+        description="预测新增/修改模块对架构的影响: 社区归属、循环依赖风险",
+        steps=[],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "target_file": {"type": "string"},
+            },
+            "required": ["target_file"],
+        },
+    ))
+
+    executor.register(SkillDefinition(
+        name="skill_detect_arch_drift",
+        description="检测项目架构是否偏离历史模式或预期结构",
+        steps=[
+            SkillStepDef(name="get_diff", fn=_call(dispatcher, "_handle_diff")),
+        ],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "recent_commits": {"type": "number", "default": 10},
+            },
+        },
+    ))
+
+    # ═══════════════════════════════════════
+    # 批量编排
+    # ═══════════════════════════════════════
+
+    executor.register(SkillDefinition(
+        name="skill_batch_analyze_communities",
+        description=(
+            "批量分析所有 L0 社区: 并发分析 → 统一命名 → 组装总览 → 生成图。"
+            "内置并发控制 + 进度上报 + 错误重试。"
+        ),
+        steps=[
+            SkillStepDef(name="get_communities", fn=_call(dispatcher, "_handle_community")),
+        ],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "edge_type": {"type": "string", "default": "INCLUDE"},
+                "max_concurrency": {"type": "number", "default": 3},
+            },
+        },
+    ))
+
+    # ═══════════════════════════════════════
+    # 会话追踪
+    # ═══════════════════════════════════════
+
+    executor.register(SkillDefinition(
+        name="skill_track_ai_session",
+        description="完整 AI 会话追踪: 开始 → 监控 → 分析变更 → 生成摘要",
+        steps=[
+            SkillStepDef(name="get_diff", fn=_call(dispatcher, "_handle_diff")),
+            SkillStepDef(name="get_session", fn=_call(dispatcher, "_handle_session_summary")),
+        ],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "tag": {"type": "string", "default": ""},
+            },
+        },
+    ))
+
+    executor.register(SkillDefinition(
+        name="skill_audit_changes",
+        description="审计代码变更质量: 检查架构风险、反模式",
+        steps=[
+            SkillStepDef(name="inspect", fn=_call(dispatcher, "_handle_quality_inspect")),
+        ],
+        input_schema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+            },
         },
     ))

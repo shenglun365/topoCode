@@ -158,7 +158,10 @@ async function handleFileImport() {
   if (window.api && window.api.dialog) {
     const paths = await window.api.dialog.openDirectory()
     if (paths) {
-      await projectStore.importProject(paths)
+      const result = await projectStore.importProject(paths)
+      if (!result) {
+        alert(t('import.error.duplicate'))
+      }
     }
   }
 }

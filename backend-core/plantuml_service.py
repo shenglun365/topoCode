@@ -25,7 +25,7 @@ def find_plantuml_jar() -> Optional[str]:
 
     # 常见路径
     candidates = [
-        os.path.join(os.path.expanduser('~'), '.topoone', 'plantuml.jar'),
+        os.path.join(os.path.expanduser('~'), '.topocode', 'plantuml.jar'),
         os.path.join(os.path.expanduser('~'), '.local', 'share', 'plantuml', 'plantuml.jar'),
         '/usr/share/plantuml/plantuml.jar',
         '/opt/plantuml/plantuml.jar',

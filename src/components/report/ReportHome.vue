@@ -22,7 +22,6 @@ import { useFuncGroupStore } from '@/stores/funcGroup'
 import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
-import ReportGenerationPipeline from './ReportGenerationPipeline.vue'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
 import TaskSummaryCard from '@/components/home/TaskSummaryCard.vue'
 import ActionsBar from '@/components/home/ActionsBar.vue'
@@ -54,6 +53,27 @@ const showNoReportDialog = ref(false)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
+const expandedComms = ref<Set<string>>(new Set())
+
+const depCommunityCount = computed(() =>
+  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'INCLUDE').length
+)
+const callCommunityCount = computed(() =>
+  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'CALL').length
+)
+
+function toggleArchComm(id: string) {
+  if (expandedComms.value.has(id)) {
+    expandedComms.value.delete(id)
+  } else {
+    expandedComms.value.add(id)
+  }
+}
+
+function getArchChildren(communityId: string): CommunityItem[] {
+  const all = communityStore.tasks[props.taskId]?.communities || []
+  return all.filter(c => c.parentId === communityId)
+}
 const projectSummaryText = ref('')
 const projectSummaryDate = ref('')
 const showSummaryModal = ref(false)
@@ -487,13 +507,76 @@ watch(() => props.taskId, loadData)
           </div>
         </section>
 
-        <CommunitySection
-          v-if="hasAnyCommunity"
-          :communities="runtimeCommunities"
-          :edge-type="commEdgeType"
-          @update:edge-type="commEdgeType = $event"
-          @select-community="(item: any) => openCommunityDoc(item)"
-        />
+        <!-- 组件架构 — 分视角（依赖/调用）、分层级 -->
+        <section v-if="hasAnyCommunity" class="home-section arch-section">
+          <div class="section-header">
+            <RectangleGroupIcon class="w-4 h-4" />
+            <span>{{ t('report.communityArchitecture', '组件架构') }}</span>
+            <span class="arch-stats">
+              {{ runtimeCommunities.length }} {{ t('report.l0Communities', '个L0社区') }}
+            </span>
+          </div>
+
+          <!-- INCLUDE / CALL 切换 -->
+          <div class="arch-tabs">
+            <button
+              class="arch-tab" :class="{ active: commEdgeType === 'INCLUDE' }"
+              @click="commEdgeType = 'INCLUDE'"
+            >
+              <FolderIcon class="w-3.5 h-3.5" />
+              {{ t('report.dependencyAnalysis', '依赖分析') }} ({{ depCommunityCount }})
+            </button>
+            <button
+              class="arch-tab" :class="{ active: commEdgeType === 'CALL' }"
+              @click="commEdgeType = 'CALL'"
+            >
+              <ChartBarIcon class="w-3.5 h-3.5" />
+              {{ t('report.callAnalysis', '调用分析') }} ({{ callCommunityCount }})
+            </button>
+          </div>
+
+          <!-- 社区层级列表 -->
+          <div class="arch-tree">
+            <div
+              v-for="item in runtimeCommunities"
+              :key="item.id"
+              class="arch-comm"
+            >
+              <div
+                class="arch-comm-header"
+                :class="{ expanded: expandedComms.has(item.id) }"
+                @click="toggleArchComm(item.id)"
+              >
+                <span class="arch-expand">{{ expandedComms.has(item.id) ? '▾' : '▸' }}</span>
+                <span class="arch-comm-name">{{ item.name || formatCommId(item) }}</span>
+                <span class="arch-comm-meta">
+                  {{ item.nodeCount }} nodes
+                  <span v-if="item.edgeCount" class="arch-edge-count">{{ item.edgeCount }} edges</span>
+                </span>
+                <span v-if="item.nodeCount > 20" class="arch-badge arch-badge-hub" title="Hub community">HUB</span>
+                <span v-else-if="item.nodeCount < 4" class="arch-badge arch-badge-small">small</span>
+                <span v-if="item.qualityScore" class="arch-score" :class="{ high: item.qualityScore > 0.6 }">
+                  {{ (item.qualityScore * 100).toFixed(0) }}%
+                </span>
+              </div>
+
+              <!-- 子社区 (展开时显示) -->
+              <div v-if="expandedComms.has(item.id)" class="arch-children">
+                <div
+                  v-for="child in getArchChildren(item.communityId)"
+                  :key="child.id"
+                  class="arch-child"
+                >
+                  <span class="arch-child-name">{{ child.name || child.communityId }}</span>
+                  <span class="arch-child-meta">{{ child.nodeCount }}n</span>
+                </div>
+                <div v-if="getArchChildren(item.communityId).length === 0" class="arch-no-children">
+                  {{ t('report.noSubCommunities', '无子社区') }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <!-- 操作区 -->
         <section class="home-section actions-section">
@@ -550,16 +633,6 @@ watch(() => props.taskId, loadData)
               <span>{{ t('report.closeAllDocs') }}</span>
             </button>
 
-          </div>
-
-          <!-- 生成流水线（隐藏，后台同步） -->
-          <div style="display:none">
-            <ReportGenerationPipeline
-              :task-id="props.taskId"
-              :project-id="projectId"
-              @generated="handleReportGenerated"
-              @view-community-md="handleCommunityMD"
-            />
           </div>
         </section>
       </div>
@@ -1109,4 +1182,39 @@ watch(() => props.taskId, loadData)
   gap: 6px;
   margin-left: auto;
 }
+
+/* Architecture section */
+.arch-stats { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; font-weight: 400; }
+.arch-tabs { display: flex; gap: 0; margin-bottom: 0.75rem; border-bottom: 2px solid var(--border); }
+.arch-tab {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.4rem 0.9rem; font-size: 0.8rem; color: var(--text-muted);
+  border: none; background: none; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s;
+}
+.arch-tab:hover { color: var(--text-primary); }
+.arch-tab.active { color: var(--accent, #7c3aed); border-bottom-color: var(--accent, #7c3aed); }
+.arch-tree { max-height: 400px; overflow-y: auto; }
+.arch-comm { border-bottom: 1px solid var(--border); }
+.arch-comm:last-child { border-bottom: none; }
+.arch-comm-header {
+  display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.25rem;
+  cursor: pointer; font-size: 0.8rem; transition: background 0.1s;
+}
+.arch-comm-header:hover { background: var(--bg-secondary); }
+.arch-expand { width: 0.75rem; font-size: 0.65rem; color: var(--text-muted); flex-shrink: 0; }
+.arch-comm-name { flex: 1; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arch-comm-meta { font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; }
+.arch-edge-count { margin-left: 0.3rem; color: var(--text-muted); }
+.arch-badge { font-size: 0.6rem; border-radius: 0.25rem; padding: 0.1rem 0.3rem; font-weight: 600; }
+.arch-badge-hub { background: var(--accent, #7c3aed); color: #fff; }
+.arch-badge-small { background: var(--bg-secondary); color: var(--text-muted); }
+.arch-score { font-size: 0.65rem; color: var(--text-muted); }
+.arch-score.high { color: #22c55e; }
+.arch-children { padding-left: 1.2rem; border-top: 1px solid var(--border-subtle, #2a2a3e); }
+.arch-child { display: flex; justify-content: space-between; padding: 0.2rem 0.5rem; font-size: 0.75rem; color: var(--text-secondary); }
+.arch-child:hover { background: var(--bg-secondary); }
+.arch-child-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arch-child-meta { font-size: 0.65rem; color: var(--text-muted); flex-shrink: 0; }
+.arch-no-children { padding: 0.3rem 0.5rem; font-size: 0.7rem; color: var(--text-muted); font-style: italic; }
 </style>

@@ -17,6 +17,7 @@ from .tools import CORE_TOOLS
 from .dispatcher import ToolDispatcher
 from .skill_executor import SkillExecutor
 from .skills import register_core_skills
+from .server_instructions import EXTERNAL_AGENT_INSTRUCTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +109,9 @@ class MCPServer:
                 },
                 "serverInfo": {
                     "name": "topocode-mcp",
-                    "version": "0.1.0",
+                    "version": "0.2.0",
                 },
+                "instructions": EXTERNAL_AGENT_INSTRUCTIONS,
             })
 
         elif method == "ping":

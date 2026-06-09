@@ -1,0 +1,9 @@
+{
+  "id": "installer",
+  "name": "Agent Installer",
+  "version": "1.0.0",
+  "description": "Detect and configure AI coding agents to use topocode MCP",
+  "entry": "plugin_entry",
+  "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
+  "dependencies": []
+}

@@ -38,7 +38,7 @@ class BackendApp:
             elif sys.platform == "darwin":
                 data_dir = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "TopoOne")
             else:
-                data_dir = os.path.join(os.path.expanduser("~"), ".topoone")
+                data_dir = os.path.join(os.path.expanduser("~"), ".topocode")
 
         os.makedirs(data_dir, exist_ok=True)
         self.data_dir = data_dir
