@@ -1,25 +1,19 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   FolderIcon,
   Cog6ToothIcon,
-  DocumentTextIcon,
-  XCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useNavigationStore } from '@/stores/navigation'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useSettingsStore } from '@/stores/settings-store'
-import HomeTabBar from '@/components/project/HomeTabBar.vue'
-import CodeViewer from '@/components/code/CodeViewer.vue'
 import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
 import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
-import GroupManager from '@/components/project/GroupManager.vue'
 import ClearCacheDialog from '@/components/project/ClearCacheDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
-import { ref } from 'vue'
 
 const { showId, componentId } = useComponentId('PG-002')
 const { t } = useI18n()
@@ -31,32 +25,15 @@ const settingsStore = useSettingsStore()
 
 const showClearCacheDialog = ref(false)
 const selectedProject = projectStore.selectedProject
-const isSample = selectedProject?.isSample
 
 onMounted(() => {
   navigation.navigateTo('code')
 })
 
-function onTabUpdate(tabId: string | null) {
-  projectStore.setActiveTab(tabId ?? '')
-}
-
-function onTabClose(tabId: string) {
-  projectStore.closeTab(tabId)
-}
-
-function onCloseCodeViewer() {
-  if (projectStore.activeTabId) {
-    projectStore.closeTab(projectStore.activeTabId)
-  }
-  projectStore.openTaskListTab()
-}
-
 function onTaskCreated(taskId: string) {
   if (projectStore.activeTabId) {
     projectStore.closeTab(projectStore.activeTabId)
   }
-  projectStore.openTaskListTab()
 }
 
 function onTaskListCreateTask(taskId?: string) {
@@ -153,32 +130,6 @@ function onClearCacheDone() {
         >{{ t('project.synced') }}</span>
         <div style="flex:1;" />
         <button
-          v-if="projectStore.tabs.length > 0"
-          class="btn btn-ghost btn-sm"
-          :title="t('project.closeAllTabs')"
-          @click="projectStore.closeAllTabs()"
-        >
-          <XCircleIcon class="w-4 h-4" />
-          <span>{{ t('project.closeAllTabs') }}</span>
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          :title="t('analysis.taskList')"
-          @click="projectStore.openTaskListTab()"
-        >
-          <svg
-            class="w-4 h-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path d="M12 6V12L16 14" />
-            <circle cx="12" cy="12" r="9" />
-          </svg>
-          <span>{{ t('analysis.taskList') }}</span>
-        </button>
-        <button
           class="btn btn-ghost btn-sm"
           @click="showMenu"
         >
@@ -193,74 +144,24 @@ function onClearCacheDone() {
         </button>
       </div>
 
-      <!-- Tab 栏 -->
-      <HomeTabBar
-        v-if="projectStore.currentProjectTabs.length > 0"
-        :tabs="projectStore.currentProjectTabs"
-        :active-tab-id="projectStore.activeTabId ?? null"
-        @update:active-tab-id="onTabUpdate"
-        @close="onTabClose"
-      />
-
       <!-- 内容区 -->
       <div class="code-tab-content">
-        <!-- 代码视图 -->
-        <div
-          v-if="projectStore.activeTab?.kind === 'file'"
-          class="code-viewer-full"
-        >
-          <CodeViewer
-            :node="projectStore.activeTab.node!"
-            :root-path="projectStore.selectedProject?.rootPath || projectStore.selectedProject?.path || ''"
-            @close="onCloseCodeViewer"
-          />
-        </div>
-
-        <!-- 任务列表 -->
-        <div
-          v-else-if="projectStore.activeTab?.kind === 'taskList'"
-          class="task-list-panel"
-        >
-          <TaskListPanel
-            :project-id="projectStore.selectedProjectId!"
-            @create-task="onTaskListCreateTask"
-          />
-        </div>
-
-        <!-- 新建/编辑任务 -->
-        <div
-          v-else-if="projectStore.activeTab?.kind === 'taskCreate'"
-          class="task-create-form"
-        >
+        <template v-if="projectStore.activeTab?.kind === 'taskCreate'">
           <TaskCreateForm
             :project-id="projectStore.selectedProjectId!"
             :task-id="projectStore.activeTab.taskId"
             @created="onTaskCreated"
-            @cancelled="onCloseCodeViewer"
+            @cancelled="onTaskCreated('')"
           />
-        </div>
-
-        <!-- 分组管理 -->
-        <div
-          v-else-if="projectStore.activeTab?.kind === 'groupManager'"
-          class="group-manager-panel"
-        >
-          <GroupManager />
-        </div>
-
-        <!-- 空状态 -->
-        <div
-          v-else
-          class="empty-state centered"
-        >
-          <DocumentTextIcon class="w-12 h-12 text-accent" />
-          <div class="title">
-            {{ t('file.selectFile') }}
+        </template>
+        <template v-else>
+          <div class="task-list-panel">
+            <TaskListPanel
+              :project-id="projectStore.selectedProjectId!"
+              @create-task="onTaskListCreateTask"
+            />
           </div>
-          <div class="desc">
-            {{ t('file.selectFileDesc') }}
-          </div>
-        </div>
+        </template>
       </div>
     </template>
 
@@ -268,42 +169,30 @@ function onClearCacheDone() {
     <Teleport to="body">
       <div
         v-if="menuVisible"
-        class="context-menu"
-        :style="{ left: menuPosition.x + 'px', top: menuPosition.y + 'px' }"
-        @click.stop
-        @mouseleave="hideMenu"
+        class="menu-overlay"
+        @click="hideMenu"
       >
         <div
-          v-if="!isSample"
-          class="context-menu-item context-menu-item-warning"
-          @click="handleClearCache"
+          class="menu-popup"
+          :style="{ left: menuPosition.x + 'px', top: menuPosition.y + 'px' }"
+          @click.stop
         >
-          <svg
-            class="w-4 h-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+          <button
+            class="menu-item"
+            @click="handleClearCache"
           >
-            <path d="M4 7H20" />
-            <path d="M6 7V18C6 19.1046 6.89543 20 8 20H16C17.1046 20 18 19.1046 18 18V7" />
-            <path d="M9 7V4H15V7" />
-          </svg>
-          <span>{{ t('project.clearCache') }}</span>
+            <Cog6ToothIcon class="w-4 h-4" />
+            <span>{{ t('project.clearCache') }}</span>
+          </button>
         </div>
       </div>
     </Teleport>
 
-    <div
-      v-if="menuVisible"
-      class="context-menu-backdrop"
-      @click="hideMenu"
-    />
-
+    <!-- 清除缓存确认弹窗 -->
     <ClearCacheDialog
       v-if="showClearCacheDialog"
-      :project-id="selectedProject?.id || ''"
-      @close="onClearCacheDone"
+      @close="showClearCacheDialog = false"
+      @cleared="onClearCacheDone"
     />
   </div>
 </template>
@@ -322,32 +211,12 @@ function onClearCacheDone() {
   display: flex;
 }
 
-.code-viewer-full {
-  flex: 1;
-  overflow: hidden;
-}
-
 .task-list-panel,
-.task-create-form,
-.group-manager-panel {
+.task-create-form {
   flex: 1;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-
-.group-manager-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.group-manager-body {
-  flex: 1;
-  overflow: hidden;
 }
 
 .empty-state.centered {

@@ -61,6 +61,13 @@ export default { report: {
   taskSummary: '任务概要',
   analysisScope: '分析范围',
   communitySummary: '组件概要',
+  // 组件架构
+  communityArchitecture: '组件架构',
+  l0Communities: '个L0社区',
+  searchCommunity: '搜索组件...',
+  dependencyAnalysis: '依赖分析',
+  callAnalysis: '调用分析',
+  noCommunities: '该视角下无社区数据',
   generateReport: '生成报告',
   startGeneration: '开始生成',
 

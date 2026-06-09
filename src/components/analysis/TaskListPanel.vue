@@ -10,8 +10,12 @@ import {
   TrashIcon,
   ExclamationTriangleIcon,
   PlayIcon,
+  DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
+import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useProjectStore } from '@/stores/project'
+import { useNavigationStore } from '@/stores/navigation'
 import TaskDetailDialog from './TaskDetailDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
@@ -26,7 +30,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const router = useRouter()
 const analysisStore = useAnalysisStore()
+const projectStore = useProjectStore()
+const navigation = useNavigationStore()
 
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
@@ -153,6 +160,18 @@ function onEditTask(taskId: string) {
 
 function onDeleteTask(taskId: string) {
   deleteConfirm.value = taskId
+}
+
+function onOpenAnalysis(task: AnalysisTask) {
+  projectStore.selectProject(task.projectId)
+  router.push('/analysis')
+  navigation.navigateTo('analysis')
+  projectStore.openReportHomeTab({
+    taskId: task.id,
+    taskName: task.name,
+    projectId: task.projectId,
+    projectName: projectStore.selectedProject?.name,
+  })
 }
 
 async function confirmDelete() {
@@ -375,6 +394,18 @@ function getConfigSummary(task: AnalysisTask): string {
           >
             <TrashIcon class="w-3.5 h-3.5" />
             <span>{{ t('analysis.deleteTask') }}</span>
+          </button>
+
+          <div class="actions-spacer" />
+
+          <button
+            v-if="task.status === 'done'"
+            class="btn btn-primary btn-xs"
+            :title="t('report.structuralReport', '结构分析')"
+            @click="onOpenAnalysis(task)"
+          >
+            <DocumentTextIcon class="w-3.5 h-3.5" />
+            <span>结构分析</span>
           </button>
         </div>
       </div>
@@ -599,7 +630,9 @@ function getConfigSummary(task: AnalysisTask): string {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+  align-items: center;
 }
+.actions-spacer { flex: 1; }
 
 .btn-xs {
   padding: 3px 8px;

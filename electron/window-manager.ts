@@ -1,6 +1,6 @@
 /** 单窗口管理器 - 单后端共享 + 保活机制 */
 
-import { BrowserWindow, app, ipcMain } from 'electron'
+import { BrowserWindow, app, ipcMain, session } from 'electron'
 import { join } from 'path'
 import { pythonBridge, BackendStatus } from './python-bridge'
 
@@ -50,6 +50,38 @@ export class WindowManager {
     } else {
       win.loadFile(join(__dirname, '..', 'dist', 'index.html'))
     }
+
+    // 设置 Content-Security-Policy
+    // unsafe-eval 必须放行：vue-i18n 依赖 new Function() 编译翻译模板
+    const csp = isDev
+      ? [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-eval'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data: blob:",
+          "connect-src 'self' ws://localhost:5173 http://localhost:*",
+          "font-src 'self' data:",
+          "object-src 'none'",
+          "media-src 'self'",
+        ].join('; ')
+      : [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-eval'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data: blob:",
+          "connect-src 'self'",
+          "font-src 'self' data:",
+          "object-src 'none'",
+          "media-src 'self'",
+        ].join('; ')
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [csp],
+        },
+      })
+    })
 
     this.configureFonts(win)
 

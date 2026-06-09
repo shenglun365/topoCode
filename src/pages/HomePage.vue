@@ -11,6 +11,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { useAnalysisStore } from '@/stores/analysis'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useNavigationStore } from '@/stores/navigation'
 import ProjectCard from '@/components/project/ProjectCard.vue'
@@ -22,6 +23,7 @@ const { t } = useI18n()
 const router = useRouter()
 const navigation = useNavigationStore()
 const projectStore = useProjectStore()
+const analysisStore = useAnalysisStore()
 const settingsStore = useSettingsStore()
 
 // 筛选模式: all | favorites
@@ -130,14 +132,37 @@ function handleSelectProject(id: string) {
   navigation.navigateTo('code')
 }
 
+const PARSER_LANGUAGES = new Set([
+  'python', 'javascript', 'typescript', 'java', 'c', 'cpp', 'go', 'rust', 'csharp',
+  'swift', 'ruby', 'kotlin', 'php', 'dart', 'scala', 'lua',
+])
+
 async function handleImportProject() {
   if (projectStore.importing) return
   if (window.api && window.api.dialog) {
     const path = await window.api.dialog.openDirectory()
     if (path) {
-      const result = await projectStore.importProject(path)
-      if (result) {
+      const project = await projectStore.importProject(path)
+      if (project) {
         await projectStore.loadProjects()
+        try {
+          const fileStats = await analysisStore.scanFileStats(project.id)
+          const exts = Object.entries(fileStats.extensions || {})
+            .filter(([k]) => k !== '' && PARSER_LANGUAGES.has(k))
+          exts.sort((a, b) => b[1] - a[1])
+          const topExt = exts.length > 0 ? [exts[0][0]] : []
+          await analysisStore.createTask({
+            projectId: project.id,
+            type: 'full',
+            name: project.name,
+            scopes: [],
+            extensions: topExt,
+            excludeDirs: [],
+            reportTypes: ['dependency', 'callChain'],
+          })
+        } catch (e) {
+          console.error('[HomePage] auto-create task failed:', e)
+        }
       } else {
         alert(t('import.error.duplicate'))
       }

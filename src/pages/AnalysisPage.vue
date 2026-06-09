@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onActivated, onDeactivated, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChartBarIcon, ArrowLeftIcon } from '@heroicons/vue/24/outline'
+import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
@@ -9,7 +9,7 @@ import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
 import ChildAnalysisPanel from '@/components/report/ChildAnalysisPanel.vue'
 import ChatView from '@/components/report/ChatView.vue'
-import ArchitectureExplorer from '@/components/report/ArchitectureExplorer.vue'
+import { usePanelStore } from '@/stores/panel'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-002')
@@ -21,6 +21,7 @@ function toggleChatPanel() {
 }
 const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
+const panelStore = usePanelStore()
 
 /* ===== 分析功能组上下文 ===== */
 const analysisContext = computed(() => funcGroup.context.analysis)
@@ -56,6 +57,10 @@ function restoreAnalysisState() {
 
 onActivated(() => {
   restoreAnalysisState();
+})
+onMounted(() => {
+  panelStore.setLeftCollapsed(false)
+  panelStore.setRightCollapsed(false)
 })
 
 onDeactivated(() => {
@@ -260,18 +265,11 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
 
     <!-- ===== 报告首页（分析报告生成） / 子文档 / 空白状态 ===== -->
     <template v-if="isReportHomeTab && activeTab">
-      <div class="report-layout">
-        <div class="report-main">
-          <ReportHome
-            :key="activeTab.id"
-            :task-id="activeTab.taskId!"
-            @open-md="handleOpenMD"
-          />
-        </div>
-        <div class="report-sidebar">
-          <ArchitectureExplorer :task-id="activeTab.taskId!" :project-id="activeTab.projectId || projectStore.selectedProjectId || ''" />
-        </div>
-      </div>
+      <ReportHome
+        :key="activeTab.id"
+        :task-id="activeTab.taskId!"
+        @open-md="handleOpenMD"
+      />
     </template>
 
     <!-- Agent 对话面板（浮动按钮触发） -->
@@ -340,18 +338,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         </div>
       </div>
     </template>
-
-    <template v-else>
-      <div class="analysis-empty">
-        <ChartBarIcon class="w-16 h-16" />
-        <div class="title">
-          {{ t('analysis.selectReportHint') }}
-        </div>
-        <div class="desc">
-          {{ t('analysis.selectReportHintDesc') }}
-        </div>
-      </div>
-    </template>
   </div>
 </template>
 
@@ -361,26 +347,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.analysis-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--text-muted);
-}
-
-.analysis-empty .title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.analysis-empty .desc {
-  font-size: 12px;
 }
 
 .comp-analysis-container {
@@ -409,24 +375,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   flex: 1;
   overflow-y: auto;
   padding: 8px;
-}
-
-/* Report layout — main + sidebar */
-.report-layout {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-.report-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-}
-.report-sidebar {
-  width: 260px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border, #374151);
-  overflow-y: auto;
 }
 
 /* Chat panel (floating) */

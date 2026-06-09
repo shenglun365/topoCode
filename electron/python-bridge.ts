@@ -146,10 +146,10 @@ export class PythonBridge {
       ], spawnOptions)
 
       this.process.stdout?.on('data', (data) => {
-        console.error('[Python]', data.toString())
+        console.log('[Python]', data.toString())
       })
       this.process.stderr?.on('data', (data) => {
-        console.error('[Python Error]', data.toString())
+        console.log('[Python]', data.toString())
       })
 
       this.process.on('exit', (code, signal) => {

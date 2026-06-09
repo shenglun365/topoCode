@@ -427,12 +427,14 @@ export const useProjectStore = defineStore('project', () => {
     taskId: string
     taskName: string
     projectName?: string
+    projectId?: string
   }) {
-    const pid = funcGroup.currentProjectId;
+    const pid = params.projectId ?? funcGroup.currentProjectId;
     const existing = funcGroup.context.analysis.tabs.find(
       t => t.kind === 'reportHome' && t.taskId === params.taskId
     )
     if (existing) {
+      existing.projectId = pid
       funcGroup.setActiveTab('analysis', existing.id)
       return existing.id
     }

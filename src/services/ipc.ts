@@ -45,6 +45,24 @@ function adaptProjectList(list: any[]): Project[] {
   return (list || []).filter(Boolean).map(adaptProject)
 }
 
+function adaptTask(t: any): AnalysisTask {
+  if (!t) return null as any
+  return {
+    ...t,
+    projectId: t.project_id ?? t.projectId ?? '',
+    createdAt: t.created_at ?? t.createdAt ?? '',
+    updatedAt: t.updated_at ?? t.updatedAt ?? '',
+    scopes: t.scopes ?? [],
+    extensions: t.extensions ?? [],
+    excludeDirs: t.excludeDirs ?? t.exclude_dirs ?? [],
+    reportTypes: t.reportTypes ?? t.report_types ?? [],
+  }
+}
+
+function adaptTaskList(list: any[]): AnalysisTask[] {
+  return (list || []).filter(Boolean).map(adaptTask)
+}
+
 /**
  * IPC Service
  *
@@ -143,14 +161,15 @@ function createRealIPC() {
     // ==================== 代码分析 ====================
     analysis: {
       listTasks: async (projectId: string) => {
-        return await api.analysis.listTasks(projectId)
+        const list = await api.analysis.listTasks(projectId)
+        return adaptTaskList(list)
       },
       createTask: async (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => {
         console.log('[IPC] createTask -> api.analysis.createTask:', JSON.stringify(params))
         try {
           const result = await api.analysis.createTask(params)
           console.log('[IPC] createTask result:', JSON.stringify(result))
-          return result
+          return adaptTask(result)
         } catch (err: any) {
           console.error('[IPC] createTask error:', err.message, err)
           throw err
@@ -168,7 +187,8 @@ function createRealIPC() {
         return await api.analysis.getResults(taskId)
       },
       updateTask: async (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => {
-        return await api.analysis.updateTask(params)
+        const result = await api.analysis.updateTask(params)
+        return adaptTask(result)
       },
       deleteTask: async (taskId: string) => {
         return await api.analysis.deleteTask(taskId)

@@ -2,38 +2,28 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  DocumentTextIcon,
   DocumentMagnifyingGlassIcon,
   ChartBarIcon,
   FolderIcon,
   RectangleGroupIcon,
-  SparklesIcon,
   ExclamationTriangleIcon,
   HashtagIcon,
-  ListBulletIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import { usePanelStore } from '@/stores/panel'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
-import { useModelConfigStore } from '@/stores/model-config-store'
-import { useFuncGroupStore } from '@/stores/funcGroup'
 
 import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
 import TaskSummaryCard from '@/components/home/TaskSummaryCard.vue'
-import ActionsBar from '@/components/home/ActionsBar.vue'
 import CommunitySection from '@/components/report/CommunitySection.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
-const panelStore = usePanelStore()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
-const modelConfigStore = useModelConfigStore()
-const funcGroup = useFuncGroupStore()
 const communityStore = useCommunityStore()
 const reportStore = useReportStore()
 
@@ -49,11 +39,37 @@ const emit = defineEmits<{
 
 const loading = ref(true)
 const loadError = ref<string | null>(null)
-const showNoReportDialog = ref(false)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
-const expandedComms = ref<Set<string>>(new Set())
+const communitySearch = ref('')
+
+function communityIdLabel(item: { communityId: string; level?: string }): string {
+  const parts = item.communityId.split('-')
+  const num = parts[parts.length - 1]
+  const level = item.level || 'L0'
+  return `${level}-${num}`
+}
+
+function commName(item: CommunityItem): string {
+  const name = item.name && item.name !== item.communityId ? item.name : ''
+  if (name) return name.length > 12 ? name.slice(0, 12) + '\u2026' : name
+  return communityIdLabel(item)
+}
+
+function openCommunityDoc(item: CommunityItem) {
+  if (item.summary) {
+    emit('open-md', {
+      taskId: props.taskId,
+      content: `## ${commName(item)}\n\n${item.summary || ''}`,
+      title: commName(item),
+      parentCommId: item.communityId,
+      parentLevel: item.level || 'L0',
+      parentEdgeType: item.edgeType,
+      regenerationType: 'community',
+    })
+  }
+}
 
 const depCommunityCount = computed(() =>
   (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'INCLUDE').length
@@ -62,25 +78,12 @@ const callCommunityCount = computed(() =>
   (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'CALL').length
 )
 
-function toggleArchComm(id: string) {
-  if (expandedComms.value.has(id)) {
-    expandedComms.value.delete(id)
-  } else {
-    expandedComms.value.add(id)
-  }
-}
-
-function getArchChildren(communityId: string): CommunityItem[] {
-  const all = communityStore.tasks[props.taskId]?.communities || []
-  return all.filter(c => c.parentId === communityId)
-}
 const projectSummaryText = ref('')
 const projectSummaryDate = ref('')
 const showSummaryModal = ref(false)
 const editingSummary = ref(false)
 const editSummaryText = ref('')
 
-const hasModel = computed(() => modelConfigStore.models.some(m => m.isDefault))
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
 const task = computed(() => taskDetail.value)
 
@@ -96,19 +99,7 @@ const hasAnyCommunity = computed(() => {
   return filtered
 })
 
-  const communityAnalysisProgress = computed(() => {
-    const allL0 = (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0')
-  if (allL0.length === 0) return 0
-  const done = allL0.filter(c => c.status === 'completed').length
-  const pct = Math.round((done / allL0.length) * 100)
-  console.log(`[RP-001] communityAnalysisProgress allL0=${allL0.length} done=${done} pct=${pct}`)
-  return pct
-})
 
-const hasArchitectureReport = computed(() => {
-  if (reportStore.generatedReports[props.taskId]) return true
-  return !!reportStore.dbReportExists[props.taskId]
-})
 
 
 
@@ -119,62 +110,11 @@ function truncatePath(p: string): string {
   return p.slice(0, 10) + '…' + p.slice(-20)
 }
 
-function formatCommId(item: { id: string; level?: string }): string {
-  const parts = item.id.split('-')
-  const num = parts[parts.length - 1]
-  const level = item.level || parts[parts.length - 2] || 'L0'
-  return `${level}-${num}`
-}
-
-function commName(item: CommunityItem): string {
-  const name = item.name && item.name !== item.communityId ? item.name : ''
-  if (name) return name.length > 10 ? name.slice(0, 10) + '…' : name
-  return formatCommId(item)
-}
-
-async function openCommunityDoc(item: CommunityItem) {
-  try {
-    if (item.name || item.summary) {
-      handleCommunityMD({ communityId: item.communityId, name: item.name || formatCommId(item), summary: item.summary || '', mermaid: item.mermaid, plantuml: item.plantuml, parentLevel: item.level, parentCommId: item.communityId, parentEdgeType: commEdgeType.value })
-      return
-    }
-    const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
-    if (!pid) return
-    const detail = await reportStore.getLevelCommunityDetail({
-      projectId: pid, taskId: props.taskId,
-      level: item.level || 'L0', edgeType: commEdgeType.value,
-    })
-    const community = detail.communities.find((c: any) => c.communityId === item.communityId)
-    if (!community) return
-    const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
-    const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
-    const md = [
-      `# 社区: ${item.communityId}`,
-      '',
-      `**层级**: ${item.level || 'L0'} | **边缘类型**: ${commEdgeType.value}`,
-      `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
-      '',
-      '## 节点列表',
-      nodeLines || '（空）',
-      '',
-      '## 边列表',
-      edgeLines || '（空）',
-    ].join('\n')
-    emit('open-md', {
-      taskId: props.taskId,
-      content: md,
-      title: formatCommId(item),
-      parentLevel: item.level,
-      parentCommId: item.communityId,
-      parentEdgeType: commEdgeType.value,
-      regenerationType: 'community',
-    })
-  } catch (e: any) {
-    console.error('[ReportHome] openCommunityDoc error:', e)
-  }
-}
-
-function handleCommunityMD(params: { communityId: string; name: string; summary: string; mermaid?: string; plantuml?: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }) {
+async function handleCommunityMD(params: {
+  communityId: string; name: string; summary: string;
+  mermaid?: string; plantuml?: string;
+  parentLevel?: string; parentCommId?: string; parentEdgeType?: string;
+}) {
   const parts: string[] = [
     `# 社区: ${params.name}`,
     '',
@@ -254,138 +194,9 @@ async function saveSummary() {
   }
 }
 
-function closeAllSubDocTabs() {
-  const ctx = funcGroup.context.analysis
-  const toClose = ctx.tabs.filter(t => t.kind === 'subdoc' && (t as any).taskId === props.taskId)
-  for (const tab of toClose) {
-    funcGroup.closeTab('analysis', tab.id)
-  }
-}
 
-function openTaskList() {
-  panelStore.setRightCollapsed(false)
-  panelStore.setRightTab('detail')
-}
 
-function openCommunityAnalysis() {
-  const ctx = funcGroup.context.analysis
-  const existing = ctx.tabs.find(
-    t => t.kind === 'componentAnalysis' && (t as any).taskId === props.taskId
-  )
-  if (existing) {
-    funcGroup.setActiveTab('analysis', existing.id)
-    return
-  }
-  funcGroup.openTab('analysis', {
-    id: `comp-analysis-${props.taskId}-${Date.now()}`,
-    kind: 'componentAnalysis',
-    title: t('report.pipeline.communityAnalysis'),
-    taskId: props.taskId,
-    projectId: projectId.value,
-  })
-}
 
-async function handleReportGenerated(content: string) {
-  reportStore.setGeneratedReport(props.taskId, content)
-  try {
-    await ipc.report.saveOverallDoc({
-      taskId: props.taskId,
-      title: t('report.pipeline.overallArchitecture'),
-      content,
-    })
-  } catch (e: any) {
-    console.warn('[ReportHome] saveOverallDoc on generated failed:', e)
-  }
-}
-
-function escapeTbl(val: any): string {
-  return String(val ?? '')
-    .replace(/\|/g, '\\|')
-    .replace(/\n/g, ' ')
-    .replace(/^### /gm, '')
-    .replace(/^- /gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/`(.*?)`/g, '$1')
-    .trim()
-}
-
-function buildCommunityAppendix(): string {
-  const parts: string[] = ['## 组件附录', '']
-  const edges: { key: 'CALL' | 'INCLUDE'; label: string }[] = [
-    { key: 'CALL', label: '调用' },
-    { key: 'INCLUDE', label: '依赖' },
-  ]
-  const coms = communityStore.tasks[props.taskId]?.communities || []
-  let hasItems = false
-  parts.push('| 类型 | 名称 |')
-  parts.push('|------|------|')
-  for (const et of edges) {
-    const items = coms.filter(c => c.level === 'L0' && c.edgeType === et.key)
-    for (const item of items) {
-      hasItems = true
-      const name = escapeTbl(item.name || item.communityId)
-      parts.push(`| ${et.label} | [${name}](##community:${et.key}:${item.communityId}) |`)
-    }
-  }
-  if (!hasItems) {
-    parts.push('| - | （暂无组件数据） |')
-  }
-  parts.push('')
-  return parts.join('\n')
-}
-
-async function openOverallArchitecture() {
-  let content = reportStore.generatedReports[props.taskId]
-  if (!content) {
-    try {
-      const docs = await ipc.report.listSubDocs({ taskId: props.taskId, commId: 'overall' })
-      if (docs?.length) {
-        const doc = await ipc.report.getSubDoc(docs[0].id)
-        content = doc.content
-      }
-    } catch (e: any) {
-      console.warn('[ReportHome] DB fetch for overall doc failed:', e)
-    }
-  }
-  if (!content) {
-    showNoReportDialog.value = true
-    return
-  }
-  // 避免重复追加附录
-  if (!content.includes('## 组件附录')) {
-    content = content + '\n\n---\n\n' + buildCommunityAppendix()
-  }
-  let docId = ''
-  try {
-    const result = await ipc.report.saveOverallDoc({
-      taskId: props.taskId,
-      title: t('report.pipeline.overallArchitecture'),
-      content,
-    })
-    docId = result.id
-  } catch (e: any) {
-    console.warn('[ReportHome] saveOverallDoc failed:', e)
-  }
-  const tabId = `tab-overall-arch-${props.taskId}`
-  const ctx = funcGroup.context.analysis
-  const existing = ctx.tabs.find(t => t.id === tabId)
-  if (existing) {
-    funcGroup.setActiveTab('analysis', existing.id)
-    return
-  }
-  funcGroup.openTab('analysis', {
-    id: tabId,
-    kind: 'subdoc',
-    title: t('report.pipeline.overallArchitecture'),
-    content,
-    taskId: props.taskId,
-    projectId: projectId.value,
-    subDocId: docId,
-    hasUnsavedChanges: false,
-    regenerationType: 'overall',
-  })
-}
 
 onMounted(loadData)
 watch(() => props.taskId, loadData)
@@ -515,6 +326,15 @@ watch(() => props.taskId, loadData)
             <span class="arch-stats">
               {{ runtimeCommunities.length }} {{ t('report.l0Communities', '个L0社区') }}
             </span>
+            <div class="header-spacer" />
+            <div class="arch-search">
+              <input
+                v-model="communitySearch"
+                type="text"
+                :placeholder="t('report.searchCommunity', '搜索组件...')"
+                class="arch-search-input"
+              />
+            </div>
           </div>
 
           <!-- INCLUDE / CALL 切换 -->
@@ -535,126 +355,25 @@ watch(() => props.taskId, loadData)
             </button>
           </div>
 
-          <!-- 社区层级列表 -->
-          <div class="arch-tree">
+          <!-- 社区 tag 列表 — 分析过的显示 name，未分析的显示编号 -->
+          <div class="arch-tags">
             <div
               v-for="item in runtimeCommunities"
               :key="item.id"
-              class="arch-comm"
+              class="arch-tag"
+              :class="{ 'has-name': item.status === 'completed' && item.name && item.name !== item.communityId }"
+              :title="`${item.communityId} (${item.nodeCount} 节点${item.qualityScore ? ', 质量: ' + (item.qualityScore * 100).toFixed(0) + '%' : ''})`"
+              @click="openCommunityDoc(item)"
             >
-              <div
-                class="arch-comm-header"
-                :class="{ expanded: expandedComms.has(item.id) }"
-                @click="toggleArchComm(item.id)"
-              >
-                <span class="arch-expand">{{ expandedComms.has(item.id) ? '▾' : '▸' }}</span>
-                <span class="arch-comm-name">{{ item.name || formatCommId(item) }}</span>
-                <span class="arch-comm-meta">
-                  {{ item.nodeCount }} nodes
-                  <span v-if="item.edgeCount" class="arch-edge-count">{{ item.edgeCount }} edges</span>
-                </span>
-                <span v-if="item.nodeCount > 20" class="arch-badge arch-badge-hub" title="Hub community">HUB</span>
-                <span v-else-if="item.nodeCount < 4" class="arch-badge arch-badge-small">small</span>
-                <span v-if="item.qualityScore" class="arch-score" :class="{ high: item.qualityScore > 0.6 }">
-                  {{ (item.qualityScore * 100).toFixed(0) }}%
-                </span>
-              </div>
-
-              <!-- 子社区 (展开时显示) -->
-              <div v-if="expandedComms.has(item.id)" class="arch-children">
-                <div
-                  v-for="child in getArchChildren(item.communityId)"
-                  :key="child.id"
-                  class="arch-child"
-                >
-                  <span class="arch-child-name">{{ child.name || child.communityId }}</span>
-                  <span class="arch-child-meta">{{ child.nodeCount }}n</span>
-                </div>
-                <div v-if="getArchChildren(item.communityId).length === 0" class="arch-no-children">
-                  {{ t('report.noSubCommunities', '无子社区') }}
-                </div>
-              </div>
+              <span class="tag-name">{{ commName(item) }}</span>
+              <span class="tag-count">{{ item.nodeCount }}</span>
+            </div>
+            <div v-if="runtimeCommunities.length === 0" class="arch-empty">
+              {{ t('report.noCommunities', '该视角下无社区数据') }}
             </div>
           </div>
         </section>
 
-        <!-- 操作区 -->
-        <section class="home-section actions-section">
-          <div class="section-header">
-            <SparklesIcon class="w-4 h-4" />
-            <span>{{ t('report.generateReport') }}</span>
-          </div>
-
-          <!-- LLM API 校验提示 -->
-          <div
-            v-if="!hasModel"
-            class="model-warning"
-          >
-            <ExclamationTriangleIcon class="w-4 h-4" />
-            <span>{{ t('report.llmNotConfigured') }}</span>
-          </div>
-
-          <div class="actions-row">
-            <button
-              class="btn btn-primary"
-              @click="openTaskList"
-            >
-              <ListBulletIcon class="w-4 h-4" />
-              <span>{{ t('report.openTaskList') }}</span>
-            </button>
-            <button
-              class="btn btn-secondary comp-analysis-btn"
-              @click="openCommunityAnalysis"
-            >
-              <span
-                class="comp-analysis-progress"
-                :style="{ width: communityAnalysisProgress + '%' }"
-              />
-              <SparklesIcon class="w-4 h-4" />
-              <span>{{ t('report.pipeline.communityAnalysis') }}</span>
-              <span
-                v-if="communityAnalysisProgress > 0"
-                class="comp-analysis-pct"
-              >{{ communityAnalysisProgress }}%</span>
-            </button>
-            <button
-              :class="['btn', hasArchitectureReport ? 'btn-has-result' : 'btn-secondary']"
-              @click="openOverallArchitecture"
-            >
-              <DocumentTextIcon class="w-4 h-4" />
-              <span>{{ t('report.viewOverallArchitecture') }}</span>
-            </button>
-            <button
-              class="btn btn-ghost"
-              title="关闭本报告所有文档页"
-              @click="closeAllSubDocTabs"
-            >
-              <XMarkIcon class="w-4 h-4" />
-              <span>{{ t('report.closeAllDocs') }}</span>
-            </button>
-
-          </div>
-        </section>
-      </div>
-
-      <!-- 生成报告提示弹窗 -->
-      <div
-        v-if="showNoReportDialog"
-        class="dialog-overlay"
-        @click.self="showNoReportDialog = false"
-      >
-        <div class="dialog-content">
-          <ExclamationTriangleIcon class="w-5 h-5 dialog-warning-icon" />
-          <p class="dialog-message">{{ t('report.noArchitectureReport') }}</p>
-          <div class="dialog-actions">
-            <button
-              class="btn btn-primary btn-sm"
-              @click="showNoReportDialog = false"
-            >
-              {{ t('common.confirm') }}
-            </button>
-          </div>
-        </div>
       </div>
 
       <!-- 项目摘要弹窗 -->
@@ -1183,8 +902,9 @@ watch(() => props.taskId, loadData)
   margin-left: auto;
 }
 
-/* Architecture section */
-.arch-stats { font-size: 0.75rem; color: var(--text-muted); margin-left: auto; font-weight: 400; }
+/* Architecture section — tag/chip layout */
+.arch-stats { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; white-space: nowrap; }
+.header-spacer { flex: 1; }
 .arch-tabs { display: flex; gap: 0; margin-bottom: 0.75rem; border-bottom: 2px solid var(--border); }
 .arch-tab {
   display: flex; align-items: center; gap: 0.35rem;
@@ -1194,27 +914,25 @@ watch(() => props.taskId, loadData)
 }
 .arch-tab:hover { color: var(--text-primary); }
 .arch-tab.active { color: var(--accent, #7c3aed); border-bottom-color: var(--accent, #7c3aed); }
-.arch-tree { max-height: 400px; overflow-y: auto; }
-.arch-comm { border-bottom: 1px solid var(--border); }
-.arch-comm:last-child { border-bottom: none; }
-.arch-comm-header {
-  display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.25rem;
-  cursor: pointer; font-size: 0.8rem; transition: background 0.1s;
+
+.arch-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
+.arch-tag {
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.2rem 0.5rem; border-radius: 0.375rem;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  font-size: 0.75rem; cursor: pointer; transition: all 0.15s;
 }
-.arch-comm-header:hover { background: var(--bg-secondary); }
-.arch-expand { width: 0.75rem; font-size: 0.65rem; color: var(--text-muted); flex-shrink: 0; }
-.arch-comm-name { flex: 1; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arch-comm-meta { font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; }
-.arch-edge-count { margin-left: 0.3rem; color: var(--text-muted); }
-.arch-badge { font-size: 0.6rem; border-radius: 0.25rem; padding: 0.1rem 0.3rem; font-weight: 600; }
-.arch-badge-hub { background: var(--accent, #7c3aed); color: #fff; }
-.arch-badge-small { background: var(--bg-secondary); color: var(--text-muted); }
-.arch-score { font-size: 0.65rem; color: var(--text-muted); }
-.arch-score.high { color: #22c55e; }
-.arch-children { padding-left: 1.2rem; border-top: 1px solid var(--border-subtle, #2a2a3e); }
-.arch-child { display: flex; justify-content: space-between; padding: 0.2rem 0.5rem; font-size: 0.75rem; color: var(--text-secondary); }
-.arch-child:hover { background: var(--bg-secondary); }
-.arch-child-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arch-child-meta { font-size: 0.65rem; color: var(--text-muted); flex-shrink: 0; }
-.arch-no-children { padding: 0.3rem 0.5rem; font-size: 0.7rem; color: var(--text-muted); font-style: italic; }
+.arch-tag:hover { border-color: var(--accent, #7c3aed); }
+.arch-tag.has-name { background: var(--bg-accent-subtle, #2d1f5e); border-color: var(--accent, #7c3aed); }
+.tag-name { font-weight: 500; color: var(--text-primary); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-count { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); border-radius: 0.25rem; padding: 0.05rem 0.3rem; }
+.arch-empty { font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem; font-style: italic; }
+
+.arch-search { display: flex; }
+.arch-search-input {
+  width: 160px; padding: 0.2rem 0.5rem; font-size: 0.75rem;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 0.375rem; color: var(--text-primary);
+}
+.arch-search-input:focus { outline: none; border-color: var(--accent); }
 </style>

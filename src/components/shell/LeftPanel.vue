@@ -10,6 +10,7 @@ import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import FileTree from '@/components/project/FileTree.vue'
 import ProjectList from '@/components/project/ProjectList.vue'
 import type { FileTreeNode } from '@/types/ipc'
@@ -22,6 +23,17 @@ const panelStore = usePanelStore()
 const navigation = useNavigationStore()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
+const funcGroup = useFuncGroupStore()
+const activeAnalysisTab = computed(() => {
+  const ctx = funcGroup.context.analysis
+  return ctx.tabs.find(t => t.id === ctx.activeTabId) || null
+})
+const highlightTaskId = computed(() =>
+  activeAnalysisTab.value?.kind === 'reportHome' ? (activeAnalysisTab.value as any).taskId : null
+)
+const highlightProjectId = computed(() =>
+  activeAnalysisTab.value?.kind === 'reportHome' ? (activeAnalysisTab.value as any).projectId : null
+)
 
 // 拖拽调整宽度
 const isResizing = ref(false)
@@ -73,7 +85,9 @@ onMounted(() => {
 watch(() => navigation.currentPage, (page) => {
   if (page === 'analysis') {
     panelStore.setLeftCollapsed(false)
-  } else if ((page === 'home' || page === 'code') && !projectStore.selectedProjectId) {
+  } else if (page === 'home' && !projectStore.selectedProjectId) {
+    panelStore.setLeftCollapsed(true)
+  } else if (page === 'code' && !projectStore.selectedProjectId) {
     panelStore.setLeftCollapsed(true)
   }
 })
@@ -108,13 +122,13 @@ const fileTreeLoading = ref(false)
 watch(
   () => projectStore.selectedProjectId,
   async (newId) => {
-    if (navigation.currentPage === 'home' || navigation.currentPage === 'code') {
-      if (newId) {
-        panelStore.setLeftCollapsed(false)
-      } else {
-        panelStore.setLeftCollapsed(true)
-      }
+  if (navigation.currentPage === 'home' || navigation.currentPage === 'code') {
+    if (newId) {
+      panelStore.setLeftCollapsed(false)
+    } else {
+      panelStore.setLeftCollapsed(true)
     }
+  }
     if (newId) {
       await loadFileTree()
     }
@@ -151,6 +165,7 @@ async function handleSelectReport(item: { taskId: string; type: string; taskName
   projectStore.openReportHomeTab({
     taskId: item.taskId,
     taskName: item.taskName,
+    projectId,
     projectName: project?.name,
   })
 }
@@ -227,9 +242,11 @@ loadPanelContent()
       </div>
     </div>
     <div class="panel-body">
-      <!-- 分析页面：项目列表（优先判断，不受 viewMode 影响） -->
+      <!-- 分析页面：项目列表 -->
       <template v-if="navigation.currentPage === 'analysis'">
         <ProjectList
+          :highlight-task-id="highlightTaskId"
+          :highlight-project-id="highlightProjectId"
           @select-report="handleSelectReport"
           @import-project="handleImportProject"
           @create-task-for-project="handleCreateTaskForProject"

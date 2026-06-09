@@ -59,6 +59,13 @@ export default { report: {
   taskSummary: 'Task Summary',
   analysisScope: 'Analysis Scope',
   communitySummary: 'Component Summary',
+  // Component Architecture
+  communityArchitecture: 'Component Architecture',
+  l0Communities: 'L0 communities',
+  searchCommunity: 'Search components...',
+  dependencyAnalysis: 'Dependency Analysis',
+  callAnalysis: 'Call Analysis',
+  noCommunities: 'No community data for this view',
   generateReport: 'Generate Report',
   startGeneration: 'Start Generation',
   viewOverallArchitecture: 'View Overall Architecture',

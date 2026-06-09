@@ -21,6 +21,11 @@ const { t } = useI18n()
 const projectStore = useProjectStore()
 const analysisStore = useAnalysisStore()
 
+const props = defineProps<{
+  highlightTaskId?: string
+  highlightProjectId?: string
+}>()
+
 const emit = defineEmits<{
   selectReport: [item: ReportItem, projectId: string]
   importProject: []
@@ -30,6 +35,7 @@ const emit = defineEmits<{
 const searchQuery = ref('')
 const expandedProjects = ref<Set<string>>(new Set())
 const loadingProjects = ref<Set<string>>(new Set())
+const selectedTaskId = ref<string | null>(null)
 
 // 报告项：每个报告类型单独一行
 export interface ReportItem {
@@ -127,7 +133,36 @@ const filteredProjects = computed(() => {
 watch(() => projectStore.projects, () => {
   reportItemsByProject.value.clear()
   expandedProjects.value.clear()
+  selectedTaskId.value = null
 })
+
+function onSelectReport(item: ReportItem, projectId: string) {
+  selectedTaskId.value = item.taskId
+  emit('selectReport', item, projectId)
+}
+
+// 外部传入高亮任务 ID 时自动展开项目并选中报告项
+watch(() => props.highlightTaskId, async (taskId) => {
+  selectedTaskId.value = taskId || null
+  if (!taskId) return
+  // 先在已加载的数据中查找
+  for (const [pid, items] of reportItemsByProject.value) {
+    if (items.some(item => item.taskId === taskId)) {
+      expandedProjects.value.add(pid)
+      return
+    }
+  }
+  // 未找到时用传入的项目 ID 展开并加载
+  const pid = props.highlightProjectId
+  if (pid) {
+    expandedProjects.value.add(pid)
+    await loadCompletedTasks(pid)
+    const items = reportItemsByProject.value.get(pid)
+    if (items?.some(item => item.taskId === taskId)) {
+      selectedTaskId.value = taskId
+    }
+  }
+}, { immediate: true })
 
 // 点击"无报告"，弹出确认框
 const pendingCreateProject = ref<Project | null>(null)
@@ -238,7 +273,8 @@ function cancelCreateTask() {
             v-else
             :key="`${item.taskId}-${item.type}`"
             class="report-item"
-            @click="emit('selectReport', item, project.id)"
+            :class="{ selected: selectedTaskId === item.taskId }"
+            @click="onSelectReport(item, project.id)"
           >
             <DocumentTextIcon class="w-3.5 h-3.5 report-icon" />
             <span
@@ -417,6 +453,10 @@ function cancelCreateTask() {
 .report-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.report-item.selected {
+  background: var(--bg-active);
+  color: var(--accent);
 }
 
 .report-icon {
