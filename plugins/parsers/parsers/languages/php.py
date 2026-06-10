@@ -19,6 +19,17 @@ def _php_is_static(node: SyntaxNode) -> bool:
     return False
 
 
+def _php_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "namespace_use_declaration":
+        name_node = node.child_by_field_name("name")
+        if name_node:
+            return {"module_name": source[name_node.start_byte:name_node.end_byte]}
+        for c in node.named_children:
+            if c.type == "qualified_name" or c.type == "namespace_name":
+                return {"module_name": source[c.start_byte:c.end_byte]}
+    return None
+
+
 PHP = LanguageExtractor(
     function_types=("function_definition",),
     class_types=("class_declaration", "trait_declaration"),
@@ -34,4 +45,5 @@ PHP = LanguageExtractor(
     params_field="parameters",
     extract_visibility=_php_visibility,
     is_static=_php_is_static,
+    extract_import=_php_extract_import,
 )

@@ -125,13 +125,24 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables) -> li
         elif module_name.startswith("./") or module_name.startswith("../"):
             candidate = os.path.normpath(os.path.join(source_dir, module_name))
             target_id = file_index.get(candidate) or suffix_index.get(candidate)
-        # 3. 绝对模块路径: parsers.core.walker → 路径后缀匹配
-        elif not target_id:
+        # 3. C/C++ 风格: 尝试从源文件目录解析相对路径 (如 "header.h", "dir/header.h")
+        if not target_id:
+            candidate = os.path.normpath(os.path.join(source_dir, module_name))
+            target_id = file_index.get(candidate) or suffix_index.get(candidate)
+        # 4. 绝对模块路径: parsers.core.walker → 路径后缀匹配
+        if not target_id:
             mod_path = module_name.replace(".", "/")
             target_id = suffix_index.get(mod_path)
-        # 4. stem 匹配 (fallback: os → os.py)
+        # 5. 路径后缀匹配 (如 "dir/header.h" 匹配 ".../dir/header.h" 或 ".../dir/header")
         if not target_id:
-            stem = module_name.split("/")[-1].split(".")[-1]
+            target_id = suffix_index.get(module_name)
+            if not target_id:
+                mod_noext = os.path.splitext(module_name)[0]
+                target_id = suffix_index.get(mod_noext)
+        # 6. stem 匹配 (fallback: os → os.py, header.h → header)
+        if not target_id:
+            basename = module_name.split("/")[-1]
+            stem = basename.rsplit(".", 1)[0] if "." in basename else basename
             ids = stem_index.get(stem, [])
             if len(ids) == 1:
                 target_id = ids[0]
@@ -177,7 +188,7 @@ def _find_target_for_import(module_name: str, source_file: str, file_index: dict
         return None
 
     # 绝对模块路径: parsers.core.walker → parsers/core/walker
-    for ext in (".py", ".ts", ".tsx", ".js", ".jsx"):
+    for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx"):
         candidate = module_name.replace(".", "/") + ext
         for table in all_tables:
             for node in table.nodes:
@@ -207,7 +218,7 @@ def is_task_executing(task_id: str) -> bool:
 # ==================== 进度回调 ====================
 
 def _update_progress(server, multi_db, task_id: str, run_id: str,
-                     current: int, total: int):
+                     current: int = 0, total: int = 100, progress: int = None):
     """
     更新进度: SQLite + ZMQ PUB 推送
 
@@ -216,10 +227,12 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
         multi_db: MultiDBManager 实例（复用连接）
         task_id: 任务 ID
         run_id: 运行 ID
-        current: 当前处理到第几个文件
+        current: 当前处理到第几个文件（文件解析阶段）
         total: 总文件数
+        progress: 覆盖进度值（0-100），为 None 时从 current/total 计算
     """
-    progress = int(current * 100 / total) if total > 0 else 0
+    if progress is None:
+        progress = int(current * 100 / total) if total > 0 else 0
 
     # 更新任务进度 (execute() 已自动 commit)
     multi_db.main_db.execute("""
@@ -352,9 +365,20 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     skipped = 0
     logs = []
 
+    # ── 进度分配 ──
+    # Step 1 (AST parse):  5-65 (按文件比例缩放)
+    # Step 2 (reference):  65-72
+    # Step 2.5 (import):   72-74
+    # Step 3 (framework):  74-77
+    # Step 4 (INCLUDE):    77-82 (若有) / 77-99 (无 CALL)
+    # Step 4 (CALL):       82-99 (若有)
+    # Step 5 (summary):    99-100
+
     def _log(msg: str):
         logs.append({"timestamp": datetime.utcnow().isoformat(), "message": msg})
         logger.info(f"[PARSE] {msg}")
+
+    _update_progress(server, multi_db, task_id, run_id, progress=5)
 
     # ==================== Step 1: AST 解析 + 符号提取 (并行) ====================
     _log(f"Step 1: AST 解析开始 (并行, {PARSE_WORKERS} 个工作线程, 支持 {len(EXTRACTORS)} 种语言)")
@@ -437,13 +461,16 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
                     pass
 
                 if processed % PROGRESS_INTERVAL == 0:
-                    _update_progress(server, multi_db, task_id, run_id, processed, total)
+                    scaled = 5 + int(processed * 60 / total) if total > 0 else 5
+                    _update_progress(server, multi_db, task_id, run_id, progress=scaled)
 
     if should_stop(task_id):
         _log("AST 解析被用户停止")
         return {"files_processed": processed, "skipped_files": skipped, "stopped": True}
 
     _log(f"AST 解析完成 - 处理 {processed} 个文件，跳过 {skipped} 个")
+
+    _update_progress(server, multi_db, task_id, run_id, progress=65)
 
     # 统计节点总数
     total_ast_nodes = analysis_store.count_graph_nodes(task_id)
@@ -481,6 +508,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     except Exception as e:
         _log(f"引用解析失败: {e}")
 
+    _update_progress(server, multi_db, task_id, run_id, progress=72)
+
     # 调试日志
     dep_check = analysis_store.get_dep_edges(task_id)
     call_check = analysis_store.get_call_edges(task_id)
@@ -496,6 +525,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
             _log(f"文件依赖提取完成: {total_dep_edges} 条依赖边")
     except Exception as e:
         _log(f"文件依赖提取失败: {e}")
+
+    _update_progress(server, multi_db, task_id, run_id, progress=74)
 
     # ==================== Step 3: 框架感知 + 动态合成 ====================
     _log("Step 3: 框架感知 + 动态合成开始")
@@ -527,6 +558,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
             _log(f"动态合成完成: {total_synthetic_edges} 条合成边")
     except Exception as e:
         _log(f"动态合成失败: {e}")
+
+    _update_progress(server, multi_db, task_id, run_id, progress=77)
 
     # ==================== Step 4: 社区分析 ====================
     _log("Step 4: 社区分析开始")
@@ -562,6 +595,9 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         else:
             _log("社区分析插件未安装，跳过 INCLUDE")
 
+    _update_progress(server, multi_db, task_id, run_id,
+                     progress=82 if ("callChain" in report_types or "full" in report_types) else 99)
+
     if "callChain" in report_types or "full" in report_types:
         if analyze_communities is not None:
             try:
@@ -583,6 +619,8 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
                 _log(f"CALL 社区分析失败: {e}")
         else:
             _log("社区分析插件未安装，跳过 CALL")
+
+    _update_progress(server, multi_db, task_id, run_id, progress=99)
 
     # ==================== Step 5: 结果汇总 ====================
     _log("Step 5: 结果汇总")
@@ -629,7 +667,7 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     task_store.upsert_report(report)
 
     # 更新最终进度
-    _update_progress(server, multi_db, task_id, run_id, total, total)
+    _update_progress(server, multi_db, task_id, run_id, progress=100)
 
     _log(f"分析完成，耗时 {duration_ms}ms")
 

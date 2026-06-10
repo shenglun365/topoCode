@@ -15,6 +15,17 @@ def _scala_classify(node: SyntaxNode) -> str:
     return "class"
 
 
+def _scala_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "import_declaration":
+        path_node = node.child_by_field_name("path")
+        if path_node:
+            return {"module_name": source[path_node.start_byte:path_node.end_byte]}
+        for c in node.named_children:
+            if c.type in ("stable_identifier", "identifier"):
+                return {"module_name": source[c.start_byte:c.end_byte]}
+    return None
+
+
 SCALA = LanguageExtractor(
     class_types=("class_definition", "object_definition", "trait_definition"),
     method_types=("function_definition",),
@@ -26,4 +37,5 @@ SCALA = LanguageExtractor(
     body_field="body",
     params_field="parameters",
     classify_class=_scala_classify,
+    extract_import=_scala_extract_import,
 )

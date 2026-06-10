@@ -4,6 +4,16 @@ from tree_sitter import Node as SyntaxNode
 from . import LanguageExtractor
 
 
+def _dart_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "import_or_export":
+        uri = node.child_by_field_name("uri")
+        if uri:
+            text = source[uri.start_byte:uri.end_byte].strip().strip("'\"")
+            if text:
+                return {"module_name": text}
+    return None
+
+
 def _dart_resolve_body(node: SyntaxNode, body_field: str) -> SyntaxNode | None:
     """Dart puts function_body as sibling, not child"""
     if node.type == "function_signature":
@@ -28,4 +38,5 @@ DART = LanguageExtractor(
     params_field="parameters",
     return_field="return_type",
     resolve_body=_dart_resolve_body,
+    extract_import=_dart_extract_import,
 )

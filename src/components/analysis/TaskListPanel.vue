@@ -189,11 +189,16 @@ function cancelDelete() {
   deleteConfirm.value = null
 }
 
+const reportTypeLabels: Record<string, string> = {
+  dependency: 'analysis.dependencyAnalysis',
+  callChain: 'analysis.callChainAnalysis',
+}
+
 // 格式化配置摘要
 function getConfigSummary(task: AnalysisTask): string {
   const parts: string[] = []
   if (task.reportTypes?.length) {
-    parts.push(task.reportTypes.join(', '))
+    parts.push(task.reportTypes.map(r => t(reportTypeLabels[r] || r)).join(', '))
   }
   if (task.scope) {
     parts.push(task.scope)

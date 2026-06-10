@@ -1,6 +1,20 @@
 """Rust LanguageExtractor"""
+from tree_sitter import Node as SyntaxNode
+
 from . import LanguageExtractor
 from ..core.node_types import NodeKind
+
+
+def _rust_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "use_declaration":
+        use_node = node.child_by_field_name("argument")
+        if use_node:
+            return {"module_name": source[use_node.start_byte:use_node.end_byte]}
+        text = source[node.start_byte:node.end_byte].strip()
+        if text.startswith("use ") and text.endswith(";"):
+            mod = text[4:-1].strip()
+            return {"module_name": mod}
+    return None
 
 
 RUST = LanguageExtractor(
@@ -18,4 +32,5 @@ RUST = LanguageExtractor(
     body_field="body",
     params_field="parameters",
     interface_kind=NodeKind.TRAIT,
+    extract_import=_rust_extract_import,
 )

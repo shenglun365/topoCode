@@ -556,6 +556,13 @@ def _save_communities(task_id: str, edge_type: str, level: str,
 
         node_count = len(comm_nodes)
         edge_count = len(edge_list)
+        # 计算社区覆盖的去重文件数（节点ID格式：file-uuid:symbolName）
+        file_ids = set()
+        for nid in comm_nodes:
+            fid = nid.split(':')[0] if ':' in (nid or '') else nid
+            if fid:
+                file_ids.add(fid)
+        file_count = len(file_ids)
 
         comm_docs.append({
             "task_id": task_id,
@@ -565,6 +572,7 @@ def _save_communities(task_id: str, edge_type: str, level: str,
             "comm_id": comm_id,
             "node_list": node_list,
             "node_count": node_count,
+            "file_count": file_count,
             "edge_list": edge_list,
             "edge_count": edge_count,
             "quality_score": round(_compute_modularity([comm_nodes], graph, degrees, m), 6) if m > 0 else 0.0,
@@ -578,6 +586,7 @@ def _save_communities(task_id: str, edge_type: str, level: str,
             "comm_id": comm_id,
             "parent_comm_id": parent_comm_id,
             "node_count": node_count,
+            "file_count": file_count,
             "edge_count": edge_count,
             "quality_score": round(_compute_modularity([comm_nodes], graph, degrees, m), 6) if m > 0 else 0.0,
         })

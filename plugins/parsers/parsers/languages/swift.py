@@ -17,6 +17,14 @@ def _swift_classify(node: SyntaxNode) -> str:
     return "class"
 
 
+def _swift_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "import_declaration":
+        for c in node.named_children:
+            if c.type in ("identifier", "simple_identifier", "navigation_expression"):
+                return {"module_name": source[c.start_byte:c.end_byte]}
+    return None
+
+
 SWIFT = LanguageExtractor(
     function_types=("function_declaration",),
     class_types=("class_declaration",),
@@ -33,4 +41,5 @@ SWIFT = LanguageExtractor(
     params_field="parameters",
     classify_class=_swift_classify,
     methods_are_top_level=True,
+    extract_import=_swift_extract_import,
 )

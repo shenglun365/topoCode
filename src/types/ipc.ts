@@ -497,7 +497,7 @@ export interface IPCAPI {
     getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<any>
     getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
     getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
-    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; edgeCount: number; qualityScore: number }> }> }>
+    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number }> }> }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {

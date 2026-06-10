@@ -1,8 +1,18 @@
 """Objective-C LanguageExtractor"""
+import re
 from tree_sitter import Node as SyntaxNode
 
 from . import LanguageExtractor
 from ..core.node_types import NodeKind
+
+
+def _objc_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "preproc_include":
+        text = source[node.start_byte:node.end_byte].strip()
+        m = re.search(r'[<"]([^>"]+)[>"]', text)
+        if m:
+            return {"module_name": m.group(1)}
+    return None
 
 
 def _objc_extract_name(node: SyntaxNode, source: str) -> str | None:
@@ -33,4 +43,5 @@ OBJC = LanguageExtractor(
     params_field="parameters",
     interface_kind=NodeKind.PROTOCOL,
     extract_name=_objc_extract_name,
+    extract_import=_objc_extract_import,
 )

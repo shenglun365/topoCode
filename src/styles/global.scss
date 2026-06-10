@@ -190,6 +190,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 12px;
+  box-sizing: border-box;
 }
 
 .card-clickable {

@@ -33,8 +33,9 @@ const currentFuncGroup = computed(() => {
     return routeToFuncGroupMap[route.path] || 'home';
 })
 
-// 是否隐藏左右侧栏（首页、设置页）
+// 是否隐藏左右侧栏
 const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user')
+const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user')
 
 // 初始化后端状态监听
 onMounted(async () => {
@@ -94,8 +95,8 @@ watch(
       <!-- 活动栏 -->
       <ActivityBar />
 
-      <!-- 左侧面板（设置页隐藏） -->
-      <LeftPanel v-show="!isSettingsPage" />
+      <!-- 左侧面板 -->
+      <LeftPanel v-show="!hideLeftPanel" />
 
       <!-- 主内容区 -->
       <main class="content-area">
@@ -135,7 +136,6 @@ watch(
 .app-row2 {
   flex: 1;
   display: flex;
-  overflow: hidden;
 }
 
 .content-area {

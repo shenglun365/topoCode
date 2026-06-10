@@ -305,15 +305,16 @@ class AnalysisStore:
             db.executemany("""
                 INSERT INTO graph_doc (
                     task_id, edge_type, comm_lv, parent_comm_id,
-                    comm_id, node_list, node_count,
+                    comm_id, node_list, node_count, file_count,
                     edge_list, edge_count, quality_score, description
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 (
                     c["task_id"], c["edge_type"], c["comm_lv"],
                     c.get("parent_comm_id"), c["comm_id"],
                     json.dumps(c["node_list"]) if isinstance(c["node_list"], list) else c["node_list"],
                     c["node_count"],
+                    c.get("file_count", 0),
                     json.dumps(c["edge_list"]) if isinstance(c.get("edge_list"), list) else c.get("edge_list"),
                     c.get("edge_count", 0),
                     c.get("quality_score"),
@@ -380,13 +381,14 @@ class AnalysisStore:
             db.executemany("""
                 INSERT INTO community_hierarchy (
                     task_id, edge_type, comm_lv, comm_id,
-                    parent_comm_id, node_count, edge_count, quality_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    parent_comm_id, node_count, file_count, edge_count, quality_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 (
                     h["task_id"], h["edge_type"], h["comm_lv"],
                     h["comm_id"], h.get("parent_comm_id"),
-                    h.get("node_count"), h.get("edge_count", 0),
+                    h.get("node_count"), h.get("file_count", 0),
+                    h.get("edge_count", 0),
                     h.get("quality_score"),
                 )
                 for h in batch

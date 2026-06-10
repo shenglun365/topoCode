@@ -1,5 +1,17 @@
 """C++ LanguageExtractor"""
+import re
+from tree_sitter import Node as SyntaxNode
+
 from . import LanguageExtractor
+
+
+def _cpp_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "preproc_include":
+        text = source[node.start_byte:node.end_byte].strip()
+        m = re.search(r'[<"]([^>"]+)[>"]', text)
+        if m:
+            return {"module_name": m.group(1)}
+    return None
 
 
 def _cpp_is_misparsed(name: str, node) -> bool:
@@ -23,4 +35,5 @@ CPP = LanguageExtractor(
     body_field="body",
     params_field="parameters",
     is_misparsed_function=_cpp_is_misparsed,
+    extract_import=_cpp_extract_import,
 )

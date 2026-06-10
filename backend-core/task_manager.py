@@ -1237,19 +1237,38 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_id = task["project_id"]
         project_db = multi_db.get_project_db(project_id)
 
-        rows = project_db.execute(
-            """SELECT DISTINCT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
-               FROM community_hierarchy h
-               LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
-               WHERE h.task_id=? AND h.edge_type=?
-               ORDER BY h.comm_lv, h.comm_id""",
-            (tid, et)
-        ).fetchall()
+        try:
+            rows = project_db.execute(
+                """SELECT DISTINCT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                          h.file_count, h.quality_score,
+                          COALESCE(g.edge_count, 0)
+                   FROM community_hierarchy h
+                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                   WHERE h.task_id=? AND h.edge_type=?
+                   ORDER BY h.comm_lv, h.comm_id""",
+                (tid, et)
+            ).fetchall()
+            has_file_count = True
+        except Exception as e:
+            logger.warning("[analysis.getCascadeLevels] file_count query failed, falling back: %s", e)
+            has_file_count = False
+            rows = project_db.execute(
+                """SELECT DISTINCT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
+                   FROM community_hierarchy h
+                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                   WHERE h.task_id=? AND h.edge_type=?
+                   ORDER BY h.comm_lv, h.comm_id""",
+                (tid, et)
+            ).fetchall()
         logger.info("[analysis.getCascadeLevels] query returned %d rows task_id=%s edge_type=%s", len(rows), tid, et)
 
         levels_dict: dict[str, list] = {}
         for row in rows:
-            lv, comm_id, parent_id, node_count, quality, edge_count = row
+            if has_file_count:
+                lv, comm_id, parent_id, node_count, file_count, quality, edge_count = row
+            else:
+                lv, comm_id, parent_id, node_count, quality, edge_count = row
+                file_count = 0
             if lv not in levels_dict:
                 levels_dict[lv] = []
             levels_dict[lv].append({
@@ -1257,6 +1276,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 'label': comm_id[:30],
                 'parentCommId': parent_id,
                 'nodeCount': node_count or 0,
+                'fileCount': file_count or 0,
                 'edgeCount': edge_count or 0,
                 'qualityScore': quality,
             })

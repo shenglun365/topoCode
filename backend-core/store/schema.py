@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS graph_doc (
     comm_id TEXT NOT NULL,
     node_list TEXT NOT NULL,
     node_count INTEGER NOT NULL,
+    file_count INTEGER DEFAULT 0,
     edge_list TEXT,
     edge_count INTEGER DEFAULT 0,
     quality_score REAL,
@@ -241,6 +242,7 @@ CREATE TABLE IF NOT EXISTS community_hierarchy (
     comm_id TEXT NOT NULL,
     parent_comm_id TEXT,
     node_count INTEGER,
+    file_count INTEGER DEFAULT 0,
     edge_count INTEGER DEFAULT 0,
     quality_score REAL,
     created_at TEXT DEFAULT (datetime('now'))
@@ -380,11 +382,19 @@ def init_project_schema(db):
     """初始化项目库表结构"""
     db.conn.executescript(PROJECT_SCHEMA_SQL)
 
-    # 迁移: 为 community_hierarchy 添加 edge_count 列（如不存在则忽略）
+    # 迁移: 为 community_hierarchy 添加 edge_count / file_count 列（如不存在则忽略）
     cursor = db.conn.execute("PRAGMA table_info(community_hierarchy)")
     cols = {row[1] for row in cursor.fetchall()}
     if 'edge_count' not in cols:
         db.conn.execute("ALTER TABLE community_hierarchy ADD COLUMN edge_count INTEGER DEFAULT 0")
+    if 'file_count' not in cols:
+        db.conn.execute("ALTER TABLE community_hierarchy ADD COLUMN file_count INTEGER DEFAULT 0")
+
+    # 迁移: 为 graph_doc 添加 file_count 列
+    cursor = db.conn.execute("PRAGMA table_info(graph_doc)")
+    gd_cols = {row[1] for row in cursor.fetchall()}
+    if 'file_count' not in gd_cols:
+        db.conn.execute("ALTER TABLE graph_doc ADD COLUMN file_count INTEGER DEFAULT 0")
 
     # 迁移: 新建 community_llm_results 表（如已存在则忽略）
     db.conn.execute("""

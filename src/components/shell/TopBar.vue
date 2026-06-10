@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowRightStartOnRectangleIcon,
@@ -24,6 +24,8 @@ import { useComponentId } from '@/composables/useComponentId'
 const { showId, componentId } = useComponentId('SH-005')
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
+const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user')
 const panelStore = usePanelStore()
 const themeStore = useThemeStore()
 const projectStore = useProjectStore()
@@ -130,7 +132,7 @@ async function handleMenuItemClick(item: any) {
   } else if (item.action === 'exit') {
     handleExit()
   } else if (item.action === 'toggleLeft') {
-    panelStore.toggleLeft()
+    if (!hideLeftPanel.value) panelStore.toggleLeft()
   } else if (item.action === 'toggleRight') {
     panelStore.toggleRight()
   } else if (item.action === 'zoomIn') {
@@ -232,6 +234,7 @@ onMounted(() => {
       <!-- 右侧工具 -->
       <div class="tab-bar-actions">
         <div
+          v-if="!hideLeftPanel"
           class="icon-btn"
           :class="{ active: !panelStore.leftCollapsed }"
           :title="t('shell.topBar.toggleLeftPanel')"
@@ -473,6 +476,7 @@ onMounted(() => {
   color: var(--accent);
   background: var(--bg-tertiary);
 }
+
 
 /* 关于弹窗 */
 .modal-overlay {

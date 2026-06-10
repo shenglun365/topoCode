@@ -66,6 +66,7 @@ function onResizeEnd() {
 }
 
 onMounted(() => {
+
   document.addEventListener('mouseup', onResizeEnd)
   // 首页初始状态：无项目时自动折叠左侧面板
   if (navigation.currentPage === 'home' && !projectStore.selectedProjectId) {
@@ -121,14 +122,15 @@ const fileTreeLoading = ref(false)
 // 监听项目选择，加载文件树 + 自动折叠/展开
 watch(
   () => projectStore.selectedProjectId,
-  async (newId) => {
-  if (navigation.currentPage === 'home' || navigation.currentPage === 'code') {
-    if (newId) {
-      panelStore.setLeftCollapsed(false)
-    } else {
-      panelStore.setLeftCollapsed(true)
+  async (newId, oldId) => {
+
+    if (navigation.currentPage === 'home' || navigation.currentPage === 'code') {
+      if (newId) {
+        panelStore.setLeftCollapsed(false)
+      } else {
+        panelStore.setLeftCollapsed(true)
+      }
     }
-  }
     if (newId) {
       await loadFileTree()
     }

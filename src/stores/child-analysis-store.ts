@@ -40,7 +40,7 @@ export const useChildAnalysisStore = defineStore('childAnalysis', () => {
             const saved = llmMap[item.id] as Record<string, unknown> | undefined
             communities.push({
               id: `${edgeType}-${item.id}`, communityId: item.id, level: lv.lv, edgeType,
-              nodeCount: item.nodeCount || 0, edgeCount: item.edgeCount || 0, qualityScore: item.qualityScore ?? null,
+              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0, qualityScore: item.qualityScore ?? null,
               status: saved ? 'completed' : 'pending' as CommunityItem['status'], selected: false,
               parentId: item.parentCommId ?? undefined,
               name: (saved?.name as string) || item.id, summary: (saved?.summary as string) || undefined,

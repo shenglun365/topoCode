@@ -43,6 +43,8 @@ const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
 const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
 const communitySearch = ref('')
+const fileStats = ref<Record<string, number>>({})
+const totalScopeFiles = ref(0)
 
 function communityIdLabel(item: { communityId: string; level?: string }): string {
   const parts = item.communityId.split('-')
@@ -92,16 +94,24 @@ const hasAnyCommunity = computed(() => {
   return coms.length > 0
 })
 
-  const runtimeCommunities = computed(() => {
-    const coms = communityStore.tasks[props.taskId]?.communities || []
-    const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
-  console.log(`[RP-001] runtimeCommunities edgeType=${commEdgeType.value} total=${coms.length} filtered=${filtered.length} completed=${filtered.filter(c=>c.status==='completed').length}`)
+const runtimeCommunities = computed(() => {
+  const coms = communityStore.tasks[props.taskId]?.communities || []
+  const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
   return filtered
 })
 
+const coveredFileCount = computed(() => {
+  let total = 0
+  for (const c of runtimeCommunities.value) {
+    total += c.fileCount || 0
+  }
+  return total
+})
 
-
-
+const coveragePercent = computed(() => {
+  if (!totalScopeFiles.value) return 0
+  return Math.round((coveredFileCount.value / totalScopeFiles.value) * 100)
+})
 
 const { showId, componentId } = useComponentId('RP-001')
 
@@ -140,18 +150,15 @@ async function handleCommunityMD(params: {
 }
 
 async function loadData() {
-  console.log(`[RP-001] loadData ENTRY taskId=${props.taskId}`)
   loading.value = true
   loadError.value = null
   projectSummary.value = projectStore.selectedProject
   try {
     taskDetail.value = await analysisStore.getTask(props.taskId)
     if (!taskDetail.value) {
-      console.log(`[RP-001] loadData task not found taskId=${props.taskId}`)
       loadError.value = t('report.taskNotFound')
       return
     }
-    console.log(`[RP-001] loadData task found name=${taskDetail.value.name} type=${taskDetail.value.type}`)
     const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
     if (pid) {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
@@ -163,7 +170,13 @@ async function loadData() {
     }
     await communityStore.loadCommunities(props.taskId, pid || '')
     await reportStore.checkReportExists(props.taskId)
-    console.log(`[RP-001] loadData DONE communities=${(communityStore.tasks[props.taskId]?.communities || []).length}`)
+    if (pid) {
+      const fs = await analysisStore.scanFileStats(pid).catch(() => null)
+      if (fs) {
+        fileStats.value = fs.extensions || {}
+        totalScopeFiles.value = fs.totalFiles || 0
+      }
+    }
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -297,7 +310,7 @@ watch(() => props.taskId, loadData)
                     v-for="ext in (taskDetail?.extensions || [])"
                     :key="ext"
                     class="scope-tag"
-                  >{{ ext }}</span>
+                  >{{ ext }} <span class="scope-tag-count">{{ fileStats[ext] ?? '-' }}</span></span>
                 </div>
               </div>
               <div class="scope-row">
@@ -324,7 +337,10 @@ watch(() => props.taskId, loadData)
             <RectangleGroupIcon class="w-4 h-4" />
             <span>{{ t('report.communityArchitecture', '组件架构') }}</span>
             <span class="arch-stats">
-              {{ runtimeCommunities.length }} {{ t('report.l0Communities', '个L0社区') }}
+              <span class="arch-stats-count">{{ runtimeCommunities.length }}</span>
+              {{ t('report.l0Communities', '个L0社区') }}
+              <span class="arch-stats-divider">|</span>
+              <span class="arch-stats-coverage">{{ t('report.coverage', '覆盖率') }} <strong>{{ coveragePercent }}%</strong> {{ coveredFileCount }}/{{ totalScopeFiles }}</span>
             </span>
             <div class="header-spacer" />
             <div class="arch-search">
@@ -586,6 +602,13 @@ watch(() => props.taskId, loadData)
 .scope-tag-all {
   font-family: inherit;
   color: var(--text-muted);
+}
+
+.scope-tag-count {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .comm-et-tabs {
@@ -903,7 +926,7 @@ watch(() => props.taskId, loadData)
 }
 
 /* Architecture section — tag/chip layout */
-.arch-stats { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; white-space: nowrap; }
+.arch-stats { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 .header-spacer { flex: 1; }
 .arch-tabs { display: flex; gap: 0; margin-bottom: 0.75rem; border-bottom: 2px solid var(--border); }
 .arch-tab {

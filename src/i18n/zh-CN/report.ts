@@ -68,6 +68,8 @@ export default { report: {
   dependencyAnalysis: '依赖分析',
   callAnalysis: '调用分析',
   noCommunities: '该视角下无社区数据',
+  totalFiles: '总文件',
+  coverage: '覆盖率',
   generateReport: '生成报告',
   startGeneration: '开始生成',
 

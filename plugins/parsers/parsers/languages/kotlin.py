@@ -34,6 +34,17 @@ def _kotlin_package(node: SyntaxNode, source: str) -> str | None:
     return None
 
 
+def _kotlin_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "import_header":
+        ident = node.child_by_field_name("identifier")
+        if ident:
+            return {"module_name": source[ident.start_byte:ident.end_byte]}
+        for c in node.named_children:
+            if c.type in ("identifier", "simple_identifier"):
+                return {"module_name": source[c.start_byte:c.end_byte]}
+    return None
+
+
 KOTLIN = LanguageExtractor(
     class_types=("class_declaration", "object_declaration"),
     method_types=("function_declaration",),
@@ -49,4 +60,5 @@ KOTLIN = LanguageExtractor(
     classify_class=_kotlin_classify,
     extract_visibility=_kotlin_visibility,
     extract_package=_kotlin_package,
+    extract_import=_kotlin_extract_import,
 )

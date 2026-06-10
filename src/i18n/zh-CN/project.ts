@@ -34,7 +34,7 @@ export default { project: {
   selectFolder: '选择文件夹',
   dragDrop: '拖拽到此处',
   projectCount: '项目数',
-  fileCount: '文件数',
+  fileCount: '总文件数',
   totalSize: '总大小',
   storageSize: '存储空间',
   languageDistribution: '语言分布',

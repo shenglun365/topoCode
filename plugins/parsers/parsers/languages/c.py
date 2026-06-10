@@ -1,5 +1,18 @@
 """C LanguageExtractor"""
+import re
+from tree_sitter import Node as SyntaxNode
+
 from . import LanguageExtractor
+
+
+def _c_extract_import(node: SyntaxNode, source: str) -> dict | None:
+    if node.type == "preproc_include":
+        text = source[node.start_byte:node.end_byte].strip()
+        m = re.search(r'[<"]([^>"]+)[>"]', text)
+        if m:
+            return {"module_name": m.group(1)}
+    return None
+
 
 C = LanguageExtractor(
     function_types=("function_definition",),
@@ -12,4 +25,5 @@ C = LanguageExtractor(
     name_field="declarator",        # C uses declarator not name field
     body_field="body",
     params_field="parameters",
+    extract_import=_c_extract_import,
 )

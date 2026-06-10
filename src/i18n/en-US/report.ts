@@ -66,6 +66,8 @@ export default { report: {
   dependencyAnalysis: 'Dependency Analysis',
   callAnalysis: 'Call Analysis',
   noCommunities: 'No community data for this view',
+  totalFiles: 'Total Files',
+  coverage: 'Coverage',
   generateReport: 'Generate Report',
   startGeneration: 'Start Generation',
   viewOverallArchitecture: 'View Overall Architecture',

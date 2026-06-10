@@ -8,6 +8,7 @@ export interface CommunityItem {
   level: string
   edgeType: string
   nodeCount: number
+  fileCount: number
   edgeCount: number
   qualityScore: number | null
   status: 'pending' | 'queued' | 'running' | 'completed' | 'error' | 'skipped'
@@ -123,7 +124,7 @@ export const useCommunityStore = defineStore('community', () => {
             communities.push({
               id: `CALL-${item.id}`,
               communityId: item.id, level: lv.lv, edgeType: 'CALL',
-              nodeCount: item.nodeCount || 0, edgeCount: item.edgeCount || 0,
+              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
               qualityScore: item.qualityScore ?? null,
               status: saved ? 'completed' : ('pending' as any),
               selected: false,
@@ -142,7 +143,7 @@ export const useCommunityStore = defineStore('community', () => {
             communities.push({
               id: `INCLUDE-${item.id}`,
               communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
-              nodeCount: item.nodeCount || 0, edgeCount: item.edgeCount || 0,
+              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
               qualityScore: item.qualityScore ?? null,
               status: saved ? 'completed' : ('pending' as any),
               selected: false,
