@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
+import type { ExternalStatsResult } from '@/types/ipc'
 
 export interface CommunityItem {
   id: string
@@ -40,6 +41,10 @@ interface CommunityTaskRuntime {
   llmResults: Record<string, any>
   errorLogs: string[]
   analysisStates: Record<string, ChildAnalysisState>
+  /** L0 社区覆盖的去重文件数（按 edgeType） */
+  uniqueFileCounts: Record<string, number>
+  /** 外部依赖/调用统计 */
+  externalStats: ExternalStatsResult | null
 }
 
 function normalizeDiagramField(val: unknown): string {
@@ -62,6 +67,8 @@ export const useCommunityStore = defineStore('community', () => {
         llmResults: {},
         errorLogs: [],
         analysisStates: {},
+        uniqueFileCounts: {},
+        externalStats: null,
       }
     }
     return tasks.value[taskId]
@@ -154,6 +161,10 @@ export const useCommunityStore = defineStore('community', () => {
           }
         }
       }
+      t.uniqueFileCounts = {
+        CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
+        INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
+      }
       const savedIds = getSelections(taskId)
       const newCommMap = new Map(communities.map(c => [c.id, c]))
       for (const existing of t.communities) {
@@ -197,12 +208,87 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
+  /** 从 getReportDashboard 合并响应中加载社区数据（一次 RPC 替代 4 次独立调用） */
+  async function loadCommunitiesFromDashboard(taskId: string, dash: any) {
+    const t = ensureTask(taskId)
+    try {
+      const callLevels = dash.callLevels
+      const depLevels = dash.depLevels
+      const callResults = dash.callResults || { results: [] }
+      const depResults = dash.depResults || { results: [] }
+      const llmMap: Record<string, any> = {}
+      for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
+        const r = rRaw as Record<string, unknown>
+        const id = (r.commId || r.comm_id) as string | undefined
+        if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
+      }
+      const communities: CommunityItem[] = []
+      if (callLevels?.levels) {
+        for (const lv of callLevels.levels) {
+          if (!lv.items) continue
+          for (const item of lv.items) {
+            const saved = llmMap[item.id]
+            communities.push({
+              id: `CALL-${item.id}`,
+              communityId: item.id, level: lv.lv, edgeType: 'CALL',
+              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
+              qualityScore: item.qualityScore ?? null,
+              status: saved ? 'completed' : ('pending' as any),
+              selected: false,
+              parentId: item.parentCommId ?? undefined,
+              name: saved?.name || item.id,
+              summary: saved?.summary || undefined,
+            })
+          }
+        }
+      }
+      if (depLevels?.levels) {
+        for (const lv of depLevels.levels) {
+          if (!lv.items) continue
+          for (const item of lv.items) {
+            const saved = llmMap[item.id]
+            communities.push({
+              id: `INCLUDE-${item.id}`,
+              communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
+              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
+              qualityScore: item.qualityScore ?? null,
+              status: saved ? 'completed' : ('pending' as any),
+              selected: false,
+              parentId: item.parentCommId ?? undefined,
+              name: saved?.name || item.id,
+              summary: saved?.summary || undefined,
+            })
+          }
+        }
+      }
+      t.uniqueFileCounts = {
+        CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
+        INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
+      }
+      t.communities = communities
+      t.llmResults = llmMap
+      const pid = dash.task?.project_id || dash.task?.projectId
+      if (pid) loadProjectContext(taskId, pid)
+    } catch (e: any) {
+      pushError(taskId, `loadCommunitiesFromDashboard: ${e?.message || String(e)}`)
+    }
+  }
+
   async function loadProjectContext(taskId: string, projectId: string) {
     if (!projectId) return
     try {
       const result = await ipc.report.getProjectSummary({ projectId })
       if (result?.summary) {
         ensureTask(taskId).projectContext = `## 项目概要\n${result.summary}`
+      }
+    } catch { /* skip */ }
+  }
+
+  async function loadExternalStats(taskId: string) {
+    try {
+      const result = await ipc.analysis.getExternalStats(taskId)
+      if (result) {
+        ensureTask(taskId).externalStats = result
       }
     } catch { /* skip */ }
   }
@@ -409,7 +495,7 @@ export const useCommunityStore = defineStore('community', () => {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
     listCommunityResults, getCascadeLevels, saveCommunityResult,
-    loadCommunities, loadProjectContext, analyzeSelected, runTask, stopAnalysis, retryTask,
+    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, analyzeSelected, runTask, stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
   }

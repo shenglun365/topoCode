@@ -74,11 +74,10 @@ class SQLiteContext:
 
 class MultiDBManager:
     """
-    多数据库管理器
+    多数据库管理器（已迁移至 sqlite_ctx.MultiDBManager，此处保留兼容层）
 
     - 主库 (topoone.db): 任务元数据
-    - 项目库 ({project_id}.db): 分析数据
-    - LRU 缓存最多 MAX_DB_CONNECTIONS 个项目库连接
+    - 项目库 (.topocode/data/project.db): 分析数据
     """
 
     def __init__(self, db_dir: str = DB_DIR):
@@ -102,32 +101,12 @@ class MultiDBManager:
 
     def get_project_db(self, project_id: str) -> SQLiteContext:
         """
-        获取项目库连接，LRU 缓存 + 自动回收
-
-        Args:
-            project_id: 项目 ID
-
-        Returns:
-            SQLiteContext 实例
+        获取项目库连接（委托给 sqlite_ctx.MultiDBManager 使用新架构路径）
         """
-        with self._lock:
-            # 命中缓存 → 移到末尾（最常用）
-            if project_id in self._cache:
-                self._cache.move_to_end(project_id)
-                return self._cache[project_id]
-
-            # 缓存满 → 回收最久未用
-            while len(self._cache) >= MAX_DB_CONNECTIONS:
-                oldest_id, oldest_db = self._cache.popitem(last=False)
-                oldest_db.close()
-
-            # 创建新连接
-            path = os.path.join(self.db_dir, f"{project_id}.db")
-            db = SQLiteContext(path)
-            db.conn
-            schema.init_project_schema(db)
-            self._cache[project_id] = db
-            return db
+        # 延迟导入避免循环依赖
+        from sqlite_ctx import MultiDBManager as NewMultiDBManager
+        new_mgr = NewMultiDBManager(self.db_dir)
+        return new_mgr.get_project_db(project_id)
 
     def close_all(self):
         """关闭所有连接"""

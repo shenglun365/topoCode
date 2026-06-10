@@ -3,6 +3,7 @@ import type {
   ClearCacheCountsResult, ClearCacheTableResult, TaskRun, TaskLogsResult,
   FileStatsResult, ScanOptions, TaskConfigUpdate, CommunityGraphResult,
   SymbolDetail, CascadeLevelsResult, QueryStatsResult,
+    ExternalStatsResult,
   SaveCommunityResultResponse, ListCommunityResultsResponse,
   UpdateCommunityNameResponse, SuccessResponse, TaskProgressEvent,
   TaskCompleteEvent, TaskErrorEvent,
@@ -72,6 +73,7 @@ export interface AnalysisService {
   getQueryStats(params: {
     taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number
   }): Promise<QueryStatsResult>
+  getExternalStats(taskId: string): Promise<ExternalStatsResult>
   saveCommunityResult(params: any): Promise<SaveCommunityResultResponse>
   getCommunityResult(params: any): Promise<any>
   listCommunityResults(taskId: string, edgeType: string): Promise<ListCommunityResultsResponse>
@@ -160,6 +162,9 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     getQueryStats: async (params) => {
       return await api.analysis.getQueryStats(params) as QueryStatsResult
+    },
+    getExternalStats: async (taskId: string) => {
+      return await api.analysis.getExternalStats(taskId) as ExternalStatsResult
     },
     saveCommunityResult: async (params: any) => {
       const safe = JSON.parse(JSON.stringify(params))

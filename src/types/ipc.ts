@@ -497,8 +497,10 @@ export interface IPCAPI {
     getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<any>
     getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
     getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
-    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number }> }> }>
+    getReportDashboard: (taskId: string) => Promise<{ task: any; callLevels: any; depLevels: any; callResults: { results: any[] }; depResults: { results: any[] }; fileStats: any }>
+    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number }> }>; totalUniqueFiles: number }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
+    getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
@@ -755,6 +757,29 @@ declare global {
 }
 
 // ==================== DTO type aliases for service layer ====================
+
+// 外部依赖/调用统计
+export interface ExternalDepItem {
+  package: string
+  fileCount: number
+  files: string[]
+}
+
+export interface ExternalCallItem {
+  name: string
+  count: number
+  files: string[]
+}
+
+export interface ExternalStatsResult {
+  externalDeps: ExternalDepItem[]
+  externalCalls: ExternalCallItem[]
+  totalExternalDeps: number
+  uniqueExternalDepFiles: number
+  totalExternalCalls: number
+  uniqueExternalCallFiles: number
+}
+
 export type ModelConfigDTO = ModelConfigItem
 export type AgentConfigDTO = AgentConfigItem
 export type SkillConfigDTO = SkillConfigItem

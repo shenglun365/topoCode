@@ -288,8 +288,30 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         # 重新扫描
         file_count = _scan_file_tree(project_db, root_path, root_path, None, gitignore)
 
-        # 重新检测语言
-        language = _detect_language(root_path, gitignore)
+        # 重新检测语言（从 source_files 统计最常见语言）
+        lang_row = project_db.fetchone(
+            "SELECT language, COUNT(*) as cnt FROM source_files WHERE language != 'directory' AND language != '' GROUP BY language ORDER BY cnt DESC LIMIT 1"
+        )
+        if lang_row:
+            lang_key = lang_row["language"]
+            # 反向映射: 从 language key 查找显示名
+            lang_display_map = {
+                "typescript": "TypeScript", "javascript": "JavaScript",
+                "python": "Python", "go": "Go", "rust": "Rust", "java": "Java",
+                "c": "C", "cpp": "C++", "c_sharp": "C#",
+                "ruby": "Ruby", "php": "PHP", "swift": "Swift", "kotlin": "Kotlin",
+                "scala": "Scala", "dart": "Dart", "lua": "Lua", "luau": "Luau",
+                "objc": "Objective-C",
+                "vue": "Vue", "html": "HTML", "css": "CSS", "scss": "SCSS",
+                "json": "JSON", "markdown": "Markdown", "yaml": "YAML", "toml": "TOML",
+                "r": "R", "sql": "SQL", "bash": "Bash",
+                "perl": "Perl", "elixir": "Elixir", "erlang": "Erlang",
+                "haskell": "Haskell", "ocaml": "OCaml",
+                "zig": "Zig", "nim": "Nim", "verilog": "Verilog",
+            }
+            language = lang_display_map.get(lang_key, lang_key.capitalize())
+        else:
+            language = "Unknown"
 
         main_db.update("projects", {
             "file_count": file_count,
@@ -489,9 +511,19 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not project:
             raise ValueError(f"Project not found: {project_id}")
 
-        project_db_path = os.path.join(multi_db.data_dir, f"{project_id}.db")
-        if not os.path.exists(project_db_path):
-            raise FileNotFoundError(f"Project database not found: {project_id}")
+        # 获取项目库路径（仅新架构 .topocode/data/project.db）
+        project_db_path = None
+        try:
+            row = multi_db.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            project_root = row["root_path"] if row else None
+        except Exception:
+            project_root = None
+        if project_root and project_root.strip():
+            project_db_path = os.path.join(project_root, ".topocode", "data", "project.db")
+        if not project_db_path or not os.path.exists(project_db_path):
+            raise FileNotFoundError(f"Project database not found: {project_id} — project has no root_path or .topocode/data/project.db is missing")
 
         # 创建临时目录
         temp_dir = os.path.join(multi_db.data_dir, f"export_{project_id}")
@@ -499,7 +531,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         try:
             # 复制项目库
-            shutil.copy2(project_db_path, os.path.join(temp_dir, f"{project_id}.db"))
+            shutil.copy2(project_db_path, os.path.join(temp_dir, "project.db"))
 
             # 导出 graph 文件（JSON 格式）
             graph_data = _export_graph_data(multi_db, project_id)
@@ -543,8 +575,29 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             db_file = db_files[0]
             project_id = db_file.replace(".db", "")
 
-            # 复制项目库到目标位置
-            target_db_path = os.path.join(multi_db.data_dir, db_file)
+            # 确定目标路径（仅新架构 .topocode/data/project.db）
+            target_db_path = None
+            try:
+                row = multi_db.main_db.execute(
+                    "SELECT root_path FROM projects WHERE id = ?", (project_id,)
+                ).fetchone()
+                project_root = row["root_path"] if row else None
+            except Exception:
+                project_root = None
+            if project_root and project_root.strip():
+                topo_dir = os.path.join(project_root, ".topocode", "data")
+                os.makedirs(topo_dir, exist_ok=True)
+                target_db_path = os.path.join(topo_dir, "project.db")
+            else:
+                # 导入项目无 root_path 时，使用当前工作目录作为默认路径
+                cwd_root = os.getcwd()
+                topo_dir = os.path.join(cwd_root, ".topocode", "data")
+                os.makedirs(topo_dir, exist_ok=True)
+                target_db_path = os.path.join(topo_dir, "project.db")
+                # 同时更新项目记录中的 root_path
+                main_db.execute(
+                    "UPDATE projects SET root_path = ? WHERE id = ?", (cwd_root, project_id)
+                )
             shutil.copy2(os.path.join(temp_dir, db_file), target_db_path)
 
             # 在主库中创建项目记录
@@ -580,10 +633,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             raise ValueError("Not a sample project")
 
         # 删除项目库
-        multi_db.close_project_db(project_id)
-        project_db_path = os.path.join(multi_db.data_dir, f"{project_id}.db")
-        if os.path.exists(project_db_path):
-            os.remove(project_db_path)
+        multi_db.delete_project_db(project_id)
 
         # 删除主库中的项目记录
         main_db.delete("projects", "id = ?", (project_id,))
@@ -597,9 +647,18 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not pid:
             raise ValueError("project_id is required")
 
-        # 项目 DB 文件
-        db_path = os.path.join(multi_db.data_dir, f"{pid}.db")
-        db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+        # 项目 DB 文件路径（仅新架构 .topocode/data/project.db）
+        db_path = None
+        try:
+            row = multi_db.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (pid,)
+            ).fetchone()
+            project_root = row["root_path"] if row else None
+        except Exception:
+            project_root = None
+        if project_root and project_root.strip():
+            db_path = os.path.join(project_root, ".topocode", "data", "project.db")
+        db_size = os.path.getsize(db_path) if (db_path and os.path.exists(db_path)) else 0
 
         # WAL / SHM 文件（SQLite WAL 模式）
         wal_size = 0
@@ -1403,18 +1462,25 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
         ".cpp": "C++", ".c": "C", ".h": "C", ".cs": "C#",
         ".vue": "Vue", ".html": "HTML", ".css": "CSS", ".scss": "SCSS",
         ".json": "JSON", ".md": "Markdown", ".yaml": "YAML", ".yml": "YAML", ".toml": "TOML",
+        ".rb": "Ruby", ".php": "PHP", ".swift": "Swift", ".kt": "Kotlin",
+        ".scala": "Scala", ".dart": "Dart", ".lua": "Lua",
     }
     LANG_MAP_FILE = {
         ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
-        ".py": "python", ".go": "go", ".rs": "rust", ".java": "java",
+        ".mts": "typescript", ".cts": "typescript", ".mjs": "javascript", ".cjs": "javascript",
+        ".py": "python", ".pyw": "python", ".go": "go", ".rs": "rust", ".java": "java",
         ".c": "c", ".h": "c",
         ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
-        ".cs": "csharp",
+        ".cs": "c_sharp",
         ".vue": "vue", ".html": "html", ".css": "css", ".scss": "scss",
         ".json": "json", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
-        ".rb": "ruby", ".php": "php", ".swift": "swift", ".kt": "kotlin", ".scala": "scala",
+        ".rb": "ruby", ".rake": "ruby", ".php": "php", ".inc": "php",
+        ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
+        ".scala": "scala", ".sc": "scala",
         ".r": "r", ".sql": "sql", ".sh": "bash",
-        ".dart": "dart", ".lua": "lua", ".perl": "perl", ".pl": "perl",
+        ".dart": "dart", ".lua": "lua", ".luau": "luau",
+        ".m": "objc", ".mm": "objc",
+        ".perl": "perl", ".pl": "perl",
         ".elixir": "elixir", ".ex": "elixir", ".exs": "elixir",
         ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
         ".zig": "zig", ".nim": "nim", ".v": "verilog",
@@ -1563,12 +1629,27 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
             project_db.execute("ROLLBACK")
             raise
 
-    # 确定主要语言
+    # 确定主要语言（仅统计系统可解析的语言类型，避免将 HTML/JSON/Markdown 等误识别为主语言）
+    SUPPORTED_LANGUAGES = {
+        "python", "javascript", "typescript", "tsx",
+        "java", "c", "cpp", "go", "rust", "c_sharp",
+        "swift", "ruby", "kotlin", "php", "dart",
+        "scala", "lua", "luau", "objc",
+    }
     if not lang_counts:
         primary_language = "Unknown"
     else:
-        primary_ext = max(lang_counts, key=lang_counts.get)
-        primary_language = LANG_MAP_DISPLAY.get(primary_ext, "Unknown")
+        supported_counts = {}
+        for ext, count in lang_counts.items():
+            lang_key = LANG_MAP_FILE.get(ext, "")
+            if lang_key in SUPPORTED_LANGUAGES:
+                supported_counts[ext] = count
+        if supported_counts:
+            primary_ext = max(supported_counts, key=supported_counts.get)
+            primary_language = LANG_MAP_DISPLAY.get(primary_ext, "Unknown")
+        else:
+            primary_ext = max(lang_counts, key=lang_counts.get)
+            primary_language = LANG_MAP_DISPLAY.get(primary_ext, "Unknown")
 
     total_elapsed = time.time() - scan_t0
     logger.info(f"[import] _scan_and_import 完成: {file_count} 文件, 主语言={primary_language}, 总耗时 {total_elapsed:.2f}s")
@@ -1596,15 +1677,20 @@ def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str
 
             lang_map = {
                 ".ts": "typescript", ".js": "javascript", ".jsx": "javascript", ".tsx": "typescript",
-                ".py": "python", ".go": "go", ".rs": "rust", ".java": "java",
+                ".mts": "typescript", ".cts": "typescript", ".mjs": "javascript", ".cjs": "javascript",
+                ".py": "python", ".pyw": "python", ".go": "go", ".rs": "rust", ".java": "java",
                 ".c": "c", ".h": "c",
                 ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
-                ".cs": "csharp",
+                ".cs": "c_sharp",
                 ".vue": "vue", ".html": "html", ".css": "css", ".scss": "scss",
                 ".json": "json", ".md": "markdown", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
-                ".rb": "ruby", ".php": "php", ".swift": "swift", ".kt": "kotlin", ".scala": "scala",
+                ".rb": "ruby", ".rake": "ruby", ".php": "php", ".inc": "php",
+                ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin",
+                ".scala": "scala", ".sc": "scala",
                 ".r": "r", ".sql": "sql", ".sh": "bash",
-                ".dart": "dart", ".lua": "lua", ".perl": "perl", ".pl": "perl",
+                ".dart": "dart", ".lua": "lua", ".luau": "luau",
+                ".m": "objc", ".mm": "objc",
+                ".perl": "perl", ".pl": "perl",
                 ".elixir": "elixir", ".ex": "elixir", ".exs": "elixir",
                 ".erl": "erlang", ".hs": "haskell", ".ml": "ocaml",
                 ".zig": "zig", ".nim": "nim", ".v": "verilog",
@@ -2127,53 +2213,66 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
         all_source_files = project_db.fetchall("SELECT id, file_path, file_name FROM source_files")
         sf_map = {row['id']: row for row in all_source_files}
 
+        # 预加载 graph_node 映射: node_id → row (用于 resolve_node / edge_display_name)
+        all_gn_rows = project_db.fetchall(
+            "SELECT id, kind, name, qualified_name, file_path, file_id FROM graph_node WHERE task_id=?", (tid,)
+        )
+        gn_index = {str(row['id']): row for row in all_gn_rows}
+        # 构建 name_map (node name → file name) 和 file_path_map (node id → file_path)
+        name_map = {}
+        file_path_map = {}
+        for row in all_gn_rows:
+            fp = str(row.get('file_path', '') or '')
+            name = str(row.get('name', '') or '')
+            if fp:
+                file_path_map[str(row['id'])] = fp
+                base = os.path.basename(fp)
+                if name and name not in name_map:
+                    name_map[name] = base
+
         import re
 
         def _resolve_node(node_str: str) -> dict:
-            """解析 node 字符串，返回 {id, name, filePath, type}"""
+            """解析 node 字符串，返回 {id, name, filePath, type}
+
+            当前格式: file:/path/to/file (文件节点) 或 hash (符号节点)
+            """
             node_str = str(node_str)
 
-            # CASE 1: file-UUID:symbol_name (CALL 边)
-            m = re.match(r'^([a-zA-Z0-9_-]+):(.+)$', node_str)
-            if m:
-                file_ref = m.group(1)
-                symbol = m.group(2)
-                sf = sf_map.get(file_ref)
-                if sf:
+            # 通过 graph_node 表直接查找
+            gn_row = gn_index.get(node_str)
+            if gn_row:
+                fp = str(gn_row.get('file_path', '') or '')
+                name = str(gn_row.get('name', '') or '')
+                kind = str(gn_row.get('kind', '') or '')
+                qualified = str(gn_row.get('qualified_name', '') or '')
+                if kind == 'file':
+                    return {
+                        "id": node_str, "name": name or os.path.basename(fp) or node_str,
+                        "filePath": fp, "type": "file",
+                    }
+                else:
                     return {
                         "id": node_str,
-                        "name": symbol,
-                        "filePath": sf['file_path'],
-                        "type": "function",
+                        "name": qualified or name or node_str,
+                        "filePath": fp,
+                        "type": kind or "function",
                     }
-                # file_ref 不在 source_files 中，但仍保留符号名
-                return {
-                    "id": node_str,
-                    "name": symbol,
-                    "filePath": "?",
-                    "type": "function",
-                }
 
-            # CASE 2: 纯 file-UUID（INCLUDE 边的 source，或 CALL 边中无函数名的引用）
+            # graph_node 中未找到，尝试 source_files
             sf = sf_map.get(node_str)
             if sf:
                 name = sf['file_name']
                 if not name:
                     name = sf['file_path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
-                return {
-                    "id": node_str,
-                    "name": name,
-                    "filePath": sf['file_path'],
-                    "type": "file",
-                }
+                return {"id": node_str, "name": name, "filePath": sf['file_path'], "type": "file"}
 
-            # CASE 3: include_path 或其他未知格式
-            return {
-                "id": node_str,
-                "name": node_str,
-                "filePath": "?",
-                "type": "?",
-            }
+            # 如果 node_str 是文件名（如 "app.ts"），通过 name_map 查找
+            file_name = name_map.get(node_str)
+            if file_name:
+                return {"id": node_str, "name": file_name, "filePath": file_path_map.get(node_str, ''), "type": "file"}
+
+            return {"id": node_str, "name": node_str, "filePath": "?", "type": "?"}
 
         result = []
         for comm in communities:
@@ -2198,20 +2297,23 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
 
             # 获取边的关系
             def _edge_display_name(node_str: str) -> str:
-                """将 node 字符串转换为可读名称:
-                   file-UUID → source_files.file_name
-                   file-UUID:symbol → symbol
-                   其他 → 原样返回
-                """
+                """将 node 字符串转换为可读名称: 优先通过 graph_node 查找，其次 source_files"""
+                # 通过 graph_node 查找
+                gn_row = gn_index.get(node_str)
+                if gn_row:
+                    name = str(gn_row.get('name', '') or '')
+                    if name:
+                        return name
+                    fp = str(gn_row.get('file_path', '') or '')
+                    if fp:
+                        return os.path.basename(fp)
+                # 通过 source_files 查找
                 sf = sf_map.get(node_str)
                 if sf:
                     name = sf['file_name']
                     if not name:
                         name = sf['file_path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
                     return name
-                m = re.match(r'^([a-zA-Z0-9_-]+):(.+)$', node_str)
-                if m:
-                    return m.group(2)
                 return node_str
 
             edges_with_details = []

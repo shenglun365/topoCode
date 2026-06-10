@@ -83,7 +83,6 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
             f"[COMMUNITY] {edge_type}: 过滤后节点数 {len(all_nodes)} < {min_node_cnt}"
             f" (枢纽={len(hub_nodes)}, 孤立={len(orphan_nodes)})，跳过"
         )
-        # 即使不够社区分析，也保存枢纽/孤立节点
         _save_special_nodes(task_id, edge_type, hub_nodes, orphan_nodes, graph, edge_directions, analysis_store)
         return {"community_count": 0, "levels": 0,
                 "hub_count": len(hub_nodes), "orphan_count": len(orphan_nodes)}
@@ -107,6 +106,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     saved, hub_saved, orphan_saved = _save_communities(
         task_id, edge_type, level, parent_comm_id,
         communities, graph, analysis_store, edge_directions,
+        node_lookup=node_lookup,
     )
 
     # 5. 检测是否需要备选方案（CALL 图连通性过高）
@@ -155,6 +155,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         saved, hub_saved, orphan_saved = _save_communities(
             task_id, edge_type, level, parent_comm_id,
             communities, graph, analysis_store, edge_directions,
+            node_lookup=node_lookup,
         )
         logger.info(f"[COMMUNITY] CALL (备选): L0 产生 {len(communities)} 个社区")
 
@@ -175,7 +176,8 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
             if sub_comms:
                 ns, _, _ = _save_communities(
                     task_id, edge_type, new_level, parent_id,
-                    sub_comms, sub_graph, analysis_store, edge_directions
+                    sub_comms, sub_graph, analysis_store, edge_directions,
+                    node_lookup=node_lookup,
                 )
                 new_saved += ns
                 total_count += ns
@@ -251,10 +253,11 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
             if source_id and target_id:
                 src_info = node_lookup.get(source_id, ("", source_id))
                 tgt_info = node_lookup.get(target_id, ("", target_id))
-                source = src_info[1] if len(src_info) > 1 else source_id
-                target = tgt_info[1] if len(tgt_info) > 1 else target_id
+                # 使用 file_path 而非 name，避免同名文件在不同目录下冲突
+                source = src_info[0] if src_info and src_info[0] else source_id
+                target = tgt_info[0] if tgt_info and tgt_info[0] else target_id
             else:
-                # 旧 schema fallback
+                # fallback for old schema
                 source = str(edge.get("file_id", ""))
                 target = edge.get("include_path", "")
             if not source or not target:
@@ -267,29 +270,29 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
             source_id = edge.get("source_id", "")
             target_id = edge.get("target_id", "")
 
-            if source_id and target_id:
-                src_info = node_lookup.get(source_id, ("", source_id))
-                tgt_info = node_lookup.get(target_id, ("", target_id))
+            if not source_id or not target_id:
+                # 无法解析的调用 (metadata.method="unresolved") 直接跳过
+                skipped += 1
+                continue
 
-                src_name = src_info[1] if len(src_info) > 1 else source_id
-                tgt_name = tgt_info[1] if len(tgt_info) > 1 else target_id
+            # 映射到文件级：将 source 和 target 都转换为其所在文件路径
+            # v2 schema 中 source_id 通常是文件节点、target_id 是符号节点
+            # 统一聚合为文件级图，避免符号节点全部沦为孤立节点
+            src_info = node_lookup.get(source_id)
+            tgt_info = node_lookup.get(target_id)
 
-                source = f"{src_name}"
-                target = f"{tgt_name}"
-            else:
-                # ── 旧 schema fallback: graph_node 表 ──
-                caller_file = str(edge.get("caller_file_id", ""))
-                callee_file = str(edge.get("callee_file_id", ""))
-                caller_func = edge.get("caller_func_name", "")
-                callee_name = edge.get("callee_name", "")
+            src_file = src_info[0] if src_info and src_info[0] else source_id
+            tgt_file = tgt_info[0] if tgt_info and tgt_info[0] else target_id
 
-                if not callee_file or callee_file == "None":
-                    skipped += 1
-                    continue
-                source = f"{caller_file}:{caller_func}"
-                target = f"{callee_file}:{callee_name}"
+            if src_file == tgt_file:
+                # 同文件内调用不参与文件级社区分析
+                skipped += 1
+                continue
 
-            if not source or not target or source == ":" or target == ":":
+            source = src_file
+            target = tgt_file
+
+            if not source or not target:
                 skipped += 1
                 continue
 
@@ -504,7 +507,8 @@ def _save_communities(task_id: str, edge_type: str, level: str,
                        communities: List[Set[str]],
                        graph: Dict[str, Set[str]],
                        analysis_store,
-                       edge_directions: Dict = None) -> Tuple[int, int, int]:
+                       edge_directions: Dict = None,
+                       node_lookup: Dict = None) -> Tuple[int, int, int]:
     """
     保存社区到 SQLite（含模块度质量分）
 
@@ -556,12 +560,18 @@ def _save_communities(task_id: str, edge_type: str, level: str,
 
         node_count = len(comm_nodes)
         edge_count = len(edge_list)
-        # 计算社区覆盖的去重文件数（节点ID格式：file-uuid:symbolName）
+        # 计算社区覆盖的去重文件数：通过 node_lookup 获取每个节点所属的文件路径
         file_ids = set()
-        for nid in comm_nodes:
-            fid = nid.split(':')[0] if ':' in (nid or '') else nid
-            if fid:
-                file_ids.add(fid)
+        if node_lookup:
+            for nid in comm_nodes:
+                info = node_lookup.get(nid)
+                if info and info[0]:
+                    file_ids.add(info[0])
+        else:
+            for nid in comm_nodes:
+                fid = nid.split(':')[0] if ':' in (nid or '') else nid
+                if fid:
+                    file_ids.add(fid)
         file_count = len(file_ids)
 
         comm_docs.append({

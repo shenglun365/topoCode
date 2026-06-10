@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -133,6 +134,8 @@ class TreeSitterWalker:
 
     def extract(self) -> FileSymbolTable:
         """解析文件，返回 FileSymbolTable"""
+        sys.setrecursionlimit(max(sys.getrecursionlimit(), 50000))
+
         # 解码源文本（供钩子函数使用）
         self.source_str = self.source.decode("utf-8", errors="replace")
 
@@ -193,92 +196,110 @@ class TreeSitterWalker:
     # ── 核心分发循环 ─────────────────────────────────────
 
     def visit(self, node: SyntaxNode):
+        skip_children = self._dispatch(node)
+
+        # 递归子节点 — 使用显式迭代栈避免 Python 递归深度限制
+        # 未命中分发表的节点类型 (preproc_if, expression_statement 等) 会大量累积深度
+        if not skip_children:
+            _work = [(node, 0)]
+            while _work:
+                parent, idx = _work[-1]
+                if idx < parent.named_child_count:
+                    child = parent.named_child(idx)
+                    _work[-1] = (parent, idx + 1)
+                    if child:
+                        _work.append((child, 0))
+                        if self._dispatch(child):
+                            _work.pop()
+                else:
+                    _work.pop()
+
+    def _dispatch(self, node: SyntaxNode) -> bool:
+        """分发单节点到对应提取逻辑，返回 True 表示 skip_children"""
         node_type = node.type
         ex = self.ex
-        skip_children = False
 
         # 0. 自定义钩子
         if node_type in ex.import_types:
             self._extract_import(node)
+            return False
 
         # 1. 函数
-        elif node_type in ex.function_types:
+        if node_type in ex.function_types:
             if self._inside_class_like() and node_type in ex.method_types:
                 self._extract_method(node)
             else:
                 self._extract_function(node)
-            skip_children = True
+            return True
 
         # 2. 方法
-        elif node_type in ex.method_types:
+        if node_type in ex.method_types:
             self._extract_method(node)
-            skip_children = True
+            return True
 
-        # 3. 类 (可能 dispatch 到 struct/enum/interface/trait)
-        elif node_type in ex.class_types:
+        # 3. 类
+        if node_type in ex.class_types:
             classification = "class"
             if ex.classify_class:
                 classification = ex.classify_class(node)
             self._extract_class_like(node, classification)
-            skip_children = True
+            return True
 
         # 4. 接口/trait/protocol
-        elif node_type in ex.interface_types:
+        if node_type in ex.interface_types:
             self._extract_class_like(node, ex.interface_kind.value)
-            skip_children = True
+            return True
 
         # 5. 结构体
-        elif node_type in ex.struct_types:
+        if node_type in ex.struct_types:
             self._extract_class_like(node, "struct")
-            skip_children = True
+            return True
 
         # 6. 枚举
-        elif node_type in ex.enum_types:
+        if node_type in ex.enum_types:
             self._extract_class_like(node, "enum")
-            skip_children = True
+            return True
 
-        # 7. 类型别名（Go typedef 可能下钻为 struct/enum）
-        elif node_type in ex.type_alias_types:
-            skip_children = self._extract_type_alias(node)
+        # 7. 类型别名
+        if node_type in ex.type_alias_types:
+            return self._extract_type_alias(node)
 
-        # 8. 变量（仅顶层/模块级）
-        elif node_type in ex.variable_types and not self._inside_class_like():
+        # 8. 变量
+        if node_type in ex.variable_types and not self._inside_class_like():
             self._extract_variable(node)
+            return False
 
-        # 9. 字段（类内部）
-        elif node_type in ex.field_types and self._inside_class_like():
+        # 9. 字段
+        if node_type in ex.field_types and self._inside_class_like():
             self._extract_field(node)
+            return False
 
-        # 10. 属性（类内部）
-        elif node_type in ex.property_types and self._inside_class_like():
+        # 10. 属性
+        if node_type in ex.property_types and self._inside_class_like():
             self._extract_property(node)
+            return False
 
         # 11. 枚举成员
-        elif node_type in ex.enum_member_types and self._inside_enum():
+        if node_type in ex.enum_member_types and self._inside_enum():
             self._extract_enum_member(node)
+            return False
 
         # 12. 调用
-        elif node_type in ex.call_types:
+        if node_type in ex.call_types:
             self._collect_call(node)
+            return False
 
         # 13. 实例化
-        elif node_type in ex.instantiation_types or node_type in _INSTANTIATION_NODES:
+        if node_type in ex.instantiation_types or node_type in _INSTANTIATION_NODES:
             self._collect_instantiation(node)
+            return False
 
         # 14. Rust impl
-        elif node_type == "impl_item":
+        if node_type == "impl_item":
             self._extract_rust_impl(node)
+            return False
 
-        # 15. ERROR / missing — 递归子节点（Kotlin 等语言的 class 可能被误解析）
-        elif node_type == "ERROR" or node_type == "MISSING":
-            pass  # fall through to child iteration
-
-        # 递归子节点
-        if not skip_children:
-            for i in range(node.named_child_count):
-                child = node.named_child(i)
-                if child:
-                    self.visit(child)
+        return False
 
     # ── 节点创建 ─────────────────────────────────────────
 
@@ -700,6 +721,22 @@ class TreeSitterWalker:
         ex = self.ex
         import_text = _node_text(node, self.source).strip()
 
+        # ── 通用 source 字段提取 (从 bytes，避免非 ASCII 偏移失真) ──
+        source_node = _child_by_field(node, "source")
+        if source_node:
+            raw = self.source[source_node.start_byte:source_node.end_byte]
+            module_name = raw.decode("utf-8", errors="replace").strip("'\"")
+            if module_name:
+                self._create_node(
+                    NodeKind.IMPORT, module_name, node,
+                    signature=import_text,
+                )
+                # 仍调用 extract_import 钩子以允许额外处理（非标准导入样式等）
+                if ex.extract_import:
+                    ex.extract_import(node, self.source_str)
+                return
+
+        # ── 回退：语言特定提取器 ──
         if ex.extract_import:
             info = ex.extract_import(node, self.source_str)
             if info:
@@ -709,7 +746,7 @@ class TreeSitterWalker:
                         NodeKind.IMPORT, module_name, node,
                         signature=import_text,
                     )
-                return
+                    return
 
         # Python: import os, sys → 每项一个 node
         if self.language == "python" and node.type == "import_statement":

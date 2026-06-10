@@ -24,11 +24,11 @@ export interface CommunityItem {
 
 const props = defineProps<{
   communities: CommunityItem[]
-  edgeType: 'INCLUDE' | 'CALL'
+  edgeType: 'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'
 }>()
 
 const emit = defineEmits<{
-  'update:edgeType': [type: 'INCLUDE' | 'CALL']
+  'update:edgeType': [type: 'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL']
   'select-community': [item: CommunityItem]
 }>()
 

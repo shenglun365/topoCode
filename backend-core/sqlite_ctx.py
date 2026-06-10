@@ -633,6 +633,7 @@ PROJECT_DB_TABLES_SQL = """
         comm_id TEXT NOT NULL,
         node_list TEXT NOT NULL,
         node_count INTEGER NOT NULL,
+        file_count INTEGER DEFAULT 0,
         edge_list TEXT,
         edge_count INTEGER DEFAULT 0,
         quality_score REAL,
@@ -655,12 +656,14 @@ PROJECT_DB_TABLES_SQL = """
         comm_id TEXT NOT NULL,
         parent_comm_id TEXT,
         node_count INTEGER,
+        file_count INTEGER DEFAULT 0,
         edge_count INTEGER DEFAULT 0,
         quality_score REAL,
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_comm_hier_task ON community_hierarchy(task_id);
     CREATE INDEX IF NOT EXISTS idx_comm_hier_type ON community_hierarchy(task_id, edge_type);
+    CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv);
 
     -- ============================================
     -- report_subdocs — 分析报告子文档 (任务级)
@@ -912,13 +915,26 @@ class MultiDBManager:
         self.sessions_db.conn.commit()
 
     def _project_db_path(self, project_id: str, project_root: str = None) -> str:
-        """获取项目数据库路径。优先使用项目根目录下的 .topocode/data/project.db。"""
-        if project_root and project_root.strip():
-            topo_dir = os.path.join(project_root, ".topocode", "data")
+        """获取项目数据库路径。仅使用新架构 .topocode/data/project.db。"""
+        root = project_root or self._get_project_root(project_id)
+        if root and root.strip():
+            topo_dir = os.path.join(root, ".topocode", "data")
             os.makedirs(topo_dir, exist_ok=True)
             return os.path.join(topo_dir, "project.db")
-        # 回退到全局 data_dir
-        return os.path.join(self.data_dir, f"{project_id}.db")
+        raise ValueError(
+            f"Project {project_id} has no root_path — cannot resolve .topocode/data/project.db. "
+            "Project must be re-imported or root_path must be set."
+        )
+
+    def _get_project_root(self, project_id: str) -> str:
+        """从主库查询项目根路径"""
+        try:
+            row = self.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+            return row["root_path"] if row else ""
+        except Exception:
+            return ""
 
     def init_project_db(self, project_id: str, project_root: str = None):
         """创建并初始化项目库"""
@@ -929,7 +945,7 @@ class MultiDBManager:
         return project_db
 
     def _migrate_project_db(self, project_db: SQLiteContext):
-        """迁移项目库表 - v2 重设计: 重建 graph_node + 新增 graph_edge"""
+        """迁移项目库表 - v2 重设计: 重建 graph_node + 新增 graph_edge + file_count"""
         # 为新版 graph_node 补充字段
         try:
             cursor = project_db.execute("PRAGMA table_info(graph_node)")
@@ -943,6 +959,24 @@ class MultiDBManager:
                         project_db.execute(f'ALTER TABLE graph_node ADD COLUMN "{col}" TEXT')
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+        # 为 graph_doc 添加 file_count 列（如不存在则忽略）
+        try:
+            cursor = project_db.execute("PRAGMA table_info(graph_doc)")
+            gd_cols = {row[1] for row in cursor.fetchall()}
+            if 'file_count' not in gd_cols:
+                project_db.execute("ALTER TABLE graph_doc ADD COLUMN file_count INTEGER DEFAULT 0")
+        except Exception:
+            pass
+
+        # 为 community_hierarchy 添加 file_count 列（如不存在则忽略）
+        try:
+            cursor = project_db.execute("PRAGMA table_info(community_hierarchy)")
+            ch_cols = {row[1] for row in cursor.fetchall()}
+            if 'file_count' not in ch_cols:
+                project_db.execute("ALTER TABLE community_hierarchy ADD COLUMN file_count INTEGER DEFAULT 0")
         except Exception:
             pass
 
@@ -1019,11 +1053,6 @@ class MultiDBManager:
             project_root = None
 
         db_path = self._project_db_path(project_id, project_root)
-        if not os.path.exists(db_path) and project_root:
-            # 也检查旧路径 (全局 data_dir 下的)
-            old_path = os.path.join(self.data_dir, f"{project_id}.db")
-            if os.path.exists(old_path):
-                db_path = old_path
 
         if not os.path.exists(db_path):
             # 自动创建
@@ -1044,9 +1073,8 @@ class MultiDBManager:
             del self._project_db_cache[project_id]
 
     def delete_project_db(self, project_id: str):
-        """关闭连接 + 删除项目库文件"""
+        """关闭连接 + 删除项目库文件（仅新架构 .topocode/data/project.db）"""
         self.close_project_db(project_id)
-        # 尝试从项目根目录和全局目录删除
         try:
             row = self.main_db.execute(
                 "SELECT root_path FROM projects WHERE id = ?", (project_id,)
@@ -1055,16 +1083,12 @@ class MultiDBManager:
         except Exception:
             project_root = None
         db_path = self._project_db_path(project_id, project_root)
-        # 也检查旧全局路径
-        global_path = os.path.join(self.data_dir, f"{project_id}.db")
-        for path in [db_path, global_path]:
-            if os.path.exists(path):
-                os.remove(path)
-            # 也删除 -wal 和 -shm 文件
-            for suffix in ['-wal', '-shm']:
-                wal_path = path + suffix
-                if os.path.exists(wal_path):
-                    os.remove(wal_path)
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        for suffix in ['-wal', '-shm']:
+            wal_path = db_path + suffix
+            if os.path.exists(wal_path):
+                os.remove(wal_path)
 
     def compute_md5(self, file_path: str) -> str:
         """计算文件的 MD5 哈希"""

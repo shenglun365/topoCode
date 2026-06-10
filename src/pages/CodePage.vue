@@ -191,8 +191,8 @@ function onClearCacheDone() {
     <!-- 清除缓存确认弹窗 -->
     <ClearCacheDialog
       v-if="showClearCacheDialog"
-      @close="showClearCacheDialog = false"
-      @cleared="onClearCacheDone"
+      :project-id="projectStore.selectedProjectId!"
+      @close="onClearCacheDone"
     />
   </div>
 </template>
@@ -226,5 +226,41 @@ function onClearCacheDone() {
   align-items: center;
   justify-content: center;
   gap: 12px;
+}
+
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+.menu-popup {
+  position: fixed;
+  z-index: 10000;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #313244);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  min-width: 160px;
+  padding: 4px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary, #cdd6f4);
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: var(--bg-hover, #313244);
 }
 </style>

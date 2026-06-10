@@ -41,7 +41,7 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
-const commEdgeType = ref<'INCLUDE' | 'CALL'>('INCLUDE')
+const commEdgeType = ref<'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'>('INCLUDE')
 const communitySearch = ref('')
 const fileStats = ref<Record<string, number>>({})
 const totalScopeFiles = ref(0)
@@ -80,6 +80,10 @@ const callCommunityCount = computed(() =>
   (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'CALL').length
 )
 
+const externalStats = computed(() =>
+  communityStore.tasks[props.taskId]?.externalStats || null
+)
+
 const projectSummaryText = ref('')
 const projectSummaryDate = ref('')
 const showSummaryModal = ref(false)
@@ -94,13 +98,24 @@ const hasAnyCommunity = computed(() => {
   return coms.length > 0
 })
 
+const isExternalTab = computed(() =>
+  commEdgeType.value === 'EXTERNAL_INCLUDE' || commEdgeType.value === 'EXTERNAL_CALL'
+)
+
 const runtimeCommunities = computed(() => {
+  if (isExternalTab.value) return []
   const coms = communityStore.tasks[props.taskId]?.communities || []
   const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
   return filtered
 })
 
 const coveredFileCount = computed(() => {
+  // 使用跨社区去重后的文件数，避免同一文件被多个社区重复计数
+  const counts = communityStore.tasks[props.taskId]?.uniqueFileCounts
+  if (counts) {
+    return counts[commEdgeType.value] ?? 0
+  }
+  // fallback: 按社区 fileCount 求和（可能重复）
   let total = 0
   for (const c of runtimeCommunities.value) {
     total += c.fileCount || 0
@@ -148,7 +163,6 @@ async function handleCommunityMD(params: {
     regenerationType: 'community',
   })
 }
-
 async function loadData() {
   loading.value = true
   loadError.value = null
@@ -168,15 +182,49 @@ async function loadData() {
         projectSummaryDate.value = ps.generated_at || ''
       }
     }
-    await communityStore.loadCommunities(props.taskId, pid || '')
-    await reportStore.checkReportExists(props.taskId)
+
+    // 合并查询：一次 RPC 获取 community + fileStats（替代 5 次独立调用）
     if (pid) {
-      const fs = await analysisStore.scanFileStats(pid).catch(() => null)
-      if (fs) {
-        fileStats.value = fs.extensions || {}
-        totalScopeFiles.value = fs.totalFiles || 0
+      try {
+        const dash = await ipc.analysis.getReportDashboard(props.taskId).catch(() => null)
+        if (dash) {
+          // 文件统计
+          fileStats.value = dash.fileStats?.extensions || {}
+          const taskExtensions = (taskDetail.value as any)?.extensions || []
+          if (taskExtensions.length > 0 && dash.fileStats?.extensions) {
+            totalScopeFiles.value = taskExtensions.reduce(
+              (sum: number, ext: string) => sum + (dash.fileStats.extensions[ext] || 0),
+              0
+            )
+          } else {
+            totalScopeFiles.value = dash.fileStats?.totalFiles || 0
+          }
+          // 社区数据注入 store
+          await communityStore.loadCommunitiesFromDashboard(props.taskId, dash)
+        }
+        // 加载外部依赖/调用统计
+        await communityStore.loadExternalStats(props.taskId).catch(() => {})
+      } catch {
+        // fallback: 原始独立调用
+        await communityStore.loadCommunities(props.taskId, pid)
+        // 加载外部依赖/调用统计
+        await communityStore.loadExternalStats(props.taskId).catch(() => {})
+        const fs = await analysisStore.scanFileStats(pid).catch(() => null)
+        if (fs) {
+          fileStats.value = fs.extensions || {}
+          const taskExtensions = (taskDetail.value as any)?.extensions || []
+          if (taskExtensions.length > 0 && fs.extensions) {
+            totalScopeFiles.value = taskExtensions.reduce(
+              (sum: number, ext: string) => sum + (fs.extensions[ext] || 0),
+              0
+            )
+          } else {
+            totalScopeFiles.value = fs.totalFiles || 0
+          }
+        }
       }
     }
+    await reportStore.checkReportExists(props.taskId)
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -332,15 +380,27 @@ watch(() => props.taskId, loadData)
         </section>
 
         <!-- 组件架构 — 分视角（依赖/调用）、分层级 -->
-        <section v-if="hasAnyCommunity" class="home-section arch-section">
+        <section v-if="hasAnyCommunity || isExternalTab" class="home-section arch-section">
           <div class="section-header">
             <RectangleGroupIcon class="w-4 h-4" />
             <span>{{ t('report.communityArchitecture', '组件架构') }}</span>
             <span class="arch-stats">
-              <span class="arch-stats-count">{{ runtimeCommunities.length }}</span>
-              {{ t('report.l0Communities', '个L0社区') }}
-              <span class="arch-stats-divider">|</span>
-              <span class="arch-stats-coverage">{{ t('report.coverage', '覆盖率') }} <strong>{{ coveragePercent }}%</strong> {{ coveredFileCount }}/{{ totalScopeFiles }}</span>
+              <template v-if="!isExternalTab">
+                <span class="arch-stats-count">{{ runtimeCommunities.length }}</span>
+                {{ t('report.l0Communities', '个L0社区') }}
+                <span class="arch-stats-divider">|</span>
+                <span class="arch-stats-coverage">{{ t('report.coverage', '覆盖率') }} <strong>{{ coveragePercent }}%</strong> {{ coveredFileCount }}/{{ totalScopeFiles }}</span>
+              </template>
+              <template v-else-if="commEdgeType === 'EXTERNAL_INCLUDE' && externalStats">
+                <span class="arch-stats-count">{{ externalStats.externalDeps?.length || 0 }}</span> 个外部包
+                <span class="arch-stats-divider">|</span>
+                <span class="arch-stats-coverage">{{ externalStats.uniqueExternalDepFiles }} 个文件</span>
+              </template>
+              <template v-else-if="commEdgeType === 'EXTERNAL_CALL' && externalStats">
+                <span class="arch-stats-count">{{ externalStats.externalCalls?.length || 0 }}</span> 个外部API
+                <span class="arch-stats-divider">|</span>
+                <span class="arch-stats-coverage">{{ externalStats.uniqueExternalCallFiles }} 个文件</span>
+              </template>
             </span>
             <div class="header-spacer" />
             <div class="arch-search">
@@ -353,26 +413,40 @@ watch(() => props.taskId, loadData)
             </div>
           </div>
 
-          <!-- INCLUDE / CALL 切换 -->
+          <!-- INCLUDE / CALL / 外部依赖 / 外部调用 切换 -->
           <div class="arch-tabs">
             <button
               class="arch-tab" :class="{ active: commEdgeType === 'INCLUDE' }"
               @click="commEdgeType = 'INCLUDE'"
             >
               <FolderIcon class="w-3.5 h-3.5" />
-              {{ t('report.dependencyAnalysis', '依赖分析') }} ({{ depCommunityCount }})
+              {{ t('report.internalDependency', '内部依赖分析') }} ({{ depCommunityCount }})
             </button>
             <button
               class="arch-tab" :class="{ active: commEdgeType === 'CALL' }"
               @click="commEdgeType = 'CALL'"
             >
               <ChartBarIcon class="w-3.5 h-3.5" />
-              {{ t('report.callAnalysis', '调用分析') }} ({{ callCommunityCount }})
+              {{ t('report.internalCall', '内部调用分析') }} ({{ callCommunityCount }})
+            </button>
+            <button
+              class="arch-tab" :class="{ active: commEdgeType === 'EXTERNAL_INCLUDE' }"
+              @click="commEdgeType = 'EXTERNAL_INCLUDE'"
+            >
+              <FolderIcon class="w-3.5 h-3.5" />
+              {{ t('report.externalDependency', '外部依赖视图') }}
+            </button>
+            <button
+              class="arch-tab" :class="{ active: commEdgeType === 'EXTERNAL_CALL' }"
+              @click="commEdgeType = 'EXTERNAL_CALL'"
+            >
+              <ChartBarIcon class="w-3.5 h-3.5" />
+              {{ t('report.externalCall', '外部调用视图') }}
             </button>
           </div>
 
           <!-- 社区 tag 列表 — 分析过的显示 name，未分析的显示编号 -->
-          <div class="arch-tags">
+          <div v-if="!isExternalTab" class="arch-tags">
             <div
               v-for="item in runtimeCommunities"
               :key="item.id"
@@ -387,6 +461,53 @@ watch(() => props.taskId, loadData)
             <div v-if="runtimeCommunities.length === 0" class="arch-empty">
               {{ t('report.noCommunities', '该视角下无社区数据') }}
             </div>
+          </div>
+
+          <!-- 外部依赖/调用统计视图 -->
+          <div v-if="isExternalTab && externalStats" class="arch-tags">
+            <!-- 外部依赖视图 -->
+            <template v-if="commEdgeType === 'EXTERNAL_INCLUDE'">
+              <div class="arch-empty" style="margin-bottom:12px;">
+                {{ t('report.totalFiles', '总文件') }}: {{ totalScopeFiles }}
+                | {{ externalStats.uniqueExternalDepFiles }} {{ t('report.coverage', '') + ' ' }}
+                {{ externalStats.totalExternalDeps }} 条外部导入
+              </div>
+              <div
+                v-for="dep in externalStats.externalDeps.slice(0, 50)"
+                :key="dep.package"
+                class="arch-tag"
+                :title="dep.files.slice(0, 10).join('\n') + (dep.files.length > 10 ? '\n...' + (dep.files.length - 10) + ' more' : '')"
+              >
+                <span class="tag-name">{{ dep.package }}</span>
+                <span class="tag-count">{{ dep.fileCount }}</span>
+              </div>
+            </template>
+            <!-- 外部调用视图 -->
+            <template v-if="commEdgeType === 'EXTERNAL_CALL'">
+              <div class="arch-empty" style="margin-bottom:12px;">
+                {{ t('report.totalFiles', '总文件') }}: {{ totalScopeFiles }}
+                | {{ externalStats.uniqueExternalCallFiles }} {{ t('report.coverage', '') + ' ' }}
+                {{ externalStats.totalExternalCalls }} 条外部调用
+              </div>
+              <div
+                v-for="call in externalStats.externalCalls.slice(0, 50)"
+                :key="call.name"
+                class="arch-tag"
+                :title="call.files.slice(0, 10).join('\n') + (call.files.length > 10 ? '\n...' + (call.files.length - 10) + ' more' : '')"
+              >
+                <span class="tag-name">{{ call.name }}</span>
+                <span class="tag-count">{{ call.count }}</span>
+              </div>
+            </template>
+            <div v-if="commEdgeType === 'EXTERNAL_INCLUDE' && (!externalStats.externalDeps || externalStats.externalDeps.length === 0)" class="arch-empty">
+              {{ t('report.noCommunities', '无外部依赖数据') }}
+            </div>
+            <div v-if="commEdgeType === 'EXTERNAL_CALL' && (!externalStats.externalCalls || externalStats.externalCalls.length === 0)" class="arch-empty">
+              {{ t('report.noCommunities', '无外部调用数据') }}
+            </div>
+          </div>
+          <div v-if="isExternalTab && !externalStats" class="arch-empty">
+            {{ t('report.noCommunities', '该视角下无数据') }}
           </div>
         </section>
 

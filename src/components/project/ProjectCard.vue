@@ -607,7 +607,6 @@ async function handleCheckChanges() {
 .project-card {
   padding: 14px;
   position: relative;
-  box-sizing: border-box;
 }
 
 .project-card.card-pinned {

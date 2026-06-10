@@ -11,7 +11,7 @@ import uuid
 import logging
 from typing import Optional
 
-from store.connection import MultiDBManager
+from sqlite_ctx import MultiDBManager
 from store.task_store import TaskStore
 from store.analysis_store import AnalysisStore
 from analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing
@@ -210,7 +210,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 先清理 WAL 文件，再 VACUUM 回收磁盘空间
         project_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         import os
-        proj_db_path = os.path.join(multi_db.data_dir, f"{project_id}.db")
+        proj_db_path = project_db.db_path
         logger.info(f"[analysis.clearProjectCache] VACUUM 项目库 {project_id} (尺寸: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)...")
         project_db.execute("VACUUM")
         project_db.commit()
@@ -687,9 +687,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         def build_node_ref_map(all_node_lists, all_edge_lists):
             """构建 node_id → {label, fileId, filePath, graphNodeId, symbolName} 映射
 
-            node_id 格式:
-              - CALL:  file-{hash}:{funcName}  (如 file-abc123:constructor)
-              - INCLUDE: file-{hash} 或裸 hash (如 file-abc123, abc123)
+            node_id 格式（当前）:
+              - 文件节点: file:/full/path/to/file.ts
+              - 符号节点: 16 位 hex hash
             """
             ref_map = {}
 
@@ -703,86 +703,60 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             if not all_node_ids:
                 return ref_map
 
-            # 解析 node_id → (file_hash, func_name)
-            pairs = []
+            # 仅查询所需的 node_id（而非全表 30K+ 行），批量 IN 查询利用主键索引
+            gn_index = {}  # node_id → row
+            node_list = list(all_node_ids)
+            batch_size = 500
+            for i in range(0, len(node_list), batch_size):
+                batch = node_list[i:i + batch_size]
+                placeholders = ','.join(['?' for _ in batch])
+                gn_rows = project_db.execute(
+                    f"SELECT id, kind, name, qualified_name, file_path, file_id"
+                    f" FROM graph_node WHERE task_id=? AND id IN ({placeholders})",
+                    (tid, *batch)
+                ).fetchall()
+                for row in gn_rows:
+                    gn_index[str(row['id'])] = row
+
+            # 为每个 node_id 查询元数据 — 通过 graph_node 直接查找
             for nid in all_node_ids:
-                if ':' in nid:
-                    fh, fn = nid.split(':', 1)
-                    pairs.append((fh.strip(), fn.strip()))
-                else:
-                    pairs.append((nid, None))
+                row = gn_index.get(nid)
+                if row:
+                    file_path = str(row['file_path'] or '')
+                    name = str(row['name'] or '')
+                    qualified = str(row['qualified_name'] or '')
+                    kind = str(row['kind'] or '')
+                    file_id = str(row['file_id'] or '')
 
-            # 从 graph_node 批量查询节点元数据
-            # 构建 (file_id, name) → graph_node row 的映射
-            gn_rows = project_db.execute(
-                "SELECT id, kind, name, qualified_name, file_id"
-                " FROM graph_node WHERE task_id=?",
-                (tid,)
-            ).fetchall()
-
-            # 构建索引: (file_id, name) → row
-            name_index = {}  # (file_id, name) → row
-            for row in gn_rows:
-                fi = str(row['file_id'] or '')
-                nm = str(row['name'] or '')
-                if fi and fi != 'None' and nm and nm != 'None':
-                    name_index[(fi, nm)] = row
-
-            # 为每个 node_id 查询元数据
-            for nid in all_node_ids:
-                label = nid
-                file_id = ''
-                file_path = ''
-                graph_node_id = None
-                symbol_name = ''
-
-                if ':' in nid:
-                    fh, fn_name = nid.split(':', 1)
-                    fh, fn_name = fh.strip(), fn_name.strip()
-
-                    row = name_index.get((fh, fn_name))
-
-                    if row:
-                        graph_node_id = row['id']
-                        file_id = str(row['file_id'] or fh)
-                        symbol_name = fn_name
-                        # 构建实名标签
-                        file_name = file_name_map.get(file_id, '')
-                        if file_name:
-                            label = f'{file_name}::{symbol_name}'
-                        else:
-                            label = f'{fh}::{symbol_name}'
-                        if row['qualified_name']:
-                            label = f'{row["qualified_name"]} ({file_name or fh})'
-                else:
-                    # 无冒号：裸 file_id（INCLUDE 类型或 file-hash）
-                    fh = nid
-                    # 尝试用 file-hash 查找
-                    file_name = file_name_map.get(fh, '')
-                    if file_name:
-                        label = file_name
-                        file_id = fh
+                    if kind == 'file':
+                        label = os.path.basename(file_path) or nid
+                    elif qualified:
+                        label = qualified
+                    elif name:
+                        label = name
                     else:
-                        # 可能是去掉 "file-" 前缀的 hash，尝试补全
-                        prefixed = f'file-{fh}'
-                        file_name = file_name_map.get(prefixed, '')
-                        if file_name:
-                            label = file_name
-                            file_id = prefixed
-                        else:
-                            label = fh
-                            file_id = fh
+                        label = nid
 
-                if file_id:
-                    file_path = file_path_map.get(file_id, '')
-
-                ref_map[nid] = {
-                    'label': label,
-                    'fileId': file_id,
-                    'filePath': file_path,
-                    'graphNodeId': graph_node_id,
-                    'symbolName': symbol_name,
-                }
+                    ref_map[nid] = {
+                        'label': label,
+                        'fileId': file_id or nid,
+                        'filePath': file_path,
+                        'graphNodeId': row['id'],
+                        'symbolName': name if kind != 'file' else '',
+                    }
+                else:
+                    # 不在 graph_node 中的 ID（可能是文件名/路径），尝试从 source_files 查找
+                    file_name = file_name_map.get(nid, '')
+                    if not file_name:
+                        base = os.path.basename(nid) if isinstance(nid, str) else str(nid)
+                        file_name = file_name_map.get(base, base)
+                    ref_map[nid] = {
+                        'label': file_name or nid,
+                        'fileId': nid,
+                        'filePath': file_path_map.get(nid, ''),
+                        'graphNodeId': None,
+                        'symbolName': '',
+                    }
 
             return ref_map
 
@@ -871,24 +845,22 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             return info.get('filePath', '')
 
         def aggregate_to_files(_nodes, _edges):
-            """将语法级节点汇聚到文件级：去重 + 合并边，用 source_files 实名"""
+            """将语法级节点汇聚到文件级：去重 + 合并边，优先通过 graph_node 查找文件归属"""
             file_nodes = {}
             for node_id in _nodes:
-                clean_id = node_id.split(':')[0] if ':' in (node_id or '') else node_id
+                # 优先通过 ref_map 获取文件归属（已修正为 graph_node 直查）
+                ref_info = ref_map.get(node_id)
+                if ref_info and ref_info.get('filePath'):
+                    clean_id = ref_info['filePath']
+                else:
+                    # fallback: 解析 node_id（兼容旧格式）
+                    clean_id = node_id.split(':')[0] if ':' in (node_id or '') else node_id
                 if bad_id(clean_id):
                     continue
                 if clean_id not in file_nodes:
-                    # 从 source_files / ref_map 获取标签（多种 ID 格式兼容）
                     label = file_name_map.get(clean_id, '')
                     if not label:
-                        # 尝试 file- 前缀补全
-                        label = file_name_map.get(f'file-{clean_id}', '')
-                    if not label and clean_id.startswith('file-'):
-                        # 尝试去掉 file- 前缀
-                        label = file_name_map.get(clean_id[5:], '')
-                    if not label:
-                        # 尝试 ref_map（原始 node_id 或干净 ID）
-                        label = ref_map.get(clean_id, {}).get('label', '')
+                        label = ref_map.get(node_id, {}).get('label', '')
                     if not label:
                         label = str(clean_id)
                     file_nodes[clean_id] = label
@@ -1218,6 +1190,153 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     # ==================== 级联社区查询 ====================
 
+    @server.register("analysis.getReportDashboard")
+    def get_report_dashboard(task_id=None, taskId=None):
+        """获取报告仪表盘数据：任务详情 + 社区层级 + LLM 结果 + 文件统计（一次调用）
+        用于 ReportHome 页面初始加载，替代多次独立 RPC 调用
+        """
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        logger.info("[analysis.getReportDashboard] ENTRY task_id=%s", tid)
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            return None
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        # 1. 获取级联社区层级 (CALL + INCLUDE)
+        call_levels = _get_cascade_levels_impl(project_db, tid, 'CALL')
+        dep_levels = _get_cascade_levels_impl(project_db, tid, 'INCLUDE')
+
+        # 2. 获取 LLM 结果
+        call_results = _list_community_results_impl(project_db, tid, 'CALL')
+        dep_results = _list_community_results_impl(project_db, tid, 'INCLUDE')
+
+        # 3. 获取文件统计
+        file_stats = _scan_file_stats_impl(project_db, pid)
+
+        logger.info("[analysis.getReportDashboard] DONE task_id=%s", tid)
+        return {
+            'task': task,
+            'callLevels': call_levels,
+            'depLevels': dep_levels,
+            'callResults': call_results,
+            'depResults': dep_results,
+            'fileStats': file_stats,
+        }
+
+    def _get_cascade_levels_impl(project_db, tid, et):
+        """getCascadeLevels 内部实现（无 RPC 注册）"""
+        try:
+            rows = project_db.execute(
+                """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                          h.file_count, h.quality_score, COALESCE(g.edge_count, 0)
+                   FROM community_hierarchy h
+                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                   WHERE h.task_id=? AND h.edge_type=?
+                   ORDER BY h.comm_lv, h.comm_id""",
+                (tid, et)
+            ).fetchall()
+            has_file_count = True
+        except Exception:
+            has_file_count = False
+            rows = project_db.execute(
+                """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
+                   FROM community_hierarchy h
+                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                   WHERE h.task_id=? AND h.edge_type=?
+                   ORDER BY h.comm_lv, h.comm_id""",
+                (tid, et)
+            ).fetchall()
+
+        levels_dict = {}
+        for row in rows:
+            if has_file_count:
+                lv, comm_id, parent_id, node_count, file_count, quality, edge_count = row
+            else:
+                lv, comm_id, parent_id, node_count, quality, edge_count = row
+                file_count = 0
+            if lv not in levels_dict:
+                levels_dict[lv] = []
+            levels_dict[lv].append({
+                'id': comm_id, 'label': comm_id[:30], 'parentCommId': parent_id,
+                'nodeCount': node_count or 0, 'fileCount': file_count or 0,
+                'edgeCount': edge_count or 0, 'qualityScore': quality,
+            })
+
+        # 1. 社区级别的文件覆盖（L0 node_list 去重）—— 精确但偏保守
+        community_files = 0
+        try:
+            rows = project_db.execute(
+                "SELECT node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
+                (tid, et)).fetchall()
+            if rows:
+                uniq = set()
+                for r in rows:
+                    nl = json.loads(r[0]) if r[0] else []
+                    for nid in nl:
+                        uniq.add(str(nid))
+                community_files = len(uniq)
+        except Exception:
+            pass
+
+        # 2. 边级别的文件覆盖（所有有 resolved 边参与的文件）—— 避免同类文件调用、孤立节点被过滤后的低估
+        edge_files = community_files
+        if et in ('CALL', 'INCLUDE'):
+            edge_kind = 'calls' if et == 'CALL' else 'imports'
+            try:
+                rows = project_db.execute(
+                    f"""SELECT DISTINCT COALESCE(gn.file_path, ge.source_id) as fp
+                        FROM graph_edge ge
+                        LEFT JOIN graph_node gn ON gn.id = ge.source_id AND gn.task_id = ge.task_id
+                        WHERE ge.task_id=? AND ge.kind=? AND ge.target_id != ''
+                        UNION
+                        SELECT DISTINCT COALESCE(gn.file_path, ge.target_id) as fp
+                        FROM graph_edge ge
+                        LEFT JOIN graph_node gn ON gn.id = ge.target_id AND gn.task_id = ge.task_id
+                        WHERE ge.task_id=? AND ge.kind=? AND ge.target_id != ''""",
+                    (tid, edge_kind, tid, edge_kind)
+                ).fetchall()
+                edge_files = len(rows)
+            except Exception:
+                pass
+
+        # 使用边级计数作为 totalUniqueFiles（更准确反映"有调用/依赖关系的文件数"）
+        total_unique = max(community_files, edge_files)
+
+        result = []
+        for lv in sorted(levels_dict.keys()):
+            result.append({'lv': lv, 'items': levels_dict[lv]})
+        return {'levels': result, 'totalUniqueFiles': total_unique}
+
+    def _list_community_results_impl(project_db, tid, et):
+        """listCommunityResults 内部实现"""
+        try:
+            rows = project_db.execute(
+                "SELECT * FROM community_llm_results WHERE task_id=? AND edge_type=? ORDER BY comm_lv, comm_id",
+                (tid, et)).fetchall()
+            return {'results': [dict(r) for r in rows]}
+        except Exception:
+            return {'results': []}
+
+    def _scan_file_stats_impl(project_db, pid):
+        """scanFileStats 内部实现"""
+        files = project_db.fetchall(
+            "SELECT file_path, file_name, language, size FROM source_files WHERE language != 'directory' ORDER BY file_path")
+        extensions = {}
+        for f in files:
+            lang = f.get("language", "unknown")
+            extensions[lang] = extensions.get(lang, 0) + 1
+        return {
+            'extensions': extensions,
+            'totalFiles': len(files),
+            'totalDirs': 0,
+            'directories': [],
+        }
+
     @server.register("analysis.getCascadeLevels")
     def get_cascade_levels(task_id=None, taskId=None, edge_type=None, edgeType=None):
         """获取级联社区层级结构
@@ -1234,64 +1353,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not task:
             logger.warning("[analysis.getCascadeLevels] task not found task_id=%s", tid)
             return {"levels": []}
-        project_id = task["project_id"]
-        project_db = multi_db.get_project_db(project_id)
+        project_db = multi_db.get_project_db(task["project_id"])
 
-        try:
-            rows = project_db.execute(
-                """SELECT DISTINCT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                          h.file_count, h.quality_score,
-                          COALESCE(g.edge_count, 0)
-                   FROM community_hierarchy h
-                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
-                   WHERE h.task_id=? AND h.edge_type=?
-                   ORDER BY h.comm_lv, h.comm_id""",
-                (tid, et)
-            ).fetchall()
-            has_file_count = True
-        except Exception as e:
-            logger.warning("[analysis.getCascadeLevels] file_count query failed, falling back: %s", e)
-            has_file_count = False
-            rows = project_db.execute(
-                """SELECT DISTINCT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
-                   FROM community_hierarchy h
-                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
-                   WHERE h.task_id=? AND h.edge_type=?
-                   ORDER BY h.comm_lv, h.comm_id""",
-                (tid, et)
-            ).fetchall()
-        logger.info("[analysis.getCascadeLevels] query returned %d rows task_id=%s edge_type=%s", len(rows), tid, et)
-
-        levels_dict: dict[str, list] = {}
-        for row in rows:
-            if has_file_count:
-                lv, comm_id, parent_id, node_count, file_count, quality, edge_count = row
-            else:
-                lv, comm_id, parent_id, node_count, quality, edge_count = row
-                file_count = 0
-            if lv not in levels_dict:
-                levels_dict[lv] = []
-            levels_dict[lv].append({
-                'id': comm_id,
-                'label': comm_id[:30],
-                'parentCommId': parent_id,
-                'nodeCount': node_count or 0,
-                'fileCount': file_count or 0,
-                'edgeCount': edge_count or 0,
-                'qualityScore': quality,
-            })
-
-        result = []
-        for lv in sorted(levels_dict.keys()):
-            result.append({
-                'lv': lv,
-                'items': levels_dict[lv],
-            })
-        logger.info("[analysis.getCascadeLevels] DONE task_id=%s edge_type=%s levels=%s total_items=%d",
-                     tid, et, sorted(levels_dict.keys()),
-                     sum(len(v) for v in levels_dict.values()))
-
-        return {'levels': result}
+        result = _get_cascade_levels_impl(project_db, tid, et)
+        logger.info("[analysis.getCascadeLevels] DONE task_id=%s edge_type=%s", tid, et)
+        return result
 
     @server.register("analysis.getQueryStats")
     def get_query_stats(task_id=None, taskId=None, edge_type=None, edgeType=None,
@@ -1359,6 +1425,105 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             'communityCount': community_count,
             'nodeCount': total_nodes,
             'edgeCount': total_edges,
+        }
+
+    @server.register("analysis.getExternalStats")
+    def get_external_stats(task_id=None, taskId=None):
+        """获取外部依赖/调用统计: 从已有数据聚合，不需社区分析"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        # 1. 外部依赖 — 导入名无对应 INCLUDE 边的（按文件匹配）
+        deps_sql = """
+            SELECT gn.name as pkg, gn.file_path
+            FROM graph_node gn
+            WHERE gn.task_id = ? AND gn.kind = 'import'
+            AND NOT EXISTS (
+                SELECT 1 FROM graph_edge ge
+                JOIN graph_node gn_src ON gn_src.id = ge.source_id AND gn_src.task_id = ge.task_id
+                WHERE ge.task_id = ? AND ge.kind = 'imports'
+                AND json_extract(ge.metadata, '$.module') = gn.name
+                AND gn_src.file_path = gn.file_path
+            )
+        """
+        try:
+            dep_rows = project_db.execute(deps_sql, (tid, tid)).fetchall()
+        except Exception:
+            dep_rows = []
+
+        dep_map = {}
+        for row in dep_rows:
+            pkg = row[0] or ""
+            fp = row[1] or ""
+            if not pkg:
+                continue
+            if pkg not in dep_map:
+                dep_map[pkg] = {"package": pkg, "fileCount": 0, "files": []}
+            dep_map[pkg]["fileCount"] += 1
+            # 去重（同文件可能多次 import 同一包）
+            if fp not in dep_map[pkg]["files"]:
+                dep_map[pkg]["files"].append(fp)
+
+        external_deps = sorted(dep_map.values(), key=lambda x: -x["fileCount"])
+        # 限制返回前 100
+        external_deps = external_deps[:100]
+
+        # 2. 外部调用 — 未解析的调用边
+        calls_sql = """
+            SELECT ge.source_id, gn.file_path, ge.metadata
+            FROM graph_edge ge
+            LEFT JOIN graph_node gn ON gn.id = ge.source_id AND gn.task_id = ge.task_id
+            WHERE ge.task_id = ? AND ge.kind = 'calls' AND ge.target_id = ''
+        """
+        try:
+            call_rows = project_db.execute(calls_sql, (tid,)).fetchall()
+        except Exception:
+            call_rows = []
+
+        call_map = {}
+        for row in call_rows:
+            sid = row[0] or ""
+            fp = row[1] or sid
+            meta_str = row[2] or "{}"
+            try:
+                meta = json.loads(meta_str)
+            except Exception:
+                meta = {}
+            call_name = meta.get("expression") or meta.get("callee") or ""
+            if not call_name:
+                call_name = sid[:16]  # fallback: source function id prefix
+            if call_name not in call_map:
+                call_map[call_name] = {"name": call_name, "count": 0, "files": []}
+            call_map[call_name]["count"] += 1
+            if fp not in call_map[call_name]["files"]:
+                call_map[call_name]["files"].append(fp)
+
+        external_calls = sorted(call_map.values(), key=lambda x: -x["count"])
+        external_calls = external_calls[:100]
+
+        # 总数统计
+        total_ext_deps = len(dep_rows)
+        unique_ext_dep_files = len(set(row[1] for row in dep_rows if row[1]))
+        total_ext_calls = len(call_rows)
+        unique_ext_call_files = len(set(
+            row[1] if row[1] else row[0] for row in call_rows
+        ))
+
+        return {
+            'externalDeps': external_deps,
+            'externalCalls': external_calls,
+            'totalExternalDeps': total_ext_deps,
+            'uniqueExternalDepFiles': unique_ext_dep_files,
+            'totalExternalCalls': total_ext_calls,
+            'uniqueExternalCallFiles': unique_ext_call_files,
         }
 
     # ==================== 子文档 CRUD ====================

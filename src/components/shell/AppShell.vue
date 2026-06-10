@@ -136,6 +136,7 @@ watch(
 .app-row2 {
   flex: 1;
   display: flex;
+  overflow: hidden;
 }
 
 .content-area {

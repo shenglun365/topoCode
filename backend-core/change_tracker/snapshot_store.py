@@ -82,7 +82,7 @@ class SnapshotStore:
                         snapshot.timestamp.isoformat(),
                         json.dumps(snapshot.file_hashes),
                         json.dumps(snapshot.symbols) if snapshot.symbols else None,
-                        json.dumps(snapshot.dependencies) if snapshot.dependencies else [],
+                        json.dumps(snapshot.dependencies) if snapshot.dependencies else None,
                         1 if snapshot.is_analyzed else 0,
                     ),
                 )

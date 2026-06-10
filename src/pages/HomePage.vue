@@ -413,8 +413,9 @@ onMounted(async () => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   padding: 32px;
-  overflow-y: auto;
+  overflow: auto;
 }
 
 .group-manager-panel {

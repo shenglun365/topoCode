@@ -156,6 +156,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCascadeLevels', params: { taskId, edgeType } }),
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getQueryStats', params }),
+    getExternalStats: (taskId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getExternalStats', params: { taskId } }),
 
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {

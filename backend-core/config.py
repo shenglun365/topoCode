@@ -57,7 +57,7 @@ HUB_DEGREE_RATIO = 0.3            # 度超过总节点30%
 HUB_MIN_DEGREE = 50               # 至少50度才触发（小项目不误判）
 
 # 孤立节点：移除枢纽后，剩余度 ≤ ORPHAN_MAX_DEGREE 视为孤立
-ORPHAN_MAX_DEGREE = 1
+ORPHAN_MAX_DEGREE = 0              # 仅移除完全无连接的节点（度为 1 的叶子节点纳入社区检测）
 
 # 同文件内调用降权系数（备选方案）：设为 1.0 = 等同处理，< 1.0 = 降低影响力
 INTRAn_FILE_EDGE_WEIGHT = 1.0       # 正常值

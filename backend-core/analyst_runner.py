@@ -65,12 +65,33 @@ def _edge_to_dict(edge):
     }
 
 
-def _extract_import_dependencies(analysis_store, task_id: str, all_tables) -> list:
+def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_path: str = "") -> list:
     """从 graph_node 中 import 类型节点生成 imports 边 (依赖图)"""
     from parsers.core.symbol_model import Edge
     from parsers.core.node_types import EdgeKind, Provenance
     import hashlib
+    import re
     from pathlib import Path
+
+    # ── Go 项目: 尝试读取 go.mod 获取模块名 ──
+    go_mod_prefix = ""
+    if proj_path:
+        mod_file = os.path.join(proj_path, "go.mod")
+        if not os.path.isfile(mod_file):
+            # 支持 go.mod 在子目录中（如 server/go.mod）
+            for root, dirs, files in os.walk(proj_path):
+                if "go.mod" in files:
+                    mod_file = os.path.join(root, "go.mod")
+                    break
+        try:
+            with open(mod_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    m = re.match(r'^\s*module\s+(\S+)', line)
+                    if m:
+                        go_mod_prefix = m.group(1)
+                        break
+        except (OSError, StopIteration):
+            pass
 
     # 构建完整索引: file_path, stem, 路径后缀 → file_node_id
     file_index: dict[str, str] = {}       # file_path → node_id
@@ -95,6 +116,9 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables) -> li
                     key = "/".join(parts[i:])
                     if key not in suffix_index:
                         suffix_index[key] = node.id
+
+    # ── Java 项目检测 ──
+    is_java_project = proj_path and any(fp.endswith(".java") for fp in file_index) if file_index else False
 
     # 读取所有 import 节点
     import_nodes = analysis_store.get_graph_nodes(task_id, "import")
@@ -126,21 +150,102 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables) -> li
             candidate = os.path.normpath(os.path.join(source_dir, module_name))
             target_id = file_index.get(candidate) or suffix_index.get(candidate)
         # 3. C/C++ 风格: 尝试从源文件目录解析相对路径 (如 "header.h", "dir/header.h")
-        if not target_id:
+        #     Go 项目跳过: import "fmt" 非文件包含，同目录易误中 (fmt.go)
+        if not target_id and not go_mod_prefix:
             candidate = os.path.normpath(os.path.join(source_dir, module_name))
             target_id = file_index.get(candidate) or suffix_index.get(candidate)
+        # 3.5 Python 点式相对导入: .module, ..module, ...module
+        #     路径式相对 (./ ../) 已在步骤2处理，此处仅处理纯点前缀
+        if not target_id and module_name.startswith(".") \
+                and not module_name.startswith("./") \
+                and not module_name.startswith("../"):
+            dots = 0
+            for ch in module_name:
+                if ch == '.':
+                    dots += 1
+                else:
+                    break
+            remainder = module_name[dots:]
+            rel_path = remainder.replace(".", "/") if remainder else ""
+            up_levels = dots - 1
+            parts = Path(source_dir).parts
+            if up_levels < len(parts):
+                if up_levels > 0:
+                    base = str(Path(*parts[:len(parts) - up_levels]))
+                else:
+                    base = source_dir
+                if rel_path:
+                    base = os.path.join(base, rel_path)
+                # 依次尝试: 后缀匹配(无扩展名) / .py 文件 / __init__.py 包
+                target_id = suffix_index.get(base)
+                if not target_id:
+                    target_id = file_index.get(base + ".py")
+                if not target_id:
+                    init_path = os.path.join(base, "__init__.py")
+                    target_id = file_index.get(init_path)
+                    if not target_id:
+                        target_id = suffix_index.get(os.path.splitext(init_path)[0])
         # 4. 绝对模块路径: parsers.core.walker → 路径后缀匹配
-        if not target_id:
+        #     Go 项目跳过(steps 4-6): 后缀匹配易误中 stdlib 名 (fmt→.../fmt.go, net/url→.../url.go)
+        if not target_id and not go_mod_prefix:
             mod_path = module_name.replace(".", "/")
             target_id = suffix_index.get(mod_path)
         # 5. 路径后缀匹配 (如 "dir/header.h" 匹配 ".../dir/header.h" 或 ".../dir/header")
-        if not target_id:
+        if not target_id and not go_mod_prefix:
             target_id = suffix_index.get(module_name)
             if not target_id:
                 mod_noext = os.path.splitext(module_name)[0]
                 target_id = suffix_index.get(mod_noext)
-        # 6. stem 匹配 (fallback: os → os.py, header.h → header)
-        if not target_id:
+        # 6. Go 模块导入解析 (go.mod): github.com/my/proj/v2/pkg/foo → pkg/foo/foo.go
+        #     放在 stem 之前，因为 Go 模块前缀是确定性信号，stem 匹配可能误中其他文件
+        if not target_id and go_mod_prefix and module_name.startswith(go_mod_prefix):
+            inner = module_name[len(go_mod_prefix):].lstrip("/")
+            if inner:
+                pkg_name = inner.split("/")[-1]
+                candidates = [
+                    # 单文件包: pkg/foo.go
+                    os.path.join(proj_path, inner + ".go"),
+                    # 目录包: pkg/foo/foo.go
+                    os.path.join(proj_path, inner, pkg_name + ".go"),
+                    # 测试文件: pkg/foo/foo_test.go
+                    os.path.join(proj_path, inner, pkg_name + "_test.go"),
+                ]
+                for cand in candidates:
+                    target_id = file_index.get(cand)
+                    if target_id:
+                        break
+                    target_id = suffix_index.get(os.path.splitext(cand)[0])
+                    if target_id:
+                        break
+                # 回退: 目录下任意非 test .go 文件
+                if not target_id:
+                    dir_prefix = os.path.join(proj_path, inner) + "/"
+                    for fp, fid in file_index.items():
+                        if fp.startswith(dir_prefix) and fp.endswith(".go") and not fp.endswith("_test.go"):
+                            target_id = fid
+                            break
+                # 再次回退: 目录下任意 .go 文件 (含 test)
+                if not target_id:
+                    for fp, fid in file_index.items():
+                        if fp.startswith(dir_prefix) and fp.endswith(".go"):
+                            target_id = fid
+                            break
+        # 6.5 Java 内部类回退: Banner.Mode → 剥离到 Banner 级匹配
+        #      仅当项目含 .java 文件时启用，不依赖模块前缀（非 module-path 语言）
+        if not target_id and is_java_project:
+            inner_parts = module_name.split(".")
+            while len(inner_parts) > 1:
+                inner_parts.pop()
+                inner_path = "/".join(inner_parts)
+                candidate = os.path.join(proj_path, inner_path + ".java")
+                target_id = file_index.get(candidate)
+                if not target_id:
+                    target_id = suffix_index.get(inner_path)
+                if target_id:
+                    break
+        # 7. stem 匹配 (fallback: os → os.py, header.h → header)
+        #     Go 项目跳过 stem: stdlib 名 (fmt, net/url) 与外部模块名容易误中内部文件
+        if not target_id and not go_mod_prefix:
             basename = module_name.split("/")[-1]
             stem = basename.rsplit(".", 1)[0] if "." in basename else basename
             ids = stem_index.get(stem, [])
@@ -518,7 +623,7 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     # Step 2.5: 从 import 节点生成依赖边 (imports edges)
     _log("Step 2.5: 文件依赖提取开始")
     try:
-        import_dep_edges = _extract_import_dependencies(analysis_store, task_id, all_tables)
+        import_dep_edges = _extract_import_dependencies(analysis_store, task_id, all_tables, proj_path)
         if import_dep_edges:
             emitter.write_edges(import_dep_edges)
             total_dep_edges = len(import_dep_edges)
@@ -776,7 +881,7 @@ def _save_analysis_snapshot(multi_db, task_id: str, task_store, result: dict):
         if files_processed > 0 and proj_path:
             from store.analysis_store import AnalysisStore
             analysis_store = AnalysisStore(project_db)
-            source_files = analysis_store.list_source_files(task_id=task_id)
+            source_files = analysis_store.list_source_files()
             for sf in source_files:
                 fp = sf.get("file_path", "")
                 abs_path = os.path.join(proj_path, fp) if proj_path else fp
@@ -801,9 +906,9 @@ def _save_analysis_snapshot(multi_db, task_id: str, task_store, result: dict):
                 if fp not in symbols_dict:
                     symbols_dict[fp] = []
                 symbols_dict[fp].append({
-                    "name": row.get("name", ""),
-                    "kind": row.get("kind", ""),
-                    "line": row.get("start_line", 0),
+                    "name": row["name"] or "",
+                    "kind": row["kind"] or "",
+                    "line": row["start_line"] or 0,
                 })
         except Exception:
             logger.warning("[SNAPSHOT] Failed to collect symbols", exc_info=True)
