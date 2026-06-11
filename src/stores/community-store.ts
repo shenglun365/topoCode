@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
-import type { ExternalStatsResult } from '@/types/ipc'
+import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@/types/ipc'
 
 export interface CommunityItem {
   id: string
@@ -45,6 +45,8 @@ interface CommunityTaskRuntime {
   uniqueFileCounts: Record<string, number>
   /** 外部依赖/调用统计 */
   externalStats: ExternalStatsResult | null
+  /** 跨社区边数据 (edgeType→level→edges) */
+  crossCommunityEdges: Record<string, Record<string, CrossCommunityEdge[]>>
 }
 
 function normalizeDiagramField(val: unknown): string {
@@ -69,6 +71,7 @@ export const useCommunityStore = defineStore('community', () => {
         analysisStates: {},
         uniqueFileCounts: {},
         externalStats: null,
+        crossCommunityEdges: {},
       }
     }
     return tasks.value[taskId]
@@ -290,7 +293,28 @@ export const useCommunityStore = defineStore('community', () => {
       if (result) {
         ensureTask(taskId).externalStats = result
       }
-    } catch { /* skip */ }
+    } catch (e: any) {
+      console.warn('[community-store] loadExternalStats failed:', e?.message || e)
+    }
+  }
+
+  async function loadCrossCommunityEdges(taskId: string, edgeType: string, commLv: string) {
+    const t = ensureTask(taskId)
+    try {
+      const result = await ipc.analysis.getCrossCommunityEdges({ taskId, edgeType, commLv })
+      if (result?.crossEdges) {
+        if (!t.crossCommunityEdges[edgeType]) {
+          t.crossCommunityEdges[edgeType] = {}
+        }
+        t.crossCommunityEdges[edgeType][commLv] = result.crossEdges
+      }
+    } catch (e: any) {
+      console.warn('[community-store] loadCrossCommunityEdges failed:', e?.message || e)
+    }
+  }
+
+  function getCrossEdges(taskId: string, edgeType: string, commLv: string): CrossCommunityEdge[] {
+    return tasks.value[taskId]?.crossCommunityEdges?.[edgeType]?.[commLv] || []
   }
 
   async function analyzeSelected(taskId: string, modelId: string, batchSize: number, projectId: string) {
@@ -495,7 +519,7 @@ export const useCommunityStore = defineStore('community', () => {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
     listCommunityResults, getCascadeLevels, saveCommunityResult,
-    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, analyzeSelected, runTask, stopAnalysis, retryTask,
+    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
   }

@@ -54,7 +54,7 @@ onMounted(async () => {
       key,
       label: TABLE_LABELS[key] || key,
       count,
-      checked: true,
+      checked: key !== 'tasks',
       status: 'pending' as const,
     }))
   } catch (e) {

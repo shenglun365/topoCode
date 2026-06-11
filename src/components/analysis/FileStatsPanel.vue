@@ -4,11 +4,34 @@ import { useI18n } from 'vue-i18n'
 import {
   DocumentTextIcon,
   XMarkIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
 import type { FileStatsResult, DirTreeNode } from '@/types/ipc'
 import DirTreeNodeComponent from './DirTreeNodeComponent.vue'
 import { useComponentId } from '@/composables/useComponentId'
+
+// 解析器支持的语言（与 backend EXTRACTORS 注册表同步）
+// scanFileStats 返回的 extensions key 是语言名，非文件后缀
+const SUPPORTED_LANGUAGES = new Set([
+  'python',
+  'javascript', 'jsx',
+  'typescript', 'tsx',
+  'java',
+  'c', 'c_header',
+  'cpp', 'cpp_header',
+  'go',
+  'rust',
+  'c_sharp',
+  'swift',
+  'ruby',
+  'php',
+  'kotlin',
+  'scala',
+  'dart',
+  'lua', 'luau',
+  'objc',
+])
 
 const { showId, componentId } = useComponentId('AN-005')
 const props = defineProps<{
@@ -185,6 +208,7 @@ function invertDirs() {
 
 // Toggle file type selection
 function toggleExtension(ext: string) {
+  if (!isExtensionSupported(ext)) return
   const idx = selectedExtensions.value.indexOf(ext)
   if (idx >= 0) {
     selectedExtensions.value.splice(idx, 1)
@@ -197,7 +221,7 @@ function toggleExtension(ext: string) {
 // Select all extensions
 function selectAllExtensions() {
   if (stats.value?.extensions) {
-    selectedExtensions.value = [...Object.keys(stats.value.extensions)]
+    selectedExtensions.value = Object.keys(stats.value.extensions).filter(isExtensionSupported)
   }
   emitSelectedExtensions()
 }
@@ -205,10 +229,17 @@ function selectAllExtensions() {
 // Invert extension selection
 function invertExtensions() {
   if (!stats.value?.extensions) return
-  const all = Object.keys(stats.value.extensions)
+  const all = Object.keys(stats.value.extensions).filter(isExtensionSupported)
   selectedExtensions.value = all.filter(e => !selectedExtensions.value.includes(e))
   emitSelectedExtensions()
 }
+
+function isExtensionSupported(ext: string): boolean {
+  if (!ext || ext.trim() === '') return true  // no-extension / directory → still selectable
+  return SUPPORTED_LANGUAGES.has(ext.toLowerCase())
+}
+
+const unsupportedTooltip = t('analysis.unsupportedExtension', '当前不支持解析此文件类型')
 
 // Remove a selected extension
 function removeExtension(ext: string) {
@@ -498,10 +529,23 @@ loadStats().then(() => { initialLoadDone = true })
           v-for="[ext, count] in sortedExtensions"
           :key="ext || '__no_ext__'"
           class="stat-bar-row"
-          :class="{ 'selected': selectedExtensions.includes(ext) }"
+          :class="{
+            'selected': selectedExtensions.includes(ext),
+            'unsupported': !isExtensionSupported(ext),
+          }"
           @click="toggleExtension(ext)"
         >
-          <span class="stat-ext">{{ formatExtension(ext) }}</span>
+          <span class="stat-ext">
+            {{ formatExtension(ext) }}
+            <span
+              v-if="!isExtensionSupported(ext)"
+              class="unsupported-badge"
+              :title="unsupportedTooltip"
+            >
+              <ExclamationTriangleIcon class="w-3 h-3" />
+              <span class="unsupported-text">不支持</span>
+            </span>
+          </span>
           <span class="stat-count">{{ count }}</span>
           <div class="stat-bar">
             <div
@@ -566,7 +610,7 @@ loadStats().then(() => { initialLoadDone = true })
   background: var(--bg-secondary);
   border-radius: 6px;
   border: 1px solid var(--border);
-  max-height: 600px;
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
 
@@ -618,7 +662,7 @@ loadStats().then(() => { initialLoadDone = true })
 
 /* Directory tree */
 .dir-tree {
-  max-height: 200px;
+  max-height: 280px;
   overflow-y: auto;
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -755,6 +799,30 @@ loadStats().then(() => { initialLoadDone = true })
 
 .stat-bar-row:not(.selected) {
   border: 1px solid transparent;
+}
+
+.stat-bar-row.unsupported {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: var(--bg-muted, #1a1a2e);
+}
+.stat-bar-row.unsupported:hover {
+  background: var(--bg-muted, #1a1a2e);
+}
+
+.unsupported-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  color: var(--warning, #f59e0b);
+  font-size: 11px;
+  font-family: system-ui;
+  font-weight: 400;
+  cursor: help;
+}
+.unsupported-badge .unsupported-text {
+  display: none;  /* 默认隐藏文字，悬停时由 title 提示 */
 }
 
 .stat-ext {

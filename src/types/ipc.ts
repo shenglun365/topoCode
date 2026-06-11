@@ -501,6 +501,7 @@ export interface IPCAPI {
     getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number }> }>; totalUniqueFiles: number }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
+    getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
@@ -763,12 +764,14 @@ export interface ExternalDepItem {
   package: string
   fileCount: number
   files: string[]
+  communities?: Array<{ communityId: string; name?: string }>
 }
 
 export interface ExternalCallItem {
   name: string
   count: number
   files: string[]
+  communities?: Array<{ communityId: string; name?: string }>
 }
 
 export interface ExternalStatsResult {
@@ -778,6 +781,16 @@ export interface ExternalStatsResult {
   uniqueExternalDepFiles: number
   totalExternalCalls: number
   uniqueExternalCallFiles: number
+}
+
+export interface CrossCommunityEdge {
+  sourceCommId: string
+  targetCommId: string
+  edgeCount: number
+}
+
+export interface CrossCommunityEdgesResult {
+  crossEdges: CrossCommunityEdge[]
 }
 
 export type ModelConfigDTO = ModelConfigItem

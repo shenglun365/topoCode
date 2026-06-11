@@ -56,8 +56,8 @@ export default { project: {
   confirmCreateTask: '是否转入「{name}」的项目资源管理，设置分析任务？',
   // 报告类型
   reportType: {
-    dependency: '依赖分析',
-    callChain: '调用分析',
+    dependency: '内部依赖分析',
+    callChain: '内部调用分析',
     dataFlow: '数据流分析',
     architecture: '架构分析',
     full: '全量分析',

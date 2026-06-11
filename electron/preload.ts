@@ -158,6 +158,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getQueryStats', params }),
     getExternalStats: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getExternalStats', params: { taskId } }),
+    getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getCrossCommunityEdges', params }),
 
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {

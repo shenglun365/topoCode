@@ -17,6 +17,7 @@ from typing import Optional
 
 from .node_types import NodeKind, EdgeKind, Provenance
 from .symbol_model import Node, Edge, UnresolvedReference, FileSymbolTable
+from ..languages import same_language_family
 
 logger = logging.getLogger(__name__)
 
@@ -84,16 +85,34 @@ class ResolutionEngine:
                         method = "name_match"
 
                 if target:
-                    edges.append(Edge(
-                        source=ref.from_node_id,
-                        target=target.id,
-                        kind=ref.reference_kind,
-                        line=ref.line,
-                        col=ref.col,
-                        file_path=ref.file_path,
-                        provenance=Provenance.RESOLUTION,
-                        metadata={"method": method},
-                    ))
+                    # 语言族校验: 跨族调用无意义 (e.g. Java → Python)
+                    src_lang = ref.language or ""
+                    tgt_lang = target.language or ""
+                    if src_lang and tgt_lang and not same_language_family(src_lang, tgt_lang):
+                        method = "cross_language_rejected"
+
+                    if method != "cross_language_rejected":
+                        edges.append(Edge(
+                            source=ref.from_node_id,
+                            target=target.id,
+                            kind=ref.reference_kind,
+                            line=ref.line,
+                            col=ref.col,
+                            file_path=ref.file_path,
+                            provenance=Provenance.RESOLUTION,
+                            metadata={"method": method},
+                        ))
+                    else:
+                        edges.append(Edge(
+                            source=ref.from_node_id,
+                            target="",
+                            kind=ref.reference_kind,
+                            line=ref.line,
+                            col=ref.col,
+                            file_path=ref.file_path,
+                            provenance=Provenance.RESOLUTION,
+                            metadata={"method": "cross_language_rejected"},
+                        ))
                 else:
                     edges.append(Edge(
                         source=ref.from_node_id,

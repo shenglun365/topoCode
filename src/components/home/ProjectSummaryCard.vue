@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { FolderIcon } from '@heroicons/vue/24/outline'
+import { FolderIcon, MinusIcon } from '@heroicons/vue/24/outline'
 import { useComponentId } from '@/composables/useComponentId'
 
 defineProps<{
@@ -8,6 +8,11 @@ defineProps<{
   language: string
   fileCount: number
   rootPath: string
+  showMinimize?: boolean
+}>()
+
+defineEmits<{
+  minimize: []
 }>()
 
 const { t } = useI18n()
@@ -25,6 +30,15 @@ function truncatePath(p: string): string {
     <div class="section-header">
       <FolderIcon class="w-4 h-4" />
       <span>{{ t('report.projectSummary') }}</span>
+      <button
+        v-if="showMinimize"
+        class="collapse-btn"
+        :title="t('common.minimize', '最小化')"
+        @click="$emit('minimize')"
+      >
+        <MinusIcon class="w-3.5 h-3.5" />
+      </button>
+      <div class="header-spacer" />
     </div>
     <div class="summary-cards">
       <div class="summary-card">
@@ -101,4 +115,13 @@ function truncatePath(p: string): string {
   font-family: var(--font-mono);
   word-break: break-all;
 }
+
+.header-spacer { flex: 1; }
+.collapse-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: transparent; border: 1px solid transparent; border-radius: 0.25rem;
+  color: var(--text-muted); cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+}
+.collapse-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
 </style>

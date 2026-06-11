@@ -69,6 +69,7 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
     """从 graph_node 中 import 类型节点生成 imports 边 (依赖图)"""
     from parsers.core.symbol_model import Edge
     from parsers.core.node_types import EdgeKind, Provenance
+    from parsers.languages import same_language_family
     import hashlib
     import re
     from pathlib import Path
@@ -97,12 +98,17 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
     file_index: dict[str, str] = {}       # file_path → node_id
     stem_index: dict[str, list[str]] = {} # stem → [node_id]
     suffix_index: dict[str, str] = {}     # path_suffix → node_id
+    file_language: dict[str, str] = {}    # file_path → language_key
 
     for table in all_tables:
+        lang = table.language or ""
         for node in table.nodes:
             if node.kind.value == "file":
                 fp = node.file_path
                 file_index[fp] = node.id
+                file_language[fp] = lang
+                # 反向索引: node.id → file_path（用于语言族校验）
+                file_language[node.id] = lang
                 stem = Path(fp).stem
                 stem_index.setdefault(stem, []).append(node.id)
 
@@ -253,6 +259,12 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                 target_id = ids[0]
 
         if target_id:
+            # 语言族校验: 跨族导入/依赖无意义 (e.g. Python → Java)
+            src_lang = file_language.get(source_file_id, "")
+            tgt_lang = file_language.get(target_id, "")
+            if src_lang and tgt_lang and not same_language_family(src_lang, tgt_lang):
+                continue
+
             edge_id = hashlib.sha256(f"{source_file_id}->{target_id}:imports".encode()).hexdigest()[:16]
             edges.append(Edge(
                 source=source_file_id, target=target_id,

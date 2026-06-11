@@ -259,6 +259,12 @@ function createRealIPC() {
       }) => {
         return await api.analysis.getQueryStats(params)
       },
+      getExternalStats: async (taskId: string) => {
+        return await api.analysis.getExternalStats(taskId)
+      },
+      getCrossCommunityEdges: async (params: { taskId: string; edgeType: string; commLv: string }) => {
+        return await api.analysis.getCrossCommunityEdges(params)
+      },
       saveCommunityResult: async (params: any) => {
         // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
         const safe = JSON.parse(JSON.stringify(params))

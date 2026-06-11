@@ -10,6 +10,7 @@ import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
 import { useNavigationStore } from '@/stores/navigation'
 import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
 import { useStatusStore } from '@/stores/status'
+import { usePanelStore } from '@/stores/panel'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-001')
@@ -17,6 +18,7 @@ const route = useRoute()
 const navigation = useNavigationStore()
 const funcGroup = useFuncGroupStore()
 const statusStore = useStatusStore()
+const panelStore = usePanelStore()
 
 // 路由 path 到功能组 ID 的映射
 const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
@@ -88,15 +90,15 @@ watch(
     </div>
 
     <!-- 顶部菜单栏 -->
-    <TopBar />
+    <TopBar v-show="!panelStore.isFullscreen" />
 
     <!-- 主内容行 -->
     <div class="app-row2">
       <!-- 活动栏 -->
-      <ActivityBar />
+      <ActivityBar v-show="!panelStore.isFullscreen" />
 
       <!-- 左侧面板 -->
-      <LeftPanel v-show="!hideLeftPanel" />
+      <LeftPanel v-show="!hideLeftPanel && !panelStore.isFullscreen" />
 
       <!-- 主内容区 -->
       <main class="content-area">
@@ -112,12 +114,12 @@ watch(
         </div>
       </main>
 
-      <!-- 右侧面板（设置页隐藏） -->
+      <!-- 右侧面板（设置页隐藏，全屏时用户可手动开启） -->
       <RightPanel v-show="!isSettingsPage" />
     </div>
 
     <!-- 底部状态栏 -->
-    <StatusBar />
+    <StatusBar v-show="!panelStore.isFullscreen" />
 
     <!-- 新手引导 -->
     <OnboardingTour />

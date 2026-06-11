@@ -4,11 +4,10 @@ import { useI18n } from 'vue-i18n'
 import {
   DocumentMagnifyingGlassIcon,
   ChartBarIcon,
-  FolderIcon,
-  RectangleGroupIcon,
   ExclamationTriangleIcon,
-  HashtagIcon,
   XMarkIcon,
+  MinusIcon,
+  PlusIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
@@ -19,6 +18,7 @@ import { ipc } from '@/services/ipc'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
 import TaskSummaryCard from '@/components/home/TaskSummaryCard.vue'
 import CommunitySection from '@/components/report/CommunitySection.vue'
+import CommunityArchitecturePanel from '@/components/report/CommunityArchitecturePanel.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
@@ -41,48 +41,8 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const projectSummary = ref<any>(null)
 const taskDetail = ref<any>(null)
-const commEdgeType = ref<'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'>('INCLUDE')
-const communitySearch = ref('')
 const fileStats = ref<Record<string, number>>({})
 const totalScopeFiles = ref(0)
-
-function communityIdLabel(item: { communityId: string; level?: string }): string {
-  const parts = item.communityId.split('-')
-  const num = parts[parts.length - 1]
-  const level = item.level || 'L0'
-  return `${level}-${num}`
-}
-
-function commName(item: CommunityItem): string {
-  const name = item.name && item.name !== item.communityId ? item.name : ''
-  if (name) return name.length > 12 ? name.slice(0, 12) + '\u2026' : name
-  return communityIdLabel(item)
-}
-
-function openCommunityDoc(item: CommunityItem) {
-  if (item.summary) {
-    emit('open-md', {
-      taskId: props.taskId,
-      content: `## ${commName(item)}\n\n${item.summary || ''}`,
-      title: commName(item),
-      parentCommId: item.communityId,
-      parentLevel: item.level || 'L0',
-      parentEdgeType: item.edgeType,
-      regenerationType: 'community',
-    })
-  }
-}
-
-const depCommunityCount = computed(() =>
-  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'INCLUDE').length
-)
-const callCommunityCount = computed(() =>
-  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'CALL').length
-)
-
-const externalStats = computed(() =>
-  communityStore.tasks[props.taskId]?.externalStats || null
-)
 
 const projectSummaryText = ref('')
 const projectSummaryDate = ref('')
@@ -98,29 +58,24 @@ const hasAnyCommunity = computed(() => {
   return coms.length > 0
 })
 
-const isExternalTab = computed(() =>
-  commEdgeType.value === 'EXTERNAL_INCLUDE' || commEdgeType.value === 'EXTERNAL_CALL'
+const depCommunityCount = computed(() =>
+  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'INCLUDE').length
+)
+const callCommunityCount = computed(() =>
+  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'CALL').length
 )
 
-const runtimeCommunities = computed(() => {
-  if (isExternalTab.value) return []
-  const coms = communityStore.tasks[props.taskId]?.communities || []
-  const filtered = coms.filter(c => c.level === 'L0' && c.edgeType === commEdgeType.value)
-  return filtered
-})
+const externalStats = computed(() =>
+  communityStore.tasks[props.taskId]?.externalStats || null
+)
 
 const coveredFileCount = computed(() => {
-  // 使用跨社区去重后的文件数，避免同一文件被多个社区重复计数
   const counts = communityStore.tasks[props.taskId]?.uniqueFileCounts
   if (counts) {
-    return counts[commEdgeType.value] ?? 0
+    const included = Math.max((counts['INCLUDE'] ?? 0), (counts['CALL'] ?? 0))
+    return Math.min(included, totalScopeFiles.value)
   }
-  // fallback: 按社区 fileCount 求和（可能重复）
-  let total = 0
-  for (const c of runtimeCommunities.value) {
-    total += c.fileCount || 0
-  }
-  return total
+  return 0
 })
 
 const coveragePercent = computed(() => {
@@ -129,6 +84,27 @@ const coveragePercent = computed(() => {
 })
 
 const { showId, componentId } = useComponentId('RP-001')
+
+const COLLAPSE_STORAGE_KEY = 'report-home-collapsed'
+
+function loadCollapsed(): { project: boolean; task: boolean } {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { project: false, task: false }
+}
+
+function saveCollapsed(state: { project: boolean; task: boolean }) {
+  localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify(state))
+}
+
+const collapsed = ref<{ project: boolean; task: boolean }>(loadCollapsed())
+
+function toggleCollapse(section: 'project' | 'task') {
+  collapsed.value[section] = !collapsed.value[section]
+  saveCollapsed(collapsed.value)
+}
 
 function truncatePath(p: string): string {
   if (!p || p.length <= 35) return p || '-'
@@ -292,18 +268,50 @@ watch(() => props.taskId, loadData)
 
     <template v-else>
       <div class="report-home-scroll">
+        <!-- 项目概要 + 任务概要 折叠容器 -->
+        <div v-if="collapsed.project || collapsed.task" class="collapsed-tags">
+          <button
+            v-if="collapsed.project"
+            class="collapsed-tag"
+            @click="toggleCollapse('project')"
+          >
+            <PlusIcon class="w-3 h-3" />
+            <span>{{ t('report.projectSummary') }}: {{ project?.name || '-' }}</span>
+          </button>
+          <button
+            v-if="collapsed.task"
+            class="collapsed-tag"
+            @click="toggleCollapse('task')"
+          >
+            <PlusIcon class="w-3 h-3" />
+            <span>{{ t('report.taskSummary') }}: {{ task?.name || '-' }}</span>
+          </button>
+        </div>
+
+        <!-- 项目概要 -->
         <ProjectSummaryCard
+          v-if="!collapsed.project"
           :project-name="project?.name || '-'"
           :language="project?.language || '-'"
           :file-count="project?.fileCount || 0"
           :root-path="project?.rootPath || project?.path || '-'"
+          :show-minimize="true"
+          @minimize="toggleCollapse('project')"
         />
 
         <!-- 任务概要 -->
-        <section class="home-section">
+        <section v-if="!collapsed.task" class="home-section">
           <div class="section-header">
             <ChartBarIcon class="w-4 h-4" />
             <span>{{ t('report.taskSummary') }}</span>
+            <div class="header-spacer" />
+            <button
+              class="collapse-btn"
+              :title="t('common.minimize', '最小化')"
+              @click="toggleCollapse('task')"
+            >
+              <MinusIcon class="w-3.5 h-3.5" />
+            </button>
           </div>
           <div class="summary-cards">
             <div class="summary-card">
@@ -379,137 +387,20 @@ watch(() => props.taskId, loadData)
           </div>
         </section>
 
-        <!-- 组件架构 — 分视角（依赖/调用）、分层级 -->
-        <section v-if="hasAnyCommunity || isExternalTab" class="home-section arch-section">
-          <div class="section-header">
-            <RectangleGroupIcon class="w-4 h-4" />
-            <span>{{ t('report.communityArchitecture', '组件架构') }}</span>
-            <span class="arch-stats">
-              <template v-if="!isExternalTab">
-                <span class="arch-stats-count">{{ runtimeCommunities.length }}</span>
-                {{ t('report.l0Communities', '个L0社区') }}
-                <span class="arch-stats-divider">|</span>
-                <span class="arch-stats-coverage">{{ t('report.coverage', '覆盖率') }} <strong>{{ coveragePercent }}%</strong> {{ coveredFileCount }}/{{ totalScopeFiles }}</span>
-              </template>
-              <template v-else-if="commEdgeType === 'EXTERNAL_INCLUDE' && externalStats">
-                <span class="arch-stats-count">{{ externalStats.externalDeps?.length || 0 }}</span> 个外部包
-                <span class="arch-stats-divider">|</span>
-                <span class="arch-stats-coverage">{{ externalStats.uniqueExternalDepFiles }} 个文件</span>
-              </template>
-              <template v-else-if="commEdgeType === 'EXTERNAL_CALL' && externalStats">
-                <span class="arch-stats-count">{{ externalStats.externalCalls?.length || 0 }}</span> 个外部API
-                <span class="arch-stats-divider">|</span>
-                <span class="arch-stats-coverage">{{ externalStats.uniqueExternalCallFiles }} 个文件</span>
-              </template>
-            </span>
-            <div class="header-spacer" />
-            <div class="arch-search">
-              <input
-                v-model="communitySearch"
-                type="text"
-                :placeholder="t('report.searchCommunity', '搜索组件...')"
-                class="arch-search-input"
-              />
-            </div>
-          </div>
-
-          <!-- INCLUDE / CALL / 外部依赖 / 外部调用 切换 -->
-          <div class="arch-tabs">
-            <button
-              class="arch-tab" :class="{ active: commEdgeType === 'INCLUDE' }"
-              @click="commEdgeType = 'INCLUDE'"
-            >
-              <FolderIcon class="w-3.5 h-3.5" />
-              {{ t('report.internalDependency', '内部依赖分析') }} ({{ depCommunityCount }})
-            </button>
-            <button
-              class="arch-tab" :class="{ active: commEdgeType === 'CALL' }"
-              @click="commEdgeType = 'CALL'"
-            >
-              <ChartBarIcon class="w-3.5 h-3.5" />
-              {{ t('report.internalCall', '内部调用分析') }} ({{ callCommunityCount }})
-            </button>
-            <button
-              class="arch-tab" :class="{ active: commEdgeType === 'EXTERNAL_INCLUDE' }"
-              @click="commEdgeType = 'EXTERNAL_INCLUDE'"
-            >
-              <FolderIcon class="w-3.5 h-3.5" />
-              {{ t('report.externalDependency', '外部依赖视图') }}
-            </button>
-            <button
-              class="arch-tab" :class="{ active: commEdgeType === 'EXTERNAL_CALL' }"
-              @click="commEdgeType = 'EXTERNAL_CALL'"
-            >
-              <ChartBarIcon class="w-3.5 h-3.5" />
-              {{ t('report.externalCall', '外部调用视图') }}
-            </button>
-          </div>
-
-          <!-- 社区 tag 列表 — 分析过的显示 name，未分析的显示编号 -->
-          <div v-if="!isExternalTab" class="arch-tags">
-            <div
-              v-for="item in runtimeCommunities"
-              :key="item.id"
-              class="arch-tag"
-              :class="{ 'has-name': item.status === 'completed' && item.name && item.name !== item.communityId }"
-              :title="`${item.communityId} (${item.nodeCount} 节点${item.qualityScore ? ', 质量: ' + (item.qualityScore * 100).toFixed(0) + '%' : ''})`"
-              @click="openCommunityDoc(item)"
-            >
-              <span class="tag-name">{{ commName(item) }}</span>
-              <span class="tag-count">{{ item.nodeCount }}</span>
-            </div>
-            <div v-if="runtimeCommunities.length === 0" class="arch-empty">
-              {{ t('report.noCommunities', '该视角下无社区数据') }}
-            </div>
-          </div>
-
-          <!-- 外部依赖/调用统计视图 -->
-          <div v-if="isExternalTab && externalStats" class="arch-tags">
-            <!-- 外部依赖视图 -->
-            <template v-if="commEdgeType === 'EXTERNAL_INCLUDE'">
-              <div class="arch-empty" style="margin-bottom:12px;">
-                {{ t('report.totalFiles', '总文件') }}: {{ totalScopeFiles }}
-                | {{ externalStats.uniqueExternalDepFiles }} {{ t('report.coverage', '') + ' ' }}
-                {{ externalStats.totalExternalDeps }} 条外部导入
-              </div>
-              <div
-                v-for="dep in externalStats.externalDeps.slice(0, 50)"
-                :key="dep.package"
-                class="arch-tag"
-                :title="dep.files.slice(0, 10).join('\n') + (dep.files.length > 10 ? '\n...' + (dep.files.length - 10) + ' more' : '')"
-              >
-                <span class="tag-name">{{ dep.package }}</span>
-                <span class="tag-count">{{ dep.fileCount }}</span>
-              </div>
-            </template>
-            <!-- 外部调用视图 -->
-            <template v-if="commEdgeType === 'EXTERNAL_CALL'">
-              <div class="arch-empty" style="margin-bottom:12px;">
-                {{ t('report.totalFiles', '总文件') }}: {{ totalScopeFiles }}
-                | {{ externalStats.uniqueExternalCallFiles }} {{ t('report.coverage', '') + ' ' }}
-                {{ externalStats.totalExternalCalls }} 条外部调用
-              </div>
-              <div
-                v-for="call in externalStats.externalCalls.slice(0, 50)"
-                :key="call.name"
-                class="arch-tag"
-                :title="call.files.slice(0, 10).join('\n') + (call.files.length > 10 ? '\n...' + (call.files.length - 10) + ' more' : '')"
-              >
-                <span class="tag-name">{{ call.name }}</span>
-                <span class="tag-count">{{ call.count }}</span>
-              </div>
-            </template>
-            <div v-if="commEdgeType === 'EXTERNAL_INCLUDE' && (!externalStats.externalDeps || externalStats.externalDeps.length === 0)" class="arch-empty">
-              {{ t('report.noCommunities', '无外部依赖数据') }}
-            </div>
-            <div v-if="commEdgeType === 'EXTERNAL_CALL' && (!externalStats.externalCalls || externalStats.externalCalls.length === 0)" class="arch-empty">
-              {{ t('report.noCommunities', '无外部调用数据') }}
-            </div>
-          </div>
-          <div v-if="isExternalTab && !externalStats" class="arch-empty">
-            {{ t('report.noCommunities', '该视角下无数据') }}
-          </div>
-        </section>
+        <!-- 组件架构 — Tag/Graph 双模式 -->
+        <CommunityArchitecturePanel
+          :task-id="props.taskId"
+          :project-id="projectId"
+          :task-updated-at="taskDetail?.updatedAt || ''"
+          :has-any-community="hasAnyCommunity"
+          :total-scope-files="totalScopeFiles"
+          :coverage-percent="coveragePercent"
+          :covered-file-count="coveredFileCount"
+          :dep-community-count="depCommunityCount"
+          :call-community-count="callCommunityCount"
+          :external-stats="externalStats"
+          @open-md="(p) => emit('open-md', p)"
+        />
 
       </div>
 
@@ -1046,37 +937,24 @@ watch(() => props.taskId, loadData)
   margin-left: auto;
 }
 
-/* Architecture section — tag/chip layout */
-.arch-stats { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
-.header-spacer { flex: 1; }
-.arch-tabs { display: flex; gap: 0; margin-bottom: 0.75rem; border-bottom: 2px solid var(--border); }
-.arch-tab {
-  display: flex; align-items: center; gap: 0.35rem;
-  padding: 0.4rem 0.9rem; font-size: 0.8rem; color: var(--text-muted);
-  border: none; background: none; cursor: pointer;
-  border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s;
+/* Collapse / minimize */
+.collapse-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: transparent; border: 1px solid transparent; border-radius: 0.25rem;
+  color: var(--text-muted); cursor: pointer; transition: all 0.15s;
 }
-.arch-tab:hover { color: var(--text-primary); }
-.arch-tab.active { color: var(--accent, #7c3aed); border-bottom-color: var(--accent, #7c3aed); }
+.collapse-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
 
-.arch-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
-.arch-tag {
+.collapsed-tags {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem;
+}
+.collapsed-tag {
   display: flex; align-items: center; gap: 0.3rem;
   padding: 0.2rem 0.5rem; border-radius: 0.375rem;
   background: var(--bg-secondary); border: 1px solid var(--border);
-  font-size: 0.75rem; cursor: pointer; transition: all 0.15s;
+  font-size: 0.75rem; color: var(--text-muted); cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
 }
-.arch-tag:hover { border-color: var(--accent, #7c3aed); }
-.arch-tag.has-name { background: var(--bg-accent-subtle, #2d1f5e); border-color: var(--accent, #7c3aed); }
-.tag-name { font-weight: 500; color: var(--text-primary); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag-count { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); border-radius: 0.25rem; padding: 0.05rem 0.3rem; }
-.arch-empty { font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem; font-style: italic; }
-
-.arch-search { display: flex; }
-.arch-search-input {
-  width: 160px; padding: 0.2rem 0.5rem; font-size: 0.75rem;
-  background: var(--bg-secondary); border: 1px solid var(--border);
-  border-radius: 0.375rem; color: var(--text-primary);
-}
-.arch-search-input:focus { outline: none; border-color: var(--accent); }
+.collapsed-tag:hover { border-color: var(--accent, #7c3aed); color: var(--text-primary); background: var(--bg-accent-subtle, #2d1f5e); }
 </style>

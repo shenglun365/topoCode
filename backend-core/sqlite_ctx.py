@@ -163,6 +163,7 @@ MAIN_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_project ON analysis_tasks(project_id);
     CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_analysis_tasks_created ON analysis_tasks(created_at);
 
     -- 任务配置变更历史
     CREATE TABLE IF NOT EXISTS task_config_history (
@@ -644,6 +645,8 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_graph_doc_type ON graph_doc(task_id, edge_type);
     CREATE INDEX IF NOT EXISTS idx_graph_doc_comm ON graph_doc(comm_id);
     CREATE INDEX IF NOT EXISTS idx_graph_doc_score ON graph_doc(task_id, edge_type, quality_score DESC);
+    CREATE INDEX IF NOT EXISTS idx_graph_doc_join ON graph_doc(task_id, edge_type, comm_id);
+    CREATE INDEX IF NOT EXISTS idx_graph_doc_parent ON graph_doc(task_id, edge_type, parent_comm_id);
 
     -- ============================================
     -- community_hierarchy — 社区层级元数据 (任务级)
@@ -663,7 +666,8 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_comm_hier_task ON community_hierarchy(task_id);
     CREATE INDEX IF NOT EXISTS idx_comm_hier_type ON community_hierarchy(task_id, edge_type);
-    CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv);
+    CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv, comm_id);
+    CREATE INDEX IF NOT EXISTS idx_comm_hier_parent ON community_hierarchy(task_id, edge_type, parent_comm_id);
 
     -- ============================================
     -- report_subdocs — 分析报告子文档 (任务级)
@@ -681,6 +685,7 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_subdoc_task ON report_subdocs(task_id);
     CREATE INDEX IF NOT EXISTS idx_subdoc_comm ON report_subdocs(comm_id);
+    CREATE INDEX IF NOT EXISTS idx_subdoc_sort ON report_subdocs(task_id, comm_id, created_at);
 
     -- ============================================
     -- community_llm_results — 社区 LLM 分析结果 (任务级)
@@ -704,6 +709,7 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_llm_res_task ON community_llm_results(task_id);
     CREATE INDEX IF NOT EXISTS idx_llm_res_type ON community_llm_results(task_id, edge_type);
+    CREATE INDEX IF NOT EXISTS idx_llm_res_sort ON community_llm_results(task_id, edge_type, comm_lv, comm_id);
 
     -- ============================================
     -- model_daily_usage — 模型每日用量统计
@@ -901,6 +907,12 @@ class MultiDBManager:
             CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
         """)
 
+        # 性能索引: 任务列表 ORDER BY created_at
+        try:
+            self.main_db.execute("CREATE INDEX IF NOT EXISTS idx_analysis_tasks_created ON analysis_tasks(created_at)")
+        except Exception:
+            pass
+
         self.main_db.conn.commit()
         _init_default_skills(self.main_db)
 
@@ -1023,6 +1035,34 @@ class MultiDBManager:
                     UNIQUE(task_id, edge_type, comm_lv, comm_id)
                 )
             """)
+        except Exception:
+            pass
+
+        # 性能索引: graph_doc JOIN + community_hierarchy ORDER BY
+        try:
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_doc_join ON graph_doc(task_id, edge_type, comm_id)")
+        except Exception:
+            pass
+        try:
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv, comm_id)")
+        except Exception:
+            pass
+        # 深度展开索引: parent_comm_id
+        try:
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_doc_parent ON graph_doc(task_id, edge_type, parent_comm_id)")
+        except Exception:
+            pass
+        try:
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_comm_hier_parent ON community_hierarchy(task_id, edge_type, parent_comm_id)")
+        except Exception:
+            pass
+        # LLM 结果排序 + 子文档排序
+        try:
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_llm_res_sort ON community_llm_results(task_id, edge_type, comm_lv, comm_id)")
+        except Exception:
+            pass
+        try:
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_subdoc_sort ON report_subdocs(task_id, comm_id, created_at)")
         except Exception:
             pass
 

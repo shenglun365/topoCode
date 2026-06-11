@@ -51,8 +51,8 @@ const reportItemsByProject = ref<Map<string, ReportItem[]>>(new Map())
 
 // 报告类型映射
 const typeMap: Record<string, string> = {
-  dependency: '依赖分析',
-  callChain: '调用分析',
+  dependency: '内部依赖分析',
+  callChain: '内部调用分析',
   dataFlow: '数据流分析',
   architecture: '架构分析',
 }

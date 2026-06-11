@@ -107,3 +107,32 @@ EXTRACTORS: dict[str, LanguageExtractor] = {
     "luau":       LUA,
     "objc":       OBJC,
 }
+
+# ── 语言族（同族内可互相依赖/调用，跨族禁止）────────────────
+
+# 每个 language_key → family_name
+_LANG_FAMILY_MAP: dict[str, str] = {}
+
+def _build_family_map():
+    """从 EXTRACTORS 构建语言→族映射"""
+    groups = [
+        ("c",       ["c", "c_header", "cpp", "cpp_header", "objc"]),
+        ("jvm",     ["java", "kotlin", "scala"]),
+        ("js",      ["javascript", "jsx", "typescript", "tsx"]),
+    ]
+    for family, langs in groups:
+        for lang in langs:
+            _LANG_FAMILY_MAP[lang] = family
+    # 独立语言用自身为族名
+    for lang in EXTRACTORS:
+        if lang not in _LANG_FAMILY_MAP:
+            _LANG_FAMILY_MAP[lang] = lang
+
+_build_family_map()
+
+
+def same_language_family(lang_a: str, lang_b: str) -> bool:
+    """两个语言 key 是否属于同一语言族"""
+    fa = _LANG_FAMILY_MAP.get(lang_a, lang_a)
+    fb = _LANG_FAMILY_MAP.get(lang_b, lang_b)
+    return fa == fb

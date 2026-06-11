@@ -4,20 +4,22 @@ import { ref } from 'vue'
 export type RightTab = 'ai' | 'detail'
 
 export const usePanelStore = defineStore('panel', () => {
-  // State
   const leftCollapsed = ref(false)
   const rightCollapsed = ref(true)
   const leftWidth = ref(240)
   const rightWidth = ref(280)
   const debugMode = ref(false)
   const rightTab = ref<RightTab>('ai')
+  const isFullscreen = ref(false)
+  const fullscreenLockLeft = ref(false)
 
-  // Actions
   function toggleLeft() {
+    if (fullscreenLockLeft.value) return
     leftCollapsed.value = !leftCollapsed.value
   }
 
   function setLeftCollapsed(collapsed: boolean) {
+    if (fullscreenLockLeft.value && !collapsed) return
     leftCollapsed.value = collapsed
   }
 
@@ -52,6 +54,17 @@ export const usePanelStore = defineStore('panel', () => {
     debugMode.value = !debugMode.value
   }
 
+  function setFullscreen(fs: boolean) {
+    isFullscreen.value = fs
+    if (fs) {
+      fullscreenLockLeft.value = true
+      leftCollapsed.value = true
+      rightCollapsed.value = true
+    } else {
+      fullscreenLockLeft.value = false
+    }
+  }
+
   return {
     leftCollapsed,
     rightCollapsed,
@@ -59,6 +72,8 @@ export const usePanelStore = defineStore('panel', () => {
     rightWidth,
     debugMode,
     rightTab,
+    isFullscreen,
+    fullscreenLockLeft,
     toggleLeft,
     setLeftCollapsed,
     toggleRight,
@@ -68,5 +83,6 @@ export const usePanelStore = defineStore('panel', () => {
     setRightWidth,
     resetPanels,
     toggleDebug,
+    setFullscreen,
   }
 })

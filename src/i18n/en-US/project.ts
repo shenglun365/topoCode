@@ -48,8 +48,8 @@ export default { project: {
   confirmCreateTask: 'Switch to project resource manager of "{name}" to set up analysis task?',
   // Report types
   reportType: {
-    dependency: 'Dependency',
-    callChain: 'Call Chain',
+    dependency: 'Internal Dependency',
+    callChain: 'Internal Call',
     dataFlow: 'Data Flow',
     architecture: 'Architecture',
     full: 'Full',

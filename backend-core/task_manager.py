@@ -264,8 +264,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 pass
         task_store = TaskStore(multi_db.main_db)
         tasks = task_store.list_tasks(project_id)
-        if tasks:
-            counts["tasks"] = len(tasks)
+        counts["tasks"] = len(tasks) if tasks else 0
         return {"projectId": project_id, "counts": counts}
 
     @server.register("analysis.clearProjectCacheTable")
@@ -1198,26 +1197,42 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
+        t_total = time.perf_counter()
         logger.info("[analysis.getReportDashboard] ENTRY task_id=%s", tid)
 
+        t0 = time.perf_counter()
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
         if not task:
             return None
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
+        logger.info("[PERF] getReportDashboard load_task=%.1fms", (time.perf_counter() - t0) * 1000)
 
         # 1. 获取级联社区层级 (CALL + INCLUDE)
+        t0 = time.perf_counter()
         call_levels = _get_cascade_levels_impl(project_db, tid, 'CALL')
+        t_call = time.perf_counter() - t0
+        t0 = time.perf_counter()
         dep_levels = _get_cascade_levels_impl(project_db, tid, 'INCLUDE')
+        t_dep = time.perf_counter() - t0
+        logger.info("[PERF] getReportDashboard cascade_levels CALL=%.1fms INCLUDE=%.1fms", t_call * 1000, t_dep * 1000)
 
         # 2. 获取 LLM 结果
+        t0 = time.perf_counter()
         call_results = _list_community_results_impl(project_db, tid, 'CALL')
+        t_call_res = time.perf_counter() - t0
+        t0 = time.perf_counter()
         dep_results = _list_community_results_impl(project_db, tid, 'INCLUDE')
+        t_dep_res = time.perf_counter() - t0
+        logger.info("[PERF] getReportDashboard llm_results CALL=%.1fms INCLUDE=%.1fms", t_call_res * 1000, t_dep_res * 1000)
 
         # 3. 获取文件统计
+        t0 = time.perf_counter()
         file_stats = _scan_file_stats_impl(project_db, pid)
+        logger.info("[PERF] getReportDashboard file_stats=%.1fms", (time.perf_counter() - t0) * 1000)
 
+        logger.info("[PERF] getReportDashboard TOTAL=%.1fms task_id=%s", (time.perf_counter() - t_total) * 1000, tid)
         logger.info("[analysis.getReportDashboard] DONE task_id=%s", tid)
         return {
             'task': task,
@@ -1230,6 +1245,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     def _get_cascade_levels_impl(project_db, tid, et):
         """getCascadeLevels 内部实现（无 RPC 注册）"""
+        t_sql = time.perf_counter()
         try:
             rows = project_db.execute(
                 """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
@@ -1251,6 +1267,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                    ORDER BY h.comm_lv, h.comm_id""",
                 (tid, et)
             ).fetchall()
+        logger.info("[PERF] cascade_sql %s rows=%d %.1fms", et, len(rows), (time.perf_counter() - t_sql) * 1000)
 
         levels_dict = {}
         for row in rows:
@@ -1288,6 +1305,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if et in ('CALL', 'INCLUDE'):
             edge_kind = 'calls' if et == 'CALL' else 'imports'
             try:
+                t_edge = time.perf_counter()
                 rows = project_db.execute(
                     f"""SELECT DISTINCT COALESCE(gn.file_path, ge.source_id) as fp
                         FROM graph_edge ge
@@ -1301,6 +1319,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     (tid, edge_kind, tid, edge_kind)
                 ).fetchall()
                 edge_files = len(rows)
+                logger.info("[PERF] cascade_edge_files %s count=%d %.1fms",
+                           et, edge_files, (time.perf_counter() - t_edge) * 1000)
             except Exception:
                 pass
 
@@ -1427,12 +1447,140 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             'edgeCount': total_edges,
         }
 
+    @server.register("analysis.getCrossCommunityEdges")
+    def get_cross_community_edges(task_id=None, taskId=None,
+                                   edge_type=None, edgeType=None,
+                                   comm_lv=None, commLv=None):
+        """获取指定层级社区间的跨社区边（聚合计数）"""
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'INCLUDE'
+        lv = comm_lv or commLv or 'L0'
+
+        if not tid:
+            raise ValueError("task_id is required")
+
+        t_total = time.perf_counter()
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        edge_kind = 'calls' if et == 'CALL' else 'imports'
+
+        # 1. Load all communities at the given level for this edge_type
+        doc_rows = project_db.execute(
+            "SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv=?",
+            (tid, et, lv)
+        ).fetchall()
+
+        if not doc_rows:
+            logger.info(f"[PERF] getCrossCommunityEdges TOTAL=%.1fms (no communities)",
+                       (time.perf_counter() - t_total) * 1000)
+            return {'crossEdges': []}
+
+        # 2. Build node → comm_id reverse map
+        # graph_doc.node_list contains file paths (without 'file:' prefix) for INCLUDE,
+        # and file paths for CALL communities (after community detection aggregation).
+        # graph_edge.source_id/target_id for 'imports' uses 'file:/path' format,
+        # for 'calls' uses symbol hash IDs → need to resolve to file_path via graph_node.
+        node_comm = {}  # normalized_key → comm_id
+
+        for row in doc_rows:
+            comm_id = row[0]
+            try:
+                nodes = json.loads(row[1]) if row[1] else []
+            except Exception:
+                nodes = []
+            for nid in nodes:
+                key = nid  # already a file path for INCLUDE, may be file path for CALL too
+                node_comm[key] = comm_id
+
+        logger.info(f"[getCrossCommunityEdges] loaded {len(node_comm)} nodes across {len(doc_rows)} communities")
+
+        # 3. Load all edges for the task
+        all_edges = project_db.execute(
+            "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
+            (tid, edge_kind)
+        ).fetchall()
+
+        # For CALL, pre-load symbol→file_path mapping (batch query from graph_node)
+        symbol_file_map = {}
+        if edge_kind == 'calls':
+            # collect all unique symbol IDs from edges
+            sym_ids = set()
+            for edge in all_edges:
+                if edge[0]: sym_ids.add(edge[0])
+                if edge[1]: sym_ids.add(edge[1])
+            if sym_ids:
+                # batch lookup in chunks of 999 (SQLite variable limit)
+                sym_list = list(sym_ids)
+                batch_size = 900
+                for i in range(0, len(sym_list), batch_size):
+                    batch = sym_list[i:i + batch_size]
+                    placeholders = ','.join(['?'] * len(batch))
+                    rows = project_db.execute(
+                        f"SELECT id, file_path FROM graph_node WHERE task_id=? AND id IN ({placeholders})",
+                        [tid] + batch
+                    ).fetchall()
+                    for r in rows:
+                        symbol_file_map[r[0]] = r[1] or ''
+
+        # 4. Resolve edge source/target to community keys
+        def resolve_key(raw_id, edge_kind, sym_map, file_comm):
+            """Resolve an edge endpoint to a community-matching key."""
+            if not raw_id:
+                return None
+            if edge_kind == 'imports':
+                # strip 'file:' prefix to match node_list format
+                key = raw_id.replace('file:', '', 1) if raw_id.startswith('file:') else raw_id
+                return file_comm.get(key) or key  # return comm_id if found, else raw_key
+            else:  # calls
+                # resolve symbol ID → file_path, then match file_path in node_comm
+                fpath = sym_map.get(raw_id, '')
+                if fpath and fpath in file_comm:
+                    return file_comm[fpath]
+                # fallback: try direct lookup (some CALL node_lists may use symbol IDs)
+                if raw_id in file_comm:
+                    return file_comm[raw_id]
+                return None
+
+        # 5. Aggregate cross-community edges
+        cross_map = {}  # (source_comm, target_comm) → count
+        for edge in all_edges:
+            src = edge[0] or ''
+            tgt = edge[1] or ''
+            if not src or not tgt:
+                continue
+            src_comm = resolve_key(src, edge_kind, symbol_file_map, node_comm)
+            tgt_comm = resolve_key(tgt, edge_kind, symbol_file_map, node_comm)
+            if not src_comm or not tgt_comm:
+                continue
+            if src_comm == tgt_comm:
+                continue
+            pair = (src_comm, tgt_comm)
+            cross_map[pair] = cross_map.get(pair, 0) + 1
+
+        cross_edges = [
+            {'sourceCommId': p[0], 'targetCommId': p[1], 'edgeCount': cnt}
+            for p, cnt in sorted(cross_map.items(), key=lambda x: -x[1])
+        ]
+
+        logger.info("[PERF] getCrossCommunityEdges TOTAL=%.1fms communities=%d crossEdges=%d edges=%d",
+                   (time.perf_counter() - t_total) * 1000,
+                   len(doc_rows), len(cross_edges), len(all_edges))
+
+        return {'crossEdges': cross_edges}
+
     @server.register("analysis.getExternalStats")
     def get_external_stats(task_id=None, taskId=None):
         """获取外部依赖/调用统计: 从已有数据聚合，不需社区分析"""
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
+        t_total = time.perf_counter()
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -1442,22 +1590,48 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
 
         # 1. 外部依赖 — 导入名无对应 INCLUDE 边的（按文件匹配）
-        deps_sql = """
-            SELECT gn.name as pkg, gn.file_path
-            FROM graph_node gn
-            WHERE gn.task_id = ? AND gn.kind = 'import'
-            AND NOT EXISTS (
-                SELECT 1 FROM graph_edge ge
-                JOIN graph_node gn_src ON gn_src.id = ge.source_id AND gn_src.task_id = ge.task_id
-                WHERE ge.task_id = ? AND ge.kind = 'imports'
-                AND json_extract(ge.metadata, '$.module') = gn.name
-                AND gn_src.file_path = gn.file_path
-            )
-        """
+        #    避免相关子查询: 先批量加载已解析导入，再 Python 差集过滤
+        dep_rows = []
+        import_count = 0
+        resolved_count = 0
+        t_dep_sql = time.perf_counter()
         try:
-            dep_rows = project_db.execute(deps_sql, (tid, tid)).fetchall()
+            # 加载所有 import 节点
+            import_nodes = project_db.execute(
+                "SELECT name, file_path FROM graph_node WHERE task_id = ? AND kind = 'import'",
+                (tid,)
+            ).fetchall()
+            import_count = len(import_nodes)
+
+            # 加载已解析的 (source_file, module) 对
+            resolved_pairs = set()
+            edge_rows = project_db.execute(
+                """SELECT gn_src.file_path, json_extract(ge.metadata, '$.module')
+                   FROM graph_edge ge
+                   JOIN graph_node gn_src ON gn_src.id = ge.source_id AND gn_src.task_id = ge.task_id
+                   WHERE ge.task_id = ? AND ge.kind = 'imports'""",
+                (tid,)
+            ).fetchall()
+            resolved_count = len(edge_rows)
+            for er in edge_rows:
+                fp = er[0] or ""
+                mod = er[1] or ""
+                if fp and mod:
+                    resolved_pairs.add((fp, mod))
+
+            # 过滤：未出现在 resolved_pairs 中的 import 视为外部依赖
+            for imp in import_nodes:
+                pkg = imp[0] or ""
+                fp = imp[1] or ""
+                if not pkg:
+                    continue
+                if (fp, pkg) not in resolved_pairs:
+                    dep_rows.append((pkg, fp))
         except Exception:
             dep_rows = []
+        logger.info("[PERF] getExternalStats deps_sql imported=%d resolved_edges=%d external=%d %.1fms",
+                   import_count, resolved_count, len(dep_rows),
+                   (time.perf_counter() - t_dep_sql) * 1000)
 
         dep_map = {}
         for row in dep_rows:
@@ -1483,10 +1657,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             LEFT JOIN graph_node gn ON gn.id = ge.source_id AND gn.task_id = ge.task_id
             WHERE ge.task_id = ? AND ge.kind = 'calls' AND ge.target_id = ''
         """
+        t_call_sql = time.perf_counter()
         try:
             call_rows = project_db.execute(calls_sql, (tid,)).fetchall()
         except Exception:
             call_rows = []
+        logger.info("[PERF] getExternalStats calls_sql rows=%d %.1fms", len(call_rows), (time.perf_counter() - t_call_sql) * 1000)
 
         call_map = {}
         for row in call_rows:
@@ -1499,7 +1675,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 meta = {}
             call_name = meta.get("expression") or meta.get("callee") or ""
             if not call_name:
-                call_name = sid[:16]  # fallback: source function id prefix
+                # fallback: use source file abbreviation for readability
+                if sid.startswith("file:"):
+                    basename = os.path.basename(sid)
+                    # __init__.py / __init__.ts → 用父目录名代替，避免大量调用归入无意义名称
+                    if basename in ("__init__.py", "__init__.ts", "__init__.js",
+                                    "index.ts", "index.js", "index.tsx", "index.jsx"):
+                        parent_dir = os.path.basename(os.path.dirname(sid.replace("file:", "", 1)))
+                        call_name = parent_dir or basename
+                    else:
+                        call_name = basename
+                else:
+                    call_name = sid[:16]
             if call_name not in call_map:
                 call_map[call_name] = {"name": call_name, "count": 0, "files": []}
             call_map[call_name]["count"] += 1
@@ -1516,6 +1703,65 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         unique_ext_call_files = len(set(
             row[1] if row[1] else row[0] for row in call_rows
         ))
+
+        # 附加: 文件 → L0 社区归属映射 (用于前端外部依赖 graph 视图)
+        try:
+            t_comm = time.perf_counter()
+            # 加载所有 L0 INCLUDE 社区的 node_list
+            comm_rows = project_db.execute(
+                "SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND edge_type='INCLUDE' AND comm_lv='L0'",
+                (tid,)
+            ).fetchall()
+
+            # graph_doc.node_list 存储的是 file_path (纯路径), 直接使用即可
+            file_comm = {}  # file_path → [{communityId}]
+            for row in comm_rows:
+                cid = row[0]
+                try:
+                    nodes = json.loads(row[1]) if row[1] else []
+                except Exception:
+                    nodes = []
+                for fp in nodes:
+                    if not fp:
+                        continue
+                    if fp not in file_comm:
+                        file_comm[fp] = []
+                    already = any(c['communityId'] == cid for c in file_comm[fp])
+                    if not already:
+                        file_comm[fp].append({'communityId': cid})
+
+            # 注入 externalDeps.communities
+            for dep in external_deps:
+                dep_files = dep.get('files', [])
+                dep_comms = []
+                seen_cids = set()
+                for f in dep_files:
+                    for c in file_comm.get(f, []):
+                        if c['communityId'] not in seen_cids:
+                            seen_cids.add(c['communityId'])
+                            dep_comms.append(c)
+                dep['communities'] = dep_comms
+
+            # 注入 externalCalls.communities
+            for call in external_calls:
+                call_files = call.get('files', [])
+                call_comms = []
+                seen_cids = set()
+                for f in call_files:
+                    for c in file_comm.get(f, []):
+                        if c['communityId'] not in seen_cids:
+                            seen_cids.add(c['communityId'])
+                            call_comms.append(c)
+                call['communities'] = call_comms
+
+            logger.info("[PERF] getExternalStats community map build=%.1fms",
+                       (time.perf_counter() - t_comm) * 1000)
+        except Exception as e:
+            logger.warning(f"[getExternalStats] community mapping failed: {e}")
+
+        logger.info("[PERF] getExternalStats TOTAL=%.1fms deps=%d calls=%d",
+                   (time.perf_counter() - t_total) * 1000,
+                   total_ext_deps, total_ext_calls)
 
         return {
             'externalDeps': external_deps,
