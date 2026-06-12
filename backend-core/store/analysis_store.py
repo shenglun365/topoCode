@@ -296,6 +296,7 @@ class AnalysisStore:
             "DELETE FROM graph_doc WHERE task_id = ?",
             (task_id,),
         )
+        self._db.commit()
 
     def bulk_insert_communities(self, communities: List[Dict]):
         """批量插入社区分析结果"""
@@ -373,6 +374,7 @@ class AnalysisStore:
             "DELETE FROM community_hierarchy WHERE task_id = ?",
             (task_id,),
         )
+        self._db.commit()
 
     def bulk_insert_hierarchy(self, hierarchies: List[Dict]):
         db = self._db.conn
@@ -469,6 +471,7 @@ class AnalysisStore:
             self._db.execute(
                 "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
             )
+        self._db.commit()
         logger.info(
             f"[AnalysisStore] clear_communities_for_task: task_id={task_id}, edge_type={edge_type}"
         )

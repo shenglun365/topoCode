@@ -86,8 +86,9 @@ function onHeaderMouseDown(e: MouseEvent) {
 
 function onMouseMove(e: MouseEvent) {
   if (!dragging.value) return
-  panelX.value = dragStartPX.value + e.clientX - dragStartX.value
-  panelY.value = dragStartPY.value + e.clientY - dragStartY.value
+  const area = safeArea()
+  panelX.value = Math.max(area.left, Math.min(area.right, dragStartPX.value + e.clientX - dragStartX.value))
+  panelY.value = Math.max(area.top, Math.min(area.bottom - 420, dragStartPY.value + e.clientY - dragStartY.value))
 }
 
 function onMouseUp() {
@@ -138,7 +139,11 @@ function invert() {
 
 <template>
   <teleport to="body">
-    <div v-if="visible && !pinned" class="nfp-backdrop" @click="emit('close')" />
+    <div
+      v-if="visible && !pinned"
+      class="nfp-backdrop"
+      @click="emit('close')"
+    />
     <div
       v-if="visible"
       class="nfp-overlay"
@@ -146,7 +151,10 @@ function invert() {
       :class="{ dragging }"
     >
       <div class="nfp-panel">
-        <div class="nfp-header" @mousedown="onHeaderMouseDown">
+        <div
+          class="nfp-header"
+          @mousedown="onHeaderMouseDown"
+        >
           <span class="nfp-title">{{ t('report.nodeFilter', '节点筛选') }} ({{ props.nodes.length - props.hiddenIds.size }}/{{ props.nodes.length }})</span>
           <div class="nfp-header-actions">
             <button
@@ -157,27 +165,67 @@ function invert() {
             >
               <ArrowDownTrayIcon class="w-3 h-3" />
             </button>
-            <button class="nfp-icon-btn" @click="emit('close')">
+            <button
+              class="nfp-icon-btn"
+              @click="emit('close')"
+            >
               <XMarkIcon class="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
         <div class="nfp-search">
-          <input v-model="search" type="text" :placeholder="t('report.searchCommunity', '搜索...')" class="nfp-search-input" />
+          <input
+            v-model="search"
+            type="text"
+            :placeholder="t('report.searchCommunity', '搜索...')"
+            class="nfp-search-input"
+          >
         </div>
         <div class="nfp-actions">
-          <button class="nfp-action-btn" @click="selectAll"><CheckIcon class="w-3 h-3" /> {{ t('report.selectAll', '全选') }}</button>
-          <button class="nfp-action-btn" @click="deselectAll">{{ t('report.invertSelect', '取消') }}</button>
-          <button class="nfp-action-btn" @click="invert">{{ t('report.invert', '反选') }}</button>
+          <button
+            class="nfp-action-btn"
+            @click="selectAll"
+          >
+            <CheckIcon class="w-3 h-3" /> {{ t('report.selectAll', '全选') }}
+          </button>
+          <button
+            class="nfp-action-btn"
+            @click="deselectAll"
+          >
+            {{ t('report.invertSelect', '取消') }}
+          </button>
+          <button
+            class="nfp-action-btn"
+            @click="invert"
+          >
+            {{ t('report.invert', '反选') }}
+          </button>
           <span class="nfp-count">{{ props.hiddenIds.size }} {{ t('report.hidden', '隐藏') }}</span>
         </div>
         <div class="nfp-list">
-          <label v-for="n in filtered" :key="n.id" class="nfp-item" :class="{ hidden: isHidden(n.id) }">
-            <input type="checkbox" :checked="!isHidden(n.id)" @change="toggle(n.id)" />
+          <label
+            v-for="n in filtered"
+            :key="n.id"
+            class="nfp-item"
+            :class="{ hidden: isHidden(n.id) }"
+          >
+            <input
+              type="checkbox"
+              :checked="!isHidden(n.id)"
+              @change="toggle(n.id)"
+            >
             <span class="nfp-label">{{ n.label.length > 22 ? n.label.slice(0, 22) + '\u2026' : n.label }}</span>
-            <span v-if="n.nodeCount" class="nfp-count-badge">{{ n.nodeCount }}</span>
+            <span
+              v-if="n.nodeCount"
+              class="nfp-count-badge"
+            >{{ n.nodeCount }}</span>
           </label>
-          <div v-if="filtered.length === 0" class="nfp-empty">{{ t('report.noSearchResults', '无匹配') }}</div>
+          <div
+            v-if="filtered.length === 0"
+            class="nfp-empty"
+          >
+            {{ t('report.noSearchResults', '无匹配') }}
+          </div>
         </div>
       </div>
     </div>

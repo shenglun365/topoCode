@@ -12,6 +12,8 @@ export interface TaskFilter {
   viewMode: 'card' | 'list'
 }
 
+const _taskLoading = new Set<string>()
+
 export const useAnalysisStore = defineStore('analysis', () => {
   // State
   const tasks = ref<AnalysisTask[]>([])
@@ -81,14 +83,23 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function reRunTask(taskId: string) {
-    await ipc.analysis.reRunTask(taskId)
-    // 后端复用同一任务，更新本地状态
-    const task = tasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'running'
-      task.progress = 0
-      task.error = null
+    if (_taskLoading.has(taskId)) return
+    _taskLoading.add(taskId)
+    try {
+      await ipc.analysis.reRunTask(taskId)
+      const task = tasks.value.find(t => t.id === taskId)
+      if (task) {
+        task.status = 'running'
+        task.progress = 0
+        task.error = null
+      }
+    } finally {
+      _taskLoading.delete(taskId)
     }
+  }
+
+  function isTaskLoading(taskId: string): boolean {
+    return _taskLoading.has(taskId)
   }
 
   async function getTaskLogs(taskId: string, runId?: string) {
@@ -132,11 +143,17 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   async function runTask(taskId: string) {
-    await ipc.analysis.runTask(taskId)
-    const task = tasks.value.find(t => t.id === taskId)
-    if (task) {
-      task.status = 'running'
-      task.progress = 0
+    if (_taskLoading.has(taskId)) return
+    _taskLoading.add(taskId)
+    try {
+      await ipc.analysis.runTask(taskId)
+      const task = tasks.value.find(t => t.id === taskId)
+      if (task) {
+        task.status = 'running'
+        task.progress = 0
+      }
+    } finally {
+      _taskLoading.delete(taskId)
     }
   }
 
@@ -249,6 +266,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     createTask,
     stopTask,
     reRunTask,
+    isTaskLoading,
     getTaskLogs,
     getTaskRuns,
     updateTaskConfig,

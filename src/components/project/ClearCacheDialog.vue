@@ -91,32 +91,61 @@ function cancel() {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <Teleport to="body">
-    <div class="ccd-overlay" @click.self="cancel">
+    <div
+      class="ccd-overlay"
+      @click.self="cancel"
+    >
       <div class="ccd-card">
         <div class="ccd-header">
           <span class="ccd-title">{{ t('project.clearCache') }}</span>
-          <button v-if="!isDeleting" class="ccd-close" @click="cancel">&times;</button>
+          <button
+            v-if="!isDeleting"
+            class="ccd-close"
+            @click="cancel"
+          >
+            &times;
+          </button>
         </div>
 
-        <div v-if="loading" class="ccd-loading">
+        <div
+          v-if="loading"
+          class="ccd-loading"
+        >
           <div class="ccd-spinner" />
           <span>{{ t('common.loading') }}...</span>
         </div>
 
         <template v-else-if="!isDeleting">
-          <div class="ccd-hint">{{ t('project.clearCacheSelectHint') }}</div>
+          <div class="ccd-hint">
+            {{ t('project.clearCacheSelectHint') }}
+          </div>
           <div class="ccd-select-all">
             <label class="ccd-cb-row">
-              <input type="checkbox" v-model="allChecked" class="ccd-cb">
+              <input
+                v-model="allChecked"
+                type="checkbox"
+                class="ccd-cb"
+              >
               <span class="ccd-cb-label">{{ t('common.selectAll') }} ({{ items.length }})</span>
               <span class="ccd-total">{{ totalCount }} {{ t('project.cacheRecords') }}</span>
             </label>
           </div>
           <div class="ccd-list">
-            <label v-for="item in items" :key="item.key" class="ccd-cb-row ccd-item">
-              <input type="checkbox" v-model="item.checked" class="ccd-cb">
+            <label
+              v-for="item in items"
+              :key="item.key"
+              class="ccd-cb-row ccd-item"
+            >
+              <input
+                v-model="item.checked"
+                type="checkbox"
+                class="ccd-cb"
+              >
               <span class="ccd-cb-label">{{ item.label }}</span>
               <span class="ccd-count">{{ item.count }} {{ t('project.cacheRecords') }}</span>
             </label>
@@ -124,8 +153,17 @@ function cancel() {
           <div class="ccd-footer">
             <span class="ccd-selected">{{ t('project.cacheSelected', { n: selectedCount }) }}</span>
             <div class="ccd-actions">
-              <button class="btn btn-ghost btn-sm" @click="cancel">{{ t('common.cancel') }}</button>
-              <button class="btn btn-warning btn-sm" :disabled="selectedCount === 0" @click="confirmClear">
+              <button
+                class="btn btn-ghost btn-sm"
+                @click="cancel"
+              >
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                class="btn btn-warning btn-sm"
+                :disabled="selectedCount === 0"
+                @click="confirmClear"
+              >
                 {{ t('project.clearCache') }}
               </button>
             </div>
@@ -134,12 +172,28 @@ function cancel() {
 
         <template v-else>
           <div class="ccd-progress">
-            <div v-for="item in displayedItems" :key="item.key" :class="['ccd-progress-item', `ccd-${item.status}`]">
+            <div
+              v-for="item in displayedItems"
+              :key="item.key"
+              :class="['ccd-progress-item', `ccd-${item.status}`]"
+            >
               <span class="ccd-pi-label">{{ item.label }}</span>
-              <span v-if="item.status === 'pending'" class="ccd-pi-status ccd-pending">{{ t('project.cacheWaiting') }}</span>
-              <span v-else-if="item.status === 'running'" class="ccd-pi-status ccd-running">{{ t('common.deleting') }}</span>
-              <span v-else-if="item.status === 'completed'" class="ccd-pi-status ccd-completed">{{ t('project.cacheDeleted', { n: item.deleted }) }}</span>
-              <span v-else-if="item.status === 'error'" class="ccd-pi-status ccd-error">{{ t('common.error') }}</span>
+              <span
+                v-if="item.status === 'pending'"
+                class="ccd-pi-status ccd-pending"
+              >{{ t('project.cacheWaiting') }}</span>
+              <span
+                v-else-if="item.status === 'running'"
+                class="ccd-pi-status ccd-running"
+              >{{ t('common.deleting') }}</span>
+              <span
+                v-else-if="item.status === 'completed'"
+                class="ccd-pi-status ccd-completed"
+              >{{ t('project.cacheDeleted', { n: item.deleted }) }}</span>
+              <span
+                v-else-if="item.status === 'error'"
+                class="ccd-pi-status ccd-error"
+              >{{ t('common.error') }}</span>
             </div>
           </div>
         </template>

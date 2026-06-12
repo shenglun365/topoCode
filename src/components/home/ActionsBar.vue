@@ -22,7 +22,10 @@ const { showId, componentId } = useComponentId('AC-001')
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <section class="home-section actions-section">
     <div class="section-header">
       <SparklesIcon class="w-4 h-4" />

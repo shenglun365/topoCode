@@ -28476,7 +28476,7 @@ function contours_default() {
     };
   }
   function isorings(values2, value2, callback) {
-    var fragmentByStart = new Array(), fragmentByEnd = new Array(), x8, y8, t03, t13, t22, t32;
+    var fragmentByStart = [], fragmentByEnd = [], x8, y8, t03, t13, t22, t32;
     x8 = y8 = -1;
     t13 = above(values2[0], value2);
     cases[t13 << 1].forEach(stitch);
@@ -50043,7 +50043,7 @@ function k3(t4, e3) {
 }
 function b10(t4) {
   const e3 = [], s3 = function(t5) {
-    const e4 = new Array();
+    const e4 = [];
     for (; "" !== t5; ) if (t5.match(/^([ \t\r\n,]+)/)) t5 = t5.substr(RegExp.$1.length);
     else if (t5.match(/^([aAcChHlLmMqQsStTvVzZ])/)) e4[e4.length] = { type: f, text: RegExp.$1 }, t5 = t5.substr(RegExp.$1.length);
     else {
@@ -98725,7 +98725,7 @@ var require_layout_base = __commonJS({
               }
               for (var i3 = 0; i3 < sizeX; i3++) {
                 for (var j3 = 0; j3 < sizeY; j3++) {
-                  grid[i3][j3] = new Array();
+                  grid[i3][j3] = [];
                 }
               }
               return grid;
@@ -98759,7 +98759,7 @@ var require_layout_base = __commonJS({
             FDLayout.prototype.calculateRepulsionForceOfANode = function(nodeA, processedNodeSet, gridUpdateAllowed, forceToNodeSurroundingUpdate) {
               if (this.totalIterations % FDLayoutConstants.GRID_CALCULATION_CHECK_PERIOD == 1 && gridUpdateAllowed || forceToNodeSurroundingUpdate) {
                 var surrounding = /* @__PURE__ */ new Set();
-                nodeA.surrounding = new Array();
+                nodeA.surrounding = [];
                 var nodeB;
                 var grid = this.grid;
                 for (var i3 = nodeA.startX - 1; i3 < nodeA.finishX + 2; i3++) {
@@ -98904,7 +98904,7 @@ var require_layout_base = __commonJS({
             function HashSet() {
               this.set = {};
             }
-            ;
+            
             HashSet.prototype.add = function(obj) {
               var theId = UniqueIDGeneretor.createID(obj);
               if (!this.contains(theId)) this.set[theId] = obj;
@@ -100287,7 +100287,7 @@ var require_cose_base = __commonJS({
               } else if (minCount == 2 && min9 == 0) {
                 var random2 = Math.floor(Math.random() * 2);
                 if (controlRegions[0] == 0 && controlRegions[1] == 0) {
-                  ;
+                  
                   if (random2 == 0) {
                     gridForPrunedNode = 0;
                   } else {
@@ -100515,7 +100515,7 @@ var require_cytoscape_cose_bilkent = __commonJS({
               }
               return obj;
             }
-            ;
+            
             function _CoSELayout(_options) {
               this.options = extend4(defaults4, _options);
               getUserOptions(this.options);
@@ -107052,7 +107052,7 @@ var init_erDiagram_SMLLAGMA = __esm({
               yy.setClass($$[$0 - 1], $$[$0]);
               break;
             case 42:
-              ;
+              
               this.$ = $$[$0 - 3];
               yy.addCssStyles($$[$0 - 2], $$[$0 - 1]);
               break;
@@ -126701,7 +126701,7 @@ var require_messageBuffer = __commonJS({
         row: while (chunkIndex < this._chunks.length) {
           const chunk = this._chunks[chunkIndex];
           offset = 0;
-          column: while (offset < chunk.length) {
+          while (offset < chunk.length) {
             const value2 = chunk[offset];
             switch (value2) {
               case CR2:
@@ -141789,7 +141789,7 @@ var init_xychartDiagram_5P7HB3ND = __esm({
                 break;
             }
           }, "anonymous"),
-          rules: [/^(?:%%(?!\{)[^\n]*)/i, /^(?:[^\}]%%[^\n]*)/i, /^(?:(\r?\n))/i, /^(?:(\r?\n))/i, /^(?:[\n\r]+)/i, /^(?:%%[^\n]*)/i, /^(?:title\b)/i, /^(?:accTitle\s*:\s*)/i, /^(?:(?!\n||)*[^\n]*)/i, /^(?:accDescr\s*:\s*)/i, /^(?:(?!\n||)*[^\n]*)/i, /^(?:accDescr\s*\{\s*)/i, /^(?:\})/i, /^(?:[^\}]*)/i, /^(?:xychart-beta\b)/i, /^(?:xychart\b)/i, /^(?:(?:vertical|horizontal))/i, /^(?:x-axis\b)/i, /^(?:y-axis\b)/i, /^(?:\[)/i, /^(?:-->)/i, /^(?:line\b)/i, /^(?:bar\b)/i, /^(?:\[)/i, /^(?:[+-]?(?:\d+(?:\.\d+)?|\.\d+))/i, /^(?:\])/i, /^(?:(?:`\)                                    \{ this\.pushState\(md_string\); \}\n<md_string>\(\?:\(\?!`"\)\.\)\+                  \{ return MD_STR; \}\n<md_string>\(\?:`))/i, /^(?:["])/i, /^(?:["])/i, /^(?:[^"]*)/i, /^(?:\[)/i, /^(?:\])/i, /^(?:[A-Za-z]+)/i, /^(?::)/i, /^(?:\+)/i, /^(?:,)/i, /^(?:=)/i, /^(?:\*)/i, /^(?:#)/i, /^(?:[\_])/i, /^(?:\.)/i, /^(?:&)/i, /^(?:-)/i, /^(?:[0-9]+)/i, /^(?:\s+)/i, /^(?:;)/i, /^(?:$)/i],
+          rules: [/^(?:%%(?!\{)[^\n]*)/i, /^(?:[^\}]%%[^\n]*)/i, /^(?:(\r?\n))/i, /^(?:(\r?\n))/i, /^(?:[\n\r]+)/i, /^(?:%%[^\n]*)/i, /^(?:title\b)/i, /^(?:accTitle\s*:\s*)/i, /^(?:(?!\n||)*[^\n]*)/i, /^(?:accDescr\s*:\s*)/i, /^(?:(?!\n||)*[^\n]*)/i, /^(?:accDescr\s*\{\s*)/i, /^(?:\})/i, /^(?:[^\}]*)/i, /^(?:xychart-beta\b)/i, /^(?:xychart\b)/i, /^(?:(?:vertical|horizontal))/i, /^(?:x-axis\b)/i, /^(?:y-axis\b)/i, /^(?:\[)/i, /^(?:-->)/i, /^(?:line\b)/i, /^(?:bar\b)/i, /^(?:\[)/i, /^(?:[+-]?(?:\d+(?:\.\d+)?|\.\d+))/i, /^(?:\])/i, /^(?:(?:`\) {36}\{ this\.pushState\(md_string\); \}\n<md_string>\(\?:\(\?!`"\)\.\)\+ {18}\{ return MD_STR; \}\n<md_string>\(\?:`))/i, /^(?:["])/i, /^(?:["])/i, /^(?:[^"]*)/i, /^(?:\[)/i, /^(?:\])/i, /^(?:[A-Za-z]+)/i, /^(?::)/i, /^(?:\+)/i, /^(?:,)/i, /^(?:=)/i, /^(?:\*)/i, /^(?:#)/i, /^(?:[\_])/i, /^(?:\.)/i, /^(?:&)/i, /^(?:-)/i, /^(?:[0-9]+)/i, /^(?:\s+)/i, /^(?:;)/i, /^(?:$)/i],
           conditions: { "data_inner": { "rules": [0, 1, 4, 5, 6, 7, 9, 11, 14, 15, 16, 17, 18, 21, 22, 24, 25, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46], "inclusive": true }, "data": { "rules": [0, 1, 3, 4, 5, 6, 7, 9, 11, 14, 15, 16, 17, 18, 21, 22, 23, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46], "inclusive": true }, "axis_band_data": { "rules": [0, 1, 4, 5, 6, 7, 9, 11, 14, 15, 16, 17, 18, 21, 22, 25, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46], "inclusive": true }, "axis_data": { "rules": [0, 1, 2, 4, 5, 6, 7, 9, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46], "inclusive": true }, "acc_descr_multiline": { "rules": [12, 13], "inclusive": false }, "acc_descr": { "rules": [10], "inclusive": false }, "acc_title": { "rules": [8], "inclusive": false }, "title": { "rules": [], "inclusive": false }, "md_string": { "rules": [], "inclusive": false }, "string": { "rules": [28, 29], "inclusive": false }, "INITIAL": { "rules": [0, 1, 4, 5, 6, 7, 9, 11, 14, 15, 16, 17, 18, 21, 22, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46], "inclusive": true } }
         };
         return lexer2;
@@ -167665,7 +167665,7 @@ var require_layout_base2 = __commonJS({
               }
               for (var i3 = 0; i3 < sizeX; i3++) {
                 for (var j3 = 0; j3 < sizeY; j3++) {
-                  grid[i3][j3] = new Array();
+                  grid[i3][j3] = [];
                 }
               }
               return grid;
@@ -167699,7 +167699,7 @@ var require_layout_base2 = __commonJS({
             FDLayout.prototype.calculateRepulsionForceOfANode = function(nodeA, processedNodeSet, gridUpdateAllowed, forceToNodeSurroundingUpdate) {
               if (this.totalIterations % FDLayoutConstants.GRID_CALCULATION_CHECK_PERIOD == 1 && gridUpdateAllowed || forceToNodeSurroundingUpdate) {
                 var surrounding = /* @__PURE__ */ new Set();
-                nodeA.surrounding = new Array();
+                nodeA.surrounding = [];
                 var nodeB;
                 var grid = this.grid;
                 for (var i3 = nodeA.startX - 1; i3 < nodeA.finishX + 2; i3++) {
@@ -167847,7 +167847,7 @@ var require_layout_base2 = __commonJS({
             function HashSet() {
               this.set = {};
             }
-            ;
+            
             HashSet.prototype.add = function(obj) {
               var theId = UniqueIDGeneretor.createID(obj);
               if (!this.contains(theId)) this.set[theId] = obj;
@@ -168087,7 +168087,7 @@ var require_layout_base2 = __commonJS({
             "use strict";
             function SVD() {
             }
-            ;
+            
             SVD.svd = function(A6) {
               this.U = null;
               this.V = null;
@@ -168156,7 +168156,7 @@ var require_layout_base2 = __commonJS({
                   for (var i3 = k4; i3 < this.m; i3++) {
                     this.s[k4] = SVD.hypot(this.s[k4], A6[i3][k4]);
                   }
-                  ;
+                  
                   if (this.s[k4] !== 0) {
                     if (A6[k4][k4] < 0) {
                       this.s[k4] = -this.s[k4];
@@ -168164,7 +168164,7 @@ var require_layout_base2 = __commonJS({
                     for (var _i = k4; _i < this.m; _i++) {
                       A6[_i][k4] /= this.s[k4];
                     }
-                    ;
+                    
                     A6[k4][k4] += 1;
                   }
                   this.s[k4] = -this.s[k4];
@@ -168177,30 +168177,30 @@ var require_layout_base2 = __commonJS({
                     for (var _i2 = k4; _i2 < this.m; _i2++) {
                       t4 += A6[_i2][k4] * A6[_i2][j3];
                     }
-                    ;
+                    
                     t4 = -t4 / A6[k4][k4];
                     for (var _i3 = k4; _i3 < this.m; _i3++) {
                       A6[_i3][j3] += t4 * A6[_i3][k4];
                     }
-                    ;
+                    
                   }
                   e3[j3] = A6[k4][j3];
                 }
-                ;
+                
                 if (/* @__PURE__ */ function(lhs, rhs) {
                   return lhs && rhs;
                 }(wantu, k4 < nct)) {
                   for (var _i4 = k4; _i4 < this.m; _i4++) {
                     this.U[_i4][k4] = A6[_i4][k4];
                   }
-                  ;
+                  
                 }
                 if (k4 < nrt) {
                   e3[k4] = 0;
                   for (var _i5 = k4 + 1; _i5 < this.n; _i5++) {
                     e3[k4] = SVD.hypot(e3[k4], e3[_i5]);
                   }
-                  ;
+                  
                   if (e3[k4] !== 0) {
                     if (e3[k4 + 1] < 0) {
                       e3[k4] = -e3[k4];
@@ -168208,7 +168208,7 @@ var require_layout_base2 = __commonJS({
                     for (var _i6 = k4 + 1; _i6 < this.n; _i6++) {
                       e3[_i6] /= e3[k4];
                     }
-                    ;
+                    
                     e3[k4 + 1] += 1;
                   }
                   e3[k4] = -e3[k4];
@@ -168218,32 +168218,32 @@ var require_layout_base2 = __commonJS({
                     for (var _i7 = k4 + 1; _i7 < this.m; _i7++) {
                       work[_i7] = 0;
                     }
-                    ;
+                    
                     for (var _j = k4 + 1; _j < this.n; _j++) {
                       for (var _i8 = k4 + 1; _i8 < this.m; _i8++) {
                         work[_i8] += e3[_j] * A6[_i8][_j];
                       }
-                      ;
+                      
                     }
-                    ;
+                    
                     for (var _j2 = k4 + 1; _j2 < this.n; _j2++) {
                       var _t = -e3[_j2] / e3[k4 + 1];
                       for (var _i9 = k4 + 1; _i9 < this.m; _i9++) {
                         A6[_i9][_j2] += _t * work[_i9];
                       }
-                      ;
+                      
                     }
-                    ;
+                    
                   }
                   if (wantv) {
                     for (var _i10 = k4 + 1; _i10 < this.n; _i10++) {
                       this.V[_i10][k4] = e3[_i10];
                     }
-                    ;
+                    
                   }
                 }
               }
-              ;
+              
               var p3 = Math.min(this.n, this.m + 1);
               if (nct < this.n) {
                 this.s[nct] = A6[nct][nct];
@@ -168260,10 +168260,10 @@ var require_layout_base2 = __commonJS({
                   for (var _i11 = 0; _i11 < this.m; _i11++) {
                     this.U[_i11][_j3] = 0;
                   }
-                  ;
+                  
                   this.U[_j3][_j3] = 1;
                 }
-                ;
+                
                 for (var _k = nct - 1; _k >= 0; _k--) {
                   if (this.s[_k] !== 0) {
                     for (var _j4 = _k + 1; _j4 < nu; _j4++) {
@@ -168271,32 +168271,32 @@ var require_layout_base2 = __commonJS({
                       for (var _i12 = _k; _i12 < this.m; _i12++) {
                         _t2 += this.U[_i12][_k] * this.U[_i12][_j4];
                       }
-                      ;
+                      
                       _t2 = -_t2 / this.U[_k][_k];
                       for (var _i13 = _k; _i13 < this.m; _i13++) {
                         this.U[_i13][_j4] += _t2 * this.U[_i13][_k];
                       }
-                      ;
+                      
                     }
-                    ;
+                    
                     for (var _i14 = _k; _i14 < this.m; _i14++) {
                       this.U[_i14][_k] = -this.U[_i14][_k];
                     }
-                    ;
+                    
                     this.U[_k][_k] = 1 + this.U[_k][_k];
                     for (var _i15 = 0; _i15 < _k - 1; _i15++) {
                       this.U[_i15][_k] = 0;
                     }
-                    ;
+                    
                   } else {
                     for (var _i16 = 0; _i16 < this.m; _i16++) {
                       this.U[_i16][_k] = 0;
                     }
-                    ;
+                    
                     this.U[_k][_k] = 1;
                   }
                 }
-                ;
+                
               }
               if (wantv) {
                 for (var _k2 = this.n - 1; _k2 >= 0; _k2--) {
@@ -168308,22 +168308,22 @@ var require_layout_base2 = __commonJS({
                       for (var _i17 = _k2 + 1; _i17 < this.n; _i17++) {
                         _t3 += this.V[_i17][_k2] * this.V[_i17][_j5];
                       }
-                      ;
+                      
                       _t3 = -_t3 / this.V[_k2 + 1][_k2];
                       for (var _i18 = _k2 + 1; _i18 < this.n; _i18++) {
                         this.V[_i18][_j5] += _t3 * this.V[_i18][_k2];
                       }
-                      ;
+                      
                     }
-                    ;
+                    
                   }
                   for (var _i19 = 0; _i19 < this.n; _i19++) {
                     this.V[_i19][_k2] = 0;
                   }
-                  ;
+                  
                   this.V[_k2][_k2] = 1;
                 }
-                ;
+                
               }
               var pp = p3 - 1;
               var iter = 0;
@@ -168341,7 +168341,7 @@ var require_layout_base2 = __commonJS({
                     break;
                   }
                 }
-                ;
+                
                 if (_k3 === p3 - 2) {
                   kase = 4;
                 } else {
@@ -168356,7 +168356,7 @@ var require_layout_base2 = __commonJS({
                       break;
                     }
                   }
-                  ;
+                  
                   if (ks === _k3) {
                     kase = 3;
                   } else if (ks === p3 - 1) {
@@ -168387,12 +168387,12 @@ var require_layout_base2 = __commonJS({
                             this.V[_i20][p3 - 1] = -sn * this.V[_i20][_j6] + cs * this.V[_i20][p3 - 1];
                             this.V[_i20][_j6] = _t5;
                           }
-                          ;
+                          
                         }
                       }
-                      ;
+                      
                     }
-                    ;
+                    
                     break;
                   case 2:
                     {
@@ -168411,12 +168411,12 @@ var require_layout_base2 = __commonJS({
                             this.U[_i21][_k3 - 1] = -_sn * this.U[_i21][_j7] + _cs * this.U[_i21][_k3 - 1];
                             this.U[_i21][_j7] = _t6;
                           }
-                          ;
+                          
                         }
                       }
-                      ;
+                      
                     }
-                    ;
+                    
                     break;
                   case 3:
                     {
@@ -168457,7 +168457,7 @@ var require_layout_base2 = __commonJS({
                             this.V[_i22][_j8 + 1] = -_sn2 * this.V[_i22][_j8] + _cs2 * this.V[_i22][_j8 + 1];
                             this.V[_i22][_j8] = _t7;
                           }
-                          ;
+                          
                         }
                         _t7 = SVD.hypot(_f2, g2);
                         _cs2 = _f2 / _t7;
@@ -168473,14 +168473,14 @@ var require_layout_base2 = __commonJS({
                             this.U[_i23][_j8 + 1] = -_sn2 * this.U[_i23][_j8] + _cs2 * this.U[_i23][_j8 + 1];
                             this.U[_i23][_j8] = _t7;
                           }
-                          ;
+                          
                         }
                       }
-                      ;
+                      
                       e3[p3 - 2] = _f2;
                       iter = iter + 1;
                     }
-                    ;
+                    
                     break;
                   case 4:
                     {
@@ -168490,7 +168490,7 @@ var require_layout_base2 = __commonJS({
                           for (var _i24 = 0; _i24 <= pp; _i24++) {
                             this.V[_i24][_k3] = -this.V[_i24][_k3];
                           }
-                          ;
+                          
                         }
                       }
                       while (_k3 < pp) {
@@ -168506,7 +168506,7 @@ var require_layout_base2 = __commonJS({
                             this.V[_i25][_k3 + 1] = this.V[_i25][_k3];
                             this.V[_i25][_k3] = _t8;
                           }
-                          ;
+                          
                         }
                         if (wantu && _k3 < this.m - 1) {
                           for (var _i26 = 0; _i26 < this.m; _i26++) {
@@ -168514,19 +168514,19 @@ var require_layout_base2 = __commonJS({
                             this.U[_i26][_k3 + 1] = this.U[_i26][_k3];
                             this.U[_i26][_k3] = _t8;
                           }
-                          ;
+                          
                         }
                         _k3++;
                       }
-                      ;
+                      
                       iter = 0;
                       p3--;
                     }
-                    ;
+                    
                     break;
                 }
               }
-              ;
+              
               var result = { U: this.U, V: this.V, S: this.s };
               return result;
             };
@@ -170293,7 +170293,7 @@ var require_cose_base2 = __commonJS({
                     } else if (minCount == 2 && min9 == 0) {
                       var random2 = Math.floor(Math.random() * 2);
                       if (controlRegions[0] == 0 && controlRegions[1] == 0) {
-                        ;
+                        
                         if (random2 == 0) {
                           gridForPrunedNode = 0;
                         } else {
@@ -172052,7 +172052,7 @@ var require_cytoscape_fcose = __commonJS({
                                   spectralResult.splice(indexesToBeDeleted[i3], 1);
                                   componentCenters.splice(indexesToBeDeleted[i3], 1);
                                 }
-                                ;
+                                
                               }
                             }
                             components3.forEach(function(component2, index3) {

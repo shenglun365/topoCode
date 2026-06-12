@@ -1,18 +1,27 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SupportedLocale } from '@/i18n'
+import type { ImportConfig } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { useStatusStore } from '@/stores/status'
 import { useAnalysisStore } from '@/stores/analysis'
 import i18n from '@/i18n'
 
 export const useSettingsStore = defineStore('settings', () => {
-  const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about'>('ai')
+  const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import'>('ai')
   const loading = ref(false)
   const locale = ref<SupportedLocale>('zh-CN')
   const fontSize = ref(14)
   const autoSaveInterval = ref(60)
   const projectPageSize = ref(50)
+
+  // 导入配置
+  const importConfig = ref<ImportConfig>({
+    ignoreMode: 'strict',
+    customPatterns: [],
+    extraIgnoreFiles: [],
+  })
+  const importConfigLoading = ref(false)
 
   try {
     const saved = localStorage.getItem('projectPageSize')
@@ -42,7 +51,7 @@ export const useSettingsStore = defineStore('settings', () => {
     locale.value = newLocale; i18n.global.locale.value = newLocale; localStorage.setItem('locale', newLocale)
   }
 
-  function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about') {
+  function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import') {
     activeTab.value = tab
   }
 
@@ -109,12 +118,37 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function loadImportConfig() {
+    importConfigLoading.value = true
+    try {
+      importConfig.value = await ipc.settings.getImportConfig()
+    } catch (e) {
+      console.warn('Failed to load import config', e)
+    } finally {
+      importConfigLoading.value = false
+    }
+  }
+
+  async function saveImportConfig(params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[] }) {
+    importConfigLoading.value = true
+    try {
+      importConfig.value = await ipc.settings.setImportConfig(params)
+    } catch (e) {
+      console.warn('Failed to save import config', e)
+      throw e
+    } finally {
+      importConfigLoading.value = false
+    }
+  }
+
   return {
     activeTab, loading, locale, fontSize, autoSaveInterval, projectPageSize,
     backendStatus, pythonMemoryLimit, memoryLimitPending,
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
+    importConfig, importConfigLoading,
     setProjectPageSize, initLocale, setLocale, setActiveTab,
     restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,
+    loadImportConfig, saveImportConfig,
   }
 })

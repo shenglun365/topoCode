@@ -269,7 +269,10 @@ watch(() => props.taskId, loadData)
     <template v-else>
       <div class="report-home-scroll">
         <!-- 项目概要 + 任务概要 折叠容器 -->
-        <div v-if="collapsed.project || collapsed.task" class="collapsed-tags">
+        <div
+          v-if="collapsed.project || collapsed.task"
+          class="collapsed-tags"
+        >
           <button
             v-if="collapsed.project"
             class="collapsed-tag"
@@ -300,7 +303,10 @@ watch(() => props.taskId, loadData)
         />
 
         <!-- 任务概要 -->
-        <section v-if="!collapsed.task" class="home-section">
+        <section
+          v-if="!collapsed.task"
+          class="home-section"
+        >
           <div class="section-header">
             <ChartBarIcon class="w-4 h-4" />
             <span>{{ t('report.taskSummary') }}</span>
@@ -401,7 +407,6 @@ watch(() => props.taskId, loadData)
           :external-stats="externalStats"
           @open-md="(p) => emit('open-md', p)"
         />
-
       </div>
 
       <!-- 项目摘要弹窗 -->

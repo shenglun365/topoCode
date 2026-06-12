@@ -98,8 +98,14 @@ onMounted(initUsageStats)
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-  <div class="card" style="display:flex; flex-direction:column; overflow:hidden;">
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
+  <div
+    class="card"
+    style="display:flex; flex-direction:column; overflow:hidden;"
+  >
     <div style="padding:12px; display:flex; flex-direction:column; overflow:hidden;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
         <h3 style="font-size:13px; font-weight:600;">

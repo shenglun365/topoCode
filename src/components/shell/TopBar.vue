@@ -184,7 +184,10 @@ onMounted(() => {
 
 <template>
   <div class="app-top">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="app-row1">
       <!-- 产品 Logo -->
       <div class="menu-bar-logo">
@@ -213,16 +216,25 @@ onMounted(() => {
             @mouseenter="onDropdownMouseEnter"
             @mouseleave="onDropdownMouseLeave"
           >
-            <template v-for="(menuItem, idx) in menuItems" :key="idx">
+            <template
+              v-for="(menuItem, idx) in menuItems"
+              :key="idx"
+            >
               <div
                 v-if="!menuItem.divider"
                 class="menu-dropdown-item"
                 @click="handleMenuItemClick(menuItem)"
               >
                 <span>{{ menuItem.label }}</span>
-                <span v-if="menuItem.shortcut" class="shortcut">{{ menuItem.shortcut }}</span>
+                <span
+                  v-if="menuItem.shortcut"
+                  class="shortcut"
+                >{{ menuItem.shortcut }}</span>
               </div>
-              <div v-else class="menu-dropdown-divider" />
+              <div
+                v-else
+                class="menu-dropdown-divider"
+              />
             </template>
           </div>
         </div>
@@ -240,8 +252,14 @@ onMounted(() => {
           :title="t('shell.topBar.toggleLeftPanel')"
           @click="panelStore.toggleLeft()"
         >
-          <ArrowLeftEndOnRectangleIcon v-if="!panelStore.leftCollapsed" class="w-4 h-4" />
-          <ArrowRightStartOnRectangleIcon v-else class="w-4 h-4" />
+          <ArrowLeftEndOnRectangleIcon
+            v-if="!panelStore.leftCollapsed"
+            class="w-4 h-4"
+          />
+          <ArrowRightStartOnRectangleIcon
+            v-else
+            class="w-4 h-4"
+          />
         </div>
         <div
           class="icon-btn"
@@ -249,16 +267,28 @@ onMounted(() => {
           :title="t('shell.topBar.toggleRightPanel')"
           @click="panelStore.toggleRight()"
         >
-          <ArrowRightEndOnRectangleIcon v-if="!panelStore.rightCollapsed" class="w-4 h-4" />
-          <ArrowLeftStartOnRectangleIcon v-else class="w-4 h-4" />
+          <ArrowRightEndOnRectangleIcon
+            v-if="!panelStore.rightCollapsed"
+            class="w-4 h-4"
+          />
+          <ArrowLeftStartOnRectangleIcon
+            v-else
+            class="w-4 h-4"
+          />
         </div>
         <div
           class="icon-btn"
           :title="`${t('shell.topBar.toggleTheme')} (${themeStore.theme === 'dark' ? t('settings.darkMode') : t('settings.lightMode')})`"
           @click="themeStore.toggleTheme()"
         >
-          <MoonIcon v-if="themeStore.theme === 'dark'" class="w-4 h-4" />
-          <SunIcon v-else class="w-4 h-4" />
+          <MoonIcon
+            v-if="themeStore.theme === 'dark'"
+            class="w-4 h-4"
+          />
+          <SunIcon
+            v-else
+            class="w-4 h-4"
+          />
         </div>
         <!-- 新手引导入口（暂时隐藏）
         <div
@@ -273,13 +303,25 @@ onMounted(() => {
 
       <!-- 窗口控制（无边框窗口） -->
       <div class="window-controls">
-        <div class="win-btn" @click="onMinimize" :title="t('common.minimize')">
+        <div
+          class="win-btn"
+          :title="t('common.minimize')"
+          @click="onMinimize"
+        >
           <MinusIcon class="w-3.5 h-3.5" />
         </div>
-        <div class="win-btn" @click="onMaximize" :title="t(isMaximized ? 'common.restore' : 'common.maximize')">
+        <div
+          class="win-btn"
+          :title="t(isMaximized ? 'common.restore' : 'common.maximize')"
+          @click="onMaximize"
+        >
           <Square2StackIcon class="w-3.5 h-3.5" />
         </div>
-        <div class="win-btn win-btn-close" @click="onClose" :title="t('common.close')">
+        <div
+          class="win-btn win-btn-close"
+          :title="t('common.close')"
+          @click="onClose"
+        >
           <XMarkIcon class="w-3.5 h-3.5" />
         </div>
       </div>
@@ -287,20 +329,35 @@ onMounted(() => {
 
     <!-- 关于弹窗 -->
     <Teleport to="body">
-      <div v-if="showAbout" class="modal-overlay" @click.self="showAbout = false">
+      <div
+        v-if="showAbout"
+        class="modal-overlay"
+        @click.self="showAbout = false"
+      >
         <div class="modal about-modal">
           <div class="modal-header">
             <span class="modal-title">{{ t('shell.topBar.about') }}</span>
-            <button class="btn btn-ghost btn-xs" @click="showAbout = false">
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="showAbout = false"
+            >
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
           <div class="modal-body about-body">
-            <div class="about-icon">◆</div>
-            <div class="about-name">TopoCode</div>
-            <div class="about-version">v1.0.0</div>
-<div class="about-desc">{{ t('settings.aboutTagline') }}</div>
-<div class="about-section">
+            <div class="about-icon">
+              ◆
+            </div>
+            <div class="about-name">
+              TopoCode
+            </div>
+            <div class="about-version">
+              v1.0.0
+            </div>
+            <div class="about-desc">
+              {{ t('settings.aboutTagline') }}
+            </div>
+            <div class="about-section">
               <span class="about-label">作者</span>
               <span>TopoCode Team</span>
             </div>
@@ -308,7 +365,10 @@ onMounted(() => {
               <span class="about-label">联系方式</span>
               <a href="mailto:support@opencode.ai">support@opencode.ai</a>
             </div>
-            <button class="btn btn-ghost btn-sm" @click="openDocs(); showAbout = false">
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="openDocs(); showAbout = false"
+            >
               检查版本升级
             </button>
           </div>
@@ -318,20 +378,43 @@ onMounted(() => {
 
     <!-- 退出确认弹窗 -->
     <Teleport to="body">
-      <div v-if="showExitConfirm" class="modal-overlay" @click.self="showExitConfirm = false">
-        <div class="modal" style="width:400px;">
+      <div
+        v-if="showExitConfirm"
+        class="modal-overlay"
+        @click.self="showExitConfirm = false"
+      >
+        <div
+          class="modal"
+          style="width:400px;"
+        >
           <div class="modal-header">
             <span class="modal-title">{{ t('common.confirm') }}</span>
-            <button class="btn btn-ghost btn-xs" @click="showExitConfirm = false">
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="showExitConfirm = false"
+            >
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
           <div class="modal-body">
-            <p style="font-size:13px;color:var(--text-primary);">{{ t('shell.topBar.exitConfirm') }}</p>
+            <p style="font-size:13px;color:var(--text-primary);">
+              {{ t('shell.topBar.exitConfirm') }}
+            </p>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost btn-sm" @click="showExitConfirm = false">{{ t('common.cancel') }}</button>
-            <button class="btn btn-primary btn-sm" style="background:var(--error);border-color:var(--error);" @click="confirmExit">{{ t('common.confirm') }}</button>
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="showExitConfirm = false"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              class="btn btn-primary btn-sm"
+              style="background:var(--error);border-color:var(--error);"
+              @click="confirmExit"
+            >
+              {{ t('common.confirm') }}
+            </button>
           </div>
         </div>
       </div>

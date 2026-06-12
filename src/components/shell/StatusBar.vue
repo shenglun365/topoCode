@@ -93,7 +93,6 @@ async function testModelStatus() {
     <div class="status-item">
       <span>Zoom: {{ status.zoom }}%</span>
     </div>
-
   </footer>
 </template>
 

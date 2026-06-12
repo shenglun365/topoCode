@@ -28,7 +28,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <Teleport to="body">
     <div
       v-if="visible"

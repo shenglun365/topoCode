@@ -110,7 +110,10 @@ const activePanelComponent = computed(() => {
       </button>
     </div>
     <div class="panel-body">
-      <component :is="activePanelComponent?.component" v-bind="activePanelComponent?.props || {}" />
+      <component
+        :is="activePanelComponent?.component"
+        v-bind="activePanelComponent?.props || {}"
+      />
     </div>
   </aside>
 </template>

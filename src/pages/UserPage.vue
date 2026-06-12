@@ -9,6 +9,7 @@ import {
   ArrowPathIcon,
   PaintBrushIcon,
   DocumentTextIcon,
+  FunnelIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -21,6 +22,7 @@ import GeneralSettings from '@/components/settings/GeneralSettings.vue'
 import ThemeManager from '@/components/settings/ThemeManager.vue'
 import AboutPage from '@/components/settings/AboutPage.vue'
 import TemplateManager from '@/components/settings/TemplateManager.vue'
+import ImportConfig from '@/components/settings/ImportConfig.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-005')
@@ -54,6 +56,7 @@ onMounted(async () => {
 const tabs = [
   { id: 'ai' as const, key: 'settings.modelConfig', icon: CpuChipIcon },
   { id: 'general' as const, key: 'settings.general', icon: Cog6ToothIcon },
+  { id: 'import' as const, key: 'settings.importConfig', icon: FunnelIcon },
   { id: 'theme' as const, key: 'settings.theme', icon: PaintBrushIcon },
   { id: 'templates' as const, key: 'settings.templates', icon: DocumentTextIcon },
   { id: 'about' as const, key: 'settings.about', icon: InformationCircleIcon },
@@ -104,6 +107,7 @@ const tabs = [
     <div style="flex:1; overflow:auto; padding:24px;">
       <ModelConfig v-if="settingsStore.activeTab === 'ai'" />
       <GeneralSettings v-else-if="settingsStore.activeTab === 'general'" />
+      <ImportConfig v-else-if="settingsStore.activeTab === 'import'" />
       <ThemeManager v-else-if="settingsStore.activeTab === 'theme'" />
       <TemplateManager v-else-if="settingsStore.activeTab === 'templates'" />
       <AboutPage v-else-if="settingsStore.activeTab === 'about'" />
@@ -111,23 +115,49 @@ const tabs = [
 
     <!-- 重启确认弹窗 -->
     <Teleport to="body">
-      <div v-if="showRestartConfirm" class="modal-overlay" @click.self="showRestartConfirm = false">
-        <div class="modal" style="width:380px;">
+      <div
+        v-if="showRestartConfirm"
+        class="modal-overlay"
+        @click.self="showRestartConfirm = false"
+      >
+        <div
+          class="modal"
+          style="width:380px;"
+        >
           <div class="modal-header">
             <span class="modal-title">{{ t('common.restart') }}</span>
-            <button class="btn btn-ghost btn-xs" @click="showRestartConfirm = false">
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="showRestartConfirm = false"
+            >
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
           <div class="modal-body">
-            <p style="font-size:13px;color:var(--text-primary);">确认重启 Python 后端服务？</p>
-            <p v-if="runningTaskCount > 0" style="font-size:12px;color:var(--warning);margin-top:8px;">
+            <p style="font-size:13px;color:var(--text-primary);">
+              确认重启 Python 后端服务？
+            </p>
+            <p
+              v-if="runningTaskCount > 0"
+              style="font-size:12px;color:var(--warning);margin-top:8px;"
+            >
               {{ t('common.restartBlockedTasks', { count: runningTaskCount }) }}
             </p>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost btn-sm" @click="showRestartConfirm = false">{{ t('common.cancel') }}</button>
-            <button :disabled="runningTaskCount > 0" class="btn btn-primary btn-sm" @click="handleRestart">确定</button>
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="showRestartConfirm = false"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              :disabled="runningTaskCount > 0"
+              class="btn btn-primary btn-sm"
+              @click="handleRestart"
+            >
+              确定
+            </button>
           </div>
         </div>
       </div>

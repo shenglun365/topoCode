@@ -17,7 +17,10 @@ const { showId, componentId } = useComponentId('TS-001')
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <section class="home-section">
     <div class="section-header">
       <ChartBarIcon class="w-4 h-4" />

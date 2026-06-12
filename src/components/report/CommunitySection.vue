@@ -82,7 +82,10 @@ function communityIdLabel(item: { communityId: string; level?: string }): string
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <section class="home-section">
     <div class="section-header">
       <svg

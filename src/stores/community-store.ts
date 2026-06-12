@@ -58,6 +58,19 @@ function normalizeDiagramField(val: unknown): string {
   return String(val)
 }
 
+const _inflightLoads = new Map<string, Promise<any>>()
+const _requestVersions = new Map<string, number>()
+
+function _nextVersion(key: string): number {
+  const v = (_requestVersions.get(key) || 0) + 1
+  _requestVersions.set(key, v)
+  return v
+}
+
+function _inflightKey(taskId: string, ...parts: string[]): string {
+  return `${taskId}::${parts.join('::')}`
+}
+
 export const useCommunityStore = defineStore('community', () => {
   const tasks = ref<Record<string, CommunityTaskRuntime>>({})
 
@@ -114,206 +127,280 @@ export const useCommunityStore = defineStore('community', () => {
   }
 
   async function loadCommunities(taskId: string, projectId: string) {
-    const t = ensureTask(taskId)
-    try {
-      const [callLevels, depLevels, callResults, depResults] = await Promise.all([
-        ipc.analysis.getCascadeLevels(taskId, 'CALL').catch(() => null),
-        ipc.analysis.getCascadeLevels(taskId, 'INCLUDE').catch(() => null),
-        ipc.analysis.listCommunityResults(taskId, 'CALL').catch(() => ({ results: [] })),
-        ipc.analysis.listCommunityResults(taskId, 'INCLUDE').catch(() => ({ results: [] })),
-      ])
-      const llmMap: Record<string, any> = {}
-      for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
-        const r = rRaw as Record<string, unknown>
-        const id = (r.commId || r.comm_id) as string | undefined
-        if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
-      }
-      const communities: CommunityItem[] = []
-      if (callLevels?.levels) {
-        for (const lv of callLevels.levels) {
-          if (!lv.items) continue
-          for (const item of lv.items) {
-            const saved = llmMap[item.id]
-            communities.push({
-              id: `CALL-${item.id}`,
-              communityId: item.id, level: lv.lv, edgeType: 'CALL',
-              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
-              qualityScore: item.qualityScore ?? null,
-              status: saved ? 'completed' : ('pending' as any),
-              selected: false,
-              parentId: item.parentCommId ?? undefined,
-              name: saved?.name || item.id,
-              summary: saved?.summary || undefined,
-            })
+    const key = _inflightKey(taskId, 'loadCommunities')
+    const existing = _inflightLoads.get(key)
+    if (existing) return existing
+
+    const promise = (async () => {
+      const t = ensureTask(taskId)
+      try {
+        const [callLevels, depLevels, callResults, depResults] = await Promise.all([
+          ipc.analysis.getCascadeLevels(taskId, 'CALL').catch(() => null),
+          ipc.analysis.getCascadeLevels(taskId, 'INCLUDE').catch(() => null),
+          ipc.analysis.listCommunityResults(taskId, 'CALL').catch(() => ({ results: [] })),
+          ipc.analysis.listCommunityResults(taskId, 'INCLUDE').catch(() => ({ results: [] })),
+        ])
+        const llmMap: Record<string, any> = {}
+        for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
+          const r = rRaw as Record<string, unknown>
+          const id = (r.commId || r.comm_id) as string | undefined
+          if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
+        }
+        const communities: CommunityItem[] = []
+        if (callLevels?.levels) {
+          for (const lv of callLevels.levels) {
+            if (!lv.items) continue
+            for (const item of lv.items) {
+              const saved = llmMap[item.id]
+              communities.push({
+                id: `CALL-${item.id}`,
+                communityId: item.id, level: lv.lv, edgeType: 'CALL',
+                nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
+                qualityScore: item.qualityScore ?? null,
+                status: saved ? 'completed' : ('pending' as any),
+                selected: false,
+                parentId: item.parentCommId ?? undefined,
+                name: saved?.name || item.id,
+                summary: saved?.summary || undefined,
+              })
+            }
           }
         }
-      }
-      if (depLevels?.levels) {
-        for (const lv of depLevels.levels) {
-          if (!lv.items) continue
-          for (const item of lv.items) {
-            const saved = llmMap[item.id]
-            communities.push({
-              id: `INCLUDE-${item.id}`,
-              communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
-              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
-              qualityScore: item.qualityScore ?? null,
-              status: saved ? 'completed' : ('pending' as any),
-              selected: false,
-              parentId: item.parentCommId ?? undefined,
-              name: saved?.name || item.id,
-              summary: saved?.summary || undefined,
-            })
+        if (depLevels?.levels) {
+          for (const lv of depLevels.levels) {
+            if (!lv.items) continue
+            for (const item of lv.items) {
+              const saved = llmMap[item.id]
+              communities.push({
+                id: `INCLUDE-${item.id}`,
+                communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
+                nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
+                qualityScore: item.qualityScore ?? null,
+                status: saved ? 'completed' : ('pending' as any),
+                selected: false,
+                parentId: item.parentCommId ?? undefined,
+                name: saved?.name || item.id,
+                summary: saved?.summary || undefined,
+              })
+            }
           }
         }
-      }
-      t.uniqueFileCounts = {
-        CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
-        INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
-      }
-      const savedIds = getSelections(taskId)
-      const newCommMap = new Map(communities.map(c => [c.id, c]))
-      for (const existing of t.communities) {
-        const newData = newCommMap.get(existing.id)
-        if (newData) {
-          if (existing.status === 'error' || existing.status === 'running' || existing.status === 'queued') {
+        t.uniqueFileCounts = {
+          CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
+          INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
+        }
+        const savedIds = getSelections(taskId)
+        const newCommMap = new Map(communities.map(c => [c.id, c]))
+        for (const existing of t.communities) {
+          const newData = newCommMap.get(existing.id)
+          if (newData) {
+            if (existing.status === 'error' || existing.status === 'running' || existing.status === 'queued') {
+              existing.selected = savedIds.includes(existing.id)
+              newCommMap.delete(existing.id)
+              continue
+            }
+            const saved = llmMap[existing.communityId]
+            if (saved) {
+              existing.status = 'completed'
+              existing.name = saved.name || existing.communityId
+              existing.summary = saved.summary || undefined
+              existing.mermaid = saved.mermaid || undefined
+              existing.plantuml = saved.plantuml || undefined
+            } else {
+              existing.status = 'pending'
+            }
             existing.selected = savedIds.includes(existing.id)
             newCommMap.delete(existing.id)
-            continue
           }
-          const saved = llmMap[existing.communityId]
+        }
+        for (const c of Array.from(newCommMap.values())) {
+          const saved = llmMap[c.communityId]
           if (saved) {
-            existing.status = 'completed'
-            existing.name = saved.name || existing.communityId
-            existing.summary = saved.summary || undefined
-            existing.mermaid = saved.mermaid || undefined
-            existing.plantuml = saved.plantuml || undefined
-          } else {
-            existing.status = 'pending'
+            c.status = 'completed'
+            c.name = saved.name || c.communityId
+            c.summary = saved.summary || undefined
+            c.mermaid = saved.mermaid || undefined
+            c.plantuml = saved.plantuml || undefined
           }
-          existing.selected = savedIds.includes(existing.id)
-          newCommMap.delete(existing.id)
+          c.selected = savedIds.includes(c.id)
+          t.communities.push(c)
         }
+        t.llmResults = llmMap
+        loadProjectContext(taskId, projectId)
+      } catch (e: any) {
+        pushError(taskId, `loadCommunities: ${e?.message || String(e)}`)
+      } finally {
+        _inflightLoads.delete(key)
       }
-      for (const c of Array.from(newCommMap.values())) {
-        const saved = llmMap[c.communityId]
-        if (saved) {
-          c.status = 'completed'
-          c.name = saved.name || c.communityId
-          c.summary = saved.summary || undefined
-          c.mermaid = saved.mermaid || undefined
-          c.plantuml = saved.plantuml || undefined
-        }
-        c.selected = savedIds.includes(c.id)
-        t.communities.push(c)
-      }
-      t.llmResults = llmMap
-      loadProjectContext(taskId, projectId)
-    } catch (e: any) {
-      pushError(taskId, `loadCommunities: ${e?.message || String(e)}`)
-    }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
   }
 
   /** 从 getReportDashboard 合并响应中加载社区数据（一次 RPC 替代 4 次独立调用） */
   async function loadCommunitiesFromDashboard(taskId: string, dash: any) {
-    const t = ensureTask(taskId)
-    try {
-      const callLevels = dash.callLevels
-      const depLevels = dash.depLevels
-      const callResults = dash.callResults || { results: [] }
-      const depResults = dash.depResults || { results: [] }
-      const llmMap: Record<string, any> = {}
-      for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
-        const r = rRaw as Record<string, unknown>
-        const id = (r.commId || r.comm_id) as string | undefined
-        if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
-      }
-      const communities: CommunityItem[] = []
-      if (callLevels?.levels) {
-        for (const lv of callLevels.levels) {
-          if (!lv.items) continue
-          for (const item of lv.items) {
-            const saved = llmMap[item.id]
-            communities.push({
-              id: `CALL-${item.id}`,
-              communityId: item.id, level: lv.lv, edgeType: 'CALL',
-              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
-              qualityScore: item.qualityScore ?? null,
-              status: saved ? 'completed' : ('pending' as any),
-              selected: false,
-              parentId: item.parentCommId ?? undefined,
-              name: saved?.name || item.id,
-              summary: saved?.summary || undefined,
-            })
+    const key = _inflightKey(taskId, 'loadCommunitiesFromDashboard')
+    const existing = _inflightLoads.get(key)
+    if (existing) return existing
+
+    const promise = (async () => {
+      const t = ensureTask(taskId)
+      try {
+        const callLevels = dash.callLevels
+        const depLevels = dash.depLevels
+        const callResults = dash.callResults || { results: [] }
+        const depResults = dash.depResults || { results: [] }
+        const llmMap: Record<string, any> = {}
+        for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
+          const r = rRaw as Record<string, unknown>
+          const id = (r.commId || r.comm_id) as string | undefined
+          if (id) llmMap[id] = { ...r, name: r.name || r.name_manual }
+        }
+        const communities: CommunityItem[] = []
+        if (callLevels?.levels) {
+          for (const lv of callLevels.levels) {
+            if (!lv.items) continue
+            for (const item of lv.items) {
+              const saved = llmMap[item.id]
+              communities.push({
+                id: `CALL-${item.id}`,
+                communityId: item.id, level: lv.lv, edgeType: 'CALL',
+                nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
+                qualityScore: item.qualityScore ?? null,
+                status: saved ? 'completed' : ('pending' as any),
+                selected: false,
+                parentId: item.parentCommId ?? undefined,
+                name: saved?.name || item.id,
+                summary: saved?.summary || undefined,
+              })
+            }
           }
         }
-      }
-      if (depLevels?.levels) {
-        for (const lv of depLevels.levels) {
-          if (!lv.items) continue
-          for (const item of lv.items) {
-            const saved = llmMap[item.id]
-            communities.push({
-              id: `INCLUDE-${item.id}`,
-              communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
-              nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
-              qualityScore: item.qualityScore ?? null,
-              status: saved ? 'completed' : ('pending' as any),
-              selected: false,
-              parentId: item.parentCommId ?? undefined,
-              name: saved?.name || item.id,
-              summary: saved?.summary || undefined,
-            })
+        if (depLevels?.levels) {
+          for (const lv of depLevels.levels) {
+            if (!lv.items) continue
+            for (const item of lv.items) {
+              const saved = llmMap[item.id]
+              communities.push({
+                id: `INCLUDE-${item.id}`,
+                communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
+                nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
+                qualityScore: item.qualityScore ?? null,
+                status: saved ? 'completed' : ('pending' as any),
+                selected: false,
+                parentId: item.parentCommId ?? undefined,
+                name: saved?.name || item.id,
+                summary: saved?.summary || undefined,
+              })
+            }
           }
         }
+        t.uniqueFileCounts = {
+          CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
+          INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
+        }
+        const savedIds = getSelections(taskId)
+        const savedStatuses = new Map(t.communities.map(c => [c.id, c.status] as const))
+        for (const c of communities) {
+          const prevStatus = savedStatuses.get(c.id)
+          if (prevStatus === 'running' || prevStatus === 'queued') {
+            c.status = prevStatus
+          }
+          if (prevStatus === 'error') {
+            c.status = 'error'
+          }
+          c.selected = savedIds.includes(c.id)
+        }
+        t.communities = communities
+        t.llmResults = llmMap
+        const pid = dash.task?.project_id || dash.task?.projectId
+        if (pid) loadProjectContext(taskId, pid)
+      } catch (e: any) {
+        pushError(taskId, `loadCommunitiesFromDashboard: ${e?.message || String(e)}`)
+      } finally {
+        _inflightLoads.delete(key)
       }
-      t.uniqueFileCounts = {
-        CALL: (callLevels as any)?.totalUniqueFiles ?? 0,
-        INCLUDE: (depLevels as any)?.totalUniqueFiles ?? 0,
-      }
-      t.communities = communities
-      t.llmResults = llmMap
-      const pid = dash.task?.project_id || dash.task?.projectId
-      if (pid) loadProjectContext(taskId, pid)
-    } catch (e: any) {
-      pushError(taskId, `loadCommunitiesFromDashboard: ${e?.message || String(e)}`)
-    }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
   }
 
   async function loadProjectContext(taskId: string, projectId: string) {
     if (!projectId) return
-    try {
-      const result = await ipc.report.getProjectSummary({ projectId })
-      if (result?.summary) {
-        ensureTask(taskId).projectContext = `## 项目概要\n${result.summary}`
+
+    const key = _inflightKey(taskId, 'projectContext', projectId)
+    const t = ensureTask(taskId)
+    if (t.projectContext || _inflightLoads.get(key)) return
+
+    const promise = (async () => {
+      try {
+        const result = await ipc.report.getProjectSummary({ projectId })
+        if (result?.summary) {
+          ensureTask(taskId).projectContext = `## 项目概要\n${result.summary}`
+        }
+      } catch { /* skip */ } finally {
+        _inflightLoads.delete(key)
       }
-    } catch { /* skip */ }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
   }
 
   async function loadExternalStats(taskId: string) {
-    try {
-      const result = await ipc.analysis.getExternalStats(taskId)
-      if (result) {
-        ensureTask(taskId).externalStats = result
+    const t = ensureTask(taskId)
+    if (t.externalStats) return
+
+    const key = _inflightKey(taskId, 'externalStats')
+    const existing = _inflightLoads.get(key)
+    if (existing) return existing
+
+    const promise = (async () => {
+      try {
+        const result = await ipc.analysis.getExternalStats(taskId)
+        if (result) {
+          ensureTask(taskId).externalStats = result
+        }
+      } catch (e: any) {
+        console.warn('[community-store] loadExternalStats failed:', e?.message || e)
+      } finally {
+        _inflightLoads.delete(key)
       }
-    } catch (e: any) {
-      console.warn('[community-store] loadExternalStats failed:', e?.message || e)
-    }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
   }
 
   async function loadCrossCommunityEdges(taskId: string, edgeType: string, commLv: string) {
     const t = ensureTask(taskId)
-    try {
-      const result = await ipc.analysis.getCrossCommunityEdges({ taskId, edgeType, commLv })
-      if (result?.crossEdges) {
-        if (!t.crossCommunityEdges[edgeType]) {
-          t.crossCommunityEdges[edgeType] = {}
+    if (t.crossCommunityEdges[edgeType]?.[commLv]) return
+
+    const key = _inflightKey(taskId, 'crossEdges', edgeType, commLv)
+    const existing = _inflightLoads.get(key)
+    if (existing) return existing
+
+    const version = _nextVersion(key)
+    const promise = (async () => {
+      try {
+        const result = await ipc.analysis.getCrossCommunityEdges({ taskId, edgeType, commLv })
+        if (result?.crossEdges && _requestVersions.get(key) === version) {
+          if (!t.crossCommunityEdges[edgeType]) {
+            t.crossCommunityEdges[edgeType] = {}
+          }
+          t.crossCommunityEdges[edgeType][commLv] = result.crossEdges
         }
-        t.crossCommunityEdges[edgeType][commLv] = result.crossEdges
+      } catch (e: any) {
+        console.warn('[community-store] loadCrossCommunityEdges failed:', e?.message || e)
+      } finally {
+        _inflightLoads.delete(key)
       }
-    } catch (e: any) {
-      console.warn('[community-store] loadCrossCommunityEdges failed:', e?.message || e)
-    }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
   }
 
   function getCrossEdges(taskId: string, edgeType: string, commLv: string): CrossCommunityEdge[] {
@@ -323,15 +410,28 @@ export const useCommunityStore = defineStore('community', () => {
   async function loadCommunityNodeLists(taskId: string, edgeType: string, commLv: string) {
     const t = ensureTask(taskId)
     if (t.nodeLists[edgeType]?.[commLv]) return
-    try {
-      const result = await ipc.analysis.getCommunityNodeLists({ taskId, edgeType, commLv })
-      if (result) {
-        if (!t.nodeLists[edgeType]) t.nodeLists[edgeType] = {}
-        t.nodeLists[edgeType][commLv] = result
+
+    const key = _inflightKey(taskId, 'nodeLists', edgeType, commLv)
+    const existing = _inflightLoads.get(key)
+    if (existing) return existing
+
+    const version = _nextVersion(key)
+    const promise = (async () => {
+      try {
+        const result = await ipc.analysis.getCommunityNodeLists({ taskId, edgeType, commLv })
+        if (result && _requestVersions.get(key) === version) {
+          if (!t.nodeLists[edgeType]) t.nodeLists[edgeType] = {}
+          t.nodeLists[edgeType][commLv] = result
+        }
+      } catch (e: any) {
+        console.warn('[community-store] loadCommunityNodeLists failed:', e?.message || e)
+      } finally {
+        _inflightLoads.delete(key)
       }
-    } catch (e: any) {
-      console.warn('[community-store] loadCommunityNodeLists failed:', e?.message || e)
-    }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
   }
 
   async function analyzeSelected(taskId: string, modelId: string, batchSize: number, projectId: string) {

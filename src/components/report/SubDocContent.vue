@@ -147,7 +147,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div
     v-if="loading"
     class="loading-state"

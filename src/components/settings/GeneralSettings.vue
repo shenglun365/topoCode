@@ -174,13 +174,19 @@ function openHttpPage() {
             :value="statusStore.httpHost"
             @change="onBindIpChange(($event.target as HTMLSelectElement).value)"
           >
-            <option value="127.0.0.1">localhost (127.0.0.1)</option>
-            <option value="0.0.0.0">0.0.0.0</option>
+            <option value="127.0.0.1">
+              localhost (127.0.0.1)
+            </option>
+            <option value="0.0.0.0">
+              0.0.0.0
+            </option>
             <option
               v-for="ip in localIps"
               :key="ip"
               :value="ip"
-            >{{ ip }}</option>
+            >
+              {{ ip }}
+            </option>
           </select>
           <span style="font-size:11px; color:var(--text-muted);">{{ t('settings.port') }}:</span>
           <input
@@ -208,8 +214,14 @@ function openHttpPage() {
               :title="restartBtnTitle"
               @click="applyHttpConfigAndRestart"
             >
-              <span v-if="settingsStore.restartState === 'restarting'" class="spinner" />
-              <ArrowPathIcon v-else class="w-3 h-3" />
+              <span
+                v-if="settingsStore.restartState === 'restarting'"
+                class="spinner"
+              />
+              <ArrowPathIcon
+                v-else
+                class="w-3 h-3"
+              />
               <span>{{ restartLabel }}</span>
             </button>
           </template>
@@ -301,7 +313,10 @@ function openHttpPage() {
         class="card"
         style="padding:14px;"
       >
-        <div class="form-group" style="margin-bottom:12px;">
+        <div
+          class="form-group"
+          style="margin-bottom:12px;"
+        >
           <label class="form-label">{{ t('settings.memoryLimit') }}</label>
           <div style="display:flex; gap:10px; align-items:center;">
             <input
@@ -340,8 +355,14 @@ function openHttpPage() {
               :title="restartBtnTitle"
               @click="settingsStore.restartBackend()"
             >
-              <span v-if="settingsStore.restartState === 'restarting'" class="spinner" />
-              <ArrowPathIcon v-else class="w-3 h-3" />
+              <span
+                v-if="settingsStore.restartState === 'restarting'"
+                class="spinner"
+              />
+              <ArrowPathIcon
+                v-else
+                class="w-3 h-3"
+              />
               <span>{{ restartLabel }}</span>
             </button>
           </div>

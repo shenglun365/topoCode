@@ -72,6 +72,7 @@ const MERGE_THRESHOLD = 100
 const BATCH_EXPAND_SIZE = 50
 const expandBatchCount = ref(0)
 const graphSearch = ref('')
+const drilling = ref(false)
 
 /* ---- filter persistence ---- */
 const FILTER_STORAGE_KEY = computed(() => `graph-filter-${props.projectId}-${props.taskId}`)
@@ -122,15 +123,29 @@ const drillMeta = computed(() => {
 const allCommunities = computed(() => {
   return communityStore.tasks[props.taskId]?.communities || []
 })
+const commMap = computed(() => {
+  const m = new Map<string, CommunityItem>()
+  for (const c of allCommunities.value) {
+    m.set(c.communityId, c)
+  }
+  return m
+})
+const parentCommIds = computed(() => {
+  const s = new Set<string>()
+  for (const c of allCommunities.value) {
+    if (c.parentId) s.add(c.parentId)
+  }
+  return s
+})
 
 /* ---- filter nodes for filter panel ---- */
 const filterNodes = computed(() => {
   if (isExternalTab.value) {
-    const items = graphNodes.value.filter(n => !n.isMerged).map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+    const items = rawGraphNodes.value.filter(n => !n.isMerged).map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
     const commNodes = externalCommunityNodes.value.map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
     return [...items, ...commNodes]
   }
-  return graphNodes.value
+  return rawGraphNodes.value
     .filter(n => !n.isMerged)
     .map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
 })
@@ -176,7 +191,7 @@ const externalCommunityNodes = computed(() => {
           label: communityIdLabel(c.communityId),
           nodeCount: 0,
           isExternal: false,
-          hasChildren: allCommunities.value.some(ch => ch.parentId === c.communityId),
+          hasChildren: parentCommIds.value.has(c.communityId),
         })
       }
     })
@@ -201,7 +216,7 @@ function mapCommunityToNode(c: CommunityItem) {
     fileCount: c.fileCount,
     qualityScore: c.qualityScore,
     status: c.status,
-    hasChildren: allCommunities.value.some(ch => ch.parentId === c.communityId),
+    hasChildren: parentCommIds.value.has(c.communityId),
   }
 }
 
@@ -229,10 +244,10 @@ const rawGraphNodes = computed(() => {
     const commId = drillMeta.value.drillCommId
     if (commId) {
       const coms = allCommunities.value
-      const parent = coms.find(c => c.communityId === commId)
+      const parent = commMap.value.get(commId) || null
       if (!parent) return []
       const parentLevel = parent.level || 'L0'
-      const nextLevel = `L${parseInt(parentLevel[1] || '0') + 1}`
+      const nextLevel = `L${parseInt(parentLevel.slice(1) || '0') + 1}`
       const childNodes = coms.filter(c =>
         c.edgeType === parent.edgeType &&
         c.level === nextLevel &&
@@ -243,7 +258,6 @@ const rawGraphNodes = computed(() => {
       const connectedExtIds = new Set<string>()
       if (rootL0Id) {
         for (const e of externalCrossEdges.value) {
-          if (e.source === rootL0Id) connectedExtIds.add(e.target)
           if (e.target === rootL0Id) connectedExtIds.add(e.source)
         }
       }
@@ -285,7 +299,7 @@ const rawGraphNodes = computed(() => {
   }
   const parent = coms.find(c => c.communityId === commId)
   if (!parent) return []
-  const nextLevel = `L${parseInt(parent.level?.[1] || '0') + 1}`
+  const nextLevel = `L${parseInt(parent.level?.slice(1) || '0') + 1}`
   return coms.filter(c =>
     c.edgeType === props.edgeType &&
     c.level === nextLevel &&
@@ -352,7 +366,7 @@ const crossEdges = computed(() => {
   if (isExternalTab.value && !drillMeta.value.drillCommId) return externalCrossEdges.value
 
   const parentComm = drillMeta.value.drillCommId
-    ? allCommunities.value.find(c => c.communityId === drillMeta.value.drillCommId)
+    ? commMap.value.get(drillMeta.value.drillCommId)
     : null
   const et = parentComm?.edgeType || effectiveEdgeType.value
   const lv = drillMeta.value.drillLevel
@@ -423,7 +437,7 @@ const internalHeatmapItems = computed(() => {
     }
     const item = pkgMap.get(key)!
     item.fileCount += e.count || 1
-    const tgtComm = allCommunities.value.find(c => c.communityId === e.target)
+    const tgtComm = commMap.value.get(e.target)
     item.communities.push({ communityId: e.target, name: tgtComm?.name || communityIdLabel(e.target) })
   }
   const result = Array.from(pkgMap.values())
@@ -448,7 +462,7 @@ const drillHeatmapItems = computed(() => {
     }
     const item = pkgMap.get(key)!
     item.fileCount += e.count || 1
-    const tgtComm = allCommunities.value.find(c => c.communityId === e.target)
+    const tgtComm = commMap.value.get(e.target)
     item.communities.push({ communityId: e.target, name: tgtComm?.name || communityIdLabel(e.target) })
   }
   return Array.from(pkgMap.values())
@@ -465,6 +479,7 @@ const drillTableCommunities = computed(() => {
 
 /* ---- unified drill actions ---- */
 async function handleDrill(targetId: string) {
+  if (drilling.value) return
   if (targetId === '__merged__') {
     handleExpandMerged()
     return
@@ -472,20 +487,25 @@ async function handleDrill(targetId: string) {
   expandBatchCount.value = 0
   graphSearch.value = ''
 
-  const com = allCommunities.value.find(c => c.communityId === targetId)
+  const com = commMap.value.get(targetId)
   if (com) {
     if (drillMeta.value.drillCommId === targetId) return
-    const nextLevel = `L${parseInt(com.level?.[1] || '0') + 1}`
-    await communityStore.loadCrossCommunityEdges(props.taskId, com.edgeType, nextLevel)
-    await communityStore.loadCommunityNodeLists(props.taskId, com.edgeType, nextLevel)
-    const label = com.name && com.name !== com.communityId ? com.name : communityIdLabel(com.communityId)
-    drillPath.value.push({
-      key: `comm-${targetId}`,
-      label: label.length > 24 ? label.slice(0, 24) + '\u2026' : label,
-      kind: 'community',
-      commId: targetId,
-      commLevel: nextLevel,
-    })
+    drilling.value = true
+    try {
+      const nextLevel = `L${parseInt(com.level?.[1] || '0') + 1}`
+      await communityStore.loadCrossCommunityEdges(props.taskId, com.edgeType, nextLevel)
+      await communityStore.loadCommunityNodeLists(props.taskId, com.edgeType, nextLevel)
+      const label = com.name && com.name !== com.communityId ? com.name : communityIdLabel(com.communityId)
+      drillPath.value.push({
+        key: `comm-${targetId}`,
+        label: label.length > 24 ? label.slice(0, 24) + '\u2026' : label,
+        kind: 'community',
+        commId: targetId,
+        commLevel: nextLevel,
+      })
+    } finally {
+      drilling.value = false
+    }
     return
   }
 
@@ -525,7 +545,7 @@ function handleResetView() {
 
 function handleNodeContextMenu(nodeId: string) {
   if (nodeId === '__merged__') return
-  const com = allCommunities.value.find(c => c.communityId === nodeId)
+  const com = commMap.value.get(nodeId)
   if (com && com.summary) {
     emit('open-md', {
       taskId: props.taskId,
@@ -558,7 +578,7 @@ watch(() => props.edgeType, () => {
 watch(() => [props.edgeType, drillMeta.value.drillLevel], async ([_et, lv]) => {
   if (!isExternalTab.value || drillMeta.value.drillCommId) {
     const parentComm = drillMeta.value.drillCommId
-      ? allCommunities.value.find(c => c.communityId === drillMeta.value.drillCommId)
+      ? commMap.value.get(drillMeta.value.drillCommId)
       : null
     const et = parentComm?.edgeType || effectiveEdgeType.value
     await communityStore.loadCrossCommunityEdges(props.taskId, et, lv as string)
@@ -578,9 +598,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-  <div class="cgv-container" :class="{ 'cgv-fullscreen': isFullscreen }">
-    <div class="cgv-topbar" v-show="!isFullscreen">
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
+  <div
+    class="cgv-container"
+    :class="{ 'cgv-fullscreen': isFullscreen }"
+  >
+    <div
+      v-show="!isFullscreen"
+      class="cgv-topbar"
+    >
       <GraphBreadcrumb
         :path="drillMeta.breadcrumbSegments"
         @click="handleBreadcrumbClick"
@@ -592,15 +621,15 @@ onUnmounted(() => {
           type="text"
           :placeholder="t('report.searchCommunity', '搜索...')"
           class="cgv-search-input"
-        />
+        >
       </div>
       <GraphToolbar
         v-model:style="graphStyle"
+        v-model:external-view-mode="externalViewMode"
+        v-model:internal-view-mode="internalViewMode"
         :can-roll-up="drillPath.length > 1"
         :external-mode="isExternalTab"
         :filter-active="hiddenNodeIds.size > 0"
-        v-model:external-view-mode="externalViewMode"
-        v-model:internal-view-mode="internalViewMode"
         @roll-up="handleRollUp"
         @fullscreen="enterFullscreen"
         @reset-view="handleResetView"
@@ -611,10 +640,10 @@ onUnmounted(() => {
     <template v-if="isExternalTab">
       <GraphCanvas
         v-if="externalViewMode === 'force'"
+        :key="'ext-force-' + props.edgeType + '-' + drillMeta.drillKey"
         :nodes="graphNodes"
         :edges="crossEdges"
         :style="'d3force'"
-        :key="'ext-force-' + props.edgeType + '-' + drillMeta.drillKey"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
@@ -639,10 +668,10 @@ onUnmounted(() => {
     <template v-else>
       <GraphCanvas
         v-if="internalViewMode === 'force' || internalViewMode === 'dagre'"
+        :key="drillMeta.drillKey + '-' + props.edgeType + '-' + internalViewMode"
         :nodes="graphNodes"
         :edges="crossEdges"
         :style="internalViewMode === 'dagre' ? 'dagre' : 'd3force'"
-        :key="drillMeta.drillKey + '-' + props.edgeType + '-' + internalViewMode"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
@@ -666,7 +695,10 @@ onUnmounted(() => {
       />
     </template>
 
-    <div v-if="isFullscreen" class="cgv-fullscreen-bar">
+    <div
+      v-if="isFullscreen"
+      class="cgv-fullscreen-bar"
+    >
       <div class="fs-left">
         <GraphBreadcrumb
           :path="drillMeta.breadcrumbSegments"
@@ -679,15 +711,15 @@ onUnmounted(() => {
             type="text"
             :placeholder="t('report.searchCommunity', '搜索...')"
             class="cgv-search-input"
-          />
+          >
         </div>
         <GraphToolbar
           v-model:style="graphStyle"
+          v-model:external-view-mode="externalViewMode"
+          v-model:internal-view-mode="internalViewMode"
           :can-roll-up="drillPath.length > 1"
           :external-mode="isExternalTab"
           :filter-active="hiddenNodeIds.size > 0"
-          v-model:external-view-mode="externalViewMode"
-          v-model:internal-view-mode="internalViewMode"
           @roll-up="handleRollUp"
           @fullscreen="exitFullscreen"
           @reset-view="handleResetView"
@@ -695,7 +727,12 @@ onUnmounted(() => {
         />
       </div>
       <div class="fs-actions">
-        <button class="fs-btn" @click="exitFullscreen">{{ t('report.exitFullscreen', '退出全屏') }}</button>
+        <button
+          class="fs-btn"
+          @click="exitFullscreen"
+        >
+          {{ t('report.exitFullscreen', '退出全屏') }}
+        </button>
       </div>
     </div>
 

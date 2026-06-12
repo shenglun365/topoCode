@@ -21,13 +21,21 @@ const emit = defineEmits<{
     >
       <ChevronLeftIcon class="w-3 h-3" />
     </button>
-    <template v-for="(item, idx) in props.path" :key="item.key">
-      <ChevronRightIcon v-if="idx > 0" class="gb-sep w-3 h-3" />
+    <template
+      v-for="(item, idx) in props.path"
+      :key="item.key"
+    >
+      <ChevronRightIcon
+        v-if="idx > 0"
+        class="gb-sep w-3 h-3"
+      />
       <button
         class="gb-item"
         :class="{ active: idx === props.path.length - 1 }"
         @click="emit('click', idx)"
-      >{{ item.label }}</button>
+      >
+        {{ item.label }}
+      </button>
     </template>
   </div>
 </template>

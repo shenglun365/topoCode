@@ -25,7 +25,10 @@ function truncatePath(p: string): string {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <section class="home-section">
     <div class="section-header">
       <FolderIcon class="w-4 h-4" />

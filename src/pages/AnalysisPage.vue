@@ -273,7 +273,10 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
     </template>
 
     <!-- Agent 对话面板（浮动按钮触发） -->
-    <div class="chat-panel" v-if="showChatPanel">
+    <div
+      v-if="showChatPanel"
+      class="chat-panel"
+    >
       <ChatView />
     </div>
 
@@ -309,7 +312,9 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
           <span class="comp-analysis-title">{{ activeTab.title }}</span>
         </div>
         <div class="comp-analysis-body">
-          <p class="text-gray-500 text-sm p-4">{{ t('analysis.communityAnalysisComingSoon') }}</p>
+          <p class="text-gray-500 text-sm p-4">
+            {{ t('analysis.communityAnalysisComingSoon') }}
+          </p>
         </div>
       </div>
     </template>

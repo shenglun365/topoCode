@@ -110,6 +110,8 @@ class GitIgnoreParser:
 
 
 # 默认忽略模式
+# ==================== 默认忽略模式 ====================
+
 DEFAULT_IGNORE_PATTERNS = [
     # 构建产物
     'node_modules/', 'dist/', 'build/', '.next/', '.nuxt/',
@@ -117,29 +119,136 @@ DEFAULT_IGNORE_PATTERNS = [
     'env/', 'venv/', '.venv/',
     'target/', 'out/', 'bin/', 'obj/',
     '*.o', '*.a', '*.so', '*.dylib', '*.dll', '*.exe',
-    # 包管理器
+    # 包管理器 / 依赖目录
     'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
-    'poetry.lock', 'Cargo.lock', 'Go.sum',
-    '*.egg-info/', '*.egg', '.eggs/',
-    # IDE
+    'poetry.lock', 'Cargo.lock', 'Go.sum', 'Gopkg.lock',
+    '*.egg-info/', '*.egg', '.eggs/', 'eggs/',
+    'vendor/', 'bower_components/', 'third_party/', 'deps/',
+    'Pods/', '.build/', 'DerivedData/',
+    '.gradle/', 'gradle/', 'mvnw/', 'mvnw.cmd',
+    'go/pkg/', '.go_build/',
+    '.tox/', '*.whl', 'MANIFEST.in',
+    '.dart_tool/', '.pub-cache/', '.packages/', '.pub/',
+    # IDE / 编辑器
     '.idea/', '.vscode/', '*.swp', '*.swo', '*~',
     '.DS_Store', 'Thumbs.db',
-    # 日志
+    # 版本控制
+    '.git/', '.svn/', '.hg/',
+    # 日志 / 调试
     '*.log', 'npm-debug.log*', 'yarn-debug.log*',
     # 临时文件
     'tmp/', 'temp/', '.cache/',
+    # 云 / 基础设施
+    '.terraform/', 'terraform.tfstate*', 'terraform.tfvars',
+    '.serverless/', 'cdk.out/',
+    # 测试产物
+    'artifacts/', 'coverage/', '.nyc_output/', '.coverage/',
+    # 其他编译中间产物
+    '*.tsbuildinfo', '*.js.map', '*.d.ts.map',
+]
+
+# 各生态额外 ignore 文件名，按优先级排列
+IGNORE_FILE_PRIORITY = [
+    '.gitignore',
+    '.ignore',
+    '.dockerignore',
+    '.npmignore',
+    '.prettierignore',
+    '.eslintignore',
 ]
 
 
-def should_ignore_file(rel_path: str, gitignore_parser: GitIgnoreParser | None = None, is_dir: bool = False) -> bool:
+class MultiIgnoreParser:
+    """多 ignore 文件合并解析器，支持 .gitignore/.dockerignore/.npmignore 等"""
+
+    def __init__(self):
+        self.parsers: list[GitIgnoreParser] = []
+
+    def load_files(self, root_path: str, filenames: list[str] | None = None) -> 'MultiIgnoreParser':
+        """从根目录加载多个 ignore 文件，后者优先级高于前者"""
+        if filenames is None:
+            filenames = IGNORE_FILE_PRIORITY
+        for fname in filenames:
+            fp = os.path.join(root_path, fname)
+            parser = GitIgnoreParser().load_file(fp)
+            if parser.patterns:
+                self.parsers.append(parser)
+        return self
+
+    def is_ignored(self, rel_path: str, is_dir: bool = False) -> bool:
+        """按优先级检查：任一 ignore 文件匹配则忽略"""
+        for parser in self.parsers:
+            if parser.is_ignored(rel_path, is_dir):
+                return True
+        return False
+
+
+def _load_import_config(main_db) -> dict:
+    """从 app_config 表加载导入配置"""
+    config = {
+        "ignore_mode": "strict",
+        "extra_ignore_files": [],
+        "custom_patterns": [],
+    }
+    try:
+        rows = main_db.fetchall("SELECT key, value FROM app_config WHERE key LIKE 'import_%'")
+        for row in rows:
+            key = row["key"]
+            val = row["value"]
+            if key == "import_ignore_mode":
+                config["ignore_mode"] = val
+            elif key == "import_extra_ignore_files":
+                config["extra_ignore_files"] = json.loads(val) if val else []
+            elif key == "import_custom_patterns":
+                config["custom_patterns"] = json.loads(val) if val else []
+    except Exception:
+        pass
+    return config
+
+
+def build_effective_ignore_patterns(config: dict) -> list[str]:
+    """根据配置构建有效的忽略模式列表"""
+    mode = config.get("ignore_mode", "standard")
+    custom = config.get("custom_patterns", [])
+
+    if mode == "minimal":
+        base = [p for p in DEFAULT_IGNORE_PATTERNS if any(
+            kw in p for kw in ['node_modules', '__pycache__', '.git/', '.DS_Store',
+                               '*.pyc', '*.log', '.idea/', '.vscode/']
+        )]
+    elif mode == "strict":
+        base = list(DEFAULT_IGNORE_PATTERNS)
+        base.extend([
+            'test/', 'tests/', '__tests__/', 'spec/', 'e2e/',
+            'docs/', 'doc/', 'examples/', 'example/',
+            '*.md', '*.txt', '*.rst',
+            '*.svg', '*.png', '*.jpg', '*.jpeg', '*.gif', '*.ico',
+            '.github/', '.gitlab/',
+        ])
+    else:
+        base = list(DEFAULT_IGNORE_PATTERNS)
+
+    seen = set(base)
+    for p in custom:
+        if p not in seen:
+            base.append(p)
+            seen.add(p)
+    return base
+
+
+def should_ignore_file(rel_path: str,
+                       gitignore_parser: GitIgnoreParser | MultiIgnoreParser | None = None,
+                       is_dir: bool = False,
+                       extra_patterns: list[str] | None = None) -> bool:
     """检查文件是否应该被忽略"""
-    # 检查 .gitignore
+    # 检查 ignore 文件
     if gitignore_parser:
         if gitignore_parser.is_ignored(rel_path, is_dir):
             return True
 
-    # 检查默认忽略模式
-    for pattern in DEFAULT_IGNORE_PATTERNS:
+    # 检查默认 + 自定义忽略模式
+    patterns = extra_patterns or DEFAULT_IGNORE_PATTERNS
+    for pattern in patterns:
         if fnmatch.fnmatch(rel_path, pattern):
             return True
         if fnmatch.fnmatch(os.path.basename(rel_path), pattern):
@@ -194,10 +303,16 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not os.path.isdir(path):
             raise FileNotFoundError(f"Directory not found: {path}")
 
-        # 加载 .gitignore
-        logger.info(f"[import] 加载 .gitignore...")
-        gitignore = GitIgnoreParser().load_file(os.path.join(path, '.gitignore'))
-        logger.info(f"[import] .gitignore 加载完成, 耗时 {time.time() - t0:.2f}s")
+        # 加载系统导入配置
+        import_config = _load_import_config(main_db)
+        effective_patterns = build_effective_ignore_patterns(import_config)
+
+        # 加载多种 ignore 文件 (.gitignore, .dockerignore, .npmignore, .ignore 等)
+        extra_ignore_files = import_config.get("extra_ignore_files", [])
+        ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
+        logger.info(f"[import] 加载 ignore 文件: {ignore_filenames}")
+        gitignore = MultiIgnoreParser().load_files(path, ignore_filenames)
+        logger.info(f"[import] ignore 文件加载完成, 耗时 {time.time() - t0:.2f}s")
 
         # 创建项目库
         project_id = f"proj-{uuid.uuid4().hex[:8]}"
@@ -209,7 +324,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         # 单次遍历：同时完成语言检测和文件扫描
         logger.info(f"[import] 开始扫描文件...")
         scan_t0 = time.time()
-        file_count, language = await _scan_and_import(project_db, path, gitignore, server, project_id)
+        file_count, language = await _scan_and_import(project_db, path, gitignore, server, project_id, extra_patterns=effective_patterns)
         scan_elapsed = time.time() - scan_t0
         logger.info(f"[import] 扫描完成: {file_count} 个文件, 主语言={language}, 耗时 {scan_elapsed:.2f}s")
 
@@ -279,14 +394,20 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(id)
         root_path = project["root_path"]
 
-        # 加载 .gitignore
-        gitignore = GitIgnoreParser().load_file(os.path.join(root_path, '.gitignore'))
+        # 加载系统导入配置
+        import_config = _load_import_config(main_db)
+        effective_patterns = build_effective_ignore_patterns(import_config)
+
+        # 加载多种 ignore 文件
+        extra_ignore_files = import_config.get("extra_ignore_files", [])
+        ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
+        gitignore = MultiIgnoreParser().load_files(root_path, ignore_filenames)
 
         # 清空旧文件
         project_db.execute("DELETE FROM source_files")
 
         # 重新扫描
-        file_count = _scan_file_tree(project_db, root_path, root_path, None, gitignore)
+        file_count = _scan_file_tree(project_db, root_path, root_path, None, gitignore, extra_patterns=effective_patterns)
 
         # 重新检测语言（从 source_files 统计最常见语言）
         lang_row = project_db.fetchone(
@@ -1243,6 +1364,34 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             params.append(end_date)
         main_db.execute(sql, tuple(params))
 
+    # ==================== 导入配置 ====================
+
+    @server.register("settings.getImportConfig")
+    def get_import_config():
+        """获取导入配置（忽略模式、自定义模式、额外 ignore 文件）"""
+        return _load_import_config(main_db)
+
+    @server.register("settings.setImportConfig")
+    def set_import_config(ignore_mode: str = None, custom_patterns: list = None, extra_ignore_files: list = None):
+        """保存导入配置"""
+        now = datetime.now().isoformat()
+        if ignore_mode is not None:
+            main_db.execute(
+                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+                ("import_ignore_mode", ignore_mode, now),
+            )
+        if custom_patterns is not None:
+            main_db.execute(
+                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+                ("import_custom_patterns", json.dumps(custom_patterns), now),
+            )
+        if extra_ignore_files is not None:
+            main_db.execute(
+                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+                ("import_extra_ignore_files", json.dumps(extra_ignore_files), now),
+            )
+        return _load_import_config(main_db)
+
     return server
 
 
@@ -1446,7 +1595,7 @@ def register_render_methods(server: ZMQServer, multi_db: MultiDBManager):
 
 # ==================== 辅助函数 ====================
 
-async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParser | None = None, server=None, project_id: str = "") -> tuple:
+async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParser | MultiIgnoreParser | None = None, server=None, project_id: str = "", extra_patterns: list[str] | None = None) -> tuple:
     """
     单次遍历完成语言检测 + 文件扫描 + 事务批量写入
     返回 (file_count, primary_language)
@@ -1515,13 +1664,14 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                         "progress": progress_pct,
                         "fileCount": file_count,
                         "totalEstimate": total_estimate,
+                        "ignoredCount": ignored_count,
                         "phase": "scan",
                     })
 
             rel_path = os.path.relpath(entry.path, root_path)
 
             # 跳过被忽略的文件/目录
-            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir()):
+            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):
                 ignored_count += 1
                 continue
 
@@ -1617,6 +1767,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                         "progress": min(write_pct, 99),
                         "fileCount": file_count,
                         "totalEstimate": total_estimate,
+                        "ignoredCount": ignored_count,
                         "phase": "write",
                         "batch": batch_num,
                         "totalBatches": num_batches,
@@ -1657,7 +1808,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
     return file_count, primary_language
 
 
-def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str, parent_path: str = None, gitignore: GitIgnoreParser | None = None) -> int:
+def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str, parent_path: str = None, gitignore: GitIgnoreParser | MultiIgnoreParser | None = None, extra_patterns: list[str] | None = None) -> int:
     """
     扫描文件树到项目库（相对路径 + MD5 哈希，应用 gitignore 过滤）
     返回文件数量
@@ -1670,7 +1821,7 @@ def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str
             rel_path = os.path.relpath(entry.path, root_path)
 
             # 跳过被忽略的文件/目录
-            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir()):
+            if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):
                 continue
 
             ext = os.path.splitext(entry.name)[1].lower()

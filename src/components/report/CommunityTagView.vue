@@ -99,9 +99,18 @@ function levelLabel(lv: string): string {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-  <div ref="containerRef" class="ctv-container">
-    <div v-if="!isExternalTab" class="ctv-level-filter">
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
+  <div
+    ref="containerRef"
+    class="ctv-container"
+  >
+    <div
+      v-if="!isExternalTab"
+      class="ctv-level-filter"
+    >
       <span class="level-filter-label">{{ t('report.level', '层级') }}:</span>
       <button
         v-for="lv in props.availableLevels"
@@ -109,10 +118,15 @@ function levelLabel(lv: string): string {
         class="level-filter-btn"
         :class="{ active: selectedLevel === lv }"
         @click="selectedLevel = lv; page = 1"
-      >{{ levelLabel(lv) }}</button>
+      >
+        {{ levelLabel(lv) }}
+      </button>
     </div>
 
-    <div v-if="!isExternalTab" class="arch-tags">
+    <div
+      v-if="!isExternalTab"
+      class="arch-tags"
+    >
       <div
         v-for="item in pagedCommunities"
         :key="item.id"
@@ -124,12 +138,18 @@ function levelLabel(lv: string): string {
         <span class="tag-name">{{ commName(item) }}</span>
         <span class="tag-count">{{ item.nodeCount }}</span>
       </div>
-      <div v-if="filteredCommunities.length === 0" class="arch-empty">
+      <div
+        v-if="filteredCommunities.length === 0"
+        class="arch-empty"
+      >
         {{ props.search ? t('report.noSearchResults', '无匹配社区') : t('report.noCommunities', '该视角下无社区数据') }}
       </div>
     </div>
 
-    <div v-if="isExternalTab && props.externalStats" class="arch-tags">
+    <div
+      v-if="isExternalTab && props.externalStats"
+      class="arch-tags"
+    >
       <template v-if="props.edgeType === 'EXTERNAL_INCLUDE'">
         <div
           v-for="dep in props.externalStats.externalDeps.slice(0, 50)"
@@ -152,24 +172,44 @@ function levelLabel(lv: string): string {
           <span class="tag-count">{{ call.count }}</span>
         </div>
       </template>
-      <div v-if="props.edgeType === 'EXTERNAL_INCLUDE' && (!props.externalStats.externalDeps || props.externalStats.externalDeps.length === 0)" class="arch-empty">
+      <div
+        v-if="props.edgeType === 'EXTERNAL_INCLUDE' && (!props.externalStats.externalDeps || props.externalStats.externalDeps.length === 0)"
+        class="arch-empty"
+      >
         {{ t('report.noCommunities', '无外部依赖数据') }}
       </div>
-      <div v-if="props.edgeType === 'EXTERNAL_CALL' && (!props.externalStats.externalCalls || props.externalStats.externalCalls.length === 0)" class="arch-empty">
+      <div
+        v-if="props.edgeType === 'EXTERNAL_CALL' && (!props.externalStats.externalCalls || props.externalStats.externalCalls.length === 0)"
+        class="arch-empty"
+      >
         {{ t('report.noCommunities', '无外部调用数据') }}
       </div>
     </div>
 
-    <div v-if="isExternalTab && !props.externalStats" class="arch-empty">
+    <div
+      v-if="isExternalTab && !props.externalStats"
+      class="arch-empty"
+    >
       {{ t('report.noCommunities', '该视角下无数据') }}
     </div>
 
-    <div v-if="!isExternalTab && totalPages > 1" class="ctv-pagination">
-      <button class="btn btn-ghost btn-xs" :disabled="page <= 1" @click="page--">
+    <div
+      v-if="!isExternalTab && totalPages > 1"
+      class="ctv-pagination"
+    >
+      <button
+        class="btn btn-ghost btn-xs"
+        :disabled="page <= 1"
+        @click="page--"
+      >
         {{ t('common.prev', '上一页') }}
       </button>
       <span class="ctv-page-info">{{ page }} / {{ totalPages }} ({{ filteredCommunities.length }})</span>
-      <button class="btn btn-ghost btn-xs" :disabled="page >= totalPages" @click="page++">
+      <button
+        class="btn btn-ghost btn-xs"
+        :disabled="page >= totalPages"
+        @click="page++"
+      >
         {{ t('common.next', '下一页') }}
       </button>
     </div>

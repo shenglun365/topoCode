@@ -92,8 +92,14 @@ const viewModeLabel = computed(() => {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
-  <section v-if="hasAnyCommunity || isExternalTab" class="ca-section">
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
+  <section
+    v-if="hasAnyCommunity || isExternalTab"
+    class="ca-section"
+  >
     <div class="section-header">
       <RectangleGroupIcon class="w-4 h-4" />
       <span>{{ t('report.communityArchitecture', '组件架构') }}</span>
@@ -131,13 +137,29 @@ const viewModeLabel = computed(() => {
           @click="viewMode = viewMode === 'tag' ? 'graph' : 'tag'"
         >
           <template v-if="viewMode === 'tag'">
-            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M10 3a1 1 0 01.993.883L11 4v4.586L16.414 14l.292-.293a1 1 0 011.497 1.32l-.083.094L15.415 18l-2.707-2.707a1 1 0 011.32-1.497l.094.083L14.414 14 9 8.586V4a1 1 0 011-1z" clip-rule="evenodd"/>
+            <svg
+              class="w-4 h-4"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M10 3a1 1 0 01.993.883L11 4v4.586L16.414 14l.292-.293a1 1 0 011.497 1.32l-.083.094L15.415 18l-2.707-2.707a1 1 0 011.32-1.497l.094.083L14.414 14 9 8.586V4a1 1 0 011-1z"
+                clip-rule="evenodd"
+              />
             </svg>
           </template>
           <template v-else>
-            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd"/>
+            <svg
+              class="w-4 h-4"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                clip-rule="evenodd"
+              />
             </svg>
           </template>
           <span class="view-mode-text">{{ viewMode === 'tag' ? '结构图' : '标签' }}</span>
@@ -148,35 +170,39 @@ const viewModeLabel = computed(() => {
             type="text"
             :placeholder="t('report.searchCommunity', '搜索组件...')"
             class="arch-search-input"
-          />
+          >
         </div>
       </div>
     </div>
 
     <div class="arch-tabs">
       <button
-        class="arch-tab" :class="{ active: commEdgeType === 'INCLUDE' }"
+        class="arch-tab"
+        :class="{ active: commEdgeType === 'INCLUDE' }"
         @click="commEdgeType = 'INCLUDE'"
       >
         <FolderIcon class="w-3.5 h-3.5" />
         {{ t('report.internalDependency', '内部依赖分析') }} ({{ props.depCommunityCount }})
       </button>
       <button
-        class="arch-tab" :class="{ active: commEdgeType === 'CALL' }"
+        class="arch-tab"
+        :class="{ active: commEdgeType === 'CALL' }"
         @click="commEdgeType = 'CALL'"
       >
         <ChartBarIcon class="w-3.5 h-3.5" />
         {{ t('report.internalCall', '内部调用分析') }} ({{ props.callCommunityCount }})
       </button>
       <button
-        class="arch-tab" :class="{ active: commEdgeType === 'EXTERNAL_INCLUDE' }"
+        class="arch-tab"
+        :class="{ active: commEdgeType === 'EXTERNAL_INCLUDE' }"
         @click="commEdgeType = 'EXTERNAL_INCLUDE'"
       >
         <FolderIcon class="w-3.5 h-3.5" />
         {{ t('report.externalDependency', '外部依赖视图') }}
       </button>
       <button
-        class="arch-tab" :class="{ active: commEdgeType === 'EXTERNAL_CALL' }"
+        class="arch-tab"
+        :class="{ active: commEdgeType === 'EXTERNAL_CALL' }"
         @click="commEdgeType = 'EXTERNAL_CALL'"
       >
         <ChartBarIcon class="w-3.5 h-3.5" />

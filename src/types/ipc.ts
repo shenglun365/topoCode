@@ -397,6 +397,13 @@ export interface SkillConfigItem {
   enabled: boolean
 }
 
+/** 导入配置 */
+export interface ImportConfig {
+  ignoreMode: 'standard' | 'strict' | 'minimal'
+  extraIgnoreFiles: string[]
+  customPatterns: string[]
+}
+
 /** 后端状态 */
 export interface BackendStatus {
   status: 'running' | 'stopped' | 'error' | 'restarting'
@@ -572,6 +579,8 @@ export interface IPCAPI {
     updateSkill: (params: { id: string; enabled: boolean }) => Promise<SkillConfigItem>
     getBindings: () => Promise<Record<string, string>>
     updateBindings: (params: { bindings: Record<string, string> }) => Promise<Record<string, string>>
+    getImportConfig: () => Promise<ImportConfig>
+    setImportConfig: (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[] }) => Promise<ImportConfig>
   }
 
   // 模型用量统计

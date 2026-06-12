@@ -161,6 +161,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
 
     # 6. 递归分析子社区
     total_count = saved
+    max_depth = 0
     for depth in range(1, 6):  # 最多 6 层
         sub_communities = _get_sub_communities(
             task_id, edge_type, level, graph, min_node_cnt, analysis_store
@@ -185,6 +186,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         if new_saved == 0:
             break
         level = new_level
+        max_depth = depth
 
     fallback_tag = " (备选)" if use_fallback else ""
     logger.info(
@@ -200,7 +202,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
 
     return {
         "community_count": total_count,
-        "levels": len(level) - 1 if level else 0,
+        "levels": max_depth + 1 if total_count > 0 else 0,
         "hub_count": hub_saved,
         "orphan_count": orphan_saved,
     }
@@ -560,19 +562,7 @@ def _save_communities(task_id: str, edge_type: str, level: str,
 
         node_count = len(comm_nodes)
         edge_count = len(edge_list)
-        # 计算社区覆盖的去重文件数：通过 node_lookup 获取每个节点所属的文件路径
-        file_ids = set()
-        if node_lookup:
-            for nid in comm_nodes:
-                info = node_lookup.get(nid)
-                if info and info[0]:
-                    file_ids.add(info[0])
-        else:
-            for nid in comm_nodes:
-                fid = nid.split(':')[0] if ':' in (nid or '') else nid
-                if fid:
-                    file_ids.add(fid)
-        file_count = len(file_ids)
+        file_count = len(set(comm_nodes)) if comm_nodes else 0
 
         comm_docs.append({
             "task_id": task_id,

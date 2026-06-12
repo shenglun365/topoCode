@@ -203,7 +203,10 @@ defineExpose({ loadGroups })
 
       <!-- 分组树 -->
       <div class="group-filter-tree">
-        <template v-for="group in groups" :key="group.id">
+        <template
+          v-for="group in groups"
+          :key="group.id"
+        >
           <div v-if="matchesSearch(group)">
             <div
               class="group-tree-item"
@@ -234,7 +237,10 @@ defineExpose({ loadGroups })
             </div>
             <!-- 子节点 -->
             <div v-if="isExpanded(group) && group.children && group.children.length > 0">
-              <template v-for="child in group.children" :key="child.id">
+              <template
+                v-for="child in group.children"
+                :key="child.id"
+              >
                 <div v-if="matchesSearch(child)">
                   <div
                     class="group-tree-item"
@@ -255,7 +261,10 @@ defineExpose({ loadGroups })
                   </div>
                   <!-- 递归渲染更深层级 -->
                   <div v-if="child.children && child.children.length > 0">
-                    <template v-for="gc in child.children" :key="gc.id">
+                    <template
+                      v-for="gc in child.children"
+                      :key="gc.id"
+                    >
                       <div v-if="matchesSearch(gc)">
                         <div
                           class="group-tree-item"

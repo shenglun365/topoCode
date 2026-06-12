@@ -171,28 +171,68 @@ function commLabel(c: { id: string; name?: string }): string {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div class="ehm-container">
     <div class="ehm-toolbar">
       <span class="ehm-label">{{ t('report.matrixSize', '矩阵') }}: {{ communities.length }}×{{ packages.length }}</span>
-      <button class="ehm-zoom-btn" :disabled="scale <= 0.4" @click="scale = Math.max(0.4, scale - 0.2)" title="Zoom out">−</button>
+      <button
+        class="ehm-zoom-btn"
+        :disabled="scale <= 0.4"
+        title="Zoom out"
+        @click="scale = Math.max(0.4, scale - 0.2)"
+      >
+        −
+      </button>
       <span class="ehm-zoom-label">{{ Math.round(scale * 100) }}%</span>
-      <button class="ehm-zoom-btn" :disabled="scale >= 3.0" @click="scale = Math.min(3.0, scale + 0.2)" title="Zoom in">+</button>
-      <button class="ehm-zoom-btn" :disabled="scale === 1" @click="scale = 1" title="Reset zoom">{{ t('report.resetView', '重置') }}</button>
+      <button
+        class="ehm-zoom-btn"
+        :disabled="scale >= 3.0"
+        title="Zoom in"
+        @click="scale = Math.min(3.0, scale + 0.2)"
+      >
+        +
+      </button>
+      <button
+        class="ehm-zoom-btn"
+        :disabled="scale === 1"
+        title="Reset zoom"
+        @click="scale = 1"
+      >
+        {{ t('report.resetView', '重置') }}
+      </button>
     </div>
-    <div ref="scrollRef" class="ehm-scroll" v-if="matrix.length > 0 && packages.length > 0" @wheel="onWheel">
-      <div class="ehm-table-wrap" :style="zoomStyle">
+    <div
+      v-if="matrix.length > 0 && packages.length > 0"
+      ref="scrollRef"
+      class="ehm-scroll"
+      @wheel="onWheel"
+    >
+      <div
+        class="ehm-table-wrap"
+        :style="zoomStyle"
+      >
         <table class="ehm-table">
           <thead>
             <tr>
-              <th class="ehm-corner"></th>
-              <th v-for="pkg in packages" :key="pkg" class="ehm-col" :title="pkg">
+              <th class="ehm-corner" />
+              <th
+                v-for="pkg in packages"
+                :key="pkg"
+                class="ehm-col"
+                :title="pkg"
+              >
                 {{ pkg.length > 8 ? pkg.slice(0, 8) + '\u2026' : pkg }}
               </th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="mr in matrix" :key="mr.comm.id">
+            <tr
+              v-for="mr in matrix"
+              :key="mr.comm.id"
+            >
               <td
                 class="ehm-row-label"
                 :class="{ 'ehm-row-drillable': mr.comm.hasChildren }"
@@ -209,19 +249,29 @@ function commLabel(c: { id: string; name?: string }): string {
                 @mouseleave="hideTooltip"
                 @dblclick="mr.comm.hasChildren && emit('drill', mr.comm.id)"
               >
-                <span v-if="count > 0" class="cell-text">{{ count }}</span>
+                <span
+                  v-if="count > 0"
+                  class="cell-text"
+                >{{ count }}</span>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
-    <div v-else class="ehm-empty">{{ t('report.noCommunities', '无关联数据') }}</div>
+    <div
+      v-else
+      class="ehm-empty"
+    >
+      {{ t('report.noCommunities', '无关联数据') }}
+    </div>
     <div
       v-if="tooltip"
       class="ehm-tooltip"
       :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
-    >{{ tooltip }}</div>
+    >
+      {{ tooltip }}
+    </div>
   </div>
 </template>
 

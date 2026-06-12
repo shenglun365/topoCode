@@ -355,6 +355,7 @@ function getConfigSummary(task: AnalysisTask): string {
             v-if="task.status === 'error'"
             class="btn btn-ghost btn-xs"
             :title="t('analysis.retryTask')"
+            :disabled="analysisStore.isTaskLoading(task.id)"
             @click="onRerunTask(task.id)"
           >
             <ArrowPathIcon class="w-3.5 h-3.5" />
@@ -365,6 +366,7 @@ function getConfigSummary(task: AnalysisTask): string {
             v-if="task.status === 'pending'"
             class="btn btn-ghost btn-xs btn-primary"
             :title="t('analysis.runTask')"
+            :disabled="analysisStore.isTaskLoading(task.id)"
             @click="onRunTask(task.id)"
           >
             <PlayIcon class="w-3.5 h-3.5" />
@@ -375,6 +377,7 @@ function getConfigSummary(task: AnalysisTask): string {
             v-if="task.status !== 'running' && task.status !== 'pending'"
             class="btn btn-ghost btn-xs"
             :title="t('analysis.rerunTask')"
+            :disabled="analysisStore.isTaskLoading(task.id)"
             @click="onRerunTask(task.id)"
           >
             <ArrowPathIcon class="w-3.5 h-3.5" />

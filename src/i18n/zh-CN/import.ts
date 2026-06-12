@@ -26,5 +26,7 @@ export default { import: {
   sortBySize: '按大小',
   sortByTime: '按时间',
   sortByType: '按类型',
+  filterHint: '导入时将自动过滤非项目依赖文件',
+  filterSettings: '配置过滤规则',
 },
 }

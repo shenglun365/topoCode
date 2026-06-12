@@ -74,29 +74,61 @@ watch(() => props.taskId, async (newId) => {
     <div class="explorer-header">
       <CubeIcon class="hdr-icon" />
       <span>{{ t('arch.explorer', '架构') }}</span>
-      <span v-if="loading" class="loading">...</span>
+      <span
+        v-if="loading"
+        class="loading"
+      >...</span>
     </div>
     <div class="explorer-body">
-      <div v-if="!props.taskId" class="empty">
+      <div
+        v-if="!props.taskId"
+        class="empty"
+      >
         <p>{{ t('arch.noTask', '请先运行项目分析') }}</p>
       </div>
       <template v-else>
         <!-- INCLUDE communities -->
-        <div class="section" v-if="depCommunities.length">
+        <div
+          v-if="depCommunities.length"
+          class="section"
+        >
           <div class="section-title">
             <CircleStackIcon class="sec-icon" />
             {{ t('arch.depCommunities', '依赖社区') }} ({{ depCommunities.length }})
           </div>
-          <div v-for="item in depCommunities" :key="item.id" class="comm-item">
-            <div class="comm-row" @click="toggleExpand(item.id)">
-              <ChevronRightIcon v-if="!expanded.has(item.id)" class="expand-icon" />
-              <ChevronDownIcon v-else class="expand-icon" />
+          <div
+            v-for="item in depCommunities"
+            :key="item.id"
+            class="comm-item"
+          >
+            <div
+              class="comm-row"
+              @click="toggleExpand(item.id)"
+            >
+              <ChevronRightIcon
+                v-if="!expanded.has(item.id)"
+                class="expand-icon"
+              />
+              <ChevronDownIcon
+                v-else
+                class="expand-icon"
+              />
               <span class="comm-name">{{ item.name || item.communityId }}</span>
               <span class="comm-meta">{{ item.nodeCount }} nodes</span>
-              <span v-if="getHubLabel(item)" class="hub-badge">{{ getHubLabel(item) }}</span>
+              <span
+                v-if="getHubLabel(item)"
+                class="hub-badge"
+              >{{ getHubLabel(item) }}</span>
             </div>
-            <div v-if="expanded.has(item.id)" class="comm-children">
-              <div v-for="child in childrenOf(item.communityId)" :key="child.id" class="child-item">
+            <div
+              v-if="expanded.has(item.id)"
+              class="comm-children"
+            >
+              <div
+                v-for="child in childrenOf(item.communityId)"
+                :key="child.id"
+                class="child-item"
+              >
                 {{ child.name || child.communityId }}
                 <span class="child-meta">{{ child.nodeCount }}n</span>
               </div>
@@ -104,21 +136,47 @@ watch(() => props.taskId, async (newId) => {
           </div>
         </div>
         <!-- CALL communities -->
-        <div class="section" v-if="callCommunities.length">
+        <div
+          v-if="callCommunities.length"
+          class="section"
+        >
           <div class="section-title">
             <CubeIcon class="sec-icon" />
             {{ t('arch.callCommunities', '调用社区') }} ({{ callCommunities.length }})
           </div>
-          <div v-for="item in callCommunities" :key="item.id" class="comm-item">
-            <div class="comm-row" @click="toggleExpand(item.id)">
-              <ChevronRightIcon v-if="!expanded.has(item.id)" class="expand-icon" />
-              <ChevronDownIcon v-else class="expand-icon" />
+          <div
+            v-for="item in callCommunities"
+            :key="item.id"
+            class="comm-item"
+          >
+            <div
+              class="comm-row"
+              @click="toggleExpand(item.id)"
+            >
+              <ChevronRightIcon
+                v-if="!expanded.has(item.id)"
+                class="expand-icon"
+              />
+              <ChevronDownIcon
+                v-else
+                class="expand-icon"
+              />
               <span class="comm-name">{{ item.name || item.communityId }}</span>
               <span class="comm-meta">{{ item.nodeCount }} nodes</span>
-              <span v-if="getHubLabel(item)" class="hub-badge">{{ getHubLabel(item) }}</span>
+              <span
+                v-if="getHubLabel(item)"
+                class="hub-badge"
+              >{{ getHubLabel(item) }}</span>
             </div>
-            <div v-if="expanded.has(item.id)" class="comm-children">
-              <div v-for="child in childrenOf(item.communityId)" :key="child.id" class="child-item">
+            <div
+              v-if="expanded.has(item.id)"
+              class="comm-children"
+            >
+              <div
+                v-for="child in childrenOf(item.communityId)"
+                :key="child.id"
+                class="child-item"
+              >
                 {{ child.name || child.communityId }}
                 <span class="child-meta">{{ child.nodeCount }}n</span>
               </div>

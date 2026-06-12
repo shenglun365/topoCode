@@ -36,6 +36,42 @@ _stop_flags: Dict[str, bool] = {}
 _executing_tasks: set = set()  # 正在执行的任务 ID 集合
 
 logger = logging.getLogger(__name__)
+# ==================== 任务串行队列 ====================
+# 确保同一时间只有一个分析任务在执行，避免资源竞争和 SQLite 事务冲突
+_task_queue: asyncio.Queue | None = None
+_queue_consumer: asyncio.Task | None = None
+
+
+async def _run_next_task():
+    """队列消费者：一次取一个任务执行，完成后取下一个"""
+    global _task_queue
+    while True:
+        coro = await _task_queue.get()
+        try:
+            await coro
+        except Exception as e:
+            logger.error(f"[QUEUE] 任务执行异常: {e}", exc_info=True)
+        finally:
+            _task_queue.task_done()
+
+
+async def enqueue_analysis_task(server, multi_db, task_id: str, run_id: str, start_time: float):
+    """将分析任务提交到串行队列，排队等待执行"""
+    global _task_queue, _queue_consumer
+
+    if _task_queue is None:
+        _task_queue = asyncio.Queue(maxsize=100)
+
+    if _queue_consumer is None or _queue_consumer.done():
+        _queue_consumer = asyncio.create_task(_run_next_task())
+
+    # 入队即标记为执行中，防止 stop_task 误判为孤儿任务
+    _executing_tasks.add(task_id)
+    coro = _execute_task(server, multi_db, task_id, run_id, start_time)
+    await _task_queue.put(coro)
+
+
+
 
 
 def set_stop_flag(task_id: str):

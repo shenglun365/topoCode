@@ -23,5 +23,7 @@ export default { import: {
   sortBySize: 'By Size',
   sortByTime: 'By Time',
   sortByType: 'By Type',
+  filterHint: 'Non-project dependency files will be filtered during import',
+  filterSettings: 'Configure filter rules',
 },
 }

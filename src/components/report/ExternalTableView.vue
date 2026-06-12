@@ -73,6 +73,7 @@ function toggleSort(col: 'name' | 'count' | 'communities') {
     sortBy.value = col
     sortDir.value = 'desc'
   }
+  page.value = 1
 }
 
 function toggleExpand(id: string) {
@@ -100,7 +101,10 @@ watch(search, () => { page.value = 1 })
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div class="etv-container">
     <div class="etv-toolbar">
       <input
@@ -108,68 +112,107 @@ watch(search, () => { page.value = 1 })
         type="text"
         :placeholder="t('report.searchCommunity', '搜索...')"
         class="etv-search"
-      />
+      >
       <span class="etv-total">{{ sorted.length }} {{ t('report.items', '条') }}</span>
     </div>
     <div class="etv-table-wrap">
       <table class="etv-table">
         <thead>
           <tr>
-            <th class="th-expand"></th>
-            <th class="th-name sortable"
+            <th class="th-expand" />
+            <th
+              class="th-name sortable"
               :class="{ active: sortBy === 'name' }"
-              @click="toggleSort('name')">
+              @click="toggleSort('name')"
+            >
               {{ props.edgeType === 'EXTERNAL_INCLUDE' ? t('report.externalDependency', '外部包') : t('report.externalCall', '外部API') }}
               <span class="sort-icon">{{ sortIcon('name') }}</span>
             </th>
-            <th class="th-count sortable"
+            <th
+              class="th-count sortable"
               :class="{ active: sortBy === 'count' }"
-              @click="toggleSort('count')">
+              @click="toggleSort('count')"
+            >
               {{ t('report.fileCount', '引用数') }}
               <span class="sort-icon">{{ sortIcon('count') }}</span>
             </th>
-            <th class="th-comm sortable"
+            <th
+              class="th-comm sortable"
               :class="{ active: sortBy === 'communities' }"
-              @click="toggleSort('communities')">
+              @click="toggleSort('communities')"
+            >
               {{ t('report.l0Community', '关联社区') }}
               <span class="sort-icon">{{ sortIcon('communities') }}</span>
             </th>
           </tr>
         </thead>
         <tbody>
-          <template v-for="item in paged" :key="itemKey(item)">
+          <template
+            v-for="item in paged"
+            :key="itemKey(item)"
+          >
             <tr
               class="etv-row"
               @click="toggleExpand(itemKey(item))"
               @dblclick="emit('drill', itemKey(item))"
             >
               <td class="td-expand">
-                <span class="expand-icon" :class="{ open: expanded.has(itemKey(item)) }">&#9654;</span>
+                <span
+                  class="expand-icon"
+                  :class="{ open: expanded.has(itemKey(item)) }"
+                >&#9654;</span>
               </td>
-              <td class="td-name" :title="itemKey(item)">{{ itemKey(item) }}</td>
-              <td class="td-count">{{ itemCount(item) }}</td>
+              <td
+                class="td-name"
+                :title="itemKey(item)"
+              >
+                {{ itemKey(item) }}
+              </td>
+              <td class="td-count">
+                {{ itemCount(item) }}
+              </td>
               <td class="td-comm">
                 <span
                   v-for="c in (item.communities || []).slice(0, 5)"
                   :key="c.communityId"
                   class="comm-chip"
                 >{{ commDisplay(c) }}</span>
-                <span v-if="(item.communities || []).length > 5" class="comm-more">
+                <span
+                  v-if="(item.communities || []).length > 5"
+                  class="comm-more"
+                >
                   +{{ (item.communities || []).length - 5 }}
                 </span>
               </td>
             </tr>
-            <tr v-if="expanded.has(itemKey(item))" class="etv-expand-row">
+            <tr
+              v-if="expanded.has(itemKey(item))"
+              class="etv-expand-row"
+            >
               <td colspan="4">
                 <div class="etv-expand-content">
                   <div class="expand-section">
                     <span class="expand-label">{{ t('report.files', '引用文件') }} ({{ item.files.length }}):</span>
                     <div class="expand-files">
-                      <div v-for="f in item.files.slice(0, 30)" :key="f" class="file-item">{{ f }}</div>
-                      <div v-if="item.files.length > 30" class="file-more">... {{ t('report.andMore', '等') }} {{ item.files.length - 30 }} {{ t('report.moreFiles', '个文件') }}</div>
+                      <div
+                        v-for="f in item.files.slice(0, 30)"
+                        :key="f"
+                        class="file-item"
+                      >
+                        {{ f }}
+                      </div>
+                      <div
+                        v-if="item.files.length > 30"
+                        class="file-more"
+                      >
+                        ... {{ t('report.andMore', '等') }} {{ item.files.length - 30 }} {{ t('report.moreFiles', '个文件') }}
+                      </div>
                     </div>
                   </div>
-                  <div v-if="(item.communities || []).length > 0" class="expand-section">
+                  <div
+                    v-if="(item.communities || []).length > 0"
+                    class="expand-section"
+                  >
                     <span class="expand-label">{{ t('report.allCommunities', '全部关联社区') }}:</span>
                     <div class="expand-communities">
                       <span
@@ -184,15 +227,35 @@ watch(search, () => { page.value = 1 })
             </tr>
           </template>
           <tr v-if="paged.length === 0">
-            <td colspan="4" class="etv-empty">{{ t('report.noSearchResults', '无匹配结果') }}</td>
+            <td
+              colspan="4"
+              class="etv-empty"
+            >
+              {{ t('report.noSearchResults', '无匹配结果') }}
+            </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div v-if="totalPages > 1" class="etv-pagination">
-      <button class="btn btn-ghost btn-xs" :disabled="page <= 1" @click="page--">{{ t('common.prev', '上一页') }}</button>
+    <div
+      v-if="totalPages > 1"
+      class="etv-pagination"
+    >
+      <button
+        class="btn btn-ghost btn-xs"
+        :disabled="page <= 1"
+        @click="page--"
+      >
+        {{ t('common.prev', '上一页') }}
+      </button>
       <span class="etv-page">{{ page }} / {{ totalPages }}</span>
-      <button class="btn btn-ghost btn-xs" :disabled="page >= totalPages" @click="page++">{{ t('common.next', '下一页') }}</button>
+      <button
+        class="btn btn-ghost btn-xs"
+        :disabled="page >= totalPages"
+        @click="page++"
+      >
+        {{ t('common.next', '下一页') }}
+      </button>
     </div>
   </div>
 </template>

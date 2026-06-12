@@ -14,7 +14,7 @@ from typing import Optional
 from sqlite_ctx import MultiDBManager
 from store.task_store import TaskStore
 from store.analysis_store import AnalysisStore
-from analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing
+from analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 后台启动
         start_time = time.time()
-        asyncio.create_task(_execute_task(server, multi_db, tid, run["id"], start_time))
+        asyncio.create_task(enqueue_analysis_task(server, multi_db, tid, run["id"], start_time))
 
         logger.info(f"[analysis.runTask] task={tid} run={run['id']}")
         return {
@@ -367,7 +367,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         store.update_task_status(tid, "running", progress=0, error="")
 
         start_time = time.time()
-        asyncio.create_task(_execute_task(server, multi_db, tid, run["id"], start_time))
+        asyncio.create_task(enqueue_analysis_task(server, multi_db, tid, run["id"], start_time))
 
         return run
 
@@ -1257,7 +1257,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 (tid, et)
             ).fetchall()
             has_file_count = True
-        except Exception:
+        except Exception as e:
+            if 'file_count' not in str(e).lower() and 'no such column' not in str(e).lower():
+                raise
             has_file_count = False
             rows = project_db.execute(
                 """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
@@ -1536,7 +1538,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             if edge_kind == 'imports':
                 # strip 'file:' prefix to match node_list format
                 key = raw_id.replace('file:', '', 1) if raw_id.startswith('file:') else raw_id
-                return file_comm.get(key) or key  # return comm_id if found, else raw_key
+                return file_comm.get(key)
             else:  # calls
                 # resolve symbol ID → file_path, then match file_path in node_comm
                 fpath = sym_map.get(raw_id, '')

@@ -206,6 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_graph_edge_task ON graph_edge(task_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edge_source ON graph_edge(source_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edge_target ON graph_edge(target_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edge_kind ON graph_edge(task_id, kind);
+CREATE INDEX IF NOT EXISTS idx_graph_edge_task_kind_target ON graph_edge(task_id, kind, target_id);
 
 -- ============================================
 -- graph_doc — 社区分析结果 (任务级，分层)
@@ -230,6 +231,8 @@ CREATE INDEX IF NOT EXISTS idx_graph_doc_task ON graph_doc(task_id);
 CREATE INDEX IF NOT EXISTS idx_graph_doc_type ON graph_doc(task_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_graph_doc_comm ON graph_doc(comm_id);
 CREATE INDEX IF NOT EXISTS idx_graph_doc_score ON graph_doc(task_id, edge_type, quality_score DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_doc_join ON graph_doc(task_id, edge_type, comm_id);
+CREATE INDEX IF NOT EXISTS idx_graph_doc_parent ON graph_doc(task_id, edge_type, parent_comm_id);
 
 -- ============================================
 -- community_hierarchy — 社区层级元数据 (任务级)
@@ -249,6 +252,8 @@ CREATE TABLE IF NOT EXISTS community_hierarchy (
 );
 CREATE INDEX IF NOT EXISTS idx_comm_hier_task ON community_hierarchy(task_id);
 CREATE INDEX IF NOT EXISTS idx_comm_hier_type ON community_hierarchy(task_id, edge_type);
+CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv, comm_id);
+CREATE INDEX IF NOT EXISTS idx_comm_hier_parent ON community_hierarchy(task_id, edge_type, parent_comm_id);
 
 -- ============================================
 -- community_llm_results — 社区 LLM 分析结果 (任务级)

@@ -79,21 +79,44 @@ function viewMD(c: any) {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div class="child-section">
     <div class="child-section-header">
       <span class="child-section-title">{{ childLevel }} {{ t('report.pipeline.childAnalysis') }}</span>
-      <button v-if="communities.length > 0 || loading" class="btn btn-primary btn-xs" @click="openAnalysis">
+      <button
+        v-if="communities.length > 0 || loading"
+        class="btn btn-primary btn-xs"
+        @click="openAnalysis"
+      >
         {{ t('report.pipeline.enterChildAnalysis', { level: childLevel }) }}
       </button>
     </div>
 
-    <div v-if="loading" class="child-section-loading">{{ t('common.loading') }}...</div>
-    <div v-else-if="error" class="child-section-error">{{ error }}</div>
-    <div v-else-if="communities.length === 0" class="child-section-empty">
+    <div
+      v-if="loading"
+      class="child-section-loading"
+    >
+      {{ t('common.loading') }}...
+    </div>
+    <div
+      v-else-if="error"
+      class="child-section-error"
+    >
+      {{ error }}
+    </div>
+    <div
+      v-else-if="communities.length === 0"
+      class="child-section-empty"
+    >
       {{ t('report.pipeline.noChildCommunities') }}
     </div>
-    <div v-else class="child-section-list">
+    <div
+      v-else
+      class="child-section-list"
+    >
       <div
         v-for="c in communities"
         :key="c.id"
@@ -105,7 +128,10 @@ function viewMD(c: any) {
           v-if="c.status === 'completed' && c.name"
           class="child-comm-name clickable"
         >{{ c.name }}</span>
-        <span v-else class="child-comm-name pending">{{ t('common.pending') }}</span>
+        <span
+          v-else
+          class="child-comm-name pending"
+        >{{ t('common.pending') }}</span>
         <span :class="['child-comm-status', `status-${c.status}`]">
           {{ c.status === 'completed' ? t('common.completed') : c.status === 'error' ? t('common.error') : t('common.pending') }}
         </span>

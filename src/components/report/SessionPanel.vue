@@ -51,15 +51,31 @@ watch(() => props.taskId, () => loadSessions())
       <span>{{ t('session.history', '会话') }}</span>
     </div>
     <div class="panel-body">
-      <div v-if="sessions.length === 0" class="empty">
+      <div
+        v-if="sessions.length === 0"
+        class="empty"
+      >
         <p>{{ t('session.empty', 'AI 会话记录将在分析运行时自动生成') }}</p>
       </div>
-      <div v-for="s in sessions" :key="s.id" class="session-item" @click="selectSession(s.id)">
-        <div class="session-tag">{{ s.tag || s.id.slice(0, 12) }}</div>
+      <div
+        v-for="s in sessions"
+        :key="s.id"
+        class="session-item"
+        @click="selectSession(s.id)"
+      >
+        <div class="session-tag">
+          {{ s.tag || s.id.slice(0, 12) }}
+        </div>
         <div class="session-meta">
           <span class="meta-time">{{ s.started_at?.slice(0, 16) || '' }}</span>
-          <CheckCircleIcon v-if="s.quality_score && s.quality_score > 0.7" class="meta-icon text-green" />
-          <ExclamationTriangleIcon v-else class="meta-icon text-amber" />
+          <CheckCircleIcon
+            v-if="s.quality_score && s.quality_score > 0.7"
+            class="meta-icon text-green"
+          />
+          <ExclamationTriangleIcon
+            v-else
+            class="meta-icon text-amber"
+          />
         </div>
       </div>
     </div>

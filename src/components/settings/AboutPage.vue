@@ -32,7 +32,13 @@ const { t } = useI18n()
       <span class="badge badge-blue">v0.1.0 beta</span>
       <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">
         <div>topocode@163.com</div>
-        <div><a href="https://github.com/shenglun365/topoCode" target="_blank" style="color:var(--accent);">github.com/shenglun365/topoCode</a></div>
+        <div>
+          <a
+            href="https://github.com/shenglun365/topoCode"
+            target="_blank"
+            style="color:var(--accent);"
+          >github.com/shenglun365/topoCode</a>
+        </div>
       </div>
     </div>
 
@@ -52,11 +58,26 @@ const { t } = useI18n()
         <span class="badge badge-blue">Tailwind CSS 3.4</span>
         <span class="badge badge-green">D3.js</span>
         <span class="badge badge-green">Mermaid</span>
-        <span class="badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">Python 3.10+</span>
-        <span class="badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">FastAPI</span>
-        <span class="badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">ZeroMQ</span>
-        <span class="badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">NetworkX</span>
-        <span class="badge" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">Tree-sitter</span>
+        <span
+          class="badge"
+          style="background:rgba(139,92,246,0.15);color:#8b5cf6;"
+        >Python 3.10+</span>
+        <span
+          class="badge"
+          style="background:rgba(139,92,246,0.15);color:#8b5cf6;"
+        >FastAPI</span>
+        <span
+          class="badge"
+          style="background:rgba(139,92,246,0.15);color:#8b5cf6;"
+        >ZeroMQ</span>
+        <span
+          class="badge"
+          style="background:rgba(139,92,246,0.15);color:#8b5cf6;"
+        >NetworkX</span>
+        <span
+          class="badge"
+          style="background:rgba(139,92,246,0.15);color:#8b5cf6;"
+        >Tree-sitter</span>
       </div>
     </div>
 

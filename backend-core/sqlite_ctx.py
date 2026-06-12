@@ -392,6 +392,13 @@ MAIN_DB_TABLES_SQL = """
         PRIMARY KEY (project_id, group_id)
     );
     CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
+
+    -- 应用配置表 (key-value, 用于导入过滤等系统级配置)
+    CREATE TABLE IF NOT EXISTS app_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
 """
 
 KNOWLEDGE_DB_TABLES_SQL = """
@@ -621,6 +628,7 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_graph_edge_source ON graph_edge(source_id);
     CREATE INDEX IF NOT EXISTS idx_graph_edge_target ON graph_edge(target_id);
     CREATE INDEX IF NOT EXISTS idx_graph_edge_kind ON graph_edge(task_id, kind);
+    CREATE INDEX IF NOT EXISTS idx_graph_edge_task_kind_target ON graph_edge(task_id, kind, target_id);
 
     -- ============================================
     -- graph_doc — 社区分析结果 (任务级，分层)

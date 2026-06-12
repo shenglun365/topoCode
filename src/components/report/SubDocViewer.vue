@@ -292,7 +292,6 @@ watch(() => props.subDocId, () => {
         @open-child-analysis="(p: any) => emit('open-child-analysis', p)"
         @view-child-md="(p: any) => emit('view-child-md', p)"
       />
-
     </div>
 
     <SubDocRegenDialog

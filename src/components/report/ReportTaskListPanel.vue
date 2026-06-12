@@ -90,24 +90,48 @@ onMounted(() => loadRuns())
 
 <template>
   <div class="task-run-panel">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div class="panel-header">
       <PlayIcon class="hdr-icon" />
       <span>{{ t('report.taskRuns', '分析任务执行') }}</span>
-      <button class="refresh-btn" @click="loadRuns" :disabled="loading">
-        <ArrowPathIcon class="refresh-icon" :class="{ spin: loading }" />
+      <button
+        class="refresh-btn"
+        :disabled="loading"
+        @click="loadRuns"
+      >
+        <ArrowPathIcon
+          class="refresh-icon"
+          :class="{ spin: loading }"
+        />
       </button>
     </div>
     <div class="panel-body">
-      <div v-if="runs.length === 0" class="empty-state">
+      <div
+        v-if="runs.length === 0"
+        class="empty-state"
+      >
         <p>{{ t('report.noRuns', '暂无执行记录') }}</p>
       </div>
-      <div v-for="run in runs" :key="run.id" class="run-item">
-        <component :is="statusIcon(run.status)" class="run-icon" :class="`status-${run.status}`" />
+      <div
+        v-for="run in runs"
+        :key="run.id"
+        class="run-item"
+      >
+        <component
+          :is="statusIcon(run.status)"
+          class="run-icon"
+          :class="`status-${run.status}`"
+        />
         <div class="run-info">
           <div class="run-header">
             <span class="run-number">#{{ run.runNumber }}</span>
-            <span class="run-status" :class="`status-${run.status}`">
+            <span
+              class="run-status"
+              :class="`status-${run.status}`"
+            >
               {{ run.status === 'done' ? '成功' : run.status === 'error' ? '失败' : run.status === 'running' ? '运行中' : '停止' }}
             </span>
           </div>
@@ -115,7 +139,12 @@ onMounted(() => loadRuns())
             <span class="run-time">{{ formatTime(run.startedAt) }}</span>
             <span class="run-duration"> · {{ formatDuration(run.durationMs) }}</span>
           </div>
-          <div v-if="run.error" class="run-error">{{ run.error }}</div>
+          <div
+            v-if="run.error"
+            class="run-error"
+          >
+            {{ run.error }}
+          </div>
         </div>
       </div>
     </div>

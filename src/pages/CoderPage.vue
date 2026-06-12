@@ -69,7 +69,9 @@ function clearSessions() {
         class="btn btn-ghost btn-xs"
         style="color:var(--text-muted);font-size:11px;"
         @click="clearSessions"
-      >清除所有历史会话</button>
+      >
+        清除所有历史会话
+      </button>
     </div>
 
     <!-- 对话流 -->

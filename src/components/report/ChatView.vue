@@ -80,6 +80,8 @@ async function handleSend() {
   userInput.value = ''
   streaming.value = true
 
+  const ac = new AbortController()
+  abortController.value = ac
   const assistantMsg = addMessage('assistant', '')
 
   try {
@@ -96,15 +98,21 @@ async function handleSend() {
         }
         scrollToBottom()
       },
+      signal: ac.signal,
     })
     assistantMsg.content = _renderMarkdownInline(fullContent || assistantMsg.content)
     assistantMsg.isStreaming = false
   } catch (err: any) {
-    assistantMsg.content = err.message || t('chat.requestFailed', '请求失败')
-    assistantMsg.role = 'error'
+    if (err.name === 'AbortError') {
+      assistantMsg.content = assistantMsg.content || '(已取消)'
+    } else {
+      assistantMsg.content = err.message || t('chat.requestFailed', '请求失败')
+      assistantMsg.role = 'error'
+    }
     assistantMsg.isStreaming = false
   } finally {
     streaming.value = false
+    abortController.value = null
     scrollToBottom()
   }
 }
@@ -129,7 +137,7 @@ function clearChat() {
 }
 
 function stopStreaming() {
-  streaming.value = false
+  abortController.value?.abort()
 }
 
 // Basic inline markdown rendering (for mermaid/plantuml blocks)
@@ -161,45 +169,99 @@ watch(llmConfigured, (val) => {
 
 <template>
   <div class="chat-view">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
 
     <!-- 未配置 -->
-    <div v-if="!llmConfigured" class="chat-empty">
+    <div
+      v-if="!llmConfigured"
+      class="chat-empty"
+    >
       <SparklesIcon class="icon-lg" />
-      <div class="text-lg font-semibold">{{ t('chat.title', 'Agent 对话') }}</div>
-      <div class="text-sm text-gray-500">{{ t('chat.notConfigured', '请先在设置中配置 LLM 模型') }}</div>
-      <router-link to="/user#llm" class="config-link">{{ t('chat.goConfig', '去配置') }}</router-link>
+      <div class="text-lg font-semibold">
+        {{ t('chat.title', 'Agent 对话') }}
+      </div>
+      <div class="text-sm text-gray-500">
+        {{ t('chat.notConfigured', '请先在设置中配置 LLM 模型') }}
+      </div>
+      <router-link
+        to="/user#llm"
+        class="config-link"
+      >
+        {{ t('chat.goConfig', '去配置') }}
+      </router-link>
     </div>
 
     <template v-else>
       <!-- 消息列表 -->
-      <div ref="scrollRef" class="chat-messages">
-        <div v-for="msg in messages" :key="msg.id" class="chat-msg" :class="`msg-${msg.role}`">
+      <div
+        ref="scrollRef"
+        class="chat-messages"
+      >
+        <div
+          v-for="msg in messages"
+          :key="msg.id"
+          class="chat-msg"
+          :class="`msg-${msg.role}`"
+        >
           <div class="msg-avatar">
-            <SparklesIcon v-if="msg.role === 'assistant'" class="av-icon" />
-            <CubeIcon v-else-if="msg.role === 'system'" class="av-icon" />
-            <span v-else class="av-text">U</span>
+            <SparklesIcon
+              v-if="msg.role === 'assistant'"
+              class="av-icon"
+            />
+            <CubeIcon
+              v-else-if="msg.role === 'system'"
+              class="av-icon"
+            />
+            <span
+              v-else
+              class="av-text"
+            >U</span>
           </div>
           <div class="msg-body">
-            <div class="msg-html" v-html="msg.content"></div>
+            <div
+              class="msg-html"
+              v-html="msg.content"
+            />
 
             <!-- Tool calls display -->
-            <div v-if="msg.toolCalls?.length" class="tool-calls">
-              <div v-for="tc in msg.toolCalls" :key="tc.name" class="tool-call-item">
+            <div
+              v-if="msg.toolCalls?.length"
+              class="tool-calls"
+            >
+              <div
+                v-for="tc in msg.toolCalls"
+                :key="tc.name"
+                class="tool-call-item"
+              >
                 <span class="tool-name">{{ tc.name }}</span>
-                <span v-if="tc.result" class="tool-result">{{ tc.result.slice(0, 200) }}</span>
+                <span
+                  v-if="tc.result"
+                  class="tool-result"
+                >{{ tc.result.slice(0, 200) }}</span>
               </div>
             </div>
 
-            <div v-if="msg.isStreaming" class="stream-dot">●</div>
+            <div
+              v-if="msg.isStreaming"
+              class="stream-dot"
+            >
+              ●
+            </div>
           </div>
         </div>
       </div>
 
       <!-- 快捷操作 -->
-      <div v-if="messages.length <= 1" class="quick-actions">
+      <div
+        v-if="messages.length <= 1"
+        class="quick-actions"
+      >
         <button
-          v-for="qa in quickActions" :key="qa.key"
+          v-for="qa in quickActions"
+          :key="qa.key"
           class="qa-btn"
           @click="handleQuickAction(qa.prompt)"
         >
@@ -218,13 +280,26 @@ watch(llmConfigured, (val) => {
           :disabled="streaming"
           @keydown="handleKeydown"
         />
-        <button v-if="streaming" class="btn-stop" @click="stopStreaming">
+        <button
+          v-if="streaming"
+          class="btn-stop"
+          @click="stopStreaming"
+        >
           <StopIcon class="btn-icon" />
         </button>
-        <button v-else class="btn-send" :disabled="!userInput.trim()" @click="handleSend">
+        <button
+          v-else
+          class="btn-send"
+          :disabled="!userInput.trim()"
+          @click="handleSend"
+        >
           <PaperAirplaneIcon class="btn-icon" />
         </button>
-        <button v-if="messages.length > 1" class="btn-clear" @click="clearChat">
+        <button
+          v-if="messages.length > 1"
+          class="btn-clear"
+          @click="clearChat"
+        >
           <TrashIcon class="btn-icon" />
         </button>
       </div>

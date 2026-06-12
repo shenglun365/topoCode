@@ -21,7 +21,10 @@ const { showId, componentId } = useComponentId('ST-001')
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div class="subdoc-toolbar">
     <div class="toolbar-left">
       <button

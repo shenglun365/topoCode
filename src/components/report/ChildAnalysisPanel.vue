@@ -161,7 +161,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <div class="child-analysis-panel">
     <div class="cap-header">
       <div class="cap-title-row">
@@ -171,22 +174,45 @@ onMounted(async () => {
       </div>
       <div class="cap-progress">
         <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: overallProgress + '%' }" />
+          <div
+            class="progress-fill"
+            :style="{ width: overallProgress + '%' }"
+          />
         </div>
         <span class="progress-text">{{ overallProgress }}%</span>
       </div>
     </div>
 
-    <div v-if="loading" class="cap-loading">{{ t('common.loading') }}...</div>
-    <div v-else-if="loadError" class="cap-error">{{ loadError }}</div>
+    <div
+      v-if="loading"
+      class="cap-loading"
+    >
+      {{ t('common.loading') }}...
+    </div>
+    <div
+      v-else-if="loadError"
+      class="cap-error"
+    >
+      {{ loadError }}
+    </div>
 
     <template v-else>
       <div class="clist-search">
-        <input v-model="searchQuery" type="text" :placeholder="t('common.search')" class="search-input">
+        <input
+          v-model="searchQuery"
+          type="text"
+          :placeholder="t('common.search')"
+          class="search-input"
+        >
       </div>
 
       <div class="cap-tasklist">
-        <div v-if="searchedCommunities.length === 0" class="cap-empty">{{ t('report.pipeline.noCommunities') }}</div>
+        <div
+          v-if="searchedCommunities.length === 0"
+          class="cap-empty"
+        >
+          {{ t('report.pipeline.noCommunities') }}
+        </div>
 
         <template v-else>
           <div class="clist-header">
@@ -194,10 +220,18 @@ onMounted(async () => {
               {{ childLevel }} ({{ searchedCommunities.length }})
             </span>
             <div class="clist-actions">
-              <button class="btn btn-ghost btn-xs" :disabled="isRunning" @click="childAnalysisStore.selectChildIncomplete(props.taskId, stateKey)">
+              <button
+                class="btn btn-ghost btn-xs"
+                :disabled="isRunning"
+                @click="childAnalysisStore.selectChildIncomplete(props.taskId, stateKey)"
+              >
                 {{ t('common.selectIncomplete') }}
               </button>
-              <button class="btn btn-ghost btn-xs" :disabled="isRunning" @click="childAnalysisStore.deselectAllChild(props.taskId, stateKey)">
+              <button
+                class="btn btn-ghost btn-xs"
+                :disabled="isRunning"
+                @click="childAnalysisStore.deselectAllChild(props.taskId, stateKey)"
+              >
                 {{ t('common.reset') }}
               </button>
             </div>
@@ -220,28 +254,50 @@ onMounted(async () => {
               :class="['clist-row', `clist-${task.status}`]"
               @click="toggleSelect(task.communityId)"
             >
-              <span class="clist-check" @click.stop="toggleSelect(task.communityId)">
-                <input type="checkbox" :checked="task.selected" class="clist-cb">
+              <span
+                class="clist-check"
+                @click.stop="toggleSelect(task.communityId)"
+              >
+                <input
+                  type="checkbox"
+                  :checked="task.selected"
+                  class="clist-cb"
+                >
               </span>
-              <span class="clist-id" :title="task.communityId">
+              <span
+                class="clist-id"
+                :title="task.communityId"
+              >
                 <span class="id-text">{{ fmtCommId(task.communityId) }}</span>
                 <span
                   v-if="task.name && task.status === 'completed'"
                   class="id-name clickable"
                   @click.stop="viewMD(task)"
                 >{{ task.name }}</span>
-                <span v-else-if="task.name" class="id-name">{{ task.name }}</span>
+                <span
+                  v-else-if="task.name"
+                  class="id-name"
+                >{{ task.name }}</span>
               </span>
               <span class="clist-nodes">{{ task.nodeCount }}</span>
               <span class="clist-edges">{{ task.edgeCount }}</span>
               <span class="clist-score">
-                <span v-if="task.qualityScore != null" class="score-val">{{ task.qualityScore.toFixed(3) }}</span>
-                <span v-else class="score-na">&mdash;</span>
+                <span
+                  v-if="task.qualityScore != null"
+                  class="score-val"
+                >{{ task.qualityScore.toFixed(3) }}</span>
+                <span
+                  v-else
+                  class="score-na"
+                >&mdash;</span>
               </span>
               <span class="clist-status">
                 <span :class="['badge', statusBadgeClass(task.status)]">{{ statusLabel(task.status) }}</span>
               </span>
-              <span class="clist-actions-col" @click.stop>
+              <span
+                class="clist-actions-col"
+                @click.stop
+              >
                 <button
                   v-if="task.status === 'error'"
                   class="btn btn-ghost btn-xs"
@@ -254,31 +310,74 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div v-if="totalPages > 1" class="clist-pagination">
-            <button class="btn btn-ghost btn-xs" :disabled="currentPage <= 1" @click="currentPage--">{{ t('common.prev') }}</button>
+          <div
+            v-if="totalPages > 1"
+            class="clist-pagination"
+          >
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="currentPage <= 1"
+              @click="currentPage--"
+            >
+              {{ t('common.prev') }}
+            </button>
             <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>
-            <button class="btn btn-ghost btn-xs" :disabled="currentPage >= totalPages" @click="currentPage++">{{ t('common.next') }}</button>
+            <button
+              class="btn btn-ghost btn-xs"
+              :disabled="currentPage >= totalPages"
+              @click="currentPage++"
+            >
+              {{ t('common.next') }}
+            </button>
           </div>
         </template>
       </div>
 
-      <div v-if="errorLogs.length > 0" class="cap-error-logs">
+      <div
+        v-if="errorLogs.length > 0"
+        class="cap-error-logs"
+      >
         <div class="error-log-header">
           <span class="error-log-title">{{ t('common.error') }} ({{ errorLogs.length }})</span>
-          <button class="btn btn-ghost btn-xs" @click="childAnalysisStore.clearChildErrorLogs(props.taskId, stateKey)">{{ t('common.clear') }}</button>
+          <button
+            class="btn btn-ghost btn-xs"
+            @click="childAnalysisStore.clearChildErrorLogs(props.taskId, stateKey)"
+          >
+            {{ t('common.clear') }}
+          </button>
         </div>
-        <div v-for="(msg, i) in errorLogs.slice(0, 10)" :key="i" class="error-log-item">{{ msg }}</div>
+        <div
+          v-for="(msg, i) in errorLogs.slice(0, 10)"
+          :key="i"
+          class="error-log-item"
+        >
+          {{ msg }}
+        </div>
       </div>
 
       <div class="cap-bottom">
         <div class="cap-batch">
           <span class="batch-label">{{ t('report.pipeline.batchSize') }}:</span>
-          <select v-model.number="batchSize" class="batch-select" :disabled="isRunning">
-            <option v-for="n in [1,2,3,5,10]" :key="n" :value="n">{{ n }}</option>
+          <select
+            v-model.number="batchSize"
+            class="batch-select"
+            :disabled="isRunning"
+          >
+            <option
+              v-for="n in [1,2,3,5,10]"
+              :key="n"
+              :value="n"
+            >
+              {{ n }}
+            </option>
           </select>
         </div>
         <div class="cap-bottom-actions">
-          <button v-if="isRunning" class="btn btn-error btn-sm" @click="stopAnalysis">
+          <button
+            v-if="isRunning"
+            class="btn btn-error btn-sm"
+            @click="stopAnalysis"
+          >
             <StopIcon class="w-3 h-3" />
             {{ t('common.stop') }}
           </button>

@@ -60,6 +60,7 @@ const paged = computed(() => {
 function toggleSort(col: typeof sortBy.value) {
   if (sortBy.value === col) { sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc' }
   else { sortBy.value = col; sortDir.value = 'desc' }
+  page.value = 1
 }
 
 function sortIcon(col: typeof sortBy.value): string {
@@ -78,27 +79,52 @@ watch(search, () => { page.value = 1 })
 <template>
   <div class="ctv-container">
     <div class="ctv-toolbar">
-      <input v-model="search" type="text" :placeholder="t('report.searchCommunity', '搜索...')" class="ctv-search" />
+      <input
+        v-model="search"
+        type="text"
+        :placeholder="t('report.searchCommunity', '搜索...')"
+        class="ctv-search"
+      >
       <span class="ctv-total">{{ sorted.length }} {{ t('report.l0Communities', '个社区') }}</span>
     </div>
     <div class="ctv-table-wrap">
       <table class="ctv-table">
         <thead>
           <tr>
-            <th class="ctv-th-status"></th>
-            <th class="ctv-th-name sortable" :class="{ active: sortBy === 'name' }" @click="toggleSort('name')">
+            <th class="ctv-th-status" />
+            <th
+              class="ctv-th-name sortable"
+              :class="{ active: sortBy === 'name' }"
+              @click="toggleSort('name')"
+            >
               {{ t('report.communityArchitecture', '组件') }} <span class="sort-icon">{{ sortIcon('name') }}</span>
             </th>
-            <th class="ctv-th-num sortable" :class="{ active: sortBy === 'nodes' }" @click="toggleSort('nodes')">
+            <th
+              class="ctv-th-num sortable"
+              :class="{ active: sortBy === 'nodes' }"
+              @click="toggleSort('nodes')"
+            >
               {{ t('report.nodes', '节点') }} <span class="sort-icon">{{ sortIcon('nodes') }}</span>
             </th>
-            <th class="ctv-th-num sortable" :class="{ active: sortBy === 'files' }" @click="toggleSort('files')">
+            <th
+              class="ctv-th-num sortable"
+              :class="{ active: sortBy === 'files' }"
+              @click="toggleSort('files')"
+            >
               {{ t('report.files', '文件') }} <span class="sort-icon">{{ sortIcon('files') }}</span>
             </th>
-            <th class="ctv-th-num sortable" :class="{ active: sortBy === 'edges' }" @click="toggleSort('edges')">
+            <th
+              class="ctv-th-num sortable"
+              :class="{ active: sortBy === 'edges' }"
+              @click="toggleSort('edges')"
+            >
               {{ t('report.edges', '边') }} <span class="sort-icon">{{ sortIcon('edges') }}</span>
             </th>
-            <th class="ctv-th-num sortable" :class="{ active: sortBy === 'quality' }" @click="toggleSort('quality')">
+            <th
+              class="ctv-th-num sortable"
+              :class="{ active: sortBy === 'quality' }"
+              @click="toggleSort('quality')"
+            >
               {{ t('report.qualityScore', '质量') }} <span class="sort-icon">{{ sortIcon('quality') }}</span>
             </th>
           </tr>
@@ -112,28 +138,67 @@ watch(search, () => { page.value = 1 })
             @click="emit('open-community', c)"
             @dblclick="emit('drill', c.communityId)"
           >
-            <td class="ctv-td-status" :title="c.status">{{ statusLabel(c.status) }}</td>
-            <td class="ctv-td-name" :title="c.communityId">{{ communityLabel(c) }}</td>
-            <td class="ctv-td-num">{{ c.nodeCount }}</td>
-            <td class="ctv-td-num">{{ c.fileCount }}</td>
-            <td class="ctv-td-num">{{ c.edgeCount }}</td>
+            <td
+              class="ctv-td-status"
+              :title="c.status"
+            >
+              {{ statusLabel(c.status) }}
+            </td>
+            <td
+              class="ctv-td-name"
+              :title="c.communityId"
+            >
+              {{ communityLabel(c) }}
+            </td>
             <td class="ctv-td-num">
-              <span v-if="c.qualityScore != null" :class="{ 'qual-high': c.qualityScore > 0.7, 'qual-mid': c.qualityScore > 0.3 && c.qualityScore <= 0.7, 'qual-low': c.qualityScore <= 0.3 }">
+              {{ c.nodeCount }}
+            </td>
+            <td class="ctv-td-num">
+              {{ c.fileCount }}
+            </td>
+            <td class="ctv-td-num">
+              {{ c.edgeCount }}
+            </td>
+            <td class="ctv-td-num">
+              <span
+                v-if="c.qualityScore != null"
+                :class="{ 'qual-high': c.qualityScore > 0.7, 'qual-mid': c.qualityScore > 0.3 && c.qualityScore <= 0.7, 'qual-low': c.qualityScore <= 0.3 }"
+              >
                 {{ (c.qualityScore * 100).toFixed(0) }}%
               </span>
               <span v-else>-</span>
             </td>
           </tr>
           <tr v-if="paged.length === 0">
-            <td colspan="6" class="ctv-empty">{{ t('report.noSearchResults', '无匹配') }}</td>
+            <td
+              colspan="6"
+              class="ctv-empty"
+            >
+              {{ t('report.noSearchResults', '无匹配') }}
+            </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div v-if="totalPages > 1" class="ctv-pagination">
-      <button class="btn btn-ghost btn-xs" :disabled="page <= 1" @click="page--">{{ t('common.prev', '上一页') }}</button>
+    <div
+      v-if="totalPages > 1"
+      class="ctv-pagination"
+    >
+      <button
+        class="btn btn-ghost btn-xs"
+        :disabled="page <= 1"
+        @click="page--"
+      >
+        {{ t('common.prev', '上一页') }}
+      </button>
       <span class="ctv-page">{{ page }} / {{ totalPages }}</span>
-      <button class="btn btn-ghost btn-xs" :disabled="page >= totalPages" @click="page++">{{ t('common.next', '下一页') }}</button>
+      <button
+        class="btn btn-ghost btn-xs"
+        :disabled="page >= totalPages"
+        @click="page++"
+      >
+        {{ t('common.next', '下一页') }}
+      </button>
     </div>
   </div>
 </template>

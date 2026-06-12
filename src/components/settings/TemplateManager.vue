@@ -201,7 +201,10 @@ onMounted(() => {
 
 <template>
   <div class="template-manager">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">
       {{ t('settings.templateManager') }}
     </h2>
@@ -214,31 +217,55 @@ onMounted(() => {
         :value="defaultTemplateLocale"
         @change="setDefaultTemplateLocale(($event.target as HTMLSelectElement).value)"
       >
-        <option value="zh-CN">{{ t('settings.simplifiedChinese') }}</option>
-        <option value="en-US">{{ t('settings.english') }}</option>
+        <option value="zh-CN">
+          {{ t('settings.simplifiedChinese') }}
+        </option>
+        <option value="en-US">
+          {{ t('settings.english') }}
+        </option>
       </select>
     </div>
 
     <!-- 工具栏 -->
     <div class="toolbar">
       <div class="filters">
-        <select v-model="filterLocale" class="select">
-          <option v-for="loc in locales" :key="loc.value" :value="loc.value">
+        <select
+          v-model="filterLocale"
+          class="select"
+        >
+          <option
+            v-for="loc in locales"
+            :key="loc.value"
+            :value="loc.value"
+          >
             {{ t(loc.key) }}
           </option>
         </select>
-        <select v-model="filterMode" class="select">
-          <option v-for="m in modes" :key="m.value" :value="m.value">
+        <select
+          v-model="filterMode"
+          class="select"
+        >
+          <option
+            v-for="m in modes"
+            :key="m.value"
+            :value="m.value"
+          >
             {{ t(m.key) }}
           </option>
         </select>
       </div>
       <div class="actions">
-        <button class="btn btn-ghost btn-sm" @click="restoreDialog = true">
+        <button
+          class="btn btn-ghost btn-sm"
+          @click="restoreDialog = true"
+        >
           <ArrowPathIcon class="w-4 h-4" />
           <span>{{ t('settings.templateRestoreDefaults') }}</span>
         </button>
-        <button class="btn btn-primary btn-sm" @click="openCreate">
+        <button
+          class="btn btn-primary btn-sm"
+          @click="openCreate"
+        >
           <PlusIcon class="w-4 h-4" />
           <span>{{ t('settings.templateCreate') }}</span>
         </button>
@@ -246,25 +273,56 @@ onMounted(() => {
     </div>
 
     <!-- 模板列表 -->
-    <div v-if="loading" class="loading">{{ t('common.loading') }}</div>
-    <div v-else-if="templates.length === 0" class="empty-state">
-      <DocumentTextIcon class="icon" />
-      <div class="title">{{ t('settings.templateEmpty') }}</div>
+    <div
+      v-if="loading"
+      class="loading"
+    >
+      {{ t('common.loading') }}
     </div>
-    <div v-else class="template-list">
-      <div v-for="tmpl in templates" :key="tmpl.id" class="template-item">
+    <div
+      v-else-if="templates.length === 0"
+      class="empty-state"
+    >
+      <DocumentTextIcon class="icon" />
+      <div class="title">
+        {{ t('settings.templateEmpty') }}
+      </div>
+    </div>
+    <div
+      v-else
+      class="template-list"
+    >
+      <div
+        v-for="tmpl in templates"
+        :key="tmpl.id"
+        class="template-item"
+      >
         <div class="template-info">
-          <div class="template-name">{{ tmpl.name }}</div>
+          <div class="template-name">
+            {{ tmpl.name }}
+          </div>
           <div class="template-meta">
             <span class="badge badge-mode">{{ tmpl.mode }}</span>
-            <span v-if="tmpl.module_type" class="badge badge-module">{{ tmpl.module_type }}</span>
-            <span v-if="tmpl.category" class="badge badge-category">{{ tmpl.category }}</span>
+            <span
+              v-if="tmpl.module_type"
+              class="badge badge-module"
+            >{{ tmpl.module_type }}</span>
+            <span
+              v-if="tmpl.category"
+              class="badge badge-category"
+            >{{ tmpl.category }}</span>
             <span class="badge badge-locale">{{ tmpl.locale }}</span>
-            <span v-if="tmpl.is_builtin" class="badge badge-builtin">{{ t('settings.templateBuiltin') }}</span>
+            <span
+              v-if="tmpl.is_builtin"
+              class="badge badge-builtin"
+            >{{ t('settings.templateBuiltin') }}</span>
           </div>
         </div>
         <div class="template-actions">
-          <button class="btn btn-ghost btn-xs" @click="openEdit(tmpl)">
+          <button
+            class="btn btn-ghost btn-xs"
+            @click="openEdit(tmpl)"
+          >
             <PencilSquareIcon class="w-4 h-4" />
           </button>
         </div>
@@ -273,7 +331,10 @@ onMounted(() => {
 
     <!-- 编辑/新建弹窗 -->
     <Teleport to="body">
-      <div v-if="editDialog" class="modal-overlay">
+      <div
+        v-if="editDialog"
+        class="modal-overlay"
+      >
         <div class="modal template-edit-modal">
           <div class="modal-header">
             <div style="display:flex; flex-direction:column; gap:4px;">
@@ -282,7 +343,10 @@ onMounted(() => {
               </span>
               <span class="modal-hint">{{ t('settings.templateEditHint') }}</span>
             </div>
-            <button class="btn btn-ghost btn-xs" @click="editDialog = false">
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="editDialog = false"
+            >
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
@@ -295,90 +359,169 @@ onMounted(() => {
               class="edit-tab"
               :class="{ active: editTab === tab.id }"
               @click="editTab = tab.id"
-            >{{ tab.label }}</button>
+            >
+              {{ tab.label }}
+            </button>
           </div>
 
           <div class="modal-body">
             <!-- 基本信息 -->
-            <div v-show="editTab === 'basic'" class="tab-content">
+            <div
+              v-show="editTab === 'basic'"
+              class="tab-content"
+            >
               <div class="form-grid-2">
                 <div class="form-group">
                   <label class="form-label">{{ t('settings.templateName') }}</label>
-                  <input v-model="editing.name" class="input" />
+                  <input
+                    v-model="editing.name"
+                    class="input"
+                  >
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('settings.templateMode') }}</label>
-                  <select v-model="editing.mode" class="select">
-                    <option value="chat">chat</option>
-                    <option value="structured">structured</option>
-                    <option value="tools">tools</option>
+                  <select
+                    v-model="editing.mode"
+                    class="select"
+                  >
+                    <option value="chat">
+                      chat
+                    </option>
+                    <option value="structured">
+                      structured
+                    </option>
+                    <option value="tools">
+                      tools
+                    </option>
                   </select>
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('settings.templateModuleType') }}</label>
-                  <select v-model="editing.module_type" class="select">
-                    <option value="">{{ t('common.none') }}</option>
-                    <option value="project_analysis">project_analysis</option>
-                    <option value="project_resource">project_resource</option>
-                    <option value="knowledge_base">knowledge_base</option>
-                    <option value="ai_assistant">ai_assistant</option>
+                  <select
+                    v-model="editing.module_type"
+                    class="select"
+                  >
+                    <option value="">
+                      {{ t('common.none') }}
+                    </option>
+                    <option value="project_analysis">
+                      project_analysis
+                    </option>
+                    <option value="project_resource">
+                      project_resource
+                    </option>
+                    <option value="knowledge_base">
+                      knowledge_base
+                    </option>
+                    <option value="ai_assistant">
+                      ai_assistant
+                    </option>
                   </select>
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('settings.templateCategory') }}</label>
-                  <input v-model="editing.category" class="input" />
+                  <input
+                    v-model="editing.category"
+                    class="input"
+                  >
                 </div>
                 <div class="form-group">
                   <label class="form-label">{{ t('settings.templateLocale') }}</label>
-                  <select v-model="editing.locale" class="select">
-                    <option value="zh-CN">zh-CN</option>
-                    <option value="en-US">en-US</option>
+                  <select
+                    v-model="editing.locale"
+                    class="select"
+                  >
+                    <option value="zh-CN">
+                      zh-CN
+                    </option>
+                    <option value="en-US">
+                      en-US
+                    </option>
                   </select>
                 </div>
               </div>
             </div>
 
             <!-- 提示词 -->
-            <div v-show="editTab === 'prompts'" class="tab-content">
+            <div
+              v-show="editTab === 'prompts'"
+              class="tab-content"
+            >
               <div class="form-group">
                 <label class="form-label">{{ t('settings.templateSystemPrompt') }}</label>
-                <textarea v-model="editing.system_prompt" class="textarea textarea-code" rows="10"></textarea>
+                <textarea
+                  v-model="editing.system_prompt"
+                  class="textarea textarea-code"
+                  rows="10"
+                />
               </div>
               <div class="form-group">
                 <label class="form-label">{{ t('settings.templateUserPrompt') }}</label>
-                <textarea v-model="editing.user_prompt_template" class="textarea textarea-code" rows="10"></textarea>
+                <textarea
+                  v-model="editing.user_prompt_template"
+                  class="textarea textarea-code"
+                  rows="10"
+                />
               </div>
             </div>
 
             <!-- Schema -->
-            <div v-show="editTab === 'schema'" class="tab-content">
+            <div
+              v-show="editTab === 'schema'"
+              class="tab-content"
+            >
               <div class="form-group">
                 <label class="form-label">{{ t('settings.templateOutputSchema') }}</label>
-                <textarea v-model="editing.output_schema_json" class="textarea textarea-code" rows="10"></textarea>
+                <textarea
+                  v-model="editing.output_schema_json"
+                  class="textarea textarea-code"
+                  rows="10"
+                />
               </div>
               <div class="form-group">
                 <label class="form-label">{{ t('settings.templateOutputExample') }}</label>
-                <textarea v-model="editing.output_example" class="textarea textarea-code" rows="6"></textarea>
+                <textarea
+                  v-model="editing.output_example"
+                  class="textarea textarea-code"
+                  rows="6"
+                />
               </div>
             </div>
 
             <!-- 高级 -->
-            <div v-show="editTab === 'advanced'" class="tab-content">
+            <div
+              v-show="editTab === 'advanced'"
+              class="tab-content"
+            >
               <div class="form-group">
                 <label class="form-label">{{ t('settings.templateVariables') }}</label>
-                <textarea v-model="editing.variables_json" class="textarea textarea-code" rows="8"></textarea>
+                <textarea
+                  v-model="editing.variables_json"
+                  class="textarea textarea-code"
+                  rows="8"
+                />
               </div>
               <div class="form-group">
                 <label class="form-label">{{ t('settings.templateToolsJson') }}</label>
-                <textarea v-model="editing.tools_json" class="textarea textarea-code" rows="4"></textarea>
+                <textarea
+                  v-model="editing.tools_json"
+                  class="textarea textarea-code"
+                  rows="4"
+                />
               </div>
             </div>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost btn-sm" @click="editDialog = false">
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="editDialog = false"
+            >
               {{ t('common.cancel') }}
             </button>
-            <button class="btn btn-primary btn-sm" @click="saveTemplate">
+            <button
+              class="btn btn-primary btn-sm"
+              @click="saveTemplate"
+            >
               {{ t('common.save') }}
             </button>
           </div>
@@ -388,11 +531,17 @@ onMounted(() => {
 
     <!-- 恢复默认弹窗 -->
     <Teleport to="body">
-      <div v-if="restoreDialog" class="modal-overlay">
+      <div
+        v-if="restoreDialog"
+        class="modal-overlay"
+      >
         <div class="modal">
           <div class="modal-header">
             <span class="modal-title">{{ t('settings.templateRestoreDefaults') }}</span>
-            <button class="btn btn-ghost btn-xs" @click="restoreDialog = false">
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="restoreDialog = false"
+            >
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
@@ -400,11 +549,21 @@ onMounted(() => {
             <p>{{ t('settings.templateRestoreConfirm') }}</p>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost btn-sm" @click="restoreDialog = false">
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="restoreDialog = false"
+            >
               {{ t('common.cancel') }}
             </button>
-            <button class="btn btn-primary btn-sm" :disabled="restoreLoading" @click="restoreDefaults">
-              <ArrowPathIcon v-if="restoreLoading" class="w-4 h-4 animate-spin" />
+            <button
+              class="btn btn-primary btn-sm"
+              :disabled="restoreLoading"
+              @click="restoreDefaults"
+            >
+              <ArrowPathIcon
+                v-if="restoreLoading"
+                class="w-4 h-4 animate-spin"
+              />
               <span>{{ t('common.confirm') }}</span>
             </button>
           </div>

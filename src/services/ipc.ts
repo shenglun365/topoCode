@@ -13,6 +13,7 @@ import type {
   AgentConfigItem,
   SkillConfigItem,
   BackendStatus,
+  ImportConfig,
   TaskProgressEvent,
   TaskCompleteEvent,
   TaskErrorEvent,
@@ -442,6 +443,22 @@ function createRealIPC() {
       },
       updateBindings: async (params: { bindings: Record<string, string> }) => {
         return await api.settings.updateBindings(params)
+      },
+      getImportConfig: async () => {
+        const result: ImportConfig = await api.settings.getImportConfig()
+        return {
+          ignoreMode: result.ignoreMode || 'strict',
+          extraIgnoreFiles: result.extraIgnoreFiles || [],
+          customPatterns: result.customPatterns || [],
+        }
+      },
+      setImportConfig: async (params: { ignoreMode?: string; customPatterns?: string[]; extraIgnoreFiles?: string[] }) => {
+        const result: ImportConfig = await api.settings.setImportConfig(params)
+        return {
+          ignoreMode: result.ignoreMode || 'strict',
+          extraIgnoreFiles: result.extraIgnoreFiles || [],
+          customPatterns: result.customPatterns || [],
+        }
       },
     },
 

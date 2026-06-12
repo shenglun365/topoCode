@@ -1,21 +1,34 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   FolderPlusIcon,
   ArrowUpTrayIcon,
   ExclamationCircleIcon,
+  FunnelIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useNavigationStore } from '@/stores/navigation'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-004')
 const { t } = useI18n()
+const router = useRouter()
 const projectStore = useProjectStore()
+const settingsStore = useSettingsStore()
+const navigation = useNavigationStore()
 
 const isDragging = ref(false)
 const importError = ref<string | null>(null)
 const errorTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+function goToImportSettings() {
+  navigation.navigateTo('user')
+  router.push('/user')
+  setTimeout(() => settingsStore.setActiveTab('import'), 200)
+}
 
 function onDragEnter(e: DragEvent) {
   e.preventDefault()
@@ -173,6 +186,18 @@ function clearError() {
       >
         {{ t('file.supportedFormats') }}
       </div>
+
+      <!-- 导入过滤提示 -->
+      <div class="import-filter-hint">
+        <FunnelIcon class="w-3 h-3" />
+        <span>{{ t('import.filterHint') }}</span>
+        <button
+          class="filter-settings-link"
+          @click="goToImportSettings"
+        >
+          {{ t('import.filterSettings') }}
+        </button>
+      </div>
     </div>
 
     <!-- 加载状态 -->
@@ -262,5 +287,30 @@ function clearError() {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.import-filter-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.filter-settings-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.filter-settings-link:hover {
+  color: var(--accent-hover);
 }
 </style>

@@ -84,7 +84,10 @@ const { t } = useI18n()
         :title="t('report.viewDagre', 'Dagre图')"
         @click="emit('update:internalViewMode', 'dagre')"
       >
-        <ArrowUturnLeftIcon class="w-3 h-3" style="transform: rotate(90deg)" />
+        <ArrowUturnLeftIcon
+          class="w-3 h-3"
+          style="transform: rotate(90deg)"
+        />
       </button>
       <button
         class="gt-btn gt-view-btn"

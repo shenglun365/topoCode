@@ -472,118 +472,125 @@ initUsageStats()
             style="padding:12px; margin-bottom:8px; position:relative;"
             :style="{ border: config.isDefault ? '1px solid var(--accent)' : '1px solid var(--border)' }"
           >
-        <div
-          v-if="config.isDefault"
-          class="default-badge"
-        >
-          {{ t('common.default') }}
-        </div>
-        <div style="display:flex; gap:12px; align-items:flex-start;">
-          <!-- 图标 -->
-          <component
-            :is="getProviderIcon(config.provider)"
-            class="w-6 h-6 text-accent"
-          />
+            <div
+              v-if="config.isDefault"
+              class="default-badge"
+            >
+              {{ t('common.default') }}
+            </div>
+            <div style="display:flex; gap:12px; align-items:flex-start;">
+              <!-- 图标 -->
+              <component
+                :is="getProviderIcon(config.provider)"
+                class="w-6 h-6 text-accent"
+              />
 
-          <!-- 信息 -->
-          <div style="flex:1;">
-            <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
-              <span style="font-size:12px; font-weight:500;">{{ config.name }}</span>
+              <!-- 信息 -->
+              <div style="flex:1;">
+                <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                  <span style="font-size:12px; font-weight:500;">{{ config.name }}</span>
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">
+                  {{ config.url }} / {{ config.model }}
+                </div>
+                <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+                  <span
+                    :class="`badge ${config.type === 'local' ? 'badge-green' : 'badge-yellow'}`"
+                    style="font-size:9px;"
+                  >
+                    {{ config.type === 'local' ? t('settings.local') : t('settings.cloud') }}
+                  </span>
+                  <span
+                    v-if="config.temperature !== undefined"
+                    class="badge badge-gray"
+                    style="font-size:9px;"
+                  >
+                    {{ t('settings.modelTemperature') }}: {{ fmt(config.temperature) }}
+                  </span>
+                  <span
+                    v-if="config.maxTokens !== undefined"
+                    class="badge badge-gray"
+                    style="font-size:9px;"
+                  >
+                    {{ t('settings.modelMaxTokens') }}: {{ fmt(config.maxTokens) }}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono);">
-              {{ config.url }} / {{ config.model }}
+
+            <!-- 操作按钮 -->
+            <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
+              <button
+                class="btn btn-ghost btn-sm"
+                :disabled="testingId === config.id"
+                @click="testModel(config.id)"
+              >
+                <ArrowPathIcon
+                  class="w-3 h-3"
+                  :class="{ 'animate-spin': testingId === config.id }"
+                />
+                <span>{{ testingId === config.id ? t('settings.testing') : t('settings.testConnection') }}</span>
+              </button>
+              <button
+                v-if="!config.isDefault"
+                class="btn btn-ghost btn-sm"
+                @click="setDefaultModel(config.id)"
+              >
+                {{ t('settings.setDefault') }}
+              </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                @click="openEditDialog(config)"
+              >
+                <PencilIcon class="w-3 h-3" />
+                <span>{{ t('common.edit') }}</span>
+              </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                @click="openUsageLimitDialog(config)"
+              >
+                <AdjustmentsHorizontalIcon class="w-3 h-3" />
+                <span>{{ t('settings.usageLimit') }}</span>
+              </button>
+              <span style="flex:1;" />
+              <button
+                class="btn btn-ghost btn-sm"
+                style="color:var(--error);"
+                @click="removeModel(config.id)"
+              >
+                <TrashIcon class="w-3 h-3" />
+                <span>{{ t('common.delete') }}</span>
+              </button>
             </div>
-            <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
-              <span
-                :class="`badge ${config.type === 'local' ? 'badge-green' : 'badge-yellow'}`"
-                style="font-size:9px;"
-              >
-                {{ config.type === 'local' ? t('settings.local') : t('settings.cloud') }}
-              </span>
-              <span
-                v-if="config.temperature !== undefined"
-                class="badge badge-gray"
-                style="font-size:9px;"
-              >
-                {{ t('settings.modelTemperature') }}: {{ fmt(config.temperature) }}
-              </span>
-              <span
-                v-if="config.maxTokens !== undefined"
-                class="badge badge-gray"
-                style="font-size:9px;"
-              >
-                {{ t('settings.modelMaxTokens') }}: {{ fmt(config.maxTokens) }}
-              </span>
+            <!-- 今日用量概览 -->
+            <div
+              v-if="todayUsageForModel(config.id)"
+              style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; color:var(--text-muted); display:flex; gap:12px;"
+            >
+              <span>{{ t('settings.todayUsage') }}:</span>
+              <span>{{ t('settings.requests') }} {{ fmt(todayUsageForModel(config.id)?.requestCount) }}{{ config.maxRequestsPerDay ? ' / ' + fmt(config.maxRequestsPerDay) : '' }}</span>
+              <span>Token {{ fmt(todayUsageForModel(config.id)?.totalTokens) }}{{ config.maxTokensPerDay ? ' / ' + fmt(config.maxTokensPerDay) : '' }}</span>
             </div>
           </div>
         </div>
-
-        <!-- 操作按钮 -->
-        <div style="display:flex; gap:4px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border);">
-          <button
-            class="btn btn-ghost btn-sm"
-            :disabled="testingId === config.id"
-            @click="testModel(config.id)"
-          >
-            <ArrowPathIcon
-              class="w-3 h-3"
-              :class="{ 'animate-spin': testingId === config.id }"
-            />
-            <span>{{ testingId === config.id ? t('settings.testing') : t('settings.testConnection') }}</span>
-          </button>
-          <button
-            v-if="!config.isDefault"
-            class="btn btn-ghost btn-sm"
-            @click="setDefaultModel(config.id)"
-          >
-            {{ t('settings.setDefault') }}
-          </button>
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="openEditDialog(config)"
-          >
-            <PencilIcon class="w-3 h-3" />
-            <span>{{ t('common.edit') }}</span>
-          </button>
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="openUsageLimitDialog(config)"
-          >
-            <AdjustmentsHorizontalIcon class="w-3 h-3" />
-            <span>{{ t('settings.usageLimit') }}</span>
-          </button>
-          <span style="flex:1;"></span>
-          <button
-            class="btn btn-ghost btn-sm"
-            style="color:var(--error);"
-            @click="removeModel(config.id)"
-          >
-            <TrashIcon class="w-3 h-3" />
-            <span>{{ t('common.delete') }}</span>
-          </button>
-        </div>
-        <!-- 今日用量概览 -->
-        <div
-          v-if="todayUsageForModel(config.id)"
-          style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border); font-size:11px; color:var(--text-muted); display:flex; gap:12px;"
-        >
-          <span>{{ t('settings.todayUsage') }}:</span>
-          <span>{{ t('settings.requests') }} {{ fmt(todayUsageForModel(config.id)?.requestCount) }}{{ config.maxRequestsPerDay ? ' / ' + fmt(config.maxRequestsPerDay) : '' }}</span>
-          <span>Token {{ fmt(todayUsageForModel(config.id)?.totalTokens) }}{{ config.maxTokensPerDay ? ' / ' + fmt(config.maxTokensPerDay) : '' }}</span>
-        </div>
+      </div>
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <UsageStatsPanel style="flex:1; min-height:0;" />
       </div>
     </div>
-  </div>
-  <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
-    <UsageStatsPanel style="flex:1; min-height:0;" />
-  </div>
-</div>
   </div>
 
   <!-- ==================== 用量限制编辑对话框 ==================== -->
   <Teleport to="body">
-    <div v-if="showUsageLimitDialog" class="modal-overlay" @click.self="showUsageLimitDialog = false">
-      <div class="modal" style="width:420px;">
+    <div
+      v-if="showUsageLimitDialog"
+      class="modal-overlay"
+      @click.self="showUsageLimitDialog = false"
+    >
+      <div
+        class="modal"
+        style="width:420px;"
+      >
         <div class="modal-header">
           <h3>{{ t('settings.editUsageLimit') }}</h3>
         </div>
@@ -597,7 +604,7 @@ initUsageStats()
                 min="0"
                 class="field-input"
                 placeholder="0 = unlimited"
-              />
+              >
             </div>
             <div class="form-field">
               <label class="field-label">{{ t('settings.dailyTokens') }}</label>
@@ -607,14 +614,26 @@ initUsageStats()
                 min="0"
                 class="field-input"
                 placeholder="0 = unlimited"
-              />
+              >
             </div>
           </div>
-          <p style="font-size:11px; color:var(--text-muted); margin-top:12px;">{{ t('settings.zeroMeansUnlimited') }}</p>
+          <p style="font-size:11px; color:var(--text-muted); margin-top:12px;">
+            {{ t('settings.zeroMeansUnlimited') }}
+          </p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showUsageLimitDialog = false">{{ t('common.cancel') }}</button>
-          <button class="btn btn-primary" @click="saveUsageLimit">{{ t('common.save') }}</button>
+          <button
+            class="btn btn-ghost"
+            @click="showUsageLimitDialog = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="btn btn-primary"
+            @click="saveUsageLimit"
+          >
+            {{ t('common.save') }}
+          </button>
         </div>
       </div>
     </div>
@@ -781,7 +800,7 @@ initUsageStats()
           />
           <span>{{ dialogTesting ? t('settings.testing') : t('settings.testConnection') }}</span>
         </button>
-        <span style="flex:1;"></span>
+        <span style="flex:1;" />
         <button
           class="btn btn-ghost"
           @click="showDialog = false"
@@ -800,17 +819,37 @@ initUsageStats()
 
   <!-- 删除确认弹窗 -->
   <Teleport to="body">
-    <div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
-      <div class="modal" style="width:400px;">
+    <div
+      v-if="showDeleteConfirm"
+      class="modal-overlay"
+      @click.self="showDeleteConfirm = false"
+    >
+      <div
+        class="modal"
+        style="width:400px;"
+      >
         <div class="modal-header">
           <h3>{{ t('common.confirm') }}</h3>
         </div>
         <div class="modal-body">
-          <p style="font-size:13px; color:var(--text-primary);">{{ t('settings.confirmDeleteModel') }}</p>
+          <p style="font-size:13px; color:var(--text-primary);">
+            {{ t('settings.confirmDeleteModel') }}
+          </p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showDeleteConfirm = false">{{ t('common.cancel') }}</button>
-          <button class="btn btn-primary" style="background:var(--error);border-color:var(--error);" @click="confirmDelete">{{ t('common.delete') }}</button>
+          <button
+            class="btn btn-ghost"
+            @click="showDeleteConfirm = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="btn btn-primary"
+            style="background:var(--error);border-color:var(--error);"
+            @click="confirmDelete"
+          >
+            {{ t('common.delete') }}
+          </button>
         </div>
       </div>
     </div>
@@ -818,20 +857,56 @@ initUsageStats()
 
   <!-- 测试结果弹窗 -->
   <Teleport to="body">
-    <div v-if="showTestResult" class="modal-overlay" @click.self="showTestResult = false">
-      <div class="modal" style="width:400px;">
+    <div
+      v-if="showTestResult"
+      class="modal-overlay"
+      @click.self="showTestResult = false"
+    >
+      <div
+        class="modal"
+        style="width:400px;"
+      >
         <div class="modal-header">
           <h3>{{ testResultType === 'success' ? t('settings.testConnection') : t('settings.testFailed') }}</h3>
         </div>
         <div class="modal-body">
           <div style="display:flex; align-items:center; gap:10px;">
-            <svg v-if="testResultType === 'success'" class="w-6 h-6" style="color:var(--success);flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-            <svg v-else class="w-6 h-6" style="color:var(--error);flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            <svg
+              v-if="testResultType === 'success'"
+              class="w-6 h-6"
+              style="color:var(--success);flex-shrink:0;"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+              stroke="currentColor"
+            ><path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M4.5 12.75l6 6 9-13.5"
+            /></svg>
+            <svg
+              v-else
+              class="w-6 h-6"
+              style="color:var(--error);flex-shrink:0;"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="2"
+              stroke="currentColor"
+            ><path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M6 18L18 6M6 6l12 12"
+            /></svg>
             <span style="font-size:13px; color:var(--text-primary);">{{ testResultMessage }}</span>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-primary" @click="showTestResult = false">{{ t('common.confirm') }}</button>
+          <button
+            class="btn btn-primary"
+            @click="showTestResult = false"
+          >
+            {{ t('common.confirm') }}
+          </button>
         </div>
       </div>
     </div>
@@ -839,16 +914,30 @@ initUsageStats()
 
   <!-- 验证提示弹窗 -->
   <Teleport to="body">
-    <div v-if="showValidationAlert" class="modal-overlay" @click.self="showValidationAlert = false">
-      <div class="modal" style="width:380px;">
+    <div
+      v-if="showValidationAlert"
+      class="modal-overlay"
+      @click.self="showValidationAlert = false"
+    >
+      <div
+        class="modal"
+        style="width:380px;"
+      >
         <div class="modal-header">
           <h3>{{ t('common.info') }}</h3>
         </div>
         <div class="modal-body">
-          <p style="font-size:13px; color:var(--text-primary);">{{ validationMessage }}</p>
+          <p style="font-size:13px; color:var(--text-primary);">
+            {{ validationMessage }}
+          </p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-primary" @click="showValidationAlert = false">{{ t('common.confirm') }}</button>
+          <button
+            class="btn btn-primary"
+            @click="showValidationAlert = false"
+          >
+            {{ t('common.confirm') }}
+          </button>
         </div>
       </div>
     </div>

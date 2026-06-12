@@ -22,6 +22,7 @@ export interface ChatOptions {
   variables?: Record<string, any>
   mode?: 'chat' | 'tools' | 'structured'
   onChunk?: (chunk: string) => void
+  signal?: AbortSignal
 }
 
 export function chat(options: ChatOptions): Promise<string> {
@@ -31,6 +32,23 @@ export function chat(options: ChatOptions): Promise<string> {
   const bridge = window.api
 
   return new Promise<string>(async (resolve, reject) => {
+    let aborted = false
+    let requestId: string | null = null
+    let unsub: (() => void) | null = null
+
+    function abortHandler() {
+      aborted = true
+      if (requestId) bridge.llm.abortChat({ requestId })
+      unsub?.()
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+
+    if (options.signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    options.signal?.addEventListener('abort', abortHandler)
+
     try {
       const result = await bridge.llm.chat({
         sessionId: `_inline_${Date.now()}`,
@@ -41,21 +59,35 @@ export function chat(options: ChatOptions): Promise<string> {
         mode: options.mode || 'chat',
       })
 
-      const unsubscribe = bridge.llm.subscribe(result.requestId, {
+      if (aborted) {
+        bridge.llm.abortChat({ requestId: result.requestId })
+        return
+      }
+
+      requestId = result.requestId
+      unsub = bridge.llm.subscribe(result.requestId, {
         onChunk(data: { index: number; text: string }) {
+          if (aborted) return
           options.onChunk?.(data.text)
         },
         onDone(data: { content: string; structured?: Record<string, any> }) {
-          unsubscribe()
+          if (aborted) return
+          options.signal?.removeEventListener('abort', abortHandler)
+          unsub?.()
           resolve(data.content)
         },
         onError(errData: { message: string; code: string }) {
-          unsubscribe()
+          if (aborted) return
+          options.signal?.removeEventListener('abort', abortHandler)
+          unsub?.()
           reject(new Error(errData.message))
         },
       })
     } catch (e) {
-      reject(e)
+      if (!aborted) {
+        options.signal?.removeEventListener('abort', abortHandler)
+        reject(e)
+      }
     }
   })
 }

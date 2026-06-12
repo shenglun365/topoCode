@@ -53,7 +53,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   resizeObs?.disconnect()
+  if (resizeTimer) clearTimeout(resizeTimer)
   simulation?.stop()
+  if (svgRef.value) {
+    (d3.select(svgRef.value as any) as any).on('.zoom', null)
+  }
 })
 
 function initSvg() {
@@ -111,8 +115,16 @@ function render() {
 </script>
 
 <template>
-  <div ref="containerRef" class="gc-container">
-    <svg ref="svgRef" :width="width" :height="height" class="gc-svg" />
+  <div
+    ref="containerRef"
+    class="gc-container"
+  >
+    <svg
+      ref="svgRef"
+      :width="width"
+      :height="height"
+      class="gc-svg"
+    />
   </div>
 </template>
 

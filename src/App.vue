@@ -30,7 +30,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <span
+    v-if="showId"
+    class="cmp-id"
+  >{{ componentId }}</span>
   <AppShell />
 </template>
 
