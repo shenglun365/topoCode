@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useComponentId } from '@/composables/useComponentId'
+import { communityLabel } from '@/utils/communityLabel'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
@@ -87,16 +88,7 @@ const pagedCommunities = computed(() => {
 })
 
 function commName(item: CommunityItem): string {
-  const name = item.name && item.name !== item.communityId ? item.name : ''
-  if (name) return name.length > 12 ? name.slice(0, 12) + '\u2026' : name
-  return communityIdLabel(item)
-}
-
-function communityIdLabel(item: { communityId: string; level?: string }): string {
-  const parts = item.communityId.split('-')
-  const num = parts[parts.length - 1]
-  const level = item.level || 'L0'
-  return `${level}-${num}`
+  return communityLabel(item)
 }
 
 function levelLabel(lv: string): string {

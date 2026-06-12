@@ -36,11 +36,16 @@ function fitView() {
 }
 
 let resizeObs: ResizeObserver | null = null
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(() => {
   fitView()
   if (containerRef.value) {
-    resizeObs = new ResizeObserver(() => fitView())
+    resizeObs = new ResizeObserver(() => {
+      fitView()
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => render(), 150)
+    })
     resizeObs.observe(containerRef.value)
   }
   nextTick(() => initSvg())

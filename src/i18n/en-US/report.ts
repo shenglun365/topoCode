@@ -89,10 +89,12 @@ export default { report: {
   clickToExpand: 'Click to expand',
   // External views
   viewForce: 'Force Graph',
+  viewDagre: 'Dagre Graph',
   viewTable: 'Table',
   viewHeatmap: 'Heatmap',
   resetView: 'Reset View',
   nodeFilter: 'Node Filter',
+  pinPanel: 'Pin',
   hidden: 'hidden',
   items: 'items',
   fileCount: 'Refs',

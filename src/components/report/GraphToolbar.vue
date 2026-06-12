@@ -15,6 +15,7 @@ const props = defineProps<{
   canRollUp: boolean
   externalMode?: boolean
   externalViewMode?: 'force' | 'table' | 'heatmap'
+  internalViewMode?: 'force' | 'dagre' | 'table' | 'heatmap'
   filterActive?: boolean
 }>()
 
@@ -23,15 +24,12 @@ const emit = defineEmits<{
   'roll-up': []
   'fullscreen': []
   'update:externalViewMode': [mode: 'force' | 'table' | 'heatmap']
+  'update:internalViewMode': [mode: 'force' | 'dagre' | 'table' | 'heatmap']
   'reset-view': []
-  'toggle-filter': []
+  'toggle-filter': [event?: MouseEvent]
 }>()
 
 const { t } = useI18n()
-
-function toggleStyle() {
-  emit('update:style', props.style === 'd3force' ? 'dagre' : 'd3force')
-}
 </script>
 
 <template>
@@ -73,11 +71,36 @@ function toggleStyle() {
     </template>
     <template v-else>
       <button
-        class="gt-btn gt-style-btn"
-        :title="t('report.switchStyle', '切换布局风格')"
-        @click="toggleStyle"
+        class="gt-btn gt-view-btn"
+        :class="{ active: (internalViewMode || 'force') === 'force' }"
+        :title="t('report.viewForce', '力导向图')"
+        @click="emit('update:internalViewMode', 'force')"
       >
-        <span class="gt-style-label">{{ props.style === 'd3force' ? 'Force' : 'Dagre' }}</span>
+        <ChartBarIcon class="w-3 h-3" />
+      </button>
+      <button
+        class="gt-btn gt-view-btn"
+        :class="{ active: internalViewMode === 'dagre' }"
+        :title="t('report.viewDagre', 'Dagre图')"
+        @click="emit('update:internalViewMode', 'dagre')"
+      >
+        <ArrowUturnLeftIcon class="w-3 h-3" style="transform: rotate(90deg)" />
+      </button>
+      <button
+        class="gt-btn gt-view-btn"
+        :class="{ active: internalViewMode === 'table' }"
+        :title="t('report.viewTable', '表格')"
+        @click="emit('update:internalViewMode', 'table')"
+      >
+        <TableCellsIcon class="w-3 h-3" />
+      </button>
+      <button
+        class="gt-btn gt-view-btn"
+        :class="{ active: internalViewMode === 'heatmap' }"
+        :title="t('report.viewHeatmap', '热力图')"
+        @click="emit('update:internalViewMode', 'heatmap')"
+      >
+        <Squares2X2Icon class="w-3 h-3" />
       </button>
     </template>
 
@@ -92,7 +115,7 @@ function toggleStyle() {
       class="gt-btn"
       :class="{ active: props.filterActive }"
       :title="t('report.nodeFilter', '节点筛选')"
-      @click="emit('toggle-filter')"
+      @click="(e: MouseEvent) => emit('toggle-filter', e)"
     >
       <FunnelIcon class="w-3 h-3" />
     </button>

@@ -91,10 +91,12 @@ export default { report: {
   clickToExpand: '点击展开',
   // 外部视图
   viewForce: '力导向图',
+  viewDagre: 'Dagre图',
   viewTable: '表格',
   viewHeatmap: '热力图',
   resetView: '重置视图',
   nodeFilter: '节点筛选',
+  pinPanel: '常驻',
   hidden: '隐藏',
   items: '条',
   fileCount: '引用数',

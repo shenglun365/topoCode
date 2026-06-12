@@ -5,12 +5,14 @@ import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useComponentId } from '@/composables/useComponentId'
 import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
+import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
 import GraphCanvas from './GraphCanvas.vue'
 import ExternalTableView from './ExternalTableView.vue'
 import ExternalHeatmapView from './ExternalHeatmapView.vue'
 import NodeFilterPanel from './NodeFilterPanel.vue'
+import CommunityTableView from './CommunityTableView.vue'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
@@ -36,10 +38,14 @@ const { getNodePosition, setNodePosition } = useGraphPosition(
 
 const graphStyle = ref<'d3force' | 'dagre'>('dagre')
 const externalViewMode = ref<'force' | 'table' | 'heatmap'>('force')
+const internalViewMode = ref<'force' | 'dagre' | 'table' | 'heatmap'>('dagre')
 const resetTrigger = ref(0)
 const showFilter = ref(false)
+const filterClickX = ref(0)
+const filterClickY = ref(0)
 const currentViewKey = ref('L0')
 const currentDrillLevel = ref('L0')
+const externalDrillItem = ref<string | null>(null)
 const breadcrumbPath = ref<Array<{ key: string; label: string; level: string }>>([
   { key: 'L0', label: t('report.allL0', '全部L0社区'), level: 'L0' }
 ])
@@ -91,7 +97,20 @@ const rawGraphNodes = computed(() => {
   if (isExternalTab.value) {
     const extNodes = buildExternalNodes()
     const commNodes = externalCommunityNodes.value
-    return [...extNodes, ...commNodes]
+    const all = [...extNodes, ...commNodes]
+    if (externalDrillItem.value) {
+      const drillId = externalDrillItem.value
+      const extNode = extNodes.find(n => n.id === drillId)
+      if (extNode) {
+        const connectedCommIds = new Set<string>()
+        for (const e of externalCrossEdges.value) {
+          if (e.source === drillId) connectedCommIds.add(e.target)
+          if (e.target === drillId) connectedCommIds.add(e.source)
+        }
+        return all.filter(n => n.id === drillId || connectedCommIds.has(n.id))
+      }
+    }
+    return all
   }
   const coms = allCommunities.value
   if (currentViewKey.value === 'L0') {
@@ -113,7 +132,7 @@ const rawGraphNodes = computed(() => {
 function mapCommunityToNode(c: CommunityItem) {
   return {
     id: c.communityId,
-    label: c.name && c.name !== c.communityId ? c.name : c.communityId,
+    label: communityLabel(c),
     nodeCount: c.nodeCount,
     fileCount: c.fileCount,
     qualityScore: c.qualityScore,
@@ -254,7 +273,7 @@ const externalCommunityNodes = computed(() => {
         seen.add(c.communityId)
         nodes.push({
           id: c.communityId,
-          label: c.name || c.communityId,
+          label: communityIdLabel(c.communityId),
           nodeCount: 0,
           isExternal: false,
           hasChildren: true,
@@ -269,6 +288,10 @@ const externalCommunityNodes = computed(() => {
 async function handleDrillDown(communityId: string) {
   if (communityId === '__merged__') {
     handleExpandMerged()
+    return
+  }
+  if (isExternalTab.value) {
+    externalDrillItem.value = communityId
     return
   }
   const com = allCommunities.value.find(c => c.communityId === communityId)
@@ -292,6 +315,10 @@ function handleBreadcrumbClick(index: number) {
 }
 
 function handleRollUp() {
+  if (isExternalTab.value && externalDrillItem.value) {
+    externalDrillItem.value = null
+    return
+  }
   if (breadcrumbPath.value.length <= 1) return
   breadcrumbPath.value.pop()
   currentViewKey.value = breadcrumbPath.value[breadcrumbPath.value.length - 1].key
@@ -299,6 +326,10 @@ function handleRollUp() {
   expandBatchCount.value = 0
   graphSearch.value = ''
 }
+
+const canRollUp = computed(() =>
+  isExternalTab.value ? !!externalDrillItem.value : breadcrumbPath.value.length > 1
+)
 
 function handleNodeContextMenu(nodeId: string) {
   if (nodeId === '__merged__') return
@@ -322,14 +353,40 @@ function handleResetView() {
   resetTrigger.value++
 }
 
-function handleToggleFilter() {
+function handleToggleFilter(event?: { clientX: number; clientY: number }) {
+  if (event) {
+    filterClickX.value = event.clientX
+    filterClickY.value = event.clientY
+  }
   showFilter.value = !showFilter.value
 }
 
 const filterNodes = computed(() => {
+  if (isExternalTab.value) {
+    const items = graphNodes.value.filter(n => !n.isMerged).map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+    const commNodes = externalCommunityNodes.value.map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+    return [...items, ...commNodes]
+  }
   return graphNodes.value
     .filter(n => !n.isMerged)
     .map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+})
+
+const internalHeatmapItems = computed(() => {
+  const raw = crossEdges.value
+  if (raw.length === 0) return []
+  const pkgMap = new Map<string, { package: string; fileCount: number; files: string[]; communities: Array<{ communityId: string; name?: string }> }>()
+  for (const e of raw) {
+    const key = e.source
+    if (!pkgMap.has(key)) {
+      pkgMap.set(key, { package: key, fileCount: 0, files: [], communities: [] })
+    }
+    const item = pkgMap.get(key)!
+    item.fileCount += e.count || 1
+    const tgtComm = allCommunities.value.find(c => c.communityId === e.target)
+    item.communities.push({ communityId: e.target, name: tgtComm?.name || communityIdLabel(e.target) })
+  }
+  return Array.from(pkgMap.values())
 })
 
 watch(() => [props.edgeType, currentViewKey.value], async () => {
@@ -370,10 +427,11 @@ onUnmounted(() => {
       </div>
       <GraphToolbar
         v-model:style="graphStyle"
-        :can-roll-up="breadcrumbPath.length > 1"
+        :can-roll-up="canRollUp"
         :external-mode="isExternalTab"
         :filter-active="hiddenNodeIds.size > 0"
         v-model:external-view-mode="externalViewMode"
+        v-model:internal-view-mode="internalViewMode"
         @roll-up="handleRollUp"
         @fullscreen="enterFullscreen"
         @reset-view="handleResetView"
@@ -406,16 +464,28 @@ onUnmounted(() => {
     </template>
     <template v-else>
       <GraphCanvas
+        v-if="internalViewMode === 'force' || internalViewMode === 'dagre'"
         :nodes="graphNodes"
         :edges="crossEdges"
-        :style="graphStyle"
-        :key="currentViewKey + '-' + props.edgeType"
+        :style="internalViewMode === 'dagre' ? 'dagre' : 'd3force'"
+        :key="currentViewKey + '-' + props.edgeType + '-' + internalViewMode"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
         @node-dblclick="(id: string) => handleDrillDown(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, currentViewKey, id, { x, y })"
+      />
+      <CommunityTableView
+        v-else-if="internalViewMode === 'table'"
+        :communities="allCommunities"
+        :edge-type="props.edgeType"
+        @open-community="(item) => handleNodeContextMenu(item.communityId)"
+      />
+      <ExternalHeatmapView
+        v-else
+        :items="internalHeatmapItems"
+        :all-communities="allCommunities"
       />
     </template>
     <div v-if="isFullscreen" class="cgv-fullscreen-bar">
@@ -431,9 +501,15 @@ onUnmounted(() => {
         </div>
         <GraphToolbar
           v-model:style="graphStyle"
-          :can-roll-up="breadcrumbPath.length > 1"
+          :can-roll-up="canRollUp"
+          :external-mode="isExternalTab"
+          :filter-active="hiddenNodeIds.size > 0"
+          v-model:external-view-mode="externalViewMode"
+          v-model:internal-view-mode="internalViewMode"
           @roll-up="handleRollUp"
           @fullscreen="exitFullscreen"
+          @reset-view="handleResetView"
+          @toggle-filter="handleToggleFilter"
         />
       </div>
       <div class="fs-actions">
@@ -441,10 +517,11 @@ onUnmounted(() => {
       </div>
     </div>
     <NodeFilterPanel
-      v-if="!isExternalTab"
       :nodes="filterNodes"
       :hidden-ids="hiddenNodeIds"
       :visible="showFilter"
+      :click-x="filterClickX"
+      :click-y="filterClickY"
       @update:hidden-ids="updateHiddenIds"
       @close="showFilter = false"
     />
