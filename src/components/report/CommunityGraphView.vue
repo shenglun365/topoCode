@@ -14,6 +14,26 @@ import ExternalHeatmapView from './ExternalHeatmapView.vue'
 import NodeFilterPanel from './NodeFilterPanel.vue'
 import CommunityTableView from './CommunityTableView.vue'
 
+/* ========================================================
+   Unified drill path — single source of truth for all views
+   ======================================================== */
+
+interface DrillPathNode {
+  key: string
+  label: string
+  kind: 'root' | 'community' | 'external'
+  commId?: string
+  extItemId?: string
+  commLevel?: string
+}
+
+const rootDrillNode = (): DrillPathNode => ({
+  key: 'L0',
+  label: t('report.allL0', '全部L0社区'),
+  kind: 'root',
+  commLevel: 'L0',
+})
+
 const { t } = useI18n()
 const communityStore = useCommunityStore()
 
@@ -30,12 +50,12 @@ const emit = defineEmits<{
 }>()
 
 const { showId, componentId } = useComponentId('CG-001')
-
 const { isFullscreen, enterFullscreen, exitFullscreen, onKeydown } = useGraphFullscreen()
 const { getNodePosition, setNodePosition } = useGraphPosition(
   props.projectId, props.taskId, props.taskUpdatedAt
 )
 
+/* ---- view mode state ---- */
 const graphStyle = ref<'d3force' | 'dagre'>('dagre')
 const externalViewMode = ref<'force' | 'table' | 'heatmap'>('force')
 const internalViewMode = ref<'force' | 'dagre' | 'table' | 'heatmap'>('dagre')
@@ -43,20 +63,17 @@ const resetTrigger = ref(0)
 const showFilter = ref(false)
 const filterClickX = ref(0)
 const filterClickY = ref(0)
-const currentViewKey = ref('L0')
-const currentDrillLevel = ref('L0')
-const externalDrillItem = ref<string | null>(null)
-const breadcrumbPath = ref<Array<{ key: string; label: string; level: string }>>([
-  { key: 'L0', label: t('report.allL0', '全部L0社区'), level: 'L0' }
-])
 
+/* ---- unified drill state ---- */
+const drillPath = ref<DrillPathNode[]>([rootDrillNode()])
+
+/* ---- graph / merge / search ---- */
 const MERGE_THRESHOLD = 100
 const BATCH_EXPAND_SIZE = 50
-
-const mergedHiddenNodes = ref<any[]>([])
 const expandBatchCount = ref(0)
 const graphSearch = ref('')
 
+/* ---- filter persistence ---- */
 const FILTER_STORAGE_KEY = computed(() => `graph-filter-${props.projectId}-${props.taskId}`)
 const hiddenNodeIds = ref<Set<string>>(loadHiddenIds())
 
@@ -67,68 +84,115 @@ function loadHiddenIds(): Set<string> {
   } catch {}
   return new Set()
 }
-
 function saveHiddenIds() {
   try {
     localStorage.setItem(FILTER_STORAGE_KEY.value, JSON.stringify([...hiddenNodeIds.value]))
   } catch {}
 }
-
 function updateHiddenIds(ids: Set<string>) {
   hiddenNodeIds.value = ids
   saveHiddenIds()
 }
 
+/* ---- tab detection ---- */
 const isExternalTab = computed(() =>
   props.edgeType === 'EXTERNAL_INCLUDE' || props.edgeType === 'EXTERNAL_CALL'
 )
+const effectiveEdgeType = computed(() => {
+  if (props.edgeType === 'EXTERNAL_INCLUDE') return 'INCLUDE'
+  if (props.edgeType === 'EXTERNAL_CALL') return 'CALL'
+  return props.edgeType
+})
 
+/* ---- derived drill metadata ---- */
+const drillMeta = computed(() => {
+  const tail = drillPath.value[drillPath.value.length - 1]
+  return {
+    isAtRoot: drillPath.value.length <= 1,
+    drillLevel: tail.commLevel || 'L0',
+    drillCommId: tail.commId || null,
+    drillExtItemId: tail.extItemId || null,
+    drillKey: tail.key,
+    breadcrumbSegments: drillPath.value.map(n => ({ key: n.key, label: n.label, level: n.commLevel })),
+    fsTitle: tail.kind === 'root' ? t('report.communityArchitecture', '组件架构') : tail.label,
+  }
+})
+
+/* ---- community data ---- */
 const allCommunities = computed(() => {
-  if (isExternalTab.value) return []
   return communityStore.tasks[props.taskId]?.communities || []
 })
 
-const parentCommId = computed(() => {
-  if (currentViewKey.value === 'L0') return null
-  return currentViewKey.value.replace(/^comm-/, '')
-})
-
-const rawGraphNodes = computed(() => {
+/* ---- filter nodes for filter panel ---- */
+const filterNodes = computed(() => {
   if (isExternalTab.value) {
-    const extNodes = buildExternalNodes()
-    const commNodes = externalCommunityNodes.value
-    const all = [...extNodes, ...commNodes]
-    if (externalDrillItem.value) {
-      const drillId = externalDrillItem.value
-      const extNode = extNodes.find(n => n.id === drillId)
-      if (extNode) {
-        const connectedCommIds = new Set<string>()
-        for (const e of externalCrossEdges.value) {
-          if (e.source === drillId) connectedCommIds.add(e.target)
-          if (e.target === drillId) connectedCommIds.add(e.source)
-        }
-        return all.filter(n => n.id === drillId || connectedCommIds.has(n.id))
-      }
-    }
-    return all
+    const items = graphNodes.value.filter(n => !n.isMerged).map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+    const commNodes = externalCommunityNodes.value.map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+    return [...items, ...commNodes]
   }
-  const coms = allCommunities.value
-  if (currentViewKey.value === 'L0') {
-    return coms.filter(c => c.level === 'L0' && c.edgeType === props.edgeType)
-      .map(c => mapCommunityToNode(c))
-  }
-  const parentId = parentCommId.value
-  if (!parentId) return []
-  const parent = coms.find(c => c.communityId === parentId)
-  if (!parent) return []
-  const nextLevel = `L${parseInt(parent.level?.[1] || '0') + 1}`
-  return coms.filter(c =>
-    c.edgeType === props.edgeType &&
-    c.level === nextLevel &&
-    c.parentId === parentId
-  ).map(c => mapCommunityToNode(c))
+  return graphNodes.value
+    .filter(n => !n.isMerged)
+    .map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
 })
 
+/* ---- external data ---- */
+const externalItems = computed(() => {
+  if (!isExternalTab.value || !props.externalStats) return []
+  return props.edgeType === 'EXTERNAL_INCLUDE'
+    ? (props.externalStats.externalDeps || [])
+    : (props.externalStats.externalCalls || [])
+})
+
+const externalCrossEdges = computed(() => {
+  if (!isExternalTab.value || !props.externalStats) return []
+  const edges: any[] = []
+  const items = props.edgeType === 'EXTERNAL_INCLUDE'
+    ? (props.externalStats.externalDeps || [])
+    : (props.externalStats.externalCalls || [])
+  items.forEach((item: any) => {
+    const extId = item.package || item.name
+    const communities = item.communities || []
+    communities.forEach((c: any) => {
+      edges.push({ source: extId, target: c.communityId })
+    })
+  })
+  return edges
+})
+
+const externalCommunityNodes = computed(() => {
+  if (!isExternalTab.value || !props.externalStats) return []
+  const seen = new Set<string>()
+  const nodes: any[] = []
+  const items = props.edgeType === 'EXTERNAL_INCLUDE'
+    ? (props.externalStats.externalDeps || [])
+    : (props.externalStats.externalCalls || [])
+  items.forEach((item: any) => {
+    const communities = item.communities || []
+    communities.forEach((c: any) => {
+      if (!seen.has(c.communityId)) {
+        seen.add(c.communityId)
+        nodes.push({
+          id: c.communityId,
+          label: communityIdLabel(c.communityId),
+          nodeCount: 0,
+          isExternal: false,
+          hasChildren: allCommunities.value.some(ch => ch.parentId === c.communityId),
+        })
+      }
+    })
+  })
+  return nodes
+})
+
+/* ---- external drill-filtered items ---- */
+const drillExternalItems = computed(() => {
+  if (!isExternalTab.value) return props.externalStats
+  const extId = drillMeta.value.drillExtItemId
+  if (!extId) return externalItems.value
+  return externalItems.value.filter((i: any) => (i.package || i.name) === extId)
+})
+
+/* ---- graph nodes ---- */
 function mapCommunityToNode(c: CommunityItem) {
   return {
     id: c.communityId,
@@ -141,22 +205,105 @@ function mapCommunityToNode(c: CommunityItem) {
   }
 }
 
+function buildExternalNodes(): any[] {
+  if (!props.externalStats) return []
+  const items = props.edgeType === 'EXTERNAL_INCLUDE'
+    ? (props.externalStats.externalDeps || [])
+    : (props.externalStats.externalCalls || [])
+  const nodes: any[] = []
+  items.forEach((item: any) => {
+    const extId = item.package || item.name
+    nodes.push({
+      id: extId,
+      label: extId.length > 16 ? extId.slice(0, 16) + '\u2026' : extId,
+      nodeCount: item.fileCount || item.count,
+      isExternal: true,
+      hasChildren: !!(item.communities && item.communities.length > 0),
+    })
+  })
+  return nodes
+}
+
+const rawGraphNodes = computed(() => {
+  if (isExternalTab.value) {
+    const commId = drillMeta.value.drillCommId
+    if (commId) {
+      const coms = allCommunities.value
+      const parent = coms.find(c => c.communityId === commId)
+      if (!parent) return []
+      const parentLevel = parent.level || 'L0'
+      const nextLevel = `L${parseInt(parentLevel[1] || '0') + 1}`
+      const childNodes = coms.filter(c =>
+        c.edgeType === parent.edgeType &&
+        c.level === nextLevel &&
+        c.parentId === commId
+      ).map(c => mapCommunityToNode(c))
+      const firstCommEntry = drillPath.value.find(n => n.kind === 'community')
+      const rootL0Id = firstCommEntry?.commId
+      const connectedExtIds = new Set<string>()
+      if (rootL0Id) {
+        for (const e of externalCrossEdges.value) {
+          if (e.source === rootL0Id) connectedExtIds.add(e.target)
+          if (e.target === rootL0Id) connectedExtIds.add(e.source)
+        }
+      }
+      const extNodes = buildExternalNodes().filter(n => {
+        if (!connectedExtIds.has(n.id)) return false
+        if (!commId) return true
+        const edgeSet = new Set(crossEdges.value.map(e => e.source))
+        return edgeSet.has(n.id)
+      })
+      return [...childNodes, ...extNodes]
+    }
+    const extNodes = buildExternalNodes()
+    const commNodes = externalCommunityNodes.value
+    const connectedIds = new Set<string>()
+    for (const e of externalCrossEdges.value) {
+      connectedIds.add(e.source)
+      connectedIds.add(e.target)
+    }
+    const all = [...extNodes.filter(n => connectedIds.has(n.id)), ...commNodes]
+    const extId = drillMeta.value.drillExtItemId
+    if (extId) {
+      const extNode = all.find(n => n.id === extId && n.isExternal)
+      if (extNode) {
+        const connectedCommIds = new Set<string>()
+        for (const e of externalCrossEdges.value) {
+          if (e.source === extId) connectedCommIds.add(e.target)
+          if (e.target === extId) connectedCommIds.add(e.source)
+        }
+        return all.filter(n => n.id === extId || connectedCommIds.has(n.id))
+      }
+    }
+    return all
+  }
+  const coms = allCommunities.value
+  const commId = drillMeta.value.drillCommId
+  if (!commId) {
+    return coms.filter(c => c.level === 'L0' && c.edgeType === props.edgeType)
+      .map(c => mapCommunityToNode(c))
+  }
+  const parent = coms.find(c => c.communityId === commId)
+  if (!parent) return []
+  const nextLevel = `L${parseInt(parent.level?.[1] || '0') + 1}`
+  return coms.filter(c =>
+    c.edgeType === props.edgeType &&
+    c.level === nextLevel &&
+    c.parentId === commId
+  ).map(c => mapCommunityToNode(c))
+})
+
 const graphNodes = computed(() => {
   const raw = rawGraphNodes.value
   if (raw.length <= MERGE_THRESHOLD || isExternalTab.value) return applySearchFilter(raw)
-
   const sorted = [...raw].sort((a, b) => (b.nodeCount || 0) - (a.nodeCount || 0))
   const visible = sorted.slice(0, MERGE_THRESHOLD)
-
   const currentHidden = sorted.slice(MERGE_THRESHOLD)
   const expandedFromPrev = expandBatchCount.value * BATCH_EXPAND_SIZE
   const showing = Math.min(expandedFromPrev, currentHidden.length)
-
   const result = [...visible]
   if (currentHidden.length > 0) {
-    for (let i = 0; i < showing; i++) {
-      result.push(currentHidden[i])
-    }
+    for (let i = 0; i < showing; i++) result.push(currentHidden[i])
     const remaining = currentHidden.length - showing
     if (remaining > 0) {
       result.push({
@@ -168,7 +315,6 @@ const graphNodes = computed(() => {
       })
     }
   }
-
   return applySearchFilter(result)
 })
 
@@ -197,139 +343,185 @@ function handleExpandMerged() {
   } else if (remaining > 0) {
     expandBatchCount.value++
   } else {
-    expandBatchCount.value++ // 全展开
+    expandBatchCount.value++
   }
 }
 
+/* ---- cross edges (uses drillLevel) ---- */
 const crossEdges = computed(() => {
-  if (isExternalTab.value) return externalCrossEdges.value
-  const lv = currentDrillLevel.value
-  const raw = communityStore.tasks[props.taskId]?.crossCommunityEdges?.[props.edgeType]?.[lv] || []
-  return raw.map(e => ({ source: e.sourceCommId, target: e.targetCommId, count: e.edgeCount }))
-})
+  if (isExternalTab.value && !drillMeta.value.drillCommId) return externalCrossEdges.value
 
-const externalItems = computed(() => {
-  if (!isExternalTab.value || !props.externalStats) return []
-  return props.edgeType === 'EXTERNAL_INCLUDE'
-    ? (props.externalStats.externalDeps || [])
-    : (props.externalStats.externalCalls || [])
-})
+  const parentComm = drillMeta.value.drillCommId
+    ? allCommunities.value.find(c => c.communityId === drillMeta.value.drillCommId)
+    : null
+  const et = parentComm?.edgeType || effectiveEdgeType.value
+  const lv = drillMeta.value.drillLevel
+  const raw = communityStore.tasks[props.taskId]?.crossCommunityEdges?.[et]?.[lv] || []
+  const internalEdges = raw.map(e => ({ source: e.sourceCommId, target: e.targetCommId, count: e.edgeCount }))
 
-function buildExternalNodes(): any[] {
-  if (!props.externalStats) return []
-  const items = props.edgeType === 'EXTERNAL_INCLUDE'
-    ? (props.externalStats.externalDeps || [])
-    : (props.externalStats.externalCalls || [])
-  const nodes: any[] = []
-  const edgeType = props.edgeType
+  if (!isExternalTab.value) return internalEdges
+  if (!drillMeta.value.drillCommId) return internalEdges
 
-  items.forEach((item: any) => {
-    const extId = item.package || item.name
-    nodes.push({
-      id: extId,
-      label: extId.length > 16 ? extId.slice(0, 16) + '\u2026' : extId,
-      nodeCount: item.fileCount || item.count,
-      isExternal: true,
-      hasChildren: !!(item.communities && item.communities.length > 0),
-    })
-  })
+  const nodeListMap = communityStore.tasks[props.taskId]?.nodeLists?.[et]?.[lv]
+  const firstCommEntry = drillPath.value.find(n => n.kind === 'community')
 
-  return nodes
-}
-
-const externalCrossEdges = computed(() => {
-  if (!isExternalTab.value || !props.externalStats) return []
-  const edges: any[] = []
-  const items = props.edgeType === 'EXTERNAL_INCLUDE'
-    ? (props.externalStats.externalDeps || [])
-    : (props.externalStats.externalCalls || [])
-
-  items.forEach((item: any) => {
-    const extId = item.package || item.name
-    const communities = item.communities || []
-    communities.forEach((c: any) => {
-      edges.push({
-        source: extId,
-        target: c.communityId,
-      })
-    })
-  })
-
-  return edges
-})
-
-const externalCommunityNodes = computed(() => {
-  if (!isExternalTab.value || !props.externalStats) return []
-  const seen = new Set<string>()
-  const nodes: any[] = []
-  const items = props.edgeType === 'EXTERNAL_INCLUDE'
-    ? (props.externalStats.externalDeps || [])
-    : (props.externalStats.externalCalls || [])
-
-  items.forEach((item: any) => {
-    const communities = item.communities || []
-    communities.forEach((c: any) => {
-      if (!seen.has(c.communityId)) {
-        seen.add(c.communityId)
-        nodes.push({
-          id: c.communityId,
-          label: communityIdLabel(c.communityId),
-          nodeCount: 0,
-          isExternal: false,
-          hasChildren: true,
-        })
+  if (nodeListMap) {
+    const rootL0Id = firstCommEntry?.commId
+    const childCommIds = new Set(
+      allCommunities.value.filter(c => c.parentId === drillMeta.value.drillCommId).map(c => c.communityId)
+    )
+    const fileToComm = new Map<string, string>()
+    for (const [commId, files] of Object.entries(nodeListMap)) {
+      if (!childCommIds.has(commId)) continue
+      for (const f of files) {
+        if (!fileToComm.has(f)) fileToComm.set(f, commId)
       }
-    })
-  })
+    }
+    const remappedEdges: { source: string; target: string }[] = []
+    for (const item of externalItems.value) {
+      const extId = item.package || item.name || ''
+      if (!extId) continue
+      if (!rootL0Id || !(item.communities || []).some(c => c.communityId === rootL0Id)) continue
+      const matchedIds = new Set<string>()
+      for (const f of (item.files || [])) {
+        const cId = fileToComm.get(f)
+        if (cId) matchedIds.add(cId)
+      }
+      for (const cId of matchedIds) {
+        remappedEdges.push({ source: extId, target: cId })
+      }
+    }
+    return [...internalEdges, ...remappedEdges]
+  }
 
-  return nodes
+  const childIds = new Set<string>()
+  for (const e of internalEdges) {
+    childIds.add(e.source)
+    childIds.add(e.target)
+  }
+  const rootL0IdFallback = firstCommEntry?.commId
+  if (rootL0IdFallback) childIds.add(rootL0IdFallback)
+  const relevantExternal = externalCrossEdges.value.filter(e =>
+    childIds.has(e.source) || childIds.has(e.target)
+  )
+  return [...internalEdges, ...relevantExternal]
 })
 
-async function handleDrillDown(communityId: string) {
-  if (communityId === '__merged__') {
+/* ---- heatmap items ---- */
+const internalHeatmapItems = computed(() => {
+  const raw = crossEdges.value
+  if (raw.length === 0) {
+    // eslint-disable-next-line no-console
+    console.log('[heatmap] crossEdges empty for level:', drillMeta.value.drillLevel, 'edgeType:', props.edgeType)
+    return []
+  }
+  const pkgMap = new Map<string, { package: string; name: string; fileCount: number; files: string[]; communities: Array<{ communityId: string; name?: string }> }>()
+  for (const e of raw) {
+    const key = e.source
+    if (!pkgMap.has(key)) {
+      pkgMap.set(key, { package: key, name: communityIdLabel(key), fileCount: 0, files: [], communities: [] })
+    }
+    const item = pkgMap.get(key)!
+    item.fileCount += e.count || 1
+    const tgtComm = allCommunities.value.find(c => c.communityId === e.target)
+    item.communities.push({ communityId: e.target, name: tgtComm?.name || communityIdLabel(e.target) })
+  }
+  const result = Array.from(pkgMap.values())
+  // eslint-disable-next-line no-console
+  console.log('[heatmap] items built:', result.length, 'sources, level:', drillMeta.value.drillLevel, 'rawEdges:', raw.length)
+  return result
+})
+
+/* ---- external drill heatmap items (external-package × child-community) ---- */
+const drillHeatmapItems = computed(() => {
+  if (!isExternalTab.value || !drillMeta.value.drillCommId) return []
+  const raw = crossEdges.value
+  if (raw.length === 0) return []
+  const commIds = new Set(allCommunities.value.map(c => c.communityId))
+  const extEdges = raw.filter(e => !commIds.has(e.source))
+  if (extEdges.length === 0) return []
+  const pkgMap = new Map<string, { package: string; name: string; fileCount: number; files: string[]; communities: Array<{ communityId: string; name?: string }> }>()
+  for (const e of extEdges) {
+    const key = e.source
+    if (!pkgMap.has(key)) {
+      pkgMap.set(key, { package: key, name: key, fileCount: 0, files: [], communities: [] })
+    }
+    const item = pkgMap.get(key)!
+    item.fileCount += e.count || 1
+    const tgtComm = allCommunities.value.find(c => c.communityId === e.target)
+    item.communities.push({ communityId: e.target, name: tgtComm?.name || communityIdLabel(e.target) })
+  }
+  return Array.from(pkgMap.values())
+})
+
+/* ---- table communities (drill-filtered) ---- */
+const drillTableCommunities = computed(() => {
+  const commId = drillMeta.value.drillCommId
+  if (!commId) {
+    return allCommunities.value.filter(c => c.level === 'L0' && c.edgeType === props.edgeType)
+  }
+  return allCommunities.value.filter(c => c.parentId === commId && c.edgeType === props.edgeType)
+})
+
+/* ---- unified drill actions ---- */
+async function handleDrill(targetId: string) {
+  if (targetId === '__merged__') {
     handleExpandMerged()
     return
   }
-  if (isExternalTab.value) {
-    externalDrillItem.value = communityId
+  expandBatchCount.value = 0
+  graphSearch.value = ''
+
+  const com = allCommunities.value.find(c => c.communityId === targetId)
+  if (com) {
+    if (drillMeta.value.drillCommId === targetId) return
+    const nextLevel = `L${parseInt(com.level?.[1] || '0') + 1}`
+    await communityStore.loadCrossCommunityEdges(props.taskId, com.edgeType, nextLevel)
+    await communityStore.loadCommunityNodeLists(props.taskId, com.edgeType, nextLevel)
+    const label = com.name && com.name !== com.communityId ? com.name : communityIdLabel(com.communityId)
+    drillPath.value.push({
+      key: `comm-${targetId}`,
+      label: label.length > 24 ? label.slice(0, 24) + '\u2026' : label,
+      kind: 'community',
+      commId: targetId,
+      commLevel: nextLevel,
+    })
     return
   }
-  const com = allCommunities.value.find(c => c.communityId === communityId)
-  if (!com) return
-  expandBatchCount.value = 0
-  graphSearch.value = ''
-  const label = com.name && com.name !== com.communityId ? com.name : communityId
-  const nextLevel = `L${parseInt(com.level?.[1] || '0') + 1}`
-  currentViewKey.value = `comm-${communityId}`
-  currentDrillLevel.value = nextLevel
-  breadcrumbPath.value.push({ key: currentViewKey.value, label: label.length > 24 ? label.slice(0, 24) + '…' : label, level: nextLevel })
-}
 
-function handleBreadcrumbClick(index: number) {
-  if (index === breadcrumbPath.value.length - 1) return
-  breadcrumbPath.value = breadcrumbPath.value.slice(0, index + 1)
-  currentViewKey.value = breadcrumbPath.value[index].key
-  currentDrillLevel.value = breadcrumbPath.value[index].level
-  expandBatchCount.value = 0
-  graphSearch.value = ''
+  if (isExternalTab.value) {
+    if (drillMeta.value.drillExtItemId === targetId) return
+    const item = externalItems.value.find((i: any) => (i.package || i.name) === targetId)
+    if (!item) return
+    drillPath.value.push({
+      key: `ext-${targetId}`,
+      label: targetId.length > 24 ? targetId.slice(0, 24) + '\u2026' : targetId,
+      kind: 'external',
+      extItemId: targetId,
+    })
+    return
+  }
 }
 
 function handleRollUp() {
-  if (isExternalTab.value && externalDrillItem.value) {
-    externalDrillItem.value = null
-    return
-  }
-  if (breadcrumbPath.value.length <= 1) return
-  breadcrumbPath.value.pop()
-  currentViewKey.value = breadcrumbPath.value[breadcrumbPath.value.length - 1].key
-  currentDrillLevel.value = breadcrumbPath.value[breadcrumbPath.value.length - 1].level
+  if (drillPath.value.length <= 1) return
+  drillPath.value.pop()
   expandBatchCount.value = 0
   graphSearch.value = ''
 }
 
-const canRollUp = computed(() =>
-  isExternalTab.value ? !!externalDrillItem.value : breadcrumbPath.value.length > 1
-)
+function handleBreadcrumbClick(index: number) {
+  if (index >= drillPath.value.length - 1) return
+  drillPath.value = drillPath.value.slice(0, index + 1)
+  expandBatchCount.value = 0
+  graphSearch.value = ''
+}
+
+function handleResetView() {
+  hiddenNodeIds.value = new Set()
+  saveHiddenIds()
+  resetTrigger.value++
+}
 
 function handleNodeContextMenu(nodeId: string) {
   if (nodeId === '__merged__') return
@@ -347,12 +539,6 @@ function handleNodeContextMenu(nodeId: string) {
   }
 }
 
-function handleResetView() {
-  hiddenNodeIds.value = new Set()
-  saveHiddenIds()
-  resetTrigger.value++
-}
-
 function handleToggleFilter(event?: { clientX: number; clientY: number }) {
   if (event) {
     filterClickX.value = event.clientX
@@ -361,44 +547,27 @@ function handleToggleFilter(event?: { clientX: number; clientY: number }) {
   showFilter.value = !showFilter.value
 }
 
-const filterNodes = computed(() => {
-  if (isExternalTab.value) {
-    const items = graphNodes.value.filter(n => !n.isMerged).map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
-    const commNodes = externalCommunityNodes.value.map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
-    return [...items, ...commNodes]
-  }
-  return graphNodes.value
-    .filter(n => !n.isMerged)
-    .map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+/* ---- reset drill state on edgeType / tab switch ---- */
+watch(() => props.edgeType, () => {
+  drillPath.value = [rootDrillNode()]
+  expandBatchCount.value = 0
+  graphSearch.value = ''
 })
 
-const internalHeatmapItems = computed(() => {
-  const raw = crossEdges.value
-  if (raw.length === 0) return []
-  const pkgMap = new Map<string, { package: string; fileCount: number; files: string[]; communities: Array<{ communityId: string; name?: string }> }>()
-  for (const e of raw) {
-    const key = e.source
-    if (!pkgMap.has(key)) {
-      pkgMap.set(key, { package: key, fileCount: 0, files: [], communities: [] })
-    }
-    const item = pkgMap.get(key)!
-    item.fileCount += e.count || 1
-    const tgtComm = allCommunities.value.find(c => c.communityId === e.target)
-    item.communities.push({ communityId: e.target, name: tgtComm?.name || communityIdLabel(e.target) })
-  }
-  return Array.from(pkgMap.values())
-})
-
-watch(() => [props.edgeType, currentViewKey.value], async () => {
-  if (!isExternalTab.value) {
-    const lv = currentDrillLevel.value
-    await communityStore.loadCrossCommunityEdges(props.taskId, props.edgeType, lv)
+/* ---- cross-edges loading ---- */
+watch(() => [props.edgeType, drillMeta.value.drillLevel], async ([_et, lv]) => {
+  if (!isExternalTab.value || drillMeta.value.drillCommId) {
+    const parentComm = drillMeta.value.drillCommId
+      ? allCommunities.value.find(c => c.communityId === drillMeta.value.drillCommId)
+      : null
+    const et = parentComm?.edgeType || effectiveEdgeType.value
+    await communityStore.loadCrossCommunityEdges(props.taskId, et, lv as string)
   }
 })
 
 onMounted(async () => {
   if (!isExternalTab.value) {
-    await communityStore.loadCrossCommunityEdges(props.taskId, props.edgeType, currentDrillLevel.value)
+    await communityStore.loadCrossCommunityEdges(props.taskId, effectiveEdgeType.value, drillMeta.value.drillLevel)
   }
   document.addEventListener('keydown', onKeydown)
 })
@@ -413,7 +582,7 @@ onUnmounted(() => {
   <div class="cgv-container" :class="{ 'cgv-fullscreen': isFullscreen }">
     <div class="cgv-topbar" v-show="!isFullscreen">
       <GraphBreadcrumb
-        :path="breadcrumbPath"
+        :path="drillMeta.breadcrumbSegments"
         @click="handleBreadcrumbClick"
         @roll-up="handleRollUp"
       />
@@ -427,7 +596,7 @@ onUnmounted(() => {
       </div>
       <GraphToolbar
         v-model:style="graphStyle"
-        :can-roll-up="canRollUp"
+        :can-roll-up="drillPath.length > 1"
         :external-mode="isExternalTab"
         :filter-active="hiddenNodeIds.size > 0"
         v-model:external-view-mode="externalViewMode"
@@ -438,28 +607,33 @@ onUnmounted(() => {
         @toggle-filter="handleToggleFilter"
       />
     </div>
+
     <template v-if="isExternalTab">
       <GraphCanvas
         v-if="externalViewMode === 'force'"
         :nodes="graphNodes"
         :edges="crossEdges"
         :style="'d3force'"
-        :key="'ext-force-' + props.edgeType"
+        :key="'ext-force-' + props.edgeType + '-' + drillMeta.drillKey"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
-        @node-dblclick="(id: string) => handleDrillDown(id)"
+        @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
-        @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, currentViewKey, id, { x, y })"
+        @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
       />
       <ExternalTableView
         v-else-if="externalViewMode === 'table'"
         :items="externalItems"
         :edge-type="props.edgeType"
+        @drill="handleDrill"
       />
       <ExternalHeatmapView
         v-else
-        :items="externalItems"
+        :key="'ext-heat-' + drillMeta.drillKey"
+        :items="drillMeta.drillCommId ? drillHeatmapItems : externalItems"
+        :all-communities="allCommunities"
+        @drill="handleDrill"
       />
     </template>
     <template v-else>
@@ -468,29 +642,37 @@ onUnmounted(() => {
         :nodes="graphNodes"
         :edges="crossEdges"
         :style="internalViewMode === 'dagre' ? 'dagre' : 'd3force'"
-        :key="currentViewKey + '-' + props.edgeType + '-' + internalViewMode"
+        :key="drillMeta.drillKey + '-' + props.edgeType + '-' + internalViewMode"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
-        @node-dblclick="(id: string) => handleDrillDown(id)"
+        @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
-        @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, currentViewKey, id, { x, y })"
+        @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
       />
       <CommunityTableView
         v-else-if="internalViewMode === 'table'"
-        :communities="allCommunities"
+        :communities="drillTableCommunities"
         :edge-type="props.edgeType"
+        @drill="handleDrill"
         @open-community="(item) => handleNodeContextMenu(item.communityId)"
       />
       <ExternalHeatmapView
         v-else
+        :key="'internal-heat-' + drillMeta.drillKey"
         :items="internalHeatmapItems"
         :all-communities="allCommunities"
+        @drill="handleDrill"
       />
     </template>
+
     <div v-if="isFullscreen" class="cgv-fullscreen-bar">
       <div class="fs-left">
-        <span class="fs-title">{{ breadcrumbPath[breadcrumbPath.length - 1]?.label || '组件结构图' }}</span>
+        <GraphBreadcrumb
+          :path="drillMeta.breadcrumbSegments"
+          @click="handleBreadcrumbClick"
+          @roll-up="handleRollUp"
+        />
         <div class="cgv-search">
           <input
             v-model="graphSearch"
@@ -501,7 +683,7 @@ onUnmounted(() => {
         </div>
         <GraphToolbar
           v-model:style="graphStyle"
-          :can-roll-up="canRollUp"
+          :can-roll-up="drillPath.length > 1"
           :external-mode="isExternalTab"
           :filter-active="hiddenNodeIds.size > 0"
           v-model:external-view-mode="externalViewMode"
@@ -516,6 +698,7 @@ onUnmounted(() => {
         <button class="fs-btn" @click="exitFullscreen">{{ t('report.exitFullscreen', '退出全屏') }}</button>
       </div>
     </div>
+
     <NodeFilterPanel
       :nodes="filterNodes"
       :hidden-ids="hiddenNodeIds"
@@ -535,7 +718,6 @@ onUnmounted(() => {
   padding: 0.35rem 0.75rem; background: var(--bg-secondary);
   border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 0.5rem;
 }
-
 .cgv-search { display: flex; flex: 1; max-width: 200px; }
 .cgv-search-input {
   width: 100%; padding: 0.15rem 0.4rem; font-size: 0.7rem;
@@ -543,7 +725,6 @@ onUnmounted(() => {
   border-radius: 0.25rem; color: var(--text-primary);
 }
 .cgv-search-input:focus { outline: none; border-color: var(--accent); }
-
 .cgv-fullscreen {
   position: fixed; inset: 0; z-index: 200;
   height: 100vh; border-radius: 0; border: none;

@@ -96,6 +96,7 @@ export default { report: {
   nodeFilter: 'Node Filter',
   pinPanel: 'Pin',
   hidden: 'hidden',
+  dblclickToDrill: 'Double-click to drill',
   items: 'items',
   fileCount: 'Refs',
   files: 'Files',

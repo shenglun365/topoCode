@@ -149,8 +149,8 @@ export function renderDagreGraph(ctx: DagreRenderContext): void {
       .text(d.label.length > 12 ? d.label.slice(0, 12) + '\u2026' : d.label)
 
     el.append('title').text(d.isMerged
-      ? `${d.label} \u2014 Click to expand`
-      : `${d.label} (${d.nodeCount || 0} nodes)`)
+      ? `${d.label} \u2014 ${d.nodeCount} nodes \u2014 Click to expand`
+      : `${d.label} \u2014 ${d.id} \u2014 ${d.nodeCount || 0} nodes`)
   })
 
   const zoom = d3.zoom<SVGSVGElement, unknown>()

@@ -47,6 +47,8 @@ interface CommunityTaskRuntime {
   externalStats: ExternalStatsResult | null
   /** 跨社区边数据 (edgeType→level→edges) */
   crossCommunityEdges: Record<string, Record<string, CrossCommunityEdge[]>>
+  /** 社区 node_list 缓存 (edgeType→level→{commId: [filePaths]}) */
+  nodeLists: Record<string, Record<string, Record<string, string[]>>>
 }
 
 function normalizeDiagramField(val: unknown): string {
@@ -72,6 +74,7 @@ export const useCommunityStore = defineStore('community', () => {
         uniqueFileCounts: {},
         externalStats: null,
         crossCommunityEdges: {},
+        nodeLists: {},
       }
     }
     return tasks.value[taskId]
@@ -317,6 +320,20 @@ export const useCommunityStore = defineStore('community', () => {
     return tasks.value[taskId]?.crossCommunityEdges?.[edgeType]?.[commLv] || []
   }
 
+  async function loadCommunityNodeLists(taskId: string, edgeType: string, commLv: string) {
+    const t = ensureTask(taskId)
+    if (t.nodeLists[edgeType]?.[commLv]) return
+    try {
+      const result = await ipc.analysis.getCommunityNodeLists({ taskId, edgeType, commLv })
+      if (result) {
+        if (!t.nodeLists[edgeType]) t.nodeLists[edgeType] = {}
+        t.nodeLists[edgeType][commLv] = result
+      }
+    } catch (e: any) {
+      console.warn('[community-store] loadCommunityNodeLists failed:', e?.message || e)
+    }
+  }
+
   async function analyzeSelected(taskId: string, modelId: string, batchSize: number, projectId: string) {
     const t = ensureTask(taskId)
     if (t.communityRunning || t.communityPaused) return []
@@ -519,7 +536,7 @@ export const useCommunityStore = defineStore('community', () => {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
     listCommunityResults, getCascadeLevels, saveCommunityResult,
-    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
+    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
   }

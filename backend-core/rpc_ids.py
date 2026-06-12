@@ -34,6 +34,7 @@ RPC_IDS: dict[str, str] = {
     "analysis.getQueryStats":       "API-024",
     "analysis.getCrossCommunityEdges": "API-024a",
     "analysis.getExternalStats":    "API-024b",
+    "analysis.getCommunityNodeLists": "API-024c",
 
     # ── analysisSession ───────────────────────────────────────
     "analysisSession.list":         "API-025",

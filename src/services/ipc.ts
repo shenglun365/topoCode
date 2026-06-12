@@ -265,6 +265,9 @@ function createRealIPC() {
       getCrossCommunityEdges: async (params: { taskId: string; edgeType: string; commLv: string }) => {
         return await api.analysis.getCrossCommunityEdges(params)
       },
+      getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
+        return await api.analysis.getCommunityNodeLists(params)
+      },
       saveCommunityResult: async (params: any) => {
         // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
         const safe = JSON.parse(JSON.stringify(params))

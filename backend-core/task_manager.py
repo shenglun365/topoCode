@@ -1664,6 +1664,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             call_rows = []
         logger.info("[PERF] getExternalStats calls_sql rows=%d %.1fms", len(call_rows), (time.perf_counter() - t_call_sql) * 1000)
 
+        project_root = ""
+        try:
+            root_row = multi_db.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (pid,)
+            ).fetchone()
+            if root_row and root_row["root_path"]:
+                project_root = os.path.abspath(root_row["root_path"])
+        except Exception:
+            pass
+
         call_map = {}
         for row in call_rows:
             sid = row[0] or ""
@@ -1685,6 +1695,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         call_name = parent_dir or basename
                     else:
                         call_name = basename
+                elif fp and fp != sid:
+                    call_name = os.path.relpath(fp, project_root) if os.path.isabs(fp) else fp
                 else:
                     call_name = sid[:16]
             if call_name not in call_map:
@@ -1704,55 +1716,50 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             row[1] if row[1] else row[0] for row in call_rows
         ))
 
-        # 附加: 文件 → L0 社区归属映射 (用于前端外部依赖 graph 视图)
+        # 附加: 文件 → L0 社区归属映射 (用于前端外部依赖/调用 graph 视图)
         try:
             t_comm = time.perf_counter()
-            # 加载所有 L0 INCLUDE 社区的 node_list
-            comm_rows = project_db.execute(
-                "SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND edge_type='INCLUDE' AND comm_lv='L0'",
-                (tid,)
-            ).fetchall()
 
-            # graph_doc.node_list 存储的是 file_path (纯路径), 直接使用即可
-            file_comm = {}  # file_path → [{communityId}]
-            for row in comm_rows:
-                cid = row[0]
-                try:
-                    nodes = json.loads(row[1]) if row[1] else []
-                except Exception:
-                    nodes = []
-                for fp in nodes:
-                    if not fp:
-                        continue
-                    if fp not in file_comm:
-                        file_comm[fp] = []
-                    already = any(c['communityId'] == cid for c in file_comm[fp])
-                    if not already:
-                        file_comm[fp].append({'communityId': cid})
+            def _build_file_comm(edge_type):
+                """file_path → [{communityId}] for given edge_type's L0 communities"""
+                rows = project_db.execute(
+                    "SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
+                    (tid, edge_type)
+                ).fetchall()
+                file_comm = {}
+                for row in rows:
+                    cid = row[0]
+                    try:
+                        nodes = json.loads(row[1]) if row[1] else []
+                    except Exception:
+                        nodes = []
+                    for fp in nodes:
+                        if not fp:
+                            continue
+                        if fp not in file_comm:
+                            file_comm[fp] = []
+                        already = any(c['communityId'] == cid for c in file_comm[fp])
+                        if not already:
+                            file_comm[fp].append({'communityId': cid})
+                return file_comm
 
-            # 注入 externalDeps.communities
-            for dep in external_deps:
-                dep_files = dep.get('files', [])
-                dep_comms = []
-                seen_cids = set()
-                for f in dep_files:
-                    for c in file_comm.get(f, []):
-                        if c['communityId'] not in seen_cids:
-                            seen_cids.add(c['communityId'])
-                            dep_comms.append(c)
-                dep['communities'] = dep_comms
+            include_file_comm = _build_file_comm('INCLUDE')
+            call_file_comm    = _build_file_comm('CALL')
 
-            # 注入 externalCalls.communities
-            for call in external_calls:
-                call_files = call.get('files', [])
-                call_comms = []
-                seen_cids = set()
-                for f in call_files:
-                    for c in file_comm.get(f, []):
-                        if c['communityId'] not in seen_cids:
-                            seen_cids.add(c['communityId'])
-                            call_comms.append(c)
-                call['communities'] = call_comms
+            def _inject_communities(items, file_comm):
+                for item in items:
+                    item_files = item.get('files', [])
+                    item_comms = []
+                    seen_cids = set()
+                    for f in item_files:
+                        for c in file_comm.get(f, []):
+                            if c['communityId'] not in seen_cids:
+                                seen_cids.add(c['communityId'])
+                                item_comms.append(c)
+                    item['communities'] = item_comms
+
+            _inject_communities(external_deps, include_file_comm)
+            _inject_communities(external_calls, call_file_comm)
 
             logger.info("[PERF] getExternalStats community map build=%.1fms",
                        (time.perf_counter() - t_comm) * 1000)
@@ -1771,6 +1778,37 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             'totalExternalCalls': total_ext_calls,
             'uniqueExternalCallFiles': unique_ext_call_files,
         }
+
+    @server.register("analysis.getCommunityNodeLists")
+    def get_community_node_lists(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                                  comm_lv=None, commLv=None):
+        """返回指定层级+edge_type 下所有社区的文件路径列表。
+        返回格式: { communityId: [filePath, ...] }"""
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'INCLUDE'
+        lv = comm_lv or commLv
+        if not tid or not lv:
+            raise ValueError("task_id and comm_lv are required")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+
+        rows = project_db.execute(
+            "SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv=?",
+            (tid, et, lv)
+        ).fetchall()
+        result = {}
+        for row in rows:
+            cid = row[0]
+            try:
+                nodes = json.loads(row[1]) if row[1] else []
+            except Exception:
+                nodes = []
+            result[cid] = [str(n) for n in nodes if n]
+        return result
 
     # ==================== 子文档 CRUD ====================
 

@@ -98,6 +98,7 @@ export default { report: {
   nodeFilter: '节点筛选',
   pinPanel: '常驻',
   hidden: '隐藏',
+  dblclickToDrill: '双击下钻',
   items: '条',
   fileCount: '引用数',
   files: '引用文件',

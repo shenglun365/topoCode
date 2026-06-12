@@ -502,6 +502,7 @@ export interface IPCAPI {
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
     getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
+    getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<Record<string, string[]>>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;

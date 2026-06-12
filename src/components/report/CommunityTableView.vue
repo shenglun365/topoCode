@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'open-community': [item: CommunityItem]
+  'drill': [communityId: string]
 }>()
 
 const { t } = useI18n()
@@ -20,19 +21,9 @@ const sortBy = ref<'name' | 'nodes' | 'files' | 'edges' | 'quality'>('nodes')
 const sortDir = ref<'asc' | 'desc'>('desc')
 const page = ref(1)
 const pageSize = 50
-const drillStack = ref<string[]>([])
-
-const currentLevelComms = computed(() => {
-  const parentId = drillStack.value.length > 0 ? drillStack.value[drillStack.value.length - 1] : null
-  const filtered = props.communities.filter(c => c.edgeType === props.edgeType)
-  if (parentId) {
-    return filtered.filter(c => c.parentId === parentId)
-  }
-  return filtered.filter(c => c.level === 'L0')
-})
 
 const sorted = computed(() => {
-  let list = [...currentLevelComms.value]
+  let list = [...props.communities]
   const q = search.value.trim().toLowerCase()
   if (q) {
     list = list.filter(c => {
@@ -66,31 +57,6 @@ const paged = computed(() => {
   return sorted.value.slice(s, s + pageSize)
 })
 
-const drillLabel = computed(() => {
-  if (drillStack.value.length === 0) return t('report.l0Communities', 'L0 社区')
-  const topId = drillStack.value[drillStack.value.length - 1]
-  const cm = props.communities.find(c => c.communityId === topId)
-  return communityLabel(cm || { communityId: topId })
-})
-
-function handleDrill(communityId: string) {
-  // 检测是否有子社区（任意边缘类型）
-  const hasChildren = props.communities.some(c => c.parentId === communityId && c.edgeType === props.edgeType)
-  if (hasChildren) {
-    drillStack.value.push(communityId)
-    page.value = 1
-    search.value = ''
-  }
-}
-
-function handleRollUp() {
-  if (drillStack.value.length > 0) {
-    drillStack.value.pop()
-    page.value = 1
-    search.value = ''
-  }
-}
-
 function toggleSort(col: typeof sortBy.value) {
   if (sortBy.value === col) { sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc' }
   else { sortBy.value = col; sortDir.value = 'desc' }
@@ -113,13 +79,6 @@ watch(search, () => { page.value = 1 })
   <div class="ctv-container">
     <div class="ctv-toolbar">
       <input v-model="search" type="text" :placeholder="t('report.searchCommunity', '搜索...')" class="ctv-search" />
-      <button
-        v-if="drillStack.length > 0"
-        class="ctv-rollup-btn"
-        :title="t('report.rollUp', '返回上层')"
-        @click="handleRollUp"
-      >\u2190</button>
-      <span class="ctv-breadcrumb">{{ drillLabel }}</span>
       <span class="ctv-total">{{ sorted.length }} {{ t('report.l0Communities', '个社区') }}</span>
     </div>
     <div class="ctv-table-wrap">
@@ -151,7 +110,7 @@ watch(search, () => { page.value = 1 })
             class="ctv-row"
             :class="{ completed: c.status === 'completed' }"
             @click="emit('open-community', c)"
-            @dblclick="handleDrill(c.communityId)"
+            @dblclick="emit('drill', c.communityId)"
           >
             <td class="ctv-td-status" :title="c.status">{{ statusLabel(c.status) }}</td>
             <td class="ctv-td-name" :title="c.communityId">{{ communityLabel(c) }}</td>
@@ -188,14 +147,6 @@ watch(search, () => { page.value = 1 })
   border-radius: 0.375rem; color: var(--text-primary); outline: none;
 }
 .ctv-search:focus { border-color: var(--accent); }
-.ctv-rollup-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; padding: 0; font-size: 0.7rem;
-  background: transparent; border: 1px solid transparent;
-  border-radius: 0.25rem; color: var(--text-muted); cursor: pointer;
-}
-.ctv-rollup-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
-.ctv-breadcrumb { font-size: 0.7rem; color: var(--accent, #7c3aed); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
 .ctv-total { font-size: 0.75rem; color: var(--text-muted); flex-shrink: 0; }
 .ctv-table-wrap { flex: 1; overflow-y: auto; }
 .ctv-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
@@ -212,7 +163,6 @@ watch(search, () => { page.value = 1 })
 .sortable:hover { color: var(--text-primary); }
 .sortable.active { color: var(--accent, #7c3aed); }
 .sort-icon { font-size: 0.6rem; margin-left: 2px; }
-
 .ctv-row { cursor: pointer; }
 .ctv-row:hover { background: var(--bg-secondary); }
 .ctv-row.completed .ctv-td-name { color: var(--accent, #7c3aed); }

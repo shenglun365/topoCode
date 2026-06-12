@@ -108,8 +108,8 @@ export function renderForceGraph(ctx: ForceRenderContext): d3.Simulation<any, an
       .text(data.label.length > 12 ? data.label.slice(0, 12) + '\u2026' : data.label)
 
     el.append('title').text(data.isMerged
-      ? `${data.label} \u2014 Click to expand`
-      : `${data.label} (${data.nodeCount || 0} nodes)`)
+      ? `${data.label} \u2014 ${data.nodeCount} nodes \u2014 Click to expand`
+      : `${data.label} \u2014 ${data.id} \u2014 ${data.nodeCount || 0} nodes`)
 
     el.call(
       d3.drag<any, any>()

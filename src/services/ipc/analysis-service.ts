@@ -75,6 +75,7 @@ export interface AnalysisService {
   }): Promise<QueryStatsResult>
   getExternalStats(taskId: string): Promise<ExternalStatsResult>
   getCrossCommunityEdges(params: { taskId: string; edgeType: string; commLv: string }): Promise<CrossCommunityEdgesResult>
+  getCommunityNodeLists(params: { taskId: string; edgeType: string; commLv: string }): Promise<Record<string, string[]>>
   saveCommunityResult(params: any): Promise<SaveCommunityResultResponse>
   getCommunityResult(params: any): Promise<any>
   listCommunityResults(taskId: string, edgeType: string): Promise<ListCommunityResultsResponse>
@@ -169,6 +170,9 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     getCrossCommunityEdges: async (params: { taskId: string; edgeType: string; commLv: string }) => {
       return await api.analysis.getCrossCommunityEdges(params) as CrossCommunityEdgesResult
+    },
+    getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
+      return await api.analysis.getCommunityNodeLists(params) as Record<string, string[]>
     },
     saveCommunityResult: async (params: any) => {
       const safe = JSON.parse(JSON.stringify(params))
