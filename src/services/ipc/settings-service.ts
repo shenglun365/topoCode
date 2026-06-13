@@ -1,6 +1,7 @@
 import type {
   ModelConfigDTO, ModelTestResult, AgentConfigDTO,
   AgentDetectResult, SkillConfigDTO, BindingsDTO,
+  AgentExecutionDTO,
 } from '@/types/ipc'
 
 export interface SettingsService {
@@ -13,10 +14,14 @@ export interface SettingsService {
   removeModel(id: string): Promise<void>
   testModel(id: string): Promise<ModelTestResult>
   getAgents(): Promise<AgentConfigDTO[]>
-  addAgent(params: { name: string; path: string; args: string }): Promise<AgentConfigDTO>
-  updateAgent(params: { id: string; path?: string; args?: string }): Promise<AgentConfigDTO>
+  addAgent(params: { name: string; path: string; args: string; type?: string }): Promise<AgentConfigDTO>
+  updateAgent(params: { id: string; path?: string; args?: string; name?: string; type?: string }): Promise<AgentConfigDTO>
   removeAgent(id: string): Promise<void>
   detectAgent(id: string): Promise<AgentDetectResult>
+  executeAgent(params: { id: string; task: string; args?: string; taskId?: string; env?: Record<string, string> }): Promise<{ id: string; agentId: string; command: string; status: string }>
+  getAgentExecution(execId: string): Promise<AgentExecutionDTO | { found: false }>
+  listAgentExecutions(params?: { agentId?: string; taskId?: string; status?: string; limit?: number }): Promise<AgentExecutionDTO[]>
+  cancelAgentExecution(execId: string): Promise<{ cancelled: boolean; message?: string }>
   getSkills(): Promise<SkillConfigDTO[]>
   updateSkill(params: { id: string; enabled: boolean }): Promise<SkillConfigDTO>
   getBindings(): Promise<BindingsDTO>
@@ -54,6 +59,18 @@ export function createSettingsService(api: any): SettingsService {
     },
     detectAgent: async (id: string) => {
       return await api.settings.detectAgent(id) as AgentDetectResult
+    },
+    executeAgent: async (params) => {
+      return await api.settings.executeAgent(params)
+    },
+    getAgentExecution: async (execId: string) => {
+      return await api.settings.getAgentExecution(execId)
+    },
+    listAgentExecutions: async (params) => {
+      return await api.settings.listAgentExecutions(params || {}) as AgentExecutionDTO[]
+    },
+    cancelAgentExecution: async (execId: string) => {
+      return await api.settings.cancelAgentExecution(execId)
     },
     getSkills: async () => {
       return await api.settings.getSkills() as SkillConfigDTO[]

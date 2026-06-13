@@ -1812,6 +1812,382 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             result[cid] = [str(n) for n in nodes if n]
         return result
 
+    # ==================== 架构 Agent 操作 ====================
+
+    def _get_project_root(pid):
+        try:
+            root_row = multi_db.main_db.execute(
+                "SELECT root_path FROM projects WHERE id = ?", (pid,)
+            ).fetchone()
+            return root_row["root_path"] if root_row and root_row.get("root_path") else ""
+        except Exception:
+            return ""
+
+    def _get_project_summary(pid):
+        try:
+            row = multi_db.main_db.execute(
+                "SELECT summary FROM projects WHERE id = ?", (pid,)
+            ).fetchone()
+            return row["summary"] if row and row.get("summary") else ""
+        except Exception:
+            return ""
+
+    def _build_agent_tools(ctx, llm_chat_fn, diagram_orch, save_result_fn):
+        from agent_workflow.workflows.arch_analyst import (
+            _AnalyzeCommunityTool, _GenerateDiagramTool,
+            _GenerateOverviewTool, _SaveResultsTool,
+        )
+        import asyncio as _asyncio
+        tools = ToolRegistry()
+        tools.register(_AnalyzeCommunityTool(llm_chat_fn, None))
+        tools.register(_GenerateDiagramTool())
+        tools.register(_GenerateOverviewTool(llm_chat_fn, None))
+        tools.register(_SaveResultsTool(save_result_fn))
+        return tools
+
+    @server.register("analysis.startArchAnalysis")
+    def start_arch_analysis(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                             level=None, model_id=None, modelId=None):
+        """启动批量 LLM 社区分析 (ArchAnalyst 入口)"""
+        tid = task_id or taskId
+        et = edge_type or edgeType or "INCLUDE"
+        lv = level or "L0"
+        mid = model_id or modelId or ""
+        logger.info(f"[startArchAnalysis] task_id={tid} edge_type={et} level={lv}")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
+        project_summary = _get_project_summary(pid)
+        project_name = task.get("name") or task.get("project_name") or pid
+
+        result = _get_cascade_levels_impl(project_db, tid, et)
+        communities = []
+        for l in result.get("levels", []):
+            if l.get("lv") == lv:
+                communities = [
+                    {"communityId": it.get("id", ""), "label": it.get("label", ""),
+                     "nodeCount": it.get("nodeCount", 0), "qualityScore": it.get("qualityScore", 0),
+                     "level": lv, "edgeType": et}
+                    for it in l.get("items", [])
+                ]
+                break
+
+        logger.info(f"[startArchAnalysis] {len(communities)} communities at {lv}")
+
+        if not communities:
+            return {"taskId": tid, "success": False, "error": "no communities found"}
+
+        from agent_workflow.llm_adapter import create_llm_chat_fn
+        from agent_workflow.tool_factory import build_analyst_tools
+        from agent_workflow.router import create_default_router
+        from store.analysis_store import AnalysisStore
+
+        async def _save_fn(**kw):
+            s = AnalysisStore(project_db)
+            s.bulk_insert_llm_results([{
+                "task_id": kw.get("taskId", tid), "edge_type": kw.get("edgeType", et),
+                "comm_lv": kw.get("commLv", lv), "comm_id": kw.get("commId", ""),
+                "name": kw.get("name", ""), "summary": kw.get("summary", ""),
+                "mermaid": kw.get("mermaid", ""), "plantuml": kw.get("plantuml", ""),
+                "model_id": mid or "default", "template_id": "community_analyze",
+            }])
+
+        router = create_default_router(
+            project_root=project_root, project_db=project_db, multi_db=multi_db,
+            task_id=tid, project_summary=project_summary,
+            llm_model_id=mid, save_result_fn=_save_fn,
+        )
+
+        context = {
+            "task_id": tid, "edge_type": et, "level": lv,
+            "project_name": project_name, "project_summary": project_summary,
+            "communities": communities,
+        }
+
+        agent_id = router.dispatch("analyze", tid, context)
+
+        return {"taskId": tid, "success": True, "agentTaskId": agent_id,
+                "communities": len(communities)}
+
+    @server.register("analysis.getAgentProgress")
+    def get_agent_progress(agent_task_id=None, agentTaskId=None):
+        aid = agent_task_id or agentTaskId
+        if not aid:
+            raise ValueError("agent_task_id is required")
+        from agent_workflow.agent_queue import get_global_queue
+        queue = get_global_queue()
+        result = queue.get_progress(aid)
+        if not result:
+            return {"found": False}
+        return {**result, "found": True}
+
+    @server.register("analysis.cancelAgentTask")
+    def cancel_agent_task(agent_task_id=None, agentTaskId=None):
+        aid = agent_task_id or agentTaskId
+        if not aid:
+            raise ValueError("agent_task_id is required")
+        from agent_workflow.agent_queue import get_global_queue
+        queue = get_global_queue()
+        ok = queue.cancel(aid)
+        return {"cancelled": ok}
+
+    @server.register("analysis.dispatchArchNL")
+    def dispatch_arch_nl(task_id=None, taskId=None, input_text=None, inputText=None,
+                          edge_type=None, edgeType=None, level=None,
+                          model_id=None, modelId=None):
+        """自然语言路由 — LLM 推理分类 → 分发到对应 Workflow"""
+        tid = task_id or taskId
+        text = input_text or inputText or ""
+        if not tid or not text:
+            raise ValueError("task_id and input_text are required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
+        project_summary = _get_project_summary(pid)
+        project_name = task.get("name") or pid
+        et = edge_type or edgeType or "INCLUDE"
+        lv = level or "L0"
+        mid = model_id or modelId or ""
+
+        result = _get_cascade_levels_impl(project_db, tid, et)
+        communities = []
+        for lv_item in result.get("levels", []):
+            if lv_item.get("lv") == lv:
+                communities = [
+                    {"communityId": it.get("id", ""), "label": it.get("label", ""),
+                     "nodeCount": it.get("nodeCount", 0), "qualityScore": it.get("qualityScore", 0),
+                     "level": lv, "edgeType": et}
+                    for it in lv_item.get("items", [])
+                ]
+                break
+
+        from agent_workflow.llm_adapter import create_llm_chat_fn
+        from agent_workflow.router import create_default_router
+        from store.analysis_store import AnalysisStore
+
+        llm_fn = create_llm_chat_fn(multi_db, mid)
+
+        async def _save_fn(**kw):
+            s = AnalysisStore(project_db)
+            s.bulk_insert_llm_results([{
+                "task_id": kw.get("taskId", tid), "edge_type": kw.get("edgeType", et),
+                "comm_lv": kw.get("commLv", lv), "comm_id": kw.get("commId", ""),
+                "name": kw.get("name", ""), "summary": kw.get("summary", ""),
+                "mermaid": kw.get("mermaid", ""), "plantuml": kw.get("plantuml", ""),
+                "model_id": mid or "default", "template_id": "community_analyze",
+            }])
+
+        router = create_default_router(
+            project_root=project_root, project_db=project_db, multi_db=multi_db,
+            task_id=tid, project_summary=project_summary,
+            llm_model_id=mid, save_result_fn=_save_fn,
+        )
+        base_context = {
+            "task_id": tid, "edge_type": et, "level": lv,
+            "project_name": project_name, "project_summary": project_summary,
+            "communities": communities,
+        }
+        try:
+            agent_id = router.dispatch_nl(text, tid, base_context, llm_fn)
+            return {"taskId": tid, "success": True, "agentTaskId": agent_id,
+                    "mode": "nl", "input": text[:100]}
+        except ValueError as e:
+            return {"taskId": tid, "success": False, "error": str(e),
+                    "mode": "nl", "input": text[:100]}
+
+    @server.register("analysis.listArchSnapshots")
+    def list_arch_snapshots(task_id=None, taskId=None):
+        """列出项目的架构快照 (读取 versions.jsonl)"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            return []
+        pid = task["project_id"]
+        project_root = _get_project_root(pid)
+        if not project_root:
+            return []
+        from agent_workflow.jsonl_store import read_jsonl
+        return read_jsonl(project_root, "versions.jsonl")
+
+    @server.register("analysis.getArchSnapshot")
+    def get_arch_snapshot(task_id=None, taskId=None, version_id=None, versionId=None):
+        """获取指定版本的社区快照数据"""
+        tid = task_id or taskId
+        vid = version_id or versionId
+        if not tid or not vid:
+            raise ValueError("task_id and version_id are required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            return []
+        pid = task["project_id"]
+        project_root = _get_project_root(pid)
+        if not project_root:
+            return []
+        from agent_workflow.jsonl_store import read_jsonl
+        all_comms = read_jsonl(project_root, "communities.jsonl")
+        return [c for c in all_comms if c.get("v") == vid]
+
+    @server.register("analysis.startArchTrack")
+    def start_arch_track(task_id=None, taskId=None, tag=None):
+        """开始架构追踪 (记录快照) — 同步写 JSONL + 异步入队 LLM 摘要"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        version_id = tag or f"v-{int(time.time())}"
+        logger.info(f"[startArchTrack] task_id={tid} version={version_id}")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_root = _get_project_root(pid)
+        project_db = multi_db.get_project_db(pid)
+
+        communities = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+        l0_items = []
+        for l in communities.get("levels", []):
+            if l.get("lv") == "L0":
+                l0_items = l.get("items", [])
+                break
+
+        from agent_workflow.jsonl_store import append_jsonl
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        append_jsonl(project_root, "versions.jsonl", {
+            "id": version_id, "ts": ts, "trigger": "manual",
+            "comm_count": len(l0_items),
+            "summary": f"快照 {version_id}: {len(l0_items)} 个社区",
+        })
+        for c in l0_items:
+            append_jsonl(project_root, "communities.jsonl", {
+                "v": version_id, "cid": c.get("id", ""),
+                "nodes": c.get("nodeCount", 0),
+                "score": c.get("qualityScore", 0),
+            })
+
+        l0_for_ctx = [{"communityId": c.get("id", ""), "name": c.get("label", ""),
+                        "node_count": c.get("nodeCount", 0),
+                        "quality_score": c.get("qualityScore", 0)}
+                       for c in l0_items]
+        try:
+            from agent_workflow.router import create_default_router
+            router = create_default_router(project_root=project_root, project_db=project_db,
+                                           multi_db=multi_db, task_id=tid)
+            agent_id = router.dispatch("track_start", tid, {
+                "action": "start", "version_id": version_id, "tag": version_id,
+                "communities": l0_for_ctx, "trigger": "manual",
+            })
+            logger.info(f"[startArchTrack] enqueued agent={agent_id}")
+        except Exception as e:
+            logger.warning(f"[startArchTrack] RouterHarness failed: {e}")
+
+        return {"versionId": version_id}
+
+    @server.register("analysis.stopArchTrack")
+    def stop_arch_track(task_id=None, taskId=None, tag=None):
+        """结束架构追踪 (diff + 摘要) — 同步 diff + JSONL + 异步入队 LLM 摘要"""
+        tid = task_id or taskId
+        logger.info(f"[stopArchTrack] task_id={tid}")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_root = _get_project_root(pid)
+        project_db = multi_db.get_project_db(pid)
+
+        from agent_workflow.jsonl_store import read_jsonl, append_jsonl
+        versions = read_jsonl(project_root, "versions.jsonl")
+
+        if len(versions) < 2:
+            version_id = tag or f"v-{int(time.time())}"
+            ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            communities = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+            l0_items = []
+            for l in communities.get("levels", []):
+                if l.get("lv") == "L0":
+                    l0_items = l.get("items", [])
+                    break
+            append_jsonl(project_root, "versions.jsonl", {
+                "id": version_id, "ts": ts, "trigger": "manual", "comm_count": len(l0_items),
+            })
+            return {"versionId": version_id, "summary": "首个快照，无对比基准",
+                    "risk": "low", "added": len(l0_items), "removed": 0, "changed": 0}
+
+        prev_v = versions[-1].get("id", "")
+        version_id = tag or f"v-{int(time.time())}"
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        communities = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+        l0_items = []
+        for l in communities.get("levels", []):
+            if l.get("lv") == "L0":
+                l0_items = l.get("items", [])
+                break
+
+        prev_comms = read_jsonl(project_root, "communities.jsonl")
+        prev_ids = {c["cid"] for c in prev_comms if c.get("v") == prev_v}
+        curr_ids = {c.get("id", "") for c in l0_items}
+
+        added = len(curr_ids - prev_ids)
+        removed = len(prev_ids - curr_ids)
+        changed = len(curr_ids & prev_ids)
+        risk = "high" if removed > 0 else ("medium" if added > 5 else "low")
+
+        append_jsonl(project_root, "versions.jsonl", {
+            "id": version_id, "ts": ts, "trigger": "manual",
+            "comm_count": len(l0_items), "from": prev_v, "delta": f"+{added}/-{removed}",
+        })
+        for c in l0_items:
+            append_jsonl(project_root, "communities.jsonl", {
+                "v": version_id, "cid": c.get("id", ""),
+                "nodes": c.get("nodeCount", 0), "score": c.get("qualityScore", 0),
+            })
+        append_jsonl(project_root, "deltas.jsonl", {
+            "from": prev_v, "to": version_id,
+            "added": added, "removed": removed, "changed": changed, "risk": risk,
+        })
+
+        l0_for_ctx = [{"communityId": c.get("id", ""), "name": c.get("label", ""),
+                        "node_count": c.get("nodeCount", 0),
+                        "quality_score": c.get("qualityScore", 0)}
+                       for c in l0_items]
+        prev_for_ctx = [{"communityId": pc.get("cid", ""), "name": pc.get("cid", ""),
+                          "node_count": pc.get("nodes", 0),
+                          "quality_score": pc.get("score", 0)}
+                         for pc in prev_comms if pc.get("v") == prev_v]
+        try:
+            from agent_workflow.router import create_default_router
+            router = create_default_router(project_root=project_root, project_db=project_db,
+                                           multi_db=multi_db, task_id=tid)
+            agent_id = router.dispatch("track_stop", tid, {
+                "action": "stop", "version_id": version_id, "tag": version_id,
+                "communities": l0_for_ctx,
+                "previous_communities": prev_for_ctx,
+                "previous_version": prev_v, "trigger": "manual",
+            })
+            logger.info(f"[stopArchTrack] enqueued agent={agent_id}")
+        except Exception as e:
+            logger.warning(f"[stopArchTrack] RouterHarness failed: {e}")
+
+        summary = f"新增 {added} 个社区，删除 {removed} 个，{changed} 个未变"
+        return {"versionId": version_id, "summary": summary, "risk": risk,
+                "added": added, "removed": removed, "changed": changed}
+
     # ==================== 子文档 CRUD ====================
 
     @server.register("report.createSubDoc")
@@ -1979,55 +2355,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             return {'ok': True}
 
         raise ValueError(f"SubDoc {sid} not found")
-
-    @server.register("report.savePipelineState")
-    def save_pipeline_state(task_id=None, taskId=None, state_json=None, stateJson=None):
-        """保存 pipeline 运行状态到 report_subdocs"""
-        tid = task_id or taskId
-        raw = state_json or stateJson
-        if not tid:
-            raise ValueError("task_id is required")
-        if not raw:
-            raise ValueError("state_json is required")
-        if isinstance(raw, dict):
-            raw = json.dumps(raw)
-
-        store = TaskStore(multi_db.main_db)
-        task = store.get_task(tid)
-        if not task:
-            raise ValueError(f"Task {tid} not found")
-        pdb = multi_db.get_project_db(task["project_id"])
-
-        doc_id = f"pipeline-state-{tid}"
-        now = time.strftime('%Y-%m-%d %H:%M:%S')
-        pdb.execute(
-            "INSERT OR REPLACE INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, created_at, updated_at) VALUES (?, ?, '', '__pipeline_state__', ?, ?, ?, ?)",
-            (doc_id, tid, 'Pipeline State', raw, now, now)
-        )
-        pdb.commit()
-        return {'ok': True, 'id': doc_id}
-
-    @server.register("report.loadPipelineState")
-    def load_pipeline_state(task_id=None, taskId=None):
-        """从 report_subdocs 恢复 pipeline 运行状态"""
-        tid = task_id or taskId
-        if not tid:
-            raise ValueError("task_id is required")
-
-        store = TaskStore(multi_db.main_db)
-        task = store.get_task(tid)
-        if not task:
-            raise ValueError(f"Task {tid} not found")
-        pdb = multi_db.get_project_db(task["project_id"])
-
-        row = pdb.execute(
-            "SELECT content FROM report_subdocs WHERE id=?",
-            (f"pipeline-state-{tid}",)
-        ).fetchone()
-
-        if row:
-            return {'state': json.loads(row[0]) if row[0] else None}
-        return {'state': None}
 
     logger.info("[task_manager] 所有 analysis.* 方法已注册")
 

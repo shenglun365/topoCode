@@ -39,6 +39,8 @@
     "@types/dagre": "^0.7.54",
     "@vueuse/core": "11.3.0",
     "axios": "1.15.2",
+    "cytoscape": "^3.34.0",
+    "cytoscape-dagre": "^4.0.0",
     "d3": "7.9.0",
     "dagre": "^0.8.5",
     "dayjs": "1.11.13",

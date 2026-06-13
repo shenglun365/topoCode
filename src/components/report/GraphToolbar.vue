@@ -8,6 +8,7 @@ import {
   Squares2X2Icon,
   ArrowPathIcon,
   FunnelIcon,
+  DocumentArrowDownIcon,
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps<{
@@ -27,6 +28,7 @@ const emit = defineEmits<{
   'update:internalViewMode': [mode: 'force' | 'dagre' | 'table' | 'heatmap']
   'reset-view': []
   'toggle-filter': [event?: MouseEvent]
+  'export-arch': []
 }>()
 
 const { t } = useI18n()
@@ -121,6 +123,13 @@ const { t } = useI18n()
       @click="(e: MouseEvent) => emit('toggle-filter', e)"
     >
       <FunnelIcon class="w-3 h-3" />
+    </button>
+    <button
+      class="gt-btn"
+      :title="t('report.exportArch', '导出架构文档')"
+      @click="emit('export-arch')"
+    >
+      <DocumentArrowDownIcon class="w-3 h-3" />
     </button>
     <button
       class="gt-btn"

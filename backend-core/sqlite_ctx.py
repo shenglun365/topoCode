@@ -147,7 +147,6 @@ MAIN_DB_TABLES_SQL = """
         favorite INTEGER DEFAULT 0,
         pinned INTEGER DEFAULT 0,
         tags TEXT,
-        agent_id TEXT,
         scope TEXT,
         scopes TEXT,
         extensions TEXT,
@@ -244,7 +243,7 @@ MAIN_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS agent_configs (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('qwen-code', 'cline', 'opencode', 'custom')),
+        type TEXT NOT NULL DEFAULT 'generic' CHECK(type IN ('qwen-code', 'cline', 'opencode', 'custom', 'generic')),
         path TEXT NOT NULL,
         args TEXT DEFAULT '',
         env TEXT,
@@ -256,6 +255,31 @@ MAIN_DB_TABLES_SQL = """
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- agent_executions — 外部 Agent 执行记录（与 agent_configs 关联）
+    CREATE TABLE IF NOT EXISTS agent_executions (
+        id TEXT PRIMARY KEY,
+        agent_config_id TEXT NOT NULL,
+        task_id TEXT,
+        status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out')),
+        args TEXT NOT NULL DEFAULT '',
+        env TEXT,
+        command TEXT,
+        stdout_path TEXT,
+        stderr_path TEXT,
+        exit_code INTEGER,
+        error TEXT,
+        progress REAL DEFAULT 0,
+        meta TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        duration_ms INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (agent_config_id) REFERENCES agent_configs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_exec_agent ON agent_executions(agent_config_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_exec_task ON agent_executions(task_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_exec_status ON agent_executions(status);
 
     -- SKILL 配置表
     CREATE TABLE IF NOT EXISTS skill_configs (
@@ -397,6 +421,35 @@ MAIN_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS app_config (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- ============================================
+    -- cloud_api_config — 云端 API 配置（预留）
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS cloud_api_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        api_key TEXT,
+        endpoint TEXT DEFAULT 'https://cloud.topocode.dev',
+        enabled INTEGER DEFAULT 0,
+        privacy_upload_metrics INTEGER DEFAULT 0,
+        privacy_upload_patterns INTEGER DEFAULT 0,
+        privacy_allow_benchmark_contrib INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- ============================================
+    -- agent_instructions — 用户自定义 Agent 指令（预留）
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS agent_instructions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        scope TEXT DEFAULT 'all',
+        priority TEXT DEFAULT 'append',
+        enabled INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
 """
@@ -736,6 +789,55 @@ PROJECT_DB_TABLES_SQL = """
     );
     CREATE INDEX IF NOT EXISTS idx_mdu_model ON model_daily_usage(model_id);
     CREATE INDEX IF NOT EXISTS idx_mdu_date  ON model_daily_usage(date);
+
+
+    -- ============================================
+    -- ai_sessions — AI 编码会话追踪（预留）
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS ai_sessions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        task_id TEXT,
+        tag TEXT DEFAULT '',
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        status TEXT DEFAULT 'active',
+        file_snapshot TEXT,
+        summary_markdown TEXT,
+        quality_score REAL,
+        metadata TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_sessions_project ON ai_sessions(project_id, started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS ai_session_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        change_type TEXT NOT NULL,
+        symbol_name TEXT,
+        symbol_kind TEXT,
+        old_signature TEXT,
+        new_signature TEXT,
+        old_content TEXT,
+        new_content TEXT,
+        FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_changes_session ON ai_session_changes(session_id);
+
+    CREATE TABLE IF NOT EXISTS ai_session_issues (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        file_path TEXT,
+        line_number INTEGER,
+        issue_type TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        suggestion TEXT,
+        FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_issues_session ON ai_session_issues(session_id, severity);
 """
 
 

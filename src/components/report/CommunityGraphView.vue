@@ -6,6 +6,7 @@ import { useComponentId } from '@/composables/useComponentId'
 import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
 import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
+import { ipc } from '@/services/ipc'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
 import GraphCanvas from './GraphCanvas.vue'
@@ -60,6 +61,7 @@ const graphStyle = ref<'d3force' | 'dagre'>('dagre')
 const externalViewMode = ref<'force' | 'table' | 'heatmap'>('force')
 const internalViewMode = ref<'force' | 'dagre' | 'table' | 'heatmap'>('dagre')
 const resetTrigger = ref(0)
+const recenterTrigger = ref(0)
 const showFilter = ref(false)
 const filterClickX = ref(0)
 const filterClickY = ref(0)
@@ -67,12 +69,78 @@ const filterClickY = ref(0)
 /* ---- unified drill state ---- */
 const drillPath = ref<DrillPathNode[]>([rootDrillNode()])
 
+/* ---- compare mode ---- */
+const compareActive = ref(false)
+const compareFrom = ref('')
+const compareTo = ref('')
+const compareSnapshotIds = ref<Array<{ id: string; ts: string; commCount: number; summary: string }>>([])
+const compareNodeStates = ref<Map<string, 'added' | 'removed' | 'changed' | 'unchanged'>>(new Map())
+
+async function toggleCompare() {
+  if (compareActive.value) {
+    compareActive.value = false
+    compareNodeStates.value = new Map()
+    return
+  }
+  try {
+    const list = await ipc.analysis.listArchSnapshots({ taskId: props.taskId })
+    compareSnapshotIds.value = list
+    if (list.length < 2) {
+      compareActive.value = false
+      return
+    }
+    const prev = list[list.length - 2]
+    const curr = list[list.length - 1]
+    compareFrom.value = prev.id
+    compareTo.value = curr.id
+    await loadCompareData(prev.id, curr.id)
+    compareActive.value = true
+  } catch {
+    compareActive.value = false
+  }
+}
+
+async function loadCompareData(fromId: string, toId: string) {
+  try {
+    const [prevData, currData] = await Promise.all([
+      ipc.analysis.getArchSnapshot({ taskId: props.taskId, versionId: fromId }),
+      ipc.analysis.getArchSnapshot({ taskId: props.taskId, versionId: toId }),
+    ])
+    const prevIds = new Set(prevData.map((c: any) => c.cid))
+    const currIds = new Set(currData.map((c: any) => c.cid))
+    const states = new Map<string, 'added' | 'removed' | 'changed' | 'unchanged'>()
+    for (const c of currData) {
+      const cid = c.cid
+      if (!prevIds.has(cid)) states.set(cid, 'added')
+      else {
+        const prevC = prevData.find((p: any) => p.cid === cid)
+        const changed = prevC && (prevC.nodes !== c.nodes || Math.abs((prevC.score || 0) - (c.score || 0)) > 0.01)
+        states.set(cid, changed ? 'changed' : 'unchanged')
+      }
+    }
+    for (const c of prevData) {
+      if (!currIds.has(c.cid)) states.set(c.cid, 'removed')
+    }
+    compareNodeStates.value = states
+  } catch { /* skip */ }
+}
+
+function setCompareVersion(fromId: string, toId: string) {
+  compareFrom.value = fromId
+  compareTo.value = toId
+  loadCompareData(fromId, toId)
+}
+
 /* ---- graph / merge / search ---- */
 const MERGE_THRESHOLD = 100
 const BATCH_EXPAND_SIZE = 50
 const expandBatchCount = ref(0)
 const graphSearch = ref('')
 const drilling = ref(false)
+
+/* ---- force layout controls ---- */
+const forceLockMode = ref<'linked' | 'locked'>('linked')
+const forceRepulsion = ref(15000)
 
 /* ---- filter persistence ---- */
 const FILTER_STORAGE_KEY = computed(() => `graph-filter-${props.projectId}-${props.taskId}`)
@@ -140,14 +208,29 @@ const parentCommIds = computed(() => {
 
 /* ---- filter nodes for filter panel ---- */
 const filterNodes = computed(() => {
+  const deg = nodeDegrees.value
   if (isExternalTab.value) {
-    const items = rawGraphNodes.value.filter(n => !n.isMerged).map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
-    const commNodes = externalCommunityNodes.value.map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
-    return [...items, ...commNodes]
+    const seen = new Set<string>()
+    const result = []
+    for (const n of rawGraphNodes.value) {
+      if (!n.isMerged && !seen.has(n.id)) {
+        seen.add(n.id)
+        const d = deg.get(n.id)
+        result.push({ id: n.id, label: n.label, nodeCount: n.nodeCount, type: n.isExternal ? 'external' as const : 'community' as const, qualityScore: n.qualityScore ?? null, inDegree: d?.in ?? 0, outDegree: d?.out ?? 0 })
+      }
+    }
+    for (const n of externalCommunityNodes.value) {
+      if (!seen.has(n.id)) {
+        seen.add(n.id)
+        const d = deg.get(n.id)
+        result.push({ id: n.id, label: n.label, nodeCount: n.nodeCount, type: 'community' as const, qualityScore: null, inDegree: d?.in ?? 0, outDegree: d?.out ?? 0 })
+      }
+    }
+    return result
   }
   return rawGraphNodes.value
     .filter(n => !n.isMerged)
-    .map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount }))
+    .map(n => ({ id: n.id, label: n.label, nodeCount: n.nodeCount, type: n.isExternal ? 'external' as const : 'community' as const, qualityScore: n.qualityScore ?? null, inDegree: deg.get(n.id)?.in ?? 0, outDegree: deg.get(n.id)?.out ?? 0 }))
 })
 
 /* ---- external data ---- */
@@ -209,6 +292,7 @@ const drillExternalItems = computed(() => {
 
 /* ---- graph nodes ---- */
 function mapCommunityToNode(c: CommunityItem) {
+  const state = compareActive.value ? compareNodeStates.value.get(c.communityId) : undefined
   return {
     id: c.communityId,
     label: communityLabel(c),
@@ -217,6 +301,7 @@ function mapCommunityToNode(c: CommunityItem) {
     qualityScore: c.qualityScore,
     status: c.status,
     hasChildren: parentCommIds.value.has(c.communityId),
+    compareState: state,
   }
 }
 
@@ -421,6 +506,21 @@ const crossEdges = computed(() => {
   return [...internalEdges, ...relevantExternal]
 })
 
+/* ---- node degree maps ---- */
+const nodeDegrees = computed(() => {
+  const map = new Map<string, { in: number; out: number }>()
+  const get = (id: string) => {
+    if (!map.has(id)) map.set(id, { in: 0, out: 0 })
+    return map.get(id)!
+  }
+  for (const edge of crossEdges.value) {
+    const weight = (edge as any).count || 1
+    get(edge.source).out += weight
+    get(edge.target).in += weight
+  }
+  return map
+})
+
 /* ---- heatmap items ---- */
 const internalHeatmapItems = computed(() => {
   const raw = crossEdges.value
@@ -567,6 +667,27 @@ function handleToggleFilter(event?: { clientX: number; clientY: number }) {
   showFilter.value = !showFilter.value
 }
 
+function handleExportArch() {
+  const win = window.open('', '_blank')
+  if (!win) return
+  const commCount = allCommunities.value.filter(c => c.level === 'L0' && c.edgeType === props.edgeType).length
+  win.document.write(`<html><body style="font-family:sans-serif;padding:2rem"><h2>架构导出 — ${props.taskId}</h2><p>社区数: ${commCount}</p><p>导出功能完整版将通过 reports 插件 HTTP 服务实现。</p></body></html>`)
+}
+
+function handleConnectComplete() {
+  if (hiddenNodeIds.value.size === 0) return
+  const visibleSet = new Set(graphNodes.value.filter(n => !hiddenNodeIds.value.has(n.id)).map(n => n.id))
+  const connectedIds = new Set<string>()
+  for (const e of crossEdges.value) {
+    if (visibleSet.has(e.source) && hiddenNodeIds.value.has(e.target)) connectedIds.add(e.target)
+    if (visibleSet.has(e.target) && hiddenNodeIds.value.has(e.source)) connectedIds.add(e.source)
+  }
+  if (connectedIds.size === 0) return
+  const next = new Set(hiddenNodeIds.value)
+  connectedIds.forEach(id => next.delete(id))
+  updateHiddenIds(next)
+}
+
 /* ---- reset drill state on edgeType / tab switch ---- */
 watch(() => props.edgeType, () => {
   drillPath.value = [rootDrillNode()]
@@ -595,6 +716,10 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
 })
+
+watch(isFullscreen, () => {
+  recenterTrigger.value++
+})
 </script>
 
 <template>
@@ -615,6 +740,37 @@ onUnmounted(() => {
         @click="handleBreadcrumbClick"
         @roll-up="handleRollUp"
       />
+      <button
+        class="cgv-compare-btn"
+        :class="{ active: compareActive }"
+        :title="compareActive ? t('report.exitCompare', '退出对比') : t('report.compareArch', '对比架构')"
+        @click="toggleCompare"
+      >📊</button>
+      <select
+        v-if="compareActive && compareSnapshotIds.length > 1"
+        class="cgv-compare-select"
+        :value="compareFrom"
+        @change="setCompareVersion(($event.target as HTMLSelectElement).value, compareTo)"
+      >
+        <option
+          v-for="s in compareSnapshotIds"
+          :key="s.id"
+          :value="s.id"
+        >{{ s.id }}</option>
+      </select>
+      <span v-if="compareActive && compareSnapshotIds.length > 1" class="cgv-compare-vs">vs</span>
+      <select
+        v-if="compareActive && compareSnapshotIds.length > 1"
+        class="cgv-compare-select"
+        :value="compareTo"
+        @change="setCompareVersion(compareFrom, ($event.target as HTMLSelectElement).value)"
+      >
+        <option
+          v-for="s in compareSnapshotIds"
+          :key="s.id"
+          :value="s.id"
+        >{{ s.id }}</option>
+      </select>
       <div class="cgv-search">
         <input
           v-model="graphSearch"
@@ -634,7 +790,34 @@ onUnmounted(() => {
         @fullscreen="enterFullscreen"
         @reset-view="handleResetView"
         @toggle-filter="handleToggleFilter"
+        @export-arch="handleExportArch"
       />
+    </div>
+    <div v-if="compareActive" class="cgv-compare-legend">
+      <span class="legend-item"><span class="legend-dot added"></span>新增</span>
+      <span class="legend-item"><span class="legend-dot removed"></span>删除</span>
+      <span class="legend-item"><span class="legend-dot changed"></span>变更</span>
+      <span class="legend-item"><span class="legend-dot unchanged"></span>无变化</span>
+    </div>
+
+    <!-- 下钻/上卷 加载遮罩 -->
+    <div v-if="drilling" class="cgv-drill-overlay">
+      <div class="cgv-drill-spinner" />
+      <span class="cgv-drill-text">加载中...</span>
+    </div>
+
+    <!-- 力导向图控制条 -->
+    <div
+      v-if="(isExternalTab && externalViewMode === 'force') || externalViewMode === 'force' || internalViewMode === 'force'"
+      class="cgv-force-bar"
+    >
+      <label class="cgv-force-label">
+        <input type="range" :min="5000" :max="30000" :step="500" :value="forceRepulsion" @input="forceRepulsion = Number(($event.target as HTMLInputElement).value)" class="cgv-force-slider"/>
+        <span class="cgv-force-val">斥力: {{ forceRepulsion }}</span>
+      </label>
+      <button class="cgv-force-btn" :class="{ active: forceLockMode === 'locked' }" @click="forceLockMode = forceLockMode === 'locked' ? 'linked' : 'locked'">
+        {{ forceLockMode === 'locked' ? '🔒 锁定' : '🔗 联动' }}
+      </button>
     </div>
 
     <template v-if="isExternalTab">
@@ -647,6 +830,9 @@ onUnmounted(() => {
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
+        :lock-mode="forceLockMode"
+        :repulsion="forceRepulsion"
+        :recenter-trigger="recenterTrigger"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
@@ -675,6 +861,9 @@ onUnmounted(() => {
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
+        :lock-mode="forceLockMode"
+        :repulsion="forceRepulsion"
+        :recenter-trigger="recenterTrigger"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
@@ -705,6 +894,12 @@ onUnmounted(() => {
           @click="handleBreadcrumbClick"
           @roll-up="handleRollUp"
         />
+        <button
+          class="cgv-compare-btn"
+          :class="{ active: compareActive }"
+          :title="compareActive ? t('report.exitCompare', '退出对比') : t('report.compareArch', '对比架构')"
+          @click="toggleCompare"
+        >📊</button>
         <div class="cgv-search">
           <input
             v-model="graphSearch"
@@ -724,6 +919,7 @@ onUnmounted(() => {
           @fullscreen="exitFullscreen"
           @reset-view="handleResetView"
           @toggle-filter="handleToggleFilter"
+          @export-arch="handleExportArch"
         />
       </div>
       <div class="fs-actions">
@@ -743,13 +939,14 @@ onUnmounted(() => {
       :click-x="filterClickX"
       :click-y="filterClickY"
       @update:hidden-ids="updateHiddenIds"
+      @connect-complete="handleConnectComplete"
       @close="showFilter = false"
     />
   </div>
 </template>
 
 <style scoped>
-.cgv-container { display: flex; flex-direction: column; height: 420px; min-height: 280px; border: 1px solid var(--border); border-radius: 0.5rem; overflow: hidden; background: var(--bg-primary); position: relative; }
+.cgv-container { display: flex; flex-direction: column; flex: 1; min-height: 320px; border: 1px solid var(--border); border-radius: 0.5rem; overflow: hidden; background: var(--bg-primary); position: relative; }
 .cgv-topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.35rem 0.75rem; background: var(--bg-secondary);
@@ -762,6 +959,33 @@ onUnmounted(() => {
   border-radius: 0.25rem; color: var(--text-primary);
 }
 .cgv-search-input:focus { outline: none; border-color: var(--accent); }
+.cgv-compare-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; padding: 0;
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 0.25rem; cursor: pointer; font-size: 0.75rem;
+  color: var(--text-muted); transition: all 0.15s;
+}
+.cgv-compare-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.cgv-compare-btn.active { background: var(--bg-accent-subtle, #2d1f5e); border-color: var(--accent); color: var(--accent); }
+.cgv-compare-select {
+  padding: 0.1rem 0.3rem; font-size: 0.65rem;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 0.2rem; color: var(--text-muted); outline: none;
+}
+.cgv-compare-select:focus { border-color: var(--accent); }
+.cgv-compare-vs { font-size: 0.65rem; color: var(--text-muted); }
+.cgv-compare-legend {
+  display: flex; align-items: center; gap: 1rem; padding: 0.2rem 0.75rem;
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.legend-item { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; color: var(--text-muted); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+.legend-dot.added { background: #22c55e; }
+.legend-dot.removed { background: #ef4444; }
+.legend-dot.changed { background: #f97316; }
+.legend-dot.unchanged { background: #6b7280; }
 .cgv-fullscreen {
   position: fixed; inset: 0; z-index: 200;
   height: 100vh; border-radius: 0; border: none;
@@ -781,4 +1005,58 @@ onUnmounted(() => {
   border-radius: 0.25rem; cursor: pointer; transition: all 0.15s;
 }
 .fs-btn:hover { color: var(--text-primary); border-color: var(--accent, #7c3aed); }
+
+/* ── 下钻/上卷 加载遮罩 ── */
+.cgv-drill-overlay {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.75rem;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+.cgv-drill-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent, #7c3aed);
+  border-radius: 50%;
+  animation: cgv-spin 0.7s linear infinite;
+}
+@keyframes cgv-spin { to { transform: rotate(360deg); } }
+.cgv-drill-text {
+  font-size: 0.75rem; color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.04em;
+}
+
+/* ── 文件层底部工具栏 ── */
+.cgv-bottom-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.35rem 0.75rem; background: var(--bg-secondary);
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.fs-btn-active { background: var(--accent, #7c3aed); color: #fff; border-color: var(--accent); }
+.cgv-empty { font-size: 0.8rem; color: var(--text-muted); text-align: center; padding: 2rem; flex: 1; }
+
+/* ── 力导向图控制条 ── */
+.cgv-force-bar {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.25rem 0.75rem; background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.cgv-force-label {
+  display: flex; align-items: center; gap: 0.4rem; flex: 1;
+}
+.cgv-force-slider {
+  width: 140px; height: 4px; cursor: pointer; accent-color: var(--accent, #7c3aed);
+}
+.cgv-force-val {
+  font-size: 0.65rem; color: var(--text-muted); white-space: nowrap; min-width: 80px;
+}
+.cgv-force-btn {
+  padding: 0.15rem 0.5rem; font-size: 0.65rem;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  border-radius: 0.2rem; color: var(--text-muted); cursor: pointer;
+  white-space: nowrap; transition: all 0.1s;
+}
+.cgv-force-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.cgv-force-btn.active { background: var(--bg-accent-subtle, #2d1f5e); border-color: var(--accent); color: var(--accent); }
 </style>

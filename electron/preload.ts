@@ -162,6 +162,20 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCrossCommunityEdges', params }),
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityNodeLists', params }),
+    startArchAnalysis: (params: { taskId: string; edgeType: string; level: string; modelId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.startArchAnalysis', params }),
+    listArchSnapshots: (params: { taskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.listArchSnapshots', params }),
+    getArchSnapshot: (params: { taskId: string; versionId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getArchSnapshot', params }),
+    startArchTrack: (params: { taskId: string; tag: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.startArchTrack', params }),
+    stopArchTrack: (params: { taskId: string; tag: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.stopArchTrack', params }),
+    getAgentProgress: (params: { agentTaskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentProgress', params }),
+    cancelAgentTask: (params: { agentTaskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.cancelAgentTask', params }),
 
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
@@ -247,16 +261,16 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'report.getProjectSummary', params }),
     saveProjectSummary: (params: { projectId: string; summary: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.saveProjectSummary', params }),
-    savePipelineState: (params: { taskId: string; stateJson: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'report.savePipelineState', params }),
-    loadPipelineState: (params: { taskId: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'report.loadPipelineState', params }),
     getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getLevelCommunityDetail', params }),
     saveFileSummaries: (params: { projectId: string; taskId: string; summaries: any[] }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.saveFileSummaries', params }),
     getFileSummaries: (params: { projectId: string; taskId?: string; source?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getFileSummaries', params }),
+    renderDiagram: (params: { taskId: string; communityId: string; edgeType?: string; mode?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.renderDiagram', params }),
+    getCommunityFileDetail: (params: { taskId: string; communityId: string; edgeType?: string; limit?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'report.getCommunityFileDetail', params }),
     getCallLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; status?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'report.getCallLogs', params }),
     getInteractionLogs: (params: { sessionId?: string; requestId?: string; templateId?: string; limit?: number; offset?: number }) =>
@@ -300,6 +314,14 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'settings.removeAgent', params: { id } }),
     detectAgent: (id: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'settings.detectAgent', params: { id } }),
+    executeAgent: (params: { id: string; task: string; args?: string; taskId?: string; env?: Record<string, string> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'settings.executeAgent', params }),
+    getAgentExecution: (execId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'settings.getAgentExecution', params: { exec_id: execId } }),
+    listAgentExecutions: (params: { agent_id?: string; task_id?: string; status_filter?: string; limit?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'settings.listAgentExecutions', params: params || {} }),
+    cancelAgentExecution: (execId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'settings.cancelAgentExecution', params: { exec_id: execId } }),
 
     getSkills: () => ipcRenderer.invoke('ipc:call', { method: 'settings.getSkills', params: {} }),
     updateSkill: (params: { id: string; enabled: boolean }) =>
@@ -363,6 +385,16 @@ contextBridge.exposeInMainWorld('api', {
     clearAll: () =>
       ipcRenderer.invoke('ipc:call', { method: 'session.clearAll', params: {} }),
     },
+
+  // ==================== 分析会话关联 ====================
+  analysisSession: {
+    list: (params?: { projectId?: string; taskId?: string; reportId?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysisSession.list', params: params || {} }),
+    create: (params: { projectId: string; taskId: string; reportId?: string; sessionId: string; metadata?: Record<string, any> }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysisSession.create', params }),
+    delete: (params: { sessionId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysisSession.delete', params }),
+  },
 
   // ==================== LLM 推理 (v2 — 统一入口，所有业务方法使用 templateId) ====================
   llm: {

@@ -13,17 +13,14 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from config import (
     PARSE_WORKERS, PARSE_THREAD_PREFIX, PROGRESS_INTERVAL,
     COMMUNITY_MIN_NODE_INCLUDE, COMMUNITY_MIN_NODE_CALL,
 )
-
-# ==================== Feature Flag: 新 Query 分析管线 ====================
-# v2: 已全面切换到 TreeSitterWalker + ResolutionEngine，旧管线已移除
-USE_NEW_PARSER = True  # 固定为 True，保留以兼容旧引用
 
 # ==================== 线程池 ====================
 parse_executor = ThreadPoolExecutor(
@@ -313,56 +310,6 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
     return edges
 
 
-def _find_target_for_import(module_name: str, source_file: str, file_index: dict, all_tables) -> str | None:
-    """根据 import 模块名在项目中查找目标文件 node"""
-    import os
-    from pathlib import Path
-
-    source_dir = Path(source_file).parent.as_posix() if source_file else ""
-
-    # 直接匹配 file_path
-    if module_name in file_index:
-        return file_index[module_name]
-
-    # 相对路径导入: ./foo, ../bar
-    if module_name.startswith("./") or module_name.startswith("../"):
-        candidate = os.path.normpath(os.path.join(source_dir, module_name))
-        for table in all_tables:
-            for node in table.nodes:
-                if node.kind.value == "file":
-                    fp = node.file_path
-                    # 精确匹配规范路径
-                    if fp == candidate:
-                        return node.id
-                    # 补齐扩展名匹配
-                    fp_noext = os.path.splitext(fp)[0]
-                    if fp_noext == candidate:
-                        return node.id
-        return None
-
-    # 绝对模块路径: parsers.core.walker → parsers/core/walker
-    for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx"):
-        candidate = module_name.replace(".", "/") + ext
-        for table in all_tables:
-            for node in table.nodes:
-                if node.kind.value == "file" and node.file_path == candidate:
-                    return node.id
-        # 也尝试匹配路径后缀
-        for table in all_tables:
-            for node in table.nodes:
-                if node.kind.value == "file" and node.file_path.endswith(candidate):
-                    return node.id
-
-    # 按文件名匹配 (fallback: import os → os.py, import react → react)
-    module_basename = module_name.split("/")[-1].split(".")[-1]
-    for table in all_tables:
-        for node in table.nodes:
-            if node.kind.value == "file" and Path(node.file_path).stem == module_basename:
-                return node.id
-
-    return None
-
-
 def is_task_executing(task_id: str) -> bool:
     """检查任务是否正在线程池中执行"""
     return task_id in _executing_tasks
@@ -412,134 +359,132 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
         })
 
 
-# ==================== 6 步分析流程 ====================
+# ==================== 分析管线上下文 ====================
 
-def _do_parse(server, multi_db, task_id: str, run_id: str,
-              start_time: float) -> Dict[str, Any]:
-    """
-    线程池中的阻塞执行函数 — 6 步分析流程
+@dataclass
+class PipelineContext:
+    """跨步骤共享的分析管线状态"""
+    server: Any
+    multi_db: Any
+    task_id: str
+    run_id: str
+    start_time: float
+    # 步骤 0: 任务上下文（_load_task_context 填充）
+    task: dict = field(default_factory=dict)
+    project_id: str = ""
+    project_db: Any = None
+    analysis_store: Any = None
+    emitter: Any = None
+    proj_path: str = ""
+    report_types: list = field(default_factory=list)
+    # 步骤 1 产物
+    all_tables: list = field(default_factory=list)
+    processed: int = 0
+    skipped: int = 0
+    language_stats: dict = field(default_factory=dict)
+    # 步骤 2 产物
+    resolved_edges: list = field(default_factory=list)
+    total_call_edges: int = 0
+    total_dep_edges: int = 0
+    total_extends_edges: int = 0
+    total_implements_edges: int = 0
+    total_type_of_edges: int = 0
+    # 步骤 4 产物
+    framework_edges_list: list = field(default_factory=list)
+    total_framework_edges: int = 0
+    total_synthetic_edges: int = 0
+    # 步骤 5 产物
+    total_communities: int = 0
+    total_hubs: int = 0
+    total_orphans: int = 0
+    best_call_community_id: Optional[str] = None
+    best_dep_community_id: Optional[str] = None
+    # 日志
+    logs: list = field(default_factory=list)
+    # 停止标志
+    stopped: bool = False
 
-    使用 backend/parsers/ 架构:
-    - parser.parse_file() → AST 解析
-    - extract_global_symbols() → 符号提取
-    - extract_call_graph() → 调用图
-    - extract_dependency_graph() → 依赖图
-    - analyze_communities() → 社区分析
+    def log(self, msg: str):
+        self.logs.append({"timestamp": datetime.utcnow().isoformat(), "message": msg})
+        logger.info(f"[PARSE] {msg}")
 
-    Args:
-        server: ZMQServer 实例
-        multi_db: MultiDBManager 实例
-        task_id: 任务 ID
-        run_id: 运行 ID
-        start_time: 开始时间戳
+    def report_progress(self, progress: int):
+        _update_progress(self.server, self.multi_db, self.task_id, self.run_id, progress=progress)
 
-    Returns:
-        分析结果摘要
-    """
-    import os
 
+def _load_task_context(server, multi_db, task_id) -> PipelineContext:
+    """加载任务配置、创建 stores/emitter、获取文件列表"""
     from store.task_store import TaskStore
     from store.analysis_store import AnalysisStore
-    from parsers.core.walker import TreeSitterWalker, _detect_language
     from parsers.core.emitter import GraphEmitter
-    from parsers.core.resolver import ResolutionEngine
-    from parsers.core.symbol_model import FileSymbolTable
-    from parsers.languages import EXTRACTORS
-    from parsers.language_loader import get_parser
-
-    # 社区分析插件（可选）
-    try:
-        from community_analysis import analyze_communities
-        _community_available = True
-    except ImportError:
-        analyze_communities = None
-        _community_available = False
-        logger.warning("community_analysis plugin not available, community analysis will be skipped")
 
     task_store = TaskStore(multi_db.main_db)
-
-    # 1. 加载任务配置
     task = task_store.get_task(task_id)
     if not task:
         raise ValueError(f"Task {task_id} not found")
 
-    project_id = task["project_id"]
-    project_db = multi_db.get_project_db(project_id)
-    analysis_store = AnalysisStore(project_db)
-    emitter = GraphEmitter(analysis_store, task_id)
+    pid = task["project_id"]
+    pdb = multi_db.get_project_db(pid)
+    a_store = AnalysisStore(pdb)
 
-    # 调试日志：确认两个 store 是否共享连接
-    logger.info(f"[PARSE] [DEBUG] task_id={task_id}, project_id={project_id}")
-    logger.info(f"[PARSE] [DEBUG] analysis_store._db id={id(analysis_store._db)}")
+    ctx = PipelineContext(
+        server=server, multi_db=multi_db, task_id=task_id,
+        run_id="", start_time=time.time(),
+        task=task, project_id=pid, project_db=pdb,
+        analysis_store=a_store,
+        emitter=GraphEmitter(a_store, task_id),
+        proj_path="",
+        report_types=task.get("report_types") or [],
+    )
 
-    # 解析配置字段（TaskStore.get_task 已通过 _parse_task_row 反序列化，无需再次 json.loads）
+    row = multi_db.main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (pid,))
+    ctx.proj_path = row["root_path"] if row else ""
+
+    return ctx
+
+
+def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
+    """Step 1: AST 解析 + 符号提取 (并行) — 进度 5→65"""
+    from parsers.core.walker import TreeSitterWalker, _detect_language
+    from parsers.core.symbol_model import FileSymbolTable
+    from parsers.languages import EXTRACTORS
+    from parsers.language_loader import get_parser
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    a_store = ctx.analysis_store
+    task = ctx.task
+    task_id = ctx.task_id
+
     scopes = task.get("scopes") or []
     extensions = task.get("extensions") or []
     exclude_dirs = task.get("exclude_dirs") or []
     pattern_type = task.get("pattern_type")
     pattern = task.get("pattern")
-    report_types = task.get("report_types") or []
 
-    # 获取项目根路径
-    project = multi_db.main_db.fetchone(
-        "SELECT * FROM projects WHERE id = ?", (project_id,)
-    )
-    proj_path = project.get("root_path", "") if project else ""
-
-    # 2. 获取文件列表
-    files = analysis_store.list_source_files(
-        scopes=scopes,
-        extensions=extensions,
-        exclude_dirs=exclude_dirs,
-        pattern_type=pattern_type,
-        pattern=pattern,
+    files = a_store.list_source_files(
+        scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+        pattern_type=pattern_type, pattern=pattern,
     )
     total = len(files)
-    logger.info(f"[PARSE] 共 {total} 个文件待分析")
+    ctx.log(f"共 {total} 个文件待分析")
 
     if total == 0:
-        logger.warning(f"[PARSE] 没有文件需要分析")
-        return {"files_processed": 0, "skipped_files": 0}
+        ctx.log("没有文件需要分析")
+        return ctx
 
-    # 3. 清理旧数据
-    logger.info(f"[PARSE] 清理任务 {task_id} 的旧数据")
-    analysis_store.clear_task_data(task_id)
+    ctx.log(f"清理任务 {task_id} 的旧数据")
+    a_store.clear_task_data(task_id)
 
-    # 4. 按语言分组
     files_by_lang = {}
     for f in files:
         lang = f.get("language")
         if lang:
             files_by_lang.setdefault(lang, []).append(f)
 
-    language_stats = {lang: len(fl) for lang, fl in files_by_lang.items()}
-    logger.info(f"[PARSE] [DEBUG] 语言分布: {language_stats}")
-    processed = 0
-    skipped = 0
-    logs = []
-
-    # ── 进度分配 ──
-    # Step 1 (AST parse):  5-65 (按文件比例缩放)
-    # Step 2 (reference):  65-72
-    # Step 2.5 (import):   72-74
-    # Step 3 (framework):  74-77
-    # Step 4 (INCLUDE):    77-82 (若有) / 77-99 (无 CALL)
-    # Step 4 (CALL):       82-99 (若有)
-    # Step 5 (summary):    99-100
-
-    def _log(msg: str):
-        logs.append({"timestamp": datetime.utcnow().isoformat(), "message": msg})
-        logger.info(f"[PARSE] {msg}")
-
-    _update_progress(server, multi_db, task_id, run_id, progress=5)
-
-    # ==================== Step 1: AST 解析 + 符号提取 (并行) ====================
-    _log(f"Step 1: AST 解析开始 (并行, {PARSE_WORKERS} 个工作线程, 支持 {len(EXTRACTORS)} 种语言)")
-
-    all_tables: list[FileSymbolTable] = []
+    ctx.language_stats = {lang: len(fl) for lang, fl in files_by_lang.items()}
+    ctx.log(f"语言分布: {ctx.language_stats}")
 
     def _parse_one(lang, f, abs_path):
-        """同步解析单个文件（在线程池中执行）"""
         if should_stop(task_id):
             return ("stopped", None)
         try:
@@ -549,25 +494,19 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
             extractor = EXTRACTORS.get(lang_key)
             if extractor is None:
                 return ("no_extractor", None)
-
             parser = get_parser(lang_key)
             if parser is None:
                 return ("no_parser", None)
-
             if not os.path.exists(abs_path):
                 return ("file_missing", None)
-
             src_bytes = open(abs_path, "rb").read()
             if len(src_bytes) > 500 * 1024:
                 return ("too_large", None)
-
             walker = TreeSitterWalker(abs_path, src_bytes, lang_key, extractor)
             table = walker.extract()
-
-            rel_path = os.path.relpath(abs_path, proj_path)
+            rel_path = os.path.relpath(abs_path, ctx.proj_path)
             table.file_path = rel_path
-            emitter.write_nodes(table)
-
+            ctx.emitter.write_nodes(table)
             return ("ok", table)
         except Exception as e:
             logger.exception(f"Parse error {abs_path}: {e}")
@@ -576,19 +515,21 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
     all_tasks = []
     for lang, file_list in files_by_lang.items():
         for f in file_list:
-            abs_path = os.path.join(proj_path, f["file_path"]) if proj_path else f["file_path"]
+            abs_path = os.path.join(ctx.proj_path, f["file_path"]) if ctx.proj_path else f["file_path"]
             all_tasks.append((lang, f, abs_path))
 
-    _log(f"共 {len(all_tasks)} 个文件待解析")
+    ctx.log(f"共 {len(all_tasks)} 个文件待解析")
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    ctx.report_progress(5)
+    ctx.log("Step 1: AST 解析开始")
 
     with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as file_executor:
         batch_size = PARSE_WORKERS * 2
         for batch_start in range(0, len(all_tasks), batch_size):
             if should_stop(task_id):
-                _log("检测到停止标志，中断解析")
-                break
+                ctx.log("检测到停止标志，中断解析")
+                ctx.stopped = True
+                return ctx
 
             batch = all_tasks[batch_start:batch_start + batch_size]
             futures = {
@@ -602,228 +543,257 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
                 try:
                     status, table = future.result()
                 except Exception as e:
-                    _log(f"解析任务异常: {e}")
+                    ctx.log(f"解析任务异常: {e}")
                     continue
 
                 if status == "ok" and table:
-                    processed += 1
-                    all_tables.append(table)
+                    ctx.processed += 1
+                    ctx.all_tables.append(table)
                 elif status in ("no_extractor", "no_parser", "too_large", "file_missing"):
-                    skipped += 1
-                elif status == "stopped":
-                    pass
+                    ctx.skipped += 1
 
-                if processed % PROGRESS_INTERVAL == 0:
-                    scaled = 5 + int(processed * 60 / total) if total > 0 else 5
-                    _update_progress(server, multi_db, task_id, run_id, progress=scaled)
+                if ctx.processed % PROGRESS_INTERVAL == 0:
+                    scaled = 5 + (ctx.processed * 60 // total) if total > 0 else 5
+                    ctx.report_progress(scaled)
 
     if should_stop(task_id):
-        _log("AST 解析被用户停止")
-        return {"files_processed": processed, "skipped_files": skipped, "stopped": True}
+        ctx.log("AST 解析被用户停止")
+        ctx.stopped = True
+        return ctx
 
-    _log(f"AST 解析完成 - 处理 {processed} 个文件，跳过 {skipped} 个")
+    ctx.log(f"AST 解析完成 - 处理 {ctx.processed} 个文件，跳过 {ctx.skipped} 个")
+    ctx.report_progress(65)
+    return ctx
 
-    _update_progress(server, multi_db, task_id, run_id, progress=65)
 
-    # 统计节点总数
-    total_ast_nodes = analysis_store.count_graph_nodes(task_id)
-    _log(f"节点总数: {total_ast_nodes}")
+def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
+    """Step 2: 跨文件引用解析 — 进度 65→72"""
+    from parsers.core.resolver import ResolutionEngine
 
-    # ==================== Step 2: 跨文件引用解析 ====================
-    _log("Step 2: 跨文件引用解析开始")
-    total_call_edges = 0
-    total_dep_edges = 0
-    total_extends_edges = 0
-    total_implements_edges = 0
-    total_type_of_edges = 0
-
+    ctx.log("Step 2: 跨文件引用解析开始")
     try:
         resolver = ResolutionEngine()
-        resolved_edges = resolver.resolve(all_tables)
-        emitter.write_edges(resolved_edges)
+        ctx.resolved_edges = resolver.resolve(ctx.all_tables)
+        ctx.emitter.write_edges(ctx.resolved_edges)
 
-        # 按类型统计
-        for e in resolved_edges:
-            if e.kind.value == "calls":
-                total_call_edges += 1
-            elif e.kind.value == "imports":
-                total_dep_edges += 1
-            elif e.kind.value == "extends":
-                total_extends_edges += 1
-            elif e.kind.value == "implements":
-                total_implements_edges += 1
-            elif e.kind.value in ("type_of", "returns"):
-                total_type_of_edges += 1
+        for e in ctx.resolved_edges:
+            kv = e.kind.value
+            if kv == "calls":
+                ctx.total_call_edges += 1
+            elif kv == "imports":
+                ctx.total_dep_edges += 1
+            elif kv == "extends":
+                ctx.total_extends_edges += 1
+            elif kv == "implements":
+                ctx.total_implements_edges += 1
+            elif kv in ("type_of", "returns"):
+                ctx.total_type_of_edges += 1
 
-        _log(f"引用解析完成: calls={total_call_edges}, imports={total_dep_edges}, "
-             f"extends={total_extends_edges}, implements={total_implements_edges}, "
-             f"type_refs={total_type_of_edges}")
+        ctx.log(f"引用解析完成: calls={ctx.total_call_edges}, imports={ctx.total_dep_edges}, "
+                f"extends={ctx.total_extends_edges}, implements={ctx.total_implements_edges}, "
+                f"type_refs={ctx.total_type_of_edges}")
     except Exception as e:
-        _log(f"引用解析失败: {e}")
+        ctx.log(f"引用解析失败: {e}")
 
-    _update_progress(server, multi_db, task_id, run_id, progress=72)
+    ctx.report_progress(72)
+    return ctx
 
-    # 调试日志
-    dep_check = analysis_store.get_dep_edges(task_id)
-    call_check = analysis_store.get_call_edges(task_id)
-    _log(f"[DEBUG] 数据库验证: dep_edges={len(dep_check)}, call_edges={len(call_check)}")
 
-    # Step 2.5: 从 import 节点生成依赖边 (imports edges)
-    _log("Step 2.5: 文件依赖提取开始")
+def _step3_extract_imports(ctx: PipelineContext) -> PipelineContext:
+    """Step 2.5: 文件依赖提取 — 进度 72→74"""
+    ctx.log("Step 2.5: 文件依赖提取开始")
     try:
-        import_dep_edges = _extract_import_dependencies(analysis_store, task_id, all_tables, proj_path)
-        if import_dep_edges:
-            emitter.write_edges(import_dep_edges)
-            total_dep_edges = len(import_dep_edges)
-            _log(f"文件依赖提取完成: {total_dep_edges} 条依赖边")
+        import_edges = _extract_import_dependencies(
+            ctx.analysis_store, ctx.task_id, ctx.all_tables, ctx.proj_path
+        )
+        if import_edges:
+            ctx.emitter.write_edges(import_edges)
+            ctx.total_dep_edges = len(import_edges)
+            ctx.log(f"文件依赖提取完成: {ctx.total_dep_edges} 条依赖边")
     except Exception as e:
-        _log(f"文件依赖提取失败: {e}")
+        ctx.log(f"文件依赖提取失败: {e}")
 
-    _update_progress(server, multi_db, task_id, run_id, progress=74)
+    ctx.report_progress(74)
+    return ctx
 
-    # ==================== Step 3: 框架感知 + 动态合成 ====================
-    _log("Step 3: 框架感知 + 动态合成开始")
-    total_framework_edges = 0
-    total_synthetic_edges = 0
-    framework_edges_list = []
+
+def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
+    """Step 3: 框架感知 + 动态合成 — 进度 74→77"""
+    ctx.log("Step 3: 框架感知 + 动态合成开始")
     try:
         from parsers.frameworks import run_all as run_frameworks
-        framework_edges = run_frameworks(all_tables)
+        framework_edges = run_frameworks(ctx.all_tables)
         if framework_edges:
-            emitter.write_edges(framework_edges)
-            total_framework_edges = len(framework_edges)
-            framework_edges_list = framework_edges
-            _log(f"框架感知完成: {total_framework_edges} 条框架边")
+            ctx.emitter.write_edges(framework_edges)
+            ctx.total_framework_edges = len(framework_edges)
+            ctx.framework_edges_list = framework_edges
+            ctx.log(f"框架感知完成: {ctx.total_framework_edges} 条框架边")
     except Exception as e:
-        _log(f"框架感知失败: {e}")
+        ctx.log(f"框架感知失败: {e}")
 
     try:
         from parsers.core.synthesis import DynamicSynthesizer
         synthesizer = DynamicSynthesizer()
-        all_nodes = [n for t in all_tables for n in t.nodes]
-        # Convert Edge objects to dicts for synthesizer
-        all_edges_for_synth = [_edge_to_dict(e) for e in resolved_edges]
-        all_edges_for_synth += [_edge_to_dict(e) for e in framework_edges_list]
-        synthetic_edges = synthesizer.synthesize(all_nodes, all_edges_for_synth, all_tables)
+        all_nodes = [n for t in ctx.all_tables for n in t.nodes]
+        all_edges_for_synth = [_edge_to_dict(e) for e in ctx.resolved_edges]
+        all_edges_for_synth += [_edge_to_dict(e) for e in ctx.framework_edges_list]
+        synthetic_edges = synthesizer.synthesize(all_nodes, all_edges_for_synth, ctx.all_tables)
         if synthetic_edges:
-            emitter.write_edges(synthetic_edges)
-            total_synthetic_edges = len(synthetic_edges)
-            _log(f"动态合成完成: {total_synthetic_edges} 条合成边")
+            ctx.emitter.write_edges(synthetic_edges)
+            ctx.total_synthetic_edges = len(synthetic_edges)
+            ctx.log(f"动态合成完成: {ctx.total_synthetic_edges} 条合成边")
     except Exception as e:
-        _log(f"动态合成失败: {e}")
+        ctx.log(f"动态合成失败: {e}")
 
-    _update_progress(server, multi_db, task_id, run_id, progress=77)
+    ctx.report_progress(77)
+    return ctx
 
-    # ==================== Step 4: 社区分析 ====================
-    _log("Step 4: 社区分析开始")
-    total_communities = 0
-    total_hubs = 0
-    total_orphans = 0
-    best_call_community_id = None
-    best_dep_community_id = None
 
-    # 调试日志：确认 task_id 和 analysis_store
-    _log(f"[DEBUG] 社区分析参数: task_id={task_id}, analysis_store id={id(analysis_store)}, report_types={report_types}")
+def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
+    """Step 4: 社区分析 (Louvain) — 进度 77→99"""
+    ctx.log("Step 4: 社区分析开始")
 
-    # 根据 report_types 配置选择分析类型
+    try:
+        from community_analysis import analyze_communities as _analyze_communities
+        _community_available = True
+    except ImportError:
+        _analyze_communities = None
+        _community_available = False
+        logger.warning("community_analysis plugin not available, community analysis will be skipped")
+
+    report_types = ctx.report_types
+    a_store = ctx.analysis_store
+    task_id = ctx.task_id
+
     if "dependency" in report_types or "full" in report_types:
-        if analyze_communities is not None:
+        if _community_available:
             try:
-                comm_result = analyze_communities(
-                    task_id=task_id,
-                    analysis_store=analysis_store,
-                    edge_type="INCLUDE",
-                    min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE,
+                comm_result = _analyze_communities(
+                    task_id=task_id, analysis_store=a_store,
+                    edge_type="INCLUDE", min_node_cnt=COMMUNITY_MIN_NODE_INCLUDE,
                 )
-                total_communities += comm_result.get("community_count", 0)
-                total_hubs += comm_result.get("hub_count", 0)
-                total_orphans += comm_result.get("orphan_count", 0)
-                best = analysis_store.get_best_community(task_id, "INCLUDE")
+                ctx.total_communities += comm_result.get("community_count", 0)
+                ctx.total_hubs += comm_result.get("hub_count", 0)
+                ctx.total_orphans += comm_result.get("orphan_count", 0)
+                best = a_store.get_best_community(task_id, "INCLUDE")
                 if best:
-                    best_dep_community_id = best["comm_id"]
-                _log(f"INCLUDE 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
-                     f" (枢纽={total_hubs}, 孤立={total_orphans})")
+                    ctx.best_dep_community_id = best["comm_id"]
+                ctx.log(f"INCLUDE 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
+                        f" (枢纽={ctx.total_hubs}, 孤立={ctx.total_orphans})")
             except Exception as e:
-                _log(f"INCLUDE 社区分析失败: {e}")
+                ctx.log(f"INCLUDE 社区分析失败: {e}")
         else:
-            _log("社区分析插件未安装，跳过 INCLUDE")
+            ctx.log("社区分析插件未安装，跳过 INCLUDE")
 
-    _update_progress(server, multi_db, task_id, run_id,
-                     progress=82 if ("callChain" in report_types or "full" in report_types) else 99)
+    has_call = "callChain" in report_types or "full" in report_types
+    ctx.report_progress(82 if has_call else 99)
 
-    if "callChain" in report_types or "full" in report_types:
-        if analyze_communities is not None:
+    if has_call:
+        if _community_available:
             try:
-                comm_result = analyze_communities(
-                    task_id=task_id,
-                    analysis_store=analysis_store,
-                    edge_type="CALL",
-                    min_node_cnt=COMMUNITY_MIN_NODE_CALL,
+                comm_result = _analyze_communities(
+                    task_id=task_id, analysis_store=a_store,
+                    edge_type="CALL", min_node_cnt=COMMUNITY_MIN_NODE_CALL,
                 )
-                total_communities += comm_result.get("community_count", 0)
-                total_hubs += comm_result.get("hub_count", 0)
-                total_orphans += comm_result.get("orphan_count", 0)
-                best = analysis_store.get_best_community(task_id, "CALL")
+                ctx.total_communities += comm_result.get("community_count", 0)
+                ctx.total_hubs += comm_result.get("hub_count", 0)
+                ctx.total_orphans += comm_result.get("orphan_count", 0)
+                best = a_store.get_best_community(task_id, "CALL")
                 if best:
-                    best_call_community_id = best["comm_id"]
-                _log(f"CALL 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
-                     f" (枢纽={total_hubs}, 孤立={total_orphans})")
+                    ctx.best_call_community_id = best["comm_id"]
+                ctx.log(f"CALL 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
+                        f" (枢纽={ctx.total_hubs}, 孤立={ctx.total_orphans})")
             except Exception as e:
-                _log(f"CALL 社区分析失败: {e}")
+                ctx.log(f"CALL 社区分析失败: {e}")
         else:
-            _log("社区分析插件未安装，跳过 CALL")
+            ctx.log("社区分析插件未安装，跳过 CALL")
 
-    _update_progress(server, multi_db, task_id, run_id, progress=99)
+    ctx.report_progress(99)
+    return ctx
 
-    # ==================== Step 5: 结果汇总 ====================
-    _log("Step 5: 结果汇总")
-    duration_ms = int((time.time() - start_time) * 1000)
 
-    # 统计总数
-    total_ast_nodes = analysis_store.count_graph_nodes(task_id)
-    total_symbols = total_ast_nodes  # v2: 节点即符号
+def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
+    """Step 5: 结果汇总 + 报告写入 — 进度 99→100"""
+    ctx.log("Step 5: 结果汇总")
+    duration_ms = int((time.time() - ctx.start_time) * 1000)
+    a_store = ctx.analysis_store
+    node_count = a_store.count_graph_nodes(ctx.task_id)
 
     report = {
         "id": str(uuid.uuid4()),
-        "task_id": task_id,
-        "run_id": run_id,
-        "total_ast_nodes": total_ast_nodes,
-        "total_symbols": total_symbols,
-        "total_call_edges": total_call_edges,
-        "total_dep_edges": total_dep_edges,
-        "total_extends_edges": total_extends_edges,
-        "total_implements_edges": total_implements_edges,
-        "total_type_of_edges": total_type_of_edges,
-        "total_framework_edges": total_framework_edges,
-        "total_synthetic_edges": total_synthetic_edges,
-        "total_communities": total_communities,
-        "total_hubs": total_hubs,
-        "total_orphans": total_orphans,
-        "language_stats": language_stats,
-        "files_processed": processed,
-        "skipped_files": skipped,
-        "best_call_community_id": best_call_community_id,
-        "best_dep_community_id": best_dep_community_id,
-        "logs": logs,
+        "task_id": ctx.task_id,
+        "run_id": ctx.run_id,
+        "total_ast_nodes": node_count,
+        "total_symbols": node_count,
+        "total_call_edges": ctx.total_call_edges,
+        "total_dep_edges": ctx.total_dep_edges,
+        "total_extends_edges": ctx.total_extends_edges,
+        "total_implements_edges": ctx.total_implements_edges,
+        "total_type_of_edges": ctx.total_type_of_edges,
+        "total_framework_edges": ctx.total_framework_edges,
+        "total_synthetic_edges": ctx.total_synthetic_edges,
+        "total_communities": ctx.total_communities,
+        "total_hubs": ctx.total_hubs,
+        "total_orphans": ctx.total_orphans,
+        "language_stats": ctx.language_stats,
+        "files_processed": ctx.processed,
+        "skipped_files": ctx.skipped,
+        "best_call_community_id": ctx.best_call_community_id,
+        "best_dep_community_id": ctx.best_dep_community_id,
+        "logs": ctx.logs,
         "summary": (
-            f"分析完成: {processed} 个文件, {total_ast_nodes} 个符号节点, "
-            f"{total_call_edges} 调用, {total_dep_edges} 依赖, "
-            f"{total_extends_edges} 继承, {total_implements_edges} 实现, "
-            f"{total_communities} 个社区"
-            f"{f', {total_hubs} 枢纽' if total_hubs else ''}"
-            f"{f', {total_orphans} 孤立' if total_orphans else ''}"
+            f"分析完成: {ctx.processed} 个文件, {node_count} 个符号节点, "
+            f"{ctx.total_call_edges} 调用, {ctx.total_dep_edges} 依赖, "
+            f"{ctx.total_extends_edges} 继承, {ctx.total_implements_edges} 实现, "
+            f"{ctx.total_communities} 个社区"
+            f"{f', {ctx.total_hubs} 枢纽' if ctx.total_hubs else ''}"
+            f"{f', {ctx.total_orphans} 孤立' if ctx.total_orphans else ''}"
             f", 耗时 {duration_ms}ms"
         ),
     }
 
-    # 写入分析报告
+    from store.task_store import TaskStore
+    task_store = TaskStore(ctx.multi_db.main_db)
     task_store.upsert_report(report)
+    ctx.report_progress(100)
+    ctx.log(f"分析完成，耗时 {duration_ms}ms")
+    return report
 
-    # 更新最终进度
-    _update_progress(server, multi_db, task_id, run_id, progress=100)
 
-    _log(f"分析完成，耗时 {duration_ms}ms")
+# ==================== 6 步分析流程 — 入口 ====================
 
+def _do_parse(server, multi_db, task_id: str, run_id: str,
+              start_time: float) -> Dict[str, Any]:
+    """6 步分析流程编排器 — 按顺序执行各步骤，逐步聚合结果"""
+
+    ctx = _load_task_context(server, multi_db, task_id)
+    ctx.run_id = run_id
+    ctx.start_time = start_time
+
+    ctx.log(f"[DEBUG] task_id={task_id}, project_id={ctx.project_id}")
+
+    # Step 1: AST 解析 + 符号提取 (5→65%)
+    ctx = _step1_parse_ast(ctx)
+    if ctx.stopped:
+        return {"files_processed": ctx.processed, "skipped_files": ctx.skipped, "stopped": True}
+
+    node_count = ctx.analysis_store.count_graph_nodes(task_id)
+    ctx.log(f"节点总数: {node_count}")
+
+    # Step 2: 跨文件引用解析 (65→72%)
+    ctx = _step2_resolve_references(ctx)
+
+    # Step 2.5: 文件依赖提取 (72→74%)
+    ctx = _step3_extract_imports(ctx)
+
+    # Step 3: 框架感知 + 动态合成 (74→77%)
+    ctx = _step4_synthesize_frameworks(ctx)
+
+    # Step 4: 社区分析 (77→99%)
+    ctx = _step5_detect_communities(ctx)
+
+    # Step 5: 结果汇总 (99→100%)
+    report = _step6_generate_summary(ctx)
     return report
 
 

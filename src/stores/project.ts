@@ -12,7 +12,6 @@ import { useFuncGroupStore } from '@/stores/funcGroup'
 import { useReportStore } from '@/stores/report-store'
 import { useDebugStore } from '@/stores/debug'
 import { useCommunityStore } from '@/stores/community-store'
-import { usePipelineStore } from '@/stores/pipeline-store'
 import { ipc } from '@/services/ipc'
 import type { FileTreeNode, Project } from '@/types/ipc'
 import i18n from '@/i18n'
@@ -180,9 +179,7 @@ export const useProjectStore = defineStore('project', () => {
     const analysisStore = useAnalysisStore()
     analysisStore.tasks = []
     const communityStore = useCommunityStore()
-    const pipelineStore = usePipelineStore()
     communityStore.clearTask(id)
-    pipelineStore.clearTask(id)
     // 关闭该项目的所有分析 tab，清理已删除任务的引用
     const funcGroup = useFuncGroupStore()
     const ctx = funcGroup.context.analysis

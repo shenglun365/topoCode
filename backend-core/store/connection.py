@@ -2,17 +2,13 @@
 SQLite 连接管理
 
 - SQLiteContext: 单个 SQLite 连接的上下文管理器
-- MultiDBManager: LRU 缓存多个项目库连接 + 主库管理
 """
 import os
 import sqlite3
 import threading
-from collections import OrderedDict
 from typing import Optional
 
-from config import DB_DIR, MAIN_DB_FILE, SQLITE_PRAGMAS, MAX_DB_CONNECTIONS
-
-from . import schema
+from config import SQLITE_PRAGMAS
 
 
 class SQLiteContext:
@@ -70,50 +66,3 @@ class SQLiteContext:
 
     def __exit__(self, *args):
         self.close()
-
-
-class MultiDBManager:
-    """
-    多数据库管理器（已迁移至 sqlite_ctx.MultiDBManager，此处保留兼容层）
-
-    - 主库 (topoone.db): 任务元数据
-    - 项目库 (.topocode/data/project.db): 分析数据
-    """
-
-    def __init__(self, db_dir: str = DB_DIR):
-        self.db_dir = db_dir
-        os.makedirs(db_dir, exist_ok=True)
-        self._main_db: Optional[SQLiteContext] = None
-        self._cache: OrderedDict[str, SQLiteContext] = OrderedDict()
-        self._lock = threading.RLock()
-
-    @property
-    def main_db(self) -> SQLiteContext:
-        """获取主库连接，自动初始化 + 迁移"""
-        if self._main_db is None:
-            with self._lock:
-                if self._main_db is None:
-                    path = os.path.join(self.db_dir, MAIN_DB_FILE)
-                    self._main_db = SQLiteContext(path)
-                    self._main_db.conn
-                    schema.init_main_schema(self._main_db)
-        return self._main_db
-
-    def get_project_db(self, project_id: str) -> SQLiteContext:
-        """
-        获取项目库连接（委托给 sqlite_ctx.MultiDBManager 使用新架构路径）
-        """
-        # 延迟导入避免循环依赖
-        from sqlite_ctx import MultiDBManager as NewMultiDBManager
-        new_mgr = NewMultiDBManager(self.db_dir)
-        return new_mgr.get_project_db(project_id)
-
-    def close_all(self):
-        """关闭所有连接"""
-        if self._main_db:
-            self._main_db.close()
-            self._main_db = None
-        with self._lock:
-            for db in self._cache.values():
-                db.close()
-            self._cache.clear()

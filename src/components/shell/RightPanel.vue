@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { XMarkIcon, ChatBubbleLeftIcon, ListBulletIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon, ChatBubbleLeftIcon, ListBulletIcon, CommandLineIcon, ClockIcon } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
 import { useProjectStore } from '@/stores/project'
@@ -42,12 +42,22 @@ const showTaskList = computed(() => {
   return isAnalysisReport.value && panelStore.rightTab === 'detail'
 })
 
+// 是否显示 Agent 任务列表面板
+const showAgentTasks = computed(() => {
+  return isAnalysisReport.value && panelStore.rightTab === 'tasks'
+})
+
 const title = computed(() => {
   if (showCodeIndex.value) {
     return t('report.codeIndex')
   }
+  if (showAgentTasks.value) {
+    return t('report.agentTasks', 'Agent 任务')
+  }
   if (isAnalysisReport.value) {
-    return panelStore.rightTab === 'ai' ? t('ai.assistantTitle') : t('report.sidebar.taskList')
+    if (panelStore.rightTab === 'detail') return t('report.sidebar.analysisHistory', '分析历史')
+    if (panelStore.rightTab === 'tasks') return t('report.agentTasks', 'Agent')
+    return t('ai.assistantTitle')
   }
   if (showAIAssistant.value) {
     return t('ai.assistantTitle')
@@ -61,6 +71,7 @@ const title = computed(() => {
 const activePanelComponent = computed(() => {
   if (panelStore.debugMode) return { component: RIGHT_PANEL_COMPONENTS.debug }
   if (showCodeIndex.value) return { component: RIGHT_PANEL_COMPONENTS.codeIndex }
+  if (showAgentTasks.value) return { component: RIGHT_PANEL_COMPONENTS.agentTaskList }
   if (showTaskList.value) return { component: RIGHT_PANEL_COMPONENTS.taskList, props: { taskId: projectStore.activeTab?.taskId || '', taskName: projectStore.activeTab?.title } }
   if (showAIAssistant.value || (projectStore.viewMode === 'project' && projectStore.activeTab)) return { component: RIGHT_PANEL_COMPONENTS.ai }
   return null
@@ -105,8 +116,15 @@ const activePanelComponent = computed(() => {
         :class="['right-tab', { active: panelStore.rightTab === 'detail' }]"
         @click="panelStore.setRightTab('detail')"
       >
-        <ListBulletIcon class="w-3.5 h-3.5" />
-        <span>{{ t('report.sidebar.taskList') }}</span>
+        <ClockIcon class="w-3.5 h-3.5" />
+        <span>{{ t('report.sidebar.analysisHistory', '分析历史') }}</span>
+      </button>
+      <button
+        :class="['right-tab', { active: panelStore.rightTab === 'tasks' }]"
+        @click="panelStore.setRightTab('tasks')"
+      >
+        <CommandLineIcon class="w-3.5 h-3.5" />
+        <span>{{ t('report.agentTasks', 'Agent') }}</span>
       </button>
     </div>
     <div class="panel-body">

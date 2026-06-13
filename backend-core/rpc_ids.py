@@ -35,7 +35,14 @@ RPC_IDS: dict[str, str] = {
     "analysis.getCrossCommunityEdges": "API-024a",
     "analysis.getExternalStats":    "API-024b",
     "analysis.getCommunityNodeLists": "API-024c",
-    "analysis.getReportDashboard":  "API-024d",
+    "analysis.startArchAnalysis":  "API-024d",
+    "analysis.startArchTrack":     "API-024e",
+    "analysis.stopArchTrack":      "API-024f",
+    "analysis.listArchSnapshots":  "API-024g",
+    "analysis.getArchSnapshot":    "API-024h",
+    "analysis.getReportDashboard":  "API-024i",
+    "analysis.getAgentProgress":   "API-024j",
+    "analysis.cancelAgentTask":    "API-024k",
 
     # ── analysisSession ───────────────────────────────────────
     "analysisSession.list":         "API-025",
@@ -134,6 +141,8 @@ RPC_IDS: dict[str, str] = {
     "report.getLevelCommunityDetail":"API-073",
     "report.saveFileSummaries":     "API-074",
     "report.getFileSummaries":      "API-075",
+    "report.renderDiagram":         "API-114",
+    "report.getCommunityFileDetail": "API-115",
     "report.getCallLogs":           "API-076",
     "report.getInteractionLogs":    "API-077",
     "report.createSubDoc":          "API-078",
@@ -167,6 +176,10 @@ RPC_IDS: dict[str, str] = {
     "settings.updateAgent":         "API-097",
     "settings.removeAgent":         "API-098",
     "settings.detectAgent":         "API-099",
+    "settings.executeAgent":        "API-110",
+    "settings.getAgentExecution":   "API-111",
+    "settings.listAgentExecutions": "API-112",
+    "settings.cancelAgentExecution": "API-113",
     "settings.getSkills":           "API-100",
     "settings.updateSkill":         "API-101",
     "settings.getBindings":         "API-102",
@@ -175,10 +188,6 @@ RPC_IDS: dict[str, str] = {
     # ── system ────────────────────────────────────────────────
     "system.exportProject":         "API-104",
     "system.importProject":         "API-105",
-
-    # ── pipeline ───────────────────────────────────────────────
-    "report.savePipelineState":      "API-108",
-    "report.loadPipelineState":      "API-109",
 }
 
 

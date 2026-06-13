@@ -392,8 +392,10 @@ watch(() => props.taskId, loadData)
             </div>
           </div>
         </section>
+      </div>
 
-        <!-- 组件架构 — Tag/Graph 双模式 -->
+      <!-- 组件架构 — Tag/Graph 双模式 — 填充剩余空间 -->
+      <div class="report-arch-panel">
         <CommunityArchitecturePanel
           :task-id="props.taskId"
           :project-id="projectId"
@@ -507,9 +509,18 @@ watch(() => props.taskId, loadData)
 }
 
 .report-home-scroll {
-  flex: 1;
+  flex: 0 1 auto;
   overflow-y: auto;
   padding: 16px 20px;
+  min-height: 0;
+}
+.report-arch-panel {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .home-section {

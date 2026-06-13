@@ -15,12 +15,14 @@ import {
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useCommunityStore } from '@/stores/community-store'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const communityStore = useCommunityStore()
 
 interface Message {
   id: string
@@ -34,6 +36,9 @@ const messages = ref<Message[]>([])
 const userInput = ref('')
 const streaming = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
+
+const showCmdConfirm = ref(false)
+const cmdConfirmData = ref<{ text: string; action: string; args: Record<string, string> }>({ text: '', action: '', args: {} })
 
 const llmConfigured = computed(() => isLLMConfigured())
 
@@ -71,9 +76,44 @@ function addMessage(role: Message['role'], content: string): Message {
   return msg
 }
 
+function handleCmdConfirm() {
+  showCmdConfirm.value = false
+  userInput.value = cmdConfirmData.value.text
+  addMessage('user', cmdConfirmData.value.text)
+  userInput.value = ''
+  streaming.value = true
+  const assistantMsg = addMessage('assistant', '')
+  chat({
+    messages: messages.value
+      .filter(m => m.role !== 'system' && m !== assistantMsg)
+      .map(m => ({ role: m.role, content: m.content })),
+    onChunk(chunk: string) {
+      assistantMsg.content += chunk
+      scrollToBottom()
+    },
+  }).then(full => {
+    assistantMsg.content = full
+    assistantMsg.isStreaming = false
+  }).catch((err: any) => {
+    assistantMsg.content = err.message || 'unknown error'
+    assistantMsg.role = 'error'
+    assistantMsg.isStreaming = false
+  }).finally(() => { streaming.value = false })
+}
+
 async function handleSend() {
   const text = userInput.value.trim()
   if (!text || streaming.value) return
+
+  // /cmd 指令检测
+  if (text.startsWith('/')) {
+    const parsed = communityStore.parseArchCommand(text)
+    if (parsed) {
+      showCmdConfirm.value = true
+      cmdConfirmData.value = { text, action: parsed.action, args: parsed.args }
+      return
+    }
+  }
 
   // 添加用户消息
   addMessage('user', text)
@@ -171,6 +211,32 @@ watch(llmConfigured, (val) => {
             class="ai-message-bubble"
             v-html="msg.content"
           />
+        </div>
+      </div>
+
+      <!-- /cmd 确认卡片 -->
+      <div
+        v-if="showCmdConfirm"
+        class="ai-cmd-confirm"
+      >
+        <div class="ai-cmd-title">🔧 即将执行指令</div>
+        <code class="ai-cmd-text">{{ cmdConfirmData.text }}</code>
+        <div class="ai-cmd-args">
+          <span
+            v-for="(v, k) in cmdConfirmData.args"
+            :key="k"
+            class="ai-cmd-arg"
+          >--{{ k }} {{ v }}</span>
+        </div>
+        <div class="ai-cmd-actions">
+          <button
+            class="ai-cmd-btn primary"
+            @click="handleCmdConfirm"
+          >确认执行</button>
+          <button
+            class="ai-cmd-btn"
+            @click="showCmdConfirm = false"
+          >取消</button>
         </div>
       </div>
 
@@ -378,4 +444,18 @@ watch(llmConfigured, (val) => {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.ai-cmd-confirm {
+  margin: 0 12px 8px; padding: 0.5rem 0.75rem;
+  background: var(--bg-accent-subtle, #2d1f5e); border: 1px solid var(--accent, #7c3aed);
+  border-radius: 0.375rem;
+}
+.ai-cmd-title { font-size: 0.75rem; font-weight: 600; color: var(--accent, #7c3aed); margin-bottom: 0.25rem; }
+.ai-cmd-text { display: block; font-size: 0.7rem; color: var(--text-primary); background: var(--bg-primary); padding: 0.2rem 0.4rem; border-radius: 0.2rem; margin-bottom: 0.25rem; font-family: var(--font-mono); }
+.ai-cmd-args { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.35rem; }
+.ai-cmd-arg { font-size: 0.6rem; color: var(--text-muted); background: var(--bg-secondary); padding: 0.05rem 0.3rem; border-radius: 0.15rem; }
+.ai-cmd-actions { display: flex; gap: 0.35rem; }
+.ai-cmd-btn { padding: 0.15rem 0.5rem; font-size: 0.7rem; border: 1px solid var(--border); border-radius: 0.25rem; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; }
+.ai-cmd-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.ai-cmd-btn.primary { background: var(--accent, #7c3aed); color: #fff; border-color: var(--accent); }
 </style>

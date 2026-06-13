@@ -37,15 +37,44 @@ def _build_parser() -> argparse.ArgumentParser:
     p_comm.add_argument("--level", type=int, default=0)
     p_comm.add_argument("--json", action="store_true")
 
-    p_arch = sub.add_parser("arch", help="架构总览")
-    p_arch.add_argument("--focus", default="overview")
-    p_arch.add_argument("--json", action="store_true")
+    p_arch = sub.add_parser("arch", help="架构操作")
+    p_arch_subs = p_arch.add_subparsers(dest="arch_action")
+
+    p_arch_analyze = p_arch_subs.add_parser("analyze", help="批量 LLM 分析社区")
+    p_arch_analyze.add_argument("--all", action="store_true", help="分析全部社区")
+    p_arch_analyze.add_argument("--level", default="L0")
+    p_arch_analyze.add_argument("--edge-type", default="INCLUDE", choices=["INCLUDE", "CALL"])
+    p_arch_analyze.add_argument("--output", default="", help="输出目录")
+    p_arch_analyze.add_argument("--model", default="", help="LLM 模型 ID")
+
+    p_arch_overview = p_arch_subs.add_parser("overview", help="生成架构概览")
+    p_arch_overview.add_argument("--output", default="")
+
+    p_arch_export = p_arch_subs.add_parser("export", help="导出架构文档")
+    p_arch_export.add_argument("--format", default="md", choices=["md", "json", "html"])
+    p_arch_export.add_argument("--output", default="")
+
+    p_arch_list = p_arch_subs.add_parser("list", help="列出社区结构")
+    p_arch_list.add_argument("--level", default="L0")
+    p_arch_list.add_argument("--json", action="store_true")
 
     p_diff = sub.add_parser("diff", help="版本差异")
-    p_diff.add_argument("from_commit", nargs="?", default="HEAD~1")
-    p_diff.add_argument("to_commit", nargs="?", default="HEAD")
-    p_diff.add_argument("--scope", default="full")
-    p_diff.add_argument("--json", action="store_true")
+    p_diff_subs = p_diff.add_subparsers(dest="diff_action")
+    p_diff_snapshots = p_diff_subs.add_parser("snapshots", help="列出可用快照")
+    p_diff_compare = p_diff_subs.add_parser("compare", help="对比两个版本")
+    p_diff_compare.add_argument("from_version", nargs="?", default="")
+    p_diff_compare.add_argument("to_version", nargs="?", default="")
+    p_diff_compare.add_argument("--output", default="")
+
+    p_track = sub.add_parser("track", help="架构变更追踪")
+    p_track_subs = p_track.add_subparsers(dest="track_action")
+    p_track_start = p_track_subs.add_parser("start", help="开始追踪")
+    p_track_start.add_argument("--tag", default="", help="版本标签")
+    p_track_stop = p_track_subs.add_parser("stop", help="结束追踪")
+    p_track_stop.add_argument("--output", default="")
+    p_track_list = p_track_subs.add_parser("list", help="历史追踪记录")
+    p_track_list.add_argument("--limit", type=int, default=10)
+    p_track_status = p_track_subs.add_parser("status", help="当前追踪状态")
 
     p_qual = sub.add_parser("quality", help="质量检查")
     p_qual.add_argument("--focus", default="all")
@@ -97,8 +126,14 @@ def main():
     elif cmd in ("install", "uninstall", "detect"):
         _cmd_installer(args)
 
-    elif cmd in ("community", "arch", "diff", "quality", "status"):
+    elif cmd in ("community", "arch", "diff", "quality", "track", "status"):
         _cmd_query(args)
+        if cmd == "track":
+            _cmd_track(args)
+        elif cmd == "arch":
+            _cmd_arch(args)
+        elif cmd == "diff" and hasattr(args, "diff_action") and args.diff_action:
+            _cmd_diff(args)
 
     elif cmd in ("init", "uninit"):
         _cmd_project(args)
@@ -143,7 +178,7 @@ def _cmd_query(args):
     use_json = getattr(args, "json", False)
 
     try:
-        from store.connection import SQLiteContext
+        from sqlite_ctx import SQLiteContext
         store_dir = os.path.join(project_root, ".topocode", "data")
         db_path = os.path.join(store_dir, "project.db")
         if not os.path.exists(db_path):
@@ -207,9 +242,63 @@ def _cmd_project(args):
             print(f"已清除: {topo_dir}")
 
 
-def _cmd_session(args):
-    """AI 会话追踪。"""
-    print("session 追踪功能待集成 ai_session_tracker 模块。")
+def _cmd_arch(args):
+    """架构操作命令。"""
+    project_root = os.path.abspath(args.project_root)
+    store_dir = os.path.join(project_root, ".topocode", "data")
+    db_path = os.path.join(store_dir, "project.db")
+    if not os.path.exists(db_path):
+        print(f"项目未初始化: {project_root}")
+        return
+
+    action = getattr(args, "arch_action", None)
+    if not action:
+        print("使用: topocode arch [analyze|overview|export|list]")
+        return
+
+    print(f"[arch] {action} — 功能开发中 (AgentRuntime 已完成, 待集成)")
+    print(f"  项目: {project_root}")
+    if action == "analyze":
+        print(f"  层级: {getattr(args, 'level', 'L0')}")
+        print(f"  类型: {getattr(args, 'edge_type', 'INCLUDE')}")
+    elif action == "export":
+        print(f"  格式: {getattr(args, 'format', 'md')}")
+        print(f"  输出: {getattr(args, 'output') or '.topocode/architecture/'}")
+
+
+def _cmd_track(args):
+    """架构变更追踪命令。"""
+    project_root = os.path.abspath(args.project_root)
+    store_dir = os.path.join(project_root, ".topocode", "data")
+    db_path = os.path.join(store_dir, "project.db")
+    if not os.path.exists(db_path):
+        print(f"项目未初始化: {project_root}")
+        return
+
+    action = getattr(args, "track_action", None)
+    if not action:
+        print("使用: topocode track [start|stop|list|status]")
+        return
+
+    print(f"[track] {action} — 功能开发中 (ArchSentinel 已完成, 待集成)")
+    print(f"  项目: {project_root}")
+    if action == "start":
+        tag = getattr(args, "tag", "") or f"v-auto-{int(time.time())}"
+        print(f"  标签: {tag}")
+    elif action == "list":
+        print(f"  显示最近 {getattr(args, 'limit', 10)} 条记录")
+
+
+def _cmd_diff(args):
+    """版本差异命令。"""
+    project_root = os.path.abspath(args.project_root)
+    print(f"[diff] — 功能开发中")
+    if args.diff_action == "snapshots":
+        print("  列出可用快照...")
+    elif args.diff_action == "compare":
+        frm = getattr(args, "from_version", "") or "latest-previous"
+        to = getattr(args, "to_version", "") or "current"
+        print(f"  对比: {frm} → {to}")
 
 
 if __name__ == "__main__":

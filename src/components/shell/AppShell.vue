@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TopBar from './TopBar.vue'
 import ActivityBar from './ActivityBar.vue'
@@ -39,17 +39,31 @@ const currentFuncGroup = computed(() => {
 const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user')
 const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user')
 
+const showSuccessBanner = ref(false)
+
+function onBackendReady() {
+  showSuccessBanner.value = true
+  setTimeout(() => { showSuccessBanner.value = false }, 2000)
+}
+
 // 初始化后端状态监听
 onMounted(async () => {
   try {
     const st: any = await window.api!.backend.getStatus()
-    if (st) statusStore.setBackendStatus(st)
+    if (st) {
+      statusStore.setBackendStatus(st)
+      if (st.status === 'running') onBackendReady()
+    }
   } catch (_) {}
   // 每 5 秒轮询本地 PythonBridge 状态（不经过 ZMQ，避免挂死）
   setInterval(async () => {
     try {
       const st: any = await window.api!.backend.getStatus()
-      if (st) statusStore.setBackendStatus(st, true)
+      if (st) {
+        const wasRunning = statusStore.backend.status === 'running'
+        statusStore.setBackendStatus(st, true)
+        if (!wasRunning && st.status === 'running') onBackendReady()
+      }
     } catch (_) {}
   }, 5000)
 })
@@ -74,6 +88,12 @@ watch(
     >{{ componentId }}</span>
 
     <!-- 后端状态提示条 -->
+    <div
+      v-if="showSuccessBanner"
+      class="backend-error-banner banner-success"
+    >
+      <span>✓ 后端服务已连接</span>
+    </div>
     <div
       v-if="statusStore.backend.status === 'error' || (statusStore.backend.status === 'starting' && Date.now() > 15000)"
       class="backend-error-banner"
@@ -167,6 +187,9 @@ watch(
 }
 .backend-error-banner.banner-warning {
   background: #d4941e;
+}
+.backend-error-banner.banner-success {
+  background: #28a745;
 }
 .backend-error-msg {
   opacity: 0.85;

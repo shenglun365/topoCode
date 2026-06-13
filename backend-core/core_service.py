@@ -1260,6 +1260,127 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         return {"status": status, "version": version}
 
+    @server.register("settings.executeAgent")
+    async def execute_agent(id: str, task: str = "", args: str = "", task_id: str = "", env: dict = None):
+        """异步执行外部 Agent 命令，写入 agent_executions 表追踪状态"""
+        import shlex
+        import tempfile
+
+        agent = main_db.fetchone("SELECT * FROM agent_configs WHERE id = ?", (id,))
+        if not agent:
+            raise ValueError(f"Agent not found: {id}")
+
+        exec_id = f"aex-{uuid.uuid4().hex[:8]}"
+        user_args = shlex.split(args or "") if args else []
+        cmd_parts = [agent["path"]] + shlex.split(agent["args"] or "") + user_args
+        if task:
+            cmd_parts.append(task)
+        cmd = " ".join(cmd_parts)
+
+        stdout_fd, stdout_path = tempfile.mkstemp(prefix=f"agent-exec-{exec_id}-stdout-", suffix=".log")
+        stderr_fd, stderr_path = tempfile.mkstemp(prefix=f"agent-exec-{exec_id}-stderr-", suffix=".log")
+        os.close(stdout_fd)
+        os.close(stderr_fd)
+
+        proc_env = os.environ.copy()
+        if agent["env"]:
+            try:
+                proc_env.update(json.loads(agent["env"]))
+            except Exception:
+                pass
+        if env:
+            proc_env.update(env)
+
+        now = datetime.now().isoformat()
+        main_db.insert("agent_executions", {
+            "id": exec_id,
+            "agent_config_id": id,
+            "task_id": task_id or "",
+            "status": "queued",
+            "args": args,
+            "env": json.dumps(env) if env else "",
+            "command": cmd,
+            "stdout_path": stdout_path,
+            "stderr_path": stderr_path,
+            "created_at": now,
+        })
+
+        async def _run():
+            started = datetime.now().isoformat()
+            main_db.update("agent_executions", {"status": "running", "started_at": started}, "id = ?", (exec_id,))
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=open(stdout_path, "w"), stderr=open(stderr_path, "w"),
+                    env=proc_env,
+                )
+                timeout = agent.get("timeout", 300) / 1000.0 if agent.get("timeout") else 300.0
+                try:
+                    exit_code = await asyncio.wait_for(proc.wait(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    exit_code = -1
+                    error = f"timeout after {timeout}s"
+
+                finished = datetime.now().isoformat()
+                started_ts = datetime.fromisoformat(started)
+                finished_ts = datetime.fromisoformat(finished)
+                duration = int((finished_ts - started_ts).total_seconds() * 1000)
+
+                final_status = "completed" if exit_code == 0 else ("timed_out" if exit_code == -1 else "failed")
+                main_db.update("agent_executions", {
+                    "status": final_status,
+                    "exit_code": exit_code,
+                    "finished_at": finished,
+                    "duration_ms": duration,
+                    "error": error or "",
+                }, "id = ?", (exec_id,))
+            except Exception as e:
+                logger.exception(f"executeAgent {exec_id} crashed")
+                main_db.update("agent_executions", {
+                    "status": "failed", "error": str(e),
+                    "finished_at": datetime.now().isoformat(),
+                }, "id = ?", (exec_id,))
+
+        asyncio.get_event_loop().create_task(_run())
+        return {"id": exec_id, "agentId": id, "command": cmd, "status": "queued"}
+
+    @server.register("settings.getAgentExecution")
+    def get_agent_execution(exec_id: str):
+        row = main_db.fetchone("SELECT * FROM agent_executions WHERE id = ?", (exec_id,))
+        if not row:
+            return {"found": False}
+        return row
+
+    @server.register("settings.listAgentExecutions")
+    def list_agent_executions(agent_id: str = "", task_id: str = "", status_filter: str = "", limit: int = 50):
+        where = ["1=1"]
+        params = []
+        if agent_id:
+            where.append("agent_config_id = ?")
+            params.append(agent_id)
+        if task_id:
+            where.append("task_id = ?")
+            params.append(task_id)
+        if status_filter:
+            statuses = [s.strip() for s in status_filter.split(",") if s.strip()]
+            if statuses:
+                where.append("status IN (" + ",".join("?" for _ in statuses) + ")")
+                params.extend(statuses)
+        sql = f"SELECT * FROM agent_executions WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        return main_db.fetchall(sql, tuple(params))
+
+    @server.register("settings.cancelAgentExecution")
+    def cancel_agent_execution(exec_id: str):
+        row = main_db.fetchone("SELECT * FROM agent_executions WHERE id = ?", (exec_id,))
+        if not row:
+            raise ValueError(f"Agent execution not found: {exec_id}")
+        if row["status"] not in ("queued", "running"):
+            return {"cancelled": False, "message": f"status is {row['status']}"}
+        main_db.update("agent_executions", {"status": "cancelled", "finished_at": datetime.now().isoformat()}, "id = ?", (exec_id,))
+        return {"cancelled": True}
+
     @server.register("settings.getSkills")
     def get_skills():
         rows = main_db.fetchall("SELECT * FROM skill_configs ORDER BY name")
@@ -2511,6 +2632,128 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                      sum(c.get('nodeCount', 0) for c in result),
                      sum(c.get('edgeCount', 0) for c in result))
         return {"communities": result, "count": len(result), "level": level, "taskId": task_id}
+
+    @server.register("report.renderDiagram")
+    def render_diagram(task_id=None, taskId=None, community_id=None, communityId=None,
+                       edge_type=None, edgeType=None, mode="mermaid"):
+        """0-Token 模板化图生成: 返回 Mermaid/PlantUML 图代码（不走 LLM）"""
+        from pathlib import Path
+        tid = task_id or taskId
+        cid = community_id or communityId
+        et = edge_type or edgeType or "INCLUDE"
+        if not tid or not cid:
+            raise ValueError("task_id and community_id are required")
+
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (tid,))
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        pdb = multi_db.get_project_db(pid)
+
+        rows = pdb.execute(
+            "SELECT comm_id, level, node_count, edge_count, quality_score, parent_id "
+            "FROM graph_doc WHERE task_id = ? AND edge_type = ?",
+            (tid, et)
+        ).fetchall()
+
+        comm_map = {}
+        for row in rows:
+            comm_map[row["comm_id"]] = dict(row)
+
+        children = []
+        for row in rows:
+            if row["parent_id"] == cid:
+                children.append({"communityId": row["comm_id"], "name": row["comm_id"]})
+
+        parent = comm_map.get(cid, {})
+        label = parent.get("comm_id", cid)
+
+        edges_rows = pdb.execute(
+            "SELECT source_id, target_id, kind FROM graph_edge WHERE task_id = ?",
+            (tid,)
+        ).fetchall()
+
+        child_ids = {c["communityId"] for c in children}
+        child_ids.add(cid)
+        edges = []
+        for e in edges_rows:
+            if e["source_id"] in child_ids and e["target_id"] in child_ids:
+                edges.append({"source": e["source_id"], "target": e["target_id"], "kind": e["kind"]})
+
+        from agent_workflow.workflows.arch_analyst import _build_mermaid, _build_plantuml
+        code = _build_mermaid(cid, label, children, edges) if mode == "mermaid" else _build_plantuml(cid, label, children, edges)
+        return {"communityId": cid, "mode": mode, "code": code}
+
+    @server.register("report.getCommunityFileDetail")
+    def get_community_file_detail(task_id=None, taskId=None, community_id=None, communityId=None,
+                                   edge_type=None, edgeType=None, limit=300):
+        """获取社区内文件列表（支持文件层下钻）"""
+        import json as _json
+        tid = task_id or taskId
+        cid = community_id or communityId
+        et = edge_type or edgeType or "INCLUDE"
+        if not tid or not cid:
+            raise ValueError("task_id and community_id are required")
+
+        task = main_db.fetchone("SELECT * FROM analysis_tasks WHERE id = ?", (tid,))
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        pdb = multi_db.get_project_db(pid)
+
+        community = pdb.execute(
+            "SELECT comm_id, comm_lv, node_list FROM graph_doc "
+            "WHERE task_id = ? AND comm_id = ? AND edge_type = ?",
+            (tid, cid, et)
+        ).fetchone()
+
+        if not community:
+            return {"files": [], "communityId": cid, "found": False}
+
+        node_list_json = community["node_list"]
+        if not node_list_json:
+            return {"files": [], "communityId": cid, "found": True, "fileCount": 0}
+
+        try:
+            file_paths = _json.loads(node_list_json) if isinstance(node_list_json, str) else node_list_json
+        except Exception:
+            return {"files": [], "communityId": cid, "found": True, "fileCount": 0}
+
+        if not file_paths:
+            return {"files": [], "communityId": cid, "found": True, "fileCount": 0}
+
+        fp_set = set(file_paths)
+
+        all_nodes = pdb.execute(
+            "SELECT id, name, file_path, language FROM graph_node WHERE task_id = ?",
+            (tid,)
+        ).fetchall()
+
+        file_map = {}
+        for row in all_nodes:
+            fp = row["file_path"]
+            if fp and fp in fp_set and fp not in file_map:
+                file_map[fp] = {
+                    "id": fp, "name": row["name"] or fp,
+                    "filePath": fp, "language": row["language"] or "",
+                    "lines": 0, "summary": "",
+                }
+
+        files = [file_map[fp] for fp in fp_set if fp in file_map]
+        limit_val = int(limit)
+        seen_fp = set(f["filePath"] for f in files)
+        for fp in fp_set:
+            if fp not in seen_fp and len(files) < limit_val:
+                files.append({"id": fp, "name": fp, "filePath": fp, "language": "", "lines": 0, "summary": ""})
+                seen_fp.add(fp)
+
+        return {
+            "files": files,
+            "communityId": cid,
+            "edgeType": et,
+            "found": True,
+            "fileCount": len(files),
+        }
 
     @server.register("report.saveFileSummaries")
     def save_file_summaries(project_id=None, task_id=None, summaries=None,

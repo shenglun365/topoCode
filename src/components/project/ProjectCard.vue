@@ -434,6 +434,11 @@ async function handleCheckChanges() {
         {{ project.status === 'synced' ? t('project.analysisComplete') : t('project.analysisInProgress') }}
       </span>
       <span
+        v-if="project.hasFileChanges"
+        class="badge"
+        style="background:#f59e0b;color:#fff;font-size:7px;"
+      >{{ t('project.filesChanged', '变更') }}</span>
+      <span
         :class="`badge ${getStatusBadge(project.status)}`"
         style="font-size:8px;"
       >

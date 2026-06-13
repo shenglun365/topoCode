@@ -316,38 +316,6 @@ export interface Dimensions {
   purpose: string[]
 }
 
-/** 流水线任务节点（动态树结构） */
-export interface PipelineTaskNode {
-  id: string
-  label: string
-  type: 'group' | 'step' | 'subtask'
-  status: 'pending' | 'running' | 'completed' | 'error' | 'skipped'
-  progress: number
-  children?: PipelineTaskNode[]
-  error?: string
-  templateId?: string
-  dependsOn?: string[]
-}
-
-/** 流水线控制函数 */
-export interface PipelineControlFunctions {
-  runAll: () => Promise<void>
-  runNode: (nodeId: string) => Promise<void>
-  pause: () => void
-  resume: () => void
-  reset: () => void
-  stop: () => void
-}
-
-/** 流水线状态 */
-export interface PipelineState {
-  rootTask: PipelineTaskNode
-  currentPhase: 'validating' | 'preprocessing' | 'community_analysis' | 'step1' | 'step2' | 'step3' | 'step4' | 'step5' | 'done' | 'error'
-  overallProgress: number
-  startedAt: string
-  completedAt?: string
-}
-
 /** 模型配置 */
 export interface ModelConfigItem {
   id: string
@@ -383,10 +351,33 @@ export interface AgentConfigItem {
   id: string
   name: string
   path: string
+  type: string
   args: string
-  status: 'online' | 'offline' | 'not-detected' | 'not-configured'
+  status: 'online' | 'offline' | 'not-detected' | 'not-configured' | 'configured' | 'error'
   version?: string
   isDefault: boolean
+  extraConfig?: Record<string, unknown>
+  timeout?: number
+}
+
+/** Agent 执行记录 */
+export interface AgentExecution {
+  id: string
+  agentConfigId: string
+  taskId?: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+  args: string
+  command: string
+  stdoutPath?: string
+  stderrPath?: string
+  exitCode?: number
+  error?: string
+  progress: number
+  meta?: Record<string, unknown>
+  startedAt?: string
+  finishedAt?: string
+  durationMs?: number
+  createdAt: string
 }
 
 /** SKILL 配置 */
@@ -510,6 +501,13 @@ export interface IPCAPI {
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
     getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<Record<string, string[]>>
+    startArchAnalysis: (params: { taskId: string; edgeType: string; level: string; modelId?: string }) => Promise<{ taskId: string; success: boolean }>
+    listArchSnapshots: (params: { taskId: string }) => Promise<Array<{ id: string; ts: string; commCount: number; summary: string }>>
+    getArchSnapshot: (params: { taskId: string; versionId: string }) => Promise<Array<{ communityId: string; name: string; nodeCount: number; qualityScore: number; summary: string }>>
+    startArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string }>
+    stopArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
+    getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
+    cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
@@ -541,10 +539,10 @@ export interface IPCAPI {
     generateProjectSummary: (params: { projectId: string }) => Promise<{ success: boolean; summary: string; generated_at: string }>
     getProjectSummary: (params: { projectId: string }) => Promise<{ summary: string; generated_at: string | null }>
     saveProjectSummary: (params: { projectId: string; summary: string }) => Promise<{ success: boolean; summary: string; generated_at: string }>
-    savePipelineState: (params: { taskId: string; stateJson: string }) => Promise<{ ok: boolean; id: string }>
-    loadPipelineState: (params: { taskId: string }) => Promise<{ state: Record<string, any> | null }>
     saveOverallDoc: (params: { taskId: string; title: string; content: string }) => Promise<{ id: string; title: string; content: string; createdAt: string }>
     getLevelCommunityDetail: (params: { projectId: string; taskId: string; level?: string; edgeType?: string }) => Promise<{ communities: Array<{ communityId: string; parentCommunityId: string | null; level: string; nodeCount: number; edgeCount: number; qualityScore: number | null; nodes: Array<{ id: string; name: string; type: string; filePath: string }>; edges: Array<{ source: string; target: string; type: string; direction: string }> }>; count: number; level: string; taskId: string }>
+    renderDiagram: (params: { taskId: string; communityId: string; edgeType?: string; mode?: 'mermaid' | 'plantuml' }) => Promise<{ communityId: string; mode: string; code: string }>
+    getCommunityFileDetail: (params: { taskId: string; communityId: string; edgeType?: string; limit?: number }) => Promise<{ files: Array<{ id: string; name: string; filePath: string; language: string; lines: number; summary: string }>; communityId: string; edgeType: string; found: boolean; fileCount: number }>
     saveFileSummaries: (params: { projectId: string; taskId: string; summaries: Array<{ filePath: string; summary: string; source?: string }> }) => Promise<{ saved: number }>
     getFileSummaries: (params: { projectId: string; taskId?: string; source?: string }) => Promise<{ summaries: Array<{ id: string; project_id: string; task_id: string | null; file_path: string; summary: string; source: string; created_at: string }>; count: number }>
     // LLM 调用日志查询
@@ -571,10 +569,14 @@ export interface IPCAPI {
     removeModel: (id: string) => Promise<void>
     testModel: (id: string) => Promise<{ status: string; latency: number; model: string }>
     getAgents: () => Promise<AgentConfigItem[]>
-    addAgent: (params: { name: string; path: string; args: string }) => Promise<AgentConfigItem>
-    updateAgent: (params: { id: string; path?: string; args?: string }) => Promise<AgentConfigItem>
+    addAgent: (params: { name: string; path: string; args: string; type?: string }) => Promise<AgentConfigItem>
+    updateAgent: (params: { id: string; path?: string; args?: string; name?: string; type?: string }) => Promise<AgentConfigItem>
     removeAgent: (id: string) => Promise<void>
     detectAgent: (id: string) => Promise<{ status: string; version?: string }>
+    executeAgent: (params: { id: string; task: string; args?: string; taskId?: string; env?: Record<string, string> }) => Promise<{ id: string; agentId: string; command: string; status: string }>
+    getAgentExecution: (execId: string) => Promise<AgentExecution | { found: false }>
+    listAgentExecutions: (params?: { agentId?: string; taskId?: string; status?: string; limit?: number }) => Promise<AgentExecution[]>
+    cancelAgentExecution: (execId: string) => Promise<{ cancelled: boolean; message?: string }>
     getSkills: () => Promise<SkillConfigItem[]>
     updateSkill: (params: { id: string; enabled: boolean }) => Promise<SkillConfigItem>
     getBindings: () => Promise<Record<string, string>>
@@ -720,8 +722,6 @@ export interface SubDocCreateResponse { id: string; subDocId?: string }
 export interface SubDocUpdateResponse { success: boolean }
 export interface SubDocDeleteResponse { success: boolean }
 export interface SaveOverallDocResponse { success: boolean; id?: string }
-export interface PipelineStateData { stateJson?: string }
-export interface PipelineStateResponse { success: boolean; data?: PipelineStateData }
 export interface ReadmeContentResponse { content: string }
 export interface DependencyFilesResult { files: string[] }
 export interface ProjectSummaryResponse { summary?: string }
@@ -805,6 +805,7 @@ export interface CrossCommunityEdgesResult {
 
 export type ModelConfigDTO = ModelConfigItem
 export type AgentConfigDTO = AgentConfigItem
+export type AgentExecutionDTO = AgentExecution
 export type SkillConfigDTO = SkillConfigItem
 export type AnalysisTaskDTO = AnalysisTask
 export type AnalysisResultsDTO = AnalysisResult

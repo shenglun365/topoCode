@@ -90,6 +90,13 @@ async function testModelStatus() {
       <span>{{ status.encoding }}</span>
     </div>
 
+    <div
+      v-if="status.httpPort"
+      class="status-item"
+    >
+      <span>Web: {{ status.httpHost }}:{{ status.httpPort }}</span>
+    </div>
+
     <div class="status-item">
       <span>Zoom: {{ status.zoom }}%</span>
     </div>

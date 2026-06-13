@@ -160,21 +160,15 @@ export async function explainCommunity(
   },
   onChunk?: (chunk: string) => void
 ): Promise<string> {
-  const systemPrompt = '你是一个专业的代码架构分析助手。用户会提供一个代码社区（由 Louvain 算法生成的代码模块分组）。请解释这个社区的可能含义。用中文回答。'
-  const userPrompt = `## 社区信息
-- 社区 ID: ${params.commId}
-- 节点数: ${params.nodeCount}
-- 边数: ${params.edgeCount}
-- 质量分数: ${params.qualityScore}
-${params.description ? `- 描述: ${params.description}` : ''}
-
-请解释这个社区在代码架构中可能代表的模块或功能。`
-
   return chat({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
+    templateId: 'agent_explain_community',
+    variables: {
+      comm_id: params.commId,
+      node_count: String(params.nodeCount),
+      edge_count: String(params.edgeCount),
+      quality_score: String(params.qualityScore),
+      description: params.description ? `- 描述: ${params.description}` : '',
+    },
     onChunk,
   })
 }

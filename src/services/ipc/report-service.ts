@@ -1,6 +1,6 @@
 import type {
   SubDocCreateResponse, SubDocDTO, SubDocUpdateResponse, SubDocDeleteResponse,
-  SaveOverallDocResponse, PipelineStateResponse, PipelineStateData,
+  SaveOverallDocResponse,
   ReadmeContentResponse, DependencyFilesResult, ProjectSummaryResponse,
   ProjectSummaryData, LevelCommunityDetailResult, SaveFileSummariesResponse,
   FileSummariesResult,
@@ -16,8 +16,6 @@ export interface ReportService {
   updateSubDoc(params: { subDocId: string; title?: string; content?: string }): Promise<SubDocUpdateResponse>
   deleteSubDoc(subDocId: string): Promise<SubDocDeleteResponse>
   saveOverallDoc(params: { taskId: string; title: string; content: string }): Promise<SaveOverallDocResponse>
-  savePipelineState(params: { taskId: string; stateJson: string }): Promise<PipelineStateResponse>
-  loadPipelineState(params: { taskId: string }): Promise<PipelineStateData>
   getReadmeContent(params: { projectId: string }): Promise<ReadmeContentResponse>
   extractDependencyFiles(params: { projectId: string }): Promise<DependencyFilesResult>
   generateProjectSummary(params: { projectId: string }): Promise<ProjectSummaryResponse>
@@ -49,12 +47,6 @@ export function createReportService(api: any): ReportService {
     },
     saveOverallDoc: async (params) => {
       return await api.report.saveOverallDoc(params) as SaveOverallDocResponse
-    },
-    savePipelineState: async (params) => {
-      return await api.report.savePipelineState(params) as PipelineStateResponse
-    },
-    loadPipelineState: async (params) => {
-      return await api.report.loadPipelineState(params) as PipelineStateData
     },
     getReadmeContent: async (params) => {
       return await api.report.getReadmeContent(params) as ReadmeContentResponse

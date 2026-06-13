@@ -233,11 +233,11 @@ const viewModeLabel = computed(() => {
 </template>
 
 <style scoped>
-.ca-section { margin-bottom: 1.25rem; }
+.ca-section { margin-bottom: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .section-header {
   display: flex; align-items: center; gap: 6px;
-  font-size: 0.85rem; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 0.5rem; padding-bottom: 6px;
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  margin-bottom: 10px; padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }

@@ -269,6 +269,27 @@ function createRealIPC() {
       getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
         return await api.analysis.getCommunityNodeLists(params)
       },
+      startArchAnalysis: async (params: { taskId: string; edgeType: string; level: string; modelId?: string }) => {
+        return await api.analysis.startArchAnalysis(params)
+      },
+      listArchSnapshots: async (params: { taskId: string }) => {
+        return await api.analysis.listArchSnapshots(params)
+      },
+      getArchSnapshot: async (params: { taskId: string; versionId: string }) => {
+        return await api.analysis.getArchSnapshot(params)
+      },
+      startArchTrack: async (params: { taskId: string; tag: string }) => {
+        return await api.analysis.startArchTrack(params)
+      },
+      stopArchTrack: async (params: { taskId: string; tag: string }) => {
+        return await api.analysis.stopArchTrack(params)
+      },
+      getAgentProgress: async (params: { agentTaskId: string }) => {
+        return await api.analysis.getAgentProgress(params)
+      },
+      cancelAgentTask: async (params: { agentTaskId: string }) => {
+        return await api.analysis.cancelAgentTask(params)
+      },
       saveCommunityResult: async (params: any) => {
         // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
         const safe = JSON.parse(JSON.stringify(params))
@@ -334,12 +355,6 @@ function createRealIPC() {
       deleteSubDoc: async (subDocId: string) => {
         return await api.report.deleteSubDoc(subDocId)
       },
-      savePipelineState: async (params: { taskId: string; stateJson: string }) => {
-        return await api.report.savePipelineState(params)
-      },
-      loadPipelineState: async (params: { taskId: string }) => {
-        return await api.report.loadPipelineState(params)
-      },
       saveOverallDoc: async (params: { taskId: string; title: string; content: string }) => {
         return await api.report.saveOverallDoc(params)
       },
@@ -366,6 +381,9 @@ function createRealIPC() {
       },
       getFileSummaries: async (params: { projectId: string; taskId?: string; source?: string }) => {
         return await api.report.getFileSummaries(params)
+      },
+      getCommunityFileDetail: async (params: { taskId: string; communityId: string; edgeType?: string; limit?: number }) => {
+        return await api.report.getCommunityFileDetail(params)
       },
       getCallLogs: async (params: any) => {
         return await api.report.getCallLogs(params)
@@ -420,10 +438,10 @@ function createRealIPC() {
       getAgents: async () => {
         return await api.settings.getAgents()
       },
-      addAgent: async (params: { name: string; path: string; args: string }) => {
+      addAgent: async (params: { name: string; path: string; args: string; type?: string }) => {
         return await api.settings.addAgent(params)
       },
-      updateAgent: async (params: { id: string; path?: string; args?: string }) => {
+      updateAgent: async (params: { id: string; path?: string; args?: string; name?: string; type?: string }) => {
         return await api.settings.updateAgent(params)
       },
       removeAgent: async (id: string) => {
@@ -431,6 +449,18 @@ function createRealIPC() {
       },
       detectAgent: async (id: string) => {
         return await api.settings.detectAgent(id)
+      },
+      executeAgent: async (params: { id: string; task: string; args?: string; taskId?: string; env?: Record<string, string> }) => {
+        return await api.settings.executeAgent(params)
+      },
+      getAgentExecution: async (execId: string) => {
+        return await api.settings.getAgentExecution(execId)
+      },
+      listAgentExecutions: async (params?: { agentId?: string; taskId?: string; status?: string; limit?: number }) => {
+        return await api.settings.listAgentExecutions(params || {})
+      },
+      cancelAgentExecution: async (execId: string) => {
+        return await api.settings.cancelAgentExecution(execId)
       },
       getSkills: async () => {
         return await api.settings.getSkills()

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type RightTab = 'ai' | 'detail'
+export type RightTab = 'ai' | 'detail' | 'tasks'
 
 export const usePanelStore = defineStore('panel', () => {
   const leftCollapsed = ref(false)

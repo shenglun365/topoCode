@@ -49,6 +49,20 @@ interface CommunityTaskRuntime {
   crossCommunityEdges: Record<string, Record<string, CrossCommunityEdge[]>>
   /** 社区 node_list 缓存 (edgeType→level→{commId: [filePaths]}) */
   nodeLists: Record<string, Record<string, Record<string, string[]>>>
+  /** 社区文件层详细数据缓存 (commKey→{files,fileCount}) */
+  fileDetails: Record<string, { files: Array<{ id: string; name: string; filePath: string; language: string; lines: number; summary: string }>, fileCount: number }>
+  /** Agent 任务队列 */
+  agentTasks: Array<{
+    id: string; action: string; status: 'queued'|'running'|'completed'|'partial'|'failed'|'cancelled'
+    steps: Array<{ description: string; status: 'pending'|'running'|'done'|'failed' }>
+    progress: number; message: string; createdAt: string
+  }>
+  /** 架构快照列表 */
+  archSnapshots: Array<{ id: string; ts: string; commCount: number; summary: string }>
+  /** 对比模式激活状态 */
+  compareActive: boolean
+  compareFrom: string
+  compareTo: string
 }
 
 function normalizeDiagramField(val: unknown): string {
@@ -88,6 +102,12 @@ export const useCommunityStore = defineStore('community', () => {
         externalStats: null,
         crossCommunityEdges: {},
         nodeLists: {},
+        fileDetails: {},
+        agentTasks: [],
+        archSnapshots: [],
+        compareActive: false,
+        compareFrom: '',
+        compareTo: '',
       }
     }
     return tasks.value[taskId]
@@ -434,6 +454,35 @@ export const useCommunityStore = defineStore('community', () => {
     return promise
   }
 
+  async function loadFileDetail(taskId: string, commId: string, edgeType: string, limit = 300) {
+    const t = ensureTask(taskId)
+    const cacheKey = `${commId}::${edgeType}`
+    if (t.fileDetails[cacheKey]) return t.fileDetails[cacheKey]
+
+    const key = _inflightKey(taskId, 'fileDetail', commId, edgeType)
+    const existing = _inflightLoads.get(key)
+    if (existing) return existing
+
+    const version = _nextVersion(key)
+    const promise = (async () => {
+      try {
+        const result = await ipc.report.getCommunityFileDetail({ taskId, communityId: commId, edgeType, limit })
+        if (result && result.found && _requestVersions.get(key) === version) {
+          t.fileDetails[cacheKey] = { files: result.files, fileCount: result.fileCount }
+        }
+        return result
+      } catch (e: any) {
+        console.warn('[community-store] loadFileDetail failed:', e?.message || e)
+        return { files: [], edges: [], found: false }
+      } finally {
+        _inflightLoads.delete(key)
+      }
+    })()
+
+    _inflightLoads.set(key, promise)
+    return promise
+  }
+
   async function analyzeSelected(taskId: string, modelId: string, batchSize: number, projectId: string) {
     const t = ensureTask(taskId)
     if (t.communityRunning || t.communityPaused) return []
@@ -632,12 +681,128 @@ export const useCommunityStore = defineStore('community', () => {
     delete tasks.value[taskId]
   }
 
+  /* ---- Agent task management ---- */
+
+  function addAgentTask(taskId: string, action: string, steps: string[]) {
+    const t = ensureTask(taskId)
+    const id = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    t.agentTasks.push({
+      id, action, status: 'queued',
+      steps: steps.map(s => ({ description: s, status: 'pending' as const })),
+      progress: 0, message: '', createdAt: new Date().toISOString(),
+    })
+    return id
+  }
+
+  function updateAgentTask(taskId: string, taskIdx: number, updates: Partial<{
+    status: string; progress: number; message: string
+  }>) {
+    const t = tasks.value[taskId]; if (!t || !t.agentTasks[taskIdx]) return
+    Object.assign(t.agentTasks[taskIdx], updates)
+  }
+
+  function updateAgentStep(taskId: string, taskIdx: number, stepIdx: number, status: string) {
+    const t = tasks.value[taskId]; if (!t || !t.agentTasks[taskIdx]) return
+    const steps = t.agentTasks[taskIdx].steps
+    if (steps[stepIdx]) steps[stepIdx].status = status as any
+  }
+
+  async function triggerArchAnalysis(taskId: string, edgeType: string, level: string, modelId?: string) {
+    const steps = [
+      `加载社区列表 (${level}, ${edgeType})`,
+      `LLM 分析社区`,
+      `生成架构概览文档`,
+      `持久化分析结果`,
+    ]
+    const t = ensureTask(taskId)
+    const idx = t.agentTasks.length
+    addAgentTask(taskId, 'analyze', steps)
+    t.agentTasks[idx].status = 'running'
+
+    try {
+      const result = await ipc.analysis.startArchAnalysis({ taskId, edgeType, level, modelId })
+      if (result.success && result.agentTaskId) {
+        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `社区数: ${result.communities}` })
+        _pollAgentProgress(taskId, idx, result.agentTaskId)
+      } else {
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+      }
+      return result
+    } catch (e: any) {
+      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || 'unknown error' })
+      throw e
+    }
+  }
+
+  function _pollAgentProgress(taskId: string, taskIdx: number, agentTaskId: string) {
+    const poll = setInterval(async () => {
+      try {
+        const progress = await ipc.analysis.getAgentProgress({ agentTaskId })
+        if (!progress.found) return
+        const t = tasks.value[taskId]
+        if (!t || !t.agentTasks[taskIdx]) {
+          clearInterval(poll)
+          return
+        }
+        updateAgentTask(taskId, taskIdx, {
+          status: progress.status || 'running',
+          progress: progress.step_total ? Math.round((progress.step_current || 0) / (progress.step_total || 1) * 100) : 0,
+          message: progress.message || '',
+        })
+        if (progress.steps) {
+          for (let i = 0; i < progress.steps.length; i++) {
+            updateAgentStep(taskId, taskIdx, i, progress.steps[i].status)
+          }
+        }
+        if (progress.status === 'completed' || progress.status === 'partial' ||
+            progress.status === 'failed' || progress.status === 'cancelled') {
+          clearInterval(poll)
+        }
+      } catch {
+        clearInterval(poll)
+      }
+    }, 1500)
+  }
+
+  function parseArchCommand(input: string): { action: string; args: Record<string, string> } | null {
+    const trimmed = input.trim()
+    if (!trimmed.startsWith('/arch ') && !trimmed.startsWith('/analyze ') &&
+        !trimmed.startsWith('/track ') && !trimmed.startsWith('/diff ')) return null
+    const parts = trimmed.slice(1).split(/\s+/)
+    const action = parts[0] as string
+    const args: Record<string, string> = {}
+    for (let i = 1; i < parts.length; i++) {
+      if (parts[i].startsWith('--')) {
+        const key = parts[i].slice(2)
+        const val = parts[i + 1] && !parts[i + 1].startsWith('--') ? parts[++i] : 'true'
+        args[key] = val
+      }
+    }
+    return { action, args }
+  }
+
+  /* ---- Snapshot management ---- */
+
+  function setArchSnapshots(taskId: string, snapshots: any[]) {
+    const t = ensureTask(taskId)
+    t.archSnapshots = snapshots
+  }
+
+  function setCompareMode(taskId: string, active: boolean, from?: string, to?: string) {
+    const t = ensureTask(taskId)
+    t.compareActive = active
+    t.compareFrom = from || ''
+    t.compareTo = to || ''
+  }
+
   return {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
     listCommunityResults, getCascadeLevels, saveCommunityResult,
-    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
+    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, loadFileDetail, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
+    addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, parseArchCommand,
+    setArchSnapshots, setCompareMode,
   }
 })

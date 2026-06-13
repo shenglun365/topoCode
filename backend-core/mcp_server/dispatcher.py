@@ -225,7 +225,7 @@ class ToolDispatcher:
                 return {
                     "session_id": session_id or "latest",
                     "project_summary": summary,
-                    "note": "Session tracking requires ai_session_tracker module. Current output is project-level summary.",
+                    "note": "Session tracking is not available. Current output is project-level summary.",
                 }
         except Exception as e:
             logger.warning(f"session_summary failed: {e}")

@@ -76,6 +76,13 @@ export interface AnalysisService {
   getExternalStats(taskId: string): Promise<ExternalStatsResult>
   getCrossCommunityEdges(params: { taskId: string; edgeType: string; commLv: string }): Promise<CrossCommunityEdgesResult>
   getCommunityNodeLists(params: { taskId: string; edgeType: string; commLv: string }): Promise<Record<string, string[]>>
+  startArchAnalysis(params: { taskId: string; edgeType: string; level: string; modelId?: string }): Promise<{ taskId: string; success: boolean }>
+  listArchSnapshots(params: { taskId: string }): Promise<Array<{ id: string; ts: string; commCount: number; summary: string }>>
+  getArchSnapshot(params: { taskId: string; versionId: string }): Promise<Array<{ communityId: string; name: string; nodeCount: number; qualityScore: number; summary: string }>>
+  startArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string }>
+  stopArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
+  getAgentProgress(params: { agentTaskId: string }): Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
+  cancelAgentTask(params: { agentTaskId: string }): Promise<{ cancelled: boolean }>
   saveCommunityResult(params: any): Promise<SaveCommunityResultResponse>
   getCommunityResult(params: any): Promise<any>
   listCommunityResults(taskId: string, edgeType: string): Promise<ListCommunityResultsResponse>
@@ -173,6 +180,21 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
       return await api.analysis.getCommunityNodeLists(params) as Record<string, string[]>
+    },
+    startArchAnalysis: async (params) => {
+      return await api.analysis.startArchAnalysis(params) as { taskId: string; success: boolean }
+    },
+    listArchSnapshots: async (params) => {
+      return await api.analysis.listArchSnapshots(params)
+    },
+    getArchSnapshot: async (params) => {
+      return await api.analysis.getArchSnapshot(params)
+    },
+    startArchTrack: async (params) => {
+      return await api.analysis.startArchTrack(params) as { versionId: string }
+    },
+    stopArchTrack: async (params) => {
+      return await api.analysis.stopArchTrack(params) as { versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }
     },
     saveCommunityResult: async (params: any) => {
       const safe = JSON.parse(JSON.stringify(params))

@@ -13,74 +13,6 @@
     },
     {
       "locale": "zh-CN",
-      "id": "func_summary",
-      "name": "程序功能概要",
-      "mode": "chat",
-      "module_type": "project_resource",
-      "category": "摘要",
-      "system_prompt": "你是一个专业的代码分析助手。请阅读以下代码文件，概述其整体功能和结构。用中文回答，层次分明：1. 文件用途 2. 核心类/函数 3. 关键逻辑。",
-      "user_prompt_template": "## 文件: {filePath}\n## 语言: {language}\n\n```{language}\n{code}\n```\n\n请概述这个文件的功能和结构。",
-      "variables_json": "[{\"name\": \"filePath\", \"type\": \"string\", \"description\": \"文件路径\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"编程语言\", \"required\": true}, {\"name\": \"code\", \"type\": \"string\", \"description\": \"源代码\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "arch_analysis",
-      "name": "架构深度解析",
-      "mode": "tools",
-      "module_type": "project_analysis",
-      "category": "分析",
-      "system_prompt": "你是一个代码架构分析专家。用户提供项目概要信息（文件名、类名、节点和边的名称列表），你需要分析架构模式、依赖关系和潜在问题。\n\n重要约束：上下文容量有限，不要一次性请求所有文件内容。先给出整体架构概览，然后使用提供的工具按需获取关键文件/符号的详细信息。每次只获取最关键的 2-3 个符号，分析后再决定是否需要更多。",
-      "user_prompt_template": "## 项目: {projectName}\n## 语言: {language}\n\n### 文件列表 (部分)\n{fileList}\n\n### 节点示例 (前 50 个)\n{nodeNames}\n\n### 边示例 (前 50 个)\n{edgeNames}\n\n请分析这个项目的架构。先用工具获取关键文件的详细信息，然后给出架构概览。",
-      "tools_json": "[\"get_file_content\", \"get_symbol_detail\", \"search_symbols\", \"get_edge_detail\"]",
-      "tool_strategy": "auto",
-      "variables_json": "[{\"name\": \"projectName\", \"type\": \"string\", \"description\": \"项目名称\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"编程语言\", \"required\": true}, {\"name\": \"fileList\", \"type\": \"string\", \"description\": \"文件列表 (一行一个)\", \"required\": false}, {\"name\": \"nodeNames\", \"type\": \"string\", \"description\": \"节点名称列表\", \"required\": false}, {\"name\": \"edgeNames\", \"type\": \"string\", \"description\": \"边名称列表\", \"required\": false}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "doc_qa",
-      "name": "文档问答",
-      "mode": "chat",
-      "module_type": "knowledge_base",
-      "category": "问答",
-      "system_prompt": "你是一个知识库助手。根据用户提供的文档内容和问题，给出准确、简洁的回答。如果文档中没有相关信息，请明确说明。用中文回答。",
-      "user_prompt_template": "## 文档: {docTitle}\n\n{docContent}\n\n## 问题\n{question}",
-      "variables_json": "[{\"name\": \"docTitle\", \"type\": \"string\", \"description\": \"文档标题\", \"required\": true}, {\"name\": \"docContent\", \"type\": \"string\", \"description\": \"文档内容\", \"required\": true}, {\"name\": \"question\", \"type\": \"string\", \"description\": \"用户问题\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "doc_organize",
-      "name": "文档梳理",
-      "mode": "chat",
-      "module_type": "knowledge_base",
-      "category": "整理",
-      "system_prompt": "你是一个文档整理助手。根据用户提供的原始文档内容，提取关键信息，整理为结构化的摘要。用中文回答。",
-      "user_prompt_template": "## 原始文档\n\n{docContent}\n\n请整理该文档：1. 核心主题 2. 关键要点 (3-5 个) 3. 技术术语表 4. 建议的分类标签",
-      "variables_json": "[{\"name\": \"docContent\", \"type\": \"string\", \"description\": \"文档内容\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "doc_parse",
-      "name": "文档解析",
-      "mode": "chat",
-      "module_type": "knowledge_base",
-      "category": "解析",
-      "system_prompt": "你是一个文档解析助手。从文档中提取结构化信息，包括：关键概念、API 引用、代码示例、外部链接。用中文回答。",
-      "user_prompt_template": "## 文档\n\n{docContent}\n\n请解析并提取：1. 关键概念 2. API/SDK 引用 3. 代码示例 4. 外部引用链接",
-      "variables_json": "[{\"name\": \"docContent\", \"type\": \"string\", \"description\": \"文档内容\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "agent_chat",
-      "name": "Agent 对话",
-      "mode": "chat",
-      "module_type": "ai_assistant",
-      "category": "通用",
-      "system_prompt": "你是一个 AI 编程助手 (TopoOne AI Assistant)，集成在源码架构分析工具中。\n你的能力包括：\n1. 代码架构分析 — 分析项目结构、依赖关系、调用链路\n2. 知识库问答 — 基于项目文档回答技术问题\n3. 设计辅助 — 帮助设计 API、模块划分、重构方案\n4. 代码解释 — 解释函数/类/模块的功能和实现\n\n请用中文回答，保持专业简洁。",
-      "user_prompt_template": "{question}",
-      "variables_json": "[{\"name\": \"question\", \"type\": \"string\", \"description\": \"用户问题\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
       "id": "community_name",
       "name": "组件命名",
       "mode": "structured",
@@ -91,32 +23,6 @@
       "output_schema_json": "{\"type\": \"object\", \"properties\": {\"name\": {\"type\": \"string\", \"maxLength\": 10, \"description\": \"组件中文名称\"}, \"category\": {\"type\": \"string\", \"enum\": [\"核心逻辑\", \"数据访问\", \"接口定义\", \"配置管理\", \"测试\", \"工具类\", \"其他\"], \"description\": \"组件分类\"}, \"summary\": {\"type\": \"string\", \"maxLength\": 30, \"description\": \"一句话概述\"}}, \"required\": [\"name\", \"category\"]}",
       "output_example": "{\"name\": \"HTTP请求处理\", \"category\": \"核心逻辑\", \"summary\": \"负责处理HTTP请求的解析和响应生成\"}",
       "variables_json": "[{\"name\": \"nodeCount\", \"type\": \"integer\", \"description\": \"节点数量\", \"required\": true}, {\"name\": \"edgeCount\", \"type\": \"integer\", \"description\": \"边数量\", \"required\": true}, {\"name\": \"nodeNames\", \"type\": \"string\", \"description\": \"节点名称列表\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "symbol_summary",
-      "name": "符号摘要",
-      "mode": "structured",
-      "module_type": "project_analysis",
-      "category": "摘要",
-      "system_prompt": "你是一个代码符号摘要助手。为指定的代码符号生成结构化的摘要信息。返回 JSON 格式，严格遵守 schema。",
-      "user_prompt_template": "## 符号: {symbolName}\n## 类型: {symbolType}\n## 文件: {filePath}\n\n```{language}\n{codeSnippet}\n```",
-      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"summary\": {\"type\": \"string\", \"maxLength\": 80, \"description\": \"功能摘要（1-2句话）\"}, \"purpose\": {\"type\": \"string\", \"maxLength\": 40, \"description\": \"场景用途\"}, \"logic\": {\"type\": \"string\", \"maxLength\": 60, \"description\": \"实现逻辑关键词\"}, \"params\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"description\": \"关键参数列表\"}, \"returns\": {\"type\": \"string\", \"maxLength\": 40, \"description\": \"返回值说明\"}}, \"required\": [\"summary\", \"purpose\", \"logic\"]}",
-      "output_example": "{\"summary\": \"处理HTTP请求并将其路由到对应的处理器\", \"purpose\": \"Web请求分发\", \"logic\": \"责任链+反射调用+路径匹配\", \"params\": [\"HttpRequest request\", \"HttpResponse response\"], \"returns\": \"void\"}",
-      "variables_json": "[{\"name\": \"symbolName\", \"type\": \"string\", \"description\": \"符号名称\", \"required\": true}, {\"name\": \"symbolType\", \"type\": \"string\", \"description\": \"符号类型 (function/class/method)\", \"required\": true}, {\"name\": \"filePath\", \"type\": \"string\", \"description\": \"文件路径\", \"required\": false}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"编程语言\", \"required\": true}, {\"name\": \"codeSnippet\", \"type\": \"string\", \"description\": \"代码片段\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "code_keywords",
-      "name": "代码关键词摘要",
-      "mode": "structured",
-      "module_type": "project_analysis",
-      "category": "摘要",
-      "system_prompt": "你是一个代码关键词提取助手。为代码或文档生成结构化的关键词摘要。返回 JSON 格式，严格遵守 schema。",
-      "user_prompt_template": "## 来源: {sourceType} — {sourceName}\n\n```\n{content}\n```",
-      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"scenario\": {\"type\": \"string\", \"maxLength\": 40, \"description\": \"场景摘要\"}, \"function\": {\"type\": \"string\", \"maxLength\": 60, \"description\": \"功能摘要\"}, \"implementation\": {\"type\": \"string\", \"maxLength\": 60, \"description\": \"实现逻辑关键词\"}, \"tags\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"maxItems\": 5, \"description\": \"分类标签\"}}, \"required\": [\"scenario\", \"function\", \"implementation\"]}",
-      "output_example": "{\"scenario\": \"依赖注入容器初始化\", \"function\": \"扫描类路径，创建Bean定义，管理Bean生命周期\", \"implementation\": \"反射+注解处理+工厂模式+单例缓存\", \"tags\": [\"DI容器\", \"Spring\", \"Bean管理\"]}",
-      "variables_json": "[{\"name\": \"sourceType\", \"type\": \"string\", \"description\": \"来源类型 (code/doc)\", \"required\": true}, {\"name\": \"sourceName\", \"type\": \"string\", \"description\": \"来源名称\", \"required\": true}, {\"name\": \"content\", \"type\": \"string\", \"description\": \"内容\", \"required\": true}]"
     },
     {
       "locale": "zh-CN",
@@ -131,39 +37,6 @@
     },
     {
       "locale": "zh-CN",
-      "id": "community_architecture",
-      "name": "组件架构说明",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "community",
-      "system_prompt": "你是一个软件架构师。请根据提供的代码组件结构信息,生成结构化的架构说明文档。\n输出格式要求:\n- 使用 Markdown 标题层级组织\n- 包含: 概述、模块划分、核心流程、依赖关系、设计评价\n- 每个模块用表格列出关键节点\n- 使用 Mermaid 图表展示模块关系",
-      "user_prompt_template": "## 组件结构数据\n- 组件ID: {commId}\n- 节点数: {nodeCount}\n- 边数: {edgeCount}\n\n## 节点列表\n{nodeList}\n\n## 边关系\n{edgeList}\n\n{detailNodes}\n\n请生成结构化的架构说明文档。",
-      "variables_json": "[{\"name\": \"commId\", \"type\": \"string\", \"description\": \"组件ID\", \"required\": true}, {\"name\": \"nodeCount\", \"type\": \"integer\", \"description\": \"节点数\", \"required\": true}, {\"name\": \"edgeCount\", \"type\": \"integer\", \"description\": \"边数\", \"required\": true}, {\"name\": \"nodeList\", \"type\": \"string\", \"description\": \"节点列表\", \"required\": true}, {\"name\": \"edgeList\", \"type\": \"string\", \"description\": \"边关系列表\", \"required\": true}, {\"name\": \"detailNodes\", \"type\": \"string\", \"description\": \"详细节点信息\", \"required\": false}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "community_business",
-      "name": "业务场景适配分析",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "community",
-      "system_prompt": "你是一个业务架构分析师。请根据提供的代码组件结构,分析:\n1. 这段代码可能适配的业务场景\n2. 核心业务流程\n3. 可扩展性评估\n4. 可能的优化方向\n用中文回答,结合软件工程最佳实践。",
-      "user_prompt_template": "## 组件结构\n- 组件ID: {commId}\n- 节点数: {nodeCount}\n- 边数: {edgeCount}\n\n## 节点列表\n{nodeList}\n\n## 边关系\n{edgeList}\n\n{detailNodes}\n\n请分析这个组件适配的业务场景。",
-      "variables_json": "[{\"name\": \"commId\", \"type\": \"string\", \"description\": \"组件ID\", \"required\": true}, {\"name\": \"nodeCount\", \"type\": \"integer\", \"description\": \"节点数\", \"required\": true}, {\"name\": \"edgeCount\", \"type\": \"integer\", \"description\": \"边数\", \"required\": true}, {\"name\": \"nodeList\", \"type\": \"string\", \"description\": \"节点列表\", \"required\": true}, {\"name\": \"edgeList\", \"type\": \"string\", \"description\": \"边关系列表\", \"required\": true}, {\"name\": \"detailNodes\", \"type\": \"string\", \"description\": \"详细节点信息\", \"required\": false}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "community_pseudocode",
-      "name": "组件伪代码生成",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "community",
-      "system_prompt": "你是一个代码抽象专家。请根据提供的代码组件结构信息,生成该组件核心逻辑的伪代码。\n要求:\n- 保留核心算法流程和关键判断逻辑\n- 用中文注释说明每个步骤\n- 忽略具体语法细节,关注逻辑结构",
-      "user_prompt_template": "## 组件结构\n- 组件ID: {commId}\n- 节点数: {nodeCount}\n\n## 节点列表\n{nodeList}\n\n## 边关系\n{edgeList}\n\n{detailNodes}\n\n请生成这个组件核心逻辑的伪代码。",
-      "variables_json": "[{\"name\": \"commId\", \"type\": \"string\", \"description\": \"组件ID\", \"required\": true}, {\"name\": \"nodeCount\", \"type\": \"integer\", \"description\": \"节点数\", \"required\": true}, {\"name\": \"nodeList\", \"type\": \"string\", \"description\": \"节点列表\", \"required\": true}, {\"name\": \"edgeList\", \"type\": \"string\", \"description\": \"边关系列表\", \"required\": true}, {\"name\": \"detailNodes\", \"type\": \"string\", \"description\": \"详细节点信息\", \"required\": false}]"
-    },
-    {
-      "locale": "zh-CN",
       "id": "source_explain",
       "name": "源码功能说明",
       "mode": "chat",
@@ -175,83 +48,6 @@
     },
     {
       "locale": "zh-CN",
-      "id": "source_summary",
-      "name": "源码摘要",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "source_code",
-      "system_prompt": "你是一个代码摘要专家。请为提供的源码生成简洁的功能摘要。\n要求:\n- 不超过 200 字\n- 说明核心功能和关键接口\n- 适合用作文档索引",
-      "user_prompt_template": "## 文件: {filePath}\n\n```{language}\n{codeContent}\n```\n\n请生成这段代码的功能摘要。",
-      "variables_json": "[{\"name\": \"filePath\", \"type\": \"string\", \"description\": \"文件路径\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"编程语言\", \"required\": true}, {\"name\": \"codeContent\", \"type\": \"string\", \"description\": \"代码内容\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "source_pseudocode",
-      "name": "源码伪代码",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "source_code",
-      "system_prompt": "你是一个代码抽象专家。请将提供的源码转换为简洁的伪代码,保留核心逻辑和关键步骤。\n要求:\n- 使用中文关键字和注释\n- 保留循环、条件、函数调用等核心结构\n- 省略具体语法细节",
-      "user_prompt_template": "## 文件: {filePath}\n\n```{language}\n{codeContent}\n```\n\n请将这段代码转换为伪代码。",
-      "variables_json": "[{\"name\": \"filePath\", \"type\": \"string\", \"description\": \"文件路径\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"编程语言\", \"required\": true}, {\"name\": \"codeContent\", \"type\": \"string\", \"description\": \"代码内容\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "report_project_summary",
-      "name": "报告-项目概要",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个项目文档生成助手。请根据提供的项目信息生成项目概要。\n输出 Markdown 格式，包含:\n1. 项目名称和语言\n2. 文件数量和目录结构\n3. 主要技术栈\n4. README 摘要\n5. 依赖管理工具和库\n用中文回答。",
-      "user_prompt_template": "## 项目信息\n- 项目名称: {projectName}\n- 主要语言: {language}\n- 文件总数: {fileCount}\n- 根目录: {rootPath}\n\n## 文件分布\n{fileDistribution}\n\n## README 摘要\n{readmeContent}\n\n## 依赖信息\n{dependencySummary}\n\n## 核心文件摘要\n{fileSummaries}\n\n请生成项目概要文档。",
-      "variables_json": "[{\"name\": \"projectName\", \"type\": \"string\", \"description\": \"项目名称\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"主要编程语言\", \"required\": true}, {\"name\": \"fileCount\", \"type\": \"string\", \"description\": \"文件总数\", \"required\": true}, {\"name\": \"rootPath\", \"type\": \"string\", \"description\": \"项目根路径\", \"required\": false}, {\"name\": \"fileDistribution\", \"type\": \"string\", \"description\": \"文件分布统计\", \"required\": false}, {\"name\": \"readmeContent\", \"type\": \"string\", \"description\": \"README 摘要\", \"required\": false}, {\"name\": \"dependencySummary\", \"type\": \"string\", \"description\": \"依赖管理信息\", \"required\": false}, {\"name\": \"fileSummaries\", \"type\": \"string\", \"description\": \"核心文件摘要\", \"required\": false}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "report_arch_decomposition",
-      "name": "报告-架构分解",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个软件架构分析专家。请根据组件分析数据分解项目架构层次。\n输出 Markdown 格式，包含:\n1. 架构层次划分\n2. 各层次的核心职责\n3. Mermaid graph TD 架构图\n用中文回答。Mermaid 代码放在 ```mermaid 代码块中。",
-      "user_prompt_template": "## 组件分组数据\n{communitySummary}\n\n请根据以上组件分析数据:\n1. 识别项目的主要架构层次（如：核心逻辑层、数据访问层、接口层等）\n2. 将组件分组映射到各层次\n3. 生成 Mermaid graph TD 架构图\n4. 说明各层次之间的依赖关系",
-      "variables_json": "[{\"name\": \"communitySummary\", \"type\": \"string\", \"description\": \"组件分组摘要\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "report_core_modules",
-      "name": "报告-核心模块说明",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个代码分析专家。请根据组件节点和调用关系,详细说明核心模块的功能和职责。\n输出 Markdown 格式，每个模块包含:\n1. 模块名称和分类\n2. 核心功能说明\n3. 关键类/函数列表（表格形式）\n4. 内部调用关系\n用中文回答。",
-      "user_prompt_template": "## 核心组件分组\n{topCommunities}\n\n请详细分析以上 {count} 个组件的功能:\n1. 每个组件的业务/技术职责\n2. 关键符号（类、函数）及其作用\n3. 组件内部的高频调用关系模式",
-      "variables_json": "[{\"name\": \"topCommunities\", \"type\": \"string\", \"description\": \"核心组件分组详情\", \"required\": true}, {\"name\": \"count\", \"type\": \"string\", \"description\": \"组件数量\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "report_dependency_analysis",
-      "name": "报告-依赖与调用分析",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个依赖分析专家。请根据跨组件调用和依赖数据,分析模块间的耦合关系。\n输出 Markdown 格式，包含:\n1. 跨组件调用统计\n2. 核心依赖链路\n3. 循环依赖检测（如有）\n4. 架构质量评估\n用中文回答。",
-      "user_prompt_template": "## 跨组件调用/依赖数据\n{crossCommunityEdges}\n\n请分析:\n1. 哪些组件之间存在最多的交互（高耦合）\n2. 是否存在单向依赖违反或循环依赖\n3. 核心数据流向\n4. 给出架构改进建议",
-      "variables_json": "[{\"name\": \"crossCommunityEdges\", \"type\": \"string\", \"description\": \"跨组件边数据\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "report_final_assembly",
-      "name": "报告-最终整合",
-      "mode": "chat",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个技术文档编辑专家。请将多个分析片段整合为一份完整、连贯的架构分析报告。\n输出为标准的 Markdown 文档，要求:\n1. 保持各部分的逻辑衔接\n2. 去除重复内容\n3. 统一术语和风格\n4. 生成的 Mermaid/PlantUML 代码块保留原始格式\n5. 添加目录和章节编号",
-      "user_prompt_template": "请将以下分析内容整合为一份完整的架构分析报告：\n\n---\n## 步骤1: 项目概要\n{step1}\n\n---\n## 步骤2: 架构分解\n{step2}\n\n---\n## 步骤3: 核心模块说明\n{step3}\n\n---\n## 步骤4: 依赖与调用分析\n{step4}\n\n---\n请整合以上内容为一份完整的 Markdown 报告，添加文档标题、目录和页码标记。",
-      "variables_json": "[{\"name\": \"step1\", \"type\": \"string\", \"description\": \"项目概要步骤输出\", \"required\": true}, {\"name\": \"step2\", \"type\": \"string\", \"description\": \"架构分解步骤输出\", \"required\": true}, {\"name\": \"step3\", \"type\": \"string\", \"description\": \"核心模块说明步骤输出\", \"required\": true}, {\"name\": \"step4\", \"type\": \"string\", \"description\": \"依赖分析步骤输出\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
       "id": "report_overall_architecture",
       "name": "报告-整体架构分析",
       "mode": "chat",
@@ -260,19 +56,6 @@
       "system_prompt": "你是一个软件架构分析专家。请根据提供的项目信息和 L0 组件数据，生成一份完整的架构分析文档。\n输出 Markdown 格式，要求：\n1. 按社区名称分模块编写文档，**每个模块标题标注社区 ID**（如 `## 模块名称 (community: xxx)`）\n2. 每个模块包含：核心职责、关键文件/函数列表（表格）、主要逻辑说明\n3. 生成**依赖关系图**：用 Mermaid graph LR 展示所有 L0 组件之间的 INCLUDE 依赖，节点 label 使用社区名称\n4. 生成**调用关系图**：用 Mermaid graph LR 展示所有 L0 组件之间的 CALL 调用，节点 label 使用社区名称\n5. 依赖图和调用图分开为两个独立的 ```mermaid 代码块\n6. 文档开头添加目录和项目概要\n\n**重要：图中的节点必须使用「社区命名映射」中对应的可读名称作为 label，禁止使用原始社区 ID。**\n例如：如果映射中有 `comm-xxx → 路由处理模块`，则图中应写 `路由处理模块[路由处理模块]`，而非 `comm-xxx[comm-xxx]`。\n\n用中文回答。Mermaid 代码放在 ```mermaid 代码块中。",
       "user_prompt_template": "## 项目概要\n- 项目名称: {projectName}\n- 主要语言: {language}\n- 文件总数: {fileCount}\n- 项目根路径: {rootPath}\n\n### README 摘要\n{readmeContent}\n\n### 依赖信息\n{dependencySummary}\n\n## 社区命名映射\n以下为社区 ID 对应的可读名称（AI 分析命名）。**图中节点 label 必须使用这些名称，而不是原始社区 ID**：\n{communityNameMap}\n\n## L0 调用分析数据 (CALL)\n以下为 L0 层级的所有组件（社区）的调用关系数据，名称已应用命名映射：\n{callCommunityDetail}\n\n## L0 依赖分析数据 (INCLUDE)\n以下为 L0 层级的所有组件（社区）的依赖关系数据，名称已应用命名映射：\n{includeCommunityDetail}\n\n{userAdditionalPrompt}\n\n请生成一份完整的架构分析文档。",
       "variables_json": "[{\"name\": \"projectName\", \"type\": \"string\", \"description\": \"项目名称\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"主要编程语言\", \"required\": true}, {\"name\": \"fileCount\", \"type\": \"string\", \"description\": \"文件总数\", \"required\": true}, {\"name\": \"rootPath\", \"type\": \"string\", \"description\": \"项目根路径\", \"required\": false}, {\"name\": \"readmeContent\", \"type\": \"string\", \"description\": \"README 摘要\", \"required\": false}, {\"name\": \"dependencySummary\", \"type\": \"string\", \"description\": \"依赖信息\", \"required\": false}, {\"name\": \"communityNameMap\", \"type\": \"string\", \"description\": \"社区 ID→名称映射\", \"required\": true}, {\"name\": \"callCommunityDetail\", \"type\": \"string\", \"description\": \"L0 调用分析社区详情\", \"required\": true}, {\"name\": \"includeCommunityDetail\", \"type\": \"string\", \"description\": \"L0 依赖分析社区详情\", \"required\": true}, {\"name\": \"userAdditionalPrompt\", \"type\": \"string\", \"description\": \"用户补充提示词\", \"required\": false}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "file_summarize",
-      "name": "文件摘要生成",
-      "mode": "structured",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个代码摘要专家。为提供的源码文件生成不超过 100 字的功能摘要。\n返回 JSON 格式，包含: summary, keywords (最多 5 个标签)。\n用中文回答。",
-      "user_prompt_template": "## 文件: {filePath}\n## 语言: {language}\n\n```{language}\n{codeContent}\n```\n\n请生成功能摘要（不超过 100 字）。",
-      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"summary\": {\"type\": \"string\", \"maxLength\": 100, \"description\": \"功能摘要（不超过100字）\"}, \"keywords\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}, \"maxItems\": 5, \"description\": \"关键标签\"}}, \"required\": [\"summary\"]}",
-      "output_example": "{\"summary\": \"处理HTTP请求的路由分发，支持路径参数匹配和中间件链\", \"keywords\": [\"路由\", \"HTTP\", \"中间件\"]}",
-      "variables_json": "[{\"name\": \"filePath\", \"type\": \"string\", \"description\": \"文件路径\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"编程语言\", \"required\": true}, {\"name\": \"codeContent\", \"type\": \"string\", \"description\": \"源代码\", \"required\": true}]"
     },
     {
       "locale": "zh-CN",
@@ -373,41 +156,6 @@
       "variables_json": "[{\"name\": \"existingCode\", \"type\": \"string\", \"description\": \"Current PlantUML code\", \"required\": true}, {\"name\": \"userInstruction\", \"type\": \"string\", \"description\": \"User request or error info\", \"required\": true}]"
     },
     {
-      "locale": "en-US",
-      "id": "agent_chat",
-      "name": "Agent Chat",
-      "mode": "chat",
-      "module_type": "ai_assistant",
-      "category": "general",
-      "system_prompt": "You are an AI coding assistant (TopoOne AI Assistant), integrated in a source code architecture analysis tool.\nYour capabilities include:\n1. Code Architecture Analysis — Analyze project structure, dependencies, call chains\n2. Knowledge Base Q&A — Answer technical questions based on project documentation\n3. Design Assistance — Help design APIs, module partitioning, refactoring plans\n4. Code Explanation — Explain the functionality and implementation of functions/classes/modules\n\nBe professional and concise.",
-      "user_prompt_template": "{question}",
-      "variables_json": "[{\"name\": \"question\", \"type\": \"string\", \"description\": \"User question\", \"required\": true}]"
-    },
-    {
-      "locale": "zh-CN",
-      "id": "regenerate_diagram",
-      "name": "图表重新生成",
-      "mode": "structured",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "你是一个代码图表修正专家。请根据用户提供的需求或报错信息，修正或重构给定的图表代码。\n只返回 JSON 格式，包含 code 字段（修正后的图表代码），不要添加其他内容。\n\n根据图表类型使用对应的语法：\n\n当图表类型是 mermaid 时：\n- 使用合法的 Mermaid 语法 (graph LR / flowchart / graph TD)\n- 节点用 `A[标签]` 或 `A(标签)` 格式\n- 连接用 `-->`（箭头）或 `---`（无箭头）\n- 子图用 `subgraph 标题\\n  内容\\nend`\n\n当图表类型是 plantuml 时，必须使用合法的 PlantUML 组件图语法：\n- 每个组件/模块单独一行定义：`component \"名称\" as alias`\n- 使用 package 或 rectangle 包含子元素，格式：`package \"名称\" {\\n  component \"子1\" as a1\\n  component \"子2\" as a2\\n}`\n- 依赖用箭头：`alias1 --> alias2` 或 `alias1 ..> alias2`\n- 不允许在同一行写多个定义\n- 所有引用的别名必须先定义\n\n【PlantUML 错误示例（禁止使用）】\n```\ncomponent \"X\" as x { module a.ts, b.ts }  ← 花括号内不能写逗号分隔文本\nmodule \"Y\" { module c.ts } component \"Z\"  ← 不能同行放多个定义\n```\n\n【PlantUML 正确示例】\n```\n@startuml\ncomponent \"配置管理\" as config\ncomponent \"核心状态\" as core\ncore --> config\n@enduml\n```\n\n```\n@startuml\npackage \"配置管理\" {\n  component \"状态文件\" as stateFile\n  component \"日志文件\" as logFile\n}\npackage \"核心\" {\n  component \"运行时\" as runtime\n}\nruntime --> stateFile\n@enduml\n```",
-      "user_prompt_template": "## 现有图表代码\n```\n{existing_diagram}\n```\n\n## 图表类型\n{diagram_type}\n\n## 用户需求/报错信息\n{user_prompt}\n\n请根据上述信息修正图表代码。返回 JSON 格式，包含 code 字段（修正后的图表代码）。",
-      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\", \"description\": \"修正后的图表代码\"}}, \"required\": [\"code\"]}",
-      "variables_json": "[{\"name\": \"existing_diagram\", \"type\": \"string\", \"description\": \"当前图表代码\", \"required\": true}, {\"name\": \"diagram_type\", \"type\": \"string\", \"description\": \"图表类型 (mermaid/plantuml)\", \"required\": true}, {\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"用户需求或报错信息\", \"required\": true}]"
-    },
-    {
-      "locale": "en-US",
-      "id": "regenerate_diagram",
-      "name": "Regenerate Diagram",
-      "mode": "structured",
-      "module_type": "project_analysis",
-      "category": "report_pipeline",
-      "system_prompt": "You are a code diagram correction expert. Based on the user's requirements or error information, correct or refactor the given diagram code.\nReturn only JSON format with a code field (the corrected diagram code). Do not add any other content.\n\nUse the appropriate syntax based on the diagram type:\n\nWhen diagram type is mermaid:\n- Use valid Mermaid syntax (graph LR / flowchart / graph TD)\n- Nodes use `A[label]` or `A(label)` format\n- Connections use `-->` (arrow) or `---` (no arrow)\n- Subgraphs use `subgraph title\\n  content\\nend`\n\nWhen diagram type is plantuml, you MUST use only valid PlantUML component diagram syntax:\n- Define each component/module on its own line: `component \"Name\" as alias`\n- Use `package` or `rectangle` to contain sub-elements: `package \"Name\" {\\n  component \"Sub1\" as a1\\n  component \"Sub2\" as a2\\n}`\n- Dependencies use arrows: `alias1 --> alias2` or `alias1 ..> alias2`\n- NEVER put multiple definitions on one line\n- All referenced aliases must be defined first\n\n【WRONG (never use for plantuml)】\n```\ncomponent \"X\" as x { module a.ts, b.ts }  ← curly braces cannot hold comma-separated text\nmodule \"Y\" { module c.ts } component \"Z\"  ← multiple definitions on one line\n```\n\n【CORRECT plantuml example】\n```\n@startuml\ncomponent \"Config Manager\" as config\ncomponent \"Core State\" as core\ncore --> config\n@enduml\n```\n\n```\n@startuml\npackage \"Config Manager\" {\n  component \"State File\" as stateFile\n  component \"Log File\" as logFile\n}\npackage \"Core\" {\n  component \"Runtime\" as runtime\n}\nruntime --> stateFile\n@enduml\n```",
-      "user_prompt_template": "## Existing Diagram Code\n```\n{existing_diagram}\n```\n\n## Diagram Type\n{diagram_type}\n\n## User Request / Error Info\n{user_prompt}\n\nCorrect the diagram code based on the above information. Return JSON with a code field (corrected diagram code).",
-      "output_schema_json": "{\"type\": \"object\", \"properties\": {\"code\": {\"type\": \"string\", \"description\": \"Corrected diagram code\"}}, \"required\": [\"code\"]}",
-      "variables_json": "[{\"name\": \"existing_diagram\", \"type\": \"string\", \"description\": \"Current diagram code\", \"required\": true}, {\"name\": \"diagram_type\", \"type\": \"string\", \"description\": \"Diagram type (mermaid/plantuml)\", \"required\": true}, {\"name\": \"user_prompt\", \"type\": \"string\", \"description\": \"User request or error info\", \"required\": true}]"
-    },
-    {
       "locale": "zh-CN",
       "id": "regenerate_community_doc",
       "name": "组件文档重新生成",
@@ -454,6 +202,50 @@
       "user_prompt_template": "## Project Summary\n- Project Name: {projectName}\n- Main Language: {language}\n- Total Files: {fileCount}\n- Root Path: {rootPath}\n\n### README Summary\n{readmeContent}\n\n### Dependency Info\n{dependencySummary}\n\n## Community Name Mapping\nThe following are readable names corresponding to community IDs (AI analysis naming). **Diagram node labels MUST use these names, not raw community IDs**:\n{communityNameMap}\n\n## L0 Call Analysis Data (CALL)\nThe following is the call relationship data of all components (communities) at the L0 level, with names already applied:\n{callCommunityDetail}\n\n## L0 Dependency Analysis Data (INCLUDE)\nThe following is the dependency relationship data of all components (communities) at the L0 level, with names already applied:\n{includeCommunityDetail}\n\n## User Additional Requirements\n{userAdditionalPrompt}\n\nRegenerate the overall architecture analysis document based on the above project data and user's additional requirements. Return JSON with a content field (Markdown format architecture document content).",
       "output_schema_json": "{\"type\": \"object\", \"properties\": {\"content\": {\"type\": \"string\", \"description\": \"Architecture analysis document (Markdown format)\"}}, \"required\": [\"content\"]}",
       "variables_json": "[{\"name\": \"projectName\", \"type\": \"string\", \"description\": \"Project name\", \"required\": true}, {\"name\": \"language\", \"type\": \"string\", \"description\": \"Main programming language\", \"required\": true}, {\"name\": \"fileCount\", \"type\": \"string\", \"description\": \"Total file count\", \"required\": true}, {\"name\": \"rootPath\", \"type\": \"string\", \"description\": \"Project root path\", \"required\": false}, {\"name\": \"readmeContent\", \"type\": \"string\", \"description\": \"README summary\", \"required\": false}, {\"name\": \"dependencySummary\", \"type\": \"string\", \"description\": \"Dependency info\", \"required\": false}, {\"name\": \"communityNameMap\", \"type\": \"string\", \"description\": \"Community ID to name mapping\", \"required\": true}, {\"name\": \"callCommunityDetail\", \"type\": \"string\", \"description\": \"L0 call community detail\", \"required\": true}, {\"name\": \"includeCommunityDetail\", \"type\": \"string\", \"description\": \"L0 include community detail\", \"required\": true}, {\"name\": \"userAdditionalPrompt\", \"type\": \"string\", \"description\": \"User additional prompt\", \"required\": false}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "agent_analyze_community",
+      "name": "Agent-社区分析",
+      "mode": "chat",
+      "module_type": "project_analysis",
+      "category": "agent",
+      "system_prompt": "你是架构分析专家。分析一个代码社区模块，输出名称和功能摘要。中文输出，100-300字。只输出文本，不要Markdown格式标记。",
+      "user_prompt_template": "社区ID: {comm_id}\n社区标签: {comm_label}\n上下文: {context}",
+      "variables_json": "[{\"name\": \"comm_id\", \"type\": \"string\", \"description\": \"社区ID\", \"required\": true}, {\"name\": \"comm_label\", \"type\": \"string\", \"description\": \"社区标签\", \"required\": true}, {\"name\": \"context\", \"type\": \"string\", \"description\": \"社区上下文数据\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "agent_generate_overview",
+      "name": "Agent-架构总览生成",
+      "mode": "chat",
+      "module_type": "project_analysis",
+      "category": "agent",
+      "system_prompt": "你是资深架构师。基于社区分析结果和项目背景，生成整体架构概览（中文，800-1500 字）。Markdown 格式，包含: 1) 项目架构总览 2) 各层职责与依赖 3) 核心设计模式 4) 架构质量评估 5) 改进建议。社区分析结果已包含每社区的名称和摘要，请直接引用。",
+      "user_prompt_template": "项目: {project_name}\n{project_background}\n社区数量: {community_count}\n\n社区统计:\n{stats_text}\n\n社区分析结果:\n{community_summaries}",
+      "variables_json": "[{\"name\": \"project_name\", \"type\": \"string\", \"description\": \"项目名称\", \"required\": true}, {\"name\": \"project_background\", \"type\": \"string\", \"description\": \"项目背景（含README等上下文）\", \"required\": false}, {\"name\": \"community_count\", \"type\": \"string\", \"description\": \"社区数量\", \"required\": true}, {\"name\": \"stats_text\", \"type\": \"string\", \"description\": \"社区统计文本\", \"required\": true}, {\"name\": \"community_summaries\", \"type\": \"string\", \"description\": \"各社区分析结果\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "agent_summarize_changes",
+      "name": "Agent-变更摘要生成",
+      "mode": "chat",
+      "module_type": "project_analysis",
+      "category": "agent",
+      "system_prompt": "你是架构变更分析专家。根据 diff 数据生成简洁的变更摘要。用中文，控制在 300 字以内。",
+      "user_prompt_template": "从 {from_version} 到 {to_version} 的架构变化:\n新增: {added_count} 个社区\n删除: {removed_count} 个社区\n变更: {changed_count} 个社区\n风险: {risk}\n详情: {diff_detail}",
+      "variables_json": "[{\"name\": \"from_version\", \"type\": \"string\", \"description\": \"起始版本\", \"required\": true}, {\"name\": \"to_version\", \"type\": \"string\", \"description\": \"目标版本\", \"required\": true}, {\"name\": \"added_count\", \"type\": \"string\", \"description\": \"新增社区数\", \"required\": true}, {\"name\": \"removed_count\", \"type\": \"string\", \"description\": \"删除社区数\", \"required\": true}, {\"name\": \"changed_count\", \"type\": \"string\", \"description\": \"变更社区数\", \"required\": true}, {\"name\": \"risk\", \"type\": \"string\", \"description\": \"风险等级\", \"required\": true}, {\"name\": \"diff_detail\", \"type\": \"string\", \"description\": \"Diff详情\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "agent_explain_community",
+      "name": "Agent-社区解释",
+      "mode": "chat",
+      "module_type": "project_analysis",
+      "category": "agent",
+      "system_prompt": "你是一个专业的代码架构分析助手。用户会提供一个代码社区（由 Louvain 算法生成的代码模块分组）。请解释这个社区的可能含义。用中文回答。",
+      "user_prompt_template": "## 社区信息\n- 社区 ID: {comm_id}\n- 节点数: {node_count}\n- 边数: {edge_count}\n- 质量分数: {quality_score}\n{description}\n\n请解释这个社区在代码架构中可能代表的模块或功能。",
+      "variables_json": "[{\"name\": \"comm_id\", \"type\": \"string\", \"description\": \"社区ID\", \"required\": true}, {\"name\": \"node_count\", \"type\": \"string\", \"description\": \"节点数\", \"required\": true}, {\"name\": \"edge_count\", \"type\": \"string\", \"description\": \"边数\", \"required\": true}, {\"name\": \"quality_score\", \"type\": \"string\", \"description\": \"质量分数\", \"required\": true}, {\"name\": \"description\", \"type\": \"string\", \"description\": \"描述文本（可选）\", \"required\": false}]"
     }
   ]
 }
