@@ -12,7 +12,6 @@ import {
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps<{
-  style: 'd3force' | 'dagre'
   canRollUp: boolean
   externalMode?: boolean
   externalViewMode?: 'force' | 'table' | 'heatmap'
@@ -21,7 +20,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:style': [style: 'd3force' | 'dagre']
   'roll-up': []
   'fullscreen': []
   'update:externalViewMode': [mode: 'force' | 'table' | 'heatmap']

@@ -27,19 +27,23 @@ export interface GraphEdge {
 const props = defineProps<{
   nodes: GraphNode[]
   edges: GraphEdge[]
-  style: 'dagre' | 'd3force'
+  style: 'dagre' | 'force'
   highlightedIds?: Set<string>
   hiddenIds?: Set<string>
   resetTrigger?: number
   recenterTrigger?: number
   lockMode?: 'linked' | 'locked'
   repulsion?: number
+  zoomLevel?: number
+  fontSize?: number
+  fullscreen?: boolean
 }>()
 
 const emit = defineEmits<{
   'node-dblclick': [nodeId: string]
   'node-context-menu': [nodeId: string]
   'node-drag-end': [nodeId: string, x: number, y: number]
+  'zoom-changed': [level: number]
 }>()
 
 const container = ref<HTMLDivElement>()
@@ -47,7 +51,9 @@ const tooltip = ref<HTMLDivElement>()
 let cy: cytoscape.Core | null = null
 
 function getNodeRadius(n: GraphNode): number {
-  return Math.round(Math.max(18, Math.min(40, (n.nodeCount || 5) * 1.5 + 12)))
+  const countRadius = Math.sqrt(n.nodeCount || 5) * 3 + 14
+  const textRadius = Math.min(n.label.length * 2 + 14, 38)
+  return Math.round(Math.max(textRadius, Math.min(40, countRadius)))
 }
 
 function nodeColor(n: GraphNode): string {
@@ -104,6 +110,7 @@ function buildCytoscape() {
       },
     }))
 
+  const fs = props.fontSize || 10
   const styles: cytoscape.Stylesheet[] = [
     {
       selector: 'node',
@@ -117,14 +124,14 @@ function buildCytoscape() {
         'shape': 'ellipse',
         'width': (el: any) => el.data('_radius') * 2 + 12,
         'height': (el: any) => el.data('_radius') * 2 + 12,
-        'font-size': '10px',
+        'font-size': `${fs}px`,
         'color': '#e5e7eb',
         'label': 'data(label)',
         'text-valign': 'center',
         'text-halign': 'center',
         'text-wrap': 'ellipsis',
-        'text-max-width': '120px',
-        'min-zoomed-font-size': 8,
+        'text-max-width': `${fs * 12}px`,
+        'min-zoomed-font-size': Math.max(4, fs * 0.5),
       },
     },
     {
@@ -248,6 +255,8 @@ function buildCytoscape() {
       if (n.degree(false) === 0 && !n.data('_isMerged')) isoNodes.push(n)
     })
 
+    scheduleOffScreenCheck()
+
     if (isoNodes.length === 0) return
 
     const cols = Math.min(isoNodes.length, 6)
@@ -270,10 +279,31 @@ function buildCytoscape() {
   // run layout after all event handlers registered
   const layout = cy.layout(
     props.style === 'dagre'
-      ? { name: 'dagre', rankDir: 'LR', nodeSep: 80, rankSep: 120, edgeSep: 30, fit: true, padding: 40 }
-      : { name: 'cose', idealEdgeLength: 200, nodeRepulsion: props.repulsion || 15000, gravity: 1.5, fit: true, padding: 40, animate: true, animationDuration: 1500, numIter: 4000 }
+      ? { name: 'dagre', rankDir: 'LR', nodeSep: 40, rankSep: 60, edgeSep: 20, fit: false }
+      : { name: 'cose', idealEdgeLength: 200, nodeRepulsion: props.repulsion || 15000, nodeOverlap: 40, gravity: 1.0, fit: false, animate: true, animationDuration: 1500, numIter: 4000 }
   )
-  layout.run()
+
+  if (props.style === 'dagre') {
+    layout.run()
+    nextTick(() => {
+      if (!cy) return
+      cy.zoom(1.0)
+      centerOnConnected()
+    })
+  } else {
+    cy.one('layoutstop', () => {
+      if (!cy) return
+      cy.zoom(1.0)
+      centerOnConnected()
+    })
+    layout.run()
+  }
+
+  cy.on('zoom', () => {
+    emit('zoom-changed', cy?.zoom() ?? 1)
+  })
+
+  cy.on('viewport', () => { scheduleOffScreenCheck() })
 
   cy.on('mouseover', 'node', (evt) => {
     const node = evt.target
@@ -327,36 +357,139 @@ function destroyCy() {
   try { inst.destroy() } catch (_) {}
 }
 
+function centerOnConnected() {
+  if (!cy) return
+  const connected = cy.nodes().filter((n: any) => n.degree(false) > 0 && !n.data('_isMerged'))
+  if (connected.empty()) { cy.center(); return }
+  cy.center(connected)
+}
+
+let repulsionTimer: ReturnType<typeof setTimeout> | null = null
+
 onMounted(() => { nextTick(buildCytoscape) })
-onUnmounted(destroyCy)
+onUnmounted(() => { if (repulsionTimer) clearTimeout(repulsionTimer); if (offScreenTimer) clearTimeout(offScreenTimer); destroyCy() })
 
 watch(() => props.resetTrigger, () => { destroyCy(); nextTick(buildCytoscape) })
 watch(() => [props.nodes, props.edges, props.style, props.hiddenIds], () => { destroyCy(); nextTick(buildCytoscape) }, { deep: false })
 
 watch(() => props.repulsion, (v) => {
   if (!cy || props.style === 'dagre') return
-  try {
-    const layout = cy.layout({
-      name: 'cose', idealEdgeLength: 200, nodeRepulsion: v || 15000,
-      gravity: 1.5, fit: true, padding: 40, animate: true,
-      animationDuration: 800, numIter: 2000,
-    })
-    layout.run()
-  } catch (_) {}
+  if (repulsionTimer) clearTimeout(repulsionTimer)
+  repulsionTimer = setTimeout(() => {
+    try {
+      const layout = cy!.layout({
+        name: 'cose', idealEdgeLength: 200, nodeRepulsion: v || 15000,
+        nodeOverlap: 40, gravity: 1.0, fit: false, animate: true,
+        animationDuration: 1500, numIter: 4000,
+      })
+      layout.run()
+    } catch (_) {}
+  }, 200)
 })
 
 watch(() => props.recenterTrigger, () => {
   if (!cy) return
   cy.resize()
-  cy.fit(undefined, 30)
-  cy.center()
+  centerOnConnected()
 })
+
+watch(() => props.zoomLevel, (v) => {
+  if (!cy || v == null) return
+  if (Math.abs(cy.zoom() - v) < 0.01) return
+  cy.zoom({ level: v, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+})
+
+watch(() => props.fontSize, (v) => {
+  if (!cy || v == null) return
+  cy.style()
+    .selector('node')
+    .style({
+      'font-size': `${v}px`,
+      'text-max-width': `${v * 12}px`,
+      'min-zoomed-font-size': Math.max(4, v * 0.5),
+    })
+    .update()
+})
+
+const offScreenDirs = ref(new Set<string>())
+const DIRS = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'] as const
+
+function checkOffScreen() {
+  if (!cy) return
+  const ext = cy.extent()
+  const vpW = ext.x2 - ext.x1
+  const vpH = ext.y2 - ext.y1
+  const pad = Math.max(vpW, vpH) * 0.05
+  const bx1 = ext.x1 + pad
+  const by1 = ext.y1 + pad
+  const bx2 = ext.x2 - pad
+  const by2 = ext.y2 - pad
+  const vpCx = (ext.x1 + ext.x2) / 2
+  const vpCy = (ext.y1 + ext.y2) / 2
+
+  const dirSet = new Set<string>()
+  cy.nodes().forEach((n: any) => {
+    if (n.data('_isMerged') || n.data('_hidden')) return
+    const p = n.position()
+    if (p.x >= bx1 && p.x <= bx2 && p.y >= by1 && p.y <= by2) return
+    const angle = Math.atan2(p.y - vpCy, p.x - vpCx)
+    const deg = ((angle * 180 / Math.PI) + 360) % 360
+    const octant = Math.round(deg / 45) % 8
+    dirSet.add(DIRS[octant])
+  })
+  offScreenDirs.value = dirSet
+}
+
+function offScreenTitle(dir: string): string {
+  const map: Record<string, string> = {
+    N: '上方有节点', NE: '右上方有节点', E: '右侧有节点', SE: '右下方有节点',
+    S: '下方有节点', SW: '左下方有节点', W: '左侧有节点', NW: '左上方有节点',
+  }
+  return map[dir] || ''
+}
+
+function panDir(dir: string) {
+  if (!cy) return
+  const w = cy.width() * 0.25
+  const h = cy.height() * 0.25
+  const offsets: Record<string, { x: number; y: number }> = {
+    E:  { x: -w, y: 0 },
+    SE: { x: -w, y: -h },
+    S:  { x: 0, y: -h },
+    SW: { x: w, y: -h },
+    W:  { x: w, y: 0 },
+    NW: { x: w, y: h },
+    N:  { x: 0, y: h },
+    NE: { x: -w, y: h },
+  }
+  const off = offsets[dir]
+  if (off) cy.panBy(off)
+}
+
+watch(offScreenDirs, () => {})
+
+let offScreenTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleOffScreenCheck() {
+  if (offScreenTimer) clearTimeout(offScreenTimer)
+  offScreenTimer = setTimeout(checkOffScreen, 100)
+}
 </script>
 
 <template>
   <div class="cytoscape-graph">
     <div ref="container" class="cg-container" />
     <div ref="tooltip" class="cg-tooltip" />
+    <div
+      v-for="d in DIRS"
+      :key="d"
+      v-show="offScreenDirs.has(d)"
+      :class="['cg-offscreen', `cg-offscreen-${d.toLowerCase()}`]"
+      :style="props.fullscreen && ['se','s','sw'].includes(d.toLowerCase()) ? { bottom: '40px' } : undefined"
+      :title="offScreenTitle(d)"
+      @click.stop="panDir(d)"
+    >
+      <span class="cg-offscreen-arrow" />
+    </div>
   </div>
 </template>
 
@@ -393,4 +526,34 @@ watch(() => props.recenterTrigger, () => {
   font-size: 0.6rem; color: #a5b4fc;
   margin-top: 0.2rem;
 }
+
+.cg-offscreen {
+  position: absolute; z-index: 210;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.cg-offscreen-arrow {
+  display: block;
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 10px solid rgba(124, 58, 237, 0.7);
+  filter: drop-shadow(0 0 3px rgba(124, 58, 237, 0.3));
+}
+.cg-offscreen-n  { top: 6px; left: 50%; transform: translateX(-50%); }
+.cg-offscreen-n  .cg-offscreen-arrow { transform: rotate(0deg); }
+.cg-offscreen-ne { top: 6px; right: 6px; }
+.cg-offscreen-ne .cg-offscreen-arrow { transform: rotate(45deg); }
+.cg-offscreen-e  { top: 50%; right: 6px; transform: translateY(-50%); }
+.cg-offscreen-e  .cg-offscreen-arrow { transform: rotate(90deg); }
+.cg-offscreen-se { bottom: 6px; right: 6px; }
+.cg-offscreen-se .cg-offscreen-arrow { transform: rotate(135deg); }
+.cg-offscreen-s  { bottom: 6px; left: 50%; transform: translateX(-50%); }
+.cg-offscreen-s  .cg-offscreen-arrow { transform: rotate(180deg); }
+.cg-offscreen-sw { bottom: 6px; left: 6px; }
+.cg-offscreen-sw .cg-offscreen-arrow { transform: rotate(225deg); }
+.cg-offscreen-w  { top: 50%; left: 6px; transform: translateY(-50%); }
+.cg-offscreen-w  .cg-offscreen-arrow { transform: rotate(270deg); }
+.cg-offscreen-nw { top: 6px; left: 6px; }
+.cg-offscreen-nw .cg-offscreen-arrow { transform: rotate(315deg); }
 </style>

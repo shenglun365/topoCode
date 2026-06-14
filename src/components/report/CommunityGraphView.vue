@@ -7,6 +7,7 @@ import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
 import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
 import { ipc } from '@/services/ipc'
+import { LinkSlashIcon, LockClosedIcon } from '@heroicons/vue/24/outline'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
 import GraphCanvas from './GraphCanvas.vue'
@@ -57,7 +58,10 @@ const { getNodePosition, setNodePosition } = useGraphPosition(
 )
 
 /* ---- view mode state ---- */
-const graphStyle = ref<'d3force' | 'dagre'>('dagre')
+
+const fontSize = ref(10)
+const zoomLevel = ref(1)
+
 const externalViewMode = ref<'force' | 'table' | 'heatmap'>('force')
 const internalViewMode = ref<'force' | 'dagre' | 'table' | 'heatmap'>('dagre')
 const resetTrigger = ref(0)
@@ -140,7 +144,10 @@ const drilling = ref(false)
 
 /* ---- force layout controls ---- */
 const forceLockMode = ref<'linked' | 'locked'>('linked')
-const forceRepulsion = ref(15000)
+const forceRepulsionSlider = ref(50)
+const forceRepulsion = computed(() =>
+  Math.round(Math.exp(forceRepulsionSlider.value / 28) * 1500)
+)
 
 /* ---- filter persistence ---- */
 const FILTER_STORAGE_KEY = computed(() => `graph-filter-${props.projectId}-${props.taskId}`)
@@ -640,6 +647,7 @@ function handleBreadcrumbClick(index: number) {
 function handleResetView() {
   hiddenNodeIds.value = new Set()
   saveHiddenIds()
+  zoomLevel.value = 1
   resetTrigger.value++
 }
 
@@ -780,7 +788,6 @@ watch(isFullscreen, () => {
         >
       </div>
       <GraphToolbar
-        v-model:style="graphStyle"
         v-model:external-view-mode="externalViewMode"
         v-model:internal-view-mode="internalViewMode"
         :can-roll-up="drillPath.length > 1"
@@ -808,15 +815,44 @@ watch(isFullscreen, () => {
 
     <!-- 力导向图控制条 -->
     <div
-      v-if="(isExternalTab && externalViewMode === 'force') || externalViewMode === 'force' || internalViewMode === 'force'"
+      v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && (internalViewMode === 'force' || internalViewMode === 'dagre'))"
       class="cgv-force-bar"
     >
       <label class="cgv-force-label">
-        <input type="range" :min="5000" :max="30000" :step="500" :value="forceRepulsion" @input="forceRepulsion = Number(($event.target as HTMLInputElement).value)" class="cgv-force-slider"/>
+        <span class="cgv-force-val">字号: {{ fontSize }}px</span>
+        <input
+          type="range"
+          min="6"
+          max="18"
+          step="0.5"
+          :value="fontSize"
+          @input="fontSize = parseFloat(($event.target as HTMLInputElement).value)"
+          class="cgv-force-slider"
+        >
+      </label>
+      <label class="cgv-force-label">
+        <span class="cgv-force-val">缩放: {{ Math.round(zoomLevel * 100) }}%</span>
+        <input
+          type="range"
+          min="0.2"
+          max="3.0"
+          step="0.05"
+          :value="zoomLevel"
+          @input="zoomLevel = parseFloat(($event.target as HTMLInputElement).value)"
+          class="cgv-force-slider"
+        >
+      </label>
+      <label
+        v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && internalViewMode === 'force')"
+        class="cgv-force-label"
+      >
         <span class="cgv-force-val">斥力: {{ forceRepulsion }}</span>
+        <input type="range" :min="1" :max="100" :value="forceRepulsionSlider" @input="forceRepulsionSlider = Number(($event.target as HTMLInputElement).value)" class="cgv-force-slider"/>
       </label>
       <button class="cgv-force-btn" :class="{ active: forceLockMode === 'locked' }" @click="forceLockMode = forceLockMode === 'locked' ? 'linked' : 'locked'">
-        {{ forceLockMode === 'locked' ? '🔒 锁定' : '🔗 联动' }}
+        <LockClosedIcon v-if="forceLockMode === 'linked'" class="w-3.5 h-3.5" />
+        <LinkSlashIcon v-else class="w-3.5 h-3.5" />
+        <span>{{ forceLockMode === 'locked' ? '独立模式' : '跟随模式' }}</span>
       </button>
     </div>
 
@@ -826,16 +862,20 @@ watch(isFullscreen, () => {
         :key="'ext-force-' + props.edgeType + '-' + drillMeta.drillKey"
         :nodes="graphNodes"
         :edges="crossEdges"
-        :style="'d3force'"
+        :style="'force'"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
         :lock-mode="forceLockMode"
         :repulsion="forceRepulsion"
         :recenter-trigger="recenterTrigger"
+        :zoom-level="zoomLevel"
+        :font-size="fontSize"
+        :fullscreen="isFullscreen"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
+        @zoom-changed="(level: number) => zoomLevel = level"
       />
       <ExternalTableView
         v-else-if="externalViewMode === 'table'"
@@ -857,16 +897,20 @@ watch(isFullscreen, () => {
         :key="drillMeta.drillKey + '-' + props.edgeType + '-' + internalViewMode"
         :nodes="graphNodes"
         :edges="crossEdges"
-        :style="internalViewMode === 'dagre' ? 'dagre' : 'd3force'"
+        :style="internalViewMode === 'dagre' ? 'dagre' : 'force'"
         :highlighted-ids="highlightedNodeIds"
         :hidden-ids="hiddenNodeIds"
         :reset-trigger="resetTrigger"
         :lock-mode="forceLockMode"
         :repulsion="forceRepulsion"
         :recenter-trigger="recenterTrigger"
+        :zoom-level="zoomLevel"
+        :font-size="fontSize"
+        :fullscreen="isFullscreen"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
+        @zoom-changed="(level: number) => zoomLevel = level"
       />
       <CommunityTableView
         v-else-if="internalViewMode === 'table'"
@@ -909,7 +953,6 @@ watch(isFullscreen, () => {
           >
         </div>
         <GraphToolbar
-          v-model:style="graphStyle"
           v-model:external-view-mode="externalViewMode"
           v-model:internal-view-mode="internalViewMode"
           :can-roll-up="drillPath.length > 1"
@@ -1038,20 +1081,21 @@ watch(isFullscreen, () => {
 
 /* ── 力导向图控制条 ── */
 .cgv-force-bar {
-  display: flex; align-items: center; gap: 0.75rem;
+  display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem;
   padding: 0.25rem 0.75rem; background: var(--bg-secondary);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .cgv-force-label {
-  display: flex; align-items: center; gap: 0.4rem; flex: 1;
+  display: flex; align-items: center; gap: 0.4rem;
 }
 .cgv-force-slider {
   width: 140px; height: 4px; cursor: pointer; accent-color: var(--accent, #7c3aed);
 }
 .cgv-force-val {
-  font-size: 0.65rem; color: var(--text-muted); white-space: nowrap; min-width: 80px;
+  font-size: 0.65rem; color: var(--text-muted); white-space: nowrap; min-width: 80px; text-align: right;
 }
 .cgv-force-btn {
+  display: inline-flex; align-items: center; gap: 0.25rem;
   padding: 0.15rem 0.5rem; font-size: 0.65rem;
   background: var(--bg-tertiary); border: 1px solid var(--border);
   border-radius: 0.2rem; color: var(--text-muted); cursor: pointer;
