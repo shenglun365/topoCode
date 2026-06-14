@@ -37,6 +37,7 @@ const props = defineProps<{
   zoomLevel?: number
   fontSize?: number
   fullscreen?: boolean
+  positions?: Record<string, { x: number; y: number }>
 }>()
 
 const emit = defineEmits<{
@@ -289,12 +290,14 @@ function buildCytoscape() {
       if (!cy) return
       cy.zoom(1.0)
       centerOnConnected()
+      applyPresetPositions()
     })
   } else {
     cy.one('layoutstop', () => {
       if (!cy) return
       cy.zoom(1.0)
       centerOnConnected()
+      applyPresetPositions()
     })
     layout.run()
   }
@@ -364,6 +367,22 @@ function centerOnConnected() {
   cy.center(connected)
 }
 
+function applyPresetPositions() {
+  if (!cy || !props.positions) return
+  const pos = props.positions
+  const preset: Record<string, { x: number; y: number }> = {}
+  cy.nodes().forEach((n: any) => {
+    const id = n.data('id')
+    if (pos[id]) {
+      preset[id] = { x: pos[id].x, y: pos[id].y }
+    }
+  })
+  if (Object.keys(preset).length === 0) return
+  try {
+    cy.layout({ name: 'preset', positions: preset, fit: false, zoom: 1.0, animate: true, animationDuration: 300 } as any).run()
+  } catch (_) {}
+}
+
 let repulsionTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(() => { nextTick(buildCytoscape) })
@@ -409,6 +428,10 @@ watch(() => props.fontSize, (v) => {
       'min-zoomed-font-size': Math.max(4, v * 0.5),
     })
     .update()
+})
+
+watch(() => props.positions, () => {
+  applyPresetPositions()
 })
 
 const offScreenDirs = ref(new Set<string>())
@@ -473,6 +496,18 @@ function scheduleOffScreenCheck() {
   if (offScreenTimer) clearTimeout(offScreenTimer)
   offScreenTimer = setTimeout(checkOffScreen, 100)
 }
+
+defineExpose({
+  getAllPositions: (): Record<string, { x: number; y: number }> => {
+    if (!cy) return {}
+    const result: Record<string, { x: number; y: number }> = {}
+    cy.nodes().forEach((n: any) => {
+      if (n.data('_isMerged')) return
+      result[n.data('id')] = { x: n.position().x, y: n.position().y }
+    })
+    return result
+  },
+})
 </script>
 
 <template>

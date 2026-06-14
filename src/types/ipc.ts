@@ -460,6 +460,11 @@ export interface IPCAPI {
     clearSampleData: (id: string) => Promise<{ success: boolean }>
     checkPathValidity: (id: string) => Promise<{ pathValid: boolean; rootPath: string; needsResync: boolean }>
     getStorageStats: (projectId: string) => Promise<{ projectId: string; dbSize: number; dbFileSize: number; walSize: number; shmSize: number; sourceSize: number }>
+    detectGitInfo: (params: { projectId: string }) => Promise<GitInfo>
+    saveGitInfo: (params: { projectId: string; remoteUrl?: string; currentBranch?: string; currentCommit?: string; latestTag?: string; tags?: string; branches?: string; recentCommits?: string }) => Promise<{ status: string }>
+    getGitInfo: (params: { projectId: string }) => Promise<GitInfo>
+    checkImportStatus: (params: { projectId: string }) => Promise<{ hasSnapshot: boolean; needsSavePrompt: boolean }>
+    cleanupTaskSnapshots: (params: { taskId: string }) => Promise<{ deleted: number }>
   }
 
   // 分组管理
@@ -693,6 +698,21 @@ export interface IPCAPI {
     broadcast: (channel: string, data: any) => Promise<boolean>
     onPanelToggle: (channel: string, callback: () => void) => () => void
   }
+
+  // 架构快照 + 图位置
+  graph: {
+    saveSnapshot: (params: { taskId: string; projectId: string; alias?: string }) => Promise<{ snapshotId: string; status: string }>
+    getSnapshot: (params: { taskId: string }) => Promise<{ snapshot: ArchSnapshot | null }>
+    deleteSnapshot: (params: { taskId: string }) => Promise<{ deleted: number }>
+    exportSnapshots: (params: { taskId: string }) => Promise<{ exported: number }>
+    compareSnapshots: (params: { snapshotIdA: string; snapshotIdB: string }) => Promise<SnapshotCompareResult>
+    savePositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; positions: PositionEntry[]; snapshotId?: string }) => Promise<{ saved: number }>
+    loadPositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; snapshotId?: string }) => Promise<{ positions: Record<string, NodePosition> }>
+    clearPositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string }) => Promise<{ deleted: number }>
+    listArchivedSnapshots: (params: { projectId: string }) => Promise<{ snapshots: ArchivedSnapshotMeta[] }>
+    compareWithArchived: (params: { taskId: string; projectId: string; archivedId: string }) => Promise<SnapshotCompareResult>
+  }
+
   dialog: { openDirectory: () => Promise<string | null> }
   shell: { openExternal: (url: string) => Promise<void> }
   store: { get: (key: string) => Promise<any>; set: (key: string, value: any) => Promise<boolean> }
@@ -812,5 +832,91 @@ export type AnalysisResultsDTO = AnalysisResult
 export type TaskRunDTO = TaskRun
 export type ScanOptionsDTO = ScanOptions
 export type TaskConfigUpdateDTO = TaskConfigUpdate
+
+// ==================== 快照 & 位置 类型 ====================
+
+export interface GitInfo {
+  projectId?: string
+  remoteUrl: string
+  currentBranch: string
+  currentCommit: string
+  latestTag?: string
+  tags?: string
+  branches?: string
+  recentCommits?: string
+  detectedAt?: string
+  manuallyEdited?: number
+}
+
+export interface ArchSnapshotCommunity {
+  communityId: string
+  edgeType: string
+  level: string
+  name: string | null
+  nodeCount: number
+  fileCount: number
+  qualityScore: number | null
+  nodeList: string[]
+  fileList: string[]
+  edgeList?: any[]
+}
+
+export interface ArchSnapshot {
+  id: string
+  taskId: string
+  alias: string | null
+  projectId: string
+  timestamp: string
+  gitBranch: string | null
+  gitCommit: string | null
+  gitTag: string | null
+  communityCount: number
+  totalFiles: number
+  exported: number
+  communities?: ArchSnapshotCommunity[]
+}
+
+export interface SnapshotCompareItem {
+  communityId: string
+  nameA: string | null
+  nameB: string | null
+  fileCountA: number
+  fileCountB: number
+  filesShared: number
+  filesAdded: number
+  filesRemoved: number
+  jaccard: number
+}
+
+export interface SnapshotCompareResult {
+  a: { id: string; alias: string | null; communityCount: number; totalFiles: number }
+  b: { id: string; alias: string | null; communityCount: number; totalFiles: number }
+  communityMatches: SnapshotCompareItem[]
+  communitiesOnlyInA: Array<{ communityId: string; name: string | null }>
+  communitiesOnlyInB: Array<{ communityId: string; name: string | null }>
+  overall: { communityJaccard: number; avgFileJaccard: number; totalFilesA: number; totalFilesB: number; filesShared: number }
+}
+
+export interface PositionEntry {
+  nodeId: string
+  x: number
+  y: number
+}
+
+export interface NodePosition {
+  x: number
+  y: number
+}
+
+export interface ArchivedSnapshotMeta {
+  id: string
+  alias: string | null
+  taskId: string
+  timestamp: string
+  gitBranch: string | null
+  gitCommit: string | null
+  communityCount: number
+  totalFiles: number
+}
 
 export {}

@@ -20,6 +20,11 @@ import type {
   BackendStatusEvent,
   TaskConfigUpdate,
   ScanOptions,
+  GitInfo,
+  ArchSnapshot,
+  SnapshotCompareResult,
+  PositionEntry,
+  NodePosition,
 } from '@/types/ipc'
 
 /**
@@ -131,6 +136,55 @@ function createRealIPC() {
       },
       getStorageStats: async (projectId: string) => {
         return await api.project.getStorageStats(projectId)
+      },
+      detectGitInfo: async (params: { projectId: string }) => {
+        return await api.project.detectGitInfo(params)
+      },
+      saveGitInfo: async (params: any) => {
+        return await api.project.saveGitInfo(params)
+      },
+      getGitInfo: async (params: { projectId: string }) => {
+        return await api.project.getGitInfo(params)
+      },
+      checkImportStatus: async (params: { projectId: string }) => {
+        return await api.project.checkImportStatus(params)
+      },
+      cleanupTaskSnapshots: async (params: { taskId: string }) => {
+        return await api.project.cleanupTaskSnapshots(params)
+      },
+    },
+
+    // 架构快照 + 图位置
+    graph: {
+      saveSnapshot: async (params: { taskId: string; projectId: string; alias?: string }) => {
+        return await api.graph.saveSnapshot(params)
+      },
+      getSnapshot: async (params: { taskId: string }) => {
+        return await api.graph.getSnapshot(params)
+      },
+      deleteSnapshot: async (params: { taskId: string }) => {
+        return await api.graph.deleteSnapshot(params)
+      },
+      exportSnapshots: async (params: { taskId: string }) => {
+        return await api.graph.exportSnapshots(params)
+      },
+      compareSnapshots: async (params: { snapshotIdA: string; snapshotIdB: string }) => {
+        return await api.graph.compareSnapshots(params)
+      },
+      savePositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; positions: any[]; snapshotId?: string }) => {
+        return await api.graph.savePositions(params)
+      },
+      loadPositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; snapshotId?: string }) => {
+        return await api.graph.loadPositions(params)
+      },
+      clearPositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string }) => {
+        return await api.graph.clearPositions(params)
+      },
+      listArchivedSnapshots: async (params: { projectId: string }) => {
+        return await api.graph.listArchivedSnapshots(params)
+      },
+      compareWithArchived: async (params: { taskId: string; projectId: string; archivedId: string }) => {
+        return await api.graph.compareWithArchived(params)
       },
     },
 

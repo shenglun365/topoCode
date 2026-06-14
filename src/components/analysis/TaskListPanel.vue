@@ -11,6 +11,7 @@ import {
   ExclamationTriangleIcon,
   PlayIcon,
   DocumentTextIcon,
+  CameraIcon,
 } from '@heroicons/vue/24/outline'
 import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '@/stores/analysis'
@@ -19,6 +20,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import TaskDetailDialog from './TaskDetailDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
+import { ipc } from '@/services/ipc'
 
 const { showId, componentId } = useComponentId('AN-002')
 const props = defineProps<{
@@ -37,7 +39,26 @@ const navigation = useNavigationStore()
 
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
+const snapshotSaving = ref(new Set<string>())
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+async function handleSaveSnapshot(task: AnalysisTask) {
+  snapshotSaving.value.add(task.id)
+  try {
+    const result = await ipc.graph.saveSnapshot({
+      taskId: task.id,
+      projectId: props.projectId,
+      alias: undefined,
+    })
+    if (result.snapshotId) {
+      console.log(`[TaskListPanel] snapshot saved: ${result.snapshotId} (${result.communityCount} communities, ${result.totalFiles} files)`)
+    }
+  } catch (err) {
+    console.warn('[TaskListPanel] snapshot save failed:', err)
+  } finally {
+    snapshotSaving.value.delete(task.id)
+  }
+}
 
 // 加载任务列表
 async function loadTasks() {
@@ -414,6 +435,16 @@ function getConfigSummary(task: AnalysisTask): string {
           >
             <DocumentTextIcon class="w-3.5 h-3.5" />
             <span>结构分析</span>
+          </button>
+          <button
+            v-if="task.status === 'done'"
+            class="btn btn-ghost btn-xs"
+            :title="'保存架构快照'"
+            :disabled="snapshotSaving.has(task.id)"
+            @click="handleSaveSnapshot(task)"
+          >
+            <CameraIcon class="w-3.5 h-3.5" />
+            <span>{{ snapshotSaving.has(task.id) ? '保存中...' : '快照' }}</span>
           </button>
         </div>
       </div>

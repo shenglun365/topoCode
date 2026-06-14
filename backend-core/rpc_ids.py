@@ -188,6 +188,25 @@ RPC_IDS: dict[str, str] = {
     # ── system ────────────────────────────────────────────────
     "system.exportProject":         "API-104",
     "system.importProject":         "API-105",
+
+    # ── project (git & import) ─────────────────────────────────
+    "project.detectGitInfo":        "API-134",
+    "project.saveGitInfo":          "API-135",
+    "project.getGitInfo":           "API-136",
+    "project.checkImportStatus":    "API-137",
+    "project.cleanupTaskSnapshots": "API-138",
+
+    # ── graph (snapshot & positions) ───────────────────────────
+    "graph.saveSnapshot":           "API-139",
+    "graph.getSnapshot":            "API-140",
+    "graph.deleteSnapshot":         "API-141",
+    "graph.exportSnapshots":        "API-142",
+    "graph.compareSnapshots":       "API-143",
+    "graph.savePositions":          "API-144",
+    "graph.loadPositions":          "API-145",
+    "graph.clearPositions":         "API-146",
+    "graph.listArchivedSnapshots":  "API-147",
+    "graph.compareWithArchived":    "API-148",
 }
 
 

@@ -452,6 +452,24 @@ MAIN_DB_TABLES_SQL = """
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- ============================================
+    -- project_git_info — 项目 Git 元信息
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS project_git_info (
+        project_id TEXT PRIMARY KEY,
+        remote_url TEXT,
+        current_branch TEXT,
+        current_commit TEXT,
+        latest_tag TEXT,
+        tags TEXT,
+        branches TEXT,
+        recent_commits TEXT,
+        detected_at TEXT,
+        manually_edited INTEGER DEFAULT 0,
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
 """
 
 KNOWLEDGE_DB_TABLES_SQL = """
@@ -838,6 +856,68 @@ PROJECT_DB_TABLES_SQL = """
         FOREIGN KEY (session_id) REFERENCES ai_sessions(id)
     );
     CREATE INDEX IF NOT EXISTS idx_ai_issues_session ON ai_session_issues(session_id, severity);
+
+    -- ============================================
+    -- arch_snapshots — 架构快照（手动触发）
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS arch_snapshots (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        alias TEXT,
+        project_id TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        git_branch TEXT,
+        git_commit TEXT,
+        git_tag TEXT,
+        community_count INTEGER,
+        total_files INTEGER,
+        exported INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_snap_task ON arch_snapshots(task_id);
+
+    -- ============================================
+    -- arch_snapshot_communities — 快照中的社区 + 文件列表
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS arch_snapshot_communities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        snapshot_id TEXT NOT NULL,
+        community_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        level TEXT NOT NULL,
+        name TEXT,
+        node_count INTEGER,
+        file_count INTEGER,
+        quality_score REAL,
+        node_list TEXT,
+        file_list TEXT,
+        edge_list TEXT,
+        FOREIGN KEY (snapshot_id) REFERENCES arch_snapshots(id) ON DELETE CASCADE,
+        UNIQUE(snapshot_id, community_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_scomm_snap ON arch_snapshot_communities(snapshot_id);
+
+    -- ============================================
+    -- graph_node_positions — 图节点拖拽位置
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS graph_node_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL CHECK(edge_type IN ('INCLUDE','CALL','EXTERNAL_INCLUDE','EXTERNAL_CALL')),
+        drill_key TEXT NOT NULL,
+        snapshot_id TEXT,
+        layout_type TEXT NOT NULL CHECK(layout_type IN ('dagre','force')),
+        node_id TEXT NOT NULL,
+        pos_x REAL NOT NULL,
+        pos_y REAL NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_pos_active_unique
+        ON graph_node_positions(task_id, edge_type, drill_key, layout_type, node_id)
+        WHERE snapshot_id IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_pos_snap_unique
+        ON graph_node_positions(task_id, edge_type, drill_key, snapshot_id, layout_type, node_id)
+        WHERE snapshot_id IS NOT NULL;
 """
 
 

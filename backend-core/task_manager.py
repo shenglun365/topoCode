@@ -6,9 +6,11 @@ Task Manager — 13 个 analysis.* 后端方法
 import asyncio
 import json
 import os
+import subprocess
 import time
 import uuid
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlite_ctx import MultiDBManager
@@ -2381,3 +2383,689 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             logger.info(f"[startup] Recovered {recovered} orphan task(s)")
     except Exception as e:
         logger.error(f"[startup] Orphan recovery failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  项目 Git 信息 & 架构快照 & 图节点位置
+# ═══════════════════════════════════════════════════════════════
+
+_POSITIONS_DDL = """CREATE TABLE IF NOT EXISTS graph_node_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    edge_type TEXT NOT NULL CHECK(edge_type IN ('INCLUDE','CALL','EXTERNAL_INCLUDE','EXTERNAL_CALL')),
+    drill_key TEXT NOT NULL,
+    snapshot_id TEXT,
+    layout_type TEXT NOT NULL CHECK(layout_type IN ('dagre','force')),
+    node_id TEXT NOT NULL,
+    pos_x REAL NOT NULL,
+    pos_y REAL NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gp_active_unique
+    ON graph_node_positions(task_id, edge_type, drill_key, layout_type, node_id)
+    WHERE snapshot_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gp_snap_unique
+    ON graph_node_positions(task_id, edge_type, drill_key, snapshot_id, layout_type, node_id)
+    WHERE snapshot_id IS NOT NULL;
+"""
+
+
+def _ensure_project_db(multi_db, task_id: str):
+    """Get the project database for a task, ensuring the DB is initialized."""
+    main_db = multi_db.main_db
+    row = main_db.fetchone(
+        "SELECT project_id FROM analysis_tasks WHERE id = ?", (task_id,))
+    if not row:
+        return None
+    return multi_db.get_project_db(row["project_id"])
+
+
+def _ensure_table(db, table_name: str, ddl: str):
+    """Create table if it doesn't exist on the given database."""
+    try:
+        for stmt in ddl.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                db.execute(stmt)
+        db.commit()
+    except Exception as e:
+        logger.warning(f"[ensure_table] failed to create {table_name}: {e}")
+
+def _run_git(project_root: str, *args) -> str:
+    """Run a git command in project_root and return stdout, or '' on failure."""
+    try:
+        result = subprocess.run(
+            ["git"] + list(args),
+            cwd=project_root, capture_output=True, text=True, timeout=10
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def detect_git_info(multi_db: MultiDBManager, project_id: str) -> dict:
+    """Auto-detect Git information from the project's .git directory."""
+    main_db = multi_db.main_db
+    row = main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (project_id,))
+    if not row or not row["root_path"]:
+        return {"remoteUrl": "", "currentBranch": "", "currentCommit": "", "error": "project_not_found"}
+    root = row["root_path"]
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return {"remoteUrl": "", "currentBranch": "", "currentCommit": "", "error": "not_a_git_repo"}
+
+    remote_url = _run_git(root, "remote", "get-url", "origin")
+    branch = _run_git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    commit = _run_git(root, "rev-parse", "HEAD")
+    latest_tag = _run_git(root, "describe", "--tags", "--abbrev=0")
+
+    # list tags (last 20)
+    tags_raw = _run_git(root, "tag", "--sort=-creatordate")
+    tags_list = tags_raw.split("\n")[:20] if tags_raw else []
+
+    # list branches
+    branches_raw = _run_git(root, "branch", "--format=%(refname:short)")
+    branches_list = branches_raw.split("\n") if branches_raw else []
+
+    # recent commits (last 10)
+    log_raw = _run_git(root, "log", "--format=%H|%s|%aI", "-n", "10")
+    commits_list = []
+    if log_raw:
+        for line in log_raw.split("\n"):
+            parts = line.split("|", 2)
+            if len(parts) == 3:
+                commits_list.append({"hash": parts[0][:8], "message": parts[1], "date": parts[2]})
+
+    result = {
+        "remoteUrl": remote_url,
+        "currentBranch": branch,
+        "currentCommit": commit,
+        "latestTag": latest_tag if latest_tag else "",
+        "tags": json.dumps(tags_list),
+        "branches": json.dumps(branches_list),
+        "recentCommits": json.dumps(commits_list),
+    }
+
+    # persist
+    main_db.execute("""
+        INSERT INTO project_git_info (project_id, remote_url, current_branch, current_commit,
+            latest_tag, tags, branches, recent_commits, detected_at)
+        VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(project_id) DO UPDATE SET
+            remote_url=excluded.remote_url, current_branch=excluded.current_branch,
+            current_commit=excluded.current_commit, latest_tag=excluded.latest_tag,
+            tags=excluded.tags, branches=excluded.branches,
+            recent_commits=excluded.recent_commits, detected_at=excluded.detected_at,
+            updated_at=datetime('now')
+    """, (project_id, remote_url, branch, commit, latest_tag or "",
+          json.dumps(tags_list), json.dumps(branches_list),
+          json.dumps(commits_list), datetime.now(timezone.utc).isoformat()))
+    main_db.commit()
+
+    return result
+
+
+def save_git_info(multi_db: MultiDBManager, project_id: str, remote_url=None,
+                  current_branch=None, current_commit=None, latest_tag=None,
+                  tags=None, branches=None, recent_commits=None) -> dict:
+    """Manually save or override Git information."""
+    main_db = multi_db.main_db
+    main_db.execute("""
+        INSERT INTO project_git_info (project_id, remote_url, current_branch, current_commit,
+            latest_tag, tags, branches, recent_commits, manually_edited, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,1,datetime('now'))
+        ON CONFLICT(project_id) DO UPDATE SET
+            remote_url=COALESCE(excluded.remote_url, project_git_info.remote_url),
+            current_branch=COALESCE(excluded.current_branch, project_git_info.current_branch),
+            current_commit=COALESCE(excluded.current_commit, project_git_info.current_commit),
+            latest_tag=COALESCE(excluded.latest_tag, project_git_info.latest_tag),
+            tags=COALESCE(excluded.tags, project_git_info.tags),
+            branches=COALESCE(excluded.branches, project_git_info.branches),
+            recent_commits=COALESCE(excluded.recent_commits, project_git_info.recent_commits),
+            manually_edited=1, updated_at=datetime('now')
+    """, (project_id, remote_url, current_branch, current_commit, latest_tag,
+          tags, branches, recent_commits))
+    main_db.commit()
+    return {"status": "ok"}
+
+
+def get_git_info(multi_db: MultiDBManager, project_id: str) -> dict:
+    """Read stored Git information for a project."""
+    main_db = multi_db.main_db
+    row = main_db.fetchone(
+        "SELECT * FROM project_git_info WHERE project_id = ?", (project_id,))
+    if not row:
+        return {"remoteUrl": "", "currentBranch": "", "currentCommit": ""}
+    return {
+        "remoteUrl": row["remote_url"] or "",
+        "currentBranch": row["current_branch"] or "",
+        "currentCommit": row["current_commit"] or "",
+        "latestTag": row["latest_tag"] or "",
+        "tags": row["tags"] or "",
+        "branches": row["branches"] or "",
+        "recentCommits": row["recent_commits"] or "",
+        "detectedAt": row["detected_at"] or "",
+        "manuallyEdited": row["manually_edited"] or 0,
+    }
+
+
+def check_import_status(multi_db: MultiDBManager, project_id: str) -> dict:
+    """Check if project has existing unsaved snapshots (only for completed tasks)."""
+    main_db = multi_db.main_db
+    project_db = multi_db.get_project_db(project_id)
+    tasks = main_db.fetchall(
+        "SELECT id FROM analysis_tasks WHERE project_id = ? AND status = 'done'", (project_id,))
+    has_snapshot = False
+    needs_save = False
+    for t in tasks:
+        row = None
+        if project_db:
+            row = project_db.fetchone(
+                "SELECT id FROM arch_snapshots WHERE task_id = ?", (t["id"],))
+        if row:
+            has_snapshot = True
+        else:
+            needs_save = True
+    return {"hasSnapshot": has_snapshot, "needsSavePrompt": needs_save}
+
+
+def cleanup_task_snapshots(multi_db: MultiDBManager, task_id: str) -> dict:
+    """Cascade-delete snapshots, communities, and positions for a task."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"deleted": 0}
+    _ensure_table(project_db, "graph_node_positions", _POSITIONS_DDL)
+    project_db.execute(
+        "DELETE FROM graph_node_positions WHERE task_id = ?", (task_id,))
+    deleted_snapshots = project_db.fetchall(
+        "SELECT id FROM arch_snapshots WHERE task_id = ?", (task_id,))
+    for s in deleted_snapshots:
+        project_db.execute(
+            "DELETE FROM arch_snapshot_communities WHERE snapshot_id = ?", (s["id"],))
+    project_db.execute(
+        "DELETE FROM arch_snapshots WHERE task_id = ?", (task_id,))
+    project_db.commit()
+    return {"deleted": len(deleted_snapshots)}
+
+
+def _resolve_file_list(multi_db: MultiDBManager, project_id: str, node_list_json: str) -> list:
+    """Given a JSON node_list (list of graph_node IDs), return deduped file_path list."""
+    try:
+        node_ids = json.loads(node_list_json) if isinstance(node_list_json, str) else node_list_json
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not node_ids:
+        return []
+    project_db = multi_db.get_project_db(project_id)
+    if not project_db:
+        return []
+    placeholders = ",".join("?" * len(node_ids))
+    rows = project_db.fetchall(
+        f"SELECT DISTINCT file_path FROM graph_node WHERE id IN ({placeholders})",
+        tuple(str(nid) for nid in node_ids))
+    return sorted(r["file_path"] for r in rows if r["file_path"])
+
+
+def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias=None) -> dict:
+    """Save an architecture snapshot (upsert: one snapshot per task)."""
+    main_db = multi_db.main_db
+    project_db = multi_db.get_project_db(project_id)
+    if not project_db:
+        return {"error": "project_db_not_found"}
+
+    # gather git info
+    git_row = main_db.fetchone(
+        "SELECT current_branch, current_commit, latest_tag FROM project_git_info WHERE project_id = ?",
+        (project_id,))
+    git_branch = git_row["current_branch"] if git_row else None
+    git_commit = git_row["current_commit"] if git_row else None
+    git_tag = git_row["latest_tag"] if git_row else None
+
+    # collect L0 communities from community_hierarchy
+    comms = project_db.fetchall("""
+        SELECT comm_id, edge_type, level, node_count, file_count, quality_score
+        FROM community_hierarchy
+        WHERE task_id = ? AND level = 'L0'
+        ORDER BY edge_type, comm_id
+    """, (task_id,))
+
+    # get community names + node_lists from graph_doc
+    total_files_set = set()
+    snapshot_id = str(uuid.uuid4())
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    for c in comms:
+        doc_row = project_db.fetchone(
+            "SELECT node_list, edge_list FROM graph_doc WHERE task_id = ? AND comm_id = ? AND comm_lv = ?",
+            (task_id, c["comm_id"], c["level"]))
+        node_list = doc_row["node_list"] if doc_row else "[]"
+        edge_list = doc_row["edge_list"] if doc_row else "[]"
+
+        file_list = _resolve_file_list(multi_db, project_id, node_list)
+        for fp in file_list:
+            total_files_set.add(fp)
+
+        # get AI-generated name from community_llm_results
+        name_row = project_db.fetchone(
+            "SELECT name FROM community_llm_results WHERE task_id=? AND community_id=? AND level=?",
+            (task_id, c["comm_id"], c["level"]))
+        name = name_row["name"] if name_row else None
+
+        project_db.execute("""
+            INSERT INTO arch_snapshot_communities
+                (snapshot_id, community_id, edge_type, level, name, node_count,
+                 file_count, quality_score, node_list, file_list, edge_list)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (snapshot_id, c["comm_id"], c["edge_type"], c["level"], name,
+              c["node_count"] or 0, len(file_list), c["quality_score"],
+              node_list if isinstance(node_list, str) else json.dumps(node_list),
+              json.dumps(file_list),
+              edge_list if isinstance(edge_list, str) else json.dumps(edge_list)))
+
+    total_files = len(total_files_set)
+    community_count = len(comms)
+
+    # delete old snapshot for this task
+    old_snaps = project_db.fetchall(
+        "SELECT id FROM arch_snapshots WHERE task_id = ?", (task_id,))
+    for s in old_snaps:
+        project_db.execute(
+            "DELETE FROM arch_snapshot_communities WHERE snapshot_id = ?", (s["id"],))
+    project_db.execute(
+        "DELETE FROM arch_snapshots WHERE task_id = ?", (task_id,))
+
+    # insert new snapshot
+    project_db.execute("""
+        INSERT INTO arch_snapshots
+            (id, task_id, alias, project_id, timestamp, git_branch, git_commit, git_tag,
+             community_count, total_files)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (snapshot_id, task_id, alias, project_id, timestamp,
+          git_branch, git_commit, git_tag, community_count, total_files))
+    project_db.commit()
+
+    return {"snapshotId": snapshot_id, "status": "ok",
+            "communityCount": community_count, "totalFiles": total_files}
+
+
+def get_snapshot(multi_db: MultiDBManager, task_id: str) -> dict:
+    """Get the current snapshot for a task."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"snapshot": None}
+    row = project_db.fetchone(
+        "SELECT * FROM arch_snapshots WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
+        (task_id,))
+    if not row:
+        return {"snapshot": None}
+
+    communities = project_db.fetchall(
+        "SELECT * FROM arch_snapshot_communities WHERE snapshot_id = ? ORDER BY edge_type, community_id",
+        (row["id"],))
+
+    return {"snapshot": {
+        "id": row["id"],
+        "taskId": row["task_id"],
+        "alias": row["alias"],
+        "projectId": row["project_id"],
+        "timestamp": row["timestamp"],
+        "gitBranch": row["git_branch"],
+        "gitCommit": row["git_commit"],
+        "gitTag": row["git_tag"],
+        "communityCount": row["community_count"],
+        "totalFiles": row["total_files"],
+        "exported": row["exported"],
+        "communities": [{
+            "communityId": c["community_id"],
+            "edgeType": c["edge_type"],
+            "level": c["level"],
+            "name": c["name"],
+            "nodeCount": c["node_count"],
+            "fileCount": c["file_count"],
+            "qualityScore": c["quality_score"],
+            "nodeList": json.loads(c["node_list"]) if c["node_list"] else [],
+            "fileList": json.loads(c["file_list"]) if c["file_list"] else [],
+            "edgeList": json.loads(c["edge_list"]) if c["edge_list"] else [],
+        } for c in communities]
+    }}
+
+
+def delete_snapshot(multi_db: MultiDBManager, task_id: str) -> dict:
+    """Delete a task's snapshot and all its communities."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"deleted": 0}
+    snaps = project_db.fetchall(
+        "SELECT id FROM arch_snapshots WHERE task_id = ?", (task_id,))
+    for s in snaps:
+        project_db.execute(
+            "DELETE FROM arch_snapshot_communities WHERE snapshot_id = ?", (s["id"],))
+    project_db.execute(
+        "DELETE FROM arch_snapshots WHERE task_id = ?", (task_id,))
+    project_db.commit()
+    return {"deleted": len(snaps)}
+
+
+def export_snapshots(multi_db: MultiDBManager, task_id: str) -> dict:
+    """Export a task's snapshot as JSONL files."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"exported": 0}
+    row = project_db.fetchone(
+        "SELECT * FROM arch_snapshots WHERE task_id = ?", (task_id,))
+    if not row:
+        return {"exported": 0}
+
+    # get project root
+    proj = multi_db.main_db.fetchone(
+        "SELECT root_path FROM projects WHERE id = ?", (row["project_id"],))
+    if not proj or not proj["root_path"]:
+        return {"error": "project_not_found"}
+
+    export_dir = os.path.join(proj["root_path"], ".topocode", "snapshots")
+    os.makedirs(export_dir, exist_ok=True)
+
+    communities = project_db.fetchall(
+        "SELECT * FROM arch_snapshot_communities WHERE snapshot_id = ?", (row["id"],))
+
+    # write versions.jsonl
+    with open(os.path.join(export_dir, "snapshots.jsonl"), "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "id": row["id"], "alias": row["alias"], "taskId": row["task_id"],
+            "timestamp": row["timestamp"], "gitBranch": row["git_branch"],
+            "gitCommit": row["git_commit"], "communityCount": row["community_count"],
+            "totalFiles": row["total_files"],
+        }, ensure_ascii=False) + "\n")
+
+    # write communities.jsonl
+    with open(os.path.join(export_dir, "communities.jsonl"), "w", encoding="utf-8") as f:
+        for c in communities:
+            f.write(json.dumps({
+                "v": row["id"], "cid": c["community_id"],
+                "edge_type": c["edge_type"], "level": c["level"],
+                "name": c["name"], "nodes": c["node_count"],
+                "files": c["file_count"], "score": c["quality_score"],
+                "file_list": json.loads(c["file_list"]) if c["file_list"] else [],
+            }, ensure_ascii=False) + "\n")
+
+    # mark as exported
+    project_db.execute(
+        "UPDATE arch_snapshots SET exported = 1 WHERE id = ?", (row["id"],))
+    project_db.commit()
+
+    return {"exported": len(communities),
+            "dir": export_dir}
+
+
+def compare_snapshots(multi_db: MultiDBManager, snapshot_id_a: str,
+                      snapshot_id_b: str) -> dict:
+    """Compare two snapshots by community and file Jaccard similarity."""
+    def _load_from_db(sid):
+        # snapshots are in project DBs; look up project_id from snapshot
+        for pid_row in multi_db.main_db.fetchall("SELECT id FROM projects"):
+            pdb = multi_db.get_project_db(pid_row["id"])
+            if not pdb:
+                continue
+            meta = pdb.fetchone("SELECT * FROM arch_snapshots WHERE id=?", (sid,))
+            if meta:
+                comms = pdb.fetchall(
+                    "SELECT * FROM arch_snapshot_communities WHERE snapshot_id=? ORDER BY community_id", (sid,))
+                return meta, comms
+        return None, None
+
+    meta_a, comms_a = _load_from_db(snapshot_id_a)
+    meta_b, comms_b = _load_from_db(snapshot_id_b)
+    if not meta_a or not meta_b:
+        return {"error": "snapshot_not_found"}
+
+    return _compare_community_sets(meta_a, comms_a, meta_b, comms_b)
+
+
+def save_positions(multi_db: MultiDBManager, task_id: str, edge_type: str, drill_key: str,
+                   layout_type: str, positions: list, snapshot_id=None) -> dict:
+    """Batch save node positions (UPSERT per node)."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"saved": 0, "error": "project_db_not_found"}
+    _ensure_table(project_db, "graph_node_positions", _POSITIONS_DDL)
+    saved = 0
+    for p in positions:
+        project_db.execute("""
+            INSERT OR REPLACE INTO graph_node_positions
+                (task_id, edge_type, drill_key, snapshot_id, layout_type, node_id, pos_x, pos_y)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (task_id, edge_type, drill_key, snapshot_id, layout_type,
+              p.get("nodeId", p.get("node_id", "")), p.get("x", 0), p.get("y", 0)))
+        saved += 1
+    project_db.commit()
+    return {"saved": saved}
+
+
+def load_positions(multi_db: MultiDBManager, task_id: str, edge_type: str, drill_key: str,
+                   layout_type: str, snapshot_id=None) -> dict:
+    """Load saved node positions."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"positions": {}}
+    _ensure_table(project_db, "graph_node_positions", _POSITIONS_DDL)
+    rows = project_db.fetchall(
+        """SELECT node_id, pos_x, pos_y FROM graph_node_positions
+           WHERE task_id=? AND edge_type=? AND drill_key=? AND layout_type=?
+             AND snapshot_id IS ?""",
+        (task_id, edge_type, drill_key, layout_type, snapshot_id))
+    result = {}
+    for r in rows:
+        result[r["node_id"]] = {"x": r["pos_x"], "y": r["pos_y"]}
+    return {"positions": result}
+
+
+def clear_positions(multi_db: MultiDBManager, task_id: str, edge_type: str, drill_key: str,
+                    layout_type: str) -> dict:
+    """Clear all saved positions for a given key."""
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"deleted": 0}
+    _ensure_table(project_db, "graph_node_positions", _POSITIONS_DDL)
+    cursor = project_db.execute(
+        """DELETE FROM graph_node_positions
+           WHERE task_id=? AND edge_type=? AND drill_key=? AND layout_type=?""",
+        (task_id, edge_type, drill_key, layout_type))
+    deleted = cursor.rowcount if hasattr(cursor, 'rowcount') else 0
+    project_db.commit()
+    return {"deleted": deleted}
+
+
+def list_archived_snapshots(multi_db: MultiDBManager, project_id: str) -> dict:
+    """List JSONL-exported (archived) snapshots for a project (read-only)."""
+    main_db = multi_db.main_db
+    row = main_db.fetchone(
+        "SELECT root_path FROM projects WHERE id = ?", (project_id,))
+    if not row or not row["root_path"]:
+        return {"snapshots": []}
+
+    snapshots_file = os.path.join(row["root_path"], ".topocode", "snapshots", "snapshots.jsonl")
+    if not os.path.exists(snapshots_file):
+        return {"snapshots": []}
+
+    snapshots = []
+    with open(snapshots_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                s = json.loads(line)
+                snapshots.append({
+                    "id": s.get("id", ""),
+                    "alias": s.get("alias"),
+                    "taskId": s.get("taskId", ""),
+                    "timestamp": s.get("timestamp", ""),
+                    "gitBranch": s.get("gitBranch"),
+                    "gitCommit": s.get("gitCommit"),
+                    "communityCount": s.get("communityCount", 0),
+                    "totalFiles": s.get("totalFiles", 0),
+                })
+            except json.JSONDecodeError:
+                continue
+
+    return {"snapshots": snapshots}
+
+
+def _load_archived_communities(project_root: str, snapshot_id: str) -> list:
+    """Load communities from a JSONL file for a given snapshot_id (read-only)."""
+    communities_file = os.path.join(project_root, ".topocode", "snapshots", "communities.jsonl")
+    if not os.path.exists(communities_file):
+        return []
+
+    communities = []
+    with open(communities_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                c = json.loads(line)
+                if c.get("v") == snapshot_id:
+                    communities.append({
+                        "community_id": c.get("cid", ""),
+                        "edge_type": c.get("edge_type", ""),
+                        "level": c.get("level", ""),
+                        "name": c.get("name"),
+                        "node_count": c.get("nodes", 0),
+                        "file_count": c.get("files", 0),
+                        "quality_score": c.get("score"),
+                        "file_list": json.dumps(c.get("file_list", [])),
+                    })
+            except json.JSONDecodeError:
+                continue
+
+    return communities
+
+
+def compare_with_archived(multi_db: MultiDBManager, task_id: str, project_id: str,
+                          archived_id: str) -> dict:
+    """Compare current DB snapshot with an archived (JSONL) snapshot (read-only)."""
+    project_db = multi_db.get_project_db(project_id)
+    main_db = multi_db.main_db
+    proj = main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (project_id,))
+    if not proj or not proj["root_path"]:
+        return {"error": "project_not_found"}
+
+    # load current snapshot from DB
+    db_snap = None
+    db_communities = []
+    if project_db:
+        db_snap = project_db.fetchone(
+            "SELECT * FROM arch_snapshots WHERE task_id = ?", (task_id,))
+        if db_snap:
+            db_communities = project_db.fetchall(
+                "SELECT * FROM arch_snapshot_communities WHERE snapshot_id = ? ORDER BY community_id",
+                (db_snap["id"],))
+    if not db_snap:
+        return {"error": "current_snapshot_not_found"}
+
+    # load archived metadata
+    snapshots_file = os.path.join(proj["root_path"], ".topocode", "snapshots", "snapshots.jsonl")
+    archived_meta = None
+    with open(snapshots_file, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                s = json.loads(line.strip())
+                if s.get("id") == archived_id or s.get("alias") == archived_id:
+                    archived_meta = s
+                    break
+            except json.JSONDecodeError:
+                continue
+    if not archived_meta:
+        return {"error": "archived_snapshot_not_found"}
+
+    archived_communities = _load_archived_communities(proj["root_path"], archived_meta["id"])
+
+    # run comparison using the same logic as compare_snapshots
+    return _compare_community_sets(db_snap, db_communities, archived_meta, archived_communities)
+
+
+def _compare_community_sets(meta_a, comms_a, meta_b, comms_b) -> dict:
+    """Shared comparison logic used by compare_snapshots and compare_with_archived."""
+    def _cid(c):
+        return c.get("community_id", c.get("cid", ""))
+
+    cids_a = {_cid(c) for c in comms_a}
+    cids_b = {_cid(c) for c in comms_b}
+    intersection = cids_a & cids_b
+    union = cids_a | cids_b
+    community_jaccard = len(intersection) / len(union) if union else 0
+
+    match_items = []
+    total_files_a = meta_a.get("total_files", 0) or 0
+    total_files_b = meta_b.get("totalFiles", 0) or 0  # JSONL uses camelCase
+    files_a_set = set()
+    files_b_set = set()
+
+    for cid in intersection:
+        ca = next((c for c in comms_a if _cid(c) == cid), None)
+        cb = next((c for c in comms_b if _cid(c) == cid), None)
+        fl_a = _parse_file_list(ca)
+        fl_b = _parse_file_list(cb)
+        files_a_set.update(fl_a)
+        files_b_set.update(fl_b)
+        shared = fl_a & fl_b
+        file_jaccard = len(shared) / len(fl_a | fl_b) if (fl_a | fl_b) else 0
+        match_items.append({
+            "communityId": cid,
+            "nameA": ca.get("name") if ca else None,
+            "nameB": cb.get("name") if cb else None,
+            "fileCountA": len(fl_a), "fileCountB": len(fl_b),
+            "filesShared": len(shared),
+            "filesAdded": len(fl_b - fl_a),
+            "filesRemoved": len(fl_a - fl_b),
+            "jaccard": round(file_jaccard, 4),
+        })
+
+    only_a = [{"communityId": cid, "name": next((c.get("name") for c in comms_a if _cid(c) == cid), None)}
+              for cid in (cids_a - cids_b)]
+    only_b = [{"communityId": cid, "name": next((c.get("name") for c in comms_b if _cid(c) == cid), None)}
+              for cid in (cids_b - cids_a)]
+
+    avg_file_jaccard = (sum(m["jaccard"] for m in match_items) / len(match_items)) if match_items else 0.0
+    files_shared = files_a_set & files_b_set
+
+    def _get(meta, key, fallback_key=None):
+        return meta.get(key) or (meta.get(fallback_key) if fallback_key else None) or 0
+
+    return {
+        "a": {"id": meta_a.get("id", ""), "alias": meta_a.get("alias"),
+              "communityCount": _get(meta_a, "community_count", "communityCount"),
+              "totalFiles": _get(meta_a, "total_files", "totalFiles")},
+        "b": {"id": meta_b.get("id", ""), "alias": meta_b.get("alias"),
+              "communityCount": _get(meta_b, "communityCount", "community_count"),
+              "totalFiles": _get(meta_b, "totalFiles", "total_files")},
+        "communityMatches": match_items,
+        "communitiesOnlyInA": only_a,
+        "communitiesOnlyInB": only_b,
+        "overall": {
+            "communityJaccard": round(community_jaccard, 4),
+            "avgFileJaccard": round(avg_file_jaccard, 4),
+            "totalFilesA": total_files_a,
+            "totalFilesB": total_files_b,
+            "filesShared": len(files_shared),
+        },
+    }
+
+
+def _parse_file_list(community: dict | None) -> set:
+    """Parse file_list from a community record (SQLite or JSONL)."""
+    if not community:
+        return set()
+    fl = community.get("file_list", "")
+    if not fl:
+        return set()
+    if isinstance(fl, str):
+        try:
+            return set(json.loads(fl))
+        except (json.JSONDecodeError, TypeError):
+            return set()
+    if isinstance(fl, list):
+        return set(fl)
+    return set()

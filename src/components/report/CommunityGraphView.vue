@@ -53,7 +53,7 @@ const emit = defineEmits<{
 
 const { showId, componentId } = useComponentId('CG-001')
 const { isFullscreen, enterFullscreen, exitFullscreen, onKeydown } = useGraphFullscreen()
-const { getNodePosition, setNodePosition } = useGraphPosition(
+const { getNodePosition, setNodePosition, positions: localPositions } = useGraphPosition(
   props.projectId, props.taskId, props.taskUpdatedAt
 )
 
@@ -61,6 +61,7 @@ const { getNodePosition, setNodePosition } = useGraphPosition(
 
 const fontSize = ref(10)
 const zoomLevel = ref(1)
+const graphCanvasRef = ref<InstanceType<typeof GraphCanvas> | null>(null)
 
 const externalViewMode = ref<'force' | 'table' | 'heatmap'>('force')
 const internalViewMode = ref<'force' | 'dagre' | 'table' | 'heatmap'>('dagre')
@@ -148,6 +149,59 @@ const forceRepulsionSlider = ref(50)
 const forceRepulsion = computed(() =>
   Math.round(Math.exp(forceRepulsionSlider.value / 28) * 1500)
 )
+
+/* ---- saved positions (DB) ---- */
+const savedPositions = ref<Record<string, { x: number; y: number }>>({})
+
+async function loadDBPositions() {
+  const layoutType = internalViewMode.value === 'force' ? 'force' : 'dagre'
+  try {
+    const result = await ipc.graph.loadPositions({
+      taskId: props.taskId,
+      edgeType: props.edgeType,
+      drillKey: drillMeta.value.drillKey,
+      layoutType,
+    })
+    savedPositions.value = result.positions || {}
+  } catch (_) {
+    savedPositions.value = {}
+  }
+}
+
+async function handleSavePositions() {
+  const layoutType = internalViewMode.value === 'force' ? 'force' : 'dagre'
+  const allPos = graphCanvasRef.value?.getAllPositions?.()
+  const positions: Array<{ nodeId: string; x: number; y: number }> = []
+  if (allPos) {
+    for (const [nodeId, pos] of Object.entries(allPos)) {
+      if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+        positions.push({ nodeId, x: pos.x, y: pos.y })
+      }
+    }
+  }
+  // also include any localStorage positions for nodes not currently visible
+  const viewPositions = localPositions.value?.[props.edgeType]?.[drillMeta.value.drillKey] || {}
+  for (const [nodeId, pos] of Object.entries(viewPositions)) {
+    if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+      if (!positions.find(p => p.nodeId === nodeId)) {
+        positions.push({ nodeId, x: pos.x, y: pos.y })
+      }
+    }
+  }
+  if (positions.length === 0) return
+  try {
+    const result = await ipc.graph.savePositions({
+      taskId: props.taskId,
+      edgeType: props.edgeType,
+      drillKey: drillMeta.value.drillKey,
+      layoutType,
+      positions,
+    })
+    const saved: Record<string, { x: number; y: number }> = {}
+    for (const p of positions) saved[p.nodeId] = { x: p.x, y: p.y }
+    savedPositions.value = saved
+  } catch (_) {}
+}
 
 /* ---- filter persistence ---- */
 const FILTER_STORAGE_KEY = computed(() => `graph-filter-${props.projectId}-${props.taskId}`)
@@ -719,10 +773,18 @@ onMounted(async () => {
     await communityStore.loadCrossCommunityEdges(props.taskId, effectiveEdgeType.value, drillMeta.value.drillLevel)
   }
   document.addEventListener('keydown', onKeydown)
+  loadDBPositions()
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
+  if (positionLoadTimer) clearTimeout(positionLoadTimer)
+})
+
+let positionLoadTimer: ReturnType<typeof setTimeout> | null = null
+watch([() => drillMeta.value.drillKey, () => props.edgeType, internalViewMode], () => {
+  if (positionLoadTimer) clearTimeout(positionLoadTimer)
+  positionLoadTimer = setTimeout(loadDBPositions, 100)
 })
 
 watch(isFullscreen, () => {
@@ -842,6 +904,9 @@ watch(isFullscreen, () => {
           class="cgv-force-slider"
         >
       </label>
+      <button class="cgv-force-btn" @click="handleSavePositions" title="保存当前节点位置到数据库">
+        💾 <span>保存位置</span>
+      </button>
       <label
         v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && internalViewMode === 'force')"
         class="cgv-force-label"
@@ -859,6 +924,7 @@ watch(isFullscreen, () => {
     <template v-if="isExternalTab">
       <GraphCanvas
         v-if="externalViewMode === 'force'"
+        ref="graphCanvasRef"
         :key="'ext-force-' + props.edgeType + '-' + drillMeta.drillKey"
         :nodes="graphNodes"
         :edges="crossEdges"
@@ -872,6 +938,7 @@ watch(isFullscreen, () => {
         :zoom-level="zoomLevel"
         :font-size="fontSize"
         :fullscreen="isFullscreen"
+        :positions="savedPositions"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"
@@ -894,6 +961,7 @@ watch(isFullscreen, () => {
     <template v-else>
       <GraphCanvas
         v-if="internalViewMode === 'force' || internalViewMode === 'dagre'"
+        ref="graphCanvasRef"
         :key="drillMeta.drillKey + '-' + props.edgeType + '-' + internalViewMode"
         :nodes="graphNodes"
         :edges="crossEdges"
@@ -907,6 +975,7 @@ watch(isFullscreen, () => {
         :zoom-level="zoomLevel"
         :font-size="fontSize"
         :fullscreen="isFullscreen"
+        :positions="savedPositions"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y })"

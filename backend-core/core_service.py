@@ -22,6 +22,24 @@ from sqlite_ctx import SQLiteContext, MultiDBManager
 from zmq_server import ZMQServer
 from report_tree_service import save_overall_doc as _save_overall_doc
 
+from task_manager import (
+    detect_git_info as _tm_detect_git_info,
+    save_git_info as _tm_save_git_info,
+    get_git_info as _tm_get_git_info,
+    check_import_status as _tm_check_import_status,
+    cleanup_task_snapshots as _tm_cleanup_task_snapshots,
+    save_snapshot as _tm_save_snapshot,
+    get_snapshot as _tm_get_snapshot,
+    delete_snapshot as _tm_delete_snapshot,
+    export_snapshots as _tm_export_snapshots,
+    compare_snapshots as _tm_compare_snapshots,
+    save_positions as _tm_save_positions,
+    load_positions as _tm_load_positions,
+    clear_positions as _tm_clear_positions,
+    list_archived_snapshots as _tm_list_archived_snapshots,
+    compare_with_archived as _tm_compare_with_archived,
+)
+
 
 
 # ==================== .gitignore 解析器 ====================
@@ -807,6 +825,143 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "shmSize": shm_size,
             "sourceSize": source_size,
         }
+
+    # ==================== 项目 Git 信息 ====================
+
+    @server.register("project.detectGitInfo")
+    def detect_git_info(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_detect_git_info(multi_db, pid)
+
+    @server.register("project.saveGitInfo")
+    def save_git_info(project_id: str = None, projectId: str = None,
+                      remote_url: str = None, current_branch: str = None,
+                      current_commit: str = None, latest_tag: str = None,
+                      tags: str = None, branches: str = None, recent_commits: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_save_git_info(multi_db, pid, remote_url, current_branch, current_commit,
+                                 latest_tag, tags, branches, recent_commits)
+
+    @server.register("project.getGitInfo")
+    def get_git_info(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_get_git_info(multi_db, pid)
+
+    @server.register("project.checkImportStatus")
+    def check_import_status(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_check_import_status(multi_db, pid)
+
+    @server.register("project.cleanupTaskSnapshots")
+    def cleanup_task_snapshots(task_id: str = None, taskId: str = None):
+        tid = task_id or taskId
+        if not tid: raise ValueError("task_id is required")
+        return _tm_cleanup_task_snapshots(multi_db, tid)
+
+    # ==================== 架构快照 ====================
+
+    @server.register("graph.saveSnapshot")
+    def save_snapshot(task_id: str = None, taskId: str = None, alias: str = None,
+                      project_id: str = None, projectId: str = None):
+        tid = task_id or taskId
+        pid = project_id or projectId
+        if not tid: raise ValueError("task_id is required")
+        if not pid: raise ValueError("project_id is required")
+        return _tm_save_snapshot(multi_db, tid, pid, alias)
+
+    @server.register("graph.getSnapshot")
+    def get_snapshot(task_id: str = None, taskId: str = None):
+        tid = task_id or taskId
+        if not tid: raise ValueError("task_id is required")
+        return _tm_get_snapshot(multi_db, tid)
+
+    @server.register("graph.deleteSnapshot")
+    def delete_snapshot(task_id: str = None, taskId: str = None):
+        tid = task_id or taskId
+        if not tid: raise ValueError("task_id is required")
+        return _tm_delete_snapshot(multi_db, tid)
+
+    @server.register("graph.exportSnapshots")
+    def export_snapshots(task_id: str = None, taskId: str = None):
+        tid = task_id or taskId
+        if not tid: raise ValueError("task_id is required")
+        return _tm_export_snapshots(multi_db, tid)
+
+    @server.register("graph.compareSnapshots")
+    def compare_snapshots(snapshot_id_a: str = None, snapshotIdA: str = None,
+                          snapshot_id_b: str = None, snapshotIdB: str = None):
+        sid_a = snapshot_id_a or snapshotIdA
+        sid_b = snapshot_id_b or snapshotIdB
+        if not sid_a or not sid_b: raise ValueError("snapshotIdA and snapshotIdB are required")
+        return _tm_compare_snapshots(multi_db, sid_a, sid_b)
+
+    # ==================== 图节点位置 ====================
+
+    @server.register("graph.savePositions")
+    def save_positions(task_id: str = None, taskId: str = None,
+                       edge_type: str = None, edgeType: str = None,
+                       drill_key: str = None, drillKey: str = None,
+                       snapshot_id: str = None, snapshotId: str = None,
+                       layout_type: str = None, layoutType: str = None,
+                       positions: list = None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        dk = drill_key or drillKey
+        lt = layout_type or layoutType
+        sid = snapshot_id or snapshotId
+        if not tid or not et or not dk or not lt:
+            raise ValueError("task_id, edge_type, drill_key, layout_type are required")
+        return _tm_save_positions(multi_db, tid, et, dk, lt, positions or [], sid)
+
+    @server.register("graph.loadPositions")
+    def load_positions(task_id: str = None, taskId: str = None,
+                       edge_type: str = None, edgeType: str = None,
+                       drill_key: str = None, drillKey: str = None,
+                       snapshot_id: str = None, snapshotId: str = None,
+                       layout_type: str = None, layoutType: str = None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        dk = drill_key or drillKey
+        lt = layout_type or layoutType
+        sid = snapshot_id or snapshotId
+        if not tid or not et or not dk or not lt:
+            raise ValueError("task_id, edge_type, drill_key, layout_type are required")
+        return _tm_load_positions(multi_db, tid, et, dk, lt, sid)
+
+    @server.register("graph.clearPositions")
+    def clear_positions(task_id: str = None, taskId: str = None,
+                        edge_type: str = None, edgeType: str = None,
+                        drill_key: str = None, drillKey: str = None,
+                        layout_type: str = None, layoutType: str = None):
+        tid = task_id or taskId
+        et = edge_type or edgeType
+        dk = drill_key or drillKey
+        lt = layout_type or layoutType
+        if not tid or not et or not dk or not lt:
+            raise ValueError("task_id, edge_type, drill_key, layout_type are required")
+        return _tm_clear_positions(multi_db, tid, et, dk, lt)
+
+    @server.register("graph.listArchivedSnapshots")
+    def list_archived_snapshots(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_list_archived_snapshots(multi_db, pid)
+
+    @server.register("graph.compareWithArchived")
+    def compare_with_archived(task_id: str = None, taskId: str = None,
+                              project_id: str = None, projectId: str = None,
+                              archived_id: str = None, archivedId: str = None):
+        tid = task_id or taskId
+        pid = project_id or projectId
+        aid = archived_id or archivedId
+        if not tid: raise ValueError("task_id is required")
+        if not pid: raise ValueError("project_id is required")
+        if not aid: raise ValueError("archived_id is required")
+        return _tm_compare_with_archived(multi_db, tid, pid, aid)
 
     # ==================== 分组管理方法 ====================
 

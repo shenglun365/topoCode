@@ -77,6 +77,11 @@ contextBridge.exposeInMainWorld('api', {
     checkPathValidity: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.checkPathValidity', params: { id } }),
     updateMeta: (id: string, meta: Record<string, any>) => ipcRenderer.invoke('ipc:call', { method: 'project.updateMeta', params: { id, ...meta } }),
     getStorageStats: (projectId: string) => ipcRenderer.invoke('ipc:call', { method: 'project.getStorageStats', params: { projectId } }),
+    detectGitInfo: (params: { projectId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.detectGitInfo', params }),
+    saveGitInfo: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'project.saveGitInfo', params }),
+    getGitInfo: (params: { projectId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.getGitInfo', params }),
+    checkImportStatus: (params: { projectId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.checkImportStatus', params }),
+    cleanupTaskSnapshots: (params: { taskId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.cleanupTaskSnapshots', params }),
   },
 
   // ==================== 分组管理 ====================
@@ -547,6 +552,20 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('mcp:status', listener)
       return () => ipcRenderer.removeListener('mcp:status', listener)
     },
+  },
+
+  // ==================== 架构快照 & 图位置 ====================
+  graph: {
+    saveSnapshot: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.saveSnapshot', params }),
+    getSnapshot: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.getSnapshot', params }),
+    deleteSnapshot: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.deleteSnapshot', params }),
+    exportSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.exportSnapshots', params }),
+    compareSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.compareSnapshots', params }),
+    savePositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.savePositions', params }),
+    loadPositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.loadPositions', params }),
+    clearPositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.clearPositions', params }),
+    listArchivedSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.listArchivedSnapshots', params }),
+    compareWithArchived: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.compareWithArchived', params }),
   },
 
   // ==================== 日志系统 ====================

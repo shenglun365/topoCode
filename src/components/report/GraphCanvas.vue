@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import CytoscapeGraph from './renderers/CytoscapeGraph.vue'
 import type { GraphNode, GraphEdge } from './renderers/CytoscapeGraph.vue'
+
+const cyRef = ref<InstanceType<typeof CytoscapeGraph>>()
+
+defineExpose({
+  getAllPositions: () => cyRef.value?.getAllPositions(),
+})
 
 const props = defineProps<{
   nodes: GraphNode[]
@@ -15,6 +22,7 @@ const props = defineProps<{
   zoomLevel?: number
   fontSize?: number
   fullscreen?: boolean
+  positions?: Record<string, { x: number; y: number }>
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +35,7 @@ const emit = defineEmits<{
 
 <template>
   <CytoscapeGraph
+    ref="cyRef"
     :nodes="nodes"
     :edges="edges"
     :style="style === 'dagre' ? 'dagre' : 'force'"
@@ -39,6 +48,7 @@ const emit = defineEmits<{
     :zoom-level="zoomLevel"
     :font-size="fontSize"
     :fullscreen="fullscreen"
+    :positions="positions"
     @node-dblclick="(id: string) => emit('node-dblclick', id)"
     @node-drag-end="(id: string, x: number, y: number) => emit('node-drag-end', id, x, y)"
     @node-context-menu="(id: string) => emit('node-context-menu', id)"
