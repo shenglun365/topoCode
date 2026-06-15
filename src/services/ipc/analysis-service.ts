@@ -7,6 +7,7 @@ import type {
   SaveCommunityResultResponse, ListCommunityResultsResponse,
   UpdateCommunityNameResponse, SuccessResponse, TaskProgressEvent,
   TaskCompleteEvent, TaskErrorEvent,
+  TimelineEntry, TimelineEntryCommunity,
 } from '@/types/ipc'
 
 function adaptTask(t: any): AnalysisTask {
@@ -77,8 +78,8 @@ export interface AnalysisService {
   getCrossCommunityEdges(params: { taskId: string; edgeType: string; commLv: string }): Promise<CrossCommunityEdgesResult>
   getCommunityNodeLists(params: { taskId: string; edgeType: string; commLv: string }): Promise<Record<string, string[]>>
   startArchAnalysis(params: { taskId: string; edgeType: string; level: string; modelId?: string }): Promise<{ taskId: string; success: boolean }>
-  listArchSnapshots(params: { taskId: string }): Promise<Array<{ id: string; ts: string; commCount: number; summary: string }>>
-  getArchSnapshot(params: { taskId: string; versionId: string }): Promise<Array<{ communityId: string; name: string; nodeCount: number; qualityScore: number; summary: string }>>
+  listTimeline(params: { projectId: string }): Promise<TimelineEntry[]>
+  getTimelineEntry(params: { timelineId: string }): Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
   startArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string }>
   stopArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
   getAgentProgress(params: { agentTaskId: string }): Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
@@ -184,11 +185,11 @@ export function createAnalysisService(api: any): AnalysisService {
     startArchAnalysis: async (params) => {
       return await api.analysis.startArchAnalysis(params) as { taskId: string; success: boolean }
     },
-    listArchSnapshots: async (params) => {
-      return await api.analysis.listArchSnapshots(params)
+    listTimeline: async (params) => {
+      return await api.analysis.listTimeline(params)
     },
-    getArchSnapshot: async (params) => {
-      return await api.analysis.getArchSnapshot(params)
+    getTimelineEntry: async (params) => {
+      return await api.analysis.getTimelineEntry(params)
     },
     startArchTrack: async (params) => {
       return await api.analysis.startArchTrack(params) as { versionId: string }

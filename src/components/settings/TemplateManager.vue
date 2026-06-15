@@ -53,6 +53,7 @@ const editMode = ref<'edit' | 'create'>('create')
 const editTab = ref<'basic' | 'prompts' | 'schema' | 'advanced'>('basic')
 
 const restoreDialog = ref(false)
+const saveError = ref('')
 const restoreLoading = ref(false)
 
 async function loadTemplates() {
@@ -78,6 +79,7 @@ async function loadTemplates() {
 function openEdit(tmpl: TemplateItem) {
   editing.value = { ...tmpl }
   editMode.value = 'edit'
+  saveError.value = ''
   editDialog.value = true
 }
 
@@ -133,7 +135,7 @@ async function saveTemplate() {
     await loadTemplates()
   } catch (e: any) {
     console.error('[TemplateManager] Save failed:', e)
-    alert(e.message || String(e))
+    saveError.value = e.message || String(e)
   }
 }
 
@@ -146,7 +148,7 @@ async function restoreDefaults() {
     await loadTemplates()
   } catch (e: any) {
     console.error('[TemplateManager] Restore failed:', e)
-    alert(e.message || String(e))
+    saveError.value = e.message || String(e)
   } finally {
     restoreLoading.value = false
   }
@@ -350,6 +352,7 @@ onMounted(() => {
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
+          <div v-if="saveError" class="dialog-error">{{ saveError }}</div>
 
           <!-- 子 Tab 切换 -->
           <div class="edit-tabs">
@@ -576,6 +579,15 @@ onMounted(() => {
 <style scoped>
 .template-manager {
   max-width: 900px;
+}
+.dialog-error {
+  padding: 8px 14px;
+  margin: 0 4px 4px;
+  background: rgba(239, 68, 68, .1);
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  font-size: 12px;
 }
 .default-locale-bar {
   display: flex;

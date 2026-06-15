@@ -7,12 +7,14 @@ const cyRef = ref<InstanceType<typeof CytoscapeGraph>>()
 
 defineExpose({
   getAllPositions: () => cyRef.value?.getAllPositions(),
+  zoomIn: () => cyRef.value?.zoomIn(),
+  zoomOut: () => cyRef.value?.zoomOut(),
 })
 
 const props = defineProps<{
   nodes: GraphNode[]
   edges: GraphEdge[]
-  style: 'force' | 'dagre'
+  style: 'force'
   highlightedIds?: Set<string>
   hiddenIds?: Set<string>
   resetTrigger?: number
@@ -38,7 +40,7 @@ const emit = defineEmits<{
     ref="cyRef"
     :nodes="nodes"
     :edges="edges"
-    :style="style === 'dagre' ? 'dagre' : 'force'"
+    :style="style"
     :highlighted-ids="highlightedIds"
     :hidden-ids="hiddenIds"
     :reset-trigger="resetTrigger"

@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import cytoscape from 'cytoscape'
-import dagre from 'cytoscape-dagre'
-
-cytoscape.use(dagre)
 
 export interface GraphNode {
   id: string
   label: string
   nodeCount?: number
   qualityScore?: number | null
+  avgCoreness?: number
+  maxCoreness?: number
   status?: string
   hasChildren?: boolean
   isExternal?: boolean
@@ -27,7 +26,7 @@ export interface GraphEdge {
 const props = defineProps<{
   nodes: GraphNode[]
   edges: GraphEdge[]
-  style: 'dagre' | 'force'
+  style: 'force'
   highlightedIds?: Set<string>
   hiddenIds?: Set<string>
   resetTrigger?: number
@@ -52,7 +51,9 @@ const tooltip = ref<HTMLDivElement>()
 let cy: cytoscape.Core | null = null
 
 function getNodeRadius(n: GraphNode): number {
-  const countRadius = Math.sqrt(n.nodeCount || 5) * 3 + 14
+  const baseCount = n.nodeCount || 5
+  const coreBoost = n.avgCoreness ? 1 + Math.min(n.avgCoreness / 10, 0.5) : 1
+  const countRadius = (Math.sqrt(baseCount) * 3 + 14) * coreBoost
   const textRadius = Math.min(n.label.length * 2 + 14, 38)
   return Math.round(Math.max(textRadius, Math.min(40, countRadius)))
 }
@@ -63,7 +64,18 @@ function nodeColor(n: GraphNode): string {
   if (n.compareState === 'changed') return '#f97316'
   if (n.compareState === 'unchanged') return '#6b7280'
   if (n.isExternal) return '#f59e0b'
+  if (n.avgCoreness != null && n.avgCoreness >= 0.5) {
+    const t = Math.min(n.avgCoreness / 8, 1)
+    return corenessGradient(t)
+  }
   return '#60a5fa'
+}
+
+function corenessGradient(t: number): string {
+  const r = Math.round(59 + (239 - 59) * t)
+  const g = Math.round(130 + (68 - 130) * t)
+  const b = Math.round(246 + (68 - 246) * t)
+  return `rgb(${r},${g},${b})`
 }
 
 function buildCytoscape() {
@@ -199,31 +211,25 @@ function buildCytoscape() {
   let dragNodeId = ''
   let dragPrevPos: { x: number; y: number } | null = null
 
-  cy.on('dragfree', 'node', (evt: any) => {
-    if (!evt.target.data('_isMerged')) {
-      dragNodeId = evt.target.id()
-      dragPrevPos = { ...evt.target.position() }
-    }
-  })
-  cy.on('dragfreeon', 'node', (evt: any) => {
-    const node = evt.target
-    if (!node.data('_isMerged') && dragNodeId === node.id()) {
-      dragNodeId = ''
-      dragPrevPos = null
-      const pos = node.position()
-      emit('node-drag-end', node.id(), pos.x, pos.y)
-    }
-  })
-
   cy.on('grab', 'node', (evt: any) => {
     const node = evt.target
     if (node.data('_isMerged')) return
+    dragNodeId = node.id()
+    dragPrevPos = { ...node.position() }
+    console.log('[CytoscapeGraph] grab', dragNodeId, 'pos:', dragPrevPos.x.toFixed(1), dragPrevPos.y.toFixed(1))
     if (props.lockMode === 'locked') {
       cy?.nodes().forEach(n => { if (!n.same(node) && !n.data('_isMerged')) n.lock() })
     }
-    dragPrevPos = { ...node.position() }
   })
-  cy.on('free', 'node', () => {
+  cy.on('free', 'node', (evt: any) => {
+    const node = evt.target
+    if (node.data('_isMerged')) return
+    if (dragNodeId === node.id()) {
+      const pos = node.position()
+      console.log('[CytoscapeGraph] free → emit node-drag-end', node.id(), 'pos:', pos.x.toFixed(1), pos.y.toFixed(1))
+      emit('node-drag-end', node.id(), pos.x, pos.y)
+    }
+    dragNodeId = ''
     dragPrevPos = null
     if (props.lockMode === 'locked') {
       cy?.nodes().forEach(n => { n.unlock() })
@@ -279,28 +285,17 @@ function buildCytoscape() {
 
   // run layout after all event handlers registered
   const layout = cy.layout(
-    props.style === 'dagre'
-      ? { name: 'dagre', rankDir: 'LR', nodeSep: 40, rankSep: 60, edgeSep: 20, fit: false }
-      : { name: 'cose', idealEdgeLength: 200, nodeRepulsion: props.repulsion || 15000, nodeOverlap: 40, gravity: 1.0, fit: false, animate: true, animationDuration: 1500, numIter: 4000 }
+    { name: 'cose', idealEdgeLength: 200, nodeRepulsion: props.repulsion || 15000, nodeOverlap: 40, gravity: 1.0, fit: false, animate: false, numIter: 4000 }
   )
 
-  if (props.style === 'dagre') {
-    layout.run()
-    nextTick(() => {
-      if (!cy) return
-      cy.zoom(1.0)
-      centerOnConnected()
-      applyPresetPositions()
-    })
-  } else {
-    cy.one('layoutstop', () => {
-      if (!cy) return
-      cy.zoom(1.0)
-      centerOnConnected()
-      applyPresetPositions()
-    })
-    layout.run()
-  }
+  lastAppliedRepulsion = props.repulsion || 15000
+  cy.one('layoutstop', () => {
+    if (!cy) return
+    cy.zoom(1.0)
+    centerOnConnected()
+    applyPresetPositions()
+  })
+  layout.run()
 
   cy.on('zoom', () => {
     emit('zoom-changed', cy?.zoom() ?? 1)
@@ -351,12 +346,9 @@ function escapeHtml(s: string) {
 
 function destroyCy() {
   if (!cy) return
-  try {
-    const running = cy.layout({ name: 'preset' } as any)
-    if (running) running.stop()
-  } catch (_) {}
   const inst = cy
   cy = null
+  try { inst.layout().stop() } catch (_) {}
   try { inst.destroy() } catch (_) {}
 }
 
@@ -367,10 +359,13 @@ function centerOnConnected() {
   cy.center(connected)
 }
 
+let applyingPreset = false
+
 function applyPresetPositions() {
-  if (!cy || !props.positions) return
+  if (applyingPreset || !cy || !props.positions) return
   const pos = props.positions
   const preset: Record<string, { x: number; y: number }> = {}
+  const totalNodes = cy.nodes().length
   cy.nodes().forEach((n: any) => {
     const id = n.data('id')
     if (pos[id]) {
@@ -378,12 +373,18 @@ function applyPresetPositions() {
     }
   })
   if (Object.keys(preset).length === 0) return
+  const sampleIds = Object.keys(preset).slice(0, 3)
+  console.log('[CytoscapeGraph] applyPresetPositions style=', props.style, 'matching nodes=', Object.keys(preset).length, '/', totalNodes, 'sample=', sampleIds.map(id => `${id}=(${preset[id].x.toFixed(0)},${preset[id].y.toFixed(0)})`))
+  applyingPreset = true
   try {
-    cy.layout({ name: 'preset', positions: preset, fit: false, zoom: 1.0, animate: true, animationDuration: 300 } as any).run()
+    try { cy!.layout().stop() } catch (_) {}
+    cy!.layout({ name: 'preset', positions: preset, fit: false } as any).run()
   } catch (_) {}
+  applyingPreset = false
 }
 
 let repulsionTimer: ReturnType<typeof setTimeout> | null = null
+let lastAppliedRepulsion: number | undefined
 
 onMounted(() => { nextTick(buildCytoscape) })
 onUnmounted(() => { if (repulsionTimer) clearTimeout(repulsionTimer); if (offScreenTimer) clearTimeout(offScreenTimer); destroyCy() })
@@ -392,12 +393,15 @@ watch(() => props.resetTrigger, () => { destroyCy(); nextTick(buildCytoscape) })
 watch(() => [props.nodes, props.edges, props.style, props.hiddenIds], () => { destroyCy(); nextTick(buildCytoscape) }, { deep: false })
 
 watch(() => props.repulsion, (v) => {
-  if (!cy || props.style === 'dagre') return
+  if (!cy) return
+  const r = v || 15000
+  if (r === lastAppliedRepulsion) return
+  lastAppliedRepulsion = r
   if (repulsionTimer) clearTimeout(repulsionTimer)
   repulsionTimer = setTimeout(() => {
     try {
       const layout = cy!.layout({
-        name: 'cose', idealEdgeLength: 200, nodeRepulsion: v || 15000,
+        name: 'cose', idealEdgeLength: 200, nodeRepulsion: r,
         nodeOverlap: 40, gravity: 1.0, fit: false, animate: true,
         animationDuration: 1500, numIter: 4000,
       })
@@ -497,6 +501,16 @@ function scheduleOffScreenCheck() {
   offScreenTimer = setTimeout(checkOffScreen, 100)
 }
 
+function zoomIn() {
+  if (!cy) return
+  cy.zoom({ level: cy.zoom() * 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+}
+
+function zoomOut() {
+  if (!cy) return
+  cy.zoom({ level: cy.zoom() / 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
+}
+
 defineExpose({
   getAllPositions: (): Record<string, { x: number; y: number }> => {
     if (!cy) return {}
@@ -507,6 +521,8 @@ defineExpose({
     })
     return result
   },
+  zoomIn,
+  zoomOut,
 })
 </script>
 
@@ -524,6 +540,10 @@ defineExpose({
       @click.stop="panDir(d)"
     >
       <span class="cg-offscreen-arrow" />
+    </div>
+    <div class="cg-zoom-btns" :style="props.fullscreen ? { bottom: '52px' } : undefined">
+      <button class="cg-zoom-btn" @click="zoomOut" title="缩小">−</button>
+      <button class="cg-zoom-btn" @click="zoomIn" title="放大">+</button>
     </div>
   </div>
 </template>
@@ -591,4 +611,19 @@ defineExpose({
 .cg-offscreen-w  .cg-offscreen-arrow { transform: rotate(270deg); }
 .cg-offscreen-nw { top: 6px; left: 6px; }
 .cg-offscreen-nw .cg-offscreen-arrow { transform: rotate(315deg); }
+
+.cg-zoom-btns {
+  position: absolute; bottom: 12px; left: 12px; z-index: 211;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cg-zoom-btn {
+  width: 26px; height: 26px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.9rem; font-weight: 700;
+  background: var(--bg-primary); color: var(--text-muted);
+  border: 1px solid var(--border); cursor: pointer;
+}
+.cg-zoom-btn:first-child { border-radius: 0.25rem 0.25rem 0 0; }
+.cg-zoom-btn:last-child { border-radius: 0 0 0.25rem 0.25rem; }
+.cg-zoom-btn:hover { color: var(--text-primary); border-color: var(--accent); }
 </style>

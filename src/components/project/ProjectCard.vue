@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
@@ -9,6 +9,10 @@ import {
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
   ArchiveBoxXMarkIcon,
+  XMarkIcon,
+  CheckIcon,
+  DocumentPlusIcon,
+  DocumentMinusIcon,
 } from '@heroicons/vue/24/outline'
 import { StarIcon } from '@heroicons/vue/24/solid'
 import type { Project, GroupNode } from '@/types/ipc'
@@ -43,6 +47,9 @@ async function loadStorageStats() {
 }
 
 onMounted(loadStorageStats)
+onUnmounted(() => {
+  if (pinnedWarningTimer) clearTimeout(pinnedWarningTimer)
+})
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -58,6 +65,14 @@ const emit = defineEmits<{
 // 菜单状态
 const menuVisible = ref(false)
 const menuPosition = ref({ x: 0, y: 0 })
+const pinnedWarning = ref(false)
+let pinnedWarningTimer: ReturnType<typeof setTimeout> | null = null
+
+const changesDialogVisible = ref(false)
+const changesLoading = ref(false)
+const changesResult = ref<{ added: string[]; modified: string[]; deleted: string[]; hasChanges: boolean } | null>(null)
+const changesError = ref<string | null>(null)
+const changesActiveTab = ref<'added' | 'modified' | 'deleted'>('modified')
 
 // 确认弹窗状态
 const showDeleteConfirm = ref(false)
@@ -151,7 +166,9 @@ async function togglePinned() {
     // 检查置顶数量（最多10个）
     const pinnedCount = projectStore.projects.filter(p => p.pinned).length
     if (pinnedCount >= 10) {
-      alert(t('project.maxPinnedReached'))
+      pinnedWarning.value = true
+      if (pinnedWarningTimer) clearTimeout(pinnedWarningTimer)
+      pinnedWarningTimer = setTimeout(() => { pinnedWarning.value = false }, 2500)
       return
     }
     await projectStore.updateProjectMeta(props.project.id, { pinned: 1 })
@@ -305,19 +322,24 @@ async function onClearCacheDone() {
 
 async function handleCheckChanges() {
   hideMenu()
+  changesLoading.value = true
+  changesResult.value = null
+  changesError.value = null
+  changesDialogVisible.value = true
   try {
     const result = await projectStore.checkFileChanges(props.project.id)
-    if (result.hasChanges) {
-      const msg = `${result.added.length} added, ${result.modified.length} modified, ${result.deleted.length} deleted`
-      if (confirm(`${msg}\n${t('project.resyncConfirm')}`)) {
-        await projectStore.syncProject(props.project.id)
-      }
-    } else {
-      alert(t('project.noChanges'))
-    }
-  } catch (err) {
+    changesResult.value = result
+  } catch (err: any) {
     console.error('Failed to check changes:', err)
+    changesError.value = err?.message || '检查失败'
+  } finally {
+    changesLoading.value = false
   }
+}
+
+async function handleResyncFromDialog() {
+  changesDialogVisible.value = false
+  await projectStore.syncProject(props.project.id)
 }
 
 </script>
@@ -606,6 +628,95 @@ async function handleCheckChanges() {
       @confirm="confirmPathChange"
     />
   </div>
+
+  <Teleport to="body">
+    <div v-if="pinnedWarning" class="projectcard-toast">{{ t('project.maxPinnedReached') }}</div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div
+      v-if="changesDialogVisible"
+      class="dialog-overlay"
+      @click.self="!changesLoading && (changesDialogVisible = false)"
+    >
+      <div class="changes-dialog">
+        <div class="changes-dialog-header">
+          <span class="changes-dialog-title">文件变更检查 — {{ project.name || project.rootPath || project.path }}</span>
+          <button
+            v-if="!changesLoading"
+            class="btn-close"
+            @click="changesDialogVisible = false"
+          >
+            <XMarkIcon class="w-4 h-4" />
+          </button>
+        </div>
+
+        <div v-if="changesLoading" class="changes-dialog-loading">
+          <div class="spinner" />
+          <span>正在扫描文件变更...</span>
+        </div>
+
+        <div v-else-if="changesError" class="changes-dialog-body">
+          <div class="changes-dialog-error">
+            <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
+            <span>{{ changesError }}</span>
+          </div>
+          <div class="changes-dialog-actions">
+            <button class="btn btn-primary btn-sm" @click="changesDialogVisible = false">关闭</button>
+          </div>
+        </div>
+
+        <div v-else-if="changesResult && !changesResult.hasChanges" class="changes-dialog-body">
+          <div class="changes-dialog-ok">
+            <CheckIcon class="w-5 h-5 text-success" />
+            <span>{{ t('project.noChanges') }}</span>
+          </div>
+          <div class="changes-dialog-actions">
+            <button class="btn btn-primary btn-sm" @click="changesDialogVisible = false">关闭</button>
+          </div>
+        </div>
+
+        <div v-else-if="changesResult && changesResult.hasChanges" class="changes-dialog-body">
+          <div class="changes-tabs">
+            <button
+              class="changes-tab"
+              :class="{ active: changesActiveTab === 'modified' }"
+              @click="changesActiveTab = 'modified'"
+            >修改 ({{ changesResult.modified.length }})</button>
+            <button
+              class="changes-tab"
+              :class="{ active: changesActiveTab === 'added' }"
+              @click="changesActiveTab = 'added'"
+            >新增 ({{ changesResult.added.length }})</button>
+            <button
+              class="changes-tab"
+              :class="{ active: changesActiveTab === 'deleted' }"
+              @click="changesActiveTab = 'deleted'"
+            >删除 ({{ changesResult.deleted.length }})</button>
+          </div>
+          <div class="changes-file-list">
+            <div
+              v-for="fp in changesResult[changesActiveTab]"
+              :key="fp"
+              class="changes-file-row"
+            >
+              <DocumentPlusIcon v-if="changesActiveTab === 'added'" class="w-3.5 h-3.5 text-success flex-shrink-0" />
+              <DocumentMinusIcon v-else-if="changesActiveTab === 'deleted'" class="w-3.5 h-3.5 text-danger flex-shrink-0" />
+              <PencilIcon v-else class="w-3.5 h-3.5 text-warning flex-shrink-0" />
+              <span class="changes-file-path">{{ fp }}</span>
+            </div>
+            <div v-if="changesResult[changesActiveTab].length === 0" class="changes-file-empty">无变更文件</div>
+          </div>
+          <div class="changes-dialog-actions">
+            <button class="btn btn-ghost btn-sm" @click="changesDialogVisible = false">关闭</button>
+            <button class="btn btn-primary btn-sm" @click="handleResyncFromDialog">
+              {{ t('project.resyncConfirm') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -846,4 +957,155 @@ async function handleCheckChanges() {
   color: var(--text-muted);
   margin-bottom: 16px;
 }
+
+.projectcard-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 24px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+  font-size: 13px;
+  z-index: 2000;
+  animation: projectcard-toast-in .2s ease;
+}
+@keyframes projectcard-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 文件变更检查弹窗 */
+.changes-dialog {
+  width: 540px;
+  max-height: 70vh;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.changes-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.changes-dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.changes-dialog-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.changes-dialog-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 48px 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.changes-dialog-loading .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.changes-dialog-ok {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 18px 10px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.changes-dialog-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 20px 18px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.changes-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0 18px;
+}
+.changes-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.changes-tab:hover { color: var(--text-primary); }
+.changes-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.changes-file-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.changes-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.changes-file-row:hover { background: var(--bg-hover); }
+.changes-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.changes-file-empty {
+  padding: 16px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.changes-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--border);
+}
+.btn-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.btn-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>

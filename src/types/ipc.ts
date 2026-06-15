@@ -501,14 +501,14 @@ export interface IPCAPI {
     getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
     getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
     getReportDashboard: (taskId: string) => Promise<{ task: any; callLevels: any; depLevels: any; callResults: { results: any[] }; depResults: { results: any[] }; fileStats: any }>
-    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number }> }>; totalUniqueFiles: number }>
+    getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number; metadata?: { avgCoreness?: number; maxCoreness?: number; coreNodeRatio?: number } }> }>; totalUniqueFiles: number }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
     getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<Record<string, string[]>>
     startArchAnalysis: (params: { taskId: string; edgeType: string; level: string; modelId?: string }) => Promise<{ taskId: string; success: boolean }>
-    listArchSnapshots: (params: { taskId: string }) => Promise<Array<{ id: string; ts: string; commCount: number; summary: string }>>
-    getArchSnapshot: (params: { taskId: string; versionId: string }) => Promise<Array<{ communityId: string; name: string; nodeCount: number; qualityScore: number; summary: string }>>
+    listTimeline: (params: { projectId: string }) => Promise<TimelineEntry[]>
+    getTimelineEntry: (params: { timelineId: string }) => Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
     startArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string }>
     stopArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
@@ -699,17 +699,20 @@ export interface IPCAPI {
     onPanelToggle: (channel: string, callback: () => void) => () => void
   }
 
-  // 架构快照 + 图位置
+  // 架构时间线 + 图位置
   graph: {
     saveSnapshot: (params: { taskId: string; projectId: string; alias?: string }) => Promise<{ snapshotId: string; status: string }>
-    getSnapshot: (params: { taskId: string }) => Promise<{ snapshot: ArchSnapshot | null }>
-    deleteSnapshot: (params: { taskId: string }) => Promise<{ deleted: number }>
+    getSnapshot: (params: { taskId: string; snapshotId?: string }) => Promise<{ snapshot: TimelineEntry | null }>
+    deleteSnapshot: (params: { taskId: string; snapshotId?: string }) => Promise<{ deleted: number }>
     exportSnapshots: (params: { taskId: string }) => Promise<{ exported: number }>
-    compareSnapshots: (params: { snapshotIdA: string; snapshotIdB: string }) => Promise<SnapshotCompareResult>
+    compareSnapshots: (params: { snapshotIdA?: string; snapshotIdB?: string; taskIdA?: string; taskIdB?: string }) => Promise<SnapshotCompareResult>
+    promoteTimelineEntry: (params: { taskId: string; timelineId: string }) => Promise<{ success: boolean }>
+    timelineGC: (params: { projectId: string }) => Promise<{ deleted: number }>
     savePositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; positions: PositionEntry[]; snapshotId?: string }) => Promise<{ saved: number }>
     loadPositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; snapshotId?: string }) => Promise<{ positions: Record<string, NodePosition> }>
     clearPositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string }) => Promise<{ deleted: number }>
-    listArchivedSnapshots: (params: { projectId: string }) => Promise<{ snapshots: ArchivedSnapshotMeta[] }>
+    listSavedPositionKeys: (params: { projectId: string }) => Promise<{ keys: SavedPositionKey[] }>
+    listArchivedSnapshots: (params: { projectId: string }) => Promise<{ snapshots: ArchiveMeta[] }>
     compareWithArchived: (params: { taskId: string; projectId: string; archivedId: string }) => Promise<SnapshotCompareResult>
   }
 
@@ -833,7 +836,7 @@ export type TaskRunDTO = TaskRun
 export type ScanOptionsDTO = ScanOptions
 export type TaskConfigUpdateDTO = TaskConfigUpdate
 
-// ==================== 快照 & 位置 类型 ====================
+// ==================== 架构时间线 & 位置 类型 ====================
 
 export interface GitInfo {
   projectId?: string
@@ -848,11 +851,14 @@ export interface GitInfo {
   manuallyEdited?: number
 }
 
-export interface ArchSnapshotCommunity {
+export interface TimelineEntryCommunity {
   communityId: string
   edgeType: string
   level: string
   name: string | null
+  summary: string | null
+  mermaid: string | null
+  plantuml: string | null
   nodeCount: number
   fileCount: number
   qualityScore: number | null
@@ -861,19 +867,23 @@ export interface ArchSnapshotCommunity {
   edgeList?: any[]
 }
 
-export interface ArchSnapshot {
+export interface TimelineEntry {
   id: string
   taskId: string
-  alias: string | null
   projectId: string
+  type: 'archtrack' | 'manual'
+  alias: string | null
   timestamp: string
+  versionTag?: string
+  sourceVersion?: string
   gitBranch: string | null
   gitCommit: string | null
   gitTag: string | null
   communityCount: number
   totalFiles: number
-  exported: number
-  communities?: ArchSnapshotCommunity[]
+  exported: boolean
+  isActive: boolean
+  communities?: TimelineEntryCommunity[]
 }
 
 export interface SnapshotCompareItem {
@@ -908,8 +918,17 @@ export interface NodePosition {
   y: number
 }
 
-export interface ArchivedSnapshotMeta {
+export interface SavedPositionKey {
+  taskId: string
+  edgeType: string
+  drillKey: string
+  layoutType: string
+  count: number
+}
+
+export interface ArchiveMeta {
   id: string
+  type: string
   alias: string | null
   taskId: string
   timestamp: string
@@ -917,6 +936,7 @@ export interface ArchivedSnapshotMeta {
   gitCommit: string | null
   communityCount: number
   totalFiles: number
+  file: string
 }
 
 export {}

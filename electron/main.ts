@@ -188,7 +188,10 @@ function setupIPC() {
 
   // ---- ZeroMQ RPC 调用 ----
   ipcMain.handle('ipc:call', async (_, { method, params }: { method: string; params: Record<string, any> }) => {
-    console.log(`[Main] ipc:call -> ${method}`, params)
+    const logParams = method === 'graph.savePositions' && params?.positions
+      ? { ...params, positions: `${params.positions.length} entries` }
+      : params
+    console.log(`[Main] ipc:call -> ${method}`, logParams)
     try {
       const result = await zmqRouter.call(method, params)
       console.log(`[Main] ipc:call <- ${method} (success)`)

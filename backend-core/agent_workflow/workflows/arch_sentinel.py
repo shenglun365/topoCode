@@ -6,24 +6,10 @@ ArchSentinel — 架构哨兵工作流。
       → AgentRuntime.start(ArchSentinel) → 记录快照 vN
   ... 用户编码 ...
   GUI [结束追踪] / MCP skill / CLI track stop / 三方 MCP tool
-      → AgentRuntime.stop(ArchSentinel) → diff v(N-1)→vN → LLM 摘要 → JSONL
+      → AgentRuntime.stop(ArchSentinel) → diff v(N-1)→vN → LLM 摘要
 
-使用方式:
-    workflow = ArchSentinelWorkflow()
-    context = {
-        "task_id": "...",
-        "project_root": "...",
-        "action": "start" | "stop",
-        "tag": "v13",
-        "commit": "abc123",
-        "communities": [...],
-        "previous_version": "v12",
-        "llm_chat_fn": async_callable,
-        "git_adapter": git,                    # GitAdapter 实例
-        "diff_engine": engine,                  # DiffEngine 实例
-        "snapshot_store": store,                # SnapshotStore 实例
-        "append_jsonl_fn": async_callable,      # async fn(file_path, entry) → None
-    }
+持久化由 startArchTrack / stopArchTrack 同步写入 arch_timeline 表完成，
+Agent 工作流仅负责 diff + LLM 摘要生成。
 """
 
 from __future__ import annotations
@@ -36,47 +22,6 @@ from ..tools import AgentTool, ToolResult
 from ..workflows.base import AgentWorkflow, AgentStep, WorkflowResult
 
 logger = logging.getLogger(__name__)
-
-
-class _SnapshotTool(AgentTool):
-    """记录当前架构快照"""
-
-    name = "snapshot_architecture"
-    description = "捕获当前架构状态（社区列表、节点数、质量分），追加入 versions.jsonl 和 communities.jsonl"
-    category = "persistence"
-
-    def __init__(self, append_jsonl_fn: Callable, snapshot_store: Any = None):
-        self._append = append_jsonl_fn
-        self._store = snapshot_store
-
-    async def execute(self, version_id: str, tag: str, timestamp: str,
-                      communities: list[dict], commit: str = "",
-                      trigger: str = "manual", **kwargs) -> ToolResult:
-        try:
-            version_entry = {
-                "id": version_id, "ts": timestamp, "trigger": trigger,
-                "commit": commit, "comm_count": len(communities),
-            }
-            if self._append:
-                await self._append("versions.jsonl", version_entry)
-
-            for c in communities:
-                comm_entry = {
-                    "v": version_id,
-                    "cid": c.get("communityId") or c.get("comm_id", ""),
-                    "name": c.get("name", ""),
-                    "nodes": c.get("node_count", 0),
-                    "score": c.get("quality_score", 0),
-                    "summary": c.get("summary", ""),
-                }
-                if self._append:
-                    await self._append("communities.jsonl", comm_entry)
-
-            logger.info(f"[ArchSentinel] snapshot {version_id}: {len(communities)} communities")
-            return ToolResult.ok(data={"version": version_id, "communities": len(communities)})
-        except Exception as e:
-            logger.warning(f"[ArchSentinel] snapshot failed: {e}")
-            return ToolResult.fail(str(e))
 
 
 class _DiffTool(AgentTool):
@@ -187,37 +132,6 @@ class _SummarizeTool(AgentTool):
             return ToolResult.fail(str(e))
 
 
-class _SaveDeltaTool(AgentTool):
-    """持久化变更事件到 deltas.jsonl"""
-
-    name = "save_delta"
-    description = "将变更事件追加到 deltas.jsonl"
-    category = "persistence"
-
-    def __init__(self, append_jsonl_fn: Callable):
-        self._append = append_jsonl_fn
-
-    async def execute(self, from_version: str, to_version: str, diff_data: dict,
-                      summary: str = "", risk: str = "low", **kwargs) -> ToolResult:
-        try:
-            delta_entry = {
-                "from": from_version, "to": to_version,
-                "added": diff_data.get("added_count", 0),
-                "removed": diff_data.get("removed_count", 0),
-                "changed": diff_data.get("changed_count", 0),
-                "risk": risk,
-                "summary": summary[:200] if summary else "",
-            }
-            if self._append:
-                await self._append("deltas.jsonl", delta_entry)
-
-            logger.info(f"[ArchSentinel] delta saved: {from_version} → {to_version}")
-            return ToolResult.ok(data=delta_entry)
-        except Exception as e:
-            logger.warning(f"[ArchSentinel] save_delta failed: {e}")
-            return ToolResult.fail(str(e))
-
-
 # ────────────────────── 工作流 ──────────────────────
 
 class ArchSentinelWorkflow(AgentWorkflow):
@@ -231,32 +145,16 @@ class ArchSentinelWorkflow(AgentWorkflow):
 
         if action == "start":
             return [AgentStep(
-                tool="snapshot_architecture",
+                tool="diff_architecture",
                 args={
-                    "version_id": context.get("version_id", ""),
-                    "tag": context.get("tag", ""),
-                    "timestamp": context.get("timestamp", ""),
-                    "communities": context.get("communities", []),
-                    "commit": context.get("commit", ""),
-                    "trigger": context.get("trigger", "manual"),
+                    "previous_communities": [],
+                    "current_communities": context.get("communities", []),
                 },
-                description=f"记录快照: {context.get('version_id', '')}",
+                description=f"对比架构差异: {context.get('version_id', '')}",
             )]
 
         elif action == "stop":
             return [
-                AgentStep(
-                    tool="snapshot_architecture",
-                    args={
-                        "version_id": context.get("version_id", ""),
-                        "tag": context.get("tag", ""),
-                        "timestamp": context.get("timestamp", ""),
-                        "communities": context.get("communities", []),
-                        "commit": context.get("commit", ""),
-                        "trigger": context.get("trigger", "manual"),
-                    },
-                    description=f"记录快照: {context.get('version_id', '')}",
-                ),
                 AgentStep(
                     tool="diff_architecture",
                     args={
@@ -273,32 +171,26 @@ class ArchSentinelWorkflow(AgentWorkflow):
                     },
                     description="LLM 生成变更摘要",
                 ),
-                AgentStep(
-                    tool="save_delta",
-                    args={
-                        "from_version": context.get("previous_version", ""),
-                        "to_version": context.get("version_id", ""),
-                    },
-                    description="持久化变更事件",
-                ),
             ]
 
         return []
 
     def finalize(self, results: dict[str, Any]) -> WorkflowResult:
-        snapshot = results.get("snapshot_architecture", {})
         summary = results.get("summarize_changes", "")
         diff = results.get("diff_architecture", {})
 
-        version = snapshot.get("version", "?") if isinstance(snapshot, dict) else "?"
+        version = (
+            results.get("snapshot_architecture", {}).get("version", "?")
+            if isinstance(results.get("snapshot_architecture"), dict)
+            else "?"
+        )
         risk = diff.get("risk", "low") if isinstance(diff, dict) else "low"
 
         return WorkflowResult(
             success=True,
             data={
-                "version": version,
                 "summary": summary,
                 "diff": diff,
             },
-            summary=f"架构变更追踪完成: {version} (风险: {risk})",
+            summary=f"架构变更追踪完成 (风险: {risk})",
         )

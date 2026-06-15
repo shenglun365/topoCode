@@ -1,156 +1,128 @@
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
+import { ref, onMounted, onUnmounted } from 'vue'
 import {
-  ArrowsPointingOutIcon,
-  ArrowUturnLeftIcon,
-  TableCellsIcon,
-  ChartBarIcon,
-  Squares2X2Icon,
+  EllipsisVerticalIcon,
   ArrowPathIcon,
-  FunnelIcon,
   DocumentArrowDownIcon,
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps<{
-  canRollUp: boolean
-  externalMode?: boolean
-  externalViewMode?: 'force' | 'table' | 'heatmap'
-  internalViewMode?: 'force' | 'dagre' | 'table' | 'heatmap'
-  filterActive?: boolean
+  mode: 'force' | 'table' | 'heatmap'
+  fullscreen?: boolean
 }>()
 
 const emit = defineEmits<{
-  'roll-up': []
-  'fullscreen': []
-  'update:externalViewMode': [mode: 'force' | 'table' | 'heatmap']
-  'update:internalViewMode': [mode: 'force' | 'dagre' | 'table' | 'heatmap']
+  'update:mode': [mode: 'force' | 'table' | 'heatmap']
   'reset-view': []
-  'toggle-filter': [event?: MouseEvent]
   'export-arch': []
+  'fullscreen': []
+  'compare': []
 }>()
 
-const { t } = useI18n()
+const openMore = ref(false)
+const moreRef = ref<HTMLDivElement>()
+
+function onDocClick(e: MouseEvent) {
+  if (moreRef.value && !moreRef.value.contains(e.target as Node)) {
+    openMore.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
 
 <template>
   <div class="gt-container">
-    <button
-      v-if="props.canRollUp"
-      class="gt-btn"
-      :title="t('report.rollUp', '返回上层')"
-      @click="emit('roll-up')"
-    >
-      <ArrowUturnLeftIcon class="w-3 h-3" />
-    </button>
+    <div class="gt-tabs">
+      <button
+        class="gt-tab"
+        :class="{ active: props.mode === 'force' }"
+        @click="emit('update:mode', 'force')"
+      >力导向</button>
+      <button
+        class="gt-tab"
+        :class="{ active: props.mode === 'table' }"
+        @click="emit('update:mode', 'table')"
+      >表格</button>
+      <button
+        class="gt-tab"
+        :class="{ active: props.mode === 'heatmap' }"
+        @click="emit('update:mode', 'heatmap')"
+      >热力图</button>
+    </div>
 
-    <template v-if="externalMode">
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: (externalViewMode || 'force') === 'force' }"
-        :title="t('report.viewForce', '力导向图')"
-        @click="emit('update:externalViewMode', 'force')"
-      >
-        <ChartBarIcon class="w-3 h-3" />
+    <div ref="moreRef" class="gt-more">
+      <button class="gt-more-btn" @click.stop="openMore = !openMore">
+        <EllipsisVerticalIcon class="w-3.5 h-3.5" />
       </button>
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: externalViewMode === 'table' }"
-        :title="t('report.viewTable', '表格')"
-        @click="emit('update:externalViewMode', 'table')"
-      >
-        <TableCellsIcon class="w-3 h-3" />
-      </button>
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: externalViewMode === 'heatmap' }"
-        :title="t('report.viewHeatmap', '热力图')"
-        @click="emit('update:externalViewMode', 'heatmap')"
-      >
-        <Squares2X2Icon class="w-3 h-3" />
-      </button>
-    </template>
-    <template v-else>
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: (internalViewMode || 'force') === 'force' }"
-        :title="t('report.viewForce', '力导向图')"
-        @click="emit('update:internalViewMode', 'force')"
-      >
-        <ChartBarIcon class="w-3 h-3" />
-      </button>
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: internalViewMode === 'dagre' }"
-        :title="t('report.viewDagre', 'Dagre图')"
-        @click="emit('update:internalViewMode', 'dagre')"
-      >
-        <ArrowUturnLeftIcon
-          class="w-3 h-3"
-          style="transform: rotate(90deg)"
-        />
-      </button>
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: internalViewMode === 'table' }"
-        :title="t('report.viewTable', '表格')"
-        @click="emit('update:internalViewMode', 'table')"
-      >
-        <TableCellsIcon class="w-3 h-3" />
-      </button>
-      <button
-        class="gt-btn gt-view-btn"
-        :class="{ active: internalViewMode === 'heatmap' }"
-        :title="t('report.viewHeatmap', '热力图')"
-        @click="emit('update:internalViewMode', 'heatmap')"
-      >
-        <Squares2X2Icon class="w-3 h-3" />
-      </button>
-    </template>
-
-    <button
-      class="gt-btn"
-      :title="t('report.resetView', '重置视图')"
-      @click="emit('reset-view')"
-    >
-      <ArrowPathIcon class="w-3 h-3" />
-    </button>
-    <button
-      class="gt-btn"
-      :class="{ active: props.filterActive }"
-      :title="t('report.nodeFilter', '节点筛选')"
-      @click="(e: MouseEvent) => emit('toggle-filter', e)"
-    >
-      <FunnelIcon class="w-3 h-3" />
-    </button>
-    <button
-      class="gt-btn"
-      :title="t('report.exportArch', '导出架构文档')"
-      @click="emit('export-arch')"
-    >
-      <DocumentArrowDownIcon class="w-3 h-3" />
-    </button>
-    <button
-      class="gt-btn"
-      :title="t('report.fullscreen', '全屏')"
-      @click="emit('fullscreen')"
-    >
-      <ArrowsPointingOutIcon class="w-3 h-3" />
-    </button>
+      <div v-if="openMore" class="gt-more-dropdown" :class="{ 'gt-more-up': props.fullscreen }">
+        <button class="gt-more-item" @click="emit('reset-view'); openMore = false">
+          <ArrowPathIcon class="w-3 h-3" />
+          <span>重置视图</span>
+        </button>
+        <button class="gt-more-item" @click="emit('export-arch'); openMore = false">
+          <DocumentArrowDownIcon class="w-3 h-3" />
+          <span>导出架构</span>
+        </button>
+        <button class="gt-more-item" @click="emit('compare'); openMore = false">
+          <span class="gt-more-item-icon">📊</span>
+          <span>对比架构</span>
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .gt-container { display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0; }
-.gt-btn {
+
+.gt-tabs {
+  display: flex; align-items: center;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  border-radius: 0.25rem; overflow: hidden;
+}
+.gt-tab {
+  padding: 0.15rem 0.5rem; font-size: 0.65rem; font-weight: 500;
+  background: transparent; border: none; color: var(--text-muted);
+  cursor: pointer; white-space: nowrap; transition: all 0.15s;
+  border-right: 1px solid var(--border);
+}
+.gt-tab:last-child { border-right: none; }
+.gt-tab:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.gt-tab.active {
+  background: var(--bg-accent-subtle, #2d1f5e);
+  color: var(--accent, #7c3aed);
+  font-weight: 600;
+}
+
+.gt-more { position: relative; }
+.gt-more-btn {
   display: flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; padding: 0;
   background: transparent; border: 1px solid transparent;
   border-radius: 0.25rem; color: var(--text-muted); cursor: pointer;
   transition: all 0.15s;
 }
-.gt-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
-.gt-btn.active { background: var(--bg-accent-subtle, #2d1f5e); color: var(--accent, #7c3aed); border-color: var(--accent, #7c3aed); }
-.gt-style-btn { width: auto; padding: 0 0.35rem; }
-.gt-view-btn { width: auto; padding: 0 0.3rem; }
-.gt-style-label { font-size: 0.65rem; font-weight: 600; font-family: var(--font-mono); }
+.gt-more-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
+
+.gt-more-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 4px;
+  min-width: 120px; background: var(--bg-primary);
+  border: 1px solid var(--border); border-radius: 0.35rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35); z-index: 100;
+  padding: 0.25rem; display: flex; flex-direction: column; gap: 1px;
+}
+.gt-more-up {
+  top: auto; bottom: 100%; margin-top: 0; margin-bottom: 4px;
+}
+.gt-more-item {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.3rem 0.5rem; font-size: 0.7rem;
+  background: transparent; border: none; border-radius: 0.2rem;
+  color: var(--text-primary); cursor: pointer;
+  white-space: nowrap; transition: background 0.1s;
+}
+.gt-more-item:hover { background: var(--bg-tertiary); }
+.gt-more-item-icon { font-size: 0.7rem; }
 </style>

@@ -40,10 +40,17 @@ function scrollToBottom() {
   }
 }
 
+const toastMsg = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+const showClearConfirm = ref(false)
+
 function clearSessions() {
-  if (confirm('确认清除所有历史会话？此操作不可恢复。')) {
-    chatStore.clearAllSessions()
-  }
+  showClearConfirm.value = true
+}
+
+function confirmClear() {
+  chatStore.clearAllSessions()
+  showClearConfirm.value = false
 }
 </script>
 
@@ -146,6 +153,29 @@ function clearSessions() {
       @settings=""
     />
   </div>
+
+  <!-- 清除确认 -->
+  <Teleport to="body">
+    <div
+      v-if="showClearConfirm"
+      class="dialog-overlay"
+      @click.self="showClearConfirm = false"
+    >
+      <div class="confirm-dialog">
+        <div class="confirm-title">
+          <span>确认清除所有历史会话？此操作不可恢复。</span>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" @click="showClearConfirm = false">
+            {{ t('common.cancel') }}
+          </button>
+          <button class="btn btn-danger" @click="confirmClear">
+            {{ t('common.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>

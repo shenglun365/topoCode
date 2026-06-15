@@ -4,6 +4,7 @@ Task Manager — 13 个 analysis.* 后端方法
 通过 @server.register 注册到 RPC 服务器。
 """
 import asyncio
+import fcntl
 import json
 import os
 import subprocess
@@ -1251,11 +1252,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         try:
             rows = project_db.execute(
                 """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                          h.file_count, h.quality_score, COALESCE(g.edge_count, 0)
-                   FROM community_hierarchy h
-                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
-                   WHERE h.task_id=? AND h.edge_type=?
-                   ORDER BY h.comm_lv, h.comm_id""",
+                           h.file_count, h.quality_score, COALESCE(g.edge_count, 0),
+                           g.metadata
+                    FROM community_hierarchy h
+                    LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                    WHERE h.task_id=? AND h.edge_type=?
+                    ORDER BY h.comm_lv, h.comm_id""",
                 (tid, et)
             ).fetchall()
             has_file_count = True
@@ -1276,16 +1278,24 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         levels_dict = {}
         for row in rows:
             if has_file_count:
-                lv, comm_id, parent_id, node_count, file_count, quality, edge_count = row
+                lv, comm_id, parent_id, node_count, file_count, quality, edge_count, metadata_raw = row
             else:
                 lv, comm_id, parent_id, node_count, quality, edge_count = row
                 file_count = 0
+                metadata_raw = None
+            metadata = {}
+            if metadata_raw:
+                try:
+                    metadata = json.loads(metadata_raw)
+                except (json.JSONDecodeError, TypeError):
+                    pass
             if lv not in levels_dict:
                 levels_dict[lv] = []
             levels_dict[lv].append({
                 'id': comm_id, 'label': comm_id[:30], 'parentCommId': parent_id,
                 'nodeCount': node_count or 0, 'fileCount': file_count or 0,
                 'edgeCount': edge_count or 0, 'qualityScore': quality,
+                'metadata': metadata,
             })
 
         # 1. 社区级别的文件覆盖（L0 node_list 去重）—— 精确但偏保守
@@ -2006,45 +2016,66 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             return {"taskId": tid, "success": False, "error": str(e),
                     "mode": "nl", "input": text[:100]}
 
-    @server.register("analysis.listArchSnapshots")
-    def list_arch_snapshots(task_id=None, taskId=None):
-        """列出项目的架构快照 (读取 versions.jsonl)"""
-        tid = task_id or taskId
-        if not tid:
-            raise ValueError("task_id is required")
-        store = TaskStore(multi_db.main_db)
-        task = store.get_task(tid)
-        if not task:
+    @server.register("analysis.listTimeline")
+    def list_timeline(project_id=None, projectId=None):
+        pid = project_id or projectId
+        if not pid:
+            raise ValueError("project_id is required")
+        project_db = multi_db.get_project_db(pid)
+        if not project_db:
             return []
-        pid = task["project_id"]
-        project_root = _get_project_root(pid)
-        if not project_root:
-            return []
-        from agent_workflow.jsonl_store import read_jsonl
-        return read_jsonl(project_root, "versions.jsonl")
+        _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+        return project_db.fetchall(
+            "SELECT * FROM arch_timeline WHERE project_id = ? ORDER BY created_at DESC",
+            (pid,))
 
-    @server.register("analysis.getArchSnapshot")
-    def get_arch_snapshot(task_id=None, taskId=None, version_id=None, versionId=None):
-        """获取指定版本的社区快照数据"""
-        tid = task_id or taskId
-        vid = version_id or versionId
-        if not tid or not vid:
-            raise ValueError("task_id and version_id are required")
-        store = TaskStore(multi_db.main_db)
-        task = store.get_task(tid)
-        if not task:
-            return []
-        pid = task["project_id"]
-        project_root = _get_project_root(pid)
-        if not project_root:
-            return []
-        from agent_workflow.jsonl_store import read_jsonl
-        all_comms = read_jsonl(project_root, "communities.jsonl")
-        return [c for c in all_comms if c.get("v") == vid]
+    @server.register("analysis.getTimelineEntry")
+    def get_timeline_entry(timeline_id=None, timelineId=None):
+        tid = timeline_id or timelineId
+        if not tid:
+            raise ValueError("timeline_id is required")
+        for pid_row in multi_db.main_db.fetchall("SELECT id FROM projects"):
+            pdb = multi_db.get_project_db(pid_row["id"])
+            if not pdb:
+                continue
+            _ensure_table(pdb, "arch_timeline", _ARCH_TIMELINE_DDL)
+            _ensure_table(pdb, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+            entry = pdb.fetchone("SELECT * FROM arch_timeline WHERE id = ?", (tid,))
+            if entry:
+                comms = pdb.fetchall(
+                    "SELECT * FROM arch_timeline_communities WHERE timeline_id = ? ORDER BY community_id",
+                    (tid,))
+                return {
+                    "entry": {
+                        "id": entry["id"], "taskId": entry["task_id"],
+                        "projectId": entry["project_id"], "type": entry["type"],
+                        "alias": entry["alias"], "timestamp": entry["timestamp"],
+                        "versionTag": entry["version_tag"],
+                        "sourceVersion": entry["source_version"],
+                        "communityCount": entry["community_count"],
+                        "totalFiles": entry["total_files"],
+                        "gitBranch": entry["git_branch"],
+                        "gitCommit": entry["git_commit"],
+                        "gitTag": entry["git_tag"],
+                        "exported": entry["exported"],
+                        "isActive": bool(entry["is_active"]),
+                    },
+                    "communities": [{
+                        "communityId": c["community_id"],
+                        "edgeType": c["edge_type"], "level": c["level"],
+                        "name": c["name"], "summary": c["summary"],
+                        "mermaid": c["mermaid"], "plantuml": c["plantuml"],
+                        "nodeCount": c["node_count"], "fileCount": c["file_count"],
+                        "qualityScore": c["quality_score"],
+                        "nodeList": json.loads(c["node_list"]) if c["node_list"] else [],
+                        "fileList": json.loads(c["file_list"]) if c["file_list"] else [],
+                        "edgeList": json.loads(c["edge_list"]) if c["edge_list"] else [],
+                    } for c in comms],
+                }
+        return {"entry": None, "communities": []}
 
     @server.register("analysis.startArchTrack")
     def start_arch_track(task_id=None, taskId=None, tag=None):
-        """开始架构追踪 (记录快照) — 同步写 JSONL + 异步入队 LLM 摘要"""
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
@@ -2059,6 +2090,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_root = _get_project_root(pid)
         project_db = multi_db.get_project_db(pid)
 
+        _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+        _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+
         communities = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
         l0_items = []
         for l in communities.get("levels", []):
@@ -2066,19 +2100,24 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 l0_items = l.get("items", [])
                 break
 
-        from agent_workflow.jsonl_store import append_jsonl
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        append_jsonl(project_root, "versions.jsonl", {
-            "id": version_id, "ts": ts, "trigger": "manual",
-            "comm_count": len(l0_items),
-            "summary": f"快照 {version_id}: {len(l0_items)} 个社区",
-        })
+        timeline_id = str(uuid.uuid4())
+        project_db.execute("""
+            INSERT INTO arch_timeline
+                (id, task_id, project_id, type, version_tag, timestamp,
+                 community_count, is_active)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (timeline_id, tid, pid, 'archtrack', version_id, ts,
+              len(l0_items), 0))
         for c in l0_items:
-            append_jsonl(project_root, "communities.jsonl", {
-                "v": version_id, "cid": c.get("id", ""),
-                "nodes": c.get("nodeCount", 0),
-                "score": c.get("qualityScore", 0),
-            })
+            project_db.execute("""
+                INSERT INTO arch_timeline_communities
+                    (timeline_id, community_id, edge_type, level,
+                     node_count, quality_score)
+                VALUES (?,?,?,?,?,?)
+            """, (timeline_id, c.get("id", ""), "INCLUDE", "L0",
+                  c.get("nodeCount", 0), c.get("qualityScore", 0)))
+        project_db.commit()
 
         l0_for_ctx = [{"communityId": c.get("id", ""), "name": c.get("label", ""),
                         "node_count": c.get("nodeCount", 0),
@@ -2096,11 +2135,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         except Exception as e:
             logger.warning(f"[startArchTrack] RouterHarness failed: {e}")
 
-        return {"versionId": version_id}
+        return {"versionId": version_id, "timelineId": timeline_id}
 
     @server.register("analysis.stopArchTrack")
     def stop_arch_track(task_id=None, taskId=None, tag=None):
-        """结束架构追踪 (diff + 摘要) — 同步 diff + JSONL + 异步入队 LLM 摘要"""
         tid = task_id or taskId
         logger.info(f"[stopArchTrack] task_id={tid}")
 
@@ -2112,10 +2150,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_root = _get_project_root(pid)
         project_db = multi_db.get_project_db(pid)
 
-        from agent_workflow.jsonl_store import read_jsonl, append_jsonl
-        versions = read_jsonl(project_root, "versions.jsonl")
+        _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+        _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
 
-        if len(versions) < 2:
+        prev_entries = project_db.fetchall(
+            "SELECT * FROM arch_timeline WHERE project_id = ? AND type = 'archtrack' ORDER BY created_at DESC LIMIT 1",
+            (pid,))
+
+        if len(prev_entries) < 1:
             version_id = tag or f"v-{int(time.time())}"
             ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             communities = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
@@ -2124,13 +2166,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 if l.get("lv") == "L0":
                     l0_items = l.get("items", [])
                     break
-            append_jsonl(project_root, "versions.jsonl", {
-                "id": version_id, "ts": ts, "trigger": "manual", "comm_count": len(l0_items),
-            })
-            return {"versionId": version_id, "summary": "首个快照，无对比基准",
+            timeline_id = str(uuid.uuid4())
+            project_db.execute("""
+                INSERT INTO arch_timeline
+                    (id, task_id, project_id, type, version_tag, timestamp, community_count, is_active)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (timeline_id, tid, pid, 'archtrack', version_id, ts, len(l0_items), 0))
+            project_db.commit()
+            return {"versionId": version_id, "summary": "第一个快照，无对比基准",
                     "risk": "low", "added": len(l0_items), "removed": 0, "changed": 0}
 
-        prev_v = versions[-1].get("id", "")
+        prev_entry = prev_entries[0]
+        prev_v = prev_entry["version_tag"] or prev_entry["id"]
         version_id = tag or f"v-{int(time.time())}"
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -2141,8 +2188,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 l0_items = l.get("items", [])
                 break
 
-        prev_comms = read_jsonl(project_root, "communities.jsonl")
-        prev_ids = {c["cid"] for c in prev_comms if c.get("v") == prev_v}
+        prev_comms = project_db.fetchall(
+            "SELECT * FROM arch_timeline_communities WHERE timeline_id = ?",
+            (prev_entry["id"],))
+        prev_ids = {pc["community_id"] for pc in prev_comms}
         curr_ids = {c.get("id", "") for c in l0_items}
 
         added = len(curr_ids - prev_ids)
@@ -2150,28 +2199,32 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         changed = len(curr_ids & prev_ids)
         risk = "high" if removed > 0 else ("medium" if added > 5 else "low")
 
-        append_jsonl(project_root, "versions.jsonl", {
-            "id": version_id, "ts": ts, "trigger": "manual",
-            "comm_count": len(l0_items), "from": prev_v, "delta": f"+{added}/-{removed}",
-        })
+        timeline_id = str(uuid.uuid4())
+        project_db.execute("""
+            INSERT INTO arch_timeline
+                (id, task_id, project_id, type, version_tag, source_version, timestamp,
+                 community_count, is_active)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (timeline_id, tid, pid, 'archtrack', version_id, prev_v, ts,
+              len(l0_items), 0))
         for c in l0_items:
-            append_jsonl(project_root, "communities.jsonl", {
-                "v": version_id, "cid": c.get("id", ""),
-                "nodes": c.get("nodeCount", 0), "score": c.get("qualityScore", 0),
-            })
-        append_jsonl(project_root, "deltas.jsonl", {
-            "from": prev_v, "to": version_id,
-            "added": added, "removed": removed, "changed": changed, "risk": risk,
-        })
+            project_db.execute("""
+                INSERT INTO arch_timeline_communities
+                    (timeline_id, community_id, edge_type, level,
+                     node_count, quality_score)
+                VALUES (?,?,?,?,?,?)
+            """, (timeline_id, c.get("id", ""), "INCLUDE", "L0",
+                  c.get("nodeCount", 0), c.get("qualityScore", 0)))
+        project_db.commit()
 
         l0_for_ctx = [{"communityId": c.get("id", ""), "name": c.get("label", ""),
                         "node_count": c.get("nodeCount", 0),
                         "quality_score": c.get("qualityScore", 0)}
                        for c in l0_items]
-        prev_for_ctx = [{"communityId": pc.get("cid", ""), "name": pc.get("cid", ""),
-                          "node_count": pc.get("nodes", 0),
-                          "quality_score": pc.get("score", 0)}
-                         for pc in prev_comms if pc.get("v") == prev_v]
+        prev_for_ctx = [{"communityId": pc["community_id"], "name": pc["community_id"],
+                          "node_count": pc["node_count"],
+                          "quality_score": pc["quality_score"]}
+                         for pc in prev_comms]
         try:
             from agent_workflow.router import create_default_router
             router = create_default_router(project_root=project_root, project_db=project_db,
@@ -2187,8 +2240,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             logger.warning(f"[stopArchTrack] RouterHarness failed: {e}")
 
         summary = f"新增 {added} 个社区，删除 {removed} 个，{changed} 个未变"
-        return {"versionId": version_id, "summary": summary, "risk": risk,
-                "added": added, "removed": removed, "changed": changed}
+        return {"versionId": version_id, "timelineId": timeline_id, "summary": summary,
+                "risk": risk, "added": added, "removed": removed, "changed": changed}
 
     # ==================== 子文档 CRUD ====================
 
@@ -2411,6 +2464,50 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_gp_snap_unique
     WHERE snapshot_id IS NOT NULL;
 """
 
+_ARCH_TIMELINE_DDL = """CREATE TABLE IF NOT EXISTS arch_timeline (
+    id              TEXT PRIMARY KEY,
+    task_id         TEXT NOT NULL,
+    project_id      TEXT NOT NULL,
+    type            TEXT NOT NULL DEFAULT 'manual',
+    alias           TEXT,
+    timestamp       TEXT NOT NULL,
+    version_tag     TEXT,
+    source_version  TEXT,
+    community_count INTEGER DEFAULT 0,
+    total_files     INTEGER DEFAULT 0,
+    git_branch      TEXT,
+    git_commit      TEXT,
+    git_tag         TEXT,
+    exported        INTEGER DEFAULT 0,
+    is_active       INTEGER DEFAULT 0,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_timeline_task ON arch_timeline(task_id);
+CREATE INDEX IF NOT EXISTS idx_timeline_project ON arch_timeline(project_id);
+CREATE INDEX IF NOT EXISTS idx_timeline_type ON arch_timeline(type);
+"""
+
+_ARCH_TIMELINE_COMM_DDL = """CREATE TABLE IF NOT EXISTS arch_timeline_communities (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timeline_id     TEXT NOT NULL,
+    community_id    TEXT NOT NULL,
+    edge_type       TEXT NOT NULL,
+    level           TEXT NOT NULL,
+    name            TEXT,
+    summary         TEXT,
+    mermaid         TEXT,
+    plantuml        TEXT,
+    node_count      INTEGER,
+    file_count      INTEGER,
+    quality_score   REAL,
+    node_list       TEXT,
+    file_list       TEXT,
+    edge_list       TEXT,
+    UNIQUE(timeline_id, community_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tl_comm_timeline ON arch_timeline_communities(timeline_id);
+"""
+
 
 def _ensure_project_db(multi_db, task_id: str):
     """Get the project database for a task, ensuring the DB is initialized."""
@@ -2551,7 +2648,6 @@ def get_git_info(multi_db: MultiDBManager, project_id: str) -> dict:
 
 
 def check_import_status(multi_db: MultiDBManager, project_id: str) -> dict:
-    """Check if project has existing unsaved snapshots (only for completed tasks)."""
     main_db = multi_db.main_db
     project_db = multi_db.get_project_db(project_id)
     tasks = main_db.fetchall(
@@ -2562,7 +2658,7 @@ def check_import_status(multi_db: MultiDBManager, project_id: str) -> dict:
         row = None
         if project_db:
             row = project_db.fetchone(
-                "SELECT id FROM arch_snapshots WHERE task_id = ?", (t["id"],))
+                "SELECT id FROM arch_timeline WHERE task_id = ?", (t["id"],))
         if row:
             has_snapshot = True
         else:
@@ -2571,22 +2667,23 @@ def check_import_status(multi_db: MultiDBManager, project_id: str) -> dict:
 
 
 def cleanup_task_snapshots(multi_db: MultiDBManager, task_id: str) -> dict:
-    """Cascade-delete snapshots, communities, and positions for a task."""
     project_db = _ensure_project_db(multi_db, task_id)
     if not project_db:
         return {"deleted": 0}
     _ensure_table(project_db, "graph_node_positions", _POSITIONS_DDL)
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
     project_db.execute(
         "DELETE FROM graph_node_positions WHERE task_id = ?", (task_id,))
-    deleted_snapshots = project_db.fetchall(
-        "SELECT id FROM arch_snapshots WHERE task_id = ?", (task_id,))
-    for s in deleted_snapshots:
+    deleted_entries = project_db.fetchall(
+        "SELECT id FROM arch_timeline WHERE task_id = ?", (task_id,))
+    for s in deleted_entries:
         project_db.execute(
-            "DELETE FROM arch_snapshot_communities WHERE snapshot_id = ?", (s["id"],))
+            "DELETE FROM arch_timeline_communities WHERE timeline_id = ?", (s["id"],))
     project_db.execute(
-        "DELETE FROM arch_snapshots WHERE task_id = ?", (task_id,))
+        "DELETE FROM arch_timeline WHERE task_id = ?", (task_id,))
     project_db.commit()
-    return {"deleted": len(deleted_snapshots)}
+    return {"deleted": len(deleted_entries)}
 
 
 def _resolve_file_list(multi_db: MultiDBManager, project_id: str, node_list_json: str) -> list:
@@ -2608,13 +2705,14 @@ def _resolve_file_list(multi_db: MultiDBManager, project_id: str, node_list_json
 
 
 def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias=None) -> dict:
-    """Save an architecture snapshot (upsert: one snapshot per task)."""
     main_db = multi_db.main_db
     project_db = multi_db.get_project_db(project_id)
     if not project_db:
         return {"error": "project_db_not_found"}
 
-    # gather git info
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+
     git_row = main_db.fetchone(
         "SELECT current_branch, current_commit, latest_tag FROM project_git_info WHERE project_id = ?",
         (project_id,))
@@ -2622,23 +2720,21 @@ def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias
     git_commit = git_row["current_commit"] if git_row else None
     git_tag = git_row["latest_tag"] if git_row else None
 
-    # collect L0 communities from community_hierarchy
     comms = project_db.fetchall("""
-        SELECT comm_id, edge_type, level, node_count, file_count, quality_score
+        SELECT comm_id, edge_type, comm_lv, node_count, file_count, quality_score
         FROM community_hierarchy
-        WHERE task_id = ? AND level = 'L0'
+        WHERE task_id = ? AND comm_lv = 'L0'
         ORDER BY edge_type, comm_id
     """, (task_id,))
 
-    # get community names + node_lists from graph_doc
     total_files_set = set()
-    snapshot_id = str(uuid.uuid4())
+    timeline_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for c in comms:
         doc_row = project_db.fetchone(
             "SELECT node_list, edge_list FROM graph_doc WHERE task_id = ? AND comm_id = ? AND comm_lv = ?",
-            (task_id, c["comm_id"], c["level"]))
+            (task_id, c["comm_id"], c["comm_lv"]))
         node_list = doc_row["node_list"] if doc_row else "[]"
         edge_list = doc_row["edge_list"] if doc_row else "[]"
 
@@ -2646,18 +2742,22 @@ def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias
         for fp in file_list:
             total_files_set.add(fp)
 
-        # get AI-generated name from community_llm_results
-        name_row = project_db.fetchone(
-            "SELECT name FROM community_llm_results WHERE task_id=? AND community_id=? AND level=?",
-            (task_id, c["comm_id"], c["level"]))
-        name = name_row["name"] if name_row else None
+        llm_row = project_db.fetchone(
+            "SELECT name, summary, mermaid, plantuml FROM community_llm_results"
+            " WHERE task_id=? AND comm_id=? AND comm_lv=?",
+            (task_id, c["comm_id"], c["comm_lv"]))
+        name = llm_row.get("name") if llm_row else None
+        summary = llm_row.get("summary") if llm_row else None
+        mermaid = llm_row.get("mermaid") if llm_row else None
+        plantuml = llm_row.get("plantuml") if llm_row else None
 
         project_db.execute("""
-            INSERT INTO arch_snapshot_communities
-                (snapshot_id, community_id, edge_type, level, name, node_count,
+            INSERT INTO arch_timeline_communities
+                (timeline_id, community_id, edge_type, level, name, summary, mermaid, plantuml, node_count,
                  file_count, quality_score, node_list, file_list, edge_list)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
-        """, (snapshot_id, c["comm_id"], c["edge_type"], c["level"], name,
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (timeline_id, c["comm_id"], c["edge_type"], c["comm_lv"], name,
+              summary, mermaid, plantuml,
               c["node_count"] or 0, len(file_list), c["quality_score"],
               node_list if isinstance(node_list, str) else json.dumps(node_list),
               json.dumps(file_list),
@@ -2666,61 +2766,67 @@ def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias
     total_files = len(total_files_set)
     community_count = len(comms)
 
-    # delete old snapshot for this task
-    old_snaps = project_db.fetchall(
-        "SELECT id FROM arch_snapshots WHERE task_id = ?", (task_id,))
-    for s in old_snaps:
-        project_db.execute(
-            "DELETE FROM arch_snapshot_communities WHERE snapshot_id = ?", (s["id"],))
     project_db.execute(
-        "DELETE FROM arch_snapshots WHERE task_id = ?", (task_id,))
+        "UPDATE arch_timeline SET is_active = 0 WHERE task_id = ? AND is_active = 1",
+        (task_id,))
 
-    # insert new snapshot
     project_db.execute("""
-        INSERT INTO arch_snapshots
-            (id, task_id, alias, project_id, timestamp, git_branch, git_commit, git_tag,
-             community_count, total_files)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-    """, (snapshot_id, task_id, alias, project_id, timestamp,
-          git_branch, git_commit, git_tag, community_count, total_files))
+        INSERT INTO arch_timeline
+            (id, task_id, project_id, type, alias, timestamp, git_branch, git_commit, git_tag,
+             community_count, total_files, is_active)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (timeline_id, task_id, project_id, 'manual', alias, timestamp,
+          git_branch, git_commit, git_tag, community_count, total_files, 1))
     project_db.commit()
 
-    return {"snapshotId": snapshot_id, "status": "ok",
+    return {"snapshotId": timeline_id, "status": "ok",
             "communityCount": community_count, "totalFiles": total_files}
 
 
-def get_snapshot(multi_db: MultiDBManager, task_id: str) -> dict:
-    """Get the current snapshot for a task."""
+def get_snapshot(multi_db: MultiDBManager, task_id: str, snapshot_id: str = None) -> dict:
     project_db = _ensure_project_db(multi_db, task_id)
     if not project_db:
         return {"snapshot": None}
-    row = project_db.fetchone(
-        "SELECT * FROM arch_snapshots WHERE task_id = ? ORDER BY created_at DESC LIMIT 1",
-        (task_id,))
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+    if snapshot_id:
+        row = project_db.fetchone(
+            "SELECT * FROM arch_timeline WHERE id = ?", (snapshot_id,))
+    else:
+        row = project_db.fetchone(
+            "SELECT * FROM arch_timeline WHERE task_id = ? AND is_active = 1",
+            (task_id,))
     if not row:
         return {"snapshot": None}
 
     communities = project_db.fetchall(
-        "SELECT * FROM arch_snapshot_communities WHERE snapshot_id = ? ORDER BY edge_type, community_id",
+        "SELECT * FROM arch_timeline_communities WHERE timeline_id = ? ORDER BY edge_type, community_id",
         (row["id"],))
 
     return {"snapshot": {
         "id": row["id"],
         "taskId": row["task_id"],
+        "type": row["type"],
         "alias": row["alias"],
         "projectId": row["project_id"],
         "timestamp": row["timestamp"],
+        "versionTag": row["version_tag"],
+        "sourceVersion": row["source_version"],
         "gitBranch": row["git_branch"],
         "gitCommit": row["git_commit"],
         "gitTag": row["git_tag"],
         "communityCount": row["community_count"],
         "totalFiles": row["total_files"],
         "exported": row["exported"],
+        "isActive": bool(row["is_active"]),
         "communities": [{
             "communityId": c["community_id"],
             "edgeType": c["edge_type"],
             "level": c["level"],
             "name": c["name"],
+            "summary": c["summary"],
+            "mermaid": c["mermaid"],
+            "plantuml": c["plantuml"],
             "nodeCount": c["node_count"],
             "fileCount": c["file_count"],
             "qualityScore": c["quality_score"],
@@ -2731,91 +2837,136 @@ def get_snapshot(multi_db: MultiDBManager, task_id: str) -> dict:
     }}
 
 
-def delete_snapshot(multi_db: MultiDBManager, task_id: str) -> dict:
-    """Delete a task's snapshot and all its communities."""
+def delete_snapshot(multi_db: MultiDBManager, task_id: str, snapshot_id: str = None) -> dict:
     project_db = _ensure_project_db(multi_db, task_id)
     if not project_db:
         return {"deleted": 0}
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+    if snapshot_id:
+        project_db.execute(
+            "DELETE FROM arch_timeline_communities WHERE timeline_id = ?", (snapshot_id,))
+        project_db.execute(
+            "DELETE FROM arch_timeline WHERE id = ?", (snapshot_id,))
+        project_db.commit()
+        return {"deleted": 1}
     snaps = project_db.fetchall(
-        "SELECT id FROM arch_snapshots WHERE task_id = ?", (task_id,))
+        "SELECT id FROM arch_timeline WHERE task_id = ?", (task_id,))
     for s in snaps:
         project_db.execute(
-            "DELETE FROM arch_snapshot_communities WHERE snapshot_id = ?", (s["id"],))
+            "DELETE FROM arch_timeline_communities WHERE timeline_id = ?", (s["id"],))
     project_db.execute(
-        "DELETE FROM arch_snapshots WHERE task_id = ?", (task_id,))
+        "DELETE FROM arch_timeline WHERE task_id = ?", (task_id,))
     project_db.commit()
     return {"deleted": len(snaps)}
 
 
 def export_snapshots(multi_db: MultiDBManager, task_id: str) -> dict:
-    """Export a task's snapshot as JSONL files."""
     project_db = _ensure_project_db(multi_db, task_id)
     if not project_db:
         return {"exported": 0}
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
     row = project_db.fetchone(
-        "SELECT * FROM arch_snapshots WHERE task_id = ?", (task_id,))
+        "SELECT * FROM arch_timeline WHERE task_id = ? AND is_active = 1", (task_id,))
     if not row:
         return {"exported": 0}
 
-    # get project root
     proj = multi_db.main_db.fetchone(
         "SELECT root_path FROM projects WHERE id = ?", (row["project_id"],))
     if not proj or not proj["root_path"]:
         return {"error": "project_not_found"}
 
-    export_dir = os.path.join(proj["root_path"], ".topocode", "snapshots")
+    export_dir = os.path.join(proj["root_path"], ".topocode", "archive")
     os.makedirs(export_dir, exist_ok=True)
 
     communities = project_db.fetchall(
-        "SELECT * FROM arch_snapshot_communities WHERE snapshot_id = ?", (row["id"],))
+        "SELECT * FROM arch_timeline_communities WHERE timeline_id = ?", (row["id"],))
 
-    # write versions.jsonl
-    with open(os.path.join(export_dir, "snapshots.jsonl"), "w", encoding="utf-8") as f:
-        f.write(json.dumps({
-            "id": row["id"], "alias": row["alias"], "taskId": row["task_id"],
-            "timestamp": row["timestamp"], "gitBranch": row["git_branch"],
-            "gitCommit": row["git_commit"], "communityCount": row["community_count"],
-            "totalFiles": row["total_files"],
-        }, ensure_ascii=False) + "\n")
+    ts_suffix = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    archive_file = os.path.join(export_dir, f"tl_{ts_suffix}.jsonl")
 
-    # write communities.jsonl
-    with open(os.path.join(export_dir, "communities.jsonl"), "w", encoding="utf-8") as f:
-        for c in communities:
+    entry_data = {
+        "id": row["id"], "taskId": row["task_id"], "type": row["type"],
+        "alias": row["alias"], "timestamp": row["timestamp"],
+        "versionTag": row["version_tag"], "sourceVersion": row["source_version"],
+        "gitBranch": row["git_branch"], "gitCommit": row["git_commit"],
+        "communityCount": row["community_count"], "totalFiles": row["total_files"],
+        "communities": [{
+            "communityId": c["community_id"],
+            "edgeType": c["edge_type"], "level": c["level"],
+            "name": c["name"], "summary": c["summary"],
+            "mermaid": c["mermaid"], "plantuml": c["plantuml"],
+            "nodeCount": c["node_count"], "fileCount": c["file_count"],
+            "qualityScore": c["quality_score"],
+            "fileList": json.loads(c["file_list"]) if c["file_list"] else [],
+        } for c in communities],
+    }
+    with open(archive_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps(entry_data, ensure_ascii=False) + "\n")
+
+    with open(os.path.join(export_dir, "index.jsonl"), "a", encoding="utf-8") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
             f.write(json.dumps({
-                "v": row["id"], "cid": c["community_id"],
-                "edge_type": c["edge_type"], "level": c["level"],
-                "name": c["name"], "nodes": c["node_count"],
-                "files": c["file_count"], "score": c["quality_score"],
-                "file_list": json.loads(c["file_list"]) if c["file_list"] else [],
+                "id": row["id"], "taskId": row["task_id"], "type": row["type"],
+                "alias": row["alias"], "timestamp": row["timestamp"],
+                "gitBranch": row["git_branch"], "gitCommit": row["git_commit"],
+                "communityCount": row["community_count"], "totalFiles": row["total_files"],
+                "file": f"tl_{ts_suffix}.jsonl",
             }, ensure_ascii=False) + "\n")
+            f.flush()
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-    # mark as exported
     project_db.execute(
-        "UPDATE arch_snapshots SET exported = 1 WHERE id = ?", (row["id"],))
+        "UPDATE arch_timeline SET exported = 1 WHERE id = ?", (row["id"],))
     project_db.commit()
 
     return {"exported": len(communities),
-            "dir": export_dir}
+            "dir": export_dir, "file": f"tl_{ts_suffix}.jsonl"}
 
 
-def compare_snapshots(multi_db: MultiDBManager, snapshot_id_a: str,
-                      snapshot_id_b: str) -> dict:
-    """Compare two snapshots by community and file Jaccard similarity."""
-    def _load_from_db(sid):
-        # snapshots are in project DBs; look up project_id from snapshot
+def compare_snapshots(multi_db: MultiDBManager, snapshot_id_a: str = None,
+                      snapshot_id_b: str = None, task_id_a: str = None,
+                      task_id_b: str = None) -> dict:
+    def _load_by_id(sid):
         for pid_row in multi_db.main_db.fetchall("SELECT id FROM projects"):
             pdb = multi_db.get_project_db(pid_row["id"])
             if not pdb:
                 continue
-            meta = pdb.fetchone("SELECT * FROM arch_snapshots WHERE id=?", (sid,))
+            _ensure_table(pdb, "arch_timeline", _ARCH_TIMELINE_DDL)
+            _ensure_table(pdb, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+            meta = pdb.fetchone("SELECT * FROM arch_timeline WHERE id=?", (sid,))
             if meta:
                 comms = pdb.fetchall(
-                    "SELECT * FROM arch_snapshot_communities WHERE snapshot_id=? ORDER BY community_id", (sid,))
+                    "SELECT * FROM arch_timeline_communities WHERE timeline_id=? ORDER BY community_id", (sid,))
                 return meta, comms
         return None, None
 
-    meta_a, comms_a = _load_from_db(snapshot_id_a)
-    meta_b, comms_b = _load_from_db(snapshot_id_b)
+    def _load_active(tid):
+        pdb = _ensure_project_db(multi_db, tid)
+        if not pdb:
+            return None, None
+        _ensure_table(pdb, "arch_timeline", _ARCH_TIMELINE_DDL)
+        _ensure_table(pdb, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+        meta = pdb.fetchone(
+            "SELECT * FROM arch_timeline WHERE task_id=? AND is_active=1", (tid,))
+        if not meta:
+            return None, None
+        comms = pdb.fetchall(
+            "SELECT * FROM arch_timeline_communities WHERE timeline_id=? ORDER BY community_id",
+            (meta["id"],))
+        return meta, comms
+
+    if task_id_a:
+        meta_a, comms_a = _load_active(task_id_a)
+    else:
+        meta_a, comms_a = _load_by_id(snapshot_id_a)
+    if task_id_b:
+        meta_b, comms_b = _load_active(task_id_b)
+    else:
+        meta_b, comms_b = _load_by_id(snapshot_id_b)
     if not meta_a or not meta_b:
         return {"error": "snapshot_not_found"}
 
@@ -2857,7 +3008,42 @@ def load_positions(multi_db: MultiDBManager, task_id: str, edge_type: str, drill
     result = {}
     for r in rows:
         result[r["node_id"]] = {"x": r["pos_x"], "y": r["pos_y"]}
+    logger.info(
+        f"[loadPositions] task={task_id[:8]} edge={edge_type} drill={drill_key}"
+        f" layout={layout_type} snap={snapshot_id!r} → rows={len(rows)}"
+    )
     return {"positions": result}
+
+
+def list_position_keys(multi_db: MultiDBManager, project_id: str) -> dict:
+    """List all saved position key summaries for a project."""
+    main_db = multi_db.main_db
+    task_rows = main_db.fetchall(
+        "SELECT id FROM analysis_tasks WHERE project_id = ?", (project_id,))
+    task_ids = [r["id"] for r in task_rows]
+    if not task_ids:
+        return {"keys": []}
+    project_db = multi_db.get_project_db(project_id)
+    if not project_db:
+        return {"keys": []}
+    _ensure_table(project_db, "graph_node_positions", _POSITIONS_DDL)
+    result = []
+    for tid in task_ids:
+        rows = project_db.fetchall(
+            """SELECT edge_type, drill_key, layout_type, COUNT(*) AS cnt
+               FROM graph_node_positions
+               WHERE task_id = ? AND snapshot_id IS NULL
+               GROUP BY edge_type, drill_key, layout_type""",
+            (tid,))
+        for r in rows:
+            result.append({
+                "taskId": tid,
+                "edgeType": r["edge_type"],
+                "drillKey": r["drill_key"],
+                "layoutType": r["layout_type"],
+                "count": r["cnt"],
+            })
+    return {"keys": result}
 
 
 def clear_positions(multi_db: MultiDBManager, task_id: str, edge_type: str, drill_key: str,
@@ -2877,19 +3063,18 @@ def clear_positions(multi_db: MultiDBManager, task_id: str, edge_type: str, dril
 
 
 def list_archived_snapshots(multi_db: MultiDBManager, project_id: str) -> dict:
-    """List JSONL-exported (archived) snapshots for a project (read-only)."""
     main_db = multi_db.main_db
     row = main_db.fetchone(
         "SELECT root_path FROM projects WHERE id = ?", (project_id,))
     if not row or not row["root_path"]:
         return {"snapshots": []}
 
-    snapshots_file = os.path.join(row["root_path"], ".topocode", "snapshots", "snapshots.jsonl")
-    if not os.path.exists(snapshots_file):
+    index_file = os.path.join(row["root_path"], ".topocode", "archive", "index.jsonl")
+    if not os.path.exists(index_file):
         return {"snapshots": []}
 
     snapshots = []
-    with open(snapshots_file, "r", encoding="utf-8") as f:
+    with open(index_file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -2898,6 +3083,7 @@ def list_archived_snapshots(multi_db: MultiDBManager, project_id: str) -> dict:
                 s = json.loads(line)
                 snapshots.append({
                     "id": s.get("id", ""),
+                    "type": s.get("type"),
                     "alias": s.get("alias"),
                     "taskId": s.get("taskId", ""),
                     "timestamp": s.get("timestamp", ""),
@@ -2905,6 +3091,7 @@ def list_archived_snapshots(multi_db: MultiDBManager, project_id: str) -> dict:
                     "gitCommit": s.get("gitCommit"),
                     "communityCount": s.get("communityCount", 0),
                     "totalFiles": s.get("totalFiles", 0),
+                    "file": s.get("file", ""),
                 })
             except json.JSONDecodeError:
                 continue
@@ -2912,78 +3099,110 @@ def list_archived_snapshots(multi_db: MultiDBManager, project_id: str) -> dict:
     return {"snapshots": snapshots}
 
 
-def _load_archived_communities(project_root: str, snapshot_id: str) -> list:
-    """Load communities from a JSONL file for a given snapshot_id (read-only)."""
-    communities_file = os.path.join(project_root, ".topocode", "snapshots", "communities.jsonl")
-    if not os.path.exists(communities_file):
-        return []
-
-    communities = []
-    with open(communities_file, "r", encoding="utf-8") as f:
+def _load_archived_entry(project_root: str, snapshot_id: str) -> dict:
+    index_file = os.path.join(project_root, ".topocode", "archive", "index.jsonl")
+    if not os.path.exists(index_file):
+        return {}
+    file_name = None
+    with open(index_file, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
-                continue
             try:
-                c = json.loads(line)
-                if c.get("v") == snapshot_id:
-                    communities.append({
-                        "community_id": c.get("cid", ""),
-                        "edge_type": c.get("edge_type", ""),
-                        "level": c.get("level", ""),
-                        "name": c.get("name"),
-                        "node_count": c.get("nodes", 0),
-                        "file_count": c.get("files", 0),
-                        "quality_score": c.get("score"),
-                        "file_list": json.dumps(c.get("file_list", [])),
-                    })
+                s = json.loads(line.strip())
+                if s.get("id") == snapshot_id or s.get("alias") == snapshot_id:
+                    file_name = s.get("file", "")
+                    break
             except json.JSONDecodeError:
                 continue
-
-    return communities
+    if not file_name:
+        return {}
+    archive_path = os.path.join(project_root, ".topocode", "archive", file_name)
+    if not os.path.exists(archive_path):
+        return {}
+    with open(archive_path, "r", encoding="utf-8") as f:
+        return json.loads(f.readline())
 
 
 def compare_with_archived(multi_db: MultiDBManager, task_id: str, project_id: str,
                           archived_id: str) -> dict:
-    """Compare current DB snapshot with an archived (JSONL) snapshot (read-only)."""
     project_db = multi_db.get_project_db(project_id)
     main_db = multi_db.main_db
     proj = main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (project_id,))
     if not proj or not proj["root_path"]:
         return {"error": "project_not_found"}
 
-    # load current snapshot from DB
     db_snap = None
     db_communities = []
     if project_db:
+        _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+        _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
         db_snap = project_db.fetchone(
-            "SELECT * FROM arch_snapshots WHERE task_id = ?", (task_id,))
+            "SELECT * FROM arch_timeline WHERE task_id = ? AND is_active = 1", (task_id,))
         if db_snap:
             db_communities = project_db.fetchall(
-                "SELECT * FROM arch_snapshot_communities WHERE snapshot_id = ? ORDER BY community_id",
+                "SELECT * FROM arch_timeline_communities WHERE timeline_id = ? ORDER BY community_id",
                 (db_snap["id"],))
     if not db_snap:
         return {"error": "current_snapshot_not_found"}
 
-    # load archived metadata
-    snapshots_file = os.path.join(proj["root_path"], ".topocode", "snapshots", "snapshots.jsonl")
-    archived_meta = None
-    with open(snapshots_file, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                s = json.loads(line.strip())
-                if s.get("id") == archived_id or s.get("alias") == archived_id:
-                    archived_meta = s
-                    break
-            except json.JSONDecodeError:
-                continue
-    if not archived_meta:
+    archived_entry = _load_archived_entry(proj["root_path"], archived_id)
+    if not archived_entry:
         return {"error": "archived_snapshot_not_found"}
 
-    archived_communities = _load_archived_communities(proj["root_path"], archived_meta["id"])
+    archived_communities = archived_entry.get("communities", [])
+    archived_comms_for_cmp = [{
+        "community_id": c.get("communityId", ""),
+        "edge_type": c.get("edgeType", ""),
+        "level": c.get("level", ""),
+        "name": c.get("name"),
+        "node_count": c.get("nodeCount", 0),
+        "file_count": c.get("fileCount", 0),
+        "quality_score": c.get("qualityScore"),
+        "file_list": json.dumps(c.get("fileList", [])),
+    } for c in archived_communities]
 
-    # run comparison using the same logic as compare_snapshots
-    return _compare_community_sets(db_snap, db_communities, archived_meta, archived_communities)
+    return _compare_community_sets(db_snap, db_communities, archived_entry, archived_comms_for_cmp)
+
+
+def promote_timeline_entry(multi_db: MultiDBManager, task_id: str, timeline_id: str) -> dict:
+    project_db = _ensure_project_db(multi_db, task_id)
+    if not project_db:
+        return {"error": "project_db_not_found"}
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    entry = project_db.fetchone(
+        "SELECT id FROM arch_timeline WHERE id = ? AND type = 'archtrack'", (timeline_id,))
+    if not entry:
+        return {"error": "timeline_entry_not_found_or_not_archtrack"}
+    project_db.execute(
+        "UPDATE arch_timeline SET is_active = 0 WHERE task_id = ? AND is_active = 1",
+        (task_id,))
+    project_db.execute(
+        "UPDATE arch_timeline SET type = 'manual', is_active = 1 WHERE id = ?",
+        (timeline_id,))
+    project_db.commit()
+    return {"success": True}
+
+
+def timeline_gc(multi_db: MultiDBManager, project_id: str, retention: int = 50) -> dict:
+    project_db = multi_db.get_project_db(project_id)
+    if not project_db:
+        return {"deleted": 0}
+    _ensure_table(project_db, "arch_timeline", _ARCH_TIMELINE_DDL)
+    _ensure_table(project_db, "arch_timeline_communities", _ARCH_TIMELINE_COMM_DDL)
+    rows = project_db.fetchall(
+        "SELECT id FROM arch_timeline WHERE project_id = ? AND type = 'archtrack' ORDER BY created_at DESC",
+        (project_id,))
+    if len(rows) <= retention:
+        return {"deleted": 0}
+    ids_to_delete = [r["id"] for r in rows[retention:]]
+    placeholders = ",".join("?" * len(ids_to_delete))
+    project_db.execute(
+        f"DELETE FROM arch_timeline_communities WHERE timeline_id IN ({placeholders})",
+        ids_to_delete)
+    project_db.execute(
+        f"DELETE FROM arch_timeline WHERE id IN ({placeholders})",
+        ids_to_delete)
+    project_db.commit()
+    return {"deleted": len(ids_to_delete)}
 
 
 def _compare_community_sets(meta_a, comms_a, meta_b, comms_b) -> dict:

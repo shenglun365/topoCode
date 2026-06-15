@@ -31,6 +31,8 @@ const i18n = createI18n({
   legacy: false,
   locale: loadLocale() as SupportedLocale,
   fallbackLocale: 'en-US',
+  missingWarn: false,
+  fallbackWarn: false,
   messages: {
     'zh-CN': zhCN,
     'en-US': enUS,

@@ -25,6 +25,7 @@ const showCreateDialog = ref(false)
 const showEditDialog = ref(false)
 const showDeleteConfirm = ref(false)
 const showDepthWarning = ref(false)
+const errorMsg = ref('')
 
 const newName = ref('')
 const editId = ref<string | null>(null)
@@ -59,12 +60,14 @@ async function loadGroups() {
 }
 
 function startCreate() {
+  errorMsg.value = ''
   newName.value = ''
   selectedParentId.value = null
   showCreateDialog.value = true
 }
 
 function startEdit(group: GroupNode) {
+  errorMsg.value = ''
   editId.value = group.id
   editName.value = group.name
   showEditDialog.value = true
@@ -89,7 +92,7 @@ async function confirmCreate() {
     showCreateDialog.value = false
     await loadGroups()
   } catch (err: any) {
-    alert(err.message || t('group.createFailed'))
+    errorMsg.value = err.message || t('group.createFailed')
   }
 }
 
@@ -100,7 +103,7 @@ async function confirmEdit() {
     showEditDialog.value = false
     await loadGroups()
   } catch (err: any) {
-    alert(err.message || t('group.updateFailed'))
+    errorMsg.value = err.message || t('group.updateFailed')
   }
 }
 
@@ -111,7 +114,8 @@ async function confirmDelete() {
     showDeleteConfirm.value = false
     await loadGroups()
   } catch (err: any) {
-    alert(err.message || t('group.deleteFailed'))
+    errorMsg.value = err.message || t('group.deleteFailed')
+    showDeleteConfirm.value = false
   }
 }
 
@@ -314,6 +318,7 @@ defineExpose({ loadGroups })
         @click.stop
       >
         <h3>{{ t('group.newGroup') }}</h3>
+        <div v-if="errorMsg" class="dialog-error">{{ errorMsg }}</div>
         <div class="dialog-field">
           <label>{{ t('group.groupName') }}</label>
           <input
@@ -368,6 +373,7 @@ defineExpose({ loadGroups })
         @click.stop
       >
         <h3>{{ t('common.edit') }}</h3>
+        <div v-if="errorMsg" class="dialog-error">{{ errorMsg }}</div>
         <div class="dialog-field">
           <label>{{ t('group.groupName') }}</label>
           <input
@@ -436,6 +442,16 @@ defineExpose({ loadGroups })
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.dialog-error {
+  padding: 8px 12px;
+  background: var(--error-bg, rgba(239, 68, 68, .1));
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
 }
 
 .group-manager-toolbar {

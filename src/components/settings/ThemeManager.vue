@@ -34,6 +34,16 @@ const previewTheme = ref<CustomTheme | null>(null)
 const showPreview = ref(false)
 const importJson = ref('')
 const showImportDialog = ref(false)
+const showDeleteConfirm = ref<CustomTheme | null>(null)
+const importErrorMsg = ref('')
+const toastMsg = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+function showToast(msg: string) {
+  toastMsg.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMsg.value = '' }, 2500)
+}
 
 // 所有主题
 const allThemes = computed(() => themeStore.getAllThemes())
@@ -69,8 +79,14 @@ function handleSave(data: Omit<CustomTheme, 'id' | 'createdAt' | 'updatedAt'>) {
 }
 
 function handleDelete(theme: CustomTheme) {
-  if (!confirm(`${t('theme.confirmDeleteTheme')} "${theme.name}"？`)) return
-  themeStore.deleteTheme(theme.id)
+  showDeleteConfirm.value = theme
+}
+
+function confirmDeleteTheme() {
+  if (showDeleteConfirm.value) {
+    themeStore.deleteTheme(showDeleteConfirm.value.id)
+    showDeleteConfirm.value = null
+  }
 }
 
 function handleDuplicate(theme: CustomTheme) {
@@ -84,13 +100,16 @@ function handleExport(theme: CustomTheme) {
   const json = themeStore.exportTheme(theme.id)
   if (!json) return
 
-  // 复制到剪贴板
   navigator.clipboard.writeText(json).then(() => {
-    alert(t('theme.copiedToClipboard'))
+    showToast(t('theme.copiedToClipboard'))
   }).catch(() => {
-    // 降级：显示对话框
     prompt(t('theme.copyJsonPrompt'), json)
   })
+}
+
+function openImportDialog() {
+  importErrorMsg.value = ''
+  showImportDialog.value = true
 }
 
 function handleImport() {
@@ -99,9 +118,9 @@ function handleImport() {
   if (result) {
     showImportDialog.value = false
     importJson.value = ''
-    alert(`${t('theme.importSuccess')} "${result.name}"`)
+    showToast(`${t('theme.importSuccess')} "${result.name}"`)
   } else {
-    alert(t('theme.importFailed'))
+    importErrorMsg.value = t('theme.importFailed')
   }
 }
 
@@ -167,7 +186,7 @@ onMounted(() => {
         <button
           class="btn btn-ghost btn-sm"
           :title="t('theme.importTheme')"
-          @click="showImportDialog = true"
+          @click="openImportDialog"
         >
           <ArrowUpTrayIcon class="w-4 h-4" />
           <span>{{ t('common.import') }}</span>
@@ -458,6 +477,7 @@ onMounted(() => {
           <p class="import-hint">
             {{ t('theme.pasteThemeJson') }}
           </p>
+          <div v-if="importErrorMsg" class="dialog-error">{{ importErrorMsg }}</div>
           <textarea
             v-model="importJson"
             class="import-textarea"
@@ -482,6 +502,34 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 删除确认 -->
+    <Teleport to="body">
+      <div
+        v-if="showDeleteConfirm"
+        class="dialog-overlay"
+        @click.self="showDeleteConfirm = null"
+      >
+        <div class="confirm-dialog">
+          <div class="confirm-title">
+            <span>{{ t('theme.confirmDeleteTheme') }} "{{ showDeleteConfirm.name }}"？</span>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn btn-ghost" @click="showDeleteConfirm = null">
+              {{ t('common.cancel') }}
+            </button>
+            <button class="btn btn-danger" @click="confirmDeleteTheme">
+              {{ t('common.delete') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Toast -->
+    <Teleport to="body">
+      <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+    </Teleport>
   </div>
 </template>
 
@@ -847,5 +895,36 @@ defineExpose({ getPreviewStyle })
 
 .import-textarea:focus {
   border-color: var(--accent);
+}
+
+.dialog-error {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: rgba(239, 68, 68, .1);
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 24px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+  font-size: 13px;
+  z-index: 2000;
+  animation: toast-in .2s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 </style>

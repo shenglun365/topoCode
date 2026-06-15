@@ -1,11 +1,11 @@
 """
 Community Analysis — 社区分析（纯内存 + SQLite 写入）
 
-从 SQLite 加载调用/依赖边数据，构建图，执行 Louvain 社区检测，
+从 SQLite 加载调用/依赖边数据，构建图，执行社区检测（Leiden 首选 / Louvain 回退），
 递归分层分析，结果写入 graph_doc + community_hierarchy 表。
 
 改进：
-- Louvain 使用 NetworkX community_louvain（标准实现，支持多级聚合）
+- Leiden 算法（连通性保证、更稳定、更快收敛），Louvain 为回退
 - 枢纽节点过滤（degree > total_nodes * 0.3 或 > 50）
 - 孤立节点标记（移除枢纽后 degree ≤ 1）
 - 质量分使用模块度而非图密度
@@ -21,9 +21,19 @@ from typing import Dict, List, Set, Tuple, Optional
 import networkx as nx
 from community import community_louvain
 
+try:
+    import leidenalg as la
+    import igraph as ig
+    _LEIDEN_AVAILABLE = True
+except ImportError:
+    _LEIDEN_AVAILABLE = False
+    la = None
+    ig = None
+
 from config import (
     HUB_DEGREE_RATIO, HUB_MIN_DEGREE, ORPHAN_MAX_DEGREE,
     INTRAn_FILE_EDGE_WEIGHT, INTRAn_FILE_EDGE_FALLBACK_WEIGHT,
+    LARGE_GRAPH_NODE_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,7 +81,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     node_lookup = _build_node_lookup(analysis_store, task_id)
 
     # 3. 构建图 + 枢纽/孤立节点过滤
-    graph, edge_directions, hub_nodes, orphan_nodes = _build_graph(
+    graph, edge_directions, hub_nodes, orphan_nodes, node_coreness = _build_graph(
         edges, edge_type, filter_intra_file=False, node_lookup=node_lookup
     )
     all_nodes = set(graph.keys())
@@ -107,6 +117,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         task_id, edge_type, level, parent_comm_id,
         communities, graph, analysis_store, edge_directions,
         node_lookup=node_lookup,
+        node_coreness=node_coreness,
     )
 
     # 5. 检测是否需要备选方案（CALL 图连通性过高）
@@ -125,12 +136,11 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
         logger.info(f"[COMMUNITY] CALL: 已清除默认方案的社区数据，重新分析")
 
         # 重新构建图（同文件内调用降权而非删除）
-        graph, edge_directions, hub_nodes, orphan_nodes = _build_graph(
+        graph, edge_directions, hub_nodes, orphan_nodes, node_coreness = _build_graph(
             edges, edge_type, filter_intra_file=False,
             intra_file_weight=INTRAn_FILE_EDGE_FALLBACK_WEIGHT,
             node_lookup=node_lookup,
         )
-        # 再次过滤枢纽/孤立（可能已变化）
         graph, edge_directions, hub_nodes, orphan_nodes = _filter_hubs_and_orphans(
             graph, edge_directions
         )
@@ -156,6 +166,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
             task_id, edge_type, level, parent_comm_id,
             communities, graph, analysis_store, edge_directions,
             node_lookup=node_lookup,
+            node_coreness=node_coreness,
         )
         logger.info(f"[COMMUNITY] CALL (备选): L0 产生 {len(communities)} 个社区")
 
@@ -179,6 +190,7 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
                     task_id, edge_type, new_level, parent_id,
                     sub_comms, sub_graph, analysis_store, edge_directions,
                     node_lookup=node_lookup,
+                    node_coreness=node_coreness,
                 )
                 new_saved += ns
                 total_count += ns
@@ -227,14 +239,12 @@ def _build_node_lookup(analysis_store, task_id: str) -> dict:
 def _build_graph(edges: List[Dict], edge_type: str, *,
                  filter_intra_file: bool = False,
                  intra_file_weight: float = 1.0,
-                 node_lookup: Dict[str, tuple] = None) -> Tuple[Dict, Dict, Set, Set]:
+                 node_lookup: Dict[str, tuple] = None) -> Tuple[Dict, Dict, Set, Set, Dict]:
     """
-    从边数据构建无向图（邻接表），含枢纽/孤立节点预过滤
+    从边数据构建无向图（邻接表），含枢纽/孤立节点预过滤 + k-core 核心度。
 
-    Args:
-        edges: 边数据列表
-        edge_type: "INCLUDE" 或 "CALL"
-        node_lookup: {node_id → (file_path, name)} v2 schema 映射
+    Returns:
+        (filtered_graph, edge_directions, hub_nodes, orphan_nodes, node_coreness)
     """
     if filter_intra_file:
         intra_file_weight = 0.0
@@ -302,6 +312,10 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
         else:
             continue
 
+        if source == target:
+            skipped += 1
+            continue
+
         graph[source].add(target)
         graph[target].add(source)
         edge_directions[(source, target)] = direction
@@ -320,6 +334,9 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
     # 过滤枢纽和孤立节点
     filtered_graph, hub_nodes, orphan_nodes = _filter_hubs_and_orphans(graph, edge_directions)
 
+    node_coreness = _compute_coreness(graph, all_nodes)
+    logger.info(f"[COMMUNITY] k-core: computed coreness for {len(node_coreness)} nodes, max={max(node_coreness.values()) if node_coreness else 0}")
+
     # 过滤 edge_directions
     filtered_directions = {}
     for (s, t), d in edge_directions.items():
@@ -327,7 +344,7 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
            and t not in hub_nodes and t not in orphan_nodes:
             filtered_directions[(s, t)] = d
 
-    return dict(filtered_graph), filtered_directions, hub_nodes, orphan_nodes
+    return dict(filtered_graph), filtered_directions, hub_nodes, orphan_nodes, node_coreness
 
 
 def _filter_hubs_and_orphans(graph: Dict[str, Set[str]],
@@ -422,20 +439,37 @@ def _build_sub_graph(graph: Dict[str, Set[str]], nodes: Set[str]) -> Dict[str, S
     return dict(sub)
 
 
-# ==================== Louvain 社区检测（NetworkX 标准实现）====================
+def _compute_coreness(graph: Dict[str, Set[str]],
+                      nodes: Set[str]) -> Dict[str, int]:
+    """计算全图各节点的 k-core 核心度（coreness）。
+
+    coreness = 节点所在最深 k-core 的 k 值：
+    - 高 coreness（≥5）→ 该文件被大量文件紧密依赖（架构核心）
+    - 低 coreness（1-2）→ 该文件依赖关系稀少（外围功能）
+
+    O(m) 复杂度，基于 NetworkX 内置 core_number。
+    """
+    G = nx.Graph()
+    for node in nodes:
+        for neighbor in graph.get(node, set()):
+            if neighbor in nodes and node != neighbor:
+                G.add_edge(node, neighbor)
+    if G.number_of_edges() == 0:
+        return {}
+    self_loops = list(nx.selfloop_edges(G))
+    if self_loops:
+        G.remove_edges_from(self_loops)
+    return nx.core_number(G)
+
+
+# ==================== 社区检测（Leiden 首选 / Louvain 回退）====================
 
 def _detect_communities(graph: Dict[str, Set[str]],
                         nodes: Set[str]) -> List[Set[str]]:
-    """
-    社区检测 — 基于 NetworkX community_louvain（标准 Louvain + 多级聚合）。
-
-    使用 networkx 构建图 + community_louvain.best_partition() 执行标准 Louvain，
-    返回社区列表（每个社区是节点集合），过滤掉单节点社区。
-    """
+    """社区检测 — Leiden（首选，连通性保证）/ Louvain（回退）"""
     if not nodes:
         return []
 
-    # 构建 NetworkX 图
     G = nx.Graph()
     node_set = set(nodes)
 
@@ -448,15 +482,54 @@ def _detect_communities(graph: Dict[str, Set[str]],
     if G.number_of_nodes() == 0:
         return []
 
-    # 标准 Louvain（多级聚合）
+    sl = list(nx.selfloop_edges(G))
+    if sl:
+        G.remove_edges_from(sl)
+        logger.info(f"[COMMUNITY] Removed {len(sl)} self-loop edge(s)")
+
+    if G.number_of_nodes() > LARGE_GRAPH_NODE_THRESHOLD:
+        logger.info(
+            f"[COMMUNITY] Large graph ({G.number_of_nodes()} nodes > {LARGE_GRAPH_NODE_THRESHOLD}),"
+            f" using Label Propagation for speed"
+        )
+        try:
+            from networkx.algorithms.community import label_propagation_communities
+            comms = list(label_propagation_communities(G))
+            comm_map: Dict[int, Set[str]] = {
+                i: set(c) for i, c in enumerate(comms) if len(c) >= 2
+            }
+            result = [comm for comm in comm_map.values() if len(comm) >= 2]
+            if result:
+                return result
+        except Exception as e:
+            logger.warning(f"[COMMUNITY] Label Propagation failed: {e}, falling back")
+
+    if _LEIDEN_AVAILABLE and G.number_of_edges() > 0:
+        try:
+            node_list = list(G.nodes())
+            node_to_idx = {n: i for i, n in enumerate(node_list)}
+            edge_indices = [(node_to_idx[s], node_to_idx[t]) for s, t in G.edges()]
+            g_ig = ig.Graph(len(node_list), edge_indices, directed=False)
+
+            part = la.find_partition(g_ig, la.ModularityVertexPartition)
+
+            comm_map: Dict[int, Set[str]] = {}
+            for i, cid in enumerate(part.membership):
+                comm_map.setdefault(cid, set()).add(node_list[i])
+
+            result = [comm for comm in comm_map.values() if len(comm) >= 2]
+            return result if result else [{node} for node in G.nodes()]
+        except Exception as e:
+            logger.warning(
+                f"[COMMUNITY] Leiden failed: {e}, falling back to Louvain"
+            )
+
     partition = community_louvain.best_partition(G)
 
-    # 按社区分组
     comm_map: Dict[int, Set[str]] = {}
     for node, cid in partition.items():
         comm_map.setdefault(cid, set()).add(node)
 
-    # 过滤单节点社区
     result = [comm for comm in comm_map.values() if len(comm) >= 2]
     return result if result else [{node} for node in G.nodes()]
 
@@ -510,9 +583,10 @@ def _save_communities(task_id: str, edge_type: str, level: str,
                        graph: Dict[str, Set[str]],
                        analysis_store,
                        edge_directions: Dict = None,
-                       node_lookup: Dict = None) -> Tuple[int, int, int]:
+                       node_lookup: Dict = None,
+                       node_coreness: Dict = None) -> Tuple[int, int, int]:
     """
-    保存社区到 SQLite（含模块度质量分）
+    保存社区到 SQLite（含模块度质量分 + k-core 核心度元数据）
 
     Returns:
         (saved_count, hub_saved, orphan_saved)
@@ -522,6 +596,8 @@ def _save_communities(task_id: str, edge_type: str, level: str,
 
     if edge_directions is None:
         edge_directions = {}
+    if node_coreness is None:
+        node_coreness = {}
 
     # 计算全图度和边数用于模块度
     all_nodes = set()
@@ -564,6 +640,16 @@ def _save_communities(task_id: str, edge_type: str, level: str,
         edge_count = len(edge_list)
         file_count = len(set(comm_nodes)) if comm_nodes else 0
 
+        metadata = {}
+        if node_coreness:
+            coreness_vals = [node_coreness.get(n, 0) for n in comm_nodes if n in node_coreness]
+            if coreness_vals:
+                metadata["avgCoreness"] = round(sum(coreness_vals) / len(coreness_vals), 2)
+                metadata["maxCoreness"] = max(coreness_vals)
+                metadata["coreNodeRatio"] = round(
+                    sum(1 for v in coreness_vals if v >= 3) / len(coreness_vals), 3
+                )
+
         comm_docs.append({
             "task_id": task_id,
             "edge_type": edge_type,
@@ -577,6 +663,7 @@ def _save_communities(task_id: str, edge_type: str, level: str,
             "edge_count": edge_count,
             "quality_score": round(_compute_modularity([comm_nodes], graph, degrees, m), 6) if m > 0 else 0.0,
             "description": f"{edge_type} community at {level}, {node_count} nodes, {edge_count} edges",
+            "metadata": json.dumps(metadata) if metadata else "{}",
         })
 
         hierarchies.append({

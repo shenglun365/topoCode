@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
-import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@/types/ipc'
+import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult, TimelineEntry } from '@/types/ipc'
 
 export interface CommunityItem {
   id: string
@@ -12,6 +12,9 @@ export interface CommunityItem {
   fileCount: number
   edgeCount: number
   qualityScore: number | null
+  avgCoreness: number
+  maxCoreness: number
+  coreNodeRatio: number
   status: 'pending' | 'queued' | 'running' | 'completed' | 'error' | 'skipped'
   selected: boolean
   parentId?: string
@@ -57,8 +60,8 @@ interface CommunityTaskRuntime {
     steps: Array<{ description: string; status: 'pending'|'running'|'done'|'failed' }>
     progress: number; message: string; createdAt: string
   }>
-  /** 架构快照列表 */
-  archSnapshots: Array<{ id: string; ts: string; commCount: number; summary: string }>
+  /** 架构时间线 */
+  timeline: TimelineEntry[]
   /** 对比模式激活状态 */
   compareActive: boolean
   compareFrom: string
@@ -104,7 +107,7 @@ export const useCommunityStore = defineStore('community', () => {
         nodeLists: {},
         fileDetails: {},
         agentTasks: [],
-        archSnapshots: [],
+        timeline: [],
         compareActive: false,
         compareFrom: '',
         compareTo: '',
@@ -177,6 +180,9 @@ export const useCommunityStore = defineStore('community', () => {
                 communityId: item.id, level: lv.lv, edgeType: 'CALL',
                 nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
                 qualityScore: item.qualityScore ?? null,
+                avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
+                maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
+                coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
                 status: saved ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
@@ -196,6 +202,9 @@ export const useCommunityStore = defineStore('community', () => {
                 communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
                 nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
                 qualityScore: item.qualityScore ?? null,
+                avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
+                maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
+                coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
                 status: saved ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
@@ -288,6 +297,9 @@ export const useCommunityStore = defineStore('community', () => {
                 communityId: item.id, level: lv.lv, edgeType: 'CALL',
                 nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
                 qualityScore: item.qualityScore ?? null,
+                avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
+                maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
+                coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
                 status: saved ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
@@ -307,6 +319,9 @@ export const useCommunityStore = defineStore('community', () => {
                 communityId: item.id, level: lv.lv, edgeType: 'INCLUDE',
                 nodeCount: item.nodeCount || 0, fileCount: item.fileCount || 0, edgeCount: item.edgeCount || 0,
                 qualityScore: item.qualityScore ?? null,
+                avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
+                maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
+                coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
                 status: saved ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
@@ -783,9 +798,9 @@ export const useCommunityStore = defineStore('community', () => {
 
   /* ---- Snapshot management ---- */
 
-  function setArchSnapshots(taskId: string, snapshots: any[]) {
+  function setTimeline(taskId: string, entries: TimelineEntry[]) {
     const t = ensureTask(taskId)
-    t.archSnapshots = snapshots
+    t.timeline = entries
   }
 
   function setCompareMode(taskId: string, active: boolean, from?: string, to?: string) {
@@ -803,6 +818,6 @@ export const useCommunityStore = defineStore('community', () => {
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
     addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, parseArchCommand,
-    setArchSnapshots, setCompareMode,
+    setTimeline, setCompareMode,
   }
 })

@@ -718,6 +718,7 @@ PROJECT_DB_TABLES_SQL = """
         edge_count INTEGER DEFAULT 0,
         quality_score REAL,
         description TEXT,
+        metadata TEXT DEFAULT '{}',
         created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_graph_doc_task ON graph_doc(task_id);
@@ -886,6 +887,9 @@ PROJECT_DB_TABLES_SQL = """
         edge_type TEXT NOT NULL,
         level TEXT NOT NULL,
         name TEXT,
+        summary TEXT,
+        mermaid TEXT,
+        plantuml TEXT,
         node_count INTEGER,
         file_count INTEGER,
         quality_score REAL,
@@ -1170,6 +1174,8 @@ class MultiDBManager:
             gd_cols = {row[1] for row in cursor.fetchall()}
             if 'file_count' not in gd_cols:
                 project_db.execute("ALTER TABLE graph_doc ADD COLUMN file_count INTEGER DEFAULT 0")
+            if 'metadata' not in gd_cols:
+                project_db.execute("ALTER TABLE graph_doc ADD COLUMN metadata TEXT DEFAULT '{}'")
         except Exception:
             pass
 

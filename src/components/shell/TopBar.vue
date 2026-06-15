@@ -98,6 +98,7 @@ function onDropdownMouseLeave() {
 // ── 弹窗 ──
 const showAbout = ref(false)
 const showExitConfirm = ref(false)
+const showDuplicateDialog = ref(false)
 
 type MenuItem = { label?: string; shortcut?: string; action?: string; divider?: boolean }
 const menus: Record<string, MenuItem[]> = {
@@ -162,7 +163,7 @@ async function handleFileImport() {
     if (paths) {
       const result = await projectStore.importProject(paths)
       if (!result) {
-        alert(t('import.error.duplicate'))
+        showDuplicateDialog.value = true
       }
     }
   }
@@ -414,6 +415,29 @@ onMounted(() => {
               @click="confirmExit"
             >
               {{ t('common.confirm') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 重复导入提示 -->
+    <Teleport to="body">
+      <div
+        v-if="showDuplicateDialog"
+        class="dialog-overlay"
+        @click.self="showDuplicateDialog = false"
+      >
+        <div class="confirm-dialog">
+          <div class="confirm-title">
+            <span>{{ t('import.error.duplicate') }}</span>
+          </div>
+          <div class="confirm-actions">
+            <button
+              class="btn btn-primary"
+              @click="showDuplicateDialog = false"
+            >
+              {{ t('common.ok', '确定') }}
             </button>
           </div>
         </div>

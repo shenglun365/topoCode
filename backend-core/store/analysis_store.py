@@ -307,8 +307,9 @@ class AnalysisStore:
                 INSERT INTO graph_doc (
                     task_id, edge_type, comm_lv, parent_comm_id,
                     comm_id, node_list, node_count, file_count,
-                    edge_list, edge_count, quality_score, description
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    edge_list, edge_count, quality_score, description,
+                    metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 (
                     c["task_id"], c["edge_type"], c["comm_lv"],
@@ -320,6 +321,7 @@ class AnalysisStore:
                     c.get("edge_count", 0),
                     c.get("quality_score"),
                     c.get("description"),
+                    c.get("metadata", "{}"),
                 )
                 for c in batch
             ])

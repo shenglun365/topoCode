@@ -36,8 +36,11 @@ from task_manager import (
     save_positions as _tm_save_positions,
     load_positions as _tm_load_positions,
     clear_positions as _tm_clear_positions,
+    list_position_keys as _tm_list_position_keys,
     list_archived_snapshots as _tm_list_archived_snapshots,
     compare_with_archived as _tm_compare_with_archived,
+    promote_timeline_entry as _tm_promote_timeline_entry,
+    timeline_gc as _tm_timeline_gc,
 )
 
 
@@ -131,6 +134,11 @@ class GitIgnoreParser:
 # ==================== 默认忽略模式 ====================
 
 DEFAULT_IGNORE_PATTERNS = [
+    # topoCode 自身数据
+    '.topocode/', '.topocode-archive',
+    # 忽略文件自身
+    '.gitignore', '.dockerignore', '.npmignore', '.ignore',
+    '.prettierignore', '.eslintignore',
     # 构建产物
     'node_modules/', 'dist/', 'build/', '.next/', '.nuxt/',
     '__pycache__/', '*.pyc', '*.pyo', '*.pyd', '.Python/',
@@ -251,6 +259,9 @@ def build_effective_ignore_patterns(config: dict) -> list[str]:
         if p not in seen:
             base.append(p)
             seen.add(p)
+    if '.topocode/' not in seen:
+        base.append('.topocode/')
+        seen.add('.topocode/')
     return base
 
 
@@ -273,6 +284,26 @@ def should_ignore_file(rel_path: str,
             return True
 
     return False
+
+
+def _ensure_topocode_in_gitignore(root_path: str):
+    """Ensure .topocode is listed in the project's .gitignore."""
+    gitignore_path = os.path.join(root_path, '.gitignore')
+    entry = '.topocode/'
+    try:
+        if os.path.exists(gitignore_path):
+            with open(gitignore_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            normalized = [l.strip() for l in lines]
+            if '.topocode' in normalized or '.topocode/' in normalized:
+                return
+            with open(gitignore_path, 'a', encoding='utf-8') as f:
+                f.write(f'\n{entry}\n')
+        else:
+            with open(gitignore_path, 'w', encoding='utf-8') as f:
+                f.write(f'{entry}\n')
+    except Exception as e:
+        logger.warning(f'[import] failed to update .gitignore: {e}')
 
 
 # ==================== 项目管理方法 ====================
@@ -360,6 +391,8 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "is_sample": 0,
             "last_sync": now,
         })
+
+        _ensure_topocode_in_gitignore(path)
 
         server.publish("project", "import.progress", {
             "path": path,
@@ -533,28 +566,30 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         import asyncio
 
         def _scan_files():
-            """在后台线程执行文件扫描，不阻塞 event loop"""
             project_db = multi_db.get_project_db(id)
             root_path = project["root_path"]
 
-            # 加载 .gitignore
-            gitignore = GitIgnoreParser().load_file(os.path.join(root_path, '.gitignore'))
+            import_config = _load_import_config(main_db)
+            extra_ignore_files = import_config.get("extra_ignore_files", [])
+            ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
+            multi_ignore = MultiIgnoreParser().load_files(root_path, ignore_filenames)
+            effective_patterns = build_effective_ignore_patterns(import_config)
 
-            # 获取数据库中所有文件
             db_files = project_db.fetchall("SELECT file_path, content_hash FROM source_files")
             db_file_map = {f["file_path"]: f["content_hash"] for f in db_files}
 
-            # 扫描当前文件系统（应用 gitignore）
             current_files = {}
             for dirpath, dirnames, filenames in os.walk(root_path):
                 rel_root = os.path.relpath(dirpath, root_path)
                 dirnames[:] = [d for d in dirnames if not should_ignore_file(
-                    os.path.join(rel_root, d) if rel_root != '.' else d, gitignore, is_dir=True)]
+                    os.path.join(rel_root, d) if rel_root != '.' else d,
+                    multi_ignore, is_dir=True, extra_patterns=effective_patterns)]
 
                 for filename in filenames:
                     full_path = os.path.join(dirpath, filename)
                     rel_path = os.path.relpath(full_path, root_path)
-                    if should_ignore_file(rel_path, gitignore):
+                    if should_ignore_file(rel_path, multi_ignore,
+                                          extra_patterns=effective_patterns):
                         continue
                     content_hash = multi_db.compute_md5(full_path)
                     current_files[rel_path] = content_hash
@@ -862,7 +897,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not tid: raise ValueError("task_id is required")
         return _tm_cleanup_task_snapshots(multi_db, tid)
 
-    # ==================== 架构快照 ====================
+    # ==================== 架构时间线 ====================
 
     @server.register("graph.saveSnapshot")
     def save_snapshot(task_id: str = None, taskId: str = None, alias: str = None,
@@ -874,16 +909,20 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return _tm_save_snapshot(multi_db, tid, pid, alias)
 
     @server.register("graph.getSnapshot")
-    def get_snapshot(task_id: str = None, taskId: str = None):
+    def get_snapshot(task_id: str = None, taskId: str = None,
+                      snapshot_id: str = None, snapshotId: str = None):
         tid = task_id or taskId
+        sid = snapshot_id or snapshotId
         if not tid: raise ValueError("task_id is required")
-        return _tm_get_snapshot(multi_db, tid)
+        return _tm_get_snapshot(multi_db, tid, sid)
 
     @server.register("graph.deleteSnapshot")
-    def delete_snapshot(task_id: str = None, taskId: str = None):
+    def delete_snapshot(task_id: str = None, taskId: str = None,
+                         snapshot_id: str = None, snapshotId: str = None):
         tid = task_id or taskId
+        sid = snapshot_id or snapshotId
         if not tid: raise ValueError("task_id is required")
-        return _tm_delete_snapshot(multi_db, tid)
+        return _tm_delete_snapshot(multi_db, tid, sid)
 
     @server.register("graph.exportSnapshots")
     def export_snapshots(task_id: str = None, taskId: str = None):
@@ -893,11 +932,29 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("graph.compareSnapshots")
     def compare_snapshots(snapshot_id_a: str = None, snapshotIdA: str = None,
-                          snapshot_id_b: str = None, snapshotIdB: str = None):
+                          snapshot_id_b: str = None, snapshotIdB: str = None,
+                          task_id_a: str = None, taskIdA: str = None,
+                          task_id_b: str = None, taskIdB: str = None):
         sid_a = snapshot_id_a or snapshotIdA
         sid_b = snapshot_id_b or snapshotIdB
-        if not sid_a or not sid_b: raise ValueError("snapshotIdA and snapshotIdB are required")
-        return _tm_compare_snapshots(multi_db, sid_a, sid_b)
+        tid_a = task_id_a or taskIdA
+        tid_b = task_id_b or taskIdB
+        return _tm_compare_snapshots(multi_db, sid_a, sid_b, tid_a, tid_b)
+
+    @server.register("graph.promoteTimelineEntry")
+    def promote_timeline_entry(task_id: str = None, taskId: str = None,
+                                timeline_id: str = None, timelineId: str = None):
+        tid = task_id or taskId
+        tlid = timeline_id or timelineId
+        if not tid: raise ValueError("task_id is required")
+        if not tlid: raise ValueError("timeline_id is required")
+        return _tm_promote_timeline_entry(multi_db, tid, tlid)
+
+    @server.register("graph.timelineGC")
+    def timeline_gc(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_timeline_gc(multi_db, pid)
 
     # ==================== 图节点位置 ====================
 
@@ -944,6 +1001,12 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not tid or not et or not dk or not lt:
             raise ValueError("task_id, edge_type, drill_key, layout_type are required")
         return _tm_clear_positions(multi_db, tid, et, dk, lt)
+
+    @server.register("graph.listSavedPositionKeys")
+    def list_saved_position_keys(project_id: str = None, projectId: str = None):
+        pid = project_id or projectId
+        if not pid: raise ValueError("project_id is required")
+        return _tm_list_position_keys(multi_db, pid)
 
     @server.register("graph.listArchivedSnapshots")
     def list_archived_snapshots(project_id: str = None, projectId: str = None):

@@ -63,6 +63,9 @@ ORPHAN_MAX_DEGREE = 0              # 仅移除完全无连接的节点（度为 
 INTRAn_FILE_EDGE_WEIGHT = 1.0       # 正常值
 INTRAn_FILE_EDGE_FALLBACK_WEIGHT = 0.1  # 备选方案时降权
 
+# 超大图阈值：节点数超过此值时自动切换为 Label Propagation（快 10-50x）
+LARGE_GRAPH_NODE_THRESHOLD = 5000
+
 # ==================== 日志配置 ====================
 LOG_DIR = os.environ.get("TOPOCODE_LOG_DIR", os.path.join(DB_DIR, "logs"))
 LOG_LEVEL = os.environ.get("TOPOCODE_LOG_LEVEL", "INFO")

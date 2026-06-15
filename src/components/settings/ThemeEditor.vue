@@ -106,11 +106,14 @@ watch([colors, fonts], () => {
   }
 }, { deep: true })
 
+const nameError = ref('')
+
 function handleSave() {
   if (!name.value.trim()) {
-    alert(t('theme.enterThemeName'))
+    nameError.value = t('theme.enterThemeName')
     return
   }
+  nameError.value = ''
   emit('save', {
     name: name.value.trim(),
     description: description.value.trim(),
@@ -232,6 +235,7 @@ function applyPreset(presetColors: ThemeColors) {
               class="form-input"
               :placeholder="t('theme.myTheme')"
             >
+            <span v-if="nameError" class="field-error">{{ nameError }}</span>
           </div>
           <div class="form-item">
             <label class="form-label">{{ t('common.description') }}</label>
@@ -430,6 +434,12 @@ function applyPreset(presetColors: ThemeColors) {
 
 .form-input:focus {
   border-color: var(--accent);
+}
+
+.field-error {
+  color: var(--error);
+  font-size: 11px;
+  margin-top: 4px;
 }
 
 /* 预设主题 */

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
   ArrowPathIcon,
-  ChevronRightIcon,
+  ChevronLeftIcon,
 } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
 import { useNavigationStore } from '@/stores/navigation'
@@ -239,7 +239,7 @@ loadPanelContent()
           :title="t('common.collapse')"
           @click="panelStore.toggleLeft()"
         >
-          <ChevronRightIcon class="w-3.5 h-3.5" />
+          <ChevronLeftIcon class="w-3.5 h-3.5" />
         </div>
       </div>
     </div>

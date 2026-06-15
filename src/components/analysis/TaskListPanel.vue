@@ -11,16 +11,16 @@ import {
   ExclamationTriangleIcon,
   PlayIcon,
   DocumentTextIcon,
-  CameraIcon,
+  ClockIcon,
 } from '@heroicons/vue/24/outline'
 import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
 import { useNavigationStore } from '@/stores/navigation'
 import TaskDetailDialog from './TaskDetailDialog.vue'
+import TimelineDialog from './TimelineDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
-import { ipc } from '@/services/ipc'
 
 const { showId, componentId } = useComponentId('AN-002')
 const props = defineProps<{
@@ -28,7 +28,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  createTask: [taskId?: string]  // 传入 taskId 表示编辑，否则表示新建
+  createTask: [taskId?: string]
 }>()
 
 const { t } = useI18n()
@@ -39,25 +39,13 @@ const navigation = useNavigationStore()
 
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
-const snapshotSaving = ref(new Set<string>())
+const timelineDialogVisible = ref(false)
+const timelineDialogTask = ref<AnalysisTask | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-async function handleSaveSnapshot(task: AnalysisTask) {
-  snapshotSaving.value.add(task.id)
-  try {
-    const result = await ipc.graph.saveSnapshot({
-      taskId: task.id,
-      projectId: props.projectId,
-      alias: undefined,
-    })
-    if (result.snapshotId) {
-      console.log(`[TaskListPanel] snapshot saved: ${result.snapshotId} (${result.communityCount} communities, ${result.totalFiles} files)`)
-    }
-  } catch (err) {
-    console.warn('[TaskListPanel] snapshot save failed:', err)
-  } finally {
-    snapshotSaving.value.delete(task.id)
-  }
+function openTimeline(task: AnalysisTask) {
+  timelineDialogTask.value = task
+  timelineDialogVisible.value = true
 }
 
 // 加载任务列表
@@ -313,6 +301,15 @@ function getConfigSummary(task: AnalysisTask): string {
             />
             <span class="task-name">{{ task.name }}</span>
             <span class="task-type-badge">{{ task.type }}</span>
+            <button
+              v-if="task.status === 'done'"
+              class="btn btn-ghost btn-xs task-name-btn"
+              title="查看历史快照"
+              @click.stop="openTimeline(task)"
+            >
+              <ClockIcon class="w-3 h-3" />
+              <span class="task-name-btn-text">时间线</span>
+            </button>
           </div>
           <div class="task-progress-group">
             <span
@@ -436,16 +433,6 @@ function getConfigSummary(task: AnalysisTask): string {
             <DocumentTextIcon class="w-3.5 h-3.5" />
             <span>结构分析</span>
           </button>
-          <button
-            v-if="task.status === 'done'"
-            class="btn btn-ghost btn-xs"
-            :title="'保存架构快照'"
-            :disabled="snapshotSaving.has(task.id)"
-            @click="handleSaveSnapshot(task)"
-          >
-            <CameraIcon class="w-3.5 h-3.5" />
-            <span>{{ snapshotSaving.has(task.id) ? '保存中...' : '快照' }}</span>
-          </button>
         </div>
       </div>
     </div>
@@ -487,6 +474,14 @@ function getConfigSummary(task: AnalysisTask): string {
         </div>
       </div>
     </Teleport>
+
+    <TimelineDialog
+      :visible="timelineDialogVisible"
+      :task-id="timelineDialogTask?.id || ''"
+      :task-name="timelineDialogTask?.name || ''"
+      :project-id="props.projectId"
+      @close="timelineDialogVisible = false"
+    />
   </div>
 </template>
 
@@ -614,6 +609,19 @@ function getConfigSummary(task: AnalysisTask): string {
   font-family: monospace;
 }
 
+.task-name-btn {
+  padding: 2px 4px;
+  margin-left: 2px;
+  color: var(--text-muted);
+  gap: 2px;
+}
+.task-name-btn:hover {
+  color: var(--accent);
+}
+.task-name-btn-text {
+  font-size: 10px;
+}
+
 .task-progress-group {
   display: flex;
   align-items: center;
@@ -724,6 +732,12 @@ function getConfigSummary(task: AnalysisTask): string {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.confirm-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .confirm-actions {

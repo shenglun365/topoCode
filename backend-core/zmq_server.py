@@ -42,6 +42,16 @@ def _brief_params(params: dict, max_len: int = 200) -> str:
     for k, v in params.items():
         if k in ("api_key", "password", "secret", "token"):
             safe[k] = "****"
+        elif k == "positions" and isinstance(v, list):
+            n = len(v)
+            if n == 0:
+                safe[k] = "[]"
+            elif n <= 3:
+                safe[k] = [{"nodeId": p.get("nodeId", p.get("node_id", "?")), "x": p.get("x"), "y": p.get("y")} for p in v]
+            else:
+                first3 = [{"nodeId": p.get("nodeId", p.get("node_id", "?")), "x": p.get("x"), "y": p.get("y")} for p in v[:3]]
+                first3.append(f"...({n} total)")
+                safe[k] = first3
         elif isinstance(v, str) and len(v) > 60:
             safe[k] = v[:60] + "..."
         elif isinstance(v, (list, dict)):

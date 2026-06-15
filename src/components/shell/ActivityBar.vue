@@ -10,6 +10,7 @@ import {
   Cog6ToothIcon,
 } from '@heroicons/vue/24/outline'
 import { useNavigationStore } from '@/stores/navigation'
+import { usePanelStore } from '@/stores/panel'
 import type { PageType } from '@/types'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -17,6 +18,7 @@ const { showId, componentId } = useComponentId('SH-002')
 const { t } = useI18n()
 const router = useRouter()
 const navigation = useNavigationStore()
+const panelStore = usePanelStore()
 
 const iconMap = {
   home: HomeIcon,
@@ -41,6 +43,9 @@ const currentPage = computed(() => navigation.currentPage)
 
 function navigateTo(page: PageType) {
   navigation.navigateTo(page)
+  if (page === 'analysis' && panelStore.leftCollapsed) {
+    panelStore.setLeftCollapsed(false)
+  }
   router.push(`/${page}`)
 }
 </script>

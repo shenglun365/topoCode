@@ -32,6 +32,7 @@ const filterMode = ref<'all' | 'favorites'>('all')
 // 分组筛选
 const selectedGroupIds = ref<string[]>([])
 const groupFilterRef = ref<InstanceType<typeof GroupFilter> | null>(null)
+const showDuplicateDialog = ref(false)
 
 // 分页
 const currentPage = ref(1)
@@ -164,7 +165,7 @@ async function handleImportProject() {
           console.error('[HomePage] auto-create task failed:', e)
         }
       } else {
-        alert(t('import.error.duplicate'))
+        showDuplicateDialog.value = true
       }
     }
   }
@@ -406,6 +407,29 @@ onMounted(async () => {
       </div>
     </template>
   </div>
+
+  <!-- 重复导入提示 -->
+  <Teleport to="body">
+    <div
+      v-if="showDuplicateDialog"
+      class="dialog-overlay"
+      @click.self="showDuplicateDialog = false"
+    >
+      <div class="confirm-dialog">
+        <div class="confirm-title">
+          <span>{{ t('import.error.duplicate') }}</span>
+        </div>
+        <div class="confirm-actions">
+          <button
+            class="btn btn-primary"
+            @click="showDuplicateDialog = false"
+          >
+            {{ t('common.ok', '确定') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>

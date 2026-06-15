@@ -564,6 +564,7 @@ contextBridge.exposeInMainWorld('api', {
     savePositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.savePositions', params }),
     loadPositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.loadPositions', params }),
     clearPositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.clearPositions', params }),
+    listSavedPositionKeys: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.listSavedPositionKeys', params }),
     listArchivedSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.listArchivedSnapshots', params }),
     compareWithArchived: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.compareWithArchived', params }),
   },

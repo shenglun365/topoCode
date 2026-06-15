@@ -38,8 +38,8 @@ RPC_IDS: dict[str, str] = {
     "analysis.startArchAnalysis":  "API-024d",
     "analysis.startArchTrack":     "API-024e",
     "analysis.stopArchTrack":      "API-024f",
-    "analysis.listArchSnapshots":  "API-024g",
-    "analysis.getArchSnapshot":    "API-024h",
+    "analysis.listTimeline":  "API-024g",
+    "analysis.getTimelineEntry":    "API-024h",
     "analysis.getReportDashboard":  "API-024i",
     "analysis.getAgentProgress":   "API-024j",
     "analysis.cancelAgentTask":    "API-024k",
@@ -205,8 +205,11 @@ RPC_IDS: dict[str, str] = {
     "graph.savePositions":          "API-144",
     "graph.loadPositions":          "API-145",
     "graph.clearPositions":         "API-146",
-    "graph.listArchivedSnapshots":  "API-147",
-    "graph.compareWithArchived":    "API-148",
+    "graph.listSavedPositionKeys":  "API-147",
+    "graph.listArchivedSnapshots":  "API-148",
+    "graph.compareWithArchived":    "API-149",
+    "graph.promoteTimelineEntry":   "API-150",
+    "graph.timelineGC":             "API-151",
 }
 
 
