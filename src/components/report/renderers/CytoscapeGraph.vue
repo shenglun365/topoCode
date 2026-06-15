@@ -44,6 +44,7 @@ const emit = defineEmits<{
   'node-context-menu': [nodeId: string]
   'node-drag-end': [nodeId: string, x: number, y: number]
   'zoom-changed': [level: number]
+  'guide-click': []
 }>()
 
 const container = ref<HTMLDivElement>()
@@ -511,6 +512,19 @@ function zoomOut() {
   cy.zoom({ level: cy.zoom() / 1.2, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } })
 }
 
+function zoomTo(nodeId: string, animate = true) {
+  if (!cy) return
+  const node = cy.getElementById(nodeId)
+  if (node.length === 0) return
+  cy.animate(
+    {
+      center: { eles: node },
+      zoom: 1.0,
+      duration: animate ? 400 : 0,
+    },
+  )
+}
+
 defineExpose({
   getAllPositions: (): Record<string, { x: number; y: number }> => {
     if (!cy) return {}
@@ -523,6 +537,7 @@ defineExpose({
   },
   zoomIn,
   zoomOut,
+  zoomTo,
 })
 </script>
 
@@ -545,6 +560,12 @@ defineExpose({
       <button class="cg-zoom-btn" @click="zoomOut" title="缩小">−</button>
       <button class="cg-zoom-btn" @click="zoomIn" title="放大">+</button>
     </div>
+    <button
+      v-if="!props.fullscreen"
+      class="cg-guide-btn"
+      title="AI 引导探索"
+      @click="emit('guide-click')"
+    >🎓</button>
   </div>
 </template>
 
@@ -626,4 +647,18 @@ defineExpose({
 .cg-zoom-btn:first-child { border-radius: 0.25rem 0.25rem 0 0; }
 .cg-zoom-btn:last-child { border-radius: 0 0 0.25rem 0.25rem; }
 .cg-zoom-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+
+.cg-guide-btn {
+  position: absolute; bottom: 12px; right: 12px; z-index: 211;
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+  background: var(--bg-primary); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 50%;
+  cursor: pointer; transition: all 0.15s;
+}
+.cg-guide-btn:hover {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.4);
+}
 </style>

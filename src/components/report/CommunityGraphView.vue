@@ -2,6 +2,9 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
+import { usePanelStore } from '@/stores/panel'
+import { useGraphCommandStore } from '@/stores/graph-command-store'
+import type { GraphCommand, CommandResult, GraphState } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
 import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
@@ -38,6 +41,8 @@ const rootDrillNode = (): DrillPathNode => ({
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
+const panelStore = usePanelStore()
+const cmdStore = useGraphCommandStore()
 
 const props = defineProps<{
   taskId: string
@@ -815,6 +820,7 @@ async function handleDrill(targetId: string) {
         commId: targetId,
         commLevel: nextLevel,
       })
+      cmdStore.pushEvent('drill-event', { communityId: targetId, communityName: label })
     } finally {
       drilling.value = false
     }
@@ -854,6 +860,14 @@ function handleResetView() {
   saveHiddenIds()
   zoomLevel.value = 1
   resetTrigger.value++
+}
+
+function handleGuideClick() {
+  if (panelStore.rightCollapsed) {
+    panelStore.toggleRight()
+  }
+  panelStore.setRightTab('ai')
+  cmdStore.pushEvent('guide-start', {})
 }
 
 function handleNodeContextMenu(nodeId: string) {
@@ -919,7 +933,139 @@ watch(() => [props.edgeType, drillMeta.value.drillLevel], async ([_et, lv]) => {
   }
 })
 
+/* ========================================================
+   GraphCommandBus integration — AI 助手命令执行 + 图状态同步
+   ======================================================== */
+
+function syncGraphState() {
+  const vsMode = isExternalTab.value ? externalViewMode.value : internalViewMode.value
+  const allNodes = graphNodes.value
+  const visible = allNodes.filter(n => !hiddenNodeIds.value.has(n.id))
+  const visibleIds = visible.map(n => n.id)
+
+  const l0s = allCommunities.value.filter(c => c.level === 'L0' && c.edgeType === effectiveEdgeType.value)
+  const totalL0 = l0s.length
+  const qualities = l0s.map(c => c.qualityScore ?? 0).filter(q => q > 0)
+  const avgQ = qualities.length > 0 ? qualities.reduce((s, v) => s + v, 0) / qualities.length : 0
+  const lowQC = l0s.filter(c => (c.qualityScore ?? 0) > 0 && (c.qualityScore ?? 0) < 0.3)
+  const highCC = l0s.filter(c => (c.avgCoreness ?? 0) >= 3)
+
+  const tops = [...l0s].sort((a, b) => (b.nodeCount || 0) - (a.nodeCount || 0)).slice(0, 5).map(c => ({
+    id: c.communityId, name: c.name || c.communityId,
+    nodeCount: c.nodeCount || 0, qualityScore: c.qualityScore ?? undefined, avgCoreness: c.avgCoreness ?? undefined,
+  }))
+
+  const lows = lowQC.slice(0, 10).map(c => ({
+    id: c.communityId, name: c.name || c.communityId, qualityScore: c.qualityScore ?? 0,
+  }))
+
+  const patch: Partial<GraphState> = {
+    edgeType: props.edgeType,
+    viewMode: vsMode,
+    drillLevel: drillMeta.value.drillLevel,
+    drillCommId: drillMeta.value.drillCommId,
+    selectedCommunityId: drillMeta.value.drillCommId,
+    nodeCount: allNodes.length,
+    visibleNodeIds: visibleIds,
+    stats: { totalL0, avgQuality: Math.round(avgQ * 100) / 100, lowQualityCount: lowQC.length,
+      highCorenessCount: highCC.length, maxDepth: 0, topCommunities: tops, lowQualityCommunities: lows },
+  }
+  cmdStore.updateGraphState(patch)
+}
+
+/** AI → 图的命令路由：将 GraphCommand 映射到现有 CGV 方法 */
+async function executeGraphCommand(cmd: GraphCommand): Promise<CommandResult> {
+  try {
+    switch (cmd.type) {
+      case 'highlight': {
+        const ids = new Set(cmd.nodeIds)
+        hiddenNodeIds.value = new Set(
+          graphNodes.value.filter(n => !ids.has(n.id)).map(n => n.id)
+        )
+        return { success: true }
+      }
+      case 'clearHighlight':
+        hiddenNodeIds.value = new Set()
+        return { success: true }
+      case 'focus': {
+        graphCanvasRef.value?.zoomTo?.(cmd.nodeId, cmd.animate)
+        return { success: true }
+      }
+      case 'drill':
+        await drillPath.value.length > 1 ? handleRollUp() : null
+        await handleDrill(cmd.communityId)
+        return { success: true }
+      case 'rollUp':
+        handleRollUp()
+        return { success: true }
+      case 'filterByQuality':
+      case 'filterByCoreness':
+      case 'filterBySize': {
+        const all = graphNodes.value
+        const next = new Set<string>()
+        for (const n of all) {
+          const q = (n as any).qualityScore
+          const c = (n as any).avgCoreness
+          const s = n.nodeCount || 0
+          let show = true
+          if (cmd.type === 'filterByQuality') {
+            if (cmd.min != null && (q ?? 0) < cmd.min) show = false
+            if (cmd.max != null && (q ?? 0) > cmd.max) show = false
+          } else if (cmd.type === 'filterByCoreness') {
+            if (cmd.min != null && (c ?? 0) < cmd.min) show = false
+          } else if (cmd.type === 'filterBySize') {
+            if (cmd.min != null && s < cmd.min) show = false
+            if (cmd.max != null && s > cmd.max) show = false
+          }
+          if (!show) next.add(n.id)
+        }
+        hiddenNodeIds.value = next
+        return { success: true }
+      }
+      case 'hideNodes':
+        hiddenNodeIds.value = new Set([...hiddenNodeIds.value, ...cmd.nodeIds])
+        return { success: true }
+      case 'clearFilter':
+        hiddenNodeIds.value = new Set()
+        return { success: true }
+      case 'setViewMode':
+        if (isExternalTab.value) externalViewMode.value = cmd.mode as any
+        else internalViewMode.value = cmd.mode as any
+        return { success: true }
+      case 'setEdgeType':
+        return { success: false, error: 'setEdgeType: need to propagate to parent (not implemented yet)' }
+      case 'resetView':
+        handleResetView()
+        return { success: true }
+      case 'compareVersions':
+        await toggleCompare()
+        return { success: true }
+      case 'openCommunityDetail': {
+        const com = commMap.value.get(cmd.communityId)
+        if (com?.summary) {
+          emit('open-md', { taskId: props.taskId, content: `## ${com.name || com.communityId}\n\n${com.summary || ''}`, title: com.name || com.communityId })
+        }
+        return { success: true }
+      }
+      case 'dispatchAgent':
+        await communityStore.triggerArchAnalysis(props.taskId, effectiveEdgeType.value, 'L0')
+        return { success: true }
+      default:
+        return { success: false, error: `unknown command: ${(cmd as any).type}` }
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message || String(err) }
+  }
+}
+
+// 监听状态变化 → 自动同步 graphState 到 store
+watch([() => drillMeta.value.drillKey, () => props.edgeType, isExternalTab, hiddenNodeIds, graphNodes, allCommunities], () => {
+  syncGraphState()
+}, { immediate: false, deep: false })
+
 onMounted(async () => {
+  cmdStore.registerExecutor(executeGraphCommand)
+  syncGraphState()
   if (!isExternalTab.value) {
     await communityStore.loadCrossCommunityEdges(props.taskId, effectiveEdgeType.value, drillMeta.value.drillLevel)
   }
@@ -1075,6 +1221,7 @@ watch(hasUnsavedChanges, (v) => {
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => { setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y }); dragGeneration++; console.log('[CGV] node-drag-end', id, 'dragGen:', dragGeneration) }"
         @zoom-changed="(level: number) => zoomLevel = level"
+        @guide-click="handleGuideClick"
       />
       <ExternalTableView
         v-else-if="externalViewMode === 'table'"
@@ -1112,6 +1259,7 @@ watch(hasUnsavedChanges, (v) => {
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => { setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y }); dragGeneration++; console.log('[CGV] node-drag-end', id, 'dragGen:', dragGeneration) }"
         @zoom-changed="(level: number) => zoomLevel = level"
+        @guide-click="handleGuideClick"
       />
       <CommunityTableView
         v-else-if="internalViewMode === 'table'"

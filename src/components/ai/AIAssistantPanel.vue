@@ -17,12 +17,63 @@ import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useCommunityStore } from '@/stores/community-store'
 import { isLLMConfigured, chat } from '@/services/llmClient'
+import { useGraphCommandStore } from '@/stores/graph-command-store'
+import { parseCommandTag, parseConfirmTag, parseSuggestTags, stripCommandTags } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const communityStore = useCommunityStore()
+const cmdStore = useGraphCommandStore()
+
+/* ---- 引导模式 vs 普通模式 ---- */
+const guideMode = ref(false)
+
+function startGuide() {
+  guideMode.value = true
+  clearChat()
+  const tourIntro = [
+    '我来带你了解这个项目的架构。',
+    '',
+    '如果图数据已加载，我会先介绍项目概况，然后逐步引导你探索核心社区、低质量模块和外部依赖。',
+    '',
+    '你也可以直接问："帮我分析所有社区的结构" 或 "生成架构文档"。',
+  ].join('\n')
+  addMessage('assistant', tourIntro)
+}
+
+function exitGuide() {
+  guideMode.value = false
+}
+
+const GUIDE_SYSTEM_PROMPT = [
+  '你是 TopoCode 架构分析助手，当前处于引导模式，正在向用户介绍项目架构。',
+  '',
+  '引导流程（Tour 1）：逐步介绍项目，不要一次性输出所有内容，每次只讲一个主题，等待用户回应：',
+  '1. 总览：项目有多少个 L0 社区，最大的社区，高/低质量统计 → 使用 [CMD: highlight ...] 高亮 top 社区',
+  '2. 最大社区：深入介绍并 [CMD: focus ...] 定位到该节点',
+  '3. 低质量诊断：介绍低质量社区，[CMD: filterByQuality max=0.2] 筛出来',
+  '4. 核心组件：高核心度社区，[CMD: filterByCoreness min=3] 筛出来',
+  '5. 外部依赖：介绍外部包情况',
+  '6. 下一步：询问用户想看什么',
+  '',
+  '可用的 [CMD:] 命令：',
+  '  [CMD: highlight nodeIds="id1,id2"]   — 隐藏其他节点，仅显示指定节点',
+  '  [CMD: clearHighlight]                 — 取消所有隐藏',
+  '  [CMD: focus nodeId="xxx"]             — 居中放大某个节点',
+  '  [CMD: drill communityId="xxx"]        — 下钻到子社区',
+  '  [CMD: rollUp]                         — 返回上一层级',
+  '  [CMD: filterByQuality max=0.2]        — 筛选低质量社区（max<0.3 为低质量）',
+  '  [CMD: filterByCoreness min=3]         — 筛选核心组件（min≥3 为高核心度）',
+  '  [CMD: setViewMode mode="table"]       — 切换视图（force/table/heatmap）',
+  '  [CMD: resetView]                      — 重置视图',
+  '',
+  '筛选阈值参考：quality 高质量≥0.5 低质量≤0.2 | coreness 核心≥3 | size 大型>30 小型≤5',
+  '',
+  '使用 [CMD:] 时要谨慎：每次最多发 1-2 个命令，用户观察图变化后再继续。',
+  '对话中始终使用中文回复。',
+].join('\n')
 
 interface Message {
   id: string
@@ -30,6 +81,7 @@ interface Message {
   content: string
   timestamp: number
   isStreaming?: boolean
+  suggestions?: Array<{ label: string; command: string; args?: Record<string, string> }>
 }
 
 const messages = ref<Message[]>([])
@@ -38,7 +90,12 @@ const streaming = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
 
 const showCmdConfirm = ref(false)
-const cmdConfirmData = ref<{ text: string; action: string; args: Record<string, string> }>({ text: '', action: '', args: {} })
+const cmdConfirmData = ref<{
+  text: string
+  action: string
+  args: Record<string, string>
+  confirmMeta?: { communities?: number; time?: string; tokens?: string; cost?: string }
+}>({ text: '', action: '', args: {} })
 
 const llmConfigured = computed(() => isLLMConfigured())
 
@@ -78,21 +135,45 @@ function addMessage(role: Message['role'], content: string): Message {
 
 function handleCmdConfirm() {
   showCmdConfirm.value = false
-  userInput.value = cmdConfirmData.value.text
-  addMessage('user', cmdConfirmData.value.text)
-  userInput.value = ''
+  const cd = cmdConfirmData.value
+
+  // 如果确认的是 agent 调度任务 → 直接调用后端
+  if (cd.action === 'analyze' && cd.args.all === 'true') {
+    addMessage('user', cd.text)
+    addMessage('system', 'Agent 分析任务已启动，请稍后查看结果...')
+    if (activeTaskId.value) {
+      communityStore.triggerArchAnalysis(activeTaskId.value, 'INCLUDE', cd.args.level || 'L0')
+        .catch(e => addMessage('error', String(e)))
+    }
+    return
+  }
+
+  addMessage('user', cd.text)
   streaming.value = true
   const assistantMsg = addMessage('assistant', '')
+
+  const sendMessages: Array<{ role: string; content: string }> = []
+  const gs = cmdStore.graphState
+  if (gs.nodeCount > 0) {
+    sendMessages.push({ role: 'system', content: `当前图状态:\n${JSON.stringify(gs, null, 0)}` })
+  }
+  sendMessages.push(...messages.value
+    .filter(m => m.role !== 'system' && m !== assistantMsg)
+    .map(m => ({ role: m.role, content: m.content })))
+
   chat({
-    messages: messages.value
-      .filter(m => m.role !== 'system' && m !== assistantMsg)
-      .map(m => ({ role: m.role, content: m.content })),
+    messages: sendMessages,
     onChunk(chunk: string) {
       assistantMsg.content += chunk
       scrollToBottom()
     },
-  }).then(full => {
-    assistantMsg.content = full
+  }).then(async full => {
+    const display = stripCommandTags(full || assistantMsg.content)
+    assistantMsg.content = display
+    const cmds = parseCommandTag(full || display)
+    for (const cmd of cmds) {
+      await cmdStore.executeCommand({ type: cmd.type, ...cmd.args } as any)
+    }
     assistantMsg.isStreaming = false
   }).catch((err: any) => {
     assistantMsg.content = err.message || 'unknown error'
@@ -115,25 +196,67 @@ async function handleSend() {
     }
   }
 
-  // 添加用户消息
   addMessage('user', text)
   userInput.value = ''
   streaming.value = true
 
-  // 添加流式占位
   const assistantMsg = addMessage('assistant', '')
 
+  // 构建发送消息：system prompts + 对话历史（不含 system）
+  const sendMessages: Array<{ role: string; content: string }> = []
+  const gs = cmdStore.graphState
+  if (gs.nodeCount > 0) {
+    sendMessages.push({ role: 'system', content: `当前图状态:\n${JSON.stringify(gs, null, 0)}` })
+  }
+  if (guideMode.value) {
+    sendMessages.push({ role: 'system', content: GUIDE_SYSTEM_PROMPT })
+  }
+  // 对话历史（不含已有 system 消息）
+  const history = messages.value.filter(m => m.role !== 'system' && m !== assistantMsg).map(m => ({ role: m.role, content: m.content }))
+  sendMessages.push(...history)
+
   try {
+    let rawContent = ''
     const fullContent = await chat({
-      messages: messages.value
-        .filter(m => m.role !== 'system')
-        .map(m => ({ role: m.role, content: m.content })),
+      messages: sendMessages,
       onChunk(chunk: string) {
         assistantMsg.content += chunk
+        rawContent += chunk
         scrollToBottom()
       },
     })
-    assistantMsg.content = fullContent
+
+    // 流式完成后：
+    // 1. 移除标签 → 纯净展示文本
+    const displayContent = stripCommandTags(fullContent || assistantMsg.content)
+    assistantMsg.content = displayContent
+
+    // 2. 解析 [CMD:] → 串行执行命令
+    const cmds = parseCommandTag(fullContent || rawContent)
+    if (cmds.length > 0) {
+      for (const cmd of cmds) {
+        await cmdStore.executeCommand({ type: cmd.type, ...cmd.args } as any)
+      }
+    }
+
+    // 3. 解析 [SUGGEST:] → 渲染为可点击芯片
+    const suggs = parseSuggestTags(fullContent || rawContent)
+    if (suggs.length > 0) {
+      assistantMsg.suggestions = suggs
+    }
+
+    // 4. 解析 [CONFIRM:] → 渲染确认卡片
+    const conf = parseConfirmTag(fullContent || rawContent)
+    if (conf) {
+      showCmdConfirm.value = true
+      cmdConfirmData.value = {
+        text: conf.cmd,
+        action: conf.communities ? 'analyze' : 'diff',
+        args: { all: 'true', level: 'L0' },
+        confirmMeta: { communities: conf.communities, time: conf.time, tokens: conf.tokens, cost: conf.cost },
+      }
+    }
+
     assistantMsg.isStreaming = false
   } catch (err: any) {
     assistantMsg.content = err.message || '请求失败'
@@ -165,6 +288,21 @@ onMounted(() => {
 watch(llmConfigured, (val) => {
   if (val && messages.value.length === 0) {
     addMessage('system', t('ai.assistantWelcome'))
+  }
+})
+
+// 监听 GraphCommandStore 事件 — 响应用户在图上的操作
+watch(() => cmdStore.eventSeq, () => {
+  const ev = cmdStore.popEvent()
+  if (!ev) return
+  if (ev.type === 'guide-start') {
+    startGuide()
+  }
+  if (ev.type === 'drill-event') {
+    const commId = ev.data.communityId as string
+    if (commId && guideMode.value) {
+      addMessage('system', `用户双击了社区: ${commId}`)
+    }
   }
 })
 </script>
@@ -211,6 +349,18 @@ watch(llmConfigured, (val) => {
             class="ai-message-bubble"
             v-html="msg.content"
           />
+          <!-- Suggestion Chips -->
+          <div
+            v-if="msg.suggestions && msg.suggestions.length > 0 && !msg.isStreaming"
+            class="ai-suggest-chips"
+          >
+            <button
+              v-for="(sug, si) in msg.suggestions"
+              :key="si"
+              class="ai-suggest-chip"
+              @click="userInput = sug.command; handleSend()"
+            >{{ sug.label }}</button>
+          </div>
         </div>
       </div>
 
@@ -227,6 +377,16 @@ watch(llmConfigured, (val) => {
             :key="k"
             class="ai-cmd-arg"
           >--{{ k }} {{ v }}</span>
+        </div>
+        <!-- 成本预估（解析自 [CONFIRM:] 标签） -->
+        <div
+          v-if="cmdConfirmData.confirmMeta"
+          class="ai-cmd-meta"
+        >
+          <span v-if="cmdConfirmData.confirmMeta.communities">📊 {{ cmdConfirmData.confirmMeta.communities }} 个社区</span>
+          <span v-if="cmdConfirmData.confirmMeta.time">⏱ {{ cmdConfirmData.confirmMeta.time }}</span>
+          <span v-if="cmdConfirmData.confirmMeta.tokens">💬 {{ cmdConfirmData.confirmMeta.tokens }}</span>
+          <span v-if="cmdConfirmData.confirmMeta.cost">💰 {{ cmdConfirmData.confirmMeta.cost }}</span>
         </div>
         <div class="ai-cmd-actions">
           <button
@@ -458,4 +618,23 @@ watch(llmConfigured, (val) => {
 .ai-cmd-btn { padding: 0.15rem 0.5rem; font-size: 0.7rem; border: 1px solid var(--border); border-radius: 0.25rem; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; }
 .ai-cmd-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .ai-cmd-btn.primary { background: var(--accent, #7c3aed); color: #fff; border-color: var(--accent); }
+
+.ai-cmd-meta {
+  display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.35rem;
+}
+.ai-cmd-meta span {
+  font-size: 0.6rem; color: var(--text-muted);
+}
+
+.ai-suggest-chips {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.ai-suggest-chip {
+  padding: 2px 8px; font-size: 10px; border: 1px solid var(--accent);
+  border-radius: 10px; background: transparent; color: var(--accent);
+  cursor: pointer; transition: all 0.15s;
+}
+.ai-suggest-chip:hover {
+  background: var(--accent); color: #fff;
+}
 </style>

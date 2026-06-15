@@ -9,6 +9,7 @@ defineExpose({
   getAllPositions: () => cyRef.value?.getAllPositions(),
   zoomIn: () => cyRef.value?.zoomIn(),
   zoomOut: () => cyRef.value?.zoomOut(),
+  zoomTo: (nodeId: string, animate?: boolean) => cyRef.value?.zoomTo(nodeId, animate),
 })
 
 const props = defineProps<{
@@ -32,6 +33,7 @@ const emit = defineEmits<{
   'node-drag-end': [nodeId: string, x: number, y: number]
   'node-context-menu': [nodeId: string]
   'zoom-changed': [level: number]
+  'guide-click': []
 }>()
 </script>
 
@@ -55,5 +57,6 @@ const emit = defineEmits<{
     @node-drag-end="(id: string, x: number, y: number) => emit('node-drag-end', id, x, y)"
     @node-context-menu="(id: string) => emit('node-context-menu', id)"
     @zoom-changed="(level: number) => emit('zoom-changed', level)"
+    @guide-click="() => emit('guide-click')"
   />
 </template>
