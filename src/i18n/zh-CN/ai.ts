@@ -8,6 +8,7 @@ export default {
   },
   ai: {
     assistantTitle: 'AI 助手',
+    chatTab: '对话',
     assistantWelcome: '你好！我是 TopoCode AI 助手，可以帮你分析源码架构、解释代码逻辑、回答技术问题。',
     assistantNotConfigured: 'LLM API 尚未配置，请在设置中完成配置。',
     goConfigure: '前往配置',

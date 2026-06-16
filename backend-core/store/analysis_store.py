@@ -43,7 +43,141 @@ class AnalysisStore:
     def __init__(self, project_db: SQLiteContext):
         self._db = project_db
 
-    # ==================== source_files ====================
+    # ==================== source_files (v2 高性能查询) ====================
+
+    # 数据库迁移：确保索引存在
+    _indexes_ensured = False
+
+    def _ensure_indexes(self):
+        """确保 source_files 表存在必要的索引（幂等）"""
+        if AnalysisStore._indexes_ensured:
+            return
+        try:
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sf_language ON source_files(language)"
+            )
+            self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sf_file_path ON source_files(file_path)"
+            )
+            self._db.commit()
+            AnalysisStore._indexes_ensured = True
+        except Exception:
+            pass
+
+    @staticmethod
+    def _build_where_clause(scopes=None, extensions=None, exclude_dirs=None,
+                            pattern_type=None, pattern=None):
+        """
+        构建通用 WHERE 条件 + 参数，返回 (where_clause: str, params: list, wildcard_scopes: list, use_pattern: bool)
+        供 list_source_files / count_source_files / list_file_paths 复用
+        """
+        conditions = ["language != 'directory'"]
+        params = []
+        wildcard_scopes = []
+
+        if scopes:
+            scope_conditions = []
+            for s in scopes:
+                if '*' in s or '?' in s:
+                    wildcard_scopes.append(s)
+                    like_pat = s.replace('**', '%').replace('*', '%').replace('?', '_')
+                    scope_conditions.append("file_path LIKE ?")
+                    params.append(like_pat)
+                else:
+                    scope_conditions.append("file_path LIKE ?")
+                    params.append(f"{s}%" if not s.endswith("%") else s)
+            if scope_conditions:
+                conditions.append(f"({' OR '.join(scope_conditions)})")
+
+        if extensions:
+            ext_clauses = " OR ".join(["language = ?"] * len(extensions))
+            conditions.append(f"({ext_clauses})")
+            params.extend(extensions)
+
+        if exclude_dirs:
+            for d in exclude_dirs:
+                conditions.append("file_path NOT LIKE ?")
+                params.append(f"%{d}%")
+
+        use_pattern = bool(pattern and pattern_type in ('glob', 'regex'))
+        where = " AND ".join(conditions) if conditions else "1=1"
+        return where, params, wildcard_scopes, use_pattern
+
+    def count_by_extensions(self, scopes=None, extensions=None, exclude_dirs=None,
+                            pattern_type=None, pattern=None) -> Dict[str, int]:
+        """
+        COUNT(*) GROUP BY language — 用于扩展名分布柱状图，不拉全量行
+        """
+        self._ensure_indexes()
+        where, params, wildcard_scopes, use_pattern = self._build_where_clause(
+            scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+            pattern_type=pattern_type, pattern=pattern,
+        )
+        # 有通配符 scope 或 pattern 时必须回退到全量拉取进行 Python 后过滤
+        if wildcard_scopes or use_pattern:
+            files = self.list_source_files(
+                scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+                pattern_type=pattern_type, pattern=pattern,
+            )
+            counts: Dict[str, int] = {}
+            for f in files:
+                lang = f.get("language", "unknown")
+                counts[lang] = counts.get(lang, 0) + 1
+            return counts
+
+        rows = self._db.execute(
+            f"SELECT language, COUNT(*) AS cnt FROM source_files WHERE {where} GROUP BY language",
+            params,
+        ).fetchall()
+        return {r["language"]: r["cnt"] for r in rows}
+
+    def count_files(self, scopes=None, extensions=None, exclude_dirs=None,
+                    pattern_type=None, pattern=None) -> int:
+        """
+        SELECT COUNT(*) — 用于 totalFiles，不拉全量行
+        """
+        self._ensure_indexes()
+        where, params, wildcard_scopes, use_pattern = self._build_where_clause(
+            scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+            pattern_type=pattern_type, pattern=pattern,
+        )
+        if wildcard_scopes or use_pattern:
+            files = self.list_source_files(
+                scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+                pattern_type=pattern_type, pattern=pattern,
+            )
+            return len(files)
+
+        row = self._db.execute(
+            f"SELECT COUNT(*) AS cnt FROM source_files WHERE {where}",
+            params,
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+    def list_file_paths(self, scopes=None, extensions=None, exclude_dirs=None,
+                        pattern_type=None, pattern=None) -> List[str]:
+        """
+        SELECT file_path — 用于目录树构建 + 目录文件数统计，只取路径列
+        """
+        self._ensure_indexes()
+        where, params, wildcard_scopes, use_pattern = self._build_where_clause(
+            scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+            pattern_type=pattern_type, pattern=pattern,
+        )
+        if wildcard_scopes or use_pattern:
+            files = self.list_source_files(
+                scopes=scopes, extensions=extensions, exclude_dirs=exclude_dirs,
+                pattern_type=pattern_type, pattern=pattern,
+            )
+            return [f.get("file_path", "") for f in files]
+
+        rows = self._db.execute(
+            f"SELECT file_path FROM source_files WHERE {where}",
+            params,
+        ).fetchall()
+        return [r["file_path"] for r in rows]
+
+    # ==================== source_files（旧版兼容） ====================
 
     def list_source_files(self, scopes: List[str] = None,
                           extensions: List[str] = None,

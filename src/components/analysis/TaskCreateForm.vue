@@ -8,6 +8,7 @@ import {
   ClockIcon,
   ArrowPathIcon,
   DocumentTextIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
@@ -52,6 +53,7 @@ const loading = ref(false)
 const selectedScopes = ref<string[]>([])
 const selectedExtensions = ref<string[]>([])
 const manualExtensionInput = ref('')
+const fileStatsRef = ref<InstanceType<typeof FileStatsPanel> | null>(null)
 
 // Report type options
 const reportTypeOptions = [
@@ -171,6 +173,12 @@ async function handleSubmit() {
 
   if (!name) {
     logger.warn('handleSubmit: name is empty, aborting')
+    return
+  }
+
+  const ft = fileStatsRef.value
+  if (ft && ft.fileCountLevel === 'block') {
+    logger.warn('handleSubmit: file count exceeds 10000, aborting')
     return
   }
 
@@ -322,6 +330,7 @@ function viewLogs() {
       <!-- Left: File distribution stats -->
       <div class="form-sidebar">
         <FileStatsPanel
+          ref="fileStatsRef"
           :project-id="projectId"
           :scope="scope"
           :pattern-type="patternType"
@@ -376,6 +385,24 @@ function viewLogs() {
               class="form-tag"
             >{{ s }}</span>
           </div>
+          <div
+            v-else-if="selectedScopes.length > 0"
+            class="form-tags"
+          >
+            <span
+              v-for="s in selectedScopes"
+              :key="s"
+              class="form-tag removable"
+            >
+              {{ s }}
+              <button
+                class="tag-remove"
+                @click="fileStatsRef?.removeScopeByPath(s)"
+              >
+                <span class="x-mark" aria-hidden="true">×</span>
+              </button>
+            </span>
+          </div>
         </div>
 
         <!-- Selected extensions -->
@@ -395,6 +422,24 @@ function viewLogs() {
               :key="ext"
               class="form-tag"
             >{{ ext }}</span>
+          </div>
+          <div
+            v-else-if="selectedExtensions.length > 0"
+            class="form-tags"
+          >
+            <span
+              v-for="ext in selectedExtensions"
+              :key="ext"
+              class="form-tag removable"
+            >
+              {{ ext }}
+              <button
+                class="tag-remove"
+                @click="fileStatsRef?.removeExtension(ext)"
+              >
+                <span class="x-mark" aria-hidden="true">×</span>
+              </button>
+            </span>
           </div>
         </div>
 
@@ -625,6 +670,41 @@ function viewLogs() {
   font-size: 11px;
   color: var(--text-secondary);
   font-family: monospace;
+}
+
+.form-tag.removable {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding-right: 4px;
+}
+
+.tag-remove {
+  flex-shrink: 0;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  color: var(--text-default);
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  opacity: .6;
+  transition: opacity 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tag-remove:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+.tag-remove .x-mark {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 700;
 }
 
 .empty-tag {

@@ -10,7 +10,7 @@ import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
 import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
 import { ipc } from '@/services/ipc'
-import { LinkSlashIcon, LockClosedIcon, Cog6ToothIcon, FunnelIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
+import { LinkSlashIcon, LockClosedIcon, Cog6ToothIcon, FunnelIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, ArrowDownTrayIcon, ChatBubbleLeftIcon } from '@heroicons/vue/24/outline'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
 import GraphCanvas from './GraphCanvas.vue'
@@ -870,6 +870,11 @@ function handleGuideClick() {
   cmdStore.pushEvent('guide-start', {})
 }
 
+function toggleRightInFullscreen() {
+  panelStore.toggleRight()
+  panelStore.setRightTab('ai')
+}
+
 function handleNodeContextMenu(nodeId: string) {
   if (nodeId === '__merged__') return
   const com = commMap.value.get(nodeId)
@@ -1088,6 +1093,13 @@ watch(isFullscreen, () => {
   recenterTrigger.value++
 })
 
+const fullscreenDockedStyle = computed(() => {
+  if (!isFullscreen.value) return {}
+  if (panelStore.rightFloating) return {}
+  if (panelStore.rightCollapsed) return {}
+  return { right: `${panelStore.rightWidth}px` }
+})
+
 watch(hasUnsavedChanges, (v) => {
   console.log('[CGV] hasUnsavedChanges =', v, 'dragGen:', dragGeneration.value, 'savedGen:', savedGeneration.value)
 })
@@ -1101,6 +1113,7 @@ watch(hasUnsavedChanges, (v) => {
   <div
     class="cgv-container"
     :class="{ 'cgv-fullscreen': isFullscreen }"
+    :style="fullscreenDockedStyle"
   >
     <div
       v-show="!isFullscreen"
@@ -1311,6 +1324,13 @@ watch(hasUnsavedChanges, (v) => {
           @click="handleToggleFilter"
         >
           <FunnelIcon class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="cgv-gear-btn"
+          title="AI 助手"
+          @click="toggleRightInFullscreen"
+        >
+          <ChatBubbleLeftIcon class="w-3.5 h-3.5" />
         </button>
         <GraphToolbar
           :mode="isExternalTab ? externalViewMode : internalViewMode"
@@ -1545,7 +1565,7 @@ watch(hasUnsavedChanges, (v) => {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.35rem 0.75rem; background: var(--bg-secondary);
   border-top: 1px solid var(--border); flex-shrink: 0;
-  position: absolute; bottom: 0; left: 0; right: 0; z-index: 201;
+  position: fixed; bottom: 0; left: 0; width: 100vw; z-index: 201;
 }
 .fs-left { display: flex; align-items: center; gap: 0.75rem; flex: 1; overflow: visible; }
 .fs-title { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); flex-shrink: 0; }

@@ -147,6 +147,10 @@ function updateIndeterminate() {
         class="dir-name"
         :title="node.path"
       >{{ node.name }}</span>
+      <span
+        v-if="node.fileCount != null"
+        class="dir-file-count"
+      >{{ node.fileCount }}</span>
     </div>
     
     <!-- Children -->
@@ -217,5 +221,14 @@ function updateIndeterminate() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dir-file-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 0 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 </style>

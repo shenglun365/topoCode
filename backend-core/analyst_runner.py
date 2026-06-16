@@ -829,6 +829,20 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
             task_store.update_task_status(task_id, "done", progress=100, error="")
             task_store.finish_run(run_id, "done")
             _save_analysis_snapshot(multi_db, task_id, task_store, result)
+
+            # 自动生成项目概要 — 解析完成后调用 LLM 提取 README+依赖信息写入 projects.summary
+            try:
+                task = task_store.get_task(task_id)
+                pid = task.get("project_id") if task else None
+                if pid:
+                    from core_service import _do_generate_project_summary
+                    await _do_generate_project_summary(multi_db, pid)
+                    logger.info(f"[EXECUTE] 项目概要自动生成完成: task={task_id}")
+                else:
+                    logger.info(f"[EXECUTE] 项目概要自动生成跳过: task={task_id} 无 project_id")
+            except Exception as _e:
+                logger.warning(f"[EXECUTE] 项目概要自动生成失败: {_e}")
+
             if server:
                 server.publish("task", "complete", {
                     "taskId": task_id, "runId": run_id,

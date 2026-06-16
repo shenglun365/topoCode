@@ -121,6 +121,7 @@ export default { report: {
     aiChat: 'AI Chat',
     taskList: 'Task List',
   },
+  agentTasks: 'Parse Tasks',
   openTaskList: 'Open Task List',
   taskList: {
     empty: 'No tasks yet. Click "Start Generation" to begin',

@@ -21,8 +21,10 @@ import TaskDetailDialog from './TaskDetailDialog.vue'
 import TimelineDialog from './TimelineDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
+import { createLogger } from '@/utils/logger'
 
 const { showId, componentId } = useComponentId('AN-002')
+const logger = createLogger('TaskListPanel')
 const props = defineProps<{
   projectId: string
 }>()
@@ -145,6 +147,8 @@ async function onStopTask(taskId: string) {
 
 // 首次运行（pending 状态，从未执行过）
 async function onRunTask(taskId: string) {
+  const task = analysisStore.tasks.find(t => t.id === taskId)
+  if (task && !(await validateFileCount(task))) return
   try {
     await analysisStore.runTask(taskId)
     await loadTasks()
@@ -155,11 +159,65 @@ async function onRunTask(taskId: string) {
 
 // 重跑（已有运行历史）
 async function onRerunTask(taskId: string) {
+  const task = analysisStore.tasks.find(t => t.id === taskId)
+  if (task && !(await validateFileCount(task))) return
   try {
     await analysisStore.reRunTask(taskId)
     await loadTasks()
   } catch (err) {
     console.error('Failed to rerun task:', err)
+  }
+}
+
+const FILE_LIMIT_WARN = 5000
+const FILE_LIMIT_BLOCK = 10000
+const taskFileCounts = ref<Record<string, { count: number; loading: boolean }>>({})
+
+const showFileCountExceedDialog = ref(false)
+const fileCountExceedMessage = ref('')
+
+function parseTaskArray(field: unknown): string[] {
+  if (!field) return []
+  if (Array.isArray(field)) return field
+  if (typeof field === 'string') {
+    try { return JSON.parse(field) } catch { return [] }
+  }
+  return []
+}
+
+async function validateFileCount(task: AnalysisTask): Promise<boolean> {
+  const key = task.id
+  const cached = taskFileCounts.value[key]
+  if (cached && cached.count > 0) {
+    if (cached.count > FILE_LIMIT_BLOCK) {
+      fileCountExceedMessage.value = `文件数 ${cached.count} 超过 ${FILE_LIMIT_BLOCK}，请先削减解析范围`
+      showFileCountExceedDialog.value = true
+      return false
+    }
+    return true
+  }
+  taskFileCounts.value[key] = { count: 0, loading: true }
+  try {
+    const scopes = parseTaskArray(task.scopes)
+    const exts = parseTaskArray(task.extensions)
+    const result = await analysisStore.scanFileStats(task.projectId, {
+      scopes: scopes.length > 0 ? scopes : undefined,
+      selectedExtensions: exts.length > 0 ? exts : undefined,
+    })
+    const count = result.totalFiles
+    taskFileCounts.value[key] = { count, loading: false }
+    if (count > FILE_LIMIT_BLOCK) {
+      fileCountExceedMessage.value = `文件数 ${count} 超过 ${FILE_LIMIT_BLOCK}，请先削减解析范围`
+      showFileCountExceedDialog.value = true
+      return false
+    }
+    if (count > FILE_LIMIT_WARN) {
+      logger.warn(`File count ${count} exceeds ${FILE_LIMIT_WARN} for task ${task.name}`)
+    }
+    return true
+  } catch {
+    taskFileCounts.value[key] = { count: 0, loading: false }
+    return true
   }
 }
 
@@ -482,6 +540,31 @@ function getConfigSummary(task: AnalysisTask): string {
       :project-id="props.projectId"
       @close="timelineDialogVisible = false"
     />
+
+    <!-- 文件数超限警告对话框 -->
+    <Teleport to="body">
+      <div
+        v-if="showFileCountExceedDialog"
+        class="dialog-overlay"
+        @click.self="showFileCountExceedDialog = false"
+      >
+        <div class="confirm-dialog">
+          <div class="confirm-title">
+            <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
+            <span>{{ t('import.fileCountExceed', '文件数量过多') }}</span>
+          </div>
+          <div class="confirm-body">{{ fileCountExceedMessage }}</div>
+          <div class="confirm-actions">
+            <button
+              class="btn btn-primary"
+              @click="showFileCountExceedDialog = false"
+            >
+              {{ t('common.ok', '确定') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

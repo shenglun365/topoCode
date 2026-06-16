@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type RightTab = 'ai' | 'detail' | 'tasks'
+export type RightTab = 'ai' | 'tasks'
 
 export const usePanelStore = defineStore('panel', () => {
   const leftCollapsed = ref(false)
@@ -12,6 +12,13 @@ export const usePanelStore = defineStore('panel', () => {
   const rightTab = ref<RightTab>('ai')
   const isFullscreen = ref(false)
   const fullscreenLockLeft = ref(false)
+
+  // 浮动窗口
+  const rightFloating = ref(false)
+  const rightFloatingX = ref(typeof window !== 'undefined' ? window.innerWidth - 400 : 600)
+  const rightFloatingY = ref(80)
+  const rightFloatingW = ref(380)
+  const rightFloatingH = ref(480)
 
   function toggleLeft() {
     if (fullscreenLockLeft.value) return
@@ -65,6 +72,14 @@ export const usePanelStore = defineStore('panel', () => {
     }
   }
 
+  /** 切换右面板浮动 / 停靠 */
+  function toggleRightFloating() {
+    rightFloating.value = !rightFloating.value
+    if (rightFloating.value) {
+      rightCollapsed.value = true // 浮动时收起侧栏占位
+    }
+  }
+
   return {
     leftCollapsed,
     rightCollapsed,
@@ -74,6 +89,11 @@ export const usePanelStore = defineStore('panel', () => {
     rightTab,
     isFullscreen,
     fullscreenLockLeft,
+    rightFloating,
+    rightFloatingX,
+    rightFloatingY,
+    rightFloatingW,
+    rightFloatingH,
     toggleLeft,
     setLeftCollapsed,
     toggleRight,
@@ -84,5 +104,6 @@ export const usePanelStore = defineStore('panel', () => {
     resetPanels,
     toggleDebug,
     setFullscreen,
+    toggleRightFloating,
   }
 })

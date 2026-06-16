@@ -2522,6 +2522,112 @@ def _parse_toml_deps(full_path: str) -> Dict[str, str]:
     return deps
 
 
+async def _do_generate_project_summary(multi_db, project_id: str):
+    """Standalone project summary generator — usable from both RPC handler and analyst pipeline."""
+    import os
+    from datetime import datetime
+    main_db = multi_db.main_db
+
+    pid = project_id
+    logger.info(f"[generateProjectSummary] ENTRY pid={pid}")
+    project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
+    if not project:
+        raise ValueError(f"Project not found: {pid}")
+
+    root_path = project["root_path"]
+
+    # README
+    readme_text = ""
+    for candidate in ('README.md', 'Readme.md', 'readme.md', 'README'):
+        readme_path = os.path.join(root_path, candidate)
+        if os.path.isfile(readme_path):
+            try:
+                with open(readme_path, 'r', encoding='utf-8', errors='replace') as f:
+                    readme_text = f.read(5000)[:500]
+                break
+            except Exception:
+                pass
+    logger.info(f"[generateProjectSummary] README length={len(readme_text)}")
+
+    # Dependency files
+    deps_text = ""
+    results = []
+    for fname in _DEPENDENCY_FILE_PATTERNS:
+        parsed = _parse_dependency_file(root_path, fname, fname)
+        if parsed:
+            results.append(parsed)
+            continue
+        for dirpath, _, filenames in os.walk(root_path):
+            for fn in filenames:
+                if fn == fname:
+                    rel = os.path.relpath(os.path.join(dirpath, fn), root_path)
+                    parsed = _parse_dependency_file(root_path, fname, rel)
+                    if parsed:
+                        results.append(parsed)
+                    break
+    if results:
+        lines = []
+        for d in results:
+            deps_list = ", ".join(list(d.get("dependencies", {}).keys())[:30])
+            lines.append(f"- {d['file']} ({d['type']}): {deps_list}")
+        deps_text = "\n".join(lines)
+        logger.info(f"[generateProjectSummary] dep files count={len(results)}, text_len={len(deps_text)}")
+    else:
+        logger.info(f"[generateProjectSummary] no dep files found")
+
+    # Build prompt
+    prompt = (
+        "你是一个代码架构分析专家。请根据以下项目的 README 和依赖信息，"
+        "生成一段 500 字以内的项目概要。\n\n"
+        "要求：\n"
+        "1. 只提取功能性、技术栈、需求场景等对架构分析有用的信息\n"
+        "2. 忽略无关的安装说明、贡献指南、许可信息等\n"
+        "3. 用中文回答，简洁扼要\n"
+        "4. 字数控制在 500 字以内\n\n"
+    )
+    if readme_text:
+        prompt += f"## README\n{readme_text}\n\n"
+    if deps_text:
+        prompt += f"## 依赖文件\n{deps_text}\n\n"
+    prompt += "请输出项目概要："
+    logger.info(f"[generateProjectSummary] prompt built, total_len={len(prompt)}")
+
+    # LLM call
+    from llm_service import LLMService
+    lm = LLMService(multi_db)
+    models = main_db.fetchall("SELECT * FROM model_configs ORDER BY is_default DESC, name")
+    if not models:
+        raise ValueError("No LLM model found")
+    model_id = models[0]["id"]
+    logger.info(f"[generateProjectSummary] using model_id={model_id} model_name={models[0].get('name')}")
+
+    try:
+        summary = await lm.sync_chat(
+            messages=[{"role": "user", "content": prompt}],
+            model_id=model_id,
+        )
+        logger.info(f"[generateProjectSummary] LLM response received, raw_len={len(summary or '')}")
+        summary = (summary or "").strip()
+        if not summary:
+            raise ValueError("LLM returned empty summary")
+        if len(summary) > 2000:
+            summary = summary[:2000]
+            logger.info(f"[generateProjectSummary] summary truncated to 2000 chars")
+        logger.info(f"[generateProjectSummary] summary final_len={len(summary)}, preview={summary[:120]!r}")
+    except Exception as e:
+        logger.error(f"[generateProjectSummary] LLM call failed: {e}")
+        raise RuntimeError(f"生成项目概要失败: {e}")
+
+    # Write to DB
+    now = datetime.now().isoformat()
+    main_db.execute(
+        "UPDATE projects SET summary = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?",
+        (summary, now, now, pid)
+    )
+    logger.info(f"[generateProjectSummary] DB write OK, pid={pid}, summary_len={len(summary)}, generated_at={now}")
+    return {"success": True, "summary": summary, "generated_at": now}
+
+
 def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
     """注册报告生成辅助方法"""
     main_db = multi_db.main_db
@@ -2547,85 +2653,9 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("report.generateProjectSummary")
     async def generate_project_summary(project_id=None, projectId=None):
-        """调用 LLM 生成项目概要 (500字以内), 存入 projects.summary"""
+        """调用 LLM 生成项目概要 (500字以内), 存入 projects.summary — 委托给 standalone 实现"""
         pid = project_id or projectId
-        logger.info(f"[generateProjectSummary] ENTRY pid={pid}")
-        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
-        if not project:
-            logger.warning(f"[generateProjectSummary] Project not found: {pid}")
-            raise ValueError(f"Project not found: {pid}")
-
-        # 收集 README + 依赖信息作为 LLM 输入
-        logger.info(f"[generateProjectSummary] fetching README for {pid}")
-        readme_result = get_readme_content(projectId=pid)
-        readme_text = readme_result.get("content", "") if readme_result else ""
-        logger.info(f"[generateProjectSummary] README length={len(readme_text)}")
-        deps_result = extract_dependency_files(projectId=pid)
-        deps_text = ""
-        if deps_result and deps_result.get("count", 0) > 0:
-            lines = []
-            for d in deps_result["dependencyFiles"]:
-                deps_list = ", ".join(list(d.get("dependencies", {}).keys())[:30])
-                lines.append(f"- {d['file']} ({d['type']}): {deps_list}")
-            deps_text = "\n".join(lines)
-            logger.info(f"[generateProjectSummary] dep files count={deps_result.get('count')}, text_len={len(deps_text)}")
-        else:
-            logger.info(f"[generateProjectSummary] no dep files found")
-
-        prompt = (
-            "你是一个代码架构分析专家。请根据以下项目的 README 和依赖信息，"
-            "生成一段 500 字以内的项目概要。\n\n"
-            "要求：\n"
-            "1. 只提取功能性、技术栈、需求场景等对架构分析有用的信息\n"
-            "2. 忽略无关的安装说明、贡献指南、许可信息等\n"
-            "3. 用中文回答，简洁扼要\n"
-            "4. 字数控制在 500 字以内\n\n"
-        )
-        if readme_text:
-            prompt += f"## README\n{readme_text}\n\n"
-        if deps_text:
-            prompt += f"## 依赖文件\n{deps_text}\n\n"
-        prompt += "请输出项目概要："
-        logger.info(f"[generateProjectSummary] prompt built, total_len={len(prompt)}")
-
-        # 调用 LLM
-        from llm_service import LLMService
-        lm = LLMService(multi_db)
-
-        models = main_db.fetchall(
-            "SELECT * FROM model_configs ORDER BY is_default DESC, name"
-        )
-        if not models:
-            raise ValueError("No LLM model found")
-        model_id = models[0]["id"]
-        logger.info(f"[generateProjectSummary] using model_id={model_id} model_name={models[0].get('name')}")
-
-        try:
-            summary = await lm.sync_chat(
-                messages=[{"role": "user", "content": prompt}],
-                model_id=model_id,
-            )
-            raw_len = len(summary or "")
-            logger.info(f"[generateProjectSummary] LLM response received, raw_len={raw_len}")
-            summary = (summary or "").strip()
-            if not summary:
-                raise ValueError("LLM returned empty summary")
-            if len(summary) > 2000:
-                summary = summary[:2000]
-                logger.info(f"[generateProjectSummary] summary truncated to 2000 chars")
-            logger.info(f"[generateProjectSummary] summary final_len={len(summary)}, preview={summary[:120]!r}")
-        except Exception as e:
-            logger.error(f"[generateProjectSummary] LLM call failed: {e}")
-            raise RuntimeError(f"生成项目概要失败: {e}")
-
-        from datetime import datetime
-        now = datetime.now().isoformat()
-        main_db.execute(
-            "UPDATE projects SET summary = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?",
-            (summary, now, now, pid)
-        )
-        logger.info(f"[generateProjectSummary] DB write OK, pid={pid}, summary_len={len(summary)}, generated_at={now}")
-        return {"success": True, "summary": summary, "generated_at": now}
+        return await _do_generate_project_summary(multi_db, pid)
 
     @server.register("report.getProjectSummary")
     def get_project_summary(project_id=None, projectId=None):

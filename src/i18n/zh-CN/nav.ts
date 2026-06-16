@@ -2,7 +2,7 @@ export default { nav: {
   home: '首页',
   code: '代码解析',
   projects: '项目',
-  analysis: '分析',
+  analysis: '架构分析',
   knowledge: '知识库',
   coder: 'AI 助手',
   settings: '设置',

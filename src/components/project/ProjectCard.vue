@@ -723,6 +723,7 @@ async function handleResyncFromDialog() {
 .project-card {
   padding: 14px;
   position: relative;
+  min-height: 140px;
 }
 
 .project-card.card-pinned {

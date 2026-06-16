@@ -235,21 +235,34 @@ export const useAnalysisStore = defineStore('analysis', () => {
     })
   }
 
+  const _inflightStats = new Map<string, Promise<FileStatsResult>>()
+
   async function scanFileStats(projectId: string, options?: ScanOptions) {
     const cacheKey = JSON.stringify({ projectId, ...options })
     if (fileStatsCache.value.has(cacheKey)) {
       logger.debug('scanFileStats cache hit')
       return fileStatsCache.value.get(cacheKey)!
     }
-    logger.debug('scanFileStats cache miss, calling IPC')
-    try {
-      const result = await ipc.analysis.scanFileStats(projectId, options)
-      fileStatsCache.value.set(cacheKey, result)
-      return result
-    } catch (err: any) {
-      logger.error('scanFileStats IPC error:', err)
-      throw err
+    const inflight = _inflightStats.get(cacheKey)
+    if (inflight) {
+      logger.debug('scanFileStats dedup in-flight request')
+      return inflight
     }
+    logger.debug('scanFileStats cache miss, calling IPC')
+    const promise = (async () => {
+      try {
+        const result = await ipc.analysis.scanFileStats(projectId, options)
+        fileStatsCache.value.set(cacheKey, result)
+        return result
+      } catch (err: any) {
+        logger.error('scanFileStats IPC error:', err)
+        throw err
+      } finally {
+        _inflightStats.delete(cacheKey)
+      }
+    })()
+    _inflightStats.set(cacheKey, promise)
+    return promise
   }
 
   return {

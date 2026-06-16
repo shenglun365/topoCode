@@ -74,6 +74,23 @@ const sortedExtensions = computed(() => {
     .sort((a, b) => b[1] - a[1])
 })
 
+const showAllExtensions = ref(false)
+
+const supportedExtensions = computed(() =>
+  sortedExtensions.value.filter(([ext]) => SUPPORTED_LANGUAGES.has(ext))
+)
+
+const unsupportedExtensions = computed(() =>
+  sortedExtensions.value.filter(([ext]) => !SUPPORTED_LANGUAGES.has(ext))
+)
+
+const visibleExtensions = computed(() => {
+  if (showAllExtensions.value) {
+    return [...supportedExtensions.value, ...unsupportedExtensions.value]
+  }
+  return supportedExtensions.value
+})
+
 // Compute max count for bar chart
 const maxCount = computed(() => {
   if (!stats.value || !stats.value.extensions) return 1
@@ -235,7 +252,7 @@ function invertExtensions() {
 }
 
 function isExtensionSupported(ext: string): boolean {
-  if (!ext || ext.trim() === '') return true  // no-extension / directory → still selectable
+  if (!ext || ext.trim() === '') return false
   return SUPPORTED_LANGUAGES.has(ext.toLowerCase())
 }
 
@@ -269,8 +286,11 @@ function emitSelectedExtensions() {
 }
 
 // Load stats
+let loadStatsLock = false
 async function loadStats() {
   if (!props.projectId) return
+  if (loadStatsLock) return  // 上一次调用未完成，跳过
+  loadStatsLock = true
 
   // Save scroll position before reload
   const savedScrollTop = dirTreeRef.value?.scrollTop ?? 0
@@ -279,16 +299,34 @@ async function loadStats() {
   error.value = null
 
   try {
-    const scopes = selectedScopes.value.length > 0 ? [...selectedScopes.value] : undefined
+    const hasScopes = selectedScopes.value.length > 0
+    const scopes = hasScopes ? [...selectedScopes.value] : undefined
+
+    // 无目录选择时不传 selectedExtensions → 后端返回全部语言类型供用户查看
+    // 有目录选择时传 selectedExtensions → 后端只返回已选语言（节省带宽），前端补零避免消失
+    const filteredExtensions = hasScopes && selectedExtensions.value.length > 0
+      ? [...selectedExtensions.value]
+      : undefined
+
     const scanOptions = {
       scopes,
       scope: scopes ? undefined : (props.scope || undefined),
       patternType: props.patternType,
       pattern: props.pattern || undefined,
       excludeDirs: props.excludeDirs.length > 0 ? [...props.excludeDirs] : undefined,
-      selectedExtensions: selectedExtensions.value.length > 0 ? [...selectedExtensions.value] : undefined,
+      selectedExtensions: filteredExtensions,
     }
     const result = await analysisStore.scanFileStats(props.projectId, scanOptions)
+
+    // 有目录选择时，补全缺失的已选语言为 0（如某目录下不含 JAVA，但仍需保留 JAVA 选项）
+    if (hasScopes && selectedExtensions.value.length > 0) {
+      for (const ext of selectedExtensions.value) {
+        if (!(ext in result.extensions)) {
+          result.extensions[ext] = 0
+        }
+      }
+    }
+
     stats.value = result
 
     // Recommend top 5 extensions
@@ -306,6 +344,7 @@ async function loadStats() {
     error.value = err?.message || t('common.loadFailed')
   } finally {
     loading.value = false
+    loadStatsLock = false
   }
 }
 
@@ -316,15 +355,17 @@ function debouncedLoadStats() {
   debounceTimer = setTimeout(loadStats, 300)
 }
 
-// Sync local refs with props (编辑模式下父组件异步加载数据后回显)
+// Sync local refs with props — 仅值不同时更新，避免重复触发 loadStats
 watch(() => props.selectedScopes, (val) => {
-  if (val && val.length > 0) {
-    selectedScopes.value = [...val]
+  const arr = val || []
+  if (JSON.stringify(arr) !== JSON.stringify(selectedScopes.value)) {
+    selectedScopes.value = [...arr]
   }
 })
 watch(() => props.selectedExtensions, (val) => {
-  if (val && val.length > 0) {
-    selectedExtensions.value = [...val]
+  const arr = val || []
+  if (JSON.stringify(arr) !== JSON.stringify(selectedExtensions.value)) {
+    selectedExtensions.value = [...arr]
   }
 })
 
@@ -336,13 +377,25 @@ watch([() => props.patternType, () => props.pattern, () => props.excludeDirs], (
   if (initialLoadDone) debouncedLoadStats()
 }, { immediate: false })
 
-// Watch scope/extension selection — immediate refresh (no debounce)
-watch([selectedScopes, selectedExtensions], () => {
+// Watch scope selection — immediate refresh (no debounce)
+// 语言选择变动不触发刷新，只跟目录选择一起刷新
+watch(selectedScopes, () => {
   if (initialLoadDone) loadStats()
 }, { deep: true })
 
 // Initial load
 loadStats().then(() => { initialLoadDone = true })
+
+const totalFiles = computed(() => stats.value?.totalFiles ?? 0)
+
+type FileCountLevel = 'ok' | 'warn' | 'block'
+const fileCountLevel = computed<FileCountLevel>(() => {
+  if (totalFiles.value > 10000) return 'block'
+  if (totalFiles.value > 5000) return 'warn'
+  return 'ok'
+})
+
+defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 </script>
 
 <template>
@@ -351,162 +404,12 @@ loadStats().then(() => { initialLoadDone = true })
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
-    <!-- Directory tree with checkboxes -->
+
+    <!-- 1. 语言类型选择 — 置顶，必须选择后才能启用目录区 -->
     <div class="stats-section">
-      <div class="section-header">
-        <span class="stats-label">{{ t('analysis.directoryScope') }}</span>
-        <div class="section-actions">
-          <button
-            class="text-btn"
-            @click="selectAllDirs"
-          >
-            {{ t('analysis.selectAll') }}
-          </button>
-          <span class="divider">/</span>
-          <button
-            class="text-btn"
-            @click="invertDirs"
-          >
-            {{ t('analysis.invertSelection') }}
-          </button>
-        </div>
-      </div>
-
-      <div
-        ref="dirTreeRef"
-        class="dir-tree"
-      >
-        <div
-          v-if="!stats?.directories || stats.directories.length === 0"
-          class="empty-hint"
-        >
-          {{ t('analysis.noDirectories') }}
-        </div>
-        <template v-else>
-          <DirTreeNodeComponent
-            v-for="dir in stats.directories"
-            :key="dir.path"
-            :node="dir"
-            :selected-scopes="selectedScopes"
-            :expanded-dirs="expandedDirs"
-            @toggle="handleDirToggle"
-            @expand="handleDirExpand"
-          />
-        </template>
-      </div>
-
-      <div class="selection-count">
-        {{ t('analysis.selectedCount', { count: selectedScopes.length, total: stats?.totalDirs || 0 }) }}
-      </div>
-
-      <!-- 通配符作用域输入 -->
-      <div class="glob-scope-row">
-        <input
-          v-model="globScopeInput"
-          class="stats-input glob-scope-input"
-          :placeholder="t('analysis.globScopePlaceholder')"
-          @keydown.enter="addGlobScope"
-        >
-        <button
-          class="text-btn"
-          :disabled="!globScopeInput.trim()"
-          @click="addGlobScope"
-        >
-          +
-        </button>
-      </div>
-      <div
-        v-if="selectedScopes.some(s => s.includes('*') || s.includes('?'))"
-        class="glob-scope-tags"
-      >
-        <span
-          v-for="(s, i) in selectedScopes.filter(s => s.includes('*') || s.includes('?'))"
-          :key="s"
-          class="glob-tag"
-        >
-          <code>{{ s }}</code>
-          <button
-            class="tag-remove"
-            @click="removeScopeByPath(s)"
-          >
-            <XMarkIcon class="w-3 h-3" />
-          </button>
-        </span>
-      </div>
-    </div>
-
-    <!-- Match mode -->
-    <div class="stats-section">
-      <label class="stats-label">{{ t('analysis.matchMode') }}</label>
-      <div class="radio-group">
-        <label class="radio-item">
-          <input
-            type="radio"
-            value="all"
-            :checked="patternType === 'all'"
-            @change="emit('update:patternType', 'all')"
-          >
-          <span>{{ t('analysis.allFiles') }}</span>
-        </label>
-        <label class="radio-item">
-          <input
-            type="radio"
-            value="glob"
-            :checked="patternType === 'glob'"
-            @change="emit('update:patternType', 'glob')"
-          >
-          <span>{{ t('analysis.stringMatch') }}</span>
-        </label>
-        <label class="radio-item">
-          <input
-            type="radio"
-            value="regex"
-            :checked="patternType === 'regex'"
-            @change="emit('update:patternType', 'regex')"
-          >
-          <span>{{ t('analysis.regexMatch') }}</span>
-        </label>
-      </div>
-    </div>
-
-    <!-- Pattern input -->
-    <div
-      v-if="patternType !== 'all'"
-      class="stats-section"
-    >
-      <input
-        class="stats-input"
-        :value="pattern"
-        :placeholder="t('analysis.patternPlaceholder')"
-        @input="emit('update:pattern', ($event.target as HTMLInputElement).value)"
-      >
-    </div>
-
-    <!-- Loading state -->
-    <div
-      v-if="loading"
-      class="stats-loading"
-    >
-      <div class="loading-spinner" />
-      <span>{{ t('file.loading') }}</span>
-    </div>
-
-    <!-- Error state -->
-    <div
-      v-else-if="error"
-      class="stats-error"
-    >
-      <span>{{ error }}</span>
-    </div>
-
-    <!-- File distribution (clickable bars) -->
-    <div
-      v-else-if="stats && stats.extensions && Object.keys(stats.extensions).length > 0"
-      class="stats-results"
-    >
       <div class="section-header">
         <DocumentTextIcon class="w-4 h-4" />
-        <span>{{ t('analysis.fileDistribution') }}</span>
+        <span>{{ t('analysis.languageScope', '选择语言类型') }}</span>
         <div class="section-actions">
           <button
             class="text-btn"
@@ -524,9 +427,30 @@ loadStats().then(() => { initialLoadDone = true })
         </div>
       </div>
 
-      <div class="stats-bars">
+      <!-- Loading -->
+      <div
+        v-if="loading"
+        class="stats-loading"
+      >
+        <div class="loading-spinner" />
+        <span>{{ t('file.loading') }}</span>
+      </div>
+
+      <!-- Error -->
+      <div
+        v-else-if="error"
+        class="stats-error-text"
+      >
+        <span>{{ error }}</span>
+      </div>
+
+      <!-- File distribution (clickable bars) -->
+      <div
+        v-else-if="stats && stats.extensions && Object.keys(stats.extensions).length > 0"
+        class="stats-bars"
+      >
         <div
-          v-for="[ext, count] in sortedExtensions"
+          v-for="[ext, count] in visibleExtensions"
           :key="ext || '__no_ext__'"
           class="stat-bar-row"
           :class="{
@@ -563,32 +487,165 @@ loadStats().then(() => { initialLoadDone = true })
         </div>
       </div>
 
-      <!-- Selected extensions as tags -->
+      <!-- "更多" 按钮 — 显示/隐藏不支持的语言类型 -->
       <div
-        v-if="selectedExtensions.length > 0"
-        class="selected-tags"
+        v-if="unsupportedExtensions.length > 0"
+        class="show-more-row"
       >
-        <span class="tags-label">{{ t('analysis.selectedExtensions') }}:</span>
-        <div class="tag-list">
-          <span
-            v-for="ext in selectedExtensions"
-            :key="ext || '__no_ext__'"
-            class="tag-chip"
+        <button
+          class="text-btn"
+          @click="showAllExtensions = !showAllExtensions"
+        >
+          {{ showAllExtensions ? t('analysis.showLess', '收起') : t('analysis.showMore', '更多 ({n})', { n: unsupportedExtensions.length }) }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. 目录范围选择 — 未选语言类型时禁用 -->
+    <div
+      class="stats-section"
+      :class="{ 'section-disabled': selectedExtensions.length === 0 }"
+    >
+      <div class="section-header">
+        <span class="stats-label">{{ t('analysis.directoryScope') }}</span>
+        <div class="section-actions">
+          <button
+            class="text-btn"
+            :disabled="selectedExtensions.length === 0"
+            @click="selectAllDirs"
           >
-            {{ formatExtension(ext) }}
-            <button
-              class="tag-remove"
-              @click="removeExtension(ext)"
-            >
-              <XMarkIcon class="w-3 h-3" />
-            </button>
-          </span>
+            {{ t('analysis.selectAll') }}
+          </button>
+          <span class="divider">/</span>
+          <button
+            class="text-btn"
+            :disabled="selectedExtensions.length === 0"
+            @click="invertDirs"
+          >
+            {{ t('analysis.invertSelection') }}
+          </button>
         </div>
       </div>
 
-      <div class="stats-summary">
-        <span>{{ t('analysis.totalFiles', { total: stats.totalFiles, dirs: stats.totalDirs }) }}</span>
+      <div
+        v-if="selectedExtensions.length === 0"
+        class="section-hint"
+      >
+        {{ t('analysis.selectLanguageFirst', '请先选择语言类型') }}
       </div>
+
+      <div
+        v-else
+        ref="dirTreeRef"
+        class="dir-tree"
+      >
+        <div
+          v-if="!stats?.directories || stats.directories.length === 0"
+          class="empty-hint"
+        >
+          {{ t('analysis.noDirectories') }}
+        </div>
+        <template v-else>
+          <DirTreeNodeComponent
+            v-for="dir in stats.directories"
+            :key="dir.path"
+            :node="dir"
+            :selected-scopes="selectedScopes"
+            :expanded-dirs="expandedDirs"
+            @toggle="handleDirToggle"
+            @expand="handleDirExpand"
+          />
+        </template>
+      </div>
+
+      <!-- 通配符作用域输入 -->
+      <div
+        v-if="selectedExtensions.length > 0"
+        class="glob-scope-row"
+      >
+        <input
+          v-model="globScopeInput"
+          class="stats-input glob-scope-input"
+          :placeholder="t('analysis.globScopePlaceholder')"
+          @keydown.enter="addGlobScope"
+        >
+        <button
+          class="text-btn"
+          :disabled="!globScopeInput.trim()"
+          @click="addGlobScope"
+        >
+          +
+        </button>
+      </div>
+    </div>
+
+    <!-- 3. 匹配模式 -->
+    <div class="stats-section">
+      <label class="stats-label">{{ t('analysis.matchMode') }}</label>
+      <div class="radio-group">
+        <label class="radio-item">
+          <input
+            type="radio"
+            value="all"
+            :checked="patternType === 'all'"
+            @change="emit('update:patternType', 'all')"
+          >
+          <span>{{ t('analysis.allFiles') }}</span>
+        </label>
+        <label class="radio-item">
+          <input
+            type="radio"
+            value="glob"
+            :checked="patternType === 'glob'"
+            @change="emit('update:patternType', 'glob')"
+          >
+          <span>{{ t('analysis.stringMatch') }}</span>
+        </label>
+        <label class="radio-item">
+          <input
+            type="radio"
+            value="regex"
+            :checked="patternType === 'regex'"
+            @change="emit('update:patternType', 'regex')"
+          >
+          <span>{{ t('analysis.regexMatch') }}</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 4. 自定义过滤模式 -->
+    <div
+      v-if="patternType !== 'all'"
+      class="stats-section"
+    >
+      <input
+        class="stats-input"
+        :value="pattern"
+        :placeholder="t('analysis.patternPlaceholder')"
+        @input="emit('update:pattern', ($event.target as HTMLInputElement).value)"
+      >
+    </div>
+
+    <!-- 5. 统计摘要 -->
+    <div
+      v-if="stats && stats.totalFiles > 0"
+      class="stats-summary"
+    >
+      <span>{{ t('analysis.totalFiles', { total: stats.totalFiles, dirs: stats.totalDirs }) }}</span>
+      <span
+        v-if="fileCountLevel === 'warn'"
+        class="stats-warn"
+      >
+        <ExclamationTriangleIcon class="w-3.5 h-3.5" />
+        {{ t('analysis.fileCountWarn', '文件数超过5000，建议削减解析范围') }}
+      </span>
+      <span
+        v-if="fileCountLevel === 'block'"
+        class="stats-error"
+      >
+        <ExclamationTriangleIcon class="w-3.5 h-3.5" />
+        {{ t('analysis.fileCountBlock', '文件数超过10000，必须缩小解析范围') }}
+      </span>
     </div>
 
     <!-- Empty state -->
@@ -618,6 +675,18 @@ loadStats().then(() => { initialLoadDone = true })
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.section-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.section-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 4px;
 }
 
 .section-header {
@@ -662,17 +731,10 @@ loadStats().then(() => { initialLoadDone = true })
 
 /* Directory tree */
 .dir-tree {
-  max-height: 280px;
-  overflow-y: auto;
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 6px;
-}
-
-.selection-count {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .empty-hint {
@@ -774,6 +836,12 @@ loadStats().then(() => { initialLoadDone = true })
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.show-more-row {
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
 }
 
 .stat-bar-row {
@@ -923,12 +991,31 @@ loadStats().then(() => { initialLoadDone = true })
 
 .stats-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.stats-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #d4941e;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.stats-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #ef4444;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .loading-spinner {

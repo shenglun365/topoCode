@@ -9,6 +9,8 @@ const communityStore = useCommunityStore()
 const projectStore = useProjectStore()
 
 const taskId = computed(() => projectStore.activeTab?.taskId || '')
+const projectName = computed(() => projectStore.selectedProject?.name || '')
+const taskName = computed(() => projectStore.activeTab?.title || taskId.value || '')
 
 const tasks = computed(() => {
   if (!taskId.value) return []
@@ -33,6 +35,19 @@ const stepIcon = (status: string) => {
 
 <template>
   <div class="atl-container">
+    <div
+      v-if="projectName || taskName"
+      class="atl-header"
+    >
+      <span
+        v-if="projectName"
+        class="atl-project"
+      >{{ projectName }}</span>
+      <span
+        v-if="taskName"
+        class="atl-task-badge"
+      >{{ taskName }}</span>
+    </div>
     <div v-if="tasks.length === 0" class="atl-empty">
       {{ t('report.noAgentTasks', '暂无 Agent 任务') }}
     </div>
@@ -78,6 +93,9 @@ const stepIcon = (status: string) => {
 
 <style scoped>
 .atl-container { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.atl-header { display: flex; align-items: center; gap: 0.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
+.atl-project { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); }
+.atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: 3px; }
 .atl-empty { font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 1rem; font-style: italic; }
 .atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; }
 .atl-task-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }

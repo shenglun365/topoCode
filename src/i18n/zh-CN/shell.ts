@@ -79,6 +79,8 @@ export default { shell: {
     copyLogs: '复制日志',
     symbols: 'AI 助手',
     symbolsPending: 'AI 助手已集成到右侧栏',
+    float: '弹出窗口',
+    dock: '停靠',
   },
 },
 }

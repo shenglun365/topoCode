@@ -8,6 +8,7 @@ export default {
   },
   ai: {
     assistantTitle: 'AI Assistant',
+    chatTab: 'Chat',
     assistantWelcome: 'Hello! I am the TopoCode AI assistant. I can help you analyze source code architecture, explain code logic, and answer technical questions.',
     assistantNotConfigured: 'LLM API is not configured. Please configure it in settings.',
     goConfigure: 'Go to Settings',

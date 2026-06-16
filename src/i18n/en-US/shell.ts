@@ -78,6 +78,8 @@ export default { shell: {
     copyLogs: 'Copy logs',
     symbols: 'Symbols',
     symbolsPending: 'Pending analysis module completion',
+    float: 'Pop Out',
+    dock: 'Dock',
   },
 },
 }

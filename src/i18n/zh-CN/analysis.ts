@@ -81,6 +81,10 @@ export default { analysis: {
   // FileStatsPanel
   fileType: '文件类型',
   fileDistribution: '文件分布',
+  languageScope: '选择语言类型',
+  selectLanguageFirst: '请先选择语言类型',
+  showMore: '更多 ({n})',
+  showLess: '收起',
   directoryScope: '目录范围',
   allDirectories: '全部目录',
   customPath: '自定义',

@@ -440,45 +440,46 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             final_scopes = scopes if scopes else ([scope] if scope else None)
             logger.debug(f"[scan_file_stats] scopes={scopes}, scope={scope}, final_scopes={final_scopes}")
 
-            # 1. 按 scopes/exclude/pattern 过滤的文件（不含 selectedExtensions）— 用于完整 extensions 分布
-            files_for_extensions = store.list_source_files(
-                scopes=final_scopes,
-                exclude_dirs=exclude_dirs,
-                pattern_type=pattern_type,
-                pattern=pattern,
-            )
-            logger.debug(f"[scan_file_stats] {len(files_for_extensions)} files for extensions distribution")
-
-            # 2. 按所有条件过滤的文件（含 selectedExtensions）— 用于 totalFiles
-            files_for_count = store.list_source_files(
+            # 1. totalFiles — COUNT 查询（极快）
+            total_files = store.count_files(
                 scopes=final_scopes,
                 extensions=selected_extensions,
                 exclude_dirs=exclude_dirs,
                 pattern_type=pattern_type,
                 pattern=pattern,
             )
-            logger.debug(f"[scan_file_stats] filtered {len(files_for_count)} files for totalFiles")
+            logger.debug(f"[scan_file_stats] totalFiles={total_files}")
 
-            # 3. 全量文件 — 用于构建完整目录树（不受 scopes 影响）
-            all_files = store.list_source_files()
-            logger.debug(f"[scan_file_stats] total {len(all_files)} files for directory tree")
+            # 2. 目录树 — 只取 file_path（路径列）
+            all_paths = store.list_file_paths()
+            logger.debug(f"[scan_file_stats] {len(all_paths)} paths for directory tree")
+
+            # 3. 扩展名分布 — 跟随目录选项（scopes 过滤）
+            extensions = store.count_by_extensions(
+                scopes=final_scopes,
+                extensions=selected_extensions,
+                exclude_dirs=exclude_dirs,
+                pattern_type=pattern_type,
+                pattern=pattern,
+            )
+            dir_count_paths = store.list_file_paths(
+                extensions=selected_extensions,
+                exclude_dirs=exclude_dirs,
+                pattern_type=pattern_type,
+                pattern=pattern,
+            )
+            logger.debug(f"[scan_file_stats] {len(dir_count_paths)} paths for directory counts, {len(extensions)} extension types")
 
         except Exception as e:
             logger.error(f"[scan_file_stats] error: {e}")
-            files_for_extensions = []
-            files_for_count = []
-            all_files = []
+            total_files = 0
+            all_paths = []
+            extensions = {}
+            dir_count_paths = []
 
-        # 文件分布统计（基于 scopes/exclude/pattern 过滤，不含 selectedExtensions — 保证所有类型可见）
-        extensions = {}
-        for f in files_for_extensions:
-            lang = f.get("language", "unknown")
-            extensions[lang] = extensions.get(lang, 0) + 1
-
-        # 完整目录树（基于全量文件，不受 scopes 影响）
+        # 完整目录树（基于全量文件路径，不受 scopes 影响）
         dir_tree: dict = {}
-        for f in all_files:
-            dir_path = f.get("file_path", "")
+        for dir_path in all_paths:
             if dir_path:
                 parts = dir_path.split("/")
                 current = dir_tree
@@ -487,16 +488,41 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         current[part] = {}
                     current = current[part]
 
+        # 按目录统计文件数（基于语言类型过滤，不受 scopes 影响）
+        dir_counts: dict = {}
+        for dir_path in dir_count_paths:
+            if dir_path:
+                parts = dir_path.split("/")
+                current = dir_counts
+                # 遍历所有目录层级，每层计数 +1
+                for part in parts[:-1]:
+                    if part not in current:
+                        current[part] = {"_count": 0}
+                    current[part]["_count"] = current[part].get("_count", 0) + 1
+                    # 进入下一层
+                    next_level = current[part]
+                    if not isinstance(next_level, dict):
+                        next_level = {}
+                        current[part] = {"_count": 0}
+                    current = current[part]
+
         # 将树形结构展平为前端可用的格式
-        def flatten_dir_tree(tree: dict, prefix: str = "") -> list:
+        def flatten_dir_tree(tree: dict, prefix: str = "", counts: dict = None) -> list:
             result = []
             for name, children in sorted(tree.items()):
                 path = f"{prefix}/{name}" if prefix else name
+                file_count = None
+                if counts:
+                    cnt_node = counts.get(name, {})
+                    if isinstance(cnt_node, dict):
+                        file_count = cnt_node.get("_count", 0) or None
                 node = {
                     "name": name,
                     "path": path,
-                    "children": flatten_dir_tree(children, path) if children else [],
+                    "children": flatten_dir_tree(children, path, counts.get(name, {}) if counts and isinstance(counts.get(name, {}), dict) else None) if children else [],
                 }
+                if file_count is not None:
+                    node["fileCount"] = file_count
                 result.append(node)
             return result
 
@@ -507,12 +533,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 count += count_all_dirs(children)
             return count
 
-        dir_list = flatten_dir_tree(dir_tree)
+        dir_list = flatten_dir_tree(dir_tree, "", dir_counts)
         total_dirs = count_all_dirs(dir_tree)
 
         return {
             "extensions": extensions,
-            "totalFiles": len(files_for_count),
+            "totalFiles": total_files,
             "totalDirs": total_dirs,
             "directories": dir_list,
         }

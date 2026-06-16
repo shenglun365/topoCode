@@ -134,6 +134,7 @@ export interface TaskRun {
 export interface DirTreeNode {
   name: string
   path: string
+  fileCount?: number
   children: DirTreeNode[]
 }
 

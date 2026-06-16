@@ -9,6 +9,7 @@ import {
   Squares2X2Icon,
   PlusIcon,
   XMarkIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
@@ -33,6 +34,8 @@ const filterMode = ref<'all' | 'favorites'>('all')
 const selectedGroupIds = ref<string[]>([])
 const groupFilterRef = ref<InstanceType<typeof GroupFilter> | null>(null)
 const showDuplicateDialog = ref(false)
+const showFileCountExceedDialog = ref(false)
+const fileCountExceedInfo = ref({ projectName: '', language: '', count: 0 })
 
 // 分页
 const currentPage = ref(1)
@@ -151,16 +154,22 @@ async function handleImportProject() {
           const exts = Object.entries(fileStats.extensions || {})
             .filter(([k]) => k !== '' && PARSER_LANGUAGES.has(k))
           exts.sort((a, b) => b[1] - a[1])
-          const topExt = exts.length > 0 ? [exts[0][0]] : []
-          await analysisStore.createTask({
-            projectId: project.id,
-            type: 'full',
-            name: project.name,
-            scopes: [],
-            extensions: topExt,
-            excludeDirs: [],
-            reportTypes: ['dependency', 'callChain'],
-          })
+          const topExt = exts.length > 0 ? exts[0] : null
+          if (topExt && topExt[1] > 10000) {
+            fileCountExceedInfo.value = { projectName: project.name, language: topExt[0], count: topExt[1] }
+            showFileCountExceedDialog.value = true
+          } else {
+            const topLang = topExt ? [topExt[0]] : []
+            await analysisStore.createTask({
+              projectId: project.id,
+              type: 'full',
+              name: project.name,
+              scopes: [],
+              extensions: topLang,
+              excludeDirs: [],
+              reportTypes: ['dependency', 'callChain'],
+            })
+          }
         } catch (e) {
           console.error('[HomePage] auto-create task failed:', e)
         }
@@ -430,6 +439,33 @@ onMounted(async () => {
       </div>
     </div>
   </Teleport>
+
+  <!-- 文件数量超限提示 -->
+  <Teleport to="body">
+    <div
+      v-if="showFileCountExceedDialog"
+      class="dialog-overlay"
+      @click.self="showFileCountExceedDialog = false"
+    >
+      <div class="confirm-dialog">
+        <div class="confirm-title">
+          <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
+          <span>{{ t('import.fileCountExceed', '文件数量过多') }}</span>
+        </div>
+        <div class="confirm-body">
+          {{ `项目 "${fileCountExceedInfo.projectName}" 中 ${fileCountExceedInfo.language} 文件数量为 ${fileCountExceedInfo.count}，超过 10000 个文件限制，无法自动创建解析任务。请手动筛选语言类型和目录范围后再创建任务。` }}
+        </div>
+        <div class="confirm-actions">
+          <button
+            class="btn btn-primary"
+            @click="showFileCountExceedDialog = false"
+          >
+            {{ t('common.ok', '确定') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -488,7 +524,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 160px;
+  min-height: 140px;
   border: 2px dashed var(--border);
   border-radius: 8px;
   cursor: pointer;
@@ -569,5 +605,48 @@ onMounted(async () => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+</style>
+
+<style>
+/* 对话框全局样式（Teleport to body 需要非 scoped） */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+.confirm-dialog {
+  width: 420px;
+  max-width: 90vw;
+  padding: 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.confirm-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.confirm-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 </style>

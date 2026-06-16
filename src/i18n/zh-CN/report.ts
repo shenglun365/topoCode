@@ -125,6 +125,7 @@ export default { report: {
     aiChat: 'AI 聊天',
     taskList: '任务列表',
   },
+  agentTasks: '解析任务',
   openTaskList: '打开任务列表',
   // 任务列表面板
   taskList: {

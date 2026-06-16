@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useProjectStore } from '@/stores/project'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -51,6 +52,11 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, _from, next) => {
+  const projectStore = useProjectStore()
+  if (projectStore.importing) {
+    next(false)
+    return
+  }
   const title = to.meta.title as string
   if (title) {
     document.title = `${title} - TopoCode`

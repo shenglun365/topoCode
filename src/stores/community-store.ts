@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
+import { isLLMConfigured } from '@/services/llmClient'
+import { useAnalysisStore } from '@/stores/analysis'
 import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult, TimelineEntry } from '@/types/ipc'
 
 export interface CommunityItem {
@@ -722,12 +724,20 @@ export const useCommunityStore = defineStore('community', () => {
     if (steps[stepIdx]) steps[stepIdx].status = status as any
   }
 
-  async function triggerArchAnalysis(taskId: string, edgeType: string, level: string, modelId?: string) {
+  async function triggerArchAnalysis(taskId: string, edgeType: string, level: string, modelId?: string, projectId?: string) {
+    const STEPS = {
+      SUMMARY: 0,
+      LOAD_COMMS: 1,
+      ANALYZE: 2,
+      OVERVIEW: 3,
+      PERSIST: 4,
+    }
     const steps = [
+      '生成项目摘要',
       `加载社区列表 (${level}, ${edgeType})`,
-      `LLM 分析社区`,
-      `生成架构概览文档`,
-      `持久化分析结果`,
+      'LLM 分析社区',
+      '生成架构概览文档',
+      '持久化分析结果',
     ]
     const t = ensureTask(taskId)
     const idx = t.agentTasks.length
@@ -735,10 +745,44 @@ export const useCommunityStore = defineStore('community', () => {
     t.agentTasks[idx].status = 'running'
 
     try {
+      // Step 0: 生成项目摘要（复用 README + 依赖文件上下文）
+      updateAgentStep(taskId, idx, STEPS.SUMMARY, 'running')
+
+      const pid = projectId || (() => {
+        try {
+          const analysisStore = useAnalysisStore()
+          return analysisStore.tasks.find(t => t.id === taskId)?.projectId || ''
+        } catch { return '' }
+      })()
+
+      if (pid) {
+        if (!isLLMConfigured()) {
+          updateAgentStep(taskId, idx, STEPS.SUMMARY, 'failed')
+          pushError(taskId, '生成项目摘要: LLM 模型未配置，跳过')
+        } else {
+          try {
+            const summaryResult = await ipc.report.generateProjectSummary({ projectId: pid })
+            if (summaryResult?.summary) {
+              updateAgentStep(taskId, idx, STEPS.SUMMARY, 'done')
+              t.projectContext = `## 项目概要\n${summaryResult.summary}`
+            } else {
+              updateAgentStep(taskId, idx, STEPS.SUMMARY, 'failed')
+              pushError(taskId, '生成项目摘要: LLM 返回结果为空')
+            }
+          } catch (e: any) {
+            updateAgentStep(taskId, idx, STEPS.SUMMARY, 'failed')
+            pushError(taskId, `生成项目摘要: ${e?.message || '调用失败'}`)
+          }
+        }
+      } else {
+        updateAgentStep(taskId, idx, STEPS.SUMMARY, 'failed')
+        pushError(taskId, '生成项目摘要: 未找到项目 ID')
+      }
+
       const result = await ipc.analysis.startArchAnalysis({ taskId, edgeType, level, modelId })
       if (result.success && result.agentTaskId) {
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `社区数: ${result.communities}` })
-        _pollAgentProgress(taskId, idx, result.agentTaskId)
+        _pollAgentProgress(taskId, idx, result.agentTaskId, STEPS.LOAD_COMMS)
       } else {
         updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
       }
@@ -749,7 +793,7 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
-  function _pollAgentProgress(taskId: string, taskIdx: number, agentTaskId: string) {
+  function _pollAgentProgress(taskId: string, taskIdx: number, agentTaskId: string, stepOffset = 0) {
     const poll = setInterval(async () => {
       try {
         const progress = await ipc.analysis.getAgentProgress({ agentTaskId })
@@ -766,7 +810,7 @@ export const useCommunityStore = defineStore('community', () => {
         })
         if (progress.steps) {
           for (let i = 0; i < progress.steps.length; i++) {
-            updateAgentStep(taskId, taskIdx, i, progress.steps[i].status)
+            updateAgentStep(taskId, taskIdx, i + stepOffset, progress.steps[i].status)
           }
         }
         if (progress.status === 'completed' || progress.status === 'partial' ||

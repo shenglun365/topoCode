@@ -231,6 +231,25 @@ async function saveSummary() {
   }
 }
 
+const generatingSummary = ref(false)
+
+async function reGenerateSummary() {
+  const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
+  if (!pid || generatingSummary.value) return
+  generatingSummary.value = true
+  try {
+    const result = await reportStore.generateProjectSummary(pid)
+    if (result?.summary) {
+      projectSummaryText.value = result.summary
+      projectSummaryDate.value = result.generated_at || ''
+    }
+  } catch (e: any) {
+    console.error('[ReportHome] reGenerateSummary error:', e)
+  } finally {
+    generatingSummary.value = false
+  }
+}
+
 
 
 
@@ -425,6 +444,14 @@ watch(() => props.taskId, loadData)
             <button
               v-if="!editingSummary"
               class="btn btn-ghost btn-xs"
+              :disabled="generatingSummary"
+              @click="reGenerateSummary"
+            >
+              {{ generatingSummary ? t('common.generating', '生成中…') : t('report.pipeline.generateProjectSummary', '重新生成') }}
+            </button>
+            <button
+              v-if="!editingSummary"
+              class="btn btn-ghost btn-xs"
               @click="editingSummary = true; editSummaryText = projectSummaryText"
             >
               {{ t('common.edit') }}
@@ -482,7 +509,7 @@ watch(() => props.taskId, loadData)
 <style scoped>
 .report-home {
   height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
@@ -510,7 +537,6 @@ watch(() => props.taskId, loadData)
 
 .report-home-scroll {
   flex: 0 1 auto;
-  overflow-y: auto;
   padding: 16px 20px;
   min-height: 0;
 }
@@ -520,7 +546,6 @@ watch(() => props.taskId, loadData)
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
 }
 
 .home-section {

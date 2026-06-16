@@ -12,6 +12,8 @@ import {
   PaperAirplaneIcon, SparklesIcon, TrashIcon,
   DocumentTextIcon, ClockIcon,
 } from '@heroicons/vue/24/outline'
+import MarkdownIt from 'markdown-it'
+import hljs from 'highlight.js'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
@@ -31,8 +33,9 @@ const cmdStore = useGraphCommandStore()
 const guideMode = ref(false)
 
 function startGuide() {
+  const wasGuide = guideMode.value
   guideMode.value = true
-  clearChat()
+  if (wasGuide) return
   const tourIntro = [
     '我来带你了解这个项目的架构。',
     '',
@@ -74,6 +77,97 @@ const GUIDE_SYSTEM_PROMPT = [
   '使用 [CMD:] 时要谨慎：每次最多发 1-2 个命令，用户观察图变化后再继续。',
   '对话中始终使用中文回复。',
 ].join('\n')
+
+const DEFAULT_SYSTEM_PROMPT = [
+  '你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。',
+  '用户可输入 /help 或 /帮助 查看全部可用命令；当被问到"你能做什么"时主动提醒用户使用 /help。',
+  '',
+  '可用 [CMD:] 命令：highlight, clearHighlight, focus, drill, rollUp, filterByQuality, filterByCoreness, filterBySize, hideNodes, clearFilter, setViewMode mode="force|table|heatmap", setEdgeType, resetView, openCommunityDetail, saveSnapshot, compareVersions, dispatchAgent',
+  '参数格式：key="value"，列表值逗号分隔。阈值：quality≥0.5高 ≤0.2低 | coreness≥3核心 | size>30大 ≤5小',
+  '',
+  '对话使用中文回复，需要操作图时使用 [CMD:] 标签，每次最多 1-2 个命令。',
+].join('\n')
+
+const HELP_TEXT = [
+  '## 可用命令',
+  '',
+  '### 对话指令（直接输入）',
+  '| 指令 | 说明 |',
+  '|------|------|',
+  '| `/help` / `/帮助` | 显示本帮助 |',
+  '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
+  '| `/analyze all` | 同上 |',
+  '| `/track [options]` | 跟踪项目变更 |',
+  '| `/diff [options]` | 对比快照版本 |',
+  '',
+  '### 图操作命令（AI 回复中使用 [CMD:] 标签）',
+  '| 命令 | 参数 | 说明 |',
+  '|------|------|------|',
+  '| `[CMD: highlight ...]` | `nodeIds="id1,id2"` | 仅显示指定节点 |',
+  '| `[CMD: clearHighlight]` | — | 取消所有高亮 |',
+  '| `[CMD: focus ...]` | `nodeId="xxx"` | 居中聚焦某节点 |',
+  '| `[CMD: drill ...]` | `communityId="xxx"` | 下钻到子社区 |',
+  '| `[CMD: rollUp]` | — | 返回上一层级 |',
+  '| `[CMD: filterByQuality ...]` | `max=0.2` 或 `min=0.5` | 按质量分筛选 |',
+  '| `[CMD: filterByCoreness ...]` | `min=3` | 筛选核心组件 |',
+  '| `[CMD: filterBySize ...]` | `min=30` 或 `max=5` | 按节点数筛选 |',
+  '| `[CMD: hideNodes ...]` | `nodeIds="id1,id2"` | 隐藏指定节点 |',
+  '| `[CMD: clearFilter]` | — | 清除所有筛选 |',
+  '| `[CMD: setViewMode ...]` | `mode="force\|table\|heatmap"` | 切换视图 |',
+  '| `[CMD: setEdgeType ...]` | `edgeType="CALL"` | 切换边类型 |',
+  '| `[CMD: resetView]` | — | 重置视图 |',
+  '| `[CMD: saveSnapshot]` | — | 保存快照 |',
+  '| `[CMD: compareVersions ...]` | `from="v1" to="v2"` | 对比版本 |',
+  '| `[CMD: openCommunityDetail ...]` | `communityId="xxx"` | 打开社区详情 |',
+  '| `[CMD: dispatchAgent ...]` | `action="analyze"` | 调度 Agent 任务 |',
+  '',
+  '### 筛选阈值参考',
+  '- quality: 高质量 ≥0.5、低质量 ≤0.2',
+  '- coreness: 高核心度 ≥3',
+  '- size: 大型 >30 节点、小型 ≤5 节点',
+  '',
+  '### 模式',
+  '- **普通模式**：自由问答，AI 根据上下文自动使用图操作命令',
+  '- **引导模式**：点击图上 🎓 按钮启动，AI 带你逐步了解项目架构',
+  '',
+  '---',
+  '详细说明见: [AI助手架构分析引导文档](docs/AI助手架构分析引导.md)',
+].join('\n')
+
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+  breaks: true,
+  highlight(str: string, lang: string) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return hljs.highlight(str, { language: lang }).value
+      } catch { /* ignore highlight errors */ }
+    }
+    return escapeHtml(str)
+  },
+})
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  return md.render(text)
+}
+
+function formatMessageContent(msg: Message): string {
+  if (msg.role === 'assistant') {
+    return renderMarkdown(msg.content)
+  }
+  return msg.content
+}
 
 interface Message {
   id: string
@@ -188,6 +282,13 @@ async function handleSend() {
 
   // /cmd 指令检测
   if (text.startsWith('/')) {
+    // /help / /帮助 — 客户端直接返回帮助信息，无需调用 LLM
+    if (text === '/help' || text === '/帮助') {
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('assistant', HELP_TEXT)
+      return
+    }
     const parsed = communityStore.parseArchCommand(text)
     if (parsed) {
       showCmdConfirm.value = true
@@ -210,6 +311,8 @@ async function handleSend() {
   }
   if (guideMode.value) {
     sendMessages.push({ role: 'system', content: GUIDE_SYSTEM_PROMPT })
+  } else if (gs.nodeCount > 0) {
+    sendMessages.push({ role: 'system', content: DEFAULT_SYSTEM_PROMPT })
   }
   // 对话历史（不含已有 system 消息）
   const history = messages.value.filter(m => m.role !== 'system' && m !== assistantMsg).map(m => ({ role: m.role, content: m.content }))
@@ -282,12 +385,14 @@ function clearChat() {
 onMounted(() => {
   if (llmConfigured.value && messages.value.length === 0) {
     addMessage('system', t('ai.assistantWelcome'))
+    addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
   }
 })
 
 watch(llmConfigured, (val) => {
   if (val && messages.value.length === 0) {
     addMessage('system', t('ai.assistantWelcome'))
+    addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
   }
 })
 
@@ -347,7 +452,7 @@ watch(() => cmdStore.eventSeq, () => {
         >
           <div
             class="ai-message-bubble"
-            v-html="msg.content"
+            v-html="formatMessageContent(msg)"
           />
           <!-- Suggestion Chips -->
           <div
@@ -412,7 +517,7 @@ watch(() => cmdStore.eventSeq, () => {
         />
         <div class="ai-input-actions">
           <button
-            v-if="messages.length > 0"
+            v-show="messages.length > 0"
             class="ai-action-btn"
             :title="t('ai.clearChat')"
             @click="clearChat"
@@ -563,11 +668,13 @@ watch(() => cmdStore.eventSeq, () => {
 
 .ai-input-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
+  gap: 8px;
 }
 
 .ai-action-btn {
+  margin-right: auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -636,5 +743,79 @@ watch(() => cmdStore.eventSeq, () => {
 }
 .ai-suggest-chip:hover {
   background: var(--accent); color: #fff;
+}
+
+/* ---- 助手消息内 Markdown 渲染样式 ---- */
+.ai-message-assistant .ai-message-bubble :deep(h1),
+.ai-message-assistant .ai-message-bubble :deep(h2),
+.ai-message-assistant .ai-message-bubble :deep(h3),
+.ai-message-assistant .ai-message-bubble :deep(h4) {
+  margin: 0.6em 0 0.3em; font-weight: 600; line-height: 1.3;
+  color: var(--text-primary);
+}
+.ai-message-assistant .ai-message-bubble :deep(h1) { font-size: 1.1em; }
+.ai-message-assistant .ai-message-bubble :deep(h2) { font-size: 1.05em; border-bottom: 1px solid var(--border); padding-bottom: 0.15em; }
+.ai-message-assistant .ai-message-bubble :deep(h3) { font-size: 1em; }
+.ai-message-assistant .ai-message-bubble :deep(h4) { font-size: 0.95em; }
+
+.ai-message-assistant .ai-message-bubble :deep(p) {
+  margin: 0.3em 0;
+}
+
+.ai-message-assistant .ai-message-bubble :deep(ul),
+.ai-message-assistant .ai-message-bubble :deep(ol) {
+  margin: 0.3em 0; padding-left: 1.3em;
+}
+.ai-message-assistant .ai-message-bubble :deep(li) { margin: 0.1em 0; }
+
+.ai-message-assistant .ai-message-bubble :deep(code) {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.85em;
+  background: var(--bg-tertiary);
+  padding: 0.1em 0.3em; border-radius: 3px;
+}
+.ai-message-assistant .ai-message-bubble :deep(pre) {
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.5em 0.7em; overflow-x: auto;
+  margin: 0.4em 0; line-height: 1.4;
+}
+.ai-message-assistant .ai-message-bubble :deep(pre code) {
+  background: none; padding: 0; font-size: 0.8em;
+}
+
+.ai-message-assistant .ai-message-bubble :deep(table) {
+  border-collapse: collapse; width: 100%; margin: 0.4em 0; font-size: 0.85em;
+}
+.ai-message-assistant .ai-message-bubble :deep(th),
+.ai-message-assistant .ai-message-bubble :deep(td) {
+  border: 1px solid var(--border); padding: 0.25em 0.5em; text-align: left;
+}
+.ai-message-assistant .ai-message-bubble :deep(th) {
+  background: var(--bg-tertiary); font-weight: 600;
+}
+.ai-message-assistant .ai-message-bubble :deep(tr:nth-child(even)) {
+  background: var(--bg-secondary);
+}
+
+.ai-message-assistant .ai-message-bubble :deep(blockquote) {
+  border-left: 3px solid var(--accent); margin: 0.4em 0; padding: 0.2em 0.6em;
+  color: var(--text-muted); background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-radius: 0 4px 4px 0;
+}
+
+.ai-message-assistant .ai-message-bubble :deep(a) {
+  color: var(--accent); text-decoration: underline;
+}
+
+.ai-message-assistant .ai-message-bubble :deep(hr) {
+  border: none; border-top: 1px solid var(--border); margin: 0.6em 0;
+}
+
+.ai-message-assistant .ai-message-bubble :deep(strong) {
+  font-weight: 600; color: var(--text-primary);
+}
+
+.ai-message-assistant .ai-message-bubble :deep(em) {
+  font-style: italic;
 }
 </style>

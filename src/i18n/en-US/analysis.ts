@@ -81,6 +81,10 @@ export default { analysis: {
   // FileStatsPanel
   fileType: 'File Type',
   fileDistribution: 'File Distribution',
+  languageScope: 'Select Languages',
+  selectLanguageFirst: 'Please select languages first',
+  showMore: 'More ({n})',
+  showLess: 'Less',
   directoryScope: 'Directory Scope',
   allDirectories: 'All Directories',
   customPath: 'Custom',
