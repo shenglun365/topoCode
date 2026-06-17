@@ -16,10 +16,12 @@ interface ExternalItem {
 const props = defineProps<{
   items: ExternalItem[]
   edgeType: string
+  showGuideButton?: boolean
 }>()
 
 const emit = defineEmits<{
   'drill': [itemKey: string]
+  'guide-click': []
 }>()
 
 const { t } = useI18n()
@@ -257,11 +259,18 @@ watch(search, () => { page.value = 1 })
         {{ t('common.next', '下一页') }}
       </button>
     </div>
+    <button
+      v-if="showGuideButton !== false"
+      class="etv-guide-btn"
+      @click="emit('guide-click')"
+    >
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
+    </button>
   </div>
 </template>
 
 <style scoped>
-.etv-container { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.etv-container { display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative; }
 .etv-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; flex-shrink: 0; }
 .etv-search {
   flex: 1; max-width: 240px; padding: 0.2rem 0.5rem; font-size: 0.75rem;
@@ -314,4 +323,17 @@ watch(search, () => { page.value = 1 })
 
 .etv-pagination { display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.35rem 0; flex-shrink: 0; }
 .etv-page { font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); }
+.etv-guide-btn {
+  position: absolute; bottom: 12px; right: 12px; z-index: 211;
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+  background: var(--bg-primary); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 50%;
+  cursor: pointer; transition: all 0.15s;
+}
+.etv-guide-btn:hover {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.4);
+}
 </style>

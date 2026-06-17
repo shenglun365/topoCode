@@ -26,6 +26,7 @@ const props = defineProps<{
   fontSize?: number
   fullscreen?: boolean
   positions?: Record<string, { x: number; y: number }>
+  showGuideButton?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -53,6 +54,7 @@ const emit = defineEmits<{
     :font-size="fontSize"
     :fullscreen="fullscreen"
     :positions="positions"
+    :show-guide-button="showGuideButton"
     @node-dblclick="(id: string) => emit('node-dblclick', id)"
     @node-drag-end="(id: string, x: number, y: number) => emit('node-drag-end', id, x, y)"
     @node-context-menu="(id: string) => emit('node-context-menu', id)"

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   EllipsisVerticalIcon,
   ArrowPathIcon,
   DocumentArrowDownIcon,
 } from '@heroicons/vue/24/outline'
+import ToolbarDropdown from './ToolbarDropdown.vue'
+import type { DropdownOption } from './ToolbarDropdown.vue'
 
 const props = defineProps<{
   mode: 'force' | 'table' | 'heatmap'
@@ -22,6 +24,17 @@ const emit = defineEmits<{
 const openMore = ref(false)
 const moreRef = ref<HTMLDivElement>()
 
+const modeOptions: DropdownOption[] = [
+  { value: 'force', label: '力导向图' },
+  { value: 'table', label: '表格' },
+  { value: 'heatmap', label: '热力图' },
+]
+
+const internalMode = computed({
+  get: () => props.mode,
+  set: (v) => emit('update:mode', v as 'force' | 'table' | 'heatmap'),
+})
+
 function onDocClick(e: MouseEvent) {
   if (moreRef.value && !moreRef.value.contains(e.target as Node)) {
     openMore.value = false
@@ -34,23 +47,7 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 <template>
   <div class="gt-container">
-    <div class="gt-tabs">
-      <button
-        class="gt-tab"
-        :class="{ active: props.mode === 'force' }"
-        @click="emit('update:mode', 'force')"
-      >力导向</button>
-      <button
-        class="gt-tab"
-        :class="{ active: props.mode === 'table' }"
-        @click="emit('update:mode', 'table')"
-      >表格</button>
-      <button
-        class="gt-tab"
-        :class="{ active: props.mode === 'heatmap' }"
-        @click="emit('update:mode', 'heatmap')"
-      >热力图</button>
-    </div>
+    <ToolbarDropdown v-model="internalMode" :options="modeOptions" :fullscreen="props.fullscreen" />
 
     <div ref="moreRef" class="gt-more">
       <button class="gt-more-btn" @click.stop="openMore = !openMore">
@@ -76,25 +73,6 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 <style scoped>
 .gt-container { display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0; }
-
-.gt-tabs {
-  display: flex; align-items: center;
-  background: var(--bg-tertiary); border: 1px solid var(--border);
-  border-radius: 0.25rem; overflow: hidden;
-}
-.gt-tab {
-  padding: 0.15rem 0.5rem; font-size: 0.65rem; font-weight: 500;
-  background: transparent; border: none; color: var(--text-muted);
-  cursor: pointer; white-space: nowrap; transition: all 0.15s;
-  border-right: 1px solid var(--border);
-}
-.gt-tab:last-child { border-right: none; }
-.gt-tab:hover { color: var(--text-primary); background: var(--bg-secondary); }
-.gt-tab.active {
-  background: var(--bg-accent-subtle, #2d1f5e);
-  color: var(--accent, #7c3aed);
-  font-weight: 600;
-}
 
 .gt-more { position: relative; }
 .gt-more-btn {

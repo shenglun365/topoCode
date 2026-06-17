@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@/composables/useComponentId'
 import { communityIdLabel } from '@/utils/communityLabel'
@@ -22,10 +22,12 @@ interface CommNode {
 const props = defineProps<{
   items: ExternalItem[]
   allCommunities?: CommNode[]
+  showGuideButton?: boolean
 }>()
 
 const emit = defineEmits<{
   'drill': [communityId: string]
+  'guide-click': []
 }>()
 
 const { t } = useI18n()
@@ -33,69 +35,30 @@ const { showId, componentId } = useComponentId('EH-001')
 
 const topN = ref(20)
 const scale = ref(1)
+const scrollRef = ref<HTMLElement | null>(null)
+
 const tooltip = ref('')
 const tooltipX = ref(0)
 const tooltipY = ref(0)
-const scrollRef = ref<HTMLElement | null>(null)
 
-/* ---- auto-size topN to fill container ---- */
+watch(topN, (v) => {
+  console.log('[Heatmap] topN change →', v, 'items:', props.items.length)
+})
+
+watch(scale, (newVal) => {
+  console.log('[Heatmap] scale →', newVal.toFixed(1),
+    'baseW×baseH:', baseW.value, '×', baseH.value,
+    'computedW×H:', Math.round(baseW.value * newVal), '×', Math.round(baseH.value * newVal))
+})
+
 const CELL_W = 30
 const CELL_H = 24
 const CORNER_W = 90
 const LABEL_W = 100
-const TOOLBAR_H = 38
-
-const baseW = computed(() => CORNER_W + packages.value.length * CELL_W + LABEL_W)
-const baseH = computed(() => Math.max(1, communities.value.length) * CELL_H)
-
-const zoomStyle = computed(() => ({
-  transform: `scale(${scale.value})`,
-  transformOrigin: '0 0',
-  width: `${baseW.value * scale.value}px`,
-  height: `${baseH.value * scale.value}px`,
-}))
-
-function autoSize() {
-  const el = scrollRef.value?.parentElement
-  if (!el) return
-  const cw = el.clientWidth - CORNER_W - LABEL_W - 16
-  const ch = el.clientHeight - TOOLBAR_H - 8
-  const cols = Math.max(5, Math.floor(cw / CELL_W))
-  const rows = Math.max(5, Math.floor(ch / CELL_H))
-  const maxContent = Math.max(
-    new Set(props.items.map(i => i.package || i.name || '')).size,
-    ...props.items.map(i => (i.communities || []).length)
-  )
-  topN.value = Math.min(cols, rows, Math.max(10, maxContent), 60)
-}
-
-let resizeObs: ResizeObserver | null = null
-onMounted(() => {
-  nextTick(autoSize)
-  if (scrollRef.value?.parentElement) {
-    resizeObs = new ResizeObserver(() => autoSize())
-    resizeObs.observe(scrollRef.value.parentElement)
-  }
-})
-onUnmounted(() => resizeObs?.disconnect())
-
-watch(() => props.items, () => {
-  scale.value = 1
-  nextTick(autoSize)
-})
-
-/* ---- scroll-wheel zoom ---- */
-function onWheel(e: WheelEvent) {
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault()
-    const delta = -e.deltaY * 0.002
-    scale.value = Math.max(0.4, Math.min(3.0, scale.value + delta))
-  }
-}
 
 const packages = computed(() => {
-  const items = [...props.items].sort((a, b) => (b.fileCount || b.count || 0) - (a.fileCount || a.count || 0))
-  return items.slice(0, topN.value).map(i => i.name || i.package || '')
+  const sorted = [...props.items].sort((a, b) => (b.fileCount || b.count || 0) - (a.fileCount || a.count || 0))
+  return sorted.slice(0, topN.value).map(i => i.package || i.name || '')
 })
 
 const communities = computed(() => {
@@ -113,13 +76,16 @@ const communities = computed(() => {
   return Array.from(commMap.values()).sort((a, b) => b.count - a.count).slice(0, topN.value)
 })
 
+const baseW = computed(() => CORNER_W + packages.value.length * CELL_W + LABEL_W)
+const baseH = computed(() => Math.max(1, communities.value.length) * CELL_H)
+
 const matrix = computed(() => {
   return communities.value.map(comm => {
     const row: number[] = []
     for (const pkgLabel of packages.value) {
       let count = 0
       for (const item of props.items) {
-        const key = item.name || item.package || ''
+        const key = item.package || item.name || ''
         if (key !== pkgLabel) continue
         const commIds = (item.communities || []).map(c => c.communityId)
         if (commIds.includes(comm.id)) {
@@ -168,6 +134,13 @@ function commLabel(c: { id: string; name?: string }): string {
   if (c.name && c.name !== c.id) return c.name.slice(0, 12)
   return communityIdLabel(c.id).slice(0, 20)
 }
+
+function onWheel(e: WheelEvent) {
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+  const delta = -e.deltaY * 0.002
+  scale.value = Math.max(0.4, Math.min(3.0, Number((scale.value + delta).toFixed(1))))
+}
 </script>
 
 <template>
@@ -176,13 +149,20 @@ function commLabel(c: { id: string; name?: string }): string {
     class="cmp-id"
   >{{ componentId }}</span>
   <div class="ehm-container">
-    <div class="ehm-toolbar">
-      <span class="ehm-label">{{ t('report.matrixSize', '矩阵') }}: {{ communities.length }}×{{ packages.length }}</span>
+    <div class="ehm-zoom-overlay">
+      <span class="ehm-label">{{ t('report.matrixSize', '矩阵尺寸') }}:</span>
+      <select v-model.number="topN" class="ehm-size-select">
+        <option :value="10">10×10</option>
+        <option :value="20">20×20</option>
+        <option :value="30">30×30</option>
+        <option :value="50">50×50</option>
+      </select>
+      <span class="ehm-overlay-sep" />
       <button
         class="ehm-zoom-btn"
         :disabled="scale <= 0.4"
-        title="Zoom out"
-        @click="scale = Math.max(0.4, scale - 0.2)"
+        title="缩小"
+        @click="scale = Math.max(0.4, Number((scale - 0.2).toFixed(1)))"
       >
         −
       </button>
@@ -190,20 +170,20 @@ function commLabel(c: { id: string; name?: string }): string {
       <button
         class="ehm-zoom-btn"
         :disabled="scale >= 3.0"
-        title="Zoom in"
-        @click="scale = Math.min(3.0, scale + 0.2)"
+        title="放大"
+        @click="scale = Math.min(3.0, Number((scale + 0.2).toFixed(1)))"
       >
         +
       </button>
       <button
         class="ehm-zoom-btn"
-        :disabled="scale === 1"
-        title="Reset zoom"
+        title="重置"
         @click="scale = 1"
       >
         {{ t('report.resetView', '重置') }}
       </button>
     </div>
+
     <div
       v-if="matrix.length > 0 && packages.length > 0"
       ref="scrollRef"
@@ -212,7 +192,7 @@ function commLabel(c: { id: string; name?: string }): string {
     >
       <div
         class="ehm-table-wrap"
-        :style="zoomStyle"
+        :style="{ width: baseW + 'px', height: baseH + 'px', zoom: scale }"
       >
         <table class="ehm-table">
           <thead>
@@ -259,12 +239,14 @@ function commLabel(c: { id: string; name?: string }): string {
         </table>
       </div>
     </div>
+
     <div
       v-else
       class="ehm-empty"
     >
       {{ t('report.noCommunities', '无关联数据') }}
     </div>
+
     <div
       v-if="tooltip"
       class="ehm-tooltip"
@@ -272,13 +254,34 @@ function commLabel(c: { id: string; name?: string }): string {
     >
       {{ tooltip }}
     </div>
+
+    <button
+      v-if="showGuideButton !== false"
+      class="ehm-guide-btn"
+      @click="emit('guide-click')"
+    >
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
+    </button>
   </div>
 </template>
 
 <style scoped>
-.ehm-container { display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative; align-items: center; justify-content: center; }
-.ehm-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0; flex-shrink: 0; align-self: stretch; }
+.ehm-container { display: flex; flex-direction: column; flex: 1; overflow: hidden; position: relative; align-items: center; }
+
+.ehm-zoom-overlay {
+  position: absolute; top: 12px; left: 12px; z-index: 211;
+  display: flex; align-items: center; gap: 0.3rem;
+  padding: 0.15rem 0.35rem;
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 0.25rem;
+}
 .ehm-label { font-size: 0.7rem; color: var(--text-muted); }
+.ehm-size-select {
+  padding: 0.05rem 0.15rem; font-size: 0.65rem;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 0.2rem; color: var(--text-primary); outline: none; cursor: pointer;
+}
+.ehm-overlay-sep { width: 1px; height: 14px; background: var(--border); }
 .ehm-zoom-btn {
   display: flex; align-items: center; justify-content: center;
   min-width: 22px; height: 20px; padding: 0 0.25rem; font-size: 0.65rem;
@@ -288,7 +291,8 @@ function commLabel(c: { id: string; name?: string }): string {
 .ehm-zoom-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--accent); }
 .ehm-zoom-btn:disabled { opacity: 0.3; cursor: default; }
 .ehm-zoom-label { font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); min-width: 32px; text-align: center; }
-.ehm-scroll { flex: 1; overflow: auto; display: flex; align-items: flex-start; justify-content: center; padding: 8px 4px; }
+
+.ehm-scroll { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: safe center; }
 .ehm-table-wrap { display: inline-block; }
 .ehm-table { border-collapse: collapse; }
 .ehm-corner { min-width: 90px; position: sticky; left: 0; z-index: 2; background: var(--bg-primary); }
@@ -317,5 +321,18 @@ function commLabel(c: { id: string; name?: string }): string {
   padding: 0.2rem 0.5rem; font-size: 0.7rem; color: var(--text-primary);
   background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 0.25rem;
   white-space: nowrap;
+}
+.ehm-guide-btn {
+  position: absolute; bottom: 12px; right: 12px; z-index: 211;
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+  background: var(--bg-primary); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 50%;
+  cursor: pointer; transition: all 0.15s;
+}
+.ehm-guide-btn:hover {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.4);
 }
 </style>

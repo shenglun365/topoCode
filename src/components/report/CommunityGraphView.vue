@@ -10,7 +10,7 @@ import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
 import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
 import { ipc } from '@/services/ipc'
-import { LinkSlashIcon, LockClosedIcon, Cog6ToothIcon, FunnelIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, ArrowDownTrayIcon, ChatBubbleLeftIcon } from '@heroicons/vue/24/outline'
+import { Cog6ToothIcon, FunnelIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, ArrowDownTrayIcon, ChatBubbleLeftIcon } from '@heroicons/vue/24/outline'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
 import GraphCanvas from './GraphCanvas.vue'
@@ -18,6 +18,7 @@ import ExternalTableView from './ExternalTableView.vue'
 import ExternalHeatmapView from './ExternalHeatmapView.vue'
 import NodeFilterPanel from './NodeFilterPanel.vue'
 import CommunityTableView from './CommunityTableView.vue'
+import ToolbarDropdown from './ToolbarDropdown.vue'
 
 /* ========================================================
    Unified drill path — single source of truth for all views
@@ -75,6 +76,10 @@ const recenterTrigger = ref(0)
 const showFilter = ref(false)
 const filterClickX = ref(0)
 const filterClickY = ref(0)
+
+const showAIBubble = computed(() =>
+  (panelStore.rightCollapsed || panelStore.rightTab !== 'ai') && !isFullscreen.value
+)
 
 /* ---- unified drill state ---- */
 const drillPath = ref<DrillPathNode[]>([rootDrillNode()])
@@ -1068,6 +1073,11 @@ watch([() => drillMeta.value.drillKey, () => props.edgeType, isExternalTab, hidd
   syncGraphState()
 }, { immediate: false, deep: false })
 
+const lockModeOptions = [
+  { value: 'linked', label: '跟随模式' },
+  { value: 'locked', label: '独立模式' },
+]
+
 onMounted(async () => {
   cmdStore.registerExecutor(executeGraphCommand)
   syncGraphState()
@@ -1149,6 +1159,12 @@ watch(hasUnsavedChanges, (v) => {
       >
         <FunnelIcon class="w-3.5 h-3.5" />
       </button>
+      <ToolbarDropdown
+        v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && internalViewMode === 'force')"
+        v-model="forceLockMode"
+        :options="lockModeOptions"
+        :fullscreen="false"
+      />
       <GraphToolbar
         :mode="isExternalTab ? externalViewMode : internalViewMode"
         @update:mode="(m) => isExternalTab ? (externalViewMode = m) : (internalViewMode = m)"
@@ -1230,6 +1246,7 @@ watch(hasUnsavedChanges, (v) => {
         :font-size="fontSize"
         :fullscreen="isFullscreen"
         :positions="savedPositions"
+        :show-guide-button="showAIBubble"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => { setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y }); dragGeneration++; console.log('[CGV] node-drag-end', id, 'dragGen:', dragGeneration) }"
@@ -1240,14 +1257,18 @@ watch(hasUnsavedChanges, (v) => {
         v-else-if="externalViewMode === 'table'"
         :items="externalItems"
         :edge-type="props.edgeType"
+        :show-guide-button="showAIBubble"
         @drill="handleDrill"
+        @guide-click="handleGuideClick"
       />
       <ExternalHeatmapView
         v-else
         :key="'ext-heat-' + drillMeta.drillKey"
         :items="drillMeta.drillCommId ? drillHeatmapItems : externalItems"
         :all-communities="allCommunities"
+        :show-guide-button="showAIBubble"
         @drill="handleDrill"
+        @guide-click="handleGuideClick"
       />
     </template>
     <template v-else>
@@ -1268,6 +1289,7 @@ watch(hasUnsavedChanges, (v) => {
         :font-size="fontSize"
         :fullscreen="isFullscreen"
         :positions="savedPositions"
+        :show-guide-button="showAIBubble"
         @node-dblclick="(id: string) => handleDrill(id)"
         @node-context-menu="(id: string) => handleNodeContextMenu(id)"
         @node-drag-end="(id: string, x: number, y: number) => { setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y }); dragGeneration++; console.log('[CGV] node-drag-end', id, 'dragGen:', dragGeneration) }"
@@ -1278,15 +1300,19 @@ watch(hasUnsavedChanges, (v) => {
         v-else-if="internalViewMode === 'table'"
         :communities="drillTableCommunities"
         :edge-type="props.edgeType"
+        :show-guide-button="showAIBubble"
         @drill="handleDrill"
         @open-community="(item) => handleNodeContextMenu(item.communityId)"
+        @guide-click="handleGuideClick"
       />
       <ExternalHeatmapView
         v-else
         :key="'internal-heat-' + drillMeta.drillKey"
         :items="internalHeatmapItems"
         :all-communities="allCommunities"
+        :show-guide-button="showAIBubble"
         @drill="handleDrill"
+        @guide-click="handleGuideClick"
       />
     </template>
 
@@ -1325,6 +1351,12 @@ watch(hasUnsavedChanges, (v) => {
         >
           <FunnelIcon class="w-3.5 h-3.5" />
         </button>
+        <ToolbarDropdown
+          v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && internalViewMode === 'force')"
+          v-model="forceLockMode"
+          :options="lockModeOptions"
+          :fullscreen="isFullscreen"
+        />
         <button
           class="cgv-gear-btn"
           title="AI 助手"
@@ -1353,14 +1385,6 @@ watch(hasUnsavedChanges, (v) => {
           @click="exitFullscreen"
         >
           <ArrowsPointingInIcon class="w-3.5 h-3.5" />
-        </button>
-      </div>
-      <div class="fs-actions">
-        <button
-          class="fs-btn"
-          @click="exitFullscreen"
-        >
-          {{ t('report.exitFullscreen', '退出全屏') }}
         </button>
       </div>
     </div>
@@ -1456,18 +1480,6 @@ watch(hasUnsavedChanges, (v) => {
             <span class="cgv-gear-label">斥力</span>
             <span class="cgv-gear-val">{{ forceRepulsion }}</span>
             <input type="range" min="1" max="100" :value="forceRepulsionSlider" @input="forceRepulsionSlider = Number(($event.target as HTMLInputElement).value)" class="cgv-gear-slider">
-          </div>
-          <div class="cgv-gear-row cgv-gear-mode">
-            <label class="cgv-gear-radio">
-              <input type="radio" :value="'linked'" v-model="forceLockMode">
-              <LockClosedIcon class="w-3.5 h-3.5" />
-              <span>跟随模式</span>
-            </label>
-            <label class="cgv-gear-radio">
-              <input type="radio" :value="'locked'" v-model="forceLockMode">
-              <LinkSlashIcon class="w-3.5 h-3.5" />
-              <span>独立模式</span>
-            </label>
           </div>
           <hr class="cgv-gear-divider">
           <button class="cgv-gear-action" :class="{ active: hasUnsavedChanges }" :disabled="!hasUnsavedChanges" @click="handleSavePositions()">
@@ -1628,15 +1640,6 @@ watch(hasUnsavedChanges, (v) => {
 .cgv-gear-slider {
   flex: 1; height: 4px; cursor: pointer; accent-color: var(--accent, #7c3aed);
 }
-.cgv-gear-mode {
-  display: flex; flex-direction: column; gap: 0.2rem;
-}
-.cgv-gear-radio {
-  display: flex; align-items: center; gap: 0.35rem; font-size: 0.65rem;
-  color: var(--text-muted); cursor: pointer; padding: 0.15rem 0;
-}
-.cgv-gear-radio:hover { color: var(--text-primary); }
-.cgv-gear-radio input[type="radio"] { accent-color: var(--accent); margin: 0; }
 .cgv-gear-divider {
   border: none; border-top: 1px solid var(--border); margin: 0.2rem 0;
 }

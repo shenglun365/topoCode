@@ -37,6 +37,7 @@ const props = defineProps<{
   fontSize?: number
   fullscreen?: boolean
   positions?: Record<string, { x: number; y: number }>
+  showGuideButton?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -556,14 +557,14 @@ defineExpose({
     >
       <span class="cg-offscreen-arrow" />
     </div>
-    <div class="cg-zoom-btns" :style="props.fullscreen ? { bottom: '52px' } : undefined">
+    <div class="cg-zoom-btns" :style="props.fullscreen ? { top: '52px' } : undefined">
       <button class="cg-zoom-btn" @click="zoomOut" title="缩小">−</button>
       <button class="cg-zoom-btn" @click="zoomIn" title="放大">+</button>
     </div>
     <button
+      v-if="showGuideButton !== false"
       class="cg-guide-btn"
       :style="props.fullscreen ? { bottom: '52px' } : undefined"
-      title="AI 引导探索"
       @click="emit('guide-click')"
     >
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
@@ -636,7 +637,7 @@ defineExpose({
 .cg-offscreen-nw .cg-offscreen-arrow { transform: rotate(315deg); }
 
 .cg-zoom-btns {
-  position: absolute; bottom: 12px; left: 12px; z-index: 211;
+  position: absolute; top: 12px; left: 12px; z-index: 211;
   display: flex; flex-direction: column; gap: 2px;
 }
 .cg-zoom-btn {
