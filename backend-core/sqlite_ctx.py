@@ -792,6 +792,23 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_llm_res_sort ON community_llm_results(task_id, edge_type, comm_lv, comm_id);
 
     -- ============================================
+    -- component_analysis — 组件分析结果 (任务级, 按需分析)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS component_analysis (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id           TEXT    NOT NULL,
+        component_id      TEXT    NOT NULL,
+        component_type    TEXT    NOT NULL DEFAULT 'community',
+        analyzed_name     TEXT,
+        functional_summary TEXT,
+        status            TEXT    DEFAULT 'pending',
+        analyzed_at       TEXT    DEFAULT (datetime('now')),
+        UNIQUE(task_id, component_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ca_task ON component_analysis(task_id);
+    CREATE INDEX IF NOT EXISTS idx_ca_comp ON component_analysis(task_id, component_id);
+
+    -- ============================================
     -- model_daily_usage — 模型每日用量统计
     -- ============================================
     CREATE TABLE IF NOT EXISTS model_daily_usage (
@@ -1165,6 +1182,24 @@ class MultiDBManager:
                         project_db.execute(f'ALTER TABLE graph_node ADD COLUMN "{col}" TEXT')
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+        # 新建 component_analysis 表（对旧项目库兼容）
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS component_analysis (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id           TEXT    NOT NULL,
+                    component_id      TEXT    NOT NULL,
+                    component_type    TEXT    NOT NULL DEFAULT 'community',
+                    analyzed_name     TEXT,
+                    functional_summary TEXT,
+                    status            TEXT    DEFAULT 'pending',
+                    analyzed_at       TEXT    DEFAULT (datetime('now')),
+                    UNIQUE(task_id, component_id)
+                )
+            """)
         except Exception:
             pass
 

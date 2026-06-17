@@ -307,4 +307,18 @@ def create_default_router(
     router.register("track_start", sentinel_start)
     router.register("track_stop", sentinel_stop)
 
+    # ── analyze_components 路由 ──
+    def _build_component_tools(ctx: dict) -> ToolRegistry:
+        from .llm_adapter import create_llm_chat_fn
+        from .tool_factory import build_component_analyst_tools
+        llm_fn = create_llm_chat_fn(multi_db, llm_model_id) if multi_db else None
+        return build_component_analyst_tools(llm_fn, render_prompt=None, save_result_fn=save_result_fn)
+
+    from .workflows.component_analyst import ComponentAnalystWorkflow
+    router.register("analyze_components", RouteEntry(
+        workflow_class=ComponentAnalystWorkflow,
+        tool_builder=_build_component_tools,
+        description="按需 LLM 分析用户选中的组件，提取组件名称和功能概要，结果写入 SQLite。支持单组件和批量分析。",
+    ))
+
     return router

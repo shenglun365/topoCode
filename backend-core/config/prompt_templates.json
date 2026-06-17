@@ -207,12 +207,25 @@
       "locale": "zh-CN",
       "id": "agent_analyze_community",
       "name": "Agent-社区分析",
-      "mode": "chat",
+      "mode": "structured",
       "module_type": "project_analysis",
       "category": "agent",
-      "system_prompt": "你是架构分析专家。分析一个代码社区模块，输出名称和功能摘要。中文输出，100-300字。只输出文本，不要Markdown格式标记。",
-      "user_prompt_template": "社区ID: {comm_id}\n社区标签: {comm_label}\n上下文: {context}",
-      "variables_json": "[{\"name\": \"comm_id\", \"type\": \"string\", \"description\": \"社区ID\", \"required\": true}, {\"name\": \"comm_label\", \"type\": \"string\", \"description\": \"社区标签\", \"required\": true}, {\"name\": \"context\", \"type\": \"string\", \"description\": \"社区上下文数据\", \"required\": true}]"
+      "system_prompt": "你是架构分析专家。基于提供的社区上下文数据（文件列表、关键符号、边关系），分析该代码社区模块的功能与架构角色。\n\n要求：\n1. name: 简洁的组件名称（≤20字），准确反映该社区的核心职责\n2. summary: 功能概要（100-300字），描述该社区做什么、如何组织、为何存在\n3. role: 架构角色（≤3个词，如 ConfigLoader / RequestRouter / DataAccessLayer）\n4. key_files: 关键文件路径列表（Top 5，从提供的文件列表中挑选最核心的）\n5. depends_on: 该社区依赖的其他组件或外部包（如有）",
+      "user_prompt_template": "项目背景:\n{project_summary}\n\n社区ID: {comm_id}\n\n{context}",
+      "output_schema_json": "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"组件名称≤20字\"},\"summary\":{\"type\":\"string\",\"description\":\"功能概要100-300字\"},\"role\":{\"type\":\"string\",\"description\":\"架构角色≤3词\"},\"key_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"关键文件路径Top5\"},\"depends_on\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"依赖的其他组件/外部包\"}},\"required\":[\"name\",\"summary\"]}",
+      "variables_json": "[{\"name\": \"comm_id\", \"type\": \"string\", \"description\": \"社区ID\", \"required\": true}, {\"name\": \"context\", \"type\": \"string\", \"description\": \"社区上下文数据\", \"required\": true}, {\"name\": \"project_summary\", \"type\": \"string\", \"description\": \"项目背景摘要\", \"required\": true}]"
+    },
+    {
+      "locale": "zh-CN",
+      "id": "agent_analyze_component",
+      "name": "Agent-组件分析",
+      "mode": "structured",
+      "module_type": "project_analysis",
+      "category": "agent",
+      "system_prompt": "你是代码架构分析专家。基于提供的组件上下文数据（文件列表、关键符号、边关系），分析该软件组件模块的功能与架构角色。\n\n要求：\n1. name: 简洁的组件名称（≤20字），准确反映该社区的核心职责\n2. summary: 功能概要（100-300字），描述该社区做什么、如何组织、为何存在\n3. role: 架构角色（≤3个词，如 ConfigLoader / RequestRouter / DataAccessLayer）\n4. key_files: 关键文件路径列表（Top 5，从提供的文件列表中挑选最核心的）\n5. depends_on: 该社区依赖的其他组件或外部包（如有）",
+      "user_prompt_template": "组件ID: {comp_id}\n组件名称: {comp_name}\n组件类型: {comp_type}\n\n{context}",
+      "output_schema_json": "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"组件名称≤20字\"},\"summary\":{\"type\":\"string\",\"description\":\"功能概要100-300字\"},\"role\":{\"type\":\"string\",\"description\":\"架构角色≤3词\"},\"key_files\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"关键文件路径Top5\"},\"depends_on\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"依赖的其他组件/外部包\"}},\"required\":[\"name\",\"summary\"]}",
+      "variables_json": "[{\"name\": \"comp_id\", \"type\": \"string\", \"description\": \"组件ID\", \"required\": true}, {\"name\": \"comp_name\", \"type\": \"string\", \"description\": \"组件名称\", \"required\": true}, {\"name\": \"comp_type\", \"type\": \"string\", \"description\": \"组件类型\", \"required\": true}, {\"name\": \"context\", \"type\": \"string\", \"description\": \"组件上下文数据\", \"required\": true}]"
     },
     {
       "locale": "zh-CN",

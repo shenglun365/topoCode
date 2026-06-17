@@ -45,3 +45,15 @@ def build_sentinel_tools(
     tools.register(_SummarizeTool(llm_chat_fn, render_prompt))
     tools.register(_SaveDeltaTool(lambda fp, e: _append(project_root, fp, e)))
     return tools
+
+
+def build_component_analyst_tools(
+    llm_chat_fn: Callable,
+    render_prompt: Callable = None,
+    save_result_fn: Callable = None,
+) -> ToolRegistry:
+    """构建 ComponentAnalyst 的工具集"""
+    from .workflows.component_analyst import _AnalyzeComponentTool
+    tools = ToolRegistry()
+    tools.register(_AnalyzeComponentTool(llm_chat_fn, render_prompt, save_result_fn))
+    return tools

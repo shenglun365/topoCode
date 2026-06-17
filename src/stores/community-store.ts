@@ -4,6 +4,7 @@ import { ipc } from '@/services/ipc'
 import { isLLMConfigured } from '@/services/llmClient'
 import { useAnalysisStore } from '@/stores/analysis'
 import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult, TimelineEntry } from '@/types/ipc'
+import type { ComponentRef } from '@/stores/component-selection-store'
 
 export interface CommunityItem {
   id: string
@@ -854,6 +855,40 @@ export const useCommunityStore = defineStore('community', () => {
     t.compareTo = to || ''
   }
 
+  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[]) {
+    if (!taskId || !components.length) return
+    const t = ensureTask(taskId)
+    const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
+    const idx = t.agentTasks.length
+    addAgentTask(taskId, 'analyze_components', steps)
+    t.agentTasks[idx].status = 'running'
+
+    try {
+      const safeComponents = JSON.parse(JSON.stringify(
+        components.map(c => ({
+          id: c.id,
+          type: c.type,
+          name: c.name,
+          metadata: c.metadata || {},
+        }))
+      ))
+      const result = await ipc.analysis.analyzeComponents({
+        taskId,
+        components: safeComponents,
+      })
+      if (result.success && result.agentTaskId) {
+        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `组件数: ${components.length}` })
+        _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
+      } else {
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+      }
+      return result
+    } catch (e: any) {
+      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || 'unknown error' })
+      throw e
+    }
+  }
+
   return {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
@@ -861,7 +896,7 @@ export const useCommunityStore = defineStore('community', () => {
     loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, loadFileDetail, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
-    addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, parseArchCommand,
+    addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, triggerComponentAnalysis, parseArchCommand,
     setTimeline, setCompareMode,
   }
 })

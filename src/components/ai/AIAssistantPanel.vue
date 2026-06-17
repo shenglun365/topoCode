@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 import {
   PaperAirplaneIcon, SparklesIcon, TrashIcon,
   DocumentTextIcon, ClockIcon,
+  CursorArrowRippleIcon,
 } from '@heroicons/vue/24/outline'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
@@ -20,6 +21,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useCommunityStore } from '@/stores/community-store'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useGraphCommandStore } from '@/stores/graph-command-store'
+import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { parseCommandTag, parseConfirmTag, parseSuggestTags, stripCommandTags } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -28,6 +30,7 @@ const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const communityStore = useCommunityStore()
 const cmdStore = useGraphCommandStore()
+const selectionStore = useComponentSelectionStore()
 
 /* ---- 引导模式 vs 普通模式 ---- */
 const guideMode = ref(false)
@@ -95,8 +98,10 @@ const HELP_TEXT = [
   '| 指令 | 说明 |',
   '|------|------|',
   '| `/help` / `/帮助` | 显示本帮助 |',
+  '| `/select` | 切换组件选择模式（在左侧结构图/Tag中点选组件作为分析上下文） |',
   '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
   '| `/analyze all` | 同上 |',
+  '| `/analyze_components` | 对已选中的组件启动批量分析 |',
   '| `/track [options]` | 跟踪项目变更 |',
   '| `/diff [options]` | 对比快照版本 |',
   '',
@@ -129,6 +134,8 @@ const HELP_TEXT = [
   '### 模式',
   '- **普通模式**：自由问答，AI 根据上下文自动使用图操作命令',
   '- **引导模式**：点击图上 🎓 按钮启动，AI 带你逐步了解项目架构',
+  '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮，在左侧结构图/Tag中点击选择要分析的组件，选中后直接发送分析请求',
+  '- **批量组件分析**：选择组件后，输入 `/analyze_components` 启动批量解析，结果写入 SQLite 并可在任务面板查看进度',
   '',
   '---',
   '详细说明见: [AI助手架构分析引导文档](docs/AI助手架构分析引导.md)',
@@ -282,7 +289,31 @@ async function handleSend() {
 
   // /cmd 指令检测
   if (text.startsWith('/')) {
-    // /help / /帮助 — 客户端直接返回帮助信息，无需调用 LLM
+    // /select — 切换组件选择模式
+    if (text === '/select') {
+      addMessage('user', text)
+      userInput.value = ''
+      selectionStore.toggleSelecting()
+      const status = selectionStore.selecting ? '已激活' : '已退出'
+      addMessage('system', `组件选择模式 ${status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。`)
+      return
+    }
+    // /analyze_components — 批量分析已选中的组件
+    if (text === '/analyze_components') {
+      if (selectionStore.selectedCount === 0) {
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', '尚未选择任何组件。请先用 /select 激活选择模式，然后在左侧点选组件。')
+        return
+      }
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('system', `已提交 ${selectionStore.selectedCount} 个组件的批量分析任务，请到「任务」面板查看进度。`)
+      const taskId = activeTaskId.value || selectionStore.selectedList[0]?.taskId || null
+      communityStore.triggerComponentAnalysis(taskId, selectionStore.selectedList)
+        .catch(e => addMessage('error', String(e)))
+      return
+    }
     if (text === '/help' || text === '/帮助') {
       addMessage('user', text)
       userInput.value = ''
@@ -308,6 +339,10 @@ async function handleSend() {
   const gs = cmdStore.graphState
   if (gs.nodeCount > 0) {
     sendMessages.push({ role: 'system', content: `当前图状态:\n${JSON.stringify(gs, null, 0)}` })
+  }
+  const selCtx = selectionStore.getContextForAI()
+  if (selCtx) {
+    sendMessages.push({ role: 'system', content: selCtx })
   }
   if (guideMode.value) {
     sendMessages.push({ role: 'system', content: GUIDE_SYSTEM_PROMPT })
@@ -505,6 +540,34 @@ watch(() => cmdStore.eventSeq, () => {
         </div>
       </div>
 
+      <!-- 组件引用区 -->
+      <div
+        v-if="selectionStore.selectedCount > 0"
+        class="ai-selection-refs"
+      >
+        <span class="ai-selection-label">📎 已引用 {{ selectionStore.selectedCount }} 个组件：</span>
+        <div class="ai-selection-chips">
+          <span
+            v-for="ref in selectionStore.selectedList"
+            :key="ref.id"
+            class="ai-selection-chip"
+            :title="`${ref.type === 'community' ? '社区' : '外部包'}: ${ref.id}`"
+          >
+            <span class="ai-selection-chip-type">{{ ref.type === 'community' ? '▣' : '▨' }}</span>
+            <span class="ai-selection-chip-name">{{ ref.name }}</span>
+            <button
+              class="ai-selection-chip-remove"
+              title="移除引用"
+              @click="selectionStore.deselect(ref.id)"
+            >×</button>
+          </span>
+        </div>
+        <button
+          class="ai-selection-clear"
+          @click="selectionStore.clearAll()"
+        >清空</button>
+      </div>
+
       <!-- 输入区 -->
       <div class="ai-input-area">
         <textarea
@@ -523,6 +586,14 @@ watch(() => cmdStore.eventSeq, () => {
             @click="clearChat"
           >
             <TrashIcon class="w-4 h-4" />
+          </button>
+          <button
+            class="ai-action-btn"
+            :class="{ 'ai-select-active': selectionStore.selecting }"
+            :title="selectionStore.selecting ? '退出组件选择模式' : '选择组件'"
+            @click="selectionStore.toggleSelecting()"
+          >
+            <CursorArrowRippleIcon class="w-4 h-4" />
           </button>
           <button
             class="ai-send-btn"
@@ -817,5 +888,81 @@ watch(() => cmdStore.eventSeq, () => {
 
 .ai-message-assistant .ai-message-bubble :deep(em) {
   font-style: italic;
+}
+
+/* ---- 组件选择引用区 ---- */
+.ai-selection-refs {
+  margin: 0 12px 4px;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--accent);
+  border-radius: 0.375rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+.ai-selection-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.ai-selection-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 0;
+}
+.ai-selection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.05rem 0.2rem 0.05rem 0.3rem;
+  background: var(--bg-accent-subtle, #2d1f5e);
+  border: 1px solid var(--accent);
+  border-radius: 0.25rem;
+  font-size: 0.65rem;
+  line-height: 1.3;
+}
+.ai-selection-chip-type {
+  color: var(--accent);
+  font-size: 0.6rem;
+}
+.ai-selection-chip-name {
+  color: var(--text-primary);
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-selection-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0 0.1rem;
+  line-height: 1;
+}
+.ai-selection-chip-remove:hover {
+  color: var(--accent);
+}
+.ai-selection-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.ai-selection-clear:hover {
+  color: var(--accent);
+}
+.ai-select-active {
+  color: var(--accent);
+  background: var(--bg-accent-subtle, #2d1f5e);
+  border-color: var(--accent);
 }
 </style>

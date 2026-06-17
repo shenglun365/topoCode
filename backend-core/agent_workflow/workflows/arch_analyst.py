@@ -18,6 +18,45 @@ from ..workflows.base import AgentWorkflow, AgentStep, WorkflowResult
 logger = logging.getLogger(__name__)
 
 
+def _parse_structured_response(text: str, fallback_name: str = "") -> dict:
+    """从 LLM 响应中提取 JSON，出错时尝试从纯文本恢复。"""
+    import json as _json
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:]) if len(lines) > 1 else text
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    if text.startswith("json"):
+        text = text[4:].strip()
+    try:
+        return _json.loads(text)
+    except (_json.JSONDecodeError, ValueError):
+        pass
+    # 回退：纯文本切分
+    lines = text.strip().split("\n")
+    name = lines[0].strip()[:60] if lines else fallback_name[:60]
+    summary = "\n".join(lines[1:]) if len(lines) > 1 else text
+    return {"name": name, "summary": summary, "role": "", "key_files": [], "depends_on": []}
+
+
+def _build_markdown_summary(name: str, summary: str, role: str,
+                              key_files: list, depends_on: list) -> str:
+    """将结构化分析结果拼接为增强 Markdown summary。"""
+    parts = []
+    parts.append(f"## 功能概要\n{summary}")
+    if role:
+        parts.append(f"\n**架构角色**: {role}")
+    if key_files:
+        files_md = "\n".join(f"- `{f}`" for f in key_files[:10])
+        parts.append(f"\n**关键文件**:\n{files_md}")
+    if depends_on:
+        deps_md = ", ".join(depends_on[:10])
+        parts.append(f"\n**依赖组件**: {deps_md}")
+    return "\n".join(parts)
+
+
 class _AnalyzeCommunityTool(AgentTool):
     """分析单个社区: LLM 生成名称和功能摘要"""
 
@@ -32,35 +71,59 @@ class _AnalyzeCommunityTool(AgentTool):
     async def execute(self, community: dict, **kwargs) -> ToolResult:
         comm_id = community.get("communityId") or community.get("comm_id", "")
         comm_label = community.get("name") or community.get("label") or comm_id
+        project_summary = kwargs.get("project_summary", "")
+        ctx = community.get("context", "")
+        if not ctx:
+            ctx = str(community)
+        logger.info(
+            f"[ArchAnalyst] analyze_community id={comm_id} ctx_len={len(ctx)} "
+            f"has_project_summary={bool(project_summary)} "
+            f"ctx_begin={ctx[:500]!r}"
+        )
         try:
-            ctx = community.get("context", str(community))
             if self._render:
                 messages = self._render("agent_analyze_community", {
-                    "comm_id": comm_id, "comm_label": comm_label,
-                    "context": ctx[:6000],
+                    "comm_id": comm_id,
+                    "context": ctx,
+                    "project_summary": project_summary[:1500],
                 })
             else:
+                system_text = (
+                    "你是架构分析专家。基于提供的社区上下文数据（文件列表、关键符号、边关系），"
+                    "分析该代码社区模块的功能与架构角色。\n\n"
+                    "以 JSON 格式输出，包含以下字段：\n"
+                    '- name: 组件名称（≤20字）\n'
+                    '- summary: 功能概要（100-300字）\n'
+                    '- role: 架构角色（≤3词，如 ConfigLoader / RequestRouter）\n'
+                    '- key_files: 关键文件路径数组（Top 5）\n'
+                    '- depends_on: 依赖的其他组件或外部包数组\n'
+                    "只输出 JSON，不要其他内容。"
+                )
+                if project_summary:
+                    system_text = f"## 项目背景\n{project_summary[:1500]}\n\n{system_text}"
                 messages = [
-                    {"role": "system", "content": (
-                        "你是架构分析专家。分析一个代码社区模块，输出名称和功能摘要。"
-                        "中文输出，100-300字。只输出文本，不要Markdown格式标记。"
-                    )},
-                    {"role": "user", "content": f"社区ID: {comm_id}\n社区标签: {comm_label}\n上下文: {ctx[:6000]}"},
+                    {"role": "system", "content": system_text},
+                    {"role": "user", "content": f"社区ID: {comm_id}\n\n{ctx}"},
                 ]
-            resp = await self._chat(messages=messages, temperature=0.3, max_tokens=800)
-            summary = resp if isinstance(resp, str) else str(resp)
-            name = ""
-            if summary:
-                lines = summary.strip().split("\n")
-                if lines:
-                    first = lines[0].strip()
-                    if len(first) < 80 and "：" not in first and ":" not in first:
-                        name = first[:60]
-                    else:
-                        name = comm_label[:60]
+            resp = await self._chat(messages=messages, temperature=0.3, max_tokens=1200)
+            text = resp if isinstance(resp, str) else str(resp)
+            parsed = _parse_structured_response(text, comm_id)
+            name = parsed.get("name", comm_label[:60])
+            summary_text = parsed.get("summary", "")
+            role = parsed.get("role", "")
+            key_files = parsed.get("key_files", [])
+            depends_on = parsed.get("depends_on", [])
+
+            # 构建增强 Markdown summary（嵌入 role + key_files + depends_on）
+            enhanced_summary = _build_markdown_summary(name, summary_text, role, key_files, depends_on)
+
             return ToolResult.ok(
-                data={"communityId": comm_id, "name": name, "summary": summary},
-                tokens_used=800,
+                data={
+                    "communityId": comm_id,
+                    "name": name[:60],
+                    "summary": enhanced_summary,
+                },
+                tokens_used=1200,
             )
         except Exception as e:
             logger.warning(f"[ArchAnalyst] analyze failed for {comm_id}: {e}")
@@ -253,7 +316,10 @@ class ArchAnalystWorkflow(AgentWorkflow):
             label = c.get("name") or c.get("label") or cid
             steps.append(AgentStep(
                 tool="analyze_community",
-                args={"community": c},
+                args={
+                    "community": c,
+                    "project_summary": context.get("project_summary", ""),
+                },
                 description=f"分析社区: {label[:30]}",
             ))
             steps.append(AgentStep(

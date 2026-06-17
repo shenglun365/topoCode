@@ -173,7 +173,12 @@ class AgentRuntime:
                     if result.success:
                         if result.data and isinstance(result.data, str):
                             result.data = self._sandbox.content.sanitize(result.data)
-                        self._sandbox.budget.consume_tokens(result.tokens_used or 0)
+                        tokens = result.tokens_used or 0
+                        self._sandbox.budget.consume_tokens(tokens)
+                        logger.info(
+                            f"[AgentRuntime] step {i} success consume_tokens={tokens} "
+                            f"budget_used={self._sandbox.budget.tokens_used}"
+                        )
                         self._steps[i].result = result
                         self._steps[i].status = "done"
                         results[step.tool] = result.data
@@ -210,6 +215,12 @@ class AgentRuntime:
         self._sandbox.budget.finish()
 
         # 3. Finalize
+        logger.info(
+            f"[AgentRuntime] loop done completed={completed_count} failed={failed_count} "
+            f"total={len(steps)} cancelled={self._cancelled} "
+            f"budget_exhausted={self._sandbox.budget.exhausted()} "
+            f"tokens_used={self._sandbox.budget.tokens_used}"
+        )
         if self._cancelled:
             return WorkflowResult(success=False, steps_completed=completed_count,
                                   steps_total=len(steps), error="cancelled")

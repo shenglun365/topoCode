@@ -666,3 +666,35 @@ class AnalysisStore:
             (name, task_id, edge_type, comm_lv, comm_id)
         )
         self._db.commit()
+
+    def save_component_analysis(self, result: Dict):
+        self._db.execute(
+            """INSERT OR REPLACE INTO component_analysis
+               (task_id, component_id, component_type, analyzed_name, functional_summary, status, analyzed_at)
+               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (result["task_id"], result["component_id"], result.get("component_type", "community"),
+             result.get("analyzed_name"), result.get("functional_summary"),
+             result.get("status", "completed"))
+        )
+        self._db.commit()
+
+    def list_component_analysis(self, task_id: str, component_ids: List[str] = None) -> List[Dict]:
+        if component_ids:
+            placeholders = ','.join('?' * len(component_ids))
+            rows = self._db.execute(
+                f"SELECT * FROM component_analysis WHERE task_id=? AND component_id IN ({placeholders})",
+                [task_id] + component_ids
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM component_analysis WHERE task_id=?",
+                (task_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_component_analysis(self, task_id: str, component_id: str) -> Optional[Dict]:
+        row = self._db.execute(
+            "SELECT * FROM component_analysis WHERE task_id=? AND component_id=?",
+            (task_id, component_id)
+        ).fetchone()
+        return dict(row) if row else None

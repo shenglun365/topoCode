@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 AgentTool — Agent 可调用的工具抽象。
 

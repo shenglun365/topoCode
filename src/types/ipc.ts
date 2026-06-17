@@ -514,6 +514,9 @@ export interface IPCAPI {
     stopArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
+    // 组件分析
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }> }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;

@@ -2,12 +2,14 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CommunityItem } from '@/stores/community-store'
+import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { communityLabel } from '@/utils/communityLabel'
 
 const props = defineProps<{
   communities: CommunityItem[]
   edgeType: string
   showGuideButton?: boolean
+  taskId?: string
 }>()
 
 const emit = defineEmits<{
@@ -17,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const selectionStore = useComponentSelectionStore()
 
 const search = ref('')
 const sortBy = ref<'name' | 'nodes' | 'files' | 'edges' | 'quality'>('nodes')
@@ -76,6 +79,29 @@ function statusLabel(s: string): string {
 }
 
 watch(search, () => { page.value = 1 })
+
+function handleRowClick(c: CommunityItem) {
+  if (selectionStore.selecting) {
+    selectionStore.toggle({
+      id: c.communityId,
+      type: 'community',
+      name: communityLabel(c),
+      taskId: props.taskId || '',
+      metadata: {
+        nodeCount: c.nodeCount,
+        fileCount: c.fileCount,
+        qualityScore: c.qualityScore ?? undefined,
+      },
+    })
+    return
+  }
+  emit('open-community', c)
+}
+
+function handleRowDblClick(c: CommunityItem) {
+  if (selectionStore.selecting) return
+  emit('drill', c.communityId)
+}
 </script>
 
 <template>
@@ -136,9 +162,13 @@ watch(search, () => { page.value = 1 })
             v-for="c in paged"
             :key="c.id"
             class="ctv-row"
-            :class="{ completed: c.status === 'completed' }"
-            @click="emit('open-community', c)"
-            @dblclick="emit('drill', c.communityId)"
+            :class="{
+              completed: c.status === 'completed',
+              selected: selectionStore.isSelected(c.communityId),
+              selecting: selectionStore.selecting,
+            }"
+            @click="handleRowClick(c)"
+            @dblclick="handleRowDblClick(c)"
           >
             <td
               class="ctv-td-status"
@@ -239,6 +269,8 @@ watch(search, () => { page.value = 1 })
 .sort-icon { font-size: 0.6rem; margin-left: 2px; }
 .ctv-row { cursor: pointer; }
 .ctv-row:hover { background: var(--bg-secondary); }
+.ctv-row.selecting { cursor: copy; }
+.ctv-row.selected { background: color-mix(in srgb, #22c55e 10%, transparent); outline: 1px solid #22c55e; }
 .ctv-row.completed .ctv-td-name { color: var(--accent, #7c3aed); }
 .ctv-td-status { text-align: center; color: var(--text-muted); }
 .ctv-td-name { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }

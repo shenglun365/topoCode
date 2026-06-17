@@ -10,6 +10,7 @@ import { useGraphFullscreen } from '@/composables/useGraphFullscreen'
 import { useGraphPosition } from '@/composables/useGraphPosition'
 import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
 import { ipc } from '@/services/ipc'
+import { useComponentSelectionStore, type ComponentRef } from '@/stores/component-selection-store'
 import { Cog6ToothIcon, FunnelIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, ArrowDownTrayIcon, ChatBubbleLeftIcon } from '@heroicons/vue/24/outline'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
@@ -44,6 +45,7 @@ const { t } = useI18n()
 const communityStore = useCommunityStore()
 const panelStore = usePanelStore()
 const cmdStore = useGraphCommandStore()
+const selectionStore = useComponentSelectionStore()
 
 const props = defineProps<{
   taskId: string
@@ -880,6 +882,29 @@ function toggleRightInFullscreen() {
   panelStore.setRightTab('ai')
 }
 
+function handleGraphSelectionChanged(nodeIds: string[]) {
+  if (!selectionStore.selecting) return
+  selectionStore.clearAll()
+  const refs: ComponentRef[] = []
+  for (const nid of nodeIds) {
+    const com = commMap.value.get(nid)
+    if (com) {
+      refs.push({
+        id: com.communityId,
+        type: 'community',
+        name: communityLabel(com),
+        taskId: props.taskId,
+        metadata: {
+          nodeCount: com.nodeCount,
+          fileCount: com.fileCount,
+          qualityScore: com.qualityScore ?? undefined,
+        },
+      })
+    }
+  }
+  selectionStore.selectMany(refs)
+}
+
 function handleNodeContextMenu(nodeId: string) {
   if (nodeId === '__merged__') return
   const com = commMap.value.get(nodeId)
@@ -1252,6 +1277,7 @@ watch(hasUnsavedChanges, (v) => {
         @node-drag-end="(id: string, x: number, y: number) => { setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y }); dragGeneration++; console.log('[CGV] node-drag-end', id, 'dragGen:', dragGeneration) }"
         @zoom-changed="(level: number) => zoomLevel = level"
         @guide-click="handleGuideClick"
+        @selection-changed="(ids: string[]) => handleGraphSelectionChanged(ids)"
       />
       <ExternalTableView
         v-else-if="externalViewMode === 'table'"
@@ -1295,12 +1321,14 @@ watch(hasUnsavedChanges, (v) => {
         @node-drag-end="(id: string, x: number, y: number) => { setNodePosition(props.edgeType, drillMeta.drillKey, id, { x, y }); dragGeneration++; console.log('[CGV] node-drag-end', id, 'dragGen:', dragGeneration) }"
         @zoom-changed="(level: number) => zoomLevel = level"
         @guide-click="handleGuideClick"
+        @selection-changed="(ids: string[]) => handleGraphSelectionChanged(ids)"
       />
       <CommunityTableView
         v-else-if="internalViewMode === 'table'"
         :communities="drillTableCommunities"
         :edge-type="props.edgeType"
         :show-guide-button="showAIBubble"
+        :task-id="props.taskId"
         @drill="handleDrill"
         @open-community="(item) => handleNodeContextMenu(item.communityId)"
         @guide-click="handleGuideClick"

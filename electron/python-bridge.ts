@@ -154,10 +154,11 @@ export class PythonBridge {
 
       this.process.on('exit', (code, signal) => {
         console.error(`[PythonBridge] Process exited code=${code} signal=${signal}`)
-        this.process = null
         if (this.state !== 'stopping') {
+          this.process = null
           this.setState(code !== 0 ? 'error' : 'stopped')
         } else {
+          this.process = null
           this.setState('stopped')
         }
       })
@@ -168,12 +169,16 @@ export class PythonBridge {
         this.setState('error')
       })
 
-      // 等待后端启动 — 最多 10s，然后做健康检查
+      // 等待后端启动 — 最多 10s，检测进程存活
       await new Promise<void>((resolve, reject) => {
         let waited = 0
         const check = setInterval(() => {
           waited += 1000
-          if (this.process?.exitCode !== null && this.process?.exitCode !== undefined) {
+          // 进程已被 exit handler 清空 → 已退出
+          if (this.process === null) {
+            clearInterval(check)
+            reject(new Error('Process exited during startup'))
+          } else if (this.process.exitCode !== null && this.process.exitCode !== undefined) {
             clearInterval(check)
             reject(new Error(`Process exited with code ${this.process.exitCode}`))
           } else if (waited >= 10000) {
@@ -183,8 +188,11 @@ export class PythonBridge {
         }, 1000)
       })
 
-      this.setState('running')
-      return { status: 'running', pid: this.process?.pid, port: dealerPort }
+      // 仅在未出错时标记 running
+      if (this.state !== 'error') {
+        this.setState('running')
+      }
+      return { status: this.state as BridgeState, pid: this.process?.pid, port: dealerPort }
 
     } catch (error: any) {
       this.setState('error')

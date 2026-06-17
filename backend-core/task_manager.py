@@ -1885,7 +1885,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.startArchAnalysis")
     def start_arch_analysis(task_id=None, taskId=None, edge_type=None, edgeType=None,
-                             level=None, model_id=None, modelId=None):
+                              level=None, model_id=None, modelId=None):
         """启动批量 LLM 社区分析 (ArchAnalyst 入口)"""
         tid = task_id or taskId
         et = edge_type or edgeType or "INCLUDE"
@@ -1903,7 +1903,17 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_summary = _get_project_summary(pid)
         project_name = task.get("name") or task.get("project_name") or pid
 
-        result = _get_cascade_levels_impl(project_db, tid, et)
+        # ── 前置校验 ──
+        if not project_summary:
+            return {"taskId": tid, "success": False, "error": "项目摘要未生成，请先在 ReportHome 点击「生成项目摘要」"}
+        cascade_incl = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+        cascade_call = _get_cascade_levels_impl(project_db, tid, "CALL")
+        has_l0 = any(l.get("lv") == "L0" for l in cascade_incl.get("levels", [])) or \
+                 any(l.get("lv") == "L0" for l in cascade_call.get("levels", []))
+        if not has_l0:
+            return {"taskId": tid, "success": False, "error": "缺少 L0 社区数据，请先完成代码扫描分析"}
+
+        result = cascade_incl if et == "INCLUDE" else cascade_call
         communities = []
         for l in result.get("levels", []):
             if l.get("lv") == lv:
@@ -1919,6 +1929,90 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         if not communities:
             return {"taskId": tid, "success": False, "error": "no communities found"}
+
+        # ── 富上下文构建：为每个 community 加载 node_list → 文件路径 + 关键符号 ──
+        from store.analysis_store import AnalysisStore as _AS2
+        _as = _AS2(project_db)
+        all_nodes = _as.get_graph_nodes(tid)
+        fp_map = {}
+        for n in all_nodes:
+            fp = (n.get("file_path") or "").strip()
+            if fp:
+                fp_map.setdefault(fp, []).append(n)
+        # 已有 L0 分析结果
+        existing_results = {}
+        try:
+            for et_chk in ("INCLUDE", "CALL"):
+                rows = project_db.execute(
+                    "SELECT comm_id, name, summary FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
+                    (tid, et_chk)
+                ).fetchall()
+                for r in rows:
+                    existing_results[r["comm_id"]] = dict(r)
+        except Exception:
+            pass
+
+        for c in communities:
+            cid = c["communityId"]
+            ctx_parts = []
+            ctx_parts.append(f"节点总数: {c['nodeCount']}")
+            ctx_parts.append(f"质量分: {c['qualityScore']:.4f}" if c.get("qualityScore") else "质量分: N/A")
+
+            try:
+                doc = project_db.execute(
+                    "SELECT node_list, edge_list, edge_count FROM graph_doc WHERE task_id=? AND comm_id=?",
+                    (tid, cid)
+                ).fetchone()
+                if doc:
+                    import json as _json
+                    node_ids = _json.loads(doc["node_list"]) if doc["node_list"] else []
+                    file_paths_raw = [n for n in node_ids if isinstance(n, str)]
+                    file_paths = set()
+                    symbol_names = []
+                    for fp in file_paths_raw:
+                        clean = fp.strip()
+                        if clean:
+                            file_paths.add(clean)
+                        nodes = fp_map.get(clean, []) if clean else []
+                        for node in nodes[:3]:
+                            name = node.get("name") or ""
+                            kind = node.get("kind", "")
+                            if name and kind in ("function", "method", "class"):
+                                symbol_names.append(f"{name}({kind})")
+                            elif name and kind not in ("file", "import", ""):
+                                symbol_names.append(name)
+                    edge_type_label = "依赖关系 (INCLUDE)" if c.get("edgeType") == "INCLUDE" else "调用关系 (CALL)" if c.get("edgeType") == "CALL" else "关系"
+                    ctx_parts.append(f"边数: {doc['edge_count'] or 0} ({edge_type_label})")
+                    ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(sorted(file_paths))}")
+                    if symbol_names:
+                        ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
+                    # 边关系上下文
+                    edge_list_raw = _json.loads(doc["edge_list"]) if doc.get("edge_list") else []
+                    if edge_list_raw:
+                        edge_lines = []
+                        for e in edge_list_raw:
+                            if isinstance(e, dict):
+                                src = (e.get("source") or e.get("source_id") or "")[:60]
+                                tgt = (e.get("target") or e.get("target_id") or "")[:60]
+                                kind = e.get("kind", "")
+                                if src and tgt:
+                                    edge_lines.append(f"{src} → {tgt}" + (f" ({kind})" if kind else ""))
+                            elif isinstance(e, str):
+                                edge_lines.append(e[:80])
+                        if edge_lines:
+                            ctx_parts.append(f"边关系列表 ({len(edge_lines)} 条): {'; '.join(edge_lines)}")
+            except Exception as e:
+                logger.warning(f"[startArchAnalysis] context build failed for {cid}: {e}")
+
+            if cid in existing_results:
+                er = existing_results[cid]
+                ctx_parts.append(f"已有分析: {er.get('name', '')}: {er.get('summary', '')[:200]}")
+
+            c["context"] = "\n".join(ctx_parts)
+            logger.info(
+                f"[startArchAnalysis] community {cid} context_len={len(c['context'])} "
+                f"ctx_begin={c['context'][:500]!r}"
+            )
 
         from agent_workflow.llm_adapter import create_llm_chat_fn
         from agent_workflow.tool_factory import build_analyst_tools
@@ -1973,6 +2067,236 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         queue = get_global_queue()
         ok = queue.cancel(aid)
         return {"cancelled": ok}
+
+    @server.register("analysis.analyzeComponents")
+    def analyze_components(task_id=None, taskId=None, components=None):
+        """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        comps = components or []
+        if not comps:
+            return {"success": False, "error": "no components specified"}
+
+        try:
+            store = TaskStore(multi_db.main_db)
+            task = store.get_task(tid)
+            if not task:
+                raise ValueError(f"Task {tid} not found")
+            pid = task["project_id"]
+            project_db = multi_db.get_project_db(pid)
+            project_root = _get_project_root(pid)
+
+            logger.info(f"[analyzeComponents] task_id={tid} components={len(comps)}")
+
+            # ── 富上下文构建：为每个 community 组件加载 node_list → 文件路径 + 关键符号 ──
+            import json as _json
+            enriched_comps = []
+            fp_map = {}
+            existing_results = {}
+            try:
+                from store.analysis_store import AnalysisStore as _AS3
+                _as = _AS3(project_db)
+                all_nodes = _as.get_graph_nodes(tid)
+                for n in all_nodes:
+                    fp = (n.get("file_path") or "").strip()
+                    if fp:
+                        fp_map.setdefault(fp, []).append(n)
+            except Exception:
+                pass
+            try:
+                for et_chk in ("INCLUDE", "CALL"):
+                    rows = project_db.execute(
+                        "SELECT comm_id, name, summary FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
+                        (tid, et_chk)
+                    ).fetchall()
+                    for r in rows:
+                        existing_results[r["comm_id"]] = dict(r)
+            except Exception:
+                pass
+
+            for c in comps:
+                cid = c.get("id", "")
+                if c.get("type") == "community" and cid.startswith("comm-"):
+                    ctx_parts = [
+                        f"组件ID: {cid}",
+                        f"组件名称: {c.get('name', cid)}",
+                        f"组件类型: 社区模块",
+                    ]
+                    meta = c.get("metadata", {})
+                    if meta:
+                        ctx_parts.append(f"节点数: {meta.get('nodeCount', 0)}")
+                        ctx_parts.append(f"文件数: {meta.get('fileCount', 0)}")
+                        qs = meta.get("qualityScore")
+                        if qs is not None:
+                            ctx_parts.append(f"质量分: {qs:.4f}")
+
+                    try:
+                        doc = project_db.execute(
+                            "SELECT node_list, edge_list, edge_count FROM graph_doc WHERE task_id=? AND comm_id=?",
+                            (tid, cid)
+                        ).fetchone()
+                        if doc:
+                            edge_count = doc['edge_count'] or 0
+                            parts = cid.split("-")
+                            edge_kind = parts[2] if len(parts) > 2 and parts[0] == "comm" else "incl"
+                            edge_label_map = {"incl": "依赖关系 (INCLUDE)", "call": "调用关系 (CALL)"}
+                            edge_label = edge_label_map.get(edge_kind, "关系")
+                            ctx_parts.append(f"边数: {edge_count} ({edge_label})")
+                            file_paths_raw = _json.loads(doc["node_list"]) if doc["node_list"] else []
+                            file_paths_raw = [n for n in file_paths_raw if isinstance(n, str)]
+                            file_paths = set()
+                            symbol_names = []
+                            for fp in file_paths_raw:
+                                clean = fp.strip()
+                                if clean:
+                                    file_paths.add(clean)
+                                nodes = fp_map.get(clean, []) if clean else []
+                                for node in nodes[:3]:
+                                    name = node.get("name") or ""
+                                    kind = node.get("kind", "")
+                                    if name and kind in ("function", "method", "class"):
+                                        symbol_names.append(f"{name}({kind})")
+                                    elif name and kind not in ("file", "import", ""):
+                                        symbol_names.append(name)
+                            ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(sorted(file_paths))}")
+                            if symbol_names:
+                                ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
+                            # 边关系上下文
+                            edge_list_raw = _json.loads(doc["edge_list"]) if doc.get("edge_list") else []
+                            if edge_list_raw:
+                                edge_lines = []
+                                for e in edge_list_raw:
+                                    if isinstance(e, dict):
+                                        src = (e.get("source") or e.get("source_id") or "")[:60]
+                                        tgt = (e.get("target") or e.get("target_id") or "")[:60]
+                                        kind = e.get("kind", "")
+                                        if src and tgt:
+                                            edge_lines.append(f"{src} → {tgt}" + (f" ({kind})" if kind else ""))
+                                    elif isinstance(e, str):
+                                        edge_lines.append(e[:80])
+                                if edge_lines:
+                                    ctx_parts.append(f"边关系列表 ({len(edge_lines)} 条): {'; '.join(edge_lines)}")
+                    except Exception as e:
+                        logger.warning(f"[analyzeComponents] context build failed for {cid}: {e}")
+
+                    if cid in existing_results:
+                        er = existing_results[cid]
+                        ctx_parts.append(f"已有分析: {er.get('name', '')}: {er.get('summary', '')[:200]}")
+
+                    enriched_comps.append({
+                        "id": cid,
+                        "name": c.get("name", cid),
+                        "type": c.get("type", "community"),
+                        "metadata": meta,
+                        "context": "\n".join(ctx_parts),
+                    })
+                    logger.info(
+                        f"[analyzeComponents] enriched {cid} context_len={len(enriched_comps[-1]['context'])} "
+                        f"ctx_begin={enriched_comps[-1]['context'][:400]!r}"
+                    )
+                else:
+                    enriched_comps.append(c)
+
+            from agent_workflow.router import create_default_router
+            from store.analysis_store import AnalysisStore
+
+            def _save_fn(result):
+                s = AnalysisStore(project_db)
+                comp_id = result.get("component_id", "")
+                comp_type = result.get("component_type", "community")
+                aname = result.get("analyzed_name", "") or comp_id
+                asummary = result.get("functional_summary", "")
+                s.save_component_analysis({
+                    "task_id": result.get("task_id", tid),
+                    "component_id": comp_id,
+                    "component_type": comp_type,
+                    "analyzed_name": aname,
+                    "functional_summary": asummary,
+                    "status": result.get("status", "completed"),
+                })
+                # 同步写入 community_llm_results 使标签视图可见
+                if comp_type == "community" and comp_id.startswith("comm-"):
+                    parts = comp_id.split("-")
+                    edge_type = "INCLUDE"
+                    comm_lv = "L0"
+                    try:
+                        if len(parts) >= 4:
+                            edge_key = parts[2]
+                            edge_type = "INCLUDE" if edge_key == "incl" else "CALL" if edge_key == "call" else "INCLUDE"
+                            comm_lv = parts[3] if parts[3].startswith("L") else "L0"
+                    except Exception:
+                        pass
+                    s.bulk_insert_llm_results([{
+                        "task_id": result.get("task_id", tid),
+                        "edge_type": edge_type,
+                        "comm_lv": comm_lv,
+                        "comm_id": comp_id,
+                        "name": aname,
+                        "summary": asummary,
+                    }])
+
+            router = create_default_router(
+                project_root=project_root, project_db=project_db, multi_db=multi_db,
+                task_id=tid, project_summary="",
+                llm_model_id="", save_result_fn=_save_fn,
+            )
+
+            context = {
+                "task_id": tid,
+                "components": [
+                    {
+                        "id": c.get("id", ""),
+                        "name": c.get("name", ""),
+                        "type": c.get("type", "community"),
+                        "metadata": c.get("metadata", {}),
+                        "context": c.get("context", ""),
+                    }
+                    for c in enriched_comps
+                ],
+            }
+            for c in context["components"]:
+                logger.info(
+                    f"[analyzeComponents] component id={c['id']} type={c['type']} "
+                    f"metadata={c['metadata']}"
+                )
+
+            agent_id = router.dispatch("analyze_components", tid, context)
+            return {"success": True, "agentTaskId": agent_id}
+
+        except Exception as e:
+            logger.exception(f"[analyzeComponents] handler failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    @server.register("analysis.getComponentAnalysisResults")
+    def get_component_analysis_results(task_id=None, taskId=None, component_ids=None, componentIds=None):
+        """获取组件分析结果"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        cids = component_ids or componentIds or None
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        from store.analysis_store import AnalysisStore
+        s = AnalysisStore(project_db)
+        results = s.list_component_analysis(tid, cids)
+        return {"results": [
+            {
+                "componentId": r.get("component_id", ""),
+                "componentType": r.get("component_type", ""),
+                "analyzedName": r.get("analyzed_name"),
+                "functionalSummary": r.get("functional_summary"),
+                "status": r.get("status", ""),
+                "analyzedAt": r.get("analyzed_at", ""),
+            }
+            for r in results
+        ]}
 
     @server.register("analysis.dispatchArchNL")
     def dispatch_arch_nl(task_id=None, taskId=None, input_text=None, inputText=None,

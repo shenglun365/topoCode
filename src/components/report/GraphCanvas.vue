@@ -2,6 +2,9 @@
 import { ref } from 'vue'
 import CytoscapeGraph from './renderers/CytoscapeGraph.vue'
 import type { GraphNode, GraphEdge } from './renderers/CytoscapeGraph.vue'
+import { useComponentSelectionStore } from '@/stores/component-selection-store'
+
+const selectionStore = useComponentSelectionStore()
 
 const cyRef = ref<InstanceType<typeof CytoscapeGraph>>()
 
@@ -35,6 +38,7 @@ const emit = defineEmits<{
   'node-context-menu': [nodeId: string]
   'zoom-changed': [level: number]
   'guide-click': []
+  'selection-changed': [nodeIds: string[]]
 }>()
 </script>
 
@@ -55,10 +59,12 @@ const emit = defineEmits<{
     :fullscreen="fullscreen"
     :positions="positions"
     :show-guide-button="showGuideButton"
+    :select-mode="selectionStore.selecting"
     @node-dblclick="(id: string) => emit('node-dblclick', id)"
     @node-drag-end="(id: string, x: number, y: number) => emit('node-drag-end', id, x, y)"
     @node-context-menu="(id: string) => emit('node-context-menu', id)"
     @zoom-changed="(level: number) => emit('zoom-changed', level)"
     @guide-click="() => emit('guide-click')"
+    @selection-changed="(ids: string[]) => emit('selection-changed', ids)"
   />
 </template>

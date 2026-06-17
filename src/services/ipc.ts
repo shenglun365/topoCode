@@ -353,6 +353,12 @@ function createRealIPC() {
       cancelAgentTask: async (params: { agentTaskId: string }) => {
         return await api.analysis.cancelAgentTask(params)
       },
+      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }> }) => {
+        return await api.analysis.analyzeComponents(params)
+      },
+      getComponentAnalysisResults: async (params: { taskId: string; componentIds?: string[] }) => {
+        return await api.analysis.getComponentAnalysisResults(params)
+      },
       saveCommunityResult: async (params: any) => {
         // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
         const safe = JSON.parse(JSON.stringify(params))

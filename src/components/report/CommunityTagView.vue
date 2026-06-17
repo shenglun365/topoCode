@@ -2,11 +2,13 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
+import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { useComponentId } from '@/composables/useComponentId'
 import { communityLabel } from '@/utils/communityLabel'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
+const selectionStore = useComponentSelectionStore()
 
 const props = defineProps<{
   taskId: string
@@ -96,6 +98,35 @@ function levelLabel(lv: string): string {
   const num = lv.slice(1)
   return t('report.lxCommunity', { level: num })
 }
+
+function handleTagClick(item: CommunityItem) {
+  if (selectionStore.selecting) {
+    selectionStore.toggle({
+      id: item.communityId,
+      type: 'community',
+      name: communityLabel(item),
+      taskId: props.taskId,
+      metadata: {
+        nodeCount: item.nodeCount,
+        fileCount: item.fileCount,
+        qualityScore: item.qualityScore ?? undefined,
+      },
+    })
+    return
+  }
+  emit('open-community', item)
+}
+
+function handleExternalTagClick(name: string, count: number) {
+  if (!selectionStore.selecting) return
+  selectionStore.toggle({
+    id: name,
+    type: 'external_package',
+    name,
+    taskId: props.taskId,
+    metadata: { fileCount: count },
+  })
+}
 </script>
 
 <template>
@@ -131,9 +162,13 @@ function levelLabel(lv: string): string {
         v-for="item in pagedCommunities"
         :key="item.id"
         class="arch-tag"
-        :class="{ 'has-name': item.status === 'completed' && item.name && item.name !== item.communityId }"
+        :class="{
+          'has-name': item.status === 'completed' && item.name && item.name !== item.communityId,
+          'selected': selectionStore.isSelected(item.communityId),
+          'selecting': selectionStore.selecting,
+        }"
         :title="`${item.communityId} (${item.nodeCount} 节点${item.qualityScore ? ', 质量: ' + (item.qualityScore * 100).toFixed(0) + '%' : ''})`"
-        @click="emit('open-community', item)"
+        @click="handleTagClick(item)"
       >
         <span class="tag-name">{{ commName(item) }}</span>
         <span class="tag-count">{{ item.nodeCount }}</span>
@@ -155,7 +190,9 @@ function levelLabel(lv: string): string {
           v-for="dep in props.externalStats.externalDeps.slice(0, 50)"
           :key="dep.package"
           class="arch-tag"
+          :class="{ 'selected': selectionStore.isSelected(dep.package), 'selecting': selectionStore.selecting }"
           :title="dep.files.slice(0, 10).join('\n') + (dep.files.length > 10 ? '\n...' + (dep.files.length - 10) + ' more' : '')"
+          @click="handleExternalTagClick(dep.package, dep.fileCount)"
         >
           <span class="tag-name">{{ dep.package }}</span>
           <span class="tag-count">{{ dep.fileCount }}</span>
@@ -166,7 +203,9 @@ function levelLabel(lv: string): string {
           v-for="call in props.externalStats.externalCalls.slice(0, 50)"
           :key="call.name"
           class="arch-tag"
+          :class="{ 'selected': selectionStore.isSelected(call.name), 'selecting': selectionStore.selecting }"
           :title="call.files.slice(0, 10).join('\n') + (call.files.length > 10 ? '\n...' + (call.files.length - 10) + ' more' : '')"
+          @click="handleExternalTagClick(call.name, call.count)"
         >
           <span class="tag-name">{{ call.name }}</span>
           <span class="tag-count">{{ call.count }}</span>
@@ -241,6 +280,8 @@ function levelLabel(lv: string): string {
 }
 .arch-tag:hover { border-color: var(--accent, #7c3aed); }
 .arch-tag.has-name { background: var(--bg-accent-subtle, #2d1f5e); border-color: var(--accent, #7c3aed); }
+.arch-tag.selecting { cursor: copy; }
+.arch-tag.selected { border-color: #22c55e; background: color-mix(in srgb, #22c55e 10%, var(--bg-secondary)); outline: 1px solid #22c55e; }
 .tag-name { font-weight: 500; color: var(--text-primary); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-count { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); border-radius: 0.25rem; padding: 0.05rem 0.3rem; }
 .arch-empty { font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem; font-style: italic; }

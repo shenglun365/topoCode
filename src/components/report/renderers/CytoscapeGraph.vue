@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import cytoscape from 'cytoscape'
+import { useComponentSelectionStore } from '@/stores/component-selection-store'
 
 export interface GraphNode {
   id: string
@@ -38,6 +39,7 @@ const props = defineProps<{
   fullscreen?: boolean
   positions?: Record<string, { x: number; y: number }>
   showGuideButton?: boolean
+  selectMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +48,10 @@ const emit = defineEmits<{
   'node-drag-end': [nodeId: string, x: number, y: number]
   'zoom-changed': [level: number]
   'guide-click': []
+  'selection-changed': [nodeIds: string[]]
 }>()
+
+const selectionStore = useComponentSelectionStore()
 
 const container = ref<HTMLDivElement>()
 const tooltip = ref<HTMLDivElement>()
@@ -303,6 +308,16 @@ function buildCytoscape() {
     emit('zoom-changed', cy?.zoom() ?? 1)
   })
 
+  if (selectionStore.selecting) {
+    cy.boxSelectionEnabled(true)
+    cy.autounselectify(false)
+  }
+  cy.on('select unselect', 'node', () => {
+    if (!selectionStore.selecting) return
+    const ids = cy?.nodes(':selected').map(n => n.id()) ?? []
+    emit('selection-changed', ids)
+  })
+
   cy.on('viewport', () => { scheduleOffScreenCheck() })
 
   cy.on('mouseover', 'node', (evt) => {
@@ -438,6 +453,15 @@ watch(() => props.fontSize, (v) => {
 
 watch(() => props.positions, () => {
   applyPresetPositions()
+})
+
+watch(() => selectionStore.selecting, (v) => {
+  if (!cy) return
+  cy.boxSelectionEnabled(v)
+  cy.autounselectify(!v)
+  if (!v) {
+    cy.elements().unselect()
+  }
 })
 
 const offScreenDirs = ref(new Set<string>())

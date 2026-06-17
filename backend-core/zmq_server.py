@@ -133,6 +133,8 @@ class ZMQServer:
             logger.exception("Error receiving request")
             return None
 
+    _noisy_methods = {"backend.ping", "analysis.getAgentProgress"}
+
     async def _process_request(self, frames):
         """处理请求并发送响应（独立任务，不受轮询超时限制）"""
         call_id = uuid.uuid4().hex[:12]
@@ -143,7 +145,8 @@ class ZMQServer:
             params = json.loads(frames[2])
             api_id = get_rpc_id(method_name)
 
-            logger.info(f"[{api_id}][{call_id}] → {method_name} {_brief_params(params)}")
+            if method_name not in self._noisy_methods:
+                logger.info(f"[{api_id}][{call_id}] → {method_name} {_brief_params(params)}")
 
             # 调用注册的方法
             if method_name not in self.methods:
@@ -172,7 +175,7 @@ class ZMQServer:
 
             if error:
                 logger.warning(f"[{api_id}][{call_id}] ← {method_name} error: {error.get('message', '')[:200]}")
-            else:
+            elif method_name not in self._noisy_methods:
                 logger.info(f"[{api_id}][{call_id}] ← {method_name} ok")
 
         except Exception as e:

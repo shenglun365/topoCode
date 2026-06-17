@@ -5,10 +5,9 @@ LLM 适配器 — 包装 LLMService 为 AgentTool 可调用的 async callable。
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from typing import Any, Callable
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -30,30 +29,18 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
             service = LLMService(multi_db)
             model = model_id
             if not model:
-                from settings_service import get_model_configs
-                configs = get_model_configs(multi_db)
+                configs = multi_db.main_db.fetchall(
+                    "SELECT * FROM model_configs ORDER BY is_default DESC, name")
                 defaults = [m for m in configs if m.get("is_default")]
                 model = defaults[0]["id"] if defaults else (configs[0]["id"] if configs else "")
 
             if not model:
                 return ""
 
-            session_id = f"agent-{kwargs.get('session_suffix', 'default')}"
-
-            response = await service.streaming_chat(
-                session_id=session_id,
-                model_id=model,
+            content = await service.sync_chat(
                 messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                model_id=model,
             )
-
-            content = ""
-            async for chunk in response:
-                if isinstance(chunk, dict):
-                    content += chunk.get("content", "")
-                elif isinstance(chunk, str):
-                    content += chunk
 
             latency_ms = int((time.time() - start_ts) * 1000)
             input_chars = sum(len(m.get("content", "")) for m in messages)
@@ -64,6 +51,7 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
             }
 
             try:
+                session_id = f"agent-{kwargs.get('session_suffix', 'default')}"
                 service._save_call_log(
                     main_db=multi_db.main_db,
                     session_id=session_id,
@@ -92,7 +80,7 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
                 service = LLMService(multi_db)
                 service._save_call_log(
                     main_db=multi_db.main_db,
-                    session_id=session_id if 'session_id' in dir() else "agent-error",
+                    session_id=f"agent-{kwargs.get('session_suffix', 'default')}",
                     messages=messages,
                     full_content="",
                     model={"id": model_id or "unknown"},
@@ -110,13 +98,4 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
             logger.warning(f"[llm_adapter] chat failed: {e}")
             raise RuntimeError(f"LLM chat failed: {e}") from e
 
-
-    async def _chat_sync_wrapper(messages: list[dict], temperature: float = 0.3,
-                                  max_tokens: int = 2000, **kwargs) -> str:
-        result = await _chat(messages=messages, temperature=temperature,
-                             max_tokens=max_tokens, **kwargs)
-        if result is None or result == "":
-            raise RuntimeError("LLM returned empty response")
-        return result
-
-    return _chat_sync_wrapper
+    return _chat
