@@ -62,6 +62,7 @@ class AgentTaskState:
             ]
         return {
             "agent_id": self.agent_id,
+            "task_id": self.task_id,
             "status": self.status.value,
             "step_current": self.progress.step_current if self.progress else 0,
             "step_total": self.progress.step_total if self.progress else 0,
@@ -70,6 +71,8 @@ class AgentTaskState:
             "message": self.progress.message if self.progress else "",
             "steps": steps,
             "error": self.error,
+            "created_at": self.created_at,
+            "finished_at": self.finished_at,
         }
 
 

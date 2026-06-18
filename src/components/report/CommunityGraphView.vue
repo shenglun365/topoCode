@@ -11,6 +11,7 @@ import { useGraphPosition } from '@/composables/useGraphPosition'
 import { communityLabel, communityIdLabel } from '@/utils/communityLabel'
 import { ipc } from '@/services/ipc'
 import { useComponentSelectionStore, type ComponentRef } from '@/stores/component-selection-store'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import { Cog6ToothIcon, FunnelIcon, ArrowsPointingOutIcon, ArrowsPointingInIcon, ArrowDownTrayIcon, ChatBubbleLeftIcon } from '@heroicons/vue/24/outline'
 import GraphBreadcrumb from './GraphBreadcrumb.vue'
 import GraphToolbar from './GraphToolbar.vue'
@@ -46,9 +47,11 @@ const communityStore = useCommunityStore()
 const panelStore = usePanelStore()
 const cmdStore = useGraphCommandStore()
 const selectionStore = useComponentSelectionStore()
+const funcGroup = useFuncGroupStore()
 
 const props = defineProps<{
   taskId: string
+  tabId: string
   projectId: string
   taskUpdatedAt: string
   edgeType: 'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'
@@ -79,9 +82,7 @@ const showFilter = ref(false)
 const filterClickX = ref(0)
 const filterClickY = ref(0)
 
-const showAIBubble = computed(() =>
-  (panelStore.rightCollapsed || panelStore.rightTab !== 'ai') && !isFullscreen.value
-)
+const showAIBubble = computed(() => panelStore.rightCollapsed && !isFullscreen.value)
 
 /* ---- unified drill state ---- */
 const drillPath = ref<DrillPathNode[]>([rootDrillNode()])
@@ -157,6 +158,27 @@ const BATCH_EXPAND_SIZE = 50
 const expandBatchCount = ref(0)
 const graphSearch = ref('')
 const drilling = ref(false)
+
+// 恢复 tab UI 状态
+let _restoring = false
+onMounted(() => {
+  const saved = funcGroup.getTabExtraState('analysis', props.tabId)
+  if (saved) {
+    _restoring = true
+    if (saved.search) graphSearch.value = saved.search
+    if (saved.drillPath?.length) drillPath.value = saved.drillPath
+    _restoring = false
+  }
+})
+
+watch(graphSearch, (v) => {
+  if (_restoring) return
+  funcGroup.saveTabExtraState('analysis', props.tabId, { search: v })
+})
+watch(drillPath, (v) => {
+  if (_restoring) return
+  funcGroup.saveTabExtraState('analysis', props.tabId, { drillPath: v })
+}, { deep: true })
 
 /* ---- force layout controls ---- */
 const forceLockMode = ref<'linked' | 'locked'>('linked')
@@ -874,7 +896,6 @@ function handleGuideClick() {
     panelStore.toggleRight()
   }
   panelStore.setRightTab('ai')
-  cmdStore.pushEvent('guide-start', {})
 }
 
 function toggleRightInFullscreen() {

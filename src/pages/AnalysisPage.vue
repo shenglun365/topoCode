@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onActivated, onDeactivated, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
+import { useCommunityStore } from '@/stores/community-store'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
-import ChildAnalysisPanel from '@/components/report/ChildAnalysisPanel.vue'
 import ChatView from '@/components/report/ChatView.vue'
 import { usePanelStore } from '@/stores/panel'
 import { useComponentId } from '@/composables/useComponentId'
@@ -30,7 +29,7 @@ const activeTab = computed(() => {
   return ctx.tabs.find(t => t.id === ctx.activeTabId) || null;
 })
 const reportTabs = computed(() => {
-  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome' || t.kind === 'componentAnalysis' || t.kind === 'childAnalysis');
+  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome');
 })
 
 function onTabUpdate(tabId: string | null) {
@@ -38,33 +37,20 @@ function onTabUpdate(tabId: string | null) {
 }
 
 function onTabClose(tabId: string) {
+  funcGroup.cleanTabExtraState('analysis', tabId)
   funcGroup.closeTab('analysis', tabId)
 }
 
 const isReportHomeTab = computed(() => activeTab.value?.kind === 'reportHome')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
-const isComponentAnalysisTab = computed(() => activeTab.value?.kind === 'componentAnalysis')
-const isChildAnalysisTab = computed(() => activeTab.value?.kind === 'childAnalysis')
 
-/* ===== 状态持久化 ===== */
-function saveAnalysisState() {
-  funcGroup.saveExtraState('analysis', {})
-}
-
-function restoreAnalysisState() {
-  const extra = funcGroup.getExtraState('analysis');
-}
-
-onActivated(() => {
-  restoreAnalysisState();
-})
 onMounted(() => {
   panelStore.setLeftCollapsed(false)
   panelStore.setRightCollapsed(false)
 })
 
 onDeactivated(() => {
-  saveAnalysisState();
+  useCommunityStore().cancelAgentPolling()
 })
 
 // 子文档“返回报告”按钮：切换到所属报告的 reportHome/reportTree tab
@@ -79,44 +65,6 @@ function goToReportHome() {
   const homeTab = analysisContext.value.tabs.find(t => t.kind === 'reportHome' && (t as any).taskId === taskId)
   if (homeTab) {
     funcGroup.setActiveTab('analysis', homeTab.id)
-  } else {
-    onTabClose(tab.id)
-  }
-}
-
-// 组件 AI 分析“返回”按钮：切换到对应的 reportHome tab
-function goBackFromCompAnalysis() {
-  const tab = activeTab.value
-  if (!tab) return
-  const taskId = (tab as any).taskId
-  if (!taskId) {
-    onTabClose(tab.id)
-    return
-  }
-  const homeTab = analysisContext.value.tabs.find(t => t.kind === 'reportHome' && (t as any).taskId === taskId)
-  if (homeTab) {
-    funcGroup.setActiveTab('analysis', homeTab.id)
-  } else {
-    onTabClose(tab.id)
-  }
-}
-
-// 子层级分析“返回”按钮
-function goBackFromChildAnalysis() {
-  const tab = activeTab.value
-  if (!tab) return
-  const taskId = tab.taskId
-  const parentCommId = tab.parentCommId
-  if (!taskId || !parentCommId) {
-    onTabClose(tab.id)
-    return
-  }
-  const parentTab = analysisContext.value.tabs.find(t =>
-    (t.kind === 'subdoc' && t.parentCommId === parentCommId && t.taskId === taskId) ||
-    (t.kind === 'reportHome' && t.taskId === taskId)
-  )
-  if (parentTab) {
-    funcGroup.setActiveTab('analysis', parentTab.id)
   } else {
     onTabClose(tab.id)
   }
@@ -138,47 +86,6 @@ function handleOpenMD(params: { taskId: string; content: string; title: string; 
     parentCommId: params.parentCommId,
     parentEdgeType: params.parentEdgeType,
     regenerationType: params.regenerationType,
-  })
-}
-
-function handleViewChildCommunityMD(params: { taskId?: string; communityId: string; level: string; edgeType: string; parentLevel?: string; parentCommId?: string; name: string; summary: string; mermaid?: string; plantuml?: string }) {
-  console.log(`[AnalysisPage] handleViewChildCommunityMD`, params)
-  const parts: string[] = [
-    `# 社区: ${params.name}`,
-    '',
-    `**ID**: ${params.communityId}`,
-    '',
-    params.summary,
-  ]
-  if (params.mermaid) {
-    parts.push('', '```mermaid', params.mermaid, '```')
-  }
-  if (params.plantuml) {
-    parts.push('', '```plantuml', params.plantuml, '```')
-  }
-  handleOpenMD({
-    taskId: params.taskId || activeTab.value?.taskId || '',
-    content: parts.join('\n'),
-    title: params.name,
-    parentLevel: params.parentLevel,
-    parentCommId: params.parentCommId,
-    parentEdgeType: params.edgeType,
-    regenerationType: 'community',
-  })
-}
-
-function handleOpenChildAnalysis(params: { taskId: string; parentLevel: string; parentCommId: string; edgeType: string; projectId?: string }) {
-  const tabId = `child-analysis|${params.taskId}|${params.parentLevel}|${params.parentCommId}|${params.edgeType}`
-  const childLevel = `L${parseInt(params.parentLevel[1]) + 1}`
-  funcGroup.openTab('analysis', {
-    id: tabId,
-    kind: 'childAnalysis',
-    title: `${childLevel} ${t('report.pipeline.communityAnalysis')} - ${params.parentCommId}`,
-    taskId: params.taskId,
-    projectId: params.projectId || projectStore.selectedProjectId || undefined,
-    parentLevel: params.parentLevel,
-    parentCommId: params.parentCommId,
-    parentEdgeType: params.edgeType,
   })
 }
 
@@ -268,6 +175,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       <ReportHome
         :key="activeTab.id"
         :task-id="activeTab.taskId!"
+        :tab-id="activeTab.id"
         @open-md="handleOpenMD"
       />
     </template>
@@ -294,54 +202,7 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         :regeneration-type="activeTab.regenerationType as 'community' | 'overall' | undefined"
         @close="goToReportHome"
         @navigate-community="openCommunityDetail"
-        @open-child-analysis="handleOpenChildAnalysis"
-        @view-child-md="handleViewChildCommunityMD"
       />
-    </template>
-
-    <template v-else-if="isComponentAnalysisTab && activeTab">
-      <div class="comp-analysis-container">
-        <div class="comp-analysis-header">
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="goBackFromCompAnalysis"
-          >
-            <ArrowLeftIcon class="w-3.5 h-3.5" />
-            <span>{{ t('common.back') }}</span>
-          </button>
-          <span class="comp-analysis-title">{{ activeTab.title }}</span>
-        </div>
-        <div class="comp-analysis-body">
-          <p class="text-gray-500 text-sm p-4">
-            {{ t('analysis.communityAnalysisComingSoon') }}
-          </p>
-        </div>
-      </div>
-    </template>
-
-    <template v-else-if="isChildAnalysisTab && activeTab">
-      <div class="comp-analysis-container">
-        <div class="comp-analysis-header">
-          <button
-            class="btn btn-ghost btn-sm"
-            @click="goBackFromChildAnalysis"
-          >
-            <ArrowLeftIcon class="w-3.5 h-3.5" />
-            <span>{{ t('common.back') }}</span>
-          </button>
-          <span class="comp-analysis-title">{{ activeTab.title }}</span>
-        </div>
-        <div class="comp-analysis-body">
-          <ChildAnalysisPanel
-            :task-id="activeTab.taskId!"
-            :parent-level="activeTab.parentLevel || 'L0'"
-            :parent-comm-id="activeTab.parentCommId || ''"
-            :edge-type="activeTab.parentEdgeType || 'CALL'"
-            :project-id="activeTab.projectId || projectStore.selectedProjectId || ''"
-            @view-community-md="handleViewChildCommunityMD"
-          />
-        </div>
-      </div>
     </template>
   </div>
 </template>
@@ -359,27 +220,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.comp-analysis-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-tertiary);
-}
-
-.comp-analysis-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.comp-analysis-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
 }
 
 /* Chat panel (floating) */

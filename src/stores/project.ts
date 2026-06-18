@@ -16,7 +16,7 @@ import { ipc } from '@/services/ipc'
 import type { FileTreeNode, Project } from '@/types/ipc'
 import i18n from '@/i18n'
 
-export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager' | 'componentAnalysis' | 'childAnalysis'
+export type TabKind = 'file' | 'taskList' | 'taskCreate' | 'report' | 'reportHome' | 'subdoc' | 'groupManager'
 
 export interface HomeTab {
   id: string
@@ -36,7 +36,7 @@ export interface HomeTab {
   content?: string  // 内联内容（AI 分析结果等，无 subDocId 时使用）
   parentReportId?: string  // 父报告 tab ID
   hasUnsavedChanges?: boolean  // 未保存标记
-  // child-analysis / subdoc parent context
+  // subdoc parent context
   parentLevel?: string
   parentCommId?: string
   parentEdgeType?: string

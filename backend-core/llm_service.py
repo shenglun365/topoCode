@@ -732,6 +732,7 @@ class LLMService:
                        latency_ms, status, error_message, token_data):
         """记录 LLM 调用日志（llm_call_logs）"""
         try:
+            mode = (extra_meta or {}).get('mode', 'chat')
             log_id = _make_id()
             now = datetime.now().isoformat()
             messages_json = json.dumps([

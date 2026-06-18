@@ -3,15 +3,18 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import { useComponentId } from '@/composables/useComponentId'
 import { communityLabel } from '@/utils/communityLabel'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
 const selectionStore = useComponentSelectionStore()
+const funcGroup = useFuncGroupStore()
 
 const props = defineProps<{
   taskId: string
+  tabId: string
   edgeType: 'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'
   externalStats: any
   availableLevels: string[]
@@ -57,6 +60,30 @@ const filteredCommunities = computed(() => {
 
 const page = ref(1)
 const pageSize = ref(72)
+
+// 恢复 tab UI 状态
+let _restoring = false
+onMounted(() => {
+  const saved = funcGroup.getTabExtraState('analysis', props.tabId)
+  if (saved) {
+    _restoring = true
+    if (saved.selectedLevel && props.availableLevels.includes(saved.selectedLevel)) {
+      selectedLevel.value = saved.selectedLevel
+    }
+    if (saved.page) page.value = saved.page
+    _restoring = false
+  }
+})
+
+watch(selectedLevel, (v) => {
+  if (_restoring) return
+  page.value = 1
+  funcGroup.saveTabExtraState('analysis', props.tabId, { selectedLevel: v, page: 1 })
+})
+watch(page, (v) => {
+  if (_restoring) return
+  funcGroup.saveTabExtraState('analysis', props.tabId, { page: v })
+})
 const containerRef = ref<HTMLElement | null>(null)
 
 function calcPageSize() {

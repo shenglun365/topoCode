@@ -1870,6 +1870,33 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         except Exception:
             return ""
 
+    def _make_agent_history_cb(project_id, project_db, task_id, action):
+        from store.analysis_store import AnalysisStore
+        import json as _json
+        def _cb(state_dict):
+            try:
+                s = AnalysisStore(project_db)
+                import datetime as _dt
+                def _ts(v):
+                    try: return _dt.datetime.fromtimestamp(v).isoformat() if v else None
+                    except: return None
+                steps_str = _json.dumps(state_dict.get("steps", []), ensure_ascii=False)
+                s.save_agent_task_history({
+                    "project_id": project_id,
+                    "task_id": task_id,
+                    "agent_id": state_dict["agent_id"],
+                    "action": action,
+                    "status": state_dict["status"],
+                    "steps": steps_str,
+                    "message": state_dict.get("message", ""),
+                    "error": state_dict.get("error", ""),
+                    "created_at": _ts(state_dict.get("created_at")),
+                    "finished_at": _ts(state_dict.get("finished_at")),
+                })
+            except Exception as e:
+                logger.warning(f"[AgentHistory] save failed for {state_dict.get('agent_id', '?')}: {e}")
+        return _cb
+
     def _build_agent_tools(ctx, llm_chat_fn, diagram_orch, save_result_fn):
         from agent_workflow.workflows.arch_analyst import (
             _AnalyzeCommunityTool, _GenerateDiagramTool,
@@ -2041,7 +2068,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "communities": communities,
         }
 
-        agent_id = router.dispatch("analyze", tid, context)
+        agent_id = router.dispatch("analyze", tid, context,
+            on_complete=_make_agent_history_cb(pid, project_db, tid, "analyze"))
 
         return {"taskId": tid, "success": True, "agentTaskId": agent_id,
                 "communities": len(communities)}
@@ -2068,8 +2096,40 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         ok = queue.cancel(aid)
         return {"cancelled": ok}
 
+    @server.register("analysis.getAgentTaskHistory")
+    def get_agent_task_history(task_id=None, taskId=None, offset=0, limit=10):
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        from store.analysis_store import AnalysisStore
+        s = AnalysisStore(project_db)
+        return s.list_agent_task_history(tid, offset, limit)
+
+    @server.register("analysis.clearAgentTaskHistory")
+    def clear_agent_task_history(task_id=None, taskId=None):
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        from store.analysis_store import AnalysisStore
+        s = AnalysisStore(project_db)
+        s.clear_agent_task_history(pid, tid)
+        return {"success": True}
+
     @server.register("analysis.analyzeComponents")
-    def analyze_components(task_id=None, taskId=None, components=None):
+    def analyze_components(task_id=None, taskId=None, components=None,
+                           language=None, language_=None, concurrency=None):
         """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
         tid = task_id or taskId
         if not tid:
@@ -2077,6 +2137,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         comps = components or []
         if not comps:
             return {"success": False, "error": "no components specified"}
+        lang = language or language_ or ""
+        conc = max(1, min(int(concurrency or 1), 5))
 
         try:
             store = TaskStore(multi_db.main_db)
@@ -2086,6 +2148,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             pid = task["project_id"]
             project_db = multi_db.get_project_db(pid)
             project_root = _get_project_root(pid)
+            project_summary = _get_project_summary(pid)
 
             logger.info(f"[analyzeComponents] task_id={tid} components={len(comps)}")
 
@@ -2107,7 +2170,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             try:
                 for et_chk in ("INCLUDE", "CALL"):
                     rows = project_db.execute(
-                        "SELECT comm_id, name, summary FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
+                        "SELECT comm_id, name, summary FROM community_llm_results WHERE task_id=? AND edge_type=?",
                         (tid, et_chk)
                     ).fetchall()
                     for r in rows:
@@ -2184,6 +2247,29 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         er = existing_results[cid]
                         ctx_parts.append(f"已有分析: {er.get('name', '')}: {er.get('summary', '')[:200]}")
 
+                    # L1+ 组件：递归加载完整父链（L0 → L1 → … → 当前级减 1）
+                    if cid.startswith("comm-") and "L0" not in cid:
+                        try:
+                            parts = cid.split("-")
+                            lv_idx = next((i for i, p in enumerate(parts) if p.startswith("L")), -1)
+                            if lv_idx > 0:
+                                current_lv = int(parts[lv_idx][1])
+                                while current_lv > 0:
+                                    current_lv -= 1
+                                    parent_parts = list(parts)
+                                    parent_parts[lv_idx] = f"L{current_lv}"
+                                    parent_cid = "-".join(parent_parts)
+                                    prow = project_db.execute(
+                                        "SELECT name, summary FROM community_llm_results WHERE task_id=? AND comm_id=?",
+                                        (tid, parent_cid)
+                                    ).fetchone()
+                                    if prow:
+                                        ctx_parts.append(
+                                            f"祖级组件 L{current_lv}（{prow['name'] or parent_cid}）: {(prow['summary'] or '')[:300]}"
+                                        )
+                        except Exception:
+                            pass
+
                     enriched_comps.append({
                         "id": cid,
                         "name": c.get("name", cid),
@@ -2238,12 +2324,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
             router = create_default_router(
                 project_root=project_root, project_db=project_db, multi_db=multi_db,
-                task_id=tid, project_summary="",
+                task_id=tid, project_summary=project_summary,
                 llm_model_id="", save_result_fn=_save_fn,
             )
 
             context = {
                 "task_id": tid,
+                "language": lang,
+                "concurrency": conc,
                 "components": [
                     {
                         "id": c.get("id", ""),
@@ -2261,7 +2349,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     f"metadata={c['metadata']}"
                 )
 
-            agent_id = router.dispatch("analyze_components", tid, context)
+            agent_id = router.dispatch("analyze_components", tid, context,
+                on_complete=_make_agent_history_cb(pid, project_db, tid, "analyze_components"))
             return {"success": True, "agentTaskId": agent_id}
 
         except Exception as e:

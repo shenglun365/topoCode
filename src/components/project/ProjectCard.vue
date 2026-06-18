@@ -14,7 +14,7 @@ import {
   DocumentPlusIcon,
   DocumentMinusIcon,
 } from '@heroicons/vue/24/outline'
-import { StarIcon } from '@heroicons/vue/24/solid'
+import { StarIcon, ArrowUpOnSquareIcon } from '@heroicons/vue/24/solid'
 import type { Project, GroupNode } from '@/types/ipc'
 import { ipc } from '@/services/ipc'
 import { getProjectStatusBadge } from '@/utils/statusBadge'
@@ -350,7 +350,17 @@ async function handleResyncFromDialog() {
     :class="{ 'card-pinned': project.pinned }"
     @click="emit('select', project)"
     @contextmenu="showMenu"
-  >
+    >
+    <ArrowUpOnSquareIcon
+      v-if="project.pinned"
+      class="card-pin-left w-4 h-4 text-accent"
+      :title="t('project.pinnedBadge')"
+    />
+    <StarIcon
+      v-if="project.favorite"
+      class="card-fav-right w-3.5 h-3.5 text-yellow-400"
+      :title="t('project.favorited')"
+    />
     <span
       v-if="showId"
       class="cmp-id"
@@ -364,16 +374,6 @@ async function handleResyncFromDialog() {
         class="flex items-center gap-2"
         style="min-width:0;"
       >
-        <!-- 置顶/收藏标识 -->
-        <span
-          v-if="project.pinned"
-          class="badge badge-pinned shrink-0"
-        >{{ t('project.pinnedBadge') }}</span>
-        <StarIcon
-          v-if="project.favorite"
-          class="w-3.5 h-3.5 text-yellow-400 shrink-0"
-          :title="t('project.favorited')"
-        />
         <FolderIcon class="w-4 h-4 text-accent shrink-0" />
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
@@ -905,6 +905,19 @@ async function handleResyncFromDialog() {
   position: fixed;
   inset: 0;
   z-index: 9998;
+}
+
+.card-pin-left {
+  position: absolute;
+  top: 4px;
+  left: 14px;
+  z-index: 1;
+}
+.card-fav-right {
+  position: absolute;
+  top: 5px;
+  right: 4px;
+  z-index: 1;
 }
 
 .badge-pinned {

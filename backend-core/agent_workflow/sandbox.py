@@ -123,7 +123,7 @@ class RateLimiter:
 class BudgetTracker:
     """Token / 时间预算管理"""
 
-    def __init__(self, max_tokens: int = 50000, timeout_seconds: int = 300):
+    def __init__(self, max_tokens: int = 50000, timeout_seconds: int = 1800):
         self._max_tokens = max_tokens
         self._timeout = timeout_seconds
         self._tokens_used: int = 0
@@ -188,7 +188,7 @@ class AgentSandbox:
         self,
         project_root: str,
         max_tokens: int = 50000,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = 1800,
         max_concurrent: int = 3,
         min_interval_ms: int = 200,
         cloud_max_per_second: float = 1.0,

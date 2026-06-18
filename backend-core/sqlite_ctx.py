@@ -808,6 +808,22 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_ca_task ON component_analysis(task_id);
     CREATE INDEX IF NOT EXISTS idx_ca_comp ON component_analysis(task_id, component_id);
 
+    -- Agent 任务历史记录
+    CREATE TABLE IF NOT EXISTS agent_task_history (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id  TEXT    NOT NULL,
+        task_id     TEXT    NOT NULL,
+        agent_id    TEXT    NOT NULL UNIQUE,
+        action      TEXT    NOT NULL,
+        status      TEXT    NOT NULL,
+        steps       TEXT,
+        message     TEXT,
+        error       TEXT,
+        created_at  TEXT,
+        finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ath_task ON agent_task_history(task_id, created_at DESC);
+
     -- ============================================
     -- model_daily_usage — 模型每日用量统计
     -- ============================================
@@ -1266,6 +1282,27 @@ class MultiDBManager:
                     UNIQUE(task_id, edge_type, comm_lv, comm_id)
                 )
             """)
+        except Exception:
+            pass
+
+        # 新建 agent_task_history 表（对旧项目库兼容）
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS agent_task_history (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id  TEXT    NOT NULL,
+                    task_id     TEXT    NOT NULL,
+                    agent_id    TEXT    NOT NULL UNIQUE,
+                    action      TEXT    NOT NULL,
+                    status      TEXT    NOT NULL,
+                    steps       TEXT,
+                    message     TEXT,
+                    error       TEXT,
+                    created_at  TEXT,
+                    finished_at TEXT
+                )
+            """)
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_ath_task ON agent_task_history(task_id, created_at DESC)")
         except Exception:
             pass
 

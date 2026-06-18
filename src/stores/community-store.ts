@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
 import { isLLMConfigured } from '@/services/llmClient'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useProjectStore } from '@/stores/project'
 import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult, TimelineEntry } from '@/types/ipc'
 import type { ComponentRef } from '@/stores/component-selection-store'
 
@@ -782,6 +783,8 @@ export const useCommunityStore = defineStore('community', () => {
 
       const result = await ipc.analysis.startArchAnalysis({ taskId, edgeType, level, modelId })
       if (result.success && result.agentTaskId) {
+        // 清除同任务下的旧 polling，避免泄漏
+        cancelAgentPolling(taskId)
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `社区数: ${result.communities}` })
         _pollAgentProgress(taskId, idx, result.agentTaskId, STEPS.LOAD_COMMS)
       } else {
@@ -792,36 +795,6 @@ export const useCommunityStore = defineStore('community', () => {
       updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || 'unknown error' })
       throw e
     }
-  }
-
-  function _pollAgentProgress(taskId: string, taskIdx: number, agentTaskId: string, stepOffset = 0) {
-    const poll = setInterval(async () => {
-      try {
-        const progress = await ipc.analysis.getAgentProgress({ agentTaskId })
-        if (!progress.found) return
-        const t = tasks.value[taskId]
-        if (!t || !t.agentTasks[taskIdx]) {
-          clearInterval(poll)
-          return
-        }
-        updateAgentTask(taskId, taskIdx, {
-          status: progress.status || 'running',
-          progress: progress.step_total ? Math.round((progress.step_current || 0) / (progress.step_total || 1) * 100) : 0,
-          message: progress.message || '',
-        })
-        if (progress.steps) {
-          for (let i = 0; i < progress.steps.length; i++) {
-            updateAgentStep(taskId, taskIdx, i + stepOffset, progress.steps[i].status)
-          }
-        }
-        if (progress.status === 'completed' || progress.status === 'partial' ||
-            progress.status === 'failed' || progress.status === 'cancelled') {
-          clearInterval(poll)
-        }
-      } catch {
-        clearInterval(poll)
-      }
-    }, 1500)
   }
 
   function parseArchCommand(input: string): { action: string; args: Record<string, string> } | null {
@@ -855,7 +828,7 @@ export const useCommunityStore = defineStore('community', () => {
     t.compareTo = to || ''
   }
 
-  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[]) {
+  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1) {
     if (!taskId || !components.length) return
     const t = ensureTask(taskId)
     const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
@@ -875,8 +848,11 @@ export const useCommunityStore = defineStore('community', () => {
       const result = await ipc.analysis.analyzeComponents({
         taskId,
         components: safeComponents,
+        language: language || undefined,
+        concurrency: concurrency > 1 ? concurrency : undefined,
       })
       if (result.success && result.agentTaskId) {
+        cancelAgentPolling(taskId)
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `组件数: ${components.length}` })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
       } else {
@@ -889,6 +865,108 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
+  const agentTaskHistoryOffset = ref<Record<string, number>>({})
+  const agentTaskHistoryTotal = ref<Record<string, number>>({})
+
+  // 跟踪 active polling，防止页面切换时泄漏
+  const _activePolling: Record<string, ReturnType<typeof setInterval>> = {}
+
+  function _pollAgentProgress(taskId: string, taskIdx: number, agentTaskId: string, stepOffset = 0) {
+    // 清除同一 agent 的旧 polling（兜底）
+    if (_activePolling[agentTaskId]) clearInterval(_activePolling[agentTaskId])
+
+    const key = `${taskId}:${agentTaskId}`
+    let lastDoneCount = 0  // 跟踪步骤完成数，新完成时立即刷新社区名称
+    const poll = setInterval(async () => {
+      try {
+        const progress = await ipc.analysis.getAgentProgress({ agentTaskId })
+        if (!progress.found) return
+        const t = tasks.value[taskId]
+        if (!t || !t.agentTasks[taskIdx]) {
+          clearInterval(poll)
+          delete _activePolling[agentTaskId]
+          delete _activePolling[key]
+          return
+        }
+        updateAgentTask(taskId, taskIdx, {
+          status: progress.status || 'running',
+          progress: progress.step_total ? Math.round((progress.step_current || 0) / (progress.step_total || 1) * 100) : 0,
+          message: progress.message || '',
+        })
+        if (progress.steps) {
+          const doneCount = progress.steps.filter(s => s.status === 'done').length
+          if (doneCount > lastDoneCount && taskId) {
+            lastDoneCount = doneCount
+            // 有新组件/社区分析完成，立即刷新社区数据使标签名称同步更新
+            const pid = useProjectStore().selectedProjectId
+            if (pid) loadCommunities(taskId, pid).catch(() => {})
+          }
+          for (let i = 0; i < progress.steps.length; i++) {
+            updateAgentStep(taskId, taskIdx, i + stepOffset, progress.steps[i].status)
+          }
+        }
+        if (progress.status === 'completed' || progress.status === 'partial' ||
+            progress.status === 'failed' || progress.status === 'cancelled') {
+          clearInterval(poll)
+          delete _activePolling[agentTaskId]
+          delete _activePolling[key]
+          // 兜底：极端情况下每步刷新没触发，最终再刷一次
+          if ((progress.status === 'completed' || progress.status === 'partial') &&
+              taskId) {
+            const pid = useProjectStore().selectedProjectId
+            if (pid) loadCommunities(taskId, pid).catch(() => {})
+          }
+        }
+      } catch {
+        clearInterval(poll)
+        delete _activePolling[agentTaskId]
+        delete _activePolling[key]
+      }
+    }, 1500)
+
+    _activePolling[agentTaskId] = poll
+    _activePolling[key] = poll
+  }
+
+  function cancelAgentPolling(taskId?: string) {
+    for (const key of Object.keys(_activePolling)) {
+      if (!taskId || key.startsWith(`${taskId}:`)) {
+        clearInterval(_activePolling[key])
+        delete _activePolling[key]
+      }
+    }
+  }
+
+  async function loadAgentTaskHistory(taskId: string, offset = 0, limit = 10) {
+    try {
+      const resp = await ipc.analysis.getAgentTaskHistory({ taskId, offset, limit })
+      agentTaskHistoryTotal.value[taskId] = resp.total
+      return resp.results || []
+    } catch { return [] }
+  }
+
+  async function clearAgentTaskHistory(taskId: string) {
+    try {
+      await ipc.analysis.clearAgentTaskHistory({ taskId })
+      agentTaskHistoryOffset.value[taskId] = 0
+      agentTaskHistoryTotal.value[taskId] = 0
+      const t = tasks.value[taskId]
+      if (t) t.agentTasks = t.agentTasks.filter(at => at.status === 'running' || at.status === 'queued')
+      return true
+    } catch { return false }
+  }
+
+  async function cancelAgentTask(taskId: string, agentTaskId: string) {
+    try {
+      await ipc.analysis.cancelAgentTask({ agentTaskId })
+      const t = tasks.value[taskId]
+      if (t) {
+        const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
+        if (idx >= 0) updateAgentTask(taskId, idx, { status: 'cancelled' })
+      }
+    } catch {}
+  }
+
   return {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
@@ -898,5 +976,7 @@ export const useCommunityStore = defineStore('community', () => {
     pushError, clearErrorLogs, clearTask,
     addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, triggerComponentAnalysis, parseArchCommand,
     setTimeline, setCompareMode,
+    loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
+    cancelAgentPolling, cancelAgentTask,
   }
 })

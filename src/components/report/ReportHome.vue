@@ -29,6 +29,7 @@ const reportStore = useReportStore()
 
 const props = defineProps<{
   taskId: string
+  tabId: string
 }>()
 
 const projectId = computed(() => projectStore.selectedProjectId || taskDetail.value?.projectId || '')
@@ -417,6 +418,7 @@ watch(() => props.taskId, loadData)
       <div class="report-arch-panel">
         <CommunityArchitecturePanel
           :task-id="props.taskId"
+          :tab-id="props.tabId"
           :project-id="projectId"
           :task-updated-at="taskDetail?.updatedAt || ''"
           :has-any-community="hasAnyCommunity"

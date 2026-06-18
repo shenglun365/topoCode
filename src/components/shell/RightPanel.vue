@@ -26,8 +26,20 @@ const panelTitleKeys: Record<string, string> = {
 }
 
 const isAnalysisReport = computed(() =>
-  navigation.currentPage === 'analysis' && ['reportHome', 'componentAnalysis'].includes(projectStore.activeTab?.kind || '')
+  navigation.currentPage === 'analysis' && ['reportHome', 'subdoc'].includes(projectStore.activeTab?.kind || '')
 )
+
+// 当前会话上下文（项目名 › 任务名）
+const projectName = computed(() => projectStore.selectedProject?.name || '')
+const taskName = computed(() => projectStore.activeTab?.title || '')
+const sessionHint = computed(() => {
+  if (!isAnalysisReport.value) return ''
+  const p = projectName.value
+  const t = taskName.value
+  if (!p && !t) return ''
+  const hint = p ? (t ? `${p} › ${t}` : p) : t
+  return hint.length > 24 ? hint.slice(0, 21) + '...' : hint
+})
 
 // 是否显示代码索引面板（分析页面 + 旧报告 tab）
 const showCodeIndex = computed(() => {
@@ -244,7 +256,14 @@ function toggleFloat() {
       :class="{ 'float-drag': panelStore.rightFloating }"
       @mousedown="panelStore.rightFloating ? onDragStart($event) : undefined"
     >
-      <span>{{ title }}</span>
+      <div class="panel-title-row">
+        <span>{{ title }}</span>
+        <span
+          v-if="sessionHint"
+          class="session-hint"
+          :title="[projectName, taskName].filter(Boolean).join(' › ')"
+        >{{ sessionHint }}</span>
+      </div>
       <div class="panel-header-actions">
         <div
           class="icon-btn"
@@ -429,6 +448,26 @@ function toggleFloat() {
   cursor: pointer;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.session-hint {
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
 }
 
 .panel-header-actions .icon-btn:hover {

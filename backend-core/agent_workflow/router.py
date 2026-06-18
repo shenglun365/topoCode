@@ -314,10 +314,15 @@ def create_default_router(
         llm_fn = create_llm_chat_fn(multi_db, llm_model_id) if multi_db else None
         return build_component_analyst_tools(llm_fn, render_prompt=None, save_result_fn=save_result_fn)
 
+    def _component_context_transform(ctx: dict) -> dict:
+        ctx["project_summary"] = project_summary
+        return ctx
+
     from .workflows.component_analyst import ComponentAnalystWorkflow
     router.register("analyze_components", RouteEntry(
         workflow_class=ComponentAnalystWorkflow,
         tool_builder=_build_component_tools,
+        context_transformer=_component_context_transform,
         description="按需 LLM 分析用户选中的组件，提取组件名称和功能概要，结果写入 SQLite。支持单组件和批量分析。",
     ))
 

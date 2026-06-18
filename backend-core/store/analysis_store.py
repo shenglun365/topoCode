@@ -698,3 +698,36 @@ class AnalysisStore:
             (task_id, component_id)
         ).fetchone()
         return dict(row) if row else None
+
+    # ── Agent 任务历史 ──
+
+    def save_agent_task_history(self, record: Dict):
+        self._db.execute(
+            """INSERT OR REPLACE INTO agent_task_history
+               (project_id, task_id, agent_id, action, status, steps, message, error, created_at, finished_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record.get("project_id", ""), record["task_id"], record["agent_id"],
+             record.get("action", ""), record.get("status", "unknown"),
+             record.get("steps"), record.get("message"),
+             record.get("error"), record.get("created_at"), record.get("finished_at"))
+        )
+        self._db.commit()
+
+    def list_agent_task_history(self, task_id: str, offset: int = 0, limit: int = 10) -> Dict:
+        total = self._db.execute(
+            "SELECT COUNT(*) as cnt FROM agent_task_history WHERE task_id=?",
+            (task_id,)
+        ).fetchone()["cnt"]
+        rows = self._db.execute(
+            "SELECT * FROM agent_task_history WHERE task_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (task_id, limit, offset)
+        ).fetchall()
+        return {"results": [dict(r) for r in rows], "total": total}
+
+    def clear_agent_task_history(self, project_id: str, task_id: str):
+        self._db.execute(
+            "DELETE FROM agent_task_history WHERE project_id=? AND task_id=? "
+            "AND status NOT IN ('running', 'queued')",
+            (project_id, task_id)
+        )
+        self._db.commit()

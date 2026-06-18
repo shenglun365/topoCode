@@ -145,6 +145,23 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
         return context.value[group].extraState;
     }
 
+    // Per-tab UI 状态（组件切换时不丢失）
+    function saveTabExtraState(group: FuncGroupId, tabId: string, state: Record<string, any>) {
+        if (!context.value[group].extraState) context.value[group].extraState = {};
+        if (!context.value[group].extraState[tabId]) context.value[group].extraState[tabId] = {};
+        Object.assign(context.value[group].extraState[tabId], state);
+    }
+
+    function getTabExtraState(group: FuncGroupId, tabId: string): Record<string, any> | null {
+        return context.value[group].extraState?.[tabId] ?? null;
+    }
+
+    function cleanTabExtraState(group: FuncGroupId, tabId: string) {
+        if (context.value[group].extraState) {
+            delete context.value[group].extraState[tabId];
+        }
+    }
+
     return {
         activeFuncGroup,
         context,
@@ -163,5 +180,8 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
         closeAllTabs,
         saveExtraState,
         getExtraState,
+        saveTabExtraState,
+        getTabExtraState,
+        cleanTabExtraState,
     };
 });

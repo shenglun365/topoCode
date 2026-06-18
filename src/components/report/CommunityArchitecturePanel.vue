@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   RectangleGroupIcon,
@@ -8,7 +8,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { usePanelStore } from '@/stores/panel'
-import { useGraphCommandStore } from '@/stores/graph-command-store'
+import { useFuncGroupStore } from '@/stores/funcGroup'
 import CommunityTagView from './CommunityTagView.vue'
 import CommunityGraphView from './CommunityGraphView.vue'
 import { useComponentId } from '@/composables/useComponentId'
@@ -16,10 +16,11 @@ import { useComponentId } from '@/composables/useComponentId'
 const { t } = useI18n()
 const communityStore = useCommunityStore()
 const panelStore = usePanelStore()
-const cmdStore = useGraphCommandStore()
+const funcGroup = useFuncGroupStore()
 
 const props = defineProps<{
   taskId: string
+  tabId: string
   projectId: string
   taskUpdatedAt: string
   hasAnyCommunity: boolean
@@ -40,6 +41,22 @@ const { showId, componentId } = useComponentId('CV-001')
 const viewMode = ref<'tag' | 'graph'>('tag')
 const commEdgeType = ref<'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'>('INCLUDE')
 const communitySearch = ref('')
+
+// 恢复 tab UI 状态
+onMounted(() => {
+  const saved = funcGroup.getTabExtraState('analysis', props.tabId)
+  if (saved) {
+    if (saved.viewMode) viewMode.value = saved.viewMode
+    if (saved.edgeType) commEdgeType.value = saved.edgeType
+  }
+})
+
+watch(viewMode, (v) => {
+  funcGroup.saveTabExtraState('analysis', props.tabId, { viewMode: v })
+})
+watch(commEdgeType, (v) => {
+  funcGroup.saveTabExtraState('analysis', props.tabId, { edgeType: v })
+})
 
 const isExternalTab = computed(() =>
   commEdgeType.value === 'EXTERNAL_INCLUDE' || commEdgeType.value === 'EXTERNAL_CALL'
@@ -99,12 +116,9 @@ function handleGuideClick() {
     panelStore.toggleRight()
   }
   panelStore.setRightTab('ai')
-  cmdStore.pushEvent('guide-start', {})
 }
 
-const showAIBubble = computed(() =>
-  panelStore.rightCollapsed || panelStore.rightTab !== 'ai'
-)
+const showAIBubble = computed(() => panelStore.rightCollapsed)
 </script>
 
 <template>
@@ -229,6 +243,7 @@ const showAIBubble = computed(() =>
     <CommunityTagView
       v-if="viewMode === 'tag'"
       :task-id="props.taskId"
+      :tab-id="props.tabId"
       :edge-type="commEdgeType"
       :external-stats="props.externalStats"
       :available-levels="availableLevels"
@@ -239,6 +254,7 @@ const showAIBubble = computed(() =>
     <CommunityGraphView
       v-else
       :task-id="props.taskId"
+      :tab-id="props.tabId"
       :project-id="props.projectId"
       :task-updated-at="props.taskUpdatedAt"
       :edge-type="commEdgeType"

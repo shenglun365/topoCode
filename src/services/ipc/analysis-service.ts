@@ -84,7 +84,9 @@ export interface AnalysisService {
   stopArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
   getAgentProgress(params: { agentTaskId: string }): Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
   cancelAgentTask(params: { agentTaskId: string }): Promise<{ cancelled: boolean }>
-  analyzeComponents(params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }> }): Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+  getAgentTaskHistory(params: { taskId: string; offset?: number; limit?: number }): Promise<{ results: Array<any>; total: number }>
+  clearAgentTaskHistory(params: { taskId: string }): Promise<{ success: boolean }>
+  analyzeComponents(params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number }): Promise<{ success: boolean; agentTaskId?: string; error?: string }>
   getComponentAnalysisResults(params: { taskId: string; componentIds?: string[] }): Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
   saveCommunityResult(params: any): Promise<SaveCommunityResultResponse>
   getCommunityResult(params: any): Promise<any>

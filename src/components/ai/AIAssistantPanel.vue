@@ -22,15 +22,18 @@ import { useCommunityStore } from '@/stores/community-store'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useGraphCommandStore } from '@/stores/graph-command-store'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
+import { useChatSession } from '@/stores/chat-session-store'
 import { parseCommandTag, parseConfirmTag, parseSuggestTags, stripCommandTags } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const projectStore = useProjectStore()
 const communityStore = useCommunityStore()
 const cmdStore = useGraphCommandStore()
 const selectionStore = useComponentSelectionStore()
+const chatSession = useChatSession()
 
 /* ---- 引导模式 vs 普通模式 ---- */
 const guideMode = ref(false)
@@ -101,7 +104,7 @@ const HELP_TEXT = [
   '| `/select` | 切换组件选择模式（在左侧结构图/Tag中点选组件作为分析上下文） |',
   '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
   '| `/analyze all` | 同上 |',
-  '| `/analyze_components` | 对已选中的组件启动批量分析 |',
+  '| `/analyze_components [-L zh\|en]` | 对已选中的组件启动批量分析（-L 指定输出语言） |',
   '| `/track [options]` | 跟踪项目变更 |',
   '| `/diff [options]` | 对比快照版本 |',
   '',
@@ -136,9 +139,6 @@ const HELP_TEXT = [
   '- **引导模式**：点击图上 🎓 按钮启动，AI 带你逐步了解项目架构',
   '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮，在左侧结构图/Tag中点击选择要分析的组件，选中后直接发送分析请求',
   '- **批量组件分析**：选择组件后，输入 `/analyze_components` 启动批量解析，结果写入 SQLite 并可在任务面板查看进度',
-  '',
-  '---',
-  '详细说明见: [AI助手架构分析引导文档](docs/AI助手架构分析引导.md)',
 ].join('\n')
 
 const md = new MarkdownIt({
@@ -186,7 +186,79 @@ interface Message {
 }
 
 const messages = ref<Message[]>([])
+const messagePageSize = ref(10)
 const userInput = ref('')
+
+/* ---- 指令联想 ---- */
+const CMD_HISTORY_KEY = 'ai-command-history'
+const USER_COMMANDS = ['/help', '/帮助', '/select', '/arch all', '/analyze all', '/analyze_components', '/track', '/diff']
+
+function loadCommandHistory(): string[] {
+  try { return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '[]') } catch { return [] }
+}
+function saveCommandHistory(cmds: string[]) {
+  localStorage.setItem(CMD_HISTORY_KEY, JSON.stringify(cmds))
+}
+
+const commandHistory = ref<string[]>(loadCommandHistory())
+function recordCommand(cmd: string) {
+  const idx = commandHistory.value.indexOf(cmd)
+  if (idx > -1) commandHistory.value.splice(idx, 1)
+  commandHistory.value.unshift(cmd)
+  if (commandHistory.value.length > 20) commandHistory.value.length = 20
+  saveCommandHistory(commandHistory.value)
+}
+
+const showSuggestions = ref(false)
+const suggestionIndex = ref(-1)
+
+const suggestions = computed(() => {
+  const input = userInput.value
+  if (!input.startsWith('/')) return []
+  const prefix = input.toLowerCase()
+  if (prefix === '/') return commandHistory.value.slice(0, 5)
+  const matched = USER_COMMANDS.filter(c => c.toLowerCase().startsWith(prefix))
+  matched.sort((a, b) => {
+    const ia = commandHistory.value.indexOf(a)
+    const ib = commandHistory.value.indexOf(b)
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
+  })
+  return matched.slice(0, 5)
+})
+
+let _skipSuggestionWatch = false
+
+watch(userInput, () => {
+  if (_skipSuggestionWatch) { _skipSuggestionWatch = false; return }
+  if (userInput.value.startsWith('/') && suggestions.value.length > 0) {
+    showSuggestions.value = true
+    suggestionIndex.value = -1
+  } else {
+    showSuggestions.value = false
+  }
+})
+
+function applySuggestion(index: number) {
+  const cmd = suggestions.value[index]
+  if (!cmd) return
+  _skipSuggestionWatch = true
+  userInput.value = cmd
+  showSuggestions.value = false
+  suggestionIndex.value = -1
+}
+
+// 消息分页：默认显示最近 10 条，滚动到顶部可加载更多
+const displayedMessages = computed(() => {
+  const total = messages.value.length
+  if (total <= messagePageSize.value) return messages.value
+  return messages.value.slice(total - messagePageSize.value)
+})
+const hasMoreMessages = computed(() => messages.value.length > messagePageSize.value)
+
+function showMoreMessages() {
+  messagePageSize.value += 10
+}
+
 const streaming = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
 
@@ -209,7 +281,18 @@ function bindToTask(taskId: string | null, taskName: string = '') {
   activeTaskId.value = taskId
   activeTaskName.value = taskName
   if (taskId) {
-    addMessage('system', t('ai.analysisSession', '当前分析会话: {name}', { name: taskName || taskId }))
+    const pid = projectStore.selectedProjectId
+    const saved = chatSession.loadSession(pid, taskId)
+    if (saved.length > 0) {
+      messages.value = saved as Message[]
+      addMessage('system', `继续分析会话: ${taskName || taskId}`)
+    } else {
+      addMessage('system', `当前分析会话: ${taskName || taskId}`)
+    }
+  } else {
+    messages.value = []
+    const saved = chatSession.loadSession()
+    if (saved.length > 0) messages.value = saved as Message[]
   }
 }
 
@@ -289,6 +372,7 @@ async function handleSend() {
 
   // /cmd 指令检测
   if (text.startsWith('/')) {
+    recordCommand(text)
     // /select — 切换组件选择模式
     if (text === '/select') {
       addMessage('user', text)
@@ -298,20 +382,37 @@ async function handleSend() {
       addMessage('system', `组件选择模式 ${status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。`)
       return
     }
-    // /analyze_components — 批量分析已选中的组件
-    if (text === '/analyze_components') {
+    // /analyze_components — 批量分析已选中的组件（支持 -L zh|en 指定输出语言）
+    const acMatch = text.match(/^\/analyze_components(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?$/)
+    if (acMatch) {
       if (selectionStore.selectedCount === 0) {
         addMessage('user', text)
         userInput.value = ''
         addMessage('system', '尚未选择任何组件。请先用 /select 激活选择模式，然后在左侧点选组件。')
         return
       }
-      addMessage('user', text)
-      userInput.value = ''
-      addMessage('system', `已提交 ${selectionStore.selectedCount} 个组件的批量分析任务，请到「任务」面板查看进度。`)
+      const language = acMatch[1] || ''
+      const concurrency = Math.max(1, Math.min(5, parseInt(acMatch[2] || '1')))
+      // 限制单次提交组件数，防止分析超时
+      const MAX_COMPONENTS = 30
+      const selectedComps = [...selectionStore.selectedList]
+      const excess = selectedComps.length > MAX_COMPONENTS ? selectedComps.length - MAX_COMPONENTS : 0
+      if (excess > 0) selectedComps.length = MAX_COMPONENTS
+      // 将选中组件转为对话消息
+      const compNames = selectedComps.map(r => r.name).join('、')
       const taskId = activeTaskId.value || selectionStore.selectedList[0]?.taskId || null
-      communityStore.triggerComponentAnalysis(taskId, selectionStore.selectedList)
-        .catch(e => addMessage('error', String(e)))
+      addMessage('user', `分析组件: ${compNames}`)
+      userInput.value = ''
+      const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
+      const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
+      const excessHint = excess > 0 ? `（仅提交前 ${MAX_COMPONENTS} 个，多余 ${excess} 个已跳过）` : ''
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${langHint}${concHint}${excessHint}，请到「任务」面板查看进度。`)
+      // 退出选择模式（自动清空已选）
+      if (selectionStore.selecting) selectionStore.toggleSelecting()
+      if (taskId) {
+        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency)
+          .catch(e => addMessage('error', String(e)))
+      }
       return
     }
     if (text === '/help' || text === '/帮助') {
@@ -407,6 +508,30 @@ async function handleSend() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  if (showSuggestions.value) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      suggestionIndex.value = suggestionIndex.value < suggestions.value.length - 1 ? suggestionIndex.value + 1 : 0
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      suggestionIndex.value = suggestionIndex.value > 0 ? suggestionIndex.value - 1 : suggestions.value.length - 1
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (suggestionIndex.value >= 0) {
+        applySuggestion(suggestionIndex.value)
+        return
+      }
+    }
+    if (e.key === 'Escape') {
+      showSuggestions.value = false
+      suggestionIndex.value = -1
+      return
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSend()
@@ -415,21 +540,45 @@ function handleKeydown(e: KeyboardEvent) {
 
 function clearChat() {
   messages.value = []
+  const pid = projectStore.selectedProjectId
+  const tid = activeTaskId.value
+  chatSession.clearSession(pid, tid || undefined)
 }
 
 onMounted(() => {
-  if (llmConfigured.value && messages.value.length === 0) {
-    addMessage('system', t('ai.assistantWelcome'))
-    addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+  if (llmConfigured.value) {
+    const saved = chatSession.loadSession()
+    if (saved.length > 0) {
+      messages.value = saved as Message[]
+    } else {
+      addMessage('system', t('ai.assistantWelcome'))
+      addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+    }
   }
 })
 
 watch(llmConfigured, (val) => {
   if (val && messages.value.length === 0) {
-    addMessage('system', t('ai.assistantWelcome'))
-    addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+    const saved = chatSession.loadSession()
+    if (saved.length > 0) {
+      messages.value = saved as Message[]
+    } else {
+      addMessage('system', t('ai.assistantWelcome'))
+      addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+    }
   }
 })
+
+// 自动保存对话到 session
+let _saveTimer: ReturnType<typeof setTimeout> | null = null
+watch(messages, () => {
+  if (_saveTimer) clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(() => {
+    const pid = projectStore.selectedProjectId
+    const tid = activeTaskId.value
+    chatSession.saveSession(messages.value as any, pid, tid || undefined)
+  }, 1000)
+}, { deep: true })
 
 // 监听 GraphCommandStore 事件 — 响应用户在图上的操作
 watch(() => cmdStore.eventSeq, () => {
@@ -481,7 +630,12 @@ watch(() => cmdStore.eventSeq, () => {
         class="ai-messages"
       >
         <div
-          v-for="msg in messages"
+          v-if="hasMoreMessages"
+          class="ai-messages-more"
+          @click="showMoreMessages"
+        >显示更早消息 ({{ messages.length - messagePageSize }} 条)</div>
+        <div
+          v-for="msg in displayedMessages"
           :key="msg.id"
           :class="['ai-message', `ai-message-${msg.role}`]"
         >
@@ -545,10 +699,10 @@ watch(() => cmdStore.eventSeq, () => {
         v-if="selectionStore.selectedCount > 0"
         class="ai-selection-refs"
       >
-        <span class="ai-selection-label">📎 已引用 {{ selectionStore.selectedCount }} 个组件：</span>
+        <span class="ai-selection-label">📎 {{ selectionStore.selectedCount }}个</span>
         <div class="ai-selection-chips">
           <span
-            v-for="ref in selectionStore.selectedList"
+            v-for="ref in selectionStore.selectedList.slice(0, 20)"
             :key="ref.id"
             class="ai-selection-chip"
             :title="`${ref.type === 'community' ? '社区' : '外部包'}: ${ref.id}`"
@@ -561,6 +715,10 @@ watch(() => cmdStore.eventSeq, () => {
               @click="selectionStore.deselect(ref.id)"
             >×</button>
           </span>
+          <span
+            v-if="selectionStore.selectedCount > 20"
+            class="ai-selection-more"
+          >+{{ selectionStore.selectedCount - 20 }}...</span>
         </div>
         <button
           class="ai-selection-clear"
@@ -578,23 +736,41 @@ watch(() => cmdStore.eventSeq, () => {
           rows="2"
           @keydown="handleKeydown"
         />
+        <!-- 指令联想 -->
+        <div
+          v-if="showSuggestions"
+          class="ai-suggest-dropdown"
+        >
+          <div
+            v-for="(cmd, i) in suggestions"
+            :key="cmd"
+            class="ai-suggest-item"
+            :class="{ 'ai-suggest-item-active': i === suggestionIndex }"
+            @click="applySuggestion(i)"
+            @mouseenter="suggestionIndex = i"
+          >
+            <span class="ai-suggest-cmd">{{ cmd }}</span>
+          </div>
+        </div>
         <div class="ai-input-actions">
-          <button
-            v-show="messages.length > 0"
-            class="ai-action-btn"
-            :title="t('ai.clearChat')"
-            @click="clearChat"
-          >
-            <TrashIcon class="w-4 h-4" />
-          </button>
-          <button
-            class="ai-action-btn"
-            :class="{ 'ai-select-active': selectionStore.selecting }"
-            :title="selectionStore.selecting ? '退出组件选择模式' : '选择组件'"
-            @click="selectionStore.toggleSelecting()"
-          >
-            <CursorArrowRippleIcon class="w-4 h-4" />
-          </button>
+          <div class="ai-actions-left">
+            <button
+              class="ai-action-btn"
+              :class="{ 'ai-btn-hidden': messages.length === 0 }"
+              :title="t('ai.clearChat')"
+              @click="clearChat"
+            >
+              <TrashIcon class="w-4 h-4" />
+            </button>
+            <button
+              class="ai-action-btn"
+              :class="{ 'ai-select-active': selectionStore.selecting }"
+              :title="selectionStore.selecting ? '退出组件选择模式' : '选择组件'"
+              @click="selectionStore.toggleSelecting()"
+            >
+              <CursorArrowRippleIcon class="w-4 h-4" />
+            </button>
+          </div>
           <button
             class="ai-send-btn"
             :disabled="!userInput.trim() || streaming"
@@ -694,6 +870,17 @@ watch(() => cmdStore.eventSeq, () => {
   border-bottom-left-radius: 2px;
 }
 
+.ai-messages-more {
+  text-align: center;
+  padding: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.ai-messages-more:hover {
+  text-decoration: underline;
+}
+
 .ai-message-system .ai-message-bubble {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
@@ -706,7 +893,38 @@ watch(() => cmdStore.eventSeq, () => {
   color: #fca5a5;
 }
 
+/* ---- 指令联想下拉 ---- */
+.ai-suggest-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin: 0 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
+  overflow: hidden;
+  z-index: 10;
+}
+.ai-suggest-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+.ai-suggest-item:hover,
+.ai-suggest-item-active {
+  background: var(--bg-accent-subtle, #2d1f5e);
+  color: var(--accent);
+}
+.ai-suggest-cmd {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
 .ai-input-area {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -743,9 +961,14 @@ watch(() => cmdStore.eventSeq, () => {
   align-items: center;
   gap: 8px;
 }
+.ai-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+}
 
 .ai-action-btn {
-  margin-right: auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -762,6 +985,10 @@ watch(() => cmdStore.eventSeq, () => {
 .ai-action-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.ai-btn-hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .ai-send-btn {
@@ -899,20 +1126,23 @@ watch(() => cmdStore.eventSeq, () => {
   border-radius: 0.375rem;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem;
+  align-items: flex-start;
+  gap: 0.2rem;
 }
 .ai-selection-label {
   font-size: 0.65rem;
   color: var(--text-muted);
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .ai-selection-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.2rem;
-  flex: 1;
   min-width: 0;
+  flex: 1;
+  max-height: 4.2rem;
+  overflow-y: auto;
 }
 .ai-selection-chip {
   display: inline-flex;
@@ -924,6 +1154,7 @@ watch(() => cmdStore.eventSeq, () => {
   border-radius: 0.25rem;
   font-size: 0.65rem;
   line-height: 1.3;
+  flex-shrink: 0;
 }
 .ai-selection-chip-type {
   color: var(--accent);
@@ -956,9 +1187,17 @@ watch(() => cmdStore.eventSeq, () => {
   cursor: pointer;
   padding: 0;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 .ai-selection-clear:hover {
   color: var(--accent);
+}
+.ai-selection-more {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  padding: 0.05rem 0.2rem;
+  flex-shrink: 0;
+  align-self: center;
 }
 .ai-select-active {
   color: var(--accent);

@@ -53,7 +53,10 @@ def build_component_analyst_tools(
     save_result_fn: Callable = None,
 ) -> ToolRegistry:
     """构建 ComponentAnalyst 的工具集"""
-    from .workflows.component_analyst import _AnalyzeComponentTool
+    from .workflows.component_analyst import (
+        _AnalyzeComponentTool, _AnalyzeComponentBatchTool
+    )
     tools = ToolRegistry()
     tools.register(_AnalyzeComponentTool(llm_chat_fn, render_prompt, save_result_fn))
+    tools.register(_AnalyzeComponentBatchTool(llm_chat_fn, render_prompt, save_result_fn))
     return tools

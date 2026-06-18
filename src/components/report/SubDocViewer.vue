@@ -14,6 +14,7 @@ import { useComponentId } from '@/composables/useComponentId'
 import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
+import { communityLabel } from '@/utils/communityLabel'
 import SubDocToolbar from './SubDocToolbar.vue'
 import SubDocRegenDialog from './SubDocRegenDialog.vue'
 import SubDocContent from './SubDocContent.vue'
@@ -40,8 +41,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'close': []
   'navigate-community': [payload: { taskId: string; communityId: string; edgeType: string }]
-  'open-child-analysis': [payload: { taskId: string; parentLevel: string; parentCommId: string; edgeType: string; projectId?: string }]
-  'view-child-md': [payload: { taskId: string; communityId: string; level: string; edgeType: string; parentLevel: string; parentCommId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
 // 状态
@@ -164,11 +163,54 @@ async function loadDoc() {
           `**ID**: ${props.parentCommId}`, '',
           result.summary || '',
         ]
+
+        // L1+ 组件：加载父社区名称
+        if (props.parentLevel && props.parentLevel !== 'L0') {
+          try {
+            // 从 communityStore 查找当前社区的 parentId
+            const currentComm = communityStore.tasks[props.taskId]?.communities
+              .find(c => c.communityId === props.parentCommId)
+            const parentId = currentComm?.parentId
+            if (parentId) {
+              const parentLv = currentComm?.level
+                ? `L${parseInt(currentComm.level[1]) - 1}` : 'L0'
+              const pr = await window.api!.analysis.getCommunityResult({
+                taskId: props.taskId, edgeType: props.parentEdgeType,
+                commLv: parentLv, commId: parentId,
+              }).catch(() => null)
+              if (pr?.name || pr?.summary) {
+                parts.push('', `---`, '',
+                  `## 父组件\n${pr.name || parentId} — ${(pr.summary || '').slice(0, 200)}`)
+              } else if (parentId) {
+                parts.push('', `---`, '', `## 父组件\n${parentId}`)
+              }
+            }
+          } catch {}
+        }
+
+        // 子组件列表
+        try {
+          const children = communityStore.tasks[props.taskId]?.communities
+            .filter(c => c.parentId === props.parentCommId) || []
+          parts.push('', `---`, '', `## 子组件（${children.length}）`, '')
+          if (children.length > 0) {
+            const childLines = children.map(c => {
+              const label = communityLabel(c)
+              return `- [${label}](##community:${c.edgeType}:${c.communityId})`
+            })
+            parts.push(...childLines)
+          } else {
+            parts.push('暂无更细粒度的子组件')
+          }
+        } catch {}
+
         if (result.mermaid) parts.push('', '```mermaid', result.mermaid, '```')
         if (result.plantuml) parts.push('', '```plantuml', result.plantuml, '```')
         doc.value = {
           id: '', title: result.name || props.initialTitle || '',
-          content: parts.join('\n'), templateId: '', createdAt: '', updatedAt: '',
+          content: parts.join('\n'), templateId: '',
+          createdAt: result.created_at || result.updated_at || '',
+          updatedAt: result.updated_at || '',
         }
       }
     }
@@ -284,13 +326,7 @@ watch(() => props.subDocId, () => {
         v-if="doc"
         :content="doc.content"
         :task-id="taskId"
-        :project-id="projectId"
-        :parent-level="parentLevel"
-        :parent-comm-id="parentCommId"
-        :parent-edge-type="parentEdgeType"
         @navigate-community="(p: any) => emit('navigate-community', p)"
-        @open-child-analysis="(p: any) => emit('open-child-analysis', p)"
-        @view-child-md="(p: any) => emit('view-child-md', p)"
       />
     </div>
 

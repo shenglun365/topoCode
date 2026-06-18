@@ -1,22 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useDiagramRenderer } from '@/composables/useDiagramRenderer'
-import ChildSection from './ChildSection.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const props = defineProps<{
   content: string
   taskId?: string
-  projectId?: string
-  parentLevel?: string
-  parentCommId?: string
-  parentEdgeType?: string
 }>()
 
 const emit = defineEmits<{
   'navigate-community': [payload: { taskId: string; communityId: string; edgeType: string }]
-  'open-child-analysis': [payload: { taskId: string; parentLevel: string; parentCommId: string; edgeType: string; projectId?: string }]
-  'view-child-md': [payload: { taskId: string; communityId: string; level: string; edgeType: string; parentLevel: string; parentCommId: string; name: string; summary: string; mermaid?: string; plantuml?: string }]
 }>()
 
 const loading = ref(false)
@@ -166,17 +159,6 @@ onUnmounted(() => {
       class="doc-content"
       @click="onDocContentClick"
       v-html="renderedContent"
-    />
-
-    <ChildSection
-      v-if="taskId && parentLevel && parentCommId && parentEdgeType"
-      :task-id="taskId!"
-      :parent-level="parentLevel!"
-      :parent-comm-id="parentCommId!"
-      :edge-type="parentEdgeType!"
-      :project-id="projectId"
-      @open-child-analysis="(p: any) => emit('open-child-analysis', p)"
-      @view-community-md="(p: any) => emit('view-child-md', p)"
     />
   </div>
 </template>

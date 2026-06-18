@@ -514,8 +514,10 @@ export interface IPCAPI {
     stopArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
+    getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) => Promise<{ results: Array<{ project_id: string; task_id: string; agent_id: string; action: string; status: string; steps: string | null; message: string; error: string | null; created_at: string | null; finished_at: string | null }>; total: number }>
+    clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }> }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
