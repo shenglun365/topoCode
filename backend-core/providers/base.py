@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 class BaseLLMProvider(ABC):
     """LLM 提供者基类 — 插件 provider 须实现此接口"""
 
+    supports_tools: bool = False  # 该 provider 是否支持原生 function calling
+
     @abstractmethod
     def chat_stream(
         self,

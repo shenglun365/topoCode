@@ -104,7 +104,7 @@ const HELP_TEXT = [
   '| `/select` | 切换组件选择模式（在左侧结构图/Tag中点选组件作为分析上下文） |',
   '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
   '| `/analyze all` | 同上 |',
-  '| `/analyze_components [-L zh\|en]` | 对已选中的组件启动批量分析（-L 指定输出语言） |',
+  '| `/analyze_components [-L zh\|en] [-j N] [--agentic]` | 对已选中的组件启动批量分析。「-L」指定语言，「-j」并发数（1-5），「--agentic」启用 Agentic 自主分析模式 |',
   '| `/track [options]` | 跟踪项目变更 |',
   '| `/diff [options]` | 对比快照版本 |',
   '',
@@ -191,7 +191,7 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
-const USER_COMMANDS = ['/help', '/帮助', '/select', '/arch all', '/analyze all', '/analyze_components', '/track', '/diff']
+const USER_COMMANDS = ['/help', '/帮助', '/select', '/arch all', '/analyze all', '/analyze_components', '/analyze_components --agentic', '/track', '/diff']
 
 function loadCommandHistory(): string[] {
   try { return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '[]') } catch { return [] }
@@ -383,7 +383,7 @@ async function handleSend() {
       return
     }
     // /analyze_components — 批量分析已选中的组件（支持 -L zh|en 指定输出语言）
-    const acMatch = text.match(/^\/analyze_components(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?$/)
+    const acMatch = text.match(/^\/analyze_components(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?(?:\s+--agentic)?$/)
     if (acMatch) {
       if (selectionStore.selectedCount === 0) {
         addMessage('user', text)
@@ -393,8 +393,9 @@ async function handleSend() {
       }
       const language = acMatch[1] || ''
       const concurrency = Math.max(1, Math.min(5, parseInt(acMatch[2] || '1')))
-      // 限制单次提交组件数，防止分析超时
-      const MAX_COMPONENTS = 30
+      const agentic = text.includes('--agentic')
+      // 限制单次提交组件数
+      const MAX_COMPONENTS = agentic ? 5 : 30
       const selectedComps = [...selectionStore.selectedList]
       const excess = selectedComps.length > MAX_COMPONENTS ? selectedComps.length - MAX_COMPONENTS : 0
       if (excess > 0) selectedComps.length = MAX_COMPONENTS
@@ -405,12 +406,13 @@ async function handleSend() {
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
       const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
+      const modeHint = agentic ? '（Agentic 模式）' : ''
       const excessHint = excess > 0 ? `（仅提交前 ${MAX_COMPONENTS} 个，多余 ${excess} 个已跳过）` : ''
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${langHint}${concHint}${excessHint}，请到「任务」面板查看进度。`)
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${modeHint}${langHint}${concHint}${excessHint}，请到「任务」面板查看进度。`)
       // 退出选择模式（自动清空已选）
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       if (taskId) {
-        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency)
+        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic)
           .catch(e => addMessage('error', String(e)))
       }
       return

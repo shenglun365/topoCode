@@ -517,7 +517,7 @@ export interface IPCAPI {
     getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) => Promise<{ results: Array<{ project_id: string; task_id: string; agent_id: string; action: string; status: string; steps: string | null; message: string; error: string | null; created_at: string | null; finished_at: string | null }>; total: number }>
     clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {

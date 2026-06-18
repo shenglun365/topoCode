@@ -359,7 +359,7 @@ function createRealIPC() {
       clearAgentTaskHistory: async (params: { taskId: string }) => {
         return await api.analysis.clearAgentTaskHistory(params)
       },
-      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number }) => {
+      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean }) => {
         return await api.analysis.analyzeComponents(params)
       },
       getComponentAnalysisResults: async (params: { taskId: string; componentIds?: string[] }) => {

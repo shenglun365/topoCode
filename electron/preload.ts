@@ -185,7 +185,7 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentTaskHistory', params }),
     clearAgentTaskHistory: (params: { taskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.clearAgentTaskHistory', params }),
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number }) =>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.analyzeComponents', params }),
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getComponentAnalysisResults', params }),

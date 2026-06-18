@@ -168,9 +168,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         try:
             project_db = multi_db.get_project_db(project_id)
             project_db.execute("DELETE FROM graph_node WHERE task_id = ?", (tid,))
+            project_db.execute("DELETE FROM graph_edge WHERE task_id = ?", (tid,))
             project_db.execute("DELETE FROM graph_doc WHERE task_id = ?", (tid,))
             project_db.execute("DELETE FROM community_hierarchy WHERE task_id = ?", (tid,))
             project_db.execute("DELETE FROM community_llm_results WHERE task_id = ?", (tid,))
+            project_db.execute("DELETE FROM component_analysis WHERE task_id = ?", (tid,))
             project_db.commit()
             logger.info(f"[analysis.deleteTask] Cleared analysis data for task {tid} in project {project_id}")
         except Exception as e:
@@ -199,9 +201,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 清除所有分析相关表，记录每个表的删除数量
         deleted_tables = {}
         tables_to_clear = [
-            "graph_node", "graph_doc", "community_hierarchy",
+            "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
             "community_llm_results",
-            "ast_data", "dependencies", "call_chains", "components", "ai_qa"
+            "ast_data", "dependencies", "call_chains", "components",
+            "component_analysis", "ai_qa"
         ]
         for table in tables_to_clear:
             before = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -254,8 +257,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(project_id)
         tables = [
             "ast_data", "dependencies", "call_chains", "community_hierarchy",
-            "community_llm_results", "graph_node", "graph_doc",
-            "components", "ai_qa",
+            "community_llm_results", "graph_node", "graph_edge", "graph_doc",
+            "components", "component_analysis", "ai_qa",
         ]
         counts = {}
         for table in tables:
@@ -2014,7 +2017,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     if symbol_names:
                         ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
                     # 边关系上下文
-                    edge_list_raw = _json.loads(doc["edge_list"]) if doc.get("edge_list") else []
+                    edge_list_raw = _json.loads(doc["edge_list"]) if doc["edge_list"] else []
                     if edge_list_raw:
                         edge_lines = []
                         for e in edge_list_raw:
@@ -2129,7 +2132,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.analyzeComponents")
     def analyze_components(task_id=None, taskId=None, components=None,
-                           language=None, language_=None, concurrency=None):
+                           language=None, language_=None, concurrency=None,
+                           agentic=None):
         """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
         tid = task_id or taskId
         if not tid:
@@ -2139,6 +2143,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             return {"success": False, "error": "no components specified"}
         lang = language or language_ or ""
         conc = max(1, min(int(concurrency or 1), 5))
+        agentic_mode = bool(agentic)
 
         try:
             store = TaskStore(multi_db.main_db)
@@ -2226,7 +2231,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                             if symbol_names:
                                 ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
                             # 边关系上下文
-                            edge_list_raw = _json.loads(doc["edge_list"]) if doc.get("edge_list") else []
+                            edge_list_raw = _json.loads(doc["edge_list"]) if doc["edge_list"] else []
                             if edge_list_raw:
                                 edge_lines = []
                                 for e in edge_list_raw:
@@ -2343,14 +2348,17 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     for c in enriched_comps
                 ],
             }
+            if agentic_mode:
+                context["_save_fn"] = _save_fn
             for c in context["components"]:
                 logger.info(
                     f"[analyzeComponents] component id={c['id']} type={c['type']} "
                     f"metadata={c['metadata']}"
                 )
 
-            agent_id = router.dispatch("analyze_components", tid, context,
-                on_complete=_make_agent_history_cb(pid, project_db, tid, "analyze_components"))
+            route_action = "agentic_analyze_components" if agentic_mode else "analyze_components"
+            agent_id = router.dispatch(route_action, tid, context,
+                on_complete=_make_agent_history_cb(pid, project_db, tid, route_action))
             return {"success": True, "agentTaskId": agent_id}
 
         except Exception as e:

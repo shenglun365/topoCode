@@ -39,8 +39,9 @@ class RouteEntry:
 class RouterHarness:
     """路由型 Harness — 高层 action → Workflow 分发器"""
 
-    def __init__(self, project_root: str = "", max_concurrency: int = 3):
+    def __init__(self, project_root: str = "", max_concurrency: int = 3, multi_db=None):
         self._project_root = project_root
+        self._multi_db = multi_db
         self._routes: dict[str, RouteEntry] = {}
         self._queue = None  # lazy load
 
@@ -96,6 +97,7 @@ class RouterHarness:
             tools=tools,
             sandbox=sandbox,
             on_complete=on_complete,
+            multi_db=self._multi_db,
         )
 
         logger.info(f"[Router] {action} → {workflow.name} agent={agent_id}")
@@ -242,7 +244,7 @@ def create_default_router(
       - "track_start" → ArchSentinelWorkflow (记录快照)
       - "track_stop"  → ArchSentinelWorkflow (对比 + 摘要 + 持久化)
     """
-    router = RouterHarness(project_root=project_root)
+    router = RouterHarness(project_root=project_root, multi_db=multi_db)
 
     # ── analyze 路由 ──
     def _build_analyst_tools(ctx: dict) -> ToolRegistry:
@@ -324,6 +326,29 @@ def create_default_router(
         tool_builder=_build_component_tools,
         context_transformer=_component_context_transform,
         description="按需 LLM 分析用户选中的组件，提取组件名称和功能概要，结果写入 SQLite。支持单组件和批量分析。",
+    ))
+
+    # ── agentic_analyze_components 路由（Agentic 模式） ──
+    def _build_agentic_component_tools(ctx: dict) -> ToolRegistry:
+        from .tool_factory import build_agentic_component_tools
+        from .sandbox import PathSandbox
+        ps = PathSandbox(project_root) if project_root else None
+        return build_agentic_component_tools(
+            project_root=project_root,
+            project_db=project_db,
+            path_sandbox=ps,
+        )
+
+    def _agentic_component_context_transform(ctx: dict) -> dict:
+        ctx["project_summary"] = project_summary
+        return ctx
+
+    from .workflows.agentic_component_analyst import AgenticComponentAnalystWorkflow
+    router.register("agentic_analyze_components", RouteEntry(
+        workflow_class=AgenticComponentAnalystWorkflow,
+        tool_builder=_build_agentic_component_tools,
+        context_transformer=_agentic_component_context_transform,
+        description="Agentic 按需分析用户选中的组件，LLM 可自主调用 read_file / search_content 等工具读取文件后分析",
     ))
 
     return router

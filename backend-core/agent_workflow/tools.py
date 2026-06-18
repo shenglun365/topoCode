@@ -39,6 +39,7 @@ class AgentTool(ABC):
     version: str = "1.0"
     author: str = ""
     category: str = ""
+    llm_visible: bool = False  # 该工具是否可被 LLM 的 function calling 调用
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:
@@ -46,10 +47,25 @@ class AgentTool(ABC):
         ...
 
     def to_schema(self) -> dict:
-        """生成工具描述（供 LLM function calling 使用）"""
+        """生成工具描述（兼容旧的 schema 格式）"""
         return {
             "name": self.name,
             "description": self.description,
+        }
+
+    def to_openai_schema(self) -> Optional[dict]:
+        """
+        返回 OpenAI function calling schema。
+        子类可重写以提供完整的 function schema，使工具能被 LLM 自主调用。
+        """
+        if not self.llm_visible:
+            return None
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+            },
         }
 
 
@@ -78,6 +94,21 @@ class ToolRegistry:
 
     def to_schema_list(self) -> list[dict]:
         return [t.to_schema() for t in self._tools.values()]
+
+    def to_openai_tools(self, filter_names: Optional[list[str]] = None) -> list[dict]:
+        """
+        返回符合 OpenAI function calling 格式的工具定义。
+        filter_names: 只返回指定名称的工具（None 返回所有 llm_visible=True 的工具）
+        """
+        tools = self._tools.values()
+        if filter_names is not None:
+            tools = [t for t in tools if t.name in filter_names]
+        result: list[dict] = []
+        for t in tools:
+            schema = t.to_openai_schema()
+            if schema:
+                result.append(schema)
+        return result
 
     def __contains__(self, name: str) -> bool:
         return name in self._tools

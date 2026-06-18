@@ -43,14 +43,28 @@ def _parse_structured_response(text: str, fallback_name: str = "") -> dict:
 
 def _build_markdown_summary(name: str, summary: str, role: str,
                               key_files: list, depends_on: list) -> str:
-    """将结构化分析结果拼接为增强 Markdown summary。"""
+    """将结构化分析结果拼接为增强 Markdown summary。
+
+    key_files 可以是 str 列表（旧格式）或 dict 列表（含 path/summary 字段）。
+    """
     parts = []
     parts.append(f"## 功能概要\n{summary}")
     if role:
         parts.append(f"\n**架构角色**: {role}")
     if key_files:
-        files_md = "\n".join(f"- `{f}`" for f in key_files[:10])
-        parts.append(f"\n**关键文件**:\n{files_md}")
+        files_lines = []
+        for kf in key_files[:10]:
+            if isinstance(kf, dict):
+                fp = kf.get("path", kf.get("file", ""))
+                fs = kf.get("summary", "")
+                if fp and fs:
+                    files_lines.append(f"- `{fp}` — {fs}")
+                elif fp:
+                    files_lines.append(f"- `{fp}`")
+            else:
+                files_lines.append(f"- `{kf}`")
+        if files_lines:
+            parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
     if depends_on:
         deps_md = ", ".join(depends_on[:10])
         parts.append(f"\n**依赖组件**: {deps_md}")
@@ -95,7 +109,8 @@ class _AnalyzeCommunityTool(AgentTool):
                     '- name: 组件名称（≤20字）\n'
                     '- summary: 功能概要（100-300字）\n'
                     '- role: 架构角色（≤3词，如 ConfigLoader / RequestRouter）\n'
-                    '- key_files: 关键文件路径数组（Top 5）\n'
+                    '- key_files: 关键文件及其功能概要数组（Top 10）\n'
+                    '  格式: [{"path": "src/foo.cpp", "summary": "实现矩阵乘法运算"}, ...]\n'
                     '- depends_on: 依赖的其他组件或外部包数组\n'
                     "只输出 JSON，不要其他内容。"
                 )

@@ -713,7 +713,7 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
 
 
 def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
-    """Step 5: 结果汇总 + 报告写入 — 进度 99→100"""
+    """Step 5: 结果汇总 + 报告写入 — 设置 progress=99（100 在 AI 摘要完成后由 _execute_task 设置）"""
     ctx.log("Step 5: 结果汇总")
     duration_ms = int((time.time() - ctx.start_time) * 1000)
     a_store = ctx.analysis_store
@@ -755,7 +755,7 @@ def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
     from store.task_store import TaskStore
     task_store = TaskStore(ctx.multi_db.main_db)
     task_store.upsert_report(report)
-    ctx.report_progress(100)
+    ctx.report_progress(99)
     ctx.log(f"分析完成，耗时 {duration_ms}ms")
     return report
 
@@ -826,22 +826,28 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
                     "taskId": task_id, "runId": run_id, "status": "cancelled",
                 })
         else:
-            task_store.update_task_status(task_id, "done", progress=100, error="")
-            task_store.finish_run(run_id, "done")
-            _save_analysis_snapshot(multi_db, task_id, task_store, result)
-
-            # 自动生成项目概要 — 解析完成后调用 LLM 提取 README+依赖信息写入 projects.summary
-            try:
-                task = task_store.get_task(task_id)
-                pid = task.get("project_id") if task else None
-                if pid:
+            # 解析管线已完成，progress=99（step 6 未设 100，留待 AI 摘要后）
+            # 先运行 AI 项目摘要（涉及 LLM 调用，可能耗时）
+            # 前端进度此时停留在 99，让用户感知"摘要生成中"
+            pid = None
+            task = task_store.get_task(task_id)
+            if task:
+                pid = task.get("project_id")
+            if pid:
+                _update_progress(server, multi_db, task_id, run_id, progress=95)
+                try:
                     from core_service import _do_generate_project_summary
                     await _do_generate_project_summary(multi_db, pid)
                     logger.info(f"[EXECUTE] 项目概要自动生成完成: task={task_id}")
-                else:
-                    logger.info(f"[EXECUTE] 项目概要自动生成跳过: task={task_id} 无 project_id")
-            except Exception as _e:
-                logger.warning(f"[EXECUTE] 项目概要自动生成失败: {_e}")
+                except Exception as _e:
+                    logger.warning(f"[EXECUTE] 项目概要自动生成失败: {_e}")
+            else:
+                logger.info(f"[EXECUTE] 项目概要自动生成跳过: task={task_id} 无 project_id")
+
+            # AI 摘要完成后（不论成败），标记任务完成
+            task_store.update_task_status(task_id, "done", progress=100, error="")
+            task_store.finish_run(run_id, "done")
+            _save_analysis_snapshot(multi_db, task_id, task_store, result)
 
             if server:
                 server.publish("task", "complete", {

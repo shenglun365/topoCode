@@ -24,6 +24,7 @@ class OpenAICompatProvider(BaseLLMProvider):
     """OpenAI 兼容 API 聊天补全 — 基类"""
 
     PROVIDER_NAME = 'openai-compat'
+    supports_tools = True
 
     def chat_stream(
         self,
@@ -69,7 +70,7 @@ class OpenAICompatProvider(BaseLLMProvider):
             'max_tokens': payload.get('max_tokens'),
             'tools': list(payload.get('tools', [])) if payload.get('tools') else None,
             'messages': [
-                {'role': m.get('role', ''), 'content_len': len(m.get('content', '')), 'content_preview': m.get('content', '')[:3000]}
+                {'role': m.get('role', ''), 'content_len': len(m.get('content') or ''), 'content_preview': (m.get('content') or '')[:3000]}
                 for m in payload.get('messages', [])
             ],
         }
@@ -154,21 +155,45 @@ class OpenAICompatProvider(BaseLLMProvider):
         headers = {'Content-Type': 'application/json'}
         if model_config.get('api_key'):
             headers['Authorization'] = f"Bearer {model_config['api_key']}"
+
+        if mode == 'tools' and tools:
+            payload['tools'] = tools
+            payload['tool_choice'] = 'auto'
+
         resp = requests.post(
             f"{base_url}/v1/chat/completions",
             json=payload, headers=headers,
             timeout=model_config.get('timeout', 300),
         )
         data = resp.json()
-        content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+        choice = data.get('choices', [{}])[0]
+        msg = choice.get('message', {})
+
+        content = msg.get('content', '')
         usage = data.get('usage', {})
+
+        # 解析原生 tool_calls
+        raw_calls = msg.get('tool_calls', [])
+        tool_calls = []
+        if raw_calls:
+            tool_calls = [
+                {
+                    "id": tc.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("function", {}).get("name", ""),
+                        "arguments": tc.get("function", {}).get("arguments", "{}"),
+                    },
+                }
+                for tc in raw_calls
+            ]
+
         return {
             'content': content,
-            'usage': {
-                'prompt_tokens': usage.get('prompt_tokens'),
-                'completion_tokens': usage.get('completion_tokens'),
-                'total_tokens': usage.get('total_tokens'),
-            },
+            'usage': usage,
+            'tool_calls': tool_calls,
+            'finish_reason': choice.get('finish_reason', ''),
+            'reasoning_content': msg.get('reasoning_content', ''),
         }
 
 

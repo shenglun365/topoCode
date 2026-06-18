@@ -828,7 +828,7 @@ export const useCommunityStore = defineStore('community', () => {
     t.compareTo = to || ''
   }
 
-  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1) {
+  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false) {
     if (!taskId || !components.length) return
     const t = ensureTask(taskId)
     const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
@@ -850,6 +850,7 @@ export const useCommunityStore = defineStore('community', () => {
         components: safeComponents,
         language: language || undefined,
         concurrency: concurrency > 1 ? concurrency : undefined,
+        agentic: agentic || undefined,
       })
       if (result.success && result.agentTaskId) {
         cancelAgentPolling(taskId)

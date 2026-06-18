@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
 from .tools import ToolRegistry
 
@@ -59,4 +59,28 @@ def build_component_analyst_tools(
     tools = ToolRegistry()
     tools.register(_AnalyzeComponentTool(llm_chat_fn, render_prompt, save_result_fn))
     tools.register(_AnalyzeComponentBatchTool(llm_chat_fn, render_prompt, save_result_fn))
+    return tools
+
+
+def build_agentic_component_tools(
+    project_root: str = "",
+    project_db=None,
+    path_sandbox=None,
+) -> ToolRegistry:
+    """构建 AgenticComponentAnalyst 的工具集（LLM 可见的读写工具）"""
+    from .toolkits.file_tools import ReadFileTool, SearchContentTool
+    from .toolkits.symbol_tools import GetSymbolDetailTool, SearchSymbolsTool
+    from .toolkits.graph_tools import GetCommunitySubgraphTool, GetCallChainTool, GetASTNodeTool
+    from .toolkits.edge_tools import GetEdgeDetailTool
+
+    tools = ToolRegistry()
+    tools.register(ReadFileTool(project_root=project_root, path_sandbox=path_sandbox))
+    tools.register(SearchContentTool(project_root=project_root, path_sandbox=path_sandbox))
+    if project_db:
+        tools.register(GetSymbolDetailTool(project_db=project_db))
+        tools.register(SearchSymbolsTool(project_db=project_db))
+        tools.register(GetCommunitySubgraphTool(project_db=project_db))
+        tools.register(GetCallChainTool(project_db=project_db))
+        tools.register(GetASTNodeTool(project_db=project_db))
+        tools.register(GetEdgeDetailTool(project_db=project_db))
     return tools

@@ -43,7 +43,7 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
             )
 
             latency_ms = int((time.time() - start_ts) * 1000)
-            input_chars = sum(len(m.get("content", "")) for m in messages)
+            input_chars = sum(len(m.get("content") or "") for m in messages)
             token_data = {
                 "prompt_tokens": input_chars // 4,
                 "completion_tokens": len(content) // 4,

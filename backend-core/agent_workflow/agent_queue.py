@@ -150,6 +150,7 @@ class AgentTaskManager:
         tools: ToolRegistry,
         sandbox: AgentSandbox,
         on_complete: Optional[Callable[[AgentTaskState], None]] = None,
+        multi_db=None,
     ) -> str:
         """入队 Agent 任务，返回 agent_id。立即返回，任务在后台线程执行。"""
         agent_id = f"agent-{int(time.time())}-{uuid.uuid4().hex[:6]}"
@@ -170,7 +171,7 @@ class AgentTaskManager:
 
         thread = threading.Thread(
             target=self._run_agent,
-            args=(agent_id, workflow, context, tools, sandbox),
+            args=(agent_id, workflow, context, tools, sandbox, multi_db),
             daemon=True,
         )
         thread.start()
@@ -201,7 +202,7 @@ class AgentTaskManager:
         return True
 
     def _run_agent(self, agent_id: str, workflow: AgentWorkflow, context: dict,
-                   tools: ToolRegistry, sandbox: AgentSandbox):
+                   tools: ToolRegistry, sandbox: AgentSandbox, multi_db=None):
         with self._lock:
             state = self._tasks.get(agent_id)
         if not state:
@@ -221,7 +222,7 @@ class AgentTaskManager:
 
         try:
             import asyncio
-            runtime = AgentRuntime(tools, sandbox, on_progress=progress_cb)
+            runtime = AgentRuntime(tools, sandbox, on_progress=progress_cb, multi_db=multi_db)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
