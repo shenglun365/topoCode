@@ -40,19 +40,31 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 </script>
 
 <template>
-  <div ref="rootRef" class="td-root">
-    <button class="td-btn" @click.stop="open = !open">
+  <div
+    ref="rootRef"
+    class="td-root"
+  >
+    <button
+      class="td-btn"
+      @click.stop="open = !open"
+    >
       <span class="td-label">{{ currentLabel }}</span>
       <ChevronDownIcon class="td-chevron" />
     </button>
-    <div v-if="open" class="td-menu" :class="{ 'td-menu-up': props.fullscreen }">
+    <div
+      v-if="open"
+      class="td-menu"
+      :class="{ 'td-menu-up': props.fullscreen }"
+    >
       <button
         v-for="opt in options"
         :key="opt.value"
         class="td-item"
         :class="{ active: props.modelValue === opt.value }"
         @click="select(opt.value)"
-      >{{ opt.label }}</button>
+      >
+        {{ opt.label }}
+      </button>
     </div>
   </div>
 </template>

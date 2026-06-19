@@ -104,7 +104,13 @@ const HELP_TEXT = [
   '| `/select` | 切换组件选择模式（在左侧结构图/Tag中点选组件作为分析上下文） |',
   '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
   '| `/analyze all` | 同上 |',
-  '| `/analyze_components [-L zh\|en] [-j N] [--agentic]` | 对已选中的组件启动批量分析。「-L」指定语言，「-j」并发数（1-5），「--agentic」启用 Agentic 自主分析模式 |',
+  '| `/analyze_components [-L zh\|en] [-j N] [-r N] [--agentic] [--summary-model <id>] [-c N]` | 对已选中的组件启动批量分析。「-L」指定语言，「-j」并发数（1-5），「-r」最大分析轮次（默认30，1-30），「--agentic」启用 Agentic 自主分析模式（含子任务摘要缓存），「--summary-model」指定文件摘要模型 ID（默认同主模型），「-c」摘要 LLM 并发数（默认1，1-10）|',
+  '| `/presummary` | 查看文件预摘要概况（P0/P1/P2 文件数） |',
+  '| `/presummary files P0/P1/P2 [页码]` | 分页查看某批次文件列表 |',
+  '| `/presummary start P0/P1/P2 (-n N)` | 启动某批次预摘要任务（-n 限文件数） |',
+  '| `/presummary get <文件路径>` | 查询单个文件摘要内容 |',
+  '| `/presummary delete <文件路径>` | 删除单个文件摘要缓存 |',
+  '| `/presummary rerun <文件路径>` | 单个文件重跑摘要 |',
   '| `/track [options]` | 跟踪项目变更 |',
   '| `/diff [options]` | 对比快照版本 |',
   '',
@@ -191,7 +197,9 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
-const USER_COMMANDS = ['/help', '/帮助', '/select', '/arch all', '/analyze all', '/analyze_components', '/analyze_components --agentic', '/track', '/diff']
+const USER_COMMANDS = ['/help', '/帮助', '/select', '/arch all', '/analyze all', '/analyze_components', '/analyze_components --agentic',
+  '/presummary', '/presummary files', '/presummary start', '/presummary get', '/presummary delete', '/presummary rerun',
+  '/track', '/diff']
 
 function loadCommandHistory(): string[] {
   try { return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '[]') } catch { return [] }
@@ -274,6 +282,9 @@ const llmConfigured = computed(() => isLLMConfigured())
 
 // Session management — bound to current analysis task
 const activeTaskId = ref<string | null>(null)
+function resolveTaskId(): string | null {
+  return activeTaskId.value || projectStore.activeTab?.taskId || null
+}
 const activeTaskName = ref<string>('')
 const hasAnalysisContext = computed(() => !!activeTaskId.value)
 
@@ -382,8 +393,9 @@ async function handleSend() {
       addMessage('system', `组件选择模式 ${status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。`)
       return
     }
-    // /analyze_components — 批量分析已选中的组件（支持 -L zh|en 指定输出语言）
-    const acMatch = text.match(/^\/analyze_components(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?(?:\s+--agentic)?$/)
+    // /analyze_components — 批量分析已选中的组件
+    const acRe = /^\/analyze_components(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?(?:\s+-r\s+(\d+))?(?:\s+--agentic)?(?:\s+--summary-model\s+(\S+))?(?:\s+-c\s+(\d+))?$/i
+    const acMatch = text.match(acRe)
     if (acMatch) {
       if (selectionStore.selectedCount === 0) {
         addMessage('user', text)
@@ -393,7 +405,12 @@ async function handleSend() {
       }
       const language = acMatch[1] || ''
       const concurrency = Math.max(1, Math.min(5, parseInt(acMatch[2] || '1')))
+      const rawTurns = parseInt(acMatch[3] || '30')
+      const maxTurns = Math.max(1, Math.min(30, rawTurns))
       const agentic = text.includes('--agentic')
+      const summaryModel = acMatch[4] || ''
+      const rawSubConc = parseInt(acMatch[5] || '1')
+      const subagentConcurrency = Math.max(1, Math.min(10, rawSubConc))
       // 限制单次提交组件数
       const MAX_COMPONENTS = agentic ? 5 : 30
       const selectedComps = [...selectionStore.selectedList]
@@ -406,18 +423,167 @@ async function handleSend() {
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
       const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
-      const modeHint = agentic ? '（Agentic 模式）' : ''
+      const modeHint = agentic ? '（Agentic 模式' : ''
+      const turnHint = agentic && maxTurns !== 30 ? `，轮次 ${maxTurns}` : ''
+      const modelHint = agentic && summaryModel ? `，摘要模型 ${summaryModel}` : ''
+      const subConcHint = agentic && subagentConcurrency > 1 ? `，摘要并发 ${subagentConcurrency}` : ''
+      const extraHint = modeHint + turnHint + modelHint + subConcHint + (modeHint ? '）' : '')
       const excessHint = excess > 0 ? `（仅提交前 ${MAX_COMPONENTS} 个，多余 ${excess} 个已跳过）` : ''
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${modeHint}${langHint}${concHint}${excessHint}，请到「任务」面板查看进度。`)
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${extraHint}${langHint}${concHint}${excessHint}，请到「任务」面板查看进度。`)
       // 退出选择模式（自动清空已选）
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       if (taskId) {
-        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic)
+        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic, maxTurns, summaryModel, subagentConcurrency)
           .catch(e => addMessage('error', String(e)))
       }
       return
     }
-    if (text === '/help' || text === '/帮助') {
+    // ── 预摘要命令 ──
+    // /presummary — 查看文件分级概况
+    const psStatusRe = /^\/presummary$/
+    if (psStatusRe.test(text)) {
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      try {
+        const status = await communityStore.getPreSummaryStatus(taskId)
+        let msg = `## 文件预摘要 — 项目缓存\n`
+        msg += `- 总计: ${status.total_files} 文件, 已缓存: ${status.cached_count}\n`
+        msg += `- **P0** (核心): ${status.counts.P0} 文件\n`
+        msg += `- **P1** (重要): ${status.counts.P1} 文件\n`
+        msg += `- **P2** (普通): ${status.counts.P2} 文件 (不预摘要)\n\n`
+        msg += `可用命令:\n- \`/presummary files P0\` 查看 P0 文件列表\n`
+        msg += `- \`/presummary start P0 -n 5\` 启动预摘要 P0 批次 (限 5 个)`
+        addMessage('assistant', msg)
+      } catch (e: any) {
+        addMessage('system', `查询失败: ${e.message || e}`)
+      }
+      return
+    }
+    // /presummary files <batch> [page]
+    const psFilesRe = /^\/presummary\s+files\s+(P[012])(?:\s+(\d+))?/i
+    const psFilesMatch = text.match(psFilesRe)
+    if (psFilesMatch) {
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      const batch = psFilesMatch[1].toUpperCase()
+      const page = parseInt(psFilesMatch[2] || '1')
+      try {
+        const result = await communityStore.listPreSummaryFiles(taskId, batch, page, 20)
+        let msg = `## ${batch} 批次文件 (共 ${result.total} 个)\n`
+        for (const f of result.files) {
+          msg += `- \`${f.file_path}\` score=${f.score} cross=${f.cross} edges=${f.edges} size=${f.size}\n`
+        }
+        if (result.page * result.page_size < result.total) {
+          msg += `\n下一页: /presummary files ${batch} ${page + 1}`
+        }
+        addMessage('assistant', msg)
+      } catch (e: any) {
+        addMessage('system', `查询失败: ${e.message || e}`)
+      }
+      return
+    }
+    // /presummary start <batch> [-n N]
+    const psStartRe = /^\/presummary\s+start\s+(P[012])(?:\s+-n\s+(\d+))?/i
+    const psStartMatch = text.match(psStartRe)
+    if (psStartMatch) {
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      const batch = psStartMatch[1].toUpperCase()
+      const limit = parseInt(psStartMatch[2] || '0')
+      try {
+        const result = await communityStore.startPreSummary(taskId, batch, limit)
+        if (result.success && result.agentTaskId) {
+          addMessage('system', `预摘要 ${batch} 已启动 (${result.fileCount} 文件)。请到「解析任务」面板查看进度。`)
+        } else {
+          addMessage('system', `启动失败: ${result.error || '未知错误'}`)
+        }
+      } catch (e: any) {
+        addMessage('system', `启动失败: ${e.message || e}`)
+      }
+      return
+    }
+    // /presummary get <file_path>
+    const psGetRe = /^\/presummary\s+get\s+(.+)$/i
+    const psGetMatch = text.match(psGetRe)
+    if (psGetMatch) {
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      const filePath = psGetMatch[1].trim()
+      try {
+        const detail = await communityStore.getFileSummary(taskId, filePath)
+        if (detail.found) {
+          let msg = `## 文件摘要 — ${filePath}\n`
+          msg += `- 缓存时间: ${detail.created_at || '?'}\n`
+          msg += `- 长度: ${detail.summary_len} 字符\n`
+          msg += `\`\`\`\n${(detail.summary || '').slice(0, 1000)}\n\`\`\``
+          addMessage('assistant', msg)
+        } else {
+          addMessage('system', `未找到 ${filePath} 的摘要缓存。可用 /presummary start 启动预摘要。`)
+        }
+      } catch (e: any) {
+        addMessage('system', `查询失败: ${e.message || e}`)
+      }
+      return
+    }
+    // /presummary delete <file_path>
+    const psDeleteRe = /^\/presummary\s+delete\s+(.+)$/i
+    const psDeleteMatch = text.match(psDeleteRe)
+    if (psDeleteMatch) {
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      const filePath = psDeleteMatch[1].trim()
+      try {
+        const result = await communityStore.deleteFileSummary(taskId, filePath)
+        addMessage('system', `已删除 ${filePath} 的摘要缓存 (${result.deleted || 0} 条)。`)
+      } catch (e: any) {
+        addMessage('system', `删除失败: ${e.message || e}`)
+      }
+      return
+    }
+    // /presummary rerun <file_path>
+    const psRerunRe = /^\/presummary\s+rerun\s+(.+)$/i
+    const psRerunMatch = text.match(psRerunRe)
+    if (psRerunMatch) {
+      addMessage('user', text)
+      userInput.value = ''
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      const filePath = psRerunMatch[1].trim()
+      try {
+        const result = await communityStore.rerunFileSummary(taskId, filePath)
+        if (result.success && result.agentTaskId) {
+          addMessage('system', `重摘要任务已启动。请到「解析任务」面板查看进度。`)
+        } else {
+          addMessage('system', `启动失败`)
+        }
+      } catch (e: any) {
+        addMessage('system', `启动失败: ${e.message || e}`)
+      }
+      return
+    }
+    // 未识别的 /presummary 子命令 → 显示提示
+    if (/^\/presummary\s+.+/i.test(text)) {
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('system',
+        '未识别的 /presummary 命令。可用命令:\n'
+        + '- `/presummary` 查看概况\n'
+        + '- `/presummary files P0/P1/P2 [页码]` 查看文件列表\n'
+        + '- `/presummary start P0/P1/P2 (-n N)` 启动预摘要\n'
+        + '- `/presummary get/delete/rerun <文件路径>` 操作单文件')
+      return
+    }
+    if (/^\/help$/i.test(text) || text === '/帮助') {
       addMessage('user', text)
       userInput.value = ''
       addMessage('assistant', HELP_TEXT)
@@ -635,7 +801,9 @@ watch(() => cmdStore.eventSeq, () => {
           v-if="hasMoreMessages"
           class="ai-messages-more"
           @click="showMoreMessages"
-        >显示更早消息 ({{ messages.length - messagePageSize }} 条)</div>
+        >
+          显示更早消息 ({{ messages.length - messagePageSize }} 条)
+        </div>
         <div
           v-for="msg in displayedMessages"
           :key="msg.id"
@@ -655,7 +823,9 @@ watch(() => cmdStore.eventSeq, () => {
               :key="si"
               class="ai-suggest-chip"
               @click="userInput = sug.command; handleSend()"
-            >{{ sug.label }}</button>
+            >
+              {{ sug.label }}
+            </button>
           </div>
         </div>
       </div>
@@ -665,7 +835,9 @@ watch(() => cmdStore.eventSeq, () => {
         v-if="showCmdConfirm"
         class="ai-cmd-confirm"
       >
-        <div class="ai-cmd-title">🔧 即将执行指令</div>
+        <div class="ai-cmd-title">
+          🔧 即将执行指令
+        </div>
         <code class="ai-cmd-text">{{ cmdConfirmData.text }}</code>
         <div class="ai-cmd-args">
           <span
@@ -688,11 +860,15 @@ watch(() => cmdStore.eventSeq, () => {
           <button
             class="ai-cmd-btn primary"
             @click="handleCmdConfirm"
-          >确认执行</button>
+          >
+            确认执行
+          </button>
           <button
             class="ai-cmd-btn"
             @click="showCmdConfirm = false"
-          >取消</button>
+          >
+            取消
+          </button>
         </div>
       </div>
 
@@ -725,7 +901,9 @@ watch(() => cmdStore.eventSeq, () => {
         <button
           class="ai-selection-clear"
           @click="selectionStore.clearAll()"
-        >清空</button>
+        >
+          清空
+        </button>
       </div>
 
       <!-- 输入区 -->

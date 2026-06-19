@@ -328,6 +328,29 @@ def create_default_router(
         description="按需 LLM 分析用户选中的组件，提取组件名称和功能概要，结果写入 SQLite。支持单组件和批量分析。",
     ))
 
+    # ── presummary_files 路由（文件预摘要） ──
+    def _build_presummary_tools(ctx: dict) -> ToolRegistry:
+        from .tool_factory import build_agentic_component_tools
+        from .sandbox import PathSandbox
+        ps = PathSandbox(project_root) if project_root else None
+        return build_agentic_component_tools(
+            project_root=project_root,
+            project_db=project_db,
+            path_sandbox=ps,
+            project_id=ctx.get("project_id", ""),
+            task_id=ctx.get("task_id", ""),
+            multi_db=multi_db,
+            concurrency=ctx.get("subagent_concurrency", 1),
+        )
+
+    from .workflows.pre_summary import PreSummaryWorkflow
+    router.register("presummary_files", RouteEntry(
+        workflow_class=PreSummaryWorkflow,
+        tool_builder=_build_presummary_tools,
+        context_transformer=None,
+        description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析",
+    ))
+
     # ── agentic_analyze_components 路由（Agentic 模式） ──
     def _build_agentic_component_tools(ctx: dict) -> ToolRegistry:
         from .tool_factory import build_agentic_component_tools
@@ -337,6 +360,10 @@ def create_default_router(
             project_root=project_root,
             project_db=project_db,
             path_sandbox=ps,
+            project_id=ctx.get("project_id", ""),
+            task_id=ctx.get("task_id", ""),
+            multi_db=multi_db,
+            concurrency=ctx.get("subagent_concurrency", 1),
         )
 
     def _agentic_component_context_transform(ctx: dict) -> dict:

@@ -318,7 +318,12 @@ defineExpose({ loadGroups })
         @click.stop
       >
         <h3>{{ t('group.newGroup') }}</h3>
-        <div v-if="errorMsg" class="dialog-error">{{ errorMsg }}</div>
+        <div
+          v-if="errorMsg"
+          class="dialog-error"
+        >
+          {{ errorMsg }}
+        </div>
         <div class="dialog-field">
           <label>{{ t('group.groupName') }}</label>
           <input
@@ -373,7 +378,12 @@ defineExpose({ loadGroups })
         @click.stop
       >
         <h3>{{ t('common.edit') }}</h3>
-        <div v-if="errorMsg" class="dialog-error">{{ errorMsg }}</div>
+        <div
+          v-if="errorMsg"
+          class="dialog-error"
+        >
+          {{ errorMsg }}
+        </div>
         <div class="dialog-field">
           <label>{{ t('group.groupName') }}</label>
           <input

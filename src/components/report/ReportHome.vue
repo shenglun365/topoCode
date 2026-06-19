@@ -35,7 +35,7 @@ const props = defineProps<{
 const projectId = computed(() => projectStore.selectedProjectId || taskDetail.value?.projectId || '')
 
 const emit = defineEmits<{
-  'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string; regenerationType?: 'community' | 'overall' }]
+  'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }]
 }>()
 
 const loading = ref(true)
@@ -137,7 +137,6 @@ async function handleCommunityMD(params: {
     parentLevel: params.parentLevel,
     parentCommId: params.parentCommId,
     parentEdgeType: params.parentEdgeType,
-    regenerationType: 'community',
   })
 }
 async function loadData() {
@@ -231,27 +230,6 @@ async function saveSummary() {
     console.error('[ReportHome] saveSummary error:', e)
   }
 }
-
-const generatingSummary = ref(false)
-
-async function reGenerateSummary() {
-  const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
-  if (!pid || generatingSummary.value) return
-  generatingSummary.value = true
-  try {
-    const result = await reportStore.generateProjectSummary(pid)
-    if (result?.summary) {
-      projectSummaryText.value = result.summary
-      projectSummaryDate.value = result.generated_at || ''
-    }
-  } catch (e: any) {
-    console.error('[ReportHome] reGenerateSummary error:', e)
-  } finally {
-    generatingSummary.value = false
-  }
-}
-
-
 
 
 
@@ -443,14 +421,6 @@ watch(() => props.taskId, loadData)
             <DocumentMagnifyingGlassIcon class="w-5 h-5" />
             <span>{{ t('report.aiSummary') }}</span>
             <div class="summary-dialog-spacer" />
-            <button
-              v-if="!editingSummary"
-              class="btn btn-ghost btn-xs"
-              :disabled="generatingSummary"
-              @click="reGenerateSummary"
-            >
-              {{ generatingSummary ? t('common.generating', '生成中…') : t('report.pipeline.generateProjectSummary', '重新生成') }}
-            </button>
             <button
               v-if="!editingSummary"
               class="btn btn-ghost btn-xs"

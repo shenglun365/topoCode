@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ArrowLeftIcon, ArrowPathIcon, GlobeAltIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import { ArrowLeftIcon, ArrowPathIcon, GlobeAltIcon, PencilIcon } from '@heroicons/vue/24/outline'
 import { useComponentId } from '@/composables/useComponentId'
 
 defineProps<{
   title: string
   canOpenInBrowser: boolean
-  canRegenerate: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   refresh: []
   'open-browser': []
-  'open-regen-dialog': [mode?: 'full' | 'mermaid' | 'plantuml']
+  edit: []
 }>()
 
 const { t } = useI18n()
@@ -53,12 +52,11 @@ const { showId, componentId } = useComponentId('ST-001')
         <span>{{ t('settings.openInBrowser') }}</span>
       </button>
       <button
-        v-if="canRegenerate"
         class="btn btn-ghost btn-sm"
-        @click="emit('open-regen-dialog')"
+        @click="emit('edit')"
       >
-        <SparklesIcon class="w-3.5 h-3.5" />
-        <span>{{ t('report.regenerate') }}</span>
+        <PencilIcon class="w-3.5 h-3.5" />
+        <span>{{ t('common.edit') }}</span>
       </button>
     </div>
   </div>

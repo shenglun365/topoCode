@@ -43,8 +43,7 @@ const VISIBLE_TEMPLATE_IDS = new Set([
   'report_overall_architecture',
   'community_analyze',
   'community_name',
-  'diagram_regenerate_mermaid',
-  'diagram_regenerate_plantuml',
+
 ])
 
 const editDialog = ref(false)
@@ -352,7 +351,12 @@ onMounted(() => {
               <XMarkIcon class="w-4 h-4" />
             </button>
           </div>
-          <div v-if="saveError" class="dialog-error">{{ saveError }}</div>
+          <div
+            v-if="saveError"
+            class="dialog-error"
+          >
+            {{ saveError }}
+          </div>
 
           <!-- 子 Tab 切换 -->
           <div class="edit-tabs">

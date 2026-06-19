@@ -4,11 +4,22 @@
 
 import json
 import logging
+import os
 from typing import Any, Optional
 
 from ..tools import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _rel_path(path: str, project_root: Optional[str]) -> str:
+    """将绝对路径转为相对路径（减少 LLM 上下文 token 开销）"""
+    if project_root and os.path.isabs(path):
+        try:
+            return os.path.relpath(path, project_root)
+        except ValueError:
+            return path
+    return path
 
 
 class GetCommunitySubgraphTool(AgentTool):
@@ -19,8 +30,9 @@ class GetCommunitySubgraphTool(AgentTool):
     category = "graph"
     llm_visible = True
 
-    def __init__(self, project_db=None):
+    def __init__(self, project_db=None, project_root=""):
         self._db = project_db
+        self._project_root = project_root
 
     def to_openai_schema(self) -> Optional[dict]:
         return {
@@ -48,6 +60,23 @@ class GetCommunitySubgraphTool(AgentTool):
         if not self._db:
             return ToolResult.fail("数据库未初始化")
         try:
+            # 兼容 LLM 传入字符串类型的 depth
+            if not isinstance(depth, int):
+                try:
+                    depth = int(depth)
+                except (TypeError, ValueError):
+                    depth = 2
+
+            # 当模型错误地将 comm_id 传给 task_id 时，自动从 communify 记录中解析真实 task_id
+            if task_id and task_id.startswith("comm-"):
+                resolved = self._db.execute(
+                    "SELECT task_id FROM graph_doc WHERE comm_id=? LIMIT 1",
+                    (task_id,)
+                ).fetchone()
+                if resolved:
+                    task_id = resolved["task_id"]
+                    logger.info(f"[GetCommunitySubgraphTool] auto-resolved task_id={task_id} from comm_id={comm_id}")
+
             # Try with provided values first, then fallback
             candidates = []
             if edge_type and comm_lv:
@@ -75,7 +104,12 @@ class GetCommunitySubgraphTool(AgentTool):
                         d = dict(r)
                         if d.get("node_list"):
                             try:
-                                result["nodes"].extend(json.loads(d["node_list"]))
+                                nodes = json.loads(d["node_list"])
+                                # 字符串条目是文件路径，转为相对路径
+                                result["nodes"].extend(
+                                    _rel_path(n, self._project_root) if isinstance(n, str) else n
+                                    for n in nodes
+                                )
                             except json.JSONDecodeError:
                                 pass
                         if d.get("edge_list"):

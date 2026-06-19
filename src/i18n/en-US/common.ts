@@ -194,5 +194,7 @@ export default { common: {
   checkServer: 'Check server status',
   default: 'Default',
   optional: 'Optional',
+  last7Days: 'Last 7 days',
+  last30Days: 'Last 30 days',
 },
 }

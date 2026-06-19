@@ -15,9 +15,31 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from . import AgentChatResponse, ToolCall
-from .fallback_extractors import extract_fallback_tool_calls, extract_fallback_content
+from .fallback_extractors import (
+    extract_fallback_tool_calls, extract_fallback_content, clean_model_content,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_tool_args(args: dict) -> dict:
+    """规范化模型端的工具调用参数，避免下游工具感知序列化差异。
+
+    Qwen3.5 MTP 可能不严格遵循 OpenAI schema，
+    例如将数组序列化为 JSON 字符串: '["a","b"]' 而非原生 ["a","b"]。
+    """
+    sanitized = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, (list, dict)):
+                    sanitized[k] = parsed
+                    continue
+            except (json.JSONDecodeError, ValueError):
+                pass
+        sanitized[k] = v
+    return sanitized
 
 
 class ToolCallingStrategy(ABC):
@@ -137,7 +159,7 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
                 args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
             except json.JSONDecodeError:
                 args = {"_raw": args_raw}
-            tool_calls.append(ToolCall(name=name, arguments=args, id=fid))
+            tool_calls.append(ToolCall(name=name, arguments=_sanitize_tool_args(args), id=fid))
 
         finish_reason = raw.get("finish_reason", "")
 
@@ -149,10 +171,19 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
             if fb_calls:
                 tool_calls = fb_calls
                 finish_reason = "tool_calls"
+                logger.info(f"[NativeStrategy] 从 reasoning_content 解析到 {len(fb_calls)} 个 XML 工具调用")
             else:
                 clean = extract_fallback_content(reasoning_content)
                 if clean:
                     content = clean
+                    logger.info(f"[NativeStrategy] 从 reasoning_content 提取 fallback 文本: {len(clean)} 字符")
+                else:
+                    logger.warning(f"[NativeStrategy] reasoning_content 无有效内容 (len={len(reasoning_content)})")
+        elif not tool_calls and not content:
+            logger.warning("[NativeStrategy] LLM 返回空内容且无 tool_calls")
+
+        # 清理模型输出格式（去除代码围栏等）
+        content = clean_model_content(content)
 
         return AgentChatResponse(
             content=content,
@@ -224,6 +255,7 @@ class TextFallbackToolCallingStrategy(ToolCallingStrategy):
         text = text or ""
         tool_calls = extract_fallback_tool_calls(text)
         clean_content = extract_fallback_content(text) if tool_calls else text
+        clean_content = clean_model_content(clean_content)
 
         return AgentChatResponse(
             content=clean_content,

@@ -204,7 +204,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
             "community_llm_results",
             "ast_data", "dependencies", "call_chains", "components",
-            "component_analysis", "ai_qa"
+            "component_analysis", "ai_qa", "file_summaries"
         ]
         for table in tables_to_clear:
             before = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -258,7 +258,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         tables = [
             "ast_data", "dependencies", "call_chains", "community_hierarchy",
             "community_llm_results", "graph_node", "graph_edge", "graph_doc",
-            "components", "component_analysis", "ai_qa",
+            "components", "component_analysis", "ai_qa", "file_summaries",
         ]
         counts = {}
         for table in tables:
@@ -551,7 +551,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     @server.register("analysis.saveCommunityResult")
     def save_community_result(task_id=None, taskId=None, edge_type=None, edgeType=None,
                                 comm_lv=None, commLv=None, comm_id=None, commId=None,
-                                name=None, summary=None, mermaid=None, plantuml=None,
+                                name=None, summary=None,
                                 model_id=None, modelId=None, template_id=None, templateId=None):
         from zmq_server import current_call_id
         _cid = current_call_id.get()
@@ -572,12 +572,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError(f"Task {tid} not found")
         project_db = multi_db.get_project_db(task["project_id"])
         store = AnalysisStore(project_db)
-        logger.info("[analysis.saveCommunityResult] validated name=%s summary_len=%d mermaid_len=%d plantuml_len=%d model_id=%s template_id=%s",
-                     name, len(summary or ''), len(mermaid or ''), len(plantuml or ''), mid, tpid)
+        logger.info("[analysis.saveCommunityResult] validated name=%s summary_len=%d model_id=%s template_id=%s",
+                     name, len(summary or ''), mid, tpid)
         validated = {
             "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
             "name": name, "summary": summary,
-            "mermaid": mermaid, "plantuml": plantuml,
             "model_id": mid, "template_id": tpid,
         }
         store.bulk_insert_llm_results([validated])
@@ -2013,7 +2012,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                 symbol_names.append(name)
                     edge_type_label = "依赖关系 (INCLUDE)" if c.get("edgeType") == "INCLUDE" else "调用关系 (CALL)" if c.get("edgeType") == "CALL" else "关系"
                     ctx_parts.append(f"边数: {doc['edge_count'] or 0} ({edge_type_label})")
-                    ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(sorted(file_paths))}")
+                    rel_file_paths = sorted(
+                        os.path.relpath(fp, project_root) if project_root and os.path.isabs(fp) else fp
+                        for fp in file_paths
+                    )
+                    ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(rel_file_paths)}")
                     if symbol_names:
                         ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
                     # 边关系上下文
@@ -2130,10 +2133,292 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         s.clear_agent_task_history(pid, tid)
         return {"success": True}
 
+    # ==================== 文件预摘要 ====================
+
+    def _compute_file_ranks(task_id: str, project_db, components: list) -> dict:
+        """计算文件重要度评分并分批次。"""
+        from collections import Counter
+        import json as _rj
+
+        # 1. 收集所有组件 node_list → 文件路径
+        file_to_comms: dict[str, set[str]] = {}
+        file_edges: Counter = Counter()
+        file_sizes: dict[str, int] = {}
+        comm_quality: dict[str, float] = {}
+
+        for c in components:
+            cid = c.get("id", "")
+            meta = c.get("metadata", {}) or {}
+            comm_quality[cid] = float(meta.get("qualityScore", 0) or 0)
+            try:
+                doc = project_db.execute(
+                    "SELECT node_list FROM graph_doc WHERE task_id=? AND comm_id=? LIMIT 1",
+                    (task_id, cid)
+                ).fetchone()
+                if doc and doc["node_list"]:
+                    raw = _rj.loads(doc["node_list"]) if isinstance(doc["node_list"], str) else doc["node_list"]
+                    for item in raw:
+                        if isinstance(item, str) and item.strip():
+                            file_to_comms.setdefault(item, set()).add(cid)
+            except Exception:
+                pass
+
+        # 2. 查文件大小
+        if file_to_comms:
+            try:
+                for row in project_db.execute(
+                    "SELECT file_path, size FROM source_files WHERE file_path IN ({})".format(
+                        ",".join("?" for _ in file_to_comms)
+                    ), list(file_to_comms.keys())
+                ).fetchall():
+                    file_sizes[row["file_path"]] = row["size"] or 0
+            except Exception:
+                pass
+
+        # 3. 查依赖边数
+        try:
+            for row in project_db.execute(
+                "SELECT g.file_path, COUNT(*) as cnt FROM dependencies d "
+                "JOIN graph_node g ON g.id = d.source_id AND g.task_id = ? "
+                "WHERE g.file_path IN ({}) GROUP BY g.file_path".format(
+                    ",".join("?" for _ in file_to_comms)
+                ), (task_id,) + tuple(file_to_comms.keys())
+            ).fetchall():
+                file_edges[row["file_path"]] = row["cnt"]
+        except Exception:
+            pass
+
+        # 4. 计算评分
+        scored = []
+        for fp, comms in file_to_comms.items():
+            cross = len(comms)
+            edges = file_edges.get(fp, 0)
+            size = file_sizes.get(fp, 0)
+            max_quality = max((comm_quality.get(c, 0) for c in comms), default=0)
+            is_large = 1 if size > 10000 else 0
+            score = cross * 10 + edges * 5 + is_large * 3 + int(max_quality * 100) * 2
+            if score >= 20:
+                batch = "P0"
+            elif score >= 10:
+                batch = "P1"
+            else:
+                batch = "P2"
+            scored.append({
+                "file_path": fp, "score": score, "cross": cross,
+                "edges": edges, "size": size, "is_large": is_large,
+                "quality": max_quality, "batch": batch,
+            })
+
+        scored.sort(key=lambda x: (-x["score"], -x["cross"], -x["edges"]))
+        return {
+            "files": scored,
+            "counts": {"P0": sum(1 for f in scored if f["batch"] == "P0"),
+                        "P1": sum(1 for f in scored if f["batch"] == "P1"),
+                        "P2": sum(1 for f in scored if f["batch"] == "P2")},
+        }
+
+    @server.register("analysis.getPreSummaryStatus")
+    def get_pre_summary_status(task_id=None, taskId=None):
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
+
+        # 获取所有已分析的 L0 组件
+        cascades = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+        l0_items = []
+        for l in cascades.get("levels", []):
+            if l.get("lv") == "L0":
+                l0_items = l.get("items", [])
+                break
+        comps = [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
+                 for it in l0_items]
+
+        rank_data = _compute_file_ranks(tid, project_db, comps)
+
+        # 查已缓存文件数
+        from agent_workflow.file_summary_cache import FileSummaryCache
+        cache = FileSummaryCache(project_db, pid)
+        cached_count = 0
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(*) as cnt FROM file_summaries WHERE project_id=?", (pid,)
+            ).fetchone()
+            cached_count = row["cnt"] if row else 0
+        except Exception:
+            pass
+
+        return {
+            "counts": rank_data["counts"], "total_files": len(rank_data["files"]),
+            "cached_count": cached_count, "project_root": project_root,
+        }
+
+    @server.register("analysis.listPreSummaryFiles")
+    def list_pre_summary_files(task_id=None, taskId=None, batch="P0",
+                                page=1, page_size=20):
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        cascades = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+        l0_items = []
+        for l in cascades.get("levels", []):
+            if l.get("lv") == "L0":
+                l0_items = l.get("items", [])
+                break
+        comps = [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
+                 for it in l0_items]
+
+        rank_data = _compute_file_ranks(tid, project_db, comps)
+        batch_files = [f for f in rank_data["files"] if f["batch"] == batch]
+        total = len(batch_files)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_items = batch_files[start:end]
+
+        return {
+            "batch": batch, "page": page, "page_size": page_size,
+            "total": total, "files": page_items,
+        }
+
+    @server.register("analysis.startPreSummary")
+    def start_pre_summary(task_id=None, taskId=None, batch="P0", limit=0):
+        """启动预摘要 agent 任务"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        cascades = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
+        l0_items = []
+        for l in cascades.get("levels", []):
+            if l.get("lv") == "L0":
+                l0_items = l.get("items", [])
+                break
+        comps = [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
+                 for it in l0_items]
+
+        rank_data = _compute_file_ranks(tid, project_db, comps)
+        batch_files = [f["file_path"] for f in rank_data["files"]
+                       if f["batch"] == batch]
+        if limit > 0:
+            batch_files = batch_files[:limit]
+        if not batch_files:
+            return {"success": False, "error": f"批次 {batch} 无文件"}
+
+        context = {
+            "task_id": tid,
+            "project_id": pid,
+            "files": batch_files,
+        }
+
+        from agent_workflow.router import create_default_router
+        project_root = _get_project_root(pid)
+        project_summary = _get_project_summary(pid)
+        router = create_default_router(
+            project_root=project_root,
+            project_db=project_db,
+            multi_db=multi_db,
+            task_id=tid,
+            project_summary=project_summary,
+        )
+
+        def _cb(result):
+            logger.info(f"[startPreSummary] done: {result}")
+
+        agent_id = router.dispatch(
+            "presummary_files", tid, context, on_complete=_cb)
+
+        from agent_workflow.agent_queue import get_global_queue
+        queue = get_global_queue()
+        return {"success": True, "agentTaskId": agent_id,
+                "fileCount": len(batch_files)}
+
+    @server.register("analysis.getFileSummary")
+    def get_file_summary(task_id=None, taskId=None, file_path=None):
+        tid = task_id or taskId
+        if not tid or not file_path:
+            raise ValueError("task_id and file_path are required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
+
+        from agent_workflow.file_summary_cache import FileSummaryCache
+        cache = FileSummaryCache(project_db, pid)
+        detail = cache.get_detail(file_path)
+        if detail:
+            return {"found": True, **detail}
+        return {"found": False}
+
+    @server.register("analysis.deleteFileSummary")
+    def delete_file_summary(task_id=None, taskId=None, file_path=None):
+        tid = task_id or taskId
+        if not tid or not file_path:
+            raise ValueError("task_id and file_path are required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+
+        from agent_workflow.file_summary_cache import FileSummaryCache
+        cache = FileSummaryCache(project_db, pid)
+        deleted = cache.delete(file_path)
+        return {"success": True, "deleted": deleted}
+
+    @server.register("analysis.rerunFileSummary")
+    def rerun_file_summary(task_id=None, taskId=None, file_path=None):
+        """单个文件重跑摘要 (启动 agent 任务强制刷新)。"""
+        tid = task_id or taskId
+        if not tid or not file_path:
+            raise ValueError("task_id and file_path are required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
+
+        context = {"task_id": tid, "project_id": pid, "files": [file_path]}
+
+        from agent_workflow.router import create_default_router
+        project_summary = _get_project_summary(pid)
+        router = create_default_router(
+            project_root=project_root, project_db=project_db,
+            multi_db=multi_db, task_id=tid, project_summary=project_summary,
+        )
+        agent_id = router.dispatch("presummary_files", tid, context)
+        return {"success": True, "agentTaskId": agent_id, "fileCount": 1}
+
     @server.register("analysis.analyzeComponents")
     def analyze_components(task_id=None, taskId=None, components=None,
                            language=None, language_=None, concurrency=None,
-                           agentic=None):
+                           agentic=None, max_turns=None, maxTurns=None,
+                           summary_model_id=None, summaryModelId=None,
+                           subagent_concurrency=None, subagentConcurrency=None):
         """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
         tid = task_id or taskId
         if not tid:
@@ -2144,6 +2429,33 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         lang = language or language_ or ""
         conc = max(1, min(int(concurrency or 1), 5))
         agentic_mode = bool(agentic)
+
+        # SubAgent 并发（文件摘要 LLM 调用并行数）
+        raw_sub_conc = subagent_concurrency if subagent_concurrency is not None else subagentConcurrency
+        sub_conc = max(1, min(int(raw_sub_conc or 1), 10))
+
+        # 解析轮次参数 (-r N)
+        turns = 30
+        raw_turns = max_turns if max_turns is not None else maxTurns
+        if raw_turns is not None:
+            try:
+                turns = int(raw_turns)
+            except (TypeError, ValueError):
+                return {"success": False, "error": f"max_turns 必须是整数 (1-30)，收到: {raw_turns}"}
+        if turns < 1 or turns > 30:
+            return {"success": False, "error": f"max_turns 必须在 1-30 之间，收到: {turns}"}
+
+        # 解析摘要模型
+        summary_model = summary_model_id or summaryModelId or ""
+        if summary_model and multi_db:
+            try:
+                sm = multi_db.main_db.fetchone(
+                    "SELECT id FROM model_configs WHERE id=?", (summary_model,)
+                )
+                if not sm:
+                    return {"success": False, "error": f"摘要模型未配置: {summary_model}"}
+            except Exception as e:
+                return {"success": False, "error": f"摘要模型校验失败: {e}"}
 
         try:
             store = TaskStore(multi_db.main_db)
@@ -2199,6 +2511,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         if qs is not None:
                             ctx_parts.append(f"质量分: {qs:.4f}")
 
+                    file_paths = set()
                     try:
                         doc = project_db.execute(
                             "SELECT node_list, edge_list, edge_count FROM graph_doc WHERE task_id=? AND comm_id=?",
@@ -2227,7 +2540,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                         symbol_names.append(f"{name}({kind})")
                                     elif name and kind not in ("file", "import", ""):
                                         symbol_names.append(name)
-                            ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(sorted(file_paths))}")
+                            rel_file_paths = sorted(
+                                os.path.relpath(fp, project_root) if project_root and os.path.isabs(fp) else fp
+                                for fp in file_paths
+                            )
+                            ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(rel_file_paths)}")
                             if symbol_names:
                                 ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
                             # 边关系上下文
@@ -2275,13 +2592,40 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         except Exception:
                             pass
 
-                    enriched_comps.append({
-                        "id": cid,
-                        "name": c.get("name", cid),
-                        "type": c.get("type", "community"),
-                        "metadata": meta,
-                        "context": "\n".join(ctx_parts),
-                    })
+                    if agentic_mode:
+                        # Agentic 模式精简上下文
+                        agentic_parts = ctx_parts[:7]  # 前 7 条: ID/名称/类型/节点数/文件数/质量分/边数
+                        agentic_parts.append(f"任务ID: {tid}")
+                        if file_paths:
+                            from collections import Counter
+                            dirs = Counter(
+                                os.path.relpath(os.path.dirname(fp), project_root)
+                                if project_root and os.path.isabs(fp) else os.path.dirname(fp)
+                                for fp in file_paths
+                            )
+                            dir_summary = ", ".join(
+                                f"{d} ({c})" for d, c in dirs.most_common(10)
+                            )
+                            agentic_parts.append(f"文件分布: {dir_summary}")
+                        agentic_parts.append(
+                            "工具引导: 使用 summarize_file 读取并摘要关键文件; "
+                            "get_community_subgraph 查看完整子图结构"
+                        )
+                        enriched_comps.append({
+                            "id": cid,
+                            "name": c.get("name", cid),
+                            "type": c.get("type", "community"),
+                            "metadata": meta,
+                            "context": "\n".join(agentic_parts),
+                        })
+                    else:
+                        enriched_comps.append({
+                            "id": cid,
+                            "name": c.get("name", cid),
+                            "type": c.get("type", "community"),
+                            "metadata": meta,
+                            "context": "\n".join(ctx_parts),
+                        })
                     logger.info(
                         f"[analyzeComponents] enriched {cid} context_len={len(enriched_comps[-1]['context'])} "
                         f"ctx_begin={enriched_comps[-1]['context'][:400]!r}"
@@ -2293,39 +2637,43 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             from store.analysis_store import AnalysisStore
 
             def _save_fn(result):
-                s = AnalysisStore(project_db)
-                comp_id = result.get("component_id", "")
-                comp_type = result.get("component_type", "community")
-                aname = result.get("analyzed_name", "") or comp_id
-                asummary = result.get("functional_summary", "")
-                s.save_component_analysis({
-                    "task_id": result.get("task_id", tid),
-                    "component_id": comp_id,
-                    "component_type": comp_type,
-                    "analyzed_name": aname,
-                    "functional_summary": asummary,
-                    "status": result.get("status", "completed"),
-                })
-                # 同步写入 community_llm_results 使标签视图可见
-                if comp_type == "community" and comp_id.startswith("comm-"):
-                    parts = comp_id.split("-")
-                    edge_type = "INCLUDE"
-                    comm_lv = "L0"
-                    try:
-                        if len(parts) >= 4:
-                            edge_key = parts[2]
-                            edge_type = "INCLUDE" if edge_key == "incl" else "CALL" if edge_key == "call" else "INCLUDE"
-                            comm_lv = parts[3] if parts[3].startswith("L") else "L0"
-                    except Exception:
-                        pass
-                    s.bulk_insert_llm_results([{
+                try:
+                    s = AnalysisStore(project_db)
+                    comp_id = result.get("component_id", "")
+                    comp_type = result.get("component_type", "community")
+                    aname = result.get("analyzed_name", "") or comp_id
+                    asummary = result.get("functional_summary", "")
+                    s.save_component_analysis({
                         "task_id": result.get("task_id", tid),
-                        "edge_type": edge_type,
-                        "comm_lv": comm_lv,
-                        "comm_id": comp_id,
-                        "name": aname,
-                        "summary": asummary,
-                    }])
+                        "component_id": comp_id,
+                        "component_type": comp_type,
+                        "analyzed_name": aname,
+                        "functional_summary": asummary,
+                        "status": result.get("status", "completed"),
+                    })
+                    logger.info(f"[analyzeComponents] _save_fn saved component_analysis: {comp_id} status={result.get('status','completed')}")
+                    # 同步写入 community_llm_results 使标签视图可见
+                    if comp_type == "community" and comp_id.startswith("comm-"):
+                        parts = comp_id.split("-")
+                        edge_type = "INCLUDE"
+                        comm_lv = "L0"
+                        try:
+                            if len(parts) >= 4:
+                                edge_key = parts[2]
+                                edge_type = "INCLUDE" if edge_key == "incl" else "CALL" if edge_key == "call" else "INCLUDE"
+                                comm_lv = parts[3] if parts[3].startswith("L") else "L0"
+                        except Exception:
+                            pass
+                        s.bulk_insert_llm_results([{
+                            "task_id": result.get("task_id", tid),
+                            "edge_type": edge_type,
+                            "comm_lv": comm_lv,
+                            "comm_id": comp_id,
+                            "name": aname,
+                            "summary": asummary,
+                        }])
+                except Exception as e:
+                    logger.error(f"[analyzeComponents] _save_fn failed: {e}", exc_info=True)
 
             router = create_default_router(
                 project_root=project_root, project_db=project_db, multi_db=multi_db,
@@ -2335,6 +2683,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
             context = {
                 "task_id": tid,
+                "project_id": pid,
                 "language": lang,
                 "concurrency": conc,
                 "components": [
@@ -2350,6 +2699,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             }
             if agentic_mode:
                 context["_save_fn"] = _save_fn
+                context["max_turns"] = turns
+                context["subagent_concurrency"] = sub_conc
+                if summary_model:
+                    context["summary_model_id"] = summary_model
             for c in context["components"]:
                 logger.info(
                     f"[analyzeComponents] component id={c['id']} type={c['type']} "

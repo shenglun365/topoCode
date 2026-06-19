@@ -10,7 +10,7 @@ fallback_extractors — 多格式文本工具调用提取器。
 import json
 import logging
 import re
-from typing import Callable, Optional
+from typing import Callable
 
 from . import ToolCall
 
@@ -118,3 +118,36 @@ def extract_fallback_content(text: str) -> str:
     if not text:
         return ""
     return _RE_ALL_MARKERS.sub('', text).strip()
+
+
+# ─── 内容清洗（与工具调用无关的纯文本后处理） ───
+
+# 代码围栏正则：```json\n...\n```、```...```、`...`
+_RE_FENCE = re.compile(
+    r'^(`{3,})(?:\w+)?\n(.*?)\n\1$|^`{3,}(?:\w+)?\n(.*?)`{3,}$',
+    re.DOTALL,
+)
+_RE_SINGLE_FENCE = re.compile(r'^```[\w]*\n(.*)```$', re.DOTALL)
+_RE_JSON_PREFIX = re.compile(r'^json\s*', re.IGNORECASE)
+
+
+def clean_model_content(text: str) -> str:
+    """清洗模型返回的原始 content，去除格式包裹。
+
+    不同模型/策略的输出格式可能不同：
+    - OpenAI/Qwen 可能加 ```json ... ``` 围栏
+    - 部分模型可能加 `json` 前缀
+
+    此函数在 Strategy 层调用，使下游 workflow 无需关心模型格式差异。
+    """
+    if not text:
+        return ""
+    text = text.strip()
+    # 去除代码围栏：```json\n...\n```、```...```
+    for prefix in ("```", "`"):
+        if text.startswith(prefix):
+            rest = text[len(prefix):].strip()
+            if rest.lower().startswith("json"):
+                rest = rest[4:].strip()
+            text = rest.rstrip("`").strip()
+    return text

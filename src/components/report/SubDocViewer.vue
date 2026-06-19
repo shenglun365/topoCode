@@ -16,7 +16,6 @@ import { useCommunityStore } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
 import { communityLabel } from '@/utils/communityLabel'
 import SubDocToolbar from './SubDocToolbar.vue'
-import SubDocRegenDialog from './SubDocRegenDialog.vue'
 import SubDocContent from './SubDocContent.vue'
 const { showId, componentId } = useComponentId('RP-010')
 
@@ -35,7 +34,6 @@ const props = defineProps<{
   parentCommId?: string
   parentEdgeType?: string
   projectId?: string
-  regenerationType?: 'community' | 'overall'
 }>()
 
 const emit = defineEmits<{
@@ -55,104 +53,61 @@ const doc = ref<{
 } | null>(null)
 const httpPort = ref(3456)
 
-// 重新生成
-const showRegenDialog = ref(false)
+// 编辑模式
+const isEditing = ref(false)
+const editContent = ref('')
 const saveError = ref('')
+const isSaving = ref(false)
 
-async function handleRegenerated(payload: { content: string; mode: 'full' | 'mermaid' | 'plantuml' }) {
+function startEdit() {
   if (!doc.value) return
-  if (payload.mode === 'full') {
-    if (props.regenerationType === 'community' && props.parentCommId) {
-      const name = doc.value.title || props.parentCommId
-      doc.value.content = `# 社区: ${name}\n\n**ID**: ${props.parentCommId}\n\n${payload.content}`
-    } else {
-      doc.value.content = payload.content
-    }
-  } else {
-    const lang = payload.mode
-    const existing = payload.mode === 'mermaid' ? existingMermaid.value : existingPlantuml.value
-    if (existing) {
-      const oldBlock = '```' + lang + '\n' + existing + '\n```'
-      const newBlock = '```' + lang + '\n' + payload.content + '\n```'
-      doc.value.content = doc.value.content.replace(oldBlock, newBlock)
-    }
-  }
-  showRegenDialog.value = false
+  editContent.value = doc.value.content
+  isEditing.value = true
+}
+
+async function saveEdit() {
+  if (!doc.value || !props.taskId || !props.projectId) return
+  isSaving.value = true
   saveError.value = ''
-  if (!props.taskId || !props.projectId) {
-    saveError.value = t('report.saveFailedNoProject')
-    return
-  }
   try {
-    if (props.regenerationType === 'overall') {
-      let finalContent = doc.value.content
-      if (props.taskId) {
-        const communities = communityStore.tasks[props.taskId]?.communities || []
-        const hasAppendix = finalContent.includes('## 组件附录')
-        if (!hasAppendix && communities.some(c => c.level === 'L0')) {
-          const appendixParts = ['', '---', '', '## 组件附录', '', '| 类型 | 名称 |', '|------|------|']
-          for (const et of ([{ key: 'CALL' as const, label: '调用' }, { key: 'INCLUDE' as const, label: '依赖' }])) {
-            for (const item of communities.filter(c => c.level === 'L0' && c.edgeType === et.key)) {
-              const name = (item.name || item.communityId).replace(/\|/g, '\\|').replace(/\n/g, ' ')
-              appendixParts.push(`| ${et.label} | [${name}](##community:${et.key}:${item.communityId}) |`)
-            }
-          }
-          appendixParts.push('')
-          finalContent += appendixParts.join('\n')
-        }
-      }
+    doc.value.content = editContent.value
+    if (doc.value.id) {
+      await ipc.report.updateSubDoc({ subDocId: doc.value.id, content: doc.value.content })
+    }
+    if (props.parentCommId && props.parentLevel && props.parentEdgeType) {
+      await communityStore.saveCommunityResult({
+        taskId: props.taskId, edgeType: props.parentEdgeType,
+        commLv: props.parentLevel, commId: props.parentCommId,
+        name: doc.value.title || props.parentCommId,
+        summary: doc.value.content,
+        modelId: '',
+        templateId: 'community_analyze',
+      })
+    } else {
       await ipc.report.saveOverallDoc({
         taskId: props.taskId,
-        title: doc.value.title || t('report.pipeline.overallArchitecture'),
-        content: finalContent,
+        title: doc.value.title || '',
+        content: doc.value.content,
       })
-      doc.value.content = finalContent
-    } else if (props.regenerationType === 'community') {
-      if (doc.value.id) {
-        await ipc.report.updateSubDoc({ subDocId: doc.value.id, content: doc.value.content })
-      }
-      if (props.parentCommId && props.parentLevel && props.parentEdgeType) {
-        const current =
-          await window.api?.analysis.getCommunityResult({
-            taskId: props.taskId, edgeType: props.parentEdgeType,
-            commLv: props.parentLevel, commId: props.parentCommId,
-          }).catch(() => null)
-        await communityStore.saveCommunityResult({
-          taskId: props.taskId, edgeType: props.parentEdgeType,
-          commLv: props.parentLevel, commId: props.parentCommId,
-          name: current?.name || props.parentCommId,
-          summary: payload.mode === 'full' ? payload.content : (current?.summary || ''),
-          mermaid: payload.mode === 'mermaid' ? payload.content : (current?.mermaid || ''),
-          plantuml: payload.mode === 'plantuml' ? payload.content : (current?.plantuml || ''),
-          modelId: current?.model_id,
-          templateId: current?.template_id || 'community_analyze',
-        })
-      }
     }
+    isEditing.value = false
   } catch (e: any) {
     saveError.value = `${t('report.saveFailed')}: ${e.message || String(e)}`
+  } finally {
+    isSaving.value = false
   }
 }
 
-const canRegenerate = computed(() => !!props.regenerationType && !!props.taskId && !!props.projectId)
-
-const existingMermaid = computed(() => {
-  if (!doc.value?.content) return ''
-  const m = doc.value.content.match(/```mermaid\n([\s\S]*?)```/)
-  return m ? m[1].trim() : ''
-})
-
-const existingPlantuml = computed(() => {
-  if (!doc.value?.content) return ''
-  const m = doc.value.content.match(/```plantuml\n([\s\S]*?)```/)
-  return m ? m[1].trim() : ''
-})
+function cancelEdit() {
+  isEditing.value = false
+  editContent.value = ''
+}
 
 // 加载文档
 async function loadDoc() {
   loading.value = true
   try {
-    if (props.regenerationType === 'community' && props.taskId && props.parentCommId && props.parentEdgeType && props.parentLevel) {
+    if (props.parentCommId && props.taskId && props.parentEdgeType && props.parentLevel) {
       const result = await window.api!.analysis.getCommunityResult({
         taskId: props.taskId, edgeType: props.parentEdgeType,
         commLv: props.parentLevel, commId: props.parentCommId,
@@ -204,8 +159,6 @@ async function loadDoc() {
           }
         } catch {}
 
-        if (result.mermaid) parts.push('', '```mermaid', result.mermaid, '```')
-        if (result.plantuml) parts.push('', '```plantuml', result.plantuml, '```')
         doc.value = {
           id: '', title: result.name || props.initialTitle || '',
           content: parts.join('\n'), templateId: '',
@@ -221,6 +174,13 @@ async function loadDoc() {
         doc.value = {
           id: '', title: props.initialTitle || '',
           content: props.initialContent, templateId: '', createdAt: '', updatedAt: '',
+        }
+      } else if (props.parentCommId) {
+        console.log('[SubDocViewer] fallback to hint for', props.parentCommId)
+        doc.value = {
+          id: '', title: props.parentCommId,
+          content: `# ${props.parentCommId}\n\n该组件暂无 LLM 分析结果，请先通过 AI 助手运行组件分析。`,
+          templateId: '', createdAt: '', updatedAt: '',
         }
       }
     }
@@ -298,11 +258,10 @@ watch(() => props.subDocId, () => {
       v-else
       :title="doc?.title || ''"
       :can-open-in-browser="canOpenInBrowser"
-      :can-regenerate="canRegenerate"
       @close="emit('close')"
       @refresh="loadDoc"
       @open-browser="openInBrowser"
-      @open-regen-dialog="showRegenDialog = true"
+      @edit="startEdit"
     />
 
     <!-- 保存错误提示 -->
@@ -315,7 +274,7 @@ watch(() => props.subDocId, () => {
 
     <!-- 预览模式 -->
     <div
-      v-if="doc"
+      v-if="doc && !isEditing"
       class="subdoc-preview"
     >
       <div class="doc-meta">
@@ -323,26 +282,38 @@ watch(() => props.subDocId, () => {
         <span v-if="doc.updatedAt">{{ t('common.updated') }}: {{ doc.updatedAt }}</span>
       </div>
       <SubDocContent
-        v-if="doc"
         :content="doc.content"
         :task-id="taskId"
         @navigate-community="(p: any) => emit('navigate-community', p)"
       />
     </div>
 
-    <SubDocRegenDialog
-      :visible="showRegenDialog"
-      :regeneration-type="regenerationType || 'community'"
-      :task-id="taskId || ''"
-      :project-id="projectId || ''"
-      :existing-mermaid="existingMermaid"
-      :existing-plantuml="existingPlantuml"
-      :parent-comm-id="parentCommId"
-      :parent-level="parentLevel"
-      :parent-edge-type="parentEdgeType"
-      @close="showRegenDialog = false"
-      @regenerated="handleRegenerated"
-    />
+    <!-- 编辑模式 -->
+    <div
+      v-if="doc && isEditing"
+      class="subdoc-edit"
+    >
+      <div class="edit-actions">
+        <button
+          class="btn btn-primary btn-xs"
+          :disabled="isSaving"
+          @click="saveEdit"
+        >
+          {{ isSaving ? t('common.saving') : t('common.save') }}
+        </button>
+        <button
+          class="btn btn-ghost btn-xs"
+          :disabled="isSaving"
+          @click="cancelEdit"
+        >
+          {{ t('common.cancel') }}
+        </button>
+      </div>
+      <textarea
+        v-model="editContent"
+        class="edit-textarea"
+      />
+    </div>
   </div>
 </template>
 
@@ -541,114 +512,16 @@ watch(() => props.subDocId, () => {
   outline: none;
 }
 
-/* 重新生成对话框 */
-.regen-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
+/* 编辑模式 */
+.edit-actions {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-}
-.regen-dialog {
-  width: 480px;
-  max-width: 90vw;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  display: flex;
-  flex-direction: column;
-}
-.regen-dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.regen-dialog-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.regen-dialog-body {
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.regen-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-.regen-mode-selector {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.regen-mode-option {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  transition: all 0.15s;
+  padding: 4px 0;
 }
-.regen-mode-option:hover {
-  border-color: var(--accent);
-}
-.regen-mode-option.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-.regen-submode-toggle {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.regen-submode-btn {
+.edit-textarea {
   flex: 1;
-  padding: 4px 8px;
-  font-size: 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: center;
-}
-.regen-submode-btn:hover {
-  border-color: var(--accent);
-}
-.regen-submode-btn.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
-}
-.regen-submode-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.regen-mode-option input[type="radio"] {
-  accent-color: var(--accent);
-}
-.regen-mode-label {
-  font-size: 11px;
-  font-weight: 500;
-}
-.regen-textarea {
   width: 100%;
-  padding: 8px 10px;
+  padding: 10px;
   font-size: 12px;
   font-family: var(--font-mono);
   line-height: 1.5;
@@ -657,38 +530,8 @@ watch(() => props.subDocId, () => {
   background: var(--bg-secondary);
   color: var(--text-primary);
   outline: none;
-  resize: vertical;
+  resize: none;
   box-sizing: border-box;
-  min-height: 80px;
-}
-.regen-textarea:focus {
-  border-color: var(--accent);
-}
-.regen-textarea.code-input {
-  font-size: 11px;
-  min-height: 160px;
-}
-.regen-error {
-  padding: 6px 10px;
-  background: color-mix(in srgb, var(--error) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
-  border-radius: 4px;
-}
-.regen-error-text {
-  font-size: 11px;
-  color: var(--error);
-}
-.regen-dialog-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-}
-.regen-loading-text {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* 表格样式 */

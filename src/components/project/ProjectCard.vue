@@ -350,7 +350,7 @@ async function handleResyncFromDialog() {
     :class="{ 'card-pinned': project.pinned }"
     @click="emit('select', project)"
     @contextmenu="showMenu"
-    >
+  >
     <ArrowUpOnSquareIcon
       v-if="project.pinned"
       class="card-pin-left w-4 h-4 text-accent"
@@ -630,7 +630,12 @@ async function handleResyncFromDialog() {
   </div>
 
   <Teleport to="body">
-    <div v-if="pinnedWarning" class="projectcard-toast">{{ t('project.maxPinnedReached') }}</div>
+    <div
+      v-if="pinnedWarning"
+      class="projectcard-toast"
+    >
+      {{ t('project.maxPinnedReached') }}
+    </div>
   </Teleport>
 
   <Teleport to="body">
@@ -651,48 +656,76 @@ async function handleResyncFromDialog() {
           </button>
         </div>
 
-        <div v-if="changesLoading" class="changes-dialog-loading">
+        <div
+          v-if="changesLoading"
+          class="changes-dialog-loading"
+        >
           <div class="spinner" />
           <span>正在扫描文件变更...</span>
         </div>
 
-        <div v-else-if="changesError" class="changes-dialog-body">
+        <div
+          v-else-if="changesError"
+          class="changes-dialog-body"
+        >
           <div class="changes-dialog-error">
             <ExclamationTriangleIcon class="w-5 h-5 text-warning" />
             <span>{{ changesError }}</span>
           </div>
           <div class="changes-dialog-actions">
-            <button class="btn btn-primary btn-sm" @click="changesDialogVisible = false">关闭</button>
+            <button
+              class="btn btn-primary btn-sm"
+              @click="changesDialogVisible = false"
+            >
+              关闭
+            </button>
           </div>
         </div>
 
-        <div v-else-if="changesResult && !changesResult.hasChanges" class="changes-dialog-body">
+        <div
+          v-else-if="changesResult && !changesResult.hasChanges"
+          class="changes-dialog-body"
+        >
           <div class="changes-dialog-ok">
             <CheckIcon class="w-5 h-5 text-success" />
             <span>{{ t('project.noChanges') }}</span>
           </div>
           <div class="changes-dialog-actions">
-            <button class="btn btn-primary btn-sm" @click="changesDialogVisible = false">关闭</button>
+            <button
+              class="btn btn-primary btn-sm"
+              @click="changesDialogVisible = false"
+            >
+              关闭
+            </button>
           </div>
         </div>
 
-        <div v-else-if="changesResult && changesResult.hasChanges" class="changes-dialog-body">
+        <div
+          v-else-if="changesResult && changesResult.hasChanges"
+          class="changes-dialog-body"
+        >
           <div class="changes-tabs">
             <button
               class="changes-tab"
               :class="{ active: changesActiveTab === 'modified' }"
               @click="changesActiveTab = 'modified'"
-            >修改 ({{ changesResult.modified.length }})</button>
+            >
+              修改 ({{ changesResult.modified.length }})
+            </button>
             <button
               class="changes-tab"
               :class="{ active: changesActiveTab === 'added' }"
               @click="changesActiveTab = 'added'"
-            >新增 ({{ changesResult.added.length }})</button>
+            >
+              新增 ({{ changesResult.added.length }})
+            </button>
             <button
               class="changes-tab"
               :class="{ active: changesActiveTab === 'deleted' }"
               @click="changesActiveTab = 'deleted'"
-            >删除 ({{ changesResult.deleted.length }})</button>
+            >
+              删除 ({{ changesResult.deleted.length }})
+            </button>
           </div>
           <div class="changes-file-list">
             <div
@@ -700,16 +733,38 @@ async function handleResyncFromDialog() {
               :key="fp"
               class="changes-file-row"
             >
-              <DocumentPlusIcon v-if="changesActiveTab === 'added'" class="w-3.5 h-3.5 text-success flex-shrink-0" />
-              <DocumentMinusIcon v-else-if="changesActiveTab === 'deleted'" class="w-3.5 h-3.5 text-danger flex-shrink-0" />
-              <PencilIcon v-else class="w-3.5 h-3.5 text-warning flex-shrink-0" />
+              <DocumentPlusIcon
+                v-if="changesActiveTab === 'added'"
+                class="w-3.5 h-3.5 text-success flex-shrink-0"
+              />
+              <DocumentMinusIcon
+                v-else-if="changesActiveTab === 'deleted'"
+                class="w-3.5 h-3.5 text-danger flex-shrink-0"
+              />
+              <PencilIcon
+                v-else
+                class="w-3.5 h-3.5 text-warning flex-shrink-0"
+              />
               <span class="changes-file-path">{{ fp }}</span>
             </div>
-            <div v-if="changesResult[changesActiveTab].length === 0" class="changes-file-empty">无变更文件</div>
+            <div
+              v-if="changesResult[changesActiveTab].length === 0"
+              class="changes-file-empty"
+            >
+              无变更文件
+            </div>
           </div>
           <div class="changes-dialog-actions">
-            <button class="btn btn-ghost btn-sm" @click="changesDialogVisible = false">关闭</button>
-            <button class="btn btn-primary btn-sm" @click="handleResyncFromDialog">
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="changesDialogVisible = false"
+            >
+              关闭
+            </button>
+            <button
+              class="btn btn-primary btn-sm"
+              @click="handleResyncFromDialog"
+            >
               {{ t('project.resyncConfirm') }}
             </button>
           </div>

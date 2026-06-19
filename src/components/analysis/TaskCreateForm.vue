@@ -399,7 +399,10 @@ function viewLogs() {
                 class="tag-remove"
                 @click="fileStatsRef?.removeScopeByPath(s)"
               >
-                <span class="x-mark" aria-hidden="true">×</span>
+                <span
+                  class="x-mark"
+                  aria-hidden="true"
+                >×</span>
               </button>
             </span>
           </div>
@@ -437,7 +440,10 @@ function viewLogs() {
                 class="tag-remove"
                 @click="fileStatsRef?.removeExtension(ext)"
               >
-                <span class="x-mark" aria-hidden="true">×</span>
+                <span
+                  class="x-mark"
+                  aria-hidden="true"
+                >×</span>
               </button>
             </span>
           </div>

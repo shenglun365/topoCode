@@ -194,5 +194,7 @@ export default { common: {
   checkServer: '检查服务器状态',
   default: '默认',
   optional: '可选',
+  last7Days: '最近7天',
+  last30Days: '最近30天',
 },
 }

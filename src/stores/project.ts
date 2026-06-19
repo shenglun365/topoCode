@@ -40,7 +40,6 @@ export interface HomeTab {
   parentLevel?: string
   parentCommId?: string
   parentEdgeType?: string
-  regenerationType?: 'community' | 'overall' | string
 }
 
 export const useProjectStore = defineStore('project', () => {

@@ -235,7 +235,10 @@ function applyPreset(presetColors: ThemeColors) {
               class="form-input"
               :placeholder="t('theme.myTheme')"
             >
-            <span v-if="nameError" class="field-error">{{ nameError }}</span>
+            <span
+              v-if="nameError"
+              class="field-error"
+            >{{ nameError }}</span>
           </div>
           <div class="form-item">
             <label class="form-label">{{ t('common.description') }}</label>

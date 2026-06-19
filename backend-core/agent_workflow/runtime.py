@@ -17,6 +17,7 @@ AgentRuntime — 规划→执行→观察 循环。
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -67,6 +68,28 @@ class AgentProgress:
 ProgressCallback = Callable[[AgentProgress], None]
 
 
+def _is_low_quality_content(content: str) -> bool:
+    """检测模型输出的极端低质量内容（空白/纯符号/字符重复）"""
+    if not content:
+        return True
+    txt = content.strip()
+    if len(txt) < 3:
+        return True
+    # 1. 纯符号/无实际文字（检查是否包含中英文或数字字符）
+    has_word_char = any(
+        'a' <= c <= 'z' or 'A' <= c <= 'Z' or '0' <= c <= '9'
+        or '\u4e00' <= c <= '\u9fff' for c in txt
+    )
+    if not has_word_char:
+        return True
+    # 2. 单一字符占比 >=50%（可识别 \"aaaa...\" 或 \"好的好的...\"）
+    if len(txt) > 10:
+        most_common = max(txt.count(c) for c in set(txt))
+        if most_common / len(txt) >= 0.5:
+            return True
+    return False
+
+
 class AgentRuntime:
     """Agent 运行时引擎"""
 
@@ -86,6 +109,27 @@ class AgentRuntime:
         self._cancelled = False
         self._status = AgentStatus.IDLE
         self._steps: list[StepProgress] = []
+        self._tool_call_history: list[tuple] = []
+        self._loop_warning_count: int = 0
+        self._content_warning_count: int = 0
+
+    def _detect_tool_call_loop(self, tool_calls: list, max_repeat: int = 3) -> bool:
+        """检测连续 N 轮相同的工具调用组合"""
+        sig = tuple(
+            (tc.name, tuple(sorted(tc.arguments.items())))
+            for tc in sorted(tool_calls, key=lambda t: t.name)
+        )
+        self._tool_call_history.append(sig)
+        if len(self._tool_call_history) > max_repeat:
+            self._tool_call_history = self._tool_call_history[-max_repeat:]
+            return all(s == sig for s in self._tool_call_history)
+        return False
+
+    def _reset_detection_state(self):
+        """重置检测状态（每组件循环开始时调用）"""
+        self._tool_call_history.clear()
+        self._loop_warning_count = 0
+        self._content_warning_count = 0
 
     def cancel(self):
         """取消当前执行"""
@@ -270,6 +314,7 @@ class AgentRuntime:
 
         components = context.get("components", [])
         project_summary = context.get("project_summary", "")
+        effective_max_turns = context.get("max_turns", workflow.max_turns)
         tools_schema = self._tools.to_openai_tools(workflow.get_tool_filter(context))
 
         # 初始化步骤列表（用于 frontend 展示）
@@ -295,6 +340,7 @@ class AgentRuntime:
 
             comp_id = comp.get("id", f"comp-{c_idx}")
             comp_name = comp.get("name", comp_id)
+            self._reset_detection_state()
 
             self._steps[c_idx].status = "running"
             self._report(
@@ -318,7 +364,7 @@ class AgentRuntime:
             final_response: Optional[str] = None
             comp_turns = 0
 
-            for turn in range(workflow.max_turns):
+            for turn in range(effective_max_turns):
                 if self._cancelled or self._sandbox.budget.exhausted():
                     break
 
@@ -349,16 +395,73 @@ class AgentRuntime:
                 total_tokens += response.tokens_used or 0
                 comp_turns = turn + 1
 
+                # ── 死循环检测 ──
+                if response.tool_calls:
+                    if self._detect_tool_call_loop(response.tool_calls):
+                        self._loop_warning_count += 1
+                        if self._loop_warning_count >= 2:
+                            logger.warning(f"[AgentRuntime] comp={comp_id} 工具死循环，强制退出")
+                            final_response = self._build_agentic_fallback(comp, messages)
+                            break
+                        logger.info(f"[AgentRuntime] comp={comp_id} 工具死循环，推送提醒")
+                        messages.append({
+                            "role": "user",
+                            "content": "你在重复相同的工具调用。请根据已有结果直接输出最终 JSON 分析结果。"
+                        })
+                        continue
+                # ── 低质量内容检测 ──
+                elif response.content and _is_low_quality_content(response.content):
+                    self._content_warning_count += 1
+                    if self._content_warning_count >= 2:
+                        logger.warning(f"[AgentRuntime] comp={comp_id} 连续低质量内容，强制退出")
+                        final_response = self._build_agentic_fallback(comp, messages)
+                        break
+                    logger.info(f"[AgentRuntime] comp={comp_id} 低质量内容，推送提醒")
+                    messages.append({
+                        "role": "user",
+                        "content": "请输出有意义的分析内容，不要输出空白或重复字符。"
+                    })
+                    continue
+
                 if not response.tool_calls:
-                    final_response = response.content
+                    if response.content:
+                        final_response = response.content
+                        break
+                    # 模型返回空内容 + 无工具调用 → 引导输出 JSON（最多引导 1 次）
+                    if turn < effective_max_turns - 1:
+                        logger.info(f"[AgentRuntime] comp={comp_id} push: 引导输出 JSON")
+                        messages.append({
+                            "role": "user",
+                            "content": "请根据已有的所有工具结果，直接输出最终 JSON 分析结果。"
+                        })
+                        continue
+                    final_response = ""
+                    break
+
+                # 最后一轮：不执行工具，用已有 content（可能为空）退出
+                if turn == effective_max_turns - 1:
+                    logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮，忽略工具调用")
+                    final_response = response.content or ""
                     break
 
                 # 执行本轮工具调用
                 tool_results: list[dict] = []
                 for tc in response.tool_calls[:3]:
                     tool = self._tools.get(tc.name)
+                    # 防御性参数修复：XML fallback 解析可能将数组保留为 JSON 字符串
+                    sanitized = {}
+                    for k, v in tc.arguments.items():
+                        if isinstance(v, str):
+                            try:
+                                parsed = json.loads(v)
+                                if isinstance(parsed, (list, dict)):
+                                    sanitized[k] = parsed
+                                    continue
+                            except Exception:
+                                pass
+                        sanitized[k] = v
                     try:
-                        result = await tool.execute(**tc.arguments) if tool else ToolResult.fail(f"Unknown tool: {tc.name}")
+                        result = await tool.execute(**sanitized) if tool else ToolResult.fail(f"Unknown tool: {tc.name}")
                         logger.info(f"[AgentRuntime] agentic tool={tc.name} args={tc.arguments} success={result.success} tokens={result.tokens_used or 0}")
                     except Exception as e:
                         result = ToolResult.fail(str(e))
@@ -381,6 +484,14 @@ class AgentRuntime:
                 for tr in tool_results:
                     messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"],
                                      "content": tr["content"][:2000]})
+
+                # 倒数第二轮：追加提醒，让模型在最后一轮直接输出 JSON
+                if turn == effective_max_turns - 2:
+                    logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮提醒")
+                    messages.append({
+                        "role": "user",
+                        "content": "这是最后一轮。请根据已有的所有信息，直接输出最终 JSON 分析结果，不要再调用工具。"
+                    })
 
             # 保存当前组件结果
             self._save_component_result(comp, final_response or "", context)
@@ -428,9 +539,10 @@ class AgentRuntime:
         """保存单个组件的分析结果到 DB"""
         save_fn = context.get("_save_fn")
         if not save_fn:
+            logger.warning("[AgentRuntime] _save_component_result: no _save_fn in context, skipping")
             return
         if not output:
-            # 模型未返回有效输出（空内容），保存 failed 状态使前端可见
+            logger.warning("[AgentRuntime] _save_component_result: output empty, saving failed status")
             try:
                 cid = component.get("id") or ""
                 if cid:
@@ -442,18 +554,12 @@ class AgentRuntime:
                         "functional_summary": "",
                         "status": "failed",
                     })
-            except Exception:
-                pass
+                    logger.info(f"[AgentRuntime] _save_component_result: saved failed status for {cid}")
+            except Exception as e:
+                logger.warning(f"[AgentRuntime] _save_component_result: save failed status error: {e}")
             return
         try:
             text = output.strip()
-            for fence in ("```", "`"):
-                if text.startswith(fence):
-                    rest = text[len(fence):].strip()
-                    if rest.lower().startswith("json"):
-                        rest = rest[4:].strip()
-                    text = rest.rstrip(fence).strip()
-                    break
             parsed = json.loads(text)
             item = parsed
             if isinstance(item, dict) and "components" in item:
@@ -464,17 +570,47 @@ class AgentRuntime:
                 item = item[0]
             if isinstance(item, dict) and item.get("name"):
                 cid = component.get("id") or item.get("component_id") or item.get("id") or ""
+                # 构建含关键文件和依赖的增强摘要
+                raw_summary = item.get("summary") or item.get("functional_summary") or ""
+                role = item.get("role", "")
+                kf = item.get("key_files", [])
+                deps = item.get("depends_on", [])
+                summary_parts = [f"## 功能概要\n{raw_summary}"]
+                if role:
+                    summary_parts.append(f"\n**架构角色**: {role}")
+                if kf:
+                    files_lines = []
+                    for f in kf[:10]:
+                        if isinstance(f, dict):
+                            fp = f.get("path", f.get("file", ""))
+                            fs = f.get("summary", "")
+                            if fp and fs:
+                                files_lines.append(f"- `{fp}` — {fs}")
+                            elif fp:
+                                files_lines.append(f"- `{fp}`")
+                        elif isinstance(f, str):
+                            files_lines.append(f"- `{f}`")
+                    if files_lines:
+                        summary_parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
+                if deps:
+                    deps_md = ", ".join(deps[:10])
+                    summary_parts.append(f"\n**依赖组件**: {deps_md}")
+                enhanced_summary = "\n".join(summary_parts)
                 save_fn({
                     "task_id": context.get("task_id", ""),
                     "component_id": cid,
                     "component_type": component.get("type", "community"),
                     "analyzed_name": item.get("name", ""),
-                    "functional_summary": item.get("summary") or item.get("functional_summary", ""),
+                    "functional_summary": enhanced_summary,
                     "status": "completed",
                 })
+                logger.info(f"[AgentRuntime] _save_component_result: JSON save OK for {cid}, name={item.get('name', '')[:30]}")
                 return
-        except Exception:
-            pass
+            else:
+                logger.warning(f"[AgentRuntime] _save_component_result: parsed JSON lacks 'name': {item}")
+
+        except Exception as e:
+            logger.warning(f"[AgentRuntime] _save_component_result: JSON parse failed: {e}")
         # JSON 解析失败 → 回退：将 LLM 文本作为 summary 保存
         try:
             cid = component.get("id") or component.get("component_id", "")
@@ -487,6 +623,7 @@ class AgentRuntime:
                     "functional_summary": output[:2000],
                     "status": "completed",
                 })
+                logger.info(f"[AgentRuntime] _save_component_result: fallback save OK for {cid}, text_len={len(output)}")
         except Exception as e:
             logger.warning(f"[AgentRuntime] save failed for {cid}: {e}")
 
@@ -496,34 +633,46 @@ class AgentRuntime:
         metadata = component.get("metadata", {})
         node_count = metadata.get("nodeCount", metadata.get("node_count", "?"))
         file_count = metadata.get("fileCount", metadata.get("file_count", "?"))
-        # 收集已读文件路径
-        read_files: list[str] = []
+        # 收集已读或已摘要的文件路径
+        processed_files: list[str] = []
         for msg in reversed(messages):
-            if msg.get("role") == "tool":
-                try:
-                    content = msg.get("content", "")
-                    if content and "file_path" not in msg:
-                        pass
-                except Exception:
-                    pass
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
                 for tc in msg["tool_calls"]:
                     fn = tc.get("function", {})
-                    if fn.get("name") == "read_file":
+                    tname = fn.get("name", "")
+                    if tname in ("read_file", "summarize_file"):
                         try:
                             args = json.loads(fn.get("arguments", "{}"))
                             fp = args.get("path", "")
-                            if fp:
-                                read_files.append(fp)
+                            if isinstance(fp, list):
+                                processed_files.extend(fp)
+                            elif isinstance(fp, str):
+                                import json as _rj
+                                try:
+                                    plist = _rj.loads(fp)
+                                    if isinstance(plist, list):
+                                        processed_files.extend(plist)
+                                    else:
+                                        processed_files.append(fp)
+                                except Exception:
+                                    processed_files.append(fp)
                         except Exception:
                             pass
-        files_preview = "\n".join(f"- `{f}`" for f in read_files[:10])
+        # 去重
+        seen = set()
+        unique_files = []
+        for f in processed_files:
+            norm = os.path.basename(f)
+            if norm not in seen:
+                seen.add(norm)
+                unique_files.append(f)
+        files_preview = "\n".join(f"- `{f}`" for f in unique_files[:10])
         parts = [
             f"组件: {cname}",
-            f"分析状态: 已执行 {len(read_files)} 次文件读取，但 LLM 未返回结构化分析结果",
+            f"分析状态: 已处理 {len(unique_files)} 个文件，但 LLM 未返回结构化分析结果",
         ]
         if files_preview:
-            parts.append(f"\n已读取的文件:\n{files_preview}")
+            parts.append(f"\n已处理文件:\n{files_preview}")
         return "\n".join(parts)
 
     @property

@@ -185,7 +185,20 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentTaskHistory', params }),
     clearAgentTaskHistory: (params: { taskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.clearAgentTaskHistory', params }),
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean }) =>
+    // 预摘要
+    getPreSummaryStatus: (params: { taskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getPreSummaryStatus', params }),
+    listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.listPreSummaryFiles', params }),
+    startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.startPreSummary', params }),
+    getFileSummary: (params: { taskId: string; file_path: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getFileSummary', params }),
+    deleteFileSummary: (params: { taskId: string; file_path: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.deleteFileSummary', params }),
+    rerunFileSummary: (params: { taskId: string; file_path: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.rerunFileSummary', params }),
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.analyzeComponents', params }),
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getComponentAnalysisResults', params }),

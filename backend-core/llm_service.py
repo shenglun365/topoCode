@@ -665,7 +665,7 @@ class LLMService:
         )
 
     # 分析报告重跑/重新生成等操作不写入会话记录
-    _ANALYSIS_SESSION_PREFIXES = ('comm-', 'regen-', 'pipeline-', 'ai-')
+    _ANALYSIS_SESSION_PREFIXES = ('comm-', 'pipeline-', 'ai-')
 
     def _save_stream_messages(
         self,

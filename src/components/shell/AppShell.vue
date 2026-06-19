@@ -145,8 +145,12 @@ watch(
       class="backend-error-overlay"
     >
       <div class="backend-error-modal">
-        <div class="backend-error-icon">⚠</div>
-        <h2 class="backend-error-title">本地后端服务异常</h2>
+        <div class="backend-error-icon">
+          ⚠
+        </div>
+        <h2 class="backend-error-title">
+          本地后端服务异常
+        </h2>
         <div class="backend-error-body">
           <p class="backend-error-desc">
             后端 Python 进程未能正常启动或已意外退出，应用功能受限。

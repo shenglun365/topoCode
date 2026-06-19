@@ -477,7 +477,12 @@ onMounted(() => {
           <p class="import-hint">
             {{ t('theme.pasteThemeJson') }}
           </p>
-          <div v-if="importErrorMsg" class="dialog-error">{{ importErrorMsg }}</div>
+          <div
+            v-if="importErrorMsg"
+            class="dialog-error"
+          >
+            {{ importErrorMsg }}
+          </div>
           <textarea
             v-model="importJson"
             class="import-textarea"
@@ -515,10 +520,16 @@ onMounted(() => {
             <span>{{ t('theme.confirmDeleteTheme') }} "{{ showDeleteConfirm.name }}"？</span>
           </div>
           <div class="confirm-actions">
-            <button class="btn btn-ghost" @click="showDeleteConfirm = null">
+            <button
+              class="btn btn-ghost"
+              @click="showDeleteConfirm = null"
+            >
               {{ t('common.cancel') }}
             </button>
-            <button class="btn btn-danger" @click="confirmDeleteTheme">
+            <button
+              class="btn btn-danger"
+              @click="confirmDeleteTheme"
+            >
               {{ t('common.delete') }}
             </button>
           </div>
@@ -528,7 +539,12 @@ onMounted(() => {
 
     <!-- Toast -->
     <Teleport to="body">
-      <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+      <div
+        v-if="toastMsg"
+        class="toast"
+      >
+        {{ toastMsg }}
+      </div>
     </Teleport>
   </div>
 </template>

@@ -86,7 +86,14 @@ export interface AnalysisService {
   cancelAgentTask(params: { agentTaskId: string }): Promise<{ cancelled: boolean }>
   getAgentTaskHistory(params: { taskId: string; offset?: number; limit?: number }): Promise<{ results: Array<any>; total: number }>
   clearAgentTaskHistory(params: { taskId: string }): Promise<{ success: boolean }>
-  analyzeComponents(params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean }): Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+  // 预摘要
+  getPreSummaryStatus(params: { taskId: string }): Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string }>
+  listPreSummaryFiles(params: { taskId: string; batch?: string; page?: number; page_size?: number }): Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<any> }>
+  startPreSummary(params: { taskId: string; batch?: string; limit?: number }): Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
+  getFileSummary(params: { taskId: string; file_path: string }): Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string }>
+  deleteFileSummary(params: { taskId: string; file_path: string }): Promise<{ success: boolean; deleted?: number }>
+  rerunFileSummary(params: { taskId: string; file_path: string }): Promise<{ success: boolean; agentTaskId?: string }>
+  analyzeComponents(params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }): Promise<{ success: boolean; agentTaskId?: string; error?: string }>
   getComponentAnalysisResults(params: { taskId: string; componentIds?: string[] }): Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
   saveCommunityResult(params: any): Promise<SaveCommunityResultResponse>
   getCommunityResult(params: any): Promise<any>

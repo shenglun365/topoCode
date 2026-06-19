@@ -516,8 +516,15 @@ export interface IPCAPI {
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
     getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) => Promise<{ results: Array<{ project_id: string; task_id: string; agent_id: string; action: string; status: string; steps: string | null; message: string; error: string | null; created_at: string | null; finished_at: string | null }>; total: number }>
     clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
+    // 预摘要
+    getPreSummaryStatus: (params: { taskId: string }) => Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string }>
+    listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string }> }>
+    startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
+    getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
+    deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
+    rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {

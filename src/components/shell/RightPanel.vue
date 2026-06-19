@@ -329,11 +329,26 @@ function toggleFloat() {
 
     <!-- 浮动模式缩放手柄 -->
     <template v-if="panelStore.rightFloating">
-      <div class="resize-handle resize-left" @mousedown="onResizeStart('left', $event)" />
-      <div class="resize-handle resize-right" @mousedown="onResizeStart('right', $event)" />
-      <div class="resize-handle resize-bottom" @mousedown="onResizeStart('bottom', $event)" />
-      <div class="resize-handle resize-bl" @mousedown="onResizeStart('bl', $event)" />
-      <div class="resize-handle resize-br" @mousedown="onResizeStart('br', $event)" />
+      <div
+        class="resize-handle resize-left"
+        @mousedown="onResizeStart('left', $event)"
+      />
+      <div
+        class="resize-handle resize-right"
+        @mousedown="onResizeStart('right', $event)"
+      />
+      <div
+        class="resize-handle resize-bottom"
+        @mousedown="onResizeStart('bottom', $event)"
+      />
+      <div
+        class="resize-handle resize-bl"
+        @mousedown="onResizeStart('bl', $event)"
+      />
+      <div
+        class="resize-handle resize-br"
+        @mousedown="onResizeStart('br', $event)"
+      />
     </template>
   </aside>
 </template>

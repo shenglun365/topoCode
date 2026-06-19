@@ -71,7 +71,7 @@ function goToReportHome() {
 }
 
 // 处理报告首页的 open-md 事件（在 analysis 上下文中打开 inline 子文档 tab）
-function handleOpenMD(params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string; regenerationType?: 'community' | 'overall' }) {
+function handleOpenMD(params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }) {
   const hash = params.title.slice(0, 20).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
   const id = `tab-subdoc-inline-${params.taskId}-${hash}`
   funcGroup.openTab('analysis', {
@@ -85,7 +85,6 @@ function handleOpenMD(params: { taskId: string; content: string; title: string; 
     parentLevel: params.parentLevel,
     parentCommId: params.parentCommId,
     parentEdgeType: params.parentEdgeType,
-    regenerationType: params.regenerationType,
   })
 }
 
@@ -112,34 +111,8 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       parts.push(`**ID**: ${communityId}`)
       parts.push('')
       parts.push(llmResult.summary || '')
-      if (llmResult.mermaid) {
-        parts.push('', '```mermaid', llmResult.mermaid, '```')
-      }
-      if (llmResult.plantuml) {
-        parts.push('', '```plantuml', llmResult.plantuml, '```')
-      }
-    } else {
-      const detail = await window.api!.report.getLevelCommunityDetail({
-        projectId: pid, taskId,
-        level: communityLevel, edgeType,
-      })
-      const community = detail.communities.find((c: any) => c.communityId === communityId)
-      if (!community) return
-      const nodeLines = community.nodes.map((n: any) => `- ${n.name} (${n.filePath})`).join('\n')
-      const edgeLines = community.edges.map((e: any) => `- ${e.source} → ${e.target} [${e.type}]`).join('\n')
-      parts.push(
-        `# 社区: ${communityId}`,
-        '',
-        `**层级**: ${communityLevel} | **边缘类型**: ${edgeType}`,
-        `**节点数**: ${community.nodeCount} | **边数**: ${community.edgeCount} | **质量分**: ${community.qualityScore ?? '-'}`,
-        '',
-        '## 节点列表',
-        nodeLines || '（空）',
-        '',
-        '## 边列表',
-        edgeLines || '（空）',
-      )
     }
+    // 无 LLM 结果 → 不传 content，由 SubDocViewer 显示引导提示
     handleOpenMD({
       taskId,
       content: parts.join('\n'),
@@ -147,7 +120,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       parentLevel: communityLevel,
       parentCommId: communityId,
       parentEdgeType: edgeType,
-      regenerationType: 'community',
     })
   } catch (e: any) {
     console.error('[AnalysisPage] openCommunityDetail error:', e)
@@ -199,7 +171,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         :parent-comm-id="activeTab.parentCommId"
         :parent-edge-type="activeTab.parentEdgeType"
         :project-id="activeTab.projectId"
-        :regeneration-type="activeTab.regenerationType as 'community' | 'overall' | undefined"
         @close="goToReportHome"
         @navigate-community="openCommunityDetail"
       />

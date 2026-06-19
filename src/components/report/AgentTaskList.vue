@@ -109,6 +109,17 @@ const statusIcon = (status: string) => {
   return map[status] || '\u2B1C'
 }
 
+const actionLabel = (action: string) => {
+  const map: Record<string, string> = {
+    analyze_components: '组件分析',
+    agentic_analyze_components: '智能组件分析',
+    startArchAnalysis: '架构分析',
+    analyze_all: '全量分析',
+    analyzeCommFiles: '文件分析',
+  }
+  return map[action] || action
+}
+
 const stepIcon = (status: string) => {
   const map: Record<string, string> = {
     pending: '\u2B1C', running: '\u23F3', done: '\u2705', failed: '\u274C',
@@ -119,55 +130,105 @@ const stepIcon = (status: string) => {
 
 <template>
   <div class="atl-container">
-    <div v-if="projectName || taskName" class="atl-header">
-      <span v-if="projectName" class="atl-project">{{ projectName }}</span>
-      <span v-if="taskName" class="atl-task-badge">{{ taskName }}</span>
+    <div
+      v-if="projectName || taskName"
+      class="atl-header"
+    >
+      <span
+        v-if="projectName"
+        class="atl-project"
+      >{{ projectName }}</span>
+      <span
+        v-if="taskName"
+        class="atl-task-badge"
+      >{{ taskName }}</span>
       <button
         v-if="allTasks.length > 0"
         class="atl-clear-btn"
         :title="t('report.clearHistory', '清除历史')"
         @click="clearHistory"
-      >清除</button>
+      >
+        清除
+      </button>
     </div>
-    <div v-if="allTasks.length === 0 && historyLoaded" class="atl-empty">
+    <div
+      v-if="allTasks.length === 0 && historyLoaded"
+      class="atl-empty"
+    >
       {{ t('report.noAgentTasks', '暂无 Agent 任务') }}
     </div>
-    <div v-if="!historyLoaded" class="atl-loading">
+    <div
+      v-if="!historyLoaded"
+      class="atl-loading"
+    >
       <span class="text-muted">{{ t('common.loading') }}</span>
     </div>
-    <div v-for="(task, idx) in displayedTasks" :key="task.id"
-         class="atl-task"
-         :class="{
-           'atl-task-success': task.status === 'completed',
-           'atl-task-fail': task.status === 'failed' || task.status === 'partial'
-         }">
+    <div
+      v-for="(task, idx) in displayedTasks"
+      :key="task.id"
+      class="atl-task"
+      :class="{
+        'atl-task-success': task.status === 'completed',
+        'atl-task-fail': task.status === 'failed' || task.status === 'partial'
+      }"
+    >
       <div class="atl-task-header">
         <span class="atl-status">{{ statusIcon(task.status) }}</span>
-        <span class="atl-action">{{ task.action }}</span>
+        <span class="atl-action">{{ actionLabel(task.action) }}</span>
         <span class="atl-status-text">{{ task.status }}</span>
-        <span v-if="task.progress !== undefined" class="atl-progress">{{ task.progress }}%</span>
+        <span
+          v-if="task.progress !== undefined"
+          class="atl-progress"
+        >{{ task.progress }}%</span>
         <button
           v-if="task.status === 'running' || task.status === 'queued'"
           class="atl-stop-btn"
           title="停止此任务"
           @click="communityStore.cancelAgentTask(taskId, task.id)"
-        >✕</button>
+        >
+          ✕
+        </button>
       </div>
-      <div v-if="task.status === 'running'" class="atl-progress-bar">
-        <div class="atl-progress-fill" :style="{ width: task.progress + '%' }" />
+      <div
+        v-if="task.status === 'running'"
+        class="atl-progress-bar"
+      >
+        <div
+          class="atl-progress-fill"
+          :style="{ width: task.progress + '%' }"
+        />
       </div>
-      <div v-if="task.message" class="atl-message">{{ task.message }}</div>
-      <div v-if="task.steps && task.steps.length > 0" class="atl-steps">
-        <div v-for="(step, si) in task.steps" :key="si"
-             class="atl-step"
-             :class="{ 'atl-step-done': step.status === 'done', 'atl-step-fail': step.status === 'failed' }">
+      <div
+        v-if="task.message"
+        class="atl-message"
+      >
+        {{ task.message }}
+      </div>
+      <div
+        v-if="task.steps && task.steps.length > 0"
+        class="atl-steps"
+      >
+        <div
+          v-for="(step, si) in task.steps"
+          :key="si"
+          class="atl-step"
+          :class="{ 'atl-step-done': step.status === 'done', 'atl-step-fail': step.status === 'failed' }"
+        >
           <span class="atl-step-icon">{{ stepIcon(step.status) }}</span>
           <span class="atl-step-desc">{{ step.description }}</span>
         </div>
       </div>
     </div>
-    <div v-if="hasMore" class="atl-more">
-      <button class="atl-more-btn" @click="loadMore">加载更多</button>
+    <div
+      v-if="hasMore"
+      class="atl-more"
+    >
+      <button
+        class="atl-more-btn"
+        @click="loadMore"
+      >
+        加载更多
+      </button>
     </div>
   </div>
 </template>

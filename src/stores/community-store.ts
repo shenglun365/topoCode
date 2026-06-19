@@ -25,8 +25,6 @@ export interface CommunityItem {
   parentName?: string
   name?: string
   summary?: string
-  mermaid?: string
-  plantuml?: string
   error?: string
 }
 
@@ -72,12 +70,6 @@ interface CommunityTaskRuntime {
   compareTo: string
 }
 
-function normalizeDiagramField(val: unknown): string {
-  if (!val) return ''
-  if (typeof val === 'string') return val
-  if (typeof val === 'object') return (val as Record<string, any>).content || (val as Record<string, any>).code || JSON.stringify(val) || ''
-  return String(val)
-}
 
 const _inflightLoads = new Map<string, Promise<any>>()
 const _requestVersions = new Map<string, number>()
@@ -144,7 +136,7 @@ export const useCommunityStore = defineStore('community', () => {
 
   async function saveCommunityResult(params: {
     taskId: string; edgeType: string; commLv: string; commId: string;
-    name?: string; summary?: string; mermaid?: string; plantuml?: string;
+    name?: string; summary?: string;
     modelId?: string; templateId?: string;
   }) {
     try { JSON.stringify(params) } catch {
@@ -237,8 +229,6 @@ export const useCommunityStore = defineStore('community', () => {
               existing.status = 'completed'
               existing.name = saved.name || existing.communityId
               existing.summary = saved.summary || undefined
-              existing.mermaid = saved.mermaid || undefined
-              existing.plantuml = saved.plantuml || undefined
             } else {
               existing.status = 'pending'
             }
@@ -252,8 +242,6 @@ export const useCommunityStore = defineStore('community', () => {
             c.status = 'completed'
             c.name = saved.name || c.communityId
             c.summary = saved.summary || undefined
-            c.mermaid = saved.mermaid || undefined
-            c.plantuml = saved.plantuml || undefined
           }
           c.selected = savedIds.includes(c.id)
           t.communities.push(c)
@@ -528,7 +516,6 @@ export const useCommunityStore = defineStore('community', () => {
             await ipc.analysis.saveCommunityResult({
               taskId, edgeType: c.edgeType, commLv: c.level, commId: c.communityId,
               name: c.name || c.communityId, summary: c.summary || '',
-              mermaid: c.mermaid || '', plantuml: c.plantuml || '',
               modelId, templateId: 'community_analyze',
             })
             t.llmResults[c.communityId] = { comm_id: c.communityId, name: c.name, summary: c.summary }
@@ -549,7 +536,7 @@ export const useCommunityStore = defineStore('community', () => {
       .filter(c => c.status === 'completed' && c.name)
       .map(c => ({
         communityId: c.communityId, level: c.level, edgeType: c.edgeType,
-        name: c.name!, summary: c.summary!, mermaid: c.mermaid, plantuml: c.plantuml,
+        name: c.name!, summary: c.summary!,
       }))
   }
 
@@ -598,7 +585,7 @@ export const useCommunityStore = defineStore('community', () => {
           batch_id: `batch-${Date.now()}`,
         },
         mode: 'structured',
-        outputSchema: { type: 'object', properties: { name: { type: 'string', maxLength: 20 }, summary: { type: 'string' }, mermaid: { type: 'string' }, plantuml: { type: 'string' } }, required: ['name', 'summary', 'mermaid'] },
+        outputSchema: { type: 'object', properties: { name: { type: 'string', maxLength: 20 }, summary: { type: 'string' } }, required: ['name', 'summary'] },
       })
       let fullContent = ''
       await new Promise<void>((resolve, reject) => {
@@ -612,8 +599,6 @@ export const useCommunityStore = defineStore('community', () => {
             else if (data.structured) {
               community.name = data.structured.name?.slice(0, 20) || community.communityId
               community.summary = data.structured.summary || ''
-              community.mermaid = normalizeDiagramField(data.structured.mermaid)
-              community.plantuml = normalizeDiagramField(data.structured.plantuml)
               community.status = 'completed'
             } else { community.status = 'completed'; community.name = community.communityId; community.summary = fullContent }
             unsubscribe(); resolve()
@@ -644,7 +629,7 @@ export const useCommunityStore = defineStore('community', () => {
     try {
       const ok = await runTask(taskId, community, modelId, projectId)
       if (ok && (community.status as CommunityItem['status']) === 'completed') {
-        await ipc.analysis.saveCommunityResult({ taskId, edgeType: community.edgeType, commLv: community.level, commId: community.communityId, name: community.name || community.communityId, summary: community.summary || '', mermaid: community.mermaid || '', plantuml: community.plantuml || '', modelId, templateId: 'community_analyze' })
+        await ipc.analysis.saveCommunityResult({ taskId, edgeType: community.edgeType, commLv: community.level, commId: community.communityId, name: community.name || community.communityId, summary: community.summary || '', modelId, templateId: 'community_analyze' })
       }
       return ok
     } catch (e: unknown) { community.status = 'error'; community.error = e instanceof Error ? (e as Error).message : String(e); return false }
@@ -828,7 +813,7 @@ export const useCommunityStore = defineStore('community', () => {
     t.compareTo = to || ''
   }
 
-  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false) {
+  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false, maxTurns = 30, summaryModelId = '', subagentConcurrency = 1) {
     if (!taskId || !components.length) return
     const t = ensureTask(taskId)
     const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
@@ -851,6 +836,9 @@ export const useCommunityStore = defineStore('community', () => {
         language: language || undefined,
         concurrency: concurrency > 1 ? concurrency : undefined,
         agentic: agentic || undefined,
+        maxTurns: agentic ? maxTurns : undefined,
+        summaryModelId: agentic && summaryModelId ? summaryModelId : undefined,
+        subagentConcurrency: agentic && subagentConcurrency > 1 ? subagentConcurrency : undefined,
       })
       if (result.success && result.agentTaskId) {
         cancelAgentPolling(taskId)
@@ -889,9 +877,17 @@ export const useCommunityStore = defineStore('community', () => {
           delete _activePolling[key]
           return
         }
+        const stepCurrent = progress.step_current || 0
+        const stepTotal = progress.step_total || 0
+        const pct = stepTotal ? Math.round(stepCurrent / stepTotal * 100) : 0
+        const allStepsDone = progress.steps && progress.steps.length > 0 &&
+          progress.steps.every(s => s.status === 'done' || s.status === 'failed')
+        const isCompleted = progress.status === 'completed' || progress.status === 'partial' ||
+          progress.status === 'failed' || progress.status === 'cancelled' ||
+          (stepCurrent >= stepTotal && pct === 100 && allStepsDone)
         updateAgentTask(taskId, taskIdx, {
-          status: progress.status || 'running',
-          progress: progress.step_total ? Math.round((progress.step_current || 0) / (progress.step_total || 1) * 100) : 0,
+          status: isCompleted ? (progress.status === 'failed' ? 'failed' : 'completed') : (progress.status || 'running'),
+          progress: pct,
           message: progress.message || '',
         })
         if (progress.steps) {
@@ -906,14 +902,12 @@ export const useCommunityStore = defineStore('community', () => {
             updateAgentStep(taskId, taskIdx, i + stepOffset, progress.steps[i].status)
           }
         }
-        if (progress.status === 'completed' || progress.status === 'partial' ||
-            progress.status === 'failed' || progress.status === 'cancelled') {
+        if (isCompleted) {
           clearInterval(poll)
           delete _activePolling[agentTaskId]
           delete _activePolling[key]
           // 兜底：极端情况下每步刷新没触发，最终再刷一次
-          if ((progress.status === 'completed' || progress.status === 'partial') &&
-              taskId) {
+          if (progress.status !== 'failed' && progress.status !== 'cancelled' && taskId) {
             const pid = useProjectStore().selectedProjectId
             if (pid) loadCommunities(taskId, pid).catch(() => {})
           }
@@ -968,6 +962,26 @@ export const useCommunityStore = defineStore('community', () => {
     } catch {}
   }
 
+  // ── 预摘要 ──
+  async function getPreSummaryStatus(taskId: string) {
+    return await ipc.analysis.getPreSummaryStatus({ taskId })
+  }
+  async function listPreSummaryFiles(taskId: string, batch = 'P0', page = 1, pageSize = 20) {
+    return await ipc.analysis.listPreSummaryFiles({ taskId, batch, page, page_size: pageSize })
+  }
+  async function startPreSummary(taskId: string, batch = 'P0', limit = 0) {
+    return await ipc.analysis.startPreSummary({ taskId, batch, limit })
+  }
+  async function getFileSummary(taskId: string, filePath: string) {
+    return await ipc.analysis.getFileSummary({ taskId, file_path: filePath })
+  }
+  async function deleteFileSummary(taskId: string, filePath: string) {
+    return await ipc.analysis.deleteFileSummary({ taskId, file_path: filePath })
+  }
+  async function rerunFileSummary(taskId: string, filePath: string) {
+    return await ipc.analysis.rerunFileSummary({ taskId, file_path: filePath })
+  }
+
   return {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
@@ -979,5 +993,7 @@ export const useCommunityStore = defineStore('community', () => {
     setTimeline, setCompareMode,
     loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
     cancelAgentPolling, cancelAgentTask,
+    getPreSummaryStatus, listPreSummaryFiles, startPreSummary,
+    getFileSummary, deleteFileSummary, rerunFileSummary,
   }
 })

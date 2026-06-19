@@ -1,37 +1,61 @@
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="dialog-overlay" @click.self="close">
+    <div
+      v-if="visible"
+      class="dialog-overlay"
+      @click.self="close"
+    >
       <div class="timeline-dialog">
         <div class="timeline-dialog-header">
           <h3>{{ taskName }} - {{ t('analysis.timeline', '历史快照') }}</h3>
-          <button class="btn btn-ghost btn-sm" @click="close">✕</button>
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="close"
+          >
+            ✕
+          </button>
         </div>
 
         <div class="timeline-dialog-tabs">
           <button
             :class="['btn btn-xs', filterType === 'all' ? 'btn-active' : 'btn-ghost']"
             @click="filterType = 'all'"
-          >全部</button>
+          >
+            全部
+          </button>
           <button
             :class="['btn btn-xs', filterType === 'manual' ? 'btn-active' : 'btn-ghost']"
             @click="filterType = 'manual'"
-          >🔖 手动</button>
+          >
+            🔖 手动
+          </button>
           <button
             :class="['btn btn-xs', filterType === 'archtrack' ? 'btn-active' : 'btn-ghost']"
             @click="filterType = 'archtrack'"
-          >🤖 追踪</button>
+          >
+            🤖 追踪
+          </button>
         </div>
 
         <div class="timeline-dialog-body">
-          <div v-if="loading" class="timeline-loading">
-            <span class="spinner"></span> 加载中...
+          <div
+            v-if="loading"
+            class="timeline-loading"
+          >
+            <span class="spinner" /> 加载中...
           </div>
 
-          <div v-else-if="filteredEntries.length === 0" class="timeline-empty">
+          <div
+            v-else-if="filteredEntries.length === 0"
+            class="timeline-empty"
+          >
             暂无记录
           </div>
 
-          <div v-else class="timeline-list">
+          <div
+            v-else
+            class="timeline-list"
+          >
             <div
               v-for="entry in filteredEntries"
               :key="entry.id"
@@ -40,59 +64,82 @@
               <div class="timeline-entry-main">
                 <span class="timeline-entry-type">{{ entry.type === 'archtrack' ? '🤖' : '🔖' }}</span>
                 <span class="timeline-entry-label">{{ entry.alias || entry.versionTag || entry.id.slice(0, 8) }}</span>
-                <span v-if="entry.isActive" class="timeline-active-badge">当前</span>
+                <span
+                  v-if="entry.isActive"
+                  class="timeline-active-badge"
+                >当前</span>
                 <span class="timeline-entry-meta">
                   {{ entry.timestamp?.slice(0, 16) }}
                   · {{ entry.communityCount }} 社区
                 </span>
               </div>
               <div class="timeline-entry-actions">
-                <label class="tl-compare-check" v-if="compareMode">
+                <label
+                  v-if="compareMode"
+                  class="tl-compare-check"
+                >
                   <input
                     type="checkbox"
                     :checked="compareSelection.includes(entry.id)"
                     @change="toggleCompareSelect(entry.id)"
-                  />
+                  >
                 </label>
                 <button
                   class="btn btn-ghost btn-xs"
                   :title="'设为当前活跃'"
                   :disabled="entry.isActive"
                   @click="setActive(entry.id)"
-                >★</button>
+                >
+                  ★
+                </button>
                 <button
                   v-if="entry.type === 'archtrack'"
                   class="btn btn-ghost btn-xs"
                   title="升格为手动快照"
                   @click="promote(entry.id)"
-                >⬆</button>
+                >
+                  ⬆
+                </button>
                 <button
                   class="btn btn-ghost btn-xs"
                   title="归档到文件"
                   :disabled="saving.has(entry.id)"
                   @click="archiveEntry(entry)"
-                >📦</button>
+                >
+                  📦
+                </button>
                 <button
                   class="btn btn-ghost btn-xs btn-danger"
                   title="删除"
                   @click="deleteEntry(entry.id)"
-                >🗑</button>
+                >
+                  🗑
+                </button>
               </div>
             </div>
           </div>
         </div>
 
         <div class="timeline-dialog-footer">
-          <button class="btn btn-primary btn-sm" @click="createSnapshot">+ 创建新快照</button>
+          <button
+            class="btn btn-primary btn-sm"
+            @click="createSnapshot"
+          >
+            + 创建新快照
+          </button>
           <button
             v-if="compareMode && compareSelection.length === 2"
             class="btn btn-primary btn-sm"
             @click="doCompare"
-          >对比所选</button>
+          >
+            对比所选
+          </button>
           <button
             :class="['btn btn-sm', compareMode ? 'btn-primary' : 'btn-ghost']"
             @click="compareMode = !compareMode"
-          >{{ compareMode ? '取消对比' : '选择对比' }}</button>
+          >
+            {{ compareMode ? '取消对比' : '选择对比' }}
+          </button>
         </div>
       </div>
     </div>

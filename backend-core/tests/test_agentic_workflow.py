@@ -33,7 +33,7 @@ class TestAgenticWorkflowBase:
 
     def test_max_turns_default(self):
         wf = AgenticComponentAnalystWorkflow()
-        assert wf.max_turns == 6
+        assert wf.max_turns == 30
 
     def test_max_turn_timeout_default(self):
         wf = AgenticComponentAnalystWorkflow()

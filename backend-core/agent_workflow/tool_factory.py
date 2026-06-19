@@ -66,21 +66,32 @@ def build_agentic_component_tools(
     project_root: str = "",
     project_db=None,
     path_sandbox=None,
+    project_id: str = "",
+    task_id: str = "",
+    multi_db=None,
+    concurrency: int = 1,
 ) -> ToolRegistry:
     """构建 AgenticComponentAnalyst 的工具集（LLM 可见的读写工具）"""
-    from .toolkits.file_tools import ReadFileTool, SearchContentTool
-    from .toolkits.symbol_tools import GetSymbolDetailTool, SearchSymbolsTool
+    from .toolkits.file_tools import ReadFileTool, SearchContentTool, SummarizeFileTool
+    from .toolkits.symbol_tools import GetSymbolDetailTool, SearchSymbolsTool, GetSymbolCodeTool
     from .toolkits.graph_tools import GetCommunitySubgraphTool, GetCallChainTool, GetASTNodeTool
     from .toolkits.edge_tools import GetEdgeDetailTool
 
     tools = ToolRegistry()
     tools.register(ReadFileTool(project_root=project_root, path_sandbox=path_sandbox))
     tools.register(SearchContentTool(project_root=project_root, path_sandbox=path_sandbox))
+    tools.register(SummarizeFileTool(
+        project_root=project_root, project_db=project_db,
+        project_id=project_id, task_id=task_id,
+        multi_db=multi_db, path_sandbox=path_sandbox,
+        concurrency=concurrency,
+    ))
     if project_db:
-        tools.register(GetSymbolDetailTool(project_db=project_db))
-        tools.register(SearchSymbolsTool(project_db=project_db))
-        tools.register(GetCommunitySubgraphTool(project_db=project_db))
+        tools.register(GetSymbolDetailTool(project_db=project_db, project_root=project_root))
+        tools.register(SearchSymbolsTool(project_db=project_db, project_root=project_root))
+        tools.register(GetCommunitySubgraphTool(project_db=project_db, project_root=project_root))
         tools.register(GetCallChainTool(project_db=project_db))
         tools.register(GetASTNodeTool(project_db=project_db))
         tools.register(GetEdgeDetailTool(project_db=project_db))
+        tools.register(GetSymbolCodeTool(project_db=project_db, project_root=project_root))
     return tools

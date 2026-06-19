@@ -14,6 +14,7 @@ import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
 import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
 import ClearCacheDialog from '@/components/project/ClearCacheDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
+import { useCommunityStore } from '@/stores/community-store'
 
 const { showId, componentId } = useComponentId('PG-002')
 const { t } = useI18n()
@@ -84,6 +85,11 @@ function onClearCacheDone() {
   projectStore.loadProjects()
   if (projectStore.selectedProjectId) {
     analysisStore.loadTasks(projectStore.selectedProjectId)
+    // 清除前端 store 中的社区/组件缓存，避免清后端后还显示旧数据
+    const communityStore = useCommunityStore()
+    for (const task of analysisStore.tasks) {
+      communityStore.clearTask(task.id)
+    }
   }
 }
 </script>

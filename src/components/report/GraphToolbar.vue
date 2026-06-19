@@ -47,22 +47,45 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 <template>
   <div class="gt-container">
-    <ToolbarDropdown v-model="internalMode" :options="modeOptions" :fullscreen="props.fullscreen" />
+    <ToolbarDropdown
+      v-model="internalMode"
+      :options="modeOptions"
+      :fullscreen="props.fullscreen"
+    />
 
-    <div ref="moreRef" class="gt-more">
-      <button class="gt-more-btn" @click.stop="openMore = !openMore">
+    <div
+      ref="moreRef"
+      class="gt-more"
+    >
+      <button
+        class="gt-more-btn"
+        @click.stop="openMore = !openMore"
+      >
         <EllipsisVerticalIcon class="w-3.5 h-3.5" />
       </button>
-      <div v-if="openMore" class="gt-more-dropdown" :class="{ 'gt-more-up': props.fullscreen }">
-        <button class="gt-more-item" @click="emit('reset-view'); openMore = false">
+      <div
+        v-if="openMore"
+        class="gt-more-dropdown"
+        :class="{ 'gt-more-up': props.fullscreen }"
+      >
+        <button
+          class="gt-more-item"
+          @click="emit('reset-view'); openMore = false"
+        >
           <ArrowPathIcon class="w-3 h-3" />
           <span>重置视图</span>
         </button>
-        <button class="gt-more-item" @click="emit('export-arch'); openMore = false">
+        <button
+          class="gt-more-item"
+          @click="emit('export-arch'); openMore = false"
+        >
           <DocumentArrowDownIcon class="w-3 h-3" />
           <span>导出架构</span>
         </button>
-        <button class="gt-more-item" @click="emit('compare'); openMore = false">
+        <button
+          class="gt-more-item"
+          @click="emit('compare'); openMore = false"
+        >
           <span class="gt-more-item-icon">📊</span>
           <span>对比架构</span>
         </button>

@@ -252,16 +252,36 @@ function activeType(): 'all' | 'community' | 'external' {
 
 <template>
   <teleport to="body">
-    <div v-if="visible && !pinned" class="nfp-backdrop" @click="emit('close')" />
-    <div v-if="visible" class="nfp-overlay" :style="{ left: panelX + 'px', top: panelY + 'px' }" :class="{ dragging }">
+    <div
+      v-if="visible && !pinned"
+      class="nfp-backdrop"
+      @click="emit('close')"
+    />
+    <div
+      v-if="visible"
+      class="nfp-overlay"
+      :style="{ left: panelX + 'px', top: panelY + 'px' }"
+      :class="{ dragging }"
+    >
       <div class="nfp-panel">
-        <div class="nfp-header" @mousedown="onHeaderMouseDown">
+        <div
+          class="nfp-header"
+          @mousedown="onHeaderMouseDown"
+        >
           <span class="nfp-title">{{ t('report.nodeFilter', '筛选') }} ({{ nodes.length - hiddenCount }}/{{ nodes.length }})</span>
           <div class="nfp-header-actions">
-            <button class="nfp-icon-btn" :class="{ active: pinned }" :title="t('report.pinPanel', '常驻')" @click="pinned = !pinned">
+            <button
+              class="nfp-icon-btn"
+              :class="{ active: pinned }"
+              :title="t('report.pinPanel', '常驻')"
+              @click="pinned = !pinned"
+            >
               <ArrowDownTrayIcon class="w-3 h-3" />
             </button>
-            <button class="nfp-icon-btn" @click="emit('close')">
+            <button
+              class="nfp-icon-btn"
+              @click="emit('close')"
+            >
               <XMarkIcon class="w-3.5 h-3.5" />
             </button>
           </div>
@@ -270,89 +290,276 @@ function activeType(): 'all' | 'community' | 'external' {
         <!-- Zone 1: 分类过滤 -->
         <div class="nfp-body">
           <div class="nfp-section">
-            <div class="nfp-section-title">分类过滤</div>
+            <div class="nfp-section-title">
+              分类过滤
+            </div>
 
             <!-- type row -->
             <div class="nfp-chip-row">
-              <button class="nfp-chip" :class="{ active: activeType() === 'all' }" @click="showType('all')">全部</button>
-              <button class="nfp-chip" :class="{ active: activeType() === 'community' }" @click="showType('community')">社区 {{ communityNodes.length }}</button>
-              <button class="nfp-chip" :class="{ active: activeType() === 'external' }" @click="showType('external')">外部包 {{ externalNodes.length }}</button>
+              <button
+                class="nfp-chip"
+                :class="{ active: activeType() === 'all' }"
+                @click="showType('all')"
+              >
+                全部
+              </button>
+              <button
+                class="nfp-chip"
+                :class="{ active: activeType() === 'community' }"
+                @click="showType('community')"
+              >
+                社区 {{ communityNodes.length }}
+              </button>
+              <button
+                class="nfp-chip"
+                :class="{ active: activeType() === 'external' }"
+                @click="showType('external')"
+              >
+                外部包 {{ externalNodes.length }}
+              </button>
             </div>
 
             <!-- size row -->
             <div class="nfp-chip-row">
-              <button class="nfp-chip" @click="selectAll">全部</button>
-              <button class="nfp-chip" @click="hideOthers(largeNodes)" :title="'节点数 > ' + SIZE_LARGE">大型&gt;{{ SIZE_LARGE }} {{ largeNodes.length }}</button>
-              <button class="nfp-chip" @click="hideOthers(mediumNodes)" :title="'节点数 ' + (SIZE_SMALL + 1) + '-' + SIZE_LARGE">中型 {{ mediumNodes.length }}</button>
-              <button class="nfp-chip" @click="hideOthers(smallNodes)" :title="'节点数 ≤ ' + SIZE_SMALL">小型≤{{ SIZE_SMALL }} {{ smallNodes.length }}</button>
+              <button
+                class="nfp-chip"
+                @click="selectAll"
+              >
+                全部
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'节点数 > ' + SIZE_LARGE"
+                @click="hideOthers(largeNodes)"
+              >
+                大型&gt;{{ SIZE_LARGE }} {{ largeNodes.length }}
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'节点数 ' + (SIZE_SMALL + 1) + '-' + SIZE_LARGE"
+                @click="hideOthers(mediumNodes)"
+              >
+                中型 {{ mediumNodes.length }}
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'节点数 ≤ ' + SIZE_SMALL"
+                @click="hideOthers(smallNodes)"
+              >
+                小型≤{{ SIZE_SMALL }} {{ smallNodes.length }}
+              </button>
             </div>
 
             <!-- quality row -->
             <div class="nfp-chip-row">
-              <button class="nfp-chip" @click="selectAll">全部</button>
-              <button class="nfp-chip" @click="hideOthers(highQuality)" :title="'质量分 ≥ ' + QUAL_HIGH">高质量≥{{ QUAL_HIGH }} {{ highQuality.length }}</button>
-              <button class="nfp-chip" @click="hideOthers(midQuality)" :title="'质量分 ' + QUAL_LOW + '-' + QUAL_HIGH">中等 {{ midQuality.length }}</button>
-              <button class="nfp-chip" @click="hideOthers(poorQuality)" :title="'质量分 ≤ ' + QUAL_LOW">差≤{{ QUAL_LOW }} {{ poorQuality.length }}</button>
+              <button
+                class="nfp-chip"
+                @click="selectAll"
+              >
+                全部
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'质量分 ≥ ' + QUAL_HIGH"
+                @click="hideOthers(highQuality)"
+              >
+                高质量≥{{ QUAL_HIGH }} {{ highQuality.length }}
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'质量分 ' + QUAL_LOW + '-' + QUAL_HIGH"
+                @click="hideOthers(midQuality)"
+              >
+                中等 {{ midQuality.length }}
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'质量分 ≤ ' + QUAL_LOW"
+                @click="hideOthers(poorQuality)"
+              >
+                差≤{{ QUAL_LOW }} {{ poorQuality.length }}
+              </button>
             </div>
 
             <!-- coreness row -->
             <div class="nfp-chip-row">
-              <button class="nfp-chip" @click="selectAll">全部</button>
-              <button class="nfp-chip" @click="hideOthers(coreNodes)" :title="'平均核心度 ≥ ' + CORE_THRESHOLD">核心≥{{ CORE_THRESHOLD }} {{ coreNodes.length }}</button>
-              <button class="nfp-chip" @click="hideOthers(peripheralNodes)" :title="'平均核心度 < ' + CORE_THRESHOLD">外围 {{ peripheralNodes.length }}</button>
+              <button
+                class="nfp-chip"
+                @click="selectAll"
+              >
+                全部
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'平均核心度 ≥ ' + CORE_THRESHOLD"
+                @click="hideOthers(coreNodes)"
+              >
+                核心≥{{ CORE_THRESHOLD }} {{ coreNodes.length }}
+              </button>
+              <button
+                class="nfp-chip"
+                :title="'平均核心度 < ' + CORE_THRESHOLD"
+                @click="hideOthers(peripheralNodes)"
+              >
+                外围 {{ peripheralNodes.length }}
+              </button>
             </div>
 
             <!-- quick actions -->
             <div class="nfp-chip-row nfp-chip-row-actions">
-              <button class="nfp-chip nfp-chip-action" @click="hideNodes(externalNodes)">隐藏外部包</button>
-              <button class="nfp-chip nfp-chip-action" @click="hideOthers(largeNodes)">只显示大型社区</button>
+              <button
+                class="nfp-chip nfp-chip-action"
+                @click="hideNodes(externalNodes)"
+              >
+                隐藏外部包
+              </button>
+              <button
+                class="nfp-chip nfp-chip-action"
+                @click="hideOthers(largeNodes)"
+              >
+                只显示大型社区
+              </button>
             </div>
           </div>
 
           <!-- Zone 2: 个体列表 -->
           <div class="nfp-section">
-            <div class="nfp-section-title">节点列表</div>
+            <div class="nfp-section-title">
+              节点列表
+            </div>
             <div class="nfp-sort-row">
-              <button class="nfp-chip" @click="selectAll">全部选中</button>
-              <button class="nfp-chip nfp-chip-action" @click="emit('update:hiddenIds', new Set(props.nodes.map(n => n.id)))">全部隐藏</button>
+              <button
+                class="nfp-chip"
+                @click="selectAll"
+              >
+                全部选中
+              </button>
+              <button
+                class="nfp-chip nfp-chip-action"
+                @click="emit('update:hiddenIds', new Set(props.nodes.map(n => n.id)))"
+              >
+                全部隐藏
+              </button>
               <span class="nfp-sort-spacer" />
-              <button v-for="sk in sortKeys" :key="sk.key" class="nfp-sort-btn" :class="{ active: sortKey === sk.key }" @click="toggleSort(sk.key)">{{ sk.label }}{{ sortKey === sk.key ? (sortDir === 1 ? '↓' : '↑') : '' }}</button>
+              <button
+                v-for="sk in sortKeys"
+                :key="sk.key"
+                class="nfp-sort-btn"
+                :class="{ active: sortKey === sk.key }"
+                @click="toggleSort(sk.key)"
+              >
+                {{ sk.label }}{{ sortKey === sk.key ? (sortDir === 1 ? '↓' : '↑') : '' }}
+              </button>
             </div>
             <div class="nfp-ext-list">
-              <label v-for="n in displayList.slice(0, 50)" :key="n.id" class="nfp-ext-item" :class="{ hidden: props.hiddenIds.has(n.id), match: searchQ && (n.label.toLowerCase().includes(searchQ) || n.id.toLowerCase().includes(searchQ)) }">
-                <input type="checkbox" :checked="!props.hiddenIds.has(n.id)" @change="toggle(n.id)">
-                <span class="nfp-ext-label" :title="n.label">{{ n.label.length > 18 ? n.label.slice(0, 18) + '\u2026' : n.label }}</span>
+              <label
+                v-for="n in displayList.slice(0, 50)"
+                :key="n.id"
+                class="nfp-ext-item"
+                :class="{ hidden: props.hiddenIds.has(n.id), match: searchQ && (n.label.toLowerCase().includes(searchQ) || n.id.toLowerCase().includes(searchQ)) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="!props.hiddenIds.has(n.id)"
+                  @change="toggle(n.id)"
+                >
+                <span
+                  class="nfp-ext-label"
+                  :title="n.label"
+                >{{ n.label.length > 18 ? n.label.slice(0, 18) + '\u2026' : n.label }}</span>
                 <span class="nfp-ext-stat">I{{ n.inDegree ?? 0 }}</span>
                 <span class="nfp-ext-stat">O{{ n.outDegree ?? 0 }}</span>
                 <span class="nfp-ext-stat nfp-ext-stat-strong">{{ n.nodeCount ?? 0 }}</span>
               </label>
-              <div v-if="displayList.length > 50" class="nfp-ext-more">还有 {{ displayList.length - 50 }} 个...</div>
+              <div
+                v-if="displayList.length > 50"
+                class="nfp-ext-more"
+              >
+                还有 {{ displayList.length - 50 }} 个...
+              </div>
             </div>
           </div>
 
           <!-- Zone 3: 诊断 -->
-          <div v-if="lowQualityComms.length || highCoreComms.length || isolatedComms.length || hotDepComms.length" class="nfp-section">
-            <div class="nfp-section-title">诊断</div>
+          <div
+            v-if="lowQualityComms.length || highCoreComms.length || isolatedComms.length || hotDepComms.length"
+            class="nfp-section"
+          >
+            <div class="nfp-section-title">
+              诊断
+            </div>
 
-            <div v-if="lowQualityComms.length" class="nfp-diag-row">
+            <div
+              v-if="lowQualityComms.length"
+              class="nfp-diag-row"
+            >
               <span class="nfp-diag-label">&#x26A0; 低质量社区 ({{ lowQualityComms.length }})</span>
-              <button class="nfp-chip nfp-chip-diag" @click="showNodes(lowQualityComms)">显示</button>
-              <button class="nfp-chip nfp-chip-diag" @click="focusNodes(lowQualityComms)">聚焦</button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="showNodes(lowQualityComms)"
+              >
+                显示
+              </button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="focusNodes(lowQualityComms)"
+              >
+                聚焦
+              </button>
             </div>
-            <div v-if="highCoreComms.length" class="nfp-diag-row">
+            <div
+              v-if="highCoreComms.length"
+              class="nfp-diag-row"
+            >
               <span class="nfp-diag-label">&#x26A1; 高核心节点 ({{ highCoreComms.length }})</span>
-              <button class="nfp-chip nfp-chip-diag" @click="showNodes(highCoreComms)">显示</button>
-              <button class="nfp-chip nfp-chip-diag" @click="focusNodes(highCoreComms)">聚焦</button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="showNodes(highCoreComms)"
+              >
+                显示
+              </button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="focusNodes(highCoreComms)"
+              >
+                聚焦
+              </button>
             </div>
-            <div v-if="isolatedComms.length" class="nfp-diag-row">
+            <div
+              v-if="isolatedComms.length"
+              class="nfp-diag-row"
+            >
               <span class="nfp-diag-label">&#x1F517; 孤立社区 ({{ isolatedComms.length }})</span>
-              <button class="nfp-chip nfp-chip-diag" @click="showNodes(isolatedComms)">显示</button>
-              <button class="nfp-chip nfp-chip-diag" @click="focusNodes(isolatedComms)">聚焦</button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="showNodes(isolatedComms)"
+              >
+                显示
+              </button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="focusNodes(isolatedComms)"
+              >
+                聚焦
+              </button>
             </div>
-            <div v-if="hotDepComms.length" class="nfp-diag-row">
+            <div
+              v-if="hotDepComms.length"
+              class="nfp-diag-row"
+            >
               <span class="nfp-diag-label">&#x1F4E6; 依赖热点 ({{ hotDepComms.length }})</span>
-              <button class="nfp-chip nfp-chip-diag" @click="showNodes(hotDepComms)">显示</button>
-              <button class="nfp-chip nfp-chip-diag" @click="focusNodes(hotDepComms)">聚焦</button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="showNodes(hotDepComms)"
+              >
+                显示
+              </button>
+              <button
+                class="nfp-chip nfp-chip-diag"
+                @click="focusNodes(hotDepComms)"
+              >
+                聚焦
+              </button>
             </div>
           </div>
         </div>
@@ -360,8 +567,18 @@ function activeType(): 'all' | 'community' | 'external' {
         <!-- Footer -->
         <div class="nfp-footer">
           <span class="nfp-footer-info">{{ hiddenCount }} 隐藏</span>
-          <button class="nfp-footer-btn" @click="selectAll">{{ t('report.resetFilter', '重置') }}</button>
-          <button class="nfp-footer-btn nfp-footer-btn-primary" @click="emit('connect-complete')">显示关联节点</button>
+          <button
+            class="nfp-footer-btn"
+            @click="selectAll"
+          >
+            {{ t('report.resetFilter', '重置') }}
+          </button>
+          <button
+            class="nfp-footer-btn nfp-footer-btn-primary"
+            @click="emit('connect-complete')"
+          >
+            显示关联节点
+          </button>
         </div>
       </div>
     </div>

@@ -166,10 +166,16 @@ function confirmClear() {
           <span>确认清除所有历史会话？此操作不可恢复。</span>
         </div>
         <div class="confirm-actions">
-          <button class="btn btn-ghost" @click="showClearConfirm = false">
+          <button
+            class="btn btn-ghost"
+            @click="showClearConfirm = false"
+          >
             {{ t('common.cancel') }}
           </button>
-          <button class="btn btn-danger" @click="confirmClear">
+          <button
+            class="btn btn-danger"
+            @click="confirmClear"
+          >
             {{ t('common.confirm') }}
           </button>
         </div>

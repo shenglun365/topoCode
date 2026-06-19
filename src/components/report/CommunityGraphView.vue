@@ -59,7 +59,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string; regenerationType?: 'community' | 'overall' }]
+  'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }]
 }>()
 
 const { showId, componentId } = useComponentId('CG-001')
@@ -937,7 +937,6 @@ function handleNodeContextMenu(nodeId: string) {
       parentCommId: com.communityId,
       parentLevel: com.level || 'L0',
       parentEdgeType: com.edgeType,
-      regenerationType: 'community',
     })
   }
 }
@@ -1233,8 +1232,14 @@ watch(hasUnsavedChanges, (v) => {
         <ArrowsPointingOutIcon class="w-3.5 h-3.5" />
       </button>
     </div>
-    <div v-if="compareActive" class="cgv-compare-bar">
-      <button class="cgv-compare-exit" @click="toggleCompare">
+    <div
+      v-if="compareActive"
+      class="cgv-compare-bar"
+    >
+      <button
+        class="cgv-compare-exit"
+        @click="toggleCompare"
+      >
         <span>&times; 退出对比</span>
       </button>
       <select
@@ -1246,7 +1251,9 @@ watch(hasUnsavedChanges, (v) => {
           v-for="s in compareTimeline"
           :key="s.id"
           :value="s.id"
-        >{{ s.versionTag || s.alias || s.id }}</option>
+        >
+          {{ s.versionTag || s.alias || s.id }}
+        </option>
       </select>
       <span class="cgv-compare-vs">=== vs ===</span>
       <select
@@ -1258,18 +1265,23 @@ watch(hasUnsavedChanges, (v) => {
           v-for="s in compareTimeline"
           :key="s.id"
           :value="s.id"
-        >{{ s.versionTag || s.alias || s.id }}</option>
+        >
+          {{ s.versionTag || s.alias || s.id }}
+        </option>
       </select>
       <div class="cgv-compare-legend">
-        <span class="legend-item"><span class="legend-dot added"></span>新增</span>
-        <span class="legend-item"><span class="legend-dot removed"></span>删除</span>
-        <span class="legend-item"><span class="legend-dot changed"></span>变更</span>
-        <span class="legend-item"><span class="legend-dot unchanged"></span>无变化</span>
+        <span class="legend-item"><span class="legend-dot added" />新增</span>
+        <span class="legend-item"><span class="legend-dot removed" />删除</span>
+        <span class="legend-item"><span class="legend-dot changed" />变更</span>
+        <span class="legend-item"><span class="legend-dot unchanged" />无变化</span>
       </div>
     </div>
 
     <!-- 下钻/上卷 加载遮罩 -->
-    <div v-if="drilling" class="cgv-drill-overlay">
+    <div
+      v-if="drilling"
+      class="cgv-drill-overlay"
+    >
       <div class="cgv-drill-spinner" />
       <span class="cgv-drill-text">加载中...</span>
     </div>
@@ -1452,27 +1464,46 @@ watch(hasUnsavedChanges, (v) => {
 
     <!-- 位置复原弹窗 -->
     <Teleport to="body">
-      <div v-if="showPositionReset" class="cgv-overlay" @click.self="showPositionReset = false">
+      <div
+        v-if="showPositionReset"
+        class="cgv-overlay"
+        @click.self="showPositionReset = false"
+      >
         <div class="cgv-position-reset-dialog">
           <div class="cgv-prd-header">
             <span class="cgv-prd-title">位置复原</span>
-            <button class="cgv-prd-close" @click="showPositionReset = false">&times;</button>
+            <button
+              class="cgv-prd-close"
+              @click="showPositionReset = false"
+            >
+              &times;
+            </button>
           </div>
           <div class="cgv-prd-body">
-            <div v-if="positionKeys.length === 0" class="cgv-prd-empty">
+            <div
+              v-if="positionKeys.length === 0"
+              class="cgv-prd-empty"
+            >
               当前项目无已保存的位置信息
             </div>
             <template v-else>
               <div class="cgv-prd-toolbar">
                 <label class="cgv-prd-select-all">
-                  <input type="checkbox" :checked="selectedKeys.size === positionKeys.length" @change="toggleAllKeys">
+                  <input
+                    type="checkbox"
+                    :checked="selectedKeys.size === positionKeys.length"
+                    @change="toggleAllKeys"
+                  >
                   全选 ({{ positionKeys.length }})
                 </label>
               </div>
               <div class="cgv-prd-header-row">
-                <span></span>
+                <span />
                 <span class="cgv-prd-col-edge">边类型</span>
-                <span class="cgv-prd-col-drill" title="当前图的钻取范围：L0 表示整层全部社区，comm-xxx 表示下钻到该社区的子树视图">图范围</span>
+                <span
+                  class="cgv-prd-col-drill"
+                  title="当前图的钻取范围：L0 表示整层全部社区，comm-xxx 表示下钻到该社区的子树视图"
+                >图范围</span>
                 <span class="cgv-prd-col-count">节点数</span>
               </div>
               <div class="cgv-prd-list">
@@ -1487,7 +1518,10 @@ watch(hasUnsavedChanges, (v) => {
                     @change="toggleKey(k)"
                   >
                   <span class="cgv-prd-edge">{{ edgeTypeLabel[k.edgeType] || k.edgeType }}</span>
-                  <span class="cgv-prd-drill" :title="k.drillKey === 'L0' ? '顶层全图 — 所有L0社区的位置快照' : `钻取到 ${k.drillKey} 的子图位置快照`">{{ drillKeyLabel(k) }}</span>
+                  <span
+                    class="cgv-prd-drill"
+                    :title="k.drillKey === 'L0' ? '顶层全图 — 所有L0社区的位置快照' : `钻取到 ${k.drillKey} 的子图位置快照`"
+                  >{{ drillKeyLabel(k) }}</span>
                   <span class="cgv-prd-count">{{ k.count }} 个节点</span>
                 </label>
               </div>
@@ -1502,13 +1536,28 @@ watch(hasUnsavedChanges, (v) => {
               >
                 {{ resetLoading ? '清除中...' : `清除选中 (${selectedKeys.size})` }}
               </button>
-              <button class="cgv-prd-btn-cancel" @click="showPositionReset = false">取消</button>
+              <button
+                class="cgv-prd-btn-cancel"
+                @click="showPositionReset = false"
+              >
+                取消
+              </button>
             </template>
             <template v-else>
               <span class="cgv-prd-confirm-text">确认清除 {{ selectedKeys.size }} 个已保存的位置信息？此操作不可撤销。</span>
               <div class="cgv-prd-confirm-actions">
-                <button class="cgv-prd-btn-danger" @click="executeClearPositions">确认清除</button>
-                <button class="cgv-prd-btn-cancel" @click="showClearConfirm = false">取消</button>
+                <button
+                  class="cgv-prd-btn-danger"
+                  @click="executeClearPositions"
+                >
+                  确认清除
+                </button>
+                <button
+                  class="cgv-prd-btn-cancel"
+                  @click="showClearConfirm = false"
+                >
+                  取消
+                </button>
               </div>
             </template>
           </div>
@@ -1518,27 +1567,63 @@ watch(hasUnsavedChanges, (v) => {
 
     <!-- 齿轮设置面板 -->
     <Teleport to="body">
-      <div v-if="gearOpen" class="cgv-gear-overlay" @click.self="gearOpen = false">
-        <div class="cgv-gear-panel" :style="{ position: 'fixed', top: gearPanelRect.top || undefined, bottom: gearPanelRect.bottom || undefined, right: gearPanelRect.right }">
+      <div
+        v-if="gearOpen"
+        class="cgv-gear-overlay"
+        @click.self="gearOpen = false"
+      >
+        <div
+          class="cgv-gear-panel"
+          :style="{ position: 'fixed', top: gearPanelRect.top || undefined, bottom: gearPanelRect.bottom || undefined, right: gearPanelRect.right }"
+        >
           <div class="cgv-gear-row">
             <span class="cgv-gear-label">字号</span>
             <span class="cgv-gear-val">{{ fontSize }}px</span>
-            <input type="range" min="6" max="18" step="0.5" :value="fontSize" @input="fontSize = parseFloat(($event.target as HTMLInputElement).value)" class="cgv-gear-slider">
+            <input
+              type="range"
+              min="6"
+              max="18"
+              step="0.5"
+              :value="fontSize"
+              class="cgv-gear-slider"
+              @input="fontSize = parseFloat(($event.target as HTMLInputElement).value)"
+            >
           </div>
-          <div v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && internalViewMode === 'force')" class="cgv-gear-row">
+          <div
+            v-if="(isExternalTab && externalViewMode === 'force') || (!isExternalTab && internalViewMode === 'force')"
+            class="cgv-gear-row"
+          >
             <span class="cgv-gear-label">斥力</span>
             <span class="cgv-gear-val">{{ forceRepulsion }}</span>
-            <input type="range" min="1" max="100" :value="forceRepulsionSlider" @input="forceRepulsionSlider = Number(($event.target as HTMLInputElement).value)" class="cgv-gear-slider">
+            <input
+              type="range"
+              min="1"
+              max="100"
+              :value="forceRepulsionSlider"
+              class="cgv-gear-slider"
+              @input="forceRepulsionSlider = Number(($event.target as HTMLInputElement).value)"
+            >
           </div>
           <hr class="cgv-gear-divider">
-          <button class="cgv-gear-action" :class="{ active: hasUnsavedChanges }" :disabled="!hasUnsavedChanges" @click="handleSavePositions()">
+          <button
+            class="cgv-gear-action"
+            :class="{ active: hasUnsavedChanges }"
+            :disabled="!hasUnsavedChanges"
+            @click="handleSavePositions()"
+          >
             <span v-if="hasUnsavedChanges">&#x1F4BE; 保存位置</span>
             <span v-else>&#x1F4BE; 位置已保存</span>
           </button>
-          <button class="cgv-gear-action" @click="openPositionReset(); gearOpen = false">
+          <button
+            class="cgv-gear-action"
+            @click="openPositionReset(); gearOpen = false"
+          >
             位置复原…
           </button>
-          <button class="cgv-gear-action cgv-gear-action-danger" @click="handleClearAllPositions(); gearOpen = false">
+          <button
+            class="cgv-gear-action cgv-gear-action-danger"
+            @click="handleClearAllPositions(); gearOpen = false"
+          >
             清除所有保存位置…
           </button>
         </div>
