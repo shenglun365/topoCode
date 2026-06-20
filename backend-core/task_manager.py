@@ -1263,6 +1263,27 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         file_stats = _scan_file_stats_impl(project_db, pid)
         logger.info("[PERF] getReportDashboard file_stats=%.1fms", (time.perf_counter() - t0) * 1000)
 
+        # 4. 预摘要状态
+        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': ''}
+        try:
+            # 从 file_summaries 表直接统计缓存数（无社区数据时也能工作）
+            p_rows = project_db.execute(
+                "SELECT COUNT(*) as cnt FROM file_summaries WHERE project_id=?", (pid,)
+            ).fetchone()
+            cached = p_rows["cnt"] if p_rows else 0
+            pre_summary['cached_count'] = cached
+
+            # 尝试从社区计算总分批次（可能无社区数据，此时总文件数为 0）
+            comps = _get_l0_comps(project_db, tid)
+            project_root = _get_project_root(pid)
+            rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
+            if rank_data:
+                pre_summary['counts'] = rank_data.get("counts", {'P0': 0, 'P1': 0, 'P2': 0})
+                pre_summary['total_files'] = len(rank_data.get("files", []))
+            pre_summary['project_root'] = project_root
+        except Exception as e:
+            logger.warning("[getReportDashboard] preSummary failed: %s", e)
+
         logger.info("[PERF] getReportDashboard TOTAL=%.1fms task_id=%s", (time.perf_counter() - t_total) * 1000, tid)
         logger.info("[analysis.getReportDashboard] DONE task_id=%s", tid)
         return {
@@ -1272,6 +1293,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             'callResults': call_results,
             'depResults': dep_results,
             'fileStats': file_stats,
+            'preSummary': pre_summary,
         }
 
     def _get_cascade_levels_impl(project_db, tid, et):
@@ -1859,8 +1881,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             root_row = multi_db.main_db.execute(
                 "SELECT root_path FROM projects WHERE id = ?", (pid,)
             ).fetchone()
-            return root_row["root_path"] if root_row and root_row.get("root_path") else ""
-        except Exception:
+            result = root_row["root_path"] if root_row else ""
+            return str(result or "")
+        except Exception as e:
+            logger.warning("[_get_project_root] FAILED pid=%r error=%s", pid, e)
             return ""
 
     def _get_project_summary(pid):
@@ -1868,7 +1892,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             row = multi_db.main_db.execute(
                 "SELECT summary FROM projects WHERE id = ?", (pid,)
             ).fetchone()
-            return row["summary"] if row and row.get("summary") else ""
+            return str(row["summary"] or "") if row else ""
         except Exception:
             return ""
 
@@ -2135,10 +2159,30 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     # ==================== 文件预摘要 ====================
 
-    def _compute_file_ranks(task_id: str, project_db, components: list) -> dict:
+    def _resolve_node_list_item(item: str, task_id: str, project_db) -> list[str]:
+        """将 graph_doc.node_list 中的条目转为文件路径列表。
+        如果 item 是绝对/相对路径则直接返回；否则当作 graph_node.id 解析。"""
+        import os as _os
+        if not item or not isinstance(item, str):
+            return []
+        if _os.path.isabs(item) or '/' in item:
+            return [item]
+        # 可能是 graph_node.id → 解析为 file_path
+        try:
+            rows = project_db.execute(
+                "SELECT DISTINCT file_path FROM graph_node WHERE id=? AND task_id=? AND file_path!=''",
+                (item, task_id)
+            ).fetchall()
+            return [r[0] for r in rows if r[0]]
+        except Exception:
+            return []
+
+    def _compute_file_ranks(task_id: str, project_db, components: list,
+                             project_root: str = "") -> dict:
         """计算文件重要度评分并分批次。"""
         from collections import Counter
         import json as _rj
+        import os as _os
 
         # 1. 收集所有组件 node_list → 文件路径
         file_to_comms: dict[str, set[str]] = {}
@@ -2158,64 +2202,105 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 if doc and doc["node_list"]:
                     raw = _rj.loads(doc["node_list"]) if isinstance(doc["node_list"], str) else doc["node_list"]
                     for item in raw:
-                        if isinstance(item, str) and item.strip():
-                            file_to_comms.setdefault(item, set()).add(cid)
+                        for resolved in _resolve_node_list_item(item, task_id, project_db):
+                            file_to_comms.setdefault(resolved, set()).add(cid)
             except Exception:
                 pass
 
-        # 2. 查文件大小
+        # 2. 查文件大小（node_list 存绝对路径，source_files 存相对路径）
         if file_to_comms:
             try:
+                rel_keys = [
+                    _os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp
+                    for fp in file_to_comms
+                ]
+                logger.info("[_compute_file_ranks] size_query project_root=%r n_files=%d first_abs=%r first_rel=%r",
+                           project_root, len(file_to_comms),
+                           next(iter(file_to_comms), '') if file_to_comms else '',
+                           rel_keys[0] if rel_keys else '')
+                rel_to_size = {}
                 for row in project_db.execute(
                     "SELECT file_path, size FROM source_files WHERE file_path IN ({})".format(
-                        ",".join("?" for _ in file_to_comms)
-                    ), list(file_to_comms.keys())
+                        ",".join("?" for _ in rel_keys)
+                    ), rel_keys
                 ).fetchall():
-                    file_sizes[row["file_path"]] = row["size"] or 0
-            except Exception:
-                pass
+                    rel_to_size[row["file_path"]] = row["size"] or 0
+                logger.info("[_compute_file_ranks] source_files matched=%d", len(rel_to_size))
+                # 映射回绝对路径（scoring loop 用绝对路径做 key）
+                for abs_fp, rel_fp in zip(file_to_comms, rel_keys):
+                    file_sizes[abs_fp] = rel_to_size.get(rel_fp, 0)
+                logger.info("[_compute_file_ranks] file_sizes nonzero=%d",
+                           sum(1 for v in file_sizes.values() if v > 0))
+            except Exception as e:
+                logger.warning("[_compute_file_ranks] size lookup failed: %s", e)
 
-        # 3. 查依赖边数
+        # 3. 查依赖边数（dependencies.source_file 是文件路径文本）
         try:
             for row in project_db.execute(
-                "SELECT g.file_path, COUNT(*) as cnt FROM dependencies d "
-                "JOIN graph_node g ON g.id = d.source_id AND g.task_id = ? "
-                "WHERE g.file_path IN ({}) GROUP BY g.file_path".format(
+                "SELECT d.source_file, COUNT(*) as cnt FROM dependencies d "
+                "JOIN graph_node g ON g.file_path = d.source_file AND g.task_id = ? "
+                "WHERE d.source_file IN ({}) GROUP BY d.source_file".format(
                     ",".join("?" for _ in file_to_comms)
                 ), (task_id,) + tuple(file_to_comms.keys())
             ).fetchall():
-                file_edges[row["file_path"]] = row["cnt"]
+                file_edges[row["source_file"]] = row["cnt"]
         except Exception:
             pass
 
-        # 4. 计算评分
+        # 4. 计算评分（size 分桶 + quality 微调）
         scored = []
         for fp, comms in file_to_comms.items():
             cross = len(comms)
             edges = file_edges.get(fp, 0)
             size = file_sizes.get(fp, 0)
             max_quality = max((comm_quality.get(c, 0) for c in comms), default=0)
-            is_large = 1 if size > 10000 else 0
-            score = cross * 10 + edges * 5 + is_large * 3 + int(max_quality * 100) * 2
-            if score >= 20:
-                batch = "P0"
-            elif score >= 10:
-                batch = "P1"
-            else:
-                batch = "P2"
+            size_score = (1 if size > 10000 else 0) * 15 + \
+                         (1 if size > 50000 else 0) * 15 + \
+                         (1 if size > 100000 else 0) * 10
+            score = size_score + int(max_quality * 100)
             scored.append({
                 "file_path": fp, "score": score, "cross": cross,
-                "edges": edges, "size": size, "is_large": is_large,
-                "quality": max_quality, "batch": batch,
+                "edges": edges, "size": size, "is_large": 1 if size > 10000 else 0,
+                "quality": max_quality, "batch": "",
             })
 
-        scored.sort(key=lambda x: (-x["score"], -x["cross"], -x["edges"]))
+        # 按评分降序排列
+        scored.sort(key=lambda x: (-x["score"], -x["size"]))
+
+        # 百分位分批（前30% P0, 中30% P1, 后40% P2；边界同分不截断）
+        total = len(scored)
+        p0_end = max(1, int(total * 0.30))
+        p1_end = max(p0_end + 1, int(total * 0.60))
+        while p0_end < total and scored[p0_end]["score"] == scored[p0_end - 1]["score"]:
+            p0_end += 1
+        while p1_end < total and scored[p1_end]["score"] == scored[p1_end - 1]["score"]:
+            p1_end += 1
+        for i, item in enumerate(scored):
+            if i < p0_end:
+                item["batch"] = "P0"
+            elif i < p1_end:
+                item["batch"] = "P1"
+            else:
+                item["batch"] = "P2"
+
         return {
             "files": scored,
-            "counts": {"P0": sum(1 for f in scored if f["batch"] == "P0"),
-                        "P1": sum(1 for f in scored if f["batch"] == "P1"),
-                        "P2": sum(1 for f in scored if f["batch"] == "P2")},
+            "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end},
         }
+
+    def _get_l0_comps(project_db, tid):
+        """获取 L0 社区列表，INCLUDE 为空时回退到 CALL。"""
+        for et in ("INCLUDE", "CALL"):
+            cascades = _get_cascade_levels_impl(project_db, tid, et)
+            l0_items = []
+            for l in cascades.get("levels", []):
+                if l.get("lv") == "L0":
+                    l0_items = l.get("items", [])
+                    break
+            if l0_items:
+                return [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
+                        for it in l0_items]
+        return []
 
     @server.register("analysis.getPreSummaryStatus")
     def get_pre_summary_status(task_id=None, taskId=None):
@@ -2230,21 +2315,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        # 获取所有已分析的 L0 组件
-        cascades = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
-        l0_items = []
-        for l in cascades.get("levels", []):
-            if l.get("lv") == "L0":
-                l0_items = l.get("items", [])
-                break
-        comps = [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
-                 for it in l0_items]
-
-        rank_data = _compute_file_ranks(tid, project_db, comps)
+        comps = _get_l0_comps(project_db, tid)
+        rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
 
         # 查已缓存文件数
-        from agent_workflow.file_summary_cache import FileSummaryCache
-        cache = FileSummaryCache(project_db, pid)
         cached_count = 0
         try:
             row = project_db.execute(
@@ -2271,22 +2345,45 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError(f"Task {tid} not found")
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
 
-        cascades = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
-        l0_items = []
-        for l in cascades.get("levels", []):
-            if l.get("lv") == "L0":
-                l0_items = l.get("items", [])
-                break
-        comps = [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
-                 for it in l0_items]
-
-        rank_data = _compute_file_ranks(tid, project_db, comps)
+        comps = _get_l0_comps(project_db, tid)
+        rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
         batch_files = [f for f in rank_data["files"] if f["batch"] == batch]
         total = len(batch_files)
         start = (page - 1) * page_size
         end = start + page_size
         page_items = batch_files[start:end]
+
+        # 路径 relativize + 缓存状态标记
+        import os as _os
+        logger.info("[listPreSummaryFiles] project_root=%r n_items=%d first_fp=%r",
+                   project_root, len(page_items),
+                   page_items[0]["file_path"] if page_items else '')
+        # 批量查询缓存状态
+        cached_set: set[str] = set()
+        if page_items:
+            try:
+                rel_fps = [
+                    _os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp
+                    for fp in [item["file_path"] for item in page_items]
+                ]
+                placeholders = ",".join("?" for _ in rel_fps)
+                cache_rows = project_db.execute(
+                    f"SELECT DISTINCT file_path FROM file_summaries WHERE project_id=? AND file_path IN ({placeholders})",
+                    (pid, *rel_fps)
+                ).fetchall()
+                cached_set = {r[0] for r in cache_rows}
+            except Exception:
+                pass
+        for item in page_items:
+            fp = item["file_path"]
+            if project_root and _os.path.isabs(fp):
+                rel = _os.path.relpath(fp, project_root)
+                item["file_path"] = rel
+            item["has_summary"] = item["file_path"] in cached_set
+        if page_items:
+            logger.info("[listPreSummaryFiles] after relativize first_fp=%r", page_items[0]["file_path"])
 
         return {
             "batch": batch, "page": page, "page_size": page_size,
@@ -2306,16 +2403,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
 
-        cascades = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
-        l0_items = []
-        for l in cascades.get("levels", []):
-            if l.get("lv") == "L0":
-                l0_items = l.get("items", [])
-                break
-        comps = [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
-                 for it in l0_items]
+        comps = _get_l0_comps(project_db, tid)
 
-        rank_data = _compute_file_ranks(tid, project_db, comps)
+        project_root = _get_project_root(pid)
+        rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
         batch_files = [f["file_path"] for f in rank_data["files"]
                        if f["batch"] == batch]
         if limit > 0:
@@ -2323,14 +2414,31 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not batch_files:
             return {"success": False, "error": f"批次 {batch} 无文件"}
 
+        # 查询已缓存文件集，用于断点续传
+        cached_paths: set[str] = set()
+        try:
+            import os as _os2
+            rel_fps = [_os2.path.relpath(fp, project_root) if project_root and _os2.path.isabs(fp) else fp
+                       for fp in batch_files]
+            placeholders = ",".join("?" for _ in rel_fps)
+            cache_rows = project_db.execute(
+                f"SELECT file_path FROM file_summaries WHERE project_id=? AND file_path IN ({placeholders})",
+                (pid, *rel_fps)
+            ).fetchall()
+            cached_paths = {r[0] for r in cache_rows}
+            logger.info("[startPreSummary] resume: %d/%d files already cached, will skip",
+                       len(cached_paths), len(batch_files))
+        except Exception as e:
+            logger.warning("[startPreSummary] resume check failed: %s", e)
+
         context = {
             "task_id": tid,
             "project_id": pid,
             "files": batch_files,
+            "cached_paths": cached_paths,
         }
 
         from agent_workflow.router import create_default_router
-        project_root = _get_project_root(pid)
         project_summary = _get_project_summary(pid)
         router = create_default_router(
             project_root=project_root,
@@ -2418,7 +2526,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                            language=None, language_=None, concurrency=None,
                            agentic=None, max_turns=None, maxTurns=None,
                            summary_model_id=None, summaryModelId=None,
-                           subagent_concurrency=None, subagentConcurrency=None):
+                           subagent_concurrency=None, subagentConcurrency=None,
+                           analysis_mode=None, analysisMode=None):
         """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
         tid = task_id or taskId
         if not tid:
@@ -2444,6 +2553,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 return {"success": False, "error": f"max_turns 必须是整数 (1-30)，收到: {raw_turns}"}
         if turns < 1 or turns > 30:
             return {"success": False, "error": f"max_turns 必须在 1-30 之间，收到: {turns}"}
+
+        # 解析分析模式
+        mode = str(analysis_mode or analysisMode or "quick").lower()
+        if mode not in ("quick", "deep"):
+            mode = "quick"
 
         # 解析摘要模型
         summary_model = summary_model_id or summaryModelId or ""
@@ -2686,6 +2800,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "project_id": pid,
                 "language": lang,
                 "concurrency": conc,
+                "analysis_mode": mode,
                 "components": [
                     {
                         "id": c.get("id", ""),
@@ -2693,6 +2808,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         "type": c.get("type", "community"),
                         "metadata": c.get("metadata", {}),
                         "context": c.get("context", ""),
+                        "analysis_mode": mode,
                     }
                     for c in enriched_comps
                 ],

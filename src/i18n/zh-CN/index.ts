@@ -2,7 +2,6 @@ import ai from './ai'
 import analysis from './analysis'
 import animation from './animation'
 import code from './code'
-import coder from './coder'
 import common from './common'
 import datetime from './datetime'
 import file from './file'
@@ -26,7 +25,6 @@ export default {
   ...analysis,
   ...animation,
   ...code,
-  ...coder,
   ...common,
   ...datetime,
   ...file,

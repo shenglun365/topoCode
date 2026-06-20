@@ -344,11 +344,13 @@ def create_default_router(
         )
 
     from .workflows.pre_summary import PreSummaryWorkflow
+    from .sandbox import AgentSandbox
     router.register("presummary_files", RouteEntry(
         workflow_class=PreSummaryWorkflow,
         tool_builder=_build_presummary_tools,
         context_transformer=None,
         description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析",
+        sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
     ))
 
     # ── agentic_analyze_components 路由（Agentic 模式） ──

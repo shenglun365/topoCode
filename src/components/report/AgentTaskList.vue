@@ -100,13 +100,13 @@ onMounted(() => {
   refresh()
 })
 
-const statusIcon = (status: string) => {
+const statusLabel = (status: string) => {
   const map: Record<string, string> = {
-    queued: '\u2B1C', running: '\uD83D\uDD04', completed: '\u2705',
-    partial: '\u26A0\uFE0F', failed: '\u274C', cancelled: '\u25FC\uFE0F',
-    unknown: '\u2753',
+    queued: '排队中', running: '运行中', completed: '已完成',
+    partial: '部分完成', failed: '已失败', cancelled: '已取消',
+    unknown: '未知',
   }
-  return map[status] || '\u2B1C'
+  return map[status] || '未知'
 }
 
 const actionLabel = (action: string) => {
@@ -116,16 +116,11 @@ const actionLabel = (action: string) => {
     startArchAnalysis: '架构分析',
     analyze_all: '全量分析',
     analyzeCommFiles: '文件分析',
+    presummary_files: '文件预摘要',
   }
   return map[action] || action
 }
 
-const stepIcon = (status: string) => {
-  const map: Record<string, string> = {
-    pending: '\u2B1C', running: '\u23F3', done: '\u2705', failed: '\u274C',
-  }
-  return map[status] || '\u2B1C'
-}
 </script>
 
 <template>
@@ -173,7 +168,7 @@ const stepIcon = (status: string) => {
       }"
     >
       <div class="atl-task-header">
-        <span class="atl-status">{{ statusIcon(task.status) }}</span>
+        <span class="atl-status-label">{{ statusLabel(task.status) }}</span>
         <span class="atl-action">{{ actionLabel(task.action) }}</span>
         <span class="atl-status-text">{{ task.status }}</span>
         <span
@@ -199,23 +194,25 @@ const stepIcon = (status: string) => {
         />
       </div>
       <div
-        v-if="task.message"
-        class="atl-message"
-      >
-        {{ task.message }}
-      </div>
-      <div
         v-if="task.steps && task.steps.length > 0"
         class="atl-steps"
       >
+        <div class="atl-step-compact">
+          <span>已完成 </span>
+          <span class="atl-compact-count">{{ task.steps.filter(s => s.status === 'done').length }}</span>
+          <span>/{{ task.steps.length }}</span>
+          <span class="atl-compact-detail">
+            （完成{{ task.steps.filter(s => s.status === 'done').length }}
+            / 失败{{ task.steps.filter(s => s.status === 'failed').length }}
+            / 剩余{{ task.steps.filter(s => s.status === 'pending' || s.status === 'running').length }}）
+          </span>
+        </div>
         <div
-          v-for="(step, si) in task.steps"
-          :key="si"
-          class="atl-step"
-          :class="{ 'atl-step-done': step.status === 'done', 'atl-step-fail': step.status === 'failed' }"
+          v-if="task.steps.find(s => s.status === 'running')"
+          class="atl-step-current"
         >
-          <span class="atl-step-icon">{{ stepIcon(step.status) }}</span>
-          <span class="atl-step-desc">{{ step.description }}</span>
+          <span>当前: </span>
+          <span>{{ task.steps.find(s => s.status === 'running')?.description }}</span>
         </div>
       </div>
     </div>
@@ -246,7 +243,24 @@ const stepIcon = (status: string) => {
 .atl-task-success { border-color: var(--success, #22c55e); background: color-mix(in srgb, var(--success, #22c55e) 5%, transparent); }
 .atl-task-fail { border-color: var(--danger, #ef4444); background: color-mix(in srgb, var(--danger, #ef4444) 5%, transparent); }
 .atl-task-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
-.atl-status { font-size: 0.85rem; }
+.atl-status-label {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.atl-task-success .atl-status-label {
+  background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+  color: var(--success, #22c55e);
+  border-color: color-mix(in srgb, var(--success, #22c55e) 30%, transparent);
+}
+.atl-task-fail .atl-status-label {
+  background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+  color: var(--danger, #ef4444);
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
+}
 .atl-action { font-weight: 600; color: var(--text-primary); }
 .atl-status-text { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); }
 .atl-task-success .atl-status-text { color: var(--success, #22c55e); }
@@ -263,13 +277,36 @@ const stepIcon = (status: string) => {
 .atl-progress { margin-left: auto; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); }
 .atl-progress-bar { height: 3px; background: var(--bg-secondary); border-radius: 2px; margin: 0.25rem 0; }
 .atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: 2px; transition: width 0.3s; }
-.atl-message { font-size: 0.65rem; color: var(--text-muted); margin-bottom: 0.25rem; }
 .atl-steps { display: flex; flex-direction: column; gap: 0.15rem; margin-top: 0.25rem; }
-.atl-step { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; }
-.atl-step-icon { font-size: 0.7rem; flex-shrink: 0; }
-.atl-step-desc { color: var(--text-muted); }
-.atl-step-done .atl-step-desc { color: var(--success, #22c55e); }
-.atl-step-fail .atl-step-desc { color: var(--danger, #ef4444); }
+.atl-step-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  padding: 0.15rem 0;
+}
+.atl-compact-count {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+.atl-compact-detail {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  margin-left: 0.25rem;
+}
+.atl-step-current {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  color: var(--accent);
+  margin-top: 0.15rem;
+  padding: 0.1rem 0.35rem;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 3px;
+}
 .atl-more { text-align: center; padding: 0.25rem; }
 .atl-more-btn { font-size: 0.65rem; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 3px; padding: 0.1rem 0.6rem; cursor: pointer; }
 .atl-more-btn:hover { background: var(--accent); color: #fff; }

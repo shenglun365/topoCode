@@ -52,6 +52,7 @@ class AgentTaskState:
     created_at: float = 0.0
     started_at: float = 0.0
     finished_at: float = 0.0
+    runtime: Any = None  # AgentRuntime instance, set during execution
 
     def to_dict(self) -> dict:
         steps = []
@@ -188,7 +189,7 @@ class AgentTaskManager:
         return state.to_dict()
 
     def cancel(self, agent_id: str) -> bool:
-        """取消任务。注意: 当前实现通过标记取消，具体取消取决于 AgentRuntime 协作。"""
+        """取消任务。设置队列状态 + 通知运行中的 AgentRuntime。"""
         with self._lock:
             state = self._tasks.get(agent_id)
         if not state:
@@ -199,6 +200,11 @@ class AgentTaskManager:
         state.status = TaskState.CANCELLED
         state.finished_at = time.time()
         logger.info(f"[AgentQueue] cancelled {agent_id}")
+
+        # 立即通知运行中的 runtime 停止
+        if state.runtime:
+            state.runtime.cancel()
+
         return True
 
     def _run_agent(self, agent_id: str, workflow: AgentWorkflow, context: dict,
@@ -223,12 +229,22 @@ class AgentTaskManager:
         try:
             import asyncio
             runtime = AgentRuntime(tools, sandbox, on_progress=progress_cb, multi_db=multi_db)
+            # 暴露 runtime 引用给 cancel()，使其能立即中止
+            with self._lock:
+                s = self._tasks.get(agent_id)
+                if s:
+                    s.runtime = runtime
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 result = loop.run_until_complete(runtime.run(workflow, context))
             finally:
                 loop.close()
+                # 清理 runtime 引用
+                with self._lock:
+                    s2 = self._tasks.get(agent_id)
+                    if s2:
+                        s2.runtime = None
 
             with self._lock:
                 s = self._tasks.get(agent_id)

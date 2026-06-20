@@ -3,7 +3,7 @@
    ======================================== */
 
 /** 页面类型 */
-export type PageType = 'home' | 'code' | 'analysis' | 'knowledge' | 'coder' | 'user';
+export type PageType = 'home' | 'code' | 'analysis' | 'knowledge' | 'user';
 
 /** 内置主题类型 */
 export type ThemeType = 'dark' | 'light';

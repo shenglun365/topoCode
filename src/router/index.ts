@@ -32,12 +32,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '知识库' },
   },
   {
-    path: '/coder',
-    name: 'Coder',
-    component: () => import('@/pages/CoderPage.vue'),
-    meta: { title: 'AI 助手' },
-  },
-  {
     path: '/user',
     name: 'User',
     component: () => import('@/pages/UserPage.vue'),

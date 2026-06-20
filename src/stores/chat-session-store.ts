@@ -1,10 +1,14 @@
 /**
  * 聊天会话持久化 store
  *
- * 两种模式：
- * 1. 任务会话 — key=`chat:{projectId}:{taskId}`，分析任务绑定的对话
- * 2. 自由问答 — key=`chat:free:{YYYY-MM-DD}`，跨项目共享，按日期归档
+ * Session key 规则：
+ * - 架构分析 (analysis): `arch:{projectId}:{taskId}` — 按分析任务隔离
+ * - 架构分析无活跃任务: `arch:{projectId}:free` — 按项目隔离
+ * - 代码解析 (code): `code:{projectId}` — 按项目隔离
+ * - 其他: `free:YYYY-MM-DD` — 全局自由会话
  */
+
+export type SessionPage = 'analysis' | 'code' | 'home'
 
 interface PersistedMessage {
   id: string
@@ -36,22 +40,24 @@ function save(key: string, messages: PersistedMessage[]) {
 }
 
 export function useChatSession() {
-  function sessionKey(projectId?: string, taskId?: string): string {
-    if (projectId && taskId) return `${projectId}:${taskId}`
+  function buildKey(page: SessionPage, projectId?: string, taskId?: string): string {
+    if (page === 'analysis' && projectId && taskId) return `arch:${projectId}:${taskId}`
+    if (page === 'analysis' && projectId) return `arch:${projectId}:free`
+    if (page === 'code' && projectId) return `code:${projectId}`
     return todayKey()
   }
 
-  function loadSession(projectId?: string, taskId?: string): PersistedMessage[] {
-    return load(sessionKey(projectId, taskId))
+  function loadSession(key: string): PersistedMessage[] {
+    return load(key)
   }
 
-  function saveSession(messages: PersistedMessage[], projectId?: string, taskId?: string) {
-    save(sessionKey(projectId, taskId), messages)
+  function saveSession(key: string, messages: PersistedMessage[]) {
+    save(key, messages)
   }
 
-  function clearSession(projectId?: string, taskId?: string) {
-    try { localStorage.removeItem(STORAGE_PREFIX + sessionKey(projectId, taskId)) } catch {}
+  function clearSession(key: string) {
+    try { localStorage.removeItem(STORAGE_PREFIX + key) } catch {}
   }
 
-  return { loadSession, saveSession, clearSession }
+  return { buildKey, loadSession, saveSession, clearSession }
 }

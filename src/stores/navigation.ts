@@ -22,7 +22,6 @@ export const useNavigationStore = defineStore('navigation', () => {
       code: '代码解析',
       analysis: '代码分析',
       knowledge: '知识库',
-      coder: 'AI 助手',
       user: '设置',
     }
     breadcrumbs.value = [

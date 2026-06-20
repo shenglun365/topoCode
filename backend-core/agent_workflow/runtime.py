@@ -315,6 +315,7 @@ class AgentRuntime:
         components = context.get("components", [])
         project_summary = context.get("project_summary", "")
         effective_max_turns = context.get("max_turns", workflow.max_turns)
+        analysis_mode = context.get("analysis_mode", "quick")
         tools_schema = self._tools.to_openai_tools(workflow.get_tool_filter(context))
 
         # 初始化步骤列表（用于 frontend 展示）
@@ -351,7 +352,8 @@ class AgentRuntime:
             )
 
             # 构建单组件消息
-            system_prompt = workflow.get_system_prompt(comp, project_summary)
+            system_prompt = workflow.get_system_prompt(comp, project_summary,
+                                                        detail_level=analysis_mode)
             user_context = comp.get("context", "")
             if not user_context:
                 user_context = f"组件ID: {comp_id}\n组件名称: {comp_name}\n组件类型: {comp.get('type', 'community')}"
@@ -463,6 +465,8 @@ class AgentRuntime:
                     try:
                         result = await tool.execute(**sanitized) if tool else ToolResult.fail(f"Unknown tool: {tc.name}")
                         logger.info(f"[AgentRuntime] agentic tool={tc.name} args={tc.arguments} success={result.success} tokens={result.tokens_used or 0}")
+                        if result.success and result.data and isinstance(result.data, str):
+                            result.data = self._sandbox.content.sanitize(result.data)
                     except Exception as e:
                         result = ToolResult.fail(str(e))
                     total_tokens += result.tokens_used or 0

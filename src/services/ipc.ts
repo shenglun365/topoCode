@@ -377,7 +377,7 @@ function createRealIPC() {
       rerunFileSummary: async (params: { taskId: string; file_path: string }) => {
         return await api.analysis.rerunFileSummary(params)
       },
-      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }) => {
+      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string }) => {
         return await api.analysis.analyzeComponents(params)
       },
       getComponentAnalysisResults: async (params: { taskId: string; componentIds?: string[] }) => {

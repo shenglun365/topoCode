@@ -198,7 +198,7 @@ watch(
       <main class="content-area">
         <div class="content-body">
           <router-view v-slot="{ Component }">
-            <keep-alive :include="['CoderPage']">
+            <keep-alive>
               <component
                 :is="Component"
                 :key="route.name"

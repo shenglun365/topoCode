@@ -346,7 +346,7 @@ function getConfigSummary(task: AnalysisTask): string {
       class="task-cards"
     >
       <div
-        v-for="task in analysisStore.tasks"
+        v-for="task in analysisStore.filteredTasks"
         :key="task.id"
         class="task-card"
       >

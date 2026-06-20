@@ -145,6 +145,8 @@ class BudgetTracker:
         return (time.monotonic() - self._started_at) >= self._timeout
 
     def exhausted(self) -> bool:
+        if self._max_tokens <= 0 or self._timeout <= 0:
+            return False
         return self.tokens_exceeded() or self.time_exceeded()
 
     def finish(self):
@@ -163,10 +165,14 @@ class BudgetTracker:
 
     @property
     def tokens_remaining(self) -> int:
+        if self._max_tokens <= 0:
+            return 999_999_999
         return max(0, self._max_tokens - self._tokens_used)
 
     @property
     def time_remaining(self) -> float:
+        if self._timeout <= 0:
+            return 999_999.0
         if not self._started_at:
             return self._timeout
         return max(0, self._timeout - (time.monotonic() - self._started_at))

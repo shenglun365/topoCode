@@ -13,67 +13,9 @@ from typing import Any, Callable
 
 from ..tools import AgentTool, ToolResult
 from ..workflows.base import AgentWorkflow, AgentStep, WorkflowResult
+from ..shared_utils import parse_structured_response, build_markdown_summary
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_structured_response(text: str, fallback_name: str = "") -> dict:
-    """从 LLM 响应中提取 JSON，出错时尝试从纯文本恢复。返回 dict 含 parsed 和 _parse_error 字段。"""
-    import json as _json
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:]) if len(lines) > 1 else text
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-    if text.startswith("json"):
-        text = text[4:].strip()
-    try:
-        parsed = _json.loads(text)
-        parsed["_parse_error"] = False
-        return parsed
-    except (_json.JSONDecodeError, ValueError):
-        pass
-    lines = text.strip().split("\n")
-    name = lines[0].strip()[:60] if lines else fallback_name[:60]
-    summary = "\n".join(lines[1:]) if len(lines) > 1 else text
-    is_bad = not summary.strip() or name == fallback_name
-    return {
-        "name": name, "summary": summary, "role": "", "key_files": [], "depends_on": [],
-        "_parse_error": is_bad,
-        "_error_reason": "LLM 返回格式错误，无法解析结构化 JSON" if is_bad else "",
-    }
-
-
-def _build_markdown_summary(name: str, summary: str, role: str,
-                              key_files: list, depends_on: list) -> str:
-    """将结构化分析结果拼接为增强 Markdown summary。
-
-    key_files 可以是 str 列表（旧格式）或 dict 列表（含 path/summary 字段）。
-    """
-    parts = []
-    parts.append(f"## 功能概要\n{summary}")
-    if role:
-        parts.append(f"\n**架构角色**: {role}")
-    if key_files:
-        files_lines = []
-        for kf in key_files[:10]:
-            if isinstance(kf, dict):
-                fp = kf.get("path", kf.get("file", ""))
-                fs = kf.get("summary", "")
-                if fp and fs:
-                    files_lines.append(f"- `{fp}` — {fs}")
-                elif fp:
-                    files_lines.append(f"- `{fp}`")
-            else:
-                files_lines.append(f"- `{kf}`")
-        if files_lines:
-            parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
-    if depends_on:
-        deps_md = ", ".join(depends_on[:10])
-        parts.append(f"\n**依赖组件**: {deps_md}")
-    return "\n".join(parts)
 
 
 class _AnalyzeComponentTool(AgentTool):
@@ -119,6 +61,9 @@ class _AnalyzeComponentTool(AgentTool):
                     "context": ctx,
                 })
             else:
+                analysis_mode = component.get("analysis_mode", "quick")
+                summary_range = "500-2000字" if analysis_mode == "deep" else "100-300字"
+                max_tok = 2000 if analysis_mode == "deep" else 1200
                 system_text = (
                     "你是代码架构分析专家。基于提供的组件上下文数据（文件列表、关键符号、边关系），"
                     "分析该软件组件模块的功能与架构角色。\n\n"
@@ -126,7 +71,7 @@ class _AnalyzeComponentTool(AgentTool):
                     '- name: 有实际语义的组件名称（≤20字），根据功能命名，'
                     '如 OpenVinoBackend / FlashAttentionOp / ModelOptimizerPass；'
                     '严禁返回原始社区编号（如 L0-0007、comm-xxx）作为名称\n'
-                    '- summary: 功能概要（100-300字）\n'
+                    f'- summary: 功能概要（{summary_range}）\n'
                     '- role: 架构角色（≤3词，如 ConfigLoader / RequestRouter / DataAccessLayer）\n'
                     '- key_files: 关键文件及其功能概要数组（Top 10）\n'
                     '  格式: [{"path": "src/foo.cpp", "summary": "实现矩阵乘法运算"}, ...]\n'
@@ -147,10 +92,10 @@ class _AnalyzeComponentTool(AgentTool):
                 ]
 
             try:
-                resp = await asyncio.wait_for(
-                    self._chat(messages=messages, temperature=0.3, max_tokens=1200),
-                    timeout=120
-                )
+                    resp = await asyncio.wait_for(
+                        self._chat(messages=messages, temperature=0.3, max_tokens=max_tok),
+                        timeout=120
+                    )
             except asyncio.TimeoutError:
                 logger.warning(f"[ComponentAnalyst] LLM timeout for {comp_id}")
                 if self._save:
@@ -162,7 +107,7 @@ class _AnalyzeComponentTool(AgentTool):
                         pass
                 return ToolResult.fail("LLM 调用超时（120s）", componentId=comp_id)
             text = resp if isinstance(resp, str) else str(resp)
-            parsed = _parse_structured_response(text, comp_name)
+            parsed = parse_structured_response(text, comp_name)
             parse_error = parsed.pop("_parse_error", False)
             parse_error_reason = parsed.pop("_error_reason", "")
             analyzed_name = parsed.get("name", comp_name[:60])
@@ -174,7 +119,7 @@ class _AnalyzeComponentTool(AgentTool):
             if len(analyzed_name) > 20:
                 analyzed_name = comp_name[:20]
 
-            enhanced_summary = _build_markdown_summary(
+            enhanced_summary = build_markdown_summary(
                 analyzed_name, summary_text, role, key_files, depends_on
             )
 

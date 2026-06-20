@@ -36,7 +36,6 @@ export default { shell: {
     home: 'Home',
     analysis: 'Analysis',
     knowledge: 'Knowledge',
-    coder: 'AI Assistant',
     settings: 'Settings',
   },
   statusBar: {

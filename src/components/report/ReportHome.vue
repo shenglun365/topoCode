@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   DocumentMagnifyingGlassIcon,
@@ -36,6 +36,7 @@ const projectId = computed(() => projectStore.selectedProjectId || taskDetail.va
 
 const emit = defineEmits<{
   'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }]
+  'open-presummary': [taskId: string]
 }>()
 
 const loading = ref(true)
@@ -50,6 +51,64 @@ const projectSummaryDate = ref('')
 const showSummaryModal = ref(false)
 const editingSummary = ref(false)
 const editSummaryText = ref('')
+
+// 文件预摘要状态（来自 dashboard，轮询刷新）
+const preSummaryStatus = ref<{
+  total_files: number
+  cached_count: number
+  counts: Record<string, number>
+  project_root: string
+} | null>(null)
+
+let psPollTimer: ReturnType<typeof setInterval> | null = null
+
+function setPreSummaryFromDashboard(dash: any) {
+  if (dash?.preSummary) {
+    preSummaryStatus.value = {
+      total_files: dash.preSummary.total_files,
+      cached_count: dash.preSummary.cached_count,
+      counts: dash.preSummary.counts || { P0: 0, P1: 0, P2: 0 },
+      project_root: dash.preSummary.project_root || '',
+    }
+  }
+}
+
+async function refreshPreSummary() {
+  if (!props.taskId) return
+  try {
+    const status = await communityStore.getPreSummaryStatus(props.taskId)
+    if (status) preSummaryStatus.value = status
+  } catch { /* ignore */ }
+}
+
+function startPreSummaryPoll() {
+  stopPreSummaryPoll()
+  // 立即刷一次（刚加载或刚启动）
+  refreshPreSummary()
+  // 随后每 10s 轮询一次
+  psPollTimer = setInterval(async () => {
+    if (!props.taskId) return
+    // 检查是否有 running 的预摘要 agent
+    const agents = communityStore.tasks[props.taskId]?.agentTasks || []
+    const hasRunning = agents.some(a =>
+      a.action === 'presummary_files' && a.status === 'running'
+    )
+    if (!hasRunning) {
+      // agent 刚完成：最后一次刷新，然后停止轮询
+      await refreshPreSummary()
+      stopPreSummaryPoll()
+      return
+    }
+    await refreshPreSummary()
+  }, 10000)
+}
+
+function stopPreSummaryPoll() {
+  if (psPollTimer) {
+    clearInterval(psPollTimer)
+    psPollTimer = null
+  }
+}
 
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
 const task = computed(() => taskDetail.value)
@@ -159,32 +218,23 @@ async function loadData() {
       }
     }
 
-    // 合并查询：一次 RPC 获取 community + fileStats（替代 5 次独立调用）
+    // 统一 dashboard 加载（含主/备路径、社区数据注入、预摘要状态）
     if (pid) {
-      try {
-        const dash = await ipc.analysis.getReportDashboard(props.taskId).catch(() => null)
-        if (dash) {
-          // 文件统计
-          fileStats.value = dash.fileStats?.extensions || {}
-          const taskExtensions = (taskDetail.value as any)?.extensions || []
-          if (taskExtensions.length > 0 && dash.fileStats?.extensions) {
-            totalScopeFiles.value = taskExtensions.reduce(
-              (sum: number, ext: string) => sum + (dash.fileStats.extensions[ext] || 0),
-              0
-            )
-          } else {
-            totalScopeFiles.value = dash.fileStats?.totalFiles || 0
-          }
-          // 社区数据注入 store
-          await communityStore.loadCommunitiesFromDashboard(props.taskId, dash)
+      const dash = await reportStore.loadDashboard(props.taskId)
+
+      // 文件统计（从 dashboard 或独立查询）
+      if (dash?.fileStats) {
+        fileStats.value = dash.fileStats.extensions || {}
+        const taskExtensions = (taskDetail.value as any)?.extensions || []
+        if (taskExtensions.length > 0 && dash.fileStats.extensions) {
+          totalScopeFiles.value = taskExtensions.reduce(
+            (sum: number, ext: string) => sum + (dash.fileStats.extensions[ext] || 0),
+            0
+          )
+        } else {
+          totalScopeFiles.value = dash.fileStats.totalFiles || 0
         }
-        // 加载外部依赖/调用统计
-        await communityStore.loadExternalStats(props.taskId).catch(() => {})
-      } catch {
-        // fallback: 原始独立调用
-        await communityStore.loadCommunities(props.taskId, pid)
-        // 加载外部依赖/调用统计
-        await communityStore.loadExternalStats(props.taskId).catch(() => {})
+      } else {
         const fs = await analysisStore.scanFileStats(pid).catch(() => null)
         if (fs) {
           fileStats.value = fs.extensions || {}
@@ -199,6 +249,12 @@ async function loadData() {
           }
         }
       }
+
+      // 预摘要状态（来自 dashboard）
+      setPreSummaryFromDashboard(dash)
+
+      // 启动预摘要轮询（如有 running agent 会自动保持；否则单次后停止）
+      startPreSummaryPoll()
     }
     await reportStore.checkReportExists(props.taskId)
   } catch (e: any) {
@@ -233,8 +289,13 @@ async function saveSummary() {
 
 
 
-onMounted(loadData)
-watch(() => props.taskId, loadData)
+onMounted(() => { loadData() })
+onUnmounted(() => { stopPreSummaryPoll() })
+watch(() => props.taskId, () => {
+  stopPreSummaryPoll()
+  reportStore.invalidateDashboard(props.taskId)
+  loadData()
+})
 </script>
 
 <template>
@@ -354,37 +415,66 @@ watch(() => props.taskId, loadData)
             </div>
           </div>
 
-          <div class="file-distribution">
-            <div class="dist-title">
-              {{ t('report.analysisScope') }}
-            </div>
-            <div class="scope-content">
-              <div class="scope-row">
-                <span class="scope-label">{{ t('analysis.fileType') }}</span>
-                <div class="scope-tags">
-                  <span
-                    v-if="!taskDetail?.extensions?.length"
-                    class="scope-tag scope-tag-all"
-                  >{{ t('analysis.allFiles') }}</span>
-                  <span
-                    v-for="ext in (taskDetail?.extensions || [])"
-                    :key="ext"
-                    class="scope-tag"
-                  >{{ ext }} <span class="scope-tag-count">{{ fileStats[ext] ?? '-' }}</span></span>
+          <div class="summary-cards-bottom">
+            <div
+              class="summary-card summary-card-half clickable presummary-card"
+              :class="{ 'presummary-loading': preSummaryLoading, 'presummary-empty': !preSummaryStatus }"
+              @click="preSummaryStatus && emit('open-presummary', props.taskId)"
+            >
+              <span class="card-label">{{ t('report.filePreSummary') }}</span>
+              <template v-if="preSummaryLoading">
+                <span class="card-value card-summary-empty">{{ t('common.loading') }}</span>
+              </template>
+              <template v-else-if="preSummaryStatus">
+                <div class="ps-summary-stat">
+                  {{ t('report.preSummaryProgress') }}: {{ preSummaryStatus.cached_count }}/{{ preSummaryStatus.total_files }}
+                  <span v-if="preSummaryStatus.total_files > 0" class="presummary-pct">
+                    ({{ Math.round(preSummaryStatus.cached_count / preSummaryStatus.total_files * 100) }}%)
+                  </span>
                 </div>
-              </div>
-              <div class="scope-row">
-                <span class="scope-label">{{ t('analysis.directoryScope') }}</span>
-                <div class="scope-tags">
-                  <span
-                    v-if="!taskDetail?.scopes?.length"
-                    class="scope-tag scope-tag-all"
-                  >{{ t('analysis.allDirectories') }}</span>
-                  <span
-                    v-for="s in (taskDetail?.scopes || [])"
-                    :key="s"
-                    class="scope-tag"
-                  >{{ s }}</span>
+                <div class="ps-bottom-row">
+                  <div class="ps-batches-compact">
+                    <span class="presummary-batch presummary-batch-p0">P0: {{ preSummaryStatus.counts?.P0 || 0 }}</span>
+                    <span class="presummary-batch presummary-batch-p1">P1: {{ preSummaryStatus.counts?.P1 || 0 }}</span>
+                    <span class="presummary-batch presummary-batch-p2">P2: {{ preSummaryStatus.counts?.P2 || 0 }}</span>
+                  </div>
+                  <span class="card-summary-hint">{{ t('report.preSummaryViewDetails') }}</span>
+                </div>
+              </template>
+              <template v-else>
+                <span class="card-value card-summary-empty">{{ t('common.loading') }}</span>
+              </template>
+            </div>
+            <div class="summary-card summary-card-half summary-card-scope">
+              <span class="card-label">{{ t('report.analysisScope') }}</span>
+              <div class="scope-compact">
+                <div class="scope-compact-row">
+                  <span class="scope-compact-label">{{ t('analysis.fileType') }}</span>
+                  <div class="scope-compact-tags">
+                    <span
+                      v-if="!taskDetail?.extensions?.length"
+                      class="scope-tag scope-tag-all"
+                    >{{ t('analysis.allFiles') }}</span>
+                    <span
+                      v-for="ext in (taskDetail?.extensions || [])"
+                      :key="ext"
+                      class="scope-tag"
+                    >{{ ext }} <span class="scope-tag-count">{{ fileStats[ext] ?? '-' }}</span></span>
+                  </div>
+                </div>
+                <div class="scope-compact-row">
+                  <span class="scope-compact-label">{{ t('analysis.directoryScope') }}</span>
+                  <div class="scope-compact-tags">
+                    <span
+                      v-if="!taskDetail?.scopes?.length"
+                      class="scope-tag scope-tag-all"
+                    >{{ t('analysis.allDirectories') }}</span>
+                    <span
+                      v-for="s in (taskDetail?.scopes || [])"
+                      :key="s"
+                      class="scope-tag"
+                    >{{ s }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -575,42 +665,7 @@ watch(() => props.taskId, loadData)
 .status-badge.running { color: var(--accent); }
 .status-badge.error { color: var(--error); }
 
-.file-distribution {
-  margin-top: 12px;
-}
 
-.dist-title {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.scope-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.scope-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.scope-label {
-  flex-shrink: 0;
-  width: 56px;
-  color: var(--text-muted);
-  padding-top: 2px;
-}
-
-.scope-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
 
 .scope-tag {
   display: inline-block;
@@ -831,6 +886,104 @@ watch(() => props.taskId, loadData)
 
 .summary-card.clickable:hover {
   border-color: var(--accent);
+}
+
+.presummary-card {
+  gap: 4px;
+}
+.presummary-loading {
+  opacity: 0.6;
+}
+.presummary-empty {
+  opacity: 0.6;
+  cursor: default;
+}
+.presummary-pct {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.ps-summary-stat {
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.ps-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ps-batches-compact {
+  display: flex;
+  gap: 4px;
+}
+.presummary-batch {
+  padding: 0px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  line-height: 1.6;
+}
+.presummary-batch-p0 {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.presummary-batch-p1 {
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+}
+.presummary-batch-p2 {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.card-summary-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 1px;
+}
+
+.summary-cards-bottom {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 8px;
+  margin-top: 12px;
+}
+.summary-card-half {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.summary-card-scope {
+  gap: 4px;
+}
+.scope-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.scope-compact-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 10px;
+}
+.scope-compact-label {
+  flex-shrink: 0;
+  width: 48px;
+  color: var(--text-muted);
+  padding-top: 1px;
+}
+.scope-compact-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 
 .summary-empty {

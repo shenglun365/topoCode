@@ -770,6 +770,7 @@ export const useCommunityStore = defineStore('community', () => {
       if (result.success && result.agentTaskId) {
         // 清除同任务下的旧 polling，避免泄漏
         cancelAgentPolling(taskId)
+        t.agentTasks[idx].id = result.agentTaskId
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `社区数: ${result.communities}` })
         _pollAgentProgress(taskId, idx, result.agentTaskId, STEPS.LOAD_COMMS)
       } else {
@@ -813,12 +814,13 @@ export const useCommunityStore = defineStore('community', () => {
     t.compareTo = to || ''
   }
 
-  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false, maxTurns = 30, summaryModelId = '', subagentConcurrency = 1) {
+  async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false, maxTurns = 30, summaryModelId = '', subagentConcurrency = 1, analysisMode = 'quick') {
     if (!taskId || !components.length) return
     const t = ensureTask(taskId)
     const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
     const idx = t.agentTasks.length
-    addAgentTask(taskId, 'analyze_components', steps)
+    const actionLabel = agentic ? 'agentic_analyze_components' : 'analyze_components'
+    addAgentTask(taskId, actionLabel, steps)
     t.agentTasks[idx].status = 'running'
 
     try {
@@ -839,9 +841,11 @@ export const useCommunityStore = defineStore('community', () => {
         maxTurns: agentic ? maxTurns : undefined,
         summaryModelId: agentic && summaryModelId ? summaryModelId : undefined,
         subagentConcurrency: agentic && subagentConcurrency > 1 ? subagentConcurrency : undefined,
+        analysisMode,
       })
       if (result.success && result.agentTaskId) {
         cancelAgentPolling(taskId)
+        t.agentTasks[idx].id = result.agentTaskId
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `组件数: ${components.length}` })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
       } else {
@@ -886,7 +890,10 @@ export const useCommunityStore = defineStore('community', () => {
           progress.status === 'failed' || progress.status === 'cancelled' ||
           (stepCurrent >= stepTotal && pct === 100 && allStepsDone)
         updateAgentTask(taskId, taskIdx, {
-          status: isCompleted ? (progress.status === 'failed' ? 'failed' : 'completed') : (progress.status || 'running'),
+          status: isCompleted
+            ? (progress.status === 'failed' ? 'failed' :
+               progress.status === 'cancelled' ? 'cancelled' : 'completed')
+            : (progress.status || 'running'),
           progress: pct,
           message: progress.message || '',
         })
@@ -898,8 +905,18 @@ export const useCommunityStore = defineStore('community', () => {
             const pid = useProjectStore().selectedProjectId
             if (pid) loadCommunities(taskId, pid).catch(() => {})
           }
-          for (let i = 0; i < progress.steps.length; i++) {
-            updateAgentStep(taskId, taskIdx, i + stepOffset, progress.steps[i].status)
+          // 追加运行时步骤（runtime steps > 初始 steps 时）
+          const agent = t.agentTasks[taskIdx]
+          const runtimeSteps = progress.steps || []
+          while ((agent.steps || []).length < runtimeSteps.length) {
+            const idx = agent.steps.length
+            agent.steps.push({
+              description: runtimeSteps[idx].description,
+              status: 'pending',
+            })
+          }
+          for (let i = 0; i < runtimeSteps.length; i++) {
+            updateAgentStep(taskId, taskIdx, i + stepOffset, runtimeSteps[i].status)
           }
         }
         if (isCompleted) {
@@ -951,6 +968,17 @@ export const useCommunityStore = defineStore('community', () => {
     } catch { return false }
   }
 
+  function ensureAgentPolling(taskId: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    for (let i = 0; i < t.agentTasks.length; i++) {
+      const at = t.agentTasks[i]
+      if (at.status === 'running' && at.id && !_activePolling[at.id]) {
+        _pollAgentProgress(taskId, i, at.id, 0)
+      }
+    }
+  }
+
   async function cancelAgentTask(taskId: string, agentTaskId: string) {
     try {
       await ipc.analysis.cancelAgentTask({ agentTaskId })
@@ -958,6 +986,12 @@ export const useCommunityStore = defineStore('community', () => {
       if (t) {
         const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
         if (idx >= 0) updateAgentTask(taskId, idx, { status: 'cancelled' })
+      }
+      // 立即停止轮询，防止下次 poll 覆盖回 completed
+      if (_activePolling[agentTaskId]) {
+        clearInterval(_activePolling[agentTaskId])
+        delete _activePolling[agentTaskId]
+        delete _activePolling[`${taskId}:${agentTaskId}`]
       }
     } catch {}
   }
@@ -970,7 +1004,26 @@ export const useCommunityStore = defineStore('community', () => {
     return await ipc.analysis.listPreSummaryFiles({ taskId, batch, page, page_size: pageSize })
   }
   async function startPreSummary(taskId: string, batch = 'P0', limit = 0) {
-    return await ipc.analysis.startPreSummary({ taskId, batch, limit })
+    const t = ensureTask(taskId)
+    const stepDesc = limit > 0 ? `预摘要 ${batch} (限 ${limit} 个文件)` : `预摘要 ${batch}`
+    const idx = t.agentTasks.length
+    addAgentTask(taskId, 'presummary_files', [stepDesc, '等待 LLM 分析完成'])
+    t.agentTasks[idx].status = 'running'
+
+    try {
+      const result = await ipc.analysis.startPreSummary({ taskId, batch, limit })
+      if (result.success && result.agentTaskId) {
+        t.agentTasks[idx].id = result.agentTaskId
+        updateAgentTask(taskId, idx, { progress: 0, message: `文件数: ${result.fileCount || 0}` })
+        _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
+      } else {
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+      }
+      return result
+    } catch (e: any) {
+      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || 'unknown error' })
+      throw e
+    }
   }
   async function getFileSummary(taskId: string, filePath: string) {
     return await ipc.analysis.getFileSummary({ taskId, file_path: filePath })
@@ -992,7 +1045,7 @@ export const useCommunityStore = defineStore('community', () => {
     addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, triggerComponentAnalysis, parseArchCommand,
     setTimeline, setCompareMode,
     loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
-    cancelAgentPolling, cancelAgentTask,
+    cancelAgentPolling, cancelAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary,
     getFileSummary, deleteFileSummary, rerunFileSummary,
   }

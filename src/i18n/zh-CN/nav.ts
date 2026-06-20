@@ -4,7 +4,6 @@ export default { nav: {
   projects: '项目',
   analysis: '架构分析',
   knowledge: '知识库',
-  coder: 'AI 助手',
   settings: '设置',
   dashboard: '仪表板',
   files: '文件',

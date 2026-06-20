@@ -315,9 +315,9 @@ function toggleFloat() {
       </button>
     </div>
     <div class="panel-body">
-      <component
-        :is="activePanelComponent?.component"
-      />
+      <KeepAlive>
+        <component :is="activePanelComponent?.component" />
+      </KeepAlive>
     </div>
 
     <!-- 全屏停靠模式拖拽把手 -->

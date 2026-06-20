@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onDeactivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
@@ -8,6 +8,7 @@ import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
 import ChatView from '@/components/report/ChatView.vue'
+import PreSummaryFileList from '@/components/report/PreSummaryFileList.vue'
 import { usePanelStore } from '@/stores/panel'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -21,6 +22,7 @@ function toggleChatPanel() {
 const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
 const panelStore = usePanelStore()
+const communityStore = useCommunityStore()
 
 /* ===== 分析功能组上下文 ===== */
 const analysisContext = computed(() => funcGroup.context.analysis)
@@ -29,7 +31,8 @@ const activeTab = computed(() => {
   return ctx.tabs.find(t => t.id === ctx.activeTabId) || null;
 })
 const reportTabs = computed(() => {
-  return analysisContext.value.tabs.filter(t => t.kind === 'subdoc' || t.kind === 'reportHome');
+  return analysisContext.value.tabs.filter(t =>
+    t.kind === 'subdoc' || t.kind === 'reportHome' || t.kind === 'preSummaryFiles');
 })
 
 function onTabUpdate(tabId: string | null) {
@@ -43,14 +46,27 @@ function onTabClose(tabId: string) {
 
 const isReportHomeTab = computed(() => activeTab.value?.kind === 'reportHome')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
+const isPreSummaryTab = computed(() => activeTab.value?.kind === 'preSummaryFiles')
 
 onMounted(() => {
   panelStore.setLeftCollapsed(false)
   panelStore.setRightCollapsed(false)
 })
 
-onDeactivated(() => {
-  useCommunityStore().cancelAgentPolling()
+// 页面激活时重连 agent 轮询（切回本页时 polling 可能中断）
+onActivated(() => {
+  const tid = projectStore.activeTab?.taskId
+  if (tid) communityStore.ensureAgentPolling(tid)
+})
+
+// 任务切换时清理旧轮询 + 启动新轮询
+let lastPollTaskId = ''
+watch(() => projectStore.activeTab?.taskId, (newTaskId) => {
+  if (newTaskId && newTaskId !== lastPollTaskId) {
+    if (lastPollTaskId) communityStore.cancelAgentPolling(lastPollTaskId)
+    lastPollTaskId = newTaskId
+    communityStore.ensureAgentPolling(newTaskId)
+  }
 })
 
 // 子文档“返回报告”按钮：切换到所属报告的 reportHome/reportTree tab
@@ -68,6 +84,18 @@ function goToReportHome() {
   } else {
     onTabClose(tab.id)
   }
+}
+
+// 处理报告首页的 open-presummary 事件
+function handleOpenPreSummary(taskId: string) {
+  const id = `tab-presummary-${taskId}`
+  funcGroup.openTab('analysis', {
+    id,
+    kind: 'preSummaryFiles',
+    title: '文件预摘要',
+    taskId,
+    projectId: projectStore.selectedProjectId || undefined,
+  } as any)
 }
 
 // 处理报告首页的 open-md 事件（在 analysis 上下文中打开 inline 子文档 tab）
@@ -149,6 +177,13 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         :task-id="activeTab.taskId!"
         :tab-id="activeTab.id"
         @open-md="handleOpenMD"
+        @open-presummary="handleOpenPreSummary"
+      />
+    </template>
+    <template v-else-if="isPreSummaryTab && activeTab">
+      <PreSummaryFileList
+        :key="activeTab.id"
+        :task-id="activeTab.taskId!"
       />
     </template>
 

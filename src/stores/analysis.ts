@@ -31,8 +31,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   )
 
   const filteredTasks = computed(() => {
-    if (filter.value.status.includes('all')) return tasks.value
-    return tasks.value.filter(t => filter.value.status.includes(t.status))
+    let result = filter.value.status.includes('all')
+      ? tasks.value
+      : tasks.value.filter(t => filter.value.status.includes(t.status))
+    return [...result].sort((a, b) => ((b.createdAt || '') > (a.createdAt || '') ? 1 : -1))
   })
 
   const favoritedTasks = computed(() =>
@@ -65,7 +67,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     logger.info('createTask', { projectId: params.projectId, name: params.name })
     try {
       const task = await ipc.analysis.createTask(params)
-      tasks.value.push(task)
+      tasks.value.unshift(task)
       logger.info('createTask completed', { taskId: task.id })
       return task
     } catch (err: any) {

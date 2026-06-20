@@ -1,11 +1,30 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
+import { useAnalysisStore } from './analysis'
+import { useProjectStore } from './project'
+
+export interface DashboardData {
+  task: any
+  callLevels: any
+  depLevels: any
+  callResults: { results: any[] }
+  depResults: { results: any[] }
+  fileStats: any
+  preSummary?: {
+    counts: Record<string, number>
+    total_files: number
+    cached_count: number
+    project_root: string
+  }
+}
 
 export const useReportStore = defineStore('report', () => {
   const generatedReports = ref<Record<string, string>>({})
   const dbReportExists = ref<Record<string, boolean>>({})
   const loading = ref<Record<string, boolean>>({})
+  const dashboardCache = ref<Record<string, DashboardData>>({})
+  const _inflightDashboard = new Map<string, Promise<DashboardData | null>>()
 
   function setGeneratedReport(taskId: string, content: string) {
     generatedReports.value = { ...generatedReports.value, [taskId]: content }
@@ -61,6 +80,77 @@ export const useReportStore = defineStore('report', () => {
     return await ipc.report.createSubDoc(params)
   }
 
+  async function loadDashboard(taskId: string): Promise<DashboardData | null> {
+    // 缓存命中
+    if (dashboardCache.value[taskId]) return dashboardCache.value[taskId]
+    // 在途去重
+    const inflight = _inflightDashboard.get(taskId)
+    if (inflight) return inflight
+    // 标记加载
+    loading.value = { ...loading.value, [taskId]: true }
+
+    const promise = (async () => {
+      try {
+        const dash = await ipc.analysis.getReportDashboard(taskId)
+        if (dash) {
+          dashboardCache.value = { ...dashboardCache.value, [taskId]: dash }
+          // 注入社区数据到 communityStore
+          const { useCommunityStore } = await import('./community-store')
+          const commStore = useCommunityStore()
+          if (dash.fileStats) {
+            await commStore.loadCommunitiesFromDashboard(taskId, dash)
+          }
+          // 加载外部依赖统计（并行，不阻塞）
+          commStore.loadExternalStats(taskId).catch(() => {})
+        }
+        loading.value = { ...loading.value, [taskId]: false }
+        return dash
+      } catch (e) {
+        // 备路径：dashboard 失败，回退到独立 IPC
+        loading.value = { ...loading.value, [taskId]: false }
+        const analysisStore = useAnalysisStore()
+        const projectStore = useProjectStore()
+        const pid = projectStore.selectedProjectId || ''
+        if (!pid) return null
+        try {
+          const [task, fileStats] = await Promise.all([
+            analysisStore.getTask(taskId),
+            analysisStore.scanFileStats(pid),
+          ])
+          const { useCommunityStore } = await import('./community-store')
+          const commStore = useCommunityStore()
+          await commStore.loadCommunities(taskId, pid)
+          const fallback: DashboardData = {
+            task, fileStats,
+            callLevels: null, depLevels: null,
+            callResults: { results: [] }, depResults: { results: [] },
+            preSummary: { counts: { P0: 0, P1: 0, P2: 0 }, total_files: 0, cached_count: 0, project_root: '' },
+          }
+          dashboardCache.value = { ...dashboardCache.value, [taskId]: fallback }
+          return fallback
+        } catch (e2) {
+          console.error('[reportStore] loadDashboard fallback also failed:', e2)
+          return null
+        }
+      } finally {
+        _inflightDashboard.delete(taskId)
+      }
+    })()
+
+    _inflightDashboard.set(taskId, promise)
+    return promise
+  }
+
+  function invalidateDashboard(taskId?: string) {
+    if (taskId) {
+      const copy = { ...dashboardCache.value }
+      delete copy[taskId]
+      dashboardCache.value = copy
+    } else {
+      dashboardCache.value = {}
+    }
+  }
+
   async function getFileSummaries(params: { projectId: string; taskId?: string; source?: string }) {
     return await ipc.report.getFileSummaries(params)
   }
@@ -70,11 +160,12 @@ export const useReportStore = defineStore('report', () => {
   }
 
   return {
-    generatedReports, dbReportExists, loading,
+    generatedReports, dbReportExists, loading, dashboardCache,
     setGeneratedReport, checkReportExists,
     getReadmeContent, extractDependencyFiles, generateProjectSummary, getProjectSummary, saveProjectSummary,
     getLevelCommunityDetail, updateCommunityName,
     getSubDoc, updateSubDoc, createSubDoc,
     getFileSummaries, saveFileSummaries,
+    loadDashboard, invalidateDashboard,
   }
 })

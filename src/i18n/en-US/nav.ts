@@ -4,7 +4,6 @@ export default { nav: {
   projects: 'Projects',
   analysis: 'Analysis',
   knowledge: 'Knowledge',
-  coder: 'AI Assistant',
   settings: 'Settings',
   dashboard: 'Dashboard',
   files: 'Files',

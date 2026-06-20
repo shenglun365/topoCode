@@ -501,7 +501,7 @@ export interface IPCAPI {
     getCommunityGraph: (params: { taskId: string; edgeType: string; commLv: string; commIds: string[]; depth: number }) => Promise<any>
     getSymbolDetail: (params: { taskId: string; symbolId: string }) => Promise<any>
     getEdgeDetail: (params: { taskId: string; edgeId: string }) => Promise<any>
-    getReportDashboard: (taskId: string) => Promise<{ task: any; callLevels: any; depLevels: any; callResults: { results: any[] }; depResults: { results: any[] }; fileStats: any }>
+    getReportDashboard: (taskId: string) => Promise<{ task: any; callLevels: any; depLevels: any; callResults: { results: any[] }; depResults: { results: any[] }; fileStats: any; preSummary?: { counts: Record<string, number>; total_files: number; cached_count: number; project_root: string } }>
     getCascadeLevels: (taskId: string, edgeType?: string) => Promise<{ levels: Array<{ lv: string; items: Array<{ id: string; label: string; parentCommId: string | null; nodeCount: number; fileCount: number; edgeCount: number; qualityScore: number; metadata?: { avgCoreness?: number; maxCoreness?: number; coreNodeRatio?: number } }> }>; totalUniqueFiles: number }>
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) => Promise<{ communityCount: number; nodeCount: number; edgeCount: number }>
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
@@ -518,13 +518,13 @@ export interface IPCAPI {
     clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
     // 预摘要
     getPreSummaryStatus: (params: { taskId: string }) => Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string }>
-    listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string }> }>
+    listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string; has_summary?: boolean }> }>
     startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {

@@ -35,41 +35,47 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
         "failed": "int — 失败数",
     }
 
-    def get_system_prompt(self, component: dict, project_summary: str = "") -> str:
+    def get_system_prompt(self, component: dict, project_summary: str = "",
+                           detail_level: str = "quick") -> str:
         cid = component.get("id", "?")
         cname = component.get("name", cid)
         parent_summary = component.get("parent_summary", "")
         metadata = component.get("metadata", {})
 
-        parts = [(
-            "你是代码架构分析专家。通过系统化的工具调用分析组件。\n\n"
-            "## 核心规则：用 summarize_file 代替 read_file\n"
-            "summarize_file 是读取文件的**默认方式**。它一次可处理最多 10 个文件并自动摘要，"
-            "结果会被缓存，后续轮次不消耗 token。\n"
-            "read_file 只能在你认为某个文件的摘要**明显不充分**时才使用，且每次只能读一个文件。\n"
-            "**不要逐文件调用 read_file** — 这效率极低且浪费上下文。\n\n"
-            "分析流程：\n"
-            "  Step 1 — 结构探索：\n"
-            "    调用 get_community_subgraph 了解组件拓扑结构\n"
-            "    调用 search_symbols 发现关键函数/类定义\n"
-            "\n"
-            "  Step 2 — 文件摘要（**必须用 summarize_file**）：\n"
-            "    根据 Step 1 的发现确定关键文件，用 summarize_file 批量读取\n"
-            "    示例: summarize_file(path=[\"src/a.cpp\", \"src/b.h\"], focus=\"关注接口定义\")\n"
-            "    将所有需要读的文件一次性或分批传给 summarize_file\n"
-            "\n"
-            "  Step 3 — 综合输出（**必须执行**）：\n"
-            "    综合所有信息，**必须**输出 JSON，不得输出其他文本。\n"
-            "    如果信息不足，继续调用工具获取更多信息。\n"
-            "    收到工具结果后，不要再调用工具，直接输出 JSON。\n"
-            "    JSON 格式：\n"
-            "    {{\"name\": \"有实际语义的名称（≤20字）\", "
-            "\"summary\": \"功能概要（100-300字）\", "
-            "\"role\": \"架构角色（≤3词）\", "
-            "\"key_files\": [{{\"path\": \"...\", \"summary\": \"该文件功能\"}}], "
-            "\"depends_on\": [\"其他组件或外部包\"]}}\n\n"
-            f"当前分析的组件: {cname} (ID: {cid})\n"
-        )]
+        is_deep = detail_level == "deep"
+        summary_range = "500-2000字" if is_deep else "100-300字"
+
+        base_prompt = (
+                "你是代码架构分析专家。通过系统化的工具调用分析组件。\n\n"
+                "## 核心规则：用 summarize_file 代替 read_file\n"
+                "summarize_file 是读取文件的**默认方式**。它一次可处理最多 10 个文件并自动摘要，"
+                "结果会被缓存，后续轮次不消耗 token。\n"
+                "read_file 只能在你认为某个文件的摘要**明显不充分**时才使用，且每次只能读一个文件。\n"
+                "**不要逐文件调用 read_file** — 这效率极低且浪费上下文。\n\n"
+                "分析流程：\n"
+                "  Step 1 — 结构探索：\n"
+                "    调用 get_community_subgraph 了解组件拓扑结构\n"
+                "    调用 search_symbols 发现关键函数/类定义\n"
+                "\n"
+                "  Step 2 — 文件摘要（**必须用 summarize_file**）：\n"
+                "    根据 Step 1 的发现确定关键文件，用 summarize_file 批量读取\n"
+                "    示例: summarize_file(path=[\"src/a.cpp\", \"src/b.h\"], focus=\"关注接口定义\")\n"
+                "    将所有需要读的文件一次性或分批传给 summarize_file\n"
+                "\n"
+                "  Step 3 — 综合输出（**必须执行**）：\n"
+                "    综合所有信息，**必须**输出 JSON，不得输出其他文本。\n"
+                "    如果信息不足，继续调用工具获取更多信息。\n"
+                "    收到工具结果后，不要再调用工具，直接输出 JSON。\n"
+                "    JSON 格式：\n"
+                "    {{\"name\": \"有实际语义的名称（≤20字）\", "
+                f"\"summary\": \"功能概要（{summary_range}）\", "
+                "\"role\": \"架构角色（≤3词）\", "
+                "\"key_files\": [{{\"path\": \"...\", \"summary\": \"该文件功能\"}}], "
+                "\"depends_on\": [\"其他组件或外部包\"]}}\n\n"
+                f"当前分析的组件: {cname} (ID: {cid})\n"
+            )
+
+        parts = [base_prompt]
         if metadata:
             parts.append(f"元数据: 节点数={metadata.get('nodeCount','?')}, "
                          f"文件数={metadata.get('fileCount','?')}, "
@@ -89,7 +95,7 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
 
     def get_tool_filter(self, context: dict) -> Optional[list[str]]:
         return [
-            "read_file", "search_content",
+            "read_file", "search_content", "summarize_file",
             "get_symbol_detail", "search_symbols", "get_symbol_code",
             "get_community_subgraph", "get_call_chain",
             "get_ast_node", "get_edge_detail",

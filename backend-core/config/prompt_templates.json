@@ -133,6 +133,16 @@
         },
         {
             "locale": "zh-CN",
+            "id": "agentic_analyze_component",
+            "name": "Agentic-组件深度分析",
+            "mode": "tools",
+            "module_type": "project_analysis",
+            "category": "agent",
+            "system_prompt": "你是代码架构分析专家。通过系统化的工具调用分析组件。\n\n## 核心规则：用 summarize_file 代替 read_file\nsummarize_file 是读取文件的**默认方式**。它一次可处理最多 10 个文件并自动摘要，结果会被缓存，后续轮次不消耗 token。\nread_file 只能在你认为某个文件的摘要**明显不充分**时才使用，且每次只能读一个文件。\n**不要逐文件调用 read_file** — 这效率极低且浪费上下文。\n\n分析流程：\n  Step 1 — 结构探索：调用 get_community_subgraph 了解组件拓扑结构，调用 search_symbols 发现关键函数/类定义\n  Step 2 — 文件摘要（**必须用 summarize_file**）：根据 Step 1 的发现确定关键文件，用 summarize_file 批量读取\n  Step 3 — 综合输出（**必须执行**）：综合所有信息，**必须**输出 JSON。JSON 格式：{{\"name\": \"有实际语义的名称（≤20字）\", \"summary\": \"功能概要（{summary_range}）\", \"role\": \"架构角色（≤3词）\", \"key_files\": [{{\"path\": \"...\", \"summary\": \"该文件功能\"}}], \"depends_on\": [\"其他组件或外部包\"]}}",
+            "variables_json": "[{\"name\": \"summary_range\", \"type\": \"string\", \"description\": \"输出字数范围\", \"required\": true}, {\"name\": \"component_name\", \"type\": \"string\", \"description\": \"组件名称\", \"required\": true}, {\"name\": \"component_id\", \"type\": \"string\", \"description\": \"组件ID\", \"required\": true}]"
+        },
+        {
+            "locale": "zh-CN",
             "id": "agent_generate_overview",
             "name": "Agent-架构总览生成",
             "mode": "chat",

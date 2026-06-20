@@ -24,21 +24,33 @@ class PreSummaryWorkflow(AgentWorkflow):
         if not files:
             logger.warning("[PreSummaryWorkflow] no files to summarize")
             return []
+
+        # 断点续传：跳过已缓存文件
+        cached = context.get("cached_paths") or set()
+        skipped = 0
         steps = []
         for fp in files:
+            if fp in cached:
+                skipped += 1
+                continue
             steps.append(AgentStep(
                 tool="summarize_file",
                 args={"path": [fp]},
                 description=f"预摘要: {fp}",
             ))
+
+        if skipped:
+            logger.info("[PreSummaryWorkflow] resume: skipped %d already cached files, remaining %d steps",
+                       skipped, len(steps))
         return steps
 
     def finalize(self, results: dict[str, Any]) -> WorkflowResult:
-        success_count = sum(1 for v in results.values() if v and getattr(v, 'success', False))
-        total = len(results)
+        data = results.get("summarize_file", "")
+        has_content = bool(data and isinstance(data, str) and len(data) > 10)
         return WorkflowResult(
-            success=success_count > 0,
-            steps_completed=success_count,
-            steps_total=total,
-            summary=f"预摘要完成: {success_count}/{total} 文件",
+            success=has_content,
+            steps_completed=1 if has_content else 0,
+            steps_total=1,
+            error=None if has_content else "所有文件摘要步骤均失败，请检查 LLM 模型配置或日志中的 [SummarizeFileTool] / [SubAgent] 错误",
+            summary=f"预摘要: {'成功' if has_content else '失败'}",
         )

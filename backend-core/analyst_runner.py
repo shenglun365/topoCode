@@ -224,6 +224,100 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                     target_id = file_index.get(init_path)
                     if not target_id:
                         target_id = suffix_index.get(os.path.splitext(init_path)[0])
+        # ── Rust 模块路径解析 ──
+        # Rust use 语句格式: crate::module::Type, super::sibling, self::local
+        # 模块名使用 :: 分隔，需转换为文件路径: module::sub::Type → src/module/sub.rs
+        if not target_id and source_file.endswith('.rs'):
+            crate_root = None
+            src_dir = source_dir if source_dir else str(Path(source_file).parent)
+            cur = Path(src_dir)
+            for _ in range(8):
+                if (cur / 'Cargo.toml').is_file():
+                    crate_root = str(cur)
+                    break
+                cur = cur.parent
+            if not crate_root and proj_path and (Path(proj_path) / 'Cargo.toml').is_file():
+                crate_root = proj_path
+            if not crate_root:
+                parts = Path(source_file).parts
+                for i, p in enumerate(parts):
+                    if p == 'src' and i > 0:
+                        crate_root = str(Path(*parts[:i]))
+                        break
+
+            if crate_root:
+                mod_raw = module_name
+                if mod_raw.startswith('::'):
+                    pass  # external crate, skip
+                else:
+                    base_dirs: list[str] = []
+                    is_super = mod_raw.startswith('super::')
+                    if mod_raw.startswith('crate::'):
+                        mod_raw = mod_raw[7:]
+                        base_dirs.append(os.path.join(crate_root, 'src'))
+                    elif mod_raw.startswith('self::'):
+                        mod_raw = mod_raw[6:]
+                        base_dirs.append(src_dir)
+                    elif mod_raw.startswith('super::'):
+                        up = 0
+                        while mod_raw.startswith('super::'):
+                            up += 1
+                            mod_raw = mod_raw[7:]
+                        base = src_dir
+                        for _ in range(up):
+                            base = str(Path(base).parent)
+                        base_dirs.append(base)
+                    else:
+                        base_dirs.append(src_dir)
+                        base_dirs.append(os.path.join(crate_root, 'src'))
+
+                    path_part = mod_raw.replace('::', '/').rstrip('/')
+                    segments = path_part.split('/')
+                    for base in base_dirs:
+                        if target_id:
+                            break
+                        for i in range(len(segments), 0, -1):
+                            partial = '/'.join(segments[:i])
+                            candidates = [
+                                os.path.join(base, partial + '.rs'),
+                                os.path.join(base, partial, 'mod.rs'),
+                            ]
+                            for cand in candidates:
+                                cand_norm = os.path.normpath(cand)
+                                target_id = file_index.get(cand_norm)
+                                if target_id:
+                                    break
+                                target_id = suffix_index.get(os.path.splitext(cand_norm)[0])
+                                if target_id:
+                                    break
+                            if target_id:
+                                break
+
+                    # super:: 回退: 单段路径为父模块中的 item (如 super::Type)，尝试父模块文件
+                    if not target_id and is_super and len(segments) <= 2:
+                        for base in base_dirs:
+                            if target_id:
+                                break
+                            # 父模块文件: 在 base / .. 的同名 .rs 或 base / mod.rs
+                            parent_candidates = [
+                                os.path.normpath(str(Path(base)) + '.rs'),
+                                os.path.normpath(os.path.join(base, 'mod.rs')),
+                            ]
+                            # 另外: 如果当前在 src/ 下，父模块可能是 lib.rs / main.rs
+                            src_dir_abs = os.path.join(crate_root, 'src')
+                            if os.path.normpath(base) == os.path.normpath(src_dir_abs):
+                                parent_candidates.extend([
+                                    os.path.join(src_dir_abs, 'lib.rs'),
+                                    os.path.join(src_dir_abs, 'main.rs'),
+                                ])
+                            for pc in parent_candidates:
+                                target_id = file_index.get(pc)
+                                if target_id:
+                                    break
+                                target_id = suffix_index.get(os.path.splitext(pc)[0])
+                                if target_id:
+                                    break
+
         # 4. 绝对模块路径: parsers.core.walker → 路径后缀匹配
         #     Go 项目跳过(steps 4-6): 后缀匹配易误中 stdlib 名 (fmt→.../fmt.go, net/url→.../url.go)
         if not target_id and not go_mod_prefix:

@@ -6,7 +6,7 @@
  * 支持自由提问和报告上下文相关的分析对话。
  */
 
-import { ref, computed, nextTick, watch, onMounted } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PaperAirplaneIcon, SparklesIcon, TrashIcon,
@@ -19,10 +19,11 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useCommunityStore } from '@/stores/community-store'
+import { useNavigationStore } from '@/stores/navigation'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useGraphCommandStore } from '@/stores/graph-command-store'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
-import { useChatSession } from '@/stores/chat-session-store'
+import { useChatSession, type SessionPage } from '@/stores/chat-session-store'
 import { parseCommandTag, parseConfirmTag, parseSuggestTags, stripCommandTags } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -31,9 +32,19 @@ const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const projectStore = useProjectStore()
 const communityStore = useCommunityStore()
+const navigationStore = useNavigationStore()
 const cmdStore = useGraphCommandStore()
 const selectionStore = useComponentSelectionStore()
 const chatSession = useChatSession()
+
+/* ---- 分析模式: 快速 (quick) vs 深入 (deep) ---- */
+const analysisMode = ref<'quick' | 'deep'>('quick')
+function toggleAnalysisMode() {
+  analysisMode.value = analysisMode.value === 'quick' ? 'deep' : 'quick'
+  const label = analysisMode.value === 'deep' ? '深入分析' : '快速分析'
+  const range = analysisMode.value === 'deep' ? '500-2000字' : '100-300字'
+  addMessage('system', `切换至「${label}」模式（${range}）`)
+}
 
 /* ---- 引导模式 vs 普通模式 ---- */
 const guideMode = ref(false)
@@ -145,6 +156,8 @@ const HELP_TEXT = [
   '- **引导模式**：点击图上 🎓 按钮启动，AI 带你逐步了解项目架构',
   '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮，在左侧结构图/Tag中点击选择要分析的组件，选中后直接发送分析请求',
   '- **批量组件分析**：选择组件后，输入 `/analyze_components` 启动批量解析，结果写入 SQLite 并可在任务面板查看进度',
+  '- **分析模式开关**：输入框下方 ⚡/🔬 按钮切换「快速模式」（单次 LLM 调用）和「深入分析」（Agent 多轮文件探索），',
+  '  模式影响组件分析和整体架构分析的行为',
 ].join('\n')
 
 const md = new MarkdownIt({
@@ -280,32 +293,44 @@ const cmdConfirmData = ref<{
 
 const llmConfigured = computed(() => isLLMConfigured())
 
-// Session management — bound to current analysis task
-const activeTaskId = ref<string | null>(null)
-function resolveTaskId(): string | null {
-  return activeTaskId.value || projectStore.activeTab?.taskId || null
-}
-const activeTaskName = ref<string>('')
-const hasAnalysisContext = computed(() => !!activeTaskId.value)
+// Session management — auto-bound to current page + project + task
+const currentPage = computed<SessionPage>(() => navigationStore.currentPage as SessionPage || 'home')
+const sessionProjectId = computed(() => projectStore.selectedProjectId || '')
+const sessionTaskId = computed(() => projectStore.activeTab?.taskId || '')
 
-function bindToTask(taskId: string | null, taskName: string = '') {
-  activeTaskId.value = taskId
-  activeTaskName.value = taskName
-  if (taskId) {
-    const pid = projectStore.selectedProjectId
-    const saved = chatSession.loadSession(pid, taskId)
-    if (saved.length > 0) {
-      messages.value = saved as Message[]
-      addMessage('system', `继续分析会话: ${taskName || taskId}`)
-    } else {
-      addMessage('system', `当前分析会话: ${taskName || taskId}`)
-    }
-  } else {
-    messages.value = []
-    const saved = chatSession.loadSession()
-    if (saved.length > 0) messages.value = saved as Message[]
-  }
+const sessionKey = computed(() =>
+  chatSession.buildKey(currentPage.value, sessionProjectId.value, sessionTaskId.value)
+)
+
+function resolveTaskId(): string | null {
+  return projectStore.activeTab?.taskId || null
 }
+const hasAnalysisContext = computed(() => !!resolveTaskId())
+
+// 会话 key 变化 → 自动保存旧会话 + 加载新会话
+watch(sessionKey, (newKey, oldKey) => {
+  if (!newKey) return
+  if (oldKey && oldKey !== newKey) {
+    chatSession.saveSession(oldKey, messages.value as any)
+  }
+  messages.value = []
+  const saved = chatSession.loadSession(newKey)
+  if (saved.length > 0) {
+    messages.value = saved as Message[]
+  } else {
+    addMessage('system', t('ai.assistantWelcome'))
+    addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+  }
+})
+
+let _saveTimer: ReturnType<typeof setTimeout> | null = null
+watch(messages, () => {
+  if (_saveTimer) clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(() => {
+    const key = sessionKey.value
+    if (key) chatSession.saveSession(key, messages.value as any)
+  }, 1000)
+}, { deep: true })
 
 function scrollToBottom() {
   nextTick(() => {
@@ -407,7 +432,8 @@ async function handleSend() {
       const concurrency = Math.max(1, Math.min(5, parseInt(acMatch[2] || '1')))
       const rawTurns = parseInt(acMatch[3] || '30')
       const maxTurns = Math.max(1, Math.min(30, rawTurns))
-      const agentic = text.includes('--agentic')
+      // mode 按钮优先于 --agentic 命令行参数
+      const agentic = analysisMode.value === 'deep' || text.includes('--agentic')
       const summaryModel = acMatch[4] || ''
       const rawSubConc = parseInt(acMatch[5] || '1')
       const subagentConcurrency = Math.max(1, Math.min(10, rawSubConc))
@@ -423,7 +449,8 @@ async function handleSend() {
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
       const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
-      const modeHint = agentic ? '（Agentic 模式' : ''
+      const modeLabel = analysisMode.value === 'deep' ? '深入分析' : '快速分析'
+      const modeHint = agentic ? `（${modeLabel}` : ''
       const turnHint = agentic && maxTurns !== 30 ? `，轮次 ${maxTurns}` : ''
       const modelHint = agentic && summaryModel ? `，摘要模型 ${summaryModel}` : ''
       const subConcHint = agentic && subagentConcurrency > 1 ? `，摘要并发 ${subagentConcurrency}` : ''
@@ -433,7 +460,7 @@ async function handleSend() {
       // 退出选择模式（自动清空已选）
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       if (taskId) {
-        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic, maxTurns, summaryModel, subagentConcurrency)
+        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic, maxTurns, summaryModel, subagentConcurrency, analysisMode.value)
           .catch(e => addMessage('error', String(e)))
       }
       return
@@ -707,46 +734,26 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 function clearChat() {
+  const key = sessionKey.value
+  if (key) chatSession.clearSession(key)
   messages.value = []
-  const pid = projectStore.selectedProjectId
-  const tid = activeTaskId.value
-  chatSession.clearSession(pid, tid || undefined)
 }
 
 onMounted(() => {
   if (llmConfigured.value) {
-    const saved = chatSession.loadSession()
-    if (saved.length > 0) {
-      messages.value = saved as Message[]
-    } else {
+    const key = sessionKey.value
+    if (key) {
+      const saved = chatSession.loadSession(key)
+      if (saved.length > 0) {
+        messages.value = saved as Message[]
+      }
+    }
+    if (messages.value.length === 0) {
       addMessage('system', t('ai.assistantWelcome'))
       addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
     }
   }
 })
-
-watch(llmConfigured, (val) => {
-  if (val && messages.value.length === 0) {
-    const saved = chatSession.loadSession()
-    if (saved.length > 0) {
-      messages.value = saved as Message[]
-    } else {
-      addMessage('system', t('ai.assistantWelcome'))
-      addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
-    }
-  }
-})
-
-// 自动保存对话到 session
-let _saveTimer: ReturnType<typeof setTimeout> | null = null
-watch(messages, () => {
-  if (_saveTimer) clearTimeout(_saveTimer)
-  _saveTimer = setTimeout(() => {
-    const pid = projectStore.selectedProjectId
-    const tid = activeTaskId.value
-    chatSession.saveSession(messages.value as any, pid, tid || undefined)
-  }, 1000)
-}, { deep: true })
 
 // 监听 GraphCommandStore 事件 — 响应用户在图上的操作
 watch(() => cmdStore.eventSeq, () => {
@@ -932,33 +939,44 @@ watch(() => cmdStore.eventSeq, () => {
             <span class="ai-suggest-cmd">{{ cmd }}</span>
           </div>
         </div>
-        <div class="ai-input-actions">
-          <div class="ai-actions-left">
+          <div class="ai-input-actions">
+            <div class="ai-actions-left">
+              <button
+                class="ai-action-btn"
+                :class="{ 'ai-btn-hidden': messages.length === 0 }"
+                :title="t('ai.clearChat')"
+                @click="clearChat"
+              >
+                <TrashIcon class="w-4 h-4" />
+              </button>
+              <button
+                class="ai-action-btn"
+                :class="{ 'ai-select-active': selectionStore.selecting }"
+                :title="selectionStore.selecting ? '退出组件选择模式' : '选择组件'"
+                @click="selectionStore.toggleSelecting()"
+              >
+                <CursorArrowRippleIcon class="w-4 h-4" />
+              </button>
+              <button
+                class="ai-mode-btn"
+                :class="{ 'ai-mode-deep': analysisMode === 'deep', 'ai-mode-quick': analysisMode === 'quick' }"
+                :title="analysisMode === 'deep' ? '当前: 深入分析 (点击切换为快速)' : '当前: 快速分析 (点击切换为深入)'"
+                @click="toggleAnalysisMode"
+              >
+                <span v-if="analysisMode === 'quick'" class="w-3.5 h-3.5 text-center">⚡</span>
+                <SparklesIcon v-else class="w-3.5 h-3.5" />
+                <span class="ai-mode-label">{{ analysisMode === 'deep' ? '深入' : '快速' }}</span>
+              </button>
+            </div>
             <button
-              class="ai-action-btn"
-              :class="{ 'ai-btn-hidden': messages.length === 0 }"
-              :title="t('ai.clearChat')"
-              @click="clearChat"
+              class="ai-send-btn"
+              :disabled="!userInput.trim() || streaming"
+              @click="handleSend"
             >
-              <TrashIcon class="w-4 h-4" />
-            </button>
-            <button
-              class="ai-action-btn"
-              :class="{ 'ai-select-active': selectionStore.selecting }"
-              :title="selectionStore.selecting ? '退出组件选择模式' : '选择组件'"
-              @click="selectionStore.toggleSelecting()"
-            >
-              <CursorArrowRippleIcon class="w-4 h-4" />
+              <PaperAirplaneIcon class="w-4 h-4" />
             </button>
           </div>
-          <button
-            class="ai-send-btn"
-            :disabled="!userInput.trim() || streaming"
-            @click="handleSend"
-          >
-            <PaperAirplaneIcon class="w-4 h-4" />
-          </button>
-        </div>
+
       </div>
     </template>
   </div>
@@ -1189,6 +1207,40 @@ watch(() => cmdStore.eventSeq, () => {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.ai-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  transition: all 0.15s;
+  white-space: nowrap;
+  height: 22px;
+}
+.ai-mode-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.ai-mode-quick {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.ai-mode-deep {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.ai-mode-label {
+  font-weight: 500;
+}
+
+
 
 .ai-cmd-confirm {
   margin: 0 12px 8px; padding: 0.5rem 0.75rem;
