@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on(channel, listener)
       return () => ipcRenderer.removeListener(channel, listener)
     },
+    onMaximizeChange: (callback: (maximized: boolean) => void) => {
+      const listener = (_: any, maximized: boolean) => callback(maximized)
+      ipcRenderer.on('window:maximized-changed', listener)
+      return () => ipcRenderer.removeListener('window:maximized-changed', listener)
+    },
   },
 
   // ==================== 对话框 ====================

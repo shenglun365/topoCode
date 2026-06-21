@@ -93,6 +93,13 @@ export class WindowManager {
       if (!this.isQuitting) this.startBackendKeepalive()
     })
 
+    win.on('maximize', () => {
+      win.webContents.send('window:maximized-changed', true)
+    })
+    win.on('unmaximize', () => {
+      win.webContents.send('window:maximized-changed', false)
+    })
+
     this.ensureBackendRunning()
     return win
   }

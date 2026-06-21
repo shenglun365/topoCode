@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -11,6 +11,7 @@ import {
   SunIcon,
   MinusIcon,
   Square2StackIcon,
+  ArrowsPointingInIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { usePanelStore } from '@/stores/panel'
@@ -38,11 +39,17 @@ const DOCS_URL = 'https://opencode.ai'
 
 // ── 无边框窗口控制 ──
 const isMaximized = ref(false)
+let unsubMaximize: (() => void) | undefined
 
 onMounted(async () => {
   try {
     isMaximized.value = await window.api?.window.isMaximized() || false
   } catch {}
+  unsubMaximize = window.api?.window.onMaximizeChange?.(v => isMaximized.value = v)
+})
+
+onUnmounted(() => {
+  unsubMaximize?.()
 })
 
 async function onMinimize() {
@@ -316,7 +323,8 @@ onMounted(() => {
           :title="t(isMaximized ? 'common.restore' : 'common.maximize')"
           @click="onMaximize"
         >
-          <Square2StackIcon class="w-3.5 h-3.5" />
+          <Square2StackIcon v-if="!isMaximized" class="w-3.5 h-3.5" />
+          <ArrowsPointingInIcon v-else class="w-3.5 h-3.5" />
         </div>
         <div
           class="win-btn win-btn-close"

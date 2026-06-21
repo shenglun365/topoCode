@@ -2334,13 +2334,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             for f in rank_data["files"]:
                 if f["file_path"] in cached_set:
                     batch_cached[f["batch"]] += 1
-            if rank_data["files"] and cached_set:
-                sample_fp = rank_data["files"][0]["file_path"]
-                sample_cached = next((p for p in cached_set if p.split("/")[-1] == sample_fp.split("/")[-1]), None)
-                logger.info("[getPreSummaryStatus] batch_cached: %s cached=%d rank_first=%r cached_matching_basename=%r",
-                           batch_cached, cached_count, sample_fp, sample_cached)
-        except Exception as e:
-            logger.warning("[getPreSummaryStatus] batch_cached error: %s", e)
+        except Exception:
+            pass
 
         return {
             "counts": rank_data["counts"], "total_files": len(rank_data["files"]),
