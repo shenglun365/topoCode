@@ -82,14 +82,14 @@ export interface AnalysisService {
   getTimelineEntry(params: { timelineId: string }): Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
   startArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string }>
   stopArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
-  getAgentProgress(params: { agentTaskId: string }): Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string }>; error?: string }>
+  getAgentProgress(params: { agentTaskId: string }): Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; file_current?: number; file_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string; file_count?: number }>; error?: string }>
   cancelAgentTask(params: { agentTaskId: string }): Promise<{ cancelled: boolean }>
   getAgentTaskHistory(params: { taskId: string; offset?: number; limit?: number }): Promise<{ results: Array<any>; total: number }>
   clearAgentTaskHistory(params: { taskId: string }): Promise<{ success: boolean }>
   // 预摘要
-  getPreSummaryStatus(params: { taskId: string }): Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string }>
+  getPreSummaryStatus(params: { taskId: string }): Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string; failed_count: number }>
   listPreSummaryFiles(params: { taskId: string; batch?: string; page?: number; page_size?: number }): Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<any> }>
-  startPreSummary(params: { taskId: string; batch?: string; limit?: number }): Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
+  startPreSummary(params: { taskId: string; batch?: string; limit?: number; subagentConcurrency?: number }): Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
   getFileSummary(params: { taskId: string; file_path: string }): Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string }>
   deleteFileSummary(params: { taskId: string; file_path: string }): Promise<{ success: boolean; deleted?: number }>
   rerunFileSummary(params: { taskId: string; file_path: string }): Promise<{ success: boolean; agentTaskId?: string }>

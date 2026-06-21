@@ -513,8 +513,8 @@ async function handleSend() {
       }
       return
     }
-    // /presummary start <batch> [-n N]
-    const psStartRe = /^\/presummary\s+start\s+(P[012])(?:\s+-n\s+(\d+))?/i
+    // /presummary start <batch> [-n N] [-j N]
+    const psStartRe = /^\/presummary\s+start\s+(P[012])(?:\s+-n\s+(\d+))?(?:\s+-j\s+(\d+))?/i
     const psStartMatch = text.match(psStartRe)
     if (psStartMatch) {
       addMessage('user', text)
@@ -523,10 +523,14 @@ async function handleSend() {
       if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
       const batch = psStartMatch[1].toUpperCase()
       const limit = parseInt(psStartMatch[2] || '0')
+      const rawConc = parseInt(psStartMatch[3] || '1')
+      const subagentConcurrency = Math.max(1, Math.min(10, rawConc))
       try {
-        const result = await communityStore.startPreSummary(taskId, batch, limit)
-        if (result.success && result.agentTaskId) {
-          addMessage('system', `预摘要 ${batch} 已启动 (${result.fileCount} 文件)。请到「解析任务」面板查看进度。`)
+        const result = await communityStore.startPreSummary(taskId, batch, limit, subagentConcurrency)
+        if (result.allCached) {
+          addMessage('system', `预摘要 ${batch} 跳过: 全部 ${result.fileCount} 个文件已缓存，无需处理`)
+        } else if (result.success && result.agentTaskId) {
+          addMessage('system', `预摘要 ${batch} 已启动 (${result.fileCount} 文件${subagentConcurrency > 1 ? `，并发 ${subagentConcurrency}` : ''})。请到「解析任务」面板查看进度。`)
         } else {
           addMessage('system', `启动失败: ${result.error || '未知错误'}`)
         }

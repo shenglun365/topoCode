@@ -50,6 +50,7 @@ class StepProgress:
     description: str
     status: str = "pending"   # pending | running | done | failed
     result: Optional[ToolResult] = None
+    file_count: int = 0        # 该步骤包含的文件数（预摘要批量时 >1）
 
 
 @dataclass
@@ -60,6 +61,8 @@ class AgentProgress:
     steps: list[StepProgress] = field(default_factory=list)
     step_current: int = 0
     step_total: int = 0
+    file_current: int = 0      # 已处理文件数
+    file_total: int = 0        # 总文件数
     tokens_used: int = 0
     elapsed_sec: float = 0.0
     message: str = ""
@@ -171,16 +174,22 @@ class AgentRuntime:
             self._status = AgentStatus.COMPLETED
             return WorkflowResult(success=True, steps_completed=0, steps_total=0)
 
-        self._steps = [
-            StepProgress(step_index=i, step_total=len(steps), description=s.description)
-            for i, s in enumerate(steps)
-        ]
+        self._steps = []
+        file_total = 0
+        for i, s in enumerate(steps):
+            fc = len(s.args.get("path", [])) if s.args else 0
+            self._steps.append(StepProgress(
+                step_index=i, step_total=len(steps), description=s.description,
+                file_count=fc,
+            ))
+            file_total += fc
 
         # 2. Execute each step
         self._status = AgentStatus.RUNNING
         results: dict[str, Any] = {}
         completed_count = 0
         failed_count = 0
+        file_current = 0
 
         for i, step in enumerate(steps):
             if self._cancelled:
@@ -256,13 +265,27 @@ class AgentRuntime:
                 self._steps[i].status = "failed"
                 failed_count += 1
 
+            file_current += self._steps[i].file_count
+
             self._report(
                 status=AgentStatus.RUNNING,
                 step_current=i + 1,
                 step_total=len(steps),
+                file_current=file_current,
+                file_total=file_total,
                 tokens_used=self._sandbox.budget.tokens_used,
                 elapsed_sec=self._sandbox.budget.elapsed,
             )
+
+        # 从 SubAgent 类级别读取预摘要文件失败数（绕过编译版 SummarizeFileTool）
+        if context.get("task_id"):
+            try:
+                from .sub_agent import SubAgent
+                ff = SubAgent.get_failed(context["task_id"])
+                if ff:
+                    workflow._file_failed = ff
+            except Exception:
+                pass
 
         self._sandbox.budget.finish()
 
@@ -694,6 +717,8 @@ class AgentRuntime:
                 steps=self._steps,
                 step_current=kwargs.get("step_current", 0),
                 step_total=kwargs.get("step_total", 0),
+                file_current=kwargs.get("file_current", 0),
+                file_total=kwargs.get("file_total", 0),
                 tokens_used=kwargs.get("tokens_used", self._sandbox.budget.tokens_used),
                 elapsed_sec=kwargs.get("elapsed_sec", self._sandbox.budget.elapsed),
                 message=kwargs.get("message", ""),

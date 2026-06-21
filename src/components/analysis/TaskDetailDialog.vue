@@ -5,6 +5,7 @@ import { XMarkIcon, ClockIcon, DocumentTextIcon } from '@heroicons/vue/24/outlin
 import { useAnalysisStore } from '@/stores/analysis'
 import type { AnalysisTask, TaskLogEntry, TaskRun } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
+import { displayDispatcher } from '@/services/display-dispatcher'
 
 const { showId, componentId } = useComponentId('AN-003')
 const props = defineProps<{
@@ -23,8 +24,6 @@ const logs = ref<TaskLogEntry[]>([])
 const loadingLogs = ref(false)
 const taskRuns = ref<TaskRun[]>([])
 const selectedRunId = ref<string>('')
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
 // 状态颜色
 const statusColor = computed(() => {
   const map: Record<string, string> = {
@@ -145,16 +144,17 @@ async function loadLogs(runId?: string) {
 
 // 运行中任务轮询日志
 function startPolling() {
-  if (props.task.status === 'running') {
-    pollTimer = setInterval(() => loadLogs(selectedRunId.value), 2000)
-  }
+  if (props.task.status !== 'running') return
+  const key = `task-logs:${props.task.id}:${selectedRunId.value || 'latest'}`
+  if (displayDispatcher.has(key)) return
+  displayDispatcher.register(key, {
+    interval: 2000,
+    fetcher: () => loadLogs(selectedRunId.value).then(() => undefined),
+  })
 }
 
 function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
+  displayDispatcher.unregister(`task-logs:${props.task.id}:${selectedRunId.value || 'latest'}`)
 }
 
 // 初始化
@@ -176,8 +176,10 @@ function handleClose() {
 }
 
 function handleSelectRun(runId: string) {
+  stopPolling()
   selectedRunId.value = runId
   loadLogs(runId)
+  startPolling()
 }
 
 // 格式化时间

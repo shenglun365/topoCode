@@ -21,6 +21,7 @@ import TaskDetailDialog from './TaskDetailDialog.vue'
 import TimelineDialog from './TimelineDialog.vue'
 import type { AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
+import { displayDispatcher } from '@/services/display-dispatcher'
 import { createLogger } from '@/utils/logger'
 
 const { showId, componentId } = useComponentId('AN-002')
@@ -43,8 +44,6 @@ const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
 const timelineDialogVisible = ref(false)
 const timelineDialogTask = ref<AnalysisTask | null>(null)
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
 function openTimeline(task: AnalysisTask) {
   timelineDialogTask.value = task
   timelineDialogVisible.value = true
@@ -59,22 +58,26 @@ async function loadTasks() {
 
 // 运行中任务轮询（3 秒刷新）
 function startPolling() {
-  stopPolling()
-  pollTimer = setInterval(async () => {
-    const hasRunning = analysisStore.tasks.some(t => t.status === 'running')
-    if (hasRunning && props.projectId) {
-      await analysisStore.loadTasks(props.projectId)
-    } else {
-      stopPolling()
-    }
-  }, 3000)
+  const key = `task-list:${props.projectId}`
+  if (displayDispatcher.has(key)) return
+  displayDispatcher.register(key, {
+    interval: 3000,
+    fetcher: async () => {
+      const hasRunning = analysisStore.tasks.some(t => t.status === 'running')
+      if (hasRunning && props.projectId) {
+        await analysisStore.loadTasks(props.projectId)
+      }
+      return hasRunning
+    },
+    onData: (hasRunning) => {
+      if (!hasRunning) displayDispatcher.unregister(`task-list:${props.projectId}`)
+    },
+  })
 }
 
 function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
+  if (!props.projectId) return
+  displayDispatcher.unregister(`task-list:${props.projectId}`)
 }
 
 // 监听任务列表变化，有 running 任务时启动轮询

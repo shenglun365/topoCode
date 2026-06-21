@@ -216,11 +216,10 @@ class SummarizeFileTool(AgentTool):
             if not files:
                 return ToolResult.fail("未指定文件路径")
 
+            from ..path_utils import to_abs
             safe_files = []
             for fp in files:
-                abs_path = fp
-                if self._project_root and not os.path.isabs(fp):
-                    abs_path = os.path.join(self._project_root, fp)
+                abs_path = to_abs(fp, self._project_root)
                 if self._path_sandbox:
                     abs_path = self._path_sandbox.validate_read(abs_path)
                 if abs_path:
@@ -265,10 +264,12 @@ class SummarizeFileTool(AgentTool):
                 f"缓存命中 {result.cache_hits}, "
                 f"缓存未命中 {result.cache_misses}, "
                 f"节省 ~{result.tokens_saved} tokens, "
-                f"消耗 {result.tokens_used} tokens]"
+                f"消耗 {result.tokens_used} tokens"
+                + (f", 失败 {result.failed} 个" if result.failed else "")
+                + "]"
             )
 
-            return ToolResult.ok(data="\n".join(lines))
+            return ToolResult.ok(data="\n".join(lines), failed=result.failed)
 
         except Exception as e:
             logger.warning(f"[SummarizeFileTool] failed: {e}")

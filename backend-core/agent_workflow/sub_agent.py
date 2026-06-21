@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+from .path_utils import to_abs, to_rel
+
 logger = logging.getLogger(__name__)
 
 # 摘要质量最低要求（字符数）
@@ -38,6 +40,7 @@ class SubAgentResult:
     summaries: list           # [{path, summary, cached, cached_at}]
     tokens_used: int
     tokens_saved: int          # 因缓存命中节省的估算 token
+    failed: int = 0            # 失败文件数（读取/摘要异常）
 
 
 def _is_valid_summary(summary: str) -> bool:
@@ -53,6 +56,17 @@ def _is_valid_summary(summary: str) -> bool:
 
 class SubAgent:
     """执行单次文件批处理 + 摘要任务。"""
+
+    # 预摘要失败计数（task_id → 累计失败数），用于绕过编译版 SummarizeFileTool 传值
+    _task_failed: dict[str, int] = {}
+
+    @classmethod
+    def get_failed(cls, task_id: str) -> int:
+        return cls._task_failed.get(task_id, 0)
+
+    @classmethod
+    def reset_failed(cls, task_id: str):
+        cls._task_failed.pop(task_id, None)
 
     def __init__(self, multi_db, project_root: str = "", model_id: str = "",
                  project_db=None, task_id: str = ""):
@@ -88,6 +102,7 @@ class SubAgent:
         total_tokens = 0
         cache_hits = 0
         cache_misses = 0
+        failed = 0
         total_read_chars = 0
         summaries = []
 
@@ -95,9 +110,11 @@ class SubAgent:
         lock = asyncio.Lock()
 
         async def _read_or_cache(fp: str):
-            nonlocal cache_hits, cache_misses, total_tokens, total_read_chars
+            nonlocal cache_hits, cache_misses, failed, total_tokens, total_read_chars
 
-            rel = os.path.relpath(fp, self._project_root) if self._project_root else fp
+            # 路径统一：fp 当前为项目相对路径；abs_fp 供文件 I/O / graph_node SQL
+            rel = to_rel(fp, self._project_root)
+            abs_fp = to_abs(fp, self._project_root)
 
             # 缓存命中（force_refresh 时跳过）
             if not force_refresh:
@@ -125,10 +142,10 @@ class SubAgent:
             # ── 按文件大小分流: >10KB + AST 有数据 → 结构化提取 ──
             if self._should_use_structure(fp):
                 logger.info(f"[FileCache] MISS: {rel} → 结构化提取 (AST)")
-                header = self._read_file_header(fp, 2000)
-                structure = self._extract_structure(fp)
+                header = self._read_file_header(abs_fp, 2000)
+                structure = self._extract_structure(abs_fp)
                 if structure:
-                    edges = self._extract_call_edges(fp)
+                    edges = self._extract_call_edges(abs_fp)
                     text = self._build_structure_text(structure, header or "", edges)
                     async with lock:
                         total_read_chars += len(text)
@@ -142,11 +159,15 @@ class SubAgent:
                         except Exception as e:
                             logger.warning(f"[FileCache] SUMMARIZE-ERR: {rel}: {e}")
                             summary = f"摘要失败: {e}"
+                            async with lock:
+                                failed += 1
                 else:
                     # AST 无数据，回退到文件读取
                     logger.info(f"[FileCache] MISS: {rel} → AST 无数据, 回退全文读取")
-                    content = await asyncio.to_thread(self._read_file, fp)
+                    content = await asyncio.to_thread(self._read_file, abs_fp)
                     if content is None:
+                        async with lock:
+                            failed += 1
                         return {"path": fp, "summary": "(无法读取)", "cached": False,
                                 "cached_at": ""}
                     async with lock:
@@ -158,13 +179,18 @@ class SubAgent:
                             async with lock:
                                 total_tokens += tokens or 0
                         except Exception as e:
+                            logger.warning(f"[FileCache] SUMMARIZE-ERR: {rel}: {e}")
                             summary = f"摘要失败: {e}"
+                            async with lock:
+                                failed += 1
             else:
                 # ≤ 10KB → 直接读取文件
                 logger.info(f"[FileCache] MISS: {rel} → reading + LLM摘要")
-                content = await asyncio.to_thread(self._read_file, fp)
+                content = await asyncio.to_thread(self._read_file, abs_fp)
                 if content is None:
                     logger.warning(f"[FileCache] READ-ERR: {rel} (file not found)")
+                    async with lock:
+                        failed += 1
                     return {"path": fp, "summary": f"(无法读取)", "cached": False,
                             "cached_at": ""}
                 async with lock:
@@ -178,6 +204,8 @@ class SubAgent:
                     except Exception as e:
                         logger.warning(f"[FileCache] SUMMARIZE-ERR: {rel}: {e}")
                         summary = f"摘要失败: {e}"
+                        async with lock:
+                            failed += 1
 
             # 缓存（通过质量校验才写入）
             if _is_valid_summary(summary):
@@ -203,10 +231,14 @@ class SubAgent:
             f"tokens_saved≈{tokens_saved}, tokens_used={total_tokens}"
         )
 
+        # 累积到类级别（供编译版工具链读取）
+        SubAgent._task_failed[task_id] = SubAgent._task_failed.get(task_id, 0) + failed
+
         return SubAgentResult(
             files_processed=len(unique),
             cache_hits=cache_hits,
             cache_misses=cache_misses,
+            failed=failed,
             summaries=results,
             tokens_used=total_tokens,
             tokens_saved=tokens_saved,
@@ -214,9 +246,7 @@ class SubAgent:
 
     def _read_file(self, path: str) -> Optional[str]:
         """同步读取文件内容（上限 10000 字符）。由 asyncio.to_thread 包装。"""
-        abs_path = path
-        if self._project_root and not os.path.isabs(path):
-            abs_path = os.path.join(self._project_root, path)
+        abs_path = to_abs(path, self._project_root) if self._project_root else path
         if not os.path.isfile(abs_path):
             return None
         try:
@@ -248,8 +278,9 @@ class SubAgent:
                 ).fetchone()
                 if row and row["size"]:
                     return row["size"]
-            if os.path.isfile(path):
-                return os.path.getsize(path)
+            abs_path = to_abs(path, self._project_root) if self._project_root else path
+            if os.path.isfile(abs_path):
+                return os.path.getsize(abs_path)
         except Exception:
             pass
         return 0
@@ -262,16 +293,17 @@ class SubAgent:
         if not self._project_db or not self._task_id:
             return False
         try:
+            abs_path = to_abs(path, self._project_root)
             row = self._project_db.execute(
                 "SELECT COUNT(*) as cnt FROM graph_node WHERE task_id=? AND file_path=?",
-                (self._task_id, path)
+                (self._task_id, abs_path)
             ).fetchone()
             return bool(row and row["cnt"] > 0)
         except Exception:
             return False
 
     def _extract_structure(self, path: str) -> Optional[dict]:
-        """从 graph_node 提取文件符号结构，按 kind 分组。"""
+        """从 graph_node 提取文件符号结构，按 kind 分组。path 应为绝对路径。"""
         if not self._project_db or not self._task_id:
             return None
         try:
@@ -294,7 +326,7 @@ class SubAgent:
             return None
 
     def _extract_call_edges(self, path: str) -> list[str]:
-        """提取本文件内符号间的依赖/调用关系。最多 50 条。"""
+        """提取本文件内符号间的依赖/调用关系。最多 50 条。path 应为绝对路径。"""
         if not self._project_db or not self._task_id:
             return []
         try:
@@ -332,8 +364,7 @@ class SubAgent:
     def _build_structure_text(self, structure: dict, header: str,
                               edges: list[str]) -> str:
         """将结构化数据转为 LLM 友好的 Markdown 文本。"""
-        rel_path = os.path.relpath(structure["file_path"], self._project_root) \
-            if self._project_root else structure["file_path"]
+        rel_path = to_rel(structure["file_path"], self._project_root)
 
         lines = [
             f"## 文件符号结构: {rel_path}  ({structure['symbol_count']} 个符号)\n",

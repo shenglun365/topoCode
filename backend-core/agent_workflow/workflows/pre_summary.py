@@ -27,30 +27,43 @@ class PreSummaryWorkflow(AgentWorkflow):
 
         # 断点续传：跳过已缓存文件
         cached = context.get("cached_paths") or set()
-        skipped = 0
+        uncached = [fp for fp in files if fp not in cached]
+        skipped = len(files) - len(uncached)
+
+        if not uncached:
+            return []
+
+        concurrency = context.get("subagent_concurrency", 1) or 1
+
         steps = []
-        for fp in files:
-            if fp in cached:
-                skipped += 1
-                continue
+        for i in range(0, len(uncached), concurrency):
+            batch = uncached[i:i + concurrency]
+            if len(batch) == 1:
+                desc = f"预摘要: {batch[0]}"
+            else:
+                desc = f"预摘要: {batch[0]} 等 {len(batch)} 个文件"
             steps.append(AgentStep(
                 tool="summarize_file",
-                args={"path": [fp]},
-                description=f"预摘要: {fp}",
+                args={"path": batch},
+                description=desc,
             ))
 
         if skipped:
             logger.info("[PreSummaryWorkflow] resume: skipped %d already cached files, remaining %d steps",
                        skipped, len(steps))
+        logger.info("[PreSummaryWorkflow] plan: %d files, concurrency=%d, steps=%d",
+                    len(uncached), concurrency, len(steps))
         return steps
 
     def finalize(self, results: dict[str, Any]) -> WorkflowResult:
         data = results.get("summarize_file", "")
         has_content = bool(data and isinstance(data, str) and len(data) > 10)
+        failed_count = getattr(self, '_file_failed', 0)
         return WorkflowResult(
             success=has_content,
             steps_completed=1 if has_content else 0,
             steps_total=1,
             error=None if has_content else "所有文件摘要步骤均失败，请检查 LLM 模型配置或日志中的 [SummarizeFileTool] / [SubAgent] 错误",
             summary=f"预摘要: {'成功' if has_content else '失败'}",
+            data={"failed_count": failed_count},
         )

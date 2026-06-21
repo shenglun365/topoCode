@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TopBar from './TopBar.vue'
 import ActivityBar from './ActivityBar.vue'
@@ -10,6 +10,7 @@ import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
 import { useNavigationStore } from '@/stores/navigation'
 import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
 import { useStatusStore } from '@/stores/status'
+import { controlDispatcher } from '@/services/control-dispatcher'
 import { usePanelStore } from '@/stores/panel'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -80,10 +81,11 @@ onMounted(async () => {
     }
   } catch (_) {}
 
-  // 每 3 秒轮询本地 PythonBridge 状态（不经过 ZMQ，避免挂死）
-  setInterval(async () => {
-    try {
-      const st: any = await window.api!.backend.getStatus()
+  // 每 3 秒轮询本地 PythonBridge 状态（控制层，不经过 ZMQ，避免挂死）
+  controlDispatcher.register('backend-status', {
+    interval: 3000,
+    fetcher: () => window.api!.backend.getStatus(),
+    onData: (st: any) => {
       if (st) {
         const wasRunning = statusStore.backend.status === 'running'
         statusStore.setBackendStatus(st, true)
@@ -96,8 +98,9 @@ onMounted(async () => {
           if (!startingSince.value) startingSince.value = Date.now()
         }
       }
-    } catch (_) {}
-  }, 3000)
+    },
+    onError: () => {},
+  })
 })
 
 const startingElapsed = computed(() => startingSince.value ? Date.now() - startingSince.value : 0)
@@ -115,6 +118,10 @@ watch(
         }
     }
 );
+
+onUnmounted(() => {
+  controlDispatcher.unregister('backend-status')
+});
 </script>
 
 <template>

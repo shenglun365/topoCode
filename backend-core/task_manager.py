@@ -29,6 +29,9 @@ _FIELD_MAP = {
     "selectedExtensions": "selected_extensions",
 }
 
+# 预摘要失败计数（task_id → int），由 _cb 回调写入，getPreSummaryStatus 读取
+_ps_failed_counts: dict[str, int] = {}
+
 
 def register_analysis_methods(server, multi_db: MultiDBManager):
     """将所有 analysis.* 方法注册到 RPC 服务器"""
@@ -1264,7 +1267,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         logger.info("[PERF] getReportDashboard file_stats=%.1fms", (time.perf_counter() - t0) * 1000)
 
         # 4. 预摘要状态
-        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': ''}
+        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': _ps_failed_counts.get(tid, 0)}
         try:
             # 从 file_summaries 表直接统计缓存数（无社区数据时也能工作）
             p_rows = project_db.execute(
@@ -2247,7 +2250,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         except Exception:
             pass
 
-        # 4. 计算评分（size 分桶 + quality 微调）
+        # 4. 计算评分（size 分桶 + quality 微调）；file_path 统一为项目相对路径
+        from agent_workflow.path_utils import to_rel
         scored = []
         for fp, comms in file_to_comms.items():
             cross = len(comms)
@@ -2259,7 +2263,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                          (1 if size > 100000 else 0) * 10
             score = size_score + int(max_quality * 100)
             scored.append({
-                "file_path": fp, "score": score, "cross": cross,
+                "file_path": to_rel(fp, project_root), "score": score, "cross": cross,
                 "edges": edges, "size": size, "is_large": 1 if size > 10000 else 0,
                 "quality": max_quality, "batch": "",
             })
@@ -2318,19 +2322,31 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         comps = _get_l0_comps(project_db, tid)
         rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
 
-        # 查已缓存文件数
+        # 查已缓存文件数 + 按批次统计
         cached_count = 0
+        batch_cached = {"P0": 0, "P1": 0, "P2": 0}
         try:
-            row = project_db.execute(
-                "SELECT COUNT(*) as cnt FROM file_summaries WHERE project_id=?", (pid,)
-            ).fetchone()
-            cached_count = row["cnt"] if row else 0
-        except Exception:
-            pass
+            cached_rows = project_db.execute(
+                "SELECT file_path FROM file_summaries WHERE project_id=?", (pid,)
+            ).fetchall()
+            cached_set = {r[0] for r in cached_rows}
+            cached_count = len(cached_set)
+            for f in rank_data["files"]:
+                if f["file_path"] in cached_set:
+                    batch_cached[f["batch"]] += 1
+            if rank_data["files"] and cached_set:
+                sample_fp = rank_data["files"][0]["file_path"]
+                sample_cached = next((p for p in cached_set if p.split("/")[-1] == sample_fp.split("/")[-1]), None)
+                logger.info("[getPreSummaryStatus] batch_cached: %s cached=%d rank_first=%r cached_matching_basename=%r",
+                           batch_cached, cached_count, sample_fp, sample_cached)
+        except Exception as e:
+            logger.warning("[getPreSummaryStatus] batch_cached error: %s", e)
 
         return {
             "counts": rank_data["counts"], "total_files": len(rank_data["files"]),
-            "cached_count": cached_count, "project_root": project_root,
+            "cached_count": cached_count, "batch_cached": batch_cached,
+            "project_root": project_root,
+            "failed_count": _ps_failed_counts.get(tid, 0),
         }
 
     @server.register("analysis.listPreSummaryFiles")
@@ -2355,35 +2371,21 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         end = start + page_size
         page_items = batch_files[start:end]
 
-        # 路径 relativize + 缓存状态标记
-        import os as _os
-        logger.info("[listPreSummaryFiles] project_root=%r n_items=%d first_fp=%r",
-                   project_root, len(page_items),
-                   page_items[0]["file_path"] if page_items else '')
-        # 批量查询缓存状态
+        # 缓存状态标记（file_path 已为相对路径，直接查询）
         cached_set: set[str] = set()
         if page_items:
             try:
-                rel_fps = [
-                    _os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp
-                    for fp in [item["file_path"] for item in page_items]
-                ]
-                placeholders = ",".join("?" for _ in rel_fps)
+                paths = [item["file_path"] for item in page_items]
+                placeholders = ",".join("?" for _ in paths)
                 cache_rows = project_db.execute(
                     f"SELECT DISTINCT file_path FROM file_summaries WHERE project_id=? AND file_path IN ({placeholders})",
-                    (pid, *rel_fps)
+                    (pid, *paths)
                 ).fetchall()
                 cached_set = {r[0] for r in cache_rows}
             except Exception:
                 pass
         for item in page_items:
-            fp = item["file_path"]
-            if project_root and _os.path.isabs(fp):
-                rel = _os.path.relpath(fp, project_root)
-                item["file_path"] = rel
             item["has_summary"] = item["file_path"] in cached_set
-        if page_items:
-            logger.info("[listPreSummaryFiles] after relativize first_fp=%r", page_items[0]["file_path"])
 
         return {
             "batch": batch, "page": page, "page_size": page_size,
@@ -2391,7 +2393,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         }
 
     @server.register("analysis.startPreSummary")
-    def start_pre_summary(task_id=None, taskId=None, batch="P0", limit=0):
+    def start_pre_summary(task_id=None, taskId=None, batch="P0", limit=0,
+                          subagent_concurrency=None, subagentConcurrency=None):
         """启动预摘要 agent 任务"""
         tid = task_id or taskId
         if not tid:
@@ -2414,28 +2417,40 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not batch_files:
             return {"success": False, "error": f"批次 {batch} 无文件"}
 
-        # 查询已缓存文件集，用于断点续传
+        # 查询已缓存文件集（路径格式：项目相对路径，与 _compute_file_ranks 和 SubAgent 一致）
         cached_paths: set[str] = set()
         try:
-            import os as _os2
-            rel_fps = [_os2.path.relpath(fp, project_root) if project_root and _os2.path.isabs(fp) else fp
-                       for fp in batch_files]
-            placeholders = ",".join("?" for _ in rel_fps)
+            placeholders = ",".join("?" for _ in batch_files)
             cache_rows = project_db.execute(
                 f"SELECT file_path FROM file_summaries WHERE project_id=? AND file_path IN ({placeholders})",
-                (pid, *rel_fps)
+                (pid, *batch_files)
             ).fetchall()
             cached_paths = {r[0] for r in cache_rows}
-            logger.info("[startPreSummary] resume: %d/%d files already cached, will skip",
+            logger.info("[startPreSummary] resume: %d/%d files already cached",
                        len(cached_paths), len(batch_files))
         except Exception as e:
             logger.warning("[startPreSummary] resume check failed: %s", e)
+
+        # 快速跳过: 所有文件均已缓存
+        if cached_paths and len(cached_paths) == len(batch_files):
+            logger.info("[startPreSummary] all %d files already cached, skipping", len(batch_files))
+            return {"success": True, "allCached": True, "fileCount": len(batch_files), "cachedCount": len(cached_paths)}
+        # 部分缓存: 仅提交未缓存文件（路径格式一致，直接比较）
+        if cached_paths:
+            n_total = len(batch_files)
+            batch_files = [fp for fp in batch_files if fp not in cached_paths]
+            logger.info("[startPreSummary] %d/%d files cached, submitting %d uncached",
+                       len(cached_paths), n_total, len(batch_files))
+
+        raw_sub_conc = subagent_concurrency if subagent_concurrency is not None else subagentConcurrency
+        sub_conc = max(1, min(10, int(raw_sub_conc or 1)))
 
         context = {
             "task_id": tid,
             "project_id": pid,
             "files": batch_files,
             "cached_paths": cached_paths,
+            "subagent_concurrency": sub_conc,
         }
 
         from agent_workflow.router import create_default_router
@@ -2448,8 +2463,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             project_summary=project_summary,
         )
 
-        def _cb(result):
-            logger.info(f"[startPreSummary] done: {result}")
+        # 重置前次运行的失败计数
+        try:
+            from agent_workflow.sub_agent import SubAgent
+            SubAgent.reset_failed(tid)
+        except Exception:
+            pass
+
+        def _cb(state):
+            fc = state.get("failed_count", 0)
+            if fc:
+                _ps_failed_counts[tid] = fc
+                logger.info(f"[startPreSummary] done: failed_count={fc}")
+            else:
+                logger.info(f"[startPreSummary] done: {state}")
 
         agent_id = router.dispatch(
             "presummary_files", tid, context, on_complete=_cb)

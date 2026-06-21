@@ -58,15 +58,18 @@ class AgentTaskState:
         steps = []
         if self.progress and self.progress.steps:
             steps = [
-                {"description": s.description, "status": s.status}
+                {"description": s.description, "status": s.status,
+                 "file_count": s.file_count}
                 for s in self.progress.steps
             ]
-        return {
+        d = {
             "agent_id": self.agent_id,
             "task_id": self.task_id,
             "status": self.status.value,
             "step_current": self.progress.step_current if self.progress else 0,
             "step_total": self.progress.step_total if self.progress else 0,
+            "file_current": self.progress.file_current if self.progress else 0,
+            "file_total": self.progress.file_total if self.progress else 0,
             "tokens_used": self.progress.tokens_used if self.progress else 0,
             "elapsed_sec": round(self.progress.elapsed_sec if self.progress else 0, 1),
             "message": self.progress.message if self.progress else "",
@@ -75,6 +78,9 @@ class AgentTaskState:
             "created_at": self.created_at,
             "finished_at": self.finished_at,
         }
+        if self.result and self.result.data and isinstance(self.result.data, dict):
+            d["failed_count"] = self.result.data.get("failed_count", 0)
+        return d
 
 
 class AgentTaskManager:

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
 import { isLLMConfigured } from '@/services/llmClient'
+import { controlDispatcher } from '@/services/control-dispatcher'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
 import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult, TimelineEntry } from '@/types/ipc'
@@ -705,10 +706,13 @@ export const useCommunityStore = defineStore('community', () => {
     Object.assign(t.agentTasks[taskIdx], updates)
   }
 
-  function updateAgentStep(taskId: string, taskIdx: number, stepIdx: number, status: string) {
+  function updateAgentStep(taskId: string, taskIdx: number, stepIdx: number, status: string, fileCount?: number) {
     const t = tasks.value[taskId]; if (!t || !t.agentTasks[taskIdx]) return
     const steps = t.agentTasks[taskIdx].steps
-    if (steps[stepIdx]) steps[stepIdx].status = status as any
+    if (steps[stepIdx]) {
+      steps[stepIdx].status = status as any
+      if (fileCount !== undefined) steps[stepIdx].file_count = fileCount
+    }
   }
 
   async function triggerArchAnalysis(taskId: string, edgeType: string, level: string, modelId?: string, projectId?: string) {
@@ -861,34 +865,32 @@ export const useCommunityStore = defineStore('community', () => {
   const agentTaskHistoryOffset = ref<Record<string, number>>({})
   const agentTaskHistoryTotal = ref<Record<string, number>>({})
 
-  // 跟踪 active polling，防止页面切换时泄漏
-  const _activePolling: Record<string, ReturnType<typeof setInterval>> = {}
-
   function _pollAgentProgress(taskId: string, taskIdx: number, agentTaskId: string, stepOffset = 0) {
+    const controlKey = `agent-progress:${taskId}:${agentTaskId}`
     // 清除同一 agent 的旧 polling（兜底）
-    if (_activePolling[agentTaskId]) clearInterval(_activePolling[agentTaskId])
+    if (controlDispatcher.has(controlKey)) controlDispatcher.unregister(controlKey)
 
-    const key = `${taskId}:${agentTaskId}`
-    let lastDoneCount = 0  // 跟踪步骤完成数，新完成时立即刷新社区名称
-    const poll = setInterval(async () => {
-      try {
-        const progress = await ipc.analysis.getAgentProgress({ agentTaskId })
+    let lastDoneCount = 0
+    controlDispatcher.register(controlKey, {
+      interval: 1500,
+      fetcher: () => ipc.analysis.getAgentProgress({ agentTaskId }),
+      onData: (progress) => {
         if (!progress.found) return
         const t = tasks.value[taskId]
         if (!t || !t.agentTasks[taskIdx]) {
-          clearInterval(poll)
-          delete _activePolling[agentTaskId]
-          delete _activePolling[key]
+          controlDispatcher.unregister(controlKey)
           return
         }
+        const fileCurrent = progress.file_current || 0
+        const fileTotal = progress.file_total || 0
         const stepCurrent = progress.step_current || 0
         const stepTotal = progress.step_total || 0
-        const pct = stepTotal ? Math.round(stepCurrent / stepTotal * 100) : 0
+        const pct = fileTotal ? Math.round(fileCurrent / fileTotal * 100) : (stepTotal ? Math.round(stepCurrent / stepTotal * 100) : 0)
         const allStepsDone = progress.steps && progress.steps.length > 0 &&
           progress.steps.every(s => s.status === 'done' || s.status === 'failed')
         const isCompleted = progress.status === 'completed' || progress.status === 'partial' ||
           progress.status === 'failed' || progress.status === 'cancelled' ||
-          (stepCurrent >= stepTotal && pct === 100 && allStepsDone)
+          ((fileTotal ? (fileCurrent >= fileTotal) : (stepCurrent >= stepTotal)) && pct === 100 && allStepsDone)
         updateAgentTask(taskId, taskIdx, {
           status: isCompleted
             ? (progress.status === 'failed' ? 'failed' :
@@ -901,11 +903,9 @@ export const useCommunityStore = defineStore('community', () => {
           const doneCount = progress.steps.filter(s => s.status === 'done').length
           if (doneCount > lastDoneCount && taskId) {
             lastDoneCount = doneCount
-            // 有新组件/社区分析完成，立即刷新社区数据使标签名称同步更新
             const pid = useProjectStore().selectedProjectId
             if (pid) loadCommunities(taskId, pid).catch(() => {})
           }
-          // 追加运行时步骤（runtime steps > 初始 steps 时）
           const agent = t.agentTasks[taskIdx]
           const runtimeSteps = progress.steps || []
           while ((agent.steps || []).length < runtimeSteps.length) {
@@ -913,38 +913,33 @@ export const useCommunityStore = defineStore('community', () => {
             agent.steps.push({
               description: runtimeSteps[idx].description,
               status: 'pending',
+              file_count: runtimeSteps[idx].file_count || 1,
             })
           }
           for (let i = 0; i < runtimeSteps.length; i++) {
-            updateAgentStep(taskId, taskIdx, i + stepOffset, runtimeSteps[i].status)
+            updateAgentStep(taskId, taskIdx, i + stepOffset, runtimeSteps[i].status, runtimeSteps[i].file_count || 1)
           }
         }
         if (isCompleted) {
-          clearInterval(poll)
-          delete _activePolling[agentTaskId]
-          delete _activePolling[key]
-          // 兜底：极端情况下每步刷新没触发，最终再刷一次
+          controlDispatcher.unregister(controlKey)
           if (progress.status !== 'failed' && progress.status !== 'cancelled' && taskId) {
             const pid = useProjectStore().selectedProjectId
             if (pid) loadCommunities(taskId, pid).catch(() => {})
           }
         }
-      } catch {
-        clearInterval(poll)
-        delete _activePolling[agentTaskId]
-        delete _activePolling[key]
-      }
-    }, 1500)
-
-    _activePolling[agentTaskId] = poll
-    _activePolling[key] = poll
+      },
+      onError: () => {
+        controlDispatcher.unregister(controlKey)
+      },
+    })
   }
 
   function cancelAgentPolling(taskId?: string) {
-    for (const key of Object.keys(_activePolling)) {
-      if (!taskId || key.startsWith(`${taskId}:`)) {
-        clearInterval(_activePolling[key])
-        delete _activePolling[key]
+    const activeKeys = controlDispatcher.getActiveKeys()
+    for (const key of activeKeys) {
+      if (!key.startsWith('agent-progress:')) continue
+      if (!taskId || key.startsWith(`agent-progress:${taskId}:`)) {
+        controlDispatcher.unregister(key)
       }
     }
   }
@@ -973,8 +968,11 @@ export const useCommunityStore = defineStore('community', () => {
     if (!t) return
     for (let i = 0; i < t.agentTasks.length; i++) {
       const at = t.agentTasks[i]
-      if (at.status === 'running' && at.id && !_activePolling[at.id]) {
-        _pollAgentProgress(taskId, i, at.id, 0)
+      if (at.status === 'running' && at.id) {
+        const controlKey = `agent-progress:${taskId}:${at.id}`
+        if (!controlDispatcher.has(controlKey)) {
+          _pollAgentProgress(taskId, i, at.id, 0)
+        }
       }
     }
   }
@@ -988,11 +986,8 @@ export const useCommunityStore = defineStore('community', () => {
         if (idx >= 0) updateAgentTask(taskId, idx, { status: 'cancelled' })
       }
       // 立即停止轮询，防止下次 poll 覆盖回 completed
-      if (_activePolling[agentTaskId]) {
-        clearInterval(_activePolling[agentTaskId])
-        delete _activePolling[agentTaskId]
-        delete _activePolling[`${taskId}:${agentTaskId}`]
-      }
+      const controlKey = `agent-progress:${taskId}:${agentTaskId}`
+      if (controlDispatcher.has(controlKey)) controlDispatcher.unregister(controlKey)
     } catch {}
   }
 
@@ -1003,15 +998,21 @@ export const useCommunityStore = defineStore('community', () => {
   async function listPreSummaryFiles(taskId: string, batch = 'P0', page = 1, pageSize = 20) {
     return await ipc.analysis.listPreSummaryFiles({ taskId, batch, page, page_size: pageSize })
   }
-  async function startPreSummary(taskId: string, batch = 'P0', limit = 0) {
+  async function startPreSummary(taskId: string, batch = 'P0', limit = 0, subagentConcurrency = 1) {
     const t = ensureTask(taskId)
-    const stepDesc = limit > 0 ? `预摘要 ${batch} (限 ${limit} 个文件)` : `预摘要 ${batch}`
+    const conc = Math.max(1, Math.min(10, subagentConcurrency))
+    const concHint = conc > 1 ? ` (并发 ${conc})` : ''
+    const stepDesc = `${limit > 0 ? `预摘要 ${batch} (限 ${limit} 个文件)` : `预摘要 ${batch}`}${concHint}`
     const idx = t.agentTasks.length
     addAgentTask(taskId, 'presummary_files', [stepDesc, '等待 LLM 分析完成'])
     t.agentTasks[idx].status = 'running'
 
     try {
-      const result = await ipc.analysis.startPreSummary({ taskId, batch, limit })
+      const result = await ipc.analysis.startPreSummary({ taskId, batch, limit, subagentConcurrency: conc })
+      if (result.allCached) {
+        t.agentTasks.splice(idx, 1)
+        return result
+      }
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
         updateAgentTask(taskId, idx, { progress: 0, message: `文件数: ${result.fileCount || 0}` })

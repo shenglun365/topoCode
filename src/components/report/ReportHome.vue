@@ -15,6 +15,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useReportStore } from '@/stores/report-store'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
+import { displayDispatcher } from '@/services/display-dispatcher'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
 import TaskSummaryCard from '@/components/home/TaskSummaryCard.vue'
 import CommunitySection from '@/components/report/CommunitySection.vue'
@@ -56,20 +57,41 @@ const editSummaryText = ref('')
 const preSummaryStatus = ref<{
   total_files: number
   cached_count: number
+  failed_count?: number
   counts: Record<string, number>
+  batch_cached: Record<string, number>
   project_root: string
 } | null>(null)
-
-let psPollTimer: ReturnType<typeof setInterval> | null = null
 
 function setPreSummaryFromDashboard(dash: any) {
   if (dash?.preSummary) {
     preSummaryStatus.value = {
       total_files: dash.preSummary.total_files,
       cached_count: dash.preSummary.cached_count,
+      failed_count: dash.preSummary.failed_count || 0,
       counts: dash.preSummary.counts || { P0: 0, P1: 0, P2: 0 },
+      batch_cached: dash.preSummary.batch_cached || { P0: 0, P1: 0, P2: 0 },
       project_root: dash.preSummary.project_root || '',
     }
+  }
+}
+
+function batchBarStyle(batch: string) {
+  const s = preSummaryStatus.value
+  if (!s?.batch_cached || !s.counts) return {}
+  const cached = s.batch_cached[batch] || 0
+  const total = s.counts[batch] || 1
+  const pct = Math.min(100, Math.round(cached / total * 100))
+  const isP0 = batch === 'P0'
+  const isP1 = batch === 'P1'
+  const filled = isP0 ? 'color-mix(in srgb, var(--accent) 55%, transparent)'
+    : isP1 ? 'color-mix(in srgb, var(--warning) 55%, transparent)'
+    : 'color-mix(in srgb, var(--text-muted) 35%, transparent)'
+  const unfilled = isP0 ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
+    : isP1 ? 'color-mix(in srgb, var(--warning) 10%, transparent)'
+    : 'var(--bg-tertiary)'
+  return {
+    background: `linear-gradient(to right, ${filled} ${pct}%, ${unfilled} ${pct}%)`,
   }
 }
 
@@ -82,32 +104,23 @@ async function refreshPreSummary() {
 }
 
 function startPreSummaryPoll() {
-  stopPreSummaryPoll()
-  // 立即刷一次（刚加载或刚启动）
+  const key = `pre-summary:${props.taskId}`
+  if (displayDispatcher.has(key)) return
   refreshPreSummary()
-  // 随后每 10s 轮询一次
-  psPollTimer = setInterval(async () => {
-    if (!props.taskId) return
-    // 检查是否有 running 的预摘要 agent
-    const agents = communityStore.tasks[props.taskId]?.agentTasks || []
-    const hasRunning = agents.some(a =>
-      a.action === 'presummary_files' && a.status === 'running'
-    )
-    if (!hasRunning) {
-      // agent 刚完成：最后一次刷新，然后停止轮询
-      await refreshPreSummary()
-      stopPreSummaryPoll()
-      return
-    }
-    await refreshPreSummary()
-  }, 10000)
+  displayDispatcher.register(key, {
+    interval: 10000,
+    fetcher: () => communityStore.getPreSummaryStatus(props.taskId).then(s => s || {}),
+    onData: (status) => {
+      if (status && Object.keys(status).length > 0) {
+        preSummaryStatus.value = status
+      }
+    },
+  })
 }
 
 function stopPreSummaryPoll() {
-  if (psPollTimer) {
-    clearInterval(psPollTimer)
-    psPollTimer = null
-  }
+  if (!props.taskId) return
+  displayDispatcher.unregister(`pre-summary:${props.taskId}`)
 }
 
 const project = computed(() => projectSummary.value || projectStore.selectedProject)
@@ -201,6 +214,8 @@ async function handleCommunityMD(params: {
 async function loadData() {
   loading.value = true
   loadError.value = null
+  // 切换 task 时强制清除 dashboard 缓存，避免读旧数据
+  reportStore.invalidateDashboard(props.taskId)
   projectSummary.value = projectStore.selectedProject
   try {
     taskDetail.value = await analysisStore.getTask(props.taskId)
@@ -208,7 +223,7 @@ async function loadData() {
       loadError.value = t('report.taskNotFound')
       return
     }
-    const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
+    const pid = taskDetail.value?.projectId || projectStore.selectedProjectId
     if (pid) {
       projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
       const ps = await reportStore.getProjectSummary(pid).catch(() => null)
@@ -272,7 +287,7 @@ function openSummaryModal() {
 }
 
 async function saveSummary() {
-  const pid = projectStore.selectedProjectId || taskDetail.value?.projectId
+  const pid = taskDetail.value?.projectId || projectStore.selectedProjectId
   if (!pid) return
   try {
     const result = await reportStore.saveProjectSummary(pid, editSummaryText.value)
@@ -421,7 +436,10 @@ watch(() => props.taskId, () => {
               :class="{ 'presummary-loading': preSummaryLoading, 'presummary-empty': !preSummaryStatus }"
               @click="preSummaryStatus && emit('open-presummary', props.taskId)"
             >
-              <span class="card-label">{{ t('report.filePreSummary') }}</span>
+              <div class="ps-header-row">
+                <span class="card-label">{{ t('report.filePreSummary') }}</span>
+                <span class="card-summary-hint">{{ t('report.preSummaryViewDetails') }}</span>
+              </div>
               <template v-if="preSummaryLoading">
                 <span class="card-value card-summary-empty">{{ t('common.loading') }}</span>
               </template>
@@ -431,14 +449,29 @@ watch(() => props.taskId, () => {
                   <span v-if="preSummaryStatus.total_files > 0" class="presummary-pct">
                     ({{ Math.round(preSummaryStatus.cached_count / preSummaryStatus.total_files * 100) }}%)
                   </span>
+                  <span v-if="preSummaryStatus.failed_count" class="presummary-failed">
+                    失败: {{ preSummaryStatus.failed_count }}
+                  </span>
                 </div>
-                <div class="ps-bottom-row">
-                  <div class="ps-batches-compact">
-                    <span class="presummary-batch presummary-batch-p0">P0: {{ preSummaryStatus.counts?.P0 || 0 }}</span>
-                    <span class="presummary-batch presummary-batch-p1">P1: {{ preSummaryStatus.counts?.P1 || 0 }}</span>
-                    <span class="presummary-batch presummary-batch-p2">P2: {{ preSummaryStatus.counts?.P2 || 0 }}</span>
-                  </div>
-                  <span class="card-summary-hint">{{ t('report.preSummaryViewDetails') }}</span>
+                <div class="ps-batches-compact">
+                  <span
+                    class="presummary-batch presummary-batch-p0"
+                    :style="batchBarStyle('P0')"
+                  >
+                    P0: {{ preSummaryStatus.counts?.P0 || 0 }} ({{ preSummaryStatus.counts?.P0 ? Math.round((preSummaryStatus.batch_cached?.P0 || 0) / preSummaryStatus.counts.P0 * 100) : 0 }}%)
+                  </span>
+                  <span
+                    class="presummary-batch presummary-batch-p1"
+                    :style="batchBarStyle('P1')"
+                  >
+                    P1: {{ preSummaryStatus.counts?.P1 || 0 }} ({{ preSummaryStatus.counts?.P1 ? Math.round((preSummaryStatus.batch_cached?.P1 || 0) / preSummaryStatus.counts.P1 * 100) : 0 }}%)
+                  </span>
+                  <span
+                    class="presummary-batch presummary-batch-p2"
+                    :style="batchBarStyle('P2')"
+                  >
+                    P2: {{ preSummaryStatus.counts?.P2 || 0 }} ({{ preSummaryStatus.counts?.P2 ? Math.round((preSummaryStatus.batch_cached?.P2 || 0) / preSummaryStatus.counts.P2 * 100) : 0 }}%)
+                  </span>
                 </div>
               </template>
               <template v-else>
@@ -903,11 +936,17 @@ watch(() => props.taskId, () => {
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
+.presummary-failed {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--color-danger, #e74c3c);
+}
 .ps-summary-stat {
   font-size: 11px;
   color: var(--text-primary);
 }
-.ps-bottom-row {
+
+.ps-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -922,6 +961,7 @@ watch(() => props.taskId, () => {
   font-size: 10px;
   font-family: var(--font-mono);
   line-height: 1.6;
+  white-space: nowrap;
 }
 .presummary-batch-p0 {
   background: color-mix(in srgb, var(--accent) 15%, transparent);

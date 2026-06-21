@@ -170,8 +170,8 @@ const defaultModel = computed(() => modelConfigStore.models.find(m => m.isDefaul
 function getProviderIcon(provider: string): any {
   switch (provider) {
     case 'ollama': return ComputerDesktopIcon
-    case 'openai': return GlobeAltIcon
-    case 'lm-studio': return ComputerDesktopIcon
+    case 'openai': case 'custom-cloud': case 'openrouter': case 'deepseek': case 'minimax-cn': case 'minimax-global': return GlobeAltIcon
+    case 'lm-studio': case 'custom-local': return ComputerDesktopIcon
     default: return CpuChipIcon
   }
 }
@@ -360,22 +360,21 @@ async function testCurrentForm() {
 
 //  provider 切换时自动填充 URL
 function onProviderChange(provider: string) {
-  switch (provider) {
-    case 'ollama':
-      form.value.url = 'http://localhost:11434'
-      form.value.type = 'local'
-      break
-    case 'openai':
-      form.value.url = 'https://api.openai.com'
-      form.value.type = 'cloud'
-      break
-    case 'lm-studio':
-      form.value.url = 'http://localhost:1234'
-      form.value.type = 'local'
-      break
-    case 'custom':
-      form.value.type = 'cloud'
-      break
+  const PROVIDER_DEFAULT_URLS: Record<string, string> = {
+    ollama: 'http://localhost:11434',
+    'lm-studio': 'http://localhost:1234',
+    'custom-local': '',
+    deepseek: 'https://api.deepseek.com',
+    'minimax-cn': 'https://api.minimax.chat',
+    'minimax-global': 'https://api.minimaxi.com',
+    openrouter: 'https://openrouter.ai/api/v1',
+    'custom-cloud': '',
+  }
+  form.value.url = PROVIDER_DEFAULT_URLS[provider] || ''
+  if (['ollama', 'lm-studio', 'custom-local'].includes(provider)) {
+    form.value.type = 'local'
+  } else {
+    form.value.type = 'cloud'
   }
 }
 
@@ -668,18 +667,34 @@ initUsageStats()
               class="field-input"
               @change="onProviderChange((($event.target) as HTMLSelectElement).value)"
             >
-              <option value="ollama">
-                Ollama
-              </option>
-              <option value="openai">
-                云端模型(OpenAI 格式)
-              </option>
-              <option value="lm-studio">
-                LM-Studio
-              </option>
-              <option value="custom">
-                Custom
-              </option>
+              <optgroup :label="t('settings.localModels')">
+                <option value="ollama">
+                  Ollama
+                </option>
+                <option value="lm-studio">
+                  LM Studio
+                </option>
+                <option value="custom-local">
+                  {{ t('settings.customLocal') }}
+                </option>
+              </optgroup>
+              <optgroup :label="t('settings.cloudServices')">
+                <option value="deepseek">
+                  DeepSeek
+                </option>
+                <option value="minimax-cn">
+                  MiniMax CN
+                </option>
+                <option value="minimax-global">
+                  MiniMax Global
+                </option>
+                <option value="openrouter">
+                  OpenRouter
+                </option>
+                <option value="custom-cloud">
+                  {{ t('settings.customCloud') }}
+                </option>
+              </optgroup>
             </select>
           </div>
 
@@ -702,7 +717,7 @@ initUsageStats()
           </div>
 
           <div
-            v-if="form.provider === 'openai' || form.provider === 'custom'"
+            v-if="['deepseek','minimax-cn','minimax-global','openrouter','custom-cloud'].includes(form.provider)"
             class="form-field"
           >
             <label class="field-label">{{ t('settings.apiKey') }}</label>

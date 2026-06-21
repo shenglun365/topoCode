@@ -12,6 +12,19 @@ const taskId = computed(() => projectStore.activeTab?.taskId || '')
 const projectName = computed(() => projectStore.selectedProject?.name || '')
 const taskName = computed(() => projectStore.activeTab?.title || taskId.value || '')
 
+const cancellingTaskId = ref<string | null>(null)
+const cancelFeedback = ref('')
+
+function onCancelTask(taskIdVal: string, agentId: string) {
+  if (cancellingTaskId.value === agentId) return
+  cancellingTaskId.value = agentId
+  cancelFeedback.value = '正在停止，等待当前 LLM 请求结束后完全终止'
+  communityStore.cancelAgentTask(taskIdVal, agentId)
+    .catch(() => { cancelFeedback.value = '停止失败，请重试' })
+    .finally(() => { setTimeout(() => { cancellingTaskId.value = null }, 1000) })
+  setTimeout(() => { cancelFeedback.value = '' }, 5000)
+}
+
 const historyTasks = ref<any[]>([])
 const historyLoaded = ref(false)
 const pageSize = ref(10)
@@ -100,6 +113,12 @@ onMounted(() => {
   refresh()
 })
 
+function sumFileCount(steps: any[], statuses: string[]): number {
+  return steps
+    .filter(s => statuses.includes(s.status))
+    .reduce((sum, s) => sum + (s.file_count || 1), 0)
+}
+
 const statusLabel = (status: string) => {
   const map: Record<string, string> = {
     queued: '排队中', running: '运行中', completed: '已完成',
@@ -178,10 +197,12 @@ const actionLabel = (action: string) => {
         <button
           v-if="task.status === 'running' || task.status === 'queued'"
           class="atl-stop-btn"
-          title="停止此任务"
-          @click="communityStore.cancelAgentTask(taskId, task.id)"
+          :class="{ 'atl-stopping': cancellingTaskId === task.id }"
+          :title="cancellingTaskId === task.id ? '正在停止...' : '停止此任务（等待当前 LLM 请求结束后完全终止）'"
+          :disabled="cancellingTaskId === task.id"
+          @click="onCancelTask(taskId, task.id)"
         >
-          ✕
+          {{ cancellingTaskId === task.id ? '⏳' : '✕' }}
         </button>
       </div>
       <div
@@ -199,12 +220,12 @@ const actionLabel = (action: string) => {
       >
         <div class="atl-step-compact">
           <span>已完成 </span>
-          <span class="atl-compact-count">{{ task.steps.filter(s => s.status === 'done').length }}</span>
-          <span>/{{ task.steps.length }}</span>
+          <span class="atl-compact-count">{{ sumFileCount(task.steps, ['done']) }}</span>
+          <span>/{{ sumFileCount(task.steps, ['done','failed','pending','running']) }}</span>
           <span class="atl-compact-detail">
-            （完成{{ task.steps.filter(s => s.status === 'done').length }}
-            / 失败{{ task.steps.filter(s => s.status === 'failed').length }}
-            / 剩余{{ task.steps.filter(s => s.status === 'pending' || s.status === 'running').length }}）
+            （完成{{ sumFileCount(task.steps, ['done']) }}
+            / 失败{{ sumFileCount(task.steps, ['failed']) }}
+            / 剩余{{ sumFileCount(task.steps, ['pending','running']) }}）
           </span>
         </div>
         <div
@@ -226,6 +247,12 @@ const actionLabel = (action: string) => {
       >
         加载更多
       </button>
+    </div>
+    <div
+      v-if="cancelFeedback"
+      class="atl-toast"
+    >
+      {{ cancelFeedback }}
     </div>
   </div>
 </template>
@@ -265,6 +292,17 @@ const actionLabel = (action: string) => {
 .atl-status-text { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); }
 .atl-task-success .atl-status-text { color: var(--success, #22c55e); }
 .atl-task-fail .atl-status-text { color: var(--danger, #ef4444); }
+.atl-stopping { opacity: 0.5; cursor: not-allowed; }
+.atl-stopping:hover { background: transparent; color: var(--danger, #ef4444); }
+.atl-toast {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: var(--bg-primary); border: 1px solid var(--warning, #f59e0b);
+  border-radius: 0.5rem; padding: 0.8rem 1.2rem; font-size: 0.85rem;
+  color: var(--text-primary); z-index: 9999; white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  animation: atl-toast-in 0.2s ease;
+}
+@keyframes atl-toast-in { from { opacity: 0; transform: translate(-50%, -50%) translateY(-8px); } to { opacity: 1; transform: translate(-50%, -50%) translateY(0); } }
 .atl-stop-btn {
   margin-left: auto;
   width: 18px; height: 18px;
@@ -298,7 +336,7 @@ const actionLabel = (action: string) => {
 }
 .atl-step-current {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.25rem;
   font-size: 0.65rem;
   color: var(--accent);
@@ -306,6 +344,12 @@ const actionLabel = (action: string) => {
   padding: 0.1rem 0.35rem;
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-radius: 3px;
+  overflow: hidden;
+}
+.atl-step-current span:last-child {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 .atl-more { text-align: center; padding: 0.25rem; }
 .atl-more-btn { font-size: 0.65rem; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 3px; padding: 0.1rem 0.6rem; cursor: pointer; }
