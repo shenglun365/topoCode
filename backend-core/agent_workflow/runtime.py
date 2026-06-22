@@ -111,6 +111,7 @@ class AgentRuntime:
         self._multi_db = multi_db
         self._cancelled = False
         self._status = AgentStatus.IDLE
+        self._task_id = ""
         self._steps: list[StepProgress] = []
         self._tool_call_history: list[tuple] = []
         self._loop_warning_count: int = 0
@@ -139,6 +140,9 @@ class AgentRuntime:
         self._cancelled = True
         self._status = AgentStatus.CANCELLED
         logger.info("[AgentRuntime] cancelled by user")
+        # 注意：不在此处通知 SubAgent 取消文件摘要，因为 -j 并发时
+        # 多个 AgentRuntime 共享同一 task_id，SubAgent._task_cancelled
+        # 是类级别标志，取消一个会影响其他并发 Agent
 
     async def run(self, workflow: AgentWorkflow, context: dict) -> WorkflowResult:
         """
@@ -151,6 +155,7 @@ class AgentRuntime:
         Returns:
             WorkflowResult
         """
+        self._task_id = context.get("task_id", "") or ""
         if isinstance(workflow, AgenticWorkflow):
             return await self._run_agentic(workflow, context)
         return await self._run_sequential(workflow, context)
@@ -329,6 +334,28 @@ class AgentRuntime:
 
         return final
 
+    async def _run_agentic_chat(self, messages, tools_schema, strategy, timeout):
+        """运行 agentic_chat，每 2s 轮询 self._cancelled，支持快速取消。"""
+        from .tool_calling import agentic_chat
+        chat_task = asyncio.create_task(
+            agentic_chat(messages, tools=tools_schema, multi_db=self._multi_db, strategy=strategy)
+        )
+        remaining = timeout
+        try:
+            while remaining > 0:
+                if self._cancelled:
+                    chat_task.cancel()
+                    raise asyncio.CancelledError("cancelled by user")
+                done, _ = await asyncio.wait([chat_task], timeout=min(2.0, remaining))
+                if done:
+                    return chat_task.result()
+                remaining -= 2.0
+            chat_task.cancel()
+            raise asyncio.TimeoutError()
+        except asyncio.CancelledError:
+            chat_task.cancel()
+            raise
+
     async def _run_agentic(self, workflow: AgenticWorkflow, context: dict) -> WorkflowResult:
         """Agentic 工作流执行 — 逐组件 ReAct 循环"""
         self._cancelled = False
@@ -359,8 +386,9 @@ class AgentRuntime:
         total_turns = 0
 
         for c_idx, comp in enumerate(components):
-            if self._cancelled or self._sandbox.budget.exhausted():
+            if self._cancelled:
                 break
+            self._sandbox.budget.reset()
 
             comp_id = comp.get("id", f"comp-{c_idx}")
             comp_name = comp.get("name", comp_id)
@@ -394,23 +422,27 @@ class AgentRuntime:
                     break
 
                 try:
-                    response = await asyncio.wait_for(
-                        agentic_chat(messages, tools=tools_schema, multi_db=self._multi_db, strategy=strategy),
-                        timeout=workflow.max_turn_timeout,
+                    response = await self._run_agentic_chat(
+                        messages, tools_schema, strategy, workflow.max_turn_timeout,
                     )
                 except asyncio.TimeoutError:
                     logger.warning(f"[AgentRuntime] comp={comp_id} turn {turn} timeout")
                     if not final_response:
                         final_response = ""
                     break
+                except asyncio.CancelledError:
+                    logger.info(f"[AgentRuntime] comp={comp_id} turn {turn} cancelled")
+                    break
                 except Exception as e:
                     logger.warning(f"[AgentRuntime] comp={comp_id} turn {turn} failed: {e}, retrying...")
                     await asyncio.sleep(1)
                     try:
-                        response = await asyncio.wait_for(
-                            agentic_chat(messages, tools=tools_schema, multi_db=self._multi_db, strategy=strategy),
-                            timeout=workflow.max_turn_timeout,
+                        response = await self._run_agentic_chat(
+                            messages, tools_schema, strategy, workflow.max_turn_timeout,
                         )
+                    except asyncio.CancelledError:
+                        logger.info(f"[AgentRuntime] comp={comp_id} turn {turn} cancelled (retry)")
+                        break
                     except Exception as e2:
                         logger.warning(f"[AgentRuntime] comp={comp_id} retry also failed: {e2}")
                         if not final_response:
@@ -587,6 +619,15 @@ class AgentRuntime:
             return
         try:
             text = output.strip()
+            # 剥离 markdown 代码块标记
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(lines[1:]) if len(lines) > 1 else text
+                if text.endswith("```"):
+                    text = text[:-3]
+                text = text.strip()
+            if text.startswith("json"):
+                text = text[4:].strip()
             parsed = json.loads(text)
             item = parsed
             if isinstance(item, dict) and "components" in item:
@@ -638,7 +679,57 @@ class AgentRuntime:
 
         except Exception as e:
             logger.warning(f"[AgentRuntime] _save_component_result: JSON parse failed: {e}")
-        # JSON 解析失败 → 回退：将 LLM 文本作为 summary 保存
+            # 尝试从推理文本中正则提取 JSON
+            try:
+                import re
+                for pattern in [r'(\{.*\})', r'(\[.*\])']:
+                    match = re.search(pattern, text, re.DOTALL)
+                    if match:
+                        candidate = match.group(1)
+                        parsed = json.loads(candidate)
+                        item = parsed
+                        if isinstance(item, list) and item:
+                            item = item[0]
+                        if isinstance(item, dict) and item.get("name"):
+                            cid = component.get("id") or item.get("component_id") or item.get("id") or ""
+                            raw_summary = item.get("summary") or item.get("functional_summary") or ""
+                            role = item.get("role", "")
+                            kf = item.get("key_files", [])
+                            deps = item.get("depends_on", [])
+                            summary_parts = [f"## 功能概要\n{raw_summary}"]
+                            if role:
+                                summary_parts.append(f"\n**架构角色**: {role}")
+                            if kf:
+                                files_lines = []
+                                for f in kf[:10]:
+                                    if isinstance(f, dict):
+                                        fp = f.get("path", f.get("file", ""))
+                                        fs = f.get("summary", "")
+                                        if fp and fs:
+                                            files_lines.append(f"- `{fp}` — {fs}")
+                                        elif fp:
+                                            files_lines.append(f"- `{fp}`")
+                                    elif isinstance(f, str):
+                                        files_lines.append(f"- `{f}`")
+                                if files_lines:
+                                    summary_parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
+                            if deps:
+                                deps_md = ", ".join(deps[:10])
+                                summary_parts.append(f"\n**依赖组件**: {deps_md}")
+                            enhanced_summary = "\n".join(summary_parts)
+                            save_fn({
+                                "task_id": context.get("task_id", ""),
+                                "component_id": cid,
+                                "component_type": component.get("type", "community"),
+                                "analyzed_name": item.get("name", ""),
+                                "functional_summary": enhanced_summary,
+                                "status": "completed",
+                            })
+                            logger.info(f"[AgentRuntime] _save_component_result: regex extraction OK for {cid}, name={item.get('name', '')[:30]}")
+                            return
+            except Exception:
+                pass
+        # JSON 解析失败 → 回退：标记为 failed
         try:
             cid = component.get("id") or component.get("component_id", "")
             if cid:
@@ -647,10 +738,10 @@ class AgentRuntime:
                     "component_id": cid,
                     "component_type": component.get("type", "community"),
                     "analyzed_name": component.get("name", ""),
-                    "functional_summary": output[:2000],
-                    "status": "completed",
+                    "functional_summary": "",
+                    "status": "failed",
                 })
-                logger.info(f"[AgentRuntime] _save_component_result: fallback save OK for {cid}, text_len={len(output)}")
+                logger.warning(f"[AgentRuntime] _save_component_result: fallback save as failed for {cid}, text_len={len(output)}")
         except Exception as e:
             logger.warning(f"[AgentRuntime] save failed for {cid}: {e}")
 

@@ -377,9 +377,10 @@ export const useCommunityStore = defineStore('community', () => {
     return promise
   }
 
-  async function loadExternalStats(taskId: string) {
+  async function loadExternalStats(taskId: string, force = false) {
     const t = ensureTask(taskId)
-    if (t.externalStats) return
+    // 非强制时，已有数据则跳过（避免重复请求）
+    if (!force && t.externalStats) return
 
     const key = _inflightKey(taskId, 'externalStats')
     const existing = _inflightLoads.get(key)
@@ -388,11 +389,19 @@ export const useCommunityStore = defineStore('community', () => {
     const promise = (async () => {
       try {
         const result = await ipc.analysis.getExternalStats(taskId)
-        if (result) {
+        // 只有结果含有效数据才缓存，否则设为 null 允许后续重试
+        if (result && (
+          (result.externalDeps && result.externalDeps.length > 0) ||
+          (result.externalCalls && result.externalCalls.length > 0)
+        )) {
           ensureTask(taskId).externalStats = result
+        } else {
+          ensureTask(taskId).externalStats = null
         }
       } catch (e: any) {
         console.warn('[community-store] loadExternalStats failed:', e?.message || e)
+        // 失败则设为 null，允许下次重试
+        ensureTask(taskId).externalStats = null
       } finally {
         _inflightLoads.delete(key)
       }

@@ -19,9 +19,6 @@ logger = logging.getLogger(__name__)
 # 摘要质量最低要求（字符数）
 _MIN_SUMMARY_LEN = 30
 
-# 文件大小阈值：超过此值使用 AST 结构化提取
-_FILE_SIZE_THRESHOLD = 10000
-
 _KIND_LABELS = {
     "function": "函数", "method": "方法", "class": "类",
     "struct": "结构体", "enum": "枚举", "interface": "接口",
@@ -59,6 +56,8 @@ class SubAgent:
 
     # 预摘要失败计数（task_id → 累计失败数），用于绕过编译版 SummarizeFileTool 传值
     _task_failed: dict[str, int] = {}
+    # 取消标志（task_id → bool），由 runtime.cancel() 设置
+    _task_cancelled: dict[str, bool] = {}
 
     @classmethod
     def get_failed(cls, task_id: str) -> int:
@@ -67,6 +66,17 @@ class SubAgent:
     @classmethod
     def reset_failed(cls, task_id: str):
         cls._task_failed.pop(task_id, None)
+
+    @classmethod
+    def set_cancelled(cls, task_id: str, cancelled: bool = True):
+        if cancelled:
+            cls._task_cancelled[task_id] = True
+        else:
+            cls._task_cancelled.pop(task_id, None)
+
+    @classmethod
+    def is_cancelled(cls, task_id: str) -> bool:
+        return cls._task_cancelled.get(task_id, False)
 
     def __init__(self, multi_db, project_root: str = "", model_id: str = "",
                  project_db=None, task_id: str = ""):
@@ -112,6 +122,12 @@ class SubAgent:
         async def _read_or_cache(fp: str):
             nonlocal cache_hits, cache_misses, failed, total_tokens, total_read_chars
 
+            # 取消检查：外层 runtime.cancel() 设置此标志后快速退出
+            if SubAgent.is_cancelled(task_id):
+                async with lock:
+                    failed += 1
+                return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
+
             # 路径统一：fp 当前为项目相对路径；abs_fp 供文件 I/O / graph_node SQL
             rel = to_rel(fp, self._project_root)
             abs_fp = to_abs(fp, self._project_root)
@@ -151,6 +167,10 @@ class SubAgent:
                         total_read_chars += len(text)
                         total_tokens += len(text) // 4
                     async with sem:
+                        if SubAgent.is_cancelled(task_id):
+                            async with lock:
+                                failed += 1
+                            return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
                         try:
                             summary, tokens = await self._summarize(
                                 text, rel, focus, is_structure=True)
@@ -174,6 +194,10 @@ class SubAgent:
                         total_read_chars += len(content)
                         total_tokens += len(content) // 4
                     async with sem:
+                        if SubAgent.is_cancelled(task_id):
+                            async with lock:
+                                failed += 1
+                            return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
                         try:
                             summary, tokens = await self._summarize(content, rel, focus)
                             async with lock:
@@ -197,6 +221,10 @@ class SubAgent:
                     total_read_chars += len(content)
                     total_tokens += len(content) // 4
                 async with sem:
+                    if SubAgent.is_cancelled(task_id):
+                        async with lock:
+                            failed += 1
+                        return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
                     try:
                         summary, tokens = await self._summarize(content, rel, focus)
                         async with lock:
@@ -269,27 +297,8 @@ class SubAgent:
             return ""
         return content[:max_chars]
 
-    def _get_file_size(self, path: str) -> int:
-        """获取文件大小 (优先 source_files 表, 否则 os.path.getsize)"""
-        try:
-            if self._project_db:
-                row = self._project_db.execute(
-                    "SELECT size FROM source_files WHERE file_path=? LIMIT 1", (path,)
-                ).fetchone()
-                if row and row["size"]:
-                    return row["size"]
-            abs_path = to_abs(path, self._project_root) if self._project_root else path
-            if os.path.isfile(abs_path):
-                return os.path.getsize(abs_path)
-        except Exception:
-            pass
-        return 0
-
     def _should_use_structure(self, path: str) -> bool:
-        """文件 > 10KB 且 graph_node 有数据 → 使用结构化提取"""
-        size = self._get_file_size(path)
-        if size <= _FILE_SIZE_THRESHOLD:
-            return False
+        """有 AST 数据时使用结构化提取，无数据时回退全文读取。"""
         if not self._project_db or not self._task_id:
             return False
         try:
@@ -420,18 +429,34 @@ class SubAgent:
     async def _summarize(self, content: str, filepath: str, focus: str = "",
                          is_structure: bool = False) -> tuple[str, int]:
         """调用 LLM 对文件内容进行结构化摘要。"""
-        if is_structure:
-            intro = (
-                "你是代码分析助手。以下是文件的 AST 符号结构（含签名、文档注释、调用关系），"
-                "请生成一段简洁的摘要（200 字以内），"
-                "列出文件的主要功能、关键函数/类以及依赖关系。\n\n"
+        # ── 文件元上下文（导出/导入/引用方/类型） ──
+        meta_header = ""
+        try:
+            from context.assembly import CollectContext
+            from context.recipes import RECIPE_FILE_SUMMARY
+            from context.registry import get_assembler
+            mctx = CollectContext(
+                db=self._project_db,
+                task_id=self._task_id or "",
+                project_root=self._project_root,
+                file_path=filepath,
             )
-        else:
-            intro = (
-                "你是代码分析助手。请根据以下文件内容，生成一段简洁的摘要（200 字以内），"
-                "列出文件的主要功能、关键函数/类以及依赖关系。\n\n"
-            )
-        prompt = intro
+            meta_header = get_assembler().assemble(RECIPE_FILE_SUMMARY, mctx)
+            if meta_header:
+                meta_header += "\n\n"
+        except Exception:
+            pass
+
+        intro = (
+            "你是代码分析助手。请根据以下信息，生成该文件的摘要。"
+            "按固定格式输出，每行一条：\n"
+            "[类型] module\n"
+            "[用途] 一句话说明文件功能（30字内）\n"
+            "[导出] 关键函数/类名，逗号分隔\n"
+            "[依赖] 外部包或文件依赖\n"
+            "[说明] 详细说明功能（100字以内）\n\n"
+        )
+        prompt = meta_header + intro
         if focus:
             prompt += f"摘要侧重点: {focus}\n\n"
         prompt += f"文件路径: {filepath}\n"

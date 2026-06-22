@@ -100,7 +100,7 @@ function buildCytoscape() {
         group: 'nodes' as const,
         data: {
           id: n.id,
-          label: n.label.length > 16 ? n.label.slice(0, 16) + '\u2026' : n.label,
+          label: n.label.length > 24 ? n.label.slice(0, 23) + '\u2026' : n.label,
           _label: n.label,
           _nodeCount: n.nodeCount || 0,
           _hasChildren: !!n.hasChildren,
@@ -118,19 +118,36 @@ function buildCytoscape() {
     })
 
   const edgeIdSet = new Set(cyNodes.map(n => n.data.id))
-  const cyEdges = props.edges
-    .filter(e => edgeIdSet.has(e.source) && edgeIdSet.has(e.target))
-    .map(e => ({
-      group: 'edges' as const,
-      data: {
-        id: `${e.source}→${e.target}`,
-        source: e.source,
-        target: e.target,
-        _count: e.count || 0,
-      },
-    }))
+  const cyEdges: { group: 'edges'; data: { id: string; source: string; target: string; _count: number; _bidirectional?: boolean } }[] = (() => {
+    const edgeMap = new Map<string, (typeof props.edges)[0]>()
+    for (const e of props.edges) {
+      if (!edgeIdSet.has(e.source) || !edgeIdSet.has(e.target)) continue
+      const key = `${e.source}→${e.target}`
+      if (!edgeMap.has(key)) edgeMap.set(key, e)
+    }
+    const result: { group: 'edges'; data: { id: string; source: string; target: string; _count: number; _bidirectional?: boolean } }[] = []
+    const seen = new Set<string>()
+    for (const [key, e] of edgeMap) {
+      if (seen.has(key)) continue
+      const revKey = `${e.target}→${e.source}`
+      const isBi = edgeMap.has(revKey)
+      if (isBi) seen.add(revKey)
+      seen.add(key)
+      result.push({
+        group: 'edges',
+        data: {
+          id: isBi ? `${e.source}↔${e.target}` : key,
+          source: e.source,
+          target: e.target,
+          _count: e.count || 0,
+          _bidirectional: isBi,
+        },
+      })
+    }
+    return result
+  })()
 
-  const fs = props.fontSize || 10
+  const fs = (props.fontSize || 10) + 4
   const styles: cytoscape.Stylesheet[] = [
     {
       selector: 'node',
@@ -149,7 +166,7 @@ function buildCytoscape() {
         'label': 'data(label)',
         'text-valign': 'center',
         'text-halign': 'center',
-        'text-wrap': 'ellipsis',
+        'text-wrap': 'wrap',
         'text-max-width': `${fs * 12}px`,
         'min-zoomed-font-size': Math.max(4, fs * 0.5),
       },
@@ -180,6 +197,13 @@ function buildCytoscape() {
         'target-arrow-shape': 'triangle',
         'arrow-scale': 1.2,
         'curve-style': 'bezier',
+      },
+    },
+    {
+      selector: 'edge[_bidirectional]',
+      style: {
+        'source-arrow-shape': 'triangle',
+        'source-arrow-color': '#9ca3af',
       },
     },
   ]

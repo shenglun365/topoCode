@@ -438,13 +438,12 @@ async function handleSend() {
       const rawSubConc = parseInt(acMatch[5] || '1')
       const subagentConcurrency = Math.max(1, Math.min(10, rawSubConc))
       // 限制单次提交组件数
-      const MAX_COMPONENTS = agentic ? 5 : 30
+      const MAX_COMPONENTS = 50
       const selectedComps = [...selectionStore.selectedList]
-      const excess = selectedComps.length > MAX_COMPONENTS ? selectedComps.length - MAX_COMPONENTS : 0
-      if (excess > 0) selectedComps.length = MAX_COMPONENTS
+      if (selectedComps.length > MAX_COMPONENTS) selectedComps.length = MAX_COMPONENTS
       // 将选中组件转为对话消息
       const compNames = selectedComps.map(r => r.name).join('、')
-      const taskId = activeTaskId.value || selectionStore.selectedList[0]?.taskId || null
+      const taskId = resolveTaskId() || selectionStore.selectedList[0]?.taskId || null
       addMessage('user', `分析组件: ${compNames}`)
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
@@ -455,8 +454,7 @@ async function handleSend() {
       const modelHint = agentic && summaryModel ? `，摘要模型 ${summaryModel}` : ''
       const subConcHint = agentic && subagentConcurrency > 1 ? `，摘要并发 ${subagentConcurrency}` : ''
       const extraHint = modeHint + turnHint + modelHint + subConcHint + (modeHint ? '）' : '')
-      const excessHint = excess > 0 ? `（仅提交前 ${MAX_COMPONENTS} 个，多余 ${excess} 个已跳过）` : ''
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${extraHint}${langHint}${concHint}${excessHint}，请到「任务」面板查看进度。`)
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${extraHint}${langHint}${concHint}，请到「任务」面板查看进度。`)
       // 退出选择模式（自动清空已选）
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       if (taskId) {
@@ -514,7 +512,7 @@ async function handleSend() {
       return
     }
     // /presummary start <batch> [-n N] [-j N]
-    const psStartRe = /^\/presummary\s+start\s+(P[012])(?:\s+-n\s+(\d+))?(?:\s+-j\s+(\d+))?/i
+    const psStartRe = /^\/presummary\s+start\s+(P[012])\s*(.*)$/i
     const psStartMatch = text.match(psStartRe)
     if (psStartMatch) {
       addMessage('user', text)
@@ -522,8 +520,9 @@ async function handleSend() {
       const taskId = resolveTaskId()
       if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
       const batch = psStartMatch[1].toUpperCase()
-      const limit = parseInt(psStartMatch[2] || '0')
-      const rawConc = parseInt(psStartMatch[3] || '1')
+      const rest = psStartMatch[2]
+      const limit = parseInt(rest.match(/-n\s+(\d+)/i)?.[1] || '0')
+      const rawConc = parseInt(rest.match(/-j\s+(\d+)/i)?.[1] || '1')
       const subagentConcurrency = Math.max(1, Math.min(10, rawConc))
       try {
         const result = await communityStore.startPreSummary(taskId, batch, limit, subagentConcurrency)

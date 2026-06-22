@@ -63,6 +63,18 @@ const preSummaryStatus = ref<{
   project_root: string
 } | null>(null)
 
+const preSummaryLoading = computed(() => preSummaryStatus.value === null)
+
+// 分析范围截断
+const MAX_VISIBLE_TAGS = 5
+const showScopeModal = ref(false)
+const allExtensions = computed(() => taskDetail.value?.extensions || [])
+const allScopes = computed(() => taskDetail.value?.scopes || [])
+const hasMoreExtensions = computed(() => allExtensions.value.length > MAX_VISIBLE_TAGS)
+const hasMoreScopes = computed(() => allScopes.value.length > MAX_VISIBLE_TAGS)
+const visibleExtensions = computed(() => hasMoreExtensions.value ? allExtensions.value.slice(0, MAX_VISIBLE_TAGS) : allExtensions.value)
+const visibleScopes = computed(() => hasMoreScopes.value ? allScopes.value.slice(0, MAX_VISIBLE_TAGS) : allScopes.value)
+
 function setPreSummaryFromDashboard(dash: any) {
   if (dash?.preSummary) {
     preSummaryStatus.value = {
@@ -478,8 +490,14 @@ watch(() => props.taskId, () => {
                 <span class="card-value card-summary-empty">{{ t('common.loading') }}</span>
               </template>
             </div>
-            <div class="summary-card summary-card-half summary-card-scope">
-              <span class="card-label">{{ t('report.analysisScope') }}</span>
+            <div
+              class="summary-card summary-card-half summary-card-scope"
+              @click="showScopeModal = true"
+            >
+              <div class="card-label-row">
+                <span class="card-label">{{ t('report.analysisScope') }}</span>
+                <span class="scope-view-detail">{{ t('analysis.viewDetail') }}</span>
+              </div>
               <div class="scope-compact">
                 <div class="scope-compact-row">
                   <span class="scope-compact-label">{{ t('analysis.fileType') }}</span>
@@ -489,10 +507,14 @@ watch(() => props.taskId, () => {
                       class="scope-tag scope-tag-all"
                     >{{ t('analysis.allFiles') }}</span>
                     <span
-                      v-for="ext in (taskDetail?.extensions || [])"
+                      v-for="ext in (visibleExtensions)"
                       :key="ext"
                       class="scope-tag"
                     >{{ ext }} <span class="scope-tag-count">{{ fileStats[ext] ?? '-' }}</span></span>
+                    <span
+                      v-if="hasMoreExtensions"
+                      class="scope-tag scope-tag-more"
+                    >...</span>
                   </div>
                 </div>
                 <div class="scope-compact-row">
@@ -503,10 +525,62 @@ watch(() => props.taskId, () => {
                       class="scope-tag scope-tag-all"
                     >{{ t('analysis.allDirectories') }}</span>
                     <span
-                      v-for="s in (taskDetail?.scopes || [])"
+                      v-for="s in (visibleScopes)"
                       :key="s"
                       class="scope-tag"
                     >{{ s }}</span>
+                    <span
+                      v-if="hasMoreScopes"
+                      class="scope-tag scope-tag-more"
+                    >...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 分析范围详情弹窗 -->
+            <div
+              v-if="showScopeModal"
+              class="dialog-overlay"
+              @click.self="showScopeModal = false"
+            >
+              <div class="dialog-content scope-dialog">
+                <div class="scope-dialog-header">
+                  <span>{{ t('report.analysisScope') }}</span>
+                  <button
+                    class="icon-btn"
+                    @click="showScopeModal = false"
+                  >
+                    <XMarkIcon class="w-4 h-4" />
+                  </button>
+                </div>
+                <div class="scope-dialog-body">
+                  <div class="scope-dialog-section">
+                    <h4>{{ t('analysis.fileType') }}</h4>
+                    <div class="scope-dialog-tags">
+                      <span
+                        v-if="!taskDetail?.extensions?.length"
+                        class="scope-tag scope-tag-all"
+                      >{{ t('analysis.allFiles') }}</span>
+                      <span
+                        v-for="ext in (taskDetail?.extensions || [])"
+                        :key="ext"
+                        class="scope-tag scope-tag-lg"
+                      >{{ ext }} <span class="scope-tag-count">{{ fileStats[ext] ?? '-' }}</span></span>
+                    </div>
+                  </div>
+                  <div class="scope-dialog-section">
+                    <h4>{{ t('analysis.directoryScope') }}</h4>
+                    <div class="scope-dialog-tags">
+                      <span
+                        v-if="!taskDetail?.scopes?.length"
+                        class="scope-tag scope-tag-all"
+                      >{{ t('analysis.allDirectories') }}</span>
+                      <span
+                        v-for="s in (taskDetail?.scopes || [])"
+                        :key="s"
+                        class="scope-tag scope-tag-lg"
+                      >{{ s }}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -722,6 +796,50 @@ watch(() => props.taskId, () => {
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 10px;
+}
+
+.scope-tag-more {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.scope-dialog {
+  max-width: 520px;
+  max-height: 70vh;
+}
+.scope-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+.scope-dialog-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+}
+.scope-dialog-section {
+  margin-bottom: 16px;
+}
+.scope-dialog-section h4 {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+.scope-dialog-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.scope-tag-lg {
+  font-size: 11px;
+  padding: 2px 10px;
 }
 
 .comm-et-tabs {
@@ -1002,6 +1120,17 @@ watch(() => props.taskId, () => {
 }
 .summary-card-scope {
   gap: 4px;
+  cursor: pointer;
+}
+.card-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.scope-view-detail {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
 }
 .scope-compact {
   display: flex;

@@ -56,6 +56,9 @@ watch(viewMode, (v) => {
 })
 watch(commEdgeType, (v) => {
   funcGroup.saveTabExtraState('analysis', props.tabId, { edgeType: v })
+  if (v === 'EXTERNAL_INCLUDE' || v === 'EXTERNAL_CALL') {
+    communityStore.loadExternalStats(props.taskId, true)
+  }
 })
 
 const isExternalTab = computed(() =>

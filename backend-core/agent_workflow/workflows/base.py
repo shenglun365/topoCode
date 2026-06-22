@@ -59,7 +59,7 @@ class AgenticWorkflow(AgentWorkflow):
     """
 
     max_turns: int = 5
-    max_turn_timeout: int = 180
+    max_turn_timeout: int = 900
 
     @abstractmethod
     def get_system_prompt(self, component: dict, project_summary: str = "") -> str:

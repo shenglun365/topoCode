@@ -76,7 +76,7 @@ class _AnalyzeComponentTool(AgentTool):
                     '- key_files: 关键文件及其功能概要数组（Top 10）\n'
                     '  格式: [{"path": "src/foo.cpp", "summary": "实现矩阵乘法运算"}, ...]\n'
                     '- depends_on: 依赖的其他组件或外部包数组\n'
-                    "只输出 JSON，不要其他内容。"
+                    "**只输出 JSON，禁止输出任何其他内容**（包括分析过程、思考过程、解释说明）。直接输出 JSON 对象，不要用 ```json 代码块包裹。"
                 )
                 if project_summary:
                     system_text += f"\n\n项目摘要：{project_summary[:500]}"
@@ -94,7 +94,7 @@ class _AnalyzeComponentTool(AgentTool):
             try:
                     resp = await asyncio.wait_for(
                         self._chat(messages=messages, temperature=0.3, max_tokens=max_tok),
-                        timeout=120
+                        timeout=600
                     )
             except asyncio.TimeoutError:
                 logger.warning(f"[ComponentAnalyst] LLM timeout for {comp_id}")

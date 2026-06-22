@@ -149,6 +149,12 @@ class BudgetTracker:
             return False
         return self.tokens_exceeded() or self.time_exceeded()
 
+    def reset(self):
+        """重置预算（每组件独立使用）"""
+        self._tokens_used = 0
+        self._started_at = None
+        self._finished_at = None
+
     def finish(self):
         self._finished_at = time.monotonic()
 

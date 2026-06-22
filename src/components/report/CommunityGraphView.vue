@@ -975,6 +975,10 @@ watch(() => props.edgeType, () => {
   drillPath.value = [rootDrillNode()]
   expandBatchCount.value = 0
   graphSearch.value = ''
+  // 切到外部标签时加载外部统计数据
+  if (props.edgeType === 'EXTERNAL_INCLUDE' || props.edgeType === 'EXTERNAL_CALL') {
+    communityStore.loadExternalStats(props.taskId, true)
+  }
 })
 
 /* ---- cross-edges loading ---- */

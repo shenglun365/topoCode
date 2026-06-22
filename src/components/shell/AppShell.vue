@@ -12,9 +12,14 @@ import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
 import { useStatusStore } from '@/stores/status'
 import { controlDispatcher } from '@/services/control-dispatcher'
 import { usePanelStore } from '@/stores/panel'
+import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@/composables/useComponentId'
+import { useConfirm } from '@/composables/useConfirm'
+
+const { t } = useI18n()
 
 const { showId, componentId } = useComponentId('SH-001')
+const { confirmState, confirmResolve } = useConfirm()
 const route = useRoute()
 const navigation = useNavigationStore()
 const funcGroup = useFuncGroupStore()
@@ -224,6 +229,17 @@ onUnmounted(() => {
 
     <!-- 新手引导 -->
     <OnboardingTour />
+
+    <!-- 全局确认弹窗（替代 confirm()） -->
+    <div v-if="confirmState.visible" class="confirm-overlay" @click.self="confirmResolve(false)">
+      <div class="confirm-box">
+        <p>{{ confirmState.message }}</p>
+        <div class="confirm-actions">
+          <button class="confirm-btn confirm-btn-primary" @click="confirmResolve(true)">{{ t('common.confirm') }}</button>
+          <button class="confirm-btn" @click="confirmResolve(false)">{{ t('common.cancel') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -358,5 +374,63 @@ onUnmounted(() => {
 }
 .backend-error-btn.primary:hover {
   background: #c50f1f;
+}
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.confirm-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  min-width: 300px;
+  max-width: 420px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.confirm-box p {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.confirm-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.confirm-btn:hover {
+  border-color: var(--accent);
+}
+
+.confirm-btn-primary {
+  background: #7c3aed;
+  color: #fff;
+  border-color: #7c3aed;
+}
+
+.confirm-btn-primary:hover {
+  background: #6d28d9;
 }
 </style>

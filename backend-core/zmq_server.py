@@ -133,7 +133,7 @@ class ZMQServer:
             logger.exception("Error receiving request")
             return None
 
-    _noisy_methods = {"backend.ping", "analysis.getAgentProgress"}
+    _noisy_methods = {"backend.ping", "analysis.getAgentProgress", "analysis.getPreSummaryStatus"}
 
     async def _process_request(self, frames):
         """处理请求并发送响应（独立任务，不受轮询超时限制）"""

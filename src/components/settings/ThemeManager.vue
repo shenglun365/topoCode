@@ -102,9 +102,7 @@ function handleExport(theme: CustomTheme) {
 
   navigator.clipboard.writeText(json).then(() => {
     showToast(t('theme.copiedToClipboard'))
-  }).catch(() => {
-    prompt(t('theme.copyJsonPrompt'), json)
-  })
+  }).catch(() => {})
 }
 
 function openImportDialog() {

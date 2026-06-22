@@ -585,6 +585,12 @@ class AnalysisStore:
             self._db.execute(
                 "DELETE FROM component_analysis WHERE task_id = ?", (task_id,)
             )
+            self._db.execute(
+                "DELETE FROM report_subdocs WHERE task_id = ?", (task_id,)
+            )
+            self._db.execute(
+                "DELETE FROM file_summaries WHERE task_id = ?", (task_id,)
+            )
             self._db.commit()
         logger.info(f"[AnalysisStore] clear_task_data: task_id={task_id}")
 

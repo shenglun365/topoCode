@@ -129,8 +129,8 @@ class _GenerateOverviewTool(AgentTool):
         self._render = render_prompt
 
     async def execute(self, community_results: list[dict], project_name: str = "",
-                      project_summary: str = "", community_stats: list[dict] = None,
-                      **kwargs) -> ToolResult:
+                      project_summary: str = "", project_context: str = "",
+                      community_stats: list[dict] = None, **kwargs) -> ToolResult:
         try:
             parts = []
             for r in community_results:
@@ -159,6 +159,9 @@ class _GenerateOverviewTool(AgentTool):
             proj_context = project_summary or ""
             if proj_context:
                 proj_context = f"\n## 项目背景\n{proj_context}\n"
+
+            if project_context:
+                proj_context += f"\n## 项目上下文\n{project_context}\n"
 
             if self._render:
                 messages = self._render("agent_generate_overview", {
@@ -300,6 +303,7 @@ class ArchAnalystWorkflow(AgentWorkflow):
             args={
                 "project_name": context.get("project_name", ""),
                 "project_summary": context.get("project_summary", ""),
+                "project_context": context.get("project_context", ""),
                 "community_stats": communities,
             },
             description=f"生成架构概览 ({len(communities)} 社区)",

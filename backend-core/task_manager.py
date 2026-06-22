@@ -166,20 +166,21 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not task:
             raise ValueError(f"Task {tid} not found")
 
-        # 清理项目库中的分析数据（保留 graph_node AST 数据）
+        # 清理项目库中的分析数据
         project_id = task["project_id"]
-        try:
-            project_db = multi_db.get_project_db(project_id)
-            project_db.execute("DELETE FROM graph_node WHERE task_id = ?", (tid,))
-            project_db.execute("DELETE FROM graph_edge WHERE task_id = ?", (tid,))
-            project_db.execute("DELETE FROM graph_doc WHERE task_id = ?", (tid,))
-            project_db.execute("DELETE FROM community_hierarchy WHERE task_id = ?", (tid,))
-            project_db.execute("DELETE FROM community_llm_results WHERE task_id = ?", (tid,))
-            project_db.execute("DELETE FROM component_analysis WHERE task_id = ?", (tid,))
-            project_db.commit()
-            logger.info(f"[analysis.deleteTask] Cleared analysis data for task {tid} in project {project_id}")
-        except Exception as e:
-            logger.warning(f"[analysis.deleteTask] Failed to clear project data: {e}")
+        project_db = multi_db.get_project_db(project_id)
+        tables_for_task = [
+            "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
+            "community_llm_results", "component_analysis",
+            "report_subdocs", "file_summaries", "agent_task_history",
+        ]
+        for table in tables_for_task:
+            try:
+                project_db.execute(f"DELETE FROM {table} WHERE task_id = ?", (tid,))
+            except Exception:
+                pass
+        project_db.commit()
+        logger.info(f"[analysis.deleteTask] Cleared analysis data for task {tid} in project {project_id}")
 
         # 删除主库中的任务（CASCADE 删除 runs/reports/history）
         return store.delete_task(tid)
@@ -207,7 +208,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
             "community_llm_results",
             "ast_data", "dependencies", "call_chains", "components",
-            "component_analysis", "ai_qa", "file_summaries"
+            "component_analysis", "ai_qa", "file_summaries",
+            "report_subdocs", "agent_task_history",
         ]
         for table in tables_to_clear:
             before = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -1319,7 +1321,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 raise
             has_file_count = False
             rows = project_db.execute(
-                """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.quality_score, COALESCE(g.edge_count, 0)
+                """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                           h.quality_score, COALESCE(g.edge_count, 0)
                    FROM community_hierarchy h
                    LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
                    WHERE h.task_id=? AND h.edge_type=?
@@ -1656,6 +1659,21 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
 
+        # ── 诊断: 打印任务和项目信息 ──
+        try:
+            node_kinds = project_db.execute(
+                "SELECT kind, COUNT(*) FROM graph_node WHERE task_id=? GROUP BY kind",
+                (tid,)
+            ).fetchall()
+            edge_kinds = project_db.execute(
+                "SELECT kind, COUNT(*) FROM graph_edge WHERE task_id=? GROUP BY kind",
+                (tid,)
+            ).fetchall()
+            logger.info("[DIAG] getExternalStats task=%s pid=%s graph_node=%s graph_edge=%s",
+                       tid, pid, dict(node_kinds), dict(edge_kinds))
+        except Exception as e:
+            logger.warning(f"[DIAG] getExternalStats schema query failed: {e}")
+
         # 1. 外部依赖 — 导入名无对应 INCLUDE 边的（按文件匹配）
         #    避免相关子查询: 先批量加载已解析导入，再 Python 差集过滤
         dep_rows = []
@@ -1694,7 +1712,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     continue
                 if (fp, pkg) not in resolved_pairs:
                     dep_rows.append((pkg, fp))
-        except Exception:
+        except Exception as e:
+            logger.error(f"[DIAG] getExternalStats deps query failed: {e}", exc_info=True)
             dep_rows = []
         logger.info("[PERF] getExternalStats deps_sql imported=%d resolved_edges=%d external=%d %.1fms",
                    import_count, resolved_count, len(dep_rows),
@@ -1727,7 +1746,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         t_call_sql = time.perf_counter()
         try:
             call_rows = project_db.execute(calls_sql, (tid,)).fetchall()
-        except Exception:
+        except Exception as e:
+            logger.error(f"[DIAG] getExternalStats calls query failed: {e}", exc_info=True)
             call_rows = []
         logger.info("[PERF] getExternalStats calls_sql rows=%d %.1fms", len(call_rows), (time.perf_counter() - t_call_sql) * 1000)
 
@@ -2010,9 +2030,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         for c in communities:
             cid = c["communityId"]
-            ctx_parts = []
-            ctx_parts.append(f"节点总数: {c['nodeCount']}")
-            ctx_parts.append(f"质量分: {c['qualityScore']:.4f}" if c.get("qualityScore") else "质量分: N/A")
+            file_paths: set[str] = set()
+            edge_list_raw: list = []
 
             try:
                 doc = project_db.execute(
@@ -2020,55 +2039,37 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     (tid, cid)
                 ).fetchone()
                 if doc:
-                    import json as _json
-                    node_ids = _json.loads(doc["node_list"]) if doc["node_list"] else []
-                    file_paths_raw = [n for n in node_ids if isinstance(n, str)]
-                    file_paths = set()
-                    symbol_names = []
-                    for fp in file_paths_raw:
-                        clean = fp.strip()
-                        if clean:
-                            file_paths.add(clean)
-                        nodes = fp_map.get(clean, []) if clean else []
-                        for node in nodes[:3]:
-                            name = node.get("name") or ""
-                            kind = node.get("kind", "")
-                            if name and kind in ("function", "method", "class"):
-                                symbol_names.append(f"{name}({kind})")
-                            elif name and kind not in ("file", "import", ""):
-                                symbol_names.append(name)
-                    edge_type_label = "依赖关系 (INCLUDE)" if c.get("edgeType") == "INCLUDE" else "调用关系 (CALL)" if c.get("edgeType") == "CALL" else "关系"
-                    ctx_parts.append(f"边数: {doc['edge_count'] or 0} ({edge_type_label})")
-                    rel_file_paths = sorted(
-                        os.path.relpath(fp, project_root) if project_root and os.path.isabs(fp) else fp
-                        for fp in file_paths
-                    )
-                    ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(rel_file_paths)}")
-                    if symbol_names:
-                        ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
-                    # 边关系上下文
                     edge_list_raw = _json.loads(doc["edge_list"]) if doc["edge_list"] else []
-                    if edge_list_raw:
-                        edge_lines = []
-                        for e in edge_list_raw:
-                            if isinstance(e, dict):
-                                src = (e.get("source") or e.get("source_id") or "")[:60]
-                                tgt = (e.get("target") or e.get("target_id") or "")[:60]
-                                kind = e.get("kind", "")
-                                if src and tgt:
-                                    edge_lines.append(f"{src} → {tgt}" + (f" ({kind})" if kind else ""))
-                            elif isinstance(e, str):
-                                edge_lines.append(e[:80])
-                        if edge_lines:
-                            ctx_parts.append(f"边关系列表 ({len(edge_lines)} 条): {'; '.join(edge_lines)}")
+                    raw_paths = _json.loads(doc["node_list"]) if doc["node_list"] else []
+                    file_paths = {fp.strip() for fp in raw_paths if isinstance(fp, str) and fp.strip()}
             except Exception as e:
-                logger.warning(f"[startArchAnalysis] context build failed for {cid}: {e}")
+                logger.warning(f"[startArchAnalysis] graph_doc load failed {cid}: {e}")
 
-            if cid in existing_results:
-                er = existing_results[cid]
-                ctx_parts.append(f"已有分析: {er.get('name', '')}: {er.get('summary', '')[:200]}")
+            edge_type_label = "依赖关系 (INCLUDE)" if c.get("edgeType") == "INCLUDE" \
+                else "调用关系 (CALL)" if c.get("edgeType") == "CALL" else "关系"
+            comm_meta = {
+                "nodeCount": c.get("nodeCount", 0),
+                "qualityScore": c.get("qualityScore"),
+                "edgeCount": doc["edge_count"] if doc and doc.get("edge_count") else 0,
+                "edgeLabel": edge_type_label,
+            }
 
-            c["context"] = "\n".join(ctx_parts)
+            from context.assembly import CollectContext
+            from context.recipes import RECIPE_ARCH_COMMUNITY
+            from context.registry import get_assembler
+
+            ctx = CollectContext(
+                db=project_db,
+                task_id=tid,
+                project_root=project_root or "",
+                comm_id=cid,
+                file_paths=file_paths,
+                fp_map=fp_map,
+                edge_list=edge_list_raw,
+                existing_results=existing_results,
+                _comm_meta=comm_meta,
+            )
+            c["context"] = get_assembler().assemble(RECIPE_ARCH_COMMUNITY, ctx)
             logger.info(
                 f"[startArchAnalysis] community {cid} context_len={len(c['context'])} "
                 f"ctx_begin={c['context'][:500]!r}"
@@ -2089,6 +2090,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "model_id": mid or "default", "template_id": "community_analyze",
             }])
 
+        # 项目级上下文（技术栈/测试/入口点等）
+        project_context = ""
+        try:
+            from context.assembly import CollectContext
+            from context.recipes import RECIPE_ARCH_OVERVIEW
+            from context.registry import get_assembler
+            pctx = CollectContext(
+                db=project_db, task_id=tid, project_root=project_root or "",
+                all_fp_map=fp_map,
+            )
+            project_context = get_assembler().assemble(RECIPE_ARCH_OVERVIEW, pctx)
+        except Exception:
+            pass
+
         router = create_default_router(
             project_root=project_root, project_db=project_db, multi_db=multi_db,
             task_id=tid, project_summary=project_summary,
@@ -2098,6 +2113,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         context = {
             "task_id": tid, "edge_type": et, "level": lv,
             "project_name": project_name, "project_summary": project_summary,
+            "project_context": project_context,
             "communities": communities,
         }
 
@@ -2633,141 +2649,81 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
             for c in comps:
                 cid = c.get("id", "")
-                if c.get("type") == "community" and cid.startswith("comm-"):
-                    ctx_parts = [
-                        f"组件ID: {cid}",
-                        f"组件名称: {c.get('name', cid)}",
-                        f"组件类型: 社区模块",
-                    ]
-                    meta = c.get("metadata", {})
-                    if meta:
-                        ctx_parts.append(f"节点数: {meta.get('nodeCount', 0)}")
-                        ctx_parts.append(f"文件数: {meta.get('fileCount', 0)}")
-                        qs = meta.get("qualityScore")
-                        if qs is not None:
-                            ctx_parts.append(f"质量分: {qs:.4f}")
-
-                    file_paths = set()
-                    try:
-                        doc = project_db.execute(
-                            "SELECT node_list, edge_list, edge_count FROM graph_doc WHERE task_id=? AND comm_id=?",
-                            (tid, cid)
-                        ).fetchone()
-                        if doc:
-                            edge_count = doc['edge_count'] or 0
-                            parts = cid.split("-")
-                            edge_kind = parts[2] if len(parts) > 2 and parts[0] == "comm" else "incl"
-                            edge_label_map = {"incl": "依赖关系 (INCLUDE)", "call": "调用关系 (CALL)"}
-                            edge_label = edge_label_map.get(edge_kind, "关系")
-                            ctx_parts.append(f"边数: {edge_count} ({edge_label})")
-                            file_paths_raw = _json.loads(doc["node_list"]) if doc["node_list"] else []
-                            file_paths_raw = [n for n in file_paths_raw if isinstance(n, str)]
-                            file_paths = set()
-                            symbol_names = []
-                            for fp in file_paths_raw:
-                                clean = fp.strip()
-                                if clean:
-                                    file_paths.add(clean)
-                                nodes = fp_map.get(clean, []) if clean else []
-                                for node in nodes[:3]:
-                                    name = node.get("name") or ""
-                                    kind = node.get("kind", "")
-                                    if name and kind in ("function", "method", "class"):
-                                        symbol_names.append(f"{name}({kind})")
-                                    elif name and kind not in ("file", "import", ""):
-                                        symbol_names.append(name)
-                            rel_file_paths = sorted(
-                                os.path.relpath(fp, project_root) if project_root and os.path.isabs(fp) else fp
-                                for fp in file_paths
-                            )
-                            ctx_parts.append(f"文件列表 ({len(file_paths)}): {', '.join(rel_file_paths)}")
-                            if symbol_names:
-                                ctx_parts.append(f"关键符号: {', '.join(symbol_names[:30])}")
-                            # 边关系上下文
-                            edge_list_raw = _json.loads(doc["edge_list"]) if doc["edge_list"] else []
-                            if edge_list_raw:
-                                edge_lines = []
-                                for e in edge_list_raw:
-                                    if isinstance(e, dict):
-                                        src = (e.get("source") or e.get("source_id") or "")[:60]
-                                        tgt = (e.get("target") or e.get("target_id") or "")[:60]
-                                        kind = e.get("kind", "")
-                                        if src and tgt:
-                                            edge_lines.append(f"{src} → {tgt}" + (f" ({kind})" if kind else ""))
-                                    elif isinstance(e, str):
-                                        edge_lines.append(e[:80])
-                                if edge_lines:
-                                    ctx_parts.append(f"边关系列表 ({len(edge_lines)} 条): {'; '.join(edge_lines)}")
-                    except Exception as e:
-                        logger.warning(f"[analyzeComponents] context build failed for {cid}: {e}")
-
-                    if cid in existing_results:
-                        er = existing_results[cid]
-                        ctx_parts.append(f"已有分析: {er.get('name', '')}: {er.get('summary', '')[:200]}")
-
-                    # L1+ 组件：递归加载完整父链（L0 → L1 → … → 当前级减 1）
-                    if cid.startswith("comm-") and "L0" not in cid:
-                        try:
-                            parts = cid.split("-")
-                            lv_idx = next((i for i, p in enumerate(parts) if p.startswith("L")), -1)
-                            if lv_idx > 0:
-                                current_lv = int(parts[lv_idx][1])
-                                while current_lv > 0:
-                                    current_lv -= 1
-                                    parent_parts = list(parts)
-                                    parent_parts[lv_idx] = f"L{current_lv}"
-                                    parent_cid = "-".join(parent_parts)
-                                    prow = project_db.execute(
-                                        "SELECT name, summary FROM community_llm_results WHERE task_id=? AND comm_id=?",
-                                        (tid, parent_cid)
-                                    ).fetchone()
-                                    if prow:
-                                        ctx_parts.append(
-                                            f"祖级组件 L{current_lv}（{prow['name'] or parent_cid}）: {(prow['summary'] or '')[:300]}"
-                                        )
-                        except Exception:
-                            pass
-
-                    if agentic_mode:
-                        # Agentic 模式精简上下文
-                        agentic_parts = ctx_parts[:7]  # 前 7 条: ID/名称/类型/节点数/文件数/质量分/边数
-                        agentic_parts.append(f"任务ID: {tid}")
-                        if file_paths:
-                            from collections import Counter
-                            dirs = Counter(
-                                os.path.relpath(os.path.dirname(fp), project_root)
-                                if project_root and os.path.isabs(fp) else os.path.dirname(fp)
-                                for fp in file_paths
-                            )
-                            dir_summary = ", ".join(
-                                f"{d} ({c})" for d, c in dirs.most_common(10)
-                            )
-                            agentic_parts.append(f"文件分布: {dir_summary}")
-                        agentic_parts.append(
-                            "工具引导: 使用 summarize_file 读取并摘要关键文件; "
-                            "get_community_subgraph 查看完整子图结构"
-                        )
-                        enriched_comps.append({
-                            "id": cid,
-                            "name": c.get("name", cid),
-                            "type": c.get("type", "community"),
-                            "metadata": meta,
-                            "context": "\n".join(agentic_parts),
-                        })
-                    else:
-                        enriched_comps.append({
-                            "id": cid,
-                            "name": c.get("name", cid),
-                            "type": c.get("type", "community"),
-                            "metadata": meta,
-                            "context": "\n".join(ctx_parts),
-                        })
-                    logger.info(
-                        f"[analyzeComponents] enriched {cid} context_len={len(enriched_comps[-1]['context'])} "
-                        f"ctx_begin={enriched_comps[-1]['context'][:400]!r}"
-                    )
-                else:
+                if not (c.get("type") == "community" and cid.startswith("comm-")):
                     enriched_comps.append(c)
+                    continue
+
+                meta = c.get("metadata", {})
+                file_paths: set[str] = set()
+                edge_list_raw: list = []
+
+                try:
+                    doc = project_db.execute(
+                        "SELECT node_list, edge_list, edge_count FROM graph_doc WHERE task_id=? AND comm_id=?",
+                        (tid, cid)
+                    ).fetchone()
+                    if doc:
+                        edge_list_raw = _json.loads(doc["edge_list"]) if doc["edge_list"] else []
+                        raw_paths = _json.loads(doc["node_list"]) if doc["node_list"] else []
+                        file_paths = {fp.strip() for fp in raw_paths if isinstance(fp, str) and fp.strip()}
+                except Exception as e:
+                    logger.warning(f"[analyzeComponents] graph_doc load failed {cid}: {e}")
+
+                # 确定 edge label
+                parts = cid.split("-")
+                edge_kind = parts[2] if len(parts) > 2 and parts[0] == "comm" else "incl"
+                edge_label = {"incl": "依赖关系 (INCLUDE)", "call": "调用关系 (CALL)"}.get(edge_kind, "关系")
+
+                # 构建社区元数据（供 CommunityInfoIngredient）
+                comm_meta = {
+                    "nodeCount": meta.get("nodeCount", 0),
+                    "fileCount": meta.get("fileCount", 0),
+                    "qualityScore": meta.get("qualityScore"),
+                    "edgeCount": doc["edge_count"] if doc and doc.get("edge_count") else 0,
+                    "edgeLabel": edge_label,
+                }
+
+                # 构建 CollectContext
+                from context.assembly import CollectContext
+                from context.recipes import (
+                    RECIPE_COMPONENT_ANALYSIS,
+                    RECIPE_COMPONENT_ANALYSIS_AGENTIC,
+                )
+                from context.registry import get_assembler
+
+                ctx = CollectContext(
+                    db=project_db,
+                    task_id=tid,
+                    project_root=project_root or "",
+                    comm_id=cid,
+                    file_paths=file_paths,
+                    fp_map=fp_map,
+                    edge_list=edge_list_raw,
+                    existing_results=existing_results,
+                    _comm_meta=comm_meta,
+                )
+
+                recipe = RECIPE_COMPONENT_ANALYSIS_AGENTIC if agentic_mode else RECIPE_COMPONENT_ANALYSIS
+                context_text = get_assembler().assemble(recipe, ctx)
+
+                if agentic_mode:
+                    context_text += (
+                        f"\n任务ID: {tid}"
+                        f"\n工具引导: 使用 summarize_file 读取并摘要关键文件; "
+                        f"get_community_subgraph 查看完整子图结构"
+                    )
+
+                enriched_comps.append({
+                    "id": cid,
+                    "name": c.get("name", cid),
+                    "type": c.get("type", "community"),
+                    "metadata": meta,
+                    "context": context_text,
+                })
+                logger.info(
+                    f"[analyzeComponents] enriched {cid} context_len={len(context_text)} "
+                    f"ctx_begin={context_text[:400]!r}"
+                )
 
             from agent_workflow.router import create_default_router
             from store.analysis_store import AnalysisStore

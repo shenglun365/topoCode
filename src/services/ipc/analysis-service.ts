@@ -164,7 +164,9 @@ export function createAnalysisService(api: any): AnalysisService {
       const rest: Record<string, any> = { ...options }
       delete rest.scopes
       delete rest.selectedExtensions
-      return await api.analysis.scanFileStats(projectId, { ...rest, scopes, selectedExtensions }) as FileStatsResult
+      const params: Record<string, any> = { ...rest, scopes, selectedExtensions }
+      for (const k of Object.keys(params)) { if (params[k] === undefined) delete params[k] }
+      return await api.analysis.scanFileStats(projectId, params) as FileStatsResult
     },
     getAvailableLevels: async (taskId: string, edgeType?: string) => {
       return await api.analysis.getAvailableLevels(taskId, edgeType) as string[]

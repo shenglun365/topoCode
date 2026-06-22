@@ -3,13 +3,28 @@ shared_utils — 工作流间公用的结构化响应解析和 Markdown 摘要�
 """
 
 import json as _json
+import re as _re
 import logging
 
 logger = logging.getLogger(__name__)
 
 
+def _extract_json_from_text(text: str) -> dict | None:
+    """从可能包含推理文本的 LLM 输出中尝试提取 JSON 对象/数组。"""
+    # 优先尝试从 { 到 } 提取最外层对象
+    for pattern in [r'(\{.*\})', r'(\[.*\])']:
+        match = _re.search(pattern, text, _re.DOTALL)
+        if match:
+            candidate = match.group(1)
+            try:
+                return _json.loads(candidate)
+            except (_json.JSONDecodeError, ValueError):
+                continue
+    return None
+
+
 def parse_structured_response(text: str, fallback_name: str = "") -> dict:
-    """从 LLM 响应中提取 JSON，出错时尝试从纯文本恢复。返回 dict 含 parsed 和 _parse_error 字段。"""
+    """从 LLM 响应中提取 JSON，出错时尝试从纯文本恢复或正则提取。返回 dict 含 parsed 和 _parse_error 字段。"""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -24,7 +39,11 @@ def parse_structured_response(text: str, fallback_name: str = "") -> dict:
         parsed["_parse_error"] = False
         return parsed
     except (_json.JSONDecodeError, ValueError):
-        pass
+        # 直接解析失败 → 尝试从推理文本中正则提取 JSON
+        extracted = _extract_json_from_text(text)
+        if extracted is not None:
+            extracted["_parse_error"] = False
+            return extracted
     lines = text.strip().split("\n")
     name = lines[0].strip()[:60] if lines else fallback_name[:60]
     summary = "\n".join(lines[1:]) if len(lines) > 1 else text

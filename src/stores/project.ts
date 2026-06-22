@@ -286,13 +286,13 @@ export const useProjectStore = defineStore('project', () => {
     funcGroup.openTab('home', tab)
   }
 
-  function closeTab(tabId: string): boolean {
+  async function closeTab(tabId: string): Promise<boolean> {
     const tab = funcGroup.currentTabs.find(t => t.id === tabId)
     if (!tab) return false
 
-    // 检查未保存更改
     if (tab.hasUnsavedChanges) {
-      const confirmed = confirm(i18n.global.t('report.confirmCloseUnsaved'))
+      const { useConfirm } = await import('@/composables/useConfirm')
+      const confirmed = await useConfirm().confirm(i18n.global.t('report.confirmCloseUnsaved'))
       if (!confirmed) return false
     }
 
@@ -434,7 +434,7 @@ export const useProjectStore = defineStore('project', () => {
       funcGroup.setActiveTab('analysis', existing.id)
       return existing.id
     }
-    const title = `${i18n.global.t('analysis.analysisReport')} · ${params.taskName}`
+    const title = params.taskName
     const tab: HomeTab = {
       id: `tab-reportHome-${params.taskId}-${Date.now()}`,
       kind: 'reportHome',

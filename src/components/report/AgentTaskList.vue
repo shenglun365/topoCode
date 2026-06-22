@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore } from '@/stores/community-store'
 import { useProjectStore } from '@/stores/project'
@@ -111,6 +111,12 @@ async function clearHistory() {
 
 onMounted(() => {
   refresh()
+})
+
+watch(taskId, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    refresh()
+  }
 })
 
 function sumFileCount(steps: any[], statuses: string[]): number {

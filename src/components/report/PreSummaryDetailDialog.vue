@@ -44,9 +44,15 @@ async function loadSummary() {
   finally { loading.value = false }
 }
 
+const showDeleteConfirm = ref(false)
+
 async function handleDelete() {
   if (deleting.value) return
-  if (!confirm(t('report.preSummaryDeleteConfirm'))) return
+  showDeleteConfirm.value = true
+}
+
+async function doDelete() {
+  showDeleteConfirm.value = false
   deleting.value = true
   try {
     await communityStore.deleteFileSummary(props.taskId, props.filePath)
@@ -111,6 +117,17 @@ onMounted(loadSummary)
           class="psd-btn"
           @click="emit('close')"
         >{{ t('report.preSummaryClose') }}</button>
+      </div>
+
+      <!-- 确认删除弹窗 -->
+      <div v-if="showDeleteConfirm" class="psd-overlay" @click.self="showDeleteConfirm = false">
+        <div class="psd-confirm-box">
+          <p>{{ t('report.preSummaryDeleteConfirm') }}</p>
+          <div class="psd-confirm-actions">
+            <button class="psd-btn psd-btn-danger" @click="doDelete">{{ t('common.confirm') }}</button>
+            <button class="psd-btn" @click="showDeleteConfirm = false">{{ t('common.cancel') }}</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -281,5 +298,26 @@ onMounted(loadSummary)
 .psd-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.psd-confirm-box {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  min-width: 280px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.psd-confirm-box p {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.psd-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 </style>
