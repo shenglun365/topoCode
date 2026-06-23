@@ -88,6 +88,7 @@ function createRealIPC() {
   const taskProgressCbs: Array<(data: TaskProgressEvent) => void> = []
   const taskCompleteCbs: Array<(data: TaskCompleteEvent) => void> = []
   const taskErrorCbs: Array<(data: TaskErrorEvent) => void> = []
+  const taskStoppedCbs: Array<(data: any) => void> = []
   const backendStatusCbs: Array<(data: BackendStatusEvent) => void> = []
 
   return {
@@ -228,6 +229,9 @@ function createRealIPC() {
         const list = await api.analysis.listTasks(projectId)
         return adaptTaskList(list)
       },
+      listRunningTasks: async () => {
+        return await api.analysis.listRunningTasks()
+      },
       createTask: async (params: { projectId: string; type: string; name: string; scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) => {
         console.log('[IPC] createTask -> api.analysis.createTask:', JSON.stringify(params))
         try {
@@ -334,7 +338,7 @@ function createRealIPC() {
       getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
         return await api.analysis.getCommunityNodeLists(params)
       },
-      startArchAnalysis: async (params: { taskId: string; edgeType: string; level: string; modelId?: string }) => {
+      startArchAnalysis: async (params: { taskId: string; edgeType: string; level: string; modelId?: string; force?: boolean }) => {
         return await api.analysis.startArchAnalysis(params)
       },
       listTimeline: async (params: { projectId: string }) => {
@@ -370,6 +374,9 @@ function createRealIPC() {
       startPreSummary: async (params: { taskId: string; batch?: string; limit?: number }) => {
         return await api.analysis.startPreSummary(params)
       },
+      startPreSummaryPipeline: async (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => {
+        return await api.analysis.startPreSummaryPipeline(params)
+      },
       getFileSummary: async (params: { taskId: string; file_path: string }) => {
         return await api.analysis.getFileSummary(params)
       },
@@ -379,7 +386,7 @@ function createRealIPC() {
       rerunFileSummary: async (params: { taskId: string; file_path: string }) => {
         return await api.analysis.rerunFileSummary(params)
       },
-      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string }) => {
+      analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => {
         return await api.analysis.analyzeComponents(params)
       },
       getComponentAnalysisResults: async (params: { taskId: string; componentIds?: string[] }) => {
@@ -418,6 +425,13 @@ function createRealIPC() {
           api.analysis.onError(cb)
         } else {
           taskErrorCbs.push(cb)
+        }
+      },
+      onStopped: (cb: (data: any) => void) => {
+        if (api.analysis.onStopped) {
+          api.analysis.onStopped(cb)
+        } else {
+          taskStoppedCbs.push(cb)
         }
       },
     },

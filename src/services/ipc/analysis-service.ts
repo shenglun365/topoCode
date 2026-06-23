@@ -46,6 +46,7 @@ function adaptRun(r: any): TaskRun {
 
 export interface AnalysisService {
   listTasks(projectId: string): Promise<AnalysisTask[]>
+  listRunningTasks(): Promise<Array<{ id: string; name: string; project_id: string }>>
   createTask(params: {
     projectId: string; type: string; name: string;
     scope?: string; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[]
@@ -77,7 +78,7 @@ export interface AnalysisService {
   getExternalStats(taskId: string): Promise<ExternalStatsResult>
   getCrossCommunityEdges(params: { taskId: string; edgeType: string; commLv: string }): Promise<CrossCommunityEdgesResult>
   getCommunityNodeLists(params: { taskId: string; edgeType: string; commLv: string }): Promise<Record<string, string[]>>
-  startArchAnalysis(params: { taskId: string; edgeType: string; level: string; modelId?: string }): Promise<{ taskId: string; success: boolean }>
+  startArchAnalysis(params: { taskId: string; edgeType: string; level: string; modelId?: string; force?: boolean }): Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; communities?: number; skipped?: number; error?: string }>
   listTimeline(params: { projectId: string }): Promise<TimelineEntry[]>
   getTimelineEntry(params: { timelineId: string }): Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
   startArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string }>
@@ -90,10 +91,11 @@ export interface AnalysisService {
   getPreSummaryStatus(params: { taskId: string }): Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string; failed_count: number }>
   listPreSummaryFiles(params: { taskId: string; batch?: string; page?: number; page_size?: number }): Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<any> }>
   startPreSummary(params: { taskId: string; batch?: string; limit?: number; subagentConcurrency?: number }): Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
+  startPreSummaryPipeline(params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }): Promise<{ success: boolean; batches: string[]; total: number }>
   getFileSummary(params: { taskId: string; file_path: string }): Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string }>
   deleteFileSummary(params: { taskId: string; file_path: string }): Promise<{ success: boolean; deleted?: number }>
   rerunFileSummary(params: { taskId: string; file_path: string }): Promise<{ success: boolean; agentTaskId?: string }>
-  analyzeComponents(params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }): Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+  analyzeComponents(params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }): Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
   getComponentAnalysisResults(params: { taskId: string; componentIds?: string[] }): Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
   saveCommunityResult(params: any): Promise<SaveCommunityResultResponse>
   getCommunityResult(params: any): Promise<any>
@@ -102,6 +104,7 @@ export interface AnalysisService {
   onProgress(cb: (data: TaskProgressEvent) => void): void
   onComplete(cb: (data: TaskCompleteEvent) => void): void
   onError(cb: (data: TaskErrorEvent) => void): void
+  onStopped(cb: (data: any) => void): void
 }
 
 export function createAnalysisService(api: any): AnalysisService {
@@ -133,6 +136,9 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     stopTask: async (taskId: string) => {
       return await api.analysis.stopTask(taskId) as SuccessResponse
+    },
+    listRunningTasks: async () => {
+      return await api.analysis.listRunningTasks() as Array<{ id: string; name: string; project_id: string }>
     },
     clearProjectCache: async (projectId: string) => {
       return await api.analysis.clearProjectCache(projectId) as ClearCacheResult
@@ -196,7 +202,7 @@ export function createAnalysisService(api: any): AnalysisService {
       return await api.analysis.getCommunityNodeLists(params) as Record<string, string[]>
     },
     startArchAnalysis: async (params) => {
-      return await api.analysis.startArchAnalysis(params) as { taskId: string; success: boolean }
+      return await api.analysis.startArchAnalysis(params) as { taskId: string; success: boolean; agentTaskId?: string | null; communities?: number; skipped?: number; error?: string }
     },
     listTimeline: async (params) => {
       return await api.analysis.listTimeline(params)
@@ -231,6 +237,9 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     onError: (cb: (data: TaskErrorEvent) => void) => {
       api.analysis.onError(cb)
+    },
+    onStopped: (cb: (data: any) => void) => {
+      api.analysis.onStopped(cb)
     },
   }
 }

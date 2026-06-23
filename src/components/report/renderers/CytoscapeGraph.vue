@@ -65,12 +65,17 @@ function getNodeRadius(n: GraphNode): number {
   return Math.round(Math.max(textRadius, Math.min(40, countRadius)))
 }
 
+const EXTERNAL_TIER_COLORS = ['#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fde68a']
+
 function nodeColor(n: GraphNode): string {
   if (n.compareState === 'added') return '#22c55e'
   if (n.compareState === 'removed') return '#ef4444'
   if (n.compareState === 'changed') return '#f97316'
   if (n.compareState === 'unchanged') return '#6b7280'
-  if (n.isExternal) return '#f59e0b'
+  if (n.isExternal) {
+    const tier = (n as any)._extTier
+    return tier ? EXTERNAL_TIER_COLORS[tier - 1] || '#f59e0b' : '#f59e0b'
+  }
   if (n.avgCoreness != null && n.avgCoreness >= 0.5) {
     const t = Math.min(n.avgCoreness / 8, 1)
     return corenessGradient(t)

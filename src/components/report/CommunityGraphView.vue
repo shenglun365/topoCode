@@ -556,15 +556,25 @@ function buildExternalNodes(): any[] {
   const items = props.edgeType === 'EXTERNAL_INCLUDE'
     ? (props.externalStats.externalDeps || [])
     : (props.externalStats.externalCalls || [])
+  const n = items.length
+  if (n === 0) return []
   const nodes: any[] = []
-  items.forEach((item: any) => {
+  items.forEach((item: any, i: number) => {
     const extId = item.package || item.name
+    const pct = i / n
+    let tier = 3
+    if (pct < 0.05) tier = 1
+    else if (pct < 0.20) tier = 2
+    else if (pct < 0.50) tier = 3
+    else if (pct < 0.80) tier = 4
+    else tier = 5
     nodes.push({
       id: extId,
       label: extId.length > 16 ? extId.slice(0, 16) + '\u2026' : extId,
       nodeCount: item.fileCount || item.count,
       isExternal: true,
       hasChildren: !!(item.communities && item.communities.length > 0),
+      _extTier: tier,
     })
   })
   return nodes

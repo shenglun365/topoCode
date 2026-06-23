@@ -79,8 +79,10 @@ class AnalysisStore:
             scope_conditions = []
             for s in scopes:
                 if '*' in s or '?' in s:
-                    wildcard_scopes.append(s)
                     like_pat = s.replace('**', '%').replace('*', '%').replace('?', '_')
+                    # 仅含 ** 的通配符需要 Python fnmatch 后过滤（递归匹配）
+                    if '**' in s:
+                        wildcard_scopes.append(s)
                     scope_conditions.append("file_path LIKE ?")
                     params.append(like_pat)
                 else:
@@ -202,9 +204,11 @@ class AnalysisStore:
             scope_conditions = []
             for s in scopes:
                 if '*' in s or '?' in s:
-                    wildcard_scopes.append(s)
                     # LIKE 粗略预过滤（通配符转 %），缩小结果集
                     like_pat = s.replace('**', '%').replace('*', '%').replace('?', '_')
+                    # 仅含 ** 的通配符需要 Python fnmatch 后过滤
+                    if '**' in s:
+                        wildcard_scopes.append(s)
                     scope_conditions.append("file_path LIKE ?")
                     params.append(like_pat)
                 else:
@@ -646,7 +650,27 @@ class AnalysisStore:
             "SELECT * FROM community_llm_results WHERE task_id=? AND edge_type=? ORDER BY comm_lv, comm_id",
             (task_id, edge_type)
         ).fetchall()
-        logger.info("[AnalysisStore] list_llm_results DONE task_id=%s edge_type=%s rows=%d", task_id, edge_type, len(rows))
+        # 合并 component_analysis 中 community 类型的结果（组件分析写入，但架构页面也需要看到）
+        ca_rows = self._db.execute(
+            "SELECT component_id, analyzed_name, functional_summary, analyzed_at "
+            "FROM component_analysis WHERE task_id=? AND component_type='community'",
+            (task_id,)
+        ).fetchall()
+        seen = {r["comm_id"] for r in rows}
+        for cr in ca_rows:
+            cid = cr["component_id"]
+            if cid not in seen:
+                rows.append({
+                    "comm_id": cid,
+                    "name": cr["analyzed_name"] or "",
+                    "summary": cr["functional_summary"] or "",
+                    "edge_type": edge_type,
+                    "comm_lv": "L0",
+                    "created_at": cr["analyzed_at"] or "",
+                })
+                seen.add(cid)
+        logger.info("[AnalysisStore] list_llm_results DONE task_id=%s edge_type=%s rows=%d (merged %d from component_analysis)",
+                     task_id, edge_type, len(rows), len(ca_rows))
         return [dict(r) for r in rows]
 
     def get_llm_result(self, task_id: str, edge_type: str, comm_lv: str, comm_id: str) -> Optional[Dict]:
@@ -723,6 +747,12 @@ class AnalysisStore:
         return {"results": [dict(r) for r in rows], "total": total}
 
     def clear_agent_task_history(self, project_id: str, task_id: str):
+        # 先清理所有 running/queued 的 presummary_files 记录（管线残留）
+        self._db.execute(
+            "DELETE FROM agent_task_history WHERE project_id=? AND task_id=? "
+            "AND action='presummary_files' AND status IN ('running', 'queued')",
+            (project_id, task_id)
+        )
         self._db.execute(
             "DELETE FROM agent_task_history WHERE project_id=? AND task_id=? "
             "AND status NOT IN ('running', 'queued')",

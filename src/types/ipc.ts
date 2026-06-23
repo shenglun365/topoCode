@@ -86,7 +86,7 @@ export interface AnalysisTask {
   projectId: string
   type: 'full-parse' | 'ast-gen' | 'call-chain' | 'dataflow' | 'dep-analysis'
   name: string
-  status: 'done' | 'running' | 'pending' | 'modified' | 'error' | 'cancelled'
+  status: 'done' | 'running' | 'pending' | 'modified' | 'error' | 'cancelled' | 'stopping'
   progress?: number
   total?: number
   current?: number
@@ -489,6 +489,7 @@ export interface IPCAPI {
     updateTask: (params: { taskId: string; favorite?: boolean; pinned?: boolean; tags?: string[] }) => Promise<AnalysisTask>
     deleteTask: (taskId: string) => Promise<void>
     stopTask: (taskId: string) => Promise<void>
+    listRunningTasks: () => Promise<Array<{ id: string; name: string; project_id: string }>>
     clearProjectCache: (projectId: string) => Promise<{ projectId: string; deletedTasks: number; fileCount: number; deletedTables: Record<string, number> }>
     getClearCacheCounts: (projectId: string) => Promise<{ projectId: string; counts: Record<string, number> }>
     clearProjectCacheTable: (projectId: string, table: string) => Promise<{ table: string; deleted: number }>
@@ -507,7 +508,7 @@ export interface IPCAPI {
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
     getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<Record<string, string[]>>
-    startArchAnalysis: (params: { taskId: string; edgeType: string; level: string; modelId?: string }) => Promise<{ taskId: string; success: boolean }>
+    startArchAnalysis: (params: { taskId: string; edgeType: string; level: string; modelId?: string; force?: boolean }) => Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; communities?: number; skipped?: number; error?: string }>
     listTimeline: (params: { projectId: string }) => Promise<TimelineEntry[]>
     getTimelineEntry: (params: { timelineId: string }) => Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
     startArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string }>
@@ -520,11 +521,12 @@ export interface IPCAPI {
     getPreSummaryStatus: (params: { taskId: string }) => Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string; failed_count: number }>
     listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string; has_summary?: boolean }> }>
     startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
+    startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number }>
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
     getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
@@ -542,6 +544,7 @@ export interface IPCAPI {
     onProgress: (cb: (data: TaskProgressEvent) => void) => void
     onComplete: (cb: (data: TaskCompleteEvent) => void) => void
     onError: (cb: (data: TaskErrorEvent) => void) => void
+    onStopped: (cb: (data: any) => void) => void
   }
 
   // 报告子文档 + 报告生成辅助

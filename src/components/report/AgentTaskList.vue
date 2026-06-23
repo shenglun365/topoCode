@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore } from '@/stores/community-store'
 import { useProjectStore } from '@/stores/project'
@@ -47,6 +47,11 @@ const allTasks = computed(() => {
   }
   for (const t of history) {
     if (!seen.has(t.agent_id || t.id)) {
+      // 跳过历史中 stale 的 running/queued 记录（无对应 live entry 说明是旧管线的残留）
+      // 但 presummary_files 管线除外：后续批次会创建新 agent 且无 live placeholder
+      if ((t.status === 'running' || t.status === 'queued') && !live.some(lt => lt.id === (t.agent_id || t.id))) {
+        if (t.action !== 'presummary_files') continue
+      }
       seen.add(t.agent_id || t.id)
       merged.push(transformHistory(t))
     }
@@ -62,7 +67,7 @@ const hasMore = computed(() => pageSize.value < allTasks.value.length)
 function transformHistory(h: any) {
   let steps: any[] = []
   try { steps = h.steps ? JSON.parse(h.steps) : [] } catch {}
-  return {
+  const task = {
     id: h.agent_id,
     action: h.action,
     status: h.status,
@@ -71,11 +76,14 @@ function transformHistory(h: any) {
     steps,
     createdAt: h.created_at || '',
   }
+  console.log('[transformHistory] agent=%s action=%s status=%s steps=%d', h.agent_id, h.action, h.status, steps.length)
+  return task
 }
 
 async function loadHistory(cursor: number) {
   if (!taskId.value) return
   const results = await communityStore.loadAgentTaskHistory(taskId.value, cursor, 10)
+  console.log('[loadHistory] cursor=%d got %d results (total=%d)', cursor, results.length, results.length)
   if (cursor === 0) {
     historyTasks.value = results
   } else {
@@ -100,17 +108,65 @@ async function refresh() {
   pageSize.value = 10
   historyLoaded.value = false
   await loadHistory(0)
+  // 将 history 中新发现的 running presummary_files agent 注入 store，启动轮询
+  const t = communityStore.tasks[taskId.value]
+  if (t) {
+    for (const h of historyTasks.value) {
+      if (h.action === 'presummary_files' && (h.status === 'running' || h.status === 'queued')) {
+        const existing = t.agentTasks.some(at => at.id === h.agent_id)
+        if (!existing) {
+          const idx = t.agentTasks.length
+          t.agentTasks.push({
+            id: h.agent_id, action: 'presummary_files', status: h.status || 'running',
+            progress: 0, step: 0, total: 0, message: h.message || '',
+            steps: [],
+            createdAt: h.created_at || '',
+          })
+          communityStore.ensureAgentPolling(taskId.value)
+          console.log('[refresh] injected history agent into store: %s', h.agent_id)
+        }
+      }
+    }
+  }
+  const liveLen = liveTasks.value.length
+  const historyLen = historyTasks.value.length
+  console.log('[AgentTaskList] refreshed: live=%d history=%d all=%d', liveLen, historyLen, liveLen + historyLen)
 }
 
 async function clearHistory() {
   if (!taskId.value) return
   await communityStore.clearAgentTaskHistory(taskId.value)
+  // 同时清理 store 中非 running 的 live agent
+  const t = communityStore.tasks[taskId.value]
+  if (t) {
+    t.agentTasks = t.agentTasks.filter(at => at.status === 'running' || at.status === 'queued')
+  }
   historyTasks.value = []
   pageSize.value = 10
 }
 
 onMounted(() => {
   refresh()
+})
+
+let historyPollTimer: ReturnType<typeof setInterval> | null = null
+
+watch(liveTasks, (tasks) => {
+  const hasPresummary = tasks.some(t => t.action === 'presummary_files')
+  const hasRunning = tasks.some(t => t.status === 'running' || t.status === 'queued')
+  console.log('[watchLive] hasRunning=%s hasPresummary=%s timer=%s tasks=%d', hasRunning, hasPresummary, historyPollTimer ? 'active' : 'none', tasks.length)
+  if ((hasRunning || hasPresummary) && !historyPollTimer) {
+    console.log('[watchLive] starting 3s history poll')
+    historyPollTimer = setInterval(() => { refresh() }, 3000)
+  } else if (!hasRunning && !hasPresummary && historyPollTimer) {
+    console.log('[watchLive] stopping history poll')
+    clearInterval(historyPollTimer)
+    historyPollTimer = null
+  }
+}, { deep: true })
+
+onUnmounted(() => {
+  if (historyPollTimer) { clearInterval(historyPollTimer); historyPollTimer = null }
 })
 
 watch(taskId, (newId, oldId) => {

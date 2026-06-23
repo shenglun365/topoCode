@@ -103,6 +103,19 @@ function cancelEdit() {
   editContent.value = ''
 }
 
+function buildChildList(): string[] {
+  if (!props.taskId) return []
+  const parts: string[] = []
+  const children = communityStore.tasks[props.taskId]?.communities
+    ?.filter(c => c.parentId === props.parentCommId) ?? []
+  if (children.length === 0) return parts
+  parts.push('', '---', '', `## 子组件（${children.length}）`, '')
+  for (const c of children) {
+    parts.push(`- [${communityLabel(c)}](##community:${c.edgeType}:${c.communityId})`)
+  }
+  return parts
+}
+
 // 加载文档
 async function loadDoc() {
   loading.value = true
@@ -140,24 +153,10 @@ async function loadDoc() {
                 parts.push('', `---`, '', `## 父组件\n${parentId}`)
               }
             }
-          } catch {}
+          } catch (e) { console.warn('[SubDocViewer] parent community error:', e) }
         }
 
-        // 子组件列表
-        try {
-          const children = communityStore.tasks[props.taskId]?.communities
-            .filter(c => c.parentId === props.parentCommId) || []
-          parts.push('', `---`, '', `## 子组件（${children.length}）`, '')
-          if (children.length > 0) {
-            const childLines = children.map(c => {
-              const label = communityLabel(c)
-              return `- [${label}](##community:${c.edgeType}:${c.communityId})`
-            })
-            parts.push(...childLines)
-          } else {
-            parts.push('暂无更细粒度的子组件')
-          }
-        } catch {}
+        parts.push(...buildChildList())
 
         doc.value = {
           id: '', title: result.name || props.initialTitle || '',
@@ -168,18 +167,23 @@ async function loadDoc() {
       }
     }
     if (!doc.value) {
+      const childMarkdown = buildChildList().join('\n')
       if (props.subDocId) {
         doc.value = await reportStore.getSubDoc(props.subDocId)
+        if (doc.value && childMarkdown) {
+          doc.value.content += '\n' + childMarkdown
+        }
       } else if (props.initialContent) {
         doc.value = {
           id: '', title: props.initialTitle || '',
-          content: props.initialContent, templateId: '', createdAt: '', updatedAt: '',
+          content: props.initialContent + (childMarkdown ? '\n' + childMarkdown : ''),
+          templateId: '', createdAt: '', updatedAt: '',
         }
       } else if (props.parentCommId) {
         console.log('[SubDocViewer] fallback to hint for', props.parentCommId)
         doc.value = {
           id: '', title: props.parentCommId,
-          content: `# ${props.parentCommId}\n\n该组件暂无 LLM 分析结果，请先通过 AI 助手运行组件分析。`,
+          content: `# ${props.parentCommId}\n\n该组件暂无 LLM 分析结果，请先通过 AI 助手运行组件分析。` + (childMarkdown ? '\n' + childMarkdown : ''),
           templateId: '', createdAt: '', updatedAt: '',
         }
       }
@@ -237,6 +241,14 @@ onMounted(async () => {
 watch(() => props.subDocId, () => {
   loadDoc()
 })
+
+watch(
+  () => props.taskId ? communityStore.tasks[props.taskId]?.communities : undefined,
+  (newComs, oldComs) => {
+    if (newComs !== oldComs && doc.value) loadDoc()
+  },
+  { deep: true }
+)
 
 </script>
 

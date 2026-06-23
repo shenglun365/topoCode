@@ -4,6 +4,7 @@ export default { analysis: {
   editTask: '编辑任务',
   runTask: '运行任务',
   stopTask: '停止',
+  stoppingTask: '正在停止…',
   deleteTask: '删除',
   rerunTask: '重跑',
   retryTask: '重试',

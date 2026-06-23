@@ -15,6 +15,7 @@ import { usePanelStore } from '@/stores/panel'
 import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@/composables/useComponentId'
 import { useConfirm } from '@/composables/useConfirm'
+import { useAnalysisStore } from '@/stores/analysis'
 
 const { t } = useI18n()
 
@@ -84,6 +85,11 @@ onMounted(async () => {
         startingSince.value = Date.now()
       }
     }
+      } catch (_) {}
+
+  // 订阅后端推送事件
+  try {
+    useAnalysisStore().subscribeToEvents()
   } catch (_) {}
 
   // 每 3 秒轮询本地 PythonBridge 状态（控制层，不经过 ZMQ，避免挂死）
@@ -231,10 +237,19 @@ onUnmounted(() => {
     <OnboardingTour />
 
     <!-- 全局确认弹窗（替代 confirm()） -->
-    <div v-if="confirmState.visible" class="confirm-overlay" @click.self="confirmResolve(false)">
+    <div v-if="confirmState.visible" class="confirm-overlay" @click.self="confirmResolve(confirmState.choices ? null : false)">
       <div class="confirm-box">
         <p>{{ confirmState.message }}</p>
-        <div class="confirm-actions">
+        <div v-if="confirmState.choices" class="confirm-actions">
+          <button
+            v-for="c in confirmState.choices"
+            :key="c.value"
+            class="confirm-btn"
+            :class="'confirm-btn-' + (c.variant || 'primary')"
+            @click="confirmResolve(c.value)"
+          >{{ c.label }}</button>
+        </div>
+        <div v-else class="confirm-actions">
           <button class="confirm-btn confirm-btn-primary" @click="confirmResolve(true)">{{ t('common.confirm') }}</button>
           <button class="confirm-btn" @click="confirmResolve(false)">{{ t('common.cancel') }}</button>
         </div>

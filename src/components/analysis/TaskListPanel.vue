@@ -421,13 +421,16 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status === 'running'"
-            class="btn btn-ghost btn-xs btn-warning"
-            :title="t('analysis.stopTask')"
+            v-if="task.status === 'running' || task.status === 'stopping'"
+            class="btn btn-ghost btn-xs"
+            :class="{ 'btn-warning': task.status === 'running' }"
+            :title="task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask')"
+            :disabled="task.status === 'stopping'"
             @click="onStopTask(task.id)"
           >
-            <StopIcon class="w-3.5 h-3.5" />
-            <span>{{ t('analysis.stopTask') }}</span>
+            <span v-if="task.status === 'stopping'" class="loading-spinner" />
+            <StopIcon v-else class="w-3.5 h-3.5" />
+            <span>{{ task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask') }}</span>
           </button>
 
           <button

@@ -252,28 +252,32 @@ async function loadData() {
       // 文件统计（从 dashboard 或独立查询）
       if (dash?.fileStats) {
         fileStats.value = dash.fileStats.extensions || {}
-        const taskExtensions = (taskDetail.value as any)?.extensions || []
-        if (taskExtensions.length > 0 && dash.fileStats.extensions) {
-          totalScopeFiles.value = taskExtensions.reduce(
-            (sum: number, ext: string) => sum + (dash.fileStats.extensions[ext] || 0),
-            0
-          )
-        } else {
-          totalScopeFiles.value = dash.fileStats.totalFiles || 0
-        }
       } else {
         const fs = await analysisStore.scanFileStats(pid).catch(() => null)
         if (fs) {
           fileStats.value = fs.extensions || {}
-          const taskExtensions = (taskDetail.value as any)?.extensions || []
-          if (taskExtensions.length > 0 && fs.extensions) {
-            totalScopeFiles.value = taskExtensions.reduce(
-              (sum: number, ext: string) => sum + (fs.extensions[ext] || 0),
-              0
-            )
-          } else {
-            totalScopeFiles.value = fs.totalFiles || 0
-          }
+        }
+      }
+
+      // 按任务条件（extensions / scopes / excludeDirs / pattern）统计文件数，用作覆盖率分母
+      {
+        const task = taskDetail.value as any
+        const scanOptions: Record<string, any> = {}
+        const exts: string[] = JSON.parse(JSON.stringify(task?.extensions || []))
+        const scopes: string[] = JSON.parse(JSON.stringify(task?.scopes || []))
+        const excludeDirs: string[] = JSON.parse(JSON.stringify(task?.excludeDirs || []))
+        if (exts.length > 0) scanOptions.selectedExtensions = exts
+        if (scopes.length > 0) scanOptions.scopes = scopes
+        if (excludeDirs.length > 0) scanOptions.excludeDirs = excludeDirs
+        if (task?.patternType && task.patternType !== 'all') scanOptions.patternType = task.patternType
+        if (task?.pattern) scanOptions.pattern = task.pattern
+        try {
+          const fs = await analysisStore.scanFileStats(pid, scanOptions)
+          console.log('[ReportHome] scopeFiles: options=%o totalFiles=%d', scanOptions, fs?.totalFiles)
+          totalScopeFiles.value = fs?.totalFiles || 0
+        } catch {
+          totalScopeFiles.value = dash?.fileStats?.totalFiles || 0
+          console.warn('[ReportHome] scanFileStats failed, fallback to dash.fileStats.totalFiles=%d', totalScopeFiles.value)
         }
       }
 

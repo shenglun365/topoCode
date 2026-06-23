@@ -139,7 +139,7 @@ export class ZMQRouter extends EventEmitter {
 
     return new Promise<T>((resolve, reject) => {
       const timeoutMap: Record<string, number> = {
-        'project.import': 300000,
+        'project.import': 900000,
         'analysis.runTask': 600000,
         'analysis.clearProjectCacheTable': 120000,
         'report.generateProjectSummary': 120000,

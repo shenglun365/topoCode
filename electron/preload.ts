@@ -127,6 +127,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.deleteTask', params: { taskId } }),
     stopTask: (taskId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.stopTask', params: { taskId } }),
+    listRunningTasks: () =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.listRunningTasks', params: {} }),
     clearProjectCache: (projectId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.clearProjectCache', params: { projectId } }),
     getClearCacheCounts: (projectId: string) =>
@@ -197,6 +199,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.listPreSummaryFiles', params }),
     startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.startPreSummary', params }),
+    startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.startPreSummaryPipeline', params }),
     getFileSummary: (params: { taskId: string; file_path: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getFileSummary', params }),
     deleteFileSummary: (params: { taskId: string; file_path: string }) =>
@@ -240,6 +244,11 @@ contextBridge.exposeInMainWorld('api', {
       const listener = (_: any, data: any) => callback(data)
       ipcRenderer.on('event:task.error', listener)
       return () => ipcRenderer.removeListener('event:task.error', listener)
+    },
+    onStopped: (callback: (data: any) => void) => {
+      const listener = (_: any, data: any) => callback(data)
+      ipcRenderer.on('event:task.stopped', listener)
+      return () => ipcRenderer.removeListener('event:task.stopped', listener)
     },
   },
 

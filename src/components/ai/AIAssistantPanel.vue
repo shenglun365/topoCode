@@ -18,7 +18,7 @@ import hljs from 'highlight.js'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
-import { useCommunityStore } from '@/stores/community-store'
+import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useNavigationStore } from '@/stores/navigation'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useGraphCommandStore } from '@/stores/graph-command-store'
@@ -26,6 +26,7 @@ import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { useChatSession, type SessionPage } from '@/stores/chat-session-store'
 import { parseCommandTag, parseConfirmTag, parseSuggestTags, stripCommandTags } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
+import { ipc } from '@/services/ipc'
 
 const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
@@ -99,8 +100,8 @@ const DEFAULT_SYSTEM_PROMPT = [
   '你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。',
   '用户可输入 /help 或 /帮助 查看全部可用命令；当被问到"你能做什么"时主动提醒用户使用 /help。',
   '',
-  '可用 [CMD:] 命令：highlight, clearHighlight, focus, drill, rollUp, filterByQuality, filterByCoreness, filterBySize, hideNodes, clearFilter, setViewMode mode="force|table|heatmap", setEdgeType, resetView, openCommunityDetail, saveSnapshot, compareVersions, dispatchAgent',
-  '参数格式：key="value"，列表值逗号分隔。阈值：quality≥0.5高 ≤0.2低 | coreness≥3核心 | size>30大 ≤5小',
+  '可用 [CMD:] 命令：highlight, clearHighlight, focus, drill, rollUp, filterByQuality, filterByCoreness, filterBySize, hideNodes, clearFilter, setViewMode, setEdgeType, resetView, openCommunityDetail, saveSnapshot, compareVersions, dispatchAgent',
+  '参数格式：key="value"。阈值：quality≥0.5高 ≤0.2低 | coreness≥3核心 | size>30大 ≤5小',
   '',
   '对话使用中文回复，需要操作图时使用 [CMD:] 标签，每次最多 1-2 个命令。',
 ].join('\n')
@@ -112,13 +113,13 @@ const HELP_TEXT = [
   '| 指令 | 说明 |',
   '|------|------|',
   '| `/help` / `/帮助` | 显示本帮助 |',
-  '| `/select` | 切换组件选择模式（在左侧结构图/Tag中点选组件作为分析上下文） |',
+  '| `/select [--all/--include/--call/--l0/--l1/--l2/--clear]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`/`--l1`/`--l2` 按条件自动选取；`--clear` 清除已选 |',
   '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
   '| `/analyze all` | 同上 |',
-  '| `/analyze_components [-L zh\|en] [-j N] [-r N] [--agentic] [--summary-model <id>] [-c N]` | 对已选中的组件启动批量分析。「-L」指定语言，「-j」并发数（1-5），「-r」最大分析轮次（默认30，1-30），「--agentic」启用 Agentic 自主分析模式（含子任务摘要缓存），「--summary-model」指定文件摘要模型 ID（默认同主模型），「-c」摘要 LLM 并发数（默认1，1-10）|',
+  '| `/analyze_components` `[-L zh/en] [-j N] [-r N] [--agentic] [--summary-model <id>] [-c N] [--force] [--call/--include] [--l0/--l1/--l2]` | 对已选组件启动批量分析。「-L」语言，「-j」并发(1-5)，「-r」轮次(1-30)，「--agentic」自主分析，「--summary-model」摘要模型ID，「-c」摘要并发(1-10)，「--force」强制覆盖已分析组件，「--call/--include」边类型筛选，「--l0/--l1/--l2」层级筛选 |',
   '| `/presummary` | 查看文件预摘要概况（P0/P1/P2 文件数） |',
   '| `/presummary files P0/P1/P2 [页码]` | 分页查看某批次文件列表 |',
-  '| `/presummary start P0/P1/P2 (-n N)` | 启动某批次预摘要任务（-n 限文件数） |',
+  '| `/presummary start <batch> [-n N] [-j N]` | 启动预摘要任务。`<batch>` 可为 `P2`、`P0,P1,P2` 或 `all`。「-n」限文件数，「-j」并发数（1-10） |',
   '| `/presummary get <文件路径>` | 查询单个文件摘要内容 |',
   '| `/presummary delete <文件路径>` | 删除单个文件摘要缓存 |',
   '| `/presummary rerun <文件路径>` | 单个文件重跑摘要 |',
@@ -154,7 +155,7 @@ const HELP_TEXT = [
   '### 模式',
   '- **普通模式**：自由问答，AI 根据上下文自动使用图操作命令',
   '- **引导模式**：点击图上 🎓 按钮启动，AI 带你逐步了解项目架构',
-  '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮，在左侧结构图/Tag中点击选择要分析的组件，选中后直接发送分析请求',
+  '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮切换。无参数时手动点选；支持 `/select --include --l0` 等参数自动选取。选中后输入分析请求',
   '- **批量组件分析**：选择组件后，输入 `/analyze_components` 启动批量解析，结果写入 SQLite 并可在任务面板查看进度',
   '- **分析模式开关**：输入框下方 ⚡/🔬 按钮切换「快速模式」（单次 LLM 调用）和「深入分析」（Agent 多轮文件探索），',
   '  模式影响组件分析和整体架构分析的行为',
@@ -362,7 +363,7 @@ function handleCmdConfirm() {
     addMessage('user', cd.text)
     addMessage('system', 'Agent 分析任务已启动，请稍后查看结果...')
     if (activeTaskId.value) {
-      communityStore.triggerArchAnalysis(activeTaskId.value, 'INCLUDE', cd.args.level || 'L0')
+      communityStore.triggerArchAnalysis(activeTaskId.value, 'INCLUDE', cd.args.level || 'L0', undefined, undefined, cd.args.force === 'true')
         .catch(e => addMessage('error', String(e)))
     }
     return
@@ -409,37 +410,97 @@ async function handleSend() {
   // /cmd 指令检测
   if (text.startsWith('/')) {
     recordCommand(text)
-    // /select — 切换组件选择模式
-    if (text === '/select') {
+    // /select — 切换组件选择模式 或 按条件自动选取
+    const selectRe = /^\/select(?:\s+(.+))?$/i
+    const selectMatch = text.match(selectRe)
+    if (selectMatch) {
       addMessage('user', text)
       userInput.value = ''
-      selectionStore.toggleSelecting()
-      const status = selectionStore.selecting ? '已激活' : '已退出'
-      addMessage('system', `组件选择模式 ${status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。`)
+      const args = (selectMatch[1] || '').trim()
+      if (!args) {
+        // 无参数：切换选择模式（原行为）
+        selectionStore.toggleSelecting()
+        const status = selectionStore.selecting ? '已激活' : '已退出'
+        addMessage('system', `组件选择模式 ${status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。`)
+        return
+      }
+      if (/^--clear$/i.test(args)) {
+        selectionStore.clearAll()
+        addMessage('system', '已清除所有组件选择。')
+        return
+      }
+      // 校验未知参数
+      const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2']
+      const unknownFlags = args.split(/\s+/).filter(f => f.startsWith('--') && !VALID_SELECT_FLAGS.includes(f.toLowerCase()))
+      if (unknownFlags.length > 0) {
+        addMessage('system', `未知参数: ${unknownFlags.join('、')}。可用参数: ${VALID_SELECT_FLAGS.join(' ')}`)
+        return
+      }
+      // 按条件自动选取社区
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      const taskComs = communityStore.tasks[taskId]?.communities || []
+      if (taskComs.length === 0) { addMessage('system', '社区列表尚未加载，请先打开左侧结构图。'); return }
+      const edgeFilter = args.match(/--(include|call)/i)?.[1]?.toUpperCase()
+      const levelFilters = [...args.matchAll(/--l([012])/gi)].map(m => 'L' + m[1])
+      const wantAll = /--all/i.test(args)
+      const matching = taskComs.filter(c => {
+        if (!wantAll) {
+          if (edgeFilter && c.edgeType?.toUpperCase() !== edgeFilter) return false
+          if (levelFilters.length > 0 && !levelFilters.includes(c.level?.toUpperCase())) return false
+        }
+        return true
+      })
+      if (matching.length === 0) { addMessage('system', '未找到匹配的社区。'); return }
+      if (!selectionStore.selecting) selectionStore.toggleSelecting()
+      selectionStore.clearAll()
+      selectionStore.selectMany(matching.map(c => ({
+        id: c.communityId,
+        type: 'community' as const,
+        name: c.name || c.communityId,
+        taskId,
+        metadata: { nodeCount: c.nodeCount, fileCount: c.fileCount, qualityScore: c.qualityScore ?? undefined },
+      })))
+      addMessage('system', `已选中 ${matching.length} 个组件。可输入 /analyze_components 启动批量分析，或点选加减组件后发送消息。`)
       return
     }
     // /analyze_components — 批量分析已选中的组件
-    const acRe = /^\/analyze_components(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?(?:\s+-r\s+(\d+))?(?:\s+--agentic)?(?:\s+--summary-model\s+(\S+))?(?:\s+-c\s+(\d+))?$/i
+    // 新增过滤: --call / --include / --l0 / --l1 / --l2 (不指定则不过滤)
+    const acRe = /^\/analyze_components(?:\s+--force)?(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?(?:\s+-r\s+(\d+))?(?:\s+--agentic)?(?:\s+--summary-model\s+(\S+))?(?:\s+-c\s+(\d+))?(?:\s+(--call|--include))?(?:\s+(--l[012]))?(?:\s+(--l[012]))?(?:\s+(--l[012]))?$/i
     const acMatch = text.match(acRe)
     if (acMatch) {
-      if (selectionStore.selectedCount === 0) {
-        addMessage('user', text)
-        userInput.value = ''
-        addMessage('system', '尚未选择任何组件。请先用 /select 激活选择模式，然后在左侧点选组件。')
-        return
-      }
+      const force = text.includes('--force')
       const language = acMatch[1] || ''
       const concurrency = Math.max(1, Math.min(5, parseInt(acMatch[2] || '1')))
       const rawTurns = parseInt(acMatch[3] || '30')
       const maxTurns = Math.max(1, Math.min(30, rawTurns))
-      // mode 按钮优先于 --agentic 命令行参数
       const agentic = analysisMode.value === 'deep' || text.includes('--agentic')
       const summaryModel = acMatch[4] || ''
       const rawSubConc = parseInt(acMatch[5] || '1')
       const subagentConcurrency = Math.max(1, Math.min(10, rawSubConc))
+      const rawFlags = text.match(/--(call|include|l[012])/gi) || []
+      const edgeTypeFilter = rawFlags.find(f => f === '--call' || f === '--include')
+      const levelFilter = rawFlags.filter(f => /^--l[012]$/i.test(f)).map(f => f.toUpperCase().slice(2))
+
+      if (selectionStore.selectedCount === 0) {
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', '尚未选择任何组件。请先用 /select 激活选择模式，然后在左侧点选组件，或使用 /select --include/--call/--l0 等参数自动选取。')
+        return
+      }
       // 限制单次提交组件数
-      const MAX_COMPONENTS = 50
-      const selectedComps = [...selectionStore.selectedList]
+      const MAX_COMPONENTS = 100
+      let selectedComps = [...selectionStore.selectedList]
+      // 应用过滤
+      if (edgeTypeFilter || levelFilter.length > 0) {
+        selectedComps = selectedComps.filter(c => {
+          const et = c.edgeType?.toUpperCase?.() || ''
+          const lv = c.level?.toUpperCase?.() || ''
+          if (edgeTypeFilter && et !== edgeTypeFilter.replace('--', '').toUpperCase()) return false
+          if (levelFilter.length > 0 && !levelFilter.includes(lv)) return false
+          return true
+        })
+      }
       if (selectedComps.length > MAX_COMPONENTS) selectedComps.length = MAX_COMPONENTS
       // 将选中组件转为对话消息
       const compNames = selectedComps.map(r => r.name).join('、')
@@ -453,12 +514,13 @@ async function handleSend() {
       const turnHint = agentic && maxTurns !== 30 ? `，轮次 ${maxTurns}` : ''
       const modelHint = agentic && summaryModel ? `，摘要模型 ${summaryModel}` : ''
       const subConcHint = agentic && subagentConcurrency > 1 ? `，摘要并发 ${subagentConcurrency}` : ''
+      const forceHint = force ? '，强制覆盖' : '（跳过已分析）'
       const extraHint = modeHint + turnHint + modelHint + subConcHint + (modeHint ? '）' : '')
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${extraHint}${langHint}${concHint}，请到「任务」面板查看进度。`)
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${extraHint}${langHint}${concHint}${forceHint}，请到「任务」面板查看进度。`)
       // 退出选择模式（自动清空已选）
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       if (taskId) {
-        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic, maxTurns, summaryModel, subagentConcurrency, analysisMode.value)
+        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic, maxTurns, summaryModel, subagentConcurrency, analysisMode.value, force)
           .catch(e => addMessage('error', String(e)))
       }
       return
@@ -512,29 +574,60 @@ async function handleSend() {
       return
     }
     // /presummary start <batch> [-n N] [-j N]
-    const psStartRe = /^\/presummary\s+start\s+(P[012])\s*(.*)$/i
+    // batch: P0 / P0,P1 / P0, P1, P2 / all
+    const psStartRe = /^\/presummary\s+start\s+(P[012](?:\s*,\s*P[012])*|ALL|all)\s*(.*)$/i
     const psStartMatch = text.match(psStartRe)
     if (psStartMatch) {
       addMessage('user', text)
       userInput.value = ''
       const taskId = resolveTaskId()
       if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      const batch = psStartMatch[1].toUpperCase()
+
+      const batchRaw = psStartMatch[1]
       const rest = psStartMatch[2]
+      // 校验 rest 中是否有不认识的 - 前缀参数
+      const restTokens = rest.match(/-[a-z]\s+\S+/gi) || []
+      const unknownRest = restTokens.filter(t => !/^-(n|j)\s+\d+$/i.test(t.trim()))
+      if (unknownRest.length > 0) {
+        addMessage('system', `未知参数: ${unknownRest.join('、')}。可用: -n N（限文件数）, -j N（并发数）`)
+        return
+      }
       const limit = parseInt(rest.match(/-n\s+(\d+)/i)?.[1] || '0')
       const rawConc = parseInt(rest.match(/-j\s+(\d+)/i)?.[1] || '1')
       const subagentConcurrency = Math.max(1, Math.min(10, rawConc))
-      try {
-        const result = await communityStore.startPreSummary(taskId, batch, limit, subagentConcurrency)
-        if (result.allCached) {
-          addMessage('system', `预摘要 ${batch} 跳过: 全部 ${result.fileCount} 个文件已缓存，无需处理`)
-        } else if (result.success && result.agentTaskId) {
-          addMessage('system', `预摘要 ${batch} 已启动 (${result.fileCount} 文件${subagentConcurrency > 1 ? `，并发 ${subagentConcurrency}` : ''})。请到「解析任务」面板查看进度。`)
-        } else {
-          addMessage('system', `启动失败: ${result.error || '未知错误'}`)
-        }
-      } catch (e: any) {
-        addMessage('system', `启动失败: ${e.message || e}`)
+
+      // 解析批次列表
+      let batches: string[]
+      if (batchRaw.toUpperCase() === 'ALL') {
+        batches = ['P0', 'P1', 'P2']
+      } else {
+        batches = batchRaw.split(',').map(b => b.trim().toUpperCase())
+      }
+
+      if (batches.length > 1) {
+        // 多批次：调用社区 store 统一入口，与单批次路径一致
+        communityStore.startPreSummaryPipeline(taskId, batches, limit, subagentConcurrency)
+          .then((r: any) => {
+            addMessage('system', `预摘要已启动 (${batches.join(' → ')}，共 ${batches.length} 批次)。请到「解析任务」面板查看进度。`)
+          })
+          .catch((e: any) => {
+            addMessage('system', `启动失败: ${e.message || e}`)
+          })
+      } else {
+        // 单批次，走原有逻辑
+        communityStore.startPreSummary(taskId, batches[0], limit, subagentConcurrency)
+          .then((result: any) => {
+            if (result.allCached) {
+              addMessage('system', `预摘要 ${batches[0]} 跳过: 全部 ${result.fileCount} 个文件已缓存，无需处理`)
+            } else if (result.success && result.agentTaskId) {
+              addMessage('system', `预摘要 ${batches[0]} 已启动 (${result.fileCount} 文件${subagentConcurrency > 1 ? `，并发 ${subagentConcurrency}` : ''})。请到「解析任务」面板查看进度。`)
+            } else {
+              addMessage('system', `启动失败: ${result.error || '未知错误'}`)
+            }
+          })
+          .catch((e: any) => {
+            addMessage('system', `启动失败: ${e.message || e}`)
+          })
       }
       return
     }
@@ -623,6 +716,13 @@ async function handleSend() {
     if (parsed) {
       showCmdConfirm.value = true
       cmdConfirmData.value = { text, action: parsed.action, args: parsed.args }
+      return
+    }
+    // /arch/analyze/track/diff 命令解析失败 → 提示参数错误
+    if (/^\/(arch|analyze|track|diff)\s/.test(text)) {
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('system', '命令参数无法识别。可用参数: /arch all --level L0, /track --tag <名称>, /diff --from <v1> --to <v2>。详情输入 /help 查看。')
       return
     }
   }

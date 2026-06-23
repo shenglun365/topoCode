@@ -678,6 +678,7 @@ PROJECT_DB_TABLES_SQL = """
     CREATE INDEX IF NOT EXISTS idx_graph_node_file ON graph_node(task_id, file_path);
     CREATE INDEX IF NOT EXISTS idx_graph_node_name ON graph_node(task_id, name);
     CREATE INDEX IF NOT EXISTS idx_graph_node_qname ON graph_node(task_id, qualified_name);
+    CREATE INDEX IF NOT EXISTS idx_graph_node_id_task ON graph_node(id, task_id);
 
     -- ============================================
     -- graph_edge — 关系边 (任务级, v2 新增)

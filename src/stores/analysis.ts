@@ -80,7 +80,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     await ipc.analysis.stopTask(taskId)
     const task = tasks.value.find(t => t.id === taskId)
     if (task) {
-      task.status = 'cancelled'
+      task.status = 'stopping'
     }
   }
 
@@ -224,7 +224,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
       if (task) {
         task.status = 'done'
         task.progress = 100
-        task.error = null  // 清除之前的错误信息
+        task.error = null
       }
     })
 
@@ -233,6 +233,13 @@ export const useAnalysisStore = defineStore('analysis', () => {
       if (task) {
         task.status = 'error'
         task.error = data.error
+      }
+    })
+
+    ipc.analysis.onStopped((data) => {
+      const task = tasks.value.find(t => t.id === data.taskId)
+      if (task) {
+        task.status = 'cancelled'
       }
     })
   }

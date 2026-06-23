@@ -302,9 +302,8 @@ async function loadStats() {
     const hasScopes = selectedScopes.value.length > 0
     const scopes = hasScopes ? [...selectedScopes.value] : undefined
 
-    // 无目录选择时不传 selectedExtensions → 后端返回全部语言类型供用户查看
-    // 有目录选择时传 selectedExtensions → 后端只返回已选语言（节省带宽），前端补零避免消失
-    const filteredExtensions = hasScopes && selectedExtensions.value.length > 0
+    // 选了语言类型时传给后端过滤文件数；后端始终返回全部语言列表，不影响多选
+    const filteredExtensions = selectedExtensions.value.length > 0
       ? [...selectedExtensions.value]
       : undefined
 
@@ -378,8 +377,13 @@ watch([() => props.patternType, () => props.pattern, () => props.excludeDirs], (
 }, { immediate: false })
 
 // Watch scope selection — immediate refresh (no debounce)
-// 语言选择变动不触发刷新，只跟目录选择一起刷新
+// 目录选择变动触发刷新
 watch(selectedScopes, () => {
+  if (initialLoadDone) loadStats()
+}, { deep: true })
+
+// Watch extension selection — immediate refresh
+watch(selectedExtensions, () => {
   if (initialLoadDone) loadStats()
 }, { deep: true })
 

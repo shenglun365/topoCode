@@ -119,7 +119,15 @@ export const useFuncGroupStore = defineStore('funcGroup', () => {
     }
 
     function setActiveTab(group: FuncGroupId, tabId: string | null) {
-        context.value[group].activeTabId = tabId || undefined;
+        const ctx = context.value[group];
+        ctx.activeTabId = tabId || undefined;
+        // 同步 projectId：激活的 tab 可能属于另一个项目
+        if (tabId) {
+            const tab = ctx.tabs.find(t => t.id === tabId);
+            if (tab?.projectId && tab.projectId !== ctx.projectId) {
+                ctx.projectId = tab.projectId;
+            }
+        }
     }
 
     function moveTab(group: FuncGroupId, fromIdx: number, toIdx: number) {

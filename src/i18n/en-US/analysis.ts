@@ -4,6 +4,7 @@ export default { analysis: {
   editTask: 'Edit Task',
   runTask: 'Run Task',
   stopTask: 'Stop',
+  stoppingTask: 'Stopping…',
   deleteTask: 'Delete',
   rerunTask: 'Re-run',
   retryTask: 'Retry',

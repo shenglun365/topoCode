@@ -1992,7 +1992,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
 
         for entry in entries:
             # 每处理 100 个条目释放一次 event loop 并打印进度
-            if file_count % 500 == 0 and file_count > 0:
+            if file_count % 100 == 0 and file_count > 0:
                 await asyncio.sleep(0)
                 elapsed = time.time() - scan_t0
                 progress_pct = min(int(file_count / total_estimate * 100), 99)

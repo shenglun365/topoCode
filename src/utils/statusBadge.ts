@@ -1,6 +1,6 @@
 /** 任务/后端状态徽章工具 */
 
-export type TaskStatus = 'done' | 'running' | 'pending' | 'modified' | 'error' | 'cancelled'
+export type TaskStatus = 'done' | 'running' | 'pending' | 'modified' | 'error' | 'cancelled' | 'stopping'
 export type BackendStatus = 'running' | 'stopped' | 'error'
 
 const TASK_LABELS: Record<TaskStatus, string> = {
@@ -10,6 +10,7 @@ const TASK_LABELS: Record<TaskStatus, string> = {
   modified: '已修改',
   error: '失败',
   cancelled: '已取消',
+  stopping: '正在停止…',
 }
 
 const BACKEND_LABELS: Record<BackendStatus, string> = {
@@ -25,6 +26,7 @@ const TASK_COLORS: Record<TaskStatus, string> = {
   modified: 'var(--warning)',
   error: 'var(--error)',
   cancelled: 'var(--text-muted)',
+  stopping: 'var(--warning)',
 }
 
 const BACKEND_COLORS: Record<BackendStatus, string> = {

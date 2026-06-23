@@ -31,6 +31,7 @@ _FIELD_MAP = {
 
 # 预摘要失败计数（task_id → int），由 _cb 回调写入，getPreSummaryStatus 读取
 _ps_failed_counts: dict[str, int] = {}
+_rank_cache: dict[str, dict] = {}
 
 
 def register_analysis_methods(server, multi_db: MultiDBManager):
@@ -43,6 +44,23 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError("project_id is required")
         store = TaskStore(multi_db.main_db)
         return store.list_tasks(pid)
+
+    @server.register("analysis.listRunningTasks")
+    def list_running_tasks():
+        store = TaskStore(multi_db.main_db)
+        rows = store._db.execute(
+            "SELECT id, name, project_id FROM analysis_tasks WHERE status = 'running'"
+        ).fetchall()
+        running = [dict(r) for r in rows]
+        try:
+            from agent_workflow.agent_queue import get_global_queue
+            q = get_global_queue()
+            for aid, state in list(q._tasks.items()):
+                if state.status.name in ('RUNNING', 'QUEUED'):
+                    running.append({"id": aid, "name": f"[Agent] {state.task_id}", "project_id": ""})
+        except Exception:
+            pass
+        return running
 
     @server.register("analysis.createTask")
     def create_task(project_id=None, projectId=None,
@@ -462,10 +480,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             all_paths = store.list_file_paths()
             logger.debug(f"[scan_file_stats] {len(all_paths)} paths for directory tree")
 
-            # 3. 扩展名分布 — 跟随目录选项（scopes 过滤）
+            # 3. 扩展名分布 — 跟随目录选项（scopes 过滤），不受 selected_extensions 限制
             extensions = store.count_by_extensions(
                 scopes=final_scopes,
-                extensions=selected_extensions,
+                extensions=None,
                 exclude_dirs=exclude_dirs,
                 pattern_type=pattern_type,
                 pattern=pattern,
@@ -1307,10 +1325,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         try:
             rows = project_db.execute(
                 """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                           h.file_count, h.quality_score, COALESCE(g.edge_count, 0),
-                           g.metadata
+                           h.file_count, h.quality_score, h.edge_count,
+                           (SELECT g.metadata FROM graph_doc g
+                            WHERE g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                            LIMIT 1) AS metadata
                     FROM community_hierarchy h
-                    LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
                     WHERE h.task_id=? AND h.edge_type=?
                     ORDER BY h.comm_lv, h.comm_id""",
                 (tid, et)
@@ -1322,9 +1341,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             has_file_count = False
             rows = project_db.execute(
                 """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                           h.quality_score, COALESCE(g.edge_count, 0)
+                           h.quality_score, h.edge_count
                    FROM community_hierarchy h
-                   LEFT JOIN graph_doc g ON g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
                    WHERE h.task_id=? AND h.edge_type=?
                    ORDER BY h.comm_lv, h.comm_id""",
                 (tid, et)
@@ -1961,7 +1979,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.startArchAnalysis")
     def start_arch_analysis(task_id=None, taskId=None, edge_type=None, edgeType=None,
-                              level=None, model_id=None, modelId=None):
+                              level=None, model_id=None, modelId=None, force=False):
         """启动批量 LLM 社区分析 (ArchAnalyst 入口)"""
         tid = task_id or taskId
         et = edge_type or edgeType or "INCLUDE"
@@ -2027,6 +2045,21 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     existing_results[r["comm_id"]] = dict(r)
         except Exception:
             pass
+
+        # ── 跳过已分析社区（除非 force=True）──
+        if not force:
+            filtered = [c for c in communities if c["communityId"] not in existing_results]
+            skipped = len(communities) - len(filtered)
+            communities = filtered
+            if skipped:
+                logger.info(f"[startArchAnalysis] skipped {skipped} already-analyzed communities (use --force to override)")
+        else:
+            skipped = 0
+
+        if not communities:
+            logger.info(f"[startArchAnalysis] all communities already analyzed, nothing to do")
+            return {"taskId": tid, "success": True, "agentTaskId": None,
+                    "communities": 0, "skipped": skipped}
 
         for c in communities:
             cid = c["communityId"]
@@ -2121,7 +2154,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             on_complete=_make_agent_history_cb(pid, project_db, tid, "analyze"))
 
         return {"taskId": tid, "success": True, "agentTaskId": agent_id,
-                "communities": len(communities)}
+                "communities": len(communities), "skipped": skipped}
 
     @server.register("analysis.getAgentProgress")
     def get_agent_progress(agent_task_id=None, agentTaskId=None):
@@ -2178,23 +2211,29 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     # ==================== 文件预摘要 ====================
 
-    def _resolve_node_list_item(item: str, task_id: str, project_db) -> list[str]:
-        """将 graph_doc.node_list 中的条目转为文件路径列表。
-        如果 item 是绝对/相对路径则直接返回；否则当作 graph_node.id 解析。"""
+    def _resolve_node_list_items(items: list, task_id: str, project_db) -> dict[str, list[str]]:
+        """批量将 node_list 条目解析为文件路径。返回 item → [resolved_path] 映射。"""
         import os as _os
-        if not item or not isinstance(item, str):
-            return []
-        if _os.path.isabs(item) or '/' in item:
-            return [item]
-        # 可能是 graph_node.id → 解析为 file_path
-        try:
-            rows = project_db.execute(
-                "SELECT DISTINCT file_path FROM graph_node WHERE id=? AND task_id=? AND file_path!=''",
-                (item, task_id)
-            ).fetchall()
-            return [r[0] for r in rows if r[0]]
-        except Exception:
-            return []
+        result: dict[str, list[str]] = {}
+        unresolved_ids: list[str] = []
+        for item in items:
+            if not item or not isinstance(item, str):
+                continue
+            if _os.path.isabs(item) or '/' in item:
+                result[item] = [item]
+            else:
+                unresolved_ids.append(item)
+        if unresolved_ids:
+            placeholders = ",".join("?" for _ in unresolved_ids)
+            try:
+                for row in project_db.execute(
+                    f"SELECT id, file_path FROM graph_node WHERE id IN ({placeholders}) AND task_id=? AND file_path!=''",
+                    (*unresolved_ids, task_id)
+                ).fetchall():
+                    result.setdefault(row["id"], []).append(row["file_path"])
+            except Exception:
+                pass
+        return result
 
     def _compute_file_ranks(task_id: str, project_db, components: list,
                              project_root: str = "") -> dict:
@@ -2203,28 +2242,49 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         import json as _rj
         import os as _os
 
-        # 1. 收集所有组件 node_list → 文件路径
+        # 1. 收集所有组件 node_list → 文件路径（批查询消除 N+1）
         file_to_comms: dict[str, set[str]] = {}
         file_edges: Counter = Counter()
         file_sizes: dict[str, int] = {}
         comm_quality: dict[str, float] = {}
 
+        # 1a. 批查询所有组件的 node_list
+        cid_list = [c.get("id", "") for c in components if c.get("id")]
+        doc_map: dict[str, str] = {}
+        if cid_list:
+            placeholders = ",".join("?" for _ in cid_list)
+            try:
+                for row in project_db.execute(
+                    f"SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND comm_id IN ({placeholders})",
+                    (task_id, *cid_list)
+                ).fetchall():
+                    doc_map[row["comm_id"]] = row["node_list"]
+            except Exception:
+                pass
+
+        # 1b. 先收集所有 node_list item，统一批解析
+        all_cid_items: dict[str, list] = {}
+        for c in components:
+            cid = c.get("id", "")
+            node_list_json = doc_map.get(cid, "")
+            if not node_list_json:
+                continue
+            try:
+                raw = _rj.loads(node_list_json) if isinstance(node_list_json, str) else node_list_json
+                all_cid_items[cid] = raw
+            except Exception:
+                pass
+        # 去重收集所有待解析 item
+        all_items = list({item for items in all_cid_items.values() for item in items if isinstance(item, str) and item})
+        path_map = _resolve_node_list_items(all_items, task_id, project_db)
+
         for c in components:
             cid = c.get("id", "")
             meta = c.get("metadata", {}) or {}
             comm_quality[cid] = float(meta.get("qualityScore", 0) or 0)
-            try:
-                doc = project_db.execute(
-                    "SELECT node_list FROM graph_doc WHERE task_id=? AND comm_id=? LIMIT 1",
-                    (task_id, cid)
-                ).fetchone()
-                if doc and doc["node_list"]:
-                    raw = _rj.loads(doc["node_list"]) if isinstance(doc["node_list"], str) else doc["node_list"]
-                    for item in raw:
-                        for resolved in _resolve_node_list_item(item, task_id, project_db):
-                            file_to_comms.setdefault(resolved, set()).add(cid)
-            except Exception:
-                pass
+            for item in all_cid_items.get(cid, []):
+                for resolved in path_map.get(item, []):
+                    file_to_comms.setdefault(resolved, set()).add(cid)
 
         # 2. 查文件大小（node_list 存绝对路径，source_files 存相对路径）
         if file_to_comms:
@@ -2335,10 +2395,15 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        comps = _get_l0_comps(project_db, tid)
-        rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
+        # 内存缓存 rank_data（L0 组件和排名在分析完成后不变）
+        cache_key = f"ranks:{tid}"
+        rank_data = _rank_cache.get(cache_key)
+        if rank_data is None:
+            comps = _get_l0_comps(project_db, tid)
+            rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
+            _rank_cache[cache_key] = rank_data
 
-        # 查已缓存文件数 + 按批次统计
+        # 查已缓存文件数 + 按批次统计（每次轮询只查 COUNT）
         cached_count = 0
         batch_cached = {"P0": 0, "P1": 0, "P2": 0}
         try:
@@ -2374,8 +2439,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        comps = _get_l0_comps(project_db, tid)
-        rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
+        cache_key = f"ranks:{tid}"
+        rank_data = _rank_cache.get(cache_key)
+        if rank_data is None:
+            comps = _get_l0_comps(project_db, tid)
+            rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
+            _rank_cache[cache_key] = rank_data
         batch_files = [f for f in rank_data["files"] if f["batch"] == batch]
         total = len(batch_files)
         start = (page - 1) * page_size
@@ -2407,6 +2476,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     def start_pre_summary(task_id=None, taskId=None, batch="P0", limit=0,
                           subagent_concurrency=None, subagentConcurrency=None):
         """启动预摘要 agent 任务"""
+        subagent_concurrency = subagent_concurrency if subagent_concurrency is not None else (subagentConcurrency or 1)
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
@@ -2416,6 +2486,31 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError(f"Task {tid} not found")
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
+        return _launch_pre_summary_batch(tid, pid, project_db, batch, limit, subagent_concurrency)
+
+    @server.register("analysis.startPreSummaryPipeline")
+    def start_pre_summary_pipeline(task_id=None, taskId=None, batches=None,
+                                    limit=0, subagent_concurrency=None,
+                                    subagentConcurrency=None):
+        """链式顺序启动多个预摘要批次。"""
+        subagent_concurrency = subagent_concurrency if subagent_concurrency is not None else (subagentConcurrency or 1)
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        batches = batches or ["P0", "P1", "P2"]
+        result = _chain_start_pre_summary(tid, pid, project_db, batches, 0, limit, subagent_concurrency)
+        agent_task_id = result.get("agentTaskId", "") if result else ""
+        file_count = result.get("fileCount", 0) if result else 0
+        return {"success": True, "batches": batches, "total": len(batches), "agentTaskId": agent_task_id, "fileCount": file_count}
+
+    def _launch_pre_summary_batch(tid, pid, project_db, batch="P0", limit=0,
+                                   subagent_concurrency=None, on_complete=None):
 
         comps = _get_l0_comps(project_db, tid)
 
@@ -2445,6 +2540,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 快速跳过: 所有文件均已缓存
         if cached_paths and len(cached_paths) == len(batch_files):
             logger.info("[startPreSummary] all %d files already cached, skipping", len(batch_files))
+            # 触发链式回调（如有），继续下一批次
+            if on_complete:
+                on_complete({"status": "completed", "failed_count": 0})
             return {"success": True, "allCached": True, "fileCount": len(batch_files), "cachedCount": len(cached_paths)}
         # 部分缓存: 仅提交未缓存文件（路径格式一致，直接比较）
         if cached_paths:
@@ -2453,7 +2551,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             logger.info("[startPreSummary] %d/%d files cached, submitting %d uncached",
                        len(cached_paths), n_total, len(batch_files))
 
-        raw_sub_conc = subagent_concurrency if subagent_concurrency is not None else subagentConcurrency
+        raw_sub_conc = subagent_concurrency if subagent_concurrency is not None else 1
         sub_conc = max(1, min(10, int(raw_sub_conc or 1)))
 
         context = {
@@ -2481,21 +2579,76 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         except Exception:
             pass
 
-        def _cb(state):
-            fc = state.get("failed_count", 0)
-            if fc:
-                _ps_failed_counts[tid] = fc
-                logger.info(f"[startPreSummary] done: failed_count={fc}")
-            else:
-                logger.info(f"[startPreSummary] done: {state}")
+        cb = on_complete if on_complete else (lambda state: logger.info(f"[startPreSummary] done: {state}"))
+        # 同时保存到 agent_task_history，前端通过 getAgentTaskHistory 可查到
+        history_cb = _make_agent_history_cb(pid, project_db, tid, "presummary")
+        if on_complete:
+            orig_cb = on_complete
+            def _combined_cb(state):
+                history_cb(state)
+                orig_cb(state)
+            cb = _combined_cb
+        else:
+            cb = history_cb
 
         agent_id = router.dispatch(
-            "presummary_files", tid, context, on_complete=_cb)
+            "presummary_files", tid, context, on_complete=cb)
+
+        # 立即写入一条 running 记录到 agent_task_history，前端 getAgentTaskHistory 可查到
+        try:
+            from store.analysis_store import AnalysisStore
+            import datetime as _dt
+            s = AnalysisStore(project_db)
+            # 写入前清理同 task 下旧的 presummary_files running 记录，防止残留
+            s._db.execute(
+                "UPDATE agent_task_history SET status='cancelled', finished_at=datetime('now') "
+                "WHERE task_id=? AND action='presummary_files' AND status='running'",
+                (tid,)
+            )
+            s._db.commit()
+            s.save_agent_task_history({
+                "project_id": pid,
+                "task_id": tid,
+                "agent_id": agent_id,
+                "action": "presummary_files",
+                "status": "running",
+                "steps": "",
+                "message": "",
+                "error": "",
+                "created_at": _dt.datetime.now().isoformat(),
+                "finished_at": None,
+            })
+        except Exception as e:
+            logger.warning(f"[startPreSummary] save running history failed: {e}")
 
         from agent_workflow.agent_queue import get_global_queue
         queue = get_global_queue()
         return {"success": True, "agentTaskId": agent_id,
                 "fileCount": len(batch_files)}
+
+    def _chain_start_pre_summary(tid, pid, project_db, batches, idx=0, limit=0, subagent_concurrency=1):
+        """链式顺序启动预摘要批次：前一批完成后触发下一批。
+        返回第一批的启动结果（含 agentTaskId），后续批次通过回调链式触发。
+        """
+        if idx >= len(batches):
+            logger.info("[chainPreSummary] all batches done: %s", batches)
+            return {}
+        batch = batches[idx]
+        logger.info("[chainPreSummary] starting batch %s (%d/%d)", batch, idx + 1, len(batches))
+
+        def _chain_cb(state):
+            fc = state.get("failed_count", 0)
+            if fc:
+                _ps_failed_counts[tid] = fc
+            st = state.get("status", "")
+            if st in ("cancelled", "failed"):
+                logger.info("[chainPreSummary] batch %s %s, stopping chain", batch, st)
+                return
+            logger.info("[chainPreSummary] batch %s done, starting next", batch)
+            _chain_start_pre_summary(tid, pid, project_db, batches, idx + 1, limit, subagent_concurrency)
+
+        first_result = _launch_pre_summary_batch(tid, pid, project_db, batch, limit, subagent_concurrency, on_complete=_chain_cb)
+        return first_result or {}
 
     @server.register("analysis.getFileSummary")
     def get_file_summary(task_id=None, taskId=None, file_path=None):
@@ -2565,7 +2718,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                            agentic=None, max_turns=None, maxTurns=None,
                            summary_model_id=None, summaryModelId=None,
                            subagent_concurrency=None, subagentConcurrency=None,
-                           analysis_mode=None, analysisMode=None):
+                           analysis_mode=None, analysisMode=None,
+                           force=False):
         """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
         tid = task_id or taskId
         if not tid:
@@ -2573,6 +2727,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         comps = components or []
         if not comps:
             return {"success": False, "error": "no components specified"}
+        total_requested = len(comps)
         lang = language or language_ or ""
         conc = max(1, min(int(concurrency or 1), 5))
         agentic_mode = bool(agentic)
@@ -2647,6 +2802,40 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             except Exception:
                 pass
 
+            # ── 跳过已分析组件（除非 force=True）──
+            if not force:
+                analyzed_ids = set(existing_results.keys())
+                # 也检查非社区组件的分析记录
+                try:
+                    rows = project_db.execute(
+                        "SELECT component_id, component_type FROM component_analysis WHERE task_id=?",
+                        (tid,)
+                    ).fetchall()
+                    for r in rows:
+                        analyzed_ids.add(f"{r['component_type']}:{r['component_id']}")
+                except Exception:
+                    pass
+                filtered = []
+                for c in comps:
+                    cid = c.get("id", "")
+                    if c.get("type") == "community" and cid.startswith("comm-"):
+                        if cid in analyzed_ids or f"community:{cid}" in analyzed_ids:
+                            continue
+                    else:
+                        key = f"{c.get('type', '')}:{cid}"
+                        if key in analyzed_ids:
+                            continue
+                    filtered.append(c)
+                skipped = len(comps) - len(filtered)
+                comps = filtered
+                if skipped:
+                    logger.info(f"[analyzeComponents] skipped {skipped} already-analyzed components (use --force to override)")
+                if not comps:
+                    logger.info(f"[analyzeComponents] all {skipped} components already analyzed, nothing to do")
+                    return {"success": True, "agentTaskId": None, "skipped": skipped}
+            else:
+                skipped = 0
+
             for c in comps:
                 cid = c.get("id", "")
                 if not (c.get("type") == "community" and cid.startswith("comm-")):
@@ -2679,7 +2868,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     "nodeCount": meta.get("nodeCount", 0),
                     "fileCount": meta.get("fileCount", 0),
                     "qualityScore": meta.get("qualityScore"),
-                    "edgeCount": doc["edge_count"] if doc and doc.get("edge_count") else 0,
+                    "edgeCount": doc["edge_count"] if doc else 0,
                     "edgeLabel": edge_label,
                 }
 
@@ -2744,26 +2933,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         "status": result.get("status", "completed"),
                     })
                     logger.info(f"[analyzeComponents] _save_fn saved component_analysis: {comp_id} status={result.get('status','completed')}")
-                    # 同步写入 community_llm_results 使标签视图可见
-                    if comp_type == "community" and comp_id.startswith("comm-"):
-                        parts = comp_id.split("-")
-                        edge_type = "INCLUDE"
-                        comm_lv = "L0"
-                        try:
-                            if len(parts) >= 4:
-                                edge_key = parts[2]
-                                edge_type = "INCLUDE" if edge_key == "incl" else "CALL" if edge_key == "call" else "INCLUDE"
-                                comm_lv = parts[3] if parts[3].startswith("L") else "L0"
-                        except Exception:
-                            pass
-                        s.bulk_insert_llm_results([{
-                            "task_id": result.get("task_id", tid),
-                            "edge_type": edge_type,
-                            "comm_lv": comm_lv,
-                            "comm_id": comp_id,
-                            "name": aname,
-                            "summary": asummary,
-                        }])
                 except Exception as e:
                     logger.error(f"[analyzeComponents] _save_fn failed: {e}", exc_info=True)
 
@@ -2806,11 +2975,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             route_action = "agentic_analyze_components" if agentic_mode else "analyze_components"
             agent_id = router.dispatch(route_action, tid, context,
                 on_complete=_make_agent_history_cb(pid, project_db, tid, route_action))
-            return {"success": True, "agentTaskId": agent_id}
+            return {"success": True, "agentTaskId": agent_id, "skipped": skipped}
 
         except Exception as e:
             logger.exception(f"[analyzeComponents] handler failed: {e}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": str(e), "skipped": 0}
 
     @server.register("analysis.getComponentAnalysisResults")
     def get_component_analysis_results(task_id=None, taskId=None, component_ids=None, componentIds=None):

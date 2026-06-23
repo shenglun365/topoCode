@@ -210,6 +210,9 @@ RPC_IDS: dict[str, str] = {
     "graph.compareWithArchived":    "API-149",
     "graph.promoteTimelineEntry":   "API-150",
     "graph.timelineGC":             "API-151",
+    "analysis.startPreSummary":    "API-152",
+    "analysis.startPreSummaryPipeline": "API-153",
+    "analysis.analyzeComponents":  "API-154",
 }
 
 

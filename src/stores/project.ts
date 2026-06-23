@@ -95,6 +95,10 @@ export const useProjectStore = defineStore('project', () => {
         importing.value = false
         importProgress.value = null
         importStatus.value = ''
+        // 超时/异常后导入仍可能完成，重新拉取项目列表
+        ipc.project.list().then(list => {
+          projects.value = list
+        }).catch(() => {})
       }
     })
   }
@@ -106,6 +110,43 @@ export const useProjectStore = defineStore('project', () => {
     )
     if (existing) return null
 
+    // 前置校验：检查是否有正在执行的分析任务
+    const { useConfirm } = await import('@/composables/useConfirm')
+    const { confirmChoice } = useConfirm()
+    const running = await ipc.analysis.listRunningTasks()
+    if (running && running.length > 0) {
+      const names = running.map((r: any) => r.name).join('、')
+      const choice = await confirmChoice(
+        `检测到 ${running.length} 个正在执行的分析任务（${names}）。请选择处理方式：`,
+        [
+          { label: '停止任务并导入', value: 'stop', variant: 'danger' },
+          { label: '等待完成后导入', value: 'wait', variant: 'warning' },
+          { label: '取消导入', value: 'cancel', variant: 'ghost' },
+        ]
+      )
+      if (choice === 'cancel') return null
+      if (choice === 'stop') {
+        for (const r of running) {
+          if (!r.id) continue
+          try {
+            if (r.name && r.name.startsWith('[Agent]')) {
+              await ipc.analysis.cancelAgentTask({ agentTaskId: r.id })
+            } else {
+              const store = useAnalysisStore()
+              await store.stopTask(r.id)
+            }
+          } catch { /* skip */ }
+        }
+      }
+      if (choice === 'wait') {
+        while (true) {
+          const still = await ipc.analysis.listRunningTasks()
+          if (!still || still.length === 0) break
+          await new Promise(r => setTimeout(r, 3000))
+        }
+      }
+    }
+
     initImportListener()
     importing.value = true
     importProgress.value = 0
@@ -116,6 +157,9 @@ export const useProjectStore = defineStore('project', () => {
       if (!project) return null
       projects.value.push(project)
       return project
+    } catch (e) {
+      console.warn('[importProject] import IPC failed, backend may still be processing:', e)
+      return null
     } finally {
       // 等待 backend 发布 100% 事件后再重置
       setTimeout(() => {
