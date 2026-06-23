@@ -111,12 +111,13 @@ function buildCytoscape() {
           _hasChildren: !!n.hasChildren,
           _isMerged: !!n.isMerged,
           _isExternal: !!n.isExternal,
+          _isFile: !!n.isFile,
           _compareState: n.compareState || '',
           _highlighted: hl.has(n.id),
           _color: color,
           _radius: r,
         },
-        classes: n.isMerged ? 'merged' : (n.hasChildren ? 'drillable' : 'leaf'),
+        classes: n.isMerged ? 'merged' : (n.isFile ? 'file' : (n.hasChildren ? 'drillable' : 'leaf')),
         selected: false,
         locked: false,
       }
@@ -187,6 +188,10 @@ function buildCytoscape() {
     {
       selector: 'node.drillable',
       style: { 'border-style': 'double' },
+    },
+    {
+      selector: 'node.file',
+      style: { 'shape': 'round-rectangle', 'border-style': 'solid', 'border-width': 1, 'background-opacity': 0.12 },
     },
     {
       selector: 'node:active',
@@ -310,6 +315,7 @@ function buildCytoscape() {
     const startX = cx - gridW / 2
 
     isoNodes.forEach((n, i) => {
+      if (props.positions?.[n.id()]) return
       const col = i % cols
       const row = Math.floor(i / cols)
       n.position({

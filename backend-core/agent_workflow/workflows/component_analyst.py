@@ -2,7 +2,7 @@
 ComponentAnalyst — 组件分析工作流 (Agent 模式)。
 
 对用户选中的组件执行 LLM 分析，提取组件名称和功能概要，
-每个组件分析后立即写入 SQLite component_analysis 表。
+每个组件分析后立即写入 SQLite community_llm_results 表。
 """
 
 from __future__ import annotations

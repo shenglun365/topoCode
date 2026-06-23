@@ -527,7 +527,6 @@ export interface IPCAPI {
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
     // 组件分析
     analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
-    getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) => Promise<{ results: Array<{ componentId: string; componentType: string; analyzedName: string | null; functionalSummary: string | null; status: string; analyzedAt: string }> }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
@@ -541,6 +540,10 @@ export interface IPCAPI {
       nameManual: string | null;
     }> }>
     updateCommunityName: (params: { taskId: string; edgeType: string; commLv: string; commId: string; name: string }) => Promise<{ success: boolean }>
+    getCommunityFileGraph: (params: { taskId: string; edgeType: string; commId: string }) => Promise<{
+      nodes: Array<{ id: string; label: string; filePath: string }>
+      edges: Array<{ source: string; target: string; direction?: string }>
+    }>
     onProgress: (cb: (data: TaskProgressEvent) => void) => void
     onComplete: (cb: (data: TaskCompleteEvent) => void) => void
     onError: (cb: (data: TaskErrorEvent) => void) => void

@@ -772,40 +772,25 @@ PROJECT_DB_TABLES_SQL = """
     -- community_llm_results — 社区 LLM 分析结果 (任务级)
     -- ============================================
     CREATE TABLE IF NOT EXISTS community_llm_results (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id     TEXT    NOT NULL,
-        edge_type   TEXT    NOT NULL,
-        comm_lv     TEXT    NOT NULL,
-        comm_id     TEXT    NOT NULL,
-        name        TEXT,
-        summary     TEXT,
-        model_id    TEXT,
-        template_id TEXT,
-        name_manual TEXT,
-        created_at  TEXT DEFAULT (datetime('now')),
-        updated_at  TEXT DEFAULT (datetime('now')),
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id         TEXT    NOT NULL,
+        edge_type       TEXT    NOT NULL,
+        comm_lv         TEXT    NOT NULL,
+        comm_id         TEXT    NOT NULL,
+        name            TEXT,
+        summary         TEXT,
+        model_id        TEXT,
+        template_id     TEXT,
+        name_manual     TEXT,
+        component_type  TEXT    DEFAULT 'community',
+        status          TEXT    DEFAULT 'completed',
+        created_at      TEXT    DEFAULT (datetime('now')),
+        updated_at      TEXT    DEFAULT (datetime('now')),
         UNIQUE(task_id, edge_type, comm_lv, comm_id)
     );
     CREATE INDEX IF NOT EXISTS idx_llm_res_task ON community_llm_results(task_id);
     CREATE INDEX IF NOT EXISTS idx_llm_res_type ON community_llm_results(task_id, edge_type);
     CREATE INDEX IF NOT EXISTS idx_llm_res_sort ON community_llm_results(task_id, edge_type, comm_lv, comm_id);
-
-    -- ============================================
-    -- component_analysis — 组件分析结果 (任务级, 按需分析)
-    -- ============================================
-    CREATE TABLE IF NOT EXISTS component_analysis (
-        id                INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_id           TEXT    NOT NULL,
-        component_id      TEXT    NOT NULL,
-        component_type    TEXT    NOT NULL DEFAULT 'community',
-        analyzed_name     TEXT,
-        functional_summary TEXT,
-        status            TEXT    DEFAULT 'pending',
-        analyzed_at       TEXT    DEFAULT (datetime('now')),
-        UNIQUE(task_id, component_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_ca_task ON component_analysis(task_id);
-    CREATE INDEX IF NOT EXISTS idx_ca_comp ON component_analysis(task_id, component_id);
 
     -- Agent 任务历史记录
     CREATE TABLE IF NOT EXISTS agent_task_history (
@@ -1200,21 +1185,54 @@ class MultiDBManager:
         except Exception:
             pass
 
-        # 新建 component_analysis 表（对旧项目库兼容）
+        # 为 community_llm_results 添加新增列（兼容旧库）
+        try:
+            cursor = project_db.execute("PRAGMA table_info(community_llm_results)")
+            llm_cols = {row[1] for row in cursor.fetchall()}
+            for col in ('component_type', 'status'):
+                if col not in llm_cols:
+                    project_db.execute(f'ALTER TABLE community_llm_results ADD COLUMN "{col}" TEXT')
+        except Exception:
+            pass
+
+        # 迁移旧 component_analysis 数据到 community_llm_results（兼容旧库）
+        # 从社区组件 ID 中解析真实 edge_type（comm-xxx-incl-... → INCLUDE, comm-xxx-call-... → CALL）
         try:
             project_db.execute("""
-                CREATE TABLE IF NOT EXISTS component_analysis (
-                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id           TEXT    NOT NULL,
-                    component_id      TEXT    NOT NULL,
-                    component_type    TEXT    NOT NULL DEFAULT 'community',
-                    analyzed_name     TEXT,
-                    functional_summary TEXT,
-                    status            TEXT    DEFAULT 'pending',
-                    analyzed_at       TEXT    DEFAULT (datetime('now')),
-                    UNIQUE(task_id, component_id)
-                )
+                INSERT OR IGNORE INTO community_llm_results
+                    (task_id, edge_type, comm_lv, comm_id, name, summary, component_type, status, created_at)
+                SELECT
+                    task_id,
+                    CASE
+                        WHEN component_type='community' AND component_id LIKE 'comm-%-incl-%' THEN 'INCLUDE'
+                        WHEN component_type='community' AND component_id LIKE 'comm-%-call-%' THEN 'CALL'
+                        ELSE ''
+                    END,
+                    'L0', component_id, analyzed_name, functional_summary,
+                    component_type, status, analyzed_at
+                FROM component_analysis
             """)
+        except Exception:
+            pass
+        # 修复已迁移但 edge_type='' 的数据（component_analysis 表已不存在的旧迁移数据）
+        try:
+            project_db.execute("""
+                UPDATE community_llm_results
+                SET edge_type = 'INCLUDE'
+                WHERE edge_type = '' AND component_type = 'community'
+                  AND comm_id LIKE 'comm-%-incl-%'
+            """)
+            project_db.execute("""
+                UPDATE community_llm_results
+                SET edge_type = 'CALL'
+                WHERE edge_type = '' AND component_type = 'community'
+                  AND comm_id LIKE 'comm-%-call-%'
+            """)
+        except Exception:
+            pass
+        # 删除旧表
+        try:
+            project_db.execute("DROP TABLE IF EXISTS component_analysis")
         except Exception:
             pass
 

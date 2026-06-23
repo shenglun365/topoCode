@@ -189,7 +189,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(project_id)
         tables_for_task = [
             "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
-            "community_llm_results", "component_analysis",
+            "community_llm_results",
             "report_subdocs", "file_summaries", "agent_task_history",
         ]
         for table in tables_for_task:
@@ -226,7 +226,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
             "community_llm_results",
             "ast_data", "dependencies", "call_chains", "components",
-            "component_analysis", "ai_qa", "file_summaries",
+            "ai_qa", "file_summaries",
             "report_subdocs", "agent_task_history",
         ]
         for table in tables_to_clear:
@@ -281,7 +281,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         tables = [
             "ast_data", "dependencies", "call_chains", "community_hierarchy",
             "community_llm_results", "graph_node", "graph_edge", "graph_doc",
-            "components", "component_analysis", "ai_qa", "file_summaries",
+            "components", "ai_qa", "file_summaries",
         ]
         counts = {}
         for table in tables:
@@ -1915,6 +1915,48 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             result[cid] = [str(n) for n in nodes if n]
         return result
 
+    @server.register("analysis.getCommunityFileGraph")
+    def get_community_file_graph(task_id=None, taskId=None, edge_type=None, edgeType=None,
+                                  comm_id=None, commId=None):
+        """返回叶子社区的文件级图数据（节点 + 边），来自 graph_doc 的 node_list / edge_list。"""
+        tid = task_id or taskId
+        et = edge_type or edgeType or 'INCLUDE'
+        cid = comm_id or commId
+        if not tid or not cid:
+            raise ValueError("task_id and comm_id are required")
+        task = TaskStore(multi_db.main_db).get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        project_db = multi_db.get_project_db(task["project_id"])
+        row = project_db.execute(
+            "SELECT node_list, edge_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_id=?",
+            (tid, et, cid)
+        ).fetchone()
+        if not row:
+            return {"nodes": [], "edges": []}
+        file_nodes = set()
+        try:
+            raw_nodes = json.loads(row["node_list"]) if row["node_list"] else []
+            file_nodes = {str(n) for n in raw_nodes if n}
+        except Exception:
+            pass
+        file_edges = []
+        try:
+            raw_edges = json.loads(row["edge_list"]) if row["edge_list"] else []
+            for e in raw_edges:
+                src = str(e.get("source", ""))
+                tgt = str(e.get("target", ""))
+                if src and tgt:
+                    file_edges.append({"source": src, "target": tgt,
+                                       "direction": e.get("direction", "")})
+        except Exception:
+            pass
+        nodes = []
+        for fp in sorted(file_nodes):
+            fname = fp.rstrip("/").split("/")[-1] if "/" in fp else fp
+            nodes.append({"id": fp, "label": fname, "filePath": fp})
+        return {"nodes": nodes, "edges": file_edges}
+
     # ==================== 架构 Agent 操作 ====================
 
     def _get_project_root(pid):
@@ -2119,8 +2161,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "task_id": kw.get("taskId", tid), "edge_type": kw.get("edgeType", et),
                 "comm_lv": kw.get("commLv", lv), "comm_id": kw.get("commId", ""),
                 "name": kw.get("name", ""), "summary": kw.get("summary", ""),
-                "mermaid": kw.get("mermaid", ""), "plantuml": kw.get("plantuml", ""),
                 "model_id": mid or "default", "template_id": "community_analyze",
+                "component_type": "community",
+                "status": "completed",
             }])
 
         # 项目级上下文（技术栈/测试/入口点等）
@@ -2792,29 +2835,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             except Exception:
                 pass
             try:
-                for et_chk in ("INCLUDE", "CALL"):
-                    rows = project_db.execute(
-                        "SELECT comm_id, name, summary FROM community_llm_results WHERE task_id=? AND edge_type=?",
-                        (tid, et_chk)
-                    ).fetchall()
-                    for r in rows:
-                        existing_results[r["comm_id"]] = dict(r)
+                rows = project_db.execute(
+                    "SELECT comm_id, component_type FROM community_llm_results WHERE task_id=?",
+                    (tid,)
+                ).fetchall()
+                for r in rows:
+                    existing_results[r["comm_id"]] = dict(r)
             except Exception:
                 pass
 
             # ── 跳过已分析组件（除非 force=True）──
             if not force:
                 analyzed_ids = set(existing_results.keys())
-                # 也检查非社区组件的分析记录
-                try:
-                    rows = project_db.execute(
-                        "SELECT component_id, component_type FROM component_analysis WHERE task_id=?",
-                        (tid,)
-                    ).fetchall()
-                    for r in rows:
-                        analyzed_ids.add(f"{r['component_type']}:{r['component_id']}")
-                except Exception:
-                    pass
                 filtered = []
                 for c in comps:
                     cid = c.get("id", "")
@@ -2917,6 +2949,19 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             from agent_workflow.router import create_default_router
             from store.analysis_store import AnalysisStore
 
+            # 构建组件→(edge_type, comm_lv) 查找表
+            comp_edge_lv = {}
+            for ec in enriched_comps:
+                cid = ec["id"]
+                if ec.get("type") == "community" and cid.startswith("comm-"):
+                    parts = cid.split("-")
+                    et = {"incl": "INCLUDE", "call": "CALL"}.get(parts[2] if len(parts) > 2 else "", "INCLUDE")
+                    lv = parts[3] if len(parts) > 3 else "L0"
+                else:
+                    et = ""
+                    lv = "L0"
+                comp_edge_lv[cid] = (et, lv)
+
             def _save_fn(result):
                 try:
                     s = AnalysisStore(project_db)
@@ -2924,15 +2969,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     comp_type = result.get("component_type", "community")
                     aname = result.get("analyzed_name", "") or comp_id
                     asummary = result.get("functional_summary", "")
-                    s.save_component_analysis({
+                    et, lv = comp_edge_lv.get(comp_id, ("", "L0"))
+                    s.bulk_insert_llm_results([{
                         "task_id": result.get("task_id", tid),
-                        "component_id": comp_id,
+                        "edge_type": et,
+                        "comm_lv": lv,
+                        "comm_id": comp_id,
+                        "name": aname,
+                        "summary": asummary,
                         "component_type": comp_type,
-                        "analyzed_name": aname,
-                        "functional_summary": asummary,
                         "status": result.get("status", "completed"),
-                    })
-                    logger.info(f"[analyzeComponents] _save_fn saved component_analysis: {comp_id} status={result.get('status','completed')}")
+                    }])
+                    logger.info(f"[analyzeComponents] _save_fn saved community_llm_results: {comp_id} status={result.get('status','completed')}")
                 except Exception as e:
                     logger.error(f"[analyzeComponents] _save_fn failed: {e}", exc_info=True)
 
@@ -2981,36 +3029,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             logger.exception(f"[analyzeComponents] handler failed: {e}")
             return {"success": False, "error": str(e), "skipped": 0}
 
-    @server.register("analysis.getComponentAnalysisResults")
-    def get_component_analysis_results(task_id=None, taskId=None, component_ids=None, componentIds=None):
-        """获取组件分析结果"""
-        tid = task_id or taskId
-        if not tid:
-            raise ValueError("task_id is required")
-        cids = component_ids or componentIds or None
-
-        store = TaskStore(multi_db.main_db)
-        task = store.get_task(tid)
-        if not task:
-            raise ValueError(f"Task {tid} not found")
-        pid = task["project_id"]
-        project_db = multi_db.get_project_db(pid)
-
-        from store.analysis_store import AnalysisStore
-        s = AnalysisStore(project_db)
-        results = s.list_component_analysis(tid, cids)
-        return {"results": [
-            {
-                "componentId": r.get("component_id", ""),
-                "componentType": r.get("component_type", ""),
-                "analyzedName": r.get("analyzed_name"),
-                "functionalSummary": r.get("functional_summary"),
-                "status": r.get("status", ""),
-                "analyzedAt": r.get("analyzed_at", ""),
-            }
-            for r in results
-        ]}
-
     @server.register("analysis.dispatchArchNL")
     def dispatch_arch_nl(task_id=None, taskId=None, input_text=None, inputText=None,
                           edge_type=None, edgeType=None, level=None,
@@ -3057,8 +3075,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "task_id": kw.get("taskId", tid), "edge_type": kw.get("edgeType", et),
                 "comm_lv": kw.get("commLv", lv), "comm_id": kw.get("commId", ""),
                 "name": kw.get("name", ""), "summary": kw.get("summary", ""),
-                "mermaid": kw.get("mermaid", ""), "plantuml": kw.get("plantuml", ""),
                 "model_id": mid or "default", "template_id": "community_analyze",
+                "component_type": "community",
+                "status": "completed",
             }])
 
         router = create_default_router(
@@ -3806,13 +3825,11 @@ def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias
             total_files_set.add(fp)
 
         llm_row = project_db.fetchone(
-            "SELECT name, summary, mermaid, plantuml FROM community_llm_results"
+            "SELECT name, summary FROM community_llm_results"
             " WHERE task_id=? AND comm_id=? AND comm_lv=?",
             (task_id, c["comm_id"], c["comm_lv"]))
         name = llm_row.get("name") if llm_row else None
         summary = llm_row.get("summary") if llm_row else None
-        mermaid = llm_row.get("mermaid") if llm_row else None
-        plantuml = llm_row.get("plantuml") if llm_row else None
 
         project_db.execute("""
             INSERT INTO arch_timeline_communities
@@ -3820,7 +3837,7 @@ def save_snapshot(multi_db: MultiDBManager, task_id: str, project_id: str, alias
                  file_count, quality_score, node_list, file_list, edge_list)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (timeline_id, c["comm_id"], c["edge_type"], c["comm_lv"], name,
-              summary, mermaid, plantuml,
+              summary, "", "",
               c["node_count"] or 0, len(file_list), c["quality_score"],
               node_list if isinstance(node_list, str) else json.dumps(node_list),
               json.dumps(file_list),

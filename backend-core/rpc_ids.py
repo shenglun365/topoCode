@@ -35,6 +35,7 @@ RPC_IDS: dict[str, str] = {
     "analysis.getCrossCommunityEdges": "API-024a",
     "analysis.getExternalStats":    "API-024b",
     "analysis.getCommunityNodeLists": "API-024c",
+    "analysis.getCommunityFileGraph": "API-024g",
     "analysis.startArchAnalysis":  "API-024d",
     "analysis.startArchTrack":     "API-024e",
     "analysis.stopArchTrack":      "API-024f",

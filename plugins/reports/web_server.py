@@ -186,17 +186,13 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
         pid = task["project_id"]
         pdb = multi_db.get_project_db(pid)
         row = pdb.fetchone(
-            "SELECT name, summary, mermaid, plantuml, comm_lv FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_id=?",
+            "SELECT name, summary, comm_lv FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_id=?",
             (tid, et, cid)
         )
         if not row:
             raise HTTPException(404, "Community result not found")
         name = row.get("name") or cid
         parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "", row.get("summary") or ""]
-        if row.get("mermaid"):
-            parts.extend(["", "```mermaid", row["mermaid"], "```"])
-        if row.get("plantuml"):
-            parts.extend(["", "```plantuml", row["plantuml"], "```"])
         return {
             "id": f"community-{tid}-{et}-{cid}",
             "taskId": tid,

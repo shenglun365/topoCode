@@ -185,7 +185,7 @@ const statusLabel = (status: string) => {
   const map: Record<string, string> = {
     queued: '排队中', running: '运行中', completed: '已完成',
     partial: '部分完成', failed: '已失败', cancelled: '已取消',
-    unknown: '未知',
+    skipped: '已跳过', unknown: '未知',
   }
   return map[status] || '未知'
 }
@@ -245,7 +245,8 @@ const actionLabel = (action: string) => {
       class="atl-task"
       :class="{
         'atl-task-success': task.status === 'completed',
-        'atl-task-fail': task.status === 'failed' || task.status === 'partial'
+        'atl-task-fail': task.status === 'failed' || task.status === 'partial',
+        'atl-task-skipped': task.status === 'skipped',
       }"
     >
       <div class="atl-task-header">
@@ -331,6 +332,7 @@ const actionLabel = (action: string) => {
 .atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; }
 .atl-task-success { border-color: var(--success, #22c55e); background: color-mix(in srgb, var(--success, #22c55e) 5%, transparent); }
 .atl-task-fail { border-color: var(--danger, #ef4444); background: color-mix(in srgb, var(--danger, #ef4444) 5%, transparent); }
+.atl-task-skipped { border-color: var(--warning, #f59e0b); background: color-mix(in srgb, var(--warning, #f59e0b) 5%, transparent); }
 .atl-task-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
 .atl-status-label {
   font-size: 0.65rem;
@@ -350,10 +352,16 @@ const actionLabel = (action: string) => {
   color: var(--danger, #ef4444);
   border-color: color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
 }
+.atl-task-skipped .atl-status-label {
+  background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+  color: var(--warning, #f59e0b);
+  border-color: color-mix(in srgb, var(--warning, #f59e0b) 30%, transparent);
+}
 .atl-action { font-weight: 600; color: var(--text-primary); }
 .atl-status-text { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); }
 .atl-task-success .atl-status-text { color: var(--success, #22c55e); }
 .atl-task-fail .atl-status-text { color: var(--danger, #ef4444); }
+.atl-task-skipped .atl-status-text { color: var(--warning, #f59e0b); }
 .atl-stopping { opacity: 0.5; cursor: not-allowed; }
 .atl-stopping:hover { background: transparent; color: var(--danger, #ef4444); }
 .atl-toast {

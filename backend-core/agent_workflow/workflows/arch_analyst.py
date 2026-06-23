@@ -213,8 +213,7 @@ class _SaveResultsTool(AgentTool):
                     await self._save(
                         taskId=task_id, edgeType=edge_type, commLv=level,
                         commId=r["communityId"], name=r.get("name", ""),
-                        summary=r.get("summary", ""), mermaid=r.get("mermaid", ""),
-                        plantuml=r.get("plantuml", ""),
+                        summary=r.get("summary", ""),
                     )
                 saved += 1
             except Exception:

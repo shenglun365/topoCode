@@ -57,6 +57,8 @@ interface CommunityTaskRuntime {
   nodeLists: Record<string, Record<string, Record<string, string[]>>>
   /** 社区文件层详细数据缓存 (commKey→{files,fileCount}) */
   fileDetails: Record<string, { files: Array<{ id: string; name: string; filePath: string; language: string; lines: number; summary: string }>, fileCount: number }>
+  /** 文件级图数据缓存 (commId→{nodes,edges}) */
+  fileGraphs: Record<string, { nodes: Array<{ id: string; label: string; filePath: string }>; edges: Array<{ source: string; target: string; direction?: string }> }>
   /** Agent 任务队列 */
   agentTasks: Array<{
     id: string; action: string; status: 'queued'|'running'|'completed'|'partial'|'failed'|'cancelled'
@@ -103,6 +105,7 @@ export const useCommunityStore = defineStore('community', () => {
         crossCommunityEdges: {},
         nodeLists: {},
         fileDetails: {},
+        fileGraphs: {},
         agentTasks: [],
         timeline: [],
         compareActive: false,
@@ -471,6 +474,17 @@ export const useCommunityStore = defineStore('community', () => {
     return promise
   }
 
+  async function loadCommunityFileGraph(taskId: string, commId: string, edgeType: string) {
+    const t = ensureTask(taskId)
+    const cacheKey = `${commId}::${edgeType}`
+    if (t.fileGraphs[cacheKey]) return t.fileGraphs[cacheKey]
+    try {
+      const result = await ipc.analysis.getCommunityFileGraph({ taskId, edgeType, commId })
+      if (result) t.fileGraphs[cacheKey] = result
+      return result
+    } catch { return { nodes: [], edges: [] } }
+  }
+
   async function loadFileDetail(taskId: string, commId: string, edgeType: string, limit = 300) {
     const t = ensureTask(taskId)
     const cacheKey = `${commId}::${edgeType}`
@@ -757,6 +771,9 @@ export const useCommunityStore = defineStore('community', () => {
           : `社区数: ${result.communities}`
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: msg })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
+      } else if (result.success && !result.agentTaskId) {
+        const skipped = result.skipped || 0
+        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: `全跳过（${skipped} 个已分析）` })
       } else {
         updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
       }
@@ -845,6 +862,9 @@ export const useCommunityStore = defineStore('community', () => {
           : `组件数: ${components.length}`
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: msg })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
+      } else if (result.success && !result.agentTaskId) {
+        const skipped = result.skipped || 0
+        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: `全跳过（${skipped} 个已分析）` })
       } else {
         updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
       }
@@ -1091,7 +1111,7 @@ export const useCommunityStore = defineStore('community', () => {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
     listCommunityResults, getCascadeLevels, saveCommunityResult,
-    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, loadFileDetail, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
+    loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, loadFileDetail, loadCommunityFileGraph, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
     pushError, clearErrorLogs, clearTask,
     addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, triggerComponentAnalysis, parseArchCommand,

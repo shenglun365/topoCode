@@ -113,7 +113,7 @@ const HELP_TEXT = [
   '| 指令 | 说明 |',
   '|------|------|',
   '| `/help` / `/帮助` | 显示本帮助 |',
-  '| `/select [--all/--include/--call/--l0/--l1/--l2/--clear]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`/`--l1`/`--l2` 按条件自动选取；`--clear` 清除已选 |',
+  '| `/select [--all/--include/--call/--l0/--l1/--l2/--clear/--unanalyzed]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`/`--l1`/`--l2` 按条件自动选取；`--clear` 清除已选；`--unanalyzed` 只选未分析组件 |',
   '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
   '| `/analyze all` | 同上 |',
   '| `/analyze_components` `[-L zh/en] [-j N] [-r N] [--agentic] [--summary-model <id>] [-c N] [--force] [--call/--include] [--l0/--l1/--l2]` | 对已选组件启动批量分析。「-L」语言，「-j」并发(1-5)，「-r」轮次(1-30)，「--agentic」自主分析，「--summary-model」摘要模型ID，「-c」摘要并发(1-10)，「--force」强制覆盖已分析组件，「--call/--include」边类型筛选，「--l0/--l1/--l2」层级筛选 |',
@@ -211,7 +211,7 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
-const USER_COMMANDS = ['/help', '/帮助', '/select', '/arch all', '/analyze all', '/analyze_components', '/analyze_components --agentic',
+const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/arch all', '/analyze all', '/analyze_components', '/analyze_components --agentic', '/analyze_components --force',
   '/presummary', '/presummary files', '/presummary start', '/presummary get', '/presummary delete', '/presummary rerun',
   '/track', '/diff']
 
@@ -403,6 +403,10 @@ function handleCmdConfirm() {
   }).finally(() => { streaming.value = false })
 }
 
+function _validateFlags(tokens: string[], validFlags: string[]): string[] {
+  return tokens.filter(t => t.startsWith('-') && !validFlags.includes(t.toLowerCase()))
+}
+
 async function handleSend() {
   const text = userInput.value.trim()
   if (!text || streaming.value) return
@@ -430,7 +434,7 @@ async function handleSend() {
         return
       }
       // 校验未知参数
-      const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2']
+      const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2','--unanalyzed']
       const unknownFlags = args.split(/\s+/).filter(f => f.startsWith('--') && !VALID_SELECT_FLAGS.includes(f.toLowerCase()))
       if (unknownFlags.length > 0) {
         addMessage('system', `未知参数: ${unknownFlags.join('、')}。可用参数: ${VALID_SELECT_FLAGS.join(' ')}`)
@@ -444,7 +448,9 @@ async function handleSend() {
       const edgeFilter = args.match(/--(include|call)/i)?.[1]?.toUpperCase()
       const levelFilters = [...args.matchAll(/--l([012])/gi)].map(m => 'L' + m[1])
       const wantAll = /--all/i.test(args)
+      const wantUnanalyzed = /--unanalyzed/i.test(args)
       const matching = taskComs.filter(c => {
+        if (wantUnanalyzed && c.status === 'completed') return false
         if (!wantAll) {
           if (edgeFilter && c.edgeType?.toUpperCase() !== edgeFilter) return false
           if (levelFilters.length > 0 && !levelFilters.includes(c.level?.toUpperCase())) return false
@@ -465,22 +471,30 @@ async function handleSend() {
       return
     }
     // /analyze_components — 批量分析已选中的组件
-    // 新增过滤: --call / --include / --l0 / --l1 / --l2 (不指定则不过滤)
-    const acRe = /^\/analyze_components(?:\s+--force)?(?:\s+-L\s+(zh|en))?(?:\s+-j\s+(\d+))?(?:\s+-r\s+(\d+))?(?:\s+--agentic)?(?:\s+--summary-model\s+(\S+))?(?:\s+-c\s+(\d+))?(?:\s+(--call|--include))?(?:\s+(--l[012]))?(?:\s+(--l[012]))?(?:\s+(--l[012]))?$/i
-    const acMatch = text.match(acRe)
-    if (acMatch) {
+    if (/^\/analyze_components\b/i.test(text)) {
+      const VALID_AC_FLAGS = [
+        '--force', '-L', '-j', '-r', '--agentic',
+        '--summary-model', '-c', '--call', '--include',
+        '--l0', '--l1', '--l2',
+      ]
+      const tokens = text.split(/\s+/).slice(1)
+      const unknown = _validateFlags(tokens, VALID_AC_FLAGS)
+      if (unknown.length > 0) {
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', `未知参数: ${unknown.join('、')}。可用参数: ${VALID_AC_FLAGS.join(' ')}`)
+        return
+      }
       const force = text.includes('--force')
-      const language = acMatch[1] || ''
-      const concurrency = Math.max(1, Math.min(5, parseInt(acMatch[2] || '1')))
-      const rawTurns = parseInt(acMatch[3] || '30')
-      const maxTurns = Math.max(1, Math.min(30, rawTurns))
+      const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
+      const concurrency = Math.max(1, Math.min(5, parseInt(text.match(/-j\s+(\d+)/i)?.[1] || '1')))
+      const maxTurns = Math.max(1, Math.min(30, parseInt(text.match(/-r\s+(\d+)/i)?.[1] || '30')))
       const agentic = analysisMode.value === 'deep' || text.includes('--agentic')
-      const summaryModel = acMatch[4] || ''
-      const rawSubConc = parseInt(acMatch[5] || '1')
+      const summaryModel = text.match(/--summary-model\s+(\S+)/i)?.[1] || ''
+      const rawSubConc = parseInt(text.match(/-c\s+(\d+)/i)?.[1] || '1')
       const subagentConcurrency = Math.max(1, Math.min(10, rawSubConc))
-      const rawFlags = text.match(/--(call|include|l[012])/gi) || []
-      const edgeTypeFilter = rawFlags.find(f => f === '--call' || f === '--include')
-      const levelFilter = rawFlags.filter(f => /^--l[012]$/i.test(f)).map(f => f.toUpperCase().slice(2))
+      const edgeTypeFilter = text.includes('--call') ? 'CALL' : text.includes('--include') ? 'INCLUDE' : null
+      const levelFilter = tokens.filter(t => /^--l[012]$/i.test(t)).map(t => t.toUpperCase().slice(2))
 
       if (selectionStore.selectedCount === 0) {
         addMessage('user', text)
@@ -496,7 +510,7 @@ async function handleSend() {
         selectedComps = selectedComps.filter(c => {
           const et = c.edgeType?.toUpperCase?.() || ''
           const lv = c.level?.toUpperCase?.() || ''
-          if (edgeTypeFilter && et !== edgeTypeFilter.replace('--', '').toUpperCase()) return false
+          if (edgeTypeFilter && et !== edgeTypeFilter) return false
           if (levelFilter.length > 0 && !levelFilter.includes(lv)) return false
           return true
         })

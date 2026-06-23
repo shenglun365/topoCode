@@ -389,9 +389,6 @@ function createRealIPC() {
       analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => {
         return await api.analysis.analyzeComponents(params)
       },
-      getComponentAnalysisResults: async (params: { taskId: string; componentIds?: string[] }) => {
-        return await api.analysis.getComponentAnalysisResults(params)
-      },
       saveCommunityResult: async (params: any) => {
         // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
         const safe = JSON.parse(JSON.stringify(params))
@@ -405,6 +402,9 @@ function createRealIPC() {
       },
       updateCommunityName: async (params: any) => {
         return await api.analysis.updateCommunityName(params)
+      },
+      getCommunityFileGraph: async (params: any) => {
+        return await api.analysis.getCommunityFileGraph(params)
       },
       onProgress: (cb: (data: TaskProgressEvent) => void) => {
         if (api.analysis.onProgress) {

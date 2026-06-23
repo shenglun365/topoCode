@@ -209,9 +209,6 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.rerunFileSummary', params }),
     analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.analyzeComponents', params }),
-    getComponentAnalysisResults: (params: { taskId: string; componentIds?: string[] }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.getComponentAnalysisResults', params }),
-
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
@@ -228,6 +225,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.listCommunityResults', params: { taskId, edgeType } }),
     updateCommunityName: (params: { taskId: string; edgeType: string; commLv: string; commId: string; name: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.updateCommunityName', params }),
+    getCommunityFileGraph: (params: { taskId: string; edgeType: string; commId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityFileGraph', params }),
 
     // 事件订阅
     onProgress: (callback: (data: any) => void) => {

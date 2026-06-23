@@ -29,10 +29,11 @@ import ToolbarDropdown from './ToolbarDropdown.vue'
 interface DrillPathNode {
   key: string
   label: string
-  kind: 'root' | 'community' | 'external'
+  kind: 'root' | 'community' | 'external' | 'file'
   commId?: string
   extItemId?: string
   commLevel?: string
+  fileCommId?: string
 }
 
 const rootDrillNode = (): DrillPathNode => ({
@@ -422,10 +423,13 @@ const drillMeta = computed(() => {
   const tail = drillPath.value[drillPath.value.length - 1]
   return {
     isAtRoot: drillPath.value.length <= 1,
+    drillKind: tail.kind,
     drillLevel: tail.commLevel || 'L0',
     drillCommId: tail.commId || null,
     drillExtItemId: tail.extItemId || null,
     drillKey: tail.key,
+    drillFileCommId: tail.fileCommId || null,
+    drillFileEdgeType: tail.kind === 'file' ? (tail.commLevel || props.edgeType) : null,
     breadcrumbSegments: drillPath.value.map(n => ({ key: n.key, label: n.label, level: n.commLevel })),
     fsTitle: tail.kind === 'root' ? t('report.communityArchitecture', '组件架构') : tail.label,
   }
@@ -632,6 +636,26 @@ const rawGraphNodes = computed(() => {
     }
     return all
   }
+  // 文件级视图
+  const fgCommId = drillMeta.value.drillFileCommId
+  if (fgCommId) {
+    const fgEt = drillMeta.value.drillFileEdgeType || props.edgeType
+    const fg = communityStore.tasks[props.taskId]?.fileGraphs[`${fgCommId}::${fgEt}`]
+    if (!fg || !fg.nodes) return []
+    return fg.nodes.map(n => ({
+      id: n.id,
+      label: n.label,
+      filePath: n.filePath,
+      isFile: true,
+      nodeCount: 1,
+      qualityScore: null,
+      avgCoreness: 0,
+      maxCoreness: 0,
+      coreNodeRatio: 0,
+      hasChildren: false,
+      isExternal: false,
+    }))
+  }
   const coms = allCommunities.value
   const commId = drillMeta.value.drillCommId
   if (!commId) {
@@ -704,6 +728,13 @@ function handleExpandMerged() {
 
 /* ---- cross edges (uses drillLevel) ---- */
 const crossEdges = computed(() => {
+  // 文件级视图 → 使用文件图的边
+  if (drillMeta.value.drillKind === 'file' && drillMeta.value.drillFileCommId) {
+    const fgEt = drillMeta.value.drillFileEdgeType || props.edgeType
+    const fg = communityStore.tasks[props.taskId]?.fileGraphs[`${drillMeta.value.drillFileCommId}::${fgEt}`]
+    if (!fg || !fg.edges) return []
+    return fg.edges.map(e => ({ source: e.source, target: e.target }))
+  }
   if (isExternalTab.value && !drillMeta.value.drillCommId) return externalCrossEdges.value
 
   const parentComm = drillMeta.value.drillCommId
@@ -849,17 +880,40 @@ async function handleDrill(targetId: string) {
     drilling.value = true
     try {
       const nextLevel = `L${parseInt(com.level?.[1] || '0') + 1}`
-      await communityStore.loadCrossCommunityEdges(props.taskId, com.edgeType, nextLevel)
-      await communityStore.loadCommunityNodeLists(props.taskId, com.edgeType, nextLevel)
-      const label = com.name && com.name !== com.communityId ? com.name : communityIdLabel(com.communityId)
-      drillPath.value.push({
-        key: `comm-${targetId}`,
-        label: label.length > 24 ? label.slice(0, 24) + '\u2026' : label,
-        kind: 'community',
-        commId: targetId,
-        commLevel: nextLevel,
-      })
-      cmdStore.pushEvent('drill-event', { communityId: targetId, communityName: label })
+      const hasChildren = allCommunities.value.some(c =>
+        c.parentId === targetId && c.edgeType === com.edgeType && c.level === nextLevel
+      )
+      if (hasChildren) {
+        // 有下级社区 → 正常下钻
+        await communityStore.loadCrossCommunityEdges(props.taskId, com.edgeType, nextLevel)
+        await communityStore.loadCommunityNodeLists(props.taskId, com.edgeType, nextLevel)
+        const label = com.name && com.name !== com.communityId ? com.name : communityIdLabel(com.communityId)
+        drillPath.value.push({
+          key: `comm-${targetId}`,
+          label: label.length > 24 ? label.slice(0, 24) + '\u2026' : label,
+          kind: 'community',
+          commId: targetId,
+          commLevel: nextLevel,
+        })
+        cmdStore.pushEvent('drill-event', { communityId: targetId, communityName: label })
+      } else {
+        // 叶子社区 → 切换到文件视图
+        const et = com.edgeType || props.edgeType
+        console.log('[handleDrill] file drill: commId=%s edgeType=%s', targetId, et)
+        await communityStore.loadCommunityFileGraph(props.taskId, targetId, et)
+        const fg = communityStore.tasks[props.taskId]?.fileGraphs[`${targetId}::${et}`]
+        console.log('[handleDrill] file graph loaded: nodes=%d edges=%d', fg?.nodes?.length || 0, fg?.edges?.length || 0)
+        const label = com.name && com.name !== com.communityId ? com.name : communityIdLabel(com.communityId)
+        drillPath.value.push({
+          key: `file-${targetId}`,
+          label: (label.length > 24 ? label.slice(0, 24) + '\u2026' : label) + ' — 文件',
+          kind: 'file',
+          fileCommId: targetId,
+          commId: targetId,
+          commLevel: et,
+        })
+        cmdStore.pushEvent('drill-event', { communityId: targetId, communityName: label })
+      }
     } finally {
       drilling.value = false
     }
@@ -992,7 +1046,8 @@ watch(() => props.edgeType, () => {
 })
 
 /* ---- cross-edges loading ---- */
-watch(() => [props.edgeType, drillMeta.value.drillLevel], async ([_et, lv]) => {
+watch(() => [props.edgeType, drillMeta.value.drillKind, drillMeta.value.drillLevel], async ([_et, _kind, lv]) => {
+  if (_kind === 'file') return
   if (!isExternalTab.value || drillMeta.value.drillCommId) {
     const parentComm = drillMeta.value.drillCommId
       ? commMap.value.get(drillMeta.value.drillCommId)
