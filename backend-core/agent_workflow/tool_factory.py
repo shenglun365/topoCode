@@ -9,25 +9,6 @@ from typing import Callable, Optional
 from .tools import ToolRegistry
 
 
-def build_analyst_tools(
-    llm_chat_fn: Callable,
-    render_prompt: Callable = None,
-    save_result_fn: Callable = None,
-) -> ToolRegistry:
-    """构建 ArchAnalyst 的工具集"""
-    from .workflows.arch_analyst import (
-        _AnalyzeCommunityTool, _GenerateDiagramTool,
-        _GenerateOverviewTool, _SaveResultsTool,
-    )
-    tools = ToolRegistry()
-    tools.register(_AnalyzeCommunityTool(llm_chat_fn, render_prompt))
-    tools.register(_GenerateDiagramTool())
-    tools.register(_GenerateOverviewTool(llm_chat_fn, render_prompt))
-    if save_result_fn:
-        tools.register(_SaveResultsTool(save_result_fn))
-    return tools
-
-
 def build_sentinel_tools(
     llm_chat_fn: Callable,
     project_root: str,

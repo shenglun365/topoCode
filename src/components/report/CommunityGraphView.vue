@@ -21,6 +21,7 @@ import ExternalHeatmapView from './ExternalHeatmapView.vue'
 import NodeFilterPanel from './NodeFilterPanel.vue'
 import CommunityTableView from './CommunityTableView.vue'
 import ToolbarDropdown from './ToolbarDropdown.vue'
+import PreSummaryDetailDialog from './PreSummaryDetailDialog.vue'
 
 /* ========================================================
    Unified drill path — single source of truth for all views
@@ -68,6 +69,10 @@ const { isFullscreen, enterFullscreen, exitFullscreen, onKeydown } = useGraphFul
 const { getNodePosition, setNodePosition, positions: localPositions } = useGraphPosition(
   props.projectId, props.taskId, props.taskUpdatedAt
 )
+
+// 文件摘要弹窗
+const fileDetailVisible = ref(false)
+const fileDetailPath = ref('')
 
 /* ---- view mode state ---- */
 
@@ -517,9 +522,10 @@ const externalCommunityNodes = computed(() => {
     communities.forEach((c: any) => {
       if (!seen.has(c.communityId)) {
         seen.add(c.communityId)
+        const cl = c.name && c.name !== c.communityId ? c.name : communityIdLabel(c.communityId)
         nodes.push({
           id: c.communityId,
-          label: communityIdLabel(c.communityId),
+          label: cl.length > 24 ? cl.slice(0, 24) + '\u2026' : cl,
           nodeCount: 0,
           isExternal: false,
           hasChildren: parentCommIds.value.has(c.communityId),
@@ -574,7 +580,7 @@ function buildExternalNodes(): any[] {
     else tier = 5
     nodes.push({
       id: extId,
-      label: extId.length > 16 ? extId.slice(0, 16) + '\u2026' : extId,
+      label: extId.length > 24 ? extId.slice(0, 24) + '\u2026' : extId,
       nodeCount: item.fileCount || item.count,
       isExternal: true,
       hasChildren: !!(item.communities && item.communities.length > 0),
@@ -869,6 +875,12 @@ async function handleDrill(targetId: string) {
   if (drilling.value) return
   if (targetId === '__merged__') {
     handleExpandMerged()
+    return
+  }
+  // 文件视图中双击文件节点 → 打开文件摘要弹窗
+  if (drillMeta.value.drillKind === 'file') {
+    fileDetailPath.value = targetId
+    fileDetailVisible.value = true
     return
   }
   expandBatchCount.value = 0
@@ -1172,7 +1184,7 @@ async function executeGraphCommand(cmd: GraphCommand): Promise<CommandResult> {
         return { success: true }
       }
       case 'dispatchAgent':
-        await communityStore.triggerArchAnalysis(props.taskId, effectiveEdgeType.value, 'L0')
+        await communityStore.triggerOverview(props.taskId)
         return { success: true }
       default:
         return { success: false, error: `unknown command: ${(cmd as any).type}` }
@@ -1699,6 +1711,15 @@ watch(hasUnsavedChanges, (v) => {
       </div>
     </Teleport>
   </div>
+
+  <!-- 文件摘要弹窗 -->
+  <PreSummaryDetailDialog
+    v-if="fileDetailVisible"
+    :task-id="props.taskId"
+    :file-path="fileDetailPath"
+    @close="fileDetailVisible = false"
+    @deleted="fileDetailVisible = false"
+  />
 </template>
 
 <style scoped>

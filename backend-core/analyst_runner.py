@@ -521,18 +521,18 @@ def _load_task_context(server, multi_db, task_id) -> PipelineContext:
     pdb = multi_db.get_project_db(pid)
     a_store = AnalysisStore(pdb)
 
+    row = multi_db.main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (pid,))
+    proj_path = row["root_path"] if row else ""
+
     ctx = PipelineContext(
         server=server, multi_db=multi_db, task_id=task_id,
         run_id="", start_time=time.time(),
         task=task, project_id=pid, project_db=pdb,
         analysis_store=a_store,
-        emitter=GraphEmitter(a_store, task_id),
-        proj_path="",
+        emitter=GraphEmitter(a_store, task_id, project_root=proj_path),
+        proj_path=proj_path,
         report_types=task.get("report_types") or [],
     )
-
-    row = multi_db.main_db.fetchone("SELECT root_path FROM projects WHERE id = ?", (pid,))
-    ctx.proj_path = row["root_path"] if row else ""
 
     return ctx
 

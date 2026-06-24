@@ -174,8 +174,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCrossCommunityEdges', params }),
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityNodeLists', params }),
-    startArchAnalysis: (params: { taskId: string; edgeType: string; level: string; modelId?: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.startArchAnalysis', params }),
+    startOverview: (params: { taskId: string; force?: boolean }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.startOverview', params }),
     listArchSnapshots: (params: { taskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.listArchSnapshots', params }),
     getArchSnapshot: (params: { taskId: string; versionId: string }) =>

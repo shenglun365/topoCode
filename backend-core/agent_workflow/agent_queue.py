@@ -80,6 +80,7 @@ class AgentTaskState:
         }
         if self.result and self.result.data and isinstance(self.result.data, dict):
             d["failed_count"] = self.result.data.get("failed_count", 0)
+            d["result"] = self.result.data  # 供回调读取完整结果
         return d
 
 

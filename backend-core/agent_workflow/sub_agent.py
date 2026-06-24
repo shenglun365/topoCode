@@ -302,10 +302,10 @@ class SubAgent:
         if not self._project_db or not self._task_id:
             return False
         try:
-            abs_path = to_abs(path, self._project_root)
+            rel_path = to_rel(path, self._project_root)
             row = self._project_db.execute(
                 "SELECT COUNT(*) as cnt FROM graph_node WHERE task_id=? AND file_path=?",
-                (self._task_id, abs_path)
+                (self._task_id, rel_path)
             ).fetchone()
             return bool(row and row["cnt"] > 0)
         except Exception:

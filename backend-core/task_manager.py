@@ -1851,6 +1851,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             include_file_comm = _build_file_comm('INCLUDE')
             call_file_comm    = _build_file_comm('CALL')
 
+            # 批量加载社区 LLM 名称
+            name_rows = project_db.execute(
+                "SELECT comm_id, name FROM community_llm_results WHERE task_id=? AND comm_lv='L0'",
+                (tid,)
+            ).fetchall()
+            comm_names = {row[0]: row[1] for row in name_rows if row[1]}
+
             def _inject_communities(items, file_comm):
                 for item in items:
                     item_files = item.get('files', [])
@@ -1858,9 +1865,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     seen_cids = set()
                     for f in item_files:
                         for c in file_comm.get(f, []):
-                            if c['communityId'] not in seen_cids:
-                                seen_cids.add(c['communityId'])
-                                item_comms.append(c)
+                            cid = c['communityId']
+                            if cid not in seen_cids:
+                                seen_cids.add(cid)
+                                item_comms.append({
+                                    'communityId': cid,
+                                    'name': comm_names.get(cid) or None,
+                                })
                     item['communities'] = item_comms
 
             _inject_communities(external_deps, include_file_comm)
@@ -2006,28 +2017,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 logger.warning(f"[AgentHistory] save failed for {state_dict.get('agent_id', '?')}: {e}")
         return _cb
 
-    def _build_agent_tools(ctx, llm_chat_fn, diagram_orch, save_result_fn):
-        from agent_workflow.workflows.arch_analyst import (
-            _AnalyzeCommunityTool, _GenerateDiagramTool,
-            _GenerateOverviewTool, _SaveResultsTool,
-        )
-        import asyncio as _asyncio
-        tools = ToolRegistry()
-        tools.register(_AnalyzeCommunityTool(llm_chat_fn, None))
-        tools.register(_GenerateDiagramTool())
-        tools.register(_GenerateOverviewTool(llm_chat_fn, None))
-        tools.register(_SaveResultsTool(save_result_fn))
-        return tools
-
-    @server.register("analysis.startArchAnalysis")
-    def start_arch_analysis(task_id=None, taskId=None, edge_type=None, edgeType=None,
-                              level=None, model_id=None, modelId=None, force=False):
-        """启动批量 LLM 社区分析 (ArchAnalyst 入口)"""
+    @server.register("analysis.startOverview")
+    def start_overview(task_id=None, taskId=None, force=False):
+        """启动整体架构概览生成 (OverviewWorkflow 入口)"""
         tid = task_id or taskId
-        et = edge_type or edgeType or "INCLUDE"
-        lv = level or "L0"
-        mid = model_id or modelId or ""
-        logger.info(f"[startArchAnalysis] task_id={tid} edge_type={et} level={lv}")
+        if not tid:
+            raise ValueError("task_id is required")
+        logger.info(f"[startOverview] task_id={tid}")
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -2039,165 +2035,63 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_summary = _get_project_summary(pid)
         project_name = task.get("name") or task.get("project_name") or pid
 
-        # ── 前置校验 ──
-        if not project_summary:
-            return {"taskId": tid, "success": False, "error": "项目摘要未生成，请先在 ReportHome 点击「生成项目摘要」"}
-        cascade_incl = _get_cascade_levels_impl(project_db, tid, "INCLUDE")
-        cascade_call = _get_cascade_levels_impl(project_db, tid, "CALL")
-        has_l0 = any(l.get("lv") == "L0" for l in cascade_incl.get("levels", [])) or \
-                 any(l.get("lv") == "L0" for l in cascade_call.get("levels", []))
-        if not has_l0:
-            return {"taskId": tid, "success": False, "error": "缺少 L0 社区数据，请先完成代码扫描分析"}
+        # ── 前置检查：L0/L1 社区分析是否完成 ──
+        missing = []
+        for et in ('INCLUDE', 'CALL'):
+            for lv in ('L0', 'L1'):
+                comm_count = project_db.execute(
+                    "SELECT COUNT(*) FROM community_hierarchy WHERE task_id=? AND edge_type=? AND comm_lv=?",
+                    (tid, et, lv)
+                ).fetchone()[0]
+                if comm_count == 0:
+                    continue
+                analyzed = project_db.execute(
+                    "SELECT COUNT(*) FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv=? AND name!=''",
+                    (tid, et, lv)
+                ).fetchone()[0]
+                if analyzed < comm_count:
+                    missing.append(f"{et} {lv}: {analyzed}/{comm_count} 未分析")
+        if missing:
+            raise ValueError(f"前置依赖不满足: {'; '.join(missing)}。请先用 /analyze_components 分析后再试。")
 
-        result = cascade_incl if et == "INCLUDE" else cascade_call
-        communities = []
-        for l in result.get("levels", []):
-            if l.get("lv") == lv:
-                communities = [
-                    {"communityId": it.get("id", ""), "label": it.get("label", ""),
-                     "nodeCount": it.get("nodeCount", 0), "qualityScore": it.get("qualityScore", 0),
-                     "level": lv, "edgeType": et}
-                    for it in l.get("items", [])
-                ]
-                break
-
-        logger.info(f"[startArchAnalysis] {len(communities)} communities at {lv}")
-
-        if not communities:
-            return {"taskId": tid, "success": False, "error": "no communities found"}
-
-        # ── 富上下文构建：为每个 community 加载 node_list → 文件路径 + 关键符号 ──
-        from store.analysis_store import AnalysisStore as _AS2
-        _as = _AS2(project_db)
-        all_nodes = _as.get_graph_nodes(tid)
-        fp_map = {}
-        for n in all_nodes:
-            fp = (n.get("file_path") or "").strip()
-            if fp:
-                fp_map.setdefault(fp, []).append(n)
-        # 已有 L0 分析结果
-        existing_results = {}
-        try:
-            for et_chk in ("INCLUDE", "CALL"):
-                rows = project_db.execute(
-                    "SELECT comm_id, name, summary FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
-                    (tid, et_chk)
-                ).fetchall()
-                for r in rows:
-                    existing_results[r["comm_id"]] = dict(r)
-        except Exception:
-            pass
-
-        # ── 跳过已分析社区（除非 force=True）──
+        # ── 检查是否已生成（跳过）──
         if not force:
-            filtered = [c for c in communities if c["communityId"] not in existing_results]
-            skipped = len(communities) - len(filtered)
-            communities = filtered
-            if skipped:
-                logger.info(f"[startArchAnalysis] skipped {skipped} already-analyzed communities (use --force to override)")
-        else:
-            skipped = 0
+            existing = project_db.execute(
+                "SELECT id FROM report_subdocs WHERE task_id=? AND comm_id='overall' AND (title='架构概览文档' OR template_id='overview')",
+                (tid,)
+            ).fetchone()
+            if existing:
+                logger.info(f"[startOverview] overview already exists, skipping (use --force to regenerate)")
+                return {"taskId": tid, "success": True, "agentTaskId": None, "skipped": True}
 
-        if not communities:
-            logger.info(f"[startArchAnalysis] all communities already analyzed, nothing to do")
-            return {"taskId": tid, "success": True, "agentTaskId": None,
-                    "communities": 0, "skipped": skipped}
-
-        for c in communities:
-            cid = c["communityId"]
-            file_paths: set[str] = set()
-            edge_list_raw: list = []
-
-            try:
-                doc = project_db.execute(
-                    "SELECT node_list, edge_list, edge_count FROM graph_doc WHERE task_id=? AND comm_id=?",
-                    (tid, cid)
-                ).fetchone()
-                if doc:
-                    edge_list_raw = _json.loads(doc["edge_list"]) if doc["edge_list"] else []
-                    raw_paths = _json.loads(doc["node_list"]) if doc["node_list"] else []
-                    file_paths = {fp.strip() for fp in raw_paths if isinstance(fp, str) and fp.strip()}
-            except Exception as e:
-                logger.warning(f"[startArchAnalysis] graph_doc load failed {cid}: {e}")
-
-            edge_type_label = "依赖关系 (INCLUDE)" if c.get("edgeType") == "INCLUDE" \
-                else "调用关系 (CALL)" if c.get("edgeType") == "CALL" else "关系"
-            comm_meta = {
-                "nodeCount": c.get("nodeCount", 0),
-                "qualityScore": c.get("qualityScore"),
-                "edgeCount": doc["edge_count"] if doc and doc.get("edge_count") else 0,
-                "edgeLabel": edge_type_label,
-            }
-
-            from context.assembly import CollectContext
-            from context.recipes import RECIPE_ARCH_COMMUNITY
-            from context.registry import get_assembler
-
-            ctx = CollectContext(
-                db=project_db,
-                task_id=tid,
-                project_root=project_root or "",
-                comm_id=cid,
-                file_paths=file_paths,
-                fp_map=fp_map,
-                edge_list=edge_list_raw,
-                existing_results=existing_results,
-                _comm_meta=comm_meta,
-            )
-            c["context"] = get_assembler().assemble(RECIPE_ARCH_COMMUNITY, ctx)
-            logger.info(
-                f"[startArchAnalysis] community {cid} context_len={len(c['context'])} "
-                f"ctx_begin={c['context'][:500]!r}"
-            )
-
-        from agent_workflow.llm_adapter import create_llm_chat_fn
-        from agent_workflow.tool_factory import build_analyst_tools
+        # ── 构建上下文 ──
         from agent_workflow.router import create_default_router
-        from store.analysis_store import AnalysisStore
-
-        async def _save_fn(**kw):
-            s = AnalysisStore(project_db)
-            s.bulk_insert_llm_results([{
-                "task_id": kw.get("taskId", tid), "edge_type": kw.get("edgeType", et),
-                "comm_lv": kw.get("commLv", lv), "comm_id": kw.get("commId", ""),
-                "name": kw.get("name", ""), "summary": kw.get("summary", ""),
-                "model_id": mid or "default", "template_id": "community_analyze",
-                "component_type": "community",
-                "status": "completed",
-            }])
-
-        # 项目级上下文（技术栈/测试/入口点等）
-        project_context = ""
-        try:
-            from context.assembly import CollectContext
-            from context.recipes import RECIPE_ARCH_OVERVIEW
-            from context.registry import get_assembler
-            pctx = CollectContext(
-                db=project_db, task_id=tid, project_root=project_root or "",
-                all_fp_map=fp_map,
-            )
-            project_context = get_assembler().assemble(RECIPE_ARCH_OVERVIEW, pctx)
-        except Exception:
-            pass
-
         router = create_default_router(
             project_root=project_root, project_db=project_db, multi_db=multi_db,
             task_id=tid, project_summary=project_summary,
-            llm_model_id=mid, save_result_fn=_save_fn,
         )
-
         context = {
-            "task_id": tid, "edge_type": et, "level": lv,
-            "project_name": project_name, "project_summary": project_summary,
-            "project_context": project_context,
-            "communities": communities,
+            "task_id": tid, "project_id": pid,
+            "project_name": project_name,
+            "project_summary": project_summary,
         }
 
-        agent_id = router.dispatch("analyze", tid, context,
-            on_complete=_make_agent_history_cb(pid, project_db, tid, "analyze"))
+        # ── 完成回调：保存概览文档 ──
+        def _on_overview_complete(state_dict):
+            _make_agent_history_cb(pid, project_db, tid, "overview")(state_dict)
+            try:
+                overview = (state_dict.get("result") or {}).get("overview", "")
+                if overview:
+                    from report_tree_service import save_overall_doc
+                    save_overall_doc(multi_db, tid, "架构概览文档", overview)
+                    logger.info(f"[startOverview] saved overview doc for task {tid}, len={len(overview)}")
+            except Exception as e:
+                logger.warning(f"[startOverview] failed to save overview doc: {e}")
 
-        return {"taskId": tid, "success": True, "agentTaskId": agent_id,
-                "communities": len(communities), "skipped": skipped}
+        agent_id = router.dispatch("overview", tid, context,
+            on_complete=_on_overview_complete)
+
+        return {"taskId": tid, "success": True, "agentTaskId": agent_id, "skipped": False}
 
     @server.register("analysis.getAgentProgress")
     def get_agent_progress(agent_task_id=None, agentTaskId=None):
@@ -2706,11 +2600,23 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
+        # 优先用相对路径查找（file_summaries 存储格式）
+        query_path = file_path
+        if project_root and file_path.startswith(project_root):
+            query_path = file_path[len(project_root):].lstrip("/")
+
         from agent_workflow.file_summary_cache import FileSummaryCache
         cache = FileSummaryCache(project_db, pid)
-        detail = cache.get_detail(file_path)
+        detail = cache.get_detail(query_path)
         if detail:
             return {"found": True, **detail}
+
+        # 回退：用原始路径（兼容旧数据或绝对路径存储）
+        if query_path != file_path:
+            detail = cache.get_detail(file_path)
+            if detail:
+                return {"found": True, **detail}
+
         return {"found": False}
 
     @server.register("analysis.deleteFileSummary")

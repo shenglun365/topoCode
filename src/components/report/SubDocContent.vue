@@ -22,6 +22,26 @@ const renderedContent = computed(() => {
   let html = props.content
   let diagIdx = 0
 
+  // 将子组件列表按 依赖分析(INCLUDE) / 调用分析(CALL) 分组
+  html = html.replace(/^## 子组件（(\d+)）\n([\s\S]+?)(?=\n## |\n---\n|$)/m,
+    (_match: string, count: string, body: string) => {
+      const lines = body.trim().split('\n')
+      const includeLines: string[] = []
+      const callLines: string[] = []
+      for (const line of lines) {
+        if (/\]\(##community:CALL:/.test(line)) callLines.push(line)
+        else if (/\]\(##community:INCLUDE:/.test(line)) includeLines.push(line)
+      }
+      const parts: string[] = [`## 子组件（${count}）`]
+      if (includeLines.length > 0) {
+        parts.push('', `### 依赖分析（${includeLines.length}）`, '', ...includeLines)
+      }
+      if (callLines.length > 0) {
+        parts.push('', `### 调用分析（${callLines.length}）`, '', ...callLines)
+      }
+      return parts.join('\n')
+    })
+
   html = html.replace(/```(mermaid|plantuml)\n([\s\S]*?)```/g, (_match, lang: string) => {
     const blk = diagramBlocks.value[diagIdx]
     const id = blk ? blk.id : `diagram-${diagIdx}`
@@ -79,7 +99,6 @@ const renderedContent = computed(() => {
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
   html = html.replace(/\*(.*?)\*/g, '<em>$1</em>')
   html = html.replace(/`(.*?)`/g, '<code>$1</code>')
-  html = html.replace(/\n/g, '<br>')
 
   return html
 })
@@ -179,7 +198,7 @@ onUnmounted(() => {
 }
 
 .doc-content {
-  line-height: 1.7; color: var(--text-primary);
+  line-height: 1.7; color: var(--text-primary); white-space: pre-wrap;
 }
 
 .doc-content :deep(h1) { font-size: 21px; font-weight: 700; margin: 20px 0 12px; }

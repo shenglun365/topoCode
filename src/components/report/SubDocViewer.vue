@@ -106,12 +106,23 @@ function cancelEdit() {
 function buildChildList(): string[] {
   if (!props.taskId) return []
   const parts: string[] = []
-  const children = communityStore.tasks[props.taskId]?.communities
+  const allChildren = communityStore.tasks[props.taskId]?.communities
     ?.filter(c => c.parentId === props.parentCommId) ?? []
-  if (children.length === 0) return parts
-  parts.push('', '---', '', `## 子组件（${children.length}）`, '')
-  for (const c of children) {
-    parts.push(`- [${communityLabel(c)}](##community:${c.edgeType}:${c.communityId})`)
+  if (allChildren.length === 0) return parts
+  parts.push('', '---', '', `## 子组件（${allChildren.length}）`, '')
+  const includeChildren = allChildren.filter(c => c.edgeType === 'INCLUDE')
+  const callChildren = allChildren.filter(c => c.edgeType === 'CALL')
+  if (includeChildren.length > 0) {
+    parts.push('', `### 依赖分析（${includeChildren.length}）`, '')
+    for (const c of includeChildren) {
+      parts.push(`- [${communityLabel(c)}](##community:${c.edgeType}:${c.communityId})`)
+    }
+  }
+  if (callChildren.length > 0) {
+    parts.push('', `### 调用分析（${callChildren.length}）`, '')
+    for (const c of callChildren) {
+      parts.push(`- [${communityLabel(c)}](##community:${c.edgeType}:${c.communityId})`)
+    }
   }
   return parts
 }

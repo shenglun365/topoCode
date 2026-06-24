@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from .node_types import NodeKind, EdgeKind, Provenance
@@ -23,14 +24,25 @@ logger = logging.getLogger(__name__)
 class GraphEmitter:
     """将 Node/Edge 写入 SQLite graph_node / graph_edge 表"""
 
-    def __init__(self, analysis_store, task_id: str):
+    def __init__(self, analysis_store, task_id: str, project_root: str = ""):
         """
         Args:
             analysis_store: store.analysis_store.AnalysisStore 实例
             task_id: 任务 ID
+            project_root: 项目根目录绝对路径，用于 file_path 归一化
         """
         self.store = analysis_store
         self.task_id = task_id
+        self.project_root = project_root
+
+    def _rel(self, path: str) -> str:
+        """将绝对路径转为项目相对路径（如果尚未是相对路径）"""
+        if self.project_root and path and os.path.isabs(path):
+            try:
+                return os.path.relpath(path, self.project_root)
+            except Exception:
+                return path
+        return path
 
     # ── 写节点 ───────────────────────────────────────────
 
@@ -43,7 +55,7 @@ class GraphEmitter:
             return 0
 
         # 确保 file 记录存在
-        self.store._ensure_file_record(table.file_path, table.language, self.task_id)
+        self.store._ensure_file_record(self._rel(table.file_path), table.language, self.task_id)
 
         rows = []
         for n in table.nodes:
@@ -53,7 +65,7 @@ class GraphEmitter:
                 "kind": n.kind.value,
                 "name": n.name,
                 "qualified_name": n.qualified_name,
-                "file_path": n.file_path,
+                "file_path": self._rel(n.file_path),
                 "language": n.language,
                 "start_line": n.start_line,
                 "start_col": n.start_col,
@@ -94,7 +106,7 @@ class GraphEmitter:
                 "provenance": e.provenance.value,
                 "line": e.line,
                 "col": e.col,
-                "file_path": e.file_path,
+                "file_path": self._rel(e.file_path),
                 "metadata": _json_dict(e.metadata) if e.metadata else "",
             })
 

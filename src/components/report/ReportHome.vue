@@ -17,7 +17,6 @@ import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
 import { displayDispatcher } from '@/services/display-dispatcher'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
-import TaskSummaryCard from '@/components/home/TaskSummaryCard.vue'
 import CommunitySection from '@/components/report/CommunitySection.vue'
 import CommunityArchitecturePanel from '@/components/report/CommunityArchitecturePanel.vue'
 import { useComponentId } from '@/composables/useComponentId'
@@ -36,7 +35,7 @@ const props = defineProps<{
 const projectId = computed(() => projectStore.selectedProjectId || taskDetail.value?.projectId || '')
 
 const emit = defineEmits<{
-  'open-md': [params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }]
+  'open-md': [params: { taskId: string; content: string; title: string; subDocId?: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }]
   'open-presummary': [taskId: string]
 }>()
 
@@ -54,6 +53,58 @@ const editingSummary = ref(false)
 const editSummaryText = ref('')
 
 // 文件预摘要状态（来自 dashboard，轮询刷新）
+const overviewDocId = ref('')
+const overviewPreview = ref('')
+const overviewLoading = ref(false)
+let overviewPollTimer: ReturnType<typeof setTimeout> | null = null
+
+async function loadOverviewDoc(silent = false) {
+  if (!props.taskId) return false
+  if (!silent) overviewLoading.value = true
+  try {
+    const result = await ipc.report.listSubDocs({ taskId: props.taskId, commId: 'overall' })
+    const docs = result || []
+    if (docs.length > 0) {
+      const doc = docs[0]
+      overviewDocId.value = doc.id || ''
+      overviewPreview.value = (doc.title || doc.name || '').slice(0, 100)
+      return true
+    }
+  } catch { /* ignore */ }
+  finally { if (!silent) overviewLoading.value = false }
+  return false
+}
+
+async function loadOverviewDocAndPoll() {
+  const found = await loadOverviewDoc(false)
+  if (!found) startOverviewPoll()
+}
+
+function startOverviewPoll() {
+  stopOverviewPoll()
+  overviewPollTimer = setInterval(async () => {
+    const found = await loadOverviewDoc(true)
+    if (found) stopOverviewPoll()
+  }, 5000)
+}
+
+function stopOverviewPoll() {
+  if (overviewPollTimer !== null) {
+    clearInterval(overviewPollTimer)
+    overviewPollTimer = null
+  }
+}
+
+function openOverviewDoc() {
+  if (!overviewDocId.value) return
+  emit('open-md', {
+    taskId: props.taskId,
+    content: '',
+    title: t('report.architectureOverview', '架构概览'),
+    subDocId: overviewDocId.value,
+  })
+}
+
 const preSummaryStatus = ref<{
   total_files: number
   cached_count: number
@@ -144,10 +195,10 @@ const hasAnyCommunity = computed(() => {
 })
 
 const depCommunityCount = computed(() =>
-  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'INCLUDE').length
+  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.edgeType === 'INCLUDE').length
 )
 const callCommunityCount = computed(() =>
-  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.level === 'L0' && c.edgeType === 'CALL').length
+  (communityStore.tasks[props.taskId]?.communities || []).filter(c => c.edgeType === 'CALL').length
 )
 
 const externalStats = computed(() =>
@@ -288,6 +339,7 @@ async function loadData() {
       startPreSummaryPoll()
     }
     await reportStore.checkReportExists(props.taskId)
+    await loadOverviewDocAndPoll()
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -321,9 +373,10 @@ async function saveSummary() {
 
 
 onMounted(() => { loadData() })
-onUnmounted(() => { stopPreSummaryPoll() })
+onUnmounted(() => { stopPreSummaryPoll(); stopOverviewPoll() })
 watch(() => props.taskId, () => {
   stopPreSummaryPoll()
+  stopOverviewPoll()
   reportStore.invalidateDashboard(props.taskId)
   loadData()
 })
@@ -377,7 +430,7 @@ watch(() => props.taskId, () => {
             @click="toggleCollapse('task')"
           >
             <PlusIcon class="w-3 h-3" />
-            <span>{{ t('report.taskSummary') }}: {{ task?.name || '-' }}</span>
+            <span>架构概览: {{ task?.name || '-' }}</span>
           </button>
         </div>
 
@@ -392,14 +445,14 @@ watch(() => props.taskId, () => {
           @minimize="toggleCollapse('project')"
         />
 
-        <!-- 任务概要 -->
+        <!-- 架构概览 -->
         <section
           v-if="!collapsed.task"
           class="home-section"
         >
           <div class="section-header">
             <ChartBarIcon class="w-4 h-4" />
-            <span>{{ t('report.taskSummary') }}</span>
+            <span>{{ t('report.architectureOverview', '架构概览') }}</span>
             <div class="header-spacer" />
             <button
               class="collapse-btn"
@@ -414,9 +467,24 @@ watch(() => props.taskId, () => {
               <span class="card-label">{{ t('analysis.taskName') }}</span>
               <span class="card-value">{{ task?.name || '-' }}</span>
             </div>
-            <div class="summary-card">
-              <span class="card-label">{{ t('analysis.taskType') }}</span>
-              <span class="card-value">{{ task?.type || '-' }}</span>
+            <div
+              class="summary-card clickable"
+              :class="{ 'summary-empty': !overviewDocId }"
+              @click="openOverviewDoc"
+            >
+              <span class="card-label">架构概览</span>
+              <span
+                v-if="overviewLoading"
+                class="card-value card-summary-empty"
+              >{{ t('common.loading', '加载中...') }}</span>
+              <span
+                v-else-if="overviewDocId"
+                class="card-value"
+              >已生成 — 点击查看</span>
+              <span
+                v-else
+                class="card-value card-summary-empty"
+              >输入 /overview 生成</span>
             </div>
             <div class="summary-card">
               <span class="card-label">{{ t('analysis.taskStatus') }}</span>

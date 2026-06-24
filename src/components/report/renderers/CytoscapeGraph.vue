@@ -236,9 +236,8 @@ function buildCytoscape() {
 
   cy.on('dbltap', 'node', (evt) => {
     const node = evt.target
-    if (node.data('_isMerged') || node.data('_hasChildren')) {
-      emit('node-dblclick', node.id())
-    }
+    if (node.data('_isMerged')) return
+    emit('node-dblclick', node.id())
   })
 
   cy.on('cxttap', 'node', (evt) => {
@@ -363,7 +362,7 @@ function buildCytoscape() {
     container.value!.style.cursor = 'pointer'
 
     if (!tooltip.value) return
-    const drillInfo = d._hasChildren ? '可双击下钻' : '无下级社区'
+    const drillInfo = d._isFile ? '可双击查看摘要' : d._hasChildren ? '可双击下钻' : '可双击查看文件'
     const label = d._label || d.id
     tooltip.value.innerHTML = `
       <div class="cg-tip-name">${escapeHtml(label)}</div>

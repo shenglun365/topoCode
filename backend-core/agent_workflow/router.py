@@ -240,36 +240,33 @@ def create_default_router(
     构建 RouterHarness 并注册所有默认路由。
 
     注册的路由:
-      - "analyze"     → ArchAnalystWorkflow (LLM 分析 + 图 + 概览)
+      - "overview"    → OverviewWorkflow (整体架构概览)
       - "track_start" → ArchSentinelWorkflow (记录快照)
       - "track_stop"  → ArchSentinelWorkflow (对比 + 摘要 + 持久化)
     """
     router = RouterHarness(project_root=project_root, multi_db=multi_db)
 
-    # ── analyze 路由 ──
-    def _build_analyst_tools(ctx: dict) -> ToolRegistry:
-        from .llm_adapter import create_llm_chat_fn
-        from .tool_factory import build_analyst_tools
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db.main_db)
+    # ── overview 路由 ──
+    def _build_overview_tools(ctx: dict) -> ToolRegistry:
+        from .tools import ToolRegistry as _TR
+        from .workflows.overview import _GenerateOverviewTool
+        tools = _TR()
+        tools.register(_GenerateOverviewTool(
+            multi_db, project_db, ctx.get("task_id", "")))
+        return tools
 
-        def _render(template_id, variables):
-            result = pm.render(template_id, variables, locale='zh-CN')
-            return result.get('messages', [])
-
-        llm_fn = create_llm_chat_fn(multi_db, llm_model_id)
-        return build_analyst_tools(llm_fn, _render, save_result_fn)
-
-    def _analyst_context_transform(ctx: dict) -> dict:
+    def _overview_context_transform(ctx: dict) -> dict:
         ctx["project_summary"] = project_summary
         return ctx
 
-    from .workflows.arch_analyst import ArchAnalystWorkflow
-    router.register("analyze", RouteEntry(
-        workflow_class=ArchAnalystWorkflow,
-        tool_builder=_build_analyst_tools,
-        context_transformer=_analyst_context_transform,
-        description="批量 LLM 分析全部社区模块，生成模块名称、功能摘要、架构图和整体架构概览文档。适用于新人理解项目结构或全面梳理现有架构。",
+    from .sandbox import AgentSandbox
+    from .workflows.overview import OverviewWorkflow
+    router.register("overview", RouteEntry(
+        workflow_class=OverviewWorkflow,
+        tool_builder=_build_overview_tools,
+        context_transformer=_overview_context_transform,
+        description="生成整体架构概览文档。Agent 可读取社区分析结果、文件预摘要、源码文件等，输出架构总览 Markdown",
+        sandbox_builder=lambda root: AgentSandbox(root, max_tokens=8192, timeout_seconds=600),
     ))
 
     # ── track_start / track_stop 路由 ──

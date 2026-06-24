@@ -57,7 +57,7 @@ class ContentGuard:
     _BLOCK_PATTERNS = [
         r"```(?:bash|sh|zsh|shell)\s[\s\S]*?```",   # shell code blocks
         r"```(?:python|js|javascript)\s[\s\S]*?```",  # code blocks
-        r"`[^`]{1,200}`",                              # inline code
+        r"`[^`]*[0-9()./\\{}\[\]<>@!$%^&*+=|~:;#\-_][^`]{0,199}`",  # inline code (需含代码特征字符)
         r"https?://[^\s]{5,}",                         # URLs
         r"(?:sudo|chmod|chown|rm\s+-rf|mkfs|dd\s+if=)",  # dangerous commands
         r"<\?php[\s\S]*?\?>",                          # PHP tags

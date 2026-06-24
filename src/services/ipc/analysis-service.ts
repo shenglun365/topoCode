@@ -78,7 +78,7 @@ export interface AnalysisService {
   getExternalStats(taskId: string): Promise<ExternalStatsResult>
   getCrossCommunityEdges(params: { taskId: string; edgeType: string; commLv: string }): Promise<CrossCommunityEdgesResult>
   getCommunityNodeLists(params: { taskId: string; edgeType: string; commLv: string }): Promise<Record<string, string[]>>
-  startArchAnalysis(params: { taskId: string; edgeType: string; level: string; modelId?: string; force?: boolean }): Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; communities?: number; skipped?: number; error?: string }>
+  startOverview(params: { taskId: string; force?: boolean }): Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; skipped?: boolean; error?: string }>
   listTimeline(params: { projectId: string }): Promise<TimelineEntry[]>
   getTimelineEntry(params: { timelineId: string }): Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
   startArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string }>
@@ -201,8 +201,8 @@ export function createAnalysisService(api: any): AnalysisService {
     getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
       return await api.analysis.getCommunityNodeLists(params) as Record<string, string[]>
     },
-    startArchAnalysis: async (params) => {
-      return await api.analysis.startArchAnalysis(params) as { taskId: string; success: boolean; agentTaskId?: string | null; communities?: number; skipped?: number; error?: string }
+    startOverview: async (params) => {
+      return await api.analysis.startOverview(params)
     },
     listTimeline: async (params) => {
       return await api.analysis.listTimeline(params)

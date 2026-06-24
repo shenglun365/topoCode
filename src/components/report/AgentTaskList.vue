@@ -29,6 +29,14 @@ const historyTasks = ref<any[]>([])
 const historyLoaded = ref(false)
 const pageSize = ref(10)
 
+function _historySame(a: any[], b: any[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((item, i) => {
+    const o = b[i]
+    return item.agent_id === o.agent_id && item.status === o.status
+  })
+}
+
 const liveTasks = computed(() => {
   if (!taskId.value) return []
   return communityStore.tasks[taskId.value]?.agentTasks || []
@@ -83,11 +91,11 @@ function transformHistory(h: any) {
 async function loadHistory(cursor: number) {
   if (!taskId.value) return
   const results = await communityStore.loadAgentTaskHistory(taskId.value, cursor, 10)
-  console.log('[loadHistory] cursor=%d got %d results (total=%d)', cursor, results.length, results.length)
   if (cursor === 0) {
-    historyTasks.value = results
+    if (!_historySame(results, historyTasks.value)) {
+      historyTasks.value = results
+    }
   } else {
-    // append
     for (const r of results) {
       if (!historyTasks.value.find(h => h.agent_id === r.agent_id)) {
         historyTasks.value.push(r)
@@ -104,7 +112,6 @@ async function loadMore() {
 }
 
 async function refresh() {
-  historyTasks.value = []
   pageSize.value = 10
   historyLoaded.value = false
   await loadHistory(0)
@@ -194,7 +201,7 @@ const actionLabel = (action: string) => {
   const map: Record<string, string> = {
     analyze_components: '组件分析',
     agentic_analyze_components: '智能组件分析',
-    startArchAnalysis: '架构分析',
+    overview: '架构概览',
     analyze_all: '全量分析',
     analyzeCommFiles: '文件分析',
     presummary_files: '文件预摘要',

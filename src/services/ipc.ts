@@ -338,8 +338,8 @@ function createRealIPC() {
       getCommunityNodeLists: async (params: { taskId: string; edgeType: string; commLv: string }) => {
         return await api.analysis.getCommunityNodeLists(params)
       },
-      startArchAnalysis: async (params: { taskId: string; edgeType: string; level: string; modelId?: string; force?: boolean }) => {
-        return await api.analysis.startArchAnalysis(params)
+      startOverview: async (params: { taskId: string; force?: boolean }) => {
+        return await api.analysis.startOverview(params)
       },
       listTimeline: async (params: { projectId: string }) => {
         return await api.analysis.listTimeline(params)

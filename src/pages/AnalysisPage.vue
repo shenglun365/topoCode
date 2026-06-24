@@ -99,12 +99,13 @@ function handleOpenPreSummary(taskId: string) {
 }
 
 // 处理报告首页的 open-md 事件（在 analysis 上下文中打开 inline 子文档 tab）
-function handleOpenMD(params: { taskId: string; content: string; title: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }) {
+function handleOpenMD(params: { taskId: string; content: string; title: string; subDocId?: string; parentLevel?: string; parentCommId?: string; parentEdgeType?: string }) {
   const hash = params.title.slice(0, 20).replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
   const id = `tab-subdoc-inline-${params.taskId}-${hash}`
   funcGroup.openTab('analysis', {
     id,
     kind: 'subdoc',
+    subDocId: params.subDocId,
     title: params.title,
     content: params.content,
     taskId: params.taskId,

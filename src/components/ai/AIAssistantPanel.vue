@@ -113,9 +113,8 @@ const HELP_TEXT = [
   '| 指令 | 说明 |',
   '|------|------|',
   '| `/help` / `/帮助` | 显示本帮助 |',
-  '| `/select [--all/--include/--call/--l0/--l1/--l2/--clear/--unanalyzed]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`/`--l1`/`--l2` 按条件自动选取；`--clear` 清除已选；`--unanalyzed` 只选未分析组件 |',
-  '| `/arch all` | 启动 Agent 对全部社区执行架构分析 |',
-  '| `/analyze all` | 同上 |',
+  '| `/select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`~/`--l5` 按条件自动选取；`--clear` 清除已选；`--unanalyzed` 只选未分析组件 |',
+  '| `/overview [--force]` | 生成整体架构概览文档。`--force` 强制覆盖已生成内容。需要 L0/L1 社区分析先完成 |',
   '| `/analyze_components` `[-L zh/en] [-j N] [-r N] [--agentic] [--summary-model <id>] [-c N] [--force] [--call/--include] [--l0/--l1/--l2]` | 对已选组件启动批量分析。「-L」语言，「-j」并发(1-5)，「-r」轮次(1-30)，「--agentic」自主分析，「--summary-model」摘要模型ID，「-c」摘要并发(1-10)，「--force」强制覆盖已分析组件，「--call/--include」边类型筛选，「--l0/--l1/--l2」层级筛选 |',
   '| `/presummary` | 查看文件预摘要概况（P0/P1/P2 文件数） |',
   '| `/presummary files P0/P1/P2 [页码]` | 分页查看某批次文件列表 |',
@@ -211,7 +210,7 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
-const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/arch all', '/analyze all', '/analyze_components', '/analyze_components --agentic', '/analyze_components --force',
+const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/select --l3', '/overview', '/overview --force', '/analyze_components', '/analyze_components --agentic', '/analyze_components --force',
   '/presummary', '/presummary files', '/presummary start', '/presummary get', '/presummary delete', '/presummary rerun',
   '/track', '/diff']
 
@@ -358,17 +357,6 @@ function handleCmdConfirm() {
   showCmdConfirm.value = false
   const cd = cmdConfirmData.value
 
-  // 如果确认的是 agent 调度任务 → 直接调用后端
-  if (cd.action === 'analyze' && cd.args.all === 'true') {
-    addMessage('user', cd.text)
-    addMessage('system', 'Agent 分析任务已启动，请稍后查看结果...')
-    if (activeTaskId.value) {
-      communityStore.triggerArchAnalysis(activeTaskId.value, 'INCLUDE', cd.args.level || 'L0', undefined, undefined, cd.args.force === 'true')
-        .catch(e => addMessage('error', String(e)))
-    }
-    return
-  }
-
   addMessage('user', cd.text)
   streaming.value = true
   const assistantMsg = addMessage('assistant', '')
@@ -407,6 +395,24 @@ function _validateFlags(tokens: string[], validFlags: string[]): string[] {
   return tokens.filter(t => t.startsWith('-') && !validFlags.includes(t.toLowerCase()))
 }
 
+function _parseTrackDiffCommand(input: string): { action: string; args: Record<string, string> } | null {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith('/track ') && !trimmed.startsWith('/diff ')) return null
+  const parts = trimmed.slice(1).split(/\s+/)
+  const action = parts[0] as string
+  const VALID_FLAGS: Record<string, string[]> = { track: ['tag'], diff: ['from', 'to'] }
+  const args: Record<string, string> = {}
+  for (let i = 1; i < parts.length; i++) {
+    if (parts[i].startsWith('--')) {
+      const key = parts[i].slice(2)
+      const valid = VALID_FLAGS[action]
+      if (valid && !valid.includes(key)) return null
+      args[key] = parts[i + 1] && !parts[i + 1].startsWith('--') ? parts[++i] : 'true'
+    }
+  }
+  return { action, args }
+}
+
 async function handleSend() {
   const text = userInput.value.trim()
   if (!text || streaming.value) return
@@ -434,7 +440,7 @@ async function handleSend() {
         return
       }
       // 校验未知参数
-      const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2','--unanalyzed']
+      const VALID_SELECT_FLAGS = ['--include','--call','--all','--clear','--l0','--l1','--l2','--l3','--l4','--l5','--unanalyzed']
       const unknownFlags = args.split(/\s+/).filter(f => f.startsWith('--') && !VALID_SELECT_FLAGS.includes(f.toLowerCase()))
       if (unknownFlags.length > 0) {
         addMessage('system', `未知参数: ${unknownFlags.join('、')}。可用参数: ${VALID_SELECT_FLAGS.join(' ')}`)
@@ -446,7 +452,7 @@ async function handleSend() {
       const taskComs = communityStore.tasks[taskId]?.communities || []
       if (taskComs.length === 0) { addMessage('system', '社区列表尚未加载，请先打开左侧结构图。'); return }
       const edgeFilter = args.match(/--(include|call)/i)?.[1]?.toUpperCase()
-      const levelFilters = [...args.matchAll(/--l([012])/gi)].map(m => 'L' + m[1])
+      const levelFilters = [...args.matchAll(/--l(\d+)/gi)].map(m => 'L' + m[1])
       const wantAll = /--all/i.test(args)
       const wantUnanalyzed = /--unanalyzed/i.test(args)
       const matching = taskComs.filter(c => {
@@ -726,17 +732,37 @@ async function handleSend() {
       addMessage('assistant', HELP_TEXT)
       return
     }
-    const parsed = communityStore.parseArchCommand(text)
-    if (parsed) {
-      showCmdConfirm.value = true
-      cmdConfirmData.value = { text, action: parsed.action, args: parsed.args }
-      return
-    }
-    // /arch/analyze/track/diff 命令解析失败 → 提示参数错误
-    if (/^\/(arch|analyze|track|diff)\s/.test(text)) {
+    // /overview — 生成整体架构概览
+    if (/^\/overview\b/i.test(text)) {
+      const VALID_OVERVIEW_FLAGS = ['--force']
+      const tokens = text.split(/\s+/).slice(1)
+      const unknown = _validateFlags(tokens, VALID_OVERVIEW_FLAGS)
+      if (unknown.length > 0) {
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', `未知参数: ${unknown.join('、')}。可用: --force`)
+        return
+      }
       addMessage('user', text)
       userInput.value = ''
-      addMessage('system', '命令参数无法识别。可用参数: /arch all --level L0, /track --tag <名称>, /diff --from <v1> --to <v2>。详情输入 /help 查看。')
+      const tid = resolveTaskId()
+      if (!tid) { addMessage('system', '未找到激活的任务。'); return }
+      addMessage('system', '架构概览生成任务已启动，请稍后查看结果...')
+      communityStore.triggerOverview(tid, text.includes('--force'))
+        .catch(e => addMessage('error', String(e)))
+      return
+    }
+    // /track /diff 保留
+    if (/^\/(track|diff)\s/.test(text)) {
+      const parsed = _parseTrackDiffCommand(text)
+      if (parsed) {
+        showCmdConfirm.value = true
+        cmdConfirmData.value = { text, action: parsed.action, args: parsed.args }
+        return
+      }
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('system', '命令参数无法识别。可用: /track --tag <名称>, /diff --from <v1> --to <v2>。')
       return
     }
   }

@@ -260,18 +260,20 @@ function handleExternalTagClick(name: string, count: number) {
     </div>
 
     <div
-      v-if="!isExternalTab && totalPages > 1"
+      v-if="!isExternalTab"
       class="ctv-pagination"
     >
       <button
+        v-if="totalPages > 1"
         class="btn btn-ghost btn-xs"
         :disabled="page <= 1"
         @click="page--"
       >
         {{ t('common.prev', '上一页') }}
       </button>
-      <span class="ctv-page-info">{{ page }} / {{ totalPages }} ({{ filteredCommunities.length }})</span>
+      <span class="ctv-page-info">{{ totalPages > 1 ? `${page} / ${totalPages}` : '' }} ({{ filteredCommunities.length }})</span>
       <button
+        v-if="totalPages > 1"
         class="btn btn-ghost btn-xs"
         :disabled="page >= totalPages"
         @click="page++"

@@ -738,76 +738,30 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
-  async function triggerArchAnalysis(taskId: string, edgeType: string, level: string, modelId?: string, projectId?: string, force = false) {
+  async function triggerOverview(taskId: string, force = false) {
     const t = ensureTask(taskId)
     const idx = t.agentTasks.length
-    addAgentTask(taskId, 'analyze', ['架构分析准备中...'])
+    const actionLabel = 'overview'
+    addAgentTask(taskId, actionLabel, ['架构概览生成中...'])
     t.agentTasks[idx].status = 'running'
 
     try {
-      // 前置条件：确保项目摘要已生成（后端依赖）
-      const pid = projectId || (() => {
-        try {
-          const analysisStore = useAnalysisStore()
-          return analysisStore.tasks.find(t => t.id === taskId)?.projectId || ''
-        } catch { return '' }
-      })()
-
-      if (pid && isLLMConfigured()) {
-        try {
-          const summaryResult = await ipc.report.generateProjectSummary({ projectId: pid })
-          if (summaryResult?.summary) {
-            t.projectContext = `## 项目概要\n${summaryResult.summary}`
-          }
-        } catch { /* non-blocking */ }
-      }
-
-      const result = await ipc.analysis.startArchAnalysis({ taskId, edgeType, level, modelId, force: force || undefined })
+      const result = await ipc.analysis.startOverview({ taskId, force: force || undefined })
       if (result.success && result.agentTaskId) {
         cancelAgentPolling(taskId)
         t.agentTasks[idx].id = result.agentTaskId
-        const msg = result.skipped
-          ? `社区数: ${result.communities}（跳过 ${result.skipped} 个已分析）`
-          : `社区数: ${result.communities}`
-        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: msg })
+        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: '架构概览生成中...' })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
-      } else if (result.success && !result.agentTaskId) {
-        const skipped = result.skipped || 0
-        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: `全跳过（${skipped} 个已分析）` })
+      } else if (result.success && result.skipped) {
+        updateAgentTask(taskId, idx, { status: 'skipped', progress: 100, message: '架构概览已存在，跳过生成' })
       } else {
         updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
       }
       return result
     } catch (e: any) {
-      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || 'unknown error' })
+      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || '未知错误' })
       throw e
     }
-  }
-
-  function parseArchCommand(input: string): { action: string; args: Record<string, string> } | null {
-    const trimmed = input.trim()
-    if (!trimmed.startsWith('/arch ') && !trimmed.startsWith('/analyze ') &&
-        !trimmed.startsWith('/track ') && !trimmed.startsWith('/diff ')) return null
-    const parts = trimmed.slice(1).split(/\s+/)
-    const action = parts[0] as string
-    const VALID_FLAGS: Record<string, string[]> = {
-      analyze: ['level', 'model-id', 'edge-type', 'force'],
-      track: ['tag'],
-      diff: ['from', 'to'],
-    }
-    const args: Record<string, string> = {}
-    for (let i = 1; i < parts.length; i++) {
-      if (parts[i].startsWith('--')) {
-        const key = parts[i].slice(2)
-        const valid = VALID_FLAGS[action]
-        if (valid && !valid.includes(key)) {
-          return null
-        }
-        const val = parts[i + 1] && !parts[i + 1].startsWith('--') ? parts[++i] : 'true'
-        args[key] = val
-      }
-    }
-    return { action, args }
   }
 
   /* ---- Snapshot management ---- */
@@ -1112,9 +1066,9 @@ export const useCommunityStore = defineStore('community', () => {
     ensureTask, getSelections, setSelections, clearSelections,
     listCommunityResults, getCascadeLevels, saveCommunityResult,
     loadCommunities, loadCommunitiesFromDashboard, loadProjectContext, loadExternalStats, loadCrossCommunityEdges, loadCommunityNodeLists, loadFileDetail, loadCommunityFileGraph, getCrossEdges, analyzeSelected, runTask, stopAnalysis, retryTask,
-    toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections,
+    toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections, triggerOverview,
     pushError, clearErrorLogs, clearTask,
-    addAgentTask, updateAgentTask, updateAgentStep, triggerArchAnalysis, triggerComponentAnalysis, parseArchCommand,
+    addAgentTask, updateAgentTask, updateAgentStep, triggerComponentAnalysis,
     setTimeline, setCompareMode,
     loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
     cancelAgentPolling, cancelAgentTask, ensureAgentPolling,

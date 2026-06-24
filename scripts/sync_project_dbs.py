@@ -49,7 +49,73 @@ def list_projects(main_db_path: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def migrate_project_db(project_db_path: str, project_id: str) -> dict:
+def _normalize_paths(conn, project_root: str, result: dict):
+    """将 graph_node/graph_edge/graph_doc 中的绝对路径转为项目相对路径"""
+    import sqlite3
+    prefix = project_root.rstrip("/") + "/"
+    total = 0
+
+    # graph_node.file_path
+    try:
+        cur = conn.execute("SELECT COUNT(*) as cnt FROM graph_node WHERE file_path LIKE ?", (prefix + "%",))
+        n = cur.fetchone()["cnt"]
+        if n > 0:
+            conn.execute("""
+                UPDATE graph_node SET file_path = substr(file_path, ?)
+                WHERE file_path LIKE ?
+            """, (len(prefix) + 1, prefix + "%"))
+            total += n
+            result["actions"].append(f"normalize_graph_node:{n}")
+    except Exception:
+        pass
+
+    # graph_edge.file_path
+    try:
+        cur = conn.execute("SELECT COUNT(*) as cnt FROM graph_edge WHERE file_path LIKE ?", (prefix + "%",))
+        n = cur.fetchone()["cnt"]
+        if n > 0:
+            conn.execute("""
+                UPDATE graph_edge SET file_path = substr(file_path, ?)
+                WHERE file_path LIKE ?
+            """, (len(prefix) + 1, prefix + "%"))
+            total += n
+            result["actions"].append(f"normalize_graph_edge:{n}")
+    except Exception:
+        pass
+
+    # graph_doc.node_list (JSON array of strings)
+    try:
+        import json
+        cur = conn.execute("SELECT id, task_id, edge_type, comm_id, node_list FROM graph_doc WHERE node_list IS NOT NULL")
+        fixed = 0
+        for row in cur.fetchall():
+            try:
+                paths = json.loads(row["node_list"])
+                new_paths = []
+                changed = False
+                for p in paths:
+                    if isinstance(p, str) and p.startswith(prefix):
+                        new_paths.append(p[len(prefix):])
+                        changed = True
+                    else:
+                        new_paths.append(p)
+                if changed:
+                    conn.execute("UPDATE graph_doc SET node_list=? WHERE id=?",
+                                 (json.dumps(new_paths), row["id"]))
+                    fixed += 1
+            except Exception:
+                pass
+        if fixed > 0:
+            total += 1
+            result["actions"].append(f"normalize_graph_doc_nodes:{fixed}")
+    except Exception:
+        pass
+
+    if total > 0:
+        conn.commit()
+
+
+def migrate_project_db(project_db_path: str, project_id: str, project_root: str = "") -> dict:
     import sqlite3
     result = {"path": project_db_path, "id": project_id, "status": "ok", "actions": []}
 
@@ -124,6 +190,10 @@ def migrate_project_db(project_db_path: str, project_id: str) -> dict:
             """)
             result["actions"].append(f"fixed_edge_type:{need_fix}_rows")
 
+        # ── 路径归一化：绝对路径 → 项目相对路径 ──
+        if project_root:
+            _normalize_paths(conn, project_root, result)
+
         conn.commit()
         conn.close()
 
@@ -193,7 +263,7 @@ def main():
     for p in projects:
         pid = p["id"]
         db_path = resolve_project_db_path(p, data_dir)
-        result = migrate_project_db(db_path, pid)
+        result = migrate_project_db(db_path, pid, project_root=p.get("root_path", ""))
         summary[result["status"]] = summary.get(result["status"], 0) + 1
         summary["actions"].extend(
             [a for a in result["actions"] if a not in ("up_to_date", "db_file_not_found")]
