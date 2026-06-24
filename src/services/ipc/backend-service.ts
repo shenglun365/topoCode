@@ -15,6 +15,7 @@ export interface BackendService {
   setMemoryLimit(limit: number): Promise<void>
   getHttpConfig(): Promise<HttpConfigDTO>
   setHttpConfig(config: { host: string; port: number }): Promise<SuccessResponse>
+  saveHttpConfig(config: { host?: string; port?: number }): Promise<SuccessResponse>
 }
 
 export function createBackendService(api: any): BackendService {
@@ -51,6 +52,9 @@ export function createBackendService(api: any): BackendService {
     },
     setHttpConfig: async (config: { host: string; port: number }) => {
       return await api.backend.setHttpConfig(config) as SuccessResponse
+    },
+    saveHttpConfig: async (config: { host?: string; port?: number }) => {
+      return await api.backend.saveHttpConfig(config) as SuccessResponse
     },
   }
 }

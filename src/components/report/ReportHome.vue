@@ -480,11 +480,11 @@ watch(() => props.taskId, () => {
               <span
                 v-else-if="overviewDocId"
                 class="card-value"
-              >已生成 — 点击查看</span>
+              >              ><span class="status-text status-green">已生成 可查看</span></span>
               <span
                 v-else
                 class="card-value card-summary-empty"
-              >输入 /overview 生成</span>
+              ><span class="status-text status-orange">未生成</span></span>
             </div>
             <div class="summary-card">
               <span class="card-label">{{ t('analysis.taskStatus') }}</span>
@@ -1244,6 +1244,11 @@ watch(() => props.taskId, () => {
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* 状态文本颜色（柔和） */
+.status-text { font-size: 12px; font-weight: 500; }
+.status-green { color: #5a9e6f; }
+.status-orange { color: #c08a4b; }
 
 /* Project summary dialog */
 .summary-dialog {

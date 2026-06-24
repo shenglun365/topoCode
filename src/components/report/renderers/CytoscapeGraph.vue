@@ -326,10 +326,10 @@ function buildCytoscape() {
 
   // run layout after all event handlers registered
   const layout = cy.layout(
-    { name: 'cose', idealEdgeLength: 200, nodeRepulsion: props.repulsion || 15000, nodeOverlap: 40, gravity: 1.0, fit: false, animate: false, numIter: 4000 }
+    { name: 'cose', idealEdgeLength: 100, nodeRepulsion: props.repulsion || 8000, nodeOverlap: 20, padding: 20, fit: false, animate: false, numIter: 4000 }
   )
 
-  lastAppliedRepulsion = props.repulsion || 15000
+  lastAppliedRepulsion = props.repulsion || 8000
   cy.one('layoutstop', () => {
     if (!cy) return
     cy.zoom(1.0)
@@ -452,8 +452,8 @@ watch(() => props.repulsion, (v) => {
   repulsionTimer = setTimeout(() => {
     try {
       const layout = cy!.layout({
-        name: 'cose', idealEdgeLength: 200, nodeRepulsion: r,
-        nodeOverlap: 40, gravity: 1.0, fit: false, animate: true,
+        name: 'cose', idealEdgeLength: 100, nodeRepulsion: r,
+        nodeOverlap: 20, padding: 20, fit: false, animate: true,
         animationDuration: 1500, numIter: 4000,
       })
       layout.run()

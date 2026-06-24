@@ -74,7 +74,14 @@ export const useSettingsStore = defineStore('settings', () => {
     restartState.value = 'restarting'
     restartErrorMsg.value = ''
     try {
-      try { const st = useStatusStore(); await ipc.backend.setHttpConfig({ host: st.httpHost, port: st.httpPort }) } catch (e) { console.warn('Failed to set http config on restart', e) }
+      try {
+        const st = useStatusStore()
+        const cfg = { host: st.httpHost, port: st.httpPort }
+        await Promise.all([
+          ipc.backend.setHttpConfig(cfg),
+          ipc.backend.saveHttpConfig(cfg).catch((e: any) => console.warn('Failed to persist http config', e)),
+        ])
+      } catch (e) { console.warn('Failed to set http config on restart', e) }
       const result = await ipc.backend.restart()
       const ok = result?.status === 'running'
       backendStatus.value = ok ? 'connected' : 'disconnected'

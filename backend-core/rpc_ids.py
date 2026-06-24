@@ -57,6 +57,8 @@ RPC_IDS: dict[str, str] = {
     "backend.getStatus":            "API-031",
     "backend.ping":                 "API-032",
     "backend.testPort":             "API-033",
+    "backend.saveHttpConfig":       "API-034h",
+    "backend.getHttpConfig":        "API-035h",
 
     # ── group ─────────────────────────────────────────────────
     "group.list":                   "API-034",

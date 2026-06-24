@@ -176,6 +176,26 @@ def main():
     app = BackendApp(data_dir, http_port=http_port)
     if http_host:
         app.http_host = http_host
+    # 从 app_config 加载持久化的 http_host（用户自定义设置，覆盖 CLI 默认）
+    try:
+        row = app.multi_db.main_db.fetchone(
+            "SELECT value FROM app_config WHERE key='http_host'"
+        )
+        if row and row["value"]:
+            http_host = row["value"]
+            app.http_host = http_host
+            logger.info(f"Loaded http_host from app_config: {http_host}")
+    except Exception as e:
+        logger.warning(f"Failed to load http_host from app_config: {e}")
+    try:
+        row = app.multi_db.main_db.fetchone(
+            "SELECT value FROM app_config WHERE key='http_port'"
+        )
+        if row and row["value"]:
+            app.http_port = int(row["value"])
+            logger.info(f"Loaded http_port from app_config: {app.http_port}")
+    except Exception as e:
+        logger.warning(f"Failed to load http_port from app_config: {e}")
 
     if "--stdio" in sys.argv:
         run_stdio_mode(app)

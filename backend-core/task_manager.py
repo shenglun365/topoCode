@@ -1556,6 +1556,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
 
+        # 获取项目根路径（用于归一化 edge 中的绝对路径）
+        proj_row = multi_db.main_db.fetchone(
+            "SELECT root_path FROM projects WHERE id = ?", (pid,)
+        )
+        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+
         edge_kind = 'calls' if et == 'CALL' else 'imports'
 
         # 1. Load all communities at the given level for this edge_type
@@ -1616,20 +1622,31 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     for r in rows:
                         symbol_file_map[r[0]] = r[1] or ''
 
+        def _rel(p: str) -> str:
+            """将可能的绝对路径转为项目相对路径（匹配 node_list 格式）"""
+            if not p:
+                return p
+            if p.startswith('file:'):
+                p = p[5:]
+            if project_root and p.startswith(project_root):
+                p = p[len(project_root):]
+            return p.lstrip('/')
+
         # 4. Resolve edge source/target to community keys
         def resolve_key(raw_id, edge_kind, sym_map, file_comm):
             """Resolve an edge endpoint to a community-matching key."""
             if not raw_id:
                 return None
             if edge_kind == 'imports':
-                # strip 'file:' prefix to match node_list format
-                key = raw_id.replace('file:', '', 1) if raw_id.startswith('file:') else raw_id
+                key = _rel(raw_id)
                 return file_comm.get(key)
             else:  # calls
                 # resolve symbol ID → file_path, then match file_path in node_comm
                 fpath = sym_map.get(raw_id, '')
-                if fpath and fpath in file_comm:
-                    return file_comm[fpath]
+                if fpath:
+                    fpath_rel = _rel(fpath)
+                    if fpath_rel in file_comm:
+                        return file_comm[fpath_rel]
                 # fallback: try direct lookup (some CALL node_lists may use symbol IDs)
                 if raw_id in file_comm:
                     return file_comm[raw_id]

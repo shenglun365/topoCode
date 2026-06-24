@@ -656,6 +656,9 @@ function createRealIPC() {
       setHttpConfig: async (config: { host: string; port: number }) => {
         return await api.backend.setHttpConfig(config)
       },
+      saveHttpConfig: async (config: { host?: string; port?: number }) => {
+        return await api.backend.saveHttpConfig(config)
+      },
     },
 
     // ==================== 系统 ====================

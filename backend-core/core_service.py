@@ -1758,6 +1758,37 @@ def register_backend_methods(server: ZMQServer, multi_db: MultiDBManager, plugin
         http_host = getattr(multi_db, 'http_host', None)
         return {"status": "running", "pid": os.getpid(), "port": 5671, "httpPort": http_port, "httpHost": http_host}
 
+    @server.register("backend.saveHttpConfig")
+    def save_http_config(host: str = None, port: int = None):
+        """持久化 HTTP 配置到 app_config 表"""
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        if host is not None:
+            multi_db.main_db.execute(
+                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+                ("http_host", host, now)
+            )
+        if port is not None:
+            multi_db.main_db.execute(
+                "INSERT OR REPLACE INTO app_config (key, value, updated_at) VALUES (?, ?, ?)",
+                ("http_port", str(port), now)
+            )
+        multi_db.main_db.commit()
+        logger.info(f"[saveHttpConfig] host={host} port={port}")
+        return {"success": True}
+
+    @server.register("backend.getHttpConfig")
+    def get_http_config():
+        """从 app_config 表读取持久化的 HTTP 配置"""
+        rows = main_db.fetchall("SELECT key, value FROM app_config WHERE key IN ('http_host', 'http_port')")
+        result = {}
+        for r in rows:
+            result[r["key"]] = r["value"]
+        return {
+            "host": result.get("http_host", ""),
+            "port": int(result.get("http_port", 0)) if result.get("http_port") else 0,
+        }
+
     @server.register("backend.ping")
     def ping():
         return {"pong": True, "timestamp": datetime.now().isoformat()}

@@ -396,6 +396,8 @@ contextBridge.exposeInMainWorld('api', {
     setMemoryLimit: (limit: number) => ipcRenderer.invoke('backend:setMemoryLimit', limit),
     getHttpConfig: () => ipcRenderer.invoke('backend:getHttpConfig'),
     setHttpConfig: (config: { host: string; port: number }) => ipcRenderer.invoke('backend:setHttpConfig', config),
+    saveHttpConfig: (config: { host?: string; port?: number }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'backend.saveHttpConfig', params: config }),
 
     // 事件订阅
     onStatusChange: (callback: (data: any) => void) => {

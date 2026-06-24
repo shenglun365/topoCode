@@ -627,6 +627,7 @@ export interface IPCAPI {
     setMemoryLimit: (limit: number) => Promise<void>
     getHttpConfig: () => Promise<{ host: string; port: number }>
     setHttpConfig: (config: { host: string; port: number }) => Promise<void>
+    saveHttpConfig: (config: { host?: string; port?: number }) => Promise<{ success: boolean }>
     testPort: (port: number) => Promise<PortTestResult>
     ping: () => Promise<PingResult>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void

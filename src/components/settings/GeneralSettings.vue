@@ -9,6 +9,7 @@ import { useSettingsStore } from '@/stores/settings-store'
 import { useStatusStore } from '@/stores/status'
 import type { SupportedLocale } from '@/i18n'
 import { useComponentId } from '@/composables/useComponentId'
+import { ipc } from '@/services/ipc'
 
 const { showId, componentId } = useComponentId('ST-004')
 const { t } = useI18n({ useScope: 'global' })
@@ -91,9 +92,27 @@ onMounted(() => { detectLocalIps() })
 function onBindIpChange(val: string) {
   statusStore.httpHost = val
   showRestartHint.value = true
+  saveHttpConfig()
+}
+
+function onPortChange(val: number) {
+  if (val > 0 && val <= 65535) {
+    statusStore.httpPort = val
+    showRestartHint.value = true
+    saveHttpConfig()
+  }
+}
+
+async function saveHttpConfig() {
+  try {
+    await ipc.backend.saveHttpConfig({ host: statusStore.httpHost, port: statusStore.httpPort })
+  } catch (e) {
+    console.warn('[GeneralSettings] saveHttpConfig failed:', e)
+  }
 }
 
 async function applyHttpConfigAndRestart() {
+  await saveHttpConfig()
   await settingsStore.restartBackend()
   showRestartHint.value = false
 }
@@ -194,7 +213,7 @@ function openHttpPage() {
             class="input"
             style="width:80px; padding:4px 8px; font-size:11px;"
             :value="statusStore.httpPort"
-            @change="statusStore.httpPort = Number(($event.target as HTMLInputElement).value) || statusStore.httpPort; showRestartHint = true"
+            @change="onPortChange(Number(($event.target as HTMLInputElement).value))"
           >
         </div>
         <div style="display:flex; gap:4px; align-items:center;">

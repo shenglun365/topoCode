@@ -111,6 +111,71 @@ def _normalize_paths(conn, project_root: str, result: dict):
     except Exception:
         pass
 
+    # graph_doc.edge_list (JSON array of {source, target, ...})
+    try:
+        import json
+        cur = conn.execute("SELECT id, task_id, edge_type, comm_id, edge_list FROM graph_doc WHERE edge_list IS NOT NULL AND edge_list != '[]'")
+        fixed = 0
+        for row in cur.fetchall():
+            try:
+                edges = json.loads(row["edge_list"])
+                new_edges = []
+                changed = False
+                for e in edges:
+                    if isinstance(e, dict):
+                        ne = dict(e)
+                        if isinstance(ne.get("source"), str) and ne["source"].startswith(prefix):
+                            ne["source"] = ne["source"][len(prefix):]
+                            changed = True
+                        if isinstance(ne.get("target"), str) and ne["target"].startswith(prefix):
+                            ne["target"] = ne["target"][len(prefix):]
+                            changed = True
+                        new_edges.append(ne)
+                    else:
+                        new_edges.append(e)
+                if changed:
+                    conn.execute("UPDATE graph_doc SET edge_list=? WHERE id=?",
+                                 (json.dumps(new_edges), row["id"]))
+                    fixed += 1
+            except Exception:
+                pass
+        if fixed > 0:
+            total += 1
+            result["actions"].append(f"normalize_graph_doc_edges:{fixed}")
+    except Exception:
+        pass
+
+    # graph_edge.source_id / target_id (file: 前缀 + 可能绝对路径)
+    try:
+        cur = conn.execute(
+            "SELECT id, source_id, target_id FROM graph_edge WHERE source_id LIKE 'file:%' OR target_id LIKE 'file:%'"
+        )
+        fixed = 0
+        for row in cur.fetchall():
+            src = row["source_id"]
+            tgt = row["target_id"]
+            new_src = src
+            new_tgt = tgt
+            if src.startswith('file:'):
+                new_src = src[5:]
+                if new_src.startswith(prefix):
+                    new_src = new_src[len(prefix):]
+            if tgt.startswith('file:'):
+                new_tgt = tgt[5:]
+                if new_tgt.startswith(prefix):
+                    new_tgt = new_tgt[len(prefix):]
+            if new_src != src or new_tgt != tgt:
+                conn.execute(
+                    "UPDATE graph_edge SET source_id=?, target_id=? WHERE id=?",
+                    (new_src, new_tgt, row["id"])
+                )
+                fixed += 1
+        if fixed > 0:
+            total += 1
+            result["actions"].append(f"normalize_graph_edge_ids:{fixed}")
+    except Exception:
+        pass
+
     if total > 0:
         conn.commit()
 

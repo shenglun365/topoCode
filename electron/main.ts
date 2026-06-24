@@ -188,7 +188,15 @@ function setupIPC() {
 
   // ---- ZeroMQ RPC 调用 ----
   ipcMain.handle('ipc:call', async (_, { method, params }: { method: string; params: Record<string, any> }) => {
-    const noisy = ['analysis.getAgentProgress', 'backend.ping']
+    const noisy = [
+      'analysis.getAgentProgress',
+      'analysis.getPreSummaryStatus',
+      'analysis.getAgentTaskHistory',
+      'backend.ping',
+      'graph.loadPositions',
+      'report.listSubDocs',
+      'report.getSubDoc',
+    ]
     const logParams = method === 'graph.savePositions' && params?.positions
       ? { ...params, positions: `${params.positions.length} entries` }
       : params
