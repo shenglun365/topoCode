@@ -26,6 +26,7 @@
   .doc-left .content { padding: 16px 20px 120px; max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
   .doc-right { overflow-y: auto; display: flex; flex-direction: column; min-width: 0; }
   .doc-right.hidden, .doc-left.hidden { display: none; }
+  #forceGraph { position: relative; flex: 1; min-height: 0; }
   .doc-resizer { width: 6px; cursor: col-resize; background: var(--border); flex-shrink: 0; position: relative; }
   .doc-resizer:hover, .doc-resizer:active { background: var(--accent); }
   .right-tabs { display: flex; gap: 2px; }
@@ -39,7 +40,7 @@
   .granularity-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .viz-container { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
   .viz-container .tab-content { display: none; width: 100%; flex: 1; min-height: 0; }
-  .viz-container .tab-content.active { display: flex; flex-direction: column; }
+  .viz-container .tab-content.active { display: flex; flex-direction: column; position: relative; }
   .heatmap-controls { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .heatmap-controls select { padding: 2px 4px; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); }
   #heatmapContent { padding: 8px; overflow: auto; flex: 1; min-height: 0; }
@@ -62,12 +63,14 @@
   .content table { border-collapse: collapse; width: 100%; margin: 0.4em 0; }
   .content th, .content td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; font-size: 12px; }
   .content th { background: var(--bg-code); }
-  .toc-float { position: absolute; top: 4px; left: 4px; z-index: 50; display: flex; flex-direction: column; align-items: flex-start; cursor: grab; user-select: none; opacity: 0.4; transition: opacity 0.15s; }
+  .toc-float { position: fixed; z-index: 50; display: flex; flex-direction: column; align-items: flex-start; cursor: grab; user-select: none; opacity: 0.6; transition: opacity 0.15s; width: fit-content; }
+  #tocFloat { top: 44px; left: 4px; }
+  #fileCommFloat { top: 44px; left: auto; }
   .toc-float:hover { opacity: 1; }
   .toc-float.dragging { cursor: grabbing; }
   .toc-toggle { width: 30px; height: 30px; border: 1px solid var(--border); background: var(--bg); border-radius: 5px; cursor: pointer; font-size: 15px; color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
   .toc-toggle:hover { background: var(--bg-code); }
-  .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; max-width: 260px; max-height: 50vh; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.12); font-size: 11px; }
+  .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; max-width: 260px; min-width: 200px; min-height: 60px; max-height: 50vh; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.12); font-size: 11px; }
   .toc-panel.open { display: block; }
   .toc-panel .toc-title { font-weight: 600; font-size: 11px; margin-bottom: 4px; }
   .toc-panel ul { list-style: none; padding: 0; margin: 0; }
@@ -98,6 +101,75 @@
   .loading { text-align: center; padding: 30px; color: var(--text-muted); font-size: 12px; }
   .error-msg { color: #ef4444; padding: 10px; border: 1px solid #ef4444; border-radius: 5px; margin: 10px 0; font-size: 12px; }
   @media (max-width: 800px) { .doc-resizer { display: none; } .doc-left, .doc-right { flex: 1 !important; } }
+  /* File list section */
+  #fileListSection { margin: 20px 0; padding-top: 12px; border-top: 1px solid var(--border); }
+  .file-list-title { font-size: 1.2em; font-weight: 600; margin: 0 0 8px 0; color: var(--text); }
+  .file-list-search { margin-bottom: 8px; }
+  .file-list-search-input { width: 100%; padding: 4px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
+  .file-list-search-input:focus { outline: none; border-color: var(--accent); }
+  .file-list-items { display: flex; flex-direction: column; }
+  .file-list-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; }
+  .file-list-item:hover { background: var(--bg-code); }
+  .file-list-icon { font-size: 14px; flex-shrink: 0; }
+  .file-list-name { font-weight: 500; white-space: nowrap; color: var(--text); }
+  .file-list-path { color: var(--text-muted); font-size: 10px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .file-list-empty { color: var(--text-muted); font-size: 12px; font-style: italic; padding: 8px 0; }
+  .file-list-loading, .file-list-error { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+  .file-list-error { color: #ef4444; }
+  .file-list-pager { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; font-size: 12px; }
+  .file-list-pager-btn { padding: 2px 8px; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--accent); cursor: pointer; }
+  .file-list-pager-btn:hover { background: var(--bg-code); }
+  .file-list-pager-btn:disabled { opacity: 0.4; cursor: default; }
+  .file-list-pager-info { color: var(--text-muted); font-family: monospace; }
+  /* File preview */
+  .file-preview-header { margin-bottom: 12px; }
+  .file-preview-title { font-size: 15px; font-weight: 600; }
+  .file-preview-meta { margin-bottom: 16px; }
+  .file-preview-meta-row { font-size: 12px; margin: 4px 0; color: var(--text-muted); }
+  .file-preview-meta-row .meta-label { font-weight: 500; color: var(--text); }
+  .file-preview-meta-row code { font-family: monospace; font-size: 11px; background: var(--bg-code); padding: 1px 4px; border-radius: 2px; }
+  /* File summary section */
+  .file-summary-area { margin-top: 16px; }
+  .file-summary-meta { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .file-summary-meta-row { font-size: 12px; color: var(--text-muted); }
+  .file-summary-divider { height: 1px; background: var(--border); margin: 8px 0; }
+  .file-summary-text { font-size: 12px; line-height: 1.7; color: var(--text); white-space: pre-wrap; word-break: break-word; font-family: inherit; margin: 0; }
+  .file-summary-empty { font-size: 12px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
+  .file-list-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .file-action-link { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: none; white-space: nowrap; }
+  .file-action-link:hover { text-decoration: underline; }
+  .toc-empty { font-size: 11px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
+  /* Graph toolbar */
+  .graph-toolbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); min-width: 140px; user-select: none; }
+  .graph-toolbar.collapsed .graph-toolbar-body { display: none; }
+  .graph-toolbar-header { display: flex; align-items: center; gap: 6px; padding: 3px 8px; cursor: move; border-bottom: 1px solid var(--border); }
+  .graph-toolbar.collapsed .graph-toolbar-header { border-bottom: none; }
+  .graph-toolbar-header:active { cursor: move; }
+  .graph-toolbar-title { font-size: 10px; color: var(--text-muted); flex: 1; }
+  .graph-toolbar-collapse { width: 18px; height: 18px; padding: 0; font-size: 12px; line-height: 1; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 3px; }
+  .graph-toolbar-collapse:hover { background: var(--bg-code); color: var(--text); }
+  .graph-toolbar-body { display: flex; gap: 4px; padding: 4px 6px; }
+  .graph-tb-btn { padding: 2px 8px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+  .graph-tb-btn:hover { border-color: var(--accent); color: var(--text); }
+  .graph-tb-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .graph-tb-btn.active:hover { opacity: 0.9; }
+  /* Graph filter panel */
+  .graph-filter-panel { position: absolute; top: 60px; right: 8px; width: 200px; max-height: 320px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 11; display: none; flex-direction: column; }
+  .graph-filter-panel.open { display: flex; }
+  .graph-filter-header { display: flex; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  .graph-filter-search { flex: 1; padding: 2px 6px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); }
+  .graph-filter-search:focus { outline: none; border-color: var(--accent); }
+  .graph-filter-btn { padding: 1px 6px; font-size: 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; }
+  .graph-filter-btn:hover { border-color: var(--accent); }
+  .graph-filter-close { width: 20px; padding: 0; font-size: 11px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 3px; }
+  .graph-filter-close:hover { background: var(--bg-code); color: var(--text); }
+  .graph-filter-list { flex: 1; overflow-y: auto; padding: 4px 6px; font-size: 10px; }
+  .graph-filter-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 2px; cursor: pointer; }
+  .graph-filter-item:hover { background: var(--bg-code); }
+  .graph-filter-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .graph-filter-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .graph-filter-item.hidden .name { color: var(--text-muted); text-decoration: line-through; }
+  .graph-filter-item .count { font-size: 9px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -123,7 +195,29 @@
   <div class="doc-right" id="docRight">
     <div class="viz-container">
       <div class="breadcrumb" id="rightBreadcrumb"></div>
-      <div class="tab-content active" id="tabGraph"><div id="forceGraph" style="flex:1;min-height:0"></div></div>
+      <div class="tab-content active" id="tabGraph">
+        <div class="graph-toolbar" id="graphToolbar">
+          <div class="graph-toolbar-header" id="graphToolbarHeader">
+            <span class="graph-toolbar-title">图操作</span>
+            <button class="graph-toolbar-collapse" id="graphToolbarCollapse">−</button>
+          </div>
+          <div class="graph-toolbar-body" id="graphToolbarBody">
+            <button class="graph-tb-btn active" id="graphTbLinked" title="跟随模式：拖拽节点时关联节点跟随移动">跟随</button>
+            <button class="graph-tb-btn" id="graphTbLocked" title="独立模式：拖拽节点时其它节点锁定">独立</button>
+            <button class="graph-tb-btn active" id="graphTbEdges" title="显示连线">连线</button>
+            <button class="graph-tb-btn" id="graphTbFilter" title="筛选器">筛选</button>
+          </div>
+        </div>
+        <div class="graph-filter-panel" id="graphFilterPanel">
+          <div class="graph-filter-header">
+            <input type="text" class="graph-filter-search" id="graphFilterSearch" placeholder="搜索节点...">
+            <button class="graph-filter-btn" id="graphFilterShowAll">全显</button>
+            <button class="graph-filter-btn" id="graphFilterHideAll">全隐</button>
+            <button class="graph-filter-close" id="graphFilterClose">✕</button>
+          </div>
+          <div class="graph-filter-list" id="graphFilterList"></div>
+        </div>
+        <div id="forceGraph"></div>
       <div class="tab-content" id="tabHeatmap">
         <div class="heatmap-controls">
           <label>规模: <select id="heatmapSize">
@@ -157,9 +251,10 @@ mermaid.initialize({ startOnLoad: false, theme: (window.matchMedia('(prefers-col
 const S = {
   left: true, right: true,
   tab: 'graph',          // 'graph'|'heatmap'
-  et: 'CALL',            // 'CALL'|'INCLUDE'
+  et: 'INCLUDE',          // 'INCLUDE'|'CALL'|'EXTERNAL_INCLUDE'|'EXTERNAL_CALL'
   cid: '',               // current community id
   gran: 'component',     // 'component'|'file'
+  depth: 1,              // 展开深度 1-5
   lv: '',
   size: 10,
   // derived
@@ -167,6 +262,10 @@ const S = {
   taskId: '',
   locale: 'zh-CN',
   docTitle: '',
+  // file summary
+  page: 'doc',           // 'doc'|'file-summary'
+  filePath: '',          // current file path
+  fileCommId: '',        // community the file belongs to
   // right panel nav
   commStack: [],         // [{cid, name}] breadcrumb trail
   commParent: '',        // current parent for community-children API
@@ -189,14 +288,30 @@ S.cid = g_url.get('cid') || '';
 S.lv = g_url.get('lv') || '';
 S.size = parseInt(g_url.get('size')) || 10;
 S.gran = g_url.get('gran') || 'component';
-S.scope = g_url.get('scope') || 'external';
+S.depth = parseInt(g_url.get('depth')) || 1;
+// 外部依赖/调用强制组件模式，文件模式强制内部类型
+if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
+  S.gran = 'component';
+}
+if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
+  S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
+}
+var _fid = g_url.get('fileId') || '';
+if (_fid) {
+  S.page = 'file-summary';
+  S.filePath = _fid;
+} else {
+  S.page = 'doc';
+}
+
 
 function syncURL() {
   var p = new URLSearchParams(location.search);
   if (g_taskId) p.set('taskId', g_taskId);
   if (g_docId) p.set('docId', g_docId);
   if (g_communityId) p.set('communityId', g_communityId);
-  if (g_edgeType) p.set('edgeType', g_edgeType);
+  var curET = p.get('edgeType');
+  if (curET) p.set('edgeType', curET); else if (g_edgeType) p.set('edgeType', g_edgeType);
   if (!S.left) p.set('left', '0'); else p.delete('left');
   if (!S.right) p.set('right', '0'); else p.delete('right');
   if (S.tab !== 'graph') p.set('tab', S.tab); else p.delete('tab');
@@ -205,13 +320,19 @@ function syncURL() {
   if (S.lv) p.set('lv', S.lv); else p.delete('lv');
   if (S.size !== 10) p.set('size', String(S.size)); else p.delete('size');
   if (S.gran !== 'component') p.set('gran', S.gran); else p.delete('gran');
-  if (S.scope !== 'external') p.set('scope', S.scope); else p.delete('scope');
+  if (S.depth !== 1) p.set('depth', String(S.depth)); else p.delete('depth');
+  if (S.filePath) p.set('fileId', S.filePath); else p.delete('fileId');
   history.replaceState(null, '', '/doc?' + p.toString());
 }
 
 // ============================================================
 // 2. API Client
 // ============================================================
+function baseET(et) {
+  if (et === 'EXTERNAL_INCLUDE') return 'INCLUDE';
+  if (et === 'EXTERNAL_CALL') return 'CALL';
+  return et;
+}
 const API = {
   _cache: {},
   async _get(path) {
@@ -226,24 +347,32 @@ const API = {
     return p;
   },
   communityChildren(tid, pid, et) {
-    return this._get('/api/community-children?taskId=' + encodeURIComponent(tid) + '&parentCommId=' + encodeURIComponent(pid || '') + '&edgeType=' + encodeURIComponent(et || S.et));
+    return this._get('/api/community-children?taskId=' + encodeURIComponent(tid) + '&parentCommId=' + encodeURIComponent(pid || '') + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
   },
-  communityGraph(tid, et, cid, scope, gran) {
-    var url = '/api/community-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et || S.et);
+  communityGraph(tid, et, cid, gran) {
+    var url = '/api/community-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et));
     if (cid) url += '&commId=' + encodeURIComponent(cid);
-    url += '&scope=' + encodeURIComponent(scope || S.scope || 'external');
     url += '&gran=' + encodeURIComponent(gran || S.gran || 'component');
+    url += '&depth=' + (S.depth || 1);
     return this._get(url);
   },
   fileGraph(tid, et, cid, scope) {
-    return this._get('/api/file-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et || S.et) + '&commId=' + encodeURIComponent(cid || '__all__') + '&scope=' + encodeURIComponent(scope || S.scope || 'both'));
+    return this._get('/api/file-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et || S.et) + '&commId=' + encodeURIComponent(cid || '__all__') + '&scope=' + encodeURIComponent(scope || 'both'));
   },
-  heatmap(tid, et, size) {
-    return this._get('/api/heatmap?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et || S.et) + '&size=' + (size || S.size));
+  heatmap(tid, et, size, cid) {
+    var url = '/api/heatmap?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)) + '&size=' + (size || S.size);
+    if (cid) url += '&commId=' + encodeURIComponent(cid);
+    return this._get(url);
   },
   doc(id) { return this._get('/api/docs/' + encodeURIComponent(id)); },
+  externalStats(tid) {
+    return this._get('/api/external-stats?taskId=' + encodeURIComponent(tid));
+  },
   communityDoc(tid, cid, et) {
-    return this._get('/api/community-doc?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(et || S.et));
+    return this._get('/api/community-doc?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
+  },
+  communityFiles(tid, cid, et) {
+    return this._get('/api/community-files?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
   },
 };
 
@@ -257,6 +386,49 @@ function _(key) { var m = { 'zh-CN': { tocTitle: '子组件目录', noDoc: '未�
 // ============================================================
 // 4. Layout
 // ============================================================
+var _floatBounds = {};
+
+function updateFloatBoundaries() {
+  var leftPanel = document.getElementById('docLeft');
+  var rightPanel = document.getElementById('docRight');
+  if (!leftPanel.classList.contains('hidden')) {
+    var lr = leftPanel.getBoundingClientRect();
+    _floatBounds.tocFloat = { minX: lr.left, maxX: lr.right - 30, minY: lr.top, maxY: lr.bottom - 30 };
+  } else {
+    _floatBounds.tocFloat = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  }
+  if (!rightPanel.classList.contains('hidden')) {
+    var rr = rightPanel.getBoundingClientRect();
+    _floatBounds.fileCommFloat = { minX: rr.left, maxX: rr.right - 30, minY: rr.top, maxY: rr.bottom - 30 };
+  } else {
+    _floatBounds.fileCommFloat = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  }
+}
+
+function clampFloatPosition(floatId) {
+  var el = document.getElementById(floatId);
+  var bounds = _floatBounds[floatId];
+  if (!el || !bounds || (bounds.minX === 0 && bounds.maxX === 0)) return;
+  var cr = el.getBoundingClientRect();
+  var curLeft = parseFloat(el.style.left);
+  var curTop = parseFloat(el.style.top);
+  var needsFix = false;
+  if (isNaN(curLeft)) {
+    // No inline left: use current viewport position as baseline
+    curLeft = cr.left;
+    curTop = cr.top;
+  }
+  if (curLeft < bounds.minX) { curLeft = bounds.minX; needsFix = true; }
+  if (curLeft > bounds.maxX) { curLeft = bounds.maxX; needsFix = true; }
+  if (curTop < bounds.minY) { curTop = bounds.minY; needsFix = true; }
+  if (curTop > bounds.maxY) { curTop = bounds.maxY; needsFix = true; }
+  if (needsFix) {
+    el.style.left = curLeft + 'px';
+    el.style.top = curTop + 'px';
+    console.log('[float] CLAMPED ' + floatId + ' to ' + curLeft + ',' + curTop + ' bounds=', bounds);
+  }
+}
+
 const Layout = {
   init() {
     var self = this;
@@ -275,9 +447,13 @@ const Layout = {
       if (pct < 20 || pct > 80) return;
       left.style.flex = '1 1 ' + pct + '%';
       right.style.flex = '1 1 ' + (100 - pct) + '%';
+      updateFloatBoundaries();
+      clampFloatPosition('tocFloat');
+      clampFloatPosition('fileCommFloat');
     });
     document.addEventListener('mouseup', function() { isResizing = false; document.body.style.cursor = ''; });
     window.addEventListener('resize', function() { self.apply(); });
+    updateFloatBoundaries();
     this.apply();
   },
   apply() {
@@ -301,6 +477,9 @@ const Layout = {
       right.style.flex = '1 1 100%';
       resizer.style.display = 'none';
     }
+    updateFloatBoundaries();
+    clampFloatPosition('tocFloat');
+    clampFloatPosition('fileCommFloat');
   }
 };
 
@@ -309,71 +488,103 @@ const Layout = {
 // ============================================================
 function fitPanelPosition(floatEl) {
   var panel = floatEl.querySelector('.toc-panel');
-  if (!panel || !panel.classList.contains('open')) return;
+  if (!panel || !panel.classList.contains('open')) { console.log('[fitPanel] panel not open, skip'); return; }
   var parent = floatEl.parentElement;
   var pr = parent.getBoundingClientRect();
   var fr = floatEl.getBoundingClientRect();
-  var pw = panel.offsetWidth || 260;
-  var ph = panel.offsetHeight || 200;
-  // 横向：距右边界不足时向左展开
-  if (fr.left - pr.left + pw > pr.width) {
-    panel.style.right = '0';
-    panel.style.left = 'auto';
-  } else {
-    panel.style.right = '';
-    panel.style.left = '';
-  }
-  // 纵向：距底部边界不足时向上展开
-  if (fr.top - pr.top + ph > pr.height) {
-    panel.style.bottom = '100%';
-    panel.style.top = 'auto';
-    panel.style.marginBottom = '4px';
-    panel.style.marginTop = '';
-  } else {
-    panel.style.bottom = '';
+  var pw = panel.offsetWidth;
+  var ph = panel.offsetHeight;
+  console.log('[fitPanel] floatId=' + floatEl.id + ' parentRect=', pr, ' floatRect=', fr, ' panelW=' + pw + ' panelH=' + ph);
+
+  // 1. 绝对定位面板才能使用 right/bottom
+  // 2. 不能遮盖 icon → panel 始终在 button 的一侧（下方/上方/左方）
+  // 3. 只检测真实溢出的方向做调整
+  var overflowRight = pw > 0 && fr.left - pr.left + pw > pr.width;
+  var overflowBottom = ph > 0 && fr.top - pr.top + ph > pr.height;
+
+  if (overflowRight || overflowBottom) {
+    panel.style.position = 'absolute';
     panel.style.top = '';
+    panel.style.left = '';
+    panel.style.right = '';
+    panel.style.bottom = '';
+    panel.style.marginTop = '';
     panel.style.marginBottom = '';
-    panel.style.marginTop = '4px';
+    if (overflowBottom) {
+      // 向上展开：panel 在 button 上方，bottom=100%→panel底边=button顶边
+      panel.style.bottom = '100%';
+      panel.style.marginBottom = '4px';
+      console.log('[fitPanel] -> expand UP');
+    } else {
+      // 向下展开（默认方向）：panel 在 button 下方
+      panel.style.top = '100%';
+      panel.style.marginTop = '4px';
+    }
+    if (overflowRight) {
+      // 向左展开：panel 右缘与 button 右缘对齐
+      panel.style.right = '0';
+      console.log('[fitPanel] -> expand LEFT');
+    } else {
+      // 向右展开（默认方向）：panel 左缘与 button 左缘对齐
+      panel.style.left = '0';
+    }
+  } else {
+    // 无溢出：恢复 static（flex 自然排列在 button 下方）
+    panel.style.position = '';
+    panel.style.top = '';
+    panel.style.left = '';
+    panel.style.right = '';
+    panel.style.bottom = '';
+    panel.style.marginTop = '';
+    panel.style.marginBottom = '';
   }
 }
 
-function makeDraggable(el, panelSel, storageKey) {
-  // Restore saved position
+function makeDraggable(el, boundsKey, storageKey) {
+  console.log('[drag] init id=' + el.id + ' boundsKey=' + boundsKey + ' storageKey=' + storageKey);
+  // Restore saved position (viewport-relative for position:fixed)
   if (storageKey) {
     try {
       var saved = localStorage.getItem(storageKey);
       if (saved) {
         var pos = JSON.parse(saved);
-        var parent = el.parentElement;
-        var pr = parent.getBoundingClientRect();
         if (pos.left !== undefined && pos.top !== undefined) {
-          el.style.left = Math.max(0, Math.min(pr.width - 30, pos.left)) + 'px';
-          el.style.top = Math.max(0, Math.min(pr.height - 30, pos.top)) + 'px';
+          el.style.right = '';
+          var bounds = _floatBounds[boundsKey] || { minX: 0, maxX: window.innerWidth - 30, minY: 0, maxY: window.innerHeight - 30 };
+          el.style.left = Math.max(bounds.minX, Math.min(bounds.maxX, pos.left)) + 'px';
+          el.style.top = Math.max(bounds.minY, Math.min(bounds.maxY, pos.top)) + 'px';
+          console.log('[drag] RESTORE id=' + el.id + ' left=' + el.style.left + ' top=' + el.style.top + ' bounds=', bounds);
         }
       }
     } catch(e) {}
   }
   var ox = 0, oy = 0;
   el.addEventListener('mousedown', function(e) {
-    if (e.target.closest(panelSel)) return;
+    if (e.target.closest('.toc-panel')) return;
     e.preventDefault();
     el.classList.add('dragging');
     var rect = el.getBoundingClientRect();
     ox = e.clientX - rect.left;
     oy = e.clientY - rect.top;
+    var fitPending = false;
+    var bounds = _floatBounds[boundsKey] || { minX: 0, maxX: window.innerWidth - 30, minY: 0, maxY: window.innerHeight - 30 };
+    console.log('[drag] START id=' + el.id + ' clientXY=' + e.clientX + ',' + e.clientY + ' offsetXY=' + ox + ',' + oy + ' bounds=', bounds);
     function onMove(ev) {
-      var parent = el.parentElement;
-      var pr = parent.getBoundingClientRect();
-      var left = Math.max(0, Math.min(pr.width - 30, ev.clientX - pr.left - ox));
-      var top = Math.max(0, Math.min(pr.height - 30, ev.clientY - pr.top - oy));
+      var left = Math.max(bounds.minX, Math.min(bounds.maxX, ev.clientX - ox));
+      var top = Math.max(bounds.minY, Math.min(bounds.maxY, ev.clientY - oy));
       el.style.left = left + 'px';
       el.style.top = top + 'px';
+      if (!fitPending && el.querySelector('.toc-panel.open')) {
+        fitPending = true;
+        requestAnimationFrame(function() { fitPending = false; fitPanelPosition(el); });
+      }
     }
     function onUp() {
       el.classList.remove('dragging');
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      fitPanelPosition(el);
+      console.log('[drag] END id=' + el.id + ' finalStyle=', el.style.left, el.style.top);
+      requestAnimationFrame(function() { fitPanelPosition(el); });
       if (storageKey) {
         try {
           localStorage.setItem(storageKey, JSON.stringify({
@@ -401,7 +612,19 @@ const LeftBreadcrumb = {
     var pcRaw = cur.get('pc') || '';
     var curEt = cur.get('edgeType') || 'CALL';
     var el = document.getElementById('leftBreadcrumb');
-    if (!cid) { el.innerHTML = '<span><span class="bc-level">L0</span> \u5168\u90e8</span>'; return; }
+    var isFile = S.page === 'file-summary';
+    if (!cid) {
+      var rootH = '<span><span class="bc-level">L0</span> \u5168\u90e8</span>';
+      if (isFile && S.filePath) {
+        var fparts = S.filePath.split('/');
+        var ffname = fparts[fparts.length - 1] || S.filePath;
+        var fpdir = fparts.length >= 2 ? fparts[fparts.length - 2] : '';
+        rootH += ' <span style="color:var(--text-muted)">\u203a</span> ';
+        rootH += '<span style="color:var(--text)">' + escapeHtml(ffname + (fpdir ? ' \u00b7 ' + fpdir : '')) + '</span>';
+      }
+      el.innerHTML = rootH;
+      return;
+    }
 
     var h = '<span class="bc-link bc-root-link"><span class="bc-level">L0</span> \u5168\u90e8</span>';
     var lv = 1;
@@ -418,16 +641,45 @@ const LeftBreadcrumb = {
       }
     }
     h += ' <span style="color:var(--text-muted)">\u203a</span> ';
-    h += '<span style="color:var(--text)"><span class="bc-level">L' + lv + '</span> ' + escapeHtml(cn.slice(0, 24)) + '</span>';
+    h += '<span class="' + (isFile ? 'bc-link' : '') + '" data-cid="' + escapeAttr(cid) + '"><span class="bc-level">L' + lv + '</span> ' + escapeHtml(cn.slice(0, 24)) + '</span>';
+
+    // 文件级面包屑
+    if (isFile && S.filePath) {
+      var fp = S.filePath.split('/');
+      var fn = fp[fp.length - 1] || S.filePath;
+      var pd = fp.length >= 2 ? fp[fp.length - 2] : '';
+      h += ' <span style="color:var(--text-muted)">\u203a</span> ';
+      h += '<span style="color:var(--text)">' + escapeHtml(fn + (pd ? ' \u00b7 ' + pd : '')) + '</span>';
+    }
     el.innerHTML = h;
+
+    // 点击社区链接回到社区文档（清除文件状态）
+    var self = this;
     el.querySelectorAll('.bc-link').forEach(function(l) {
       l.onclick = function() {
         if (this.classList.contains('bc-root-link')) {
           var u = new URLSearchParams();
           u.set('taskId', g_taskId);
           u.set('docId', 'overall-' + g_taskId);
+          S.page = 'doc';
+          S.filePath = '';
           history.replaceState(null, '', '/doc?' + u.toString());
           loadDoc('overall-' + g_taskId);
+          return;
+        }
+        if (this.dataset.cid) {
+          // 当前社区链接 — 如果是文件模式，回到社区文档
+          cid = this.dataset.cid;
+          var cidET = (cid.indexOf('-incl-') >= 0) ? 'INCLUDE' :
+                       (cid.indexOf('-call-') >= 0) ? 'CALL' :
+                       cur.get('edgeType') || curEt;
+          S.page = 'doc';
+          S.filePath = '';
+          // 写入正确的 edgeType 到 URL
+          var u2 = new URLSearchParams(location.search);
+          u2.set('edgeType', cidET);
+          history.replaceState(null, '', '/doc?' + u2.toString());
+          loadCommunityDoc(g_taskId, cid, cidET);
           return;
         }
         var backCid = this.dataset.backCid;
@@ -440,6 +692,9 @@ const LeftBreadcrumb = {
           if (backPc) u.set('pc', backPc); else u.delete('pc');
           u.set('cn', backCn || backCid);
           u.set('edgeType', backEt);
+          S.page = 'doc';
+          S.filePath = '';
+          syncURL();
           history.replaceState(null, '', '/doc?' + u.toString());
           loadCommunityDoc(g_taskId, backCid, backEt);
         }
@@ -548,7 +803,13 @@ const DocContent = {
 const LeftToc = {
   async render(parentCid) {
     var panel = document.getElementById('tocPanel');
+    // 文件视图下清空悬浮窗
+    if (S.page === 'file-summary') {
+      panel.innerHTML = '<div class="toc-empty">\u65e0\u4e0b\u7ea7\u5185\u5bb9</div>';
+      return;
+    }
     panel.innerHTML = '';
+
     var curUrl = new URLSearchParams(location.search);
     var curCid = curUrl.get('communityId') || '';
     var pid = parentCid || curCid;
@@ -581,6 +842,8 @@ const LeftToc = {
     if (!hasContent) panel.innerHTML = '<div style="font-size:10px;color:var(--text-muted);padding:8px;text-align:center">\u6ca1\u6709\u66f4\u6df1\u5c42\u7684\u7ec4\u4ef6\u7ed3\u6784</div>';
     panel.classList.add('open');
     document.getElementById('tocToggle').textContent = '\u2715';
+    console.log('[LeftToc] panel opened, panelSize=' + panel.offsetWidth + 'x' + panel.offsetHeight);
+    requestAnimationFrame(function() { fitPanelPosition(document.getElementById('tocFloat')); });
     panel.querySelectorAll('.toc-comm-link').forEach(function(el) {
       el.onclick = function() {
         var cid = this.dataset.cid;
@@ -610,13 +873,184 @@ const LeftToc = {
   }
 };
 
+// ---- 6c2. FileList (社区文档尾部的文件列表) ----
+const FileList = {
+  _files: [],
+  _page: 1,
+  _pageSize: 20,
+  _query: '',
+  _projectId: '',
+  async load(tid, cid, et) {
+    var container = document.getElementById('fileListSection');
+    if (!container) return;
+    container.innerHTML = '<div class="file-list-loading">加载文件列表...</div>';
+    try {
+      var data = await API.communityFiles(tid, cid, et);
+      this._files = data.files || [];
+      this._projectId = data.projectId || S.projectId || '';
+      this._page = 1;
+      this._query = '';
+      this.render();
+    } catch(e) {
+      container.innerHTML = '<div class="file-list-error">加载失败: ' + e.message + '</div>';
+    }
+  },
+  _filtered() {
+    var q = this._query.trim().toLowerCase();
+    if (!q) return this._files;
+    return this._files.filter(function(f) {
+      return f.path.toLowerCase().includes(q) || f.name.toLowerCase().includes(q);
+    });
+  },
+  _paged() {
+    var filtered = this._filtered();
+    var start = (this._page - 1) * this._pageSize;
+    return filtered.slice(start, start + this._pageSize);
+  },
+  _totalPages() {
+    return Math.max(1, Math.ceil(this._filtered().length / this._pageSize));
+  },
+  _shortPath(f) {
+    if (f.parentDir) return f.name + ' \u00b7 ' + f.parentDir;
+    return f.name;
+  },
+  render() {
+    var container = document.getElementById('fileListSection');
+    if (!container) return;
+    var paged = this._paged();
+    var total = this._filtered().length;
+    var pages = this._totalPages();
+    var h = '<h2 class="file-list-title">\u6d89\u53ca\u6587\u4ef6 (' + total + ')</h2>';
+    h += '<div class="file-list-search"><input type="text" class="file-list-search-input" id="fileListSearch" placeholder="\u641c\u7d22\u6587\u4ef6..." value="' + escapeAttr(this._query) + '"></div>';
+    if (paged.length === 0) {
+      h += '<div class="file-list-empty">' + (this._query ? '\u65e0\u5339\u914d\u6587\u4ef6' : '\u6682\u65e0\u6587\u4ef6') + '</div>';
+    } else {
+      h += '<div class="file-list-items">';
+      for (var i = 0; i < paged.length; i++) {
+        var f = paged[i];
+        var codeUrl = '/code?project_id=' + encodeURIComponent(this._projectId) + '&path=' + encodeURIComponent(f.path);
+        h += '<div class="file-list-item" data-path="' + escapeAttr(f.path) + '" data-commid="' + escapeAttr(f.commId) + '">';
+        h += '<span class="file-list-icon">\ud83d\udcc4</span>';
+        h += '<span class="file-list-name">' + escapeHtml(this._shortPath(f)) + '</span>';
+        h += '<span class="file-list-path" title="' + escapeAttr(f.path) + '">' + escapeHtml(f.path) + '</span>';
+        h += '<span class="file-list-actions">';
+        h += '<a class="file-action-link" data-action="summary" data-path="' + escapeAttr(f.path) + '" data-commid="' + escapeAttr(f.commId) + '">\u67e5\u770b\u6458\u8981</a>';
+        h += '<a class="file-action-link" data-action="code" href="' + codeUrl + '" target="_blank">\u67e5\u770b\u4ee3\u7801</a>';
+        h += '</span>';
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    if (pages > 1) {
+      h += '<div class="file-list-pager">';
+      h += '<button class="file-list-pager-btn" id="fileListPrev" ' + (this._page <= 1 ? 'disabled' : '') + '>\u2190 \u4e0a\u4e00\u9875</button>';
+      h += '<span class="file-list-pager-info">' + this._page + ' / ' + pages + '</span>';
+      h += '<button class="file-list-pager-btn" id="fileListNext" ' + (this._page >= pages ? 'disabled' : '') + '>\u4e0b\u4e00\u9875 \u2192</button>';
+      h += '</div>';
+    }
+    container.innerHTML = h;
+    var self = this;
+    var si = document.getElementById('fileListSearch');
+    if (si) {
+      si.oninput = function() {
+        self._query = this.value;
+        self._page = 1;
+        self.render();
+      };
+    }
+    var prevBtn = document.getElementById('fileListPrev');
+    var nextBtn = document.getElementById('fileListNext');
+    if (prevBtn) prevBtn.onclick = function() { self._page--; self.render(); };
+    if (nextBtn) nextBtn.onclick = function() { self._page++; self.render(); };
+    container.querySelectorAll('.file-list-item').forEach(function(item) {
+      item.onclick = function(e) {
+        if (e.target.closest('.file-action-link')) return;
+        var fp = this.dataset.path;
+        var fcid = this.dataset.commid;
+        S.page = 'file-summary';
+        S.filePath = fp;
+        S.fileCommId = fcid;
+        syncURL();
+        FilePreview.render(fp, fcid);
+        LeftBreadcrumb.render();
+        LeftToc.render(fcid);
+      };
+    });
+    container.querySelectorAll('.file-action-link[data-action="summary"]').forEach(function(link) {
+      link.onclick = function(e) {
+        e.stopPropagation();
+        var fp = this.dataset.path;
+        var fcid = this.dataset.commid;
+        S.page = 'file-summary';
+        S.filePath = fp;
+        S.fileCommId = fcid;
+        syncURL();
+        FilePreview.render(fp, fcid);
+        LeftBreadcrumb.render();
+        LeftToc.render(fcid);
+      };
+    });
+  }
+};
+
+// ---- 6c3. FilePreview (文件预摘要 + 代码浏览) ----
+const FilePreview = {
+  async render(filePath, commId) {
+    var content = document.getElementById('content');
+    var curUrl = new URLSearchParams(location.search);
+    var curEt = curUrl.get('edgeType') || S.et || 'CALL';
+    var tid = S.taskId || g_taskId;
+    var parts = filePath.split('/');
+    var fname = parts[parts.length - 1] || filePath;
+    var pdir = parts.length >= 2 ? parts[parts.length - 2] : '';
+    var shortLabel = fname + (pdir ? ' \u00b7 ' + pdir : '');
+
+    // 预摘要HTML
+    var h = '<div class="file-preview-header">';
+    h += '<div class="file-preview-title">\ud83d\udcc4 ' + escapeHtml(shortLabel) + '</div>';
+    h += '</div>';
+    h += '<div class="file-preview-meta">';
+    h += '<div class="file-preview-meta-row"><span class="meta-label">\u6587\u4ef6\u8def\u5f84:</span> <code>' + escapeHtml(filePath) + '</code></div>';
+    if (commId) {
+      h += '<div class="file-preview-meta-row"><span class="meta-label">\u6240\u5c5e\u793e\u533a:</span> <code>' + escapeHtml(commId) + '</code></div>';
+    }
+    h += '<div class="file-preview-meta-row"><span class="meta-label">\u4efb\u52a1:</span> <code>' + escapeHtml(tid) + '</code></div>';
+    h += '</div>';
+    h += '<div id="fileSummaryArea" class="file-summary-area"><div class="file-list-loading">\u52a0\u8f7d\u9884\u6458\u8981...</div></div>';
+    content.innerHTML = h;
+
+    // 异步加载文件预摘要
+    this._loadSummary(tid, filePath);
+  },
+  async _loadSummary(tid, filePath) {
+    var area = document.getElementById('fileSummaryArea');
+    if (!area) return;
+    try {
+      var data = await API._get('/api/file-summary?taskId=' + encodeURIComponent(tid) + '&filePath=' + encodeURIComponent(filePath));
+      if (data.found) {
+        var h = '<div class="file-summary-meta">';
+        h += '<div class="file-summary-meta-row"><span class="meta-label">\u7f13\u5b58\u65f6\u95f4:</span> ' + escapeHtml(data.created_at || '-') + '</div>';
+        h += '<div class="file-summary-meta-row"><span class="meta-label">\u5206\u6570:</span> ' + (data.summary_len || 0) + ' \u5b57\u7b26</div>';
+        h += '</div>';
+        h += '<div class="file-summary-divider"></div>';
+        h += '<pre class="file-summary-text">' + escapeHtml(data.summary || '') + '</pre>';
+        area.innerHTML = h;
+      } else {
+        area.innerHTML = '<div class="file-summary-empty">\u6682\u65e0\u9884\u6458\u8981\u4fe1\u606f</div>';
+      }
+    } catch(e) {
+      area.innerHTML = '<div class="file-summary-empty">\u9884\u6458\u8981\u52a0\u8f7d\u5931\u8d25</div>';
+    }
+  }
+};
+
 // ---- 6d. RightBreadcrumb ----
 const RightBreadcrumb = {
   render() {
     var el = document.getElementById('rightBreadcrumb');
-    var etLabel = S.et === 'CALL' ? '\u8c03\u7528' : '\u4f9d\u8d56';
-    var scopeLabel = S.scope === 'internal' ? '\u5185\u90e8' : '\u5916\u90e8';
-    var h = '<span class="bc-link" data-idx="-1"><span class="bc-level">L0</span> ' + scopeLabel + etLabel + '</span>';
+    var etLabels = { INCLUDE: '\u5185\u90e8\u4f9d\u8d56', EXTERNAL_INCLUDE: '\u5916\u90e8\u4f9d\u8d56', CALL: '\u5185\u90e8\u8c03\u7528', EXTERNAL_CALL: '\u5916\u90e8\u8c03\u7528' };
+    var etLabel = etLabels[S.et] || S.et;
+    var h = '<span class="bc-link" data-idx="-1"><span class="bc-level">L0</span> ' + etLabel + '</span>';
     for (var i = 0; i < S.commStack.length; i++) {
       var item = S.commStack[i];
       h += ' <span style="color:var(--text-muted)">\u203a</span> ';
@@ -674,34 +1108,45 @@ const RightPanel = {
       var p = document.getElementById('fileCommPanel');
       p.classList.toggle('open');
       this.textContent = p.classList.contains('open') ? '\u2715' : '\u2630';
+      console.log('[fileCommToggle] open=' + p.classList.contains('open'));
       if (p.classList.contains('open')) {
         RightPanel.renderPanel();
-        fitPanelPosition(document.getElementById('fileCommFloat'));
+        requestAnimationFrame(function() { fitPanelPosition(document.getElementById('fileCommFloat')); });
       }
     };
   },
 
   renderPanel() {
     var panel = document.getElementById('fileCommPanel');
+    var isExt = S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL';
     var h = '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;margin-bottom:2px;padding-bottom:3px;border-bottom:1px solid var(--border);flex-wrap:wrap">';
-    h += '<div class="granularity-tabs">';
-    h += '<button class="gran-tab' + (S.gran === 'component' ? ' active' : '') + '" data-gran="component">\u7ec4\u4ef6</button>';
-    h += '<button class="gran-tab' + (S.gran === 'file' ? ' active' : '') + '" data-gran="file">\u6587\u4ef6</button>';
-    h += '</div>';
-    h += '<span class="tab-sep">|</span>';
+    if (!isExt) {
+      h += '<div class="granularity-tabs">';
+      h += '<button class="gran-tab' + (S.gran === 'component' ? ' active' : '') + '" data-gran="component">\u7ec4\u4ef6</button>';
+      h += '<button class="gran-tab' + (S.gran === 'file' ? ' active' : '') + '" data-gran="file">\u6587\u4ef6</button>';
+      h += '</div>';
+      h += '<span class="tab-sep">|</span>';
+    }
+    // depth select (仅组件模式)
+    if (S.gran === 'component') {
+      h += '<label style="font-size:10px;color:var(--text-muted)">\u6df1\u5ea6: <select id="depthSelect" style="font-size:10px;padding:1px 2px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text)">';
+      for (var d = 1; d <= 5; d++) {
+        h += '<option value="' + d + '"' + (S.depth === d ? ' selected' : '') + '>' + d + '</option>';
+      }
+      h += '</select></label>';
+      h += '<span class="tab-sep">|</span>';
+    }
     h += '<div class="right-tabs">';
     h += '<button class="viz-tab' + (S.tab === 'graph' ? ' active' : '') + '" data-tab="graph">\u5173\u7cfb\u56fe</button>';
     h += '<button class="viz-tab' + (S.tab === 'heatmap' ? ' active' : '') + '" data-tab="heatmap">\u70ed\u529b</button>';
     h += '</div></div>';
-    // Second row: edge type + scope
+    // Second row: edge type (four modes matching App)
     h += '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">';
     h += '<div class="et-tabs">';
-    h += '<button class="et-tab' + (S.et === 'INCLUDE' ? ' active' : '') + '" data-et="INCLUDE">\u4f9d\u8d56\u5206\u6790</button>';
-    h += '<button class="et-tab' + (S.et === 'CALL' ? ' active' : '') + '" data-et="CALL">\u8c03\u7528\u5206\u6790</button>';
-    h += '</div>';
-    h += '<div class="scope-tabs" style="margin-left:8px">';
-    h += '<button class="scope-tab' + (S.scope === 'external' ? ' active' : '') + '" data-scope="external">\u5916\u90e8</button>';
-    h += '<button class="scope-tab' + (S.scope === 'internal' ? ' active' : '') + '" data-scope="internal">\u5185\u90e8</button>';
+    h += '<button class="et-tab' + (S.et === 'INCLUDE' ? ' active' : '') + '" data-et="INCLUDE">\u5185\u90e8\u4f9d\u8d56</button>';
+    h += '<button class="et-tab' + (S.et === 'EXTERNAL_INCLUDE' ? ' active' : '') + '" data-et="EXTERNAL_INCLUDE">\u5916\u90e8\u4f9d\u8d56</button>';
+    h += '<button class="et-tab' + (S.et === 'CALL' ? ' active' : '') + '" data-et="CALL">\u5185\u90e8\u8c03\u7528</button>';
+    h += '<button class="et-tab' + (S.et === 'EXTERNAL_CALL' ? ' active' : '') + '" data-et="EXTERNAL_CALL">\u5916\u90e8\u8c03\u7528</button>';
     h += '</div></div>';
     // Community list placeholder
     h += '<div id="rightCommList"><div class="loading">\u52a0\u8f7d\u4e2d...</div></div>';
@@ -717,6 +1162,10 @@ const RightPanel = {
         panel.querySelectorAll('.gran-tab').forEach(function(b) { b.classList.remove('active'); });
         this.classList.add('active');
         S.gran = this.dataset.gran;
+        // 文件模式 → 切换到内部类型
+        if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
+          S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
+        }
         S.cid = '';
         syncURL();
         RightPanel.loadViz();
@@ -735,6 +1184,10 @@ const RightPanel = {
         panel.querySelectorAll('.et-tab').forEach(function(b) { b.classList.remove('active'); });
         this.classList.add('active');
         S.et = this.dataset.et;
+        // 外部依赖/调用 → 强制组件模式
+        if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
+          S.gran = 'component';
+        }
         S.cid = '';
         S.commParent = '';
         S.commStack = [];
@@ -744,15 +1197,12 @@ const RightPanel = {
         RightBreadcrumb.render();
       };
     });
-    panel.querySelectorAll('.scope-tab').forEach(function(btn) {
-      btn.onclick = function() {
-        panel.querySelectorAll('.scope-tab').forEach(function(b) { b.classList.remove('active'); });
-        this.classList.add('active');
-        S.scope = this.dataset.scope;
-        syncURL();
-        RightPanel.loadViz();
-      };
-    });
+    var ds = document.getElementById('depthSelect');
+    if (ds) ds.onchange = function() {
+      S.depth = parseInt(this.value) || 1;
+      syncURL();
+      RightPanel.loadViz();
+    };
   },
 
   async loadCommTree() {
@@ -772,7 +1222,7 @@ const RightPanel = {
         }
         h += '</ul>';
       } else {
-        h = '<div style="font-size:10px;color:var(--text-muted);padding:8px;text-align:center">\u6ca1\u6709\u66f4\u6df1\u5c42\u7684\u7ec4\u4ef6\u7ed3\u6784</div>';
+        h = '<div style="font-size:10px;color:var(--text-muted);padding:8px;text-align:center">\u6ca1\u6709\u4e0b\u7ea7\u7ec4\u4ef6</div>';
       }
       container.innerHTML = h;
       this.attachCommHandlers(container);
@@ -783,25 +1233,16 @@ const RightPanel = {
 
   attachCommHandlers(container) {
     container.querySelectorAll('.fc-link').forEach(function(el) {
-      el.onclick = async function() {
+      el.onclick = function() {
         var cid = this.dataset.cid;
         var name = this.dataset.name;
         S.cid = cid;
+        S.depth = 1;
         S.commParent = cid;
         S.commStack.push({cid: cid, name: name});
         syncURL();
-        try {
-          var children = await API.communityChildren(S.taskId, cid, S.et);
-          if (children && children.length > 0) {
-            RightPanel.loadCommTree();
-          } else {
-            container.querySelectorAll('.fc-link').forEach(function(l) { l.classList.remove('active'); });
-            this.classList.add('active');
-          }
-          RightPanel.loadViz();
-        } catch(e) {
-          RightPanel.loadViz();
-        }
+        RightPanel.loadCommTree();
+        RightPanel.loadViz();
         RightBreadcrumb.render();
       };
     });
@@ -819,18 +1260,116 @@ const GraphView = {
 
   async load() {
     var container = document.getElementById('forceGraph');
-    if (!container || container.offsetParent === null) return;
-    container.innerHTML = '<div class="loading">\u52a0\u8f7d\u5173\u7cfb\u56fe...</div>';
+    if (!container) return;
+    container.innerHTML = '';
     try {
       var cid = S.cid || '';
-      var data = await API.communityGraph(S.taskId, S.et, cid, S.scope, S.gran);
+      var isExternal = S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL';
+      var loadET = S.et;
+      var data;
+      if (isExternal) {
+        var ext = await API.externalStats(S.taskId);
+        var allItems = S.et === 'EXTERNAL_INCLUDE' ? (ext.externalDeps || []) : (ext.externalCalls || []);
+        // 构建 L0 父级映射（外部 deps 只关联 L0 社区；下钻时需要映射到 L0 父级匹配）
+        function l0Parent(cid) {
+          var p = cid.split('-');
+          var lvlStart = -1, l0At = -1;
+          for (var k = 0; k < p.length; k++) {
+            if (/^L\d+$/.test(p[k]) && lvlStart === -1) lvlStart = k;
+            if (p[k] === 'L0') l0At = k;
+          }
+          if (lvlStart >= 0 && l0At >= 0 && l0At + 1 < p.length)
+            return p.slice(0, lvlStart).join('-') + '-L0-' + p[l0At + 1];
+          return cid;
+        }
+        // 有 drill community → 加载子社区，构建子社区→L0 父级映射
+        var childComms = {};
+        var childL0Map = {};
+        if (cid) {
+          try {
+            var children = await API.communityChildren(S.taskId, cid, S.et);
+            for (var ci2 = 0; ci2 < children.length; ci2++) {
+              var ccid = children[ci2].commId;
+              childComms[ccid] = (children[ci2].name || ccid) + ' (' + (children[ci2].nodeCount || 0) + '\u6587\u4ef6)';
+              childL0Map[ccid] = l0Parent(ccid);
+            }
+          } catch(_) {}
+        }
+        var drillL0 = cid ? l0Parent(cid) : '';
+        var gnodes = [];
+        var gedges = [];
+        var cids = {};
+        var seenEdges = {};
+        // 始终显示所有外部项；下钻后边连到子社区（非父社区）
+        var extCommL0Cache = {};
+        for (var i = 0; i < allItems.length; i++) {
+          var item = allItems[i];
+          var extId = 'ext-' + (item.package || item.name);
+          var extLabel = item.package || item.name;
+          var hasEdge = false;
+          var comms = item.communities || [];
+          for (var j = 0; j < comms.length; j++) {
+            var c = comms[j];
+            var cid2 = c.communityId;
+            if (!extCommL0Cache[cid2]) extCommL0Cache[cid2] = l0Parent(cid2);
+            var commL0 = extCommL0Cache[cid2];
+
+            if (!cid) {
+              // 全局视图：边直接连到社区节点
+              if (!cids[cid2]) {
+                cids[cid2] = c.name || cid2;
+                gnodes.push({ id: cid2, label: cids[cid2], isExternal: false });
+              }
+              hasEdge = true;
+              var ek0 = extId + '->' + cid2;
+              if (!seenEdges[ek0]) {
+                seenEdges[ek0] = true;
+                gedges.push({ id: ek0, source: extId, target: cid2 });
+              }
+            } else {
+              // drill 模式：外部项 L0 父级 == drillL0 → 连接到对应的子社区
+              if (commL0 !== drillL0) continue;
+              var foundChild = null;
+              for (var ccid2 in childL0Map) {
+                if (childL0Map[ccid2] === commL0) { foundChild = ccid2; break; }
+              }
+              if (!foundChild) continue;
+              var childLabel = childComms[foundChild] || cids[foundChild] || c.name || foundChild;
+              if (!cids[foundChild]) {
+                cids[foundChild] = childLabel;
+                gnodes.push({ id: foundChild, label: childLabel, isExternal: false });
+              }
+              hasEdge = true;
+              var ek1 = extId + '->' + foundChild;
+              if (!seenEdges[ek1]) {
+                seenEdges[ek1] = true;
+                gedges.push({ id: ek1, source: extId, target: foundChild });
+              }
+            }
+          }
+          if (hasEdge || !cid) gnodes.push({ id: extId, label: extLabel, isExternal: true });
+        }
+        // 添加未关联外部项的子社区（drill 模式下显示全部子社区）
+        if (cid) {
+          for (var ccid3 in childComms) {
+            if (!cids[ccid3]) {
+              cids[ccid3] = childComms[ccid3];
+              gnodes.push({ id: ccid3, label: childComms[ccid3], isExternal: false });
+            }
+          }
+        }
+        data = { nodes: gnodes, edges: gedges, commIds: [] };
+      } else {
+        data = await API.communityGraph(S.taskId, loadET, cid, S.gran);
+      }
+
+      if (g_cy) { g_cy.destroy(); g_cy = null; }
 
       if (!data.nodes || data.nodes.length === 0) {
         container.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
         return;
       }
 
-      if (g_cy) { g_cy.destroy(); g_cy = null; }
       var isComponent = S.gran === 'component';
       var cssText = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#333';
 
@@ -842,6 +1381,11 @@ const GraphView = {
         this._commColors[commIds[ci].commId] = palette[ci % palette.length];
       }
 
+      // Component mode: backend already returns community-level nodes+edges
+      // File mode: backend returns file-level nodes+edges with commId metadata
+      var renderNodes = data.nodes;
+      var renderEdges = data.edges;
+
       var nodeStyle = isComponent
         ? { label: 'data(label)', 'font-size': '10px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#3b82f6', width: 30, height: 30 }
         : { label: 'data(label)', 'font-size': '8px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#8b5cf6', width: 20, height: 20, 'text-wrap': 'wrap', 'text-max-width': '80px' };
@@ -849,31 +1393,56 @@ const GraphView = {
       g_cy = cytoscape({
         container: document.getElementById('forceGraph'),
         elements: [
-          ...data.nodes.map(function(n) {
+          ...renderNodes.map(function(n) {
+            if (isExternal) {
+              if (n.isExternal) return { data: { id: n.id, label: n.label, isExternal: true } };
+              return { data: { id: n.id, label: n.label } };
+            }
             if (isComponent) return { data: { id: n.id, label: n.label } };
             var color = GraphView._commColors[n.commId] || '#999';
             return { data: { id: n.id, label: n.label, commId: n.commId },
                      style: { 'background-color': color } };
           }),
-          ...data.edges.map(function(e) {
-            return { data: { id: e.id, source: e.source, target: e.target } };
+          ...renderEdges.map(function(e) {
+            var ed = { id: e.id, source: e.source, target: e.target };
+            if (e.bidirectional) ed.bidirectional = true;
+            return { data: ed };
           })
         ],
         style: [
           { selector: 'node', style: nodeStyle },
+          { selector: 'node[isExternal]', style: { 'background-color': '#f59e0b', shape: 'ellipse', width: 30, height: 30, label: 'data(label)', 'font-size': '9px', 'text-valign': 'center', 'text-halign': 'center', color: cssText } },
           { selector: 'edge', style: { width: 1, 'line-color': '#999', 'target-arrow-color': '#999', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
+          { selector: 'edge[bidirectional]', style: { 'source-arrow-shape': 'triangle', 'source-arrow-color': '#999' } },
           { selector: 'node:selected', style: { 'border-width': 2, 'border-color': '#ff6b6b' } },
         ],
-        layout: { name: 'cose', nodeRepulsion: isComponent ? 25000 : 15000, idealEdgeLength: isComponent ? 250 : 120, nodeOverlap: 20, padding: 20, gravity: 0.5 },
-        userZoomingEnabled: true, userPanningEnabled: true, minZoom: 0.2, maxZoom: 5,
+        layout: { name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 100, numIter: 4000, fit: false, nodeOverlap: 20, padding: 20 },
+        userZoomingEnabled: true, userPanningEnabled: true, minZoom: 0.15, maxZoom: 4,
+        boxSelectionEnabled: false, autounselectify: true,
       });
+      g_cy.resize();
+      g_cy.zoom(1.0);
+      var connected = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
+      if (!connected.empty()) g_cy.center(connected); else g_cy.center();
 
       // Double-click node: drill down
       g_cy.on('dblclick', 'node', function(evt) {
         var nodeId = evt.target.id();
-        if (isComponent) {
-          // Component mode: drill into sub-community
+        var extNode = evt.target.data('isExternal');
+        if (isExternal) {
+          // 外部模式：双击社区节点 → 下钻查看该社区内部图
+          if (!extNode && nodeId !== S.cid) {
+            S.cid = nodeId;
+            S.depth = 1;
+            S.commParent = nodeId;
+            S.commStack.push({cid: nodeId, name: evt.target.data('label')});
+          }
+          // 双击外部包节点 → 忽略
+        } else if (isComponent) {
+          // Component mode: drill into sub-community (skip self to avoid infinite loop)
+          if (nodeId === S.cid) return;
           S.cid = nodeId;
+          S.depth = 1;
           S.commParent = nodeId;
           S.commStack.push({cid: nodeId, name: evt.target.data('label')});
         } else {
@@ -881,72 +1450,336 @@ const GraphView = {
           var ncommId = evt.target.data('commId');
           if (ncommId) {
             S.gran = 'component';
+            S.depth = 1;
             S.cid = ncommId;
             S.commParent = ncommId;
             S.commStack.push({cid: ncommId, name: evt.target.data('label')});
           }
         }
         syncURL();
-        RightPanel.renderPanel();
+        RightPanel.loadCommTree();
         RightPanel.loadViz();
+        RightBreadcrumb.render();
       });
 
-      // Double-click background: go back
+      // Double-click background: noop (avoid accidental navigation)
       g_cy.on('dblclick', function(evt) {
-        if (evt.target === g_cy && S.cid) {
-          S.commStack.pop();
-          var prev = S.commStack.length > 0 ? S.commStack[S.commStack.length - 1] : null;
-          S.commParent = prev ? prev.cid : '';
-          S.cid = '';
-          syncURL();
-          if (S.gran !== 'component') { S.gran = 'component'; }
-          RightPanel.renderPanel();
-          RightPanel.loadViz();
-        } else if (evt.target === g_cy) {
+        if (evt.target === g_cy) {
           if (g_cy) g_cy.fit(undefined, 50);
         }
       });
+
+      // ---- graph toolbar ----
+      GraphView._initToolbar();
+
     } catch(e) {
       container.innerHTML = '<div class="error-msg">\u52a0\u8f7d\u5173\u7cfb\u56fe\u5931\u8d25: ' + e.message + '</div>';
     }
+  },
+  _initToolbar() {
+    var tb = document.getElementById('graphToolbar');
+    var hdr = document.getElementById('graphToolbarHeader');
+    var fp = document.getElementById('graphFilterPanel');
+    if (!tb || !hdr) return;
+
+    // 阻止工具栏点击冒泡到画布
+    tb.onmousedown = function(e) { e.stopPropagation(); };
+    tb.onclick = function(e) { e.stopPropagation(); };
+
+    // --- collapse ---
+    var collapseBtn = document.getElementById('graphToolbarCollapse');
+    collapseBtn.onclick = function(e) {
+      e.stopPropagation();
+      tb.classList.toggle('collapsed');
+      this.textContent = tb.classList.contains('collapsed') ? '+' : '\u2212';
+    };
+
+    // --- drag (整个 header 可拖动) ---
+    var dragOn = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    hdr.onmousedown = function(e) {
+      if (e.target.closest('button')) return;
+      e.stopPropagation();
+      e.preventDefault();
+      dragOn = true; sx = e.clientX; sy = e.clientY;
+      var pr = tb.parentElement.getBoundingClientRect();
+      var r = tb.getBoundingClientRect();
+      ox = r.left - pr.left; oy = r.top - pr.top;
+    };
+    document.addEventListener('mousemove', function(e) {
+      if (!dragOn) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      tb.style.left = (ox + dx) + 'px';
+      tb.style.top = (oy + dy) + 'px';
+      tb.style.transform = 'none';
+    });
+    document.addEventListener('mouseup', function() { dragOn = false; });
+
+    // --- 跟随 (linked) / 独立 (locked) 模式 ---
+    var btnLinked = document.getElementById('graphTbLinked');
+    var btnLocked = document.getElementById('graphTbLocked');
+    btnLinked.onclick = function(e) {
+      e.stopPropagation();
+      btnLinked.classList.add('active'); btnLocked.classList.remove('active');
+    };
+    btnLocked.onclick = function(e) {
+      e.stopPropagation();
+      btnLocked.classList.add('active'); btnLinked.classList.remove('active');
+    };
+
+    // mode helpers
+    function _isLocked() { return btnLocked.classList.contains('active'); }
+
+    // grab: locked 模式 — 锁定其它节点
+    g_cy.on('grab', 'node', function(evt) {
+      if (_isLocked()) {
+        var grabbed = evt.target;
+        g_cy.nodes().forEach(function(n) { if (!n.same(grabbed)) n.lock(); });
+      }
+    });
+    g_cy.on('free', 'node', function() {
+      if (_isLocked()) g_cy.nodes().unlock();
+    });
+    // drag → linked 模式: 关联节点跟随
+    var dragPrevPos = null;
+    g_cy.on('drag', 'node', function(evt) {
+      if (_isLocked()) return;
+      var node = evt.target;
+      var pos = node.position();
+      if (!dragPrevPos) { dragPrevPos = { x: pos.x, y: pos.y }; return; }
+      var dx = pos.x - dragPrevPos.x;
+      var dy = pos.y - dragPrevPos.y;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      dragPrevPos = { x: pos.x, y: pos.y };
+      var neighbors = node.closedNeighborhood().nodes().filter(function(n) { return !n.same(node); });
+      if (neighbors.length > 0) {
+        console.log('[Viewer-drag] grabbed=' + node.id() + ' pos=(' + pos.x.toFixed(1) + ',' + pos.y.toFixed(1) + ') dx=' + dx.toFixed(1) + ' dy=' + dy.toFixed(1) + ' neighbours=' + neighbors.length);
+      }
+      neighbors.forEach(function(n) {
+        var np = n.position();
+        var nx = np.x + dx * 0.7;
+        var ny = np.y + dy * 0.7;
+        console.log('[Viewer-drag]   -> ' + n.id() + ' (' + np.x.toFixed(1) + ',' + np.y.toFixed(1) + ') -> (' + nx.toFixed(1) + ',' + ny.toFixed(1) + ') delta=(' + (dx * 0.7).toFixed(1) + ',' + (dy * 0.7).toFixed(1) + ')');
+        n.position({ x: nx, y: ny });
+      });
+    });
+    g_cy.on('free', 'node', function() { dragPrevPos = null; });
+
+    // --- show/hide edges ---
+    var btnEdges = document.getElementById('graphTbEdges');
+    if (g_cy && !btnEdges.classList.contains('active')) {
+      g_cy.edges().hide();
+    }
+    btnEdges.onclick = function(e) {
+      e.stopPropagation();
+      if (!g_cy) return;
+      var hidden = btnEdges.classList.contains('active');
+      if (hidden) {
+        g_cy.edges().hide(); btnEdges.classList.remove('active');
+      } else {
+        g_cy.edges().show(); btnEdges.classList.add('active');
+      }
+    };
+
+    // --- filter panel ---
+    var btnFilter = document.getElementById('graphTbFilter');
+    btnFilter.onclick = function(e) {
+      e.stopPropagation();
+      fp.classList.toggle('open');
+      if (fp.classList.contains('open')) GraphView._refreshFilter();
+    };
+    document.getElementById('graphFilterClose').onclick = function(e) { e.stopPropagation(); fp.classList.remove('open'); };
+    document.getElementById('graphFilterSearch').oninput = function(e) { e.stopPropagation(); GraphView._refreshFilter(); };
+    document.getElementById('graphFilterShowAll').onclick = function() {
+      if (g_cy) g_cy.nodes().show();
+      GraphView._refreshFilter();
+    };
+    document.getElementById('graphFilterHideAll').onclick = function() {
+      if (g_cy) g_cy.nodes().hide();
+      GraphView._refreshFilter();
+    };
+  },
+  _refreshFilter() {
+    var list = document.getElementById('graphFilterList');
+    var q = (document.getElementById('graphFilterSearch').value || '').trim().toLowerCase();
+    if (!g_cy || !list) return;
+    var nodes = g_cy.nodes();
+    var h = '';
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var label = n.data('label') || n.id();
+      var hidden = n.hidden();
+      if (q && label.toLowerCase().indexOf(q) < 0 ) continue;
+      var color = n.style('background-color') || '#999';
+      h += '<div class="graph-filter-item' + (hidden ? ' hidden' : '') + '" data-nid="' + n.id() + '">';
+      h += '<span class="dot" style="background:' + color + '"></span>';
+      h += '<span class="name">' + escapeHtml(label) + '</span>';
+      h += '</div>';
+    }
+    if (!h) h = '<div style="color:var(--text-muted);padding:8px">\u65e0\u5339\u914d\u8282\u70b9</div>';
+    list.innerHTML = h;
+    var self = this;
+    list.querySelectorAll('.graph-filter-item').forEach(function(item) {
+      item.onclick = function() {
+        var nid = this.dataset.nid;
+        var node = g_cy.nodes('#' + nid);
+        if (node.length) {
+          node.toggleClass('hidden');
+          if (node.hidden()) node.hide(); else node.show();
+          self._refreshFilter();
+        }
+      };
+    });
   }
 };
 
 // ---- 6g. HeatmapView ----
 const HeatmapView = {
+  cellColor(v, maxC) {
+    if (v === 0) return 'transparent';
+    var i = Math.min(v / maxC, 1);
+    return 'rgb(255,' + Math.round(245 - 200 * i) + ',' + Math.round(245 - 200 * i) + ')';
+  },
+
   async load() {
     var size = parseInt(document.getElementById('heatmapSize').value) || S.size;
     S.size = size;
     var container = document.getElementById('heatmapContent');
-    container.innerHTML = '<div class="loading">\u52a0\u8f7d\u70ed\u529b\u56fe...</div>';
+    var cid = S.cid || '';
     try {
-      var data = await API.heatmap(S.taskId, S.et, size);
+      var isExternal = S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL';
+      if (isExternal) {
+        var ext = await API.externalStats(S.taskId);
+        var items = S.et === 'EXTERNAL_INCLUDE' ? (ext.externalDeps || []) : (ext.externalCalls || []);
+        if (cid) {
+          // drill: 过滤到该社区相关的外部项，列=子社区
+          var children = await API.communityChildren(S.taskId, cid, S.et);
+          var childIds = {};
+          for (var ci = 0; ci < children.length; ci++) childIds[children[ci].commId] = children[ci].name || children[ci].commId;
+          items = [];
+          for (var ii = 0; ii < ext.allItems ? 0 : 0; ii++) {/*placeholder*/}
+          // filter
+          for (var ii2 = 0; ii2 < (S.et === 'EXTERNAL_INCLUDE' ? ext.externalDeps : ext.externalCalls || []).length; ii2++) {
+            var fullItem = (S.et === 'EXTERNAL_INCLUDE' ? ext.externalDeps : ext.externalCalls || [])[ii2];
+            var comms = fullItem.communities || [];
+            for (var ji = 0; ji < comms.length; ji++) {
+              if (comms[ji].communityId === cid) { items.push(fullItem); break; }
+            }
+          }
+          if (items.length === 0 || children.length === 0) {
+            container.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
+            return;
+          }
+          // Build matrix: rows=items, cols=children
+          var colIds = Object.keys(childIds);
+          var cols = colIds.map(function(k) { return childIds[k]; });
+          var rows = [];
+          var matrix = [];
+          var maxC = 0;
+          for (var ii3 = 0; ii3 < items.length && ii3 < size; ii3++) {
+            var item = items[ii3];
+            rows.push(item.package || item.name);
+            var row = [];
+            var itemCommSet = {};
+            (item.communities || []).forEach(function(c2) { itemCommSet[c2.communityId] = item.fileCount || item.count || 1; });
+            for (var ji2 = 0; ji2 < colIds.length; ji2++) {
+              var v = itemCommSet[colIds[ji2]] || 0;
+              row.push(v);
+              if (v > maxC) maxC = v;
+            }
+            matrix.push(row);
+          }
+          var h2 = this._renderTable(rows, cols, matrix, maxC, colIds);
+          container.innerHTML = h2;
+          this._attachDrillHandlers(container, colIds);
+          return;
+        }
+        // global external heatmap (unchanged)
+        if (items.length === 0) {
+          container.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
+          return;
+        }
+        var commMap = {};
+        var itemList = items.slice(0, size);
+        for (var ii4 = 0; ii4 < itemList.length; ii4++) {
+          var itemA = itemList[ii4];
+          (itemA.communities || []).forEach(function(c) {
+            if (!commMap[c.communityId]) commMap[c.communityId] = c.name || c.communityId;
+          });
+        }
+        var commKeys = Object.keys(commMap);
+        var colsG = commKeys.map(function(k) { return commMap[k]; });
+        var rowsG = [];
+        var matrixG = [];
+        var maxCG = 0;
+        for (var ii5 = 0; ii5 < itemList.length; ii5++) {
+          var itemB = itemList[ii5];
+          rowsG.push(itemB.package || itemB.name);
+          var rowG = [];
+          var itemCommSetG = {};
+          (itemB.communities || []).forEach(function(c2) { itemCommSetG[c2.communityId] = itemB.fileCount || itemB.count || 1; });
+          for (var ji3 = 0; ji3 < commKeys.length; ji3++) {
+            var vG = itemCommSetG[commKeys[ji3]] || 0;
+            rowG.push(vG);
+            if (vG > maxCG) maxCG = vG;
+          }
+          matrixG.push(rowG);
+        }
+        container.innerHTML = this._renderTable(rowsG, colsG, matrixG, maxCG, commKeys);
+        this._attachDrillHandlers(container, commKeys);
+        return;
+      }
+      // Internal heatmap
+      var data = await API.heatmap(S.taskId, S.et, size, cid);
       if (!data.rows || data.rows.length === 0) {
         container.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
         return;
       }
       var maxC = data.maxCount || 1;
-      function cellColor(v) {
-        if (v === 0) return 'transparent';
-        var i = Math.min(v / maxC, 1);
-        return 'rgb(255,' + Math.round(245 - 200 * i) + ',' + Math.round(245 - 200 * i) + ')';
-      }
-      var h = '<table><thead><tr><th></th>';
-      for (var ci = 0; ci < data.cols.length; ci++) h += '<th title="' + escapeAttr(data.cols[ci]) + '">' + escapeHtml(data.cols[ci].slice(0, 8)) + '</th>';
-      h += '</tr></thead><tbody>';
-      for (var ri = 0; ri < data.rows.length && ri < size; ri++) {
-        h += '<tr><th title="' + escapeAttr(data.rows[ri]) + '">' + escapeHtml(data.rows[ri].slice(0, 8)) + '</th>';
-        for (ci = 0; ci < data.cols.length && ci < size; ci++) {
-          var v = data.matrix[ri] ? data.matrix[ri][ci] || 0 : 0;
-          h += '<td style="background:' + cellColor(v) + '" title="' + escapeAttr(data.rows[ri]) + ' \u2192 ' + escapeAttr(data.cols[ci]) + ': ' + v + '">' + (v || '') + '</td>';
-        }
-        h += '</tr>';
-      }
-      h += '</tbody></table>';
-      container.innerHTML = h;
+      container.innerHTML = this._renderTable(data.rows, data.cols, data.matrix, maxC, data.commIds || data.rows);
+      this._attachDrillHandlers(container, data.commIds || []);
     } catch(e) {
       container.innerHTML = '<div class="error-msg">\u52a0\u8f7d\u70ed\u529b\u56fe\u5931\u8d25: ' + e.message + '</div>';
     }
+  },
+
+  _renderTable(rows, cols, matrix, maxC, commIds) {
+    var h = '<table><thead><tr><th></th>';
+    for (var ci = 0; ci < cols.length; ci++) {
+      var cid = commIds && commIds[ci] ? commIds[ci] : '';
+      h += '<th class="hm-col-hdr" data-cid="' + escapeAttr(cid) + '" title="' + escapeAttr(cols[ci]) + '">' + escapeHtml(cols[ci].slice(0, 8)) + '</th>';
+    }
+    h += '</tr></thead><tbody>';
+    for (var ri = 0; ri < rows.length; ri++) {
+      var rid = commIds && commIds[ri] ? commIds[ri] : '';
+      h += '<tr><th class="hm-row-hdr" data-cid="' + escapeAttr(rid) + '" title="' + escapeAttr(rows[ri]) + '">' + escapeHtml(rows[ri].slice(0, 16)) + '</th>';
+      for (ci = 0; ci < cols.length; ci++) {
+        var v = matrix[ri] ? matrix[ri][ci] || 0 : 0;
+        h += '<td style="background:' + HeatmapView.cellColor(v, maxC) + '" title="' + escapeAttr(rows[ri]) + ' \u2192 ' + escapeAttr(cols[ci]) + ': ' + v + '">' + (v || '') + '</td>';
+      }
+      h += '</tr>';
+    }
+    h += '</tbody></table>';
+    return h;
+  },
+
+  _attachDrillHandlers(container, commIds) {
+    var self = this;
+    container.querySelectorAll('.hm-col-hdr, .hm-row-hdr').forEach(function(el) {
+      el.style.cursor = 'pointer';
+      el.onclick = function() {
+        var cid = this.dataset.cid;
+        if (!cid) return;
+        S.cid = cid;
+        S.depth = 1;
+        S.commParent = cid;
+        S.commStack.push({cid: cid, name: this.textContent});
+        syncURL();
+        RightPanel.loadCommTree();
+        HeatmapView.load();
+        RightBreadcrumb.render();
+      };
+    });
   }
 };
 
@@ -964,16 +1797,19 @@ async function load() {
     var p = document.getElementById('tocPanel');
     p.classList.toggle('open');
     this.textContent = p.classList.contains('open') ? '\u2715' : '\u2630';
-    if (p.classList.contains('open')) fitPanelPosition(document.getElementById('tocFloat'));
+    console.log('[tocToggle] open=' + p.classList.contains('open') + ' panelSize=' + p.offsetWidth + 'x' + p.offsetHeight);
+    if (p.classList.contains('open')) requestAnimationFrame(function() { fitPanelPosition(document.getElementById('tocFloat')); });
   };
 
   Layout.init();
-  makeDraggable(document.getElementById('tocFloat'), '.toc-panel', 'tocPos_' + g_taskId);
-  makeDraggable(document.getElementById('fileCommFloat'), '.toc-panel', 'commPos_' + g_taskId);
+  makeDraggable(document.getElementById('tocFloat'), 'tocFloat', 'tocPos_v2_' + g_taskId);
+  makeDraggable(document.getElementById('fileCommFloat'), 'fileCommFloat', 'commPos_v2_' + g_taskId);
 
   window.addEventListener('resize', function() {
-    fitPanelPosition(document.getElementById('tocFloat'));
-    fitPanelPosition(document.getElementById('fileCommFloat'));
+    requestAnimationFrame(function() {
+      fitPanelPosition(document.getElementById('tocFloat'));
+      fitPanelPosition(document.getElementById('fileCommFloat'));
+    });
   });
 
   document.getElementById('heatmapSize').onchange = function() { HeatmapView.load(); };
@@ -999,6 +1835,8 @@ async function load() {
 
 async function loadDoc(id) {
   var content = document.getElementById('content');
+  // 如果有文件状态但无社区ID，重置
+  if (S.page !== 'doc' && !g_communityId) { S.page = 'doc'; S.filePath = ''; }
   content.innerHTML = '<div class="loading">Loading document...</div>';
   S.taskId = g_taskId;
   try {
@@ -1019,13 +1857,35 @@ async function loadDoc(id) {
 async function loadCommunityDoc(tid, cid, et) {
   var content = document.getElementById('content');
   content.innerHTML = '<div class="loading">Loading community document...</div>';
+
+  // 如果是文件页面，直接渲染文件预摘要
+  if (S.page === 'file-summary') {
+    FilePreview.render(S.filePath, S.fileCommId);
+    LeftBreadcrumb.render();
+    LeftToc.render(cid);
+    return;
+  }
+
   try {
     var doc = await API.communityDoc(tid, cid, et);
     S.projectId = doc.projectId || '';
     S.taskId = doc.taskId || tid;
+    syncURL();
     DocContent.render(doc.content || '');
     LeftBreadcrumb.render();
     LeftToc.render(cid);
+    // 在文档尾部插入文件列表容器
+    var cd = document.getElementById('content');
+    var fl = document.getElementById('fileListSection');
+    if (!fl) {
+      fl = document.createElement('div');
+      fl.id = 'fileListSection';
+      cd.appendChild(fl);
+    }
+    // curEt is the edgeType from URL
+    var curUrl = new URLSearchParams(location.search);
+    var curEt = curUrl.get('edgeType') || et || 'CALL';
+    FileList.load(tid, cid, curEt);
   } catch(e) {
     content.innerHTML = '<div class="error-msg">Failed: ' + e.message + '</div>';
   }

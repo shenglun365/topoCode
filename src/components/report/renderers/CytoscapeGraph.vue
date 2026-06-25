@@ -286,9 +286,15 @@ function buildCytoscape() {
 
     // move connected neighbours proportionally (damped)
     const closed = node.closedNeighborhood().nodes().filter((n: any) => !n.same(node) && !n.data('_isMerged'))
+    if (closed.length > 0) {
+      console.log('[CytoscapeGraph-drag] grabbed=' + node.id() + ' pos=(' + pos.x.toFixed(1) + ',' + pos.y.toFixed(1) + ') dx=' + dx.toFixed(1) + ' dy=' + dy.toFixed(1) + ' neighbours=' + closed.length)
+    }
     closed.forEach((n: any) => {
       const np = n.position()
-      n.position({ x: np.x + dx * 0.7, y: np.y + dy * 0.7 })
+      const nx = np.x + dx * 0.7
+      const ny = np.y + dy * 0.7
+      console.log('[CytoscapeGraph-drag]   -> ' + n.id() + ' (' + np.x.toFixed(1) + ',' + np.y.toFixed(1) + ') -> (' + nx.toFixed(1) + ',' + ny.toFixed(1) + ') delta=(' + (dx * 0.7).toFixed(1) + ',' + (dy * 0.7).toFixed(1) + ')')
+      n.position({ x: nx, y: ny })
     })
   })
 

@@ -21,6 +21,14 @@ multi_db = None
 plantuml_cache_db: Optional[sqlite3.Connection] = None
 http_port = 3456
 
+# 统一数据模块
+import sys as _sys
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_backend_dir = os.path.join(_project_root, "backend-core")
+if _backend_dir not in _sys.path:
+    _sys.path.insert(0, _backend_dir)
+import community_data as cd
+
 app = FastAPI(title="TopoOne Web Viewer")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -190,9 +198,12 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
             (tid, et, cid)
         )
         if not row:
-            raise HTTPException(404, "Community result not found")
-        name = row.get("name") or cid
-        parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "", row.get("summary") or ""]
+            name = cid
+            parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "",
+                     "\u8be5\u7ec4\u4ef6\u6682\u65e0 LLM \u5206\u6790\u7ed3\u679c\uff0c\u8bf7\u5148\u901a\u8fc7 AI \u52a9\u624b\u8fd0\u884c\u7ec4\u4ef6\u5206\u6790\u3002"]
+        else:
+            name = row.get("name") or cid
+            parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "", row.get("summary") or ""]
         return {
             "id": f"community-{tid}-{et}-{cid}",
             "taskId": tid,
@@ -202,6 +213,114 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
             "createdAt": "",
             "updatedAt": "",
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/community-files")
+async def get_community_files(task_id: str = Query(None), taskId: str = Query(None),
+                               community_id: str = Query(None), communityId: str = Query(None),
+                               edge_type: str = Query(None), edgeType: str = Query(None)):
+    tid = task_id or taskId
+    cid = community_id or communityId
+    et = edge_type or edgeType or 'CALL'
+    if not tid or not cid:
+        raise HTTPException(422, "task_id/taskId and community_id/communityId are required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        task = multi_db.main_db.fetchone(
+            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
+        )
+        if not task:
+            raise HTTPException(404, "Task not found")
+        pid = task["project_id"]
+        pdb = multi_db.get_project_db(pid)
+        proj_row = multi_db.main_db.fetchone(
+            "SELECT root_path FROM projects WHERE id = ?", (pid,)
+        )
+        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        _rel = cd._make_rel(project_root)
+
+        rows = pdb.fetchall(
+            "SELECT comm_id, comm_lv, node_list FROM graph_doc "
+            "WHERE task_id=? AND edge_type=? AND comm_id=? "
+            "ORDER BY comm_lv, comm_id",
+            (tid, et, cid)
+        )
+        # 嵌套社区（L1+）在 graph_doc 中无记录，回退到 L0 祖先
+        if not rows:
+            l0_cid = cd.l0_ancestor(cid)
+            if l0_cid and l0_cid != cid:
+                rows = pdb.fetchall(
+                    "SELECT comm_id, comm_lv, node_list FROM graph_doc "
+                    "WHERE task_id=? AND edge_type=? AND comm_id=? "
+                    "ORDER BY comm_lv, comm_id",
+                    (tid, et, l0_cid)
+                )
+        files = []
+        seen = set()
+        for r in rows:
+            try:
+                raw = json.loads(r["node_list"]) if isinstance(r["node_list"], str) else r["node_list"] or []
+            except Exception:
+                raw = []
+            if not isinstance(raw, list):
+                raw = [raw]
+            for node_id in raw:
+                if isinstance(node_id, dict):
+                    nid = str(node_id.get("id", ""))
+                else:
+                    nid = str(node_id)
+                if cd._bad_id(nid):
+                    continue
+                clean = nid.split(':')[0] if ':' in nid else nid
+                clean = _rel(clean)
+                if clean and clean not in seen:
+                    seen.add(clean)
+                    parts = clean.split("/")
+                    files.append({
+                        "path": clean,
+                        "name": parts[-1] if parts else clean,
+                        "parentDir": parts[-2] if len(parts) >= 2 else "",
+                        "commId": r["comm_id"],
+                        "commLv": r["comm_lv"]
+                    })
+        return {"files": files, "total": len(files), "projectId": pid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/file-summary")
+async def get_file_summary(task_id: str = Query(None), taskId: str = Query(None),
+                            file_path: str = Query(None), filePath: str = Query(None)):
+    tid = task_id or taskId
+    fp = file_path or filePath
+    if not tid or not fp:
+        raise HTTPException(422, "task_id/taskId and file_path/filePath are required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        task = multi_db.main_db.fetchone(
+            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
+        )
+        if not task:
+            raise HTTPException(404, "Task not found")
+        pid = task["project_id"]
+        pdb = multi_db.get_project_db(pid)
+        row = pdb.fetchone(
+            "SELECT summary, summary_len, created_at, source, task_id FROM file_summaries "
+            "WHERE project_id=? AND file_path=? ORDER BY created_at DESC LIMIT 1",
+            (pid, fp)
+        )
+        if row:
+            return {"found": True, "summary": row["summary"], "summary_len": row["summary_len"],
+                    "created_at": row["created_at"], "source": row["source"], "task_id": row["task_id"]}
+        return {"found": False}
     except HTTPException:
         raise
     except Exception as e:
@@ -241,8 +360,8 @@ async def list_task_docs(task_id: str = Query(None), taskId: str = Query(None)):
 
 @app.get("/api/community-children")
 async def get_community_children(task_id: str = Query(None), taskId: str = Query(None),
-                                 parent_comm_id: str = Query(None), parentCommId: str = Query(None),
-                                 edge_type: str = Query(None), edgeType: str = Query(None)):
+                                  parent_comm_id: str = Query(None), parentCommId: str = Query(None),
+                                  edge_type: str = Query(None), edgeType: str = Query(None)):
     tid = task_id or taskId
     pid = parent_comm_id or parentCommId
     et = (edge_type or edgeType or 'CALL').upper()
@@ -251,70 +370,10 @@ async def get_community_children(task_id: str = Query(None), taskId: str = Query
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        logger.info(f"[community-children] task={tid} parent={pid} edgeType={et}")
-        # 先在主库查找该任务所属项目
-        task_row = multi_db.main_db.fetchone(
-            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
-        )
-        if not task_row:
-            logger.info(f"[community-children] Task not found in main DB: {tid}")
-            return []
-        project_id = task_row["project_id"]
-        logger.info(f"[community-children] Task {tid} belongs to project {project_id}")
-        try:
-            pdb = multi_db.get_project_db(project_id)
-        except Exception as e:
-            logger.warning(f"[community-children] Failed to get project DB: {e}")
-            return []
-        # 查询子社区：pid 为空时查顶级（parent_comm_id IS NULL），否则查指定父级
-        # 先用指定 edge_type，若无数据则尝试另一种类型（仅 CALL / INCLUDE，DEPENDENCY 不在 DB 中存储）
-        fallback_types = ['CALL', 'INCLUDE']
-        if et and et in fallback_types:
-            fallback_types.remove(et)
-        for attempt_et in ([et] if et else []) + fallback_types:
-            if pid:
-                rows = pdb.fetchall(
-                    """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                              h.edge_type,
-                              r.name AS llm_name
-                       FROM community_hierarchy h
-                       LEFT JOIN community_llm_results r
-                         ON r.task_id = h.task_id AND r.edge_type = h.edge_type
-                         AND r.comm_lv = h.comm_lv AND r.comm_id = h.comm_id
-                       WHERE h.task_id = ? AND h.edge_type = ? AND h.parent_comm_id = ?
-                       ORDER BY h.comm_lv, h.comm_id""",
-                    (tid, attempt_et, pid)
-                )
-            else:
-                rows = pdb.fetchall(
-                    """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                              h.edge_type,
-                              r.name AS llm_name
-                       FROM community_hierarchy h
-                       LEFT JOIN community_llm_results r
-                         ON r.task_id = h.task_id AND r.edge_type = h.edge_type
-                         AND r.comm_lv = h.comm_lv AND r.comm_id = h.comm_id
-                       WHERE h.task_id = ? AND h.edge_type = ? AND h.parent_comm_id IS NULL
-                       ORDER BY h.comm_lv, h.comm_id""",
-                    (tid, attempt_et)
-                )
-            if rows:
-                break
-        result = []
-        for row in rows if rows else []:
-            level = row["comm_lv"]
-            edge = row.get("edge_type", attempt_et)
-            result.append({
-                "commId": row["comm_id"],
-                "commLv": level,
-                "parentCommId": row["parent_comm_id"],
-                "name": row["llm_name"] or "",
-                "hasDoc": bool(row["llm_name"]),
-                "nodeCount": row["node_count"] or 0,
-                "edgeType": edge,
-            })
-        logger.info(f"[community-children] Found {len(result)} children for task={tid} parent={pid} (query edgeType={attempt_et}, levels={set(r['commLv'] for r in result)})")
-        return result
+        _, pdb = _resolve_project_db(tid)
+        return cd.get_community_children(pdb, tid, et, pid or None)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -650,20 +709,17 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
                               edge_type: str = Query(None), edgeType: str = Query(None),
                               comm_lv: str = Query(None), commLv: str = Query(None),
                               comm_id: str = Query(None), commId: str = Query(None),
-                              scope: str = Query(None), scope_: str = Query(None),
-                              gran: str = Query(None), gran_: str = Query(None)):
-    """社区结构图
-
-    参数:
-      gran / gran_ — component（社区级节点+边）| file（文件级节点+边）
-      scope / scope_ — external（含跨社区边）| internal（仅内部边，仅 file 模式有效）
-      comm_id / commId — 聚焦到指定社区
-    """
+                              gran: str = Query(None), gran_: str = Query(None),
+                              depth: int = Query(1)):
     task_id = task_id or taskId
     edge_type = edge_type or edgeType or "CALL"
-    comm_lv = comm_lv or commLv or ""
+    comm_lv_raw = comm_lv or commLv
+    comm_lv = comm_lv_raw or "L0"
     comm_id = comm_id or commId or ""
-    sc = (scope or scope_ or "external").lower()
+    if not comm_lv_raw and comm_id:
+        m = re.search(r"-L(\d+)-", comm_id)
+        if m:
+            comm_lv = f"L{m.group(1)}"
     gn = (gran or gran_ or "component").lower()
     if not task_id:
         raise HTTPException(422, "task_id is required")
@@ -677,128 +733,13 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
         )
         project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
 
-        def _rel(p):
-            if not p: return p
-            if p.startswith('file:'): p = p[5:]
-            if project_root and p.startswith(project_root): p = p[len(project_root):]
-            return p.lstrip('/')
-
-        def bad_id(v):
-            s = str(v).strip()
-            return not s or s == 'None'
-
-        # ======== 文件级模式 ========
-        if gn == "file":
-            return _community_graph_file(pdb, task_id, et, comm_lv, comm_id, sc, _rel, bad_id)
-
-        # ======== 社区级模式 ========
-        # 1. 查询 graph_doc 获取社区元数据
-        base_where = ["task_id=? AND edge_type=?"]
-        base_params = [task_id, et]
-        if comm_id:
-            # 下钻：查找该社区的 children
-            child_rows = pdb.fetchall(
-                "SELECT comm_id, comm_lv FROM community_hierarchy "
-                "WHERE task_id=? AND edge_type=? AND parent_comm_id=? "
-                "ORDER BY comm_lv, comm_id",
-                (task_id, et, comm_id)
-            )
-            if child_rows:
-                # 有子社区 → 查子社区的 graph_doc
-                child_ids = [r["comm_id"] for r in child_rows]
-                ph = ','.join(['?' for _ in child_ids])
-                base_where.append(f"comm_id IN ({ph})")
-                base_params.extend(child_ids)
-            else:
-                # 叶子社区 → 返回该社区自身作为节点
-                base_where.append("comm_id=?")
-                base_params.append(comm_id)
-        if comm_lv:
-            base_where.append("comm_lv=?")
-            base_params.append(comm_lv)
-
-        rows = pdb.fetchall(
-            f"SELECT comm_id, comm_lv, node_list, node_count, edge_count "
-            f"FROM graph_doc WHERE {' AND '.join(base_where)} "
-            f"ORDER BY comm_lv, comm_id",
-            tuple(base_params)
-        )
-        if not rows:
-            return {"nodes": [], "edges": [], "commIds": []}
-
-        # 社区名称
-        name_rows = pdb.fetchall(
-            "SELECT comm_id, name FROM community_llm_results WHERE task_id=? AND edge_type=?",
-            (task_id, et)
-        )
-        name_map = {r["comm_id"]: r["name"] or r["comm_id"] for r in name_rows}
-
-        # 建立 file→comm 映射
-        file_comm = {}
-        for r in rows:
-            cid = r["comm_id"]
-            try:
-                nlist = json.loads(r["node_list"]) if isinstance(r["node_list"], str) else r["node_list"] or []
-            except Exception:
-                nlist = []
-            for n in (nlist if isinstance(nlist, list) else [nlist]):
-                if isinstance(n, dict):
-                    key = str(n.get("id", ""))
-                elif isinstance(n, str):
-                    key = n
-                else:
-                    continue
-                fp = _rel(key)
-                if fp and fp not in file_comm:
-                    file_comm[fp] = cid
-
-        # 计算跨社区边
-        kind = "imports" if et == "INCLUDE" else "calls"
-        all_ge = pdb.fetchall(
-            "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
-            (task_id, kind)
-        )
-        node_set = set()
-        cross_edge_set = set()
-        for e in all_ge:
-            src_raw = e["source_id"] or ""
-            tgt_raw = e["target_id"] or ""
-            src_key = _rel(src_raw)
-            tgt_key = _rel(tgt_raw)
-            if not src_key or not tgt_key:
-                continue
-            src_comm = file_comm.get(src_key)
-            tgt_comm = file_comm.get(tgt_key)
-            if src_comm and tgt_comm and src_comm != tgt_comm:
-                eid = f"{src_comm}→{tgt_comm}"
-                cross_edge_set.add(eid)
-                node_set.add(src_comm)
-                node_set.add(tgt_comm)
-            elif src_comm:
-                node_set.add(src_comm)
-            elif tgt_comm:
-                node_set.add(tgt_comm)
-
-        # 没有跨社区边时仍显示所有查询到的社区
-        if not cross_edge_set:
-            for r in rows:
-                node_set.add(r["comm_id"])
-
-        # 构建社区级节点
-        comm_node_map = {}
-        comm_ids_meta = []
-        for r in rows:
-            cid = r["comm_id"]
-            clv = r["comm_lv"]
-            comm_ids_meta.append({"commId": cid, "commLv": clv, "name": name_map.get(cid, cid)})
-            if cid in node_set:
-                comm_node_map[cid] = {"id": cid, "label": name_map.get(cid, cid), "commLv": clv}
-
-        return {
-            "nodes": list(comm_node_map.values()),
-            "edges": [{"id": e, "source": e.split("→")[0], "target": e.split("→")[1]} for e in cross_edge_set],
-            "commIds": comm_ids_meta
-        }
+        if gn == "component":
+            return cd.get_community_graph_component(
+                pdb, task_id, et, comm_lv, comm_id, project_root,
+                depth=int(depth) if depth else 1)
+        else:
+            return cd.get_community_graph_file(
+                pdb, task_id, et, comm_lv, comm_id, project_root)
 
     except HTTPException:
         raise
@@ -806,175 +747,6 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
         import traceback
         logger.error(f"[community-graph] error: {e}\n{traceback.format_exc()}")
         raise HTTPException(500, str(e))
-
-
-def _community_graph_file(pdb, task_id, et, comm_lv, comm_id, sc, _rel, bad_id):
-    """文件级模式：返回社区内的文件节点 + 边"""
-    base_where = ["task_id=? AND edge_type=?"]
-    base_params = [task_id, et]
-    if comm_id:
-        base_where.append("comm_id=?")
-        base_params.append(comm_id)
-    if comm_lv:
-        base_where.append("comm_lv=?")
-        base_params.append(comm_lv)
-
-    rows = pdb.fetchall(
-        f"SELECT comm_id, comm_lv, node_list, edge_list, node_count, edge_count "
-        f"FROM graph_doc WHERE {' AND '.join(base_where)} "
-        f"ORDER BY comm_lv, comm_id",
-        tuple(base_params)
-    )
-    if not rows:
-        return {"nodes": [], "edges": [], "commIds": []}
-
-    name_rows = pdb.fetchall(
-        "SELECT comm_id, name FROM community_llm_results WHERE task_id=? AND edge_type=?",
-        (task_id, et)
-    )
-    name_map = {r["comm_id"]: r["name"] or r["comm_id"] for r in name_rows}
-
-    all_nodes = {}
-    all_edges = {}
-    comm_ids_meta = []
-
-    for r in rows:
-        cid = r["comm_id"]
-        clv = r["comm_lv"]
-        comm_ids_meta.append({"commId": cid, "commLv": clv, "name": name_map.get(cid, cid)})
-
-        try:
-            raw_nodes = json.loads(r["node_list"]) if isinstance(r["node_list"], str) else r["node_list"] or []
-        except Exception:
-            raw_nodes = []
-        if not isinstance(raw_nodes, list):
-            raw_nodes = [raw_nodes]
-
-        try:
-            raw_edges = json.loads(r["edge_list"]) if isinstance(r["edge_list"], str) else r["edge_list"] or []
-        except Exception:
-            raw_edges = []
-        if not isinstance(raw_edges, list):
-            raw_edges = [raw_edges]
-
-        if et == "CALL":
-            for node_id in raw_nodes:
-                if isinstance(node_id, dict):
-                    nid = str(node_id.get("id", ""))
-                else:
-                    nid = str(node_id)
-                if bad_id(nid):
-                    continue
-                clean = nid.split(':')[0] if ':' in nid else nid
-                if clean and clean not in all_nodes:
-                    label = clean.split("/")[-1] if "/" in clean else clean
-                    all_nodes[clean] = {"id": clean, "label": label, "commId": cid, "commLv": clv}
-
-            for edge in raw_edges:
-                if isinstance(edge, dict):
-                    src = edge.get("source", "")
-                    tgt = edge.get("target", "")
-                elif isinstance(edge, (list, tuple)) and len(edge) >= 2:
-                    src = edge[0]
-                    tgt = edge[1]
-                else:
-                    continue
-                s = _rel(str(src))
-                t = _rel(str(tgt))
-                if not s or not t:
-                    continue
-                s_clean = s.split(':')[0] if ':' in s else s
-                t_clean = t.split(':')[0] if ':' in t else t
-                if bad_id(s_clean) or bad_id(t_clean) or s_clean == t_clean:
-                    continue
-                eid = f"{s_clean}→{t_clean}"
-                if eid not in all_edges:
-                    all_edges[eid] = {"id": eid, "source": s_clean, "target": t_clean}
-                if s_clean not in all_nodes:
-                    label = s_clean.split("/")[-1] if "/" in s_clean else s_clean
-                    all_nodes[s_clean] = {"id": s_clean, "label": label, "commId": cid, "commLv": clv}
-                if t_clean not in all_nodes:
-                    label = t_clean.split("/")[-1] if "/" in t_clean else t_clean
-                    all_nodes[t_clean] = {"id": t_clean, "label": label, "commId": cid, "commLv": clv}
-        else:
-            for node_id in raw_nodes:
-                if isinstance(node_id, dict):
-                    nid = str(node_id.get("id", ""))
-                    label = node_id.get("name", "") or nid.split("/")[-1] if "/" in nid else nid
-                else:
-                    nid = str(node_id)
-                    label = nid.split("/")[-1] if "/" in nid else nid
-                if bad_id(nid):
-                    continue
-                nid = _rel(nid)
-                if nid and nid not in all_nodes:
-                    all_nodes[nid] = {"id": nid, "label": label, "commId": cid, "commLv": clv}
-
-            for edge in raw_edges:
-                if isinstance(edge, dict):
-                    src = edge.get("source", "")
-                    tgt = edge.get("target", "")
-                elif isinstance(edge, (list, tuple)) and len(edge) >= 2:
-                    src = edge[0]
-                    tgt = edge[1]
-                else:
-                    continue
-                s = _rel(str(src))
-                t = _rel(str(tgt))
-                if not s or not t or s == t:
-                    continue
-                eid = f"{s}→{t}"
-                if eid not in all_edges:
-                    all_edges[eid] = {"id": eid, "source": s, "target": t}
-                if s not in all_nodes:
-                    all_nodes[s] = {"id": s, "label": s.split("/")[-1] if "/" in s else s, "commId": cid, "commLv": clv}
-                if t not in all_nodes:
-                    all_nodes[t] = {"id": t, "label": t.split("/")[-1] if "/" in t else t, "commId": cid, "commLv": clv}
-
-    # scope=external + comm_id: 从 graph_edge 补充跨社区边
-    if sc == "external" and comm_id:
-        kind = "imports" if et == "INCLUDE" else "calls"
-        file_comm = {}
-        for r in rows:
-            cid2 = r["comm_id"]
-            try:
-                nlist = json.loads(r["node_list"]) if isinstance(r["node_list"], str) else r["node_list"] or []
-            except Exception:
-                nlist = []
-            for n in (nlist if isinstance(nlist, list) else [nlist]):
-                if isinstance(n, dict):
-                    key = str(n.get("id", ""))
-                elif isinstance(n, str):
-                    key = n
-                else:
-                    continue
-                fp = _rel(key)
-                if fp and fp not in file_comm:
-                    file_comm[fp] = cid2
-
-        all_ge = pdb.fetchall(
-            "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
-            (task_id, kind)
-        )
-        for e in all_ge:
-            src = _rel(e["source_id"] or "")
-            tgt = _rel(e["target_id"] or "")
-            if not src or not tgt:
-                continue
-            src_comm = file_comm.get(src)
-            tgt_comm = file_comm.get(tgt)
-            if not src_comm or not tgt_comm or src_comm == tgt_comm:
-                continue
-            if src_comm == comm_id or tgt_comm == comm_id:
-                eid = f"{src}→{tgt}"
-                if eid not in all_edges:
-                    all_edges[eid] = {"id": eid, "source": src, "target": tgt}
-                if src not in all_nodes:
-                    all_nodes[src] = {"id": src, "label": src.split("/")[-1] if "/" in src else src, "commId": src_comm or "", "commLv": ""}
-                if tgt not in all_nodes:
-                    all_nodes[tgt] = {"id": tgt, "label": tgt.split("/")[-1] if "/" in tgt else tgt, "commId": tgt_comm or "", "commLv": ""}
-
-    return {"nodes": list(all_nodes.values()), "edges": list(all_edges.values()), "commIds": comm_ids_meta}
 
 
 @app.get("/api/file-graph")
@@ -1155,44 +927,99 @@ async def get_cascade_levels(task_id: str = Query(None), taskId: str = Query(Non
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        pid, pdb = _resolve_project_db(task_id)
+        _, pdb = _resolve_project_db(task_id)
         et = (edge_type or edgeType or "CALL").upper()
-        rows = pdb.fetchall(
-            """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count, h.edge_count,
-                      r.name AS llm_name
-               FROM community_hierarchy h
-               LEFT JOIN community_llm_results r
-                 ON r.task_id = h.task_id AND r.edge_type = h.edge_type
-                 AND r.comm_lv = h.comm_lv AND r.comm_id = h.comm_id
-               WHERE h.task_id = ? AND h.edge_type = ?
-               ORDER BY h.comm_lv, h.comm_id""",
-            (task_id, et)
-        )
-        groups = {}
-        for r in rows:
-            lv = r["comm_lv"]
-            if lv not in groups:
-                groups[lv] = []
-            groups[lv].append({
-                "commId": r["comm_id"],
-                "commLv": lv,
-                "parentCommId": r["parent_comm_id"],
-                "name": r["llm_name"] or r["comm_id"],
-                "nodeCount": r["node_count"] or 0,
-                "edgeCount": r["edge_count"] or 0,
-            })
-        levels = [{"lv": k, "items": v} for k, v in sorted(groups.items())]
-        return {"levels": levels}
+        return cd.get_cascade_levels(pdb, task_id, et)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
+def _drill_heatmap(pdb, task_id, et, comm_lv, comm_id, size, project_root):
+    """下钻热力图：子社区间跨社区边矩阵（文件级数据聚合到子社区）"""
+    children = cd.get_community_children(pdb, task_id, et, comm_id)
+    if not children:
+        return {"rows": [], "cols": [], "matrix": [], "maxCount": 0}
+
+    child_ids = [c["commId"] for c in children]
+    child_names = {c["commId"]: c.get("name") or c["commId"] for c in children}
+
+    _rel = cd._make_rel(project_root)
+
+    # 文件级数据：当前 drill 社区的 node_list（文件→子社区映射）
+    file_child = {}
+    for child_cid in child_ids:
+        doc_rows = pdb.fetchall(
+            "SELECT node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_id=?",
+            (task_id, et, child_cid)
+        )
+        for dr in doc_rows:
+            try:
+                nodes = json.loads(dr["node_list"]) if isinstance(dr["node_list"], str) else dr["node_list"] or []
+            except Exception:
+                nodes = []
+            for n in (nodes if isinstance(nodes, list) else [nodes]):
+                key = str(n) if isinstance(n, str) else str(n.get("id", ""))
+                fp = _rel(key)
+                if fp:
+                    clean = fp.split(':')[0] if ':' in fp else fp
+                    if clean and clean not in file_child:
+                        file_child[clean] = child_cid
+
+    if not file_child:
+        return {"rows": [], "cols": [], "matrix": [], "maxCount": 0}
+
+    # 从 graph_edge 获取跨社区边
+    kind = "imports" if et == "INCLUDE" else "calls"
+    all_ge = pdb.fetchall(
+        "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
+        (task_id, kind)
+    )
+    hash_to_path = cd.resolve_call_symbols(pdb, task_id, all_ge, _rel) if et == "CALL" else {}
+
+    # 统计子社区间边
+    edge_counts = {}
+    for e in all_ge:
+        src = _rel(e["source_id"] or "")
+        tgt = _rel(e["target_id"] or "")
+        if not src or not tgt:
+            continue
+        if ':' in src: src = src.split(':')[0]
+        if ':' in tgt: tgt = tgt.split(':')[0]
+        src = hash_to_path.get(src, src)
+        tgt = hash_to_path.get(tgt, tgt)
+        src_child = file_child.get(src)
+        tgt_child = file_child.get(tgt)
+        if not src_child or not tgt_child or src_child == tgt_child:
+            continue
+        pair = (src_child, tgt_child)
+        edge_counts[pair] = edge_counts.get(pair, 0) + 1
+
+    n = len(child_ids)
+    comm_index = {cid: i for i, cid in enumerate(child_ids)}
+    matrix = [[0] * n for _ in range(n)]
+    for (src_c, tgt_c), cnt in edge_counts.items():
+        si = comm_index.get(src_c)
+        ti = comm_index.get(tgt_c)
+        if si is not None and ti is not None:
+            matrix[si][ti] = cnt
+
+    max_count = max(max(row) for row in matrix) if n > 0 else 0
+    return {
+        "rows": [child_names[cid] for cid in child_ids],
+        "cols": [child_names[cid] for cid in child_ids],
+        "matrix": matrix, "maxCount": max_count,
+        "commIds": child_ids
+    }
+
+
 @app.get("/api/heatmap")
 async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
                        edge_type: str = Query(None), edgeType: str = Query(None),
-                       size: int = Query(10)):
+                       size: int = Query(10),
+                       comm_id: str = Query(None), commId: str = Query(None),
+                       comm_lv: str = Query(None), commLv: str = Query(None)):
     task_id = task_id or taskId
     edge_type = edge_type or edgeType or "CALL"
     if not task_id:
@@ -1203,114 +1030,44 @@ async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
     try:
         pid, pdb = _resolve_project_db(task_id)
         et = (edge_type or edgeType or "CALL").upper()
-        lv = "L0"  # 热力图基于 L0 社区
-
-        # 获取项目根路径（用于归一化 edge 中的绝对路径）
+        cid = comm_id or commId or ""
+        clv = comm_lv or commLv or "L0"
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
         project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
 
-        def _rel(p: str) -> str:
-            if not p:
-                return p
-            if p.startswith('file:'):
-                p = p[5:]
-            if project_root and p.startswith(project_root):
-                p = p[len(project_root):]
-            return p.lstrip('/')
-
-        # 1. 加载 L0 社区 node_list
-        doc_rows = pdb.fetchall(
-            "SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_lv=?",
-            (task_id, et, lv)
-        )
-        if not doc_rows:
-            return {"rows": [], "cols": [], "matrix": [], "maxCount": 0}
-
-        # 2. 构建 node → comm_id 反向映射
-        node_comm = {}
-        comm_names = {}
-        comm_order = []
-        for r in doc_rows:
-            cid = r["comm_id"]
-            comm_order.append(cid)
-            try:
-                nodes = json.loads(r["node_list"]) if r["node_list"] else []
-            except Exception:
-                nodes = []
-            for n in (nodes if isinstance(nodes, list) else [nodes]):
-                key = n["id"] if isinstance(n, dict) else str(n)
-                if key:
-                    node_comm[key] = cid
-
-        # 获取社区名称
-        name_rows = pdb.fetchall(
-            "SELECT comm_id, name FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv=?",
-            (task_id, et, lv)
-        )
-        name_map = {r["comm_id"]: r["name"] or r["comm_id"] for r in name_rows}
-        comm_names_list = [name_map.get(cid, cid) for cid in comm_order]
-        n = len(comm_order)
-
-        # 3. 加载边数据
-        if et == "INCLUDE":
-            all_edges = pdb.fetchall(
-                "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind='imports'",
-                (task_id,)
-            )
-        else:
-            all_edges = pdb.fetchall(
-                "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind='calls'",
-                (task_id,)
-            )
-            sym_ids = set()
-            for e in all_edges:
-                if e['source_id']: sym_ids.add(e['source_id'])
-                if e['target_id']: sym_ids.add(e['target_id'])
-            symbol_file_map = {}
-            if sym_ids:
-                sym_list = list(sym_ids)
-                batch_size = 900
-                for i in range(0, len(sym_list), batch_size):
-                    batch = sym_list[i:i + batch_size]
-                    placeholders = ",".join("?" * len(batch))
-                    gn_rows = pdb.fetchall(
-                        f"SELECT id, file_path FROM graph_node WHERE task_id=? AND id IN ({placeholders})",
-                        [task_id] + batch
-                    )
-                    for gr in gn_rows:
-                        symbol_file_map[gr['id']] = gr['file_path'] or ""
-
-        # 4. 统计跨社区边
-        comm_index = {cid: i for i, cid in enumerate(comm_order)}
-        matrix = [[0] * n for _ in range(n)]
-        for edge in all_edges:
-            src_raw = edge['source_id'] or ""
-            tgt_raw = edge['target_id'] or ""
-            if not src_raw or not tgt_raw:
-                continue
-            if et == "INCLUDE":
-                src_key = _rel(src_raw)
-                tgt_key = _rel(tgt_raw)
-            else:
-                src_key = _rel(symbol_file_map.get(src_raw, ""))
-                tgt_key = _rel(symbol_file_map.get(tgt_raw, ""))
-            src_comm = node_comm.get(src_key)
-            tgt_comm = node_comm.get(tgt_key)
-            if src_comm and tgt_comm and src_comm != tgt_comm:
-                si = comm_index.get(src_comm)
-                ti = comm_index.get(tgt_comm)
-                if si is not None and ti is not None:
-                    matrix[si][ti] += 1
-
-        max_count = max(max(row) for row in matrix) if n > 0 else 0
-        return {"rows": comm_names_list, "cols": comm_names_list, "matrix": matrix, "maxCount": max_count}
+        if cid:
+            # 有 drill → 构建该社区的子社区间跨社区矩阵
+            return _drill_heatmap(pdb, task_id, et, clv, cid, size, project_root)
+        return cd.get_heatmap(pdb, task_id, et, project_root, "L0", size)
     except HTTPException:
         raise
     except Exception as e:
         import traceback
         logger.error(f"[heatmap] error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/external-stats")
+async def get_external_stats(task_id: str = Query(None), taskId: str = Query(None)):
+    tid = task_id or taskId
+    if not tid:
+        raise HTTPException(422, "task_id is required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        pid, pdb = _resolve_project_db(tid)
+        proj_row = multi_db.main_db.fetchone(
+            "SELECT root_path FROM projects WHERE id = ?", (pid,)
+        )
+        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        return cd.get_external_stats(pdb, tid, project_root)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"[external-stats] error: {e}\n{traceback.format_exc()}")
         raise HTTPException(500, str(e))
 
 

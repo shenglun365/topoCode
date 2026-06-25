@@ -523,10 +523,11 @@ const externalCommunityNodes = computed(() => {
       if (!seen.has(c.communityId)) {
         seen.add(c.communityId)
         const cl = c.name && c.name !== c.communityId ? c.name : communityIdLabel(c.communityId)
+        const comm = commMap.value.get(c.communityId)
         nodes.push({
           id: c.communityId,
           label: cl.length > 24 ? cl.slice(0, 24) + '\u2026' : cl,
-          nodeCount: 0,
+          nodeCount: comm?.nodeCount || 0,
           isExternal: false,
           hasChildren: parentCommIds.value.has(c.communityId),
         })
