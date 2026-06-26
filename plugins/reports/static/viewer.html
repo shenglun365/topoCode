@@ -70,23 +70,23 @@
   .toc-float.dragging { cursor: grabbing; }
   .toc-toggle { width: 30px; height: 30px; border: 1px solid var(--border); background: var(--bg); border-radius: 5px; cursor: pointer; font-size: 15px; color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
   .toc-toggle:hover { background: var(--bg-code); }
-  .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; max-width: 260px; min-width: 200px; min-height: 60px; max-height: 50vh; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.12); font-size: 11px; }
+  .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; max-width: 260px; min-width: 200px; min-height: 60px; max-height: 50vh; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.12); font-size: 13px; }
   .toc-panel.open { display: block; }
-  .toc-panel .toc-title { font-weight: 600; font-size: 11px; margin-bottom: 4px; }
+  .toc-panel .toc-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
   .toc-panel ul { list-style: none; padding: 0; margin: 0; }
   .toc-panel li { padding: 1px 0; }
   .toc-panel a { color: var(--accent); text-decoration: none; }
   .toc-panel a:hover { text-decoration: underline; }
-  .toc-comm-link { color: var(--accent); cursor: pointer; }
-  .toc-comm-link:hover { text-decoration: underline; }
-  .toc-panel .no-doc { color: var(--text-muted); font-family: monospace; font-size: 10px; }
   .toc-panel .bc-link { cursor: pointer; color: var(--accent); }
   .toc-panel .bc-link:hover { text-decoration: underline; }
-  .toc-panel .et-label { font-weight: 600; font-size: 10px; margin: 4px 0 2px; color: var(--text); }
-  .toc-panel .lv-label { font-size: 9px; color: var(--text-muted); margin: 2px 0 1px 6px; font-family: monospace; }
-  .toc-panel .fc-link { display: block; padding: 1px 4px; color: var(--accent); cursor: pointer; font-size: 10px; border-radius: 2px; }
+  .toc-panel .no-doc { color: var(--text-muted); font-family: monospace; font-size: 12px; }
+  .toc-panel .et-label { font-weight: 600; font-size: 12px; margin: 4px 0 2px; color: var(--text); }
+  .toc-panel .lv-label { font-size: 11px; color: var(--text-muted); margin: 2px 0 1px 6px; font-family: monospace; }
+  .toc-panel .fc-link { display: block; padding: 1px 4px; color: var(--accent); cursor: pointer; font-size: 12px; border-radius: 2px; }
   .toc-panel .fc-link:hover { background: var(--bg-code); }
   .toc-panel .fc-link.active { font-weight: 600; color: var(--text); background: var(--bg-code); }
+  .toc-panel .toc-comm-link { color: var(--accent); cursor: pointer; }
+  .toc-panel .toc-comm-link:hover { text-decoration: underline; }
   .et-tab, .scope-tab { font-size: 10px; padding: 1px 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); cursor: pointer; border-radius: 3px; }
   .et-tab.active, .scope-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .et-tab:hover, .scope-tab:hover { background: var(--bg-code); }
@@ -153,16 +153,19 @@
   .graph-tb-btn:hover { border-color: var(--accent); color: var(--text); }
   .graph-tb-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .graph-tb-btn.active:hover { opacity: 0.9; }
-  /* Graph filter panel */
-  .graph-filter-panel { position: absolute; top: 60px; right: 8px; width: 200px; max-height: 320px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 11; display: none; flex-direction: column; }
+  /* Graph filter panel — draggable, hover-to-reveal */
+  .graph-filter-panel { position: absolute; right: 8px; top: 60px; width: 220px; max-height: 320px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 11; display: none; flex-direction: column; opacity: 0.25; transition: opacity 0.2s; pointer-events: auto; }
   .graph-filter-panel.open { display: flex; }
-  .graph-filter-header { display: flex; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
-  .graph-filter-search { flex: 1; padding: 2px 6px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); }
+  .graph-filter-panel.open:hover { opacity: 1; }
+  .graph-filter-header { display: flex; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--border); cursor: move; }
+  .graph-filter-drag-icon { font-size: 11px; color: var(--text-muted); cursor: move; user-select: none; line-height: 20px; padding-right: 1px; }
+  .graph-filter-search { flex: 1; min-width: 0; padding: 2px 4px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); }
   .graph-filter-search:focus { outline: none; border-color: var(--accent); }
-  .graph-filter-btn { padding: 1px 6px; font-size: 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; }
+  .graph-filter-btn { padding: 1px 6px; font-size: 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
   .graph-filter-btn:hover { border-color: var(--accent); }
-  .graph-filter-close { width: 20px; padding: 0; font-size: 11px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 3px; }
-  .graph-filter-close:hover { background: var(--bg-code); color: var(--text); }
+  .graph-filter-toggle { font-size: 10px; padding: 2px 6px; white-space: nowrap; }
+  .graph-filter-close { position: absolute; top: -35px; left: -1px; z-index: 1; width: 30px; height: 30px; border: 1px solid var(--border); background: var(--bg); border-radius: 5px; cursor: pointer; font-size: 15px; color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+  .graph-filter-close:hover { background: var(--bg-code); }
   .graph-filter-list { flex: 1; overflow-y: auto; padding: 4px 6px; font-size: 10px; }
   .graph-filter-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 2px; cursor: pointer; }
   .graph-filter-item:hover { background: var(--bg-code); }
@@ -170,6 +173,36 @@
   .graph-filter-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
   .graph-filter-item.hidden .name { color: var(--text-muted); text-decoration: line-through; }
   .graph-filter-item .count { font-size: 9px; color: var(--text-muted); }
+  /* Graph context menu */
+  #graphContextMenu { position: fixed; z-index: 1000; min-width: 130px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.25); padding: 4px; font-size: 11px; display: none; }
+  #graphContextMenu .ctx-item { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 4px; cursor: pointer; color: var(--text); }
+  #graphContextMenu .ctx-item:hover { background: var(--bg-code); }
+  #graphContextMenu .ctx-item svg { width: 14px; height: 14px; flex-shrink: 0; opacity: 0.7; }
+  #graphContextMenu .ctx-divider { height: 1px; background: var(--border); margin: 3px 6px; }
+  /* Heading link buttons in document content */
+  .hd-btn { display: inline-flex; align-items: center; gap: 1px; margin-left: 4px; vertical-align: middle; }
+  .hd-btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-secondary); cursor: pointer; opacity: 0.5; transition: opacity 0.15s, border-color 0.15s; }
+  .hd-btn-icon:hover { opacity: 1; border-color: var(--accent); }
+  .hd-btn-icon svg { width: 12px; height: 12px; color: var(--text-muted); }
+  /* Graph loading overlay — centered dialog */
+  .graph-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.4); }
+  .graph-overlay-box { display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 20px 28px; min-width: 160px; }
+  .graph-overlay-box .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 10px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #graphLoadingText { font-size: 12px; color: var(--text-muted); }
+  /* Graph error dialog */
+  .graph-error { position: absolute; inset: 0; z-index: 25; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.3); }
+  .graph-error-box { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); padding: 20px; max-width: 380px; font-size: 12px; line-height: 1.6; }
+  .graph-error-box .title { font-weight: 600; font-size: 14px; color: #e74c3c; margin-bottom: 8px; }
+  .graph-error-box .msg { color: var(--text); margin-bottom: 12px; }
+  .graph-error-box .suggest { color: var(--text-muted); font-size: 11px; margin-bottom: 14px; padding-left: 12px; }
+  .graph-error-box .suggest li { margin: 2px 0; }
+  .graph-error-box .btn { padding: 4px 16px; font-size: 11px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-secondary); color: var(--text); cursor: pointer; }
+  .graph-error-box .btn:hover { border-color: var(--accent); }
+  .graph-error-close { position: absolute; top: 8px; right: 10px; width: 20px; height: 20px; border: none; background: transparent; font-size: 14px; cursor: pointer; color: var(--text-muted); line-height: 20px; text-align: center; }
+  .graph-error-close:hover { color: var(--text); }
+  /* Right panel separator */
+  .right-panel-hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
 </style>
 </head>
 <body>
@@ -198,26 +231,54 @@
       <div class="tab-content active" id="tabGraph">
         <div class="graph-toolbar" id="graphToolbar">
           <div class="graph-toolbar-header" id="graphToolbarHeader">
-            <span class="graph-toolbar-title">图操作</span>
+            <span class="graph-toolbar-title" id="graphToolbarTitle">图操作</span>
             <button class="graph-toolbar-collapse" id="graphToolbarCollapse">−</button>
           </div>
           <div class="graph-toolbar-body" id="graphToolbarBody">
-            <button class="graph-tb-btn active" id="graphTbLinked" title="跟随模式：拖拽节点时关联节点跟随移动">跟随</button>
-            <button class="graph-tb-btn" id="graphTbLocked" title="独立模式：拖拽节点时其它节点锁定">独立</button>
+            <button class="graph-tb-btn active" id="graphTbMode" title="跟随模式：拖拽节点时关联节点跟随移动（点击切换为独立模式）">跟随</button>
             <button class="graph-tb-btn active" id="graphTbEdges" title="显示连线">连线</button>
             <button class="graph-tb-btn" id="graphTbFilter" title="筛选器">筛选</button>
+            <button class="graph-tb-btn" id="graphTbReset" title="重置节点位置为初始布局">复原</button>
           </div>
         </div>
         <div class="graph-filter-panel" id="graphFilterPanel">
+          <button class="graph-filter-close" id="graphFilterClose">✕</button>
           <div class="graph-filter-header">
+            <span class="graph-filter-drag-icon">⠿</span>
             <input type="text" class="graph-filter-search" id="graphFilterSearch" placeholder="搜索节点...">
-            <button class="graph-filter-btn" id="graphFilterShowAll">全显</button>
-            <button class="graph-filter-btn" id="graphFilterHideAll">全隐</button>
-            <button class="graph-filter-close" id="graphFilterClose">✕</button>
+            <button class="graph-filter-btn graph-filter-toggle" id="graphFilterToggleAll" title="点击切换：隐藏全部节点">显示全部</button>
           </div>
           <div class="graph-filter-list" id="graphFilterList"></div>
         </div>
-        <div id="forceGraph"></div>
+        <div id="forceGraph">
+          <div id="cyContainer" style="position:absolute;inset:0"></div>
+          <div class="graph-overlay" id="graphLoading" style="display:none">
+            <div class="graph-overlay-box"><div class="spinner"></div><span id="graphLoadingText">\u6b63\u5728\u8ba1\u7b97\u5e03\u5c40...</span></div>
+          </div>
+          <div class="graph-error" id="graphError" style="display:none">
+            <div class="graph-error-box">
+              <button class="graph-error-close" id="graphErrorClose">\u2715</button>
+              <div class="title">\u5e03\u5c40\u8ba1\u7b97\u8d85\u65f6</div>
+              <div class="msg" id="graphErrorMsg"></div>
+              <ul class="suggest">
+                <li>\u9009\u62e9\u66f4\u5177\u4f53\u7684\u793e\u533a\uff0c\u7f29\u5c0f\u67e5\u8be2\u8303\u56f4</li>
+                <li>\u964d\u4f4e\u751f\u6210\u6df1\u5ea6\uff08depth \u53c2\u6570\uff09</li>
+                <li>\u5728\u53f3\u4fa7\u9762\u677f\u4e2d\u589e\u5927\u201c\u8d85\u65f6\u201d\u8bbe\u7f6e</li>
+              </ul>
+              <button class="btn" id="graphErrorDismiss">\u77e5\u9053\u4e86</button>
+            </div>
+          </div>
+        </div>
+        <div id="graphContextMenu">
+          <div class="ctx-item" data-action="drilldown">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
+            <span>下钻 (查看下级)</span>
+          </div>
+          <div class="ctx-item" data-action="doc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <span>打开文档</span>
+          </div>
+        </div>
       <div class="tab-content" id="tabHeatmap">
         <div class="heatmap-controls">
           <label>规模: <select id="heatmapSize">
@@ -289,6 +350,10 @@ S.lv = g_url.get('lv') || '';
 S.size = parseInt(g_url.get('size')) || 10;
 S.gran = g_url.get('gran') || 'component';
 S.depth = parseInt(g_url.get('depth')) || 1;
+S.layoutTimeout = parseInt(g_url.get('ltimeout')) || 60000;
+// 文档区面包屑链（图→文档时累加）
+S.docChain = [];
+S.docCommId = '';  // 文档区的 communityId（图→文档时更新）
 // 外部依赖/调用强制组件模式，文件模式强制内部类型
 if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
   S.gran = 'component';
@@ -308,8 +373,12 @@ if (_fid) {
 function syncURL() {
   var p = new URLSearchParams(location.search);
   if (g_taskId) p.set('taskId', g_taskId);
-  if (g_docId) p.set('docId', g_docId);
-  if (g_communityId) p.set('communityId', g_communityId);
+  var curDocId = p.get('docId');
+  var curCommId = p.get('communityId');
+  if (curDocId && !curCommId) p.set('docId', curDocId); else { p.delete('docId'); }
+  if (S.docCommId) p.set('communityId', S.docCommId);
+  else if (curCommId) p.set('communityId', curCommId);
+  else if (g_communityId) p.set('communityId', g_communityId);
   var curET = p.get('edgeType');
   if (curET) p.set('edgeType', curET); else if (g_edgeType) p.set('edgeType', g_edgeType);
   if (!S.left) p.set('left', '0'); else p.delete('left');
@@ -321,6 +390,7 @@ function syncURL() {
   if (S.size !== 10) p.set('size', String(S.size)); else p.delete('size');
   if (S.gran !== 'component') p.set('gran', S.gran); else p.delete('gran');
   if (S.depth !== 1) p.set('depth', String(S.depth)); else p.delete('depth');
+  if (S.layoutTimeout !== 60000) p.set('ltimeout', String(S.layoutTimeout)); else p.delete('ltimeout');
   if (S.filePath) p.set('fileId', S.filePath); else p.delete('fileId');
   history.replaceState(null, '', '/doc?' + p.toString());
 }
@@ -345,6 +415,18 @@ const API = {
     p.then(function() { setTimeout(function() { delete API._cache[path]; }, 300); });
     p.catch(function() { setTimeout(function() { delete API._cache[path]; }, 300); });
     return p;
+  },
+  async _post(path, body) {
+    return fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  },
+  async _delete(path) {
+    return fetch(path, {method:'DELETE'}).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
   },
   communityChildren(tid, pid, et) {
     return this._get('/api/community-children?taskId=' + encodeURIComponent(tid) + '&parentCommId=' + encodeURIComponent(pid || '') + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
@@ -374,6 +456,18 @@ const API = {
   communityFiles(tid, cid, et) {
     return this._get('/api/community-files?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
   },
+  graphLayoutLoad(tid, cid, et, gran, depth) {
+    return this._get('/api/graph-layout?taskId=' + encodeURIComponent(tid) + '&commId=' + encodeURIComponent(cid || '') + '&edgeType=' + encodeURIComponent(et) + '&gran=' + encodeURIComponent(gran || 'component') + '&depth=' + (depth || 1));
+  },
+  graphLayoutSave(tid, cid, et, gran, depth, nodes) {
+    return this._post('/api/graph-layout', {taskId:tid, commId:cid || '', edgeType:et, gran:gran || 'component', depth:depth || 1, nodes:nodes});
+  },
+  graphLayoutDelete(tid, cid, et, gran, depth) {
+    return this._delete('/api/graph-layout?taskId=' + encodeURIComponent(tid) + '&commId=' + encodeURIComponent(cid || '') + '&edgeType=' + encodeURIComponent(et) + '&gran=' + encodeURIComponent(gran || 'component') + '&depth=' + (depth || 1));
+  },
+  graphExternalLoad(tid, et, cid, depth) {
+    return this._get('/api/external-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et) + '&commId=' + encodeURIComponent(cid || '') + '&depth=' + (depth || 1));
+  },
 };
 
 // ============================================================
@@ -382,6 +476,9 @@ const API = {
 function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function escapeAttr(s) { return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function _(key) { var m = { 'zh-CN': { tocTitle: '子组件目录', noDoc: '未解析' }, 'en-US': { tocTitle: 'Sub-Components', noDoc: 'unresolved' } }[S.locale]; return (m && m[key]) || key; }
+function _cid_level(cid) { var parts = (cid || '').split('-'); for (var i = 0; i < parts.length; i++) { if (/^L\d+$/.test(parts[i])) return parts[i]; } return 'L0'; }
+function _groupKey(cid, baseLv) { var p=(cid||'').split('-'); var li=-1,lv=0; for(var i=0;i<p.length;i++){if(/^L\d+$/.test(p[i])){li=i;lv=parseInt(p[i].substring(1));break;}} if(li<0)return cid; var drop=lv-baseLv; if(drop<=0)return cid; p[li]='L'+baseLv; return p.slice(0,p.length-drop).join('-'); }
+function _hueSatLight(rel, hue) { var t=[[65,50],[55,60],[45,72],[40,82],[35,88]]; var v=t[Math.min(rel,4)]; return 'hsl('+hue+', '+v[0]+'%, '+v[1]+'%)'; }
 
 // ============================================================
 // 4. Layout
@@ -613,6 +710,7 @@ const LeftBreadcrumb = {
     var curEt = cur.get('edgeType') || 'CALL';
     var el = document.getElementById('leftBreadcrumb');
     var isFile = S.page === 'file-summary';
+    console.log('[L-bread] cid=' + cid + ' cn=' + cn.slice(0, 20) + ' pc=' + (pcRaw || '-').slice(0, 40) + ' dc=' + (S.docChain||[]).length);
     if (!cid) {
       var rootH = '<span><span class="bc-level">L0</span> \u5168\u90e8</span>';
       if (isFile && S.filePath) {
@@ -627,7 +725,6 @@ const LeftBreadcrumb = {
     }
 
     var h = '<span class="bc-link bc-root-link"><span class="bc-level">L0</span> \u5168\u90e8</span>';
-    var lv = 1;
     if (pcRaw) {
       var pcItems = pcRaw.split(',');
       for (var i = 0; i < pcItems.length; i++) {
@@ -636,12 +733,18 @@ const LeftBreadcrumb = {
         var pId = parts[1] || parts[0] || '';
         var pEt = parts[2] || curEt;
         h += ' <span style="color:var(--text-muted)">\u203a</span> ';
-        h += '<span class="bc-link" data-back-cid="' + escapeAttr(pId) + '" data-back-pc="' + escapeAttr(pcItems.slice(0, i).join(',')) + '" data-back-cn="' + escapeAttr(pName) + '" data-back-et="' + escapeAttr(pEt) + '"><span class="bc-level">L' + lv + '</span> ' + escapeHtml(pName.slice(0, 24)) + '</span>';
-        lv++;
+        h += '<span class="bc-link" data-back-cid="' + escapeAttr(pId) + '" data-back-pc="' + escapeAttr(pcItems.slice(0, i).join(',')) + '" data-back-cn="' + escapeAttr(pName) + '" data-back-et="' + escapeAttr(pEt) + '"><span class="bc-level">' + _cid_level(pId) + '</span> ' + escapeHtml(pName.slice(0, 24)) + '</span>';
       }
     }
+    // Append doc chain (图→文档累加路径)
+    var dc = S.docChain || [];
+    for (var j = 0; j < dc.length; j++) {
+      if (!dc[j].cid) continue;
+      h += ' <span style="color:var(--text-muted)">\u203a</span> ';
+      h += '<span class="bc-link" data-back-cid="' + escapeAttr(dc[j].cid) + '" data-back-pc="" data-back-cn="' + escapeAttr(dc[j].name || dc[j].cid) + '" data-back-et="' + escapeAttr(curEt) + '"><span class="bc-level">' + _cid_level(dc[j].cid) + '</span> ' + escapeHtml((dc[j].name || dc[j].cid).slice(0, 24)) + '</span>';
+    }
     h += ' <span style="color:var(--text-muted)">\u203a</span> ';
-    h += '<span class="' + (isFile ? 'bc-link' : '') + '" data-cid="' + escapeAttr(cid) + '"><span class="bc-level">L' + lv + '</span> ' + escapeHtml(cn.slice(0, 24)) + '</span>';
+    h += '<span class="' + (isFile ? 'bc-link' : '') + '" data-cid="' + escapeAttr(cid) + '"><span class="bc-level">' + _cid_level(cid) + '</span> ' + escapeHtml(cn.slice(0, 24)) + '</span>';
 
     // 文件级面包屑
     if (isFile && S.filePath) {
@@ -679,6 +782,7 @@ const LeftBreadcrumb = {
           var u2 = new URLSearchParams(location.search);
           u2.set('edgeType', cidET);
           history.replaceState(null, '', '/doc?' + u2.toString());
+          S.docChain = [];
           loadCommunityDoc(g_taskId, cid, cidET);
           return;
         }
@@ -696,12 +800,52 @@ const LeftBreadcrumb = {
           S.filePath = '';
           syncURL();
           history.replaceState(null, '', '/doc?' + u.toString());
+          S.docChain = [];
           loadCommunityDoc(g_taskId, backCid, backEt);
         }
       };
     });
   }
 };
+
+// Helper: extract parent community ID from child CID
+function _parentCid(cid) {
+  var parts = cid.split('-');
+  var levelIdx = -1;
+  for (var i = 0; i < parts.length; i++) {
+    if (/^L\d+$/.test(parts[i])) { levelIdx = i; break; }
+  }
+  if (levelIdx < 0) return null;
+  var level = parseInt(parts[levelIdx].substring(1));
+  if (level <= 0) return null;
+  parts.splice(parts.length - 1, 1);
+  parts[levelIdx] = 'L' + (level - 1);
+  return parts.join('-');
+}
+
+// Build comm stack with full parent chain from a community ID
+function _buildCommStack(cid, name) {
+  var stack = [{cid: cid, name: name}];
+  var cur = cid;
+  for (var i = 0; i < 5; i++) {
+    cur = _parentCid(cur);
+    if (!cur) break;
+    stack.unshift({cid: cur, name: _shortCidLabel(cur)});
+  }
+  return stack;
+}
+function _shortCidLabel(cid) {
+  var parts = cid.split('-');
+  var lv = '';
+  for (var i = 0; i < parts.length; i++) {
+    if (/^L\d+$/.test(parts[i])) { lv = parts[i]; break; }
+  }
+  return lv + '-' + parts[parts.length - 1];
+}
+function _shortName(cid, name) {
+  if (!name || name === cid) return _shortCidLabel(cid);
+  return name;
+}
 
 // ---- 6b. DocContent ----
 const DocContent = {
@@ -796,7 +940,102 @@ const DocContent = {
       pre.parentNode.replaceWith(container);
       fetch('/api/plantuml?code=' + encodeURIComponent(code)).then(function(r) { return r.text(); }).then(function(svg) { container.innerHTML = svg; }).catch(function(e) { container.innerHTML = '<div class="error-msg">PlantUML error: ' + e.message + '</div>'; });
     });
+
+    // Attach heading → graph buttons
+    this._attachHeadingButtons();
+  },
+
+  // Add graph-link buttons to community headings in the document
+  _attachHeadingButtons() {
+    var content = document.getElementById('content');
+    if (!content || S.page === 'file-summary') return;
+    var self = this;
+
+    // Icon SVGs
+    var depIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M16 12H8M12 8l4 4-4 4"/></svg>';
+    var callIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 16l-4-4 4-4"/></svg>';
+    var graphIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="14" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8" y1="8" x2="16" y2="4"/><line x1="8" y1="13" x2="4" y2="16"/><line x1="16" y1="13" x2="20" y2="16"/></svg>';
+
+    var isRoot = !g_communityId && !(new URLSearchParams(location.search)).get('communityId');
+    console.log('[hd-btn] isRoot=' + isRoot + ' g_cid=' + g_communityId + ' urlCid=' + (new URLSearchParams(location.search)).get('communityId'));
+
+    var selector = isRoot ? 'h1' : 'h1, h2, h3, h4';
+    content.querySelectorAll(selector).forEach(function(h) {
+      if (h.querySelector('.hd-btn')) return;
+
+      var commLinks = {};
+      var m = null;
+      var hTag = h.tagName;
+      var next = h.nextElementSibling;
+      while (next && !/^H[1-4]$/.test(next.tagName)) {
+        if (next.tagName === 'P' || next.tagName === 'LI') {
+          next.querySelectorAll('a[href^="##community:"]').forEach(function(a) {
+            var parts = a.getAttribute('href').replace('##community:', '').split(':');
+            if (parts.length === 2) commLinks[parts[0]] = parts[1];
+          });
+          if (!m) m = next.textContent.match(/comm-[\w-]+-L\d+-[\d-]+/);
+        }
+        next = next.nextElementSibling;
+      }
+      if (!m) m = h.textContent.match(/comm-[\w-]+-L\d+-[\d-]+/);
+
+      // Fallback: use g_communityId for main heading on sub-community docs
+      if (!m && !isRoot && Object.keys(commLinks).length === 0) {
+        if (g_communityId) m = [g_communityId];
+      }
+
+      var ets = isRoot ? ['INCLUDE', 'CALL'] : Object.keys(commLinks).slice(0, 1);
+      if (ets.length === 0) {
+        if (m) ets = isRoot ? ['INCLUDE', 'CALL'] : [S.et];
+        else {
+          console.log('[hd-btn] SKIP ' + hTag + ' "' + h.textContent.trim().slice(0, 30) + '" no ets m=' + JSON.stringify(m) + ' commLinks=' + JSON.stringify(commLinks));
+          return;
+        }
+      }
+
+      var hText = h.textContent.trim();
+      console.log('[hd-btn] ' + hTag + ' "' + hText.slice(0, 30) + '" ets=' + JSON.stringify(ets) + ' commLinks=' + JSON.stringify(commLinks) + ' m=' + (m ? m[0] : 'null'));
+      var btn = document.createElement('span');
+      btn.className = 'hd-btn';
+      ets.forEach(function(et) {
+        var cid = commLinks[et] || (m ? m[0] : '');
+        if (!cid || cid === 'undefined') return;
+        var icon = isRoot ? (et === 'INCLUDE' ? depIcon : callIcon) : graphIcon;
+        var title = isRoot
+          ? (et === 'INCLUDE' ? '\u5728\u4f9d\u8d56\u5173\u7cfb\u4e2d\u67e5\u770b' : '\u5728\u8c03\u7528\u5173\u7cfb\u4e2d\u67e5\u770b')
+          : '\u5728\u7ed3\u6784\u56fe\u4e2d\u67e5\u770b';
+        var ib = document.createElement('span');
+        ib.className = 'hd-btn-icon';
+        ib.title = title;
+        ib.innerHTML = icon;
+        ib.onclick = function(e) {
+          e.preventDefault(); e.stopPropagation();
+          console.log('[hd-click] cid=' + cid + ' et=' + et + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' hText=' + hText.slice(0, 30));
+          if (cid === S.cid || !cid) return;
+          S.gran = 'component'; S.et = et; S.depth = 1;
+          S.commParent = cid;
+          S.cid = cid;
+          // Preserve existing path: push if not already in stack
+          var found = false;
+          for (var i = 0; i < S.commStack.length; i++) {
+            if (S.commStack[i].cid === cid) {
+              S.commStack = S.commStack.slice(0, i + 1);
+              found = true; break;
+            }
+          }
+          if (!found) S.commStack.push({cid: cid, name: hText});
+          console.log('[hd-click] after push S.commStack=' + JSON.stringify(S.commStack.map(function(x){return x.cid+':'+(x.name||'').slice(0,20)})));
+          S.tab = 'graph';
+          syncURL();
+          RightPanel.switchTab('graph');
+          RightPanel.renderPanel();
+        };
+        btn.appendChild(ib);
+      });
+      h.appendChild(btn);
+    });
   }
+
 };
 
 // ---- 6c. LeftToc ----
@@ -1050,16 +1289,20 @@ const RightBreadcrumb = {
     var el = document.getElementById('rightBreadcrumb');
     var etLabels = { INCLUDE: '\u5185\u90e8\u4f9d\u8d56', EXTERNAL_INCLUDE: '\u5916\u90e8\u4f9d\u8d56', CALL: '\u5185\u90e8\u8c03\u7528', EXTERNAL_CALL: '\u5916\u90e8\u8c03\u7528' };
     var etLabel = etLabels[S.et] || S.et;
-    var h = '<span class="bc-link" data-idx="-1"><span class="bc-level">L0</span> ' + etLabel + '</span>';
-    for (var i = 0; i < S.commStack.length; i++) {
-      var item = S.commStack[i];
-      h += ' <span style="color:var(--text-muted)">\u203a</span> ';
-      if (i < S.commStack.length - 1) {
-        h += '<span class="bc-link" data-idx="' + i + '"><span class="bc-level">L' + (i + 1) + '</span> ' + escapeHtml(item.name.slice(0, 24)) + '</span>';
-      } else {
-        h += '<span style="color:var(--text)"><span class="bc-level">L' + (i + 1) + '</span> ' + escapeHtml(item.name.slice(0, 24)) + '</span>';
-      }
+  var h = '<span class="bc-link" data-idx="-1"><span class="bc-level">L0</span> ' + etLabel + '</span>';
+  console.log('[R-bread] S.et=' + S.et + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' stack=' + S.commStack.length);
+  for (var i = 0; i < S.commStack.length; i++) {
+    var item = S.commStack[i];
+    if (!item.cid) { console.log('[R-bread] SKIP empty cid at ' + i); continue; }
+    var dName = _shortName(item.cid, item.name);
+    var lv = _cid_level(item.cid);
+    h += ' <span style="color:var(--text-muted)">\u203a</span> ';
+    if (i < S.commStack.length - 1) {
+      h += '<span class="bc-link" data-idx="' + i + '"><span class="bc-level">' + lv + '</span> ' + escapeHtml(dName.slice(0, 24)) + '</span>';
+    } else {
+      h += '<span style="color:var(--text)"><span class="bc-level">' + lv + '</span> ' + escapeHtml(dName.slice(0, 24)) + '</span>';
     }
+  }
     el.innerHTML = h;
     el.querySelectorAll('.bc-link').forEach(function(l) {
       l.onclick = function() {
@@ -1117,8 +1360,10 @@ const RightPanel = {
   },
 
   renderPanel() {
+    console.log('[R-panel] S.tab=' + S.tab + ' S.cid=' + S.cid + ' S.et=' + S.et + ' S.gran=' + S.gran + ' S.depth=' + S.depth);
     var panel = document.getElementById('fileCommPanel');
     var isExt = S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL';
+    // Row 1: granularity + viz tabs
     var h = '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;margin-bottom:2px;padding-bottom:3px;border-bottom:1px solid var(--border);flex-wrap:wrap">';
     if (!isExt) {
       h += '<div class="granularity-tabs">';
@@ -1127,7 +1372,20 @@ const RightPanel = {
       h += '</div>';
       h += '<span class="tab-sep">|</span>';
     }
-    // depth select (仅组件模式)
+    h += '<div class="right-tabs">';
+    h += '<button class="viz-tab' + (S.tab === 'graph' ? ' active' : '') + '" data-tab="graph">\u5173\u7cfb\u56fe</button>';
+    h += '<button class="viz-tab' + (S.tab === 'heatmap' ? ' active' : '') + '" data-tab="heatmap">\u70ed\u529b</button>';
+    h += '</div></div>';
+    // Row 2: edge type tabs
+    h += '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">';
+    h += '<div class="et-tabs">';
+    h += '<button class="et-tab' + (S.et === 'INCLUDE' ? ' active' : '') + '" data-et="INCLUDE">\u5185\u90e8\u4f9d\u8d56</button>';
+    h += '<button class="et-tab' + (S.et === 'EXTERNAL_INCLUDE' ? ' active' : '') + '" data-et="EXTERNAL_INCLUDE">\u5916\u90e8\u4f9d\u8d56</button>';
+    h += '<button class="et-tab' + (S.et === 'CALL' ? ' active' : '') + '" data-et="CALL">\u5185\u90e8\u8c03\u7528</button>';
+    h += '<button class="et-tab' + (S.et === 'EXTERNAL_CALL' ? ' active' : '') + '" data-et="EXTERNAL_CALL">\u5916\u90e8\u8c03\u7528</button>';
+    h += '</div></div>';
+    // Row 3: depth + timeout
+    h += '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">';
     if (S.gran === 'component') {
       h += '<label style="font-size:10px;color:var(--text-muted)">\u6df1\u5ea6: <select id="depthSelect" style="font-size:10px;padding:1px 2px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text)">';
       for (var d = 1; d <= 5; d++) {
@@ -1136,19 +1394,17 @@ const RightPanel = {
       h += '</select></label>';
       h += '<span class="tab-sep">|</span>';
     }
-    h += '<div class="right-tabs">';
-    h += '<button class="viz-tab' + (S.tab === 'graph' ? ' active' : '') + '" data-tab="graph">\u5173\u7cfb\u56fe</button>';
-    h += '<button class="viz-tab' + (S.tab === 'heatmap' ? ' active' : '') + '" data-tab="heatmap">\u70ed\u529b</button>';
-    h += '</div></div>';
-    // Second row: edge type (four modes matching App)
-    h += '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">';
-    h += '<div class="et-tabs">';
-    h += '<button class="et-tab' + (S.et === 'INCLUDE' ? ' active' : '') + '" data-et="INCLUDE">\u5185\u90e8\u4f9d\u8d56</button>';
-    h += '<button class="et-tab' + (S.et === 'EXTERNAL_INCLUDE' ? ' active' : '') + '" data-et="EXTERNAL_INCLUDE">\u5916\u90e8\u4f9d\u8d56</button>';
-    h += '<button class="et-tab' + (S.et === 'CALL' ? ' active' : '') + '" data-et="CALL">\u5185\u90e8\u8c03\u7528</button>';
-    h += '<button class="et-tab' + (S.et === 'EXTERNAL_CALL' ? ' active' : '') + '" data-et="EXTERNAL_CALL">\u5916\u90e8\u8c03\u7528</button>';
-    h += '</div></div>';
-    // Community list placeholder
+    var timeoutSec = S.layoutTimeout / 1000 || 60;
+    h += '<label style="font-size:10px;color:var(--text-muted)">\u8d85\u65f6: <select id="layoutTimeoutSelect" style="font-size:10px;padding:1px 2px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text)">';
+    var topts = [30, 60, 90, 120];
+    for (var ti = 0; ti < topts.length; ti++) {
+      h += '<option value="' + topts[ti] + '"' + (timeoutSec === topts[ti] ? ' selected' : '') + '>' + topts[ti] + 's</option>';
+    }
+    h += '</select></label>';
+    h += '</div>';
+    // Separator
+    h += '<hr class="right-panel-hr">';
+    // Community list
     h += '<div id="rightCommList"><div class="loading">\u52a0\u8f7d\u4e2d...</div></div>';
     panel.innerHTML = h;
     this.attachToolbarHandlers(panel);
@@ -1202,6 +1458,11 @@ const RightPanel = {
       S.depth = parseInt(this.value) || 1;
       syncURL();
       RightPanel.loadViz();
+    };
+    var ts = document.getElementById('layoutTimeoutSelect');
+    if (ts) ts.onchange = function() {
+      S.layoutTimeout = parseInt(this.value) * 1000;
+      syncURL();
     };
   },
 
@@ -1261,112 +1522,32 @@ const GraphView = {
   async load() {
     var container = document.getElementById('forceGraph');
     if (!container) return;
-    container.innerHTML = '';
+    // 先销毁旧 Cytoscape 实例，再清除 DOM（避免 g_cy.destroy() 访问已清除的元素）
+    if (g_cy) { g_cy.destroy(); g_cy = null; }
+    var cyContainer = document.getElementById('cyContainer') || container;
+    cyContainer.innerHTML = '';
+    var cid = S.cid || '';
+    console.log('[G-load] cid=' + cid.slice(0,40) + ' et=' + S.et + ' gran=' + S.gran + ' depth=' + S.depth + ' tab=' + S.tab);
     try {
-      var cid = S.cid || '';
       var isExternal = S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL';
       var loadET = S.et;
       var data;
       if (isExternal) {
-        var ext = await API.externalStats(S.taskId);
-        var allItems = S.et === 'EXTERNAL_INCLUDE' ? (ext.externalDeps || []) : (ext.externalCalls || []);
-        // 构建 L0 父级映射（外部 deps 只关联 L0 社区；下钻时需要映射到 L0 父级匹配）
-        function l0Parent(cid) {
-          var p = cid.split('-');
-          var lvlStart = -1, l0At = -1;
-          for (var k = 0; k < p.length; k++) {
-            if (/^L\d+$/.test(p[k]) && lvlStart === -1) lvlStart = k;
-            if (p[k] === 'L0') l0At = k;
-          }
-          if (lvlStart >= 0 && l0At >= 0 && l0At + 1 < p.length)
-            return p.slice(0, lvlStart).join('-') + '-L0-' + p[l0At + 1];
-          return cid;
-        }
-        // 有 drill community → 加载子社区，构建子社区→L0 父级映射
-        var childComms = {};
-        var childL0Map = {};
-        if (cid) {
-          try {
-            var children = await API.communityChildren(S.taskId, cid, S.et);
-            for (var ci2 = 0; ci2 < children.length; ci2++) {
-              var ccid = children[ci2].commId;
-              childComms[ccid] = (children[ci2].name || ccid) + ' (' + (children[ci2].nodeCount || 0) + '\u6587\u4ef6)';
-              childL0Map[ccid] = l0Parent(ccid);
-            }
-          } catch(_) {}
-        }
-        var drillL0 = cid ? l0Parent(cid) : '';
-        var gnodes = [];
-        var gedges = [];
-        var cids = {};
-        var seenEdges = {};
-        // 始终显示所有外部项；下钻后边连到子社区（非父社区）
-        var extCommL0Cache = {};
-        for (var i = 0; i < allItems.length; i++) {
-          var item = allItems[i];
-          var extId = 'ext-' + (item.package || item.name);
-          var extLabel = item.package || item.name;
-          var hasEdge = false;
-          var comms = item.communities || [];
-          for (var j = 0; j < comms.length; j++) {
-            var c = comms[j];
-            var cid2 = c.communityId;
-            if (!extCommL0Cache[cid2]) extCommL0Cache[cid2] = l0Parent(cid2);
-            var commL0 = extCommL0Cache[cid2];
-
-            if (!cid) {
-              // 全局视图：边直接连到社区节点
-              if (!cids[cid2]) {
-                cids[cid2] = c.name || cid2;
-                gnodes.push({ id: cid2, label: cids[cid2], isExternal: false });
-              }
-              hasEdge = true;
-              var ek0 = extId + '->' + cid2;
-              if (!seenEdges[ek0]) {
-                seenEdges[ek0] = true;
-                gedges.push({ id: ek0, source: extId, target: cid2 });
-              }
-            } else {
-              // drill 模式：外部项 L0 父级 == drillL0 → 连接到对应的子社区
-              if (commL0 !== drillL0) continue;
-              var foundChild = null;
-              for (var ccid2 in childL0Map) {
-                if (childL0Map[ccid2] === commL0) { foundChild = ccid2; break; }
-              }
-              if (!foundChild) continue;
-              var childLabel = childComms[foundChild] || cids[foundChild] || c.name || foundChild;
-              if (!cids[foundChild]) {
-                cids[foundChild] = childLabel;
-                gnodes.push({ id: foundChild, label: childLabel, isExternal: false });
-              }
-              hasEdge = true;
-              var ek1 = extId + '->' + foundChild;
-              if (!seenEdges[ek1]) {
-                seenEdges[ek1] = true;
-                gedges.push({ id: ek1, source: extId, target: foundChild });
-              }
-            }
-          }
-          if (hasEdge || !cid) gnodes.push({ id: extId, label: extLabel, isExternal: true });
-        }
-        // 添加未关联外部项的子社区（drill 模式下显示全部子社区）
-        if (cid) {
-          for (var ccid3 in childComms) {
-            if (!cids[ccid3]) {
-              cids[ccid3] = childComms[ccid3];
-              gnodes.push({ id: ccid3, label: childComms[ccid3], isExternal: false });
-            }
-          }
-        }
-        data = { nodes: gnodes, edges: gedges, commIds: [] };
+        data = await API.graphExternalLoad(S.taskId, loadET, S.cid || '', S.depth || 1);
+        console.log('[G-load-ext] drill=' + (S.cid||'') + ' nodes=' + (data.nodes ? data.nodes.length : 0) + ' edges=' + (data.edges ? data.edges.length : 0));
       } else {
         data = await API.communityGraph(S.taskId, loadET, cid, S.gran);
+        // 后端返回节点数上限错误
+        if (data && data.error) {
+          var errEl = document.getElementById('graphError');
+          var msgEl = document.getElementById('graphErrorMsg');
+          if (errEl && msgEl) { msgEl.textContent = data.message || '\u8282\u70b9\u8fc7\u591a'; errEl.style.display = 'flex'; }
+          return;
+        }
       }
 
-      if (g_cy) { g_cy.destroy(); g_cy = null; }
-
       if (!data.nodes || data.nodes.length === 0) {
-        container.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
+        cyContainer.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
         return;
       }
 
@@ -1385,23 +1566,22 @@ const GraphView = {
       // File mode: backend returns file-level nodes+edges with commId metadata
       var renderNodes = data.nodes;
       var renderEdges = data.edges;
+      console.log('[G-load-cy] renderNodes=' + renderNodes.length + ' renderEdges=' + renderEdges.length);
 
       var nodeStyle = isComponent
         ? { label: 'data(label)', 'font-size': '10px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#3b82f6', width: 30, height: 30 }
         : { label: 'data(label)', 'font-size': '8px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#8b5cf6', width: 20, height: 20, 'text-wrap': 'wrap', 'text-max-width': '80px' };
 
       g_cy = cytoscape({
-        container: document.getElementById('forceGraph'),
+        container: document.getElementById('cyContainer'),
         elements: [
           ...renderNodes.map(function(n) {
             if (isExternal) {
               if (n.isExternal) return { data: { id: n.id, label: n.label, isExternal: true } };
-              return { data: { id: n.id, label: n.label } };
+              return { data: { id: n.id, label: n.label, hasChildren: n.hasChildren !== false } };
             }
-            if (isComponent) return { data: { id: n.id, label: n.label } };
-            var color = GraphView._commColors[n.commId] || '#999';
-            return { data: { id: n.id, label: n.label, commId: n.commId },
-                     style: { 'background-color': color } };
+            if (isComponent) return { data: { id: n.id, label: n.label, hasChildren: n.hasChildren !== false } };
+            return { data: { id: n.id, label: n.label, commId: n.commId } };
           }),
           ...renderEdges.map(function(e) {
             var ed = { id: e.id, source: e.source, target: e.target };
@@ -1416,50 +1596,151 @@ const GraphView = {
           { selector: 'edge[bidirectional]', style: { 'source-arrow-shape': 'triangle', 'source-arrow-color': '#999' } },
           { selector: 'node:selected', style: { 'border-width': 2, 'border-color': '#ff6b6b' } },
         ],
-        layout: { name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 100, numIter: 4000, fit: false, nodeOverlap: 20, padding: 20 },
+        layout: null,
         userZoomingEnabled: true, userPanningEnabled: true, minZoom: 0.15, maxZoom: 4,
         boxSelectionEnabled: false, autounselectify: true,
       });
       g_cy.resize();
-      g_cy.zoom(1.0);
-      var connected = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
-      if (!connected.empty()) g_cy.center(connected); else g_cy.center();
+      console.log('[G-load-cy] after resize: cyNodes=' + g_cy.nodes().length + ' cyEdges=' + g_cy.edges().length);
+
+      // 文件模式：后置应用社区颜色（避免 element 创建时的 style bypass 警告）
+      if (!isComponent && !isExternal) {
+        g_cy.nodes().forEach(function(n) {
+          var cid = n.data('commId');
+          if (cid) n.style('background-color', GraphView._commColors[cid] || '#999');
+        });
+      }
+      var titleEl = document.getElementById('graphToolbarTitle');
+      if (titleEl) titleEl.textContent = '\u56fe\u64cd\u4f5c\uff08' + g_cy.nodes().length + ' \u8282\u70b9 / ' + g_cy.edges().length + ' \u8fb9\uff09';
+      console.log('[G-load-color] isComp=' + isComponent + ' isExt=' + isExternal + ' depth=' + (S.depth||1) + ' baseLv=' + (function(){var b=0;if(S.cid){var cp=S.cid.split('-');for(var j=0;j<cp.length;j++){if(/^L\d+$/.test(cp[j])){b=parseInt(cp[j].substring(1))+1;break;}}}return b;})());
+      // 组件模式 depth≥2：按顶层分组尺寸排序 → 最大色相差分配（跳过外部节点，由 _applyExternalHeat 负责）
+      if (isComponent && (S.depth || 1) >= 2) {
+        var baseLv = 0;
+        if (S.cid) {
+          var cp = S.cid.split('-');
+          for (var j = 0; j < cp.length; j++) { if (/^L\d+$/.test(cp[j])) { baseLv = parseInt(cp[j].substring(1)) + 1; break; } }
+        }
+        console.log('[G-load-color] enter depth≥2 baseLv=' + baseLv + ' totalNodes=' + g_cy.nodes().length);
+        // 统计每组节点数（跳过外部节点）
+        var gc = {};
+        g_cy.nodes().forEach(function(n) { if (n.data('isExternal')) return; var k = _groupKey(n.id(), baseLv); gc[k] = (gc[k] || 0) + 1; });
+        // 按节点数降序排列
+        var sorted = Object.keys(gc).sort(function(a, b) { return gc[b] - gc[a]; });
+        console.log('[G-load-color] groups=' + sorted.length + ' first=' + (sorted[0]||'').slice(0,30) + ' last=' + (sorted[sorted.length-1]||'').slice(0,30));
+        // 贪心分配：最大组先取 hue0，后续选与已分配组最小色相差最大的
+        var hues20 = [210,260,0,160,40,330,190,85,20,230,290,110,350,50,140,310,70,170,240,280];
+        var gh = {};
+        sorted.forEach(function(key, gi) {
+          if (gi === 0) { gh[key] = 0; return; }
+          var bestIdx = 0, bestD = -1;
+          for (var hi = 0; hi < 20; hi++) {
+            var minD = Infinity;
+            for (var ak in gh) { var d = Math.abs(hues20[hi] - hues20[gh[ak]]); minD = Math.min(minD, Math.min(d, 360 - d)); }
+            if (minD > bestD) { bestD = minD; bestIdx = hi; }
+          }
+          gh[key] = bestIdx;
+        });
+        // 着色（跳过外部节点）
+        g_cy.nodes().forEach(function(n) {
+          if (n.data('isExternal')) return;
+          try {
+            var nid = n.id();
+            var key = _groupKey(nid, baseLv);
+            if (!(key in gh)) { console.warn('[G-load-color] SKIP no hue for key=' + key + ' nid=' + nid); return; }
+            var nLv = parseInt((_cid_level(nid) || 'L0').substring(1));
+            var rel = Math.max(0, nLv - baseLv);
+            n.style('background-color', _hueSatLight(rel, hues20[gh[key] % 20]));
+          } catch(e) { console.error('[G-load-color] error nid=' + n.id() + ' msg=' + e.message); }
+        });
+      }
+      // 外部节点：按被引用热度三档着色
+      if (isExternal) {
+        GraphView._applyExternalHeat();
+      }
+
+      // 动态 numIter + 加载超时保护
+      var totalNodes = g_cy.nodes().length;
+      var numIter = 4000;
+      if (totalNodes > 500) numIter = 300;
+      else if (totalNodes > 100) numIter = 1000;
+
+      // loadingEl / errorEl 是静态 HTML 中预定义的元素
+      var loadingEl = document.getElementById('graphLoading');
+      var loadingText = loadingEl ? loadingEl.querySelector('#graphLoadingText') : null;
+      if (loadingEl && loadingText) {
+        console.log('[G-load] showing loading overlay for ' + totalNodes + ' nodes');
+        loadingText.textContent = '\u6b63\u5728\u8ba1\u7b97\u5e03\u5c40 (' + totalNodes + ' \u8282\u70b9)...';
+        loadingEl.style.display = 'flex';
+        // 延迟启动布局，让浏览器先渲染 loading 动画
+        setTimeout(function() { runCose(); }, 50);
+      } else {
+        runCose();
+      }
+
+      function runCose() {
+        GraphView._layoutDone = false;
+      GraphView._layoutTimer = null;
+
+      var ly = g_cy.layout({ name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 100, numIter: numIter, fit: false, nodeOverlap: 20, padding: 20 });
+      ly.one('layoutstop', function() {
+        GraphView._layoutDone = true;
+        if (GraphView._layoutTimer) { clearTimeout(GraphView._layoutTimer); GraphView._layoutTimer = null; }
+        if (loadingEl) loadingEl.style.display = 'none';
+        g_cy.zoom(1.0);
+        var conn = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
+        if (!conn.empty()) g_cy.center(conn); else g_cy.center();
+        GraphView._loadLayout().then(function() {
+          if (!g_cy) return;
+          var cn2 = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
+          if (!cn2.empty()) g_cy.center(cn2); else g_cy.center();
+        });
+      });
+      ly.run();
+
+      // 超时检测
+      GraphView._layoutTimer = setTimeout(function() {
+          if (!GraphView._layoutDone) {
+            if (loadingEl) loadingEl.style.display = 'none';
+            var errEl = document.getElementById('graphError');
+            var msgEl = document.getElementById('graphErrorMsg');
+            if (errEl && msgEl) {
+              msgEl.textContent = '\u8282\u70b9\u8fc7\u591a\uff08' + totalNodes + '\uff09\uff0c\u5e03\u5c40\u8ba1\u7b97\u8d85\u65f6\uff08' + (S.layoutTimeout / 1000) + '\u79d2\uff09\u3002\u8bf7\u7f29\u5c0f\u67e5\u8be2\u8303\u56f4\u6216\u964d\u4f4e\u6df1\u5ea6\uff0c\u6216\u5728\u53f3\u4fa7\u9762\u677f\u4e2d\u589e\u5927\u8d85\u65f6\u8bbe\u7f6e\u3002';
+              errEl.style.display = 'flex';
+            }
+          }
+        }, S.layoutTimeout || 60000);
+      }
+
+      // Dragfree → save positions (debounced)
+      GraphView._saveTimer = null;
 
       // Double-click node: drill down
       g_cy.on('dblclick', 'node', function(evt) {
         var nodeId = evt.target.id();
         var extNode = evt.target.data('isExternal');
+        var hc = evt.target.data('hasChildren');
+        console.log('[dbclick] nodeId=' + nodeId.slice(0,30) + ' isExternal=' + extNode + ' hasChildren=' + hc + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' isComp=' + isComponent);
         if (isExternal) {
-          // 外部模式：双击社区节点 → 下钻查看该社区内部图
           if (!extNode && nodeId !== S.cid) {
             S.cid = nodeId;
             S.depth = 1;
             S.commParent = nodeId;
             S.commStack.push({cid: nodeId, name: evt.target.data('label')});
           }
-          // 双击外部包节点 → 忽略
         } else if (isComponent) {
-          // Component mode: drill into sub-community (skip self to avoid infinite loop)
           if (nodeId === S.cid) return;
           S.cid = nodeId;
           S.depth = 1;
           S.commParent = nodeId;
           S.commStack.push({cid: nodeId, name: evt.target.data('label')});
-        } else {
-          // File mode: drill into the node's community
-          var ncommId = evt.target.data('commId');
-          if (ncommId) {
-            S.gran = 'component';
-            S.depth = 1;
-            S.cid = ncommId;
-            S.commParent = ncommId;
-            S.commStack.push({cid: ncommId, name: evt.target.data('label')});
+          // Leaf community → show file-level deps/calls
+          if (evt.target.data('hasChildren') === false) {
+            S.gran = 'file';
           }
         }
         syncURL();
-        RightPanel.loadCommTree();
+        RightPanel.renderPanel();
         RightPanel.loadViz();
-        RightBreadcrumb.render();
       });
 
       // Double-click background: noop (avoid accidental navigation)
@@ -1469,11 +1750,34 @@ const GraphView = {
         }
       });
 
+      // Dragfree → auto-save positions (debounced)
+      g_cy.on('dragfree', 'node', function() {
+        if (GraphView._saveTimer) clearTimeout(GraphView._saveTimer);
+        GraphView._saveTimer = setTimeout(function() {
+          var nds = {};
+          g_cy.nodes().forEach(function(n) {
+            var p = n.position();
+            nds[n.id()] = {x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10};
+          });
+          API.graphLayoutSave(S.taskId, S.cid || '', S.et, S.gran || 'component', S.depth || 1, nds).catch(function(e) {
+            console.warn('save layout error:', e);
+          });
+        }, 1000);
+      });
+
       // ---- graph toolbar ----
       GraphView._initToolbar();
+      GraphView._initContextMenu();
+
+      // Error dismiss handlers
+      var errDismiss = document.getElementById('graphErrorDismiss');
+      var errClose = document.getElementById('graphErrorClose');
+      function hideGError() { var e = document.getElementById('graphError'); if (e) e.style.display = 'none'; }
+      if (errDismiss) errDismiss.onclick = hideGError;
+      if (errClose) errClose.onclick = hideGError;
 
     } catch(e) {
-      container.innerHTML = '<div class="error-msg">\u52a0\u8f7d\u5173\u7cfb\u56fe\u5931\u8d25: ' + e.message + '</div>';
+      cyContainer.innerHTML = '<div class="error-msg">\u52a0\u8f7d\u5173\u7cfb\u56fe\u5931\u8d25: ' + e.message + '</div>';
     }
   },
   _initToolbar() {
@@ -1515,20 +1819,51 @@ const GraphView = {
     });
     document.addEventListener('mouseup', function() { dragOn = false; });
 
-    // --- 跟随 (linked) / 独立 (locked) 模式 ---
-    var btnLinked = document.getElementById('graphTbLinked');
-    var btnLocked = document.getElementById('graphTbLocked');
-    btnLinked.onclick = function(e) {
+    // --- filter panel drag (仅 header 可拖) ---
+    var fpHdr = fp.querySelector('.graph-filter-header');
+    var fpDragOn = false, fpSx = 0, fpSy = 0, fpOx = 0, fpOy = 0;
+    // 阻止面板点击冒泡到画布
+    fp.onmousedown = function(e) { e.stopPropagation(); };
+    if (fpHdr) fpHdr.onmousedown = function(e) {
+      if (!fp.classList.contains('open')) return;
+      if (e.target.closest('button') || e.target.closest('input')) return;
       e.stopPropagation();
-      btnLinked.classList.add('active'); btnLocked.classList.remove('active');
+      e.preventDefault();
+      fpDragOn = true; fpSx = e.clientX; fpSy = e.clientY;
+      var pr = fp.parentElement.getBoundingClientRect();
+      var r = fp.getBoundingClientRect();
+      fpOx = r.left - pr.left; fpOy = r.top - pr.top;
+      fp.style.opacity = '1';
     };
-    btnLocked.onclick = function(e) {
+    document.addEventListener('mousemove', function(e) {
+      if (!fpDragOn) return;
+      var dx = e.clientX - fpSx, dy = e.clientY - fpSy;
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      fp.style.left = (fpOx + dx) + 'px';
+      fp.style.top = (fpOy + dy) + 'px';
+      fp.style.right = 'auto';
+    });
+    document.addEventListener('mouseup', function() {
+      if (fpDragOn) { fpDragOn = false; fp.style.opacity = ''; }
+    });
+
+    // --- 跟随 (linked) / 独立 (locked) 模式 (按钮切换) ---
+    var btnMode = document.getElementById('graphTbMode');
+    btnMode.onclick = function(e) {
       e.stopPropagation();
-      btnLocked.classList.add('active'); btnLinked.classList.remove('active');
+      var locked = btnMode.classList.contains('active');
+      if (locked) {
+        btnMode.classList.remove('active');
+        btnMode.textContent = '\u72ec\u7acb';
+        btnMode.title = '\u72ec\u7acb\u6a21\u5f0f\uff1a\u62d6\u62fd\u8282\u70b9\u65f6\u5176\u5b83\u8282\u70b9\u9501\u5b9a\uff08\u70b9\u51fb\u5207\u6362\u4e3a\u968f\u4ece\u6a21\u5f0f\uff09';
+      } else {
+        btnMode.classList.add('active');
+        btnMode.textContent = '\u968f\u4ece';
+        btnMode.title = '\u968f\u4ece\u6a21\u5f0f\uff1a\u62d6\u62fd\u8282\u70b9\u65f6\u5173\u8054\u8282\u70b9\u968f\u4ece\u79fb\u52a8\uff08\u70b9\u51fb\u5207\u6362\u4e3a\u72ec\u7acb\u6a21\u5f0f\uff09';
+      }
     };
 
-    // mode helpers
-    function _isLocked() { return btnLocked.classList.contains('active'); }
+    function _isLocked() { return !btnMode.classList.contains('active'); }
 
     // grab: locked 模式 — 锁定其它节点
     g_cy.on('grab', 'node', function(evt) {
@@ -1590,19 +1925,45 @@ const GraphView = {
     };
     document.getElementById('graphFilterClose').onclick = function(e) { e.stopPropagation(); fp.classList.remove('open'); };
     document.getElementById('graphFilterSearch').oninput = function(e) { e.stopPropagation(); GraphView._refreshFilter(); };
-    document.getElementById('graphFilterShowAll').onclick = function() {
-      if (g_cy) g_cy.nodes().show();
+    var toggleAllBtn = document.getElementById('graphFilterToggleAll');
+    toggleAllBtn.onclick = function() {
+      if (!g_cy) return;
+      if (g_cy.nodes(':hidden').length > 0) {
+        g_cy.nodes().show();
+        this.textContent = '\u9690\u85cf\u5168\u90e8';
+        this.title = '\u9690\u85cf\u5168\u90e8\u8282\u70b9';
+      } else {
+        g_cy.nodes().hide();
+        this.textContent = '\u663e\u793a\u5168\u90e8';
+        this.title = '\u663e\u793a\u5168\u90e8\u8282\u70b9';
+      }
       GraphView._refreshFilter();
     };
-    document.getElementById('graphFilterHideAll').onclick = function() {
-      if (g_cy) g_cy.nodes().hide();
-      GraphView._refreshFilter();
+
+    // reset positions button
+    var resetBtn = document.getElementById('graphTbReset');
+    if (resetBtn) resetBtn.onclick = function(e) {
+      e.stopPropagation();
+      if (!g_cy || !S.taskId) return;
+      API.graphLayoutDelete(S.taskId, S.cid || '', S.et, S.gran || 'component', S.depth || 1).catch(function() {});
+      var ly = g_cy.layout({ name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 100, numIter: 4000, fit: false, nodeOverlap: 20, padding: 20 });
+      ly.run();
+      g_cy.resize();
+      var conn = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
+      if (!conn.empty()) g_cy.center(conn); else g_cy.center();
     };
   },
   _refreshFilter() {
     var list = document.getElementById('graphFilterList');
     var q = (document.getElementById('graphFilterSearch').value || '').trim().toLowerCase();
     if (!g_cy || !list) return;
+    // sync toggle button text with current state
+    var tb = document.getElementById('graphFilterToggleAll');
+    if (tb) {
+      var anyHidden = g_cy.nodes(':hidden').length > 0;
+      tb.textContent = anyHidden ? '\u663e\u793a\u5168\u90e8' : '\u9690\u85cf\u5168\u90e8';
+      tb.title = anyHidden ? '\u663e\u793a\u5168\u90e8\u8282\u70b9' : '\u9690\u85cf\u5168\u90e8\u8282\u70b9';
+    }
     var nodes = g_cy.nodes();
     var h = '';
     for (var i = 0; i < nodes.length; i++) {
@@ -1622,15 +1983,136 @@ const GraphView = {
     list.querySelectorAll('.graph-filter-item').forEach(function(item) {
       item.onclick = function() {
         var nid = this.dataset.nid;
-        var node = g_cy.nodes('#' + nid);
+        var node = g_cy.getElementById(nid);
         if (node.length) {
-          node.toggleClass('hidden');
-          if (node.hidden()) node.hide(); else node.show();
+          if (node.hidden()) node.show(); else node.hide();
           self._refreshFilter();
         }
       };
     });
-  }
+  },
+  _initContextMenu() {
+    var menu = document.getElementById('graphContextMenu');
+    if (!menu || !g_cy) return;
+
+    g_cy.on('cxttap', 'node', function(evt) {
+      var oe = evt.originalEvent;
+      if (oe) oe.preventDefault();
+      var node = evt.target;
+      var nodeId = node.id();
+      var isExternal = node.data('isExternal');
+
+      var drillItem = menu.querySelector('[data-action="drilldown"]');
+      var docItem = menu.querySelector('[data-action="doc"]');
+
+      if (!isExternal && nodeId !== S.cid && node.data('hasChildren') !== false) {
+        drillItem.style.display = '';
+      } else {
+        drillItem.style.display = 'none';
+      }
+
+      menu._ctxNodeId = nodeId;
+      menu._ctxIsExt = !!isExternal;
+
+      var mx = oe ? oe.clientX : 0;
+      var my = oe ? oe.clientY : 0;
+      var mw = menu.offsetWidth || 130;
+      var mh = menu.offsetHeight || 60;
+      if (mx + mw > window.innerWidth) mx = window.innerWidth - mw - 4;
+      if (my + mh > window.innerHeight) my = window.innerHeight - mh - 4;
+      menu.style.left = Math.max(0, mx) + 'px';
+      menu.style.top = Math.max(0, my) + 'px';
+      menu.style.display = 'block';
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!menu.contains(e.target)) menu.style.display = 'none';
+    });
+    if (g_cy) g_cy.on('tap', function() { menu.style.display = 'none'; });
+
+    menu.querySelector('[data-action="drilldown"]').onclick = function() {
+      var nid = menu._ctxNodeId;
+      if (!nid || !g_cy) return;
+      menu.style.display = 'none';
+      var node = g_cy.getElementById(nid);
+      if (!node.length) return;
+      var label = node.data('label') || nid;
+      console.log('[ctx-drill] nid=' + nid + ' label=' + label.slice(0,20) + ' S.gran=' + S.gran + ' S.cid=' + S.cid + ' hasChildren=' + node.data('hasChildren'));
+      if (nid === S.cid) return;
+      // File mode: no drill-down
+      if (S.gran === 'file') return;
+      S.cid = nid;
+      S.depth = 1;
+      S.commParent = nid;
+      S.commStack.push({cid: nid, name: label});
+      // Leaf community → show file-level deps/calls
+      if (node.data('hasChildren') === false) {
+        S.gran = 'file';
+      }
+      syncURL();
+      RightPanel.renderPanel();
+      RightPanel.loadViz();
+    };
+
+    menu.querySelector('[data-action="doc"]').onclick = function() {
+      var nid = menu._ctxNodeId;
+      if (!nid || !g_cy || !S.taskId) return;
+      menu.style.display = 'none';
+      var node = g_cy.getElementById(nid);
+      if (!node.length) return;
+      var commId = nid;
+      var et = S.et;
+      var label = node.data('label') || commId;
+      console.log('[ctx-doc] nid=' + nid + ' label=' + label.slice(0,20) + ' S.et=' + et + ' S.commStack=' + S.commStack.length);
+      S.docCommId = commId;
+      // Append current cn/cid to pc, then set new as cn/communityId
+      var u = new URLSearchParams(location.search);
+      var prevCid = u.get('communityId') || '';
+      var prevCn = u.get('cn') || '';
+      if (prevCid && prevCid !== commId) {
+        var oldPc = u.get('pc') || '';
+        var newSeg = (prevCn || prevCid) + '|' + prevCid + '|' + et;
+        u.set('pc', oldPc ? oldPc + ',' + newSeg : newSeg);
+      }
+      u.set('communityId', commId);
+      u.set('cn', label);
+      history.replaceState(null, '', '/doc?' + u.toString());
+      console.log('[ctx-doc] URL: cid=' + commId.slice(0,30) + ' cn=' + label.slice(0,20) + ' pc=' + (u.get('pc') || '-').slice(0,50));
+      loadCommunityDoc(S.taskId, commId, et);
+    };
+  },
+
+  async _loadLayout() {
+    if (!g_cy || !S.taskId) return;
+    try {
+      var data = await API.graphLayoutLoad(S.taskId, S.cid || '', S.et, S.gran || 'component', S.depth || 1);
+      if (data.found && data.nodes) {
+        g_cy.nodes().forEach(function(n) {
+          var pos = data.nodes[n.id()];
+          if (pos) n.position({x: pos.x, y: pos.y});
+        });
+      }
+    } catch(e) { /* ignore */ }
+  },
+
+  _applyExternalHeat() {
+    if (!g_cy) return;
+    var extNodes = g_cy.nodes('[isExternal]');
+    console.log('[ext-heat] extNodes=' + extNodes.length + ' total=' + g_cy.nodes().length);
+    if (extNodes.length < 2) return;
+    var degs = [];
+    extNodes.forEach(function(n) { degs.push({id:n.id(), deg:n.degree(false)}); });
+    degs.sort(function(a,b){return b.deg-a.deg;});
+    var top30 = Math.ceil(degs.length * 0.3);
+    var mid60 = Math.ceil(degs.length * 0.6);
+    degs.forEach(function(item, idx) {
+      try {
+        var c = idx < top30 ? '#f59e0b' : idx < mid60 ? '#fbbf24' : '#fde68a';
+        var node = g_cy.getElementById(item.id);
+        if (node.length) node.style('background-color', c);
+      } catch(e) { console.error('[ext-heat] error id=' + item.id + ' msg=' + e.message); }
+    });
+  },
 };
 
 // ---- 6g. HeatmapView ----
@@ -1801,6 +2283,29 @@ async function load() {
     if (p.classList.contains('open')) requestAnimationFrame(function() { fitPanelPosition(document.getElementById('tocFloat')); });
   };
 
+  // 悬浮窗鼠标移出 1.5s 自动关闭
+  function _autoCloseFloat(floatId, panelId, toggleId) {
+    var floatEl = document.getElementById(floatId);
+    var panel = document.getElementById(panelId);
+    var toggle = document.getElementById(toggleId);
+    var timer = null;
+    function cancel() { if (timer) { clearTimeout(timer); timer = null; } }
+    floatEl.addEventListener('mouseleave', function() {
+      if (panel && panel.classList.contains('open')) {
+        timer = setTimeout(function() {
+          panel.classList.remove('open');
+          if (toggle) toggle.textContent = '\u2630';
+          if (fitPanelPosition) fitPanelPosition(floatEl);
+          timer = null;
+        }, 1500);
+      }
+    });
+    floatEl.addEventListener('mouseenter', cancel);
+    if (toggle) toggle.addEventListener('click', cancel);
+  }
+  _autoCloseFloat('tocFloat', 'tocPanel', 'tocToggle');
+  _autoCloseFloat('fileCommFloat', 'fileCommPanel', 'fileCommToggle');
+
   Layout.init();
   makeDraggable(document.getElementById('tocFloat'), 'tocFloat', 'tocPos_v2_' + g_taskId);
   makeDraggable(document.getElementById('fileCommFloat'), 'fileCommFloat', 'commPos_v2_' + g_taskId);
@@ -1857,6 +2362,8 @@ async function loadDoc(id) {
 async function loadCommunityDoc(tid, cid, et) {
   var content = document.getElementById('content');
   content.innerHTML = '<div class="loading">Loading community document...</div>';
+  S.docCommId = cid;
+  console.log('[loadDoc] tid=' + tid.slice(0,8) + ' cid=' + cid + ' et=' + et + ' S.docCommId=' + S.docCommId);
 
   // 如果是文件页面，直接渲染文件预摘要
   if (S.page === 'file-summary') {

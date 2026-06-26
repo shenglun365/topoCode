@@ -1049,6 +1049,32 @@ async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
         raise HTTPException(500, str(e))
 
 
+@app.get("/api/external-graph")
+async def get_external_graph(task_id: str = Query(None), taskId: str = Query(None),
+                              edge_type: str = Query(None), edgeType: str = Query(None),
+                              depth: int = Query(1), comm_id: str = Query(None), commId: str = Query(None)):
+    tid = task_id or taskId
+    et = edge_type or edgeType or 'EXTERNAL_INCLUDE'
+    cid = comm_id or commId or ''
+    if not tid:
+        raise HTTPException(422, "taskId is required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        pid, pdb = _resolve_project_db(tid)
+        proj_row = multi_db.main_db.fetchone(
+            "SELECT root_path FROM projects WHERE id = ?", (pid,)
+        )
+        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        return cd.get_external_graph(pdb, tid, et, depth, cid, project_root)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"[external-graph] error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(500, str(e))
+
+
 @app.get("/api/external-stats")
 async def get_external_stats(task_id: str = Query(None), taskId: str = Query(None)):
     tid = task_id or taskId
@@ -1089,6 +1115,103 @@ async def view_code():
     if os.path.isfile(code_path):
         return FileResponse(code_path)
     return HTMLResponse("code.html not found", status_code=404)
+
+
+# ==================== Graph Layout Persistence ====================
+
+def _ensure_graph_layout_table(pdb):
+    pdb.execute(
+        "CREATE TABLE IF NOT EXISTS web_graph_layout ("
+        "  project_id TEXT, task_id TEXT, comm_id TEXT,"
+        "  edge_type TEXT, gran TEXT, depth INTEGER,"
+        "  layout_data TEXT NOT NULL,"
+        "  created_at TEXT DEFAULT (datetime('now')),"
+        "  PRIMARY KEY (project_id, task_id, comm_id, edge_type, gran, depth)"
+        ")"
+    )
+
+@app.post("/api/graph-layout")
+async def save_graph_layout(request: Request):
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        body = await request.json()
+        tid = body.get("taskId") or body.get("task_id", "")
+        comm_id = body.get("commId") or body.get("comm_id", "")
+        et = body.get("edgeType") or body.get("edge_type", "")
+        gran = body.get("gran", "component")
+        depth = body.get("depth", 1)
+        nodes = body.get("nodes", {})  # {nodeId: {x, y}}
+        if not tid:
+            raise HTTPException(422, "taskId is required")
+        pid, pdb = _resolve_project_db(tid)
+        _ensure_graph_layout_table(pdb)
+        layout_json = json.dumps(nodes)
+        pdb.execute(
+            "INSERT OR REPLACE INTO web_graph_layout "
+            "(project_id, task_id, comm_id, edge_type, gran, depth, layout_data) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (pid, tid, comm_id, et, gran, depth, layout_json)
+        )
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/api/graph-layout")
+async def load_graph_layout(task_id: str = Query(None), taskId: str = Query(None),
+                             comm_id: str = Query(None), commId: str = Query(None),
+                             edge_type: str = Query(None), edgeType: str = Query(None),
+                             gran: str = Query("component"), depth: int = Query(1)):
+    tid = task_id or taskId
+    cid = comm_id or commId or ""
+    et = edge_type or edgeType or ""
+    if not tid:
+        raise HTTPException(422, "taskId is required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        pid, pdb = _resolve_project_db(tid)
+        _ensure_graph_layout_table(pdb)
+        row = pdb.fetchone(
+            "SELECT layout_data FROM web_graph_layout "
+            "WHERE project_id=? AND task_id=? AND comm_id=? AND edge_type=? AND gran=? AND depth=?",
+            (pid, tid, cid, et, gran, depth)
+        )
+        if row:
+            return {"found": True, "nodes": json.loads(row["layout_data"])}
+        return {"found": False}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/api/graph-layout")
+async def delete_graph_layout(task_id: str = Query(None), taskId: str = Query(None),
+                               comm_id: str = Query(None), commId: str = Query(None),
+                               edge_type: str = Query(None), edgeType: str = Query(None),
+                               gran: str = Query("component"), depth: int = Query(1)):
+    tid = task_id or taskId
+    cid = comm_id or commId or ""
+    et = edge_type or edgeType or ""
+    if not tid:
+        raise HTTPException(422, "taskId is required")
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        pid, pdb = _resolve_project_db(tid)
+        _ensure_graph_layout_table(pdb)
+        pdb.execute(
+            "DELETE FROM web_graph_layout "
+            "WHERE project_id=? AND task_id=? AND comm_id=? AND edge_type=? AND gran=? AND depth=?",
+            (pid, tid, cid, et, gran, depth)
+        )
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 def create_app(multi_db_instance) -> FastAPI:

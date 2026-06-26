@@ -104,19 +104,42 @@ _MAX_RECURSE = 5
 
 def expand_communities_to_depth(db, task_id: str, edge_type: str,
                                   rows: list, depth: int):
-    """按深度递归展开社区，无子社区则保留自身（叶子）"""
+    """按深度批量展开社区（单次全量查询 + 内存遍历）"""
     depth = max(1, min(depth, _MAX_RECURSE))
     if depth <= 1 or not rows:
         return rows
+
+    # 一次性读取所有行，构建 comm_by_id + children_of 映射
+    all_rows = db.fetchall(
+        "SELECT comm_id, comm_lv, node_list, parent_comm_id FROM graph_doc "
+        "WHERE task_id=? AND edge_type=?",
+        (task_id, edge_type)
+    )
+    comm_by_id = {r["comm_id"]: dict(r) for r in all_rows}
+    children_of = {}
+    for r in all_rows:
+        pid = r.get("parent_comm_id")
+        if pid:
+            children_of.setdefault(pid, []).append(r["comm_id"])
+
+    # 逐层展开: 叶子节点保留, 有子节点展开到下一层
     result = []
-    for r in rows:
-        cid = r["comm_id"]
-        children = read_graph_doc_children(db, task_id, edge_type, cid)
-        if children:
-            result.extend(expand_communities_to_depth(
-                db, task_id, edge_type, children, depth - 1))
-        else:
-            result.append(r)  # leaf: 保留自身
+    current = rows
+    for d in range(1, depth + 1):
+        next_level = []
+        for r in current:
+            cid = r["comm_id"]
+            child_ids = children_of.get(cid, [])
+            if child_ids and d < depth:
+                for child_cid in child_ids:
+                    if child_cid in comm_by_id:
+                        next_level.append(comm_by_id[child_cid])
+            else:
+                result.append(r)
+        current = next_level
+        if not next_level:
+            break
+
     return result
 
 
@@ -419,16 +442,11 @@ def extract_cross_file_edges(db, task_id: str, et: str,
     return list(edges.values()), nodes
 
 
-def extract_cross_comm_file_edges(db, task_id: str, et: str,
+def extract_cross_comm_file_edges(task_id: str, et: str,
                                    file_comm: dict, _rel,
-                                   comm_id: str = '',
+                                   all_ge: list,
                                    hash_to_path: dict = None):
-    """提取跨社区文件级边 (仅保留不同社区的边, 可选 comm_id 过滤)"""
-    kind = "imports" if et == "INCLUDE" else "calls"
-    all_ge = db.fetchall(
-        "SELECT source_id, target_id FROM graph_edge WHERE task_id=? AND kind=?",
-        (task_id, kind)
-    )
+    """提取跨社区文件级边 (仅保留不同社区的边, pre-fetched all_ge)"""
     edges = {}
     nodes = {}
     hp = hash_to_path or {}
@@ -447,8 +465,6 @@ def extract_cross_comm_file_edges(db, task_id: str, et: str,
         src_comm = file_comm.get(src)
         tgt_comm = file_comm.get(tgt)
         if not src_comm or not tgt_comm or src_comm == tgt_comm:
-            continue
-        if comm_id and src_comm != comm_id and tgt_comm != comm_id:
             continue
         eid = f"{src}\u2192{tgt}"
         if eid not in edges:
@@ -724,7 +740,7 @@ def _build_file_comm_for_external(db, task_id: str, et: str, _rel):
     """构建 file → [{communityId}] 映射 (用于外部统计)"""
     rows = db.fetchall(
         "SELECT comm_id, node_list FROM graph_doc "
-        "WHERE task_id=? AND edge_type=? AND comm_lv='L0'",
+        "WHERE task_id=? AND edge_type=?",
         (task_id, et)
     )
     fcomm = {}
@@ -801,8 +817,22 @@ def get_community_graph_component(db, task_id: str, edge_type: str,
     _rel = _make_rel(project_root)
 
     # 下钻模式：查子社区
+    # 下钻模式：查子社区
     if comm_id:
         rows = read_graph_doc_children(db, task_id, edge_type, comm_id)
+        if not rows:
+            rows = read_graph_doc_rows(db, task_id, edge_type, '', comm_id)
+        if not rows:
+            # fallback: commId 嵌入的边类型 (comm-xxx-call-... → CALL, comm-xxx-incl-... → INCLUDE)
+            parts = comm_id.split('-')
+            inferred = None
+            if len(parts) >= 3:
+                inferred = 'CALL' if parts[2] == 'call' else 'INCLUDE' if parts[2] == 'incl' else None
+            if inferred and inferred != edge_type:
+                rows = read_graph_doc_children(db, task_id, inferred, comm_id) or \
+                       read_graph_doc_rows(db, task_id, inferred, '', comm_id) or []
+                if rows:
+                    edge_type = inferred  # 更新下游使用的边类型
     else:
         rows = read_graph_doc_rows(db, task_id, edge_type, comm_lv, comm_id)
 
@@ -819,15 +849,14 @@ def get_community_graph_component(db, task_id: str, edge_type: str,
     # 文件→社区映射 (下钻: 子社区范围; 全局: 当前层级全部)
     file_comm = build_file_comm_map(rows, _rel)
 
-    # graph_edge 跨社区边 + hash 解析
+    # graph_edge 跨社区边 + hash 解析 (一次查询，复用)
     kind = "imports" if edge_type == "INCLUDE" else "calls"
     all_ge = read_graph_edges(db, task_id, kind)
     hash_to_path = resolve_call_symbols(db, task_id, all_ge, _rel) if edge_type == "CALL" else {}
 
     cross_edges, cross_nodes = extract_cross_comm_file_edges(
-        db, task_id, edge_type, file_comm, _rel,
-        '' if comm_id else comm_id,  # 下钻: file_comm 已限定范围，无需额外过滤
-        hash_to_path
+        task_id, edge_type, file_comm, _rel,
+        all_ge, hash_to_path
     )
     for fid, nd in cross_nodes.items():
         if fid not in nodes:
@@ -837,6 +866,28 @@ def get_community_graph_component(db, task_id: str, edge_type: str,
     comm_nodes, comm_edges = aggregate_to_community_graph(
         file_data["nodes"], file_data["edges"],
         [{"commId": k, "name": v} for k, v in name_map.items()])
+    # 节点数上限检查
+    MAX_NODES = 5000
+    if len(comm_nodes) > MAX_NODES:
+        return {
+            "nodes": [], "edges": [], "commIds": [],
+            "error": True,
+            "message": f"\u8282\u70b9\u6570\u8d85\u8fc7{MAX_NODES}\uff0c\u8bf7\u7f29\u5c0f\u67e5\u8be2\u8303\u56f4\uff08\u9009\u62e9\u66f4\u5177\u4f53\u7684\u793e\u533a\uff09\u6216\u964d\u4f4e\u751f\u6210\u6df1\u5ea6\uff08depth\uff09"
+        }
+    # add hasChildren: 批次查询(一次 SQL 替代 N 次)
+    cids = [n["id"] for n in comm_nodes]
+    has_set = set()
+    if cids:
+        placeholders = ",".join(["?"] * len(cids))
+        rows = db.fetchall(
+            f"SELECT parent_comm_id FROM graph_doc "
+            f"WHERE task_id=? AND edge_type=? AND parent_comm_id IN ({placeholders}) "
+            f"GROUP BY parent_comm_id",
+            (task_id, edge_type, *cids)
+        )
+        has_set = {r["parent_comm_id"] for r in rows}
+    for n in comm_nodes:
+        n["hasChildren"] = n["id"] in has_set
     # commIds — 仅含最终图中出现的社区
     comm_ids_meta = []
     for n in comm_nodes:
@@ -865,7 +916,7 @@ def get_external_stats(db, task_id: str, project_root: str = ''):
 
     name_rows = db.fetchall(
         "SELECT comm_id, name FROM community_llm_results "
-        "WHERE task_id=? AND comm_lv='L0'",
+        "WHERE task_id=?",
         (task_id,)
     )
     comm_names = {r["comm_id"]: r["name"] for r in name_rows if r["name"]}
@@ -928,3 +979,126 @@ def get_heatmap(db, task_id: str, edge_type: str,
     result = build_heatmap_matrix(db, task_id, edge_type, comm_lv, _rel)
     result["size"] = size
     return result
+
+
+def _cid_level_backend(cid: str) -> str:
+    """提取社区 ID 中的层级标记"""
+    parts = cid.split('-')
+    for p in parts:
+        if re.match(r'^L\d+$', p):
+            return p
+    return 'L0'
+
+
+def get_external_graph(db, task_id: str, edge_type: str,
+                       depth: int = 1, comm_id: str = '',
+                       project_root: str = ''):
+    """外部依赖/调用图 — 后端聚合，前端单接口消费"""
+    base_et = edge_type.replace("EXTERNAL_", "")
+    kind = "imports" if base_et == "INCLUDE" else "calls"
+    _rel = _make_rel(project_root)
+
+    # 1. 提取外部项
+    items = extract_external_deps(db, task_id) if base_et == "INCLUDE" else extract_external_calls(db, task_id)
+    if not items:
+        return {"nodes": [], "edges": []}
+
+    # 2. file → community 映射（所有层级）
+    rows = db.fetchall(
+        "SELECT comm_id, comm_lv, node_list FROM graph_doc WHERE task_id=? AND edge_type=?",
+        (task_id, base_et)
+    )
+    fcomm = {}
+    for r in rows:
+        cid = r["comm_id"]
+        try:
+            nlist = json.loads(r["node_list"]) if r["node_list"] else []
+        except Exception:
+            nlist = []
+        for node in (nlist if isinstance(nlist, list) else [nlist]):
+            key = str(node) if isinstance(node, str) else str(node.get("id", ""))
+            key = _rel(key)
+            if key and key not in (None, ''):
+                if key not in fcomm:
+                    fcomm[key] = []
+                if not any(x["communityId"] == cid for x in fcomm[key]):
+                    fcomm[key].append({"communityId": cid})
+
+    # 3. 社区名称
+    name_rows = db.fetchall(
+        "SELECT comm_id, name, comm_lv FROM community_llm_results WHERE task_id=?",
+        (task_id,)
+    )
+    comm_names = {r["comm_id"]: r["name"] or r["comm_id"] for r in name_rows}
+
+    # 4. 构建 nodes / edges
+    nodes = {}
+    edges = []
+
+    def _add_node(nid, label, is_ext, lv='L0'):
+        if nid not in nodes:
+            nodes[nid] = {"id": nid, "label": label, "isExternal": is_ext, "commLv": lv}
+
+    for item in items:
+        ext_id = "ext-" + (item.get("package") or item.get("name"))
+        ext_label = item.get("package") or item.get("name")
+
+        item_comms = {}
+        for f in item.get("files", []):
+            for c in fcomm.get(_rel(f), []):
+                cid = c["communityId"]
+                if cid not in item_comms:
+                    item_comms[cid] = comm_names.get(cid, cid)
+
+        for cid, cname in item_comms.items():
+            cv = _cid_level_backend(cid)
+            cv_num = int(cv[1:])
+
+            # root 视图按 depth 过滤；drill 视图按 comm_id 的 L0 祖先匹配
+            if comm_id:
+                l0_cid = l0_ancestor(cid)
+                if l0_cid != l0_ancestor(comm_id):
+                    continue
+            elif cv_num >= depth:
+                continue
+
+            _add_node(cid, cname, False, cv)
+            _add_node(ext_id, ext_label, True, 'L0')
+            ek = ext_id + '->' + cid
+            if not any(e["id"] == ek for e in edges):
+                edges.append({"id": ek, "source": ext_id, "target": cid})
+
+    # 5. 深度展开社区节点
+    # 提前加载所有 graph_doc 用于 children_of 和 hasChildren
+    all_rows = db.fetchall(
+        "SELECT comm_id, comm_lv, parent_comm_id FROM graph_doc WHERE task_id=? AND edge_type=?",
+        (task_id, base_et)
+    )
+    children_of = {}
+    for r in all_rows:
+        pid = r.get("parent_comm_id") or ''
+        if pid:
+            children_of.setdefault(pid, []).append(r)
+
+    if depth > 1:
+        expanded = set(nodes.keys())
+        queue = [nid for nid in nodes if not nodes[nid].get("isExternal")]
+        for cur_depth in range(1, depth):
+            next_batch = []
+            for cid in queue:
+                for child in children_of.get(cid, []):
+                    ccid = child["comm_id"]
+                    if ccid not in expanded:
+                        expanded.add(ccid)
+                        next_batch.append(ccid)
+                        _add_node(ccid, comm_names.get(ccid, ccid), False, child["comm_lv"])
+            queue = next_batch
+            if not queue:
+                break
+
+    # 6. hasChildren
+    for nid, nd in list(nodes.items()):
+        if not nd.get("isExternal"):
+            nd["hasChildren"] = nid in children_of
+
+    return {"nodes": list(nodes.values()), "edges": edges}
