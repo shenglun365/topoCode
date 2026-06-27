@@ -216,6 +216,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         task.progress = data.progress
         task.current = data.current
         task.total = data.total
+        task.eta = data.eta
       }
     })
 

@@ -30,6 +30,14 @@ def _go_get_receiver(node: SyntaxNode, source: str) -> str | None:
     return None
 
 
+def _go_is_exported(node: SyntaxNode, source: str) -> bool:
+    """Go 导出规则: 大写字母开头的名称"""
+    name_node = node.child_by_field_name("name")
+    if name_node:
+        return source[name_node.start_byte:name_node.start_byte + 1].isupper()
+    return False
+
+
 GO = LanguageExtractor(
     function_types=("function_declaration",),
     method_types=("method_declaration",),
@@ -44,4 +52,5 @@ GO = LanguageExtractor(
     methods_are_top_level=True,
     resolve_type_alias_kind=_go_resolve_type_alias,
     extract_receiver=_go_get_receiver,
+    is_exported=_go_is_exported,
 )

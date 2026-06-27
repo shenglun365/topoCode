@@ -98,7 +98,8 @@ def _edge_to_dict(edge):
     }
 
 
-def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_path: str = "") -> list:
+def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_path: str = "",
+                                 progress_callback=None, stop_check=None) -> list:
     """从 graph_node 中 import 类型节点生成 imports 边 (依赖图)"""
     from parsers.core.symbol_model import Edge
     from parsers.core.node_types import EdgeKind, Provenance
@@ -128,16 +129,21 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
             pass
 
     # 构建完整索引: file_path, stem, 路径后缀 → file_node_id
+    # 注意: all_tables 中 node.file_path 为绝对路径, DB 中为相对路径,
+    #       统一用相对路径索引以匹配 DB 查回的 source_file
     file_index: dict[str, str] = {}       # file_path → node_id
     stem_index: dict[str, list[str]] = {} # stem → [node_id]
     suffix_index: dict[str, str] = {}     # path_suffix → node_id
     file_language: dict[str, str] = {}    # file_path → language_key
 
+    def _rel(fp: str) -> str:
+        return os.path.relpath(fp, proj_path) if proj_path and os.path.isabs(fp) else fp
+
     for table in all_tables:
         lang = table.language or ""
         for node in table.nodes:
             if node.kind.value == "file":
-                fp = node.file_path
+                fp = _rel(node.file_path)
                 file_index[fp] = node.id
                 file_language[fp] = lang
                 # 反向索引: node.id → file_path（用于语言族校验）
@@ -165,7 +171,14 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
         return []
 
     edges = []
-    for imp in import_nodes:
+    import time as _tim
+    _t0 = _tim.perf_counter()
+    _total_imports = len(import_nodes)
+    logger.info("[_extract_import_dependencies] processing %d import nodes", _total_imports)
+    for idx, imp in enumerate(import_nodes):
+        if stop_check and stop_check():
+            logger.info("[_extract_import_dependencies] stopped at import %d/%d", idx, _total_imports)
+            break
         module_name = imp.get("name", "").strip()
         source_file = imp.get("file_path", "")
         source_id = imp.get("id", "")
@@ -335,13 +348,14 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
             inner = module_name[len(go_mod_prefix):].lstrip("/")
             if inner:
                 pkg_name = inner.split("/")[-1]
+                # 候选使用相对路径匹配 file_index (DB 和索引都用相对路径)
                 candidates = [
                     # 单文件包: pkg/foo.go
-                    os.path.join(proj_path, inner + ".go"),
+                    inner + ".go",
                     # 目录包: pkg/foo/foo.go
-                    os.path.join(proj_path, inner, pkg_name + ".go"),
+                    os.path.join(inner, pkg_name + ".go"),
                     # 测试文件: pkg/foo/foo_test.go
-                    os.path.join(proj_path, inner, pkg_name + "_test.go"),
+                    os.path.join(inner, pkg_name + "_test.go"),
                 ]
                 for cand in candidates:
                     target_id = file_index.get(cand)
@@ -352,7 +366,7 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                         break
                 # 回退: 目录下任意非 test .go 文件
                 if not target_id:
-                    dir_prefix = os.path.join(proj_path, inner) + "/"
+                    dir_prefix = inner + "/"
                     for fp, fid in file_index.items():
                         if fp.startswith(dir_prefix) and fp.endswith(".go") and not fp.endswith("_test.go"):
                             target_id = fid
@@ -401,6 +415,17 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                 metadata={"module": module_name},
             ))
 
+        if (idx + 1) % 2000 == 0:
+            _elapsed = _tim.perf_counter() - _t0
+            logger.info("[_extract_import_dependencies] %d/%d import nodes (%.1fs, edges=%d)",
+                        idx + 1, _total_imports, _elapsed, len(edges))
+            if progress_callback:
+                progress_callback(idx + 1, _total_imports)
+
+    if progress_callback:
+        progress_callback(_total_imports, _total_imports)
+    logger.info("[_extract_import_dependencies] done %d imports in %.1fs → %d edges",
+                _total_imports, _tim.perf_counter() - _t0, len(edges))
     return edges
 
 
@@ -412,7 +437,8 @@ def is_task_executing(task_id: str) -> bool:
 # ==================== 进度回调 ====================
 
 def _update_progress(server, multi_db, task_id: str, run_id: str,
-                     current: int = 0, total: int = 100, progress: int = None):
+                     current: int = 0, total: int = 100, progress: float = None,
+                     eta: str = ""):
     """
     更新进度: SQLite + ZMQ PUB 推送
 
@@ -423,10 +449,11 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
         run_id: 运行 ID
         current: 当前处理到第几个文件（文件解析阶段）
         total: 总文件数
-        progress: 覆盖进度值（0-100），为 None 时从 current/total 计算
+        progress: 覆盖进度值（0.00-100.00），为 None 时从 current/total 计算
+        eta: 预估剩余时间文本
     """
     if progress is None:
-        progress = int(current * 100 / total) if total > 0 else 0
+        progress = (current * 100.0 / total) if total > 0 else 0.0
 
     # 更新任务进度 (execute() 已自动 commit)
     multi_db.main_db.execute("""
@@ -450,6 +477,7 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
             "progress": progress,
             "total": total,
             "current": current,
+            "eta": eta,
         })
 
 
@@ -497,13 +525,37 @@ class PipelineContext:
     logs: list = field(default_factory=list)
     # 停止标志
     stopped: bool = False
+    # ETA 追踪
+    _last_progress_time: float = 0.0
+    _last_progress_value: float = 0.0
+
+    def _format_eta(self, remaining_sec: float) -> str:
+        if remaining_sec <= 0 or remaining_sec > 86400:
+            return ""
+        if remaining_sec < 60:
+            return f"{int(remaining_sec)}s"
+        if remaining_sec < 3600:
+            return f"{int(remaining_sec // 60)}m{int(remaining_sec % 60)}s"
+        return f"{int(remaining_sec // 3600)}h{int((remaining_sec % 3600) // 60)}m"
 
     def log(self, msg: str):
         self.logs.append({"timestamp": datetime.utcnow().isoformat(), "message": msg})
         logger.info(f"[PARSE] {msg}")
 
-    def report_progress(self, progress: int):
-        _update_progress(self.server, self.multi_db, self.task_id, self.run_id, progress=progress)
+    def report_progress(self, progress: float):
+        now = time.time()
+        eta = ""
+        if self._last_progress_time > 0 and progress > self._last_progress_value:
+            dt = now - self._last_progress_time
+            dp = progress - self._last_progress_value
+            speed = dp / dt if dt > 0 else 0
+            if speed > 0.001:
+                remaining = (100.0 - progress) / speed
+                eta = self._format_eta(remaining)
+        self._last_progress_time = now
+        self._last_progress_value = progress
+        _update_progress(self.server, self.multi_db, self.task_id, self.run_id,
+                         progress=progress, eta=eta)
 
 
 def _load_task_context(server, multi_db, task_id) -> PipelineContext:
@@ -600,7 +652,6 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
             table = walker.extract()
             rel_path = os.path.relpath(abs_path, ctx.proj_path)
             table.file_path = rel_path
-            ctx.emitter.write_nodes(table)
             return ("ok", table)
         except Exception as e:
             logger.exception(f"Parse error {abs_path}: {e}")
@@ -647,13 +698,19 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
                     ctx.skipped += 1
 
                 if ctx.processed % PROGRESS_INTERVAL == 0:
-                    scaled = 5 + (ctx.processed * 60 // total) if total > 0 else 5
-                    ctx.report_progress(scaled)
+                    scaled = 5.0 + (ctx.processed * 60.0 / total) if total > 0 else 5.0
+                    ctx.report_progress(round(scaled, 2))
 
     if should_stop(task_id):
         ctx.log("AST 解析被用户停止")
         ctx.stopped = True
         return ctx
+
+    # 批量写入所有节点的 graph_node（移出线程池，减少 SQLite 锁竞争）
+    if ctx.all_tables:
+        ctx.log(f"批量写入 {len(ctx.all_tables)} 个文件的解析结果到 graph_node ...")
+        for table in ctx.all_tables:
+            ctx.emitter.write_nodes(table)
 
     ctx.log(f"AST 解析完成 - 处理 {ctx.processed} 个文件，跳过 {ctx.skipped} 个")
     ctx.report_progress(65)
@@ -663,12 +720,29 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
 def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
     """Step 2: 跨文件引用解析 — 进度 65→72"""
     from parsers.core.resolver import ResolutionEngine
+    import time as _time
 
     ctx.log("Step 2: 跨文件引用解析开始")
+    _t0 = _time.perf_counter()
+
+    _total_refs = sum(len(t.unresolved_refs) for t in ctx.all_tables)
+
+    def _on_ref_progress(current, total):
+        if total > 0:
+            pct = 65.0 + (current / total) * 7.0
+            ctx.report_progress(round(pct, 2))
+
     try:
         resolver = ResolutionEngine()
-        ctx.resolved_edges = resolver.resolve(ctx.all_tables)
+        ctx.resolved_edges = resolver.resolve(ctx.all_tables,
+                                              progress_callback=_on_ref_progress,
+                                              stop_check=lambda: should_stop(ctx.task_id))
+        _t1 = _time.perf_counter()
+        ctx.log(f"跨文件引用解析耗时: {_t1 - _t0:.1f}s, 共 {len(ctx.resolved_edges)} 条边")
+
         ctx.emitter.write_edges(ctx.resolved_edges)
+        _t2 = _time.perf_counter()
+        ctx.log(f"边写入耗时: {_t2 - _t1:.1f}s")
 
         for e in ctx.resolved_edges:
             kv = e.kind.value
@@ -686,34 +760,67 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
         ctx.log(f"引用解析完成: calls={ctx.total_call_edges}, imports={ctx.total_dep_edges}, "
                 f"extends={ctx.total_extends_edges}, implements={ctx.total_implements_edges}, "
                 f"type_refs={ctx.total_type_of_edges}")
+
+        if should_stop(ctx.task_id):
+            ctx.log("Step 2: 检测到停止标志，跨文件引用解析被中断")
+            ctx.stopped = True
     except Exception as e:
         ctx.log(f"引用解析失败: {e}")
 
-    ctx.report_progress(72)
+    ctx.report_progress(72.0)
     return ctx
 
 
 def _step3_extract_imports(ctx: PipelineContext) -> PipelineContext:
     """Step 2.5: 文件依赖提取 — 进度 72→74"""
     ctx.log("Step 2.5: 文件依赖提取开始")
+    import time as _time
+    _t0 = _time.perf_counter()
+
+    def _on_import_progress(current, total):
+        if total > 0:
+            pct = 72.0 + (current / total) * 2.0
+            ctx.report_progress(round(pct, 2))
+
+    if should_stop(ctx.task_id):
+        ctx.log("Step 2.5: 检测到停止标志，跳过依赖提取")
+        ctx.report_progress(74.0)
+        return ctx
+
     try:
         import_edges = _extract_import_dependencies(
-            ctx.analysis_store, ctx.task_id, ctx.all_tables, ctx.proj_path
+            ctx.analysis_store, ctx.task_id, ctx.all_tables, ctx.proj_path,
+            progress_callback=_on_import_progress,
+            stop_check=lambda: should_stop(ctx.task_id),
         )
+        ctx.log(f"文件依赖提取耗时: {_time.perf_counter() - _t0:.1f}s, 共 {len(import_edges)} 条依赖边")
         if import_edges:
+            _t1 = _time.perf_counter()
             ctx.emitter.write_edges(import_edges)
+            ctx.log(f"依赖边写入耗时: {_time.perf_counter() - _t1:.1f}s")
             ctx.total_dep_edges = len(import_edges)
             ctx.log(f"文件依赖提取完成: {ctx.total_dep_edges} 条依赖边")
     except Exception as e:
         ctx.log(f"文件依赖提取失败: {e}")
 
-    ctx.report_progress(74)
+    if should_stop(ctx.task_id):
+        ctx.log("Step 2.5: 检测到停止标志，依赖提取被中断")
+        ctx.stopped = True
+
+    ctx.report_progress(74.0)
     return ctx
 
 
 def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
     """Step 3: 框架感知 + 动态合成 — 进度 74→77"""
     ctx.log("Step 3: 框架感知 + 动态合成开始")
+
+    if should_stop(ctx.task_id):
+        ctx.log("Step 3: 检测到停止标志，跳过框架合成")
+        ctx.stopped = True
+        ctx.report_progress(77.0)
+        return ctx
+
     try:
         from parsers.frameworks import run_all as run_frameworks
         framework_edges = run_frameworks(ctx.all_tables)
@@ -724,6 +831,12 @@ def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
             ctx.log(f"框架感知完成: {ctx.total_framework_edges} 条框架边")
     except Exception as e:
         ctx.log(f"框架感知失败: {e}")
+
+    if should_stop(ctx.task_id):
+        ctx.log("Step 3: 检测到停止标志，跳过动态合成")
+        ctx.stopped = True
+        ctx.report_progress(77.0)
+        return ctx
 
     try:
         from parsers.core.synthesis import DynamicSynthesizer
@@ -739,7 +852,7 @@ def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
     except Exception as e:
         ctx.log(f"动态合成失败: {e}")
 
-    ctx.report_progress(77)
+    ctx.report_progress(77.0)
     return ctx
 
 
@@ -754,6 +867,12 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
         _analyze_communities = None
         _community_available = False
         logger.warning("community_analysis plugin not available, community analysis will be skipped")
+
+    if should_stop(ctx.task_id):
+        ctx.log("Step 4: 检测到停止标志，跳过社区分析")
+        ctx.stopped = True
+        ctx.report_progress(99.0)
+        return ctx
 
     report_types = ctx.report_types
     a_store = ctx.analysis_store
@@ -779,8 +898,14 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
         else:
             ctx.log("社区分析插件未安装，跳过 INCLUDE")
 
+    if should_stop(ctx.task_id):
+        ctx.log("Step 4: 检测到停止标志，跳过 CALL 社区分析")
+        ctx.stopped = True
+        ctx.report_progress(99.0)
+        return ctx
+
     has_call = "callChain" in report_types or "full" in report_types
-    ctx.report_progress(82 if has_call else 99)
+    ctx.report_progress(82.0 if has_call else 99.0)
 
     if has_call:
         if _community_available:
@@ -802,7 +927,7 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
         else:
             ctx.log("社区分析插件未安装，跳过 CALL")
 
-    ctx.report_progress(99)
+    ctx.report_progress(99.0)
     return ctx
 
 
@@ -849,7 +974,7 @@ def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
     from store.task_store import TaskStore
     task_store = TaskStore(ctx.multi_db.main_db)
     task_store.upsert_report(report)
-    ctx.report_progress(99)
+    ctx.report_progress(99.0)
     ctx.log(f"分析完成，耗时 {duration_ms}ms")
     return report
 
@@ -876,15 +1001,23 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
 
     # Step 2: 跨文件引用解析 (65→72%)
     ctx = _step2_resolve_references(ctx)
+    if ctx.stopped:
+        return {"files_processed": ctx.processed, "skipped_files": ctx.skipped, "stopped": True}
 
     # Step 2.5: 文件依赖提取 (72→74%)
     ctx = _step3_extract_imports(ctx)
+    if ctx.stopped:
+        return {"files_processed": ctx.processed, "skipped_files": ctx.skipped, "stopped": True}
 
     # Step 3: 框架感知 + 动态合成 (74→77%)
     ctx = _step4_synthesize_frameworks(ctx)
+    if ctx.stopped:
+        return {"files_processed": ctx.processed, "skipped_files": ctx.skipped, "stopped": True}
 
     # Step 4: 社区分析 (77→99%)
     ctx = _step5_detect_communities(ctx)
+    if ctx.stopped:
+        return {"files_processed": ctx.processed, "skipped_files": ctx.skipped, "stopped": True}
 
     # Step 5: 结果汇总 (99→100%)
     report = _step6_generate_summary(ctx)

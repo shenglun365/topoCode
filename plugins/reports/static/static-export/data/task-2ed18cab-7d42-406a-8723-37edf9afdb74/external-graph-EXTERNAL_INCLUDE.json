@@ -1,0 +1,691 @@
+{
+  "nodes": [
+    {
+      "id": "ext-fmt",
+      "label": "fmt",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-incl-L0-0000",
+      "label": "HTTP路由与控制器层",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-2ed18cab-incl-L0-0001",
+      "label": "图片识别组件",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "comm-2ed18cab-incl-L0-0002",
+      "label": "AI对话核心业务层",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-2ed18cab-incl-L0-0003",
+      "label": "公共服务基础设施层",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "ext-log",
+      "label": "log",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-context",
+      "label": "context",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/gin-gonic/gin",
+      "label": "github.com/gin-gonic/gin",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-net/http",
+      "label": "net/http",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-time",
+      "label": "time",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-os",
+      "label": "os",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-io",
+      "label": "io",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-strings",
+      "label": "strings",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-gorm.io/gorm",
+      "label": "gorm.io/gorm",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-encoding/json",
+      "label": "encoding/json",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-sync",
+      "label": "sync",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/schema",
+      "label": "github.com/cloudwego/eino/schema",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-path/filepath",
+      "label": "path/filepath",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-strconv",
+      "label": "strconv",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/mark3labs/mcp-go/mcp",
+      "label": "github.com/mark3labs/mcp-go/mcp",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-mime/multipart",
+      "label": "mime/multipart",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-bytes",
+      "label": "bytes",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/redis/go-redis/v9",
+      "label": "github.com/redis/go-redis/v9",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/streadway/amqp",
+      "label": "github.com/streadway/amqp",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/mark3labs/mcp-go/client",
+      "label": "github.com/mark3labs/mcp-go/client",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/mark3labs/mcp-go/client/transport",
+      "label": "github.com/mark3labs/mcp-go/client/transport",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/google/uuid",
+      "label": "github.com/google/uuid",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/BurntSushi/toml",
+      "label": "github.com/BurntSushi/toml",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/embedding/ark",
+      "label": "github.com/cloudwego/eino-ext/components/embedding/ark",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/indexer/redis",
+      "label": "github.com/cloudwego/eino-ext/components/indexer/redis",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/retriever/redis",
+      "label": "github.com/cloudwego/eino-ext/components/retriever/redis",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/components/embedding",
+      "label": "github.com/cloudwego/eino/components/embedding",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/components/retriever",
+      "label": "github.com/cloudwego/eino/components/retriever",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-bufio",
+      "label": "bufio",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-errors",
+      "label": "errors",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-image",
+      "label": "image",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-image/gif",
+      "label": "image/gif",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-image/jpeg",
+      "label": "image/jpeg",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-image/png",
+      "label": "image/png",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/yalue/onnxruntime_go",
+      "label": "github.com/yalue/onnxruntime_go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-golang.org/x/image/draw",
+      "label": "golang.org/x/image/draw",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-gopkg.in/gomail.v2",
+      "label": "gopkg.in/gomail.v2",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-gorm.io/driver/mysql",
+      "label": "gorm.io/driver/mysql",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-gorm.io/gorm/logger",
+      "label": "gorm.io/gorm/logger",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/model/ollama",
+      "label": "github.com/cloudwego/eino-ext/components/model/ollama",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/model/openai",
+      "label": "github.com/cloudwego/eino-ext/components/model/openai",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/components/model",
+      "label": "github.com/cloudwego/eino/components/model",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-crypto/md5",
+      "label": "crypto/md5",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-encoding/hex",
+      "label": "encoding/hex",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-math/rand",
+      "label": "math/rand",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-github.com/golang-jwt/jwt/v4",
+      "label": "github.com/golang-jwt/jwt/v4",
+      "isExternal": true,
+      "commLv": "L0"
+    }
+  ],
+  "edges": [
+    {
+      "id": "ext-fmt->comm-2ed18cab-incl-L0-0000",
+      "source": "ext-fmt",
+      "target": "comm-2ed18cab-incl-L0-0000"
+    },
+    {
+      "id": "ext-fmt->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-fmt",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-fmt->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-fmt",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-fmt->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-fmt",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-log->comm-2ed18cab-incl-L0-0000",
+      "source": "ext-log",
+      "target": "comm-2ed18cab-incl-L0-0000"
+    },
+    {
+      "id": "ext-log->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-log",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-log->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-log",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-log->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-log",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-context->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-context",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-context->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-context",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/gin-gonic/gin->comm-2ed18cab-incl-L0-0000",
+      "source": "ext-github.com/gin-gonic/gin",
+      "target": "comm-2ed18cab-incl-L0-0000"
+    },
+    {
+      "id": "ext-github.com/gin-gonic/gin->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-github.com/gin-gonic/gin",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-github.com/gin-gonic/gin->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/gin-gonic/gin",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-net/http->comm-2ed18cab-incl-L0-0000",
+      "source": "ext-net/http",
+      "target": "comm-2ed18cab-incl-L0-0000"
+    },
+    {
+      "id": "ext-net/http->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-net/http",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-net/http->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-net/http",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-net/http->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-net/http",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-time->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-time",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-time->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-time",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-os->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-os",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-os->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-os",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-os->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-os",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-io->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-io",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-io->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-io",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-io->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-io",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-strings->comm-2ed18cab-incl-L0-0000",
+      "source": "ext-strings",
+      "target": "comm-2ed18cab-incl-L0-0000"
+    },
+    {
+      "id": "ext-strings->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-strings",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-strings->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-strings",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-gorm.io/gorm->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-gorm.io/gorm",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-encoding/json->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-encoding/json",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-encoding/json->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-encoding/json",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-sync->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-sync",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-sync->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-sync",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/schema->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/cloudwego/eino/schema",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/schema->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/cloudwego/eino/schema",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-path/filepath->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-path/filepath",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-path/filepath->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-path/filepath",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-path/filepath->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-path/filepath",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-strconv->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-strconv",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-strconv->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-strconv",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/mark3labs/mcp-go/mcp->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/mark3labs/mcp-go/mcp",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-mime/multipart->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-mime/multipart",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-mime/multipart->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-mime/multipart",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-mime/multipart->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-mime/multipart",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-bytes->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-bytes",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-bytes->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-bytes",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/redis/go-redis/v9->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/redis/go-redis/v9",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/streadway/amqp->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/streadway/amqp",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/mark3labs/mcp-go/client->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/mark3labs/mcp-go/client",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/mark3labs/mcp-go/client/transport->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/mark3labs/mcp-go/client/transport",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/google/uuid->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/google/uuid",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/BurntSushi/toml->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/BurntSushi/toml",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/embedding/ark->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/cloudwego/eino-ext/components/embedding/ark",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/indexer/redis->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/cloudwego/eino-ext/components/indexer/redis",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/retriever/redis->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/cloudwego/eino-ext/components/retriever/redis",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/components/embedding->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/cloudwego/eino/components/embedding",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/components/retriever->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/cloudwego/eino/components/retriever",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-bufio->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-bufio",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-errors->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-errors",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-image->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-image",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-image/gif->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-image/gif",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-image/jpeg->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-image/jpeg",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-image/png->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-image/png",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-github.com/yalue/onnxruntime_go->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-github.com/yalue/onnxruntime_go",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-golang.org/x/image/draw->comm-2ed18cab-incl-L0-0001",
+      "source": "ext-golang.org/x/image/draw",
+      "target": "comm-2ed18cab-incl-L0-0001"
+    },
+    {
+      "id": "ext-gopkg.in/gomail.v2->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-gopkg.in/gomail.v2",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    },
+    {
+      "id": "ext-gorm.io/driver/mysql->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-gorm.io/driver/mysql",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-gorm.io/gorm/logger->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-gorm.io/gorm/logger",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/model/ollama->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/cloudwego/eino-ext/components/model/ollama",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino-ext/components/model/openai->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/cloudwego/eino-ext/components/model/openai",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/cloudwego/eino/components/model->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-github.com/cloudwego/eino/components/model",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-crypto/md5->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-crypto/md5",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-encoding/hex->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-encoding/hex",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-math/rand->comm-2ed18cab-incl-L0-0002",
+      "source": "ext-math/rand",
+      "target": "comm-2ed18cab-incl-L0-0002"
+    },
+    {
+      "id": "ext-github.com/golang-jwt/jwt/v4->comm-2ed18cab-incl-L0-0003",
+      "source": "ext-github.com/golang-jwt/jwt/v4",
+      "target": "comm-2ed18cab-incl-L0-0003"
+    }
+  ]
+}

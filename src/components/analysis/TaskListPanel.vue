@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PlusIcon,
@@ -58,7 +58,9 @@ async function loadTasks() {
 
 // 运行中任务轮询（3 秒刷新）
 function startPolling() {
-  const key = `task-list:${props.projectId}`
+  const pid = props.projectId
+  if (!pid) return
+  const key = `task-list:${pid}`
   if (displayDispatcher.has(key)) return
   displayDispatcher.register(key, {
     interval: 3000,
@@ -70,15 +72,24 @@ function startPolling() {
       return hasRunning
     },
     onData: (hasRunning) => {
-      if (!hasRunning) displayDispatcher.unregister(`task-list:${props.projectId}`)
+      if (!hasRunning) displayDispatcher.unregister(key)
     },
   })
 }
 
-function stopPolling() {
-  if (!props.projectId) return
-  displayDispatcher.unregister(`task-list:${props.projectId}`)
+function stopPolling(pid?: string) {
+  const key = pid ? `task-list:${pid}` : null
+  if (!key) return
+  displayDispatcher.unregister(key)
 }
+
+// 项目切换时重新加载 + 清理旧轮询
+watch(() => props.projectId, (newPid, oldPid) => {
+  if (oldPid && oldPid !== newPid) {
+    displayDispatcher.unregister(`task-list:${oldPid}`)
+  }
+  if (newPid) loadTasks()
+})
 
 // 监听任务列表变化，有 running 任务时启动轮询
 watch(() => analysisStore.tasks, (tasks) => {
@@ -88,13 +99,9 @@ watch(() => analysisStore.tasks, (tasks) => {
   }
 }, { deep: true })
 
-onMounted(() => {
-  loadTasks()
-})
-
-onUnmounted(() => {
-  stopPolling()
-})
+// keep-alive 缓存激活/停用（替代 onMounted/onUnmounted）
+onActivated(() => { loadTasks() })
+onDeactivated(() => { stopPolling(props.projectId) })
 
 // 状态颜色
 function getStatusColor(status: string): string {
@@ -391,7 +398,11 @@ function getConfigSummary(task: AnalysisTask): string {
             <span
               v-if="task.progress != null"
               class="task-progress-text"
-            >{{ task.progress }}%</span>
+            >{{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%</span>
+            <span
+              v-if="task.eta"
+              class="task-progress-eta"
+            >{{ task.eta }}</span>
           </div>
         </div>
 
@@ -456,7 +467,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status !== 'running' && task.status !== 'pending'"
+            v-if="task.status !== 'running' && task.status !== 'pending' && task.status !== 'done'"
             class="btn btn-ghost btn-xs"
             :title="t('analysis.rerunTask')"
             :disabled="analysisStore.isTaskLoading(task.id)"
@@ -744,6 +755,14 @@ function getConfigSummary(task: AnalysisTask): string {
   color: var(--text-muted);
   min-width: 32px;
   text-align: right;
+}
+
+.task-progress-eta {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .task-card-body {

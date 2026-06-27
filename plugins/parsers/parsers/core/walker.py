@@ -191,6 +191,8 @@ class TreeSitterWalker:
         for n in self.nodes:
             if n.is_exported:
                 table.add_export(n.name)
+            if n.kind == NodeKind.IMPORT:
+                table.add_import(n.name)
         return table
 
     # ── 核心分发循环 ─────────────────────────────────────
@@ -477,6 +479,7 @@ class TreeSitterWalker:
             visibility=ex.extract_visibility(node) if ex.extract_visibility else None,
             is_async=bool(ex.is_async and ex.is_async(node)),
             is_static=bool(ex.is_static and ex.is_static(node)),
+            is_exported=bool(ex.is_exported and ex.is_exported(node, self.source_str)),
             docstring=_prev_docstring(node, self.source),
         )
         if not method_node:
@@ -645,7 +648,8 @@ class TreeSitterWalker:
                         n = c.named_child(0)
                         if n and n.type == "identifier":
                             k = NodeKind.CONSTANT if node.type == "const_declaration" else NodeKind.VARIABLE
-                            self._create_node(k, _node_text(n, self.source), c)
+                            self._create_node(k, _node_text(n, self.source), c,
+                                              is_exported=is_exported)
 
         # C/C++ / generic
         else:

@@ -86,6 +86,7 @@ export interface AnalysisTask {
   total?: number;
   current?: number;
   error?: string;
+  eta?: string;
   createdAt: string;
   updatedAt: string;
   favorite?: boolean;

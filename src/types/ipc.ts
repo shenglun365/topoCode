@@ -91,6 +91,7 @@ export interface AnalysisTask {
   total?: number
   current?: number
   error?: string | null
+  eta?: string
   createdAt: string
   updatedAt: string
   favorite?: boolean
@@ -412,6 +413,7 @@ export interface TaskProgressEvent {
   total: number
   current: number
   status: string
+  eta?: string
 }
 
 export interface TaskCompleteEvent {

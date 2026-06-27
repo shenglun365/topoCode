@@ -990,48 +990,103 @@ def _cid_level_backend(cid: str) -> str:
     return 'L0'
 
 
+def _parse_node_list(node_list):
+    """安全解析 graph_doc.node_list JSON"""
+    try:
+        nlist = json.loads(node_list) if node_list else []
+    except Exception:
+        nlist = []
+    if not isinstance(nlist, list):
+        nlist = [nlist]
+    return nlist
+
+
 def get_external_graph(db, task_id: str, edge_type: str,
                        depth: int = 1, comm_id: str = '',
                        project_root: str = ''):
-    """外部依赖/调用图 — 后端聚合，前端单接口消费"""
+    """
+    外部依赖/调用图 — 后端聚合，前端单接口消费
+
+    Depth 语义 (与内部图统一):
+       根视图: depth=N → 显示 L0 ~ L(N-1) 层社区
+       下钻:   depth=N → 从 drilled community 所在层级起，向下 N 层
+
+    Drill 语义:
+       将图范围限定在 drilled community 的子树内 (parent_comm_id 追溯)
+    """
     base_et = edge_type.replace("EXTERNAL_", "")
-    kind = "imports" if base_et == "INCLUDE" else "calls"
     _rel = _make_rel(project_root)
 
-    # 1. 提取外部项
-    items = extract_external_deps(db, task_id) if base_et == "INCLUDE" else extract_external_calls(db, task_id)
+    # ── 1. 提取外部项 ──
+    items = extract_external_deps(db, task_id) if base_et == "INCLUDE" \
+            else extract_external_calls(db, task_id)
     if not items:
         return {"nodes": [], "edges": []}
 
-    # 2. file → community 映射（所有层级）
+    # ── 2. 单次加载社区全量数据 ──
     rows = db.fetchall(
-        "SELECT comm_id, comm_lv, node_list FROM graph_doc WHERE task_id=? AND edge_type=?",
+        "SELECT comm_id, comm_lv, parent_comm_id, node_list FROM graph_doc "
+        "WHERE task_id=? AND edge_type=?",
         (task_id, base_et)
     )
-    fcomm = {}
+
+    # 倒排索引: rel_path → set(cid)
+    file_cids = {}
     for r in rows:
         cid = r["comm_id"]
-        try:
-            nlist = json.loads(r["node_list"]) if r["node_list"] else []
-        except Exception:
-            nlist = []
-        for node in (nlist if isinstance(nlist, list) else [nlist]):
-            key = str(node) if isinstance(node, str) else str(node.get("id", ""))
-            key = _rel(key)
-            if key and key not in (None, ''):
-                if key not in fcomm:
-                    fcomm[key] = []
-                if not any(x["communityId"] == cid for x in fcomm[key]):
-                    fcomm[key].append({"communityId": cid})
+        for node in _parse_node_list(r["node_list"]):
+            key = _rel(str(node) if isinstance(node, str) else str(node.get("id", "")))
+            if key:
+                file_cids.setdefault(key, set()).add(cid)
 
-    # 3. 社区名称
+    # 树索引: children_of[pid] = [cid...], parent_of[cid] = pid
+    children_of, parent_of = {}, {}
+    for r in rows:
+        pid = r.get("parent_comm_id") or ''
+        if pid:
+            children_of.setdefault(pid, []).append(r["comm_id"])
+            parent_of[r["comm_id"]] = pid
+
+    # 社区名称
     name_rows = db.fetchall(
-        "SELECT comm_id, name, comm_lv FROM community_llm_results WHERE task_id=?",
+        "SELECT comm_id, name FROM community_llm_results WHERE task_id=?",
         (task_id,)
     )
     comm_names = {r["comm_id"]: r["name"] or r["comm_id"] for r in name_rows}
 
-    # 4. 构建 nodes / edges
+    # ── 3. 过滤 ──
+    drill_cv = int(_cid_level_backend(comm_id)[1:]) if comm_id else 0
+    max_lv = drill_cv + depth - 1  # 允许的最高绝对层级
+
+    def _in_subtree(cid):
+        """cid 是否在 drilled community 的子树内（含自身）"""
+        if not comm_id:
+            return True
+        cur = cid
+        while True:
+            if cur == comm_id:
+                return True
+            if cur not in parent_of:
+                break
+            cur = parent_of[cur]
+        return False
+
+    visible = {}  # ext_id → set(cid)
+    for item in items:
+        ext_id = "ext-" + (item.get("package") or item.get("name"))
+        cids = set()
+        for f in item.get("files", []):
+            for cid in file_cids.get(_rel(f), ()):
+                cv = int(_cid_level_backend(cid)[1:])
+                if cv > max_lv:
+                    continue
+                if not _in_subtree(cid):
+                    continue
+                cids.add(cid)
+        if cids:
+            visible[ext_id] = cids
+
+    # ── 4. 序列化 ──
     nodes = {}
     edges = []
 
@@ -1039,66 +1094,16 @@ def get_external_graph(db, task_id: str, edge_type: str,
         if nid not in nodes:
             nodes[nid] = {"id": nid, "label": label, "isExternal": is_ext, "commLv": lv}
 
-    for item in items:
-        ext_id = "ext-" + (item.get("package") or item.get("name"))
-        ext_label = item.get("package") or item.get("name")
+    for ext_id, cids in visible.items():
+        label = ext_id[4:]  # strip "ext-"
+        _add_node(ext_id, label, True, 'L0')
+        for cid in sorted(cids):
+            _add_node(cid, comm_names.get(cid, cid), False, _cid_level_backend(cid))
+            edges.append({"id": f"{ext_id}->{cid}", "source": ext_id, "target": cid})
 
-        item_comms = {}
-        for f in item.get("files", []):
-            for c in fcomm.get(_rel(f), []):
-                cid = c["communityId"]
-                if cid not in item_comms:
-                    item_comms[cid] = comm_names.get(cid, cid)
-
-        for cid, cname in item_comms.items():
-            cv = _cid_level_backend(cid)
-            cv_num = int(cv[1:])
-
-            # root 视图按 depth 过滤；drill 视图按 comm_id 的 L0 祖先匹配
-            if comm_id:
-                l0_cid = l0_ancestor(cid)
-                if l0_cid != l0_ancestor(comm_id):
-                    continue
-            elif cv_num >= depth:
-                continue
-
-            _add_node(cid, cname, False, cv)
-            _add_node(ext_id, ext_label, True, 'L0')
-            ek = ext_id + '->' + cid
-            if not any(e["id"] == ek for e in edges):
-                edges.append({"id": ek, "source": ext_id, "target": cid})
-
-    # 5. 深度展开社区节点
-    # 提前加载所有 graph_doc 用于 children_of 和 hasChildren
-    all_rows = db.fetchall(
-        "SELECT comm_id, comm_lv, parent_comm_id FROM graph_doc WHERE task_id=? AND edge_type=?",
-        (task_id, base_et)
-    )
-    children_of = {}
-    for r in all_rows:
-        pid = r.get("parent_comm_id") or ''
-        if pid:
-            children_of.setdefault(pid, []).append(r)
-
-    if depth > 1:
-        expanded = set(nodes.keys())
-        queue = [nid for nid in nodes if not nodes[nid].get("isExternal")]
-        for cur_depth in range(1, depth):
-            next_batch = []
-            for cid in queue:
-                for child in children_of.get(cid, []):
-                    ccid = child["comm_id"]
-                    if ccid not in expanded:
-                        expanded.add(ccid)
-                        next_batch.append(ccid)
-                        _add_node(ccid, comm_names.get(ccid, ccid), False, child["comm_lv"])
-            queue = next_batch
-            if not queue:
-                break
-
-    # 6. hasChildren
-    for nid, nd in list(nodes.items()):
-        if not nd.get("isExternal"):
-            nd["hasChildren"] = nid in children_of
+    # hasChildren
+    for nid in list(nodes.keys()):
+        if not nodes[nid].get("isExternal"):
+            nodes[nid]["hasChildren"] = nid in children_of
 
     return {"nodes": list(nodes.values()), "edges": edges}

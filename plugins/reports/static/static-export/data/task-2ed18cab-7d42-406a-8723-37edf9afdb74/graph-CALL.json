@@ -1,0 +1,604 @@
+{
+  "et": "CALL",
+  "projectRoot": "/home/cuser/soft/OhMyGo-main/",
+  "communities": {
+    "comm-2ed18cab-call-L0-0000": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "API路由注册中心",
+      "summary": "## 功能概要\n该组件是OhMyGo项目的核心路由配置模块，负责集中管理所有HTTP API接口的路由注册与中间件配置。\n\n组件结构采用模块化设计，由5个文件组成：\n\n1. **router.go（核心枢纽）**：创建Gin服务器实例，配置全局中间件（JWT鉴权），按业务模块划分API路由组，并统一挂载各模块的路由注册函数。导出InitRouter函数作为路由引擎的初始化入口。\n\n2. **File.go**：注册文件上传相关路由，将POST请求映射至文件上传处理函数，支持RAG知识库的文件上传功能。\n\n3. **Image.go**：注册图片识别接口路由，将POST路径'/recognize'绑定至图片识别控制器，处理多模态图片识别请求。\n\n4. **AI.go**：注册AI核心业务路由，包括聊天会话创建与管理、消息收发、历史记录查询，以及TTS语音任务创建与状态查询等接口。\n\n5. **user.go**：注册用户模块路由，提供用户注册、登录认证与验证码接口。\n\n调用关系：各业务路由模块（File.go、Image.go、AI.go）通过调用router.go中的注册函数将自身路由挂载到统一路由组；router.go调用user.go注册用户路由。形成以router.go为中心的路由汇聚结构。\n\n该模块实现了路由配置的模块化和解耦，各业务模块独立维护自己的路由定义，通过统一的InitRouter入口初始化整个API服务。\n\n**架构角色**: 路由配置中心\n\n**关键文件**:\n- `router/router.go` — 核心路由引擎初始化文件，创建Gin服务器实例，配置JWT鉴权中间件，按模块划分API路由组，统一挂载各业务路由注册函数\n- `router/AI.go` — AI业务路由注册，涵盖聊天会话管理、消息收发、历史记录查询及TTS语音合成接口\n- `router/File.go` — 文件上传路由注册，支持RAG知识库文件上传功能\n- `router/Image.go` — 图片识别路由注册，处理多模态图片识别请求\n- `router/user.go` — 用户模块路由注册，提供用户注册、登录认证与验证码接口\n\n**依赖组件**: github.com/gin-gonic/gin, GopherAI/middleware/jwt, GopherAI/controller/file, GopherAI/controller/image, GopherAI/controller/session, GopherAI/controller/tts, GopherAI/controller/user",
+      "files": [
+        "router/File.go",
+        "router/user.go",
+        "router/Image.go",
+        "router/AI.go",
+        "router/router.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0001": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "通用工具与基础设施组件",
+      "summary": "## 功能概要\n该组件是OhMyGo AI应用平台的核心基础设施层，封装了多个跨业务场景的公共服务模块，为上层应用提供统一的基础能力支撑。组件包含8个子模块，覆盖AI模型接口、向量检索、消息队列、语音合成、邮件通知、验证码管理和MCP协议通信等关键能力。\n\n**核心功能模块：**\n\n1. **AI模型统一接口 (common/aihelper/model.go)**：定义AIModel抽象接口，提供OpenAI、Ollama、RAG增强模型和MCP协议四种实现。支持同步与流式调用，是上层AI对话能力的统一入口，通过配置动态切换底层大模型服务。\n\n2. **RAG向量检索 (common/rag/rag.go)**：基于Redis实现文档向量化索引构建与语义检索。提供RAGIndexer用于文件索引创建与清理，RAGQuery用于语义查询，并自动拼接检索到的相关文档构建RAG提示词，支撑知识库问答场景。\n\n3. **Redis服务封装 (common/redis/redis.go, common/redis/key.go)**：封装Redis客户端连接初始化，实现邮箱验证码的存储/校验/过期清理，以及基于文件名的Redis向量搜索索引管理。key.go提供统一的键名生成工具，确保命名规范。\n\n4. **RabbitMQ消息队列 (common/rabbitmq/init.go, common/rabbitmq/rabbitmq.go)**：封装RabbitMQ连接生命周期管理，支持全局单例复用连接。提供消息发布(Publish)与消费(Consume)接口，用于解耦耗时任务（如TTS异步创建与状态轮询），避免阻塞主请求链路。\n\n5. **百度TTS语音合成 (common/tts/tts.go, controller/tts/tts.go)**：封装百度AI语音合成API，实现AccessToken获取、TTS任务创建与异步状态查询。通过RabbitMQ实现异步处理，controller/tts.go提供HTTP接口供外部调用。\n\n6. **邮件服务 (common/email/email.go)**：基于gomail封装邮件发送功能，支持QQ邮箱SMTP协议，主要用于验证码和账号通知场景。\n\n7. **MCP客户端 (common/mcp/client/client.go)**：基于mcp-go库封装MCP协议客户端，管理HTTP连接生命周期，提供工具调用接口，支持AI模型通过MCP协议调用外部工具。\n\n**架构特点**：组件高度依赖config/config.go进行配置管理，各模块通过Redis、RabbitMQ等中间件实现解耦，体现了典型的微服务基础设施层设计模式。\n\n**架构角色**: 基础设施层\n\n**关键文件**:\n- `common/aihelper/model.go` — 定义AI模型统一接口AIModel，提供OpenAI、Ollama、RAG增强和MCP四种实现，支持同步与流式调用，是AI对话能力的统一入口\n- `common/rag/rag.go` — 基于Redis实现文档向量化索引构建与语义检索，提供RAGIndexer和RAGQuery，支撑知识库问答场景\n- `common/redis/redis.go` — 封装Redis客户端，实现邮箱验证码管理、向量索引操作和连接初始化\n- `common/redis/key.go` — 提供Redis键名生成工具，统一验证码键和索引名称的命名规范\n- `common/rabbitmq/rabbitmq.go` — 封装RabbitMQ核心操作，提供消息发布与消费接口，支持全局单例连接复用\n- `common/rabbitmq/init.go` — 管理RabbitMQ连接生命周期，包含InitRabbitMQ初始化和DestroyRabbitMQ销毁方法\n- `common/tts/tts.go` — 封装百度AI语音合成API，实现AccessToken获取、TTS任务创建与异步状态查询\n- `controller/tts/tts.go` — TTS服务的HTTP控制器层，提供外部可调用的接口\n- `common/email/email.go` — 基于gomail封装邮件发送功能，用于验证码和账号通知\n- `common/mcp/client/client.go` — 封装MCP协议客户端，管理HTTP连接并提供工具调用接口\n\n**依赖组件**: github.com/redis/go-redis/v9, github.com/streadway/amqp, cloudwego/eino-ext, cloudwego/eino, github.com/mark3labs/mcp-go, gopkg.in/gomail.v2, github.com/songquanpeng/gopherai, GopherAI/config",
+      "files": [
+        "common/rag/rag.go",
+        "common/redis/redis.go",
+        "common/mcp/client/client.go",
+        "common/tts/tts.go",
+        "common/rabbitmq/init.go",
+        "controller/tts/tts.go",
+        "common/email/email.go",
+        "common/redis/key.go",
+        "common/aihelper/model.go",
+        "common/rabbitmq/rabbitmq.go",
+        "config/config.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0002": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "ONNX图像识别组件",
+      "summary": "## 功能概要\n该组件是一个基于ONNX Runtime的图像分类识别服务，采用经典的三层架构设计，实现从HTTP请求到模型推理的完整流水线。\n\n**架构分层：**\n1. **Controller层 (controller/image/image.go)**：定义HTTP API接口，包含RecognizeImageResponse响应结构体和RecognizeImage处理函数。基于Gin框架接收上传的图片文件（multipart/form-data），调用service层执行识别，并将结果封装为JSON返回。同时定义了ImageRecognizer结构体用于控制器封装。\n\n2. **Service层 (service/image/image.go)**：承上启下的业务逻辑层，实现RecognizeImage函数。负责接收multipart文件头，加载MobileNetV2 ONNX预训练模型及其标签文件（labels.txt），将图片数据读入缓冲区后委托给common层的ImageRecognizer进行推理预测，返回分类标签字符串或错误信息。\n\n3. **Common层 (common/image/image_recognizer.go)**：底层图像识别引擎封装，提供ImageRecognizer结构体和NewImageRecognizer构造函数。核心功能包括：\n   - 基于github.com/yalue/onnxruntime_go加载ONNX模型\n   - 支持多种输入方式：PredictFromFile（文件路径）、PredictFromBuffer（字节缓冲区）、PredictFromImage（Image对象）\n   - 图像预处理：自动缩放、归一化像素值、转换为NCHW通道格式\n   - 推理后处理：获取最高置信度分类结果\n   - 资源管理：Close方法释放ONNX推理会话资源，线程安全初始化\n\n**技术栈：**\n- 推理引擎：ONNX Runtime (via onnxruntime_go)\n- 模型：MobileNetV2（轻量级图像分类模型）\n- Web框架：Gin\n- 图像处理：golang.org/x/image/draw\n\n**数据流：**\nHTTP请求 → Controller解析上传文件 → Service加载模型并调用识别器 → Common层预处理图片并执行ONNX推理 → 返回分类结果 → Controller封装响应\n\n该组件质量分较低(0.0434)，主要因为仅3个节点2条边，属于小型独立功能模块，代码复用率和调用复杂度有限。\n\n**架构角色**: 图像分类推理\n\n**关键文件**:\n- `controller/image/image.go` — HTTP API控制器，定义RecognizeImageResponse响应结构体和RecognizeImage Gin路由处理函数，负责接收前端上传的图片文件并调用service层执行识别\n- `service/image/image.go` — 业务服务层，实现图片识别核心逻辑，加载MobileNetV2 ONNX模型及标签文件，处理multipart图片数据并调用common层识别器完成分类\n- `common/image/image_recognizer.go` — 底层ONNX推理引擎封装，提供ImageRecognizer结构体，支持文件/缓冲区/Image对象输入，自动完成图像预处理（缩放、归一化、NCHW转换）和模型推理\n\n**依赖组件**: github.com/gin-gonic/gin, github.com/yalue/onnxruntime_go, golang.org/x/image/draw",
+      "files": [
+        "service/image/image.go",
+        "controller/image/image.go",
+        "common/image/image_recognizer.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0003": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "AI助手管理与文件上传模块",
+      "summary": "## 功能概要\n该组件是一个混合功能组件，包含两个相对独立的核心功能模块：\n\n1. **AIHelper模块（common/aihelper/）**：实现AI会话管理与响应生成。采用工厂模式（factory.go）动态创建AI模型和助手实例，通过单例管理器（manager.go）维护用户-会话维度的AIHelper实例映射。AIHelper本身（aihelper.go）封装了会话上下文维护、消息历史管理、同步/流式响应生成等核心逻辑，支持通过回调机制灵活处理消息持久化。\n\n2. **文件上传模块（controller/file/ + service/file/）**：实现RAG文件的上传与向量化索引处理。Controller层（controller/file/file.go）提供HTTP接口接收文件上传请求，校验参数与用户身份后委托Service层处理。Service层（service/file/file.go）负责文件存储、旧索引清理、新文件向量化索引生成及失败回滚逻辑。\n\n调用链路：\n- controller/file/file.go → service/file/file.go → utils/utils.go（文件上传流程）\n- common/aihelper/aihelper.go → common/aihelper/factory.go → common/aihelper/manager.go（AI实例创建与管理流程）\n- common/aihelper/aihelper.go → utils/utils.go（AI模块使用工具函数）\n\n组件通过utils.go提供通用工具函数（随机数、MD5、UUID生成等），被AIHelper和文件服务共同依赖。\n\n**架构角色**: AI会话与文件处理\n\n**关键文件**:\n- `common/aihelper/aihelper.go` — AI助手核心逻辑，管理会话上下文与消息历史，支持同步和流式响应生成\n- `common/aihelper/factory.go` — 工厂模式实现，动态创建AI模型和AI助手实例，支持多模型配置\n- `common/aihelper/manager.go` — AI助手实例管理器，维护用户-会话映射，提供线程安全的增删查操作\n- `controller/file/file.go` — RAG文件上传HTTP控制器，处理请求校验并委托服务层\n- `service/file/file.go` — 文件上传服务层，负责文件存储、索引清理与向量化处理\n- `utils/utils.go` — 通用工具函数库，提供随机数、MD5、UUID生成等基础功能\n\n**依赖组件**: GopherAI/common/rabbitmq, GopherAI/common/rag, GopherAI/config, GopherAI/model, github.com/gin-gonic/gin, github.com/cloudwego/eino/schema, github.com/google/uuid",
+      "files": [
+        "common/aihelper/factory.go",
+        "service/file/file.go",
+        "common/aihelper/aihelper.go",
+        "utils/utils.go",
+        "controller/file/file.go",
+        "common/aihelper/manager.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0004": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "核心基础设施与数据访问层",
+      "summary": "## 功能概要\n该组件是OhMyGo AI应用平台的底层基础设施与数据访问层，负责应用启动、数据库初始化管理、消息队列处理以及用户/消息数据持久化操作。组件由5个核心文件构成，分为四个层次：\n\n1. **应用入口 (main.go)**：作为整个应用的启动入口，负责初始化MySQL数据库连接、Redis缓存、RabbitMQ消息队列，并通过dao/message接口查询数据库加载历史消息以重建AI会话上下文。最后启动HTTP服务对外提供API接口。\n\n2. **MySQL数据层 (common/mysql/mysql.go)**：基于GORM封装MySQL数据库连接管理，包括连接池配置、日志记录、自动迁移User/Session/Message等表结构。提供用户数据的插入（InsertUser）和查询（GetUserByUsername、GetUserByEmail）能力，供上层数据访问模块复用。\n\n3. **数据访问对象层**：\n   - **dao/message/message.go**：消息数据访问模块，基于GORM封装消息表的增查操作，支持按单/多会话ID查询历史消息（GetMessagesBySessionID、GetMessagesBySessionIDs）、创建新消息（CreateMessage）和获取全量记录（GetAllMessages），结果按创建时间升序排列。\n   - **dao/user/user.go**：用户数据访问模块，提供用户名/邮箱存在性校验（IsExistUser、IsExistEmail）和新用户注册（Register）功能，注册时对密码进行MD5哈希处理后再存储。\n\n4. **RabbitMQ消息队列层 (common/rabbitmq/meesage.go)**：负责异步消息处理。定义MessageMQParam结构体封装消息参数（SessionID、Content、UserName、IsUser），提供GenerateMessageMQParam()将消息参数序列化为JSON发布到队列，以及MQMessage()消费者处理函数——从RabbitMQ接收消息后反序列化，调用message.CreateMessage()异步将消息持久化到数据库，实现耗时任务与主链路的解耦。\n\n调用链路：main.go初始化时串联MySQL和RabbitMQ两个基础设施；RabbitMQ消费者MQMessage调用dao/message.CreateMessage完成消息落盘；MySQL模块调用dao/user完成用户数据操作。整体构成应用启动和数据持久化的核心底座。\n\n**架构角色**: 基础设施与数据访问\n\n**关键文件**:\n- `main.go` — 应用入口文件，初始化MySQL、Redis、RabbitMQ等基础设施，加载历史消息重建会话上下文，启动HTTP服务\n- `common/mysql/mysql.go` — MySQL数据库初始化模块，封装连接池配置、表结构自动迁移，提供用户数据的插入与查询接口\n- `dao/message/message.go` — 消息数据访问层，基于GORM封装消息表的创建、按会话ID查询及全量查询功能\n- `dao/user/user.go` — 用户数据访问层，提供用户名/邮箱校验和新用户注册（密码MD5哈希）功能\n- `common/rabbitmq/meesage.go` — RabbitMQ消息队列处理模块，定义消息参数结构体，实现消息发布序列化与消费者异步入库逻辑\n\n**依赖组件**: gorm.io/gorm, gorm.io/driver/mysql, github.com/streadway/amqp, github.com/gin-gonic/gin, GopherAI/config, GopherAI/model, GopherAI/common/redis, GopherAI/router, GopherAI/utils, GopherAI/common/aihelper",
+      "files": [
+        "common/rabbitmq/meesage.go",
+        "main.go",
+        "dao/message/message.go",
+        "common/mysql/mysql.go",
+        "dao/user/user.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0005": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "用户认证与JWT令牌管理",
+      "summary": "## 功能概要\n该组件是系统的用户认证与授权核心，负责JWT令牌的全生命周期管理，包括令牌的签发（登录时生成）和验证（请求拦截时解析）。\n\n**整体架构**：采用经典的四层分层设计\n- **Controller层**（controller/user/user.go）：HTTP接口层，提供登录、注册、验证码等RESTful接口，基于Gin框架接收请求、解析JSON参数，并委托Service层处理业务逻辑\n- **Service层**（service/user/user.go）：业务逻辑层，实现用户登录校验（用户名密码验证）、JWT令牌签发、注册流程及邮箱验证码发送。登录成功后调用utils/myjwt生成令牌，将令牌返回给客户端\n- **Middleware层**（middleware/jwt/jwt.go）：Gin中间件，作为API网关式的安全拦截器。从请求头（Authorization: Bearer xxx）或查询参数中提取Token，调用utils/myjwt进行验签，失败则返回401错误终止请求，成功则将用户名注入Gin Context供下游Handler使用\n- **Utils层**（utils/myjwt/jwt.go）：JWT核心工具库，封装了Claims结构体（存储UserID和Username）、GenerateToken（HS256签名签发，带过期时间）和ParseToken（验签并提取用户信息）三个核心函数\n\n**调用链路**：\n1. 登录流程：Controller → Service → Utils.GenerateToken → 返回Token给客户端\n2. 鉴权流程：Client请求 → Middleware.Auth → Utils.ParseToken → 注入Context → 下游Handler\n\n**关键技术点**：\n- 使用golang-jwt/v4库实现JWT标准\n- HS256对称签名算法\n- Token过期时间管理\n- 验证码通过Redis缓存，结合邮件服务发送\n- 登录成功后自动生成并返回Token，实现无状态认证\n\n**架构角色**: 认证授权网关\n\n**关键文件**:\n- `controller/user/user.go` — 用户模块HTTP控制器，提供Login、Register、HandleCaptcha三个Gin Handler函数，负责接收和解析请求参数，调用Service层完成业务逻辑\n- `middleware/jwt/jwt.go` — JWT身份验证中间件，提供Auth函数作为Gin中间件，从请求中提取并验证Token，将用户名注入Context或返回401错误\n- `service/user/user.go` — 用户业务逻辑层，实现Login（校验用户并签发Token）、Register（注册并发送邮件验证码）、SendCaptcha（发送验证码）等核心业务\n- `utils/myjwt/jwt.go` — JWT核心工具库，定义Claims结构体，提供GenerateToken签发令牌和ParseToken验签解析两个核心函数\n\n**依赖组件**: github.com/gin-gonic/gin, github.com/golang-jwt/jwt/v4, GopherAI/common/redis, GopherAI/common/email, GopherAI/dao/user, GopherAI/config",
+      "files": [
+        "controller/user/user.go",
+        "service/user/user.go",
+        "middleware/jwt/jwt.go",
+        "utils/myjwt/jwt.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0006": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "会话管理模块",
+      "summary": "## 功能概要\n这是一个基于MVC三层架构的会话管理组件，负责用户与AI对话的会话生命周期管理。组件包含三个核心层次：\n\n1. **控制器层 (controller/session/session.go)**: 基于Gin框架的HTTP请求处理器，定义了会话相关的API接口，包括获取用户会话列表、创建会话并发送消息等。支持JWT鉴权、SSE流式输出以及请求/响应结构体的定义。\n\n2. **服务层 (service/session/session.go)**: 核心业务逻辑层，管理用户会话的创建、AI消息的同步发送与流式交互。提供CreateSessionAndSendMessage、ChatStreamSend等关键函数，对接AI管理器实现实时对话，支持标准响应和SSE流式两种输出模式。同时封装了错误码处理和数据转换逻辑。\n\n3. **数据访问层 (dao/session/session.go)**: 封装MySQL数据库操作，提供会话数据的持久化接口，包括按用户名查询会话列表、创建会话记录、按ID查询单个会话等功能。\n\n调用链路：Controller接收HTTP请求后调用Service层的业务方法，Service层在需要时调用DAO层进行数据库操作。同时Service层还依赖aihelper进行AI模型调用和common/code进行错误码处理。\n\n关键功能包括：会话的CRUD操作、同步AI消息发送、SSE流式消息推送、聊天历史查询、用户会话列表管理等。\n\n**架构角色**: 会话管理\n\n**关键文件**:\n- `controller/session/session.go` — HTTP控制器，定义会话相关的API路由和请求响应结构体，处理JWT鉴权和SSE流式输出\n- `service/session/session.go` — 核心业务层，管理会话生命周期，实现同步/流式AI消息发送，对接AI管理器和数据库\n- `dao/session/session.go` — 数据访问层，封装MySQL会话数据的增删改查操作\n\n**依赖组件**: GopherAI/common/mysql, GopherAI/common/aihelper, GopherAI/common/code, GopherAI/model, github.com/gin-gonic/gin, github.com/google/uuid",
+      "files": [
+        "dao/session/session.go",
+        "service/session/session.go",
+        "controller/session/session.go"
+      ]
+    },
+    "comm-2ed18cab-call-L0-0007": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "API统一响应格式组件",
+      "summary": "## 功能概要\n该组件负责定义和实现统一的API响应格式规范，是后端控制器层的核心基础设施。组件由两个文件组成：\n\n1. **common/code/code.go**：定义响应状态码体系，包含状态码常量及其对应的中文提示信息映射表。提供Code()和Msg()方法，分别用于获取状态码的数值和对应的中文描述。该模块无外部依赖，纯粹作为状态码定义层。\n\n2. **controller/common.go**：定义标准API响应结构体Response（包含状态码Code和消息Msg字段），并通过调用common/code模块的状态码数据，提供CodeOf()方法用于动态设置状态码与提示，以及Success()方法用于快捷返回成功状态的响应。该模块依赖common/code模块获取状态码定义。\n\n调用关系为：controller/common.go 调用 common/code/code.go 中的状态码定义，形成从控制器到状态码定义的单向依赖。这种设计使得所有API响应都遵循统一的格式规范，便于前端解析和错误处理。\n\n**架构角色**: 响应格式标准化\n\n**关键文件**:\n- `common/code/code.go` — 定义响应状态码常量及中文提示映射，提供Code()和Msg()方法获取状态码数值和描述\n- `controller/common.go` — 定义Response响应结构体，提供CodeOf()和Success()方法构建统一格式的API响应",
+      "files": [
+        "common/code/code.go",
+        "controller/common.go"
+      ]
+    }
+  },
+  "edges": [
+    [
+      "46aa0d4905b597f9",
+      "0c4c1e2bbd4eb9f3"
+    ],
+    [
+      "ed8b2a831aba4820",
+      "0c4c1e2bbd4eb9f3"
+    ],
+    [
+      "a999e4a10fbfe7fa",
+      "12b2d478bb9b8d09"
+    ],
+    [
+      "19bbdc525c76c93b",
+      "12b2d478bb9b8d09"
+    ],
+    [
+      "9b0f45cb7113d5ea",
+      "1567557a5e75ab93"
+    ],
+    [
+      "4b991255d95925f3",
+      "20dfd1904890dbef"
+    ],
+    [
+      "c20829ba1a07c804",
+      "20dfd1904890dbef"
+    ],
+    [
+      "3d2b62d4f386a720",
+      "212aaf0821fe2f62"
+    ],
+    [
+      "320687e8b67245a1",
+      "25961f6f4a83c7de"
+    ],
+    [
+      "e29dc5b4219cdb5e",
+      "259a1c698435a7d8"
+    ],
+    [
+      "e29dc5b4219cdb5e",
+      "267443c8086b887c"
+    ],
+    [
+      "82ffb6495d8ab120",
+      "2729cc78517db4b9"
+    ],
+    [
+      "fdf0ef2333542df6",
+      "2729cc78517db4b9"
+    ],
+    [
+      "46aa0d4905b597f9",
+      "29b7b5fe0862b33c"
+    ],
+    [
+      "28bcfa9fc6a388c1",
+      "2e9fc1ed88b837f6"
+    ],
+    [
+      "28ae1315b434f1c6",
+      "320687e8b67245a1"
+    ],
+    [
+      "e2bfec24996943e2",
+      "320687e8b67245a1"
+    ],
+    [
+      "5ea65f29db541117",
+      "33362b909ed9408c"
+    ],
+    [
+      "12b2d478bb9b8d09",
+      "3c4949aeab42282a"
+    ],
+    [
+      "c20829ba1a07c804",
+      "3c4949aeab42282a"
+    ],
+    [
+      "ecc03480d5e51a7e",
+      "3c4949aeab42282a"
+    ],
+    [
+      "9dd5ed5e33e7e74c",
+      "3d2b62d4f386a720"
+    ],
+    [
+      "71cfa6b940b30cd0",
+      "3d50eb2ed626bcfa"
+    ],
+    [
+      "e29dc5b4219cdb5e",
+      "40980a1c22b4e18e"
+    ],
+    [
+      "29b7b5fe0862b33c",
+      "4255bfd9189c3e20"
+    ],
+    [
+      "82d1b91f3d035985",
+      "4255bfd9189c3e20"
+    ],
+    [
+      "4c90bf030492cd65",
+      "46aa0d4905b597f9"
+    ],
+    [
+      "9b0f45cb7113d5ea",
+      "4b991255d95925f3"
+    ],
+    [
+      "3d50eb2ed626bcfa",
+      "4bba318860a10ef2"
+    ],
+    [
+      "2f56c6af7f4ea3be",
+      "4c0bd3457b379f04"
+    ],
+    [
+      "e29dc5b4219cdb5e",
+      "4d68bce03fd54c26"
+    ],
+    [
+      "bdd927bd0cbbc855",
+      "4e18e7037522b5e2"
+    ],
+    [
+      "e29dc5b4219cdb5e",
+      "54e58fccdc93b6e0"
+    ],
+    [
+      "61fa37d176de8673",
+      "5af9f51f724db97b"
+    ],
+    [
+      "8dbf9a5466a87288",
+      "5ea65f29db541117"
+    ],
+    [
+      "4b991255d95925f3",
+      "5ea65f29db541117"
+    ],
+    [
+      "12b2d478bb9b8d09",
+      "5ea65f29db541117"
+    ],
+    [
+      "d669c116e65fd006",
+      "5ea65f29db541117"
+    ],
+    [
+      "e6f759b5a25db55e",
+      "5ea65f29db541117"
+    ],
+    [
+      "857fbbb2f8bc6c93",
+      "5ea65f29db541117"
+    ],
+    [
+      "b15711d7d9cef435",
+      "5ea65f29db541117"
+    ],
+    [
+      "2e9fc1ed88b837f6",
+      "5ea65f29db541117"
+    ],
+    [
+      "d1a49a36ad87b8fa",
+      "5ea65f29db541117"
+    ],
+    [
+      "9dd5ed5e33e7e74c",
+      "5ea65f29db541117"
+    ],
+    [
+      "9fb63ff98ec945b3",
+      "5ea65f29db541117"
+    ],
+    [
+      "b1147589b05f4068",
+      "5ea65f29db541117"
+    ],
+    [
+      "0c4c1e2bbd4eb9f3",
+      "5ea65f29db541117"
+    ],
+    [
+      "9b0f45cb7113d5ea",
+      "5ea65f29db541117"
+    ],
+    [
+      "634de1b70f4f73b2",
+      "623818e2c37a9bf9"
+    ],
+    [
+      "82d1b91f3d035985",
+      "634de1b70f4f73b2"
+    ],
+    [
+      "b15711d7d9cef435",
+      "63d4004ee969e9bd"
+    ],
+    [
+      "e05345ef35884f24",
+      "6673e3bc643b799c"
+    ],
+    [
+      "46aa0d4905b597f9",
+      "6f12dd3f4682df03"
+    ],
+    [
+      "f7e340dd609ada56",
+      "6f74dbe2c538e91b"
+    ],
+    [
+      "b8e6a60e404a747a",
+      "7047434b20e67931"
+    ],
+    [
+      "034f05dc7589bfe1",
+      "716270f3d9a91cfd"
+    ],
+    [
+      "fa72894f052aac8f",
+      "716270f3d9a91cfd"
+    ],
+    [
+      "faa0138699136262",
+      "716270f3d9a91cfd"
+    ],
+    [
+      "28bcfa9fc6a388c1",
+      "7649e46f8c2e9757"
+    ],
+    [
+      "a999e4a10fbfe7fa",
+      "789504ff3c8e0055"
+    ],
+    [
+      "19bbdc525c76c93b",
+      "789504ff3c8e0055"
+    ],
+    [
+      "9b0f45cb7113d5ea",
+      "7d7646b65835c87a"
+    ],
+    [
+      "fe419b2371239278",
+      "820a3d3661283b83"
+    ],
+    [
+      "9a3ee04c6f1ebecf",
+      "82d1b91f3d035985"
+    ],
+    [
+      "c19a3571205039d0",
+      "82ffb6495d8ab120"
+    ],
+    [
+      "9b0f45cb7113d5ea",
+      "84371a3f9de56722"
+    ],
+    [
+      "3d50eb2ed626bcfa",
+      "857fbbb2f8bc6c93"
+    ],
+    [
+      "dbccc8a7d7506c7c",
+      "8b479208a5a79c9d"
+    ],
+    [
+      "cf8825e5db706297",
+      "8d4ce89e5e1c7f0a"
+    ],
+    [
+      "28bcfa9fc6a388c1",
+      "903ee08517b10db6"
+    ],
+    [
+      "760567aa16a5b1df",
+      "9b0f45cb7113d5ea"
+    ],
+    [
+      "29b7b5fe0862b33c",
+      "9f5407618cfacc91"
+    ],
+    [
+      "82d1b91f3d035985",
+      "9fb63ff98ec945b3"
+    ],
+    [
+      "46aa0d4905b597f9",
+      "9fb63ff98ec945b3"
+    ],
+    [
+      "2f56c6af7f4ea3be",
+      "a3fb567835816f50"
+    ],
+    [
+      "b24f4900f3db6150",
+      "a3fb567835816f50"
+    ],
+    [
+      "9dd5ed5e33e7e74c",
+      "acf475379e7aece4"
+    ],
+    [
+      "267443c8086b887c",
+      "b1147589b05f4068"
+    ],
+    [
+      "9dd5ed5e33e7e74c",
+      "b15711d7d9cef435"
+    ],
+    [
+      "6f12dd3f4682df03",
+      "c7d85ec1ac267fd2"
+    ],
+    [
+      "46aa0d4905b597f9",
+      "c7f819eb9ef84022"
+    ],
+    [
+      "ed8b2a831aba4820",
+      "c7f819eb9ef84022"
+    ],
+    [
+      "8b479208a5a79c9d",
+      "c8eda34a20fdc5af"
+    ],
+    [
+      "28bcfa9fc6a388c1",
+      "d1a49a36ad87b8fa"
+    ],
+    [
+      "46742cb882498885",
+      "d3c6688404c0411a"
+    ],
+    [
+      "9c9507638e073607",
+      "d3c6688404c0411a"
+    ],
+    [
+      "f66cc9431a1407b3",
+      "d3d74e4eaca0c90f"
+    ],
+    [
+      "7ef6cf8e5a03f83e",
+      "dbccc8a7d7506c7c"
+    ],
+    [
+      "9b0f45cb7113d5ea",
+      "eae0f9a4e46f9fab"
+    ],
+    [
+      "48dbe865bf161280",
+      "ed8b2a831aba4820"
+    ],
+    [
+      "ec7d07c01ee63715",
+      "eee7a2299537c31c"
+    ],
+    [
+      "f66cc9431a1407b3",
+      "f66cc9431a1407b3"
+    ],
+    [
+      "4b779ce4d77f37dd",
+      "f66cc9431a1407b3"
+    ],
+    [
+      "482b7fc26aa07ff8",
+      "faa0138699136262"
+    ],
+    [
+      "d2b6ca8155e628ac",
+      "fbedb567b2f349d9"
+    ],
+    [
+      "034f05dc7589bfe1",
+      "fdf0ef2333542df6"
+    ],
+    [
+      "fa72894f052aac8f",
+      "fdf0ef2333542df6"
+    ]
+  ],
+  "symToFile": {
+    "034f05dc7589bfe1": "controller/session/session.go",
+    "0c4c1e2bbd4eb9f3": "service/user/user.go",
+    "12b2d478bb9b8d09": "common/rag/rag.go",
+    "1567557a5e75ab93": "utils/utils.go",
+    "19bbdc525c76c93b": "common/aihelper/model.go",
+    "20dfd1904890dbef": "common/redis/key.go",
+    "212aaf0821fe2f62": "dao/message/message.go",
+    "25961f6f4a83c7de": "common/tts/tts.go",
+    "259a1c698435a7d8": "router/File.go",
+    "267443c8086b887c": "middleware/jwt/jwt.go",
+    "2729cc78517db4b9": "dao/session/session.go",
+    "28ae1315b434f1c6": "controller/tts/tts.go",
+    "28bcfa9fc6a388c1": "common/aihelper/factory.go",
+    "29b7b5fe0862b33c": "dao/user/user.go",
+    "2e9fc1ed88b837f6": "common/aihelper/model.go",
+    "2f56c6af7f4ea3be": "common/aihelper/aihelper.go",
+    "320687e8b67245a1": "controller/tts/tts.go",
+    "33362b909ed9408c": "config/config.go",
+    "3c4949aeab42282a": "common/redis/key.go",
+    "3d2b62d4f386a720": "main.go",
+    "3d50eb2ed626bcfa": "common/rabbitmq/rabbitmq.go",
+    "40980a1c22b4e18e": "router/user.go",
+    "4255bfd9189c3e20": "utils/utils.go",
+    "46742cb882498885": "common/redis/redis.go",
+    "46aa0d4905b597f9": "service/user/user.go",
+    "482b7fc26aa07ff8": "controller/session/session.go",
+    "48dbe865bf161280": "controller/user/user.go",
+    "4b779ce4d77f37dd": "common/mcp/server/server.go",
+    "4b991255d95925f3": "common/rag/rag.go",
+    "4bba318860a10ef2": "common/rabbitmq/rabbitmq.go",
+    "4c0bd3457b379f04": "utils/utils.go",
+    "4c90bf030492cd65": "controller/user/user.go",
+    "4d68bce03fd54c26": "router/AI.go",
+    "4e18e7037522b5e2": "common/aihelper/manager.go",
+    "54e58fccdc93b6e0": "router/Image.go",
+    "5af9f51f724db97b": "service/session/session.go",
+    "5ea65f29db541117": "config/config.go",
+    "61fa37d176de8673": "controller/session/session.go",
+    "623818e2c37a9bf9": "common/mysql/mysql.go",
+    "634de1b70f4f73b2": "dao/user/user.go",
+    "63d4004ee969e9bd": "common/mysql/mysql.go",
+    "6673e3bc643b799c": "common/mcp/client/client.go",
+    "6f12dd3f4682df03": "dao/user/user.go",
+    "6f74dbe2c538e91b": "common/aihelper/aihelper.go",
+    "7047434b20e67931": "common/aihelper/factory.go",
+    "716270f3d9a91cfd": "service/session/session.go",
+    "71cfa6b940b30cd0": "common/rabbitmq/init.go",
+    "760567aa16a5b1df": "controller/file/file.go",
+    "7649e46f8c2e9757": "common/aihelper/model.go",
+    "789504ff3c8e0055": "common/rag/rag.go",
+    "7d7646b65835c87a": "utils/utils.go",
+    "7ef6cf8e5a03f83e": "controller/image/image.go",
+    "820a3d3661283b83": "dao/message/message.go",
+    "82d1b91f3d035985": "service/user/user.go",
+    "82ffb6495d8ab120": "service/session/session.go",
+    "84371a3f9de56722": "common/rag/rag.go",
+    "857fbbb2f8bc6c93": "common/rabbitmq/rabbitmq.go",
+    "8b479208a5a79c9d": "common/image/image_recognizer.go",
+    "8d4ce89e5e1c7f0a": "service/session/session.go",
+    "8dbf9a5466a87288": "common/tts/tts.go",
+    "903ee08517b10db6": "common/aihelper/model.go",
+    "9a3ee04c6f1ebecf": "controller/user/user.go",
+    "9b0f45cb7113d5ea": "service/file/file.go",
+    "9c9507638e073607": "common/redis/redis.go",
+    "9dd5ed5e33e7e74c": "main.go",
+    "9f5407618cfacc91": "common/mysql/mysql.go",
+    "9fb63ff98ec945b3": "utils/myjwt/jwt.go",
+    "a3fb567835816f50": "utils/utils.go",
+    "a999e4a10fbfe7fa": "common/aihelper/model.go",
+    "acf475379e7aece4": "main.go",
+    "b1147589b05f4068": "utils/myjwt/jwt.go",
+    "b15711d7d9cef435": "common/mysql/mysql.go",
+    "b24f4900f3db6150": "common/aihelper/aihelper.go",
+    "b8e6a60e404a747a": "common/aihelper/manager.go",
+    "bdd927bd0cbbc855": "common/aihelper/manager.go",
+    "c19a3571205039d0": "controller/session/session.go",
+    "c20829ba1a07c804": "common/redis/redis.go",
+    "c7d85ec1ac267fd2": "common/mysql/mysql.go",
+    "c7f819eb9ef84022": "utils/utils.go",
+    "c8eda34a20fdc5af": "common/image/image_recognizer.go",
+    "cf8825e5db706297": "controller/session/session.go",
+    "d1a49a36ad87b8fa": "common/aihelper/model.go",
+    "d2b6ca8155e628ac": "controller/common.go",
+    "d3c6688404c0411a": "common/redis/key.go",
+    "d3d74e4eaca0c90f": "common/mcp/server/server.go",
+    "d669c116e65fd006": "common/email/email.go",
+    "dbccc8a7d7506c7c": "service/image/image.go",
+    "e05345ef35884f24": "common/aihelper/model.go",
+    "e29dc5b4219cdb5e": "router/router.go",
+    "e2bfec24996943e2": "controller/tts/tts.go",
+    "e6f759b5a25db55e": "common/redis/redis.go",
+    "eae0f9a4e46f9fab": "utils/utils.go",
+    "ec7d07c01ee63715": "controller/session/session.go",
+    "ecc03480d5e51a7e": "common/redis/redis.go",
+    "ed8b2a831aba4820": "service/user/user.go",
+    "eee7a2299537c31c": "service/session/session.go",
+    "f66cc9431a1407b3": "common/mcp/server/server.go",
+    "f7e340dd609ada56": "common/aihelper/factory.go",
+    "fa72894f052aac8f": "service/session/session.go",
+    "faa0138699136262": "service/session/session.go",
+    "fbedb567b2f349d9": "common/code/code.go",
+    "fdf0ef2333542df6": "service/session/session.go",
+    "fe419b2371239278": "common/rabbitmq/meesage.go"
+  }
+}

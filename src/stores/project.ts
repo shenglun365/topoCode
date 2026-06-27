@@ -190,7 +190,7 @@ export const useProjectStore = defineStore('project', () => {
       }
     }
     // 默认打开任务列表 tab
-    openTaskListTab()
+    await openTaskListTab()
   }
 
   function deselectProject() {
@@ -388,7 +388,7 @@ export const useProjectStore = defineStore('project', () => {
     funcGroup.setActiveTab('home', tabId)
   }
 
-  function openTaskListTab() {
+  async function openTaskListTab() {
     const pid = funcGroup.currentProjectId;
     // 若已存在 taskList tab，直接激活（在 home 功能组中查找）
     const existing = funcGroup.context.home.tabs.find(tab => tab.kind === 'taskList')
@@ -407,7 +407,7 @@ export const useProjectStore = defineStore('project', () => {
     // 加载任务数据
     if (pid) {
       const analysisStore = useAnalysisStore()
-      analysisStore.loadTasks(pid)
+      await analysisStore.loadTasks(pid)
     }
   }
 

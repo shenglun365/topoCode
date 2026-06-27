@@ -286,7 +286,11 @@ function formatRunStatusColor(status: string): string {
                       :style="{ width: `${task.progress}%` }"
                     />
                   </div>
-                  {{ task.progress }}% ({{ task.current || 0 }}/{{ task.total || 0 }})
+                  {{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%
+                  ({{ task.current || 0 }}/{{ task.total || 0 }})
+                  <span v-if="task.eta" style="margin-left:6px; opacity:0.7; font-size:10px;">
+                    剩余 {{ task.eta }}
+                  </span>
                 </span>
               </div>
               <div

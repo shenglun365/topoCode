@@ -1,0 +1,524 @@
+{
+  "nodes": [
+    {
+      "id": "ext-common/aihelper/model.go",
+      "label": "common/aihelper/model.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0001",
+      "label": "通用工具与基础设施组件",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-common/rag/rag.go",
+      "label": "common/rag/rag.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/image/image_recognizer.go",
+      "label": "common/image/image_recognizer.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0002",
+      "label": "ONNX图像识别组件",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-common/mcp/client/client.go",
+      "label": "common/mcp/client/client.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/aihelper/manager.go",
+      "label": "common/aihelper/manager.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0003",
+      "label": "AI助手管理与文件上传模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-common/aihelper/aihelper.go",
+      "label": "common/aihelper/aihelper.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-controller/session/session.go",
+      "label": "controller/session/session.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0006",
+      "label": "会话管理模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-utils/utils.go",
+      "label": "utils/utils.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-service/session/session.go",
+      "label": "service/session/session.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/redis/redis.go",
+      "label": "common/redis/redis.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/rabbitmq/rabbitmq.go",
+      "label": "common/rabbitmq/rabbitmq.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/mysql/mysql.go",
+      "label": "common/mysql/mysql.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0004",
+      "label": "核心基础设施与数据访问层",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-dao/message/message.go",
+      "label": "dao/message/message.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/aihelper/factory.go",
+      "label": "common/aihelper/factory.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-dao/session/session.go",
+      "label": "dao/session/session.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/tts/tts.go",
+      "label": "common/tts/tts.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/redis/key.go",
+      "label": "common/redis/key.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-main.go",
+      "label": "main.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-controller/user/user.go",
+      "label": "controller/user/user.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0005",
+      "label": "用户认证与JWT令牌管理",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-service/user/user.go",
+      "label": "service/user/user.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-config/config.go",
+      "label": "config/config.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/rabbitmq/init.go",
+      "label": "common/rabbitmq/init.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/rabbitmq/meesage.go",
+      "label": "common/rabbitmq/meesage.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-controller/tts/tts.go",
+      "label": "controller/tts/tts.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-controller/common.go",
+      "label": "controller/common.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0007",
+      "label": "API统一响应格式组件",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-utils/myjwt/jwt.go",
+      "label": "utils/myjwt/jwt.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-user.go",
+      "label": "user.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/code/code.go",
+      "label": "common/code/code.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-common/email/email.go",
+      "label": "common/email/email.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-redis.go",
+      "label": "redis.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-manager.go",
+      "label": "manager.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-middleware/jwt/jwt.go",
+      "label": "middleware/jwt/jwt.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-controller/image/image.go",
+      "label": "controller/image/image.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-controller/file/file.go",
+      "label": "controller/file/file.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-router/AI.go",
+      "label": "router/AI.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-2ed18cab-call-L0-0000",
+      "label": "API路由注册中心",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-router/Image.go",
+      "label": "router/Image.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-router/user.go",
+      "label": "router/user.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-router/File.go",
+      "label": "router/File.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-router/router.go",
+      "label": "router/router.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-service/file/file.go",
+      "label": "service/file/file.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-service/image/image.go",
+      "label": "service/image/image.go",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-session.go",
+      "label": "session.go",
+      "isExternal": true,
+      "commLv": "L0"
+    }
+  ],
+  "edges": [
+    {
+      "id": "ext-common/aihelper/model.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/aihelper/model.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/rag/rag.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/rag/rag.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/image/image_recognizer.go->comm-2ed18cab-call-L0-0002",
+      "source": "ext-common/image/image_recognizer.go",
+      "target": "comm-2ed18cab-call-L0-0002"
+    },
+    {
+      "id": "ext-common/mcp/client/client.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/mcp/client/client.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/aihelper/manager.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-common/aihelper/manager.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-common/aihelper/aihelper.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-common/aihelper/aihelper.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-controller/session/session.go->comm-2ed18cab-call-L0-0006",
+      "source": "ext-controller/session/session.go",
+      "target": "comm-2ed18cab-call-L0-0006"
+    },
+    {
+      "id": "ext-utils/utils.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-utils/utils.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-service/session/session.go->comm-2ed18cab-call-L0-0006",
+      "source": "ext-service/session/session.go",
+      "target": "comm-2ed18cab-call-L0-0006"
+    },
+    {
+      "id": "ext-common/redis/redis.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/redis/redis.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/rabbitmq/rabbitmq.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/rabbitmq/rabbitmq.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/mysql/mysql.go->comm-2ed18cab-call-L0-0004",
+      "source": "ext-common/mysql/mysql.go",
+      "target": "comm-2ed18cab-call-L0-0004"
+    },
+    {
+      "id": "ext-dao/message/message.go->comm-2ed18cab-call-L0-0004",
+      "source": "ext-dao/message/message.go",
+      "target": "comm-2ed18cab-call-L0-0004"
+    },
+    {
+      "id": "ext-common/aihelper/factory.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-common/aihelper/factory.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-dao/session/session.go->comm-2ed18cab-call-L0-0006",
+      "source": "ext-dao/session/session.go",
+      "target": "comm-2ed18cab-call-L0-0006"
+    },
+    {
+      "id": "ext-common/tts/tts.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/tts/tts.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/redis/key.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/redis/key.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-main.go->comm-2ed18cab-call-L0-0004",
+      "source": "ext-main.go",
+      "target": "comm-2ed18cab-call-L0-0004"
+    },
+    {
+      "id": "ext-controller/user/user.go->comm-2ed18cab-call-L0-0005",
+      "source": "ext-controller/user/user.go",
+      "target": "comm-2ed18cab-call-L0-0005"
+    },
+    {
+      "id": "ext-service/user/user.go->comm-2ed18cab-call-L0-0005",
+      "source": "ext-service/user/user.go",
+      "target": "comm-2ed18cab-call-L0-0005"
+    },
+    {
+      "id": "ext-config/config.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-config/config.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/rabbitmq/init.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/rabbitmq/init.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-common/rabbitmq/meesage.go->comm-2ed18cab-call-L0-0004",
+      "source": "ext-common/rabbitmq/meesage.go",
+      "target": "comm-2ed18cab-call-L0-0004"
+    },
+    {
+      "id": "ext-controller/tts/tts.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-controller/tts/tts.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-controller/common.go->comm-2ed18cab-call-L0-0007",
+      "source": "ext-controller/common.go",
+      "target": "comm-2ed18cab-call-L0-0007"
+    },
+    {
+      "id": "ext-utils/myjwt/jwt.go->comm-2ed18cab-call-L0-0005",
+      "source": "ext-utils/myjwt/jwt.go",
+      "target": "comm-2ed18cab-call-L0-0005"
+    },
+    {
+      "id": "ext-user.go->comm-2ed18cab-call-L0-0004",
+      "source": "ext-user.go",
+      "target": "comm-2ed18cab-call-L0-0004"
+    },
+    {
+      "id": "ext-common/code/code.go->comm-2ed18cab-call-L0-0007",
+      "source": "ext-common/code/code.go",
+      "target": "comm-2ed18cab-call-L0-0007"
+    },
+    {
+      "id": "ext-common/email/email.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-common/email/email.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-redis.go->comm-2ed18cab-call-L0-0001",
+      "source": "ext-redis.go",
+      "target": "comm-2ed18cab-call-L0-0001"
+    },
+    {
+      "id": "ext-manager.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-manager.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-middleware/jwt/jwt.go->comm-2ed18cab-call-L0-0005",
+      "source": "ext-middleware/jwt/jwt.go",
+      "target": "comm-2ed18cab-call-L0-0005"
+    },
+    {
+      "id": "ext-controller/image/image.go->comm-2ed18cab-call-L0-0002",
+      "source": "ext-controller/image/image.go",
+      "target": "comm-2ed18cab-call-L0-0002"
+    },
+    {
+      "id": "ext-controller/file/file.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-controller/file/file.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-router/AI.go->comm-2ed18cab-call-L0-0000",
+      "source": "ext-router/AI.go",
+      "target": "comm-2ed18cab-call-L0-0000"
+    },
+    {
+      "id": "ext-router/Image.go->comm-2ed18cab-call-L0-0000",
+      "source": "ext-router/Image.go",
+      "target": "comm-2ed18cab-call-L0-0000"
+    },
+    {
+      "id": "ext-router/user.go->comm-2ed18cab-call-L0-0000",
+      "source": "ext-router/user.go",
+      "target": "comm-2ed18cab-call-L0-0000"
+    },
+    {
+      "id": "ext-router/File.go->comm-2ed18cab-call-L0-0000",
+      "source": "ext-router/File.go",
+      "target": "comm-2ed18cab-call-L0-0000"
+    },
+    {
+      "id": "ext-router/router.go->comm-2ed18cab-call-L0-0000",
+      "source": "ext-router/router.go",
+      "target": "comm-2ed18cab-call-L0-0000"
+    },
+    {
+      "id": "ext-service/file/file.go->comm-2ed18cab-call-L0-0003",
+      "source": "ext-service/file/file.go",
+      "target": "comm-2ed18cab-call-L0-0003"
+    },
+    {
+      "id": "ext-service/image/image.go->comm-2ed18cab-call-L0-0002",
+      "source": "ext-service/image/image.go",
+      "target": "comm-2ed18cab-call-L0-0002"
+    },
+    {
+      "id": "ext-session.go->comm-2ed18cab-call-L0-0006",
+      "source": "ext-session.go",
+      "target": "comm-2ed18cab-call-L0-0006"
+    }
+  ]
+}

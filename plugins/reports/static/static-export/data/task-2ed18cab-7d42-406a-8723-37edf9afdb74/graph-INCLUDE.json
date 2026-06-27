@@ -1,0 +1,505 @@
+{
+  "et": "INCLUDE",
+  "projectRoot": "/home/cuser/soft/OhMyGo-main/",
+  "communities": {
+    "comm-2ed18cab-incl-L0-0000": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "HTTP路由与控制器层",
+      "summary": "## 功能概要\n该组件是OhMyGo AI应用平台的Web API层，采用典型的MVC架构中的Controller+Router分层设计，负责处理所有HTTP请求的接收、参数解析、业务逻辑调用和标准化响应返回。\n\n**核心架构设计**:\n1. **路由层 (router/)**: 通过router.go的InitRouter()函数统一初始化Gin引擎，注册/api/v1版本前缀，并按功能模块划分路由组：用户路由(/user)、AI路由(/AI)、图片路由(/image)、文件路由(/file)。其中AI、image、file路由组挂载了JWT鉴权中间件，确保需要认证的接口安全访问。\n\n2. **控制器层 (controller/)**: 包含四个业务控制器模块：\n   - session控制器：处理AI对话会话管理，支持普通消息发送、流式SSE输出、历史记录查询和用户会话列表获取\n   - user控制器：处理用户注册、登录及验证码生成，集成安全校验机制\n   - tts控制器：提供TTS语音合成任务的创建与状态轮询接口，支持异步语音生成\n   - file控制器：处理RAG文档上传，校验用户身份并委托服务层完成文件存储\n\n3. **公共基础设施**:\n   - common/code：定义统一的状态码常量和中文提示映射，所有控制器通过Code()和Msg()方法获取标准化响应信息\n   - controller/common：提供Response结构体和CodeOf()、Success()便捷方法，确保API响应格式一致性\n   - middleware/jwt：JWT身份验证中间件，解析并校验请求中的Token，为受保护路由提供安全屏障\n\n**依赖链路**:\n- 各控制器均依赖common/code获取状态码，通过service层调用业务逻辑\n- session控制器同时依赖tts控制器和AI路由\n- tts控制器依赖user控制器和JWT中间件\n- file控制器依赖tts控制器和File路由\n- 整体形成以common/code为核心的辐射状依赖结构\n\n**技术特点**:\n- 基于Gin框架构建RESTful API\n- 支持SSE流式响应实现AI对话实时输出\n- JWT无状态鉴权保障接口安全\n- 统一的Response封装确保API响应格式规范\n\n**架构角色**: Web API层\n\n**关键文件**:\n- `router/router.go` — 全局路由初始化入口，注册/api/v1版本前缀，按功能划分用户、AI、图片、文件路由组，挂载JWT鉴权中间件\n- `router/AI.go` — AI功能路由定义，包含会话管理、聊天发送、流式输出、TTS语音合成等接口路由注册\n- `controller/session/session.go` — 会话管理控制器，处理AI对话的会话创建、消息发送（含流式SSE）、历史记录查询等业务\n- `controller/user/user.go` — 用户认证控制器，提供登录、注册及验证码生成接口，集成安全校验机制\n- `controller/tts/tts.go` — TTS语音合成控制器，提供语音任务创建和状态查询接口，对接底层TTS服务\n- `controller/file/file.go` — 文件上传控制器，处理RAG文档上传请求，校验用户身份并委托服务层完成文件存储\n- `common/code/code.go` — 统一状态码定义模块，提供标准化响应状态码常量和中文提示映射，作为所有控制器的基础依赖\n- `middleware/jwt/jwt.go` — JWT鉴权中间件，解析请求Token并验证用户身份，保护需要认证的API接口\n\n**依赖组件**: GopherAI/service/session, GopherAI/service/user, GopherAI/service/file, GopherAI/model, GopherAI/common/tts, github.com/gin-gonic/gin, JWT认证服务",
+      "files": [
+        "common/code/code.go",
+        "router/File.go",
+        "controller/session/session.go",
+        "router/user.go",
+        "controller/user/user.go",
+        "controller/common.go",
+        "controller/tts/tts.go",
+        "router/AI.go",
+        "router/router.go",
+        "controller/file/file.go",
+        "middleware/jwt/jwt.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L0-0001": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "图片识别组件",
+      "summary": "## 功能概要\n该组件是一个基于ONNX模型的图像分类识别服务，实现了从HTTP请求接收图片到模型推理返回分类结果的完整链路。组件采用经典的三层架构设计：\n\n1. **基础设施层（common/image）**：`image_recognizer.go`封装了ONNX推理引擎的核心能力，提供`ImageRecognizer`结构体及`PredictFromImage`、`PredictFromBuffer`、`PredictFromFile`等方法。底层依赖`github.com/yalue/onnxruntime_go`进行模型推理，使用`golang.org/x/image/draw`处理图像预处理（缩放、归一化、NCHW格式转换）。内置线程安全的初始化机制和资源清理（`Close`方法）。\n\n2. **服务层（service/image）**：`image.go`实现业务逻辑，提供`RecognizeImage`函数。负责加载MobileNetV2 ONNX模型及标签文件，接收multipart格式的图片文件头，将文件内容读入缓冲区后调用common层的识别器进行预测，最终返回分类结果字符串或错误信息。该层是业务逻辑与底层推理能力的桥梁。\n\n3. **控制器层（controller/image）**：`image.go`定义`RecognizeImageResponse`响应结构体和`RecognizeImage`处理函数。作为HTTP接口入口，负责解析Gin框架的上传文件请求，调用service层服务获取识别结果，格式化后返回JSON响应。依赖`GopherAI/common/code`提供统一响应码。\n\n4. **路由层（router）**：`Image.go`提供`ImageRouter`路由注册函数，将POST路径`/recognize`绑定到控制器的`RecognizeImage`处理函数，完成HTTP路由配置。\n\n**数据流**：客户端POST上传图片 → router注册路由匹配 → controller解析请求 → service加载模型并调用common识别器 → 返回分类标签。\n\n**外部依赖**：gin（HTTP框架）、onnxruntime_go（ONNX推理）、golang.org/x/image/draw（图像处理）。\n\n该组件质量分较低（0.0381），可能由于代码注释较少、测试覆盖不足或文档缺失。\n\n**架构角色**: 图像分类服务\n\n**关键文件**:\n- `common/image/image_recognizer.go` — ONNX推理引擎封装层，提供ImageRecognizer结构体及图像预测方法，支持文件/缓冲区/图像对象输入，自动处理图像预处理（缩放、归一化、NCHW格式转换）\n- `service/image/image.go` — 业务逻辑层，实现RecognizeImage函数，负责加载MobileNetV2模型、处理multipart文件、调用识别器并返回分类结果\n- `controller/image/image.go` — HTTP控制器层，定义RecognizeImageResponse响应结构和RecognizeImage处理函数，解析上传请求并返回JSON结果\n- `router/Image.go` — 路由注册层，提供ImageRouter函数将POST /recognize路径绑定到图片识别控制器\n\n**依赖组件**: github.com/gin-gonic/gin, github.com/yalue/onnxruntime_go, golang.org/x/image/draw",
+      "files": [
+        "service/image/image.go",
+        "controller/image/image.go",
+        "common/image/image_recognizer.go",
+        "router/Image.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L0-0002": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "AI对话核心业务层",
+      "summary": "## 功能概要\n该组件是OhMyGo AI应用平台的**核心业务逻辑层**，负责AI对话的完整生命周期管理，涵盖会话创建、消息收发、历史查询、流式响应生成等关键功能。组件采用分层架构设计，自顶向下分为Service业务层、DAO数据访问层、AI Helper核心逻辑层以及基础设施支撑层。\n\n**Service层（service/session/）**：提供会话管理的业务编排，包括按用户查询会话列表、创建会话并发送消息、流式消息传输（SSE）、对话历史获取等。通过封装AIHelper实现对底层AI模型的统一调用，并集成HTTP SSE流式输出能力。\n\n**DAO层（dao/）**：包含三个子模块——session（会话CRUD）、message（消息增查）、user（用户校验与注册），均基于GORM操作MySQL数据库，实现数据的持久化管理。其中消息模块还支持按会话ID批量查询。\n\n**AI Helper层（common/aihelper/）**：组件的核心枢纽，维护会话消息历史与并发安全，提供同步响应生成与流式响应生成两种模式。通过回调机制灵活处理消息持久化（默认异步推入RabbitMQ）。model.go定义了统一的AIModel接口，并实现了OpenAI、Ollama、RAG增强和MCP协议四种模型后端。\n\n**基础设施层**：\n- mysql.go：MySQL连接池初始化、表结构自动迁移、用户查询\n- rabbitmq.go：消息队列连接管理、发布/消费封装\n- meesage.go：消息队列参数序列化与异步消息入库消费\n- utils.go：随机数、UUID、MD5加密、消息格式转换等通用工具\n\n各层通过INCLUDE边关系紧密耦合，model.go作为数据模型中心被几乎所有模块引用，aihelper.go作为业务核心协调各层交互，形成以AI对话为中心的完整后端服务链路。\n\n**架构角色**: AI对话业务核心\n\n**关键文件**:\n- `common/aihelper/aihelper.go` — AI助手核心逻辑模块，维护会话消息历史与并发安全，支持同步/流式响应生成，通过回调机制处理消息持久化\n- `common/aihelper/model.go` — 定义统一AIModel接口及OpenAI/Ollama/RAG/MCP四种模型实现，是AI能力抽象的核心\n- `service/session/session.go` — 会话管理业务逻辑层，提供创建会话、发送消息、流式响应、获取历史等核心业务接口\n- `dao/session/session.go` — 会话数据持久化层，提供按用户名查询会话列表、创建会话、按ID查询等数据库操作\n- `dao/message/message.go` — 消息数据持久化层，支持按会话ID查询消息、创建消息记录、批量查询及全量消息获取\n- `dao/user/user.go` — 用户数据持久化层，提供用户存在性校验、邮箱校验及注册功能，密码MD5加密后写入\n- `common/mysql/mysql.go` — MySQL连接管理模块，负责初始化连接池、自动迁移表结构（User/Session/Message），提供用户查询接口\n- `common/rabbitmq/rabbitmq.go` — RabbitMQ消息队列封装，提供连接管理、队列声明、消息发布与消费功能\n- `common/rabbitmq/meesage.go` — 消息队列消息处理模块，定义消息结构体，处理异步消息的反序列化与数据库持久化\n- `utils/utils.go` — 通用工具模块，提供UUID生成、MD5加密、随机数、AI消息格式转换、文件清理等辅助功能\n\n**依赖组件**: GORM (MySQL ORM), RabbitMQ AMQP, CloudWeGo Eino框架, OpenAI API, Ollama, MCP-Go",
+      "files": [
+        "common/rabbitmq/meesage.go",
+        "main.go",
+        "common/aihelper/aihelper.go",
+        "dao/session/session.go",
+        "utils/utils.go",
+        "dao/message/message.go",
+        "common/mysql/mysql.go",
+        "service/session/session.go",
+        "dao/user/user.go",
+        "common/aihelper/model.go",
+        "common/rabbitmq/rabbitmq.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L0-0003": {
+      "commLv": "L0",
+      "parentCommId": null,
+      "name": "公共服务基础设施层",
+      "summary": "## 功能概要\n该组件是项目的**公共服务基础设施层**，为整个OhMyGo AI应用平台提供共享的基础能力支撑。组件包含9个文件，涵盖配置管理、Redis操作、邮件发送、RAG文档检索、语音合成、用户服务、文件服务和JWT鉴权等核心功能。\n\n**核心功能模块：**\n\n1. **配置管理 (config/config.go)**：作为全局配置中心，定义所有业务模块的配置结构体（MainConfig、EmailConfig、RedisConfig、MysqlConfig、JwtConfig、Rabbitmq、RagModelConfig、VoiceServiceConfig、RedisKeyConfig），通过TOML格式加载配置并提供GetConfig接口供各模块统一获取配置参数。\n\n2. **Redis基础设施 (common/redis/redis.go, common/redis/key.go)**：封装Redis客户端连接与初始化，提供邮箱验证码的存储、校验与过期清理功能。同时管理基于文件名的Redis向量搜索索引的创建与销毁。key.go模块提供Redis键名生成工具，通过配置前缀模板拼接邮箱或文件名生成验证码键和索引名称。\n\n3. **RAG文档检索 (common/rag/rag.go)**：基于Redis实现文档向量化索引与语义检索。支持文件索引构建(IndexFile)、清理(DeleteIndex)、查询(RAGQuery)和文档检索(RetrieveDocuments)，并通过BuildRAGPrompt自动拼接上下文构建RAG提示词供AI生成回答。依赖CloudWeGo Eino框架进行Embedding和向量检索。\n\n4. **邮件服务 (common/email/email.go)**：基于gomail库封装邮件发送功能，通过SMTP(587端口)连接QQ邮箱，用于发送验证码和账号通知等。\n\n5. **语音合成 (common/tts/tts.go)**：封装百度AI语音合成API，提供任务创建(CreateTTS)、访问令牌获取(GetAccessToken)和异步状态查询功能，支持异步TTS任务管理。\n\n6. **用户服务 (service/user/user.go)**：用户相关业务逻辑，与JWT鉴权模块集成。\n\n7. **文件服务 (service/file/file.go)**：文件上传与管理服务，被RAG模块依赖用于文件处理。\n\n8. **JWT工具 (utils/myjwt/jwt.go)**：JWT令牌生成与验证工具，为认证鉴权提供基础支持。\n\n**架构特点：** 该组件采用分层设计，config.go作为配置中心被几乎所有模块依赖；common层提供通用服务；service层封装业务逻辑；utils层提供工具类。各模块通过配置统一获取参数，通过Redis实现数据共享，体现了良好的模块化设计。\n\n**架构角色**: 公共服务层\n\n**关键文件**:\n- `config/config.go` — 全局配置管理模块，定义所有业务配置结构体，通过TOML加载配置并提供统一接口\n- `common/redis/redis.go` — Redis客户端封装，提供验证码管理和向量索引操作功能\n- `common/redis/key.go` — Redis键名生成工具，用于验证码和索引名称的生成\n- `common/email/email.go` — 邮件发送功能，基于gomail实现验证码和通知邮件发送\n- `common/rag/rag.go` — RAG文档检索模块，实现文档向量化索引构建、清理和语义检索\n- `common/tts/tts.go` — 百度AI语音合成服务封装，支持任务创建和异步状态查询\n- `service/user/user.go` — 用户服务模块，处理用户相关业务逻辑\n- `service/file/file.go` — 文件服务模块，处理文件上传与管理\n- `utils/myjwt/jwt.go` — JWT令牌生成与验证工具\n\n**依赖组件**: github.com/redis/go-redis/v9, gopkg.in/gomail.v2, cloudwego/eino-ext, github.com/BurntSushi/toml, net/http, encoding/json, context, log, fmt",
+      "files": [
+        "service/user/user.go",
+        "common/rag/rag.go",
+        "common/redis/redis.go",
+        "service/file/file.go",
+        "common/tts/tts.go",
+        "utils/myjwt/jwt.go",
+        "common/email/email.go",
+        "common/redis/key.go",
+        "config/config.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0000-0000": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0000",
+      "name": "文件上传路由模块",
+      "summary": "## 功能概要\n该组件是OhMyGo平台中负责RAG（检索增强生成）文件上传的路由模块，采用典型的Gin框架分层架构，包含路由注册、控制器逻辑和通用响应工具三层结构。\n\n模块由4个核心文件组成：\n\n1. **router/File.go**（路由注册层）：提供FileRouter函数，用于配置和注册文件上传相关的HTTP路由。将POST请求映射到控制器层的UploadRagFile处理函数，是外部请求进入该模块的入口点。\n\n2. **controller/file/file.go**（控制器层）：核心业务逻辑所在。定义了UploadFileResponse响应结构体，包含上传后的文件路径等信息。UploadRagFile函数接收HTTP请求，执行表单参数校验和用户身份验证，委托service/file服务层完成文件的实际存储操作，捕获异常并返回标准化的JSON响应。该文件依赖common/code获取状态码、controller获取响应结构体、以及service/file执行文件存储。\n\n3. **controller/common.go**（通用响应层）：定义Response标准API响应结构体，包含状态码（Code）和消息（Msg）两个字段，确保所有API返回格式统一。提供CodeOf方法根据传入状态码动态设置响应内容，以及Success快捷方法用于返回成功状态。该模块依赖于common/code获取状态码常量。\n\n4. **common/code/code.go**（状态码定义层）：定义业务响应状态码常量及对应的中文提示信息映射表。提供Code类型和Code()、Msg()方法，供各控制器统一获取状态码数值和提示信息，实现响应格式的统一管理。\n\n调用链路：router/File.go → controller/file/file.go → controller/common.go → common/code/code.go，同时controller/file/file.go也直接依赖common/code获取状态码。整个模块通过service/file与文件存储服务交互，完成RAG文件的上传和存储。\n\n**架构角色**: 路由层组件\n\n**关键文件**:\n- `router/File.go` — 路由注册模块，提供FileRouter函数将HTTP POST请求映射到文件上传处理函数，是模块的入口点\n- `controller/file/file.go` — 核心控制器，UploadRagFile函数处理文件上传请求，执行参数校验、身份验证并委托服务层存储文件\n- `controller/common.go` — 通用响应工具，定义Response结构体和CodeOf/Success方法，统一API响应格式\n- `common/code/code.go` — 状态码定义模块，提供业务响应状态码常量和中文提示映射，供各控制器统一使用\n\n**依赖组件**: GopherAI/service/file, github.com/gin-gonic/gin, log, net/http",
+      "files": [
+        "common/code/code.go",
+        "router/File.go",
+        "controller/file/file.go",
+        "controller/common.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0000-0001": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0000",
+      "name": "用户认证路由与控制器",
+      "summary": "## 功能概要\n该组件负责用户认证相关的HTTP接口暴露，是OhMyGo平台的用户入口层。由两个核心文件组成：router/user.go 负责路由注册，controller/user/user.go 负责请求处理与响应生成。\n\n路由层（router/user.go）：定义了 `RegisterUserRouter` 函数，接收一个 `*gin.RouterGroup` 参数，将三个POST接口挂载到路由组中：`POST /register`（用户注册）、`POST /login`（用户登录）、`POST /captcha`（验证码获取）。这种设计允许路由灵活挂载到不同的API分组（如 `/api/v1`）。\n\n控制层（controller/user/user.go）：实现了三个控制器方法：\n1. `Login`：接收 `LoginRequest`（用户名+密码），调用 `user.Login()` 服务层进行身份验证，成功后返回JWT token；\n2. `Register`：接收 `RegisterRequest`（邮箱+密码+验证码），调用 `user.Register()` 服务层完成注册，成功后返回JWT token和用户名；\n3. `HandleCaptcha`：处理验证码生成请求。\n\n所有控制器方法遵循统一的请求-响应模式：通过 `c.ShouldBindJSON()` 解析JSON请求体，调用服务层执行业务逻辑，根据返回的错误码构建标准化响应（`res.CodeOf(code_)`），成功时返回业务数据。组件通过 `GopherAI/common/code` 定义统一的错误码体系，通过 `GopherAI/service/user` 调用用户业务逻辑层。\n\n该组件是典型的MVC三层架构中的Controller层，负责HTTP协议的请求解析与响应格式化，业务逻辑委托给Service层，路由配置由Router层统一注册。\n\n**架构角色**: 认证接口层\n\n**关键文件**:\n- `router/user.go` — 用户模块路由注册文件。定义了 RegisterUserRouter 函数，将注册、登录、验证码三个POST接口绑定到传入的Gin RouterGroup，实现路由的统一挂载。\n- `controller/user/user.go` — 用户认证控制器。实现 Login、Register、HandleCaptcha 三个HTTP处理器，负责JSON请求解析、调用user服务层、构建标准化响应，并集成验证码校验机制。\n\n**依赖组件**: GopherAI/service/user, GopherAI/common/code, github.com/gin-gonic/gin, net/http",
+      "files": [
+        "controller/user/user.go",
+        "router/user.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0000-0002": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0000",
+      "name": "AI会话与TTS语音控制",
+      "summary": "## 功能概要\n该组件是OhMyGo AI应用平台的HTTP接口层核心，负责AI聊天会话管理与TTS语音合成的路由注册及控制器实现。组件采用经典的MVC架构模式，由三层结构组成：\n\n1. **路由注册层 (router/AI.go)**：作为AI业务的路由入口，通过Gin框架集中注册所有AI相关HTTP接口。将聊天会话管理（创建会话、发送消息、查询历史、获取会话列表）和TTS语音合成（创建任务、查询状态）等接口绑定到对应的控制器处理函数，形成统一的API网关。\n\n2. **会话控制器层 (controller/session/session.go)**：实现AI对话会话的HTTP请求处理逻辑。定义了CreateSessionAndSendMessageRequest/Response和GetUserSessionsResponse等请求响应结构体，调用Session服务层完成会话的创建、普通消息发送、SSE流式消息发送、历史记录查询等功能。支持JWT鉴权，确保用户会话的私密性和安全性。流式输出采用SSE（Server-Sent Events）技术，以[DONE]标记流结束，保障实时交互体验。\n\n3. **TTS控制器层 (controller/tts/tts.go)**：实现TTS语音合成任务的HTTP处理。定义了TTSRequest、TTSResponse和QueryTTSResponse结构体，封装TTSServices服务层。提供CreateTTSTask用于创建语音合成任务（异步提交到RabbitMQ），以及QueryTTSTask用于轮询查询任务状态和获取合成结果。与底层TTS服务对接，返回标准JSON格式响应。\n\n组件间依赖关系清晰：router/AI.go作为路由中枢，被session和tts控制器文件通过INCLUDE关系引用；session.go同时引用tts.go，可能在路由注册时将TTS相关接口也一并注册。整体架构体现了关注点分离的设计原则，路由、控制器、服务层各司其职。\n\n**架构角色**: HTTP控制器与路由\n\n**关键文件**:\n- `router/AI.go` — AI业务路由注册中心，集中定义AI聊天与会话管理、TTS语音合成的HTTP路由，通过Gin RouterGroup将接口绑定到对应控制器函数\n- `controller/session/session.go` — 会话管理HTTP控制器，实现会话创建、消息发送（普通/流式）、历史记录查询、用户会话列表获取等接口，支持SSE流式输出与JWT鉴权\n- `controller/tts/tts.go` — TTS语音合成HTTP控制器，封装TTSServices服务层，提供语音任务创建（异步提交RabbitMQ）和状态查询接口，返回标准JSON响应\n\n**依赖组件**: github.com/gin-gonic/gin, GopherAI/model, GopherAI/service/session, GopherAI/common/tts, GopherAI/common/code, GopherAI/controller",
+      "files": [
+        "controller/tts/tts.go",
+        "router/AI.go",
+        "controller/session/session.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0000-0003": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0000",
+      "name": "路由与JWT鉴权模块",
+      "summary": "## 功能概要\n该组件是OhMyGo后端的请求路由分发与身份鉴权核心模块，负责Gin Web框架的初始化、API路由注册以及JWT（JSON Web Token）身份验证中间件的提供。\n\n组件由两个文件组成：\n\n1. **middleware/jwt/jwt.go** - JWT鉴权中间件模块：\n   - 提供 `Auth` 函数作为Gin中间件，用于保护需要身份认证的API接口\n   - 从HTTP请求的Header（Authorization字段）或Query参数中提取JWT Token\n   - 调用 `GopherAI/utils/myjwt` 包解析并校验Token的有效性（包括签名验证、过期检查等）\n   - 校验失败时返回HTTP错误响应并终止请求链\n   - 校验成功时将解析出的用户名信息存入Gin Context，供后续Handler使用\n   - 依赖包包括：`GopherAI/common/code`（错误码定义）、`GopherAI/controller`、`GopherAI/utils/myjwt`（JWT工具）\n\n2. **router/router.go** - 路由初始化模块：\n   - 提供 `InitRouter` 函数作为组件的公开入口，用于创建和配置Gin路由引擎\n   - 创建Gin服务器实例并配置相关中间件\n   - 注册根路径（/）与健康检查接口\n   - 按业务模块划分API路由组，包括AI相关接口、图片处理接口、文件处理接口等\n   - 为AI、图片、文件等接口路由组统一挂载JWT鉴权中间件（即 `middleware/jwt.Auth`），实现接口级别的权限控制\n   - 调用内部路由注册函数将具体的Handler函数绑定到各路由\n   - 返回配置完成的Gin引擎实例供服务器使用\n\n两个文件之间通过INCLUDE关系连接：jwt.go被router.go引用，router.go通过挂载jwt中间件实现API鉴权。\n\n在整体架构中，该模块处于请求处理链路的入口处，是前后端分离架构中保障API安全的核心组件。所有受保护的API请求必须携带有效的JWT Token才能通过鉴权，确保了用户身份的真实性和操作的合法性。\n\n**架构角色**: 核心鉴权路由\n\n**关键文件**:\n- `middleware/jwt/jwt.go` — JWT身份验证中间件，从请求中提取并校验Token，将用户名存入上下文供后续Handler使用\n- `router/router.go` — Gin路由初始化模块，注册API路由组并挂载JWT中间件，统一实现接口鉴权\n\n**依赖组件**: GopherAI/utils/myjwt, GopherAI/common/code, GopherAI/controller, github.com/gin-gonic/gin",
+      "files": [
+        "router/router.go",
+        "middleware/jwt/jwt.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0002-0000": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0002",
+      "name": "消息队列处理与持久化",
+      "summary": "## 功能概要\n该组件是OhMyGo平台的异步消息处理核心，负责将RabbitMQ中投递的对话消息反序列化并持久化到MySQL数据库。组件由两个文件组成：\n\n1. **common/rabbitmq/meesage.go**（消息队列处理层）：定义了`MessageMQParam`结构体作为RabbitMQ消息的数据载体，提供`GenerateMessageMQParam`函数将业务参数序列化为JSON字节，以及`MQMessage`函数作为消息消费者，从RabbitMQ接收消息后进行反序列化，构建模型对象并调用DAO层异步持久化。该模块依赖`github.com/streadway/amqp`库处理AMQP协议，使用`encoding/json`进行序列化/反序列化。\n\n2. **dao/message/message.go**（数据访问层）：基于GORM封装了消息表的数据库操作，提供四个核心接口：`CreateMessage`用于创建新消息记录；`GetMessagesBySessionID`支持按单个会话ID查询历史消息；`GetMessagesBySessionIDs`支持批量查询多个会话的消息；`GetAllMessages`获取全量消息记录。所有查询结果均按创建时间升序排列，确保对话历史的时间顺序正确。\n\n这两个模块通过INCLUDE边连接，消息处理层依赖DAO层完成数据持久化。整体构成一个典型的异步消息消费管道：RabbitMQ投递消息 → MQMessage消费反序列化 → DAO层写入MySQL，有效解耦了AI对话的实时响应与数据持久化操作，避免阻塞主链路。\n\n**架构角色**: 异步消息处理\n\n**关键文件**:\n- `common/rabbitmq/meesage.go` — RabbitMQ消息处理模块，定义MessageMQParam结构体，提供消息参数生成、JSON序列化及消息消费者MQMessage，负责从消息队列接收对话消息并反序列化后持久化\n- `dao/message/message.go` — 消息数据访问层，基于GORM封装消息表的CRUD操作，支持按会话ID查询、批量查询、创建消息及获取全量记录\n\n**依赖组件**: GopherAI/common/mysql, GopherAI/model, github.com/streadway/amqp, encoding/json",
+      "files": [
+        "common/rabbitmq/meesage.go",
+        "dao/message/message.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0002-0001": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0002",
+      "name": "会话管理与用户认证模块",
+      "summary": "## 功能概要\n这是一个典型的Go后端数据访问层与业务逻辑层组件，负责用户认证与会话管理的核心功能。组件由6个文件组成，分为5个目录，采用分层架构设计：\n\n**1. AI模型接口层 (common/aihelper/model.go)**\n定义统一的AI模型接口(AIModel)及四种实现：OpenAIModel、OllamaModel、AliRAGModel和MCPModel。支持同步与流式调用，集成文档检索与工具调用逻辑，是业务层与底层大模型服务交互的抽象层。\n\n**2. 数据持久化层 (common/mysql/mysql.go)**\n封装MySQL数据库连接、连接池配置与日志管理。基于GORM实现User、Session、Message三张核心表的自动迁移，提供用户记录的插入及按用户名/邮箱查询功能，供整个项目数据访问层复用。\n\n**3. 数据访问层 (DAO)**\n- dao/user/user.go: 封装用户模块的数据库交互，提供用户存在性校验(按账号/邮箱)和注册接口，注册时对密码进行MD5加密后持久化。\n- dao/session/session.go: 封装会话实体的数据库操作，提供按用户名查询会话列表、创建新会话、根据ID查询详情的功能。\n\n**4. 业务服务层 (service/session/session.go)**\n提供会话管理的核心业务逻辑：按用户查询会话列表、创建会话、同步/流式发送消息及获取对话历史。通过封装AIHelper实现与底层AI模型的交互，并集成SSE流式输出功能，支持ChatStreamSend等实时对话场景。\n\n**5. 工具层 (utils/utils.go)**\n提供随机数、MD5哈希、UUID生成及AI消息格式转换等通用工具函数，被DAO层和服务层复用。\n\n**依赖关系**: common/aihelper/model.go为组件核心，被其他5个文件依赖；common/mysql/mysql.go为数据访问层提供数据库能力；dao/session和dao/user为service层提供数据操作接口。整体形成从业务层→DAO层→MySQL层的清晰调用链路。\n\n**架构角色**: 数据访问与业务逻辑\n\n**关键文件**:\n- `common/aihelper/model.go` — 定义AI模型统一接口(AIModel)，提供OpenAI、Ollama、RAG增强及MCP协议四种实现，支持同步与流式调用，是业务层与底层大模型服务交互的抽象层\n- `common/mysql/mysql.go` — 封装MySQL数据库连接、连接池配置与日志管理，基于GORM实现User/Session/Message表自动迁移，提供用户插入与查询功能\n- `dao/session/session.go` — 封装会话实体的数据库操作，提供按用户名查询会话列表、创建新会话、根据ID查询详情的数据访问接口\n- `dao/user/user.go` — 封装用户模块的数据库交互，提供按账号/邮箱校验用户存在性及注册接口，注册时密码MD5加密后持久化\n- `service/session/session.go` — 提供会话管理核心业务逻辑：用户会话查询、创建会话、同步/流式发送消息及对话历史获取，集成SSE流式输出与AI模型交互\n- `utils/utils.go` — 提供随机数、MD5哈希、UUID生成及AI消息格式转换(模型消息/Schema消息)等通用工具函数\n\n**依赖组件**: gorm.io/gorm, gorm.io/driver/mysql, github.com/gin-gonic/gin, github.com/google/uuid, CloudWeGo Eino, GopherAI/config, GopherAI/model, GopherAI/common/code",
+      "files": [
+        "dao/user/user.go",
+        "dao/session/session.go",
+        "utils/utils.go",
+        "service/session/session.go",
+        "common/mysql/mysql.go",
+        "common/aihelper/model.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0002-0002": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0002",
+      "name": "AI助手与消息队列公共服务",
+      "summary": "## 功能概要\n该组件是OhMyGo AI应用平台的核心公共模块，封装了两项关键能力：AI会话管理和RabbitMQ消息队列支持，为上层应用提供统一的AI交互基础设施。\n\n**RabbitMQ消息队列封装**（common/rabbitmq/rabbitmq.go）：\n- 基于GopherAI/amqp驱动，封装RabbitMQ连接管理与消息收发\n- 提供 NewRabbitMQ、NewWorkRabbitMQ 两种实例创建方式，支持全局单例复用连接\n- 核心接口：Publish（消息发布）、Consume（消息消费）、Destroy（连接销毁）\n- 屏蔽底层AMQP协议交互细节，简化队列声明、消息发送与接收操作\n- 为异步任务处理（如百度TTS创建、状态轮询）提供可靠的消息传递通道\n\n**AI助手核心逻辑**（common/aihelper/aihelper.go）：\n- 维护AI会话上下文与消息历史记录，通过sync包保证并发安全\n- 提供 NewAIHelper 构造函数，AIHelper 结构体管理会话状态\n- 核心接口：AddMessage（添加消息）、SetSaveFunc（设置消息持久化回调）、GetMessages（获取消息历史）\n- 支持两种响应模式：GenerateResponse（同步生成）和 StreamResponse（流式生成，SSE传输）\n- 通过回调机制灵活处理消息持久化，默认异步推入RabbitMQ队列\n- 封装模型调用逻辑，支持模型类型切换（GetModelType），集成utils工具类\n\n**架构关系**：\n- main.go 作为入口文件，依赖并组合使用 aihelper 和 rabbitmq 两个子模块\n- aihelper 内部依赖 rabbitmq，用于异步消息持久化\n- 整体形成：main → aihelper → rabbitmq 的依赖链\n\n**设计特点**：\n1. 同步/异步双模式：同步响应适合简单问答，流式响应保障实时交互体验\n2. 消息持久化可配置：通过回调机制解耦，默认使用RabbitMQ异步存储\n3. 会话上下文管理：维护完整的对话历史，支持上下文感知的大模型交互\n4. 连接复用：RabbitMQ采用单例模式，避免频繁创建连接消耗资源\n\n**架构角色**: AI服务基础设施\n\n**关键文件**:\n- `common/rabbitmq/rabbitmq.go` — RabbitMQ消息队列封装模块，提供连接管理、消息发布(Publish)、消息消费(Consume)和连接销毁(Destroy)功能，支持NewRabbitMQ和NewWorkRabbitMQ两种实例创建方式，为异步任务处理提供可靠的消息传递通道。\n- `common/aihelper/aihelper.go` — AI助手核心逻辑模块，管理AI会话上下文与消息历史，支持同步(GenerateResponse)和流式(StreamResponse)两种响应模式，通过回调机制实现消息异步持久化到RabbitMQ，封装模型调用与数据结构转换。\n\n**依赖组件**: GopherAI/model, GopherAI/utils, GopherAI/config, github.com/streadway/amqp",
+      "files": [
+        "main.go",
+        "common/rabbitmq/rabbitmq.go",
+        "common/aihelper/aihelper.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0003-0000": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0003",
+      "name": "用户认证与邮件服务",
+      "summary": "## 功能概要\n该组件是OhMyGo平台的用户认证核心模块，负责用户身份验证、JWT令牌管理以及配套的邮件验证码发送功能。组件由三个协作单元构成：\n\n1. **service/user/user.go**（核心业务层）：实现用户登录、注册和验证码发送三大核心业务。登录流程校验用户凭据并签发JWT令牌；注册流程创建账户并自动发送包含账号信息的邮件；验证码管理通过Redis缓存实现临时凭证的生成与校验。\n\n2. **utils/myjwt/jwt.go**（令牌管理）：基于golang-jwt库实现JWT标准认证。Claims结构体存储用户ID和用户名；GenerateToken使用HS256算法签发带过期时间的令牌；ParseToken负责验签并提取用户身份信息，为上层业务提供统一的身份凭证管理能力。\n\n3. **common/email/email.go**（邮件服务）：基于gomail库封装QQ邮箱SMTP发送功能。读取配置获取SMTP服务器地址与授权码，通过587端口建立连接，主要用于发送验证码和账号通知邮件，内置完整的错误处理与日志记录。\n\n依赖链路：email → user → jwt，形成'邮件发送支撑用户服务，JWT支撑用户认证'的清晰分层。该组件是平台用户体系的基础设施，为后续API鉴权、会话管理等提供底层支撑。\n\n**架构角色**: 认证基础设施\n\n**关键文件**:\n- `service/user/user.go` — 用户核心业务逻辑，包含Login登录校验与JWT签发、Register账户注册、SendCaptcha验证码发送功能，依赖Redis缓存验证码、email服务发送邮件、jwt服务签发令牌\n- `utils/myjwt/jwt.go` — JWT令牌管理模块，导出Claims结构体（存储用户ID/用户名）、GenerateToken（签发HS256签名令牌）和ParseToken（验签提取用户信息）三个核心接口\n- `common/email/email.go` — 邮件发送封装模块，基于gomail库和QQ邮箱SMTP服务，提供SendCaptcha函数用于发送验证码和账号通知邮件\n\n**依赖组件**: github.com/golang-jwt/jwt/v4, gopkg.in/gomail.v2, GopherAI/common/redis, GopherAI/common/code, GopherAI/dao/user, GopherAI/model, GopherAI/utils, GopherAI/config",
+      "files": [
+        "common/email/email.go",
+        "service/user/user.go",
+        "utils/myjwt/jwt.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0003-0001": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0003",
+      "name": "RAG文件处理与向量检索服务",
+      "summary": "## 功能概要\n该组件实现了完整的RAG（检索增强生成）文件处理链路，涵盖从用户上传文本文件、向量化索引构建到语义检索的端到端流程。组件由三个核心文件组成：\n\n1. **common/redis/redis.go**（基础设施层）：封装Redis客户端操作，提供Redis连接初始化（Init）、邮箱验证码管理（SetCaptchaForEmail/CheckCaptchaForEmail）以及向量搜索索引的生命周期管理（InitRedisIndex/DeleteRedisIndex）。该模块是整个组件的数据存储基础，RAG模块依赖它来持久化向量索引数据。\n\n2. **common/rag/rag.go**（核心业务层）：实现RAG的核心逻辑，包含两个关键结构体——RAGIndexer（负责文档向量化入库）和RAGQuery（负责语义检索）。核心功能包括：IndexFile将文本文件分块并向量化后存入Redis；DeleteIndex清理旧索引；NewRAGQuery创建查询对象并调用RetrieveDocuments检索与查询相关的文档片段；BuildRAGPrompt将检索到的文档片段与用户查询拼接成完整的RAG提示词，供AI模型生成回答。\n\n3. **service/file/file.go**（用户服务层）：提供文件上传入口UploadRagFile。该服务接收用户上传的RAG文本文件，按用户目录隔离存储，上传前自动清理旧文件及Redis索引，保存新文件后调用common/rag模块进行向量化索引生成，若索引失败则自动回滚删除已保存的文件，保证数据一致性。\n\n数据流向：用户上传文件 → service/file/file.go接收并存储 → 调用common/rag/rag.go进行向量化索引 → 通过common/redis/redis.go将向量数据写入Redis。查询时通过RAGQuery检索相关文档并构建RAG提示词，实现基于知识库的AI回答增强。\n\n**架构角色**: RAG文件处理\n\n**关键文件**:\n- `common/redis/redis.go` — Redis客户端封装模块，提供连接初始化、验证码管理及向量搜索索引的创建与销毁功能，是整个RAG组件的数据存储基础。\n- `common/rag/rag.go` — RAG核心业务模块，实现文档向量化索引、语义检索及RAG提示词构建，包含RAGIndexer和RAGQuery两个核心结构体。\n- `service/file/file.go` — 文件上传服务模块，接收用户上传的RAG文本文件，负责文件存储、旧索引清理及向量化索引生成，失败时自动回滚。\n\n**依赖组件**: GopherAI/config, GopherAI/utils, cloudwego/eino-ext, redis/go-redis/v9",
+      "files": [
+        "common/rag/rag.go",
+        "common/redis/redis.go",
+        "service/file/file.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L1-L0-0003-0002": {
+      "commLv": "L1",
+      "parentCommId": "comm-2ed18cab-incl-L0-0003",
+      "name": "配置管理与公共服务",
+      "summary": "## 功能概要\n该组件是OhMyGo项目的核心基础设施层，负责全局配置管理和通用业务服务封装。组件由三个文件组成：\n\n1. **config/config.go**（配置中心）：定义应用的全局配置结构体，包括MainConfig（主配置）、EmailConfig（邮件配置）、RedisConfig（Redis配置）、MysqlConfig（MySQL配置）、JwtConfig（JWT配置）、Rabbitmq（消息队列配置）、RagModelConfig（RAG模型配置）、VoiceServiceConfig（语音服务配置）、RedisKeyConfig（Redis键配置）等。通过InitConfig()函数加载config/config.toml配置文件，使用github.com/BurntSushi/toml库解析TOML格式配置，GetConfig()提供懒加载的全局配置访问入口。这是整个应用配置的单一来源。\n\n2. **common/redis/key.go**（Redis键名生成器）：封装Redis键名生成的通用逻辑，提供GenerateCaptcha()（生成验证码键）、GenerateIndexName()（生成索引全名）、GenerateIndexNamePrefix()（生成索引前缀）三个导出函数。通过读取配置文件中的前缀模板，结合邮箱或文件名等参数，生成规范化的Redis键名，确保Redis数据（如验证码、向量索引）的统一存储管理。\n\n3. **common/tts/tts.go**（百度语音合成服务）：封装百度AI语音合成API的完整调用流程。核心导出包括：TTSService结构体、NewTTSService构造函数、TTSRequest/TTSQueryResponse/TTSCreateResponse/TTSTask/TTSTaskResult等数据结构。提供CreateTTS()（创建TTS任务）、GetAccessToken()（获取百度API访问令牌）等核心方法。内部处理HTTP请求、JSON序列化、令牌管理、任务状态轮询等逻辑，为RabbitMQ异步TTS处理提供底层API支持。\n\n**依赖关系**：redis/key.go和tts/tts.go都通过INCLUDE关系依赖config/config.go，表明这两个服务模块都需要读取应用配置（如Redis连接信息、百度TTS API密钥等）才能正常工作。\n\n**架构作用**：作为基础设施层，为上层业务（如RAG文档处理、AI对话、异步任务处理等）提供统一的配置访问和通用服务封装，减少各模块间的重复代码。\n\n**架构角色**: 基础设施层\n\n**关键文件**:\n- `config/config.go` — 全局配置管理模块。定义MainConfig、EmailConfig、RedisConfig、MysqlConfig、JwtConfig、Rabbitmq、RagModelConfig、VoiceServiceConfig、RedisKeyConfig等配置结构体，通过TOML文件加载配置，提供InitConfig()和GetConfig()接口供全应用访问。\n- `common/redis/key.go` — Redis键名生成工具。提供GenerateCaptcha()、GenerateIndexName()、GenerateIndexNamePrefix()函数，基于配置文件前缀模板拼接业务标识生成规范化Redis键，用于验证码和向量索引的键管理。\n- `common/tts/tts.go` — 百度AI语音合成服务封装。提供TTSService、CreateTTS()、GetAccessToken()等接口，处理百度TTS API的令牌获取、任务创建和状态查询，为异步TTS处理提供底层API支持。\n\n**依赖组件**: github.com/BurntSushi/toml, net/http, encoding/json, context, bytes, io",
+      "files": [
+        "common/redis/key.go",
+        "common/tts/tts.go",
+        "config/config.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L2-0002-0001-0000": {
+      "commLv": "L2",
+      "parentCommId": "comm-2ed18cab-incl-L1-L0-0002-0001",
+      "name": "会话管理与AI模型核心层",
+      "summary": "## 功能概要\n该组件是OhMyGo平台的会话管理与AI模型交互核心模块，采用经典的三层架构设计，涵盖AI模型抽象、数据库连接管理、数据访问层（DAO）和业务服务层（Service）。\n\n**架构分层：**\n\n1. **AI模型抽象层（common/aihelper/model.go）**：定义统一的AIModel接口，支持OpenAI、Ollama、阿里RAG及MCP协议四种后端实现。提供同步调用（Chat）和流式调用（StreamCallback）两种交互模式，并集成文档检索（RAG）与工具调用逻辑。该文件是整个组件的核心依赖，被mysql、dao和service三层共同引用。\n\n2. **MySQL连接层（common/mysql/mysql.go）**：基于GORM封装MySQL数据库连接，负责连接池配置、日志管理和自动表结构迁移（User、Session、Message三张核心业务表）。提供用户数据的增删查操作（InsertUser、GetUserByUsername、GetUserByEmail），为上层DAO层提供统一的数据库访问能力。\n\n3. **会话DAO层（dao/session/session.go）**：专注于会话数据的持久化操作，提供三个核心接口：按用户名查询会话列表（GetSessionsByUserName）、创建新会话（CreateSession）、根据ID获取会话详情（GetSessionByID）。该层直接依赖mysql连接层和model定义。\n\n4. **会话Service层（service/session/session.go）**：封装会话管理的核心业务逻辑，包括：用户会话查询、创建会话并发送消息（CreateSessionAndSendMessage）、同步消息发送（ChatSend）、流式消息发送（ChatStreamSend）、历史消息查询（GetChatHistory）等。该层整合AI模型调用（通过aihelper）与SSE流式输出，实现完整的AI对话交互流程。\n\n**数据流向：** Service层调用DAO层进行数据持久化，DAO层依赖MySQL连接层执行SQL操作；Service层同时调用AI模型层与底层大模型交互，形成'用户请求→Service→DAO→MySQL'和'Service→AI Model→流式响应→用户'的双向数据管道。\n\n**架构角色**: 数据访问与AI服务层\n\n**关键文件**:\n- `common/aihelper/model.go` — 定义AI模型统一接口（AIModel），封装OpenAI、Ollama、阿里RAG和MCP四种AI后端实现，支持同步与流式调用，集成RAG文档检索，是整个组件的核心依赖。\n- `common/mysql/mysql.go` — 基于GORM封装MySQL连接管理，负责User/Session/Message三张核心表的自动迁移，提供用户数据的插入与查询接口，为DAO层提供统一的数据库访问能力。\n- `dao/session/session.go` — 会话数据访问层，封装按用户名查询会话列表、创建新会话、根据ID查询会话详情的数据库操作，直接依赖mysql连接层。\n- `service/session/session.go` — 会话业务服务层，整合DAO数据操作与AI模型调用，提供会话创建、消息收发（同步/流式）、历史查询等核心功能，实现完整的AI对话交互流程。\n\n**依赖组件**: gorm.io/gorm, gorm.io/driver/mysql, github.com/gin-gonic/gin, CloudWeGo Eino, GopherAI/config, GopherAI/model, GopherAI/common/code, github.com/google/uuid, MCP-Go",
+      "files": [
+        "dao/session/session.go",
+        "common/mysql/mysql.go",
+        "common/aihelper/model.go",
+        "service/session/session.go"
+      ]
+    },
+    "comm-2ed18cab-incl-L2-0002-0001-0001": {
+      "commLv": "L2",
+      "parentCommId": "comm-2ed18cab-incl-L1-L0-0002-0001",
+      "name": "用户数据与通用工具",
+      "summary": "## 功能概要\n该组件是项目的用户数据访问层与通用工具库，包含两个核心文件：dao/user/user.go 和 utils/utils.go。\n\n**dao/user/user.go** 负责用户数据的数据库操作封装，基于 GORM 框架提供用户存在性校验（按账号名和邮箱）和用户注册功能。注册时对密码进行 MD5 加密处理，确保数据安全性。\n\n**utils/utils.go** 是通用工具函数库，提供随机数生成（GetRandomNumbers）、UUID 生成（GenerateUUID）、MD5 哈希、AI 消息格式转换（ConvertToModelMessage、ConvertToSchemaMessages）、目录文件清理（RemoveAllFilesInDir）以及文件类型校验（ValidateFile）等功能。这些工具函数被项目中其他模块广泛调用。\n\n两个文件之间存在明确的依赖关系：dao/user/user.go 依赖 utils/utils.go 中的工具函数（如 MD5 加密等），体现了分层架构中 DAO 层对工具层的合理使用。该组件虽然节点数较少（2个），但功能覆盖用户数据操作和通用工具两个关键领域，是项目基础架构的重要组成部分。\n\n**架构角色**: 数据访问与工具\n\n**关键文件**:\n- `dao/user/user.go` — 用户数据访问层，封装用户存在性校验（按账号/邮箱）和用户注册功能，基于 GORM 进行数据库操作，注册时对密码进行 MD5 加密\n- `utils/utils.go` — 通用工具函数库，提供随机数生成、UUID 创建、MD5 哈希、AI 消息转换、文件清理与校验等工具函数\n\n**依赖组件**: GopherAI/common/mysql, GopherAI/model, gorm.io/gorm, github.com/cloudwego/eino/schema",
+      "files": [
+        "dao/user/user.go",
+        "utils/utils.go"
+      ]
+    }
+  },
+  "edges": [
+    [
+      "main.go",
+      "common/aihelper/aihelper.go"
+    ],
+    [
+      "service/session/session.go",
+      "common/aihelper/aihelper.go"
+    ],
+    [
+      "dao/user/user.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "dao/session/session.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "dao/message/message.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "common/rabbitmq/meesage.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "common/mysql/mysql.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "common/aihelper/aihelper.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "controller/session/session.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "utils/utils.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "service/user/user.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "service/session/session.go",
+      "common/aihelper/model.go"
+    ],
+    [
+      "middleware/jwt/jwt.go",
+      "common/code/code.go"
+    ],
+    [
+      "controller/tts/tts.go",
+      "common/code/code.go"
+    ],
+    [
+      "controller/image/image.go",
+      "common/code/code.go"
+    ],
+    [
+      "controller/common.go",
+      "common/code/code.go"
+    ],
+    [
+      "controller/user/user.go",
+      "common/code/code.go"
+    ],
+    [
+      "controller/session/session.go",
+      "common/code/code.go"
+    ],
+    [
+      "controller/file/file.go",
+      "common/code/code.go"
+    ],
+    [
+      "service/user/user.go",
+      "common/code/code.go"
+    ],
+    [
+      "service/session/session.go",
+      "common/code/code.go"
+    ],
+    [
+      "service/user/user.go",
+      "common/email/email.go"
+    ],
+    [
+      "service/image/image.go",
+      "common/image/image_recognizer.go"
+    ],
+    [
+      "dao/user/user.go",
+      "common/mysql/mysql.go"
+    ],
+    [
+      "dao/session/session.go",
+      "common/mysql/mysql.go"
+    ],
+    [
+      "dao/message/message.go",
+      "common/mysql/mysql.go"
+    ],
+    [
+      "main.go",
+      "common/mysql/mysql.go"
+    ],
+    [
+      "common/aihelper/aihelper.go",
+      "common/rabbitmq/rabbitmq.go"
+    ],
+    [
+      "main.go",
+      "common/rabbitmq/rabbitmq.go"
+    ],
+    [
+      "common/aihelper/model.go",
+      "common/rag/rag.go"
+    ],
+    [
+      "service/file/file.go",
+      "common/rag/rag.go"
+    ],
+    [
+      "common/rag/rag.go",
+      "common/redis/redis.go"
+    ],
+    [
+      "main.go",
+      "common/redis/redis.go"
+    ],
+    [
+      "service/user/user.go",
+      "common/redis/redis.go"
+    ],
+    [
+      "controller/tts/tts.go",
+      "common/tts/tts.go"
+    ],
+    [
+      "common/tts/tts.go",
+      "config/config.go"
+    ],
+    [
+      "common/rag/rag.go",
+      "config/config.go"
+    ],
+    [
+      "common/redis/key.go",
+      "config/config.go"
+    ],
+    [
+      "common/email/email.go",
+      "config/config.go"
+    ],
+    [
+      "common/redis/redis.go",
+      "config/config.go"
+    ],
+    [
+      "common/rabbitmq/rabbitmq.go",
+      "config/config.go"
+    ],
+    [
+      "common/mysql/mysql.go",
+      "config/config.go"
+    ],
+    [
+      "common/aihelper/model.go",
+      "config/config.go"
+    ],
+    [
+      "main.go",
+      "config/config.go"
+    ],
+    [
+      "utils/myjwt/jwt.go",
+      "config/config.go"
+    ],
+    [
+      "service/user/user.go",
+      "config/config.go"
+    ],
+    [
+      "service/file/file.go",
+      "config/config.go"
+    ],
+    [
+      "router/File.go",
+      "controller/file/file.go"
+    ],
+    [
+      "router/Image.go",
+      "controller/image/image.go"
+    ],
+    [
+      "router/AI.go",
+      "controller/session/session.go"
+    ],
+    [
+      "middleware/jwt/jwt.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "controller/tts/tts.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "controller/image/image.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "controller/user/user.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "controller/session/session.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "controller/file/file.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "router/AI.go",
+      "controller/tts/tts.go"
+    ],
+    [
+      "router/user.go",
+      "controller/user/user.go"
+    ],
+    [
+      "common/rabbitmq/meesage.go",
+      "dao/message/message.go"
+    ],
+    [
+      "main.go",
+      "dao/message/message.go"
+    ],
+    [
+      "service/session/session.go",
+      "dao/session/session.go"
+    ],
+    [
+      "service/user/user.go",
+      "dao/user/user.go"
+    ],
+    [
+      "router/router.go",
+      "middleware/jwt/jwt.go"
+    ],
+    [
+      "main.go",
+      "router/router.go"
+    ],
+    [
+      "controller/file/file.go",
+      "service/file/file.go"
+    ],
+    [
+      "controller/image/image.go",
+      "service/image/image.go"
+    ],
+    [
+      "controller/session/session.go",
+      "service/session/session.go"
+    ],
+    [
+      "controller/user/user.go",
+      "service/user/user.go"
+    ],
+    [
+      "middleware/jwt/jwt.go",
+      "utils/myjwt/jwt.go"
+    ],
+    [
+      "service/user/user.go",
+      "utils/myjwt/jwt.go"
+    ],
+    [
+      "dao/user/user.go",
+      "utils/utils.go"
+    ],
+    [
+      "common/aihelper/aihelper.go",
+      "utils/utils.go"
+    ],
+    [
+      "service/user/user.go",
+      "utils/utils.go"
+    ],
+    [
+      "service/file/file.go",
+      "utils/utils.go"
+    ]
+  ],
+  "symToFile": {}
+}

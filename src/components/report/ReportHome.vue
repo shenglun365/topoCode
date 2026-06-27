@@ -147,11 +147,14 @@ function batchBarStyle(batch: string) {
   const pct = Math.min(100, Math.round(cached / total * 100))
   const isP0 = batch === 'P0'
   const isP1 = batch === 'P1'
+  const isP4 = batch === 'P4'
   const filled = isP0 ? 'color-mix(in srgb, var(--accent) 55%, transparent)'
     : isP1 ? 'color-mix(in srgb, var(--warning) 55%, transparent)'
+    : isP4 ? 'color-mix(in srgb, var(--text-muted) 20%, transparent)'
     : 'color-mix(in srgb, var(--text-muted) 35%, transparent)'
   const unfilled = isP0 ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
     : isP1 ? 'color-mix(in srgb, var(--warning) 10%, transparent)'
+    : isP4 ? 'var(--bg-secondary)'
     : 'var(--bg-tertiary)'
   return {
     background: `linear-gradient(to right, ${filled} ${pct}%, ${unfilled} ${pct}%)`,
@@ -555,6 +558,13 @@ watch(() => props.taskId, () => {
                     :style="batchBarStyle('P2')"
                   >
                     P2: {{ preSummaryStatus.counts?.P2 || 0 }} ({{ preSummaryStatus.counts?.P2 ? Math.round((preSummaryStatus.batch_cached?.P2 || 0) / preSummaryStatus.counts.P2 * 100) : 0 }}%)
+                  </span>
+                  <span
+                    v-if="(preSummaryStatus.counts?.P4 || 0) > 0"
+                    class="presummary-batch presummary-batch-p4"
+                    :style="batchBarStyle('P4')"
+                  >
+                    P4: {{ preSummaryStatus.counts?.P4 || 0 }} ({{ preSummaryStatus.counts?.P4 ? Math.round((preSummaryStatus.batch_cached?.P4 || 0) / preSummaryStatus.counts.P4 * 100) : 0 }}%)
                   </span>
                 </div>
               </template>

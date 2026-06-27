@@ -381,8 +381,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         task = store.get_task(tid)
         if not task:
             raise ValueError(f"Task {tid} not found")
-        if task["status"] in ("running", "queued"):
-            raise RuntimeError(f"Task {tid} is already {task['status']}")
+        if task["status"] in ("running", "queued", "done"):
+            raise RuntimeError(f"Task {tid} status is {task['status']}, cannot rerun")
 
         # 复用当前配置创建新运行
         run = store.create_run(tid, {
@@ -392,6 +392,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "exclude_dirs": task.get("exclude_dirs", []),
             "report_types": task.get("report_types", []),
         })
+
+        # 清除旧的排名缓存，避免重跑后前端的 P0~P4 显示旧数据
+        _rank_cache.pop(f"ranks:{tid}", None)
 
         store.update_task_status(tid, "running", progress=0, error="")
 
@@ -1287,7 +1290,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         logger.info("[PERF] getReportDashboard file_stats=%.1fms", (time.perf_counter() - t0) * 1000)
 
         # 4. 预摘要状态
-        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': _ps_failed_counts.get(tid, 0)}
+        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0, 'P4': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': _ps_failed_counts.get(tid, 0)}
         try:
             # 从 file_summaries 表直接统计缓存数（无社区数据时也能工作）
             p_rows = project_db.execute(
@@ -2317,9 +2320,28 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             else:
                 item["batch"] = "P2"
 
+        # 5. P4: 任务范围内未被任何社区覆盖的文件
+        scored_paths = {f["file_path"] for f in scored}
+        p4_files: list[dict] = []
+        try:
+            for row in project_db.execute(
+                "SELECT file_path FROM source_files WHERE language != 'directory'"
+            ).fetchall():
+                rp = row["file_path"]
+                if rp not in scored_paths:
+                    p4_files.append({
+                        "file_path": rp, "score": 0, "cross": 0,
+                        "edges": 0, "size": 0, "is_large": 0,
+                        "quality": 0, "batch": "P4",
+                    })
+        except Exception:
+            pass
+        p4_files.sort(key=lambda x: x["file_path"])
+        scored.extend(p4_files)
+
         return {
             "files": scored,
-            "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end},
+            "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end, "P4": len(p4_files)},
         }
 
     def _get_l0_comps(project_db, tid):
@@ -2359,7 +2381,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 查已缓存文件数 + 按批次统计（每次轮询只查 COUNT）
         cached_count = 0
-        batch_cached = {"P0": 0, "P1": 0, "P2": 0}
+        batch_cached = {"P0": 0, "P1": 0, "P2": 0, "P4": 0}
         try:
             cached_rows = project_db.execute(
                 "SELECT file_path FROM file_summaries WHERE project_id=?", (pid,)

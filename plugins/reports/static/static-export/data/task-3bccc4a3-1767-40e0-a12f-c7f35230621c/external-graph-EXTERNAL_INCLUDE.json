@@ -1,0 +1,2374 @@
+{
+  "nodes": [
+    {
+      "id": "ext-solid-js",
+      "label": "solid-js",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0002",
+      "label": "应用前端UI与会话管理层",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0003",
+      "label": "TUI终端交互界面系统",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0005",
+      "label": "会话分享组件模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0007",
+      "label": "Console控制台应用",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0010",
+      "label": "OpenCode CLI与TUI应用",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0012",
+      "label": "Console应用与计费系统",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0014",
+      "label": "终端与主题管理系统",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0024",
+      "label": "OpenCode品牌Logo组件",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-bun:test",
+      "label": "bun:test",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0000",
+      "label": "OpenCode 服务端与核心基础设施",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0001",
+      "label": "OpenCode核心服务层",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0004",
+      "label": "OpenAI兼容聊天提供商SDK",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0006",
+      "label": "核心Agent运行时与ACP协议",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0011",
+      "label": "i18n 国际化模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0013",
+      "label": "V2会话管理系统",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0020",
+      "label": "异步读写锁工具模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0021",
+      "label": "企业级云存储与分享管理模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0023",
+      "label": "Worktree 状态管理工具",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0025",
+      "label": "提示词解析工具",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0026",
+      "label": "时长格式化工具",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/log",
+      "label": "@opencode-ai/core/util/log",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-zod",
+      "label": "zod",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@solidjs/router",
+      "label": "@solidjs/router",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-fs/promises",
+      "label": "fs/promises",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2",
+      "label": "@opencode-ai/sdk/v2",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global",
+      "label": "@opencode-ai/core/global",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/util/schema",
+      "label": "@/util/schema",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/config/config",
+      "label": "@/config/config",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/core/filesystem",
+      "label": "@opencode-ai/core/filesystem",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/language",
+      "label": "@/context/language",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/util/filesystem",
+      "label": "@/util/filesystem",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/session/session",
+      "label": "@/session/session",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-drizzle-orm",
+      "label": "drizzle-orm",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-effect/unstable/http",
+      "label": "effect/unstable/http",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-os",
+      "label": "os",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-effect/unstable/httpapi",
+      "label": "effect/unstable/httpapi",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-bun",
+      "label": "bun",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0022",
+      "label": "桌面端构建脚本模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-@opentui/core",
+      "label": "@opentui/core",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-~/context/i18n",
+      "label": "~/context/i18n",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/provider/provider",
+      "label": "@/provider/provider",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2/client",
+      "label": "@opencode-ai/sdk/v2/client",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/bus",
+      "label": "@/bus",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opentui/solid",
+      "label": "@opentui/solid",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/storage/db",
+      "label": "@/storage/db",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-hono",
+      "label": "hono",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0016",
+      "label": "跨运行时HTTP服务器适配器",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": false
+    },
+    {
+      "id": "ext-@effect/platform-node",
+      "label": "@effect/platform-node",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-node:path",
+      "label": "node:path",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/lsp/lsp",
+      "label": "@/lsp/lsp",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/icon",
+      "label": "@opencode-ai/ui/icon",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/error",
+      "label": "@opencode-ai/core/util/error",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-~/context/language",
+      "label": "~/context/language",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/context/dialog",
+      "label": "@opencode-ai/ui/context/dialog",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/console-resource",
+      "label": "@opencode-ai/console-resource",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-remeda",
+      "label": "remeda",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/core/installation/version",
+      "label": "@opencode-ai/core/installation/version",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/context",
+      "label": "@opencode-ai/ui/context",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@solidjs/start/server",
+      "label": "@solidjs/start/server",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-hono-openapi",
+      "label": "hono-openapi",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/session/schema",
+      "label": "@/session/schema",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/toast",
+      "label": "@opencode-ai/ui/toast",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/layout",
+      "label": "@/context/layout",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/console-core/drizzle/index.js",
+      "label": "@opencode-ai/console-core/drizzle/index.js",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/path",
+      "label": "@opencode-ai/core/util/path",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/util/process",
+      "label": "@/util/process",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@solid-primitives/event-listener",
+      "label": "@solid-primitives/event-listener",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/global-sync",
+      "label": "@/context/global-sync",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/platform",
+      "label": "@/context/platform",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-~/context/auth.withActor",
+      "label": "~/context/auth.withActor",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@tui/ui/dialog",
+      "label": "@tui/ui/dialog",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@tui/context/sync",
+      "label": "@tui/context/sync",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-~/lib/language",
+      "label": "~/lib/language",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "comm-3bccc4a3-incl-L0-0009",
+      "label": "控制台应用国际化(i18n)模块",
+      "isExternal": false,
+      "commLv": "L0",
+      "hasChildren": true
+    },
+    {
+      "id": "ext-@/storage/storage",
+      "label": "@/storage/storage",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/project/instance",
+      "label": "@/project/instance",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/file",
+      "label": "@/context/file",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/util/lazy",
+      "label": "@/util/lazy",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/sync",
+      "label": "@/context/sync",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/prompt",
+      "label": "@/context/prompt",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/agent/agent",
+      "label": "@/agent/agent",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-../../src/bus",
+      "label": "../../src/bus",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@ai-sdk/provider",
+      "label": "@ai-sdk/provider",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-ai",
+      "label": "ai",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/permission",
+      "label": "@/permission",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/plugin/tui",
+      "label": "@opencode-ai/plugin/tui",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/dialog",
+      "label": "@opencode-ai/ui/dialog",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/provider/schema",
+      "label": "@/provider/schema",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-node:fs/promises",
+      "label": "node:fs/promises",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-fs",
+      "label": "fs",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-effect/unstable/process",
+      "label": "effect/unstable/process",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/sync",
+      "label": "@/sync",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/project/project",
+      "label": "@/project/project",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@tanstack/solid-query",
+      "label": "@tanstack/solid-query",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/sdk",
+      "label": "@/context/sdk",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@ai-sdk/provider-utils",
+      "label": "@ai-sdk/provider-utils",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-zod/v4",
+      "label": "zod/v4",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/control-plane/schema",
+      "label": "@/control-plane/schema",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/hooks/use-providers",
+      "label": "@/hooks/use-providers",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-electron",
+      "label": "electron",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-drizzle-orm/mysql-core",
+      "label": "drizzle-orm/mysql-core",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-../src/drizzle/index.js",
+      "label": "../src/drizzle/index.js",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-~/component/icon",
+      "label": "~/component/icon",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@solid-primitives/resize-observer",
+      "label": "@solid-primitives/resize-observer",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-effect/Stream",
+      "label": "effect/Stream",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-../../src/permission",
+      "label": "../../src/permission",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/bus/global",
+      "label": "@/bus/global",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-yargs",
+      "label": "yargs",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/util/error",
+      "label": "@/util/error",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@tui/context/sdk",
+      "label": "@tui/context/sdk",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/command",
+      "label": "@/context/command",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/context/server",
+      "label": "@/context/server",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-diff",
+      "label": "diff",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-node:timers/promises",
+      "label": "node:timers/promises",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-effect/unstable/socket/Socket",
+      "label": "effect/unstable/socket/Socket",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/control-plane/workspace",
+      "label": "@/control-plane/workspace",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-./index.css",
+      "label": "./index.css",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/glob",
+      "label": "@opencode-ai/core/util/glob",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/id/id",
+      "label": "@/id/id",
+      "isExternal": true,
+      "commLv": "L0"
+    },
+    {
+      "id": "ext-@/util/iife",
+      "label": "@/util/iife",
+      "isExternal": true,
+      "commLv": "L0"
+    }
+  ],
+  "edges": [
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0005",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0005"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-solid-js->comm-3bccc4a3-incl-L0-0024",
+      "source": "ext-solid-js",
+      "target": "comm-3bccc4a3-incl-L0-0024"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0004",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0004"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0011",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0011"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0020",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0020"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0021",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0021"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0023",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0023"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0025",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0025"
+    },
+    {
+      "id": "ext-bun:test->comm-3bccc4a3-incl-L0-0026",
+      "source": "ext-bun:test",
+      "target": "comm-3bccc4a3-incl-L0-0026"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/log->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/core/util/log",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/log->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/core/util/log",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/log->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opencode-ai/core/util/log",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/log->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/core/util/log",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/log->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opencode-ai/core/util/log",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-zod->comm-3bccc4a3-incl-L0-0021",
+      "source": "ext-zod",
+      "target": "comm-3bccc4a3-incl-L0-0021"
+    },
+    {
+      "id": "ext-@solidjs/router->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@solidjs/router",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@solidjs/router->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@solidjs/router",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@solidjs/router->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-@solidjs/router",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-fs/promises->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-fs/promises->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-fs/promises->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-fs/promises->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-fs/promises->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0021",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0021"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2->comm-3bccc4a3-incl-L0-0025",
+      "source": "ext-@opencode-ai/sdk/v2",
+      "target": "comm-3bccc4a3-incl-L0-0025"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/core/global",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/core/global",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opencode-ai/core/global",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/core/global",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@opencode-ai/core/global",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@opencode-ai/core/global->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opencode-ai/core/global",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/util/schema->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/util/schema",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/util/schema->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/util/schema",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/util/schema->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/util/schema",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/util/schema->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/util/schema",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/util/schema->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-@/util/schema",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-@/config/config->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/config/config",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/config/config->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/config/config",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/config/config->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/config/config",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/config/config->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/config/config",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/core/filesystem->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/core/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/core/filesystem->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/core/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/core/filesystem->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/core/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/context/language->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/language",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/language->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@/context/language",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-@/util/filesystem->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/util/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/util/filesystem->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/util/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/util/filesystem->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/util/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/util/filesystem->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/util/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/util/filesystem->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@/util/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@/util/filesystem->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/util/filesystem",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/session/session->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/session/session",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/session/session->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/session/session",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/session/session->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/session/session",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/session/session->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/session/session",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/session/session->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/session/session",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-drizzle-orm->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-drizzle-orm",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-drizzle-orm->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-drizzle-orm",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-drizzle-orm->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-drizzle-orm",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-drizzle-orm->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-drizzle-orm",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-effect/unstable/http->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-effect/unstable/http",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-effect/unstable/http->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-effect/unstable/http",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-effect/unstable/http->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-effect/unstable/http",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-os->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-os",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-effect/unstable/httpapi->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-effect/unstable/httpapi",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-effect/unstable/httpapi->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-effect/unstable/httpapi",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-effect/unstable/httpapi->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-effect/unstable/httpapi",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-effect/unstable/httpapi->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-effect/unstable/httpapi",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-bun->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-bun",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-bun->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-bun",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-bun->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-bun",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-bun->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-bun",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-bun->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-bun",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-bun->comm-3bccc4a3-incl-L0-0022",
+      "source": "ext-bun",
+      "target": "comm-3bccc4a3-incl-L0-0022"
+    },
+    {
+      "id": "ext-@opentui/core->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opentui/core",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opentui/core->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opentui/core",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-~/context/i18n->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-~/context/i18n",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-~/context/i18n->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-~/context/i18n",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-@/provider/provider->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/provider/provider",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/provider/provider->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/provider/provider",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/provider/provider->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/provider/provider",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/provider/provider->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/provider/provider",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/provider/provider->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/provider/provider",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/sdk/v2/client->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/sdk/v2/client",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/bus->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/bus",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/bus->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/bus",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/bus->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/bus",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opentui/solid->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opentui/solid",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opentui/solid->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opentui/solid",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/storage/db->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/storage/db",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/storage/db->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/storage/db",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/storage/db->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/storage/db",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/storage/db->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/storage/db",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/storage/db->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-@/storage/db",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-hono->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-hono",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-hono->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-hono",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-hono->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-hono",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-hono->comm-3bccc4a3-incl-L0-0016",
+      "source": "ext-hono",
+      "target": "comm-3bccc4a3-incl-L0-0016"
+    },
+    {
+      "id": "ext-@effect/platform-node->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@effect/platform-node",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@effect/platform-node->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@effect/platform-node",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@effect/platform-node->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@effect/platform-node",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@effect/platform-node->comm-3bccc4a3-incl-L0-0016",
+      "source": "ext-@effect/platform-node",
+      "target": "comm-3bccc4a3-incl-L0-0016"
+    },
+    {
+      "id": "ext-node:path->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-node:path",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-node:path->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-node:path",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-node:path->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-node:path",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-node:path->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-node:path",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-node:path->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-node:path",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-node:path->comm-3bccc4a3-incl-L0-0022",
+      "source": "ext-node:path",
+      "target": "comm-3bccc4a3-incl-L0-0022"
+    },
+    {
+      "id": "ext-@/lsp/lsp->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/lsp/lsp",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/lsp/lsp->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/lsp/lsp",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/lsp/lsp->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/lsp/lsp",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/lsp/lsp->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/lsp/lsp",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/icon->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/ui/icon",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/error->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/core/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/error->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/core/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/error->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/core/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/error->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/core/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/error->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opencode-ai/core/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-~/context/language->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-~/context/language",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-~/context/language->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-~/context/language",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/context/dialog->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/ui/context/dialog",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/context/dialog->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@opencode-ai/ui/context/dialog",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@opencode-ai/console-resource->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/console-resource",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/console-resource->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@opencode-ai/console-resource",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@opencode-ai/console-resource->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-@opencode-ai/console-resource",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-remeda->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-remeda",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-remeda->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-remeda",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-remeda->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-remeda",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-remeda->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-remeda",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-remeda->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-remeda",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-remeda->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-remeda",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/core/installation/version->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/core/installation/version",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/core/installation/version->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/core/installation/version",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/core/installation/version->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opencode-ai/core/installation/version",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opencode-ai/core/installation/version->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/core/installation/version",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opencode-ai/core/installation/version->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opencode-ai/core/installation/version",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/context->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/ui/context",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/context->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@opencode-ai/ui/context",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@solidjs/start/server->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@solidjs/start/server",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@solidjs/start/server->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@solidjs/start/server",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@solidjs/start/server->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@solidjs/start/server",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@solidjs/start/server->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-@solidjs/start/server",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-hono-openapi->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-hono-openapi",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-hono-openapi->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-hono-openapi",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-hono-openapi->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-hono-openapi",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/session/schema->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/session/schema",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/session/schema->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/session/schema",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/session/schema->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/session/schema",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/session/schema->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/session/schema",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/session/schema->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-@/session/schema",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/toast->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/ui/toast",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/toast->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@opencode-ai/ui/toast",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-@/context/layout->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/layout",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@opencode-ai/console-core/drizzle/index.js->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-@opencode-ai/console-core/drizzle/index.js",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@opencode-ai/console-core/drizzle/index.js->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-@opencode-ai/console-core/drizzle/index.js",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/path->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/core/util/path",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/util/process->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/util/process",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/util/process->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/util/process",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/util/process->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/util/process",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/util/process->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/util/process",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/util/process->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/util/process",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@solid-primitives/event-listener->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@solid-primitives/event-listener",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@solid-primitives/event-listener->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@solid-primitives/event-listener",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-@/context/global-sync->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/global-sync",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/platform->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/platform",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/platform->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@/context/platform",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-~/context/auth.withActor->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-~/context/auth.withActor",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-@tui/ui/dialog->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@tui/ui/dialog",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@tui/context/sync->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@tui/context/sync",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-~/lib/language->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-~/lib/language",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-~/lib/language->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-~/lib/language",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-~/lib/language->comm-3bccc4a3-incl-L0-0009",
+      "source": "ext-~/lib/language",
+      "target": "comm-3bccc4a3-incl-L0-0009"
+    },
+    {
+      "id": "ext-~/lib/language->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-~/lib/language",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-@/storage/storage->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/storage/storage",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/storage/storage->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/storage/storage",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/storage/storage->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/storage/storage",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/storage/storage->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/storage/storage",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/project/instance->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/project/instance",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/project/instance->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/project/instance",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/context/file->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/file",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/util/lazy->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/util/lazy",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/util/lazy->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/util/lazy",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/util/lazy->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/util/lazy",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/context/sync->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/sync",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/prompt->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/prompt",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/prompt->comm-3bccc4a3-incl-L0-0025",
+      "source": "ext-@/context/prompt",
+      "target": "comm-3bccc4a3-incl-L0-0025"
+    },
+    {
+      "id": "ext-@/agent/agent->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/agent/agent",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/agent/agent->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/agent/agent",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/agent/agent->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/agent/agent",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-../../src/bus->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-../../src/bus",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-../../src/bus->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-../../src/bus",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@ai-sdk/provider->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@ai-sdk/provider",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@ai-sdk/provider->comm-3bccc4a3-incl-L0-0004",
+      "source": "ext-@ai-sdk/provider",
+      "target": "comm-3bccc4a3-incl-L0-0004"
+    },
+    {
+      "id": "ext-@ai-sdk/provider->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@ai-sdk/provider",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-ai->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-ai",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-ai->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-ai",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/permission->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/permission",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/permission->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/permission",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@opencode-ai/plugin/tui->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opencode-ai/plugin/tui",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opencode-ai/plugin/tui->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@opencode-ai/plugin/tui",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@opencode-ai/ui/dialog->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@opencode-ai/ui/dialog",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/provider/schema->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/provider/schema",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/provider/schema->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/provider/schema",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-node:fs/promises->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-node:fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-node:fs/promises->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-node:fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-node:fs/promises->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-node:fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-node:fs/promises->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-node:fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-node:fs/promises->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-node:fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-node:fs/promises->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-node:fs/promises",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-fs->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-fs",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-fs->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-fs",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-fs->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-fs",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-fs->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-fs",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-effect/unstable/process->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-effect/unstable/process",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-effect/unstable/process->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-effect/unstable/process",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-effect/unstable/process->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-effect/unstable/process",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/sync->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/sync",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/sync->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/sync",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/sync->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/sync",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/sync->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-@/sync",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-@/project/project->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/project/project",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/project/project->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/project/project",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/project/project->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/project/project",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/project/project->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/project/project",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@tanstack/solid-query->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@tanstack/solid-query",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/sdk->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/sdk",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/sdk->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@/context/sdk",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-@ai-sdk/provider-utils->comm-3bccc4a3-incl-L0-0004",
+      "source": "ext-@ai-sdk/provider-utils",
+      "target": "comm-3bccc4a3-incl-L0-0004"
+    },
+    {
+      "id": "ext-zod/v4->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-zod/v4",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-zod/v4->comm-3bccc4a3-incl-L0-0004",
+      "source": "ext-zod/v4",
+      "target": "comm-3bccc4a3-incl-L0-0004"
+    },
+    {
+      "id": "ext-@/control-plane/schema->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/control-plane/schema",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/control-plane/schema->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/control-plane/schema",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/control-plane/schema->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/control-plane/schema",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/control-plane/schema->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-@/control-plane/schema",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-@/hooks/use-providers->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/hooks/use-providers",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-electron->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-electron",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-electron->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-electron",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-drizzle-orm/mysql-core->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-drizzle-orm/mysql-core",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-drizzle-orm/mysql-core->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-drizzle-orm/mysql-core",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-../src/drizzle/index.js->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-../src/drizzle/index.js",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-~/component/icon->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-~/component/icon",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-~/component/icon->comm-3bccc4a3-incl-L0-0012",
+      "source": "ext-~/component/icon",
+      "target": "comm-3bccc4a3-incl-L0-0012"
+    },
+    {
+      "id": "ext-@solid-primitives/resize-observer->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@solid-primitives/resize-observer",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@solid-primitives/resize-observer->comm-3bccc4a3-incl-L0-0005",
+      "source": "ext-@solid-primitives/resize-observer",
+      "target": "comm-3bccc4a3-incl-L0-0005"
+    },
+    {
+      "id": "ext-effect/Stream->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-effect/Stream",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-effect/Stream->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-effect/Stream",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-effect/Stream->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-effect/Stream",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-../../src/permission->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-../../src/permission",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-../../src/permission->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-../../src/permission",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/bus/global->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/bus/global",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/bus/global->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/bus/global",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/bus/global->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/bus/global",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-yargs->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-yargs",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-yargs->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-yargs",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@/util/error->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/util/error->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/util/error->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/util/error->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-@/util/error",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-@tui/context/sdk->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@tui/context/sdk",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/context/command->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/command",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/command->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@/context/command",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-@/context/server->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-@/context/server",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-@/context/server->comm-3bccc4a3-incl-L0-0014",
+      "source": "ext-@/context/server",
+      "target": "comm-3bccc4a3-incl-L0-0014"
+    },
+    {
+      "id": "ext-diff->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-diff",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-diff->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-diff",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-diff->comm-3bccc4a3-incl-L0-0002",
+      "source": "ext-diff",
+      "target": "comm-3bccc4a3-incl-L0-0002"
+    },
+    {
+      "id": "ext-diff->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-diff",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-diff->comm-3bccc4a3-incl-L0-0005",
+      "source": "ext-diff",
+      "target": "comm-3bccc4a3-incl-L0-0005"
+    },
+    {
+      "id": "ext-diff->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-diff",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-node:timers/promises->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-node:timers/promises",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-node:timers/promises->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-node:timers/promises",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-node:timers/promises->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-node:timers/promises",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-node:timers/promises->comm-3bccc4a3-incl-L0-0010",
+      "source": "ext-node:timers/promises",
+      "target": "comm-3bccc4a3-incl-L0-0010"
+    },
+    {
+      "id": "ext-effect/unstable/socket/Socket->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-effect/unstable/socket/Socket",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-effect/unstable/socket/Socket->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-effect/unstable/socket/Socket",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/control-plane/workspace->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/control-plane/workspace",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/control-plane/workspace->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/control-plane/workspace",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/control-plane/workspace->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/control-plane/workspace",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-./index.css->comm-3bccc4a3-incl-L0-0007",
+      "source": "ext-./index.css",
+      "target": "comm-3bccc4a3-incl-L0-0007"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/glob->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@opencode-ai/core/util/glob",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/glob->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@opencode-ai/core/util/glob",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/glob->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@opencode-ai/core/util/glob",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@opencode-ai/core/util/glob->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@opencode-ai/core/util/glob",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/id/id->comm-3bccc4a3-incl-L0-0000",
+      "source": "ext-@/id/id",
+      "target": "comm-3bccc4a3-incl-L0-0000"
+    },
+    {
+      "id": "ext-@/id/id->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/id/id",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/id/id->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/id/id",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    },
+    {
+      "id": "ext-@/id/id->comm-3bccc4a3-incl-L0-0013",
+      "source": "ext-@/id/id",
+      "target": "comm-3bccc4a3-incl-L0-0013"
+    },
+    {
+      "id": "ext-@/util/iife->comm-3bccc4a3-incl-L0-0001",
+      "source": "ext-@/util/iife",
+      "target": "comm-3bccc4a3-incl-L0-0001"
+    },
+    {
+      "id": "ext-@/util/iife->comm-3bccc4a3-incl-L0-0003",
+      "source": "ext-@/util/iife",
+      "target": "comm-3bccc4a3-incl-L0-0003"
+    },
+    {
+      "id": "ext-@/util/iife->comm-3bccc4a3-incl-L0-0006",
+      "source": "ext-@/util/iife",
+      "target": "comm-3bccc4a3-incl-L0-0006"
+    }
+  ]
+}

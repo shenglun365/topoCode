@@ -130,8 +130,8 @@ const pageRange = computed(() => {
 watch(filterMode, () => { currentPage.value = 1 })
 watch(searchQuery, () => { currentPage.value = 1 })
 
-function handleSelectProject(id: string) {
-  projectStore.selectProject(id)
+async function handleSelectProject(id: string) {
+  await projectStore.selectProject(id)
   router.push('/code')
   navigation.navigateTo('code')
 }
