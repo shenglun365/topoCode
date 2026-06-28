@@ -147,14 +147,11 @@ function batchBarStyle(batch: string) {
   const pct = Math.min(100, Math.round(cached / total * 100))
   const isP0 = batch === 'P0'
   const isP1 = batch === 'P1'
-  const isP4 = batch === 'P4'
   const filled = isP0 ? 'color-mix(in srgb, var(--accent) 55%, transparent)'
     : isP1 ? 'color-mix(in srgb, var(--warning) 55%, transparent)'
-    : isP4 ? 'color-mix(in srgb, var(--text-muted) 20%, transparent)'
     : 'color-mix(in srgb, var(--text-muted) 35%, transparent)'
   const unfilled = isP0 ? 'color-mix(in srgb, var(--accent) 10%, transparent)'
     : isP1 ? 'color-mix(in srgb, var(--warning) 10%, transparent)'
-    : isP4 ? 'var(--bg-secondary)'
     : 'var(--bg-tertiary)'
   return {
     background: `linear-gradient(to right, ${filled} ${pct}%, ${unfilled} ${pct}%)`,
@@ -280,7 +277,6 @@ async function handleCommunityMD(params: {
 async function loadData() {
   loading.value = true
   loadError.value = null
-  // 切换 task 时强制清除 dashboard 缓存，避免读旧数据
   reportStore.invalidateDashboard(props.taskId)
   projectSummary.value = projectStore.selectedProject
   try {
@@ -290,32 +286,27 @@ async function loadData() {
       return
     }
     const pid = taskDetail.value?.projectId || projectStore.selectedProjectId
-    if (pid) {
-      projectSummary.value = await ipc.project.get(pid).catch(() => projectStore.selectedProject || null)
-      const ps = await reportStore.getProjectSummary(pid).catch(() => null)
-      if (ps?.summary) {
-        projectSummaryText.value = ps.summary
-        projectSummaryDate.value = ps.generated_at || ''
-      }
+
+    // 并行：项目信息 + 项目概要 + dashboard（三者独立）
+    const [projInfo, projSummary, dash] = await Promise.all([
+      pid ? ipc.project.get(pid).catch(() => projectStore.selectedProject || null) : Promise.resolve(null),
+      pid ? reportStore.getProjectSummary(pid).catch(() => null) : Promise.resolve(null),
+      pid ? reportStore.loadDashboard(props.taskId) : Promise.resolve(null),
+    ])
+
+    if (projInfo) projectSummary.value = projInfo
+    if (projSummary?.summary) {
+      projectSummaryText.value = projSummary.summary
+      projectSummaryDate.value = projSummary.generated_at || ''
     }
 
-    // 统一 dashboard 加载（含主/备路径、社区数据注入、预摘要状态）
-    if (pid) {
-      const dash = await reportStore.loadDashboard(props.taskId)
+    if (dash) {
+      // 文件统计（从 dashboard 获取，避免额外 scanFileStats）
+      fileStats.value = dash.fileStats?.extensions || {}
 
-      // 文件统计（从 dashboard 或独立查询）
-      if (dash?.fileStats) {
-        fileStats.value = dash.fileStats.extensions || {}
-      } else {
-        const fs = await analysisStore.scanFileStats(pid).catch(() => null)
-        if (fs) {
-          fileStats.value = fs.extensions || {}
-        }
-      }
-
-      // 按任务条件（extensions / scopes / excludeDirs / pattern）统计文件数，用作覆盖率分母
-      {
-        const task = taskDetail.value as any
+      // 按任务条件统计文件数（用作覆盖率分母）— 与 dashboard 已并行
+      const task = taskDetail.value
+      if (pid) {
         const scanOptions: Record<string, any> = {}
         const exts: string[] = JSON.parse(JSON.stringify(task?.extensions || []))
         const scopes: string[] = JSON.parse(JSON.stringify(task?.scopes || []))
@@ -327,22 +318,22 @@ async function loadData() {
         if (task?.pattern) scanOptions.pattern = task.pattern
         try {
           const fs = await analysisStore.scanFileStats(pid, scanOptions)
-          console.log('[ReportHome] scopeFiles: options=%o totalFiles=%d', scanOptions, fs?.totalFiles)
           totalScopeFiles.value = fs?.totalFiles || 0
         } catch {
           totalScopeFiles.value = dash?.fileStats?.totalFiles || 0
-          console.warn('[ReportHome] scanFileStats failed, fallback to dash.fileStats.totalFiles=%d', totalScopeFiles.value)
         }
       }
 
-      // 预摘要状态（来自 dashboard）
+      // 预摘要状态
       setPreSummaryFromDashboard(dash)
-
-      // 启动预摘要轮询（如有 running agent 会自动保持；否则单次后停止）
       startPreSummaryPoll()
     }
-    await reportStore.checkReportExists(props.taskId)
-    await loadOverviewDocAndPoll()
+
+    // 检查报告 + 概览文档（与上面不冲突）
+    await Promise.all([
+      reportStore.checkReportExists(props.taskId),
+      loadOverviewDocAndPoll(),
+    ])
   } catch (e: any) {
     console.error('[ReportHome] loadData error:', e)
     loadError.value = e?.message || 'Failed to load data'
@@ -559,13 +550,7 @@ watch(() => props.taskId, () => {
                   >
                     P2: {{ preSummaryStatus.counts?.P2 || 0 }} ({{ preSummaryStatus.counts?.P2 ? Math.round((preSummaryStatus.batch_cached?.P2 || 0) / preSummaryStatus.counts.P2 * 100) : 0 }}%)
                   </span>
-                  <span
-                    v-if="(preSummaryStatus.counts?.P4 || 0) > 0"
-                    class="presummary-batch presummary-batch-p4"
-                    :style="batchBarStyle('P4')"
-                  >
-                    P4: {{ preSummaryStatus.counts?.P4 || 0 }} ({{ preSummaryStatus.counts?.P4 ? Math.round((preSummaryStatus.batch_cached?.P4 || 0) / preSummaryStatus.counts.P4 * 100) : 0 }}%)
-                  </span>
+
                 </div>
               </template>
               <template v-else>

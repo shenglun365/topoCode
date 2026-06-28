@@ -51,12 +51,6 @@ const filePath = params.get('path') || '';
 document.getElementById('filePath').textContent = filePath || 'No file specified';
 
 async function load() {
-  // Static mode check: code preview requires backend
-  const isStatic = window.__STATIC_MODE__ || location.pathname.indexOf('static-export') >= 0;
-  if (isStatic) {
-    document.getElementById('codeContainer').innerHTML = '<div class="error-msg">源码预览在静态模式下不可用。请使用 TopoCode FastAPI 服务查看。</div>';
-    return;
-  }
   if (!filePath) {
     document.getElementById('codeContainer').innerHTML = '<div class="error-msg">No file path specified. Use ?path=...</div>';
     return;

@@ -12,6 +12,7 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,6 @@ import community_data as cd
 app = FastAPI(title="TopoOne Web Viewer")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-STATIC_EXPORT_DIR = os.path.join(STATIC_DIR, "static-export")
-
-from export_static import export_task_static, remove_task_static, is_task_exported, generate_index_html
-
-_STATIC_SCRIPT = """<script>
-function toggleMenu(b){var m=b.nextElementSibling,i=m.classList.contains("open");document.querySelectorAll(".more-menu.open").forEach(function(x){x.classList.remove("open")});if(!i)m.classList.add("open")}
-document.addEventListener("click",function(e){if(!e.target.closest(".task-actions")){document.querySelectorAll(".more-menu.open").forEach(function(m){m.classList.remove("open")})}});
-async function exportStatic(tid,b){b.disabled=true;b.textContent="导出中...";b.classList.add("loading");try{var r=await fetch("/api/export-static?taskId="+encodeURIComponent(tid),{method:"POST"});if(!r.ok){alert("导出失败");b.disabled=false;b.textContent="\u6d4b 导出";b.classList.remove("loading");return}location.reload()}catch(e){alert("导出失败: "+e.message);b.disabled=false;b.textContent="\u6d4b 导出";b.classList.remove("loading")}}
-async function deleteStatic(tid,b){if(!confirm("确认删除该任务的静态化文件？"))return;b.disabled=true;try{var r=await fetch("/api/export-static?taskId="+encodeURIComponent(tid),{method:"DELETE"});if(!r.ok){alert("删除失败");b.disabled=false;return}location.reload()}catch(e){alert("删除失败: "+e.message);b.disabled=false}}
-</script>"""
 
 
 # ==================== PlantUML 缓存 ====================
@@ -578,12 +569,6 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
             if has_ov:
                 projects_map[pid]["has_doc"] = True
 
-            try:
-                is_exp = is_task_exported(STATIC_EXPORT_DIR, t["id"])
-            except Exception:
-                is_exp = False
-            projects_map[pid]["tasks"][-1]["exported"] = is_exp
-
         # 排序：有文档的靠前，其余按项目名
         proj_list = sorted(projects_map.values(), key=lambda x: (not x["has_doc"], x["name"]))
 
@@ -619,7 +604,7 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
   .toolbar input:focus{border-color:#2563eb}
   .toolbar select{padding:6px 8px;border:1px solid #d0d0d0;border-radius:6px;font-size:12px}
   .toolbar .info{font-size:12px;color:#999}
-  .project{background:#fff;border-radius:8px;border:1px solid #e0e0e0;margin-bottom:10px;overflow:visible}
+  .project{background:#fff;border-radius:8px;border:1px solid #e0e0e0;margin-bottom:10px;overflow:hidden}
   .project-header{padding:10px 14px;font-weight:600;font-size:13px;background:#fafafa;border-bottom:1px solid #e0e0e0;cursor:pointer;display:flex;align-items:center;gap:8px}
   .project-header:hover{background:#f0f0f0}
   .project-header .arrow{transition:transform .2s;font-size:10px}
@@ -634,19 +619,6 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
   .status-label{font-size:11px;font-weight:500}
   .status-label.done{color:#5a9e6f}
   .status-label.pending{color:#c08a4b}
-  .export-badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:8px;background:#d1fae5;color:#065f46;text-decoration:none;font-weight:500}
-  .export-btn{background:none;border:1px solid #d0d0d0;border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer;color:#666;white-space:nowrap}
-  .export-btn:hover{background:#f0f0f0;border-color:#2563eb;color:#2563eb}
-  .export-btn.loading{opacity:0.6;pointer-events:none}
-  .task-actions{position:relative;margin-left:auto;flex-shrink:0}
-  .more-btn{background:none;border:none;cursor:pointer;color:#999;padding:2px 6px;border-radius:4px;font-size:16px;line-height:1}
-  .more-btn:hover{background:#f0f0f0;color:#333}
-  .more-menu{display:none;position:absolute;right:0;top:100%;min-width:130px;background:#fff;border:1px solid #e0e0e0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:999;padding:4px}
-  .more-menu.open{display:block}
-  .more-menu-item{display:block;width:100%;text-align:left;padding:6px 10px;font-size:12px;border:none;background:none;cursor:pointer;border-radius:4px;color:#333;white-space:nowrap}
-  .more-menu-item:hover{background:#f0f0f0}
-  .more-menu-item.danger{color:#dc2626}
-  .more-menu-item.danger:hover{background:#fef2f2}
   .empty{padding:20px;color:#999;font-size:13px;text-align:center}
   .pagination{display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap}
   .pagination a,.pagination span{padding:4px 10px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px;text-decoration:none;color:#333}
@@ -663,15 +635,6 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
     .toolbar input,.toolbar select{background:#222;border-color:#444;color:#e0e0e0}
     .pagination a,.pagination span{background:#222;border-color:#444;color:#e0e0e0}
     .pagination .active{background:#2563eb;border-color:#2563eb}
-    .export-badge{background:#064e3b;color:#6ee7b7}
-    .export-btn{border-color:#444;color:#999}
-    .export-btn:hover{background:#2a2a3e;border-color:#60a5fa;color:#60a5fa}
-    .more-btn:hover{background:#2a2a3e}
-    .more-menu{background:#16213e;border-color:#444}
-    .more-menu-item{color:#e0e0e0}
-    .more-menu-item:hover{background:#2a2a3e}
-    .more-menu-item.danger{color:#f87171}
-    .more-menu-item.danger:hover{background:#3d1a1a}
   }
 </style></head><body>
 <div class="container">
@@ -701,34 +664,10 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
                 html += f'<div class="project"><div class="project-header" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.arrow\').classList.toggle(\'open\')"><span class="arrow">▶</span> {esc(proj_name)}</div><div class="project-tasks open">'
                 last_proj = proj_name
             dot_class = 'done' if t["hasDoc"] else 'pending'
-            is_exp = t.get("exported", False)
-            html += '<div class="task-item">'
-            html += f'<span class="status-dot {dot_class}"></span>'
             if t["hasDoc"]:
-                doc_url = f'/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}'
-                html += f'<a href="{doc_url}">{esc(t["name"])}</a>'
-                html += f'<span class="status-label {dot_class}">已生成</span>'
-                if is_exp:
-                    static_url = f'/static-export/viewer.html?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}'
-                    html += f'<a href="{static_url}" class="export-badge" title="查看静态文档">📦 静态</a>'
-                else:
-                    html += f'<button class="export-btn" onclick="exportStatic(\'{esc(t["id"])}\', this)" title="导出为静态文档">📦 导出</button>'
+                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span class="status-label {dot_class}">已生成</span></div>'
             else:
-                html += f'<span style="color:#999;font-size:13px">{esc(t["name"])}</span>'
-                html += f'<span class="status-label {dot_class}">未生成</span>'
-            html += '<div class="task-actions">'
-            html += '<button class="more-btn" onclick="toggleMenu(this)">⋯</button>'
-            html += '<div class="more-menu">'
-            if t["hasDoc"]:
-                html += f'<button class="more-menu-item" onclick="parent.location=\'{doc_url}\'">查看文档</button>'
-                if is_exp:
-                    html += f'<button class="more-menu-item" onclick="parent.location=\'{static_url}\'">打开静态版</button>'
-                    html += f'<button class="more-menu-item danger" onclick="deleteStatic(\'{esc(t["id"])}\', this)">删除静态化</button>'
-                else:
-                    html += f'<button class="more-menu-item" onclick="exportStatic(\'{esc(t["id"])}\', this)">导出静态</button>'
-            html += '</div>'
-            html += '</div>'
-            html += '</div>'
+                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span style="color:#999;font-size:13px">{esc(t["name"])}</span><span class="status-label {dot_class}">未生成</span></div>'
         if last_proj is not None:
             html += '</div></div>'
         if total == 0:
@@ -747,9 +686,7 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
                 html += f'<a href="/?{base_q}&page={page+1}">›</a>'
             html += '</div>'
 
-        html += '</div>'
-        html += _STATIC_SCRIPT
-        html += '</body></html>'
+        html += '</div></body></html>'
         return HTMLResponse(html)
     except Exception as e:
         return HTMLResponse(f"<html><body><h1>Error</h1><p>{e}</p></body></html>")
@@ -1277,81 +1214,10 @@ async def delete_graph_layout(task_id: str = Query(None), taskId: str = Query(No
         raise HTTPException(500, str(e))
 
 
-# ==================== Static Export API ====================
-
-@app.post("/api/export-static")
-async def api_export_static(task_id: str = Query(None), taskId: str = Query(None)):
-    tid = task_id or taskId
-    if not tid:
-        raise HTTPException(422, "taskId is required")
-    if not multi_db:
-        raise HTTPException(503, "Backend not ready")
-    try:
-        _ensure_dir(STATIC_EXPORT_DIR)
-        manifest = export_task_static(multi_db, tid, STATIC_EXPORT_DIR)
-        generate_index_html(STATIC_EXPORT_DIR, multi_db)
-        return {"ok": True, "taskId": tid, "exportedAt": manifest['tasks'][-1]['exportedAt']}
-    except Exception as e:
-        logger.error(f"[export-static] {e}")
-        raise HTTPException(500, str(e))
-
-
-@app.delete("/api/export-static")
-async def api_delete_export_static(task_id: str = Query(None), taskId: str = Query(None)):
-    tid = task_id or taskId
-    if not tid:
-        raise HTTPException(422, "taskId is required")
-    try:
-        ok = remove_task_static(STATIC_EXPORT_DIR, tid)
-        generate_index_html(STATIC_EXPORT_DIR, multi_db)
-        return {"ok": ok}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@app.get("/api/export-static/status")
-async def api_export_static_status(task_id: str = Query(None), taskId: str = Query(None)):
-    tid = task_id or taskId
-    if not tid:
-        raise HTTPException(422, "taskId is required")
-    try:
-        exported = is_task_exported(STATIC_EXPORT_DIR, tid)
-        return {"taskId": tid, "exported": exported}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-def _ensure_dir(path):
-    os.makedirs(path, exist_ok=True)
-
-
 def create_app(multi_db_instance) -> FastAPI:
     global multi_db
     multi_db = multi_db_instance
     return app
-
-
-# Dynamic static-export file serving (works even if directory created after startup)
-@app.get("/static-export/{full_path:path}")
-async def serve_static_export_path(full_path: str):
-    safe = os.path.normpath(full_path)
-    if safe.startswith("..") or safe.startswith("/"):
-        raise HTTPException(403)
-    file_path = os.path.join(STATIC_EXPORT_DIR, safe)
-    if os.path.isdir(file_path):
-        file_path = os.path.join(file_path, "index.html")
-    if not os.path.isfile(file_path):
-        raise HTTPException(404, "Not Found")
-    return FileResponse(file_path)
-
-
-@app.get("/static-export")
-@app.get("/static-export/")
-async def serve_static_export_root():
-    index = os.path.join(STATIC_EXPORT_DIR, "index.html")
-    if not os.path.isfile(index):
-        raise HTTPException(404, "Not Found")
-    return FileResponse(index)
 
 
 # ==================== 启动入口 ====================

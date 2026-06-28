@@ -13,6 +13,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
+import { ipc } from '@/services/ipc'
 import type { Project, AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -57,15 +58,13 @@ const typeMap: Record<string, string> = {
   architecture: '架构分析',
 }
 
-  // 加载项目的已完成报告
+  // 加载项目的已完成报告（使用独立 IPC 调用，不覆盖共享的 analysisStore.tasks）
   async function loadCompletedTasks(projectId: string) {
     if (loadingProjects.value.has(projectId)) return
     loadingProjects.value.add(projectId)
     try {
-      await analysisStore.loadTasks(projectId)
-      const completed = analysisStore.tasks.filter(task => task.status === 'done')
-
-      // 每个已完成任务显示一个"分析报告"入口
+      const all = await ipc.analysis.listTasks(projectId)
+      const completed = all.filter((task: AnalysisTask) => task.status === 'done')
       const items: ReportItem[] = []
       for (const task of completed) {
         const taskName = task.name || `Task ${task.id.slice(0, 8)}`
@@ -77,14 +76,13 @@ const typeMap: Record<string, string> = {
           updatedAt: task.updatedAt,
         })
       }
-
-    reportItemsByProject.value.set(projectId, items)
-  } catch (err) {
-    console.error(`Failed to load tasks for project ${projectId}:`, err)
-  } finally {
-    loadingProjects.value.delete(projectId)
+      reportItemsByProject.value.set(projectId, items)
+    } catch (err) {
+      console.error(`Failed to load tasks for project ${projectId}:`, err)
+    } finally {
+      loadingProjects.value.delete(projectId)
+    }
   }
-}
 
 // 切换项目展开/折叠
 function toggleProject(project: Project) {

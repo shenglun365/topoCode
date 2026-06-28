@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onActivated, onDeactivated } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PlusIcon,
@@ -99,7 +99,9 @@ watch(() => analysisStore.tasks, (tasks) => {
   }
 }, { deep: true })
 
-// keep-alive 缓存激活/停用（替代 onMounted/onUnmounted）
+// 首次挂载加载任务（路由无 KeepAlive 时 onActivated 不触发）
+onMounted(() => { loadTasks() })
+// keep-alive 缓存激活/停用
 onActivated(() => { loadTasks() })
 onDeactivated(() => { stopPolling(props.projectId) })
 

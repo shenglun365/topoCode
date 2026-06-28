@@ -166,6 +166,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getEdgeDetail', params }),
     getCascadeLevels: (taskId: string, edgeType?: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCascadeLevels', params: { taskId, edgeType } }),
+    getReportDashboard: (taskId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.getReportDashboard', params: { taskId } }),
     getQueryStats: (params: { taskId: string; edgeType?: string; commLv?: string; commIds?: string[]; depth?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getQueryStats', params }),
     getExternalStats: (taskId: string) =>

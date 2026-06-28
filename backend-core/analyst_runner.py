@@ -734,28 +734,52 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
 
     try:
         resolver = ResolutionEngine()
+        _edge_counts = {"calls": 0, "imports": 0, "extends": 0, "implements": 0, "type_refs": 0}
+
+        def _on_edge_batch(batch):
+            nonlocal _edge_counts
+            ctx.emitter.write_edges(batch)
+            for e in batch:
+                kv = e.kind.value
+                if kv == "calls":
+                    _edge_counts["calls"] += 1
+                elif kv == "imports":
+                    _edge_counts["imports"] += 1
+                elif kv == "extends":
+                    _edge_counts["extends"] += 1
+                elif kv == "implements":
+                    _edge_counts["implements"] += 1
+                elif kv in ("type_of", "returns"):
+                    _edge_counts["type_refs"] += 1
+
         ctx.resolved_edges = resolver.resolve(ctx.all_tables,
                                               progress_callback=_on_ref_progress,
-                                              stop_check=lambda: should_stop(ctx.task_id))
+                                              stop_check=lambda: should_stop(ctx.task_id),
+                                              edge_callback=_on_edge_batch)
         _t1 = _time.perf_counter()
-        ctx.log(f"跨文件引用解析耗时: {_t1 - _t0:.1f}s, 共 {len(ctx.resolved_edges)} 条边")
+        ctx.log(f"跨文件引用解析耗时: {_t1 - _t0:.1f}s")
 
-        ctx.emitter.write_edges(ctx.resolved_edges)
-        _t2 = _time.perf_counter()
-        ctx.log(f"边写入耗时: {_t2 - _t1:.1f}s")
+        # Write remaining edges from the returned list (only non-empty when resolve finishes without callback)
+        if ctx.resolved_edges:
+            ctx.emitter.write_edges(ctx.resolved_edges)
+            for e in ctx.resolved_edges:
+                kv = e.kind.value
+                if kv == "calls":
+                    _edge_counts["calls"] += 1
+                elif kv == "imports":
+                    _edge_counts["imports"] += 1
+                elif kv == "extends":
+                    _edge_counts["extends"] += 1
+                elif kv == "implements":
+                    _edge_counts["implements"] += 1
+                elif kv in ("type_of", "returns"):
+                    _edge_counts["type_refs"] += 1
 
-        for e in ctx.resolved_edges:
-            kv = e.kind.value
-            if kv == "calls":
-                ctx.total_call_edges += 1
-            elif kv == "imports":
-                ctx.total_dep_edges += 1
-            elif kv == "extends":
-                ctx.total_extends_edges += 1
-            elif kv == "implements":
-                ctx.total_implements_edges += 1
-            elif kv in ("type_of", "returns"):
-                ctx.total_type_of_edges += 1
+        ctx.total_call_edges = _edge_counts["calls"]
+        ctx.total_dep_edges = _edge_counts["imports"]
+        ctx.total_extends_edges = _edge_counts["extends"]
+        ctx.total_implements_edges = _edge_counts["implements"]
+        ctx.total_type_of_edges = _edge_counts["type_refs"]
 
         ctx.log(f"引用解析完成: calls={ctx.total_call_edges}, imports={ctx.total_dep_edges}, "
                 f"extends={ctx.total_extends_edges}, implements={ctx.total_implements_edges}, "

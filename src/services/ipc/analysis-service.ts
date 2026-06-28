@@ -101,6 +101,11 @@ export interface AnalysisService {
   listCommunityResults(taskId: string, edgeType: string): Promise<ListCommunityResultsResponse>
   updateCommunityName(params: any): Promise<UpdateCommunityNameResponse>
   getCommunityFileGraph(params: { taskId: string; edgeType: string; commId: string }): Promise<{ nodes: Array<{ id: string; label: string; filePath: string }>; edges: Array<{ source: string; target: string; direction?: string }> }>
+  getReportDashboard(taskId: string): Promise<{
+    task: any; callLevels: any; depLevels: any;
+    callResults: { results: any[] }; depResults: { results: any[] };
+    fileStats: any; preSummary?: any
+  }>
   onProgress(cb: (data: TaskProgressEvent) => void): void
   onComplete(cb: (data: TaskCompleteEvent) => void): void
   onError(cb: (data: TaskErrorEvent) => void): void
@@ -188,6 +193,9 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     getCascadeLevels: async (taskId: string, edgeType?: string) => {
       return await api.analysis.getCascadeLevels(taskId, edgeType) as CascadeLevelsResult
+    },
+    getReportDashboard: async (taskId: string) => {
+      return await api.analysis.getReportDashboard(taskId)
     },
     getQueryStats: async (params) => {
       return await api.analysis.getQueryStats(params) as QueryStatsResult

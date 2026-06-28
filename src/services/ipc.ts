@@ -320,6 +320,9 @@ function createRealIPC() {
       getCascadeLevels: async (taskId: string, edgeType?: string) => {
         return await api.analysis.getCascadeLevels(taskId, edgeType)
       },
+      getReportDashboard: async (taskId: string) => {
+        return await api.analysis.getReportDashboard(taskId)
+      },
       getQueryStats: async (params: {
         taskId: string
         edgeType?: string

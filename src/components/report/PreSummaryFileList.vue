@@ -20,7 +20,7 @@ const taskName = computed(() => {
   return props.taskId || ''
 })
 
-const BATCHES = ['P0', 'P1', 'P2', 'P4'] as const
+const BATCHES = ['P0', 'P1', 'P2'] as const
 type Batch = typeof BATCHES[number]
 
 const activeBatch = ref<Batch>('P0')

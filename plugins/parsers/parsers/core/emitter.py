@@ -146,7 +146,7 @@ import json
 
 def _make_edge_id(source: str, target: str, kind: EdgeKind) -> str:
     raw = f"{source}->{target}:{kind.value}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+    return hashlib.md5(raw.encode()).hexdigest()[:16]
 
 
 def _json_list(items: list) -> str:

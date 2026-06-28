@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TopoOne Document Viewer</title>
-<script src="static-data-proxy.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.0/dist/cytoscape.min.js"></script>
@@ -41,10 +40,10 @@
   .granularity-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .viz-container { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
   .viz-container .tab-content { display: none; width: 100%; flex: 1; min-height: 0; }
-  .viz-container .tab-content.active { display: flex; flex-direction: column; position: relative; }
+  .viz-container .tab-content.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .heatmap-controls { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .heatmap-controls select { padding: 2px 4px; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); }
-  #heatmapContent { padding: 8px; overflow: auto; flex: 1; min-height: 0; }
+  #heatmapContent { padding: 8px; overflow: auto; flex: 1; min-height: 0; display: flex; justify-content: center; align-items: flex-start; }
   #heatmapContent table { border-collapse: collapse; font-size: 10px; }
   #heatmapContent td { border: 1px solid var(--border); padding: 2px 4px; text-align: center; min-width: 20px; }
   #heatmapContent th { border: 1px solid var(--border); padding: 2px 6px; font-weight: 500; font-size: 9px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: sticky; background: var(--bg); z-index: 1; }
@@ -211,7 +210,7 @@
   <span class="title" id="docTitle">TopoCode Documents</span>
   <button class="toggle-btn active" id="toggleLeft" title="切换文档栏">&#x1F4C4;</button>
   <button class="toggle-btn active" id="toggleRight" title="切换结构图栏">&#x1F517;</button>
-  <a href="javascript:void(0)" id="backLink" onclick="location.href=(__STATIC_MODE__ ? '/static-export/' : '/')">&larr; 返回首页</a>
+  <a href="/" id="backLink">&larr; 返回首页</a>
 </div>
 
 <div class="doc-layout" id="docLayout">
@@ -280,6 +279,7 @@
             <span>打开文档</span>
           </div>
         </div>
+      </div>
       <div class="tab-content" id="tabHeatmap">
         <div class="heatmap-controls">
           <label>规模: <select id="heatmapSize">
@@ -334,27 +334,6 @@ const S = {
 };
 let g_cy = null;         // Cytoscape instance
 
-// Static mode detection: injected by server OR detected by URL path
-const __STATIC_MODE__ = !!(window.__STATIC_MODE__ || location.pathname.indexOf('static-export') >= 0);
-const __DATA_PREFIX__ = __STATIC_MODE__ ? 'data' : '/static-export/data';
-const __BASE_PATH__ = __STATIC_MODE__ ? '/static-export/viewer.html' : '/doc';
-
-function docURL(params) {
-  return __BASE_PATH__ + '?' + params.toString();
-}
-
-// Static JSON cache
-const __STATIC_DATA__ = {};
-
-async function loadStaticJSON(path) {
-  if (__STATIC_DATA__[path]) return __STATIC_DATA__[path];
-  var r = await fetch(path);
-  if (!r.ok) throw new Error('Failed to load ' + path);
-  var data = await r.json();
-  __STATIC_DATA__[path] = data;
-  return data;
-}
-
 // URL globals (read once at init)
 const g_url = new URLSearchParams(location.search);
 const g_taskId = g_url.get('taskId') || '';
@@ -366,7 +345,7 @@ const g_edgeType = g_url.get('edgeType') || 'CALL';
 S.left = g_url.get('left') !== '0';
 S.right = g_url.get('right') !== '0';
 S.tab = g_url.get('tab') || 'graph';
-S.et = g_url.get('et') || 'INCLUDE';
+S.et = g_url.get('et') || g_edgeType || 'INCLUDE';
 S.cid = g_url.get('cid') || '';
 S.lv = g_url.get('lv') || '';
 S.size = parseInt(g_url.get('size')) || 10;
@@ -414,8 +393,7 @@ function syncURL() {
   if (S.depth !== 1) p.set('depth', String(S.depth)); else p.delete('depth');
   if (S.layoutTimeout !== 60000) p.set('ltimeout', String(S.layoutTimeout)); else p.delete('ltimeout');
   if (S.filePath) p.set('fileId', S.filePath); else p.delete('fileId');
-  var base = __STATIC_MODE__ ? location.pathname : '/doc';
-  history.replaceState(null, '', base + '?' + p.toString());
+  history.replaceState(null, '', '/doc?' + p.toString());
 }
 
 // ============================================================
@@ -451,104 +429,44 @@ const API = {
       return r.json();
     });
   },
-  _staticProxyReady: false,
-  async _ensureProxy(tid) {
-    if (!this._staticProxyReady && __STATIC_MODE__) {
-      await StaticDataProxy.load(tid, __DATA_PREFIX__);
-      this._staticProxyReady = true;
-    }
-  },
-  async communityChildren(tid, pid, et) {
-    if (__STATIC_MODE__) {
-      await this._ensureProxy(tid);
-      return StaticDataProxy.getCommunityChildren(tid, et || S.et, pid || null);
-    }
+  communityChildren(tid, pid, et) {
     return this._get('/api/community-children?taskId=' + encodeURIComponent(tid) + '&parentCommId=' + encodeURIComponent(pid || '') + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
   },
-  async communityGraph(tid, et, cid, gran) {
-    if (__STATIC_MODE__) {
-      await this._ensureProxy(tid);
-      return StaticDataProxy.getCommunityGraph(tid, et || S.et, cid || '', gran || S.gran || 'component', S.depth || 1);
-    }
+  communityGraph(tid, et, cid, gran) {
     var url = '/api/community-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et));
     if (cid) url += '&commId=' + encodeURIComponent(cid);
     url += '&gran=' + encodeURIComponent(gran || S.gran || 'component');
     url += '&depth=' + (S.depth || 1);
     return this._get(url);
   },
-  async fileGraph(tid, et, cid, scope) {
-    if (__STATIC_MODE__) {
-      await this._ensureProxy(tid);
-      return StaticDataProxy.getCommunityGraph(tid, et || S.et, cid || '', 'file', S.depth || 1);
-    }
+  fileGraph(tid, et, cid, scope) {
     return this._get('/api/file-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et || S.et) + '&commId=' + encodeURIComponent(cid || '__all__') + '&scope=' + encodeURIComponent(scope || 'both'));
   },
-  async heatmap(tid, et, size, cid) {
-    if (__STATIC_MODE__) {
-      await this._ensureProxy(tid);
-      return StaticDataProxy.getHeatmap(tid, et || S.et, size || S.size || 10, cid || '');
-    }
+  heatmap(tid, et, size, cid) {
     var url = '/api/heatmap?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)) + '&size=' + (size || S.size);
     if (cid) url += '&commId=' + encodeURIComponent(cid);
     return this._get(url);
   },
-  async doc(id) {
-    if (__STATIC_MODE__) {
-      var docs = await loadStaticJSON(__DATA_PREFIX__ + '/task-' + g_taskId + '/docs.json');
-      return docs[id] || {content: ''};
-    }
-    return this._get('/api/docs/' + encodeURIComponent(id));
-  },
-  async externalStats(tid) {
-    if (__STATIC_MODE__) {
-      try { return await loadStaticJSON(__DATA_PREFIX__ + '/task-' + tid + '/external-stats.json'); } catch(e) {}
-      return {externalDeps: [], externalCalls: []};
-    }
+  doc(id) { return this._get('/api/docs/' + encodeURIComponent(id)); },
+  externalStats(tid) {
     return this._get('/api/external-stats?taskId=' + encodeURIComponent(tid));
   },
-  async communityDoc(tid, cid, et) {
-    if (__STATIC_MODE__) {
-      var docs = await loadStaticJSON(__DATA_PREFIX__ + '/task-' + tid + '/community-docs.json');
-      var docId = 'community-' + tid + '-' + (et || S.et) + '-' + cid;
-      return docs[docId] || {title: cid, content: '#' + cid, projectId: ''};
-    }
+  communityDoc(tid, cid, et) {
     return this._get('/api/community-doc?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
   },
-  async communityFiles(tid, cid, et) {
-    if (__STATIC_MODE__) {
-      return {files: [], total: 0, projectId: ''};
-    }
+  communityFiles(tid, cid, et) {
     return this._get('/api/community-files?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
   },
-  async graphLayoutLoad(tid, cid, et, gran, depth) {
-    if (__STATIC_MODE__) {
-      var key = 'layout_' + tid + '_' + (cid||'') + '_' + et + '_' + (gran||'component') + '_' + (depth||1);
-      try { var saved = localStorage.getItem(key); if (saved) return {found: true, nodes: JSON.parse(saved)}; } catch(e) {}
-      return {found: false};
-    }
+  graphLayoutLoad(tid, cid, et, gran, depth) {
     return this._get('/api/graph-layout?taskId=' + encodeURIComponent(tid) + '&commId=' + encodeURIComponent(cid || '') + '&edgeType=' + encodeURIComponent(et) + '&gran=' + encodeURIComponent(gran || 'component') + '&depth=' + (depth || 1));
   },
-  async graphLayoutSave(tid, cid, et, gran, depth, nodes) {
-    if (__STATIC_MODE__) {
-      var key = 'layout_' + tid + '_' + (cid||'') + '_' + et + '_' + (gran||'component') + '_' + (depth||1);
-      try { localStorage.setItem(key, JSON.stringify(nodes || {})); } catch(e) {}
-      return {ok: true};
-    }
+  graphLayoutSave(tid, cid, et, gran, depth, nodes) {
     return this._post('/api/graph-layout', {taskId:tid, commId:cid || '', edgeType:et, gran:gran || 'component', depth:depth || 1, nodes:nodes});
   },
-  async graphLayoutDelete(tid, cid, et, gran, depth) {
-    if (__STATIC_MODE__) {
-      var key = 'layout_' + tid + '_' + (cid||'') + '_' + et + '_' + (gran||'component') + '_' + (depth||1);
-      try { localStorage.removeItem(key); } catch(e) {}
-      return {ok: true};
-    }
+  graphLayoutDelete(tid, cid, et, gran, depth) {
     return this._delete('/api/graph-layout?taskId=' + encodeURIComponent(tid) + '&commId=' + encodeURIComponent(cid || '') + '&edgeType=' + encodeURIComponent(et) + '&gran=' + encodeURIComponent(gran || 'component') + '&depth=' + (depth || 1));
   },
-  async graphExternalLoad(tid, et, cid, depth) {
-    if (__STATIC_MODE__) {
-      try { return await loadStaticJSON(__DATA_PREFIX__ + '/task-' + tid + '/external-graph-' + et + '.json'); } catch(e) {}
-      return {nodes:[], edges:[]};
-    }
+  graphExternalLoad(tid, et, cid, depth) {
     return this._get('/api/external-graph?taskId=' + encodeURIComponent(tid) + '&edgeType=' + encodeURIComponent(et) + '&commId=' + encodeURIComponent(cid || '') + '&depth=' + (depth || 1));
   },
 };
@@ -849,7 +767,7 @@ const LeftBreadcrumb = {
           u.set('docId', 'overall-' + g_taskId);
           S.page = 'doc';
           S.filePath = '';
-          history.replaceState(null, '', docURL(u));
+          history.replaceState(null, '', '/doc?' + u.toString());
           loadDoc('overall-' + g_taskId);
           return;
         }
@@ -864,7 +782,7 @@ const LeftBreadcrumb = {
           // 写入正确的 edgeType 到 URL
           var u2 = new URLSearchParams(location.search);
           u2.set('edgeType', cidET);
-          history.replaceState(null, '', docURL(u2));
+          history.replaceState(null, '', '/doc?' + u2.toString());
           S.docChain = [];
           loadCommunityDoc(g_taskId, cid, cidET);
           return;
@@ -882,7 +800,7 @@ const LeftBreadcrumb = {
           S.page = 'doc';
           S.filePath = '';
           syncURL();
-          history.replaceState(null, '', docURL(u));
+          history.replaceState(null, '', '/doc?' + u.toString());
           S.docChain = [];
           loadCommunityDoc(g_taskId, backCid, backEt);
         }
@@ -977,6 +895,7 @@ const DocContent = {
           S.et = parts[0];
           S.tab = 'graph';
           syncURL();
+          RightPanel.renderPanel();
           RightPanel.switchTab('graph');
           RightPanel.loadViz();
         };
@@ -986,15 +905,13 @@ const DocContent = {
       }
     });
 
-    // File path links (skip in static mode - no code server)
-    if (!__STATIC_MODE__) {
-      content.querySelectorAll('p, li').forEach(function(el) {
-        el.innerHTML = el.innerHTML.replace(/\b([\w./-]+\.[a-z]{1,4})\b(?!["'\]])/gi, function(m) {
-          if (m.startsWith('http') || m.startsWith('#')) return m;
-          return '<a href="/code?project_id=' + encodeURIComponent(S.projectId) + '&path=' + encodeURIComponent(m) + '" target="_blank" class="file-link">' + m + '</a>';
-        });
+    // File path links
+    content.querySelectorAll('p, li').forEach(function(el) {
+      el.innerHTML = el.innerHTML.replace(/\b([\w./-]+\.[a-z]{1,4})\b(?!["'\]])/gi, function(m) {
+        if (m.startsWith('http') || m.startsWith('#')) return m;
+        return '<a href="/code?project_id=' + encodeURIComponent(S.projectId) + '&path=' + encodeURIComponent(m) + '" target="_blank" class="file-link">' + m + '</a>';
       });
-    }
+    });
 
     // Mermaid
     function normalizeMermaid(code) {
@@ -1018,13 +935,6 @@ const DocContent = {
 
     // PlantUML
     content.querySelectorAll('pre code.language-plantuml').forEach(function(pre) {
-      if (__STATIC_MODE__) {
-        var container = document.createElement('div');
-        container.className = 'plantuml-container';
-        container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:12px">PlantUML 在静态模式下不可用，请在 FastAPI 服务中查看。</div>';
-        pre.parentNode.replaceWith(container);
-        return;
-      }
       var code = pre.textContent;
       var container = document.createElement('div');
       container.className = 'plantuml-container';
@@ -1115,7 +1025,7 @@ const DocContent = {
               found = true; break;
             }
           }
-          if (!found) S.commStack.push({cid: cid, name: hText, depth: S.depth, et: et});
+          if (!found) S.commStack.push({cid: cid, name: hText});
           console.log('[hd-click] after push S.commStack=' + JSON.stringify(S.commStack.map(function(x){return x.cid+':'+(x.name||'').slice(0,20)})));
           S.tab = 'graph';
           syncURL();
@@ -1196,7 +1106,7 @@ const LeftToc = {
         p.set('cn', name);
         if (pcStr) p.set('pc', pcStr); else p.delete('pc');
         p.delete('docId');
-        history.replaceState(null, '', docURL(p));
+        history.replaceState(null, '', '/doc?' + p.toString());
         S.taskId = S.taskId || g_taskId;
         loadCommunityDoc(S.taskId, cid, et);
       };
@@ -1266,7 +1176,7 @@ const FileList = {
         h += '<span class="file-list-path" title="' + escapeAttr(f.path) + '">' + escapeHtml(f.path) + '</span>';
         h += '<span class="file-list-actions">';
         h += '<a class="file-action-link" data-action="summary" data-path="' + escapeAttr(f.path) + '" data-commid="' + escapeAttr(f.commId) + '">\u67e5\u770b\u6458\u8981</a>';
-        if (!__STATIC_MODE__) h += '<a class="file-action-link" data-action="code" href="' + codeUrl + '" target="_blank">\u67e5\u770b\u4ee3\u7801</a>';
+        h += '<a class="file-action-link" data-action="code" href="' + codeUrl + '" target="_blank">\u67e5\u770b\u4ee3\u7801</a>';
         h += '</span>';
         h += '</div>';
       }
@@ -1357,13 +1267,7 @@ const FilePreview = {
     var area = document.getElementById('fileSummaryArea');
     if (!area) return;
     try {
-      var data;
-      if (__STATIC_MODE__) {
-        var all = await loadStaticJSON(__DATA_PREFIX__ + '/task-' + tid + '/file-summaries.json');
-        data = all[filePath] || {found: false};
-      } else {
-        data = await API._get('/api/file-summary?taskId=' + encodeURIComponent(tid) + '&filePath=' + encodeURIComponent(filePath));
-      }
+      var data = await API._get('/api/file-summary?taskId=' + encodeURIComponent(tid) + '&filePath=' + encodeURIComponent(filePath));
       if (data.found) {
         var h = '<div class="file-summary-meta">';
         h += '<div class="file-summary-meta-row"><span class="meta-label">\u7f13\u5b58\u65f6\u95f4:</span> ' + escapeHtml(data.created_at || '-') + '</div>';
@@ -1409,14 +1313,10 @@ const RightBreadcrumb = {
           S.commStack = [];
           S.commParent = '';
           S.cid = '';
-          // don't reset depth — keep current
         } else {
-          var item = S.commStack[idx];
           S.commStack = S.commStack.slice(0, idx + 1);
-          S.commParent = item.cid;
-          S.cid = item.cid;
-          if (item.depth !== undefined) { S.depth = item.depth; document.getElementById('depthSelect').value = String(S.depth); }
-          if (item.et !== undefined) { S.et = item.et; }
+          S.commParent = S.commStack[idx].cid;
+          S.cid = S.commParent;
         }
         syncURL();
         RightPanel.refresh();
@@ -1549,9 +1449,8 @@ const RightPanel = {
         S.cid = '';
         S.commParent = '';
         S.commStack = [];
-        S.depth = 1;
         syncURL();
-        document.getElementById('depthSelect').value = '1';
+        RightPanel.renderPanel();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
         RightBreadcrumb.render();
@@ -1602,8 +1501,9 @@ const RightPanel = {
         var cid = this.dataset.cid;
         var name = this.dataset.name;
         S.cid = cid;
+        S.depth = 1;
         S.commParent = cid;
-        S.commStack.push({cid: S.cid, name: name, depth: S.depth, et: S.et});
+        S.commStack.push({cid: cid, name: name});
         syncURL();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
@@ -1826,14 +1726,16 @@ const GraphView = {
         if (isExternal) {
           if (!extNode && nodeId !== S.cid) {
             S.cid = nodeId;
+            S.depth = 1;
             S.commParent = nodeId;
-            S.commStack.push({cid: S.cid, name: evt.target.data('label'), depth: S.depth, et: S.et});
+            S.commStack.push({cid: nodeId, name: evt.target.data('label')});
           }
         } else if (isComponent) {
           if (nodeId === S.cid) return;
           S.cid = nodeId;
+          S.depth = 1;
           S.commParent = nodeId;
-          S.commStack.push({cid: S.cid, name: evt.target.data('label'), depth: S.depth, et: S.et});
+          S.commStack.push({cid: nodeId, name: evt.target.data('label')});
           // Leaf community → show file-level deps/calls
           if (evt.target.data('hasChildren') === false) {
             S.gran = 'file';
@@ -2029,27 +1931,16 @@ const GraphView = {
     var toggleAllBtn = document.getElementById('graphFilterToggleAll');
     toggleAllBtn.onclick = function() {
       if (!g_cy) return;
-      var hidden = g_cy.nodes(':hidden');
-      var total = g_cy.nodes();
-      if (hidden.length === 0) {
-        // 全显示 → 隐藏孤立
-        total.filter(function(n) { return n.degree(false) === 0; }).hide();
+      if (g_cy.nodes(':hidden').length > 0) {
+        g_cy.nodes().show();
         this.textContent = '\u9690\u85cf\u5168\u90e8';
-        this.title = '\u9690\u85cf\u6240\u6709\u8282\u70b9';
+        this.title = '\u9690\u85cf\u5168\u90e8\u8282\u70b9';
       } else {
-        var hasNonIsoHidden = total.some(function(n) { return n.hidden() && n.degree(false) > 0; });
-        if (!hasNonIsoHidden) {
-          // 隐藏孤立 → 隐藏全部
-          total.hide();
-          this.textContent = '\u663e\u793a\u5168\u90e8';
-          this.title = '\u663e\u793a\u6240\u6709\u8282\u70b9';
-        } else {
-          // 隐藏全部 → 显示全部
-          total.show();
-          this.textContent = '\u9690\u85cf\u5b64\u7acb';
-          this.title = '\u9690\u85cf\u5b64\u7acb\u8282\u70b9\uff08\u65e0\u8fde\u7ebf\uff09';
-        }
+        g_cy.nodes().hide();
+        this.textContent = '\u663e\u793a\u5168\u90e8';
+        this.title = '\u663e\u793a\u5168\u90e8\u8282\u70b9';
       }
+      GraphView._refreshFilter();
     };
 
     // reset positions button
@@ -2072,15 +1963,9 @@ const GraphView = {
     // sync toggle button text with current state
     var tb = document.getElementById('graphFilterToggleAll');
     if (tb) {
-      var hidden = g_cy.nodes(':hidden');
-      if (hidden.length === 0) {
-        tb.textContent = '\u9690\u85cf\u5b64\u7acb';
-        tb.title = '\u9690\u85cf\u5b64\u7acb\u8282\u70b9\uff08\u65e0\u8fde\u7ebf\uff09';
-      } else {
-        var hasNonIso = g_cy.nodes().some(function(n) { return n.hidden() && n.degree(false) > 0; });
-        tb.textContent = hasNonIso ? '\u663e\u793a\u5168\u90e8' : '\u9690\u85cf\u5168\u90e8';
-        tb.title = hasNonIso ? '\u663e\u793a\u6240\u6709\u8282\u70b9' : '\u9690\u85cf\u6240\u6709\u8282\u70b9';
-      }
+      var anyHidden = g_cy.nodes(':hidden').length > 0;
+      tb.textContent = anyHidden ? '\u663e\u793a\u5168\u90e8' : '\u9690\u85cf\u5168\u90e8';
+      tb.title = anyHidden ? '\u663e\u793a\u5168\u90e8\u8282\u70b9' : '\u9690\u85cf\u5168\u90e8\u8282\u70b9';
     }
     var nodes = g_cy.nodes();
     var h = '';
@@ -2160,8 +2045,9 @@ const GraphView = {
       // File mode: no drill-down
       if (S.gran === 'file') return;
       S.cid = nid;
+      S.depth = 1;
       S.commParent = nid;
-      S.commStack.push({cid: S.cid, name: label, depth: S.depth, et: S.et});
+      S.commStack.push({cid: nid, name: label});
       // Leaf community → show file-level deps/calls
       if (node.data('hasChildren') === false) {
         S.gran = 'file';
@@ -2193,7 +2079,7 @@ const GraphView = {
       }
       u.set('communityId', commId);
       u.set('cn', label);
-      history.replaceState(null, '', docURL(u));
+      history.replaceState(null, '', '/doc?' + u.toString());
       console.log('[ctx-doc] URL: cid=' + commId.slice(0,30) + ' cn=' + label.slice(0,20) + ' pc=' + (u.get('pc') || '-').slice(0,50));
       loadCommunityDoc(S.taskId, commId, et);
     };
@@ -2334,12 +2220,65 @@ const HeatmapView = {
         container.innerHTML = '<div class="loading">\u6682\u65e0\u6570\u636e</div>';
         return;
       }
+      // Client-side trim: respect the requested size
+      if (data.rows.length > size || (data.cols && data.cols.length > size)) {
+        var n = size;
+        data.rows = data.rows.slice(0, n);
+        if (data.cols) data.cols = data.cols.slice(0, n);
+        if (data.commIds) data.commIds = data.commIds.slice(0, n);
+        if (data.matrix) {
+          data.matrix = data.matrix.slice(0, n);
+          for (var ti = 0; ti < data.matrix.length; ti++) {
+            if (data.matrix[ti] && data.matrix[ti].length > n) data.matrix[ti] = data.matrix[ti].slice(0, n);
+          }
+        }
+      }
+      // Sort by heat: highest total row first (top-left)
+      this._sortByHeat(data);
       var maxC = data.maxCount || 1;
-      container.innerHTML = this._renderTable(data.rows, data.cols, data.matrix, maxC, data.commIds || data.rows);
+      var html = this._renderTable(data.rows, data.cols, data.matrix, maxC, data.commIds || data.rows);
+      container.innerHTML = html;
+      container.style.paddingTop = Math.round(container.offsetHeight * 0.25) + 'px';
       this._attachDrillHandlers(container, data.commIds || []);
     } catch(e) {
       container.innerHTML = '<div class="error-msg">\u52a0\u8f7d\u70ed\u529b\u56fe\u5931\u8d25: ' + e.message + '</div>';
     }
+  },
+
+  _sortByHeat(data) {
+    if (!data.matrix || !data.rows) return;
+    var n = data.rows.length;
+    // Row totals (sum across columns)
+    var rowTotals = [];
+    for (var ri = 0; ri < n; ri++) {
+      var s = 0;
+      for (var ci = 0; ci < (data.matrix[ri] || []).length; ci++) s += data.matrix[ri][ci] || 0;
+      rowTotals.push(s);
+    }
+    // Column totals (sum across rows)
+    var colTotals = [];
+    var m = data.cols ? data.cols.length : (data.matrix[0] ? data.matrix[0].length : 0);
+    for (var ci = 0; ci < m; ci++) {
+      var s = 0;
+      for (var ri = 0; ri < n; ri++) s += (data.matrix[ri] || [])[ci] || 0;
+      colTotals.push(s);
+    }
+    // Sort row indices by total descending
+    var rowIdx = rowTotals.map(function(_, i) { return i; }).sort(function(a, b) { return rowTotals[b] - rowTotals[a]; });
+    // Sort column indices by total descending
+    var colIdx = colTotals.map(function(_, i) { return i; }).sort(function(a, b) { return colTotals[b] - colTotals[a]; });
+    // Reorder rows, cols, commIds, matrix
+    data.rows = rowIdx.map(function(i) { return data.rows[i]; });
+    if (data.cols) data.cols = colIdx.map(function(i) { return data.cols[i]; });
+    if (data.commIds) data.commIds = rowIdx.map(function(i) { return data.commIds[i]; });
+    var newMatrix = [];
+    for (var ri = 0; ri < n; ri++) {
+      var oldRow = data.matrix[rowIdx[ri]] || [];
+      var newRow = [];
+      for (var ci = 0; ci < m; ci++) newRow.push(oldRow[colIdx[ci]] || 0);
+      newMatrix.push(newRow);
+    }
+    data.matrix = newMatrix;
   },
 
   _renderTable(rows, cols, matrix, maxC, commIds) {
@@ -2370,11 +2309,13 @@ const HeatmapView = {
         var cid = this.dataset.cid;
         if (!cid) return;
         S.cid = cid;
+        S.depth = 1;
         S.commParent = cid;
-        S.commStack.push({cid: S.cid, name: this.textContent, depth: S.depth, et: S.et});
+        S.commStack.push({cid: cid, name: this.textContent});
         syncURL();
+        RightPanel.renderPanel();
         RightPanel.loadCommTree();
-        HeatmapView.load();
+        RightPanel.loadViz();
         RightBreadcrumb.render();
       };
     });
@@ -2385,13 +2326,11 @@ const HeatmapView = {
 // 7. Bootstrap
 // ============================================================
 async function load() {
-  // Init locale (skip in static mode)
-  if (!__STATIC_MODE__) {
-    try {
-      var r = await fetch('/api/template-locale');
-      if (r.ok) { var d = await r.json(); if (d.locale === 'en-US' || d.locale === 'zh-CN') S.locale = d.locale; }
-    } catch(e) {}
-  }
+  // Init locale
+  try {
+    var r = await fetch('/api/template-locale');
+    if (r.ok) { var d = await r.json(); if (d.locale === 'en-US' || d.locale === 'zh-CN') S.locale = d.locale; }
+  } catch(e) {}
   document.getElementById('tocToggle').title = _('tocTitle');
   document.getElementById('tocToggle').onclick = function() {
     var p = document.getElementById('tocPanel');
@@ -2452,7 +2391,7 @@ async function load() {
   // Init right panel after task is known
   if (S.taskId) {
     RightPanel.init();
-    RightPanel.loadViz();
+    RightPanel.switchTab(S.tab);
   }
 }
 

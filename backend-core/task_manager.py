@@ -1266,23 +1266,26 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         logger.info("[PERF] getReportDashboard load_task=%.1fms", (time.perf_counter() - t0) * 1000)
 
-        # 1. 获取级联社区层级 (CALL + INCLUDE)
+        # 1. 获取级联社区层级 (CALL + INCLUDE) — 并行
         t0 = time.perf_counter()
-        call_levels = _get_cascade_levels_impl(project_db, tid, 'CALL')
-        t_call = time.perf_counter() - t0
-        t0 = time.perf_counter()
-        dep_levels = _get_cascade_levels_impl(project_db, tid, 'INCLUDE')
-        t_dep = time.perf_counter() - t0
-        logger.info("[PERF] getReportDashboard cascade_levels CALL=%.1fms INCLUDE=%.1fms", t_call * 1000, t_dep * 1000)
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_call = pool.submit(_get_cascade_levels_impl, project_db, tid, 'CALL')
+            fut_dep = pool.submit(_get_cascade_levels_impl, project_db, tid, 'INCLUDE')
+            call_levels = fut_call.result()
+            dep_levels = fut_dep.result()
+        t_cascade = time.perf_counter() - t0
+        logger.info("[PERF] getReportDashboard cascade_levels (parallel) total=%.1fms", t_cascade * 1000)
 
-        # 2. 获取 LLM 结果
+        # 2. 获取 LLM 结果 — 并行
         t0 = time.perf_counter()
-        call_results = _list_community_results_impl(project_db, tid, 'CALL')
-        t_call_res = time.perf_counter() - t0
-        t0 = time.perf_counter()
-        dep_results = _list_community_results_impl(project_db, tid, 'INCLUDE')
-        t_dep_res = time.perf_counter() - t0
-        logger.info("[PERF] getReportDashboard llm_results CALL=%.1fms INCLUDE=%.1fms", t_call_res * 1000, t_dep_res * 1000)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_call_res = pool.submit(_list_community_results_impl, project_db, tid, 'CALL')
+            fut_dep_res = pool.submit(_list_community_results_impl, project_db, tid, 'INCLUDE')
+            call_results = fut_call_res.result()
+            dep_results = fut_dep_res.result()
+        t_llm = time.perf_counter() - t0
+        logger.info("[PERF] getReportDashboard llm_results (parallel) total=%.1fms", t_llm * 1000)
 
         # 3. 获取文件统计
         t0 = time.perf_counter()
@@ -1290,7 +1293,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         logger.info("[PERF] getReportDashboard file_stats=%.1fms", (time.perf_counter() - t0) * 1000)
 
         # 4. 预摘要状态
-        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0, 'P4': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': _ps_failed_counts.get(tid, 0)}
+        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': _ps_failed_counts.get(tid, 0)}
         try:
             # 从 file_summaries 表直接统计缓存数（无社区数据时也能工作）
             p_rows = project_db.execute(
@@ -2320,28 +2323,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             else:
                 item["batch"] = "P2"
 
-        # 5. P4: 任务范围内未被任何社区覆盖的文件
-        scored_paths = {f["file_path"] for f in scored}
-        p4_files: list[dict] = []
-        try:
-            for row in project_db.execute(
-                "SELECT file_path FROM source_files WHERE language != 'directory'"
-            ).fetchall():
-                rp = row["file_path"]
-                if rp not in scored_paths:
-                    p4_files.append({
-                        "file_path": rp, "score": 0, "cross": 0,
-                        "edges": 0, "size": 0, "is_large": 0,
-                        "quality": 0, "batch": "P4",
-                    })
-        except Exception:
-            pass
-        p4_files.sort(key=lambda x: x["file_path"])
-        scored.extend(p4_files)
-
         return {
             "files": scored,
-            "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end, "P4": len(p4_files)},
+            "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end},
         }
 
     def _get_l0_comps(project_db, tid):
@@ -2381,7 +2365,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 查已缓存文件数 + 按批次统计（每次轮询只查 COUNT）
         cached_count = 0
-        batch_cached = {"P0": 0, "P1": 0, "P2": 0, "P4": 0}
+        batch_cached = {"P0": 0, "P1": 0, "P2": 0}
         try:
             cached_rows = project_db.execute(
                 "SELECT file_path FROM file_summaries WHERE project_id=?", (pid,)

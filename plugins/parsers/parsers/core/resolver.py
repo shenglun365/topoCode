@@ -93,7 +93,8 @@ class ResolutionEngine:
         return True
 
     def resolve(self, tables: list[FileSymbolTable],
-                progress_callback=None, stop_check=None) -> list[Edge]:
+                progress_callback=None, stop_check=None,
+                edge_callback=None) -> list[Edge]:
         """解析所有未解析引用，生成 edges
 
         Args:
@@ -102,6 +103,8 @@ class ResolutionEngine:
                                在 build_index 和 resolve 阶段均会调用
             stop_check: 可选停止检查回调 fn() → bool，
                         返回 True 时立即中断
+            edge_callback: 可选边批次回调 fn(batch: list[Edge])，
+                           每 EDGE_BATCH_SIZE 条边调用一次（流式写入）
 
         Returns:
             resolved Edge 列表
@@ -118,7 +121,37 @@ class ResolutionEngine:
         if progress_callback:
             progress_callback(0, _total_refs)
 
+        # P0: Pre-compute import→target_file mapping per file (eliminates _find_file_for_import per ref)
+        _import_cache: dict[str, dict[str, str]] = {}
+        for table in tables:
+            fp = table.file_path
+            cache: dict[str, str] = {}
+            for imp in table.imports:
+                target = self._find_file_for_import(imp, fp)
+                if target:
+                    cache[imp] = target
+            _import_cache[fp] = cache
+        logger.info("[resolve] built import cache for %d files", len(_import_cache))
+
+        # P1: Set of all exported names — refs not in this set skip Strategy 2 entirely
+        _all_exported: set[str] = set()
+        for exports in self._export_index.values():
+            _all_exported.update(exports)
+        logger.info("[resolve] all_exported_names=%d", len(_all_exported))
+
+        # P3: batch edge write
+        EDGE_BATCH_SIZE = 10000
         edges: list[Edge] = []
+        _total_edges_written = 0
+
+        def _flush_edges():
+            nonlocal _total_edges_written
+            if edges:
+                if edge_callback:
+                    edge_callback(edges)
+                _total_edges_written += len(edges)
+                edges.clear()
+
         _ref_count = 0
         _last_report = 0
 
@@ -127,6 +160,8 @@ class ResolutionEngine:
                 logger.info("[resolve] resolve: stopped at table %s, %d/%d refs processed",
                             table.file_path, _ref_count, _total_refs)
                 break
+
+            file_cache = _import_cache.get(table.file_path, {})
 
             for ref in table.unresolved_refs:
                 if stop_check and stop_check():
@@ -140,9 +175,9 @@ class ResolutionEngine:
                 # 策略 1: 文件内 local scope 链查找
                 target = self._resolve_local(ref, table)
 
-                # 策略 2: import 跨文件解析
-                if not target:
-                    result = self._resolve_via_import(ref, table)
+                # 策略 2: import 跨文件解析 (P0: use cached file lookup; P1: skip if name not exported anywhere)
+                if not target and ref.reference_name in _all_exported:
+                    result = self._resolve_via_import(ref, table, file_cache)
                     if result:
                         target = result
 
@@ -203,7 +238,7 @@ class ResolutionEngine:
                     _last_report = _ref_count
                     _elapsed = time.perf_counter() - _t0
                     logger.info("[resolve] resolve: %d/%d refs processed (%.1fs, edges=%d)",
-                                _ref_count, _total_refs, _elapsed, len(edges))
+                                _ref_count, _total_refs, _elapsed, _total_edges_written + len(edges))
                     if progress_callback:
                         progress_callback(_ref_count, _total_refs)
                     if stop_check and stop_check():
@@ -211,18 +246,26 @@ class ResolutionEngine:
                                     _ref_count, _total_refs)
                         break
 
+                # P3: flush batch
+                if len(edges) >= EDGE_BATCH_SIZE:
+                    _flush_edges()
+
             else:
                 continue
             break
+
+        # Flush remaining edges
+        _flush_edges()
 
         if progress_callback:
             progress_callback(_ref_count, _total_refs)
 
         _elapsed = time.perf_counter() - _t0
         logger.info("[resolve] resolve: done %d refs in %.1fs → %d edges (resolved=%d, unresolved=%d)",
-                    _total_refs, _elapsed, len(edges),
-                    sum(1 for e in edges if e.target),
-                    sum(1 for e in edges if not e.target))
+                    _total_refs, _elapsed, _total_edges_written,
+                    sum(1 for e in edges if e.target) if edges else 0,
+                    sum(1 for e in edges if not e.target) if edges else 0)
+        # Return remaining (already flushed — empty unless edge_callback was None)
         return edges
 
     # ── 策略实现 ─────────────────────────────────────────
@@ -250,34 +293,31 @@ class ResolutionEngine:
 
         return None
 
-    def _resolve_via_import(self, ref: UnresolvedReference, table: FileSymbolTable) -> Optional[Node]:
-        """通过 import 关系跨文件查找（使用 _suffix_index + _file_node_index O(1) 查找）"""
+    def _resolve_via_import(self, ref: UnresolvedReference, table: FileSymbolTable,
+                            import_cache: dict[str, str]) -> Optional[Node]:
+        """通过 import 关系跨文件查找（使用预计算的 import_cache，替代 _find_file_for_import 逐 ref 调用）"""
         name = ref.reference_name
         src_lang = ref.language or ""
 
         # 先检查 name 是否完整匹配某个 import 中的导出符号
-        for imp in table.imports:
-            target_file = self._find_file_for_import(imp, table.file_path)
-            if target_file:
-                exports = self._export_index.get(target_file, set())
-                if name in exports:
-                    nodes = self._file_node_index.get(target_file, {}).get(name, [])
-                    if nodes:
-                        return nodes[0]
+        for imp, target_file in import_cache.items():
+            exports = self._export_index.get(target_file, set())
+            if name in exports:
+                nodes = self._file_node_index.get(target_file, {}).get(name, [])
+                if nodes:
+                    return nodes[0]
 
         # 包限定调用 "pkg.Func" → 分割后通过 import 匹配
         if "." in name and src_lang in ("go", "python", "typescript", "javascript", "java"):
             pkg_part, func_part = name.rsplit(".", 1)
-            for imp in table.imports:
+            for imp, target_file in import_cache.items():
                 imp_pkg = imp.split("/")[-1].split(".")[-1]
                 if imp_pkg == pkg_part or imp.endswith(pkg_part):
-                    target_file = self._find_file_for_import(imp, table.file_path)
-                    if target_file:
-                        exports = self._export_index.get(target_file, set())
-                        if func_part in exports:
-                            nodes = self._file_node_index.get(target_file, {}).get(func_part, [])
-                            if nodes:
-                                return nodes[0]
+                    exports = self._export_index.get(target_file, set())
+                    if func_part in exports:
+                        nodes = self._file_node_index.get(target_file, {}).get(func_part, [])
+                        if nodes:
+                            return nodes[0]
 
         return None
 

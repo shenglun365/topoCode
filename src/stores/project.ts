@@ -390,11 +390,14 @@ export const useProjectStore = defineStore('project', () => {
 
   async function openTaskListTab() {
     const pid = funcGroup.currentProjectId;
-    // 若已存在 taskList tab，直接激活（在 home 功能组中查找）
+    // 已有 taskList tab 但属于旧项目 → 先关闭再新建
     const existing = funcGroup.context.home.tabs.find(tab => tab.kind === 'taskList')
     if (existing) {
-      funcGroup.setActiveTab('home', existing.id)
-      return
+      if (existing.projectId === pid) {
+        funcGroup.setActiveTab('home', existing.id)
+        return
+      }
+      funcGroup.closeTab('home', existing.id)
     }
     const tab: HomeTab = {
       id: `tab-taskList-${Date.now()}`,

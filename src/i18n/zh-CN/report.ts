@@ -205,7 +205,7 @@ export default { report: {
   preSummaryBatchP0: 'P0 (核心)',
   preSummaryBatchP1: 'P1 (重要)',
   preSummaryBatchP2: 'P2 (普通)',
-  preSummaryBatchP4: 'P4 (未覆盖)',
+
   preSummaryScore: '分数',
   preSummarySize: '大小',
   preSummaryCross: '交叉引用',
