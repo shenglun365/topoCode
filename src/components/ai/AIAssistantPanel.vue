@@ -38,72 +38,11 @@ const cmdStore = useGraphCommandStore()
 const selectionStore = useComponentSelectionStore()
 const chatSession = useChatSession()
 
-/* ---- 分析模式: 快速 (quick) vs 深入 (deep) ---- */
-const analysisMode = ref<'quick' | 'deep'>('quick')
-function toggleAnalysisMode() {
-  analysisMode.value = analysisMode.value === 'quick' ? 'deep' : 'quick'
-  const label = analysisMode.value === 'deep' ? '深入分析' : '快速分析'
-  const range = analysisMode.value === 'deep' ? '500-2000字' : '100-300字'
-  addMessage('system', `切换至「${label}」模式（${range}）`)
-}
-
-/* ---- 引导模式 vs 普通模式 ---- */
-const guideMode = ref(false)
-
-function startGuide() {
-  const wasGuide = guideMode.value
-  guideMode.value = true
-  if (wasGuide) return
-  const tourIntro = [
-    '我来带你了解这个项目的架构。',
-    '',
-    '如果图数据已加载，我会先介绍项目概况，然后逐步引导你探索核心社区、低质量模块和外部依赖。',
-    '',
-    '你也可以直接问："帮我分析所有社区的结构" 或 "生成架构文档"。',
-  ].join('\n')
-  addMessage('assistant', tourIntro)
-}
-
-function exitGuide() {
-  guideMode.value = false
-}
-
-const GUIDE_SYSTEM_PROMPT = [
-  '你是 TopoCode 架构分析助手，当前处于引导模式，正在向用户介绍项目架构。',
-  '',
-  '引导流程（Tour 1）：逐步介绍项目，不要一次性输出所有内容，每次只讲一个主题，等待用户回应：',
-  '1. 总览：项目有多少个 L0 社区，最大的社区，高/低质量统计 → 使用 [CMD: highlight ...] 高亮 top 社区',
-  '2. 最大社区：深入介绍并 [CMD: focus ...] 定位到该节点',
-  '3. 低质量诊断：介绍低质量社区，[CMD: filterByQuality max=0.2] 筛出来',
-  '4. 核心组件：高核心度社区，[CMD: filterByCoreness min=3] 筛出来',
-  '5. 外部依赖：介绍外部包情况',
-  '6. 下一步：询问用户想看什么',
-  '',
-  '可用的 [CMD:] 命令：',
-  '  [CMD: highlight nodeIds="id1,id2"]   — 隐藏其他节点，仅显示指定节点',
-  '  [CMD: clearHighlight]                 — 取消所有隐藏',
-  '  [CMD: focus nodeId="xxx"]             — 居中放大某个节点',
-  '  [CMD: drill communityId="xxx"]        — 下钻到子社区',
-  '  [CMD: rollUp]                         — 返回上一层级',
-  '  [CMD: filterByQuality max=0.2]        — 筛选低质量社区（max<0.3 为低质量）',
-  '  [CMD: filterByCoreness min=3]         — 筛选核心组件（min≥3 为高核心度）',
-  '  [CMD: setViewMode mode="table"]       — 切换视图（force/table/heatmap）',
-  '  [CMD: resetView]                      — 重置视图',
-  '',
-  '筛选阈值参考：quality 高质量≥0.5 低质量≤0.2 | coreness 核心≥3 | size 大型>30 小型≤5',
-  '',
-  '使用 [CMD:] 时要谨慎：每次最多发 1-2 个命令，用户观察图变化后再继续。',
-  '对话中始终使用中文回复。',
-].join('\n')
-
 const DEFAULT_SYSTEM_PROMPT = [
   '你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。',
   '用户可输入 /help 或 /帮助 查看全部可用命令；当被问到"你能做什么"时主动提醒用户使用 /help。',
   '',
-  '可用 [CMD:] 命令：highlight, clearHighlight, focus, drill, rollUp, filterByQuality, filterByCoreness, filterBySize, hideNodes, clearFilter, setViewMode, setEdgeType, resetView, openCommunityDetail, saveSnapshot, compareVersions, dispatchAgent',
-  '参数格式：key="value"。阈值：quality≥0.5高 ≤0.2低 | coreness≥3核心 | size>30大 ≤5小',
-  '',
-  '对话使用中文回复，需要操作图时使用 [CMD:] 标签，每次最多 1-2 个命令。',
+  '对话使用中文回复。',
 ].join('\n')
 
 const HELP_TEXT = [
@@ -114,50 +53,15 @@ const HELP_TEXT = [
   '|------|------|',
   '| `/help` / `/帮助` | 显示本帮助 |',
   '| `/select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`~/`--l5` 按条件自动选取；`--clear` 清除已选；`--unanalyzed` 只选未分析组件 |',
-  '| `/overview [--force]` | 生成整体架构概览文档。`--force` 强制覆盖已生成内容。需要 L0/L1 社区分析先完成 |',
-  '| `/analyze_components` `[-L zh/en] [-j N] [-r N] [--agentic] [--summary-model <id>] [-c N] [--force] [--call/--include] [--l0/--l1/--l2]` | 对已选组件启动批量分析。「-L」语言，「-j」并发(1-5)，「-r」轮次(1-30)，「--agentic」自主分析，「--summary-model」摘要模型ID，「-c」摘要并发(1-10)，「--force」强制覆盖已分析组件，「--call/--include」边类型筛选，「--l0/--l1/--l2」层级筛选 |',
-  '| `/presummary` | 查看文件预摘要概况（P0/P1/P2 文件数） |',
-  '| `/presummary files P0/P1/P2 [页码]` | 分页查看某批次文件列表 |',
-  '| `/presummary start <batch> [-n N] [-j N]` | 启动预摘要任务。`<batch>` 可为 `P2`、`P0,P1,P2` 或 `all`。「-n」限文件数，「-j」并发数（1-10） |',
-  '| `/presummary get <文件路径>` | 查询单个文件摘要内容 |',
-  '| `/presummary delete <文件路径>` | 删除单个文件摘要缓存 |',
-  '| `/presummary rerun <文件路径>` | 单个文件重跑摘要 |',
-  '| `/track [options]` | 跟踪项目变更 |',
-  '| `/diff [options]` | 对比快照版本 |',
-  '',
-  '### 图操作命令（AI 回复中使用 [CMD:] 标签）',
-  '| 命令 | 参数 | 说明 |',
-  '|------|------|------|',
-  '| `[CMD: highlight ...]` | `nodeIds="id1,id2"` | 仅显示指定节点 |',
-  '| `[CMD: clearHighlight]` | — | 取消所有高亮 |',
-  '| `[CMD: focus ...]` | `nodeId="xxx"` | 居中聚焦某节点 |',
-  '| `[CMD: drill ...]` | `communityId="xxx"` | 下钻到子社区 |',
-  '| `[CMD: rollUp]` | — | 返回上一层级 |',
-  '| `[CMD: filterByQuality ...]` | `max=0.2` 或 `min=0.5` | 按质量分筛选 |',
-  '| `[CMD: filterByCoreness ...]` | `min=3` | 筛选核心组件 |',
-  '| `[CMD: filterBySize ...]` | `min=30` 或 `max=5` | 按节点数筛选 |',
-  '| `[CMD: hideNodes ...]` | `nodeIds="id1,id2"` | 隐藏指定节点 |',
-  '| `[CMD: clearFilter]` | — | 清除所有筛选 |',
-  '| `[CMD: setViewMode ...]` | `mode="force\|table\|heatmap"` | 切换视图 |',
-  '| `[CMD: setEdgeType ...]` | `edgeType="CALL"` | 切换边类型 |',
-  '| `[CMD: resetView]` | — | 重置视图 |',
-  '| `[CMD: saveSnapshot]` | — | 保存快照 |',
-  '| `[CMD: compareVersions ...]` | `from="v1" to="v2"` | 对比版本 |',
-  '| `[CMD: openCommunityDetail ...]` | `communityId="xxx"` | 打开社区详情 |',
-  '| `[CMD: dispatchAgent ...]` | `action="analyze"` | 调度 Agent 任务 |',
-  '',
-  '### 筛选阈值参考',
-  '- quality: 高质量 ≥0.5、低质量 ≤0.2',
-  '- coreness: 高核心度 ≥3',
-  '- size: 大型 >30 节点、小型 ≤5 节点',
+  '| `/presummary [--force]` | 文件预摘要（Agent 模式），按 P0→P1→P2 顺序执行。`--force` 强制覆盖已有缓存 |',
+  '| `/analyze [--force] [-L zh/en]` | 组件分析（Agent 多轮模式），默认分析所有 L0~L5 组件。`--force` 强制覆盖已分析组件。依赖校验：预摘要需完成，高层级分析需先完成 |',
+  '| `/overview [--force] [-L zh/en]` | 生成整体架构概览文档。`--force` 强制覆盖已生成内容 |',
+  '| `/pipeline [--force] [-L zh/en]` | 流水线整体激活。顺序执行：项目摘要 → 预摘要(P0→P1→P2) → 组件分析(L0→L5) → 整体架构分析。`--force` 强制覆盖所有；默认跳过已完成。支持暂停 ⏸ / 恢复 ▶ |',
   '',
   '### 模式',
-  '- **普通模式**：自由问答，AI 根据上下文自动使用图操作命令',
-  '- **引导模式**：点击图上 🎓 按钮启动，AI 带你逐步了解项目架构',
-  '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮切换。无参数时手动点选；支持 `/select --include --l0` 等参数自动选取。选中后输入分析请求',
-  '- **批量组件分析**：选择组件后，输入 `/analyze_components` 启动批量解析，结果写入 SQLite 并可在任务面板查看进度',
-  '- **分析模式开关**：输入框下方 ⚡/🔬 按钮切换「快速模式」（单次 LLM 调用）和「深入分析」（Agent 多轮文件探索），',
-  '  模式影响组件分析和整体架构分析的行为',
+  '- **自由对话**：输入任意问题，AI 基于分析上下文回复',
+  '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮切换。无参数时手动点选；支持 `/select --include --l0` 等参数自动选取。选中后输入 `/analyze` 启动分析',
+  '- **流水线模式**：`/pipeline` 一键完成全部分析流程',
 ].join('\n')
 
 const md = new MarkdownIt({
@@ -210,9 +114,11 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
-const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/select --l3', '/overview', '/overview --force', '/analyze_components', '/analyze_components --agentic', '/analyze_components --force',
-  '/presummary', '/presummary files', '/presummary start', '/presummary get', '/presummary delete', '/presummary rerun',
-  '/track', '/diff']
+const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/select --l3',
+  '/presummary', '/presummary --force',
+  '/analyze', '/analyze --force',
+  '/overview', '/overview --force',
+  '/pipeline', '/pipeline --force']
 
 function loadCommandHistory(): string[] {
   try { return JSON.parse(localStorage.getItem(CMD_HISTORY_KEY) || '[]') } catch { return [] }
@@ -395,24 +301,6 @@ function _validateFlags(tokens: string[], validFlags: string[]): string[] {
   return tokens.filter(t => t.startsWith('-') && !validFlags.includes(t.toLowerCase()))
 }
 
-function _parseTrackDiffCommand(input: string): { action: string; args: Record<string, string> } | null {
-  const trimmed = input.trim()
-  if (!trimmed.startsWith('/track ') && !trimmed.startsWith('/diff ')) return null
-  const parts = trimmed.slice(1).split(/\s+/)
-  const action = parts[0] as string
-  const VALID_FLAGS: Record<string, string[]> = { track: ['tag'], diff: ['from', 'to'] }
-  const args: Record<string, string> = {}
-  for (let i = 1; i < parts.length; i++) {
-    if (parts[i].startsWith('--')) {
-      const key = parts[i].slice(2)
-      const valid = VALID_FLAGS[action]
-      if (valid && !valid.includes(key)) return null
-      args[key] = parts[i + 1] && !parts[i + 1].startsWith('--') ? parts[++i] : 'true'
-    }
-  }
-  return { action, args }
-}
-
 async function handleSend() {
   const text = userInput.value.trim()
   if (!text || streaming.value) return
@@ -476,13 +364,9 @@ async function handleSend() {
       addMessage('system', `已选中 ${matching.length} 个组件。可输入 /analyze_components 启动批量分析，或点选加减组件后发送消息。`)
       return
     }
-    // /analyze_components — 批量分析已选中的组件
-    if (/^\/analyze_components\b/i.test(text)) {
-      const VALID_AC_FLAGS = [
-        '--force', '-L', '-j', '-r', '--agentic',
-        '--summary-model', '-c', '--call', '--include',
-        '--l0', '--l1', '--l2',
-      ]
+    // /analyze — 批量分析组件（Agent 多轮模式，默认全量 L0~L5）
+    if (/^\/analyze\b/i.test(text)) {
+      const VALID_AC_FLAGS = ['--force', '-L']
       const tokens = text.split(/\s+/).slice(1)
       const unknown = _validateFlags(tokens, VALID_AC_FLAGS)
       if (unknown.length > 0) {
@@ -493,237 +377,62 @@ async function handleSend() {
       }
       const force = text.includes('--force')
       const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
-      const concurrency = Math.max(1, Math.min(5, parseInt(text.match(/-j\s+(\d+)/i)?.[1] || '1')))
-      const maxTurns = Math.max(1, Math.min(30, parseInt(text.match(/-r\s+(\d+)/i)?.[1] || '30')))
-      const agentic = analysisMode.value === 'deep' || text.includes('--agentic')
-      const summaryModel = text.match(/--summary-model\s+(\S+)/i)?.[1] || ''
-      const rawSubConc = parseInt(text.match(/-c\s+(\d+)/i)?.[1] || '1')
-      const subagentConcurrency = Math.max(1, Math.min(10, rawSubConc))
-      const edgeTypeFilter = text.includes('--call') ? 'CALL' : text.includes('--include') ? 'INCLUDE' : null
-      const levelFilter = tokens.filter(t => /^--l[012]$/i.test(t)).map(t => t.toUpperCase().slice(2))
+      const taskId = resolveTaskId()
+      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
 
-      if (selectionStore.selectedCount === 0) {
+      // 获取组件：用户已选择或默认全量 L0~L5
+      let selectedComps: any[] = []
+      if (selectionStore.selectedCount > 0) {
+        selectedComps = [...selectionStore.selectedList]
+      } else {
+        const taskComs = communityStore.tasks[taskId]?.communities || []
+        selectedComps = taskComs.map(c => ({
+          id: c.communityId, type: 'community' as const,
+          name: c.name || c.communityId, taskId,
+          edgeType: c.edgeType, level: c.level,
+          metadata: { nodeCount: c.nodeCount, fileCount: c.fileCount, qualityScore: c.qualityScore ?? undefined },
+        }))
+      }
+      if (selectedComps.length === 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', '尚未选择任何组件。请先用 /select 激活选择模式，然后在左侧点选组件，或使用 /select --include/--call/--l0 等参数自动选取。')
+        addMessage('system', '未找到组件。请先打开左侧结构图加载社区列表。')
         return
       }
-      // 限制单次提交组件数
       const MAX_COMPONENTS = 100
-      let selectedComps = [...selectionStore.selectedList]
-      // 应用过滤
-      if (edgeTypeFilter || levelFilter.length > 0) {
-        selectedComps = selectedComps.filter(c => {
-          const et = c.edgeType?.toUpperCase?.() || ''
-          const lv = c.level?.toUpperCase?.() || ''
-          if (edgeTypeFilter && et !== edgeTypeFilter) return false
-          if (levelFilter.length > 0 && !levelFilter.includes(lv)) return false
-          return true
-        })
-      }
       if (selectedComps.length > MAX_COMPONENTS) selectedComps.length = MAX_COMPONENTS
-      // 将选中组件转为对话消息
-      const compNames = selectedComps.map(r => r.name).join('、')
-      const taskId = resolveTaskId() || selectionStore.selectedList[0]?.taskId || null
+
+      const compNames = selectedComps.slice(0, 5).map(r => r.name).join('、') + (selectedComps.length > 5 ? `等${selectedComps.length}个` : '')
       addMessage('user', `分析组件: ${compNames}`)
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
-      const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
-      const modeLabel = analysisMode.value === 'deep' ? '深入分析' : '快速分析'
-      const modeHint = agentic ? `（${modeLabel}` : ''
-      const turnHint = agentic && maxTurns !== 30 ? `，轮次 ${maxTurns}` : ''
-      const modelHint = agentic && summaryModel ? `，摘要模型 ${summaryModel}` : ''
-      const subConcHint = agentic && subagentConcurrency > 1 ? `，摘要并发 ${subagentConcurrency}` : ''
       const forceHint = force ? '，强制覆盖' : '（跳过已分析）'
-      const extraHint = modeHint + turnHint + modelHint + subConcHint + (modeHint ? '）' : '')
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的批量分析任务${extraHint}${langHint}${concHint}${forceHint}，请到「任务」面板查看进度。`)
-      // 退出选择模式（自动清空已选）
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的 Agent 多轮分析任务${langHint}${forceHint}，请到「任务」面板查看进度。`)
       if (selectionStore.selecting) selectionStore.toggleSelecting()
-      if (taskId) {
-        communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, agentic, maxTurns, summaryModel, subagentConcurrency, analysisMode.value, force)
-          .catch(e => addMessage('error', String(e)))
-      }
+      communityStore.triggerComponentAnalysis(taskId, selectedComps, language, 1, true, 30, '', 1, 'deep', force)
+        .catch(e => addMessage('error', String(e)))
       return
     }
-    // ── 预摘要命令 ──
-    // /presummary — 查看文件分级概况
-    const psStatusRe = /^\/presummary$/
-    if (psStatusRe.test(text)) {
-      addMessage('user', text)
-      userInput.value = ''
-      const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      try {
-        const status = await communityStore.getPreSummaryStatus(taskId)
-        let msg = `## 文件预摘要 — 项目缓存\n`
-        msg += `- 总计: ${status.total_files} 文件, 已缓存: ${status.cached_count}\n`
-        msg += `- **P0** (核心): ${status.counts.P0} 文件\n`
-        msg += `- **P1** (重要): ${status.counts.P1} 文件\n`
-        msg += `- **P2** (普通): ${status.counts.P2} 文件 (不预摘要)\n\n`
-        msg += `可用命令:\n- \`/presummary files P0\` 查看 P0 文件列表\n`
-        msg += `- \`/presummary start P0 -n 5\` 启动预摘要 P0 批次 (限 5 个)`
-        addMessage('assistant', msg)
-      } catch (e: any) {
-        addMessage('system', `查询失败: ${e.message || e}`)
-      }
-      return
-    }
-    // /presummary files <batch> [page]
-    const psFilesRe = /^\/presummary\s+files\s+(P[012])(?:\s+(\d+))?/i
-    const psFilesMatch = text.match(psFilesRe)
-    if (psFilesMatch) {
-      addMessage('user', text)
-      userInput.value = ''
-      const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      const batch = psFilesMatch[1].toUpperCase()
-      const page = parseInt(psFilesMatch[2] || '1')
-      try {
-        const result = await communityStore.listPreSummaryFiles(taskId, batch, page, 20)
-        let msg = `## ${batch} 批次文件 (共 ${result.total} 个)\n`
-        for (const f of result.files) {
-          msg += `- \`${f.file_path}\` score=${f.score} cross=${f.cross} edges=${f.edges} size=${f.size}\n`
-        }
-        if (result.page * result.page_size < result.total) {
-          msg += `\n下一页: /presummary files ${batch} ${page + 1}`
-        }
-        addMessage('assistant', msg)
-      } catch (e: any) {
-        addMessage('system', `查询失败: ${e.message || e}`)
-      }
-      return
-    }
-    // /presummary start <batch> [-n N] [-j N]
-    // batch: P0 / P0,P1 / P0, P1, P2 / all
-    const psStartRe = /^\/presummary\s+start\s+(P[012](?:\s*,\s*P[012])*|ALL|all)\s*(.*)$/i
-    const psStartMatch = text.match(psStartRe)
-    if (psStartMatch) {
-      addMessage('user', text)
-      userInput.value = ''
-      const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-
-      const batchRaw = psStartMatch[1]
-      const rest = psStartMatch[2]
-      // 校验 rest 中是否有不认识的 - 前缀参数
-      const restTokens = rest.match(/-[a-z]\s+\S+/gi) || []
-      const unknownRest = restTokens.filter(t => !/^-(n|j)\s+\d+$/i.test(t.trim()))
-      if (unknownRest.length > 0) {
-        addMessage('system', `未知参数: ${unknownRest.join('、')}。可用: -n N（限文件数）, -j N（并发数）`)
+    // /presummary [--force] — 预摘要 P0→P1→P2（Agent 模式）
+    if (/^\/presummary\b/i.test(text)) {
+      const VALID_PS_FLAGS = ['--force']
+      const tokens = text.split(/\s+/).slice(1)
+      const unknown = _validateFlags(tokens, VALID_PS_FLAGS)
+      const force = text.includes('--force')
+      if (unknown.length > 0) {
+        // 兼容旧子命令: 忽略未知参数，提示用户
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', '预摘要默认按 P0→P1→P2 顺序执行。可用参数: --force（强制覆盖已有缓存）')
         return
       }
-      const limit = parseInt(rest.match(/-n\s+(\d+)/i)?.[1] || '0')
-      const rawConc = parseInt(rest.match(/-j\s+(\d+)/i)?.[1] || '1')
-      const subagentConcurrency = Math.max(1, Math.min(10, rawConc))
-
-      // 解析批次列表
-      let batches: string[]
-      if (batchRaw.toUpperCase() === 'ALL') {
-        batches = ['P0', 'P1', 'P2']
-      } else {
-        batches = batchRaw.split(',').map(b => b.trim().toUpperCase())
-      }
-
-      if (batches.length > 1) {
-        // 多批次：调用社区 store 统一入口，与单批次路径一致
-        communityStore.startPreSummaryPipeline(taskId, batches, limit, subagentConcurrency)
-          .then((r: any) => {
-            addMessage('system', `预摘要已启动 (${batches.join(' → ')}，共 ${batches.length} 批次)。请到「解析任务」面板查看进度。`)
-          })
-          .catch((e: any) => {
-            addMessage('system', `启动失败: ${e.message || e}`)
-          })
-      } else {
-        // 单批次，走原有逻辑
-        communityStore.startPreSummary(taskId, batches[0], limit, subagentConcurrency)
-          .then((result: any) => {
-            if (result.allCached) {
-              addMessage('system', `预摘要 ${batches[0]} 跳过: 全部 ${result.fileCount} 个文件已缓存，无需处理`)
-            } else if (result.success && result.agentTaskId) {
-              addMessage('system', `预摘要 ${batches[0]} 已启动 (${result.fileCount} 文件${subagentConcurrency > 1 ? `，并发 ${subagentConcurrency}` : ''})。请到「解析任务」面板查看进度。`)
-            } else {
-              addMessage('system', `启动失败: ${result.error || '未知错误'}`)
-            }
-          })
-          .catch((e: any) => {
-            addMessage('system', `启动失败: ${e.message || e}`)
-          })
-      }
-      return
-    }
-    // /presummary get <file_path>
-    const psGetRe = /^\/presummary\s+get\s+(.+)$/i
-    const psGetMatch = text.match(psGetRe)
-    if (psGetMatch) {
       addMessage('user', text)
       userInput.value = ''
       const taskId = resolveTaskId()
       if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      const filePath = psGetMatch[1].trim()
-      try {
-        const detail = await communityStore.getFileSummary(taskId, filePath)
-        if (detail.found) {
-          let msg = `## 文件摘要 — ${filePath}\n`
-          msg += `- 缓存时间: ${detail.created_at || '?'}\n`
-          msg += `- 长度: ${detail.summary_len} 字符\n`
-          msg += `\`\`\`\n${(detail.summary || '').slice(0, 1000)}\n\`\`\``
-          addMessage('assistant', msg)
-        } else {
-          addMessage('system', `未找到 ${filePath} 的摘要缓存。可用 /presummary start 启动预摘要。`)
-        }
-      } catch (e: any) {
-        addMessage('system', `查询失败: ${e.message || e}`)
-      }
-      return
-    }
-    // /presummary delete <file_path>
-    const psDeleteRe = /^\/presummary\s+delete\s+(.+)$/i
-    const psDeleteMatch = text.match(psDeleteRe)
-    if (psDeleteMatch) {
-      addMessage('user', text)
-      userInput.value = ''
-      const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      const filePath = psDeleteMatch[1].trim()
-      try {
-        const result = await communityStore.deleteFileSummary(taskId, filePath)
-        addMessage('system', `已删除 ${filePath} 的摘要缓存 (${result.deleted || 0} 条)。`)
-      } catch (e: any) {
-        addMessage('system', `删除失败: ${e.message || e}`)
-      }
-      return
-    }
-    // /presummary rerun <file_path>
-    const psRerunRe = /^\/presummary\s+rerun\s+(.+)$/i
-    const psRerunMatch = text.match(psRerunRe)
-    if (psRerunMatch) {
-      addMessage('user', text)
-      userInput.value = ''
-      const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      const filePath = psRerunMatch[1].trim()
-      try {
-        const result = await communityStore.rerunFileSummary(taskId, filePath)
-        if (result.success && result.agentTaskId) {
-          addMessage('system', `重摘要任务已启动。请到「解析任务」面板查看进度。`)
-        } else {
-          addMessage('system', `启动失败`)
-        }
-      } catch (e: any) {
-        addMessage('system', `启动失败: ${e.message || e}`)
-      }
-      return
-    }
-    // 未识别的 /presummary 子命令 → 显示提示
-    if (/^\/presummary\s+.+/i.test(text)) {
-      addMessage('user', text)
-      userInput.value = ''
-      addMessage('system',
-        '未识别的 /presummary 命令。可用命令:\n'
-        + '- `/presummary` 查看概况\n'
-        + '- `/presummary files P0/P1/P2 [页码]` 查看文件列表\n'
-        + '- `/presummary start P0/P1/P2 (-n N)` 启动预摘要\n'
-        + '- `/presummary get/delete/rerun <文件路径>` 操作单文件')
+      addMessage('system', '预摘要 P0→P1→P2 已启动（Agent 模式）。请到「任务」面板查看进度。')
+      communityStore.startPreSummaryPipeline(taskId, ['P0', 'P1', 'P2'], 0, 1)
+        .catch((e: any) => addMessage('system', `启动失败: ${e.message || e}`))
       return
     }
     if (/^\/help$/i.test(text) || text === '/帮助') {
@@ -734,13 +443,13 @@ async function handleSend() {
     }
     // /overview — 生成整体架构概览
     if (/^\/overview\b/i.test(text)) {
-      const VALID_OVERVIEW_FLAGS = ['--force']
+      const VALID_OVERVIEW_FLAGS = ['--force', '-L']
       const tokens = text.split(/\s+/).slice(1)
       const unknown = _validateFlags(tokens, VALID_OVERVIEW_FLAGS)
       if (unknown.length > 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', `未知参数: ${unknown.join('、')}。可用: --force`)
+        addMessage('system', `未知参数: ${unknown.join('、')}。可用: --force, -L zh/en`)
         return
       }
       addMessage('user', text)
@@ -752,17 +461,28 @@ async function handleSend() {
         .catch(e => addMessage('error', String(e)))
       return
     }
-    // /track /diff 保留
-    if (/^\/(track|diff)\s/.test(text)) {
-      const parsed = _parseTrackDiffCommand(text)
-      if (parsed) {
-        showCmdConfirm.value = true
-        cmdConfirmData.value = { text, action: parsed.action, args: parsed.args }
+    // /pipeline [--force] — 流水线整体激活
+    if (/^\/pipeline\b/i.test(text)) {
+      const VALID_PIPE_FLAGS = ['--force', '-L']
+      const tokens = text.split(/\s+/).slice(1)
+      const unknown = _validateFlags(tokens, VALID_PIPE_FLAGS)
+      if (unknown.length > 0) {
+        addMessage('user', text)
+        userInput.value = ''
+        addMessage('system', `未知参数: ${unknown.join('、')}。可用: --force, -L zh/en`)
         return
       }
+      const force = text.includes('--force')
+      const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
       addMessage('user', text)
       userInput.value = ''
-      addMessage('system', '命令参数无法识别。可用: /track --tag <名称>, /diff --from <v1> --to <v2>。')
+      const tid = resolveTaskId()
+      if (!tid) { addMessage('system', '未找到激活的任务。'); return }
+      const forceHint = force ? '（强制覆盖所有）' : '（跳过已完成）'
+      const langHint = language === 'zh' ? '中文' : language === 'en' ? 'English' : ''
+      addMessage('system', `流水线已启动${forceHint}${langHint ? ` | ${langHint}` : ''}。顺序执行：项目摘要 → 预摘要 P0→P1→P2 → 组件分析 L0→L5 → 整体架构分析。请到「任务」面板查看进度。`)
+      communityStore.startPipeline(tid, force, language)
+        .catch(e => addMessage('error', String(e)))
       return
     }
   }
@@ -783,9 +503,7 @@ async function handleSend() {
   if (selCtx) {
     sendMessages.push({ role: 'system', content: selCtx })
   }
-  if (guideMode.value) {
-    sendMessages.push({ role: 'system', content: GUIDE_SYSTEM_PROMPT })
-  } else if (gs.nodeCount > 0) {
+  if (gs.nodeCount > 0) {
     sendMessages.push({ role: 'system', content: DEFAULT_SYSTEM_PROMPT })
   }
   // 对话历史（不含已有 system 消息）
@@ -902,12 +620,9 @@ onMounted(() => {
 watch(() => cmdStore.eventSeq, () => {
   const ev = cmdStore.popEvent()
   if (!ev) return
-  if (ev.type === 'guide-start') {
-    startGuide()
-  }
   if (ev.type === 'drill-event') {
     const commId = ev.data.communityId as string
-    if (commId && guideMode.value) {
+    if (commId) {
       addMessage('system', `用户双击了社区: ${commId}`)
     }
   }
@@ -1099,16 +814,6 @@ watch(() => cmdStore.eventSeq, () => {
                 @click="selectionStore.toggleSelecting()"
               >
                 <CursorArrowRippleIcon class="w-4 h-4" />
-              </button>
-              <button
-                class="ai-mode-btn"
-                :class="{ 'ai-mode-deep': analysisMode === 'deep', 'ai-mode-quick': analysisMode === 'quick' }"
-                :title="analysisMode === 'deep' ? '当前: 深入分析 (点击切换为快速)' : '当前: 快速分析 (点击切换为深入)'"
-                @click="toggleAnalysisMode"
-              >
-                <span v-if="analysisMode === 'quick'" class="w-3.5 h-3.5 text-center">⚡</span>
-                <SparklesIcon v-else class="w-3.5 h-3.5" />
-                <span class="ai-mode-label">{{ analysisMode === 'deep' ? '深入' : '快速' }}</span>
               </button>
             </div>
             <button

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore } from '@/stores/community-store'
 import { useProjectStore } from '@/stores/project'
+import { PauseIcon, PlayIcon, StopIcon, ClockIcon } from '@heroicons/vue/24/outline'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
@@ -23,6 +24,16 @@ function onCancelTask(taskIdVal: string, agentId: string) {
     .catch(() => { cancelFeedback.value = '停止失败，请重试' })
     .finally(() => { setTimeout(() => { cancellingTaskId.value = null }, 1000) })
   setTimeout(() => { cancelFeedback.value = '' }, 5000)
+}
+
+function onPauseTask(taskIdVal: string, agentId: string) {
+  communityStore.pauseAgentTask(taskIdVal, agentId)
+    .catch(() => {})
+}
+
+function onResumeTask(taskIdVal: string, agentId: string) {
+  communityStore.resumeAgentTask(taskIdVal, agentId)
+    .catch(() => {})
 }
 
 const historyTasks = ref<any[]>([])
@@ -190,7 +201,7 @@ function sumFileCount(steps: any[], statuses: string[]): number {
 
 const statusLabel = (status: string) => {
   const map: Record<string, string> = {
-    queued: '排队中', running: '运行中', completed: '已完成',
+    queued: '排队中', running: '运行中', paused: '已暂停', completed: '已完成',
     partial: '部分完成', failed: '已失败', cancelled: '已取消',
     skipped: '已跳过', unknown: '未知',
   }
@@ -205,6 +216,7 @@ const actionLabel = (action: string) => {
     analyze_all: '全量分析',
     analyzeCommFiles: '文件分析',
     presummary_files: '文件预摘要',
+    pipeline: '流水线',
   }
   return map[action] || action
 }
@@ -254,6 +266,7 @@ const actionLabel = (action: string) => {
         'atl-task-success': task.status === 'completed',
         'atl-task-fail': task.status === 'failed' || task.status === 'partial',
         'atl-task-skipped': task.status === 'skipped',
+        'atl-task-paused': task.status === 'paused',
       }"
     >
       <div class="atl-task-header">
@@ -266,13 +279,30 @@ const actionLabel = (action: string) => {
         >{{ task.progress }}%</span>
         <button
           v-if="task.status === 'running' || task.status === 'queued'"
+          class="atl-pause-btn"
+          title="暂停此任务"
+          @click="onPauseTask(taskId, task.id)"
+        >
+          <PauseIcon class="w-3 h-3" />
+        </button>
+        <button
+          v-if="task.status === 'paused'"
+          class="atl-resume-btn"
+          title="恢复此任务"
+          @click="onResumeTask(taskId, task.id)"
+        >
+          <PlayIcon class="w-3 h-3" />
+        </button>
+        <button
+          v-if="task.status === 'running' || task.status === 'queued'"
           class="atl-stop-btn"
           :class="{ 'atl-stopping': cancellingTaskId === task.id }"
           :title="cancellingTaskId === task.id ? '正在停止...' : '停止此任务（等待当前 LLM 请求结束后完全终止）'"
           :disabled="cancellingTaskId === task.id"
           @click="onCancelTask(taskId, task.id)"
         >
-          {{ cancellingTaskId === task.id ? '⏳' : '✕' }}
+          <ClockIcon v-if="cancellingTaskId === task.id" class="w-3 h-3" />
+          <StopIcon v-else class="w-3 h-3" />
         </button>
       </div>
       <div
@@ -389,6 +419,24 @@ const actionLabel = (action: string) => {
   font-size: 10px; cursor: pointer; line-height: 1;
 }
 .atl-stop-btn:hover { background: var(--danger, #ef4444); color: #fff; }
+.atl-pause-btn {
+  margin-left: auto;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; border: 1px solid var(--warning, #f59e0b);
+  background: transparent; color: var(--warning, #f59e0b);
+  font-size: 10px; cursor: pointer; line-height: 1;
+}
+.atl-pause-btn:hover { background: var(--warning, #f59e0b); color: #fff; }
+.atl-resume-btn {
+  margin-left: auto;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; border: 1px solid var(--success, #22c55e);
+  background: transparent; color: var(--success, #22c55e);
+  font-size: 10px; cursor: pointer; line-height: 1;
+}
+.atl-resume-btn:hover { background: var(--success, #22c55e); color: #fff; }
 .atl-progress { margin-left: auto; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); }
 .atl-progress-bar { height: 3px; background: var(--bg-secondary); border-radius: 2px; margin: 0.25rem 0; }
 .atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: 2px; transition: width 0.3s; }

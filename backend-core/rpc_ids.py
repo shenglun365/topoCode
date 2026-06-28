@@ -44,6 +44,10 @@ RPC_IDS: dict[str, str] = {
     "analysis.getReportDashboard":  "API-024i",
     "analysis.getAgentProgress":   "API-024j",
     "analysis.cancelAgentTask":    "API-024k",
+    "analysis.pauseAgentTask":     "API-024l",
+    "analysis.resumeAgentTask":    "API-024m",
+    "analysis.startPipeline":      "API-024n",
+    "agent.getConfig":             "API-024o",
 
     # ── analysisSession ───────────────────────────────────────
     "analysisSession.list":         "API-025",

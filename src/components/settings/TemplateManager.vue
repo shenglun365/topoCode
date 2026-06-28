@@ -38,12 +38,20 @@ const loading = ref(false)
 const filterLocale = ref<string>(settingsStore.locale || 'zh-CN')
 const filterMode = ref('')
 
-// 只显示这 5 组模板（中英文各一条）
+// 显示所有已注册的模板（共 12 组）
 const VISIBLE_TEMPLATE_IDS = new Set([
+  'src_to_pseudocode',
+  'community_name',
+  'edge_explain',
+  'source_explain',
   'report_overall_architecture',
   'community_analyze',
-  'community_name',
-
+  'agent_analyze_community',
+  'agent_analyze_component',
+  'agentic_analyze_component',
+  'agent_generate_overview',
+  'agent_summarize_changes',
+  'agent_explain_community',
 ])
 
 const editDialog = ref(false)

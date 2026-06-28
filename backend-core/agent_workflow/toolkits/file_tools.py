@@ -52,6 +52,12 @@ class ReadFileTool(AgentTool):
                 abs_path = os.path.join(self._project_root, path)
             if self._path_sandbox:
                 abs_path = self._path_sandbox.validate_read(abs_path)
+            if not os.path.isfile(abs_path) and self._project_root:
+                # 精确路径未命中 → basename 模糊匹配兜底
+                from ..path_utils import resolve_file
+                resolved = resolve_file(path, self._project_root)
+                if resolved:
+                    abs_path = resolved
             if not os.path.isfile(abs_path):
                 logger.warning(f"[ReadFileTool] file not found: {path} (resolved: {abs_path})")
                 return ToolResult.fail(f"文件不存在: {path}")

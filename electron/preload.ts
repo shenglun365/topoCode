@@ -190,6 +190,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentProgress', params }),
     cancelAgentTask: (params: { agentTaskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.cancelAgentTask', params }),
+    pauseAgentTask: (params: { agentTaskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.pauseAgentTask', params }),
+    resumeAgentTask: (params: { agentTaskId: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.resumeAgentTask', params }),
     getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentTaskHistory', params }),
     clearAgentTaskHistory: (params: { taskId: string }) =>
@@ -209,8 +213,12 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.deleteFileSummary', params }),
     rerunFileSummary: (params: { taskId: string; file_path: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.rerunFileSummary', params }),
+    startPipeline: (params: { taskId: string; force?: boolean; language?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'analysis.startPipeline', params }),
     analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.analyzeComponents', params }),
+    getAgentConfig: () =>
+      ipcRenderer.invoke('ipc:call', { method: 'agent.getConfig', params: {} }),
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;

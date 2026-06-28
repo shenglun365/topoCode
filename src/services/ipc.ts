@@ -362,6 +362,12 @@ function createRealIPC() {
       cancelAgentTask: async (params: { agentTaskId: string }) => {
         return await api.analysis.cancelAgentTask(params)
       },
+      pauseAgentTask: async (params: { agentTaskId: string }) => {
+        return await api.analysis.pauseAgentTask(params)
+      },
+      resumeAgentTask: async (params: { agentTaskId: string }) => {
+        return await api.analysis.resumeAgentTask(params)
+      },
       getAgentTaskHistory: async (params: { taskId: string; offset?: number; limit?: number }) => {
         return await api.analysis.getAgentTaskHistory(params)
       },
@@ -388,6 +394,12 @@ function createRealIPC() {
       },
       rerunFileSummary: async (params: { taskId: string; file_path: string }) => {
         return await api.analysis.rerunFileSummary(params)
+      },
+      startPipeline: async (params: { taskId: string; force?: boolean; language?: string }) => {
+        return await api.analysis.startPipeline(params)
+      },
+      getAgentConfig: async () => {
+        return await api.analysis.getAgentConfig()
       },
       analyzeComponents: async (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => {
         return await api.analysis.analyzeComponents(params)

@@ -110,6 +110,7 @@ class AgentRuntime:
         self._on_progress = on_progress
         self._multi_db = multi_db
         self._cancelled = False
+        self._paused = False
         self._status = AgentStatus.IDLE
         self._task_id = ""
         self._steps: list[StepProgress] = []
@@ -143,6 +144,16 @@ class AgentRuntime:
         # 注意：不在此处通知 SubAgent 取消文件摘要，因为 -j 并发时
         # 多个 AgentRuntime 共享同一 task_id，SubAgent._task_cancelled
         # 是类级别标志，取消一个会影响其他并发 Agent
+
+    def pause(self):
+        """暂停当前执行（在下一步/轮边界生效）"""
+        self._paused = True
+        logger.info("[AgentRuntime] paused by user")
+
+    def resume(self):
+        """恢复暂停的执行"""
+        self._paused = False
+        logger.info("[AgentRuntime] resumed by user")
 
     async def run(self, workflow: AgentWorkflow, context: dict) -> WorkflowResult:
         """
@@ -199,6 +210,12 @@ class AgentRuntime:
         for i, step in enumerate(steps):
             if self._cancelled:
                 break
+            while self._paused:
+                await asyncio.sleep(0.2)
+                if self._cancelled:
+                    break
+            if self._cancelled:
+                break
             if self._sandbox.budget.exhausted():
                 logger.warning(f"[AgentRuntime] budget exhausted at step {i}/{len(steps)}")
                 self._status = AgentStatus.PARTIAL
@@ -247,6 +264,9 @@ class AgentRuntime:
                         )
                         self._steps[i].result = result
                         self._steps[i].status = "done"
+                        # 工具返回了子进度摘要 → 更新步骤描述
+                        if result.data and isinstance(result.data, dict) and result.data.get("summary"):
+                            self._steps[i].description = result.data["summary"]
                         results[step.tool] = result.data
                         completed_count += 1
                         last_result = None
@@ -280,6 +300,7 @@ class AgentRuntime:
                 file_total=file_total,
                 tokens_used=self._sandbox.budget.tokens_used,
                 elapsed_sec=self._sandbox.budget.elapsed,
+                message=f"{self._steps[i].description}",
             )
 
         # 从 SubAgent 类级别读取预摘要文件失败数（绕过编译版 SummarizeFileTool）
@@ -386,6 +407,12 @@ class AgentRuntime:
         total_turns = 0
 
         for c_idx, comp in enumerate(components):
+            if self._cancelled:
+                break
+            while self._paused:
+                await asyncio.sleep(0.2)
+                if self._cancelled:
+                    break
             if self._cancelled:
                 break
             self._sandbox.budget.reset()

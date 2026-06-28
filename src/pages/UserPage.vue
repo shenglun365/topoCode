@@ -11,6 +11,7 @@ import {
   DocumentTextIcon,
   FunnelIcon,
   XMarkIcon,
+  CommandLineIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useModelConfigStore } from '@/stores/model-config-store'
@@ -23,6 +24,7 @@ import ThemeManager from '@/components/settings/ThemeManager.vue'
 import AboutPage from '@/components/settings/AboutPage.vue'
 import TemplateManager from '@/components/settings/TemplateManager.vue'
 import ImportConfig from '@/components/settings/ImportConfig.vue'
+import AgentConfigManager from '@/components/settings/AgentConfigManager.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PG-005')
@@ -59,6 +61,7 @@ const tabs = [
   { id: 'import' as const, key: 'settings.importConfig', icon: FunnelIcon },
   { id: 'theme' as const, key: 'settings.theme', icon: PaintBrushIcon },
   { id: 'templates' as const, key: 'settings.templates', icon: DocumentTextIcon },
+  { id: 'agent' as const, key: 'settings.agentConfig', icon: CommandLineIcon },
   { id: 'about' as const, key: 'settings.about', icon: InformationCircleIcon },
 ]
 </script>
@@ -110,6 +113,7 @@ const tabs = [
       <ImportConfig v-else-if="settingsStore.activeTab === 'import'" />
       <ThemeManager v-else-if="settingsStore.activeTab === 'theme'" />
       <TemplateManager v-else-if="settingsStore.activeTab === 'templates'" />
+      <AgentConfigManager v-else-if="settingsStore.activeTab === 'agent'" />
       <AboutPage v-else-if="settingsStore.activeTab === 'about'" />
     </div>
 

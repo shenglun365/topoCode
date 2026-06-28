@@ -132,6 +132,14 @@ class SubAgent:
             rel = to_rel(fp, self._project_root)
             abs_fp = to_abs(fp, self._project_root)
 
+            # 精确路径未命中 → basename 模糊匹配兜底，同步更新 rel/abs_fp
+            if not os.path.isfile(abs_fp) and self._project_root:
+                from .path_utils import resolve_file as _resolve_file
+                r = _resolve_file(fp, self._project_root)
+                if r:
+                    abs_fp = r
+                    rel = to_rel(r, self._project_root)
+
             # 缓存命中（force_refresh 时跳过）
             if not force_refresh:
                 cached = file_cache.get(rel)
@@ -275,7 +283,13 @@ class SubAgent:
     def _read_file(self, path: str) -> Optional[str]:
         """同步读取文件内容（上限 10000 字符）。由 asyncio.to_thread 包装。"""
         abs_path = to_abs(path, self._project_root) if self._project_root else path
+        if not os.path.isfile(abs_path) and self._project_root:
+            from .path_utils import resolve_file
+            resolved = resolve_file(path, self._project_root)
+            if resolved:
+                abs_path = resolved
         if not os.path.isfile(abs_path):
+            logger.warning(f"[FileCache] READ-ERR: {path} (file not found)")
             return None
         try:
             with open(abs_path, "r", encoding="utf-8") as f:

@@ -517,6 +517,8 @@ export interface IPCAPI {
     stopArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; file_current?: number; file_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string; file_count?: number }>; error?: string }>
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
+    pauseAgentTask: (params: { agentTaskId: string }) => Promise<{ paused: boolean }>
+    resumeAgentTask: (params: { agentTaskId: string }) => Promise<{ resumed: boolean }>
     getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) => Promise<{ results: Array<{ project_id: string; task_id: string; agent_id: string; action: string; status: string; steps: string | null; message: string; error: string | null; created_at: string | null; finished_at: string | null }>; total: number }>
     clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
     // 预摘要
@@ -527,6 +529,8 @@ export interface IPCAPI {
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
+    startPipeline: (params: { taskId: string; force?: boolean; language?: string }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    getAgentConfig: () => Promise<{ routes: Array<{ action: string; workflow: string; description: string }>; skills: Array<{ name: string; description: string; steps: number }>; tools: Array<{ name: string; description: string; category: string; llm_visible: boolean }> }>
     // 组件分析
     analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
     // 社区 LLM 结果持久化

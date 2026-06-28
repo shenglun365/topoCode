@@ -215,6 +215,9 @@ export default { settings: {
   providerHintMiniMax: 'MiniMax 云 API，需填写 API Key',
   providerHintOpenRouter: 'OpenRouter 统一 API 网关，需填写 API Key',
   providerHintCustomCloud: '任意 OpenAI 兼容 API 的云服务，需填写 API Key',
+  aiAnalysisLanguage: 'AI 解析语言',
+  aiAnalysisLanguageHint: 'LLM 分析输出内容的语言（与界面语言独立）',
+  uiLanguageHint: '界面显示语言',
 
 },
 }

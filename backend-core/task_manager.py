@@ -34,6 +34,155 @@ _ps_failed_counts: dict[str, int] = {}
 _rank_cache: dict[str, dict] = {}
 
 
+def _resolve_node_list_items(items: list, task_id: str, project_db) -> dict[str, list[str]]:
+    """批量将 node_list 条目解析为文件路径。返回 item → [resolved_path] 映射。"""
+    import os as _os
+    result: dict[str, list[str]] = {}
+    unresolved_ids: list[str] = []
+    for item in items:
+        if not item or not isinstance(item, str):
+            continue
+        if _os.path.isabs(item) or '/' in item:
+            result[item] = [item]
+        else:
+            unresolved_ids.append(item)
+    if unresolved_ids:
+        placeholders = ",".join("?" for _ in unresolved_ids)
+        try:
+            for row in project_db.execute(
+                f"SELECT id, file_path FROM graph_node WHERE id IN ({placeholders}) AND task_id=? AND file_path!=''",
+                (*unresolved_ids, task_id)
+            ).fetchall():
+                result.setdefault(row["id"], []).append(row["file_path"])
+        except Exception:
+            pass
+    return result
+
+
+def _compute_file_ranks(task_id: str, project_db, components: list,
+                         project_root: str = "") -> dict:
+    """计算文件重要度评分并分批次。"""
+    from collections import Counter
+    import json as _rj
+    import os as _os
+
+    file_to_comms: dict[str, set[str]] = {}
+    file_edges: Counter = Counter()
+    file_sizes: dict[str, int] = {}
+    comm_quality: dict[str, float] = {}
+
+    cid_list = [c.get("id", "") for c in components if c.get("id")]
+    doc_map: dict[str, str] = {}
+    if cid_list:
+        placeholders = ",".join("?" for _ in cid_list)
+        try:
+            for row in project_db.execute(
+                f"SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND comm_id IN ({placeholders})",
+                (task_id, *cid_list)
+            ).fetchall():
+                doc_map[row["comm_id"]] = row["node_list"]
+        except Exception:
+            pass
+
+    all_cid_items: dict[str, list] = {}
+    for c in components:
+        cid = c.get("id", "")
+        node_list_json = doc_map.get(cid, "")
+        if not node_list_json:
+            continue
+        try:
+            raw = _rj.loads(node_list_json) if isinstance(node_list_json, str) else node_list_json
+            all_cid_items[cid] = raw
+        except Exception:
+            pass
+    all_items = list({item for items in all_cid_items.values() for item in items if isinstance(item, str) and item})
+    path_map = _resolve_node_list_items(all_items, task_id, project_db)
+
+    for c in components:
+        cid = c.get("id", "")
+        meta = c.get("metadata", {}) or {}
+        comm_quality[cid] = float(meta.get("qualityScore", 0) or 0)
+        for item in all_cid_items.get(cid, []):
+            for resolved in path_map.get(item, []):
+                file_to_comms.setdefault(resolved, set()).add(cid)
+
+    if file_to_comms:
+        try:
+            rel_keys = [
+                _os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp
+                for fp in file_to_comms
+            ]
+            logger.info("[_compute_file_ranks] size_query project_root=%r n_files=%d first_abs=%r first_rel=%r",
+                       project_root, len(file_to_comms),
+                       next(iter(file_to_comms), '') if file_to_comms else '',
+                       rel_keys[0] if rel_keys else '')
+            rel_to_size = {}
+            for row in project_db.execute(
+                "SELECT file_path, size FROM source_files WHERE file_path IN ({})".format(
+                    ",".join("?" for _ in rel_keys)
+                ), rel_keys
+            ).fetchall():
+                rel_to_size[row["file_path"]] = row["size"] or 0
+            logger.info("[_compute_file_ranks] source_files matched=%d", len(rel_to_size))
+            for abs_fp, rel_fp in zip(file_to_comms, rel_keys):
+                file_sizes[abs_fp] = rel_to_size.get(rel_fp, 0)
+            logger.info("[_compute_file_ranks] file_sizes nonzero=%d",
+                       sum(1 for v in file_sizes.values() if v > 0))
+        except Exception as e:
+            logger.warning("[_compute_file_ranks] size lookup failed: %s", e)
+
+    try:
+        for row in project_db.execute(
+            "SELECT d.source_file, COUNT(*) as cnt FROM dependencies d "
+            "JOIN graph_node g ON g.file_path = d.source_file AND g.task_id = ? "
+            "WHERE d.source_file IN ({}) GROUP BY d.source_file".format(
+                ",".join("?" for _ in file_to_comms)
+            ), (task_id,) + tuple(file_to_comms.keys())
+        ).fetchall():
+            file_edges[row["source_file"]] = row["cnt"]
+    except Exception:
+        pass
+
+    from agent_workflow.path_utils import to_rel
+    scored = []
+    for fp, comms in file_to_comms.items():
+        cross = len(comms)
+        edges = file_edges.get(fp, 0)
+        size = file_sizes.get(fp, 0)
+        max_quality = max((comm_quality.get(c, 0) for c in comms), default=0)
+        size_score = (1 if size > 10000 else 0) * 15 + \
+                     (1 if size > 50000 else 0) * 15 + \
+                     (1 if size > 100000 else 0) * 10
+        score = size_score + int(max_quality * 100)
+        scored.append({
+            "file_path": to_rel(fp, project_root), "score": score, "cross": cross,
+            "edges": edges, "size": size, "is_large": 1 if size > 10000 else 0,
+            "quality": max_quality, "batch": "",
+        })
+
+    scored.sort(key=lambda x: (-x["score"], -x["size"]))
+
+    total = len(scored)
+    p0_end = max(1, int(total * 0.30))
+    p1_end = max(p0_end + 1, int(total * 0.60))
+    while p0_end < total and scored[p0_end]["score"] == scored[p0_end - 1]["score"]:
+        p0_end += 1
+    while p1_end < total and scored[p1_end]["score"] == scored[p1_end - 1]["score"]:
+        p1_end += 1
+    for i, item in enumerate(scored):
+        if i < p0_end:
+            item["batch"] = "P0"
+        elif i < p1_end:
+            item["batch"] = "P1"
+        else:
+            item["batch"] = "P2"
+
+    return {
+        "files": scored,
+        "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end},
+    }
+
+
 def register_analysis_methods(server, multi_db: MultiDBManager):
     """将所有 analysis.* 方法注册到 RPC 服务器"""
 
@@ -2138,6 +2287,75 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         ok = queue.cancel(aid)
         return {"cancelled": ok}
 
+    @server.register("analysis.pauseAgentTask")
+    def pause_agent_task(agent_task_id=None, agentTaskId=None):
+        aid = agent_task_id or agentTaskId
+        if not aid:
+            raise ValueError("agent_task_id is required")
+        from agent_workflow.agent_queue import get_global_queue
+        queue = get_global_queue()
+        ok = queue.pause(aid)
+        return {"paused": ok}
+
+    @server.register("analysis.resumeAgentTask")
+    def resume_agent_task(agent_task_id=None, agentTaskId=None):
+        aid = agent_task_id or agentTaskId
+        if not aid:
+            raise ValueError("agent_task_id is required")
+        from agent_workflow.agent_queue import get_global_queue
+        queue = get_global_queue()
+        ok = queue.resume(aid)
+        return {"resumed": ok}
+
+    @server.register("analysis.startPipeline")
+    def start_pipeline(task_id=None, taskId=None, force=False, language=None):
+        """启动流水线整体激活 (PipelineWorkflow 入口)"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        logger.info(f"[startPipeline] task_id={tid} force={force} lang={language}")
+
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            raise ValueError(f"Task {tid} not found")
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
+        project_summary = _get_project_summary(pid)
+        project_name = task.get("name") or task.get("project_name") or pid
+
+        from agent_workflow.router import RouterHarness, RouteEntry
+        from agent_workflow.workflows.pipeline import PipelineWorkflow
+        from agent_workflow.tool_factory import build_pipeline_tools
+        from agent_workflow.sandbox import AgentSandbox
+
+        tools = build_pipeline_tools(multi_db, project_db, project_root, tid, pid, project_summary)
+
+        router = RouterHarness(project_root=project_root, multi_db=multi_db)
+        router.register("pipeline", RouteEntry(
+            workflow_class=PipelineWorkflow,
+            tool_builder=lambda ctx: tools,
+            description="流水线整体激活：项目摘要->预摘要->组件分析->架构分析",
+            sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
+        ))
+
+        context = {
+            "task_id": tid, "project_id": pid,
+            "project_name": project_name,
+            "project_summary": project_summary,
+            "force": force,
+            "language": language or "",
+        }
+
+        def _on_pipeline_complete(state_dict):
+            _make_agent_history_cb(pid, project_db, tid, "pipeline")(state_dict)
+
+        agent_id = router.dispatch("pipeline", tid, context,
+            on_complete=_on_pipeline_complete)
+
+        return {"taskId": tid, "success": True, "agentTaskId": agent_id, "skipped": False}
+
     @server.register("analysis.getAgentTaskHistory")
     def get_agent_task_history(task_id=None, taskId=None, offset=0, limit=10):
         tid = task_id or taskId
@@ -2168,165 +2386,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         s = AnalysisStore(project_db)
         s.clear_agent_task_history(pid, tid)
         return {"success": True}
-
-    # ==================== 文件预摘要 ====================
-
-    def _resolve_node_list_items(items: list, task_id: str, project_db) -> dict[str, list[str]]:
-        """批量将 node_list 条目解析为文件路径。返回 item → [resolved_path] 映射。"""
-        import os as _os
-        result: dict[str, list[str]] = {}
-        unresolved_ids: list[str] = []
-        for item in items:
-            if not item or not isinstance(item, str):
-                continue
-            if _os.path.isabs(item) or '/' in item:
-                result[item] = [item]
-            else:
-                unresolved_ids.append(item)
-        if unresolved_ids:
-            placeholders = ",".join("?" for _ in unresolved_ids)
-            try:
-                for row in project_db.execute(
-                    f"SELECT id, file_path FROM graph_node WHERE id IN ({placeholders}) AND task_id=? AND file_path!=''",
-                    (*unresolved_ids, task_id)
-                ).fetchall():
-                    result.setdefault(row["id"], []).append(row["file_path"])
-            except Exception:
-                pass
-        return result
-
-    def _compute_file_ranks(task_id: str, project_db, components: list,
-                             project_root: str = "") -> dict:
-        """计算文件重要度评分并分批次。"""
-        from collections import Counter
-        import json as _rj
-        import os as _os
-
-        # 1. 收集所有组件 node_list → 文件路径（批查询消除 N+1）
-        file_to_comms: dict[str, set[str]] = {}
-        file_edges: Counter = Counter()
-        file_sizes: dict[str, int] = {}
-        comm_quality: dict[str, float] = {}
-
-        # 1a. 批查询所有组件的 node_list
-        cid_list = [c.get("id", "") for c in components if c.get("id")]
-        doc_map: dict[str, str] = {}
-        if cid_list:
-            placeholders = ",".join("?" for _ in cid_list)
-            try:
-                for row in project_db.execute(
-                    f"SELECT comm_id, node_list FROM graph_doc WHERE task_id=? AND comm_id IN ({placeholders})",
-                    (task_id, *cid_list)
-                ).fetchall():
-                    doc_map[row["comm_id"]] = row["node_list"]
-            except Exception:
-                pass
-
-        # 1b. 先收集所有 node_list item，统一批解析
-        all_cid_items: dict[str, list] = {}
-        for c in components:
-            cid = c.get("id", "")
-            node_list_json = doc_map.get(cid, "")
-            if not node_list_json:
-                continue
-            try:
-                raw = _rj.loads(node_list_json) if isinstance(node_list_json, str) else node_list_json
-                all_cid_items[cid] = raw
-            except Exception:
-                pass
-        # 去重收集所有待解析 item
-        all_items = list({item for items in all_cid_items.values() for item in items if isinstance(item, str) and item})
-        path_map = _resolve_node_list_items(all_items, task_id, project_db)
-
-        for c in components:
-            cid = c.get("id", "")
-            meta = c.get("metadata", {}) or {}
-            comm_quality[cid] = float(meta.get("qualityScore", 0) or 0)
-            for item in all_cid_items.get(cid, []):
-                for resolved in path_map.get(item, []):
-                    file_to_comms.setdefault(resolved, set()).add(cid)
-
-        # 2. 查文件大小（node_list 存绝对路径，source_files 存相对路径）
-        if file_to_comms:
-            try:
-                rel_keys = [
-                    _os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp
-                    for fp in file_to_comms
-                ]
-                logger.info("[_compute_file_ranks] size_query project_root=%r n_files=%d first_abs=%r first_rel=%r",
-                           project_root, len(file_to_comms),
-                           next(iter(file_to_comms), '') if file_to_comms else '',
-                           rel_keys[0] if rel_keys else '')
-                rel_to_size = {}
-                for row in project_db.execute(
-                    "SELECT file_path, size FROM source_files WHERE file_path IN ({})".format(
-                        ",".join("?" for _ in rel_keys)
-                    ), rel_keys
-                ).fetchall():
-                    rel_to_size[row["file_path"]] = row["size"] or 0
-                logger.info("[_compute_file_ranks] source_files matched=%d", len(rel_to_size))
-                # 映射回绝对路径（scoring loop 用绝对路径做 key）
-                for abs_fp, rel_fp in zip(file_to_comms, rel_keys):
-                    file_sizes[abs_fp] = rel_to_size.get(rel_fp, 0)
-                logger.info("[_compute_file_ranks] file_sizes nonzero=%d",
-                           sum(1 for v in file_sizes.values() if v > 0))
-            except Exception as e:
-                logger.warning("[_compute_file_ranks] size lookup failed: %s", e)
-
-        # 3. 查依赖边数（dependencies.source_file 是文件路径文本）
-        try:
-            for row in project_db.execute(
-                "SELECT d.source_file, COUNT(*) as cnt FROM dependencies d "
-                "JOIN graph_node g ON g.file_path = d.source_file AND g.task_id = ? "
-                "WHERE d.source_file IN ({}) GROUP BY d.source_file".format(
-                    ",".join("?" for _ in file_to_comms)
-                ), (task_id,) + tuple(file_to_comms.keys())
-            ).fetchall():
-                file_edges[row["source_file"]] = row["cnt"]
-        except Exception:
-            pass
-
-        # 4. 计算评分（size 分桶 + quality 微调）；file_path 统一为项目相对路径
-        from agent_workflow.path_utils import to_rel
-        scored = []
-        for fp, comms in file_to_comms.items():
-            cross = len(comms)
-            edges = file_edges.get(fp, 0)
-            size = file_sizes.get(fp, 0)
-            max_quality = max((comm_quality.get(c, 0) for c in comms), default=0)
-            size_score = (1 if size > 10000 else 0) * 15 + \
-                         (1 if size > 50000 else 0) * 15 + \
-                         (1 if size > 100000 else 0) * 10
-            score = size_score + int(max_quality * 100)
-            scored.append({
-                "file_path": to_rel(fp, project_root), "score": score, "cross": cross,
-                "edges": edges, "size": size, "is_large": 1 if size > 10000 else 0,
-                "quality": max_quality, "batch": "",
-            })
-
-        # 按评分降序排列
-        scored.sort(key=lambda x: (-x["score"], -x["size"]))
-
-        # 百分位分批（前30% P0, 中30% P1, 后40% P2；边界同分不截断）
-        total = len(scored)
-        p0_end = max(1, int(total * 0.30))
-        p1_end = max(p0_end + 1, int(total * 0.60))
-        while p0_end < total and scored[p0_end]["score"] == scored[p0_end - 1]["score"]:
-            p0_end += 1
-        while p1_end < total and scored[p1_end]["score"] == scored[p1_end - 1]["score"]:
-            p1_end += 1
-        for i, item in enumerate(scored):
-            if i < p0_end:
-                item["batch"] = "P0"
-            elif i < p1_end:
-                item["batch"] = "P1"
-            else:
-                item["batch"] = "P2"
-
-        return {
-            "files": scored,
-            "counts": {"P0": p0_end, "P1": p1_end - p0_end, "P2": total - p1_end},
-        }
 
     def _get_l0_comps(project_db, tid):
         """获取 L0 社区列表，INCLUDE 为空时回退到 CALL。"""
@@ -2366,15 +2425,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 查已缓存文件数 + 按批次统计（每次轮询只查 COUNT）
         cached_count = 0
         batch_cached = {"P0": 0, "P1": 0, "P2": 0}
+        rank_paths = {f["file_path"] for f in rank_data["files"]}
+        rank_map = {f["file_path"]: f["batch"] for f in rank_data["files"]}
         try:
             cached_rows = project_db.execute(
                 "SELECT file_path FROM file_summaries WHERE project_id=?", (pid,)
             ).fetchall()
-            cached_set = {r[0] for r in cached_rows}
-            cached_count = len(cached_set)
-            for f in rank_data["files"]:
-                if f["file_path"] in cached_set:
-                    batch_cached[f["batch"]] += 1
+            for r in cached_rows:
+                if r[0] in rank_paths:
+                    cached_count += 1
+                    batch_cached[rank_map[r[0]]] += 1
         except Exception:
             pass
 
@@ -2949,7 +3009,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     f"metadata={c['metadata']}"
                 )
 
-            route_action = "agentic_analyze_components" if agentic_mode else "analyze_components"
+            route_action = "analyze_components"
             agent_id = router.dispatch(route_action, tid, context,
                 on_complete=_make_agent_history_cb(pid, project_db, tid, route_action))
             return {"success": True, "agentTaskId": agent_id, "skipped": skipped}
@@ -3421,6 +3481,44 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             return {'ok': True}
 
         raise ValueError(f"SubDoc {sid} not found")
+
+    @server.register("agent.getConfig")
+    def get_agent_config():
+        """返回当前 Agent 路由、技能、工具的元数据"""
+        return {
+            "routes": [
+                {"action": "overview", "workflow": "OverviewWorkflow", "description": "生成整体架构概览文档"},
+                {"action": "analyze_components", "workflow": "AgenticComponentAnalystWorkflow", "description": "Agent 多轮组件分析"},
+                {"action": "presummary_files", "workflow": "PreSummaryWorkflow", "description": "文件预摘要批量缓存"},
+            ],
+            "skills": [
+                {"name": "skill_generate_arch_overview", "description": "Generate architecture overview", "steps": 3},
+                {"name": "skill_analyze_community", "description": "Analyze a community in depth", "steps": 4},
+                {"name": "skill_fix_mermaid", "description": "Fix Mermaid diagram syntax", "steps": 2},
+                {"name": "skill_fix_plantuml", "description": "Fix PlantUML diagram syntax", "steps": 2},
+                {"name": "skill_fix_diagram", "description": "Fix generic diagram syntax", "steps": 2},
+                {"name": "skill_explain_arch_pattern", "description": "Explain architecture pattern", "steps": 3},
+                {"name": "skill_compare_arch", "description": "Compare architecture", "steps": 4},
+                {"name": "skill_recommend_refactor", "description": "Recommend refactoring", "steps": 3},
+                {"name": "skill_validate_arch_impact", "description": "Validate architecture impact", "steps": 3},
+                {"name": "skill_detect_arch_drift", "description": "Detect architecture drift", "steps": 3},
+                {"name": "skill_batch_analyze_communities", "description": "Batch analyze communities", "steps": 5},
+                {"name": "skill_track_ai_session", "description": "Track AI session", "steps": 2},
+                {"name": "skill_audit_changes", "description": "Audit changes", "steps": 3},
+            ],
+            "tools": [
+                {"name": "read_file", "description": "Read source file content", "category": "file", "llm_visible": True},
+                {"name": "search_content", "description": "Search file content by pattern", "category": "file", "llm_visible": True},
+                {"name": "summarize_file", "description": "Summarize file via LLM", "category": "file", "llm_visible": True},
+                {"name": "get_symbol_detail", "description": "Get symbol details", "category": "symbol", "llm_visible": True},
+                {"name": "search_symbols", "description": "Search symbols by name", "category": "symbol", "llm_visible": True},
+                {"name": "get_symbol_code", "description": "Get symbol source code", "category": "symbol", "llm_visible": True},
+                {"name": "get_community_subgraph", "description": "Get community subgraph", "category": "graph", "llm_visible": True},
+                {"name": "get_call_chain", "description": "Get call chain graph", "category": "graph", "llm_visible": True},
+                {"name": "get_ast_node", "description": "Get AST node details", "category": "graph", "llm_visible": True},
+                {"name": "get_edge_detail", "description": "Get edge details", "category": "edge", "llm_visible": True},
+            ],
+        }
 
     logger.info("[task_manager] 所有 analysis.* 方法已注册")
 

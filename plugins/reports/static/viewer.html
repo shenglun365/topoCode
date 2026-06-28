@@ -1931,14 +1931,29 @@ const GraphView = {
     var toggleAllBtn = document.getElementById('graphFilterToggleAll');
     toggleAllBtn.onclick = function() {
       if (!g_cy) return;
-      if (g_cy.nodes(':hidden').length > 0) {
-        g_cy.nodes().show();
-        this.textContent = '\u9690\u85cf\u5168\u90e8';
-        this.title = '\u9690\u85cf\u5168\u90e8\u8282\u70b9';
+      var hidden = g_cy.nodes(':hidden');
+      var total = g_cy.nodes();
+      if (hidden.length === 0) {
+        // 全显示 → 隐藏孤立；无孤立节点则不操作，保持状态
+        var isolated = total.filter(function(n) { return n.degree(false) === 0; });
+        if (isolated.length > 0) {
+          isolated.hide();
+          this.textContent = '\u9690\u85cf\u5168\u90e8';
+          this.title = '\u9690\u85cf\u6240\u6709\u8282\u70b9';
+        }
       } else {
-        g_cy.nodes().hide();
-        this.textContent = '\u663e\u793a\u5168\u90e8';
-        this.title = '\u663e\u793a\u5168\u90e8\u8282\u70b9';
+        var hasNonIsoHidden = total.some(function(n) { return n.hidden() && n.degree(false) > 0; });
+        if (!hasNonIsoHidden) {
+          // 隐藏孤立 → 隐藏全部
+          total.hide();
+          this.textContent = '\u663e\u793a\u5168\u90e8';
+          this.title = '\u663e\u793a\u6240\u6709\u8282\u70b9';
+        } else {
+          // 隐藏全部 → 显示全部
+          total.show();
+          this.textContent = '\u9690\u85cf\u5b64\u7acb';
+          this.title = '\u9690\u85cf\u5b64\u7acb\u8282\u70b9\uff08\u65e0\u8fde\u7ebf\uff09';
+        }
       }
       GraphView._refreshFilter();
     };
@@ -1963,9 +1978,15 @@ const GraphView = {
     // sync toggle button text with current state
     var tb = document.getElementById('graphFilterToggleAll');
     if (tb) {
-      var anyHidden = g_cy.nodes(':hidden').length > 0;
-      tb.textContent = anyHidden ? '\u663e\u793a\u5168\u90e8' : '\u9690\u85cf\u5168\u90e8';
-      tb.title = anyHidden ? '\u663e\u793a\u5168\u90e8\u8282\u70b9' : '\u9690\u85cf\u5168\u90e8\u8282\u70b9';
+      var hidden = g_cy.nodes(':hidden');
+      if (hidden.length === 0) {
+        tb.textContent = '\u9690\u85cf\u5b64\u7acb';
+        tb.title = '\u9690\u85cf\u5b64\u7acb\u8282\u70b9\uff08\u65e0\u8fde\u7ebf\uff09';
+      } else {
+        var hasNonIso = g_cy.nodes().some(function(n) { return n.hidden() && n.degree(false) > 0; });
+        tb.textContent = hasNonIso ? '\u663e\u793a\u5168\u90e8' : '\u9690\u85cf\u5168\u90e8';
+        tb.title = hasNonIso ? '\u663e\u793a\u6240\u6709\u8282\u70b9' : '\u9690\u85cf\u6240\u6709\u8282\u70b9';
+      }
     }
     var nodes = g_cy.nodes();
     var h = '';

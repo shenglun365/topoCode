@@ -840,6 +840,7 @@ export const useCommunityStore = defineStore('community', () => {
     console.log('[poll] register taskId=%s agent=%s idx=%d key=%s', taskId, agentTaskId, taskIdx, controlKey)
 
     let lastDoneCount = 0
+    let lastCommunityReload = 0
     controlDispatcher.register(controlKey, {
       interval: 1500,
       fetcher: () => ipc.analysis.getAgentProgress({ agentTaskId }),
@@ -893,6 +894,13 @@ export const useCommunityStore = defineStore('community', () => {
           for (let i = 0; i < runtimeSteps.length; i++) {
             updateAgentStep(taskId, taskIdx, i + stepOffset, runtimeSteps[i].status, runtimeSteps[i].file_count || 1)
           }
+        }
+        // 定时刷新社区数据（长时间运行的步骤，如流水线组件分析，内部子任务完成时前端无感知）
+        const now = Date.now()
+        if (now - lastCommunityReload > 10000 && taskId) {
+          lastCommunityReload = now
+          const pid = useProjectStore().selectedProjectId
+          if (pid) loadCommunities(taskId, pid).catch(() => {})
         }
         if (isCompleted) {
           controlDispatcher.unregister(controlKey)
@@ -973,6 +981,29 @@ export const useCommunityStore = defineStore('community', () => {
       // 立即停止轮询
       const controlKey = `agent-progress:${taskId}:${agentTaskId}`
       if (controlDispatcher.has(controlKey)) controlDispatcher.unregister(controlKey)
+    } catch {}
+  }
+
+  async function pauseAgentTask(taskId: string, agentTaskId: string) {
+    try {
+      await ipc.analysis.pauseAgentTask({ agentTaskId })
+      const t = tasks.value[taskId]
+      if (t) {
+        const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
+        if (idx >= 0) updateAgentTask(taskId, idx, { status: 'paused' })
+      }
+    } catch {}
+  }
+
+  async function resumeAgentTask(taskId: string, agentTaskId: string) {
+    try {
+      await ipc.analysis.resumeAgentTask({ agentTaskId })
+      const t = tasks.value[taskId]
+      if (t) {
+        const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
+        if (idx >= 0) updateAgentTask(taskId, idx, { status: 'running' })
+        _pollAgentProgress(taskId, idx, agentTaskId, 0)
+      }
     } catch {}
   }
 
@@ -1061,6 +1092,27 @@ export const useCommunityStore = defineStore('community', () => {
     return await ipc.analysis.rerunFileSummary({ taskId, file_path: filePath })
   }
 
+  async function startPipeline(taskId: string, force = false, language = '') {
+    const t = ensureTask(taskId)
+    const idx = t.agentTasks.length
+    addAgentTask(taskId, 'pipeline', ['流水线整体激活', force ? '强制覆盖所有' : '跳过已完成'])
+    t.agentTasks[idx].status = 'running'
+    try {
+      const result = await ipc.analysis.startPipeline({ taskId, force: force || undefined, language: language || undefined })
+      if (result.success && result.agentTaskId) {
+        t.agentTasks[idx].id = result.agentTaskId
+        updateAgentTask(taskId, idx, { progress: 0, message: '流水线启动中...' })
+        _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
+      } else {
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
+      }
+      return result
+    } catch (e: any) {
+      updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || 'unknown error' })
+      throw e
+    }
+  }
+
   return {
     tasks, communitySelections,
     ensureTask, getSelections, setSelections, clearSelections,
@@ -1071,8 +1123,8 @@ export const useCommunityStore = defineStore('community', () => {
     addAgentTask, updateAgentTask, updateAgentStep, triggerComponentAnalysis,
     setTimeline, setCompareMode,
     loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
-    cancelAgentPolling, cancelAgentTask, ensureAgentPolling,
+    cancelAgentPolling, cancelAgentTask, pauseAgentTask, resumeAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary, startPreSummaryPipeline,
-    getFileSummary, deleteFileSummary, rerunFileSummary,
+    getFileSummary, deleteFileSummary, rerunFileSummary, startPipeline,
   }
 })

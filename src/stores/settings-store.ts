@@ -8,7 +8,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import i18n from '@/i18n'
 
 export const useSettingsStore = defineStore('settings', () => {
-  const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import'>('ai')
+  const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent'>('ai')
   const loading = ref(false)
   const locale = ref<SupportedLocale>('zh-CN')
   const fontSize = ref(14)
@@ -51,7 +51,7 @@ export const useSettingsStore = defineStore('settings', () => {
     locale.value = newLocale; i18n.global.locale.value = newLocale; localStorage.setItem('locale', newLocale)
   }
 
-  function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import') {
+  function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent') {
     activeTab.value = tab
   }
 

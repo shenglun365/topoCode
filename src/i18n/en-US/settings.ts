@@ -210,6 +210,9 @@ export default { settings: {
   providerHintMiniMax: 'MiniMax cloud API, API Key required',
   providerHintOpenRouter: 'OpenRouter unified API gateway, API Key required',
   providerHintCustomCloud: 'Any OpenAI-compatible cloud service, API Key required',
+  aiAnalysisLanguage: 'AI Analysis Language',
+  aiAnalysisLanguageHint: 'Language for LLM analysis output (independent of UI language)',
+  uiLanguageHint: 'Interface display language',
 
 },
 }

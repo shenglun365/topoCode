@@ -45,6 +45,24 @@ const languages = [
   { value: 'en-US' as SupportedLocale, key: 'settings.english' },
 ]
 
+const aiLanguage = ref('zh-CN')
+
+async function loadAiLanguage() {
+  try {
+    const r = await (window.api as any)?.promptTemplate?.getDefaultLocale()
+    if (r && r.locale) aiLanguage.value = r.locale
+  } catch {}
+}
+
+async function setAiLanguage(locale: string) {
+  aiLanguage.value = locale
+  try {
+    await (window.api as any)?.promptTemplate?.setDefaultLocale({ locale })
+  } catch {}
+}
+
+onMounted(() => { loadAiLanguage() })
+
 // HTTP 服务 IP 设置
 const localIps = ref<string[]>([])
 const showRestartHint = ref(false)
@@ -133,7 +151,7 @@ function openHttpPage() {
       {{ t('settings.generalSettings') }}
     </h2>
 
-    <!-- 语言 -->
+    <!-- 界面语言 -->
     <div class="form-group">
       <label class="form-label">{{ t('settings.language') }}</label>
       <select
@@ -150,6 +168,22 @@ function openHttpPage() {
           {{ t(lang.key) }}
         </option>
       </select>
+      <span class="form-hint">{{ t('settings.uiLanguageHint', '界面显示语言') }}</span>
+    </div>
+
+    <!-- AI 解析输出语言 -->
+    <div class="form-group">
+      <label class="form-label">{{ t('settings.aiAnalysisLanguage', 'AI 解析语言') }}</label>
+      <select
+        class="select"
+        style="width:200px;"
+        :value="aiLanguage"
+        @change="setAiLanguage(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="zh-CN">简体中文</option>
+        <option value="en-US">English</option>
+      </select>
+      <span class="form-hint">{{ t('settings.aiAnalysisLanguageHint', 'LLM 分析输出内容的语言（与界面语言独立）') }}</span>
     </div>
 
     <!-- 代码字体大小 -->

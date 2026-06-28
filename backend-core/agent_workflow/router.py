@@ -113,6 +113,16 @@ class RouterHarness:
             return self._queue.cancel(agent_id)
         return False
 
+    def pause(self, agent_id: str) -> bool:
+        if self._queue:
+            return self._queue.pause(agent_id)
+        return False
+
+    def resume(self, agent_id: str) -> bool:
+        if self._queue:
+            return self._queue.resume(agent_id)
+        return False
+
     # ─── LLM 推理路由 ───
 
     def classify(self, natural_language: str, llm_chat_fn: callable) -> dict:
@@ -269,88 +279,7 @@ def create_default_router(
         sandbox_builder=lambda root: AgentSandbox(root, max_tokens=8192, timeout_seconds=600),
     ))
 
-    # ── track_start / track_stop 路由 ──
-    def _build_sentinel_tools(ctx: dict) -> ToolRegistry:
-        from .llm_adapter import create_llm_chat_fn
-        from .tool_factory import build_sentinel_tools
-        from prompt_manager import PromptManager
-        pm = PromptManager(multi_db.main_db)
-
-        def _render(template_id, variables):
-            result = pm.render(template_id, variables, locale='zh-CN')
-            return result.get('messages', [])
-
-        llm_fn = create_llm_chat_fn(multi_db, llm_model_id)
-        return build_sentinel_tools(llm_fn, project_root, _render)
-
-    def _sentinel_context_transform(ctx: dict) -> dict:
-        import time as _time
-        ctx["timestamp"] = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
-        if not ctx.get("version_id"):
-            ctx["version_id"] = f"v-{int(_time.time())}"
-        return ctx
-
-    from .workflows.arch_sentinel import ArchSentinelWorkflow
-    sentinel_start = RouteEntry(
-        workflow_class=ArchSentinelWorkflow,
-        tool_builder=_build_sentinel_tools,
-        context_transformer=_sentinel_context_transform,
-        description="开始架构变更追踪，记录当前架构快照（社区数量、质量分）。适用于重构或大规模修改前的基线记录。",
-    )
-    sentinel_stop = RouteEntry(
-        workflow_class=ArchSentinelWorkflow,
-        tool_builder=_build_sentinel_tools,
-        context_transformer=_sentinel_context_transform,
-        description="结束架构追踪，对比起始与当前快照，生成变更摘要（新增/删除/变更的社区数，风险评估）。适用于重构完成后验证架构变化是否符合预期。",
-    )
-    router.register("track_start", sentinel_start)
-    router.register("track_stop", sentinel_stop)
-
-    # ── analyze_components 路由 ──
-    def _build_component_tools(ctx: dict) -> ToolRegistry:
-        from .llm_adapter import create_llm_chat_fn
-        from .tool_factory import build_component_analyst_tools
-        llm_fn = create_llm_chat_fn(multi_db, llm_model_id) if multi_db else None
-        return build_component_analyst_tools(llm_fn, render_prompt=None, save_result_fn=save_result_fn)
-
-    def _component_context_transform(ctx: dict) -> dict:
-        ctx["project_summary"] = project_summary
-        return ctx
-
-    from .workflows.component_analyst import ComponentAnalystWorkflow
-    router.register("analyze_components", RouteEntry(
-        workflow_class=ComponentAnalystWorkflow,
-        tool_builder=_build_component_tools,
-        context_transformer=_component_context_transform,
-        description="按需 LLM 分析用户选中的组件，提取组件名称和功能概要，结果写入 SQLite。支持单组件和批量分析。",
-    ))
-
-    # ── presummary_files 路由（文件预摘要） ──
-    def _build_presummary_tools(ctx: dict) -> ToolRegistry:
-        from .tool_factory import build_agentic_component_tools
-        from .sandbox import PathSandbox
-        ps = PathSandbox(project_root) if project_root else None
-        return build_agentic_component_tools(
-            project_root=project_root,
-            project_db=project_db,
-            path_sandbox=ps,
-            project_id=ctx.get("project_id", ""),
-            task_id=ctx.get("task_id", ""),
-            multi_db=multi_db,
-            concurrency=ctx.get("subagent_concurrency", 1),
-        )
-
-    from .workflows.pre_summary import PreSummaryWorkflow
-    from .sandbox import AgentSandbox
-    router.register("presummary_files", RouteEntry(
-        workflow_class=PreSummaryWorkflow,
-        tool_builder=_build_presummary_tools,
-        context_transformer=None,
-        description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析",
-        sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
-    ))
-
-    # ── agentic_analyze_components 路由（Agentic 模式） ──
+    # ── analyze_components 路由（统一 Agentic 多轮模式） ──
     def _build_agentic_component_tools(ctx: dict) -> ToolRegistry:
         from .tool_factory import build_agentic_component_tools
         from .sandbox import PathSandbox
@@ -370,11 +299,35 @@ def create_default_router(
         return ctx
 
     from .workflows.agentic_component_analyst import AgenticComponentAnalystWorkflow
-    router.register("agentic_analyze_components", RouteEntry(
+    router.register("analyze_components", RouteEntry(
         workflow_class=AgenticComponentAnalystWorkflow,
         tool_builder=_build_agentic_component_tools,
         context_transformer=_agentic_component_context_transform,
-        description="Agentic 按需分析用户选中的组件，LLM 可自主调用 read_file / search_content 等工具读取文件后分析",
+        description="Agentic 多轮分析组件，LLM 可自主调用 read_file / search_content 等工具读取文件后分析",
+    ))
+
+    # ── presummary_files 路由（文件预摘要） ──
+    def _build_presummary_tools(ctx: dict) -> ToolRegistry:
+        from .tool_factory import build_agentic_component_tools
+        from .sandbox import PathSandbox
+        ps = PathSandbox(project_root) if project_root else None
+        return build_agentic_component_tools(
+            project_root=project_root,
+            project_db=project_db,
+            path_sandbox=ps,
+            project_id=ctx.get("project_id", ""),
+            task_id=ctx.get("task_id", ""),
+            multi_db=multi_db,
+            concurrency=ctx.get("subagent_concurrency", 1),
+        )
+
+    from .workflows.pre_summary import PreSummaryWorkflow
+    router.register("presummary_files", RouteEntry(
+        workflow_class=PreSummaryWorkflow,
+        tool_builder=_build_presummary_tools,
+        context_transformer=None,
+        description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析",
+        sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
     ))
 
     return router

@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 class TaskState(Enum):
     QUEUED = "queued"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     PARTIAL = "partial"
     FAILED = "failed"
@@ -134,7 +135,11 @@ class AgentTaskManager:
                             agent_id=aid, task_id=d.get("task_id", ""),
                             status=TaskState.FAILED, created_at=d.get("created_at", 0),
                         )
-                        s.error = "进程重启，任务已丢失"
+                        if d.get("status") == "paused":
+                            s.status = TaskState.PAUSED
+                            s.error = "进程重启，任务已暂停（无法恢复）"
+                        else:
+                            s.error = "进程重启，任务已丢失"
                         s.finished_at = time.time()
                         self._tasks[aid] = s
             _os.remove(self._persist_path)
@@ -211,6 +216,42 @@ class AgentTaskManager:
         # 立即通知运行中的 runtime 停止
         if state.runtime:
             state.runtime.cancel()
+
+        return True
+
+    def pause(self, agent_id: str) -> bool:
+        """暂停任务。保留进度，可恢复継続执行。"""
+        with self._lock:
+            state = self._tasks.get(agent_id)
+        if not state:
+            return False
+        if state.status not in (TaskState.RUNNING, TaskState.QUEUED):
+            return False
+
+        state.status = TaskState.PAUSED
+        self._save_persisted()
+        logger.info(f"[AgentQueue] paused {agent_id}")
+
+        if state.runtime:
+            state.runtime.pause()
+
+        return True
+
+    def resume(self, agent_id: str) -> bool:
+        """恢复暂停的任务。"""
+        with self._lock:
+            state = self._tasks.get(agent_id)
+        if not state:
+            return False
+        if state.status != TaskState.PAUSED:
+            return False
+
+        state.status = TaskState.RUNNING
+        self._save_persisted()
+        logger.info(f"[AgentQueue] resumed {agent_id}")
+
+        if state.runtime:
+            state.runtime.resume()
 
         return True
 
