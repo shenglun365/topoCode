@@ -244,6 +244,7 @@ class SummarizeFileTool(AgentTool):
                 multi_db=self._multi_db,
                 project_db=self._project_db,
                 task_id=self._task_id,
+                cancel_event=getattr(self, 'cancel_event', None),
             )
 
             result = await sub.summarize_files(

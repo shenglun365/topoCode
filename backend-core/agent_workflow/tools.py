@@ -10,6 +10,7 @@ ToolRegistry 管理工具注册，AgentRuntime 通过它获取可用工具集。
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Optional
+import threading
 
 
 @dataclass
@@ -40,6 +41,7 @@ class AgentTool(ABC):
     author: str = ""
     category: str = ""
     llm_visible: bool = False  # 该工具是否可被 LLM 的 function calling 调用
+    cancel_event: Optional[threading.Event] = None  # 由运行时注入，供工具检查取消信号
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:

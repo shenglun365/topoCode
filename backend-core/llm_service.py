@@ -684,17 +684,15 @@ class LLMService:
         token_data: Optional[Dict[str, Any]] = None,
     ):
         """保存流式完成后的消息到 SQLite（完整日志）"""
-        # 先记录用量统计（所有会话类型都记录，包括分析报告）
         try:
-            model_obj = model if isinstance(model, dict) else None
-            if model_obj and model_obj.get('id') and status in ('success', 'error'):
-                self._record_usage(model_obj.get('id'), token_data or {})
-        except Exception as e:
-            logger.warning(f"[LLMService] Failed to record usage: {e}")
-
-        try:
-            # AI 助手和分析报告会话：跳过消息持久化
+            # AI 助手和分析报告会话：跳过消息持久化，但需记录用量
             if any(session_id.startswith(p) for p in self._ANALYSIS_SESSION_PREFIXES):
+                try:
+                    model_obj = model if isinstance(model, dict) else None
+                    if model_obj and model_obj.get('id') and status in ('success', 'error'):
+                        self._record_usage(model_obj.get('id'), token_data or {})
+                except Exception as e:
+                    logger.warning(f"[LLMService] Failed to record usage: {e}")
                 logger.debug(f"[LLMService] Skip persistence for session: {session_id}")
                 return
 

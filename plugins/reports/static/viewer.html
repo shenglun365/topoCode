@@ -2085,7 +2085,9 @@ const GraphView = {
       var node = g_cy.getElementById(nid);
       if (!node.length) return;
       var commId = nid;
-      var et = S.et;
+      var et = (commId.indexOf('-incl-') >= 0) ? 'INCLUDE' :
+               (commId.indexOf('-call-') >= 0) ? 'CALL' :
+               S.et;
       var label = node.data('label') || commId;
       console.log('[ctx-doc] nid=' + nid + ' label=' + label.slice(0,20) + ' S.et=' + et + ' S.commStack=' + S.commStack.length);
       S.docCommId = commId;

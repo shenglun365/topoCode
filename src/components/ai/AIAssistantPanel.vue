@@ -116,7 +116,7 @@ const userInput = ref('')
 const CMD_HISTORY_KEY = 'ai-command-history'
 const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/select --l3',
   '/presummary', '/presummary --force',
-  '/analyze', '/analyze --force',
+  '/analyze', '/analyze --force', '/analyze_components', '/analyze_components --force',
   '/overview', '/overview --force',
   '/pipeline', '/pipeline --force']
 
@@ -176,9 +176,10 @@ function applySuggestion(index: number) {
 
 // 消息分页：默认显示最近 10 条，滚动到顶部可加载更多
 const displayedMessages = computed(() => {
-  const total = messages.value.length
-  if (total <= messagePageSize.value) return messages.value
-  return messages.value.slice(total - messagePageSize.value)
+  const filtered = messages.value.filter(m => m.content.length > 0 || m.isStreaming)
+  const total = filtered.length
+  if (total <= messagePageSize.value) return filtered
+  return filtered.slice(total - messagePageSize.value)
 })
 const hasMoreMessages = computed(() => messages.value.length > messagePageSize.value)
 
@@ -361,11 +362,11 @@ async function handleSend() {
         taskId,
         metadata: { nodeCount: c.nodeCount, fileCount: c.fileCount, qualityScore: c.qualityScore ?? undefined },
       })))
-      addMessage('system', `已选中 ${matching.length} 个组件。可输入 /analyze_components 启动批量分析，或点选加减组件后发送消息。`)
+      addMessage('system', `已选中 ${matching.length} 个组件。可输入 /analyze 启动批量分析，或点选加减组件后发送消息。`)
       return
     }
     // /analyze — 批量分析组件（Agent 多轮模式，默认全量 L0~L5）
-    if (/^\/analyze\b/i.test(text)) {
+    if (/^\/analyze(?:_components)?\b/i.test(text)) {
       const VALID_AC_FLAGS = ['--force', '-L']
       const tokens = text.split(/\s+/).slice(1)
       const unknown = _validateFlags(tokens, VALID_AC_FLAGS)
@@ -403,11 +404,11 @@ async function handleSend() {
       if (selectedComps.length > MAX_COMPONENTS) selectedComps.length = MAX_COMPONENTS
 
       const compNames = selectedComps.slice(0, 5).map(r => r.name).join('、') + (selectedComps.length > 5 ? `等${selectedComps.length}个` : '')
-      addMessage('user', `分析组件: ${compNames}`)
+      addMessage('user', text)
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
       const forceHint = force ? '，强制覆盖' : '（跳过已分析）'
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的 Agent 多轮分析任务${langHint}${forceHint}，请到「任务」面板查看进度。`)
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的 Agent 多轮分析任务${langHint}${forceHint}：${compNames}。请到「任务」面板查看进度。`)
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       communityStore.triggerComponentAnalysis(taskId, selectedComps, language, 1, true, 30, '', 1, 'deep', force)
         .catch(e => addMessage('error', String(e)))

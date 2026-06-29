@@ -9,6 +9,7 @@ SubAgent — 一次性文件探索 + 摘要子任务。
 import asyncio
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -56,8 +57,6 @@ class SubAgent:
 
     # 预摘要失败计数（task_id → 累计失败数），用于绕过编译版 SummarizeFileTool 传值
     _task_failed: dict[str, int] = {}
-    # 取消标志（task_id → bool），由 runtime.cancel() 设置
-    _task_cancelled: dict[str, bool] = {}
 
     @classmethod
     def get_failed(cls, task_id: str) -> int:
@@ -67,24 +66,15 @@ class SubAgent:
     def reset_failed(cls, task_id: str):
         cls._task_failed.pop(task_id, None)
 
-    @classmethod
-    def set_cancelled(cls, task_id: str, cancelled: bool = True):
-        if cancelled:
-            cls._task_cancelled[task_id] = True
-        else:
-            cls._task_cancelled.pop(task_id, None)
-
-    @classmethod
-    def is_cancelled(cls, task_id: str) -> bool:
-        return cls._task_cancelled.get(task_id, False)
-
     def __init__(self, multi_db, project_root: str = "", model_id: str = "",
-                 project_db=None, task_id: str = ""):
+                 project_db=None, task_id: str = "",
+                 cancel_event: Optional[threading.Event] = None):
         self._multi_db = multi_db
         self._project_root = project_root
         self._model_id = model_id
         self._project_db = project_db
         self._task_id = task_id
+        self._cancel_event = cancel_event or threading.Event()
 
     async def summarize_files(
         self,
@@ -123,7 +113,7 @@ class SubAgent:
             nonlocal cache_hits, cache_misses, failed, total_tokens, total_read_chars
 
             # 取消检查：外层 runtime.cancel() 设置此标志后快速退出
-            if SubAgent.is_cancelled(task_id):
+            if self._cancel_event.is_set():
                 async with lock:
                     failed += 1
                 return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
@@ -175,7 +165,7 @@ class SubAgent:
                         total_read_chars += len(text)
                         total_tokens += len(text) // 4
                     async with sem:
-                        if SubAgent.is_cancelled(task_id):
+                        if self._cancel_event.is_set():
                             async with lock:
                                 failed += 1
                             return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
@@ -202,7 +192,7 @@ class SubAgent:
                         total_read_chars += len(content)
                         total_tokens += len(content) // 4
                     async with sem:
-                        if SubAgent.is_cancelled(task_id):
+                        if self._cancel_event.is_set():
                             async with lock:
                                 failed += 1
                             return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
@@ -229,7 +219,7 @@ class SubAgent:
                     total_read_chars += len(content)
                     total_tokens += len(content) // 4
                 async with sem:
-                    if SubAgent.is_cancelled(task_id):
+                    if self._cancel_event.is_set():
                         async with lock:
                             failed += 1
                         return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}

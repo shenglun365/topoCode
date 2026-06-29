@@ -29,8 +29,10 @@ _FIELD_MAP = {
     "selectedExtensions": "selected_extensions",
 }
 
-# 预摘要失败计数（task_id → int），由 _cb 回调写入，getPreSummaryStatus 读取
+# 预摘要失败计数（已迁移至 multi_db.cache_store，保留模块变量用于兼容）
 _ps_failed_counts: dict[str, int] = {}
+
+# rank 缓存（已迁移至 multi_db.cache_store，保留模块变量用于兼容）
 _rank_cache: dict[str, dict] = {}
 
 
@@ -543,7 +545,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         })
 
         # 清除旧的排名缓存，避免重跑后前端的 P0~P4 显示旧数据
-        _rank_cache.pop(f"ranks:{tid}", None)
+        multi_db.cache_store.delete_file_ranks(tid)
 
         store.update_task_status(tid, "running", progress=0, error="")
 
@@ -1442,7 +1444,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         logger.info("[PERF] getReportDashboard file_stats=%.1fms", (time.perf_counter() - t0) * 1000)
 
         # 4. 预摘要状态
-        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': _ps_failed_counts.get(tid, 0)}
+        pre_summary = {'counts': {'P0': 0, 'P1': 0, 'P2': 0}, 'total_files': 0, 'cached_count': 0, 'project_root': '', 'failed_count': multi_db.cache_store.get_ps_failed(tid)}
         try:
             # 从 file_summaries 表直接统计缓存数（无社区数据时也能工作）
             p_rows = project_db.execute(
@@ -1474,35 +1476,53 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             'preSummary': pre_summary,
         }
 
-    def _get_cascade_levels_impl(project_db, tid, et):
+    def _get_cascade_levels_impl(project_db, tid, et, pid=None):
         """getCascadeLevels 内部实现（无 RPC 注册）"""
         t_sql = time.perf_counter()
-        try:
-            rows = project_db.execute(
-                """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                           h.file_count, h.quality_score, h.edge_count,
-                           (SELECT g.metadata FROM graph_doc g
-                            WHERE g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
-                            LIMIT 1) AS metadata
-                    FROM community_hierarchy h
-                    WHERE h.task_id=? AND h.edge_type=?
-                    ORDER BY h.comm_lv, h.comm_id""",
-                (tid, et)
-            ).fetchall()
-            has_file_count = True
-        except Exception as e:
-            if 'file_count' not in str(e).lower() and 'no such column' not in str(e).lower():
-                raise
-            has_file_count = False
-            rows = project_db.execute(
-                """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
-                           h.quality_score, h.edge_count
-                   FROM community_hierarchy h
-                   WHERE h.task_id=? AND h.edge_type=?
-                   ORDER BY h.comm_lv, h.comm_id""",
-                (tid, et)
-            ).fetchall()
-        logger.info("[PERF] cascade_sql %s rows=%d %.1fms", et, len(rows), (time.perf_counter() - t_sql) * 1000)
+        rows = []
+        has_file_count = True
+        # 优先 DuckDB LEFT JOIN（消除 N+1 相关子查询）
+        if pid and multi_db:
+            try:
+                duck_rows = multi_db.duckdb.get_cascade_levels(tid, pid, et)
+                if duck_rows:
+                    rows = [(r.get("comm_lv"), r.get("comm_id"),
+                             r.get("parent_comm_id"), r.get("node_count"),
+                             r.get("file_count"), r.get("quality_score"),
+                             r.get("edge_count"), r.get("metadata"))
+                            for r in duck_rows]
+                    logger.info("[PERF] cascade_duckdb %s rows=%d %.1fms",
+                               et, len(rows), (time.perf_counter() - t_sql) * 1000)
+            except Exception as e:
+                logger.warning(f"[DuckDB] cascade_levels fallback to SQLite: {e}")
+        # SQLite 回退
+        if not rows:
+            try:
+                rows = project_db.execute(
+                    """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                               h.file_count, h.quality_score, h.edge_count,
+                               (SELECT g.metadata FROM graph_doc g
+                                WHERE g.task_id = h.task_id AND g.edge_type = h.edge_type AND g.comm_id = h.comm_id
+                                LIMIT 1) AS metadata
+                        FROM community_hierarchy h
+                        WHERE h.task_id=? AND h.edge_type=?
+                        ORDER BY h.comm_lv, h.comm_id""",
+                    (tid, et)
+                ).fetchall()
+                has_file_count = True
+            except Exception as e:
+                if 'file_count' not in str(e).lower() and 'no such column' not in str(e).lower():
+                    raise
+                has_file_count = False
+                rows = project_db.execute(
+                    """SELECT h.comm_lv, h.comm_id, h.parent_comm_id, h.node_count,
+                               h.quality_score, h.edge_count
+                       FROM community_hierarchy h
+                       WHERE h.task_id=? AND h.edge_type=?
+                       ORDER BY h.comm_lv, h.comm_id""",
+                    (tid, et)
+                ).fetchall()
+            logger.info("[PERF] cascade_sql %s rows=%d %.1fms", et, len(rows), (time.perf_counter() - t_sql) * 1000)
 
         levels_dict = {}
         for row in rows:
@@ -1617,8 +1637,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             logger.warning("[analysis.getCascadeLevels] task not found task_id=%s", tid)
             return {"levels": []}
         project_db = multi_db.get_project_db(task["project_id"])
+        pid = task["project_id"]
 
-        result = _get_cascade_levels_impl(project_db, tid, et)
+        result = _get_cascade_levels_impl(project_db, tid, et, pid=pid)
         logger.info("[analysis.getCascadeLevels] DONE task_id=%s edge_type=%s", tid, et)
         return result
 
@@ -2414,13 +2435,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        # 内存缓存 rank_data（L0 组件和排名在分析完成后不变）
-        cache_key = f"ranks:{tid}"
-        rank_data = _rank_cache.get(cache_key)
+        # 缓存 rank_data（L0 组件和排名在分析完成后不变）
+        rank_data = multi_db.cache_store.get_file_ranks(tid)
         if rank_data is None:
             comps = _get_l0_comps(project_db, tid)
             rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
-            _rank_cache[cache_key] = rank_data
+            multi_db.cache_store.set_file_ranks(tid, rank_data)
 
         # 查已缓存文件数 + 按批次统计（每次轮询只查 COUNT）
         cached_count = 0
@@ -2442,7 +2462,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "counts": rank_data["counts"], "total_files": len(rank_data["files"]),
             "cached_count": cached_count, "batch_cached": batch_cached,
             "project_root": project_root,
-            "failed_count": _ps_failed_counts.get(tid, 0),
+            "failed_count": multi_db.cache_store.get_ps_failed(tid),
         }
 
     @server.register("analysis.listPreSummaryFiles")
@@ -2459,12 +2479,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        cache_key = f"ranks:{tid}"
-        rank_data = _rank_cache.get(cache_key)
+        rank_data = multi_db.cache_store.get_file_ranks(tid)
         if rank_data is None:
             comps = _get_l0_comps(project_db, tid)
             rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
-            _rank_cache[cache_key] = rank_data
+            multi_db.cache_store.set_file_ranks(tid, rank_data)
         batch_files = [f for f in rank_data["files"] if f["batch"] == batch]
         total = len(batch_files)
         start = (page - 1) * page_size
@@ -2659,7 +2678,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         def _chain_cb(state):
             fc = state.get("failed_count", 0)
             if fc:
-                _ps_failed_counts[tid] = fc
+                multi_db.cache_store.set_ps_failed(tid, fc)
             st = state.get("status", "")
             if st in ("cancelled", "failed"):
                 logger.info("[chainPreSummary] batch %s %s, stopping chain", batch, st)

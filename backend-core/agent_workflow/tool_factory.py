@@ -123,13 +123,18 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
             try:
                 from .sandbox import PathSandbox, AgentSandbox as _AS
                 from .runtime import AgentRuntime
-                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TimeoutError
+
+                ce = getattr(self, 'cancel_event', None)
 
                 sub_results = []
                 total_files = 0
                 completed_files = 0
 
                 for batch in batches:
+                    if ce and ce.is_set():
+                        _log.info(f"[Pipeline] preSummary cancelled at {batch}")
+                        break
                     files = _pipeline_get_batch_files(project_db, task_id, batch, force, project_root)
                     if not files:
                         sub_results.append(f"{batch}: 0 文件 (全缓存)")
@@ -147,19 +152,33 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                     context = {"task_id": task_id, "files": files}
                     sandbox = _AS(project_root, max_tokens=0, timeout_seconds=0)
 
-                    def _run():
+                    def _run(_ce=ce):
                         import asyncio
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
                             runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
+                            if _ce:
+                                runtime._cancel_event = _ce
                             return loop.run_until_complete(runtime.run(workflow, context))
                         finally:
                             loop.close()
 
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(_run)
-                        result = future.result(timeout=7200)
+                        if ce:
+                            while not ce.is_set():
+                                try:
+                                    result = future.result(timeout=1.0)
+                                    break
+                                except _TimeoutError:
+                                    continue
+                            if ce.is_set():
+                                future.cancel()
+                                _log.info(f"[Pipeline] preSummary cancelled at {batch}")
+                                break
+                        else:
+                            result = future.result(timeout=7200)
 
                     completed_files += result.steps_completed
                     total_files += result.steps_total
@@ -191,13 +210,18 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                 from .sandbox import PathSandbox, AgentSandbox as _AS
                 from .runtime import AgentRuntime
                 from .workflows.agentic_component_analyst import AgenticComponentAnalystWorkflow
-                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TimeoutError
+
+                ce = getattr(self, 'cancel_event', None)
 
                 sub_results = []
                 total_components = 0
                 completed_levels = 0
 
                 for level in levels:
+                    if ce and ce.is_set():
+                        _log.info(f"[Pipeline] component analysis cancelled at {level}")
+                        break
                     components = _pipeline_get_level_components(project_db, task_id, level, force)
                     if not components:
                         sub_results.append(f"{level}: 0 组件 (全已分析)")
@@ -256,19 +280,33 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                     }
                     sandbox = _AS(project_root, max_tokens=32768, timeout_seconds=900)
 
-                    def _run():
+                    def _run(_ce=ce):
                         import asyncio
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
                             runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
+                            if _ce:
+                                runtime._cancel_event = _ce
                             return loop.run_until_complete(runtime.run(workflow, context))
                         finally:
                             loop.close()
 
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(_run)
-                        future.result(timeout=3600)
+                        if ce:
+                            while not ce.is_set():
+                                try:
+                                    future.result(timeout=1.0)
+                                    break
+                                except _TimeoutError:
+                                    continue
+                            if ce.is_set():
+                                future.cancel()
+                                _log.info(f"[Pipeline] component analysis cancelled at {level}")
+                                break
+                        else:
+                            future.result(timeout=3600)
 
                     completed_levels += 1
                     total_components += len(components)
@@ -301,7 +339,11 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                 from .runtime import AgentRuntime
                 from .tools import ToolRegistry as _TR
                 from .workflows.overview import OverviewWorkflow, _GenerateOverviewTool
-                from concurrent.futures import ThreadPoolExecutor
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TimeoutError
+
+                ce = getattr(self, 'cancel_event', None)
+                if ce and ce.is_set():
+                    return ToolResult.ok({"skipped": True, "reason": "cancelled"})
 
                 if not force:
                     existing = project_db.execute(
@@ -318,12 +360,14 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                 context = {"task_id": task_id, "project_summary": project_summary or ""}
                 sandbox = _AS(project_root, max_tokens=8192, timeout_seconds=600)
 
-                def _run():
+                def _run(_ce=ce):
                     import asyncio
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
                         runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
+                        if _ce:
+                            runtime._cancel_event = _ce
                         result = loop.run_until_complete(runtime.run(workflow, context))
                         return result
                     finally:
@@ -331,7 +375,19 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
 
                 with ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(_run)
-                    result = future.result(timeout=3600)
+                    if ce:
+                        while not ce.is_set():
+                            try:
+                                result = future.result(timeout=1.0)
+                                break
+                            except _TimeoutError:
+                                continue
+                        if ce.is_set():
+                            future.cancel()
+                            _log.info(f"[Pipeline] overview cancelled")
+                            return ToolResult.ok({"skipped": True, "reason": "cancelled"})
+                    else:
+                        result = future.result(timeout=3600)
 
                 overview = (result.data or {}).get("overview", "")
                 if overview:

@@ -9,29 +9,67 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
+from data_layer.write_queue import is_write_sql
+
+
+class WriteResult:
+    """模拟 sqlite3.Cursor 的 lastrowid / rowcount 属性。"""
+
+    __slots__ = ("lastrowid", "rowcount")
+
+    def __init__(self, lastrowid=None, rowcount: int = 0):
+        self.lastrowid = lastrowid
+        self.rowcount = rowcount
+
 
 class SQLiteContext:
     """SQLite 数据库上下文（线程安全）"""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, *,
+                 label: str = "",
+                 write_queue=None):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
         self._lock = threading.RLock()
+        self._label = label
+        self._wq = write_queue
         self._connect()
 
     def _connect(self):
         """建立数据库连接（线程安全）"""
         with self._lock:
             if self._conn is None:
-                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                self._conn.row_factory = sqlite3.Row
-                # WAL 模式提升并发性能（多窗口共享后端时多个连接同时读写）
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA foreign_keys=ON")
-                # 多窗口并发安全设置
-                self._conn.execute("PRAGMA busy_timeout=5000")  # 等待锁释放 5 秒
-                self._conn.execute("PRAGMA synchronous=NORMAL")  # 平衡性能和安全
-                self._conn.execute("PRAGMA cache_size=10000")  # 10MB 缓存
+                try:
+                    self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                    self._conn.row_factory = sqlite3.Row
+                    # WAL 模式提升并发性能
+                    self._conn.execute("PRAGMA journal_mode=WAL")
+                    self._conn.execute("PRAGMA foreign_keys=ON")
+                    self._conn.execute("PRAGMA busy_timeout=5000")
+                    self._conn.execute("PRAGMA synchronous=NORMAL")
+                    self._conn.execute("PRAGMA cache_size=10000")
+                except sqlite3.OperationalError as e:
+                    if "disk I/O error" in str(e) or "unable to open" in str(e).lower():
+                        # 数据库文件损坏 → 删除 WAL/SHM 残留后重试
+                        import os as _os
+                        for ext in ("-wal", "-shm"):
+                            extra = self.db_path + ext
+                            if _os.path.exists(extra):
+                                try:
+                                    _os.unlink(extra)
+                                    logger.warning(f"[SQLite] removed corrupted {extra}")
+                                except Exception:
+                                    pass
+                        # 重试（仍可能失败，让上层处理）
+                        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                        self._conn.row_factory = sqlite3.Row
+                        self._conn.execute("PRAGMA journal_mode=WAL")
+                        self._conn.execute("PRAGMA foreign_keys=ON")
+                        self._conn.execute("PRAGMA busy_timeout=5000")
+                        self._conn.execute("PRAGMA synchronous=NORMAL")
+                        self._conn.execute("PRAGMA cache_size=10000")
+                    else:
+                        raise
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -42,11 +80,22 @@ class SQLiteContext:
     # ==================== 通用查询方法 ====================
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        """执行 SQL — 写操作自动提交，读操作不提交"""
+        """执行 SQL — 写入通过 WriteQueue 串行化；读操作直接执行。"""
+        if self._wq and self._label and is_write_sql(sql):
+            result = self._wq.execute_sync(self._label, sql, params)
+            if result.get("error"):
+                raise RuntimeError(
+                    f"WriteQueue error on {self._label}: {result['error']}"
+                )
+            return WriteResult(
+                lastrowid=result.get("lastrowid"),
+                rowcount=result.get("rowcount", 0),
+            )
         cursor = self.conn.execute(sql, params)
         # 仅对写操作提交事务，避免 SELECT 等读操作触发无意义的 commit
         upper_sql = sql.strip().upper()
-        if upper_sql.startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CREATE', 'DROP', 'REPLACE')):
+        if upper_sql.startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER',
+                                 'CREATE', 'DROP', 'REPLACE')):
             self.conn.commit()
         elif upper_sql == 'COMMIT':
             self.conn.commit()
@@ -1012,24 +1061,52 @@ class MultiDBManager:
         self.data_dir = data_dir
         os.makedirs(self.data_dir, exist_ok=True)
 
+        from data_layer.write_queue import WriteQueue
+        self._write_queue = WriteQueue()
+
         # 初始化主库
         main_db_path = os.path.join(self.data_dir, "topoone.db")
-        self.main_db = SQLiteContext(main_db_path)
+        self._write_queue.register_db("main", main_db_path)
+        self.main_db = SQLiteContext(main_db_path, label="main",
+                                     write_queue=self._write_queue)
         self._init_main_tables()
 
         # 初始化知识库
         knowledge_db_path = os.path.join(self.data_dir, "knowledge.db")
-        self.knowledge_db = SQLiteContext(knowledge_db_path)
+        self._write_queue.register_db("knowledge", knowledge_db_path)
+        self.knowledge_db = SQLiteContext(knowledge_db_path, label="knowledge",
+                                          write_queue=self._write_queue)
         self._init_knowledge_tables()
 
         # 初始化会话库
         sessions_db_path = os.path.join(self.data_dir, "sessions.db")
-        self.sessions_db = SQLiteContext(sessions_db_path)
+        self._write_queue.register_db("sessions", sessions_db_path)
+        self.sessions_db = SQLiteContext(sessions_db_path, label="sessions",
+                                         write_queue=self._write_queue)
         self._init_sessions_tables()
 
         # 项目库 LRU 缓存 (max=3)
         self._project_db_cache: OrderedDict[str, SQLiteContext] = OrderedDict()
         self._project_db_max = 3
+
+        from data_layer.cache_store import CacheStore
+        cache_dir = os.path.join(self.data_dir, "cache")
+        self._cache_store = CacheStore(cache_dir)
+
+        from data_layer.duckdb_reader import DuckDBReader
+        self._duckdb = DuckDBReader(self)
+
+    @property
+    def write_queue(self):
+        return self._write_queue
+
+    @property
+    def cache_store(self):
+        return self._cache_store
+
+    @property
+    def duckdb(self):
+        return self._duckdb
 
     def _init_main_tables(self):
         """初始化主库表"""
@@ -1162,7 +1239,10 @@ class MultiDBManager:
     def init_project_db(self, project_id: str, project_root: str = None):
         """创建并初始化项目库"""
         db_path = self._project_db_path(project_id, project_root)
-        project_db = SQLiteContext(db_path)
+        label = f"project:{project_id}"
+        self._write_queue.register_db(label, db_path)
+        project_db = SQLiteContext(db_path, label=label,
+                                   write_queue=self._write_queue)
         project_db.conn.executescript(PROJECT_DB_TABLES_SQL)
         project_db.conn.commit()
         return project_db
@@ -1382,7 +1462,10 @@ class MultiDBManager:
             project_db = self.init_project_db(project_id, project_root)
             self._migrate_project_db(project_db)
         else:
-            project_db = SQLiteContext(db_path)
+            label = f"project:{project_id}"
+            self._write_queue.register_db(label, db_path)
+            project_db = SQLiteContext(db_path, label=label,
+                                       write_queue=self._write_queue)
             self._migrate_project_db(project_db)
 
         # 加入缓存

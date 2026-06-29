@@ -67,7 +67,6 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
                     error_message="",
                     token_data=token_data,
                 )
-                service._record_usage(model, token_data)
             except Exception as log_err:
                 logger.warning(f"[llm_adapter] log failed: {log_err}")
 

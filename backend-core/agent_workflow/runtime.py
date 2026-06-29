@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -111,6 +112,7 @@ class AgentRuntime:
         self._multi_db = multi_db
         self._cancelled = False
         self._paused = False
+        self._cancel_event = threading.Event()
         self._status = AgentStatus.IDLE
         self._task_id = ""
         self._steps: list[StepProgress] = []
@@ -139,11 +141,14 @@ class AgentRuntime:
     def cancel(self):
         """取消当前执行"""
         self._cancelled = True
+        self._cancel_event.set()
         self._status = AgentStatus.CANCELLED
         logger.info("[AgentRuntime] cancelled by user")
-        # 注意：不在此处通知 SubAgent 取消文件摘要，因为 -j 并发时
-        # 多个 AgentRuntime 共享同一 task_id，SubAgent._task_cancelled
-        # 是类级别标志，取消一个会影响其他并发 Agent
+
+    def _sync_cancel(self):
+        """将 threading.Event 同步到 boolean 标志（跨线程安全）。"""
+        if self._cancel_event.is_set():
+            self._cancelled = True
 
     def pause(self):
         """暂停当前执行（在下一步/轮边界生效）"""
@@ -208,12 +213,15 @@ class AgentRuntime:
         file_current = 0
 
         for i, step in enumerate(steps):
+            self._sync_cancel()
             if self._cancelled:
                 break
             while self._paused:
                 await asyncio.sleep(0.2)
+                self._sync_cancel()
                 if self._cancelled:
                     break
+            self._sync_cancel()
             if self._cancelled:
                 break
             if self._sandbox.budget.exhausted():
@@ -228,6 +236,7 @@ class AgentRuntime:
                 self._steps[i].result = ToolResult.fail(f"Unknown tool: {step.tool}")
                 failed_count += 1
                 continue
+            tool.cancel_event = self._cancel_event
 
             self._steps[i].status = "running"
             self._report(
@@ -364,6 +373,7 @@ class AgentRuntime:
         remaining = timeout
         try:
             while remaining > 0:
+                self._sync_cancel()
                 if self._cancelled:
                     chat_task.cancel()
                     raise asyncio.CancelledError("cancelled by user")
@@ -407,12 +417,15 @@ class AgentRuntime:
         total_turns = 0
 
         for c_idx, comp in enumerate(components):
+            self._sync_cancel()
             if self._cancelled:
                 break
             while self._paused:
                 await asyncio.sleep(0.2)
+                self._sync_cancel()
                 if self._cancelled:
                     break
+            self._sync_cancel()
             if self._cancelled:
                 break
             self._sandbox.budget.reset()
@@ -445,6 +458,7 @@ class AgentRuntime:
             comp_turns = 0
 
             for turn in range(effective_max_turns):
+                self._sync_cancel()
                 if self._cancelled or self._sandbox.budget.exhausted():
                     break
 
@@ -532,6 +546,8 @@ class AgentRuntime:
                 tool_results: list[dict] = []
                 for tc in response.tool_calls[:3]:
                     tool = self._tools.get(tc.name)
+                    if tool:
+                        tool.cancel_event = self._cancel_event
                     # 防御性参数修复：XML fallback 解析可能将数组保留为 JSON 字符串
                     sanitized = {}
                     for k, v in tc.arguments.items():

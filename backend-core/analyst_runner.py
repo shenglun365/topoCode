@@ -30,7 +30,7 @@ parse_executor = ThreadPoolExecutor(
 
 # ==================== 停止标志 ====================
 _stop_flags: Dict[str, bool] = {}
-_executing_tasks: set = set()  # 正在执行的任务 ID 集合
+_executing_tasks: set = set()  # 正在执行的任务 ID 集合（内存，启动时从 CacheStore 恢复）
 
 logger = logging.getLogger(__name__)
 # ==================== 任务串行队列 ====================
@@ -64,6 +64,10 @@ async def enqueue_analysis_task(server, multi_db, task_id: str, run_id: str, sta
 
     # 入队即标记为执行中，防止 stop_task 误判为孤儿任务
     _executing_tasks.add(task_id)
+    try:
+        multi_db.cache_store.add_executing_task(task_id)
+    except Exception:
+        pass
     coro = _execute_task(server, multi_db, task_id, run_id, start_time)
     await _task_queue.put(coro)
 
@@ -1108,6 +1112,10 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
 
         clear_stop_flag(task_id)
         _executing_tasks.discard(task_id)
+        try:
+            multi_db.cache_store.remove_executing_task(task_id)
+        except Exception:
+            pass
         return result
 
     except Exception as e:
@@ -1126,6 +1134,10 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
 
         clear_stop_flag(task_id)
         _executing_tasks.discard(task_id)
+        try:
+            multi_db.cache_store.remove_executing_task(task_id)
+        except Exception:
+            pass
         raise
 
 

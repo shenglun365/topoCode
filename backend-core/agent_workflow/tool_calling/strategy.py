@@ -185,6 +185,16 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
         # 清理模型输出格式（去除代码围栏等）
         content = clean_model_content(content)
 
+        # 旁路：记录 token 用量到 model_daily_usage（NativeStrategy 漏计）
+        try:
+            if usage and usage.get('total_tokens') and model_config:
+                mid = model_config.get('id')
+                if mid:
+                    from llm_service import LLMService
+                    LLMService(multi_db)._record_usage(mid, usage)
+        except Exception:
+            pass
+
         return AgentChatResponse(
             content=content,
             tool_calls=tool_calls,
