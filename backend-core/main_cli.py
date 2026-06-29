@@ -80,12 +80,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_qual.add_argument("--focus", default="all")
     p_qual.add_argument("--json", action="store_true")
 
-    # === MCP ===
-    p_serve = sub.add_parser("serve", help="启动 MCP Server")
-    p_serve.add_argument("--mcp", action="store_true", help="MCP 模式 (默认)")
-    p_serve.add_argument("--proxy", action="store_true")
-    p_serve.add_argument("--port", type=int, default=0)
-
     # === Agent Installer ===
     p_install = sub.add_parser("install", help="安装到 AI Coding Agent 配置")
     p_install.add_argument("agents", nargs="*", help="Agent ID (claude/opencode/codex/cursor/copilot/gemini/windsurf)")
@@ -120,10 +114,7 @@ def main():
 
     cmd = args.command
 
-    if cmd == "serve":
-        _cmd_serve(args)
-
-    elif cmd in ("install", "uninstall", "detect"):
+    if cmd in ("install", "uninstall", "detect"):
         _cmd_installer(args)
 
     elif cmd in ("community", "arch", "diff", "quality", "track", "status"):
@@ -140,16 +131,6 @@ def main():
 
     elif cmd == "session":
         _cmd_session(args)
-
-
-def _cmd_serve(args):
-    """启动 MCP Server。"""
-    project_root = os.path.abspath(args.project_root)
-    print(f"topocode MCP Server starting for project: {project_root}")
-    print("(stdio mode — ready for AI agent connection)")
-    from mcp_server.__main__ import main as mcp_main
-    sys.argv = ["mcp_server", "--project-root", project_root]
-    mcp_main()
 
 
 def _cmd_installer(args):
@@ -210,9 +191,7 @@ def _cmd_query(args):
     elif args.command == "diff":
         result = {"message": "Diff 需要 SnapshotStore 数据。使用 --snapshot 模式运行分析。"}
     elif args.command == "quality":
-        from mcp_server.dispatcher import ToolDispatcher
-        d = ToolDispatcher(project_root, context=ctx)
-        result = d._handle_quality_inspect({"focus": getattr(args, "focus", "all")})
+        result = {"message": "MCP 功能已关闭"}
     elif args.command == "status":
         result = ctx.get_summary()
     else:
@@ -222,8 +201,8 @@ def _cmd_query(args):
         import json
         print(json.dumps(result, indent=2, default=str))
     else:
-        from mcp_server.dispatcher import _json_dumps
-        print(_json_dumps(result))
+        import json as _rj
+        print(_rj.dumps(result, indent=2, default=str, ensure_ascii=False))
 
 
 def _cmd_project(args):

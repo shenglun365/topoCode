@@ -244,15 +244,12 @@ def create_default_router(
     task_id: str,
     project_summary: str = "",
     llm_model_id: str = "",
-    save_result_fn: callable = None,
 ) -> RouterHarness:
     """
     构建 RouterHarness 并注册所有默认路由。
 
     注册的路由:
       - "overview"    → OverviewWorkflow (整体架构概览)
-      - "track_start" → ArchSentinelWorkflow (记录快照)
-      - "track_stop"  → ArchSentinelWorkflow (对比 + 摘要 + 持久化)
     """
     router = RouterHarness(project_root=project_root, multi_db=multi_db)
 

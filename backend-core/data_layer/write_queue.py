@@ -80,6 +80,11 @@ class WriteQueue:
         """注册数据库路径（按需懒连接）。"""
         self._db_paths[label] = path
 
+    def register_conn(self, label: str, conn: sqlite3.Connection):
+        """注册已存在的连接（DELETE 模式下共享 SQLiteContext 的连接）。"""
+        self._connections[label] = conn
+        self._db_paths[label] = conn.execute("PRAGMA database_list").fetchone()[2] if conn else ""
+
     def execute(self, label: str, sql: str, params: tuple = (),
                 _commit: bool = True):
         """非阻塞写入。不等待结果，适用于分析/日志类写入。"""
@@ -142,30 +147,67 @@ class WriteQueue:
                     "Call register_db() first."
                 )
             path = self._db_paths[label]
-            conn = sqlite3.connect(path, check_same_thread=False)
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA synchronous=NORMAL")
-                conn.execute("PRAGMA busy_timeout=5000")
-            except sqlite3.OperationalError as e:
-                if "disk I/O error" in str(e) or "unable to open" in str(e).lower():
-                    import os as _os
-                    for ext in ("-wal", "-shm"):
-                        extra = path + ext
-                        if _os.path.exists(extra):
-                            try:
-                                _os.unlink(extra)
-                                logger.warning(f"[WriteQueue] removed corrupted {extra}")
-                            except Exception:
-                                pass
-                    conn = sqlite3.connect(path, check_same_thread=False)
+            conn = self._create_conn(path)
+            self._connections[label] = conn
+        return self._connections[label]
+
+    def _create_conn(self, path: str) -> sqlite3.Connection:
+        """打开 SQLite 连接，优先 WAL，失败回退 DELETE。"""
+        conn = sqlite3.connect(path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.OperationalError as e:
+            if "disk I/O error" in str(e) or "unable to open" in str(e).lower():
+                # WAL 损坏 → 删除残留后重试 WAL
+                import os as _os
+                for ext in ("-wal", "-shm"):
+                    extra = path + ext
+                    if _os.path.exists(extra):
+                        try:
+                            _os.unlink(extra)
+                            logger.warning(f"[WriteQueue] removed corrupted {extra}")
+                        except Exception:
+                            pass
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                conn = sqlite3.connect(path, check_same_thread=False)
+                try:
                     conn.execute("PRAGMA journal_mode=WAL")
                     conn.execute("PRAGMA synchronous=NORMAL")
                     conn.execute("PRAGMA busy_timeout=5000")
-                else:
-                    raise
-            self._connections[label] = conn
-        return self._connections[label]
+                    return conn
+                except sqlite3.OperationalError:
+                    pass
+                # WAL 仍失败 → 回退 DELETE
+                logger.warning(f"[WriteQueue] WAL failed for {path}, falling back to DELETE")
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                conn = sqlite3.connect(path, check_same_thread=False)
+                conn.execute("PRAGMA journal_mode=DELETE")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA busy_timeout=5000")
+            else:
+                raise
+        return conn
+
+    def _close_conn(self, label: str):
+        """关闭并移除指定 label 的连接。写入后调用以确保跨连接可见性（DELETE 模式必须）。"""
+        conn = self._connections.pop(label, None)
+        if conn:
+            try:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _run(self):
         """写入线程主循环。"""

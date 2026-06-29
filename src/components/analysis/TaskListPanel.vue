@@ -18,7 +18,7 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
 import { useNavigationStore } from '@/stores/navigation'
 import TaskDetailDialog from './TaskDetailDialog.vue'
-import TimelineDialog from './TimelineDialog.vue'
+
 import type { AnalysisTask } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
 import { displayDispatcher } from '@/services/display-dispatcher'
@@ -42,12 +42,6 @@ const navigation = useNavigationStore()
 
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
-const timelineDialogVisible = ref(false)
-const timelineDialogTask = ref<AnalysisTask | null>(null)
-function openTimeline(task: AnalysisTask) {
-  timelineDialogTask.value = task
-  timelineDialogVisible.value = true
-}
 
 // 加载任务列表
 async function loadTasks() {
@@ -371,15 +365,7 @@ function getConfigSummary(task: AnalysisTask): string {
             />
             <span class="task-name">{{ task.name }}</span>
             <span class="task-type-badge">{{ task.type }}</span>
-            <button
-              v-if="task.status === 'done'"
-              class="btn btn-ghost btn-xs task-name-btn"
-              title="查看历史快照"
-              @click.stop="openTimeline(task)"
-            >
-              <ClockIcon class="w-3 h-3" />
-              <span class="task-name-btn-text">时间线</span>
-            </button>
+
           </div>
           <div class="task-progress-group">
             <span
@@ -551,14 +537,6 @@ function getConfigSummary(task: AnalysisTask): string {
         </div>
       </div>
     </Teleport>
-
-    <TimelineDialog
-      :visible="timelineDialogVisible"
-      :task-id="timelineDialogTask?.id || ''"
-      :task-name="timelineDialogTask?.name || ''"
-      :project-id="props.projectId"
-      @close="timelineDialogVisible = false"
-    />
 
     <!-- 文件数超限警告对话框 -->
     <Teleport to="body">

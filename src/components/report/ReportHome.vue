@@ -656,7 +656,7 @@ watch(() => props.taskId, () => {
         </section>
       </div>
 
-      <!-- 组件架构 — Tag/Graph 双模式 — 填充剩余空间 -->
+      <!-- 组件架构 — Tag 模式 — 填充剩余空间 -->
       <div class="report-arch-panel">
         <CommunityArchitecturePanel
           :task-id="props.taskId"

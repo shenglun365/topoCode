@@ -123,10 +123,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
       startedAt: r.started_at,
       finishedAt: r.finished_at,
       durationMs: r.duration_ms,
-      snapshotScope: r.snapshot_scope,
-      snapshotExtensions: r.snapshot_extensions,
-      snapshotExcludeDirs: r.snapshot_exclude_dirs,
-      snapshotReportTypes: r.snapshot_report_types,
     }))
   }
 

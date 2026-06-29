@@ -7,15 +7,12 @@ import {
   ChartBarIcon,
 } from '@heroicons/vue/24/outline'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
-import { usePanelStore } from '@/stores/panel'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import CommunityTagView from './CommunityTagView.vue'
-import CommunityGraphView from './CommunityGraphView.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
-const panelStore = usePanelStore()
 const funcGroup = useFuncGroupStore()
 
 const props = defineProps<{
@@ -37,8 +34,6 @@ const emit = defineEmits<{
 }>()
 
 const { showId, componentId } = useComponentId('CV-001')
-
-const viewMode = ref<'tag' | 'graph'>('tag')
 const commEdgeType = ref<'INCLUDE' | 'CALL' | 'EXTERNAL_INCLUDE' | 'EXTERNAL_CALL'>('INCLUDE')
 const communitySearch = ref('')
 
@@ -46,14 +41,10 @@ const communitySearch = ref('')
 onMounted(() => {
   const saved = funcGroup.getTabExtraState('analysis', props.tabId)
   if (saved) {
-    if (saved.viewMode) viewMode.value = saved.viewMode
     if (saved.edgeType) commEdgeType.value = saved.edgeType
   }
 })
 
-watch(viewMode, (v) => {
-  funcGroup.saveTabExtraState('analysis', props.tabId, { viewMode: v })
-})
 watch(commEdgeType, (v) => {
   funcGroup.saveTabExtraState('analysis', props.tabId, { edgeType: v })
   if (v === 'EXTERNAL_INCLUDE' || v === 'EXTERNAL_CALL') {
@@ -107,20 +98,6 @@ function openCommunityDoc(item: CommunityItem) {
   }
 }
 
-const viewModeLabel = computed(() => {
-  return viewMode.value === 'tag'
-    ? t('report.switchToGraph', '切换至结构图')
-    : t('report.switchToTag', '切换至标签视图')
-})
-
-function handleGuideClick() {
-  if (panelStore.rightCollapsed) {
-    panelStore.toggleRight()
-  }
-  panelStore.setRightTab('ai')
-}
-
-const showAIBubble = computed(() => panelStore.rightCollapsed)
 </script>
 
 <template>
@@ -163,39 +140,6 @@ const showAIBubble = computed(() => panelStore.rightCollapsed)
       </span>
       <div class="header-spacer" />
       <div class="arch-actions">
-        <button
-          class="view-mode-btn"
-          :title="viewModeLabel"
-          @click="viewMode = viewMode === 'tag' ? 'graph' : 'tag'"
-        >
-          <template v-if="viewMode === 'tag'">
-            <svg
-              class="w-4 h-4"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M10 3a1 1 0 01.993.883L11 4v4.586L16.414 14l.292-.293a1 1 0 011.497 1.32l-.083.094L15.415 18l-2.707-2.707a1 1 0 011.32-1.497l.094.083L14.414 14 9 8.586V4a1 1 0 011-1z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </template>
-          <template v-else>
-            <svg
-              class="w-4 h-4"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </template>
-          <span class="view-mode-text">{{ viewMode === 'tag' ? '结构图' : '标签' }}</span>
-        </button>
         <div class="arch-search">
           <input
             v-model="communitySearch"
@@ -243,7 +187,6 @@ const showAIBubble = computed(() => panelStore.rightCollapsed)
     </div>
 
     <CommunityTagView
-      v-if="viewMode === 'tag'"
       :task-id="props.taskId"
       :tab-id="props.tabId"
       :edge-type="commEdgeType"
@@ -252,33 +195,6 @@ const showAIBubble = computed(() => panelStore.rightCollapsed)
       :search="communitySearch"
       @open-community="openCommunityDoc"
     />
-
-    <CommunityGraphView
-      v-else
-      :task-id="props.taskId"
-      :tab-id="props.tabId"
-      :project-id="props.projectId"
-      :task-updated-at="props.taskUpdatedAt"
-      :edge-type="commEdgeType"
-      :external-stats="props.externalStats"
-      @open-md="(p) => emit('open-md', p)"
-    />
-
-    <button
-      v-if="viewMode === 'tag' && showAIBubble"
-      class="ca-guide-btn"
-      @click="handleGuideClick"
-    >
-      <svg
-        class="w-4 h-4"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      ><path d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>
-    </button>
   </section>
 </template>
 
@@ -299,16 +215,6 @@ const showAIBubble = computed(() => panelStore.rightCollapsed)
 .header-spacer { flex: 1; }
 
 .arch-actions { display: flex; align-items: center; gap: 0.5rem; }
-.view-mode-btn {
-  display: flex; align-items: center; gap: 0.25rem;
-  padding: 0.2rem 0.5rem; font-size: 0.75rem;
-  color: var(--text-muted); background: var(--bg-secondary);
-  border: 1px solid var(--border); border-radius: 0.375rem;
-  cursor: pointer; transition: all 0.15s; white-space: nowrap;
-}
-.view-mode-btn:hover { border-color: var(--accent, #7c3aed); color: var(--text-primary); }
-.view-mode-text { font-size: 0.7rem; }
-
 .arch-search { display: flex; }
 .arch-search-input {
   width: 160px; padding: 0.2rem 0.5rem; font-size: 0.75rem;
@@ -326,27 +232,4 @@ const showAIBubble = computed(() => panelStore.rightCollapsed)
 }
 .arch-tab:hover { color: var(--text-primary); }
 .arch-tab.active { color: var(--accent, #7c3aed); border-bottom-color: var(--accent, #7c3aed); }
-
-.ca-guide-btn {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  z-index: 211;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-primary);
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 50%;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.ca-guide-btn:hover {
-  background: var(--accent);
-  color: var(--bg-primary);
-}
 </style>

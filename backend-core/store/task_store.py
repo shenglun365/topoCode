@@ -22,8 +22,7 @@ class TaskStore:
     def create_task(self, task: dict) -> dict:
         """创建新任务"""
         task_id = task.get("id") or str(uuid.uuid4())
-        db = self._db.conn
-        db.execute("""
+        self._db.execute("""
             INSERT INTO analysis_tasks (
                 id, project_id, type, name, status, progress, total, current,
                 scopes, extensions, exclude_dirs, report_types,
@@ -44,7 +43,6 @@ class TaskStore:
             task.get("pattern"),
             1,
         ))
-        self._db.commit()
         return self.get_task(task_id)
 
     def get_task(self, task_id: str) -> Optional[dict]:
@@ -178,8 +176,7 @@ class TaskStore:
         run_id = str(uuid.uuid4())
         run_number = self._next_run_number(task_id)
 
-        db = self._db.conn
-        db.execute("""
+        self._db.execute("""
             INSERT INTO analysis_task_runs (
                 id, task_id, run_number, status, total,
                 snapshot_scope, snapshot_scopes, snapshot_extensions,
@@ -199,7 +196,6 @@ class TaskStore:
             "UPDATE analysis_tasks SET last_run_id = ? WHERE id = ?",
             (run_id, task_id),
         )
-        self._db.commit()
 
         return {
             "id": run_id,

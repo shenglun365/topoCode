@@ -86,7 +86,6 @@ contextBridge.exposeInMainWorld('api', {
     saveGitInfo: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'project.saveGitInfo', params }),
     getGitInfo: (params: { projectId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.getGitInfo', params }),
     checkImportStatus: (params: { projectId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.checkImportStatus', params }),
-    cleanupTaskSnapshots: (params: { taskId: string }) => ipcRenderer.invoke('ipc:call', { method: 'project.cleanupTaskSnapshots', params }),
   },
 
   // ==================== 分组管理 ====================
@@ -178,14 +177,6 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityNodeLists', params }),
     startOverview: (params: { taskId: string; force?: boolean }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.startOverview', params }),
-    listArchSnapshots: (params: { taskId: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.listArchSnapshots', params }),
-    getArchSnapshot: (params: { taskId: string; versionId: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.getArchSnapshot', params }),
-    startArchTrack: (params: { taskId: string; tag: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.startArchTrack', params }),
-    stopArchTrack: (params: { taskId: string; tag: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.stopArchTrack', params }),
     getAgentProgress: (params: { agentTaskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentProgress', params }),
     cancelAgentTask: (params: { agentTaskId: string }) =>
@@ -581,38 +572,12 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'module.search', params: { query } }),
   },
 
-  // ==================== MCP Server 管理 ====================
-  mcp: {
-    call: (method: string, params: Record<string, unknown>) =>
-      ipcRenderer.invoke('mcp:call', method, params),
-    listTools: () =>
-      ipcRenderer.invoke('mcp:list-tools'),
-    listPrompts: () =>
-      ipcRenderer.invoke('mcp:list-prompts'),
-    start: (projectRoot: string, zmqPort?: number, logLevel?: string) =>
-      ipcRenderer.invoke('mcp:start', projectRoot, zmqPort, logLevel),
-    stop: () =>
-      ipcRenderer.invoke('mcp:stop'),
-    onStatusChange: (cb: (s: any) => void) => {
-      const listener = (_: any, status: any) => cb(status)
-      ipcRenderer.on('mcp:status', listener)
-      return () => ipcRenderer.removeListener('mcp:status', listener)
-    },
-  },
-
-  // ==================== 架构快照 & 图位置 ====================
+  // ==================== 图位置 ====================
   graph: {
-    saveSnapshot: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.saveSnapshot', params }),
-    getSnapshot: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.getSnapshot', params }),
-    deleteSnapshot: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.deleteSnapshot', params }),
-    exportSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.exportSnapshots', params }),
-    compareSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.compareSnapshots', params }),
     savePositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.savePositions', params }),
     loadPositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.loadPositions', params }),
     clearPositions: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.clearPositions', params }),
     listSavedPositionKeys: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.listSavedPositionKeys', params }),
-    listArchivedSnapshots: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.listArchivedSnapshots', params }),
-    compareWithArchived: (params: any) => ipcRenderer.invoke('ipc:call', { method: 'graph.compareWithArchived', params }),
   },
 
   // ==================== 日志系统 ====================

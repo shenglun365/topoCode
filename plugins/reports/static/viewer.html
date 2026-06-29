@@ -480,6 +480,19 @@ function _(key) { var m = { 'zh-CN': { tocTitle: '子组件目录', noDoc: '未�
 function _cid_level(cid) { var parts = (cid || '').split('-'); for (var i = 0; i < parts.length; i++) { if (/^L\d+$/.test(parts[i])) return parts[i]; } return 'L0'; }
 function _groupKey(cid, baseLv) { var p=(cid||'').split('-'); var li=-1,lv=0; for(var i=0;i<p.length;i++){if(/^L\d+$/.test(p[i])){li=i;lv=parseInt(p[i].substring(1));break;}} if(li<0)return cid; var drop=lv-baseLv; if(drop<=0)return cid; p[li]='L'+baseLv; return p.slice(0,p.length-drop).join('-'); }
 function _hueSatLight(rel, hue) { var t=[[65,50],[55,60],[45,72],[40,82],[35,88]]; var v=t[Math.min(rel,4)]; return 'hsl('+hue+', '+v[0]+'%, '+v[1]+'%)'; }
+function _stableHash(s) { var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return Math.abs(h); }
+function _rootCommId(cid) { var p=(cid||'').split('-');for(var i=0;i<p.length;i++){if(/^L\d+$/.test(p[i])){if(p[i]==='L0')return cid;var r=p.slice(0,i);r.push('L0',p[i+1]);return r.join('-');}}return cid; }
+function _nodeColor(cid, baseLv) {
+  var hue, lv='L0';
+  if(cid){var p=cid.split('-');for(var i=0;i<p.length;i++){if(/^L\d+$/.test(p[i])){lv=p[i];break;}}}
+  var rid=_rootCommId(cid||'');
+  var CUSTOM_COLOR_KEY='graph_custom_root_colors';
+  var cc={};try{cc=JSON.parse(localStorage.getItem(CUSTOM_COLOR_KEY)||'{}');}catch(e){}
+  if(cc[rid]!==undefined)hue=cc[rid];else{hue=_stableHash(rid)%360;}
+  var absLv=parseInt(lv.substring(1));
+  var rel=baseLv!==undefined?Math.max(0,absLv-baseLv):absLv;
+  return _hueSatLight(rel, hue);
+}
 
 // ============================================================
 // 4. Layout
@@ -1557,12 +1570,11 @@ const GraphView = {
       var isComponent = S.gran === 'component';
       var cssText = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#333';
 
-      // Build commId→color map (for file mode)
+      // Build commId→color map (for file mode) — 哈希分配 + 层级深浅渐变
       this._commColors = {};
       var commIds = data.commIds || [];
-      var palette = ['#3b82f6','#8b5cf6','#ef4444','#10b981','#f59e0b','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'];
       for (var ci = 0; ci < commIds.length; ci++) {
-        this._commColors[commIds[ci].commId] = palette[ci % palette.length];
+        this._commColors[commIds[ci].commId] = _nodeColor(commIds[ci].commId);
       }
 
       // Component mode: backend already returns community-level nodes+edges
@@ -1616,7 +1628,7 @@ const GraphView = {
       var titleEl = document.getElementById('graphToolbarTitle');
       if (titleEl) titleEl.textContent = '\u56fe\u64cd\u4f5c\uff08' + g_cy.nodes().length + ' \u8282\u70b9 / ' + g_cy.edges().length + ' \u8fb9\uff09';
       console.log('[G-load-color] isComp=' + isComponent + ' isExt=' + isExternal + ' depth=' + (S.depth||1) + ' baseLv=' + (function(){var b=0;if(S.cid){var cp=S.cid.split('-');for(var j=0;j<cp.length;j++){if(/^L\d+$/.test(cp[j])){b=parseInt(cp[j].substring(1))+1;break;}}}return b;})());
-      // 组件模式 depth≥2：按顶层分组尺寸排序 → 最大色相差分配（跳过外部节点，由 _applyExternalHeat 负责）
+      // 组件模式 depth≥2：按根社区 ID 哈希分配主色 + 层级深浅渐变
       if (isComponent && (S.depth || 1) >= 2) {
         var baseLv = 0;
         if (S.cid) {
@@ -1624,36 +1636,21 @@ const GraphView = {
           for (var j = 0; j < cp.length; j++) { if (/^L\d+$/.test(cp[j])) { baseLv = parseInt(cp[j].substring(1)) + 1; break; } }
         }
         console.log('[G-load-color] enter depth≥2 baseLv=' + baseLv + ' totalNodes=' + g_cy.nodes().length);
-        // 统计每组节点数（跳过外部节点）
-        var gc = {};
-        g_cy.nodes().forEach(function(n) { if (n.data('isExternal')) return; var k = _groupKey(n.id(), baseLv); gc[k] = (gc[k] || 0) + 1; });
-        // 按节点数降序排列
-        var sorted = Object.keys(gc).sort(function(a, b) { return gc[b] - gc[a]; });
-        console.log('[G-load-color] groups=' + sorted.length + ' first=' + (sorted[0]||'').slice(0,30) + ' last=' + (sorted[sorted.length-1]||'').slice(0,30));
-        // 贪心分配：最大组先取 hue0，后续选与已分配组最小色相差最大的
-        var hues20 = [210,260,0,160,40,330,190,85,20,230,290,110,350,50,140,310,70,170,240,280];
-        var gh = {};
-        sorted.forEach(function(key, gi) {
-          if (gi === 0) { gh[key] = 0; return; }
-          var bestIdx = 0, bestD = -1;
-          for (var hi = 0; hi < 20; hi++) {
-            var minD = Infinity;
-            for (var ak in gh) { var d = Math.abs(hues20[hi] - hues20[gh[ak]]); minD = Math.min(minD, Math.min(d, 360 - d)); }
-            if (minD > bestD) { bestD = minD; bestIdx = hi; }
-          }
-          gh[key] = bestIdx;
-        });
         // 着色（跳过外部节点）
         g_cy.nodes().forEach(function(n) {
           if (n.data('isExternal')) return;
           try {
             var nid = n.id();
-            var key = _groupKey(nid, baseLv);
-            if (!(key in gh)) { console.warn('[G-load-color] SKIP no hue for key=' + key + ' nid=' + nid); return; }
-            var nLv = parseInt((_cid_level(nid) || 'L0').substring(1));
-            var rel = Math.max(0, nLv - baseLv);
-            n.style('background-color', _hueSatLight(rel, hues20[gh[key] % 20]));
+            n.style('background-color', _nodeColor(nid, baseLv));
           } catch(e) { console.error('[G-load-color] error nid=' + n.id() + ' msg=' + e.message); }
+        });
+      }
+      // 组件模式 depth≤1：给未被上色的节点分配哈希主色
+      if (isComponent && !isExternal && (S.depth || 1) <= 1) {
+        g_cy.nodes().forEach(function(n) {
+          if (n.data('isExternal')) return;
+          try { n.style('background-color', _nodeColor(n.id())); }
+          catch(e) { console.error('[G-load-color] error nid=' + n.id() + ' msg=' + e.message); }
         });
       }
       // 外部节点：按被引用热度三档着色

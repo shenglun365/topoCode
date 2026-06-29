@@ -1077,7 +1077,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (aid, pid, tid, rid, sid, json.dumps(metadata or {}), now, now),
         )
-        main_db.conn.commit()
+        main_db.commit()
         return {'id': aid, 'sessionId': sid}
 
     @server.register('analysisSession.delete')
@@ -1095,7 +1095,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
             main_db.execute("DELETE FROM analysis_sessions WHERE session_id = ?", (sid,))
         else:
             raise ValueError("Either 'id' or 'sessionId' is required")
-        main_db.conn.commit()
+        main_db.commit()
         return {'success': True}
 
     # ==================== Prompt 模板管理 (统一实例) ====================

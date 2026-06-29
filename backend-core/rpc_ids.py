@@ -37,10 +37,6 @@ RPC_IDS: dict[str, str] = {
     "analysis.getCommunityNodeLists": "API-024c",
     "analysis.getCommunityFileGraph": "API-024g",
     "analysis.startOverview":      "API-024h",
-    "analysis.startArchTrack":     "API-024e",
-    "analysis.stopArchTrack":      "API-024f",
-    "analysis.listTimeline":  "API-024g",
-    "analysis.getTimelineEntry":    "API-024h",
     "analysis.getReportDashboard":  "API-024i",
     "analysis.getAgentProgress":   "API-024j",
     "analysis.cancelAgentTask":    "API-024k",
@@ -125,7 +121,6 @@ RPC_IDS: dict[str, str] = {
     "module.search":                "API-131",
 
     # ── mcp ────────────────────────────────────────────────────
-    "mcp.dispatch":                 "API-133",
 
     # ── promptTemplate ────────────────────────────────────────
     "promptTemplate.list":          "API-063",
@@ -201,22 +196,11 @@ RPC_IDS: dict[str, str] = {
     "project.saveGitInfo":          "API-135",
     "project.getGitInfo":           "API-136",
     "project.checkImportStatus":    "API-137",
-    "project.cleanupTaskSnapshots": "API-138",
-
-    # ── graph (snapshot & positions) ───────────────────────────
-    "graph.saveSnapshot":           "API-139",
-    "graph.getSnapshot":            "API-140",
-    "graph.deleteSnapshot":         "API-141",
-    "graph.exportSnapshots":        "API-142",
-    "graph.compareSnapshots":       "API-143",
+    # ── graph (positions) ──────────────────────────────────────
     "graph.savePositions":          "API-144",
     "graph.loadPositions":          "API-145",
     "graph.clearPositions":         "API-146",
     "graph.listSavedPositionKeys":  "API-147",
-    "graph.listArchivedSnapshots":  "API-148",
-    "graph.compareWithArchived":    "API-149",
-    "graph.promoteTimelineEntry":   "API-150",
-    "graph.timelineGC":             "API-151",
     "analysis.startPreSummary":    "API-152",
     "analysis.startPreSummaryPipeline": "API-153",
     "analysis.analyzeComponents":  "API-154",

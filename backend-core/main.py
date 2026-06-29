@@ -24,7 +24,6 @@ from core_service import (
 )
 from llm_service import register_llm_methods
 from plugin_manager import PluginManager
-from mcp_server.backend_bridge import register_mcp_methods
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -84,7 +83,6 @@ class BackendApp:
         register_llm_methods(self.server, self.multi_db)
         register_report_methods(self.server, self.multi_db)
         register_module_methods(self.server)
-        register_mcp_methods(self.server)
         logger.info(f"Registered {len(self.server.methods)} core methods")
 
         # 发现并加载插件

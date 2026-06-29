@@ -1102,8 +1102,6 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
             # AI 摘要完成后（不论成败），标记任务完成
             task_store.update_task_status(task_id, "done", progress=100, error="")
             task_store.finish_run(run_id, "done")
-            _save_analysis_snapshot(multi_db, task_id, task_store, result)
-
             if server:
                 server.publish("task", "complete", {
                     "taskId": task_id, "runId": run_id,
@@ -1141,88 +1139,4 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
         raise
 
 
-def _save_analysis_snapshot(multi_db, task_id: str, task_store, result: dict):
-    """Save a ProjectSnapshot after successful analysis completion."""
-    import os
-    import hashlib
-    from datetime import datetime
 
-    try:
-        task = task_store.get_task(task_id)
-        if not task:
-            logger.warning(f"[SNAPSHOT] Task {task_id} not found, skipping snapshot")
-            return
-
-        project_id = task.get("project_id", "")
-        project_db = multi_db.get_project_db(project_id)
-        if not project_db:
-            logger.warning(f"[SNAPSHOT] Project DB not found for {project_id}")
-            return
-
-        proj_path = task.get("proj_path", "")
-        if not proj_path:
-            row = multi_db.main_db.fetchone(
-                "SELECT root_path FROM projects WHERE id = ?", (project_id,)
-            )
-            proj_path = row["root_path"] if row else ""
-
-        from change_tracker.git_adapter import GitAdapter
-        git = GitAdapter(proj_path)
-        commit_hash = git.get_current_commit() or "unknown"
-
-        from change_tracker.change_model import ProjectSnapshot
-        from change_tracker.snapshot_store import SnapshotStore
-
-        snapshot_dir = os.path.join(multi_db.data_dir, "snapshots")
-        store = SnapshotStore(os.path.join(snapshot_dir, "snapshots.db"))
-
-        # Collect file hashes from source files
-        file_hashes = {}
-        files_processed = result.get("files_processed", 0)
-        if files_processed > 0 and proj_path:
-            from store.analysis_store import AnalysisStore
-            analysis_store = AnalysisStore(project_db)
-            source_files = analysis_store.list_source_files()
-            for sf in source_files:
-                fp = sf.get("file_path", "")
-                abs_path = os.path.join(proj_path, fp) if proj_path else fp
-                if os.path.isfile(abs_path):
-                    h = hashlib.md5()
-                    try:
-                        with open(abs_path, "rb") as fh:
-                            for chunk in iter(lambda: fh.read(65536), b""):
-                                h.update(chunk)
-                        file_hashes[fp] = h.hexdigest()
-                    except OSError:
-                        continue
-
-        # Collect symbols from the analysis
-        symbols_dict = {}
-        try:
-            rows = project_db.execute(
-                "SELECT kind, name, start_line, file_path FROM graph_node WHERE task_id = ?", (task_id,)
-            ).fetchall()
-            for row in rows:
-                fp = row["file_path"]
-                if fp not in symbols_dict:
-                    symbols_dict[fp] = []
-                symbols_dict[fp].append({
-                    "name": row["name"] or "",
-                    "kind": row["kind"] or "",
-                    "line": row["start_line"] or 0,
-                })
-        except Exception:
-            logger.warning("[SNAPSHOT] Failed to collect symbols", exc_info=True)
-
-        snapshot = ProjectSnapshot(
-            commit_hash=commit_hash,
-            timestamp=datetime.now(),
-            file_hashes=file_hashes,
-            symbols=symbols_dict,
-            is_analyzed=True,
-        )
-
-        store.save_snapshot(proj_path or project_id, snapshot)
-        logger.info(f"[SNAPSHOT] Saved snapshot for {commit_hash} ({files_processed} files)")
-    except Exception as e:
-        logger.warning(f"[SNAPSHOT] Failed to save snapshot: {e}")

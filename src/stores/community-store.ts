@@ -5,7 +5,7 @@ import { isLLMConfigured } from '@/services/llmClient'
 import { controlDispatcher } from '@/services/control-dispatcher'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
-import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult, TimelineEntry } from '@/types/ipc'
+import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@/types/ipc'
 import type { ComponentRef } from '@/stores/component-selection-store'
 
 export interface CommunityItem {
@@ -65,12 +65,6 @@ interface CommunityTaskRuntime {
     steps: Array<{ description: string; status: 'pending'|'running'|'done'|'failed' }>
     progress: number; message: string; createdAt: string
   }>
-  /** 架构时间线 */
-  timeline: TimelineEntry[]
-  /** 对比模式激活状态 */
-  compareActive: boolean
-  compareFrom: string
-  compareTo: string
 }
 
 
@@ -107,10 +101,6 @@ export const useCommunityStore = defineStore('community', () => {
         fileDetails: {},
         fileGraphs: {},
         agentTasks: [],
-        timeline: [],
-        compareActive: false,
-        compareFrom: '',
-        compareTo: '',
       }
     }
     return tasks.value[taskId]
@@ -762,20 +752,6 @@ export const useCommunityStore = defineStore('community', () => {
       updateAgentTask(taskId, idx, { status: 'failed', message: e?.message || '未知错误' })
       throw e
     }
-  }
-
-  /* ---- Snapshot management ---- */
-
-  function setTimeline(taskId: string, entries: TimelineEntry[]) {
-    const t = ensureTask(taskId)
-    t.timeline = entries
-  }
-
-  function setCompareMode(taskId: string, active: boolean, from?: string, to?: string) {
-    const t = ensureTask(taskId)
-    t.compareActive = active
-    t.compareFrom = from || ''
-    t.compareTo = to || ''
   }
 
   async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false, maxTurns = 30, summaryModelId = '', subagentConcurrency = 1, analysisMode = 'quick', force = false) {

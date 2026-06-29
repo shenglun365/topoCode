@@ -313,34 +313,62 @@ class AnalysisStore:
 
     # ==================== graph_node (v2 重设计) ====================
 
+    def _bulk_insert(self, sql: str, rows: List[tuple],
+                     batch_size: int = BATCH_INSERT_SIZE) -> bool:
+        """
+        事务保护的批量插入。
+        - 优先通过 WriteQueue 批次提交（原子性）
+        - 无 WriteQueue 时直接裸连接 + BEGIN IMMEDIATE（防止 kill 半截数据）
+        """
+        if not rows:
+            return True
+        wq = getattr(self._db, '_wq', None)
+        label = getattr(self._db, '_label', '')
+        if wq and label:
+            items = [(sql, row, False) for row in rows]
+            wq.execute_batch(label, items)
+            return True
+        # Fallback: direct connection with explicit transaction
+        conn = self._db.conn
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i:i + batch_size]
+                conn.executemany(sql, batch)
+            conn.commit()
+            return True
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+
     def bulk_insert_graph_nodes(self, nodes: List[Dict]):
         """批量插入图节点（v2 schema）"""
         if not nodes:
             return
         with self._db._lock:
-            db = self._db.conn
-            for i in range(0, len(nodes), BATCH_INSERT_SIZE):
-                batch = nodes[i:i + BATCH_INSERT_SIZE]
-                db.executemany("""
-                    INSERT OR REPLACE INTO graph_node (
-                        id, task_id, kind, name, qualified_name, file_path, file_id, language,
-                        start_line, start_col, end_line, end_col,
-                        signature, visibility, is_exported, is_async, is_static,
-                        docstring, decorators, type_parameters
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    (
-                        n["id"], n["task_id"], n["kind"], n["name"],
-                        n.get("qualified_name", ""), n.get("file_path", ""),
-                        n.get("file_id", ""), n.get("language", ""),
-                        n["start_line"], n["start_col"], n["end_line"], n["end_col"],
-                        n.get("signature", ""), n.get("visibility", ""),
-                        n.get("is_exported", 0), n.get("is_async", 0), n.get("is_static", 0),
-                        n.get("docstring", ""), n.get("decorators", ""), n.get("type_parameters", ""),
-                    )
-                    for n in batch
-                ])
-            self._db.commit()
+            rows = [
+                (
+                    n["id"], n["task_id"], n["kind"], n["name"],
+                    n.get("qualified_name", ""), n.get("file_path", ""),
+                    n.get("file_id", ""), n.get("language", ""),
+                    n["start_line"], n["start_col"], n["end_line"], n["end_col"],
+                    n.get("signature", ""), n.get("visibility", ""),
+                    n.get("is_exported", 0), n.get("is_async", 0), n.get("is_static", 0),
+                    n.get("docstring", ""), n.get("decorators", ""), n.get("type_parameters", ""),
+                )
+                for n in nodes
+            ]
+            self._bulk_insert("""
+                INSERT OR REPLACE INTO graph_node (
+                    id, task_id, kind, name, qualified_name, file_path, file_id, language,
+                    start_line, start_col, end_line, end_col,
+                    signature, visibility, is_exported, is_async, is_static,
+                    docstring, decorators, type_parameters
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
 
     def get_graph_nodes(self, task_id: str, kind: str = None) -> List[Dict]:
         if kind:
@@ -375,24 +403,21 @@ class AnalysisStore:
         if not edges:
             return
         with self._db._lock:
-            db = self._db.conn
-            for i in range(0, len(edges), BATCH_INSERT_SIZE):
-                batch = edges[i:i + BATCH_INSERT_SIZE]
-                db.executemany("""
-                    INSERT OR REPLACE INTO graph_edge (
-                        id, task_id, source_id, target_id, kind, provenance,
-                        line, col, file_path, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    (
-                        e["id"], e["task_id"], e["source_id"], e["target_id"],
-                        e["kind"], e.get("provenance", "parser"),
-                        e.get("line", 0), e.get("col", 0),
-                        e.get("file_path", ""), e.get("metadata", ""),
-                    )
-                    for e in batch
-                ])
-            self._db.commit()
+            rows = [
+                (
+                    e["id"], e["task_id"], e["source_id"], e["target_id"],
+                    e["kind"], e.get("provenance", "parser"),
+                    e.get("line", 0), e.get("col", 0),
+                    e.get("file_path", ""), e.get("metadata", ""),
+                )
+                for e in edges
+            ]
+            self._bulk_insert("""
+                INSERT OR REPLACE INTO graph_edge (
+                    id, task_id, source_id, target_id, kind, provenance,
+                    line, col, file_path, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows)
 
     def get_graph_edges(self, task_id: str, kind: str = None) -> List[Dict]:
         if kind:
@@ -438,32 +463,31 @@ class AnalysisStore:
 
     def bulk_insert_communities(self, communities: List[Dict]):
         """批量插入社区分析结果"""
-        db = self._db.conn
-        for i in range(0, len(communities), BATCH_INSERT_SIZE):
-            batch = communities[i:i + BATCH_INSERT_SIZE]
-            db.executemany("""
-                INSERT INTO graph_doc (
-                    task_id, edge_type, comm_lv, parent_comm_id,
-                    comm_id, node_list, node_count, file_count,
-                    edge_list, edge_count, quality_score, description,
-                    metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                (
-                    c["task_id"], c["edge_type"], c["comm_lv"],
-                    c.get("parent_comm_id"), c["comm_id"],
-                    json.dumps(c["node_list"]) if isinstance(c["node_list"], list) else c["node_list"],
-                    c["node_count"],
-                    c.get("file_count", 0),
-                    json.dumps(c["edge_list"]) if isinstance(c.get("edge_list"), list) else c.get("edge_list"),
-                    c.get("edge_count", 0),
-                    c.get("quality_score"),
-                    c.get("description"),
-                    c.get("metadata", "{}"),
-                )
-                for c in batch
-            ])
-        self._db.commit()
+        if not communities:
+            return
+        rows = [
+            (
+                c["task_id"], c["edge_type"], c["comm_lv"],
+                c.get("parent_comm_id"), c["comm_id"],
+                json.dumps(c["node_list"]) if isinstance(c["node_list"], list) else c["node_list"],
+                c["node_count"],
+                c.get("file_count", 0),
+                json.dumps(c["edge_list"]) if isinstance(c.get("edge_list"), list) else c.get("edge_list"),
+                c.get("edge_count", 0),
+                c.get("quality_score"),
+                c.get("description"),
+                c.get("metadata", "{}"),
+            )
+            for c in communities
+        ]
+        self._bulk_insert("""
+            INSERT OR REPLACE INTO graph_doc (
+                task_id, edge_type, comm_lv, parent_comm_id,
+                comm_id, node_list, node_count, file_count,
+                edge_list, edge_count, quality_score, description,
+                metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
 
     def get_best_community(self, task_id: str, edge_type: str) -> Optional[Dict]:
         """获取 quality_score 最高的正常社区（排除 HUB/ORPHAN）"""
@@ -517,25 +541,25 @@ class AnalysisStore:
         self._db.commit()
 
     def bulk_insert_hierarchy(self, hierarchies: List[Dict]):
-        db = self._db.conn
-        for i in range(0, len(hierarchies), BATCH_INSERT_SIZE):
-            batch = hierarchies[i:i + BATCH_INSERT_SIZE]
-            db.executemany("""
-                INSERT INTO community_hierarchy (
-                    task_id, edge_type, comm_lv, comm_id,
-                    parent_comm_id, node_count, file_count, edge_count, quality_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                (
-                    h["task_id"], h["edge_type"], h["comm_lv"],
-                    h["comm_id"], h.get("parent_comm_id"),
-                    h.get("node_count"), h.get("file_count", 0),
-                    h.get("edge_count", 0),
-                    h.get("quality_score"),
-                )
-                for h in batch
-            ])
-        self._db.commit()
+        """批量插入社区层级元数据"""
+        if not hierarchies:
+            return
+        rows = [
+            (
+                h["task_id"], h["edge_type"], h["comm_lv"],
+                h["comm_id"], h.get("parent_comm_id"),
+                h.get("node_count"), h.get("file_count", 0),
+                h.get("edge_count", 0),
+                h.get("quality_score"),
+            )
+            for h in hierarchies
+        ]
+        self._bulk_insert("""
+            INSERT OR REPLACE INTO community_hierarchy (
+                task_id, edge_type, comm_lv, comm_id,
+                parent_comm_id, node_count, file_count, edge_count, quality_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
 
     def delete_communities(self, task_id: str, edge_type: str, comm_ids: List[str]):
         """批量删除指定社区（从 graph_doc + community_hierarchy）"""
@@ -623,7 +647,6 @@ class AnalysisStore:
         )
 
     def bulk_insert_llm_results(self, results: List[Dict]):
-        db = self._db.conn
         logger.info("[AnalysisStore] bulk_insert_llm_results ENTRY count=%d first=%s",
                      len(results), results[0].get('comm_id') if results else 'none')
         insert_rows = []
@@ -635,13 +658,12 @@ class AnalysisStore:
                 r.get("component_type", "community"),
                 r.get("status", "completed"),
             ))
-        db.executemany("""
+        self._db.executemany("""
             INSERT OR REPLACE INTO community_llm_results
                 (task_id, edge_type, comm_lv, comm_id, name, summary, model_id, template_id,
                  component_type, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, insert_rows)
-        self._db.commit()
         logger.info("[AnalysisStore] bulk_insert_llm_results DONE count=%d", len(results))
 
     def list_llm_results(self, task_id: str, edge_type: str) -> List[Dict]:

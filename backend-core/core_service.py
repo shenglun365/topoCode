@@ -27,20 +27,10 @@ from task_manager import (
     save_git_info as _tm_save_git_info,
     get_git_info as _tm_get_git_info,
     check_import_status as _tm_check_import_status,
-    cleanup_task_snapshots as _tm_cleanup_task_snapshots,
-    save_snapshot as _tm_save_snapshot,
-    get_snapshot as _tm_get_snapshot,
-    delete_snapshot as _tm_delete_snapshot,
-    export_snapshots as _tm_export_snapshots,
-    compare_snapshots as _tm_compare_snapshots,
     save_positions as _tm_save_positions,
     load_positions as _tm_load_positions,
     clear_positions as _tm_clear_positions,
     list_position_keys as _tm_list_position_keys,
-    list_archived_snapshots as _tm_list_archived_snapshots,
-    compare_with_archived as _tm_compare_with_archived,
-    promote_timeline_entry as _tm_promote_timeline_entry,
-    timeline_gc as _tm_timeline_gc,
 )
 
 
@@ -674,7 +664,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
                 "INSERT INTO project_config (id, key, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                 (f"cfg-{uuid.uuid4().hex[:8]}", key, value_json, now, now),
             )
-            project_db.conn.commit()
+            project_db.commit()
 
         return True
 
@@ -891,71 +881,6 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not pid: raise ValueError("project_id is required")
         return _tm_check_import_status(multi_db, pid)
 
-    @server.register("project.cleanupTaskSnapshots")
-    def cleanup_task_snapshots(task_id: str = None, taskId: str = None):
-        tid = task_id or taskId
-        if not tid: raise ValueError("task_id is required")
-        return _tm_cleanup_task_snapshots(multi_db, tid)
-
-    # ==================== 架构时间线 ====================
-
-    @server.register("graph.saveSnapshot")
-    def save_snapshot(task_id: str = None, taskId: str = None, alias: str = None,
-                      project_id: str = None, projectId: str = None):
-        tid = task_id or taskId
-        pid = project_id or projectId
-        if not tid: raise ValueError("task_id is required")
-        if not pid: raise ValueError("project_id is required")
-        return _tm_save_snapshot(multi_db, tid, pid, alias)
-
-    @server.register("graph.getSnapshot")
-    def get_snapshot(task_id: str = None, taskId: str = None,
-                      snapshot_id: str = None, snapshotId: str = None):
-        tid = task_id or taskId
-        sid = snapshot_id or snapshotId
-        if not tid: raise ValueError("task_id is required")
-        return _tm_get_snapshot(multi_db, tid, sid)
-
-    @server.register("graph.deleteSnapshot")
-    def delete_snapshot(task_id: str = None, taskId: str = None,
-                         snapshot_id: str = None, snapshotId: str = None):
-        tid = task_id or taskId
-        sid = snapshot_id or snapshotId
-        if not tid: raise ValueError("task_id is required")
-        return _tm_delete_snapshot(multi_db, tid, sid)
-
-    @server.register("graph.exportSnapshots")
-    def export_snapshots(task_id: str = None, taskId: str = None):
-        tid = task_id or taskId
-        if not tid: raise ValueError("task_id is required")
-        return _tm_export_snapshots(multi_db, tid)
-
-    @server.register("graph.compareSnapshots")
-    def compare_snapshots(snapshot_id_a: str = None, snapshotIdA: str = None,
-                          snapshot_id_b: str = None, snapshotIdB: str = None,
-                          task_id_a: str = None, taskIdA: str = None,
-                          task_id_b: str = None, taskIdB: str = None):
-        sid_a = snapshot_id_a or snapshotIdA
-        sid_b = snapshot_id_b or snapshotIdB
-        tid_a = task_id_a or taskIdA
-        tid_b = task_id_b or taskIdB
-        return _tm_compare_snapshots(multi_db, sid_a, sid_b, tid_a, tid_b)
-
-    @server.register("graph.promoteTimelineEntry")
-    def promote_timeline_entry(task_id: str = None, taskId: str = None,
-                                timeline_id: str = None, timelineId: str = None):
-        tid = task_id or taskId
-        tlid = timeline_id or timelineId
-        if not tid: raise ValueError("task_id is required")
-        if not tlid: raise ValueError("timeline_id is required")
-        return _tm_promote_timeline_entry(multi_db, tid, tlid)
-
-    @server.register("graph.timelineGC")
-    def timeline_gc(project_id: str = None, projectId: str = None):
-        pid = project_id or projectId
-        if not pid: raise ValueError("project_id is required")
-        return _tm_timeline_gc(multi_db, pid)
-
     # ==================== 图节点位置 ====================
 
     @server.register("graph.savePositions")
@@ -1008,24 +933,6 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not pid: raise ValueError("project_id is required")
         return _tm_list_position_keys(multi_db, pid)
 
-    @server.register("graph.listArchivedSnapshots")
-    def list_archived_snapshots(project_id: str = None, projectId: str = None):
-        pid = project_id or projectId
-        if not pid: raise ValueError("project_id is required")
-        return _tm_list_archived_snapshots(multi_db, pid)
-
-    @server.register("graph.compareWithArchived")
-    def compare_with_archived(task_id: str = None, taskId: str = None,
-                              project_id: str = None, projectId: str = None,
-                              archived_id: str = None, archivedId: str = None):
-        tid = task_id or taskId
-        pid = project_id or projectId
-        aid = archived_id or archivedId
-        if not tid: raise ValueError("task_id is required")
-        if not pid: raise ValueError("project_id is required")
-        if not aid: raise ValueError("archived_id is required")
-        return _tm_compare_with_archived(multi_db, tid, pid, aid)
-
     # ==================== 分组管理方法 ====================
 
     @server.register("group.list")
@@ -1062,7 +969,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "INSERT INTO project_groups (id, name, parent_id, depth, sort_order) VALUES (?, ?, ?, ?, ?)",
             (gid, name, parent_id, depth, 0)
         )
-        main_db.conn.commit()
+        main_db.commit()
         return {"id": gid, "name": name, "parent_id": parent_id, "depth": depth}
 
     @server.register("group.update")
@@ -1095,7 +1002,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if updates:
             params.append(id)
             main_db.execute(f"UPDATE project_groups SET {', '.join(updates)} WHERE id = ?", params)
-            main_db.conn.commit()
+            main_db.commit()
 
         return {"success": True}
 
@@ -1103,7 +1010,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     def delete_group(id: str):
         """删除分组（级联删除子分组和关联）"""
         main_db.execute("DELETE FROM project_groups WHERE id = ?", (id,))
-        main_db.conn.commit()
+        main_db.commit()
         return {"success": True}
 
     @server.register("group.addProject")
@@ -1121,7 +1028,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "INSERT OR IGNORE INTO project_group_map (project_id, group_id) VALUES (?, ?)",
             (project_id, group_id)
         )
-        main_db.conn.commit()
+        main_db.commit()
         return {"success": True}
 
     @server.register("group.removeProject")
@@ -1131,7 +1038,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "DELETE FROM project_group_map WHERE project_id = ? AND group_id = ?",
             (project_id, group_id)
         )
-        main_db.conn.commit()
+        main_db.commit()
         return {"success": True}
 
     @server.register("group.getProjectGroups")
@@ -2112,12 +2019,11 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
         lang_summary = ", ".join(f"{ext}={cnt}" for ext, cnt in sorted_langs)
         logger.info(f"[import] 语言分布 Top10: {lang_summary}")
 
-    # 事务批量写入
+    # 批量写入（executemany 已通过 WriteQueue execute_batch 自管理事务）
     if batch_records:
         write_t0 = time.time()
         num_batches = (len(batch_records) + BATCH_SIZE - 1) // BATCH_SIZE
         logger.info(f"[import] 开始批量写入: {len(batch_records)} 条记录, {num_batches} 批次 (每批 {BATCH_SIZE} 条)")
-        project_db.execute("BEGIN TRANSACTION")
         try:
             for i in range(0, len(batch_records), BATCH_SIZE):
                 chunk = batch_records[i:i + BATCH_SIZE]
@@ -2142,12 +2048,8 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                         "batch": batch_num,
                         "totalBatches": num_batches,
                     })
-            project_db.execute("COMMIT")
-            write_elapsed = time.time() - write_t0
-            logger.info(f"[import] 批量写入完成, 总耗时 {write_elapsed:.2f}s")
         except Exception as e:
             logger.error(f"[import] 批量写入失败: {e}")
-            project_db.execute("ROLLBACK")
             raise
 
     # 确定主要语言（仅统计系统可解析的语言类型，避免将 HTML/JSON/Markdown 等误识别为主语言）

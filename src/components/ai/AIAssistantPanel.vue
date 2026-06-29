@@ -10,7 +10,6 @@ import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PaperAirplaneIcon, SparklesIcon, TrashIcon,
-  DocumentTextIcon, ClockIcon,
   CursorArrowRippleIcon,
 } from '@heroicons/vue/24/outline'
 import MarkdownIt from 'markdown-it'
@@ -21,10 +20,8 @@ import { useAnalysisStore } from '@/stores/analysis'
 import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
 import { useNavigationStore } from '@/stores/navigation'
 import { isLLMConfigured, chat } from '@/services/llmClient'
-import { useGraphCommandStore } from '@/stores/graph-command-store'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { useChatSession, type SessionPage } from '@/stores/chat-session-store'
-import { parseCommandTag, parseConfirmTag, parseSuggestTags, stripCommandTags } from '@/types/graph-commands'
 import { useComponentId } from '@/composables/useComponentId'
 import { ipc } from '@/services/ipc'
 
@@ -34,7 +31,6 @@ const settingsStore = useSettingsStore()
 const projectStore = useProjectStore()
 const communityStore = useCommunityStore()
 const navigationStore = useNavigationStore()
-const cmdStore = useGraphCommandStore()
 const selectionStore = useComponentSelectionStore()
 const chatSession = useChatSession()
 
@@ -105,7 +101,6 @@ interface Message {
   content: string
   timestamp: number
   isStreaming?: boolean
-  suggestions?: Array<{ label: string; command: string; args?: Record<string, string> }>
 }
 
 const messages = ref<Message[]>([])
@@ -190,14 +185,6 @@ function showMoreMessages() {
 const streaming = ref(false)
 const scrollRef = ref<HTMLElement | null>(null)
 
-const showCmdConfirm = ref(false)
-const cmdConfirmData = ref<{
-  text: string
-  action: string
-  args: Record<string, string>
-  confirmMeta?: { communities?: number; time?: string; tokens?: string; cost?: string }
-}>({ text: '', action: '', args: {} })
-
 const llmConfigured = computed(() => isLLMConfigured())
 
 // Session management — auto-bound to current page + project + task
@@ -258,44 +245,6 @@ function addMessage(role: Message['role'], content: string): Message {
   messages.value.push(msg)
   scrollToBottom()
   return msg
-}
-
-function handleCmdConfirm() {
-  showCmdConfirm.value = false
-  const cd = cmdConfirmData.value
-
-  addMessage('user', cd.text)
-  streaming.value = true
-  const assistantMsg = addMessage('assistant', '')
-
-  const sendMessages: Array<{ role: string; content: string }> = []
-  const gs = cmdStore.graphState
-  if (gs.nodeCount > 0) {
-    sendMessages.push({ role: 'system', content: `当前图状态:\n${JSON.stringify(gs, null, 0)}` })
-  }
-  sendMessages.push(...messages.value
-    .filter(m => m.role !== 'system' && m !== assistantMsg)
-    .map(m => ({ role: m.role, content: m.content })))
-
-  chat({
-    messages: sendMessages,
-    onChunk(chunk: string) {
-      assistantMsg.content += chunk
-      scrollToBottom()
-    },
-  }).then(async full => {
-    const display = stripCommandTags(full || assistantMsg.content)
-    assistantMsg.content = display
-    const cmds = parseCommandTag(full || display)
-    for (const cmd of cmds) {
-      await cmdStore.executeCommand({ type: cmd.type, ...cmd.args } as any)
-    }
-    assistantMsg.isStreaming = false
-  }).catch((err: any) => {
-    assistantMsg.content = err.message || 'unknown error'
-    assistantMsg.role = 'error'
-    assistantMsg.isStreaming = false
-  }).finally(() => { streaming.value = false })
 }
 
 function _validateFlags(tokens: string[], validFlags: string[]): string[] {
@@ -496,63 +445,23 @@ async function handleSend() {
 
   // 构建发送消息：system prompts + 对话历史（不含 system）
   const sendMessages: Array<{ role: string; content: string }> = []
-  const gs = cmdStore.graphState
-  if (gs.nodeCount > 0) {
-    sendMessages.push({ role: 'system', content: `当前图状态:\n${JSON.stringify(gs, null, 0)}` })
-  }
+  sendMessages.push({ role: 'system', content: DEFAULT_SYSTEM_PROMPT })
   const selCtx = selectionStore.getContextForAI()
   if (selCtx) {
     sendMessages.push({ role: 'system', content: selCtx })
-  }
-  if (gs.nodeCount > 0) {
-    sendMessages.push({ role: 'system', content: DEFAULT_SYSTEM_PROMPT })
   }
   // 对话历史（不含已有 system 消息）
   const history = messages.value.filter(m => m.role !== 'system' && m !== assistantMsg).map(m => ({ role: m.role, content: m.content }))
   sendMessages.push(...history)
 
   try {
-    let rawContent = ''
-    const fullContent = await chat({
+    await chat({
       messages: sendMessages,
       onChunk(chunk: string) {
         assistantMsg.content += chunk
-        rawContent += chunk
         scrollToBottom()
       },
     })
-
-    // 流式完成后：
-    // 1. 移除标签 → 纯净展示文本
-    const displayContent = stripCommandTags(fullContent || assistantMsg.content)
-    assistantMsg.content = displayContent
-
-    // 2. 解析 [CMD:] → 串行执行命令
-    const cmds = parseCommandTag(fullContent || rawContent)
-    if (cmds.length > 0) {
-      for (const cmd of cmds) {
-        await cmdStore.executeCommand({ type: cmd.type, ...cmd.args } as any)
-      }
-    }
-
-    // 3. 解析 [SUGGEST:] → 渲染为可点击芯片
-    const suggs = parseSuggestTags(fullContent || rawContent)
-    if (suggs.length > 0) {
-      assistantMsg.suggestions = suggs
-    }
-
-    // 4. 解析 [CONFIRM:] → 渲染确认卡片
-    const conf = parseConfirmTag(fullContent || rawContent)
-    if (conf) {
-      showCmdConfirm.value = true
-      cmdConfirmData.value = {
-        text: conf.cmd,
-        action: conf.communities ? 'analyze' : 'diff',
-        args: { all: 'true', level: 'L0' },
-        confirmMeta: { communities: conf.communities, time: conf.time, tokens: conf.tokens, cost: conf.cost },
-      }
-    }
-
     assistantMsg.isStreaming = false
   } catch (err: any) {
     assistantMsg.content = err.message || '请求失败'
@@ -617,17 +526,6 @@ onMounted(() => {
   }
 })
 
-// 监听 GraphCommandStore 事件 — 响应用户在图上的操作
-watch(() => cmdStore.eventSeq, () => {
-  const ev = cmdStore.popEvent()
-  if (!ev) return
-  if (ev.type === 'drill-event') {
-    const commId = ev.data.communityId as string
-    if (commId) {
-      addMessage('system', `用户双击了社区: ${commId}`)
-    }
-  }
-})
 </script>
 
 <template>
@@ -679,62 +577,6 @@ watch(() => cmdStore.eventSeq, () => {
             class="ai-message-bubble"
             v-html="formatMessageContent(msg)"
           />
-          <!-- Suggestion Chips -->
-          <div
-            v-if="msg.suggestions && msg.suggestions.length > 0 && !msg.isStreaming"
-            class="ai-suggest-chips"
-          >
-            <button
-              v-for="(sug, si) in msg.suggestions"
-              :key="si"
-              class="ai-suggest-chip"
-              @click="userInput = sug.command; handleSend()"
-            >
-              {{ sug.label }}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- /cmd 确认卡片 -->
-      <div
-        v-if="showCmdConfirm"
-        class="ai-cmd-confirm"
-      >
-        <div class="ai-cmd-title">
-          🔧 即将执行指令
-        </div>
-        <code class="ai-cmd-text">{{ cmdConfirmData.text }}</code>
-        <div class="ai-cmd-args">
-          <span
-            v-for="(v, k) in cmdConfirmData.args"
-            :key="k"
-            class="ai-cmd-arg"
-          >--{{ k }} {{ v }}</span>
-        </div>
-        <!-- 成本预估（解析自 [CONFIRM:] 标签） -->
-        <div
-          v-if="cmdConfirmData.confirmMeta"
-          class="ai-cmd-meta"
-        >
-          <span v-if="cmdConfirmData.confirmMeta.communities">📊 {{ cmdConfirmData.confirmMeta.communities }} 个社区</span>
-          <span v-if="cmdConfirmData.confirmMeta.time">⏱ {{ cmdConfirmData.confirmMeta.time }}</span>
-          <span v-if="cmdConfirmData.confirmMeta.tokens">💬 {{ cmdConfirmData.confirmMeta.tokens }}</span>
-          <span v-if="cmdConfirmData.confirmMeta.cost">💰 {{ cmdConfirmData.confirmMeta.cost }}</span>
-        </div>
-        <div class="ai-cmd-actions">
-          <button
-            class="ai-cmd-btn primary"
-            @click="handleCmdConfirm"
-          >
-            确认执行
-          </button>
-          <button
-            class="ai-cmd-btn"
-            @click="showCmdConfirm = false"
-          >
-            取消
-          </button>
         </div>
       </div>
 
@@ -1090,39 +932,6 @@ watch(() => cmdStore.eventSeq, () => {
 }
 
 
-
-.ai-cmd-confirm {
-  margin: 0 12px 8px; padding: 0.5rem 0.75rem;
-  background: var(--bg-accent-subtle, #2d1f5e); border: 1px solid var(--accent, #7c3aed);
-  border-radius: 0.375rem;
-}
-.ai-cmd-title { font-size: 0.75rem; font-weight: 600; color: var(--accent, #7c3aed); margin-bottom: 0.25rem; }
-.ai-cmd-text { display: block; font-size: 0.7rem; color: var(--text-primary); background: var(--bg-primary); padding: 0.2rem 0.4rem; border-radius: 0.2rem; margin-bottom: 0.25rem; font-family: var(--font-mono); }
-.ai-cmd-args { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.35rem; }
-.ai-cmd-arg { font-size: 0.6rem; color: var(--text-muted); background: var(--bg-secondary); padding: 0.05rem 0.3rem; border-radius: 0.15rem; }
-.ai-cmd-actions { display: flex; gap: 0.35rem; }
-.ai-cmd-btn { padding: 0.15rem 0.5rem; font-size: 0.7rem; border: 1px solid var(--border); border-radius: 0.25rem; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; }
-.ai-cmd-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-.ai-cmd-btn.primary { background: var(--accent, #7c3aed); color: #fff; border-color: var(--accent); }
-
-.ai-cmd-meta {
-  display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.35rem;
-}
-.ai-cmd-meta span {
-  font-size: 0.6rem; color: var(--text-muted);
-}
-
-.ai-suggest-chips {
-  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
-}
-.ai-suggest-chip {
-  padding: 2px 8px; font-size: 10px; border: 1px solid var(--accent);
-  border-radius: 10px; background: transparent; color: var(--accent);
-  cursor: pointer; transition: all 0.15s;
-}
-.ai-suggest-chip:hover {
-  background: var(--accent); color: #fff;
-}
 
 /* ---- 助手消息内 Markdown 渲染样式 ---- */
 .ai-message-assistant .ai-message-bubble :deep(h1),

@@ -285,7 +285,7 @@ function handleExternalTagClick(name: string, count: number) {
 </template>
 
 <style scoped>
-.ctv-container { display: flex; flex-direction: column; }
+.ctv-container { display: flex; flex-direction: column; padding-bottom: 0.75rem; }
 .ctv-level-filter { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.5rem; font-size: 0.75rem; flex-wrap: wrap; }
 .level-filter-label { color: var(--text-muted); flex-shrink: 0; }
 .level-filter-btn {

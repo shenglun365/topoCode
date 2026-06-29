@@ -124,11 +124,6 @@ export interface TaskRun {
   startedAt: string
   finishedAt?: string
   durationMs?: number
-  // 配置快照
-  snapshotScope?: string[]
-  snapshotExtensions?: string[]
-  snapshotExcludeDirs?: string[]
-  snapshotReportTypes?: string[]
 }
 
 /** 目录树节点 */
@@ -467,7 +462,6 @@ export interface IPCAPI {
     saveGitInfo: (params: { projectId: string; remoteUrl?: string; currentBranch?: string; currentCommit?: string; latestTag?: string; tags?: string; branches?: string; recentCommits?: string }) => Promise<{ status: string }>
     getGitInfo: (params: { projectId: string }) => Promise<GitInfo>
     checkImportStatus: (params: { projectId: string }) => Promise<{ hasSnapshot: boolean; needsSavePrompt: boolean }>
-    cleanupTaskSnapshots: (params: { taskId: string }) => Promise<{ deleted: number }>
   }
 
   // 分组管理
@@ -511,10 +505,6 @@ export interface IPCAPI {
     getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<Record<string, string[]>>
     startOverview: (params: { taskId: string; force?: boolean }) => Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; skipped?: boolean; error?: string }>
-    listTimeline: (params: { projectId: string }) => Promise<TimelineEntry[]>
-    getTimelineEntry: (params: { timelineId: string }) => Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
-    startArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string }>
-    stopArchTrack: (params: { taskId: string; tag: string }) => Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; file_current?: number; file_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string; file_count?: number }>; error?: string }>
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
     pauseAgentTask: (params: { agentTaskId: string }) => Promise<{ paused: boolean }>
@@ -725,21 +715,12 @@ export interface IPCAPI {
     onPanelToggle: (channel: string, callback: () => void) => () => void
   }
 
-  // 架构时间线 + 图位置
+  // 图位置
   graph: {
-    saveSnapshot: (params: { taskId: string; projectId: string; alias?: string }) => Promise<{ snapshotId: string; status: string }>
-    getSnapshot: (params: { taskId: string; snapshotId?: string }) => Promise<{ snapshot: TimelineEntry | null }>
-    deleteSnapshot: (params: { taskId: string; snapshotId?: string }) => Promise<{ deleted: number }>
-    exportSnapshots: (params: { taskId: string }) => Promise<{ exported: number }>
-    compareSnapshots: (params: { snapshotIdA?: string; snapshotIdB?: string; taskIdA?: string; taskIdB?: string }) => Promise<SnapshotCompareResult>
-    promoteTimelineEntry: (params: { taskId: string; timelineId: string }) => Promise<{ success: boolean }>
-    timelineGC: (params: { projectId: string }) => Promise<{ deleted: number }>
     savePositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; positions: PositionEntry[]; snapshotId?: string }) => Promise<{ saved: number }>
     loadPositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; snapshotId?: string }) => Promise<{ positions: Record<string, NodePosition> }>
     clearPositions: (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string }) => Promise<{ deleted: number }>
     listSavedPositionKeys: (params: { projectId: string }) => Promise<{ keys: SavedPositionKey[] }>
-    listArchivedSnapshots: (params: { projectId: string }) => Promise<{ snapshots: ArchiveMeta[] }>
-    compareWithArchived: (params: { taskId: string; projectId: string; archivedId: string }) => Promise<SnapshotCompareResult>
   }
 
   dialog: { openDirectory: () => Promise<string | null> }
@@ -877,62 +858,6 @@ export interface GitInfo {
   manuallyEdited?: number
 }
 
-export interface TimelineEntryCommunity {
-  communityId: string
-  edgeType: string
-  level: string
-  name: string | null
-  summary: string | null
-  mermaid: string | null
-  plantuml: string | null
-  nodeCount: number
-  fileCount: number
-  qualityScore: number | null
-  nodeList: string[]
-  fileList: string[]
-  edgeList?: any[]
-}
-
-export interface TimelineEntry {
-  id: string
-  taskId: string
-  projectId: string
-  type: 'archtrack' | 'manual'
-  alias: string | null
-  timestamp: string
-  versionTag?: string
-  sourceVersion?: string
-  gitBranch: string | null
-  gitCommit: string | null
-  gitTag: string | null
-  communityCount: number
-  totalFiles: number
-  exported: boolean
-  isActive: boolean
-  communities?: TimelineEntryCommunity[]
-}
-
-export interface SnapshotCompareItem {
-  communityId: string
-  nameA: string | null
-  nameB: string | null
-  fileCountA: number
-  fileCountB: number
-  filesShared: number
-  filesAdded: number
-  filesRemoved: number
-  jaccard: number
-}
-
-export interface SnapshotCompareResult {
-  a: { id: string; alias: string | null; communityCount: number; totalFiles: number }
-  b: { id: string; alias: string | null; communityCount: number; totalFiles: number }
-  communityMatches: SnapshotCompareItem[]
-  communitiesOnlyInA: Array<{ communityId: string; name: string | null }>
-  communitiesOnlyInB: Array<{ communityId: string; name: string | null }>
-  overall: { communityJaccard: number; avgFileJaccard: number; totalFilesA: number; totalFilesB: number; filesShared: number }
-}
-
 export interface PositionEntry {
   nodeId: string
   x: number
@@ -950,19 +875,6 @@ export interface SavedPositionKey {
   drillKey: string
   layoutType: string
   count: number
-}
-
-export interface ArchiveMeta {
-  id: string
-  type: string
-  alias: string | null
-  taskId: string
-  timestamp: string
-  gitBranch: string | null
-  gitCommit: string | null
-  communityCount: number
-  totalFiles: number
-  file: string
 }
 
 export {}

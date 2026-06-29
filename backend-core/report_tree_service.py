@@ -30,7 +30,6 @@ def save_overall_doc(multi_db, task_id: str, title: str, content: str) -> dict:
         (doc_id, task_id, title, content, now, now)
     )
 
-    project_db.commit()
     logger.info(f"[saveOverallDoc] saved doc={doc_id} for task={task_id}")
 
     return {"id": doc_id, "title": title, "content": content, "createdAt": now}

@@ -4,10 +4,13 @@ import sqlite3
 import json
 import os
 import hashlib
+import logging
 import threading
 from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from data_layer.write_queue import is_write_sql
 
@@ -38,38 +41,53 @@ class SQLiteContext:
     def _connect(self):
         """建立数据库连接（线程安全）"""
         with self._lock:
-            if self._conn is None:
+            if self._conn is not None:
+                return
+            import os as _os
+            # Step 1: 尝试 WAL 模式（首选项中键时清理 WAL/SHM 后重试一次）
+            last_err = None
+            for attempt in range(2):
                 try:
                     self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
                     self._conn.row_factory = sqlite3.Row
-                    # WAL 模式提升并发性能
                     self._conn.execute("PRAGMA journal_mode=WAL")
-                    self._conn.execute("PRAGMA foreign_keys=ON")
-                    self._conn.execute("PRAGMA busy_timeout=5000")
-                    self._conn.execute("PRAGMA synchronous=NORMAL")
-                    self._conn.execute("PRAGMA cache_size=10000")
+                    break
                 except sqlite3.OperationalError as e:
-                    if "disk I/O error" in str(e) or "unable to open" in str(e).lower():
-                        # 数据库文件损坏 → 删除 WAL/SHM 残留后重试
-                        import os as _os
-                        for ext in ("-wal", "-shm"):
-                            extra = self.db_path + ext
-                            if _os.path.exists(extra):
-                                try:
-                                    _os.unlink(extra)
-                                    logger.warning(f"[SQLite] removed corrupted {extra}")
-                                except Exception:
-                                    pass
-                        # 重试（仍可能失败，让上层处理）
-                        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                        self._conn.row_factory = sqlite3.Row
-                        self._conn.execute("PRAGMA journal_mode=WAL")
-                        self._conn.execute("PRAGMA foreign_keys=ON")
-                        self._conn.execute("PRAGMA busy_timeout=5000")
-                        self._conn.execute("PRAGMA synchronous=NORMAL")
-                        self._conn.execute("PRAGMA cache_size=10000")
-                    else:
+                    last_err = str(e)
+                    try:
+                        self._conn.close()
+                    except Exception:
+                        pass
+                    self._conn = None
+                    if "disk I/O error" not in str(e) and "unable to open" not in str(e).lower():
                         raise
+                    # 清理 WAL/SHM 残留后重试
+                    for ext in ("-wal", "-shm"):
+                        extra = self.db_path + ext
+                        if _os.path.exists(extra):
+                            try:
+                                _os.unlink(extra)
+                                logger.warning(f"[SQLite] removed corrupted {extra}")
+                            except Exception:
+                                pass
+            # Step 2: WAL 模式失败 → 回退 DELETE 模式
+            if not self._conn:
+                logger.warning(f"[SQLite] WAL failed for {self.db_path}, falling back to DELETE: {last_err}")
+                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+                self._conn.execute("PRAGMA journal_mode=DELETE")
+                logger.info(f"[SQLite] opened {self.db_path} in DELETE mode")
+            # Step 3: 公共 PRAGMA 设置
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA cache_size=10000")
+            # 共享连接给 WriteQueue（避免 dual connection 造成的 WAL 争用）
+            if self._wq and self._label:
+                try:
+                    self._wq.register_conn(self._label, self._conn)
+                except Exception:
+                    pass
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -113,11 +131,18 @@ class SQLiteContext:
         return dict(row) if row else None
 
     def executemany(self, sql: str, params_list):
-        """批量执行 SQL（用于批量插入）"""
+        """批量执行 SQL — 通过 WriteQueue 串行化（有 WQ 时）；否则直连执行。"""
+        if self._wq and self._label:
+            items = [(sql, params, False) for params in params_list]
+            self._wq.execute_batch(self._label, items)
+            return
         self.conn.executemany(sql, params_list)
 
     def commit(self):
-        """提交事务（用于 executemany 等不自动提交的场景）"""
+        """提交事务（有 WriteQueue 时通过 WQ 串行化，避免连接争用）"""
+        if self._wq and self._label:
+            self._wq.execute_sync(self._label, "COMMIT", ())
+            return
         try:
             self.conn.commit()
         except sqlite3.OperationalError as e:
@@ -1277,8 +1302,9 @@ class MultiDBManager:
 
         # 迁移旧 component_analysis 数据到 community_llm_results（兼容旧库）
         # 从社区组件 ID 中解析真实 edge_type（comm-xxx-incl-... → INCLUDE, comm-xxx-call-... → CALL）
+        # 注意：预期内失败（表不存在），用裸连接绕过 WriteQueue 避免 ERROR 日志
         try:
-            project_db.execute("""
+            project_db.conn.execute("""
                 INSERT OR IGNORE INTO community_llm_results
                     (task_id, edge_type, comm_lv, comm_id, name, summary, component_type, status, created_at)
                 SELECT
@@ -1429,6 +1455,33 @@ class MultiDBManager:
         except Exception:
             pass
 
+        project_db.conn.commit()
+
+        # ===== 去重 + 防重复索引（graph_doc + community_hierarchy）=====
+        try:
+            project_db.execute("""
+                DELETE FROM graph_doc WHERE id NOT IN (
+                    SELECT MIN(id) FROM graph_doc GROUP BY task_id, edge_type, comm_id
+                )
+            """)
+        except Exception:
+            pass
+        try:
+            project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_doc_unique ON graph_doc(task_id, edge_type, comm_id)")
+        except Exception:
+            pass
+        try:
+            project_db.execute("""
+                DELETE FROM community_hierarchy WHERE id NOT IN (
+                    SELECT MIN(id) FROM community_hierarchy GROUP BY task_id, edge_type, comm_lv, comm_id
+                )
+            """)
+        except Exception:
+            pass
+        try:
+            project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_comm_hier_unique ON community_hierarchy(task_id, edge_type, comm_lv, comm_id)")
+        except Exception:
+            pass
         project_db.conn.commit()
 
     def get_project_db(self, project_id: str) -> SQLiteContext:

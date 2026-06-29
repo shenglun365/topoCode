@@ -21,8 +21,6 @@ import type {
   TaskConfigUpdate,
   ScanOptions,
   GitInfo,
-  TimelineEntry,
-  SnapshotCompareResult,
   PositionEntry,
   NodePosition,
 } from '@/types/ipc'
@@ -150,34 +148,10 @@ function createRealIPC() {
       checkImportStatus: async (params: { projectId: string }) => {
         return await api.project.checkImportStatus(params)
       },
-      cleanupTaskSnapshots: async (params: { taskId: string }) => {
-        return await api.project.cleanupTaskSnapshots(params)
-      },
     },
 
-    // 架构时间线 + 图位置
+    // 图位置
     graph: {
-      saveSnapshot: async (params: { taskId: string; projectId: string; alias?: string }) => {
-        return await api.graph.saveSnapshot(params)
-      },
-      getSnapshot: async (params: { taskId: string; snapshotId?: string }) => {
-        return await api.graph.getSnapshot(params)
-      },
-      deleteSnapshot: async (params: { taskId: string; snapshotId?: string }) => {
-        return await api.graph.deleteSnapshot(params)
-      },
-      exportSnapshots: async (params: { taskId: string }) => {
-        return await api.graph.exportSnapshots(params)
-      },
-      compareSnapshots: async (params: { snapshotIdA?: string; snapshotIdB?: string; taskIdA?: string; taskIdB?: string }) => {
-        return await api.graph.compareSnapshots(params)
-      },
-      promoteTimelineEntry: async (params: { taskId: string; timelineId: string }) => {
-        return await api.graph.promoteTimelineEntry(params)
-      },
-      timelineGC: async (params: { projectId: string }) => {
-        return await api.graph.timelineGC(params)
-      },
       savePositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; positions: any[]; snapshotId?: string }) => {
         return await api.graph.savePositions(params)
       },
@@ -189,12 +163,6 @@ function createRealIPC() {
       },
       listSavedPositionKeys: async (params: { projectId: string }) => {
         return await api.graph.listSavedPositionKeys(params)
-      },
-      listArchivedSnapshots: async (params: { projectId: string }) => {
-        return await api.graph.listArchivedSnapshots(params)
-      },
-      compareWithArchived: async (params: { taskId: string; projectId: string; archivedId: string }) => {
-        return await api.graph.compareWithArchived(params)
       },
     },
 
@@ -343,18 +311,6 @@ function createRealIPC() {
       },
       startOverview: async (params: { taskId: string; force?: boolean }) => {
         return await api.analysis.startOverview(params)
-      },
-      listTimeline: async (params: { projectId: string }) => {
-        return await api.analysis.listTimeline(params)
-      },
-      getTimelineEntry: async (params: { timelineId: string }) => {
-        return await api.analysis.getTimelineEntry(params)
-      },
-      startArchTrack: async (params: { taskId: string; tag: string }) => {
-        return await api.analysis.startArchTrack(params)
-      },
-      stopArchTrack: async (params: { taskId: string; tag: string }) => {
-        return await api.analysis.stopArchTrack(params)
       },
       getAgentProgress: async (params: { agentTaskId: string }) => {
         return await api.analysis.getAgentProgress(params)

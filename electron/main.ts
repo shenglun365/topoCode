@@ -6,10 +6,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { windowManager } from './window-manager'
 import { pythonBridge, HTTP_PORT } from './python-bridge'
 import { zmqRouter } from './zmq-router'
-import { MCPManager } from './mcp-manager'
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
-
-const mcpManager = new MCPManager()
 
 // 开发环境设置
 const isDev = !app.isPackaged
@@ -173,17 +170,6 @@ function setupIPC() {
   ipcMain.handle('store:set', (_, key: string, value: any) => {
     store[key] = value
     return true
-  })
-
-  // ---- MCP Server 管理 ----
-  ipcMain.handle('mcp:start', async (_, projectRoot: string, zmqPort?: number, logLevel?: string) => {
-    await mcpManager.start(projectRoot, zmqPort || 0, logLevel || 'WARN')
-  })
-  ipcMain.handle('mcp:stop', async () => {
-    mcpManager.stop()
-  })
-  mcpManager.onStatusChange((status: any) => {
-    windowManager.broadcast('mcp:status', status)
   })
 
   // ---- ZeroMQ RPC 调用 ----

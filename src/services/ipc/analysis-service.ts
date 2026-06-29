@@ -7,7 +7,6 @@ import type {
   SaveCommunityResultResponse, ListCommunityResultsResponse,
   UpdateCommunityNameResponse, SuccessResponse, TaskProgressEvent,
   TaskCompleteEvent, TaskErrorEvent,
-  TimelineEntry, TimelineEntryCommunity,
 } from '@/types/ipc'
 
 function adaptTask(t: any): AnalysisTask {
@@ -37,10 +36,6 @@ function adaptRun(r: any): TaskRun {
     startedAt: r.started_at ?? r.startedAt,
     finishedAt: r.finished_at ?? r.finishedAt,
     durationMs: r.duration_ms ?? r.durationMs,
-    snapshotScope: r.snapshot_scope ?? r.snapshotScope,
-    snapshotExtensions: r.snapshot_extensions ?? r.snapshotExtensions,
-    snapshotExcludeDirs: r.snapshot_excludeDirs ?? r.snapshotExcludeDirs,
-    snapshotReportTypes: r.snapshot_report_types ?? r.snapshotReportTypes,
   }
 }
 
@@ -79,10 +74,6 @@ export interface AnalysisService {
   getCrossCommunityEdges(params: { taskId: string; edgeType: string; commLv: string }): Promise<CrossCommunityEdgesResult>
   getCommunityNodeLists(params: { taskId: string; edgeType: string; commLv: string }): Promise<Record<string, string[]>>
   startOverview(params: { taskId: string; force?: boolean }): Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; skipped?: boolean; error?: string }>
-  listTimeline(params: { projectId: string }): Promise<TimelineEntry[]>
-  getTimelineEntry(params: { timelineId: string }): Promise<{ entry: TimelineEntry; communities: TimelineEntryCommunity[] }>
-  startArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string }>
-  stopArchTrack(params: { taskId: string; tag: string }): Promise<{ versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }>
   getAgentProgress(params: { agentTaskId: string }): Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; file_current?: number; file_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string; file_count?: number }>; error?: string }>
   cancelAgentTask(params: { agentTaskId: string }): Promise<{ cancelled: boolean }>
   getAgentTaskHistory(params: { taskId: string; offset?: number; limit?: number }): Promise<{ results: Array<any>; total: number }>
@@ -211,18 +202,6 @@ export function createAnalysisService(api: any): AnalysisService {
     },
     startOverview: async (params) => {
       return await api.analysis.startOverview(params)
-    },
-    listTimeline: async (params) => {
-      return await api.analysis.listTimeline(params)
-    },
-    getTimelineEntry: async (params) => {
-      return await api.analysis.getTimelineEntry(params)
-    },
-    startArchTrack: async (params) => {
-      return await api.analysis.startArchTrack(params) as { versionId: string }
-    },
-    stopArchTrack: async (params) => {
-      return await api.analysis.stopArchTrack(params) as { versionId: string; summary: string; risk: string; added: number; removed: number; changed: number }
     },
     saveCommunityResult: async (params: any) => {
       const safe = JSON.parse(JSON.stringify(params))
