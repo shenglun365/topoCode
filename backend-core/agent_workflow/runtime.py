@@ -103,17 +103,20 @@ class AgentRuntime:
         sandbox: AgentSandbox,
         memory: Optional[AgentMemory] = None,
         on_progress: Optional[ProgressCallback] = None,
+        on_state_change: Optional[Callable[[str], None]] = None,
         multi_db: Optional[Any] = None,
     ):
         self._tools = tools
         self._sandbox = sandbox
         self._memory = memory or AgentMemory()
         self._on_progress = on_progress
+        self._on_state_change = on_state_change
         self._multi_db = multi_db
         self._cancelled = False
         self._paused = False
         self._cancel_event = threading.Event()
         self._status = AgentStatus.IDLE
+        self._actually_paused = False  # True only when runtime is in the pause loop
         self._task_id = ""
         self._steps: list[StepProgress] = []
         self._tool_call_history: list[tuple] = []
@@ -139,11 +142,10 @@ class AgentRuntime:
         self._content_warning_count = 0
 
     def cancel(self):
-        """取消当前执行"""
+        """取消当前执行。状态在运行时实际退出循环后由 on_state_change 通知。"""
         self._cancelled = True
         self._cancel_event.set()
-        self._status = AgentStatus.CANCELLED
-        logger.info("[AgentRuntime] cancelled by user")
+        logger.info("[AgentRuntime] cancelled by user (flag set)")
 
     def _sync_cancel(self):
         """将 threading.Event 同步到 boolean 标志（跨线程安全）。"""
@@ -151,14 +153,24 @@ class AgentRuntime:
             self._cancelled = True
 
     def pause(self):
-        """暂停当前执行（在下一步/轮边界生效）"""
+        """暂停当前执行（在下一步/轮边界生效）。状态在进入暂停循环后由 on_state_change 通知。"""
         self._paused = True
-        logger.info("[AgentRuntime] paused by user")
+        self._actually_paused = False
+        logger.info("[AgentRuntime] paused by user (flag set)")
 
     def resume(self):
         """恢复暂停的执行"""
         self._paused = False
+        self._actually_paused = False
         logger.info("[AgentRuntime] resumed by user")
+
+    def _notify_state(self, state: str):
+        """通过 on_state_change 回调通知外部当前状态变化（仅在实际进入/离开暂停时调用）。"""
+        if self._on_state_change:
+            try:
+                self._on_state_change(state)
+            except Exception as e:
+                logger.warning(f"[AgentRuntime] on_state_change callback error: {e}")
 
     async def run(self, workflow: AgentWorkflow, context: dict) -> WorkflowResult:
         """
@@ -216,11 +228,17 @@ class AgentRuntime:
             self._sync_cancel()
             if self._cancelled:
                 break
+            if self._paused and not self._actually_paused:
+                self._actually_paused = True
+                self._notify_state("paused")
             while self._paused:
                 await asyncio.sleep(0.2)
                 self._sync_cancel()
                 if self._cancelled:
                     break
+            if self._actually_paused:
+                self._actually_paused = False
+                self._notify_state("running")
             self._sync_cancel()
             if self._cancelled:
                 break
@@ -420,11 +438,17 @@ class AgentRuntime:
             self._sync_cancel()
             if self._cancelled:
                 break
+            if self._paused and not self._actually_paused:
+                self._actually_paused = True
+                self._notify_state("paused")
             while self._paused:
                 await asyncio.sleep(0.2)
                 self._sync_cancel()
                 if self._cancelled:
                     break
+            if self._actually_paused:
+                self._actually_paused = False
+                self._notify_state("running")
             self._sync_cancel()
             if self._cancelled:
                 break

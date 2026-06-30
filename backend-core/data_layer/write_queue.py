@@ -121,17 +121,21 @@ class WriteQueue:
         return results
 
     def shutdown(self, timeout: float = 5.0):
-        """优雅关闭写入线程。"""
+        """优雅关闭写入线程。WAL checkpoint 后关闭连接，确保数据持久化。"""
         self._running = False
         self._pending.put(("__shutdown__", "", (), True, None, None))
         self._thread.join(timeout=timeout)
-        for conn in self._connections.values():
+        for label, conn in list(self._connections.items()):
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
             try:
                 conn.close()
             except Exception:
                 pass
         self._connections.clear()
-        logger.info("[WriteQueue] shutdown complete")
+        logger.info("[WriteQueue] shutdown complete (checkpoint done)")
 
     # ── 内部 ──────────────────────────────────────────────────────────
 
@@ -149,48 +153,25 @@ class WriteQueue:
         return self._connections[label]
 
     def _create_conn(self, path: str) -> sqlite3.Connection:
-        """打开 SQLite 连接，优先 WAL，失败回退 DELETE。"""
+        """打开 SQLite 连接，优先 WAL，失败回退 DELETE（不删除 WAL/SHM 文件）。"""
         conn = sqlite3.connect(path, check_same_thread=False)
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA busy_timeout=5000")
         except sqlite3.OperationalError as e:
-            if "disk I/O error" in str(e) or "unable to open" in str(e).lower():
-                # WAL 损坏 → 删除残留后重试 WAL
-                import os as _os
-                for ext in ("-wal", "-shm"):
-                    extra = path + ext
-                    if _os.path.exists(extra):
-                        try:
-                            _os.unlink(extra)
-                            logger.warning(f"[WriteQueue] removed corrupted {extra}")
-                        except Exception:
-                            pass
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                conn = sqlite3.connect(path, check_same_thread=False)
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    conn.execute("PRAGMA synchronous=NORMAL")
-                    conn.execute("PRAGMA busy_timeout=5000")
-                    return conn
-                except sqlite3.OperationalError:
-                    pass
-                # WAL 仍失败 → 回退 DELETE
-                logger.warning(f"[WriteQueue] WAL failed for {path}, falling back to DELETE")
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                conn = sqlite3.connect(path, check_same_thread=False)
-                conn.execute("PRAGMA journal_mode=DELETE")
-                conn.execute("PRAGMA synchronous=NORMAL")
-                conn.execute("PRAGMA busy_timeout=5000")
-            else:
+            if "disk I/O error" not in str(e) and "unable to open" not in str(e).lower():
                 raise
+            # WAL 失败 → 直接回退 DELETE（不删除 WAL/SHM，避免影响其他连接）
+            logger.warning(f"[WriteQueue] WAL failed for {path}, falling back to DELETE")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = sqlite3.connect(path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def _close_conn(self, label: str):

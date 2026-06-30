@@ -237,7 +237,7 @@ class SummarizeFileTool(AgentTool):
             from ..file_summary_cache import FileSummaryCache
             from ..sub_agent import SubAgent
 
-            cache = FileSummaryCache(self._project_db, self._project_id)
+            cache = FileSummaryCache(self._project_db, self._project_id, self._project_root)
             sub = SubAgent(
                 project_root=self._project_root,
                 model_id=self._summary_model_id,

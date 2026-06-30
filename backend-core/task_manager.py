@@ -753,33 +753,27 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                                 comm_lv=None, commLv=None, comm_id=None, commId=None,
                                 name=None, summary=None,
                                 model_id=None, modelId=None, template_id=None, templateId=None):
-        from zmq_server import current_call_id
-        _cid = current_call_id.get()
+        from ingest import write_ingest
         tid = task_id or taskId
         et = edge_type or edgeType
         cl = comm_lv or commLv
         cid = comm_id or commId
         mid = model_id or modelId
         tpid = template_id or templateId
-        logger.info("[analysis.saveCommunityResult] ENTRY task_id=%s edge_type=%s comm_lv=%s comm_id=%s name=%s",
-                     tid, et, cl, cid, name)
         if not tid or not et or not cl or not cid:
-            logger.error("[analysis.saveCommunityResult] missing required fields")
             raise ValueError("task_id, edge_type, comm_lv, comm_id are required")
         task = TaskStore(multi_db.main_db).get_task(tid)
         if not task:
-            logger.error("[analysis.saveCommunityResult] task not found task_id=%s", tid)
             raise ValueError(f"Task {tid} not found")
-        project_db = multi_db.get_project_db(task["project_id"])
-        store = AnalysisStore(project_db)
-        logger.info("[analysis.saveCommunityResult] validated name=%s summary_len=%d model_id=%s template_id=%s",
-                     name, len(summary or ''), mid, tpid)
-        validated = {
+        project_root = _get_project_root(task["project_id"])
+        data = {
+            "project_id": task["project_id"],
             "task_id": tid, "edge_type": et, "comm_lv": cl, "comm_id": cid,
             "name": name, "summary": summary,
             "model_id": mid, "template_id": tpid,
+            "component_type": "community", "status": "completed",
         }
-        store.bulk_insert_llm_results([validated])
+        write_ingest(project_root, "community_result", data)
         logger.info("[analysis.saveCommunityResult] DONE task_id=%s comm_id=%s", tid, cid)
         return {"success": True}
 
@@ -1444,8 +1438,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         t0 = time.perf_counter()
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=2) as pool:
-            fut_call = pool.submit(_get_cascade_levels_impl, project_db, tid, 'CALL')
-            fut_dep = pool.submit(_get_cascade_levels_impl, project_db, tid, 'INCLUDE')
+            fut_call = pool.submit(get_cascade_levels_impl, project_db, tid, 'CALL')
+            fut_dep = pool.submit(get_cascade_levels_impl, project_db, tid, 'INCLUDE')
             call_levels = fut_call.result()
             dep_levels = fut_dep.result()
         t_cascade = time.perf_counter() - t0
@@ -2790,7 +2784,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             query_path = file_path[len(project_root):].lstrip("/")
 
         from agent_workflow.file_summary_cache import FileSummaryCache
-        cache = FileSummaryCache(project_db, pid)
+        cache = FileSummaryCache(project_db, pid, project_root)
         detail = cache.get_detail(query_path)
         if detail:
             return {"found": True, **detail}
@@ -2814,9 +2808,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError(f"Task {tid} not found")
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
+        project_root = _get_project_root(pid)
 
         from agent_workflow.file_summary_cache import FileSummaryCache
-        cache = FileSummaryCache(project_db, pid)
+        cache = FileSummaryCache(project_db, pid, project_root)
         deleted = cache.delete(file_path)
         return {"success": True, "deleted": deleted}
 
@@ -3208,7 +3203,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                        comm_id=None, commId=None, title=None, content=None,
                        template_id=None, templateId=None,
                        id=None, docId=None):
-        """创建分析报告子文档"""
+        """创建分析报告子文档（写入 ingest 文件，由消费端入库）"""
+        from ingest import write_ingest
         tid = task_id or taskId
         et = edge_type or edgeType or 'CALL'
         cid = comm_id or commId
@@ -3223,29 +3219,24 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not task:
             raise ValueError(f"Task {tid} not found")
         project_id = task["project_id"]
-        project_db = multi_db.get_project_db(project_id)
+        project_root = _get_project_root(project_id)
 
         doc_id = provided_id or f"subdoc-{uuid.uuid4().hex[:12]}"
         now = time.strftime('%Y-%m-%d %H:%M:%S')
 
-        # 清理同一 (task_id, edge_type, comm_id) 的旧子文档
-        if tid and et:
-            if cid:
-                project_db.execute(
-                    "DELETE FROM report_subdocs WHERE task_id=? AND edge_type=? AND comm_id=? AND id!=?",
-                    (tid, et, cid, doc_id)
-                )
-            else:
-                project_db.execute(
-                    "DELETE FROM report_subdocs WHERE task_id=? AND edge_type=? AND comm_id IS NULL AND id!=?",
-                    (tid, et, doc_id)
-                )
-
-        project_db.execute(
-            "INSERT INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (doc_id, tid, et, cid, title, content, tpl, now, now)
-        )
-        project_db.commit()
+        data = {
+            "project_id": project_id,
+            "doc_id": doc_id,
+            "task_id": tid,
+            "edge_type": et,
+            "comm_id": cid,
+            "title": title,
+            "content": content,
+            "template_id": tpl,
+            "created_at": now,
+            "updated_at": now,
+        }
+        write_ingest(project_root, "subdoc", data)
 
         return {'id': doc_id}
 

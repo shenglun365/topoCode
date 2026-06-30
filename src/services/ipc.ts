@@ -648,6 +648,24 @@ function createRealIPC() {
       getHttpPort: async () => {
         return await api.system.getHttpPort()
       },
+      exportProject: async (projectId: string, taskIds?: string[]) => {
+        return await api.system.exportProject(projectId, taskIds)
+      },
+      exportStatus: async (exportId: string) => {
+        return await api.system.exportStatus(exportId)
+      },
+      importProjectArchive: async (archivePath: string) => {
+        return await api.system.importProjectArchive(archivePath)
+      },
+      importStatus: async (importId: string) => {
+        return await api.system.importStatus(importId)
+      },
+      verifyFiles: async (projectId: string) => {
+        return await api.system.verifyFiles(projectId)
+      },
+      verifyStatus: async (verifyId: string) => {
+        return await api.system.verifyStatus(verifyId)
+      },
     },
 
     // ==================== 渲染服务 ====================

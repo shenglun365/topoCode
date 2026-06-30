@@ -105,8 +105,24 @@ class BackendApp:
             self.plugin_manager.register_all_methods(self.server, self.multi_db)
             logger.info(f"Total methods after plugin registration: {len(self.server.methods)}")
 
+        # 注册 ingest 消费端 handler
+        from ingest import setup_handlers
+        setup_handlers(self.multi_db)
+
     def _start_optional_services(self):
         web_task = None
+        ingest_task = None
+
+        # 启动 ingest 消费循环
+        try:
+            from ingest import ingest_consumer_loop
+            ingest_task = asyncio.create_task(
+                ingest_consumer_loop(self.multi_db, interval=2.0)
+            )
+            logger.info("[Ingest] consumer loop started")
+        except Exception as e:
+            logger.warning(f"[Ingest] failed to start consumer: {e}")
+
         if self.http_port:
             self.multi_db.http_port = self.http_port
             self.multi_db.http_host = self.http_host
@@ -114,27 +130,29 @@ class BackendApp:
                 from web_server import start_http_server
                 cache_path = os.path.join(self.data_dir, "plantuml_cache.db")
                 web_task = asyncio.create_task(
-                    start_http_server(self.multi_db, port=self.http_port, host=self.http_host, cache_path=cache_path)
+                    start_http_server(self.multi_db, port=self.http_port, host=self.http_host,
+                                      cache_path=cache_path, zmq_server_instance=self.server)
                 )
                 logger.info(f"Web server task created for http://{self.http_host}:{self.http_port}")
             except Exception as e:
                 logger.warning(f"Failed to start web server: {e}")
-        return web_task
+        return web_task, ingest_task
 
     async def run(self):
         logger.info(f"Starting TopoOne Backend (data_dir: {self.data_dir})")
         self.register_all()
         self._setup_signals()
-        web_task = self._start_optional_services()
+        web_task, ingest_task = self._start_optional_services()
         try:
             await self.server.run_forever()
         finally:
-            if web_task:
-                web_task.cancel()
-                try:
-                    await web_task
-                except asyncio.CancelledError:
-                    pass
+            for task in (web_task, ingest_task):
+                if task:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
             self.multi_db.close_all()
             logger.info("Backend shutdown complete")
 

@@ -534,6 +534,19 @@ contextBridge.exposeInMainWorld('api', {
     get: (key: string) => ipcRenderer.invoke('store:get', key),
     set: (key: string, val: any) => ipcRenderer.invoke('store:set', key, val),
     getHttpPort: () => ipcRenderer.invoke('system:get-http-port'),
+    // 结构分析导入导出
+    exportProject: (projectId: string, taskIds?: string[]) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.exportProject', params: { projectId, taskIds } }),
+    exportStatus: (exportId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.exportStatus', params: { exportId } }),
+    importProjectArchive: (archivePath: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.importProjectArchive', params: { archivePath } }),
+    importStatus: (importId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.importStatus', params: { importId } }),
+    verifyFiles: (projectId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.verifyFiles', params: { projectId } }),
+    verifyStatus: (verifyId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.verifyStatus', params: { verifyId } }),
   },
 
   // ==================== 事件订阅 ====================

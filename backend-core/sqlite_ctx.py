@@ -45,8 +45,7 @@ class SQLiteContext:
         with self._lock:
             if self._conn is not None:
                 return
-            import os as _os
-            # Step 1: 尝试 WAL 模式（首选项中键时清理 WAL/SHM 后重试一次）
+            # 尝试 WAL → 失败回退 DELETE（不删除 WAL/SHM 文件，避免损坏其他连接）
             last_err = None
             for attempt in range(2):
                 try:
@@ -63,15 +62,7 @@ class SQLiteContext:
                     self._conn = None
                     if "disk I/O error" not in str(e) and "unable to open" not in str(e).lower():
                         raise
-                    for ext in ("-wal", "-shm"):
-                        extra = self.db_path + ext
-                        if _os.path.exists(extra):
-                            try:
-                                _os.unlink(extra)
-                                logger.warning(f"[SQLite] removed corrupted {extra}")
-                            except Exception:
-                                pass
-            # Step 2: WAL 模式失败 → 回退 DELETE 模式
+                    # 不删除 WAL/SHM — 改为尝试 checkpoint 恢复（见下方 fallback 逻辑）
             if not self._conn:
                 logger.warning(f"[SQLite] WAL failed for {self.db_path}, falling back to DELETE: {last_err}")
                 self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -81,7 +72,6 @@ class SQLiteContext:
                 except sqlite3.OperationalError as e:
                     logger.warning(f"[SQLite] DELETE mode also failed for {self.db_path}: {e}")
                 logger.info(f"[SQLite] opened {self.db_path} in fallback mode")
-            # Step 3: 公共 PRAGMA 设置（逐句容错）
             for _pragma in [
                 "PRAGMA foreign_keys=ON",
                 "PRAGMA busy_timeout=5000",
@@ -92,7 +82,6 @@ class SQLiteContext:
                     self._conn.execute(_pragma)
                 except Exception:
                     pass
-            # WriteQueue 各自管理自己的连接，不再共享（WAL 模式支持并发读写）
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -114,7 +103,8 @@ class SQLiteContext:
                 lastrowid=result.get("lastrowid"),
                 rowcount=result.get("rowcount", 0),
             )
-        cursor = self.conn.execute(sql, params)
+        with self._lock:
+            cursor = self.conn.execute(sql, params)
         # 仅对写操作提交事务，避免 SELECT 等读操作触发无意义的 commit
         upper_sql = sql.strip().upper()
         if upper_sql.startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER',
@@ -125,14 +115,17 @@ class SQLiteContext:
         return cursor
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
-        """查询所有结果（不提交）"""
+        """查询所有结果（读后提交以关闭 WAL 读视图）"""
         cursor = self.conn.execute(sql, params)
-        return [dict(row) for row in cursor.fetchall()]
+        result = [dict(row) for row in cursor.fetchall()]
+        self.conn.commit()
+        return result
 
     def fetchone(self, sql: str, params: tuple = ()) -> Optional[dict]:
-        """查询单条结果（不提交）"""
+        """查询单条结果（读后提交以关闭 WAL 读视图）"""
         cursor = self.conn.execute(sql, params)
         row = cursor.fetchone()
+        self.conn.commit()
         return dict(row) if row else None
 
     def executemany(self, sql: str, params_list):
@@ -1484,6 +1477,18 @@ class MultiDBManager:
         except Exception:
             pass
 
+        # file_hashes 表（导入导出校验用）
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS file_hashes (
+                    file_path TEXT PRIMARY KEY,
+                    md5_hash TEXT NOT NULL,
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+        except Exception:
+            pass
+
         project_db.conn.commit()
 
         # ===== 去重 + 防重复索引（graph_doc + community_hierarchy）=====
@@ -1598,5 +1603,4 @@ class MultiDBManager:
         for db in self._project_db_cache.values():
             db.close()
         self._project_db_cache.clear()
-        if self._is_remote:
-            self._write_queue.shutdown()
+        self._write_queue.shutdown()

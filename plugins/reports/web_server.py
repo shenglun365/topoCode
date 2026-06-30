@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sqlite3
+import uuid
 from typing import Optional
 
 import uvicorn
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # 在 start_http_server 中注入
 multi_db = None
+zmq_server = None  # ZMQ server for pub events
 plantuml_cache_db: Optional[sqlite3.Connection] = None
 http_port = 3456
 
@@ -1214,19 +1216,131 @@ async def delete_graph_layout(task_id: str = Query(None), taskId: str = Query(No
         raise HTTPException(500, str(e))
 
 
-def create_app(multi_db_instance) -> FastAPI:
-    global multi_db
+# ==================== 结构分析导入/导出/校验 ====================
+
+import export_service as _export_svc
+import import_service as _import_svc
+import verify_service as _verify_svc
+
+
+def _publish(channel: str, event: str, data: dict):
+    """如果 ZMQ server 可用则推送进度事件"""
+    global zmq_server
+    if zmq_server:
+        try:
+            zmq_server.publish(channel, event, data)
+        except Exception:
+            pass
+
+
+@app.post("/api/export")
+async def start_export(request: Request):
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        body = await request.json()
+        project_id = body.get("projectId") or body.get("project_id")
+        task_ids = body.get("taskIds")
+        if not project_id:
+            raise HTTPException(422, "projectId is required")
+        export_id = _export_svc.start_export(multi_db, project_id, task_ids, _publish)
+        return {"exportId": export_id, "status": "running"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/export/{export_id}/status")
+async def get_export_status(export_id: str):
+    status = _export_svc.get_export_status(export_id)
+    if not status:
+        raise HTTPException(404, "Export task not found")
+    return status
+
+
+@app.get("/api/export/{export_id}/download")
+async def download_export(export_id: str):
+    status = _export_svc.get_export_status(export_id)
+    if not status:
+        raise HTTPException(404, "Export task not found")
+    if status["status"] != "done":
+        raise HTTPException(400, "Export not yet complete")
+    archive_path = status.get("result", {}).get("archivePath")
+    if not archive_path or not os.path.exists(archive_path):
+        raise HTTPException(404, "Export file not found")
+    return FileResponse(archive_path, media_type="application/zip",
+                        filename=os.path.basename(archive_path))
+
+
+@app.post("/api/import")
+async def start_import(request: Request):
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            raise HTTPException(422, "file is required")
+        import_path = os.path.join(multi_db.data_dir, "imports")
+        os.makedirs(import_path, exist_ok=True)
+        local_path = os.path.join(import_path, f"upload-{uuid.uuid4().hex[:12]}.zip")
+        content = await file.read()
+        with open(local_path, "wb") as f:
+            f.write(content)
+        import_id = _import_svc.start_import(multi_db, local_path, _publish)
+        return {"importId": import_id, "status": "running"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/import/{import_id}/status")
+async def get_import_status(import_id: str):
+    status = _import_svc.get_import_status(import_id)
+    if not status:
+        raise HTTPException(404, "Import task not found")
+    return status
+
+
+@app.post("/api/projects/{project_id}/verify-files")
+async def start_verify(project_id: str):
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        verify_id = _verify_svc.start_verify(multi_db, project_id, _publish)
+        return {"verifyId": verify_id, "status": "running"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/verify/{verify_id}/status")
+async def get_verify_status(verify_id: str):
+    status = _verify_svc.get_verify_status(verify_id)
+    if not status:
+        raise HTTPException(404, "Verify task not found")
+    return status
+
+
+def create_app(multi_db_instance, zmq_server_instance=None) -> FastAPI:
+    global multi_db, zmq_server
     multi_db = multi_db_instance
+    zmq_server = zmq_server_instance
     return app
 
 
 # ==================== 启动入口 ====================
 
 
-async def start_http_server(multi_db_instance, port: int = 3456, host: str = '127.0.0.1', cache_path: str = None):
-    global multi_db, http_port
+async def start_http_server(multi_db_instance, port: int = 3456, host: str = '127.0.0.1',
+                            cache_path: str = None, zmq_server_instance: object = None):
+    global multi_db, http_port, zmq_server
     http_port = port
     multi_db = multi_db_instance
+    zmq_server = zmq_server_instance
     if cache_path:
         _init_cache_db(cache_path)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")

@@ -946,35 +946,23 @@ export const useCommunityStore = defineStore('community', () => {
   async function cancelAgentTask(taskId: string, agentTaskId: string) {
     try {
       await ipc.analysis.cancelAgentTask({ agentTaskId })
+      // 不立即改状态 — 等 backend 真正停止后，由 agent polling 检测到 CANCELLED 再更新 UI
+      // 取消 presummary 管线队友
       const t = tasks.value[taskId]
       if (t) {
-        // 取消当前 agent
-        const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
-        if (idx >= 0) updateAgentTask(taskId, idx, { status: 'cancelled' })
-        // 额外取消同任务下所有 presummary_files 类型的 agent（管线场景）
         for (const at of t.agentTasks) {
           if (at.id !== agentTaskId && at.action === 'presummary_files' && (at.status === 'running' || at.status === 'queued')) {
             try { await ipc.analysis.cancelAgentTask({ agentTaskId: at.id }) } catch {}
-            at.status = 'cancelled'
-            const ck = `agent-progress:${taskId}:${at.id}`
-            if (controlDispatcher.has(ck)) controlDispatcher.unregister(ck)
           }
         }
       }
-      // 立即停止轮询
-      const controlKey = `agent-progress:${taskId}:${agentTaskId}`
-      if (controlDispatcher.has(controlKey)) controlDispatcher.unregister(controlKey)
     } catch {}
   }
 
   async function pauseAgentTask(taskId: string, agentTaskId: string) {
     try {
       await ipc.analysis.pauseAgentTask({ agentTaskId })
-      const t = tasks.value[taskId]
-      if (t) {
-        const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
-        if (idx >= 0) updateAgentTask(taskId, idx, { status: 'paused' })
-      }
+      // 不立即改状态 — 等 backend 真正暂停后，由 agent polling 检测到 PAUSED 再更新 UI
     } catch {}
   }
 

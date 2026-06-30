@@ -494,20 +494,18 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
     if progress is None:
         progress = (current * 100.0 / total) if total > 0 else 0.0
 
-    # 更新任务进度 — 直写 bypass WriteQueue（高频低优，不竞争 bulk INSERT 队列）
-    conn = multi_db.main_db.conn
+    # 更新任务进度 — 走 WriteQueue 串行化（避免与批量写入并发冲突）
     try:
-        conn.execute("""
+        multi_db.main_db.execute("""
             UPDATE analysis_tasks
             SET progress = ?, current = ?, updated_at = datetime('now')
             WHERE id = ?
         """, (progress, current, task_id))
-        conn.execute("""
+        multi_db.main_db.execute("""
             UPDATE analysis_task_runs
             SET progress = ?, current = ?
             WHERE id = ?
         """, (progress, current, run_id))
-        conn.commit()
     except Exception as e:
         logger.error(f"[PROGRESS] DB write failed: {e}")
         return  # 跳过 publish，不阻塞调用方

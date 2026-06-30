@@ -25,6 +25,7 @@ export default { shell: {
     zoomOut: '缩小',
     resetZoom: '重置缩放',
     importProject: '导入项目',
+    importStructure: '导入结构分析',
     exit: '退出',
     restartBackend: '重启后端',
     clearCache: '清除缓存',

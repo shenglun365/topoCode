@@ -636,6 +636,12 @@ export interface IPCAPI {
     get: (key: string) => Promise<any>
     set: (key: string, val: any) => Promise<void>
     getHttpPort: () => Promise<number>
+    exportProject: (projectId: string, taskIds?: string[]) => Promise<{ exportId: string }>
+    exportStatus: (exportId: string) => Promise<{ status: string; progress: number; message: string; result?: any }>
+    importProjectArchive: (archivePath: string) => Promise<{ importId: string }>
+    importStatus: (importId: string) => Promise<{ status: string; progress: number; message: string; result?: { projectId: string; projectName: string } }>
+    verifyFiles: (projectId: string) => Promise<{ verifyId: string }>
+    verifyStatus: (verifyId: string) => Promise<{ status: string; progress: number; message: string; result?: { total: number; matched: number; mismatch: number; missing: number; matchRate: number; details: Array<{ filePath: string; status: string; expectedHash: string; actualHash: string }> } }>
   }
 
   // LLM Session 管理 (v2)

@@ -84,17 +84,29 @@ async function loadOverviewDocAndPoll() {
   if (!found) startOverviewPoll()
 }
 
+let overviewRetries = 0
+const OVERVIEW_POLL_MAX_RETRIES = 3
+const OVERVIEW_POLL_INITIAL_MS = 1000
+
 function startOverviewPoll() {
   stopOverviewPoll()
-  overviewPollTimer = setInterval(async () => {
+  overviewRetries = 0
+  scheduleOverviewPoll()
+}
+
+function scheduleOverviewPoll() {
+  if (overviewRetries >= OVERVIEW_POLL_MAX_RETRIES) return
+  const delay = OVERVIEW_POLL_INITIAL_MS * Math.pow(2, overviewRetries)
+  overviewRetries++
+  overviewPollTimer = setTimeout(async () => {
     const found = await loadOverviewDoc(true)
-    if (found) stopOverviewPoll()
-  }, 5000)
+    if (!found) scheduleOverviewPoll()
+  }, delay)
 }
 
 function stopOverviewPoll() {
   if (overviewPollTimer !== null) {
-    clearInterval(overviewPollTimer)
+    clearTimeout(overviewPollTimer)
     overviewPollTimer = null
   }
 }

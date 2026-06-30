@@ -173,17 +173,26 @@ class AgentWorker:
 
         def _make_save_fn(comp_edge_lv: dict | None = None):
             """创建 _save_fn — analyze_components 需要 comp_edge_lv 映射"""
-            from store.analysis_store import AnalysisStore
+            from ingest import write_ingest
 
             def _save_fn(result):
                 try:
-                    s = AnalysisStore(project_db) if project_db else None
-                    if s:
-                        comp_id = result.get("component_id", "")
-                        et, lv = comp_edge_lv.get(comp_id, ("", "L0")) if comp_edge_lv else ("", "L0")
-                        result["edge_type"] = et
-                        result["comm_lv"] = lv
-                        s.bulk_insert_llm_results([result])
+                    comp_id = result.get("component_id", "")
+                    et, lv = comp_edge_lv.get(comp_id, ("", "L0")) if comp_edge_lv else ("", "L0")
+                    data = {
+                        "project_id": pid,
+                        "task_id": result.get("task_id", tid),
+                        "edge_type": et,
+                        "comm_lv": lv,
+                        "comm_id": comp_id,
+                        "name": result.get("analyzed_name") or result.get("name", ""),
+                        "summary": result.get("functional_summary") or result.get("summary", ""),
+                        "model_id": result.get("model_id", ""),
+                        "template_id": result.get("template_id", ""),
+                        "component_type": "community",
+                        "status": "completed",
+                    }
+                    write_ingest(project_root, "community_result", data)
                 except Exception as e:
                     logger.warning(f"[AgentWorker] _save_fn failed: {e}")
             return _save_fn

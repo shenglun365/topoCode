@@ -670,125 +670,49 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return True
 
     @server.register("system.exportProject")
-    def export_project(project_id: str, outputPath: str):
-        """导出项目库为 .topocode-archive (zip)"""
-        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
-        if not project:
-            raise ValueError(f"Project not found: {project_id}")
+    def export_project(projectId: str, taskIds: list = None):
+        """导出结构分析数据（JSONL + zip）"""
+        import export_service
+        export_id = export_service.start_export(
+            multi_db, projectId, taskIds,
+            lambda ch, ev, data: server.publish(ch, ev, data)
+        )
+        return {"exportId": export_id}
 
-        # 获取项目库路径（仅新架构 .topocode/data/project.db）
-        project_db_path = None
-        try:
-            row = multi_db.main_db.execute(
-                "SELECT root_path FROM projects WHERE id = ?", (project_id,)
-            ).fetchone()
-            project_root = row["root_path"] if row else None
-        except Exception:
-            project_root = None
-        if project_root and project_root.strip():
-            project_db_path = os.path.join(project_root, ".topocode", "data", "project.db")
-        if not project_db_path or not os.path.exists(project_db_path):
-            raise FileNotFoundError(f"Project database not found: {project_id} — project has no root_path or .topocode/data/project.db is missing")
+    @server.register("system.exportStatus")
+    def export_status(exportId: str):
+        import export_service
+        return export_service.get_export_status(exportId)
 
-        # 创建临时目录
-        temp_dir = os.path.join(multi_db.data_dir, f"export_{project_id}")
-        os.makedirs(temp_dir, exist_ok=True)
-
-        try:
-            # 复制项目库
-            shutil.copy2(project_db_path, os.path.join(temp_dir, "project.db"))
-
-            # 导出 graph 文件（JSON 格式）
-            graph_data = _export_graph_data(multi_db, project_id)
-            graph_path = os.path.join(temp_dir, "graph.json")
-            with open(graph_path, "w", encoding="utf-8") as f:
-                json.dump(graph_data, f, ensure_ascii=False, indent=2)
-
-            # 打包为 zip
-            archive_path = f"{outputPath}.topocode-archive" if not outputPath.endswith(".topocode-archive") else outputPath
-            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for root, _, files in os.walk(temp_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, temp_dir)
-                        zf.write(file_path, arcname)
-
-            return {"archivePath": archive_path, "size": os.path.getsize(archive_path)}
-        finally:
-            # 清理临时目录
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-    @server.register("system.importProject")
+    @server.register("system.importProjectArchive")
     def import_project_archive(archivePath: str):
-        """导入项目数据包"""
-        if not os.path.exists(archivePath):
-            raise FileNotFoundError(f"Archive not found: {archivePath}")
+        """导入结构分析数据包（JSONL zip，仅允许创建新项目）"""
+        import import_service
+        import_id = import_service.start_import(
+            multi_db, archivePath,
+            lambda ch, ev, data: server.publish(ch, ev, data)
+        )
+        return {"importId": import_id}
 
-        # 解压到临时目录
-        temp_dir = os.path.join(multi_db.data_dir, f"import_{uuid.uuid4().hex[:8]}")
-        os.makedirs(temp_dir, exist_ok=True)
+    @server.register("system.importStatus")
+    def import_status(importId: str):
+        import import_service
+        return import_service.get_import_status(importId)
 
-        try:
-            with zipfile.ZipFile(archivePath, "r") as zf:
-                zf.extractall(temp_dir)
+    @server.register("system.verifyFiles")
+    def verify_files(projectId: str):
+        """文件比对校验"""
+        import verify_service
+        verify_id = verify_service.start_verify(
+            multi_db, projectId,
+            lambda ch, ev, data: server.publish(ch, ev, data)
+        )
+        return {"verifyId": verify_id}
 
-            # 查找 .db 文件
-            db_files = [f for f in os.listdir(temp_dir) if f.endswith(".db")]
-            if not db_files:
-                raise ValueError("No database file found in archive")
-
-            db_file = db_files[0]
-            project_id = db_file.replace(".db", "")
-
-            # 确定目标路径（仅新架构 .topocode/data/project.db）
-            target_db_path = None
-            try:
-                row = multi_db.main_db.execute(
-                    "SELECT root_path FROM projects WHERE id = ?", (project_id,)
-                ).fetchone()
-                project_root = row["root_path"] if row else None
-            except Exception:
-                project_root = None
-            if project_root and project_root.strip():
-                topo_dir = os.path.join(project_root, ".topocode", "data")
-                os.makedirs(topo_dir, exist_ok=True)
-                target_db_path = os.path.join(topo_dir, "project.db")
-            else:
-                # 导入项目无 root_path 时，使用当前工作目录作为默认路径
-                cwd_root = os.getcwd()
-                topo_dir = os.path.join(cwd_root, ".topocode", "data")
-                os.makedirs(topo_dir, exist_ok=True)
-                target_db_path = os.path.join(topo_dir, "project.db")
-                # 同时更新项目记录中的 root_path
-                main_db.execute(
-                    "UPDATE projects SET root_path = ? WHERE id = ?", (cwd_root, project_id)
-                )
-            shutil.copy2(os.path.join(temp_dir, db_file), target_db_path)
-
-            # 在主库中创建项目记录
-            project_db = multi_db.get_project_db(project_id)
-            existing_project = main_db.fetchone("SELECT id FROM projects WHERE id = ?", (project_id,))
-
-            if not existing_project:
-                # 尝试从 project_config 获取项目信息，或使用默认值
-                now = datetime.now().isoformat()
-                main_db.insert("projects", {
-                    "id": project_id,
-                    "name": f"Imported Project ({project_id[:8]})",
-                    "root_path": "",
-                    "language": "Unknown",
-                    "file_count": 0,
-                    "status": "error",
-                    "needs_resync": 1,
-                    "has_file_changes": 0,
-                    "is_sample": 0,
-                    "created_at": now,
-                    "updated_at": now,
-                })
-
-            return {"projectId": project_id, "status": "imported"}
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+    @server.register("system.verifyStatus")
+    def verify_status(verifyId: str):
+        import verify_service
+        return verify_service.get_verify_status(verify_id)
 
     @server.register("project.clearSampleData")
     def clear_sample_data(project_id: str):
