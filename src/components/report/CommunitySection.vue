@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { HashtagIcon } from '@heroicons/vue/24/outline'
 import { formatCommunityId } from '@/utils/community'
 import { useComponentId } from '@/composables/useComponentId'
+import { communityLabel } from '@/utils/communityLabel'
 
 const { t } = useI18n()
 
@@ -68,16 +69,7 @@ const { showId, componentId } = useComponentId('CM-001')
 watch(communitySearch, () => { communityPage.value = 1 })
 
 function commName(item: CommunityItem): string {
-  const name = item.name && item.name !== item.communityId ? item.name : ''
-  if (name) return name.length > 10 ? name.slice(0, 10) + '\u2026' : name
-  return communityIdLabel(item)
-}
-
-function communityIdLabel(item: { communityId: string; level?: string }): string {
-  const parts = item.communityId.split('-')
-  const num = parts[parts.length - 1]
-  const level = item.level || parts[parts.length - 2] || 'L0'
-  return `${level}-${num}`
+  return communityLabel({ communityId: item.communityId, name: item.name }, 10)
 }
 </script>
 

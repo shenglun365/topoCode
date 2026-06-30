@@ -97,10 +97,28 @@ def setup_logging(level_str: str = None, log_dir: str = None) -> None:
     for handler in root.handlers[:]:
         root.removeHandler(handler)
 
+    # JSON 日志模式（TOPOCODE_LOG_JSON=1 时启用）
+    use_json = os.environ.get("TOPOCODE_LOG_JSON", "") == "1"
+
+    if use_json:
+        class _JsonFormatter(logging.Formatter):
+            def format(self, record):
+                import json as _j
+                return _j.dumps({
+                    "ts": self.formatTime(record, self.datefmt),
+                    "level": record.levelname,
+                    "name": record.name,
+                    "msg": record.getMessage(),
+                    "trace_id": getattr(record, 'trace_id', ''),
+                }, ensure_ascii=False)
+        fmt = _JsonFormatter()
+    else:
+        fmt = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
+
     # 添加标准输出 handler
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(level)
-    console.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
+    console.setFormatter(fmt)
     root.addHandler(console)
 
     # 设置根级别

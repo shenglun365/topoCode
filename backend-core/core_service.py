@@ -1,6 +1,7 @@
 """Core Service - 方法注册 + 业务逻辑 (多数据库架构)"""
 
 import asyncio
+import time
 import fnmatch
 import hashlib
 import json
@@ -1663,7 +1664,45 @@ def register_backend_methods(server: ZMQServer, multi_db: MultiDBManager, plugin
     def get_status():
         http_port = getattr(multi_db, 'http_port', None)
         http_host = getattr(multi_db, 'http_host', None)
-        return {"status": "running", "pid": os.getpid(), "port": 5671, "httpPort": http_port, "httpHost": http_host}
+        result = {"status": "running", "pid": os.getpid(), "port": 5671, "httpPort": http_port, "httpHost": http_host}
+        sv = getattr(multi_db, '_supervisor', None)
+        if sv:
+            result["supervisor"] = sv.get_status()
+        return result
+
+    @server.register("backend.getMetrics")
+    def get_metrics():
+        """返回 Prometheus-style 运行时指标"""
+        import os as _os
+        import time as _time
+        metrics = {
+            "pid": os.getpid(),
+            "uptime_sec": _time.time() - _time.monotonic(),
+            "memory_mb": 0,
+            "active_tasks": [],
+            "supervisor": {},
+        }
+        # 内存
+        try:
+            import psutil
+            proc = psutil.Process()
+            metrics["memory_mb"] = proc.memory_info().rss / 1024 / 1024
+        except Exception:
+            pass
+        # 任务
+        from store.task_store import TaskStore
+        try:
+            rows = TaskStore(multi_db.main_db)._db.execute(
+                "SELECT id, name, status, progress FROM analysis_tasks WHERE status IN ('running','queued')"
+            ).fetchall()
+            metrics["active_tasks"] = [dict(r) for r in rows]
+        except Exception:
+            pass
+        # supervisor
+        sv = getattr(multi_db, '_supervisor', None)
+        if sv:
+            metrics["supervisor"] = sv.get_status()
+        return metrics
 
     @server.register("backend.saveHttpConfig")
     def save_http_config(host: str = None, port: int = None):
@@ -2535,11 +2574,14 @@ async def _do_generate_project_summary(multi_db, project_id: str):
     logger.info(f"[generateProjectSummary] using model_id={model_id} model_name={models[0].get('name')}")
 
     try:
+        logger.info(f"[generateProjectSummary] calling LLM sync_chat model={model_id}")
+        _t0 = time.perf_counter()
         summary = await lm.sync_chat(
             messages=[{"role": "user", "content": prompt}],
             model_id=model_id,
         )
-        logger.info(f"[generateProjectSummary] LLM response received, raw_len={len(summary or '')}")
+        _dt = time.perf_counter() - _t0
+        logger.info(f"[generateProjectSummary] LLM response received in {_dt*1000:.0f}ms, raw_len={len(summary or '')}")
         summary = (summary or "").strip()
         if not summary:
             raise ValueError("LLM returned empty summary")

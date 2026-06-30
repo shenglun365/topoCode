@@ -118,6 +118,7 @@ export class PythonBridge {
       const httpHost = this.httpHost || '0.0.0.0'
 
       this.checkAndKillPortOccupant(dealerPort)
+      this.checkAndKillPortOccupant(httpPort)
 
       const backendDir = app.isPackaged
         ? join(process.resourcesPath, 'backend-core')
@@ -309,13 +310,19 @@ export class PythonBridge {
       const foreignPids = pids.filter(pid => pid !== myPid && pid !== electronPid)
       if (foreignPids.length > 0) {
         console.warn(`[PythonBridge] Port ${port} occupied, killing: ${foreignPids.join(', ')}`)
-        foreignPids.forEach(pid => {
+        for (const pid of foreignPids) {
           try {
-            execSync(process.platform === 'win32' ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`, { stdio: 'ignore' })
-          } catch {}
-        })
-        const start = Date.now()
-        while (Date.now() - start < 300) { /* busy-wait */ }
+            if (process.platform === 'win32') {
+              execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' })
+            } else {
+              // SIGTERM first — 让 SQLite 有机会完成 WAL checkpoint
+              execSync(`kill -15 ${pid}`, { stdio: 'ignore' })
+              execSync(`sleep 1`, { stdio: 'ignore' })
+              // 仍未退出则 SIGKILL
+              execSync(`kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore' })
+            }
+          } catch { /* ignore */ }
+        }
       }
     } catch { /* ignore */ }
   }

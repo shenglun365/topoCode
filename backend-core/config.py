@@ -63,7 +63,23 @@ ORPHAN_MAX_DEGREE = 0              # 仅移除完全无连接的节点（度为 
 INTRAn_FILE_EDGE_WEIGHT = 1.0       # 正常值
 INTRAn_FILE_EDGE_FALLBACK_WEIGHT = 0.1  # 备选方案时降权
 
-# 超大图阈值：节点数超过此值时自动切换为 Label Propagation（快 10-50x）
+# ==================== 进程架构模式 ====================
+# "monolith" — 单进程模式（默认）：所有 Worker 退化为线程池 / asyncio task，适用于开发/调试
+# "distributed" — 多进程模式：AST / LLM / Agent / DB Service 各为独立进程
+TOPO_MODE = os.environ.get("TOPO_MODE", "monolith")
+
+# 内部 ZMQ Bus 端口（distributed 模式）
+INTERNAL_BUS_PORT = int(os.environ.get("INTERNAL_BUS_PORT", "18760"))
+FRONTEND_ZMQ_PORT = int(os.environ.get("FRONTEND_ZMQ_PORT", "18761"))
+
+# DB Service 端口（distributed 模式 — DB Service 监听此端口接收 SQL 请求）
+DB_SERVICE_PORT = int(os.environ.get("DB_SERVICE_PORT", "18762"))
+
+# Agent Worker 端口（distributed 模式）
+AGENT_WORKER_PORT = int(os.environ.get("AGENT_WORKER_PORT", "18763"))
+AGENT_WORKER_PUB_PORT = int(os.environ.get("AGENT_WORKER_PUB_PORT", "18764"))
+
+# ==================== 超大图阈值 ====================
 LARGE_GRAPH_NODE_THRESHOLD = 5000
 
 # ==================== 日志配置 ====================

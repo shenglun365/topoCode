@@ -16,6 +16,7 @@ import zmq.asyncio
 
 from sqlite_ctx import MultiDBManager
 from rpc_ids import get_rpc_id
+from messaging.bus import MessageBus
 
 logger = logging.getLogger(__name__)
 
@@ -88,18 +89,21 @@ class ZMQServer:
                 f"Please stop the conflicting process or change the port in settings."
             )
 
-        # DEALER socket - 处理 RPC 请求
-        self.dealer = self.context.socket(zmq.DEALER)
+        # ROUTER socket - 处理 RPC 请求（自动管理身份识别，支持优雅重连）
+        self.dealer = self.context.socket(zmq.ROUTER)
         self.dealer.bind(f"tcp://127.0.0.1:{self.dealer_port}")
-        logger.info(f"DEALER bound to tcp://127.0.0.1:{self.dealer_port}")
+        logger.info(f"ROUTER bound to tcp://127.0.0.1:{self.dealer_port}")
 
         # PUB socket - 发布事件
         self.pub = self.context.socket(zmq.PUB)
         self.pub.bind(f"tcp://127.0.0.1:{self.pub_port}")
         logger.info(f"PUB bound to tcp://127.0.0.1:{self.pub_port}")
 
-        # 方法注册表
+        # 方法注册表（前端 RPC）
         self.methods: Dict[str, Callable] = {}
+
+        # 内部消息总线（Phase 1: 单进程内存; Phase 2+: 跨进程 ZMQ）
+        self.bus = MessageBus()
 
         # 运行状态
         self._running = False
@@ -125,63 +129,81 @@ class ZMQServer:
         """接收请求消息（仅 recv，不受超时限制影响）"""
         try:
             frames = await self.dealer.recv_multipart()
-            if len(frames) < 3:
+            # ROUTER socket 首帧为 peer identity（ZMQ 自动附加）
+            if len(frames) < 4:
                 logger.error(f"Invalid message format: {len(frames)} frames")
                 return None
             return frames
+        except asyncio.CancelledError:
+            # asyncio.wait_for 的超时 CancelledError，正常轮询行为
+            return None
         except Exception as e:
             logger.exception("Error receiving request")
             return None
 
-    _noisy_methods = {"backend.ping", "analysis.getAgentProgress", "analysis.getPreSummaryStatus"}
+    _noisy_methods = {"backend.ping", "analysis.getAgentProgress", "report.listSubDocs", "analysis.getPreSummaryStatus"}
 
     async def _process_request(self, frames):
         """处理请求并发送响应（独立任务，不受轮询超时限制）"""
-        call_id = uuid.uuid4().hex[:12]
-        token = current_call_id.set(call_id)
+        token = None
         try:
-            request_id = frames[0].decode("utf-8")
-            method_name = frames[1].decode("utf-8")
-            params = json.loads(frames[2])
+            # ROUTER: frames[0] = peer identity, frames[1..] = 业务帧
+            # 新协议(5帧): [identity, request_id, trace_id, method_name, params_json]
+            # 旧协议(4帧): [identity, request_id, method_name, params_json] (兼容)
+            if len(frames) < 4:
+                logger.error(f"[ROUTER] invalid frame count: {len(frames)}, expected >= 4")
+                return
+            identity = frames[0]
+            request_id = frames[1].decode("utf-8")
+            if len(frames) >= 5:
+                trace_id = frames[2].decode("utf-8")
+                method_name = frames[3].decode("utf-8")
+                params = json.loads(frames[4])
+            else:
+                trace_id = request_id  # 旧协议：用 request_id 作为 trace_id
+                method_name = frames[2].decode("utf-8")
+                params = json.loads(frames[3])
+            token = current_call_id.set(trace_id)
             api_id = get_rpc_id(method_name)
 
             if method_name not in self._noisy_methods:
-                logger.info(f"[{api_id}][{call_id}] → {method_name} {_brief_params(params)}")
+                logger.info(f"[{api_id}][{trace_id[:8]}] → {method_name} {_brief_params(params)}")
 
             # 调用注册的方法
             if method_name not in self.methods:
-                logger.warning(f"[{api_id}][{call_id}] Method not found: {method_name}")
+                logger.warning(f"[{api_id}][{trace_id[:8]}] Method not found: {method_name}")
                 error = {"code": -32601, "message": f"Method not found: {method_name}"}
                 result = None
             else:
                 try:
                     method = self.methods[method_name]
-                    # 支持异步和同步方法
                     result = method(**params)
                     if asyncio.iscoroutine(result):
                         result = await result
                     error = None
                 except Exception as e:
-                    logger.exception(f"[{api_id}][{call_id}] Error in {method_name}: {e}")
+                    logger.exception(f"[{api_id}][{trace_id[:8]}] Error in {method_name}: {e}")
                     result = None
                     error = {"code": -32000, "message": str(e)}
 
-            # 发送响应: [REQUEST_ID, RESULT_JSON, ERROR_JSON]
-            self.dealer.send_multipart([
+            # 发送响应: [IDENTITY, REQUEST_ID, RESULT_JSON, ERROR_JSON]
+            await self.dealer.send_multipart([
+                identity,
                 request_id.encode("utf-8"),
                 json.dumps(result, default=str).encode("utf-8"),
                 json.dumps(error, default=str).encode("utf-8"),
             ])
 
             if error:
-                logger.warning(f"[{api_id}][{call_id}] ← {method_name} error: {error.get('message', '')[:200]}")
+                logger.warning(f"[{api_id}][{trace_id[:8]}] ← {method_name} error: {error.get('message', '')[:200]}")
             elif method_name not in self._noisy_methods:
-                logger.info(f"[{api_id}][{call_id}] ← {method_name} ok")
+                logger.info(f"[{api_id}][{trace_id[:8]}] ← {method_name} ok")
 
         except Exception as e:
-            logger.exception(f"[{call_id}] Error processing request")
+            logger.exception(f"[ROUTER] Error processing request")
         finally:
-            current_call_id.reset(token)
+            if token is not None:
+                current_call_id.reset(token)
 
     async def handle_request(self):
         """接收请求并派发到独立任务处理"""
@@ -190,9 +212,15 @@ class ZMQServer:
             asyncio.create_task(self._process_request(frames))
 
     def publish(self, topic: str, event_type: str, data: dict):
-        """发布事件（线程安全，NOBLOCK 避免线程池中 event loop 冲突）"""
+        """发布事件（线程安全） — 同时发送到前端 ZMQ PUB + 内部总线"""
+        # 1) 内部总线：后端模块可订阅此事件
+        try:
+            self.bus.publish(f"{topic}.{event_type}", data)
+        except Exception:
+            pass
+        # 2) 前端 ZMQ PUB（线程安全，NOBLOCK 避免线程池中 event loop 冲突）
         if self.pub is None:
-            return  # 后端已关闭，静默丢弃
+            return
         try:
             self.pub.send_multipart([
                 topic.encode("utf-8"),
@@ -210,6 +238,8 @@ class ZMQServer:
     async def run(self):
         """运行服务器"""
         self._running = True
+        self._loop = asyncio.get_running_loop()
+        self.bus.start()
         logger.info("ZMQ Server started")
 
         # 注册后端状态事件
@@ -221,12 +251,14 @@ class ZMQServer:
 
         try:
             while self._running:
-                # handle_request 只负责接收消息 + 派发任务，非阻塞
-                # 0.5s 超时仅用于定期检查 self._running 标志（支持优雅关闭）
                 try:
-                    await asyncio.wait_for(self.handle_request(), timeout=0.5)
+                    frames = await asyncio.wait_for(
+                        self.dealer.recv_multipart(), timeout=10.0
+                    )
                 except asyncio.TimeoutError:
-                    continue
+                    continue  # 定期检查 _running
+                if frames and len(frames) >= 4:
+                    asyncio.create_task(self._process_request(frames))
         except (asyncio.CancelledError, Exception):
             logger.debug("Server loop exited")
         finally:

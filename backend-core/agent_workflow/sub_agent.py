@@ -13,6 +13,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
+from state_store import get_store as _get_state_store
 from .path_utils import to_abs, to_rel
 
 logger = logging.getLogger(__name__)
@@ -55,16 +56,13 @@ def _is_valid_summary(summary: str) -> bool:
 class SubAgent:
     """执行单次文件批处理 + 摘要任务。"""
 
-    # 预摘要失败计数（task_id → 累计失败数），用于绕过编译版 SummarizeFileTool 传值
-    _task_failed: dict[str, int] = {}
-
     @classmethod
     def get_failed(cls, task_id: str) -> int:
-        return cls._task_failed.get(task_id, 0)
+        return _get_state_store().get_subagent_failed(task_id)
 
     @classmethod
     def reset_failed(cls, task_id: str):
-        cls._task_failed.pop(task_id, None)
+        _get_state_store().reset_subagent_failed(task_id)
 
     def __init__(self, multi_db, project_root: str = "", model_id: str = "",
                  project_db=None, task_id: str = "",
@@ -257,8 +255,8 @@ class SubAgent:
             f"tokens_saved≈{tokens_saved}, tokens_used={total_tokens}"
         )
 
-        # 累积到类级别（供编译版工具链读取）
-        SubAgent._task_failed[task_id] = SubAgent._task_failed.get(task_id, 0) + failed
+        # 累积到 StateStore（Phase 0 双写兼容）
+        _get_state_store().set_subagent_failed(task_id, _get_state_store().get_subagent_failed(task_id) + failed)
 
         return SubAgentResult(
             files_processed=len(unique),

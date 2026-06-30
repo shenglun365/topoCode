@@ -62,7 +62,11 @@ async function loadOverviewDoc(silent = false) {
   if (!props.taskId) return false
   if (!silent) overviewLoading.value = true
   try {
-    const result = await ipc.report.listSubDocs({ taskId: props.taskId, commId: 'overall' })
+    // 10s 客户端超时，避免 ZMQ 消息丢失时无限等待
+    const result = await Promise.race([
+      ipc.report.listSubDocs({ taskId: props.taskId, commId: 'overall' }),
+      new Promise<any>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
+    ])
     const docs = result || []
     if (docs.length > 0) {
       const doc = docs[0]

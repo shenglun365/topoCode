@@ -33,7 +33,11 @@ export const useReportStore = defineStore('report', () => {
 
   async function checkReportExists(taskId: string) {
     try {
-      const docs = await ipc.report.listSubDocs({ taskId, commId: 'overall' })
+      // 10s 客户端超时，避免 ZMQ 消息丢失时阻塞 loadData
+      const docs = await Promise.race([
+        ipc.report.listSubDocs({ taskId, commId: 'overall' }),
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
+      ])
       dbReportExists.value = { ...dbReportExists.value, [taskId]: !!(docs?.length) }
     } catch {
       dbReportExists.value = { ...dbReportExists.value, [taskId]: false }
@@ -91,14 +95,18 @@ export const useReportStore = defineStore('report', () => {
 
     const promise = (async () => {
       try {
+        console.log('[report-store] loadDashboard sending getReportDashboard', { taskId })
         const dash = await ipc.analysis.getReportDashboard(taskId)
+        console.log('[report-store] loadDashboard received', { taskId, hasFileStats: !!dash?.fileStats, hasCallLevels: !!dash?.callLevels })
         if (dash) {
           dashboardCache.value = { ...dashboardCache.value, [taskId]: dash }
           // 注入社区数据到 communityStore
           const { useCommunityStore } = await import('./community-store')
           const commStore = useCommunityStore()
           if (dash.fileStats) {
+            console.log('[report-store] loadDashboard calling loadCommunitiesFromDashboard')
             await commStore.loadCommunitiesFromDashboard(taskId, dash)
+            console.log('[report-store] loadDashboard loadCommunitiesFromDashboard done')
           }
           // 加载外部依赖统计（并行，不阻塞）
           commStore.loadExternalStats(taskId).catch(() => {})
@@ -106,6 +114,7 @@ export const useReportStore = defineStore('report', () => {
         loading.value = { ...loading.value, [taskId]: false }
         return dash
       } catch (e) {
+        console.warn('[report-store] loadDashboard failed, fallback to direct IPC', { taskId, error: (e as any)?.message })
         // 备路径：dashboard 失败，回退到独立 IPC
         loading.value = { ...loading.value, [taskId]: false }
         const analysisStore = useAnalysisStore()

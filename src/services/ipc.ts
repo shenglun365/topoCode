@@ -260,9 +260,8 @@ function createRealIPC() {
         const rest: Record<string, any> = { ...options }
         delete rest.scopes
         delete rest.selectedExtensions
-        const callParams: Record<string, any> = { ...rest, scopes, selectedExtensions }
-        // 移除 undefined 值（Electron contextBridge structuredClone 不支持）
-        for (const k of Object.keys(callParams)) { if (callParams[k] === undefined) delete callParams[k] }
+        // JSON round-trip 去除 Vue reactive Proxy（contextBridge structuredClone 拒绝 Proxy）
+        const callParams: Record<string, any> = JSON.parse(JSON.stringify({ ...rest, scopes, selectedExtensions }))
         console.log('[IPC] scanFileStats callParams:', JSON.stringify(callParams))
         try {
           const result = await api.analysis.scanFileStats(projectId, callParams)

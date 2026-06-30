@@ -17,7 +17,8 @@ from typing import Optional
 from sqlite_ctx import MultiDBManager
 from store.task_store import TaskStore
 from store.analysis_store import AnalysisStore
-from analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task
+from analysis_utils import get_cascade_levels_impl, get_l0_comps
+from analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task, stop_ast_worker
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,8 @@ _FIELD_MAP = {
     "selectedExtensions": "selected_extensions",
 }
 
-# 预摘要失败计数（已迁移至 multi_db.cache_store，保留模块变量用于兼容）
-_ps_failed_counts: dict[str, int] = {}
-
-# rank 缓存（已迁移至 multi_db.cache_store，保留模块变量用于兼容）
-_rank_cache: dict[str, dict] = {}
+# 预摘要失败计数/rank缓存 → 已迁移至 multi_db.cache_store (StateStore)
+# 参见 state_store.py / analyst_runner.py
 
 
 def _resolve_node_list_items(items: list, task_id: str, project_db) -> dict[str, list[str]]:
@@ -188,6 +186,21 @@ def _compute_file_ranks(task_id: str, project_db, components: list,
 def register_analysis_methods(server, multi_db: MultiDBManager):
     """将所有 analysis.* 方法注册到 RPC 服务器"""
 
+    # ── distributed 模式的 Agent Proxy ────────────────────────────
+    from config import TOPO_MODE as _TOPO_MODE
+    _agent_proxy = None
+    if _TOPO_MODE == "distributed":
+        from messaging.remote import RemoteAgentManager
+        _agent_proxy = RemoteAgentManager()
+        logger.info("[analysis] distributed mode: agent RPC → RemoteAgentManager")
+
+    def _agent_mgr():
+        """返回 AgentTaskManager（本地）或 RemoteAgentManager（远程）"""
+        if _agent_proxy is not None:
+            return _agent_proxy
+        from agent_workflow.agent_queue import get_global_queue
+        return get_global_queue()
+
     @server.register("analysis.listTasks")
     def list_tasks(project_id=None, projectId=None):
         pid = project_id or projectId
@@ -204,11 +217,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         ).fetchall()
         running = [dict(r) for r in rows]
         try:
-            from agent_workflow.agent_queue import get_global_queue
-            q = get_global_queue()
-            for aid, state in list(q._tasks.items()):
-                if state.status.name in ('RUNNING', 'QUEUED'):
-                    running.append({"id": aid, "name": f"[Agent] {state.task_id}", "project_id": ""})
+            if _agent_proxy is not None:
+                remote_tasks = _agent_proxy.list_running_tasks()
+                running.extend(remote_tasks)
+            else:
+                mgr = _agent_mgr()
+                for aid, state in list(mgr._tasks.items()):
+                    if state.status.name in ('RUNNING', 'QUEUED'):
+                        running.append({"id": aid, "name": f"[Agent] {state.task_id}", "project_id": ""})
         except Exception:
             pass
         return running
@@ -506,6 +522,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 return {"taskId": tid, "status": "error"}
 
             set_stop_flag(tid)
+            # distributed 模式：终止 ast_worker 子进程
+            from config import TOPO_MODE
+            if TOPO_MODE == "distributed":
+                stop_ast_worker(tid)
             store.update_task_status(tid, "cancelled")
 
         # 发布事件
@@ -551,6 +571,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         start_time = time.time()
         asyncio.create_task(enqueue_analysis_task(server, multi_db, tid, run["id"], start_time))
+
+        # 立即让出事件循环，让 enqueue_analysis_task 有机会在 send 响应前执行
+        await asyncio.sleep(0)
 
         return run
 
@@ -1454,9 +1477,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             pre_summary['cached_count'] = cached
 
             # 尝试从社区计算总分批次（可能无社区数据，此时总文件数为 0）
-            comps = _get_l0_comps(project_db, tid)
-            project_root = _get_project_root(pid)
-            rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
+            # 优先使用管线预缓存的排名数据（避免同步 I/O 阻塞事件循环）
+            rank_data = multi_db.cache_store.get_file_ranks(tid)
+            if rank_data is None:
+                comps = get_l0_comps(project_db, tid)
+                project_root = _get_project_root(pid)
+                rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
             if rank_data:
                 pre_summary['counts'] = rank_data.get("counts", {'P0': 0, 'P1': 0, 'P2': 0})
                 pre_summary['total_files'] = len(rank_data.get("files", []))
@@ -1476,7 +1502,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             'preSummary': pre_summary,
         }
 
-    def _get_cascade_levels_impl(project_db, tid, et, pid=None):
+    def get_cascade_levels_impl(project_db, tid, et, pid=None):
         """getCascadeLevels 内部实现（无 RPC 注册）"""
         t_sql = time.perf_counter()
         rows = []
@@ -1639,7 +1665,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(task["project_id"])
         pid = task["project_id"]
 
-        result = _get_cascade_levels_impl(project_db, tid, et, pid=pid)
+        result = get_cascade_levels_impl(project_db, tid, et, pid=pid)
         logger.info("[analysis.getCascadeLevels] DONE task_id=%s edge_type=%s", tid, et)
         return result
 
@@ -2257,7 +2283,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 logger.info(f"[startOverview] overview already exists, skipping (use --force to regenerate)")
                 return {"taskId": tid, "success": True, "agentTaskId": None, "skipped": True}
 
-        # ── 构建上下文 ──
+        # ── distributed 模式 → Agent Worker ────────────────────────
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            context = {
+                "task_id": tid, "project_id": pid,
+                "project_name": project_name,
+                "project_summary": project_summary,
+            }
+            result = mgr.dispatch("overview", tid, context,
+                                  project_id=pid, project_root=project_root,
+                                  project_summary=project_summary)
+            return {"taskId": tid, "success": True, "agentTaskId": result.get("agent_id"), "skipped": False}
+
+        # ── 构建上下文（monolith）──
         from agent_workflow.router import create_default_router
         router = create_default_router(
             project_root=project_root, project_db=project_db, multi_db=multi_db,
@@ -2291,9 +2330,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         aid = agent_task_id or agentTaskId
         if not aid:
             raise ValueError("agent_task_id is required")
-        from agent_workflow.agent_queue import get_global_queue
-        queue = get_global_queue()
-        result = queue.get_progress(aid)
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            return mgr.get_progress(aid)
+        result = mgr.get_progress(aid)
         if not result:
             return {"found": False}
         return {**result, "found": True}
@@ -2303,9 +2343,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         aid = agent_task_id or agentTaskId
         if not aid:
             raise ValueError("agent_task_id is required")
-        from agent_workflow.agent_queue import get_global_queue
-        queue = get_global_queue()
-        ok = queue.cancel(aid)
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            return mgr.cancel(aid)
+        ok = mgr.cancel(aid)
         return {"cancelled": ok}
 
     @server.register("analysis.pauseAgentTask")
@@ -2313,9 +2354,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         aid = agent_task_id or agentTaskId
         if not aid:
             raise ValueError("agent_task_id is required")
-        from agent_workflow.agent_queue import get_global_queue
-        queue = get_global_queue()
-        ok = queue.pause(aid)
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            return mgr.pause(aid)
+        ok = mgr.pause(aid)
         return {"paused": ok}
 
     @server.register("analysis.resumeAgentTask")
@@ -2323,9 +2365,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         aid = agent_task_id or agentTaskId
         if not aid:
             raise ValueError("agent_task_id is required")
-        from agent_workflow.agent_queue import get_global_queue
-        queue = get_global_queue()
-        ok = queue.resume(aid)
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            return mgr.resume(aid)
+        ok = mgr.resume(aid)
         return {"resumed": ok}
 
     @server.register("analysis.startPipeline")
@@ -2345,6 +2388,20 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_root = _get_project_root(pid)
         project_summary = _get_project_summary(pid)
         project_name = task.get("name") or task.get("project_name") or pid
+
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            context = {
+                "task_id": tid, "project_id": pid,
+                "project_name": project_name,
+                "project_summary": project_summary,
+                "force": force,
+                "language": language or "",
+            }
+            result = mgr.dispatch("pipeline", tid, context,
+                                  project_id=pid, project_root=project_root,
+                                  project_summary=project_summary)
+            return {"taskId": tid, "success": True, "agentTaskId": result.get("agent_id"), "skipped": False}
 
         from agent_workflow.router import RouterHarness, RouteEntry
         from agent_workflow.workflows.pipeline import PipelineWorkflow
@@ -2382,6 +2439,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
+        mgr = _agent_mgr()
+        if _agent_proxy is not None:
+            return mgr.get_history(tid, offset, limit)
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
         if not task:
@@ -2408,10 +2468,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         s.clear_agent_task_history(pid, tid)
         return {"success": True}
 
-    def _get_l0_comps(project_db, tid):
+    def get_l0_comps(project_db, tid):
         """获取 L0 社区列表，INCLUDE 为空时回退到 CALL。"""
         for et in ("INCLUDE", "CALL"):
-            cascades = _get_cascade_levels_impl(project_db, tid, et)
+            cascades = get_cascade_levels_impl(project_db, tid, et)
             l0_items = []
             for l in cascades.get("levels", []):
                 if l.get("lv") == "L0":
@@ -2438,7 +2498,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # 缓存 rank_data（L0 组件和排名在分析完成后不变）
         rank_data = multi_db.cache_store.get_file_ranks(tid)
         if rank_data is None:
-            comps = _get_l0_comps(project_db, tid)
+            comps = get_l0_comps(project_db, tid)
             rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
             multi_db.cache_store.set_file_ranks(tid, rank_data)
 
@@ -2481,7 +2541,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         rank_data = multi_db.cache_store.get_file_ranks(tid)
         if rank_data is None:
-            comps = _get_l0_comps(project_db, tid)
+            comps = get_l0_comps(project_db, tid)
             rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
             multi_db.cache_store.set_file_ranks(tid, rank_data)
         batch_files = [f for f in rank_data["files"] if f["batch"] == batch]
@@ -2543,6 +2603,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         pid = task["project_id"]
         project_db = multi_db.get_project_db(pid)
         batches = batches or ["P0", "P1", "P2"]
+
+        # ── distributed 模式 → Agent Worker 内部链式处理 ──────────
+        if _agent_proxy is not None:
+            result = _agent_proxy._send("presummary_chain", {
+                "task_id": tid, "project_id": pid, "batches": batches,
+                "limit": limit, "subagent_concurrency": subagent_concurrency,
+                "project_root": _get_project_root(pid),
+                "project_summary": _get_project_summary(pid),
+            }, timeout=30.0)
+            return {"success": True, "batches": batches, "total": len(batches),
+                    "agentTaskId": result.get("agentTaskId", ""), "fileCount": 0}
+
         result = _chain_start_pre_summary(tid, pid, project_db, batches, 0, limit, subagent_concurrency)
         agent_task_id = result.get("agentTaskId", "") if result else ""
         file_count = result.get("fileCount", 0) if result else 0
@@ -2551,7 +2623,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     def _launch_pre_summary_batch(tid, pid, project_db, batch="P0", limit=0,
                                    subagent_concurrency=None, on_complete=None):
 
-        comps = _get_l0_comps(project_db, tid)
+        comps = get_l0_comps(project_db, tid)
 
         project_root = _get_project_root(pid)
         rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
@@ -2600,6 +2672,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "cached_paths": cached_paths,
             "subagent_concurrency": sub_conc,
         }
+
+        # ── distributed 模式 → Agent Worker ────────────────────────
+        if _agent_proxy is not None:
+            result = _agent_proxy.dispatch(
+                "presummary_files", tid, context,
+                project_id=pid, project_root=project_root,
+                project_summary=_get_project_summary(pid),
+            )
+            return {"success": True, "agentTaskId": result.get("agent_id"),
+                    "fileCount": len(batch_files)}
 
         from agent_workflow.router import create_default_router
         project_summary = _get_project_summary(pid)
@@ -3022,6 +3104,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 context["subagent_concurrency"] = sub_conc
                 if summary_model:
                     context["summary_model_id"] = summary_model
+            # ── distributed 模式 → Agent Worker ────────────────────
+            if _agent_proxy is not None:
+                result = _agent_proxy.dispatch(
+                    "analyze_components", tid, context,
+                    project_id=pid, project_root=project_root,
+                    project_summary=project_summary,
+                    comp_edge_lv=comp_edge_lv,
+                )
+                return {"success": True, "agentTaskId": result.get("agent_id"), "skipped": skipped}
+
             for c in context["components"]:
                 logger.info(
                     f"[analyzeComponents] component id={c['id']} type={c['type']} "
@@ -3059,7 +3151,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         lv = level or "L0"
         mid = model_id or modelId or ""
 
-        result = _get_cascade_levels_impl(project_db, tid, et)
+        result = get_cascade_levels_impl(project_db, tid, et)
         communities = []
         for lv_item in result.get("levels", []):
             if lv_item.get("lv") == lv:

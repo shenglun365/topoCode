@@ -54,3 +54,4 @@ class Provenance(str, Enum):
     RESOLUTION  = "resolution"
     SYNTHESIZER = "synthesizer"
     FRAMEWORK   = "framework"
+    PATTERN     = "pattern"

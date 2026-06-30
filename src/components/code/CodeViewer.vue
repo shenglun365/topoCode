@@ -6,6 +6,7 @@ import 'highlight.js/styles/github-dark.css'
 import MarkdownIt from 'markdown-it'
 import type { FileTreeNode } from '@/types/ipc'
 import { useComponentId } from '@/composables/useComponentId'
+import { useFileReader } from '@/composables/useFileReader'
 
 const { showId, componentId } = useComponentId('CD-009')
 const props = defineProps<{
@@ -19,19 +20,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const content = ref('')
+const { content, loading, readFile } = useFileReader()
 const highlightedLines = ref<string[]>([])
 const markdownHtml = ref('')
-const loading = ref(true)
 const error = ref<string | null>(null)
 
-// 判断是否为 markdown 文件
 const isMarkdown = computed(() => {
   const ext = (props.node.name || '').split('.').pop()?.toLowerCase()
   return ext === 'md' || ext === 'markdown'
 })
 
-// 大文件保护：最多渲染 5000 行
 const MAX_LINES = 5000
 const totalLines = ref(0)
 const truncated = ref(false)
@@ -46,7 +44,6 @@ const visibleData = computed(() => {
   return result
 })
 
-// Markdown 渲染
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -57,7 +54,6 @@ const md = new MarkdownIt({
       try {
         return hljs.highlight(str, { language: lang }).value
       } catch (e) {
-        // 忽略高亮错误
       }
     }
     return escapeHtml(str)
@@ -72,7 +68,6 @@ function renderMarkdown() {
   markdownHtml.value = md.render(content.value)
 }
 
-// 语法高亮 — 整体高亮后按行分割
 function applyHighlight() {
   if (!content.value) {
     highlightedLines.value = []
@@ -140,47 +135,36 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
-// 读取文件
 async function loadFileContent() {
-  if (!props.node.path || props.node.type === 'directory') {
+  if (props.node.type === 'directory') {
     error.value = t('preview.isDirectory')
-    loading.value = false
     return
   }
 
-  loading.value = true
   error.value = null
 
-  try {
-    if (window.api && window.api.fs) {
-      const fullPath = props.rootPath + '/' + props.node.path
-      const result = await window.api.fs.readFile(fullPath)
-      content.value = result
-      const lines = result.split('\n')
-      truncated.value = lines.length > MAX_LINES
-      totalLines.value = lines.length
+  const result = await readFile(props.node, props.rootPath)
+  if (!result.success) {
+    error.value = result.error === 'electronOnly' ? t('preview.electronOnly') : (result.error || t('common.loadFailed'))
+    return
+  }
 
-      if (isMarkdown.value) {
-        renderMarkdown()
-      } else {
-        applyHighlight()
-      }
-    } else {
-      error.value = t('preview.electronOnly')
-    }
-  } catch (err: any) {
-    error.value = err?.message || t('common.loadFailed')
-  } finally {
-    loading.value = false
+  const lines = content.value.split('\n')
+  truncated.value = lines.length > MAX_LINES
+  totalLines.value = lines.length
+
+  if (isMarkdown.value) {
+    renderMarkdown()
+  } else {
+    applyHighlight()
   }
 }
 
-onMounted(async () => {
-  await loadFileContent()
+onMounted(() => {
+  loadFileContent()
 })
 
 watch(() => props.node, () => {
-  content.value = ''
   loadFileContent()
 }, { deep: true })
 

@@ -65,6 +65,13 @@ export class ZMQRouter extends EventEmitter {
       this.sub.subscribe('llm')
       console.log(`[ZMQRouter] SUB connected to tcp://${ZMQ_HOST}:${ZMQ_PUB_PORT}`)
 
+      // 重连成功后，清空旧的 pending 请求（它们在新连接上不会有响应）
+      for (const [_id, pending] of this.pendingRequests) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('Backend reconnected'))
+      }
+      this.pendingRequests.clear()
+
       this.connected = true
       this.reconnectAttempts = 0
       this.startListening()
@@ -129,6 +136,10 @@ export class ZMQRouter extends EventEmitter {
     })()
   }
 
+  private genTraceId(): string {
+    return `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  }
+
   /** 发送 RPC 请求 */
   async call<T = any>(method: string, params: Record<string, any> = {}): Promise<T> {
     if (!this.connected || !this.dealer) {
@@ -136,24 +147,39 @@ export class ZMQRouter extends EventEmitter {
     }
 
     const requestId = `req-${++this.requestCounter}`
+    const traceId = this.genTraceId()
+
+    const timeoutMap: Record<string, number> = {
+      'project.import': 900000,
+      'analysis.listTasks': 300000,
+      'analysis.runTask': 600000,
+      'analysis.clearProjectCacheTable': 120000,
+      'report.generateProjectSummary': 120000,
+      'analysis.getPreSummaryStatus': 120000,
+      'report.listSubDocs': 120000,
+      'analysis.getCascadeLevels': 120000,
+      'analysis.listCommunityResults': 120000,
+      'analysis.getCommunityGraph': 120000,
+      'analysis.getExternalStats': 120000,
+      'analysis.getFileDetail': 120000,
+      'analysis.getSymbolDetail': 120000,
+    }
+    const timeout = timeoutMap[method] || 30000
+
+    // zeromq v6 Dealer.send 是 async——必须 await，否则连续快速发送会丢失消息
+    const frames = [requestId, traceId, method, JSON.stringify(params)]
+    try {
+      await this.dealer.send(frames)
+    } catch (err: any) {
+      throw new Error(`ZMQ send failed: ${err.message}`)
+    }
 
     return new Promise<T>((resolve, reject) => {
-      const timeoutMap: Record<string, number> = {
-        'project.import': 900000,
-        'analysis.runTask': 600000,
-        'analysis.clearProjectCacheTable': 120000,
-        'report.generateProjectSummary': 120000,
-      }
-      const timeout = timeoutMap[method] || 30000
-
       const timer = setTimeout(() => {
         this.pendingRequests.delete(requestId)
         reject(new Error(`Request timeout: ${method} (${timeout / 1000}s)`))
       }, timeout)
-
       this.pendingRequests.set(requestId, { resolve, reject, timer })
-
-      this.dealer.send([requestId, method, JSON.stringify(params)])
     })
   }
 

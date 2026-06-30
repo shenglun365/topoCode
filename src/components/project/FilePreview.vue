@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   DocumentIcon,
@@ -11,6 +11,7 @@ import type { FileTreeNode } from '@/types/ipc'
 import { useProjectStore } from '@/stores/project'
 import { useDebugStore } from '@/stores/debug'
 import { useComponentId } from '@/composables/useComponentId'
+import { useFileReader } from '@/composables/useFileReader'
 
 const { showId, componentId } = useComponentId('PR-010')
 const debug = useDebugStore()
@@ -28,8 +29,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
-const content = ref('')
-const loading = ref(true)
+const { content, loading, readFile } = useFileReader()
 const error = ref<string | null>(null)
 const isBinary = ref(false)
 const lineCount = ref(0)
@@ -48,58 +48,42 @@ function isBinaryFile(fileName: string): boolean {
   return binaryExtensions.has(`.${ext}`)
 }
 
-// 读取文件内容
 async function loadFileContent() {
   debug.log('FilePreview', `[loadFileContent] ${props.node.type}: ${props.node.name}, path=${props.node.path}`)
   if (!props.node.path) {
     debug.log('FilePreview', `  → no path, returning`)
     return
   }
-  // 目录不可读取
-  if (props.node.type === 'directory') {
-    debug.log('FilePreview', `  → BLOCKED (directory)`)
-    error.value = t('preview.isDirectory')
-    loading.value = false
-    return
-  }
 
-  loading.value = true
   error.value = null
   isBinary.value = false
 
-  // 检测二进制文件
+  if (props.node.type === 'directory') {
+    debug.log('FilePreview', `  → BLOCKED (directory)`)
+    error.value = t('preview.isDirectory')
+    return
+  }
+
   if (isBinaryFile(props.node.name)) {
     isBinary.value = true
-    loading.value = false
     return
   }
 
-  // 检测大文件
   if (props.node.size && props.node.size > 5 * 1024 * 1024) {
     error.value = t('preview.fileTooLarge')
-    loading.value = false
     return
   }
 
-  try {
-    // Electron 环境：通过主进程读取文件
-    if (window.api && window.api.fs) {
-      const fullPath = props.rootPath + '/' + props.node.path
-      const result = await window.api.fs.readFile(fullPath)
-      content.value = result
-      lineCount.value = result.split('\n').length
-    } else {
-      // 浏览器环境：提示不可用
-      error.value = t('preview.electronOnly')
-    }
-  } catch (err: any) {
-    error.value = err.message || t('preview.readFailed')
-  } finally {
-    loading.value = false
+  const result = await readFile(props.node, props.rootPath)
+  if (result.success) {
+    lineCount.value = content.value.split('\n').length
+  } else if (result.error === 'electronOnly') {
+    error.value = t('preview.electronOnly')
+  } else {
+    error.value = result.error || t('preview.readFailed')
   }
 }
 
-// 语法高亮（简单实现，后续可替换为 Shiki）
 const highlightedLines = computed(() => {
   if (!content.value) return []
   return content.value.split('\n')

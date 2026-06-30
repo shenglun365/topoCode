@@ -59,7 +59,7 @@ class AnalysisStore:
             self._db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sf_file_path ON source_files(file_path)"
             )
-            self._db.commit()
+            # 不调 commit() — WriteQueue 已自动提交 CREATE INDEX
             AnalysisStore._indexes_ensured = True
         except Exception:
             pass
@@ -317,8 +317,8 @@ class AnalysisStore:
                      batch_size: int = BATCH_INSERT_SIZE) -> bool:
         """
         事务保护的批量插入。
-        - 优先通过 WriteQueue 批次提交（原子性）
-        - 无 WriteQueue 时直接裸连接 + BEGIN IMMEDIATE（防止 kill 半截数据）
+        - 有 WriteQueue 时通过 WQ 批提交（原子性，无需 _lock）
+        - 无 WriteQueue 时直接连接 + BEGIN IMMEDIATE（需要 _lock 防并发）
         """
         if not rows:
             return True
@@ -329,46 +329,46 @@ class AnalysisStore:
             wq.execute_batch(label, items)
             return True
         # Fallback: direct connection with explicit transaction
-        conn = self._db.conn
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-            for i in range(0, len(rows), batch_size):
-                batch = rows[i:i + batch_size]
-                conn.executemany(sql, batch)
-            conn.commit()
-            return True
-        except Exception:
+        with self._db._lock:
+            conn = self._db.conn
             try:
-                conn.rollback()
+                conn.execute("BEGIN IMMEDIATE")
+                for i in range(0, len(rows), batch_size):
+                    batch = rows[i:i + batch_size]
+                    conn.executemany(sql, batch)
+                conn.commit()
+                return True
             except Exception:
-                pass
-            raise
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
 
     def bulk_insert_graph_nodes(self, nodes: List[Dict]):
         """批量插入图节点（v2 schema）"""
         if not nodes:
             return
-        with self._db._lock:
-            rows = [
-                (
-                    n["id"], n["task_id"], n["kind"], n["name"],
-                    n.get("qualified_name", ""), n.get("file_path", ""),
-                    n.get("file_id", ""), n.get("language", ""),
-                    n["start_line"], n["start_col"], n["end_line"], n["end_col"],
-                    n.get("signature", ""), n.get("visibility", ""),
-                    n.get("is_exported", 0), n.get("is_async", 0), n.get("is_static", 0),
-                    n.get("docstring", ""), n.get("decorators", ""), n.get("type_parameters", ""),
-                )
-                for n in nodes
-            ]
-            self._bulk_insert("""
-                INSERT OR REPLACE INTO graph_node (
-                    id, task_id, kind, name, qualified_name, file_path, file_id, language,
-                    start_line, start_col, end_line, end_col,
-                    signature, visibility, is_exported, is_async, is_static,
-                    docstring, decorators, type_parameters
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, rows)
+        rows = [
+            (
+                n["id"], n["task_id"], n["kind"], n["name"],
+                n.get("qualified_name", ""), n.get("file_path", ""),
+                n.get("file_id", ""), n.get("language", ""),
+                n["start_line"], n["start_col"], n["end_line"], n["end_col"],
+                n.get("signature", ""), n.get("visibility", ""),
+                n.get("is_exported", 0), n.get("is_async", 0), n.get("is_static", 0),
+                n.get("docstring", ""), n.get("decorators", ""), n.get("type_parameters", ""),
+            )
+            for n in nodes
+        ]
+        self._bulk_insert("""
+            INSERT OR REPLACE INTO graph_node (
+                id, task_id, kind, name, qualified_name, file_path, file_id, language,
+                start_line, start_col, end_line, end_col,
+                signature, visibility, is_exported, is_async, is_static,
+                docstring, decorators, type_parameters
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
 
     def get_graph_nodes(self, task_id: str, kind: str = None) -> List[Dict]:
         if kind:
@@ -402,22 +402,21 @@ class AnalysisStore:
         """批量插入关系边"""
         if not edges:
             return
-        with self._db._lock:
-            rows = [
-                (
-                    e["id"], e["task_id"], e["source_id"], e["target_id"],
-                    e["kind"], e.get("provenance", "parser"),
-                    e.get("line", 0), e.get("col", 0),
-                    e.get("file_path", ""), e.get("metadata", ""),
-                )
-                for e in edges
-            ]
-            self._bulk_insert("""
-                INSERT OR REPLACE INTO graph_edge (
-                    id, task_id, source_id, target_id, kind, provenance,
-                    line, col, file_path, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, rows)
+        rows = [
+            (
+                e["id"], e["task_id"], e["source_id"], e["target_id"],
+                e["kind"], e.get("provenance", "parser"),
+                e.get("line", 0), e.get("col", 0),
+                e.get("file_path", ""), e.get("metadata", ""),
+            )
+            for e in edges
+        ]
+        self._bulk_insert("""
+            INSERT OR REPLACE INTO graph_edge (
+                id, task_id, source_id, target_id, kind, provenance,
+                line, col, file_path, metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
 
     def get_graph_edges(self, task_id: str, kind: str = None) -> List[Dict]:
         if kind:
@@ -594,29 +593,28 @@ class AnalysisStore:
 
     def clear_task_data(self, task_id: str):
         """清理指定任务的所有分析数据（重运行时调用）"""
-        with self._db._lock:
-            self._db.execute(
-                "DELETE FROM graph_node WHERE task_id = ?", (task_id,)
-            )
-            self._db.execute(
-                "DELETE FROM graph_edge WHERE task_id = ?", (task_id,)
-            )
-            self._db.execute(
-                "DELETE FROM graph_doc WHERE task_id = ?", (task_id,)
-            )
-            self._db.execute(
-                "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
-            )
-            self._db.execute(
-                "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
-            )
-            self._db.execute(
-                "DELETE FROM report_subdocs WHERE task_id = ?", (task_id,)
-            )
-            self._db.execute(
-                "DELETE FROM file_summaries WHERE task_id = ?", (task_id,)
-            )
-            self._db.commit()
+        self._db.execute(
+            "DELETE FROM graph_node WHERE task_id = ?", (task_id,)
+        )
+        self._db.execute(
+            "DELETE FROM graph_edge WHERE task_id = ?", (task_id,)
+        )
+        self._db.execute(
+            "DELETE FROM graph_doc WHERE task_id = ?", (task_id,)
+        )
+        self._db.execute(
+            "DELETE FROM community_hierarchy WHERE task_id = ?", (task_id,)
+        )
+        self._db.execute(
+            "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
+        )
+        self._db.execute(
+            "DELETE FROM report_subdocs WHERE task_id = ?", (task_id,)
+        )
+        self._db.execute(
+            "DELETE FROM file_summaries WHERE task_id = ?", (task_id,)
+        )
+        # WriteQueue 已自动提交每个 DELETE，不重复 commit
         logger.info(f"[AnalysisStore] clear_task_data: task_id={task_id}")
 
     def clear_communities_for_task(self, task_id: str, edge_type: str):
@@ -641,7 +639,7 @@ class AnalysisStore:
             self._db.execute(
                 "DELETE FROM community_llm_results WHERE task_id = ?", (task_id,)
             )
-        self._db.commit()
+        # WriteQueue 已自动提交每个 DELETE，不重复 commit
         logger.info(
             f"[AnalysisStore] clear_communities_for_task: task_id={task_id}, edge_type={edge_type}"
         )

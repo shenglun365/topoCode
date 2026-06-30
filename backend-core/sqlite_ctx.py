@@ -10,6 +10,8 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
+from config import TOPO_MODE
+
 logger = logging.getLogger(__name__)
 
 from data_layer.write_queue import is_write_sql
@@ -61,7 +63,6 @@ class SQLiteContext:
                     self._conn = None
                     if "disk I/O error" not in str(e) and "unable to open" not in str(e).lower():
                         raise
-                    # 清理 WAL/SHM 残留后重试
                     for ext in ("-wal", "-shm"):
                         extra = self.db_path + ext
                         if _os.path.exists(extra):
@@ -75,19 +76,23 @@ class SQLiteContext:
                 logger.warning(f"[SQLite] WAL failed for {self.db_path}, falling back to DELETE: {last_err}")
                 self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
                 self._conn.row_factory = sqlite3.Row
-                self._conn.execute("PRAGMA journal_mode=DELETE")
-                logger.info(f"[SQLite] opened {self.db_path} in DELETE mode")
-            # Step 3: 公共 PRAGMA 设置
-            self._conn.execute("PRAGMA foreign_keys=ON")
-            self._conn.execute("PRAGMA busy_timeout=5000")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._conn.execute("PRAGMA cache_size=10000")
-            # 共享连接给 WriteQueue（避免 dual connection 造成的 WAL 争用）
-            if self._wq and self._label:
                 try:
-                    self._wq.register_conn(self._label, self._conn)
+                    self._conn.execute("PRAGMA journal_mode=DELETE")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"[SQLite] DELETE mode also failed for {self.db_path}: {e}")
+                logger.info(f"[SQLite] opened {self.db_path} in fallback mode")
+            # Step 3: 公共 PRAGMA 设置（逐句容错）
+            for _pragma in [
+                "PRAGMA foreign_keys=ON",
+                "PRAGMA busy_timeout=5000",
+                "PRAGMA synchronous=NORMAL",
+                "PRAGMA cache_size=10000",
+            ]:
+                try:
+                    self._conn.execute(_pragma)
                 except Exception:
                     pass
+            # WriteQueue 各自管理自己的连接，不再共享（WAL 模式支持并发读写）
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -139,15 +144,10 @@ class SQLiteContext:
         self.conn.executemany(sql, params_list)
 
     def commit(self):
-        """提交事务（有 WriteQueue 时通过 WQ 串行化，避免连接争用）"""
+        """提交事务。WriteQueue 模式下单句写入已自提交，此为兼容空操作。"""
         if self._wq and self._label:
-            self._wq.execute_sync(self._label, "COMMIT", ())
             return
-        try:
-            self.conn.commit()
-        except sqlite3.OperationalError as e:
-            if "cannot commit" not in str(e):
-                raise
+        self.conn.commit()
 
     def insert(self, table: str, data: dict) -> str:
         """插入数据，返回 ID"""
@@ -1086,40 +1086,52 @@ class MultiDBManager:
         self.data_dir = data_dir
         os.makedirs(self.data_dir, exist_ok=True)
 
-        from data_layer.write_queue import WriteQueue
-        self._write_queue = WriteQueue()
+        if TOPO_MODE == "distributed":
+            from messaging.remote import RemoteWriteQueue, RemoteCacheStore
+            self._write_queue = RemoteWriteQueue()
+            self._cache_store = RemoteCacheStore(self._write_queue)
+            self._duckdb = None  # DuckDB 运行在 DB Service 进程
+            self._is_remote = True
+            logger.info("[MultiDB] distributed mode — all writes via RemoteWriteQueue")
+        else:
+            from data_layer.write_queue import WriteQueue
+            self._write_queue = WriteQueue()
+            from data_layer.cache_store import CacheStore
+            cache_dir = os.path.join(self.data_dir, "cache")
+            self._cache_store = CacheStore(cache_dir)
+            from data_layer.duckdb_reader import DuckDBReader
+            self._duckdb = DuckDBReader(self)
+            self._is_remote = False
 
         # 初始化主库
         main_db_path = os.path.join(self.data_dir, "topoone.db")
         self._write_queue.register_db("main", main_db_path)
         self.main_db = SQLiteContext(main_db_path, label="main",
                                      write_queue=self._write_queue)
-        self._init_main_tables()
+        if self._is_remote:
+            self._init_main_tables_remote()
+        else:
+            self._init_main_tables()
 
         # 初始化知识库
         knowledge_db_path = os.path.join(self.data_dir, "knowledge.db")
         self._write_queue.register_db("knowledge", knowledge_db_path)
         self.knowledge_db = SQLiteContext(knowledge_db_path, label="knowledge",
                                           write_queue=self._write_queue)
-        self._init_knowledge_tables()
+        if not self._is_remote:
+            self._init_knowledge_tables()
 
         # 初始化会话库
         sessions_db_path = os.path.join(self.data_dir, "sessions.db")
         self._write_queue.register_db("sessions", sessions_db_path)
         self.sessions_db = SQLiteContext(sessions_db_path, label="sessions",
                                          write_queue=self._write_queue)
-        self._init_sessions_tables()
+        if not self._is_remote:
+            self._init_sessions_tables()
 
         # 项目库 LRU 缓存 (max=3)
         self._project_db_cache: OrderedDict[str, SQLiteContext] = OrderedDict()
         self._project_db_max = 3
-
-        from data_layer.cache_store import CacheStore
-        cache_dir = os.path.join(self.data_dir, "cache")
-        self._cache_store = CacheStore(cache_dir)
-
-        from data_layer.duckdb_reader import DuckDBReader
-        self._duckdb = DuckDBReader(self)
 
     @property
     def write_queue(self):
@@ -1132,6 +1144,18 @@ class MultiDBManager:
     @property
     def duckdb(self):
         return self._duckdb
+
+    def _init_main_tables_remote(self):
+        """远程初始化主库表结构（通过 RemoteWriteQueue 发送到 DB Service）"""
+        self._write_queue.execute_sync("main", MAIN_DB_TABLES_SQL, (), timeout=60)
+        try:
+            self._write_queue.execute_sync("main", KNOWLEDGE_DB_TABLES_SQL, (), timeout=60)
+        except Exception:
+            pass
+        try:
+            self._write_queue.execute_sync("main", SESSIONS_DB_TABLES_SQL, (), timeout=60)
+        except Exception:
+            pass
 
     def _init_main_tables(self):
         """初始化主库表"""
@@ -1194,11 +1218,13 @@ class MultiDBManager:
             ],
         }
         for table, columns in columns_to_add.items():
+            if not columns:
+                continue
+            cursor = self.main_db.execute(f"PRAGMA table_info({table})")
+            existing = {row[1] for row in cursor.fetchall()}
             for col_name, col_type in columns:
-                try:
+                if col_name not in existing:
                     self.main_db.execute(f'ALTER TABLE {table} ADD COLUMN "{col_name}" {col_type}')
-                except Exception:
-                    pass  # 列已存在，忽略
 
         # 迁移: 创建新表（project_groups + project_group_map）
         self.main_db.conn.executescript("""
@@ -1262,14 +1288,17 @@ class MultiDBManager:
             return ""
 
     def init_project_db(self, project_id: str, project_root: str = None):
-        """创建并初始化项目库"""
+        """创建并初始化项目库（distributed 模式通过 WriteQueue → DB Service）"""
         db_path = self._project_db_path(project_id, project_root)
         label = f"project:{project_id}"
         self._write_queue.register_db(label, db_path)
         project_db = SQLiteContext(db_path, label=label,
                                    write_queue=self._write_queue)
-        project_db.conn.executescript(PROJECT_DB_TABLES_SQL)
-        project_db.conn.commit()
+        if self._is_remote:
+            self._write_queue.execute_sync(label, PROJECT_DB_TABLES_SQL, (), timeout=60)
+        else:
+            project_db.conn.executescript(PROJECT_DB_TABLES_SQL)
+            project_db.conn.commit()
         return project_db
 
     def _migrate_project_db(self, project_db: SQLiteContext):
@@ -1517,8 +1546,12 @@ class MultiDBManager:
         else:
             label = f"project:{project_id}"
             self._write_queue.register_db(label, db_path)
-            project_db = SQLiteContext(db_path, label=label,
-                                       write_queue=self._write_queue)
+            try:
+                project_db = SQLiteContext(db_path, label=label,
+                                           write_queue=self._write_queue)
+            except Exception as e:
+                logger.error(f"[get_project_db] failed to open {db_path}: {e}")
+                raise
             self._migrate_project_db(project_db)
 
         # 加入缓存
@@ -1565,3 +1598,5 @@ class MultiDBManager:
         for db in self._project_db_cache.values():
             db.close()
         self._project_db_cache.clear()
+        if self._is_remote:
+            self._write_queue.shutdown()

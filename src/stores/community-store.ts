@@ -142,17 +142,23 @@ export const useCommunityStore = defineStore('community', () => {
   async function loadCommunities(taskId: string, projectId: string) {
     const key = _inflightKey(taskId, 'loadCommunities')
     const existing = _inflightLoads.get(key)
-    if (existing) return existing
+    if (existing) {
+      console.log('[community-store] loadCommunities reuse inflight', { taskId, key })
+      return existing
+    }
+    console.log('[community-store] loadCommunities start', { taskId, projectId })
 
     const promise = (async () => {
       const t = ensureTask(taskId)
       try {
+        const _t0 = Date.now()
         const [callLevels, depLevels, callResults, depResults] = await Promise.all([
-          ipc.analysis.getCascadeLevels(taskId, 'CALL').catch(() => null),
-          ipc.analysis.getCascadeLevels(taskId, 'INCLUDE').catch(() => null),
-          ipc.analysis.listCommunityResults(taskId, 'CALL').catch(() => ({ results: [] })),
-          ipc.analysis.listCommunityResults(taskId, 'INCLUDE').catch(() => ({ results: [] })),
+          ipc.analysis.getCascadeLevels(taskId, 'CALL').catch((e: any) => { console.warn('[community-store] getCascadeLevels CALL failed', e?.message); return null }),
+          ipc.analysis.getCascadeLevels(taskId, 'INCLUDE').catch((e: any) => { console.warn('[community-store] getCascadeLevels INCLUDE failed', e?.message); return null }),
+          ipc.analysis.listCommunityResults(taskId, 'CALL').catch((e: any) => { console.warn('[community-store] listCommunityResults CALL failed', e?.message); return ({ results: [] }) }),
+          ipc.analysis.listCommunityResults(taskId, 'INCLUDE').catch((e: any) => { console.warn('[community-store] listCommunityResults INCLUDE failed', e?.message); return ({ results: [] }) }),
         ])
+        console.log('[community-store] loadCommunities 4 requests done', { taskId, ms: Date.now() - _t0 })
         const llmMap: Record<string, any> = {}
         for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
@@ -258,6 +264,7 @@ export const useCommunityStore = defineStore('community', () => {
     const key = _inflightKey(taskId, 'loadCommunitiesFromDashboard')
     const existing = _inflightLoads.get(key)
     if (existing) return existing
+    console.log('[community-store] loadCommunitiesFromDashboard start', { taskId, hasCallLevels: !!dash?.callLevels, hasDepLevels: !!dash?.depLevels })
 
     const promise = (async () => {
       const t = ensureTask(taskId)
@@ -1097,7 +1104,6 @@ export const useCommunityStore = defineStore('community', () => {
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections, triggerOverview,
     pushError, clearErrorLogs, clearTask,
     addAgentTask, updateAgentTask, updateAgentStep, triggerComponentAnalysis,
-    setTimeline, setCompareMode,
     loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
     cancelAgentPolling, cancelAgentTask, pauseAgentTask, resumeAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary, startPreSummaryPipeline,

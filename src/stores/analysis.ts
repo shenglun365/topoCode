@@ -53,14 +53,26 @@ export const useAnalysisStore = defineStore('analysis', () => {
     error: tasks.value.filter(t => t.status === 'error').length,
   }))
 
-  // Actions
+  const _inflightLoad = new Map<string, Promise<AnalysisTask[]>>()
+
   async function loadTasks(projectId: string) {
-    loading.value = true
-    try {
-      tasks.value = await ipc.analysis.listTasks(projectId)
-    } finally {
-      loading.value = false
+    const inflight = _inflightLoad.get(projectId)
+    if (inflight) {
+      logger.debug('loadTasks dedup in-flight request')
+      tasks.value = await inflight
+      return
     }
+    loading.value = true
+    const promise = (async () => {
+      try {
+        return await ipc.analysis.listTasks(projectId)
+      } finally {
+        _inflightLoad.delete(projectId)
+        loading.value = false
+      }
+    })()
+    _inflightLoad.set(projectId, promise)
+    tasks.value = await promise
   }
 
   async function createTask(params: { projectId: string; type: string; name: string; scope?: string; scopes?: string[]; extensions?: string[]; excludeDirs?: string[]; reportTypes?: string[] }) {

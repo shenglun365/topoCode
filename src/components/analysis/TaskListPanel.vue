@@ -142,12 +142,18 @@ function onViewDetail(task: AnalysisTask) {
   detailTask.value = task
 }
 
+const _stopping = ref(false)
+
 async function onStopTask(taskId: string) {
+  if (_stopping.value) return
+  _stopping.value = true
   try {
     await analysisStore.stopTask(taskId)
     await loadTasks()
   } catch (err) {
     console.error('Failed to stop task:', err)
+  } finally {
+    _stopping.value = false
   }
 }
 
@@ -433,17 +439,6 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status === 'error'"
-            class="btn btn-ghost btn-xs"
-            :title="t('analysis.retryTask')"
-            :disabled="analysisStore.isTaskLoading(task.id)"
-            @click="onRerunTask(task.id)"
-          >
-            <ArrowPathIcon class="w-3.5 h-3.5" />
-            <span>{{ t('analysis.retryTask') }}</span>
-          </button>
-
-          <button
             v-if="task.status === 'pending'"
             class="btn btn-ghost btn-xs btn-primary"
             :title="t('analysis.runTask')"
@@ -455,7 +450,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status !== 'running' && task.status !== 'pending' && task.status !== 'done'"
+            v-if="task.status !== 'running' && !['pending','done'].includes(task.status)"
             class="btn btn-ghost btn-xs"
             :title="t('analysis.rerunTask')"
             :disabled="analysisStore.isTaskLoading(task.id)"

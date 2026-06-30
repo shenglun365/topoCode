@@ -18,9 +18,9 @@ export function communityIdLabel(communityId: string): string {
  * Uses AI-generated name if available and distinct from ID,
  * otherwise falls back to compact ID label.
  */
-export function communityLabel(item: { communityId: string; name?: string | null }): string {
+export function communityLabel(item: { communityId: string; name?: string | null }, maxLength = 14): string {
   if (item.name && item.name !== item.communityId) {
-    return item.name.length > 14 ? item.name.slice(0, 14) + '\u2026' : item.name
+    return item.name.length > maxLength ? item.name.slice(0, maxLength) + '\u2026' : item.name
   }
   return communityIdLabel(item.communityId)
 }

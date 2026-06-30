@@ -10,6 +10,8 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import subprocess
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +23,7 @@ from config import (
     PARSE_WORKERS, PARSE_THREAD_PREFIX, PROGRESS_INTERVAL,
     COMMUNITY_MIN_NODE_INCLUDE, COMMUNITY_MIN_NODE_CALL,
 )
+from state_store import get_store as _get_state_store
 
 # ==================== 线程池 ====================
 parse_executor = ThreadPoolExecutor(
@@ -28,15 +31,13 @@ parse_executor = ThreadPoolExecutor(
     thread_name_prefix=PARSE_THREAD_PREFIX,
 )
 
-# ==================== 停止标志 ====================
-_stop_flags: Dict[str, bool] = {}
-_executing_tasks: set = set()  # 正在执行的任务 ID 集合（内存，启动时从 CacheStore 恢复）
-
 logger = logging.getLogger(__name__)
 # ==================== 任务串行队列 ====================
-# 确保同一时间只有一个分析任务在执行，避免资源竞争和 SQLite 事务冲突
 _task_queue: asyncio.Queue | None = None
 _queue_consumer: asyncio.Task | None = None
+# ==================== 子进程管理 ====================
+# distributed 模式下，记录每个 task_id 对应的 ast_worker 子进程，用于 stop_task 信号
+_ast_worker_procs: dict[str, 'subprocess.Popen'] = {}
 
 
 async def _run_next_task():
@@ -53,41 +54,75 @@ async def _run_next_task():
 
 
 async def enqueue_analysis_task(server, multi_db, task_id: str, run_id: str, start_time: float):
-    """将分析任务提交到串行队列，排队等待执行"""
-    global _task_queue, _queue_consumer
+    """将分析任务提交到 AST Worker（distributed 模式）或本地队列（monolith 模式）"""
+    from config import TOPO_MODE
 
-    if _task_queue is None:
-        _task_queue = asyncio.Queue(maxsize=100)
+    # Phase 0: 首次拿到 multi_db.cache_store，注入 StateStore
+    ss = _get_state_store()
+    if ss._cache is None and hasattr(multi_db, 'cache_store'):
+        ss._cache = multi_db.cache_store
+        ss.switch_to_dual()
+        logger.info("[StateStore] switched to dual mode with CacheStore")
+    ss.add_executing(task_id)
 
-    if _queue_consumer is None or _queue_consumer.done():
-        _queue_consumer = asyncio.create_task(_run_next_task())
+    if TOPO_MODE == "distributed":
+        data_dir = getattr(multi_db, 'data_dir', os.environ.get("TOPOCODE_DB_DIR", ""))
+        logger.info(f"[ENQUEUE] distributed mode: spawning ast_worker for task={task_id}")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "ast_worker",
+             "--task-id", task_id, "--run-id", run_id,
+             "--data-dir", data_dir],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        _ast_worker_procs[task_id] = proc
+        # 在后台线程读取子进程输出，避免阻塞 event loop
+        loop = asyncio.get_event_loop()
+        def _read_output(tid=task_id):
+            try:
+                for line in proc.stdout or []:
+                    logger.info(f"[ast_worker:{tid}] {line.decode('utf-8', errors='replace').strip()}")
+                proc.wait()
+            finally:
+                _ast_worker_procs.pop(tid, None)
+                clear_stop_flag(tid)
+                ss.remove_executing(tid)
+        loop.run_in_executor(None, _read_output)
+    else:
+        # ── monolith 模式（原行为） ────────────────────────────────
+        global _task_queue, _queue_consumer
+        if _task_queue is None:
+            _task_queue = asyncio.Queue(maxsize=100)
+        if _queue_consumer is None or _queue_consumer.done():
+            _queue_consumer = asyncio.create_task(_run_next_task())
+        coro = _execute_task(server, multi_db, task_id, run_id, start_time)
+        await _task_queue.put(coro)
 
-    # 入队即标记为执行中，防止 stop_task 误判为孤儿任务
-    _executing_tasks.add(task_id)
-    try:
-        multi_db.cache_store.add_executing_task(task_id)
-    except Exception:
-        pass
-    coro = _execute_task(server, multi_db, task_id, run_id, start_time)
-    await _task_queue.put(coro)
 
-
-
+def stop_ast_worker(task_id: str):
+    """distributed 模式下终止 ast_worker 子进程"""
+    proc = _ast_worker_procs.pop(task_id, None)
+    if proc and proc.poll() is None:
+        logger.info(f"[stop_ast_worker] terminating task={task_id} pid={proc.pid}")
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
 
 
 def set_stop_flag(task_id: str):
     """设置任务停止标志"""
-    _stop_flags[task_id] = True
+    _get_state_store().set_stop(task_id)
 
 
 def clear_stop_flag(task_id: str):
     """清除任务停止标志"""
-    _stop_flags.pop(task_id, None)
+    _get_state_store().clear_stop(task_id)
 
 
 def should_stop(task_id: str) -> bool:
     """检查是否应该停止"""
-    return _stop_flags.get(task_id, False)
+    return _get_state_store().should_stop(task_id)
 
 
 def _edge_to_dict(edge):
@@ -434,8 +469,8 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
 
 
 def is_task_executing(task_id: str) -> bool:
-    """检查任务是否正在线程池中执行"""
-    return task_id in _executing_tasks
+    """检查任务是否正在执行"""
+    return _get_state_store().is_executing(task_id)
 
 
 # ==================== 进度回调 ====================
@@ -459,30 +494,36 @@ def _update_progress(server, multi_db, task_id: str, run_id: str,
     if progress is None:
         progress = (current * 100.0 / total) if total > 0 else 0.0
 
-    # 更新任务进度 (execute() 已自动 commit)
-    multi_db.main_db.execute("""
-        UPDATE analysis_tasks
-        SET progress = ?, current = ?, updated_at = datetime('now')
-        WHERE id = ?
-    """, (progress, current, task_id))
+    # 更新任务进度 — 直写 bypass WriteQueue（高频低优，不竞争 bulk INSERT 队列）
+    conn = multi_db.main_db.conn
+    try:
+        conn.execute("""
+            UPDATE analysis_tasks
+            SET progress = ?, current = ?, updated_at = datetime('now')
+            WHERE id = ?
+        """, (progress, current, task_id))
+        conn.execute("""
+            UPDATE analysis_task_runs
+            SET progress = ?, current = ?
+            WHERE id = ?
+        """, (progress, current, run_id))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"[PROGRESS] DB write failed: {e}")
+        return  # 跳过 publish，不阻塞调用方
 
-    # 更新运行记录进度 (execute() 已自动 commit)
-    multi_db.main_db.execute("""
-        UPDATE analysis_task_runs
-        SET progress = ?, current = ?
-        WHERE id = ?
-    """, (progress, current, run_id))
-
-    # 推送 ZMQ 事件
+    # 推送 ZMQ 事件（PUB socket 非线程安全，从线程池调用时需派发到事件循环）
     if server:
-        server.publish("task", "progress", {
-            "taskId": task_id,
-            "runId": run_id,
-            "progress": progress,
-            "total": total,
-            "current": current,
-            "eta": eta,
-        })
+        try:
+            data = {"taskId": task_id, "runId": run_id, "progress": progress,
+                    "total": total, "current": current, "eta": eta}
+            loop = getattr(server, '_loop', None)
+            if loop and threading.current_thread() is not threading.main_thread():
+                loop.call_soon_threadsafe(server.publish, "task", "progress", data)
+            else:
+                server.publish("task", "progress", data)
+        except Exception as e:
+            logger.error(f"[PROGRESS] publish failed: {e}")
 
 
 # ==================== 分析管线上下文 ====================
@@ -701,6 +742,11 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
                 elif status in ("no_extractor", "no_parser", "too_large", "file_missing"):
                     ctx.skipped += 1
 
+                # 每处理一批后让出 GIL，确保事件循环能处理 ZMQ 消息
+                if ctx.processed % (PARSE_WORKERS * 4) == 0:
+                    import time
+                    time.sleep(0)
+
                 if ctx.processed % PROGRESS_INTERVAL == 0:
                     scaled = 5.0 + (ctx.processed * 60.0 / total) if total > 0 else 5.0
                     ctx.report_progress(round(scaled, 2))
@@ -788,6 +834,22 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
         ctx.log(f"引用解析完成: calls={ctx.total_call_edges}, imports={ctx.total_dep_edges}, "
                 f"extends={ctx.total_extends_edges}, implements={ctx.total_implements_edges}, "
                 f"type_refs={ctx.total_type_of_edges}")
+
+        # Step 2.25: 模式增强层 — 补充语言特定调用边
+        if not should_stop(ctx.task_id):
+            _t2 = _time.perf_counter()
+            try:
+                from parsers.patterns import run_patterns
+                extensions = ctx.task.get("extensions") or []
+                pattern_edges = run_patterns(ctx.all_tables, extensions)
+                if pattern_edges:
+                    ctx.emitter.write_edges(pattern_edges)
+                    cb_count = sum(1 for e in pattern_edges if e.kind.value == "callback")
+                    call_count = sum(1 for e in pattern_edges if e.kind.value == "calls")
+                    ctx.total_call_edges += call_count
+                    ctx.log(f"模式增强: {len(pattern_edges)} 条补充边 (callback={cb_count}, calls={call_count}) 耗时 {(_time.perf_counter() - _t2)*1000:.0f}ms")
+            except Exception as e:
+                ctx.log(f"模式增强失败: {e}")
 
         if should_stop(ctx.task_id):
             ctx.log("Step 2: 检测到停止标志，跨文件引用解析被中断")
@@ -1059,7 +1121,7 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
     """
     asyncio 协程: 提交 _do_parse 到线程池并等待完成
     """
-    _executing_tasks.add(task_id)
+    _get_state_store().add_executing(task_id)
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(
@@ -1069,8 +1131,11 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
         )
 
         # 更新最终状态
+        logger.info(f"[EXECUTE] task={task_id} post-parse phase")
         from store.task_store import TaskStore
+        logger.info(f"[EXECUTE] task={task_id} TaskStore imported")
         task_store = TaskStore(multi_db.main_db)
+        logger.info(f"[EXECUTE] task={task_id} TaskStore created")
 
         if result.get("stopped"):
             task_store.update_task_status(task_id, "cancelled",
@@ -1085,11 +1150,18 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
             # 先运行 AI 项目摘要（涉及 LLM 调用，可能耗时）
             # 前端进度此时停留在 99，让用户感知"摘要生成中"
             pid = None
+            logger.info(f"[EXECUTE] task={task_id} calling get_task")
             task = task_store.get_task(task_id)
+            logger.info(f"[EXECUTE] task={task_id} get_task done: {task is not None}")
             if task:
                 pid = task.get("project_id")
             if pid:
+                _t_log = time.perf_counter()
                 _update_progress(server, multi_db, task_id, run_id, progress=95)
+                _dt = time.perf_counter() - _t_log
+                if _dt > 0.5:
+                    logger.warning(f"[EXECUTE] _update_progress(95) took {_dt*1000:.0f}ms")
+                logger.info(f"[EXECUTE] task={task_id} calling generateProjectSummary")
                 try:
                     from core_service import _do_generate_project_summary
                     await _do_generate_project_summary(multi_db, pid)
@@ -1100,20 +1172,19 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
                 logger.info(f"[EXECUTE] 项目概要自动生成跳过: task={task_id} 无 project_id")
 
             # AI 摘要完成后（不论成败），标记任务完成
-            task_store.update_task_status(task_id, "done", progress=100, error="")
-            task_store.finish_run(run_id, "done")
-            if server:
-                server.publish("task", "complete", {
-                    "taskId": task_id, "runId": run_id,
-                    "status": "done", "progress": 100,
-                })
+            try:
+                task_store.update_task_status(task_id, "done", progress=100, error="")
+                task_store.finish_run(run_id, "done")
+                if server:
+                    server.publish("task", "complete", {
+                        "taskId": task_id, "runId": run_id,
+                        "status": "done", "progress": 100,
+                    })
+            except Exception as e:
+                logger.error(f"[EXECUTE] task={task_id} post-process error: {e}", exc_info=True)
 
         clear_stop_flag(task_id)
-        _executing_tasks.discard(task_id)
-        try:
-            multi_db.cache_store.remove_executing_task(task_id)
-        except Exception:
-            pass
+        _get_state_store().remove_executing(task_id)
         return result
 
     except Exception as e:
@@ -1131,11 +1202,7 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
             })
 
         clear_stop_flag(task_id)
-        _executing_tasks.discard(task_id)
-        try:
-            multi_db.cache_store.remove_executing_task(task_id)
-        except Exception:
-            pass
+        _get_state_store().remove_executing(task_id)
         raise
 
 

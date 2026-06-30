@@ -80,10 +80,7 @@ class WriteQueue:
         """注册数据库路径（按需懒连接）。"""
         self._db_paths[label] = path
 
-    def register_conn(self, label: str, conn: sqlite3.Connection):
-        """注册已存在的连接（DELETE 模式下共享 SQLiteContext 的连接）。"""
-        self._connections[label] = conn
-        self._db_paths[label] = conn.execute("PRAGMA database_list").fetchone()[2] if conn else ""
+    # register_conn 已废弃。WriteQueue 自建连接，不再与 SQLiteContext 共享。
 
     def execute(self, label: str, sql: str, params: tuple = (),
                 _commit: bool = True):
@@ -120,7 +117,7 @@ class WriteQueue:
         for _ in items:
             results.append({})
         self._pending.put(("__batch__", label, items, ev, results))
-        ev.wait(timeout=60)
+        ev.wait(timeout=600)
         return results
 
     def shutdown(self, timeout: float = 5.0):
@@ -253,7 +250,8 @@ class WriteQueue:
             try:
                 conn = self._get_conn(label)
                 cur = conn.execute(sql, params)
-                if _commit:
+                _is_txn_sql = sql.strip().upper() in ("COMMIT", "ROLLBACK")
+                if _commit and not _is_txn_sql:
                     conn.commit()
                 lastrowid = cur.lastrowid
                 rowcount = cur.rowcount
