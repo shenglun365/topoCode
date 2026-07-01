@@ -8,7 +8,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-INGEST_DIR_RELPATH = os.path.join(".topoone", "ingest")
+INGEST_DIR_RELPATH = os.path.join(".topocode", "ingest")
 
 
 class FileSummaryCache:

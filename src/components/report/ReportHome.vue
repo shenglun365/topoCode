@@ -194,6 +194,9 @@ function startPreSummaryPoll() {
         preSummaryStatus.value = status
       }
     },
+    onError: () => {
+      displayDispatcher.unregister(key)
+    },
   })
 }
 

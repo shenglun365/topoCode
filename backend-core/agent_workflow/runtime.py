@@ -52,6 +52,8 @@ class StepProgress:
     status: str = "pending"   # pending | running | done | failed
     result: Optional[ToolResult] = None
     file_count: int = 0        # 该步骤包含的文件数（预摘要批量时 >1）
+    retries_used: int = 0      # 实际重试次数
+    last_error: str = ""       # 最后一次错误信息（失败时）
 
 
 @dataclass
@@ -67,6 +69,8 @@ class AgentProgress:
     tokens_used: int = 0
     elapsed_sec: float = 0.0
     message: str = ""
+    failed_count: int = 0      # 失败的 step 数
+    retry_count: int = 0       # 累计重试次数
 
 
 ProgressCallback = Callable[[AgentProgress], None]
@@ -115,6 +119,7 @@ class AgentRuntime:
         self._cancelled = False
         self._paused = False
         self._cancel_event = threading.Event()
+        self._pause_event = threading.Event()
         self._status = AgentStatus.IDLE
         self._actually_paused = False  # True only when runtime is in the pause loop
         self._task_id = ""
@@ -155,12 +160,14 @@ class AgentRuntime:
     def pause(self):
         """暂停当前执行（在下一步/轮边界生效）。状态在进入暂停循环后由 on_state_change 通知。"""
         self._paused = True
+        self._pause_event.set()
         self._actually_paused = False
         logger.info("[AgentRuntime] paused by user (flag set)")
 
     def resume(self):
         """恢复暂停的执行"""
         self._paused = False
+        self._pause_event.clear()
         self._actually_paused = False
         logger.info("[AgentRuntime] resumed by user")
 
@@ -222,16 +229,17 @@ class AgentRuntime:
         results: dict[str, Any] = {}
         completed_count = 0
         failed_count = 0
+        retry_count = 0
         file_current = 0
 
         for i, step in enumerate(steps):
             self._sync_cancel()
             if self._cancelled:
                 break
-            if self._paused and not self._actually_paused:
+            if self._pause_event.is_set() and not self._actually_paused:
                 self._actually_paused = True
                 self._notify_state("paused")
-            while self._paused:
+            while self._pause_event.is_set():
                 await asyncio.sleep(0.2)
                 self._sync_cancel()
                 if self._cancelled:
@@ -239,7 +247,8 @@ class AgentRuntime:
             if self._actually_paused:
                 self._actually_paused = False
                 self._notify_state("running")
-            self._sync_cancel()
+
+                self._sync_cancel()
             if self._cancelled:
                 break
             if self._sandbox.budget.exhausted():
@@ -266,9 +275,12 @@ class AgentRuntime:
 
             MAX_RETRIES = 2
             last_result: Optional[ToolResult] = None
+            step_retries = 0
 
             for attempt in range(MAX_RETRIES + 1):
                 try:
+                    if attempt > 0:
+                        step_retries += 1
                     if self._needs_rate_limit(tool.name):
                         while not self._sandbox.llm_rate.acquire():
                             await asyncio.sleep(0.05)
@@ -291,6 +303,7 @@ class AgentRuntime:
                         )
                         self._steps[i].result = result
                         self._steps[i].status = "done"
+                        self._steps[i].retries_used = step_retries
                         # 工具返回了子进度摘要 → 更新步骤描述
                         if result.data and isinstance(result.data, dict) and result.data.get("summary"):
                             self._steps[i].description = result.data["summary"]
@@ -306,15 +319,19 @@ class AgentRuntime:
                         await asyncio.sleep(0.5 * (attempt + 1))
 
                 except Exception as e:
+                    step_retries += 1
                     logger.warning(
                         f"[AgentRuntime] step {i} ({step.tool}) exception (attempt {attempt+1}/{MAX_RETRIES+1}): {e}")
                     last_result = ToolResult.fail(str(e))
                     if attempt < MAX_RETRIES:
                         await asyncio.sleep(0.5 * (attempt + 1))
 
+            self._steps[i].retries_used = step_retries
+            retry_count += step_retries
             if last_result is not None:
                 self._steps[i].result = last_result
                 self._steps[i].status = "failed"
+                self._steps[i].last_error = last_result.error or ""
                 failed_count += 1
 
             file_current += self._steps[i].file_count
@@ -328,6 +345,8 @@ class AgentRuntime:
                 tokens_used=self._sandbox.budget.tokens_used,
                 elapsed_sec=self._sandbox.budget.elapsed,
                 message=f"{self._steps[i].description}",
+                failed_count=failed_count,
+                retry_count=retry_count,
             )
 
         # 从 SubAgent 类级别读取预摘要文件失败数（绕过编译版 SummarizeFileTool）
@@ -378,12 +397,14 @@ class AgentRuntime:
             tokens_used=self._sandbox.budget.tokens_used,
             elapsed_sec=self._sandbox.budget.elapsed,
             message=f"完成: {completed_count}/{len(steps)} 步骤成功, {failed_count} 失败",
+            failed_count=failed_count,
+            retry_count=retry_count,
         )
 
         return final
 
     async def _run_agentic_chat(self, messages, tools_schema, strategy, timeout):
-        """运行 agentic_chat，每 2s 轮询 self._cancelled，支持快速取消。"""
+        """运行 agentic_chat，每 2s 轮询 self._cancelled / self._paused。"""
         from .tool_calling import agentic_chat
         chat_task = asyncio.create_task(
             agentic_chat(messages, tools=tools_schema, multi_db=self._multi_db, strategy=strategy)
@@ -395,6 +416,22 @@ class AgentRuntime:
                 if self._cancelled:
                     chat_task.cancel()
                     raise asyncio.CancelledError("cancelled by user")
+                if self._pause_event.is_set():
+                    # LLM 请求在后台继续，但暂停等待
+                    if self._pause_event.is_set() and not self._actually_paused:
+                        self._actually_paused = True
+                        self._notify_state("paused")
+                    while self._pause_event.is_set():
+                        await asyncio.sleep(0.2)
+                        self._sync_cancel()
+                        if self._cancelled:
+                            chat_task.cancel()
+                            raise asyncio.CancelledError("cancelled by user")
+                    if self._actually_paused:
+                        self._actually_paused = False
+                        self._notify_state("running")
+                    # 恢复后重新计算剩余超时
+                    remaining = min(remaining, timeout)
                 done, _ = await asyncio.wait([chat_task], timeout=min(2.0, remaining))
                 if done:
                     return chat_task.result()
@@ -438,10 +475,10 @@ class AgentRuntime:
             self._sync_cancel()
             if self._cancelled:
                 break
-            if self._paused and not self._actually_paused:
+            if self._pause_event.is_set() and not self._actually_paused:
                 self._actually_paused = True
                 self._notify_state("paused")
-            while self._paused:
+            while self._pause_event.is_set():
                 await asyncio.sleep(0.2)
                 self._sync_cancel()
                 if self._cancelled:
@@ -482,6 +519,18 @@ class AgentRuntime:
             comp_turns = 0
 
             for turn in range(effective_max_turns):
+                self._sync_cancel()
+                if self._pause_event.is_set() and not self._actually_paused:
+                    self._actually_paused = True
+                    self._notify_state("paused")
+                while self._pause_event.is_set():
+                    await asyncio.sleep(0.2)
+                    self._sync_cancel()
+                    if self._cancelled:
+                        break
+                if self._actually_paused:
+                    self._actually_paused = False
+                    self._notify_state("running")
                 self._sync_cancel()
                 if self._cancelled or self._sandbox.budget.exhausted():
                     break
@@ -880,6 +929,8 @@ class AgentRuntime:
                 tokens_used=kwargs.get("tokens_used", self._sandbox.budget.tokens_used),
                 elapsed_sec=kwargs.get("elapsed_sec", self._sandbox.budget.elapsed),
                 message=kwargs.get("message", ""),
+                failed_count=kwargs.get("failed_count", 0),
+                retry_count=kwargs.get("retry_count", 0),
             )
             try:
                 self._on_progress(progress)

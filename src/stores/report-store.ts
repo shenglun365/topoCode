@@ -103,7 +103,7 @@ export const useReportStore = defineStore('report', () => {
           // 注入社区数据到 communityStore
           const { useCommunityStore } = await import('./community-store')
           const commStore = useCommunityStore()
-          if (dash.fileStats) {
+          if (dash.callLevels || dash.depLevels || dash.fileStats) {
             console.log('[report-store] loadDashboard calling loadCommunitiesFromDashboard')
             await commStore.loadCommunitiesFromDashboard(taskId, dash)
             console.log('[report-store] loadDashboard loadCommunitiesFromDashboard done')

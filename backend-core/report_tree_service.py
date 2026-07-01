@@ -7,29 +7,30 @@ logger = logging.getLogger(__name__)
 def save_overall_doc(multi_db, task_id: str, title: str, content: str) -> dict:
     main_db = multi_db.main_db
     task = main_db.fetchone(
-        "SELECT project_id FROM analysis_tasks WHERE id = ?",
+        "SELECT project_id, root_path FROM analysis_tasks t JOIN projects p ON p.id=t.project_id WHERE t.id = ?",
         (task_id,)
     )
     if not task:
         raise ValueError(f"Task not found: {task_id}")
 
     project_id = task["project_id"]
-    project_db = multi_db.get_project_db(project_id)
+    project_root = task["root_path"]
 
-    # 清理旧版随机 ID 的 overall 文档（过渡期兼容）
-    project_db.execute(
-        "DELETE FROM report_subdocs WHERE task_id=? AND comm_id='overall' AND id NOT LIKE ?",
-        (task_id, 'overall-%')
-    )
-
-    # 使用稳定 ID，支持持久化 web 链接
+    # 通过 ingest 异步写入，避免 pipeline 运行期间直接写 DB
     doc_id = f"overall-{task_id}"
-    now = datetime.now().isoformat()
-    project_db.execute(
-        "INSERT OR REPLACE INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, created_at, updated_at) VALUES (?, ?, '', 'overall', ?, ?, ?, ?)",
-        (doc_id, task_id, title, content, now, now)
-    )
+    from ingest import write_ingest
+    write_ingest(project_root, "subdoc", {
+        "task_id": task_id,
+        "project_id": project_id,
+        "edge_type": "",
+        "comm_id": "overall",
+        "doc_id": doc_id,
+        "title": title,
+        "content": content,
+        "template_id": "",
+        "created_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    })
 
-    logger.info(f"[saveOverallDoc] saved doc={doc_id} for task={task_id}")
+    logger.info(f"[saveOverallDoc] ingested doc={doc_id} for task={task_id}")
 
-    return {"id": doc_id, "title": title, "content": content, "createdAt": now}
+    return {"id": doc_id, "title": title, "content": content, "createdAt": datetime.now().isoformat()}

@@ -1,7 +1,7 @@
 """
 ingest/consumer.py — 异步消费 ingest 目录中的 JSON 文件
 
-扫描 <project_root>/.topoone/ingest/ 中的 *.json 文件，
+扫描 <project_root>/.topocode/ingest/ 中的 *.json 文件，
 按 _type 分发写入对应 project DB。
 写入成功后删除文件。
 """
@@ -79,7 +79,7 @@ async def ingest_consumer_loop(multi_db, interval: float = 2.0):
                 root = p["root_path"] or ""
                 if not root:
                     continue
-                ingest_dir = os.path.join(root, ".topoone", "ingest")
+                ingest_dir = os.path.join(root, ".topocode", "ingest")
                 if not os.path.isdir(ingest_dir):
                     continue
                 try:
@@ -113,6 +113,7 @@ def setup_handlers(multi_db):
     def _handle_community_result(data):
         pid, pdb = _get_project_db(data)
         store = AnalysisStore(pdb)
+        logger.info(f"[ingest consumer] writing community_result: {data.get('comm_id', '?')} status={data.get('status','?')}")
         store.bulk_insert_llm_results([{
             "task_id": data["task_id"],
             "edge_type": data["edge_type"],
@@ -130,6 +131,7 @@ def setup_handlers(multi_db):
         pid, pdb = _get_project_db(data)
         tid = data["task_id"]
         et = data.get("edge_type", "CALL")
+        logger.info(f"[ingest consumer] writing subdoc: {data.get('doc_id', '?')}")
         cid = data.get("comm_id")
         doc_id = data["doc_id"]
         now = data.get("created_at", _time.strftime('%Y-%m-%d %H:%M:%S'))
@@ -147,7 +149,7 @@ def setup_handlers(multi_db):
                 )
 
         pdb.execute(
-            "INSERT INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO report_subdocs (id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc_id, tid, et, cid, data["title"], data["content"], data.get("template_id"), now, now)
         )
         pdb.conn.commit()
@@ -155,6 +157,7 @@ def setup_handlers(multi_db):
     def _handle_file_summary(data):
         pid, pdb = _get_project_db(data)
         fp = data["file_path"]
+        logger.info(f"[ingest consumer] writing file_summary: {fp[:60]}")
         summary = data["summary"][:2000]
         sid = uuid.uuid4().hex[:16]
 

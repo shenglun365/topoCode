@@ -357,7 +357,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         tables_for_task = [
             "graph_node", "graph_edge", "graph_doc", "community_hierarchy",
             "community_llm_results",
-            "report_subdocs", "file_summaries", "agent_task_history",
+            "report_subdocs", "agent_task_history",
         ]
         for table in tables_for_task:
             try:
@@ -1473,9 +1473,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             # 尝试从社区计算总分批次（可能无社区数据，此时总文件数为 0）
             # 优先使用管线预缓存的排名数据（避免同步 I/O 阻塞事件循环）
             rank_data = multi_db.cache_store.get_file_ranks(tid)
+            project_root = _get_project_root(pid)
             if rank_data is None:
                 comps = get_l0_comps(project_db, tid)
-                project_root = _get_project_root(pid)
                 rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
             if rank_data:
                 pre_summary['counts'] = rank_data.get("counts", {'P0': 0, 'P1': 0, 'P2': 0})
@@ -3049,23 +3049,25 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
             def _save_fn(result):
                 try:
-                    s = AnalysisStore(project_db)
+                    from ingest import write_ingest
                     comp_id = result.get("component_id", "")
                     comp_type = result.get("component_type", "community")
                     aname = result.get("analyzed_name", "") or comp_id
                     asummary = result.get("functional_summary", "")
                     et, lv = comp_edge_lv.get(comp_id, ("", "L0"))
-                    s.bulk_insert_llm_results([{
+                    status = result.get("status", "completed")
+                    write_ingest(project_root, "community_result", {
                         "task_id": result.get("task_id", tid),
+                        "project_id": pid,
                         "edge_type": et,
                         "comm_lv": lv,
                         "comm_id": comp_id,
                         "name": aname,
                         "summary": asummary,
                         "component_type": comp_type,
-                        "status": result.get("status", "completed"),
-                    }])
-                    logger.info(f"[analyzeComponents] _save_fn saved community_llm_results: {comp_id} status={result.get('status','completed')}")
+                        "status": status,
+                    })
+                    logger.info(f"[analyzeComponents] _save_fn ingested: {comp_id} status={status}")
                 except Exception as e:
                     logger.error(f"[analyzeComponents] _save_fn failed: {e}", exc_info=True)
 
@@ -3279,21 +3281,11 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         ]
 
     def _find_subdoc_project(multi_db, sub_doc_id):
-        """在 projects 表中遍历查找子文档所属项目 ID"""
-        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
-        for proj in projects:
-            pid = proj["id"]
-            try:
-                pdb = multi_db.get_project_db(pid)
-                row = pdb.fetchone(
-                    "SELECT id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at FROM report_subdocs WHERE id=?",
-                    (sub_doc_id,)
-                )
-                if row:
-                    return pid, row
-            except Exception:
-                continue
-        # 回退：通过 sub_doc_id 格式推断 project_id（overall-{taskId} / subdoc-{taskId}-*）
+        """
+        查找子文档所属项目 ID。
+        优先通过 ID 前缀推断（overall-{taskId} / subdoc-{taskId}-*），
+        避免遍历所有项目 DB。
+        """
         for prefix in ("overall-", "subdoc-"):
             if sub_doc_id.startswith(prefix):
                 task_id = sub_doc_id[len(prefix):]
@@ -3311,8 +3303,21 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                         if row:
                             return pid, row
                 except Exception:
-                    continue
-                break
+                    pass
+        # 回退：全量遍历所有项目查找
+        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
+        for proj in projects:
+            pid = proj["id"]
+            try:
+                pdb = multi_db.get_project_db(pid)
+                row = pdb.fetchone(
+                    "SELECT id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at FROM report_subdocs WHERE id=?",
+                    (sub_doc_id,)
+                )
+                if row:
+                    return pid, row
+            except Exception:
+                continue
         return None, None
 
     @server.register("report.getSubDoc")

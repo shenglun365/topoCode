@@ -60,7 +60,9 @@ class AgentTaskState:
         if self.progress and self.progress.steps:
             steps = [
                 {"description": s.description, "status": s.status,
-                 "file_count": s.file_count}
+                 "file_count": s.file_count,
+                 "retries_used": s.retries_used,
+                 "last_error": s.last_error}
                 for s in self.progress.steps
             ]
         d = {
@@ -79,8 +81,33 @@ class AgentTaskState:
             "created_at": self.created_at,
             "finished_at": self.finished_at,
         }
+        if self.progress:
+            d["failed_count"] = self.progress.failed_count
+            d["retry_count"] = self.progress.retry_count
+        # Build stats dict for pipeline summary
+        if self.status in (TaskState.COMPLETED, TaskState.PARTIAL, TaskState.FAILED, TaskState.CANCELLED):
+            step_details = []
+            for s in (self.progress.steps if self.progress else []):
+                step_details.append({
+                    "description": s.description,
+                    "status": s.status,
+                    "retries_used": s.retries_used,
+                    "last_error": s.last_error,
+                })
+            total_steps = self.progress.step_total if self.progress else 0
+            completed = sum(1 for s in step_details if s["status"] == "done" and s["retries_used"] == 0)
+            retried_completed = sum(1 for s in step_details if s["status"] == "done" and s["retries_used"] > 0)
+            failed = sum(1 for s in step_details if s["status"] == "failed")
+            total_retries = sum(s["retries_used"] for s in step_details)
+            d["stats"] = {
+                "total_steps": total_steps,
+                "completed": completed,
+                "retried_completed": retried_completed,
+                "failed": failed,
+                "total_retries": total_retries,
+                "step_details": step_details,
+            }
         if self.result and self.result.data and isinstance(self.result.data, dict):
-            d["failed_count"] = self.result.data.get("failed_count", 0)
             d["result"] = self.result.data  # 供回调读取完整结果
         return d
 

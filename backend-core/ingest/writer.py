@@ -1,7 +1,7 @@
 """
 ingest/writer.py — LLM 管线结果写入文件（.tmp → atomic rename → .json）
 
-目录: <project_root>/.topoone/ingest/
+目录: <project_root>/.topocode/ingest/
 文件: <type>-<timestampMs>-<uuid8>.json
 """
 import json
@@ -16,7 +16,7 @@ INGEST_DIR_NAME = "ingest"
 
 
 def _ingest_dir(project_root: str) -> str:
-    d = os.path.join(project_root, ".topoone", INGEST_DIR_NAME)
+    d = os.path.join(project_root, ".topocode", INGEST_DIR_NAME)
     os.makedirs(d, exist_ok=True)
     return d
 

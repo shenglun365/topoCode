@@ -65,7 +65,7 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
         _rel = _make_rel(project_root)
 
         # 创建导出目录
-        exports_dir = os.path.join(project_root, ".topoone", EXPORT_DIR_NAME)
+        exports_dir = os.path.join(project_root, ".topocode", EXPORT_DIR_NAME)
         os.makedirs(exports_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in project_name)

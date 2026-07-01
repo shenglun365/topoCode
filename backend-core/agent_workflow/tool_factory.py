@@ -230,24 +230,25 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
 
                     def _save_fn(result):
                         try:
-                            from store.analysis_store import AnalysisStore
-                            s = AnalysisStore(project_db)
+                            from ingest import write_ingest
                             comp_id = result.get("component_id", "")
                             aname = result.get("analyzed_name", "") or comp_id
                             asummary = result.get("functional_summary", "")
                             comp_type = result.get("component_type", "community")
                             et, lv = comp_edge_lv.get(comp_id, ("", "L0"))
-                            s.bulk_insert_llm_results([{
+                            status = result.get("status", "completed")
+                            write_ingest(project_root, "community_result", {
                                 "task_id": result.get("task_id", task_id),
+                                "project_id": pid,
                                 "edge_type": et,
                                 "comm_lv": lv,
                                 "comm_id": comp_id,
                                 "name": aname,
                                 "summary": asummary,
                                 "component_type": comp_type,
-                                "status": result.get("status", "completed"),
-                            }])
-                            _log.info(f"[Pipeline] _save_fn saved: {comp_id} status={result.get('status','completed')}")
+                                "status": status,
+                            })
+                            _log.info(f"[Pipeline] _save_fn ingest: {comp_id} status={status}")
                         except Exception as e2:
                             _log.warning(f"[Pipeline] _save_fn failed: {e2}")
 

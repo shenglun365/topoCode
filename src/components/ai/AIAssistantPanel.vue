@@ -17,7 +17,7 @@ import hljs from 'highlight.js'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
-import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
+import { useCommunityStore, type CommunityItem, pipelineSummary } from '@/stores/community-store'
 import { useNavigationStore } from '@/stores/navigation'
 import { isLLMConfigured, chat } from '@/services/llmClient'
 import { useComponentSelectionStore } from '@/stores/component-selection-store'
@@ -226,6 +226,37 @@ watch(messages, () => {
   }, 1000)
 }, { deep: true })
 
+// 监听流水线完成统计，注入汇总消息
+watch(pipelineSummary, (summary) => {
+  if (!summary) return
+  const tid = resolveTaskId()
+  if (!tid || summary.taskId !== tid) return
+
+  const s = summary.stats
+  const lines: string[] = [
+    '📊 流水线执行完成',
+    '──────────────────',
+    `✅ 首次成功:     ${s.completed} 步`,
+  ]
+  if (s.retried_completed > 0) {
+    lines.push(`⚠️ 重试后成功:   ${s.retried_completed} 步（累计重试 ${s.total_retries} 次）`)
+  }
+  if (s.failed > 0) {
+    lines.push(`❌ 执行失败:     ${s.failed} 步（内容未写入）`)
+    lines.push('')
+    for (const fs of (s.step_details || [])) {
+      if (fs.status !== 'failed') continue
+      lines.push(`  • ${fs.description}`)
+      if (fs.last_error) lines.push(`    → ${fs.last_error.slice(0, 80)}`)
+      if (fs.retries_used > 0) lines.push(`    (重试 ${fs.retries_used} 次)`)
+    }
+  }
+  lines.push('', '使用 /retry 命令重新执行（默认跳过成功任务，--force 强制覆盖）。')
+
+  addMessage('system', lines.join('\n'))
+  pipelineSummary.value = null  // 清除，避免重复
+})
+
 function scrollToBottom() {
   nextTick(() => {
     if (scrollRef.value) {
@@ -432,6 +463,18 @@ async function handleSend() {
       const langHint = language === 'zh' ? '中文' : language === 'en' ? 'English' : ''
       addMessage('system', `流水线已启动${forceHint}${langHint ? ` | ${langHint}` : ''}。顺序执行：项目摘要 → 预摘要 P0→P1→P2 → 组件分析 L0→L5 → 整体架构分析。请到「任务」面板查看进度。`)
       communityStore.startPipeline(tid, force, language)
+        .catch(e => addMessage('error', String(e)))
+      return
+    }
+    if (/^\/retry\b/i.test(text)) {
+      const force = text.includes('--force')
+      addMessage('user', text)
+      userInput.value = ''
+      const tid = resolveTaskId()
+      if (!tid) { addMessage('system', '未找到激活的任务。'); return }
+      const hint = force ? '（强制覆盖所有）' : '（跳过成功步骤）'
+      addMessage('system', `重新执行已启动${hint}。请到「任务」面板查看进度。`)
+      communityStore.startPipeline(tid, force)
         .catch(e => addMessage('error', String(e)))
       return
     }

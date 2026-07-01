@@ -38,6 +38,7 @@ class SQLiteContext:
         self._lock = threading.RLock()
         self._label = label
         self._wq = write_queue
+        self._last_connect_error = ""
         self._connect()
 
     def _connect(self):
@@ -45,43 +46,59 @@ class SQLiteContext:
         with self._lock:
             if self._conn is not None:
                 return
-            # 尝试 WAL → 失败回退 DELETE（不删除 WAL/SHM 文件，避免损坏其他连接）
-            last_err = None
-            for attempt in range(2):
+            self._conn = self._try_open()
+            if self._conn:
+                return
+            # 所有模式都失败 → 清理 WAL/SHM 文件后最后一次重试
+            db_dir = os.path.dirname(self.db_path)
+            db_base = os.path.basename(self.db_path)
+            for ext in ("-wal", "-shm"):
+                fpath = os.path.join(db_dir, db_base + ext)
                 try:
-                    self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                    self._conn.row_factory = sqlite3.Row
-                    self._conn.execute("PRAGMA journal_mode=WAL")
-                    break
-                except sqlite3.OperationalError as e:
-                    last_err = str(e)
-                    try:
-                        self._conn.close()
-                    except Exception:
-                        pass
-                    self._conn = None
-                    if "disk I/O error" not in str(e) and "unable to open" not in str(e).lower():
-                        raise
-                    # 不删除 WAL/SHM — 改为尝试 checkpoint 恢复（见下方 fallback 逻辑）
-            if not self._conn:
-                logger.warning(f"[SQLite] WAL failed for {self.db_path}, falling back to DELETE: {last_err}")
-                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                self._conn.row_factory = sqlite3.Row
-                try:
-                    self._conn.execute("PRAGMA journal_mode=DELETE")
-                except sqlite3.OperationalError as e:
-                    logger.warning(f"[SQLite] DELETE mode also failed for {self.db_path}: {e}")
-                logger.info(f"[SQLite] opened {self.db_path} in fallback mode")
-            for _pragma in [
-                "PRAGMA foreign_keys=ON",
-                "PRAGMA busy_timeout=5000",
-                "PRAGMA synchronous=NORMAL",
-                "PRAGMA cache_size=10000",
-            ]:
-                try:
-                    self._conn.execute(_pragma)
+                    if os.path.exists(fpath):
+                        os.remove(fpath)
+                        logger.warning(f"[SQLite] removed stale {fpath}")
                 except Exception:
                     pass
+            self._conn = self._try_open()
+            if not self._conn:
+                raise RuntimeError(
+                    f"[SQLite] Cannot open {self.db_path} after cleanup: {self._last_connect_error}"
+                )
+
+    def _try_open(self):
+        """尝试打开连接，返回 connection 或 None。"""
+        import time as _time
+        for mode in ("WAL", "DELETE"):
+            try:
+                conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=3000)
+                conn.row_factory = sqlite3.Row
+                conn.execute(f"PRAGMA journal_mode={mode}")
+                for _pragma in [
+                    "PRAGMA foreign_keys=ON",
+                    "PRAGMA busy_timeout=5000",
+                    "PRAGMA synchronous=NORMAL",
+                    "PRAGMA cache_size=10000",
+                ]:
+                    try:
+                        conn.execute(_pragma)
+                    except Exception:
+                        pass
+                # 验证连接可用
+                conn.execute("SELECT 1").fetchone()
+                logger.info(f"[SQLite] opened {self.db_path} in {mode} mode")
+                return conn
+            except sqlite3.OperationalError as e:
+                self._last_connect_error = str(e)
+                logger.warning(
+                    f"[SQLite] {mode} failed for {self.db_path}: {e}"
+                )
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                _time.sleep(0.1)
+        return None
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -90,6 +107,17 @@ class SQLiteContext:
         return self._conn
 
     # ==================== 通用查询方法 ====================
+
+    def _reconnect(self):
+        """重建连接（在 disk I/O error 后恢复用）。"""
+        with self._lock:
+            try:
+                if self._conn:
+                    self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+            self._connect()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         """执行 SQL — 写入通过 WriteQueue 串行化；读操作直接执行。"""
@@ -103,29 +131,38 @@ class SQLiteContext:
                 lastrowid=result.get("lastrowid"),
                 rowcount=result.get("rowcount", 0),
             )
-        with self._lock:
-            cursor = self.conn.execute(sql, params)
-        # 仅对写操作提交事务，避免 SELECT 等读操作触发无意义的 commit
         upper_sql = sql.strip().upper()
-        if upper_sql.startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER',
-                                 'CREATE', 'DROP', 'REPLACE')):
-            self.conn.commit()
-        elif upper_sql == 'COMMIT':
-            self.conn.commit()
-        return cursor
+        is_write = upper_sql.startswith(('INSERT', 'UPDATE', 'DELETE', 'ALTER',
+                                         'CREATE', 'DROP', 'REPLACE'))
+
+        for attempt in range(3):
+            try:
+                with self._lock:
+                    cursor = self.conn.execute(sql, params)
+                if is_write or upper_sql == 'COMMIT':
+                    self.conn.commit()
+                return cursor
+            except sqlite3.OperationalError as e:
+                err_str = str(e)
+                if ("disk I/O" in err_str or "abort due to ROLLBACK" in err_str) and attempt < 2:
+                    logger.warning(
+                        f"[SQLite] transient error on {self._label or self.db_path}, "
+                        f"reconnecting (attempt {attempt+2}/3): {e}"
+                    )
+                    self._reconnect()
+                    continue
+                raise
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[dict]:
-        """查询所有结果（读后提交以关闭 WAL 读视图）"""
-        cursor = self.conn.execute(sql, params)
+        """查询所有结果（读后隐含提交）"""
+        cursor = self.execute(sql, params)
         result = [dict(row) for row in cursor.fetchall()]
-        self.conn.commit()
         return result
 
     def fetchone(self, sql: str, params: tuple = ()) -> Optional[dict]:
-        """查询单条结果（读后提交以关闭 WAL 读视图）"""
-        cursor = self.conn.execute(sql, params)
+        """查询单条结果"""
+        cursor = self.execute(sql, params)
         row = cursor.fetchone()
-        self.conn.commit()
         return dict(row) if row else None
 
     def executemany(self, sql: str, params_list):

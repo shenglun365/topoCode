@@ -81,7 +81,7 @@ const activePanelComponent = computed(() => {
   if (showCodeIndex.value) return { component: RIGHT_PANEL_COMPONENTS.codeIndex }
   if (showAgentTasks.value) return { component: RIGHT_PANEL_COMPONENTS.agentTaskList }
   if (showAIAssistant.value || (projectStore.viewMode === 'project' && projectStore.activeTab)) return { component: RIGHT_PANEL_COMPONENTS.ai }
-  return null
+  return { component: RIGHT_PANEL_COMPONENTS.ai }
 })
 
 /* ========== 浮动窗口：拖拽 & 缩放 ========== */

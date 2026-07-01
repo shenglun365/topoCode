@@ -53,8 +53,14 @@ const liveTasks = computed(() => {
   return communityStore.tasks[taskId.value]?.agentTasks || []
 })
 
+// 仅追踪影响列表结构的属性（id + status），不追踪 progress/message
+const liveTaskKeys = computed(() =>
+  liveTasks.value.map(t => `${t.id}:${t.status}:${t.createdAt}`).join('|')
+)
+
 // 合并 live + history，按 agent_id 去重（live 优先）
 const allTasks = computed(() => {
+  void liveTaskKeys.value  // 仅列表结构变化才触发重建
   const live = liveTasks.value
   const history = historyTasks.value
   const seen = new Set<string>()
@@ -169,7 +175,8 @@ onMounted(() => {
 
 let historyPollTimer: ReturnType<typeof setInterval> | null = null
 
-watch(liveTasks, (tasks) => {
+watch(liveTaskKeys, () => {
+  const tasks = liveTasks.value
   const hasPresummary = tasks.some(t => t.action === 'presummary_files')
   const hasRunning = tasks.some(t => t.status === 'running' || t.status === 'queued')
   console.log('[watchLive] hasRunning=%s hasPresummary=%s timer=%s tasks=%d', hasRunning, hasPresummary, historyPollTimer ? 'active' : 'none', tasks.length)
@@ -181,7 +188,7 @@ watch(liveTasks, (tasks) => {
     clearInterval(historyPollTimer)
     historyPollTimer = null
   }
-}, { deep: true })
+})
 
 onUnmounted(() => {
   if (historyPollTimer) { clearInterval(historyPollTimer); historyPollTimer = null }

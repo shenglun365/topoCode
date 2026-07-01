@@ -71,6 +71,9 @@ interface CommunityTaskRuntime {
 const _inflightLoads = new Map<string, Promise<any>>()
 const _requestVersions = new Map<string, number>()
 
+// 流水线完成统计，供 AI 助手注入汇总消息
+export const pipelineSummary = ref<{ taskId: string; stats: any } | null>(null)
+
 function _nextVersion(key: string): number {
   const v = (_requestVersions.get(key) || 0) + 1
   _requestVersions.set(key, v)
@@ -824,6 +827,9 @@ export const useCommunityStore = defineStore('community', () => {
 
     let lastDoneCount = 0
     let lastCommunityReload = 0
+    let _lastPct = -1
+    let _lastMsg = ''
+    let _lastStatus = ''
     controlDispatcher.register(controlKey, {
       interval: 1500,
       fetcher: () => ipc.analysis.getAgentProgress({ agentTaskId }),
@@ -846,14 +852,20 @@ export const useCommunityStore = defineStore('community', () => {
           ((fileTotal ? (fileCurrent >= fileTotal) : (stepCurrent >= stepTotal)) && pct === 100 && allStepsDone)
         const msg = (!progress.message && stepTotal === 0 && stepCurrent === 0)
           ? '正在启动…' : (progress.message || '')
-        updateAgentTask(taskId, taskIdx, {
-          status: isCompleted
-            ? (progress.status === 'failed' ? 'failed' :
-               progress.status === 'cancelled' ? 'cancelled' : 'completed')
-            : (progress.status || 'running'),
-          progress: pct,
-          message: msg,
-        })
+        const newStatus = isCompleted
+          ? (progress.status === 'failed' ? 'failed' :
+             progress.status === 'cancelled' ? 'cancelled' : 'completed')
+          : (progress.status || 'running')
+        if (pct !== _lastPct || msg !== _lastMsg || newStatus !== _lastStatus) {
+          _lastPct = pct
+          _lastMsg = msg
+          _lastStatus = newStatus
+          updateAgentTask(taskId, taskIdx, {
+            status: newStatus,
+            progress: pct,
+            message: msg,
+          })
+        }
         if (progress.status && stepTotal > 0) {
           console.log('[poll] agent=%s status=%s step=%d/%d pct=%d', agentTaskId, progress.status, stepCurrent, stepTotal, pct)
         }
@@ -891,10 +903,14 @@ export const useCommunityStore = defineStore('community', () => {
             const pid = useProjectStore().selectedProjectId
             if (pid) loadCommunities(taskId, pid).catch(() => {})
           }
+          // 流水线完成时发出统计，供 AI 面板注入汇总消息
+          if (progress.stats && taskId) {
+            pipelineSummary.value = { taskId, stats: progress.stats }
+          }
         }
       },
       onError: () => {
-        controlDispatcher.unregister(controlKey)
+        // 不卸载 polling — 暂时性 disk I/O 等错误会在下次轮询自动恢复
       },
     })
   }
