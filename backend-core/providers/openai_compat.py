@@ -108,6 +108,9 @@ class OpenAICompatProvider(BaseLLMProvider):
                     if data.get('usage'):
                         usage_data = data['usage']
 
+                    reasoning = delta.get('reasoning_content', '')
+                    if reasoning:
+                        chunk_queue.put({"type": "reasoning", "text": reasoning})
                     chunk = delta.get('content', '')
                     if chunk:
                         full_content += chunk

@@ -6,6 +6,7 @@ import os
 import hashlib
 import logging
 import threading
+import time
 from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
@@ -1159,9 +1160,11 @@ class MultiDBManager:
         if not self._is_remote:
             self._init_sessions_tables()
 
-        # 项目库 LRU 缓存 (max=3)
+        # 项目库 LRU 缓存 (max=10)
         self._project_db_cache: OrderedDict[str, SQLiteContext] = OrderedDict()
-        self._project_db_max = 3
+        self._project_db_max = 10
+        self._project_db_idle_timeout = 300  # 5 分钟无访问则自动关闭
+        self._project_db_last_used: dict[str, float] = {}
 
     @property
     def write_queue(self):
@@ -1555,20 +1558,40 @@ class MultiDBManager:
             pass
         project_db.conn.commit()
 
+    def _evict_idle_project_dbs(self):
+        """关闭超过空闲超时的项目库连接"""
+        now = time.time()
+        idle_keys = [
+            pid for pid, last in self._project_db_last_used.items()
+            if pid in self._project_db_cache and now - last > self._project_db_idle_timeout
+        ]
+        for pid in idle_keys:
+            try:
+                self._project_db_cache[pid].close()
+                del self._project_db_cache[pid]
+                del self._project_db_last_used[pid]
+            except Exception:
+                pass
+
     def get_project_db(self, project_id: str) -> SQLiteContext:
         """
-        获取项目库连接（懒加载 + LRU 缓存）
-        超出容量时关闭最久未用的连接
+        获取项目库连接（懒加载 + LRU 缓存 + 空闲超时剔除）
+        超出容量时关闭最久未用的连接；超时未用自动关闭
         """
+        # 先清理过期空闲连接
+        self._evict_idle_project_dbs()
+
         # 如果已在缓存中，移到末尾（最近使用）
         if project_id in self._project_db_cache:
             self._project_db_cache.move_to_end(project_id)
+            self._project_db_last_used[project_id] = time.time()
             return self._project_db_cache[project_id]
 
         # 如果缓存已满，关闭最久未用的连接
         if len(self._project_db_cache) >= self._project_db_max:
             oldest_id, oldest_db = self._project_db_cache.popitem(last=False)
             oldest_db.close()
+            self._project_db_last_used.pop(oldest_id, None)
 
         # 检查项目库文件是否存在 — 优先从项目根目录查找
         try:
@@ -1598,6 +1621,7 @@ class MultiDBManager:
 
         # 加入缓存
         self._project_db_cache[project_id] = project_db
+        self._project_db_last_used[project_id] = time.time()
         return project_db
 
     def close_project_db(self, project_id: str):
@@ -1605,6 +1629,7 @@ class MultiDBManager:
         if project_id in self._project_db_cache:
             self._project_db_cache[project_id].close()
             del self._project_db_cache[project_id]
+        self._project_db_last_used.pop(project_id, None)
 
     def delete_project_db(self, project_id: str):
         """关闭连接 + 删除项目库文件（仅新架构 .topocode/data/project.db）"""

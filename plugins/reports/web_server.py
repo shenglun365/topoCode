@@ -12,7 +12,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ multi_db = None
 zmq_server = None  # ZMQ server for pub events
 plantuml_cache_db: Optional[sqlite3.Connection] = None
 http_port = 3456
+web_tool_executor = None
 
 # 统一数据模块
 import sys as _sys
@@ -30,6 +31,8 @@ _backend_dir = os.path.join(_project_root, "backend-core")
 if _backend_dir not in _sys.path:
     _sys.path.insert(0, _backend_dir)
 import community_data as cd
+from web_tools import WebToolExecutor, resolve_refs_to_context
+from skills import get_skill_registry
 
 app = FastAPI(title="TopoOne Web Viewer")
 
@@ -144,7 +147,31 @@ async def get_doc(doc_id: str):
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        # 遍历项目库查找 report_subdocs
+        # 从 doc_id 提取 taskId 直接定位项目库
+        task_id = _extract_task_id_from_doc_id(doc_id)
+        if task_id:
+            task = multi_db.main_db.fetchone(
+                "SELECT project_id FROM analysis_tasks WHERE id = ?", (task_id,)
+            )
+            if task:
+                pdb = multi_db.get_project_db(task["project_id"])
+                doc = pdb.fetchone(
+                    "SELECT id, task_id, title, content, created_at, updated_at FROM report_subdocs WHERE id = ?",
+                    (doc_id,),
+                )
+                if doc:
+                    logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
+                    return {
+                        "id": doc["id"],
+                        "taskId": doc["task_id"],
+                        "projectId": task["project_id"],
+                        "title": doc["title"],
+                        "content": doc["content"],
+                        "createdAt": doc["created_at"],
+                        "updatedAt": doc["updated_at"],
+                    }
+
+        # 兜底：遍历项目库查找
         projects = multi_db.main_db.fetchall("SELECT id FROM projects")
         for proj in projects:
             pid = proj["id"]
@@ -155,12 +182,11 @@ async def get_doc(doc_id: str):
                     (doc_id,),
                 )
                 if doc:
-                    project_id = pid
                     logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
                     return {
                         "id": doc["id"],
                         "taskId": doc["task_id"],
-                        "projectId": project_id,
+                        "projectId": pid,
                         "title": doc["title"],
                         "content": doc["content"],
                         "createdAt": doc["created_at"],
@@ -337,24 +363,25 @@ async def list_task_docs(task_id: str = Query(None), taskId: str = Query(None)):
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        result = []
-        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
-        for proj in projects:
-            try:
-                pdb = multi_db.get_project_db(proj["id"])
-                docs = pdb.fetchall(
-                    "SELECT id, task_id, title, created_at FROM report_subdocs WHERE task_id = ? ORDER BY created_at",
-                    (tid,),
-                )
-                for d in docs:
-                    result.append({
-                        "id": d["id"],
-                        "taskId": d["task_id"],
-                        "title": d["title"],
-                        "createdAt": d["created_at"],
-                    })
-            except Exception:
-                continue
+        task = multi_db.main_db.fetchone(
+            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
+        )
+        if not task:
+            return {"docs": [], "error": "Task not found"}
+        pdb = multi_db.get_project_db(task["project_id"])
+        docs = pdb.fetchall(
+            "SELECT id, task_id, title, created_at FROM report_subdocs WHERE task_id = ? ORDER BY created_at",
+            (tid,),
+        )
+        result = [
+            {
+                "id": d["id"],
+                "taskId": d["task_id"],
+                "title": d["title"],
+                "createdAt": d["created_at"],
+            }
+            for d in docs
+        ]
         return result
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -704,6 +731,17 @@ def _resolve_project_db(task_id: str):
     if not task_row:
         raise HTTPException(404, f"Task {task_id} not found")
     return task_row["project_id"], multi_db.get_project_db(task_row["project_id"])
+
+
+def _extract_task_id_from_doc_id(doc_id: str) -> str | None:
+    """从 doc_id 提取 task_id。overall-{taskId} / subdoc-{taskId}-*"""
+    if doc_id.startswith("overall-"):
+        return doc_id[len("overall-"):]
+    if doc_id.startswith("subdoc-"):
+        rest = doc_id[len("subdoc-"):]
+        idx = rest.find("-")
+        return rest[:idx] if idx > 0 else rest
+    return None
 
 
 @app.get("/api/community-graph")
@@ -1119,6 +1157,14 @@ async def view_code():
     return HTMLResponse("code.html not found", status_code=404)
 
 
+@app.get("/chat", response_class=HTMLResponse)
+async def view_chat():
+    chat_path = os.path.join(STATIC_DIR, "chat.html")
+    if os.path.isfile(chat_path):
+        return FileResponse(chat_path)
+    return HTMLResponse("chat.html not found.")
+
+
 # ==================== Graph Layout Persistence ====================
 
 def _ensure_graph_layout_table(pdb):
@@ -1214,6 +1260,967 @@ async def delete_graph_layout(task_id: str = Query(None), taskId: str = Query(No
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ==================== Web AI 对话 ====================
+
+
+def _require_chat_ready():
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    if not web_tool_executor:
+        raise HTTPException(503, "Chat tools not initialized")
+
+
+def _sdb():
+    return multi_db.sessions_db
+
+
+@app.get("/api/models")
+async def list_models():
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    try:
+        rows = multi_db.main_db.fetchall(
+            "SELECT id, name, provider, model, is_default, type FROM model_configs WHERE status = 'connected'"
+        )
+        result = []
+        for r in rows:
+            badge = "本地" if r["type"] == "local" else "API"
+            result.append({
+                "id": r["id"],
+                "name": r["name"] or r["model"],
+                "provider": r["provider"],
+                "model": r["model"],
+                "isDefault": bool(r["is_default"]),
+                "badge": badge,
+            })
+        default_row = multi_db.main_db.fetchone(
+            "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
+        )
+        default_model = default_row["value"] if default_row else None
+        return {"models": result, "webChatDefaultModelId": default_model}
+    except Exception as e:
+        logger.error(f"list_models error: {e}")
+        return {"models": [], "webChatDefaultModelId": None}
+
+
+@app.get("/api/skills")
+async def list_skills():
+    registry = get_skill_registry()
+    return {"skills": registry.to_frontend_list(), "defaults": registry.list_defaults()}
+
+
+def _make_session_id():
+    return f"chat_{uuid.uuid4().hex[:12]}"
+
+
+def _make_message_id():
+    return f"msg_{uuid.uuid4().hex[:12]}"
+
+
+@app.post("/api/chat/sessions")
+async def create_chat_session(request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        title = body.get("title", "新对话")
+        project_id = body.get("projectId") or body.get("project_id", "")
+        model_id = body.get("modelId") or body.get("model_id", "")
+        active_skills = body.get("skills") or body.get("active_skills", [])
+        refs = body.get("refs", [])
+
+        if not model_id:
+            default_row = multi_db.main_db.fetchone(
+                "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
+            )
+            if default_row and default_row["value"]:
+                model_id = default_row["value"]
+            else:
+                default_model = multi_db.main_db.fetchone(
+                    "SELECT id FROM model_configs WHERE is_default = 1 AND status = 'connected'"
+                )
+                if default_model:
+                    model_id = default_model["id"]
+
+        registry = get_skill_registry()
+        if not active_skills:
+            active_skills = registry.list_defaults()
+
+        sid = _make_session_id()
+        metadata = json.dumps({
+            "module": "web_chat",
+            "model_id": model_id,
+            "active_skills": active_skills,
+            "refs": refs,
+        }, ensure_ascii=False)
+        now = __import__("datetime").datetime.now().isoformat()
+        _sdb().execute(
+            "INSERT INTO llm_sessions (id, module_type, project_id, title, metadata, created_at, updated_at) "
+            "VALUES (?, 'ai_assistant', ?, ?, ?, ?, ?)",
+            (sid, project_id or None, title, metadata, now, now),
+        )
+
+        system_parts = [
+            "你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。",
+            "你可以使用工具查询项目数据，回答用户关于架构、代码、设计的问题。",
+        ]
+        if refs:
+            ref_context = resolve_refs_to_context(refs, multi_db)
+            if ref_context:
+                system_parts.append(ref_context)
+        skill_context = registry.collect_context(active_skills)
+        if skill_context:
+            system_parts.append(skill_context)
+
+        system_content = "\n\n".join(system_parts)
+        if system_content.strip():
+            _sdb().execute(
+                "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                "VALUES (?, ?, 'system', ?, '{}', ?)",
+                (_make_message_id(), sid, system_content, now),
+            )
+
+        return {
+            "id": sid,
+            "title": title,
+            "projectId": project_id,
+            "modelId": model_id,
+            "activeSkills": active_skills,
+            "createdAt": now,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/chat/sessions")
+async def list_chat_sessions(project_id: str = Query(None), status: str = Query(None)):
+    _require_chat_ready()
+    try:
+        wheres = ["json_extract(metadata, '$.module') = 'web_chat'"]
+        params = []
+        if project_id:
+            wheres.append("project_id = ?")
+            params.append(project_id)
+        if status:
+            wheres.append("status = ?")
+            params.append(status)
+        sql = (
+            "SELECT id, project_id, title, status, metadata, created_at, updated_at "
+            f"FROM llm_sessions WHERE {' AND '.join(wheres)} ORDER BY updated_at DESC"
+        )
+        rows = _sdb().fetchall(sql, tuple(params))
+        result = []
+        for r in rows:
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+            result.append({
+                "id": r["id"],
+                "projectId": r["project_id"],
+                "title": r["title"],
+                "status": r["status"],
+                "modelId": meta.get("model_id", ""),
+                "activeSkills": meta.get("active_skills", []),
+                "messageCount": meta.get("message_count", 0),
+                "createdAt": r["created_at"],
+                "updatedAt": r["updated_at"],
+            })
+        return {"sessions": result, "total": len(result)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/chat/sessions/{session_id}")
+async def get_chat_session(session_id: str):
+    _require_chat_ready()
+    try:
+        row = _sdb().fetchone(
+            "SELECT id, project_id, title, status, metadata, created_at, updated_at "
+            "FROM llm_sessions WHERE id = ?",
+            (session_id,),
+        )
+        if not row:
+            raise HTTPException(404, "Session not found")
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        messages = _sdb().fetchall(
+            "SELECT id, role, content, metadata, created_at FROM llm_messages "
+            "WHERE session_id = ? ORDER BY created_at",
+            (session_id,),
+        )
+        return {
+            "id": row["id"],
+            "projectId": row["project_id"],
+            "title": row["title"],
+            "status": row["status"],
+            "modelId": meta.get("model_id", ""),
+            "activeSkills": meta.get("active_skills", []),
+            "refs": meta.get("refs", []),
+            "messages": [
+                {
+                    "id": m["id"],
+                    "role": m["role"],
+                    "content": m["content"],
+                    "refs": json.loads(m["metadata"]).get("refs", []) if m["metadata"] else [],
+                    "createdAt": m["created_at"],
+                }
+                for m in messages
+            ],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.put("/api/chat/sessions/{session_id}")
+async def update_chat_session(session_id: str, request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        row = _sdb().fetchone(
+            "SELECT metadata FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        if not row:
+            raise HTTPException(404, "Session not found")
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        updates = []
+
+        if "title" in body:
+            updates.append(("title", body["title"]))
+        if "status" in body:
+            updates.append(("status", body["status"]))
+        if "modelId" in body or "model_id" in body:
+            mid = body.get("modelId") or body.get("model_id", "")
+            meta["model_id"] = mid
+        if "skills" in body:
+            meta["active_skills"] = body["skills"]
+        if "refs" in body:
+            meta["refs"] = body["refs"]
+
+        now = __import__("datetime").datetime.now().isoformat()
+        updates.append(("metadata", json.dumps(meta, ensure_ascii=False)))
+        updates.append(("updated_at", now))
+
+        set_clause = ", ".join(f"{k} = ?" for k, _ in updates)
+        vals = [v for _, v in updates] + [session_id]
+        _sdb().execute(
+            f"UPDATE llm_sessions SET {set_clause} WHERE id = ?", tuple(vals)
+        )
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str):
+    _require_chat_ready()
+    try:
+        _sdb().execute("DELETE FROM llm_sessions WHERE id = ?", (session_id,))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/chat/sessions/{session_id}/messages")
+async def send_chat_message(session_id: str, request: Request):
+    """发消息 + SSE 流式回复（核心端点）"""
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        content = body.get("content", "")
+        refs = body.get("refs", [])
+        model_id = body.get("modelId") or body.get("model_id", "")
+        streaming = body.get("stream", True)
+
+        session = _sdb().fetchone(
+            "SELECT id, project_id, metadata FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        if not session:
+            raise HTTPException(404, "Session not found")
+
+        meta = json.loads(session["metadata"]) if session["metadata"] else {}
+        if not model_id:
+            model_id = meta.get("model_id", "")
+        active_skills = meta.get("active_skills", [])
+
+        now = __import__("datetime").datetime.now().isoformat()
+        msg_meta = json.dumps({"refs": refs} if refs else {})
+        _sdb().execute(
+            "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+            "VALUES (?, ?, 'user', ?, ?, ?)",
+            (_make_message_id(), session_id, content, msg_meta, now),
+        )
+
+        count_row = _sdb().fetchone(
+            "SELECT count(*) AS cnt FROM llm_messages WHERE session_id = ? AND role IN ('user', 'assistant')",
+            (session_id,),
+        )
+        count = count_row["cnt"] if count_row else 0
+        meta["message_count"] = count // 2
+        _sdb().execute(
+            "UPDATE llm_sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(meta, ensure_ascii=False), now, session_id),
+        )
+
+        if not streaming:
+            return {"ok": True, "messageId": _make_message_id()}
+
+        # ── SSE 流式 ──
+        from llm_service import LLMService
+        registry = get_skill_registry()
+        tool_names = registry.collect_tool_names(active_skills)
+        has_tools = len(tool_names) > 0
+
+        msgs = _sdb().fetchall(
+            "SELECT role, content FROM llm_messages WHERE session_id = ? ORDER BY created_at",
+            (session_id,),
+        )
+        context_messages = [{"role": m["role"], "content": m["content"]} for m in msgs]
+
+        if refs:
+            ref_context = resolve_refs_to_context(refs, multi_db)
+            if ref_context:
+                context_messages.append({"role": "system", "content": ref_context})
+
+        async def event_stream():
+            queue: asyncio.Queue = asyncio.Queue()
+            llm_service = LLMService(multi_db)
+            if hasattr(llm_service, '_server') is False or llm_service._server is None:
+                try:
+                    llm_service._server = zmq_server
+                except Exception:
+                    pass
+
+            async def _run_llm():
+                try:
+                    model_cfg = multi_db.main_db.fetchone(
+                        "SELECT * FROM model_configs WHERE id = ?", (model_id,)
+                    )
+                    if not model_cfg:
+                        await queue.put({"type": "error", "message": f"Model not found: {model_id}"})
+                        await queue.put({"type": "done"})
+                        return
+
+                    model_dict = dict(model_cfg)
+                    import queue as _queue
+                    chunk_q = _queue.Queue()
+                    loop = asyncio.get_event_loop()
+                    full_content = ""
+                    tool_calls_raw = []
+
+                    def _http_stream():
+                        try:
+                            from llm_service import get_provider
+                            provider_impl = get_provider(model_dict.get("provider", "ollama"))
+                            if provider_impl is None:
+                                raise ValueError(f"Unknown provider: {model_dict.get('provider')}")
+
+                            if has_tools and tool_names:
+                                from web_tools import get_web_tool_definitions
+                                tool_defs = get_web_tool_definitions(tool_names)
+                                if tool_defs:
+                                    # 将 tools payload 注入到 model_config，provider 以 chat 模式调用时不处理 tools
+                                    # 但我们用 mode='chat' 并让 provider 忽略 tools 参数
+                                    # 改为：直构造 HTTP 请求复用 provider 的流式解析能力
+                                    import requests as _requests
+                                    base_url = model_dict.get('url', '').rstrip('/')
+                                    if base_url.endswith('/v1'):
+                                        base_url = base_url[:-3]
+                                    payload = {
+                                        'model': model_dict.get('model', ''),
+                                        'messages': context_messages,
+                                        'stream': True,
+                                        'tools': tool_defs,
+                                        'tool_choice': 'auto',
+                                    }
+                                    if model_dict.get('temperature') is not None:
+                                        payload['temperature'] = model_dict['temperature']
+                                    payload['max_tokens'] = model_dict.get('max_tokens', 16384)
+                                    headers = {'Content-Type': 'application/json'}
+                                    api_key = model_dict.get('api_key', '')
+                                    if api_key:
+                                        headers['Authorization'] = f'Bearer {api_key}'
+                                    timeout = model_dict.get('timeout', 300)
+                                    resp = _requests.post(
+                                        f'{base_url}/v1/chat/completions',
+                                        json=payload, headers=headers, stream=True, timeout=timeout,
+                                    )
+                                    if resp.status_code != 200:
+                                        chunk_q.put({'type': 'error', 'message': f'API error {resp.status_code}: {resp.text[:200]}'})
+                                        chunk_q.put({'type': 'done', 'content': ''})
+                                        return
+                                    for line_bytes in resp.iter_lines():
+                                        if not line_bytes:
+                                            continue
+                                        line = line_bytes.decode('utf-8')
+                                        if not line.startswith('data: '):
+                                            continue
+                                        data_str = line[6:].strip()
+                                        if data_str == '[DONE]':
+                                            break
+                                        try:
+                                            import json as _jj
+                                            data = _jj.loads(data_str)
+                                            delta = data.get('choices', [{}])[0].get('delta', {})
+                                            chunk = delta.get('content', '')
+                                            reasoning = delta.get('reasoning_content', '')
+                                            if reasoning:
+                                                chunk_q.put({"type": "reasoning", "text": reasoning})
+                                            if chunk:
+                                                chunk_q.put(chunk)
+                                            tc = delta.get('tool_calls')
+                                            if tc:
+                                                chunk_q.put({'type': 'tool_calls', 'data': _jj.dumps(tc)})
+                                            if data.get('usage'):
+                                                pass
+                                        except Exception:
+                                            pass
+                                    chunk_q.put({'type': 'done', 'content': ''})
+                                    return
+                            # 无 tools → 走标准 provider 路径
+                            provider_impl.chat_stream(
+                                model_dict, context_messages, chunk_q,
+                                None, "chat",
+                            )
+                        except Exception as e:
+                            chunk_q.put({"type": "error", "message": str(e)})
+
+                    import threading
+                    thread = threading.Thread(target=_http_stream, daemon=True)
+                    thread.start()
+
+                    while True:
+                        try:
+                            item = await loop.run_in_executor(None, chunk_q.get, True, 0.15)
+                        except _queue.Empty:
+                            continue
+
+                        if isinstance(item, dict) and item.get("type") == "done":
+                            break
+                        if isinstance(item, dict) and item.get("type") == "error":
+                            await queue.put({"type": "error", "message": item.get("message", "")})
+                            await queue.put({"type": "done"})
+                            return
+                        if isinstance(item, dict) and item.get("type") == "tool_calls":
+                            tool_calls_raw.append(item.get("data", ""))
+                        if isinstance(item, dict) and item.get("type") == "reasoning":
+                            await queue.put({"type": "reasoning", "text": item.get("text", "")})
+                        if isinstance(item, str):
+                            full_content += item
+                            await queue.put({"type": "chunk", "text": item})
+
+                    thread.join(timeout=5)
+
+                    if tool_calls_raw and has_tools:
+                        parsed = _parse_tool_calls_simple(tool_calls_raw)
+                        if parsed:
+                            executor = web_tool_executor
+                            for tc in parsed:
+                                t_name = tc.get("name", "")
+                                t_args = tc.get("arguments", {})
+                                await queue.put({"type": "tool_call", "name": t_name, "arguments": t_args})
+                                result = executor.execute(t_name, t_args)
+                                await queue.put({"type": "tool_result", "name": t_name, "result": result})
+
+                    if full_content.strip():
+                        _sdb().execute(
+                            "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                            "VALUES (?, ?, 'assistant', ?, '{}', ?)",
+                            (_make_message_id(), session_id, full_content.strip(), now),
+                        )
+
+                    await queue.put({"type": "done", "content": full_content.strip()})
+
+                except Exception as e:
+                    logger.error(f"[SSE] streaming error: {e}")
+                    await queue.put({"type": "error", "message": str(e)})
+                    await queue.put({"type": "done"})
+
+            asyncio.create_task(_run_llm())
+
+            while True:
+                event = await queue.get()
+                if event["type"] == "done":
+                    yield f"event: done\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    break
+                elif event["type"] == "error":
+                    yield f"event: error\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    break
+                elif event["type"] == "chunk":
+                    yield f"event: chunk\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event["type"] == "reasoning":
+                    yield f"event: reasoning\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event["type"] == "tool_call":
+                    yield f"event: tool_call\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event["type"] == "tool_result":
+                    yield f"event: tool_result\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Chat error: {e}")
+
+
+def _parse_tool_calls_simple(raw_parts: list) -> list:
+    """简化的 tool_call JSON 解析"""
+    try:
+        raw = "".join(raw_parts)
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            result = []
+            for tc in parsed:
+                func = tc.get("function", {})
+                args_raw = func.get("arguments", "{}")
+                if isinstance(args_raw, str):
+                    args = json.loads(args_raw)
+                else:
+                    args = args_raw
+                result.append({"name": func.get("name", ""), "arguments": args})
+            return result
+        elif isinstance(parsed, dict):
+            func = parsed.get("function", {})
+            args_raw = func.get("arguments", "{}")
+            if isinstance(args_raw, str):
+                args = json.loads(args_raw)
+            else:
+                args = args_raw
+            return [{"name": func.get("name", ""), "arguments": args}]
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    return []
+
+
+@app.get("/api/chat/sessions/{session_id}/messages")
+async def get_chat_messages(session_id: str, limit: int = Query(50), offset: int = Query(0)):
+    _require_chat_ready()
+    try:
+        rows = _sdb().fetchall(
+            "SELECT id, role, content, metadata, created_at FROM llm_messages "
+            "WHERE session_id = ? ORDER BY created_at LIMIT ? OFFSET ?",
+            (session_id, limit, offset),
+        )
+        return {
+            "messages": [
+                {
+                    "id": m["id"],
+                    "role": m["role"],
+                    "content": m["content"],
+                    "refs": json.loads(m["metadata"]).get("refs", []) if m["metadata"] else [],
+                    "createdAt": m["created_at"],
+                }
+                for m in rows
+            ],
+            "total": len(rows),
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# 归档
+
+@app.post("/api/chat/archives")
+async def create_archive(request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        aid = f"arch_{uuid.uuid4().hex[:12]}"
+        session_id = body.get("sessionId") or body.get("session_id", "")
+        title = body.get("title", "")
+        content = body.get("content", "")
+        category = body.get("category", "note")
+        tags = body.get("tags", "")
+        pid = body.get("projectId") or body.get("project_id", "")
+        if not pid and session_id:
+            row = _sdb().fetchone(
+                "SELECT project_id FROM llm_sessions WHERE id = ?", (session_id,)
+            )
+            if row:
+                pid = row["project_id"]
+        multi_db.main_db.execute(
+            "INSERT INTO chat_archives (id, session_id, project_id, title, content, category, tags, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')",
+            (aid, session_id or None, pid or None, title, content, category, tags),
+        )
+        return {"id": aid, "ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/chat/archives")
+async def list_archives(project_id: str = Query(None), category: str = Query(None), tag: str = Query(None)):
+    _require_chat_ready()
+    try:
+        wheres = []
+        params = []
+        if project_id:
+            wheres.append("project_id = ?")
+            params.append(project_id)
+        if category:
+            wheres.append("category = ?")
+            params.append(category)
+        if tag:
+            wheres.append("tags LIKE ?")
+            params.append(f"%{tag}%")
+        where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
+        rows = multi_db.main_db.fetchall(
+            f"SELECT id, title, content, category, tags, source, created_at "
+            f"FROM chat_archives {where} ORDER BY created_at DESC LIMIT 50"
+        )
+        return {
+            "archives": [
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "content": r["content"][:500],
+                    "category": r["category"],
+                    "tags": r["tags"],
+                    "source": r["source"],
+                    "createdAt": r["created_at"],
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/chat/archives/{archive_id}")
+async def delete_archive(archive_id: str):
+    _require_chat_ready()
+    try:
+        multi_db.main_db.execute("DELETE FROM chat_archives WHERE id = ?", (archive_id,))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ==================== 便签 (Notes) API ====================
+
+
+def _make_note_id():
+    return f"note_{uuid.uuid4().hex[:12]}"
+
+
+@app.post("/api/notes")
+async def create_note(request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        nid = _make_note_id()
+        title = body.get("title", "")
+        content = body.get("content", "")
+        refs = json.dumps(body.get("refs", []), ensure_ascii=False)
+        project_id = body.get("projectId") or body.get("project_id", "")
+        now = __import__("datetime").datetime.now().isoformat()
+        multi_db.main_db.execute(
+            "INSERT INTO chat_notes (id, title, content, refs, status, project_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)",
+            (nid, title, content, refs, project_id or None, now, now),
+        )
+        return {"id": nid, "title": title, "ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/notes")
+async def list_notes(status: str = Query(None), project_id: str = Query(None)):
+    _require_chat_ready()
+    try:
+        wheres = []
+        params = []
+        if status:
+            wheres.append("status = ?")
+            params.append(status)
+        if project_id:
+            wheres.append("project_id = ?")
+            params.append(project_id)
+        where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
+        rows = multi_db.main_db.fetchall(
+            f"SELECT id, title, content, refs, status, session_id, project_id, created_at, updated_at "
+            f"FROM chat_notes {where} ORDER BY updated_at DESC",
+            tuple(params),
+        )
+        return {
+            "notes": [
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "content": r["content"],
+                    "refs": json.loads(r["refs"]) if r["refs"] else [],
+                    "status": r["status"],
+                    "sessionId": r["session_id"],
+                    "projectId": r["project_id"],
+                    "createdAt": r["created_at"],
+                    "updatedAt": r["updated_at"],
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/notes/{note_id}")
+async def get_note(note_id: str):
+    _require_chat_ready()
+    try:
+        row = multi_db.main_db.fetchone(
+            "SELECT id, title, content, refs, status, session_id, project_id, created_at, updated_at "
+            "FROM chat_notes WHERE id = ?",
+            (note_id,),
+        )
+        if not row:
+            raise HTTPException(404, "Note not found")
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "content": row["content"],
+            "refs": json.loads(row["refs"]) if row["refs"] else [],
+            "status": row["status"],
+            "sessionId": row["session_id"],
+            "projectId": row["project_id"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.put("/api/notes/{note_id}")
+async def update_note(note_id: str, request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        row = multi_db.main_db.fetchone(
+            "SELECT id, refs FROM chat_notes WHERE id = ?", (note_id,)
+        )
+        if not row:
+            raise HTTPException(404, "Note not found")
+        existing_refs = json.loads(row["refs"]) if row["refs"] else []
+        updates = []
+        if "title" in body:
+            updates.append(("title", body["title"]))
+        if "content" in body:
+            updates.append(("content", body["content"]))
+        if "refs" in body:
+            seen = set()
+            merged = []
+            for r in existing_refs + body["refs"]:
+                key = json.dumps(r, sort_keys=True)
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(r)
+            updates.append(("refs", json.dumps(merged, ensure_ascii=False)))
+        if not updates:
+            return {"ok": True}
+        now = __import__("datetime").datetime.now().isoformat()
+        updates.append(("updated_at", now))
+        set_clause = ", ".join(f"{k} = ?" for k, _ in updates)
+        vals = [v for _, v in updates] + [note_id]
+        multi_db.main_db.execute(
+            f"UPDATE chat_notes SET {set_clause} WHERE id = ?", tuple(vals)
+        )
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/notes/{note_id}")
+async def delete_note(note_id: str):
+    _require_chat_ready()
+    try:
+        multi_db.main_db.execute("DELETE FROM chat_notes WHERE id = ?", (note_id,))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/notes/{note_id}/send")
+async def send_note(note_id: str, request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        session_id = body.get("sessionId") or body.get("session_id", "")
+
+        row = multi_db.main_db.fetchone(
+            "SELECT id, title, content, refs, status, project_id FROM chat_notes WHERE id = ?",
+            (note_id,),
+        )
+        if not row:
+            raise HTTPException(404, "Note not found")
+        if row["status"] == "sent":
+            raise HTTPException(400, "Note already sent")
+
+        refs = json.loads(row["refs"]) if row["refs"] else []
+        title = row["title"] or "便签消息"
+        note_content = row["content"] or ""
+        project_id = row["project_id"]
+
+        ref_context = resolve_refs_to_context(refs, multi_db)
+
+        if not session_id:
+            registry = get_skill_registry()
+            default_skills = registry.list_defaults()
+            sid = _make_session_id()
+            now = __import__("datetime").datetime.now().isoformat()
+            metadata = json.dumps({
+                "module": "web_chat", "model_id": "",
+                "active_skills": default_skills,
+                "refs": refs, "note_id": note_id,
+            }, ensure_ascii=False)
+            _sdb().execute(
+                "INSERT INTO llm_sessions (id, module_type, project_id, title, metadata, created_at, updated_at) "
+                "VALUES (?, 'ai_assistant', ?, ?, ?, ?, ?)",
+                (sid, project_id or None, title, metadata, now, now),
+            )
+            session_id = sid
+        else:
+            existing = _sdb().fetchone(
+                "SELECT id, metadata FROM llm_sessions WHERE id = ?", (session_id,)
+            )
+            if not existing:
+                raise HTTPException(404, "Session not found")
+            meta = json.loads(existing["metadata"]) if existing["metadata"] else {}
+            sent_notes = meta.get("sent_note_ids", [])
+            if note_id in sent_notes:
+                raise HTTPException(400, "Note already sent to this session")
+            meta.setdefault("sent_note_ids", []).append(note_id)
+            now = __import__("datetime").datetime.now().isoformat()
+            _sdb().execute(
+                "UPDATE llm_sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(meta, ensure_ascii=False), now, session_id),
+            )
+
+        now = __import__("datetime").datetime.now().isoformat()
+        sys_msg_id = _make_message_id()
+        user_msg_id = _make_message_id()
+
+        if ref_context:
+            _sdb().execute(
+                "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                "VALUES (?, ?, 'system', ?, ?, ?)",
+                (sys_msg_id, session_id, ref_context,
+                 json.dumps({"refs": refs, "note_id": note_id}, ensure_ascii=False), now),
+            )
+
+        user_text = note_content or f"分析这些内容：{title}"
+        _sdb().execute(
+            "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+            "VALUES (?, ?, 'user', ?, ?, ?)",
+            (user_msg_id, session_id, user_text,
+             json.dumps({"refs": refs, "note_id": note_id}, ensure_ascii=False), now),
+        )
+
+        multi_db.main_db.execute(
+            "UPDATE chat_notes SET status = 'sent', session_id = ?, message_id = ?, updated_at = ? WHERE id = ?",
+            (session_id, user_msg_id, now, note_id),
+        )
+
+        return {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/notes/batch-send")
+async def batch_send_notes(request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        note_ids = body.get("noteIds", [])
+        session_id = body.get("sessionId") or body.get("session_id", "")
+        if not note_ids:
+            raise HTTPException(422, "noteIds is required")
+        first = None
+        for nid in note_ids:
+            try:
+                result = await send_note(nid, request)
+                if not first:
+                    first = result
+            except HTTPException as e:
+                if e.status_code == 400 and "already sent" in str(e.detail):
+                    continue
+                raise
+        return first or {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ==================== 上下文摘要 ====================
+@app.get("/api/chat/context/project/{project_id}")
+async def get_project_context(project_id: str):
+    _require_chat_ready()
+    try:
+        proj = multi_db.main_db.fetchone(
+            "SELECT id, name, root_path FROM projects WHERE id = ?", (project_id,)
+        )
+        if not proj:
+            raise HTTPException(404, "Project not found")
+        tasks = multi_db.main_db.fetchall(
+            "SELECT id, name, status FROM analysis_tasks WHERE project_id = ? ORDER BY created_at DESC",
+            (project_id,),
+        )
+        return {
+            "project": {"id": proj["id"], "name": proj["name"], "rootPath": proj["root_path"]},
+            "tasks": [
+                {"id": t["id"], "name": t["name"], "status": t["status"]} for t in tasks
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/chat/context/task/{task_id}")
+async def get_task_context(task_id: str):
+    _require_chat_ready()
+    try:
+        task = multi_db.main_db.fetchone(
+            "SELECT id, name, status, project_id FROM analysis_tasks WHERE id = ?", (task_id,)
+        )
+        if not task:
+            raise HTTPException(404, "Task not found")
+        pid = task["project_id"]
+        pdb = multi_db.get_project_db(pid)
+        communities = pdb.fetchall(
+            "SELECT comm_id, comm_lv, name FROM community_llm_results WHERE task_id = ? LIMIT 20",
+            (task_id,),
+        )
+        return {
+            "task": {
+                "id": task["id"],
+                "name": task["name"],
+                "status": task["status"],
+                "projectId": task["project_id"],
+            },
+            "communities": [
+                {"commId": c["comm_id"], "level": c["comm_lv"], "name": c["name"]}
+                for c in communities
+            ],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 
 
 # ==================== 结构分析导入/导出/校验 ====================
@@ -1325,10 +2332,45 @@ async def get_verify_status(verify_id: str):
     return status
 
 
+def _ensure_chat_tables():
+    """确保聊天相关表存在"""
+    if not multi_db:
+        return
+    multi_db.main_db.execute("""
+        CREATE TABLE IF NOT EXISTS chat_archives (
+            id TEXT PRIMARY KEY,
+            session_id TEXT,
+            project_id TEXT,
+            title TEXT,
+            content TEXT NOT NULL,
+            category TEXT DEFAULT 'note',
+            tags TEXT DEFAULT '',
+            source TEXT DEFAULT 'manual',
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    multi_db.main_db.execute("""
+        CREATE TABLE IF NOT EXISTS chat_notes (
+            id TEXT PRIMARY KEY,
+            title TEXT DEFAULT '',
+            content TEXT DEFAULT '',
+            refs TEXT DEFAULT '[]',
+            status TEXT DEFAULT 'draft',
+            session_id TEXT,
+            message_id TEXT,
+            project_id TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+
 def create_app(multi_db_instance, zmq_server_instance=None) -> FastAPI:
-    global multi_db, zmq_server
+    global multi_db, zmq_server, web_tool_executor
     multi_db = multi_db_instance
     zmq_server = zmq_server_instance
+    web_tool_executor = WebToolExecutor(multi_db)
+    _ensure_chat_tables()
     return app
 
 
@@ -1337,10 +2379,12 @@ def create_app(multi_db_instance, zmq_server_instance=None) -> FastAPI:
 
 async def start_http_server(multi_db_instance, port: int = 3456, host: str = '127.0.0.1',
                             cache_path: str = None, zmq_server_instance: object = None):
-    global multi_db, http_port, zmq_server
+    global multi_db, http_port, zmq_server, web_tool_executor
     http_port = port
     multi_db = multi_db_instance
     zmq_server = zmq_server_instance
+    web_tool_executor = WebToolExecutor(multi_db)
+    _ensure_chat_tables()
     if cache_path:
         _init_cache_db(cache_path)
     config = uvicorn.Config(app, host=host, port=port, log_level="info")

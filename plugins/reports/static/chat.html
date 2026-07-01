@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TopoCode AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+.hljs{background:var(--bg-code)!important;color:var(--code-text)!important}
+.hljs-comment,.hljs-quote{color:var(--text-muted)!important}
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#ffffff;--bg-side:#f7f7f8;--bg-hover:#f0f0f2;
+  --bubble-ai:#ffffff;--bubble-user:#e8e8ea;--border:#e4e4e7;
+  --text:#1a1a1a;--text-secondary:#6b6b76;--text-muted:#8e8e98;
+  --accent:#4d6bfe;--accent-hover:#3a56d4;
+  --accent-light:rgba(77,107,254,0.08);
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.06);
+  --radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-full:9999px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","Fira Code",monospace;
+  --bg-code:#f4f4f5;--code-text:#1a1a1a;
+  --transition:0.2s ease;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --bg:#212121;--bg-side:#2d2d2d;--bg-hover:#3d3d3d;
+    --bubble-ai:#2d2d2d;--bubble-user:#3d3d3d;--border:#3d3d3d;
+    --text:#e8e8e8;--text-secondary:#a0a0a0;--text-muted:#6b6b6b;
+    --accent:#60a5fa;--accent-hover:#3b82f6;
+    --accent-light:rgba(96,165,250,0.12);
+    --shadow-sm:0 1px 2px rgba(0,0,0,0.2);--shadow-md:0 4px 16px rgba(0,0,0,0.3);
+    --bg-code:#2a2a2a;--code-text:#e8e8e8;
+  }
+}
+html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+.app{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:260px;background:var(--bg-side);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-header{display:flex;align-items:center;gap:8px;padding:14px 14px 10px}
+.sidebar-header .logo{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;color:var(--text);flex:1}
+.sidebar-header .logo svg{width:18px;height:18px;flex-shrink:0}
+.sidebar-tabs{display:flex;padding:0 12px 10px;gap:4px}
+.sidebar-tab{padding:5px 12px;border-radius:var(--radius-md);font-size:13px;color:var(--text-secondary);cursor:pointer;transition:all var(--transition);font-weight:500}
+.sidebar-tab:hover{background:var(--bg-hover)}
+.sidebar-tab.active{background:var(--accent);color:#fff}
+.sidebar-content{flex:1;overflow-y:auto;padding:0 8px 8px}
+.sidebar-content::-webkit-scrollbar{width:4px}
+.sidebar-content::-webkit-scrollbar-track{background:transparent}
+.sidebar-content::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
+
+.sidebar-content .btn-new{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-full);padding:6px 14px;font-size:13px;font-weight:500;cursor:pointer;transition:background var(--transition);white-space:nowrap;display:inline-flex;align-items:center;gap:6px;margin-bottom:8px;margin-left:4px}
+.sidebar-content .btn-new:hover{background:var(--accent-hover)}
+.session-item,.note-item{display:flex;align-items:center;padding:8px 10px;border-radius:var(--radius-md);font-size:13px;color:var(--text-secondary);cursor:pointer;transition:background var(--transition);gap:6px;margin-bottom:1px}
+.session-item:hover,.note-item:hover{background:var(--bg-hover)}
+.session-item.active{background:var(--accent-light);color:var(--text);font-weight:500}
+.session-item .title,.note-item .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.del-btn{opacity:0;background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 6px;border-radius:4px;font-size:13px;transition:opacity var(--transition)}
+.session-item:hover .del-btn,.note-item:hover .del-btn{opacity:1}
+.del-btn:hover{background:var(--bg-hover);color:#ef4444}
+.note-item{padding:8px 10px;flex-wrap:wrap;border-left:3px solid transparent}
+.note-item .status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.note-item .status-dot.draft{background:#f59e0b}
+.note-item .status-dot.sent{background:#10b981}
+.note-item .ref-count{font-size:11px;color:var(--text-muted);padding:1px 6px;background:var(--bg-hover);border-radius:10px}
+.note-item .send-btn{opacity:0;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-full);padding:2px 10px;font-size:11px;font-weight:500;cursor:pointer;transition:opacity var(--transition);white-space:nowrap}
+.note-item:hover .send-btn{opacity:1}
+.note-item .send-btn:hover{background:var(--accent-hover)}
+.note-empty{padding:24px;text-align:center;font-size:13px;color:var(--text-muted)}
+
+.main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg);position:relative}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-left .chat-title{font-size:15px;font-weight:500;color:var(--text)}
+.topbar-right select{font-size:13px;padding:5px 10px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg);color:var(--text);outline:none;cursor:pointer}
+.topbar-right select:focus{border-color:var(--accent)}
+.messages{flex:1;overflow-y:auto;padding:24px 32px 16px;display:flex;flex-direction:column;scroll-behavior:smooth}
+.messages::-webkit-scrollbar{width:4px}
+.messages::-webkit-scrollbar-track{background:transparent}
+.messages::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
+.message{display:flex;gap:14px;max-width:820px;margin:0 auto;width:100%;animation:fadeUp .3s ease;margin-bottom:24px}
+.message-avatar{width:32px;height:32px;border-radius:var(--radius-full);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:500;color:#fff}
+.message-avatar.user{background:var(--text-secondary)}
+.message-avatar.ai{background:var(--accent)}
+.message-content{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
+.message-content .sender{font-size:13px;font-weight:500;color:var(--text-secondary)}
+.message-content .bubble{padding:12px 16px;border-radius:var(--radius-lg);border-top-left-radius:4px;font-size:15px;line-height:1.65;word-break:break-word;background:var(--bubble-ai);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.message.user .bubble{background:var(--bubble-user);border-color:transparent;border-top-left-radius:var(--radius-lg);border-top-right-radius:4px}
+.message .bubble>:first-child{margin-top:0}
+.message .bubble>:last-child{margin-bottom:0}
+.message .bubble p{margin:6px 0}
+.message .bubble h1{font-size:17px;font-weight:600;margin:16px 0 8px}
+.message .bubble h2{font-size:16px;font-weight:600;margin:14px 0 6px}
+.message .bubble h3{font-size:15px;font-weight:600;margin:12px 0 4px}
+.message .bubble ul,.message .bubble ol{padding-left:22px;margin:6px 0}
+.message .bubble blockquote{border-left:3px solid var(--accent);padding:4px 12px;color:var(--text-secondary);margin:8px 0;background:var(--accent-light);border-radius:0 4px 4px 0}
+.message .bubble table{border-collapse:collapse;margin:8px 0;font-size:13px;width:100%}
+.message .bubble th,.message .bubble td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+.message .bubble th{background:var(--bg-hover);font-weight:600}
+.message .bubble hr{margin:12px 0;border:none;border-top:1px solid var(--border)}
+.message .bubble pre{background:var(--bg-code);padding:12px 14px;border-radius:8px;overflow-x:auto;margin:8px 0;font-size:13px;line-height:1.5}
+.message .bubble pre code{font-family:var(--font-mono);font-size:13px;background:none;padding:0;color:var(--code-text)}
+.message .bubble p>code{background:var(--bg-code);color:var(--code-text);padding:2px 6px;border-radius:4px;font-size:13px;font-family:var(--font-mono)}
+.message .bubble a{color:var(--accent);text-decoration:none}
+.message .bubble a:hover{text-decoration:underline}
+.message .bubble svg.mermaid{max-width:100%;margin:4px 0}
+.reasoning-toggle{font-size:13px;color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px}
+.reasoning-toggle:hover{color:var(--accent)}
+.reasoning-toggle .arrow{font-size:10px;transition:transform .2s}
+.reasoning-toggle .arrow.open{transform:rotate(90deg)}
+.reasoning-content{font-size:13px;color:var(--text-secondary);padding:10px 14px;background:var(--bg-hover);border-radius:8px;margin:4px 0 10px;white-space:pre-wrap;line-height:1.5;max-height:300px;overflow-y:auto;border-left:3px solid var(--accent)}
+.input-area{padding:0 24px 24px;flex-shrink:0;display:flex;flex-direction:column;align-items:center}
+.input-wrapper{max-width:820px;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);transition:border-color var(--transition),box-shadow var(--transition);padding:6px 8px 6px 16px}
+.input-wrapper:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
+.input-row{display:flex;align-items:flex-end;gap:8px}
+.input-row textarea{flex:1;border:none;outline:none;resize:none;font-family:var(--font);font-size:15px;line-height:1.5;padding:8px 0;min-height:28px;max-height:160px;color:var(--text);background:transparent}
+.input-row textarea::placeholder{color:var(--text-muted)}
+.input-row .btn-send{background:var(--accent);color:#fff;border:none;width:34px;height:34px;border-radius:var(--radius-full);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background var(--transition),opacity var(--transition);flex-shrink:0;font-size:16px}
+.input-row .btn-send:hover{background:var(--accent-hover)}
+.input-row .btn-send:disabled{opacity:0.4;cursor:not-allowed}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)}
+.empty-state .logo{width:36px;height:36px;opacity:0.25}
+.empty-state h1{font-size:22px;color:var(--text-secondary);font-weight:500}
+.empty-state p{font-size:14px}
+.empty-state .start-btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-full);padding:8px 20px;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
+.empty-state .start-btn:hover{background:var(--accent-hover)}
+.loading-dots{display:inline-flex;gap:4px;align-items:center;padding:8px 0}
+.loading-dots span{width:6px;height:6px;border-radius:50%;background:var(--text-muted);animation:pulse 1.2s ease-in-out infinite}
+.loading-dots span:nth-child(2){animation-delay:0.2s}
+.loading-dots span:nth-child(3){animation-delay:0.4s}
+@keyframes pulse{0%,100%{opacity:0.3}50%{opacity:1}}
+@keyframes fadeUp{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
+.diagram-placeholder{background:var(--bg-hover);border:1px dashed var(--border);border-radius:8px;padding:24px;text-align:center;font-size:13px;color:var(--text-muted);margin:8px 0}
+.diagram-error{color:#ef4444;font-size:12px;padding:8px;background:rgba(239,68,68,0.08);border-radius:6px;margin:4px 0}
+
+/* note modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease}
+.modal{background:var(--bg);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);width:520px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;animation:slideUp .2s ease}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid var(--border)}
+.modal-header h2{font-size:16px;font-weight:600}
+.modal-close{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px;padding:4px}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:16px 20px;overflow-y:auto;flex:1}
+.modal-body label{font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;font-weight:500}
+.modal-body input,.modal-body textarea{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-md);font-size:14px;font-family:var(--font);color:var(--text);background:var(--bg);outline:none;transition:border-color var(--transition);margin-bottom:12px}
+.modal-body input:focus,.modal-body textarea:focus{border-color:var(--accent)}
+.modal-body textarea{resize:vertical;min-height:60px}
+.modal-body .ref-tag{display:inline-flex;align-items:center;gap:4px;background:var(--accent-light);color:var(--accent);padding:3px 10px;border-radius:var(--radius-full);font-size:12px;margin:2px 4px 2px 0}
+.modal-body .ref-tag .rm{cursor:pointer;opacity:0.6}
+.modal-body .ref-tag .rm:hover{opacity:1}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;padding:12px 20px 16px;border-top:1px solid var(--border)}
+.modal-footer .btn{background:none;border:1px solid var(--border);border-radius:var(--radius-md);padding:7px 16px;font-size:13px;cursor:pointer;color:var(--text);transition:all var(--transition)}
+.modal-footer .btn:hover{background:var(--bg-hover)}
+.modal-footer .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.modal-footer .btn-primary:hover{background:var(--accent-hover)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div id="app" class="app">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/>
+          <line x1="11" y1="7" x2="6" y2="17"/><line x1="13" y1="7" x2="18" y2="17"/><line x1="7" y1="19" x2="17" y2="19"/>
+        </svg>
+        <span>TopoCode</span>
+      </div>
+    </div>
+    <div class="sidebar-tabs">
+      <div class="sidebar-tab" :class="{active:tab==='chat'}" @click="tab='chat'">会话</div>
+      <div class="sidebar-tab" :class="{active:tab==='notes'}" @click="switchNotesTab">便签</div>
+    </div>
+    <div class="sidebar-content" v-if="tab==='chat'">
+      <div v-for="s in sessions" :key="s.id" class="session-item" :class="{active:s.id===currentId}" @click="switchSession(s.id)">
+        <span class="title">{{ s.title }}</span>
+        <button class="del-btn" @click.stop="deleteSession(s.id)">×</button>
+      </div>
+      <div v-if="!sessions.length" class="note-empty">暂无对话</div>
+    </div>
+    <div class="sidebar-content" v-else>
+      <button class="btn-new" @click="showNewNote=true">+ 新建便签</button>
+      <div v-for="n in notes" :key="n.id" class="note-item">
+        <span class="status-dot" :class="n.status"></span>
+        <span class="title">{{ n.title || '无标题' }}</span>
+        <span class="ref-count">{{ n.refs.length }}项</span>
+        <button v-if="n.status==='draft'" class="send-btn" @click.stop="sendNote(n)">发送</button>
+        <button class="del-btn" @click.stop="deleteNote(n.id)">×</button>
+      </div>
+      <div v-if="!notes.length" class="note-empty">暂无便签</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="chat-title">{{ currentTitle }}</span>
+      </div>
+      <div class="topbar-right">
+        <select v-model="currentModel" @change="onModelChange">
+          <option value="">选择模型</option>
+          <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}<template v-if="m.isDefault"> ★</template></option>
+        </select>
+      </div>
+    </header>
+
+    <div class="messages" ref="msgArea">
+      <template v-for="(m, i) in messages" :key="m.id || i">
+        <div class="message" :class="m.role">
+          <div class="message-avatar" :class="m.role">{{ m.role==='user'?'你':'AI' }}</div>
+          <div class="message-content">
+            <div class="sender">{{ m.role==='user'?'你':'TopoCode' }}</div>
+            <div v-if="m.role==='assistant'&&m.reasoning" class="reasoning-toggle" @click="m.showReasoning=!m.showReasoning">
+              <span class="arrow" :class="{open:m.showReasoning}">▶</span>
+              <span v-if="m.showReasoning">收起思考过程</span>
+              <span v-else>查看思考过程</span>
+            </div>
+            <div v-if="m.role==='assistant'&&m.reasoning&&m.showReasoning" class="reasoning-content">{{ m.reasoning }}</div>
+            <div class="bubble" v-html="renderMd(m.content)" :ref="el=>onBubbleUpdate(el,i)"></div>
+          </div>
+        </div>
+      </template>
+      <div class="message" v-if="streaming">
+        <div class="message-avatar ai">AI</div>
+        <div class="message-content"><div class="sender">TopoCode</div><div class="bubble"><div class="loading-dots"><span></span><span></span><span></span></div></div></div>
+      </div>
+    </div>
+
+    <div class="empty-state" v-if="!messages.length&&!currentId&&!streaming">
+      <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/>
+        <line x1="11" y1="7" x2="6" y2="17"/><line x1="13" y1="7" x2="18" y2="17"/><line x1="7" y1="19" x2="17" y2="19"/>
+      </svg>
+      <h1>开始对话</h1>
+      <p>新建对话或从便签发送分析请求</p>
+      <button class="start-btn" @click="createSession">+ 新对话</button>
+    </div>
+
+    <div class="input-area">
+      <div class="input-wrapper">
+        <div class="input-row">
+          <textarea v-model="input" @keydown.enter.exact="send" placeholder="给 TopoCode 发送消息…" rows="1" :disabled="streaming || !currentId"></textarea>
+          <button class="btn-send" :disabled="!input.trim()||streaming||!currentId" @click="send">↑</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- modal -->
+<div class="modal-overlay" v-if="showNewNote" @click.self="showNewNote=false">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>{{ editNote ? '编辑便签' : '新建便签' }}</h2>
+      <button class="modal-close" @click="showNewNote=false">×</button>
+    </div>
+    <div class="modal-body">
+      <label>标题</label>
+      <input v-model="noteForm.title" placeholder="便签标题">
+      <label>备注内容</label>
+      <textarea v-model="noteForm.content" placeholder="你想针对这些材料分析什么？" rows="3"></textarea>
+      <label>引用材料 ({{ noteForm.refs.length }}项)</label>
+      <div v-if="!noteForm.refs.length" style="font-size:13px;color:var(--text-muted);margin-bottom:8px">暂无引用，在文档区浏览时可加入</div>
+      <div v-for="(r,ri) in noteForm.refs" :key="ri" class="ref-tag">
+        {{ r.label || r.type }}
+        <span class="rm" @click="noteForm.refs.splice(ri,1)">×</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" @click="showNewNote=false">取消</button>
+      <button class="btn-primary btn" @click="saveNote">{{ editNote ? '保存' : '创建' }}</button>
+    </div>
+  </div>
+</div>
+
+<script>
+marked.setOptions({gfm:true,breaks:true,langPrefix:'language-',
+  highlight:function(c,l){if(l&&hljs.getLanguage(l)){try{return hljs.highlight(c,{language:l}).value}catch(e){}}return c}})
+
+const{createApp,ref,computed,nextTick,onMounted}=Vue
+
+createApp({
+  setup(){
+    const sessions=ref([]);const messages=ref([]);const models=ref([]);const notes=ref([])
+    const currentId=ref('');const currentModel=ref('');const input=ref('')
+    const streaming=ref(false);const msgArea=ref(null);const tab=ref('chat')
+    const showNewNote=ref(false);const editNote=ref(null)
+    const noteForm=ref({title:'',content:'',refs:[]})
+    const currentTitle=computed(()=>{const s=sessions.value.find(x=>x.id===currentId.value);return s?s.title:'TopoCode AI'})
+
+    function renderMd(t){return t?marked.parse(t):''}
+    function onBubbleUpdate(el,idx){
+      if(!el||streaming.value)return;const m=messages.value[idx];if(!m||m._drawn)return;m._drawn=true;renderDiagrams(el)
+    }
+    async function renderDiagrams(el){
+      for(const sel of['code.language-mermaid','code.language-plantuml']){
+        const blocks=el.querySelectorAll(sel);if(!blocks.length)continue
+        for(const b of blocks){
+          const pre=b.parentElement;if(!pre||pre.tagName!=='PRE')continue
+          const code=b.textContent.trim();if(!code)continue
+          const w=document.createElement('div');w.className='diagram-placeholder';w.textContent='渲染中…'
+          pre.parentElement.replaceChild(w,pre)
+          try{
+            if(sel.includes('mermaid')){
+              const{default:md}=await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs')
+              md.initialize({startOnLoad:false,theme:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default'})
+              const uid='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6)
+              const{svg}=await md.render(uid,code);w.className='';w.innerHTML=svg
+            }else{
+              const r=await fetch('/api/plantuml?code='+encodeURIComponent(code))
+              if(!r.ok)throw new Error('HTTP '+r.status);w.innerHTML=await r.text();w.className=''
+            }
+          }catch(e){w.className='diagram-error';w.textContent='渲染失败: '+e.message}
+        }
+      }
+    }
+
+    async function loadModels(){
+      try{
+        const r=await fetch('/api/models');const d=await r.json()
+        models.value=d.models||[]
+        if(d.webChatDefaultModelId){const f=models.value.find(m=>m.id===d.webChatDefaultModelId);if(f)currentModel.value=f.id}
+        if(!currentModel.value&&models.value.length){const def=models.value.find(m=>m.isDefault);if(def)currentModel.value=def.id}
+      }catch(e){console.error(e)}
+    }
+    async function loadSessions(){
+      try{const r=await fetch('/api/chat/sessions');const d=await r.json();sessions.value=d.sessions||[]
+        if(!currentId.value&&sessions.value.length){currentId.value=sessions.value[0].id;loadMessages()}
+      }catch(e){console.error(e)}
+    }
+    async function loadMessages(){
+      if(!currentId.value){messages.value=[];return}
+      try{
+        const r=await fetch('/api/chat/sessions/'+currentId.value);const d=await r.json()
+        if(d.messages)messages.value=d.messages.filter(m=>m.role!=='system')
+        if(d.modelId)currentModel.value=d.modelId;await nextTick();scrollBottom()
+      }catch(e){console.error(e)}
+    }
+    async function loadNotes(){
+      try{const r=await fetch('/api/notes');const d=await r.json();notes.value=d.notes||[]}catch(e){}
+    }
+
+    async function createSession(){
+      try{
+        const r=await fetch('/api/chat/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'新对话',modelId:currentModel.value})})
+        const d=await r.json()
+        sessions.value.unshift({id:d.id,title:d.title,projectId:d.projectId,modelId:d.modelId,messageCount:0})
+        currentId.value=d.id;messages.value=[]
+      }catch(e){console.error(e)}
+    }
+    async function switchSession(id){if(streaming.value)return;currentId.value=id;await loadMessages()}
+    async function deleteSession(id){
+      if(streaming.value)return
+      try{await fetch('/api/chat/sessions/'+id,{method:'DELETE'});sessions.value=sessions.value.filter(s=>s.id!==id)}
+      catch(e){}
+    }
+    function onModelChange(){
+      if(!currentId.value||!currentModel.value)return
+      fetch('/api/chat/sessions/'+currentId.value,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({modelId:currentModel.value})}).catch(e=>console.error(e))
+    }
+
+    // notes
+    function switchNotesTab(){tab.value='notes';loadNotes()}
+    function initNoteForm(n){noteForm.value={title:n?.title||'',content:n?.content||'',refs:n?.refs?[...n.refs]:[]}}
+    async function saveNote(){
+      if(editNote.value){
+        await fetch('/api/notes/'+editNote.value.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:noteForm.value.title,content:noteForm.value.content,refs:noteForm.value.refs})})
+      }else{
+        await fetch('/api/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:noteForm.value.title,content:noteForm.value.content,refs:noteForm.value.refs})})
+      }
+      showNewNote.value=false;editNote.value=null;loadNotes()
+    }
+    async function deleteNote(id){
+      try{await fetch('/api/notes/'+id,{method:'DELETE'});loadNotes()}catch(e){}
+    }
+    async function sendNote(n){
+      // 选择发送到的 session
+      let sid=currentId.value
+      if(!sid){
+        const r=await fetch('/api/chat/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:n.title||'便签分析',modelId:currentModel.value})})
+        const d=await r.json();sid=d.id
+        sessions.value.unshift({id:d.id,title:d.title,projectId:d.projectId,modelId:d.modelId,messageCount:0})
+        currentId.value=d.id
+      }
+      await fetch('/api/notes/'+n.id+'/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})})
+      loadNotes();loadMessages()
+      // 通知其它标签页
+      try{new BroadcastChannel('topocode_notes').postMessage({type:'note_arrived',sessionId:sid})}catch(e){}
+    }
+    async function send(ev){
+      if(ev&&ev.shiftKey)return
+      const text=input.value.trim()
+      if(!text||streaming.value||!currentId.value)return
+      input.value='';streaming.value=true
+      messages.value.push({id:'u'+Date.now(),role:'user',content:text});scrollBottom()
+      const mid=messages.value.push({id:'a'+Date.now(),role:'assistant',content:'',reasoning:'',showReasoning:false,_drawn:false})-1
+      try{
+        const resp=await fetch('/api/chat/sessions/'+currentId.value+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:text,modelId:currentModel.value||undefined})})
+        if(!resp.ok){messages.value[mid].content='请求失败: '+resp.status;streaming.value=false;return}
+        const reader=resp.body.getReader();const decoder=new TextDecoder();let buf=''
+        while(true){
+          const{done,value}=await reader.read()
+          if(done)break
+          buf+=decoder.decode(value,{stream:true})
+          const lines=buf.split('\n');buf=lines.pop()||''
+          for(const line of lines){
+            if(line.startsWith('event:')||!line.startsWith('data: '))continue
+            try{
+              const data=JSON.parse(line.slice(6))
+              if(data.type==='chunk'&&data.text)messages.value[mid].content+=data.text
+              if(data.type==='reasoning'&&data.text)messages.value[mid].reasoning+=data.text
+              if(data.type==='error')messages.value[mid].content='错误: '+(data.message||'')
+              if(data.type==='done'){
+                if(data.content)messages.value[mid].content=data.content
+                messages.value[mid]._drawn=false
+                nextTick(()=>{const bs=msgArea.value?.querySelectorAll('.message.assistant .bubble');if(bs)renderDiagrams(bs[bs.length-1])})
+              }
+            }catch(e){}
+          }
+          scrollBottom()
+        }
+      }catch(e){messages.value[mid].content='网络错误: '+e.message}
+      streaming.value=false;scrollBottom();loadSessions()
+    }
+    function scrollBottom(){nextTick(()=>{if(msgArea.value)msgArea.value.scrollTop=msgArea.value.scrollHeight})}
+
+    onMounted(()=>{
+      loadModels()
+      const p=new URLSearchParams(location.search);const sid=p.get('sessionId')
+      if(sid){currentId.value=sid;loadMessages()}else{loadSessions()}
+      try{new BroadcastChannel('topocode_notes').onmessage=function(e){
+        if(e.data&&e.data.type==='note_arrived'&&e.data.sessionId===currentId.value)loadMessages()
+      }}catch(e){}
+    })
+
+    return{sessions,messages,models,notes,currentId,currentModel,currentTitle,input,streaming,msgArea,tab,showNewNote,editNote,noteForm,
+      renderMd,onBubbleUpdate,createSession,switchSession,deleteSession,onModelChange,send,
+      loadNotes,switchNotesTab,initNoteForm,saveNote,deleteNote,sendNote}
+  }
+}).mount('#app')
+</script>
+</body>
+</html>

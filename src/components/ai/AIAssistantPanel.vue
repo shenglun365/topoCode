@@ -35,10 +35,14 @@ const selectionStore = useComponentSelectionStore()
 const chatSession = useChatSession()
 
 const DEFAULT_SYSTEM_PROMPT = [
-  '你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。',
-  '用户可输入 /help 或 /帮助 查看全部可用命令；当被问到"你能做什么"时主动提醒用户使用 /help。',
+  '你是 TopoCode 使用助手，仅回答关于 TopoCode 软件功能和使用方法的问题。',
+  '用户可输入 /help 或 /帮助 查看全部可用命令和完整使用指南。',
+  '对于用户关于所分析项目的架构/代码/设计等具体研究问题，请回复：',
+  '> 这个问题需要结合您的项目上下文进行深入分析，',
+  '> 请通过 **Web AI 助手** 进行探讨：',
+  '> http://localhost:3456/chat',
   '',
-  '对话使用中文回复。',
+  '对话使用中文回复。保持简洁。',
 ].join('\n')
 
 const HELP_TEXT = [
@@ -55,7 +59,8 @@ const HELP_TEXT = [
   '| `/pipeline [--force] [-L zh/en]` | 流水线整体激活。顺序执行：项目摘要 → 预摘要(P0→P1→P2) → 组件分析(L0→L5) → 整体架构分析。`--force` 强制覆盖所有；默认跳过已完成。支持暂停 ⏸ / 恢复 ▶ |',
   '',
   '### 模式',
-  '- **自由对话**：输入任意问题，AI 基于分析上下文回复',
+  '- **自由对话**：输入 TopoCode 使用相关问题，AI 基于内置文档回复',
+  '- **项目分析**：关于项目架构/代码的深入问题，请使用 **Web AI 助手** http://localhost:3456/chat',
   '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮切换。无参数时手动点选；支持 `/select --include --l0` 等参数自动选取。选中后输入 `/analyze` 启动分析',
   '- **流水线模式**：`/pipeline` 一键完成全部分析流程',
 ].join('\n')
