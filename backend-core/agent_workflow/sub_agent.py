@@ -318,12 +318,13 @@ class SubAgent:
         if not self._project_db or not self._task_id:
             return None
         try:
+            file_path = to_rel(path, self._project_root) if self._project_root else path
             rows = self._project_db.execute(
                 "SELECT id, kind, name, signature, start_line, end_line, "
                 "docstring, visibility, is_exported, qualified_name "
                 "FROM graph_node WHERE task_id=? AND file_path=? "
                 "ORDER BY start_line",
-                (self._task_id, path)
+                (self._task_id, file_path)
             ).fetchall()
             if not rows:
                 return None
@@ -332,7 +333,7 @@ class SubAgent:
             for s in symbols:
                 kind = s.get("kind", "unknown")
                 grouped.setdefault(kind, []).append(s)
-            return {"file_path": path, "symbol_count": len(symbols), "by_kind": grouped}
+            return {"file_path": file_path, "symbol_count": len(symbols), "by_kind": grouped}
         except Exception:
             return None
 
@@ -341,6 +342,7 @@ class SubAgent:
         if not self._project_db or not self._task_id:
             return []
         try:
+            file_path = to_rel(path, self._project_root) if self._project_root else path
             rows = self._project_db.execute(
                 "SELECT g1.name as src, g2.name as tgt, d.type "
                 "FROM dependencies d "
@@ -348,7 +350,7 @@ class SubAgent:
                 "JOIN graph_node g2 ON g2.id = d.target_id AND g2.task_id = ? "
                 "WHERE g1.file_path = ? AND g2.file_path = ? "
                 "LIMIT 50",
-                (self._task_id, self._task_id, path, path)
+                (self._task_id, self._task_id, file_path, file_path)
             ).fetchall()
             return [f"{r['src']} → {r['tgt']}" + (f" ({r['type']})" if r.get('type') else "")
                     for r in rows]

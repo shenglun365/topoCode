@@ -2366,12 +2366,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return {"resumed": ok}
 
     @server.register("analysis.startPipeline")
-    def start_pipeline(task_id=None, taskId=None, force=False, language=None):
+    def start_pipeline(task_id=None, taskId=None, force=False, language=None,
+                       concurrency=None, subagent_concurrency=None):
         """启动流水线整体激活 (PipelineWorkflow 入口)"""
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
-        logger.info(f"[startPipeline] task_id={tid} force={force} lang={language}")
+        conc = max(1, min(int(concurrency or 1), 5))
+        raw_sub = subagent_concurrency if subagent_concurrency is not None else conc
+        sub_conc = max(1, min(int(raw_sub), 5))
+        logger.info(f"[startPipeline] task_id={tid} force={force} lang={language} concurrency={conc} subagent={sub_conc}")
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -2391,6 +2395,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "project_summary": project_summary,
                 "force": force,
                 "language": language or "",
+                "concurrency": conc,
+                "subagent_concurrency": sub_conc,
             }
             result = mgr.dispatch("pipeline", tid, context,
                                   project_id=pid, project_root=project_root,
@@ -2402,13 +2408,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         from agent_workflow.tool_factory import build_pipeline_tools
         from agent_workflow.sandbox import AgentSandbox
 
-        tools = build_pipeline_tools(multi_db, project_db, project_root, tid, pid, project_summary)
+        tools = build_pipeline_tools(multi_db, project_db, project_root, tid, pid, project_summary,
+                                     concurrency=conc, subagent_concurrency=sub_conc)
 
         router = RouterHarness(project_root=project_root, multi_db=multi_db)
         router.register("pipeline", RouteEntry(
             workflow_class=PipelineWorkflow,
             tool_builder=lambda ctx: tools,
-            description="流水线整体激活：项目摘要->预摘要->组件分析->架构分析",
+            description="流水线整体激活：项目摘要->预摘要->组件分析->架构分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新生成), -L zh/en (输出语言)",
             sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
         ))
 
@@ -2418,6 +2425,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "project_summary": project_summary,
             "force": force,
             "language": language or "",
+            "concurrency": conc,
+            "subagent_concurrency": sub_conc,
         }
 
         def _on_pipeline_complete(state_dict):
@@ -2569,7 +2578,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     def start_pre_summary(task_id=None, taskId=None, batch="P0", limit=0,
                           subagent_concurrency=None, subagentConcurrency=None):
         """启动预摘要 agent 任务"""
-        subagent_concurrency = subagent_concurrency if subagent_concurrency is not None else (subagentConcurrency or 1)
+        raw = subagent_concurrency if subagent_concurrency is not None else subagentConcurrency
+        subagent_concurrency = max(1, min(int(raw or 1), 5))
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
@@ -2810,9 +2820,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
+        # 标准化为相对路径（同 get_file_summary 的兼容逻辑）
+        query_path = file_path
+        if project_root and file_path.startswith(project_root):
+            query_path = file_path[len(project_root):].lstrip("/")
+
         from agent_workflow.file_summary_cache import FileSummaryCache
         cache = FileSummaryCache(project_db, pid, project_root)
-        deleted = cache.delete(file_path)
+        deleted = cache.delete(query_path)
         return {"success": True, "deleted": deleted}
 
     @server.register("analysis.rerunFileSummary")
@@ -3283,9 +3298,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     def _find_subdoc_project(multi_db, sub_doc_id):
         """
         查找子文档所属项目 ID。
-        优先通过 ID 前缀推断（overall-{taskId} / subdoc-{taskId}-*），
-        避免遍历所有项目 DB。
+        优先级：ID 前缀推断 → doc_project_map 缓存表 → 全量遍历（兜底）。
         """
+        # 1. 快速路径：ID 前缀推断
         for prefix in ("overall-", "subdoc-"):
             if sub_doc_id.startswith(prefix):
                 task_id = sub_doc_id[len(prefix):]
@@ -3304,7 +3319,23 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                             return pid, row
                 except Exception:
                     pass
-        # 回退：全量遍历所有项目查找
+        # 2. 查 doc_project_map 映射表
+        try:
+            doc_row = multi_db.main_db.fetchone(
+                "SELECT project_id FROM doc_project_map WHERE doc_id=?", (sub_doc_id,)
+            )
+            if doc_row:
+                pid = doc_row["project_id"]
+                pdb = multi_db.get_project_db(pid)
+                row = pdb.fetchone(
+                    "SELECT id, task_id, edge_type, comm_id, title, content, template_id, created_at, updated_at FROM report_subdocs WHERE id=?",
+                    (sub_doc_id,)
+                )
+                if row:
+                    return pid, row
+        except Exception:
+            pass
+        # 3. 兜底：全量遍历所有项目查找
         projects = multi_db.main_db.fetchall("SELECT id FROM projects")
         for proj in projects:
             pid = proj["id"]
@@ -3315,6 +3346,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     (sub_doc_id,)
                 )
                 if row:
+                    # 写入缓存，后续秒回
+                    try:
+                        multi_db.main_db.execute(
+                            "INSERT OR IGNORE INTO doc_project_map (doc_id, project_id, task_id) VALUES (?, ?, ?)",
+                            (sub_doc_id, pid, row["task_id"] or ""),
+                        )
+                    except Exception:
+                        pass
                     return pid, row
             except Exception:
                 continue
@@ -3381,6 +3420,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             pdb = multi_db.get_project_db(pid)
             pdb.execute("DELETE FROM report_subdocs WHERE id=?", (sid,))
             pdb.commit()
+            # 同步删除 doc_project_map
+            try:
+                multi_db.main_db.execute(
+                    "DELETE FROM doc_project_map WHERE doc_id=?", (sid,)
+                )
+            except Exception:
+                pass
             return {'ok': True}
 
         raise ValueError(f"SubDoc {sid} not found")

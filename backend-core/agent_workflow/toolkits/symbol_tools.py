@@ -210,18 +210,20 @@ class GetSymbolCodeTool(AgentTool):
             # 2. file_path + name
             if not row and file_path and name:
                 method = "file_path+name"
+                qpath = _rel_path(file_path, self._project_root) if self._project_root else file_path
                 row = self._db.execute(
                     "SELECT * FROM graph_node WHERE file_path=? AND name=? LIMIT 1",
-                    (file_path, name)
+                    (qpath, name)
                 ).fetchone()
 
             # 3. file_path + line
             if not row and file_path and line > 0:
                 method = "file_path+line"
+                qpath = _rel_path(file_path, self._project_root) if self._project_root else file_path
                 row = self._db.execute(
                     "SELECT * FROM graph_node WHERE file_path=? "
                     "AND start_line <= ? AND end_line >= ? LIMIT 1",
-                    (file_path, line, line)
+                    (qpath, line, line)
                 ).fetchone()
 
             if not row:

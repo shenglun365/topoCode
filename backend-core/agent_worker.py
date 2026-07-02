@@ -214,8 +214,11 @@ class AgentWorker:
                 logger.warning(f"[AgentWorker] history save failed: {e}")
 
         if route == "pipeline":
+            conc = max(1, min(int(context.get("concurrency", 1)), 5))
+            sub_conc = max(1, min(int(context.get("subagent_concurrency", conc)), 5))
             tools = build_pipeline_tools(
-                self._multi_db, project_db, project_root, tid, pid, project_summary
+                self._multi_db, project_db, project_root, tid, pid, project_summary,
+                concurrency=conc, subagent_concurrency=sub_conc,
             )
             router = RouterHarness(project_root=project_root, multi_db=self._multi_db)
             router.register("pipeline", RouteEntry(

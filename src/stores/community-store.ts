@@ -1079,13 +1079,19 @@ export const useCommunityStore = defineStore('community', () => {
     return await ipc.analysis.rerunFileSummary({ taskId, file_path: filePath })
   }
 
-  async function startPipeline(taskId: string, force = false, language = '') {
+  async function startPipeline(taskId: string, force = false, language = '', concurrency = 1) {
     const t = ensureTask(taskId)
     const idx = t.agentTasks.length
-    addAgentTask(taskId, 'pipeline', ['流水线整体激活', force ? '强制覆盖所有' : '跳过已完成'])
+    const subConc = Math.max(1, Math.min(5, concurrency))
+    const concHint = subConc > 1 ? `（并发 ${subConc}）` : ''
+    addAgentTask(taskId, 'pipeline', [`流水线整体激活${concHint}`, force ? '强制覆盖所有' : '跳过已完成'])
     t.agentTasks[idx].status = 'running'
     try {
-      const result = await ipc.analysis.startPipeline({ taskId, force: force || undefined, language: language || undefined })
+      const result = await ipc.analysis.startPipeline({
+        taskId, force: force || undefined, language: language || undefined,
+        concurrency: subConc > 1 ? subConc : undefined,
+        subagent_concurrency: subConc > 1 ? subConc : undefined,
+      })
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
         updateAgentTask(taskId, idx, { progress: 0, message: '流水线启动中...' })

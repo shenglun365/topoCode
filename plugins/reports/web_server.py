@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import uuid
+from collections import defaultdict
 from typing import Optional
 
 import uvicorn
@@ -147,55 +148,26 @@ async def get_doc(doc_id: str):
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        # 从 doc_id 提取 taskId 直接定位项目库
-        task_id = _extract_task_id_from_doc_id(doc_id)
-        if task_id:
-            task = multi_db.main_db.fetchone(
-                "SELECT project_id FROM analysis_tasks WHERE id = ?", (task_id,)
-            )
-            if task:
-                pdb = multi_db.get_project_db(task["project_id"])
-                doc = pdb.fetchone(
-                    "SELECT id, task_id, title, content, created_at, updated_at FROM report_subdocs WHERE id = ?",
-                    (doc_id,),
-                )
-                if doc:
-                    logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
-                    return {
-                        "id": doc["id"],
-                        "taskId": doc["task_id"],
-                        "projectId": task["project_id"],
-                        "title": doc["title"],
-                        "content": doc["content"],
-                        "createdAt": doc["created_at"],
-                        "updatedAt": doc["updated_at"],
-                    }
-
-        # 兜底：遍历项目库查找
-        projects = multi_db.main_db.fetchall("SELECT id FROM projects")
-        for proj in projects:
-            pid = proj["id"]
-            try:
-                pdb = multi_db.get_project_db(pid)
-                doc = pdb.fetchone(
-                    "SELECT id, task_id, title, content, created_at, updated_at FROM report_subdocs WHERE id = ?",
-                    (doc_id,),
-                )
-                if doc:
-                    logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
-                    return {
-                        "id": doc["id"],
-                        "taskId": doc["task_id"],
-                        "projectId": pid,
-                        "title": doc["title"],
-                        "content": doc["content"],
-                        "createdAt": doc["created_at"],
-                        "updatedAt": doc["updated_at"],
-                    }
-            except Exception:
-                continue
-
-        raise HTTPException(404, "Document not found")
+        pid = resolve_project_by_doc_id(doc_id)
+        if not pid:
+            raise HTTPException(404, f"Document {doc_id} not found")
+        pdb = multi_db.get_project_db(pid)
+        doc = pdb.fetchone(
+            "SELECT id, task_id, title, content, created_at, updated_at FROM report_subdocs WHERE id = ?",
+            (doc_id,),
+        )
+        if not doc:
+            raise HTTPException(404, f"Document {doc_id} not found")
+        logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
+        return {
+            "id": doc["id"],
+            "taskId": doc["task_id"],
+            "projectId": pid,
+            "title": doc["title"],
+            "content": doc["content"],
+            "createdAt": doc["created_at"],
+            "updatedAt": doc["updated_at"],
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -581,22 +553,30 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
             (q, f'%{q}%', f'%{q}%')
         )
 
-        # 按项目分组，优先排有文档的
-        projects_map = {}
+        # 按项目分组，每项目一次批量查询 overall doc
+        tasks_by_pid = defaultdict(list)
         for t in all_tasks:
-            pid = t["project_id"]
-            if pid not in projects_map:
-                projects_map[pid] = {"name": t["project_name"], "tasks": [], "has_doc": False}
-            has_ov = False
+            tasks_by_pid[t["project_id"]].append(t)
+
+        projects_map = {}
+        for pid, tasks in tasks_by_pid.items():
+            proj_name = tasks[0]["project_name"]
+            overall_ids = [f"overall-{t['id']}" for t in tasks]
+            has_doc_set = set()
             try:
                 pdb = multi_db.get_project_db(pid)
-                doc = pdb.fetchone("SELECT id FROM report_subdocs WHERE id=?", (f"overall-{t['id']}",))
-                has_ov = doc is not None
+                ph = ",".join("?" * len(overall_ids))
+                rows = pdb.fetchall(
+                    f"SELECT id FROM report_subdocs WHERE id IN ({ph})", overall_ids
+                )
+                has_doc_set = {r["id"].replace("overall-", "") for r in rows}
             except Exception:
                 pass
-            projects_map[pid]["tasks"].append({"id": t["id"], "name": t["name"], "status": t["status"], "hasDoc": has_ov})
-            if has_ov:
-                projects_map[pid]["has_doc"] = True
+            proj_tasks = []
+            for t in tasks:
+                has_ov = t["id"] in has_doc_set
+                proj_tasks.append({"id": t["id"], "name": t["name"], "status": t["status"], "hasDoc": has_ov})
+            projects_map[pid] = {"name": proj_name, "tasks": proj_tasks, "has_doc": len(has_doc_set) > 0}
 
         # 排序：有文档的靠前，其余按项目名
         proj_list = sorted(projects_map.values(), key=lambda x: (not x["has_doc"], x["name"]))
@@ -623,55 +603,51 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TopoCode - Documents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
 <style>
+  :root{--bg:#ffffff;--bg-secondary:#f7f7f8;--bg-hover:#f0f0f2;--text:#1a1a1a;--text-secondary:#6b6b76;--text-muted:#8e8e98;--border:#e4e4e7;--accent:#4d6bfe;--accent-hover:#3a56d4;--shadow-sm:0 1px 2px rgba(0,0,0,0.04);--shadow-md:0 4px 16px rgba(0,0,0,0.06);--radius-sm:6px;--radius-md:8px;--radius-lg:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;--transition:0.2s ease}
+  @media(prefers-color-scheme:dark){:root{--bg:#212121;--bg-secondary:#2d2d2d;--bg-hover:#3d3d3d;--text:#e8e8e8;--text-secondary:#a0a0a0;--text-muted:#6b6b6b;--border:#3d3d3d;--accent:#60a5fa;--accent-hover:#3b82f6;--shadow-sm:0 1px 2px rgba(0,0,0,0.2);--shadow-md:0 4px 16px rgba(0,0,0,0.3)}}
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f5;color:#333;font-size:14px;line-height:1.6;padding:24px}
-  .container{max-width:800px;margin:0 auto}
-  h1{font-size:20px;margin-bottom:16px;color:#111}
+  body{font-family:var(--font);background:var(--bg-secondary);color:var(--text);font-size:14px;line-height:1.6;padding:24px;-webkit-font-smoothing:antialiased}
+  .container{max-width:760px;margin:0 auto}
+  h1{font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text)}
   .toolbar{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
-  .toolbar input{padding:6px 10px;border:1px solid #d0d0d0;border-radius:6px;font-size:13px;flex:1;min-width:160px;outline:none}
-  .toolbar input:focus{border-color:#2563eb}
-  .toolbar select{padding:6px 8px;border:1px solid #d0d0d0;border-radius:6px;font-size:12px}
-  .toolbar .info{font-size:12px;color:#999}
-  .project{background:#fff;border-radius:8px;border:1px solid #e0e0e0;margin-bottom:10px;overflow:hidden}
-  .project-header{padding:10px 14px;font-weight:600;font-size:13px;background:#fafafa;border-bottom:1px solid #e0e0e0;cursor:pointer;display:flex;align-items:center;gap:8px}
-  .project-header:hover{background:#f0f0f0}
-  .project-header .arrow{transition:transform .2s;font-size:10px}
+  .toolbar input{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;flex:1;min-width:160px;outline:none;background:var(--bg);color:var(--text);transition:border-color var(--transition)}
+  .toolbar input:focus{border-color:var(--accent)}
+  .toolbar button{padding:7px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);cursor:pointer;font-size:12px;transition:all var(--transition)}
+  .toolbar button:hover{border-color:var(--accent);color:var(--accent)}
+  .toolbar select{padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;background:var(--bg);color:var(--text);outline:none}
+  .toolbar .info{font-size:12px;color:var(--text-muted)}
+  .project{background:var(--bg);border-radius:var(--radius-lg);border:1px solid var(--border);margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow-sm)}
+  .project-header{padding:10px 14px;font-weight:600;font-size:13px;background:var(--bg-secondary);border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:8px;transition:background var(--transition)}
+  .project-header:hover{background:var(--bg-hover)}
+  .project-header .arrow{transition:transform .2s;font-size:10px;color:var(--text-muted)}
   .project-header .arrow.open{transform:rotate(90deg)}
-  .task-item{padding:8px 14px 8px 32px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:8px}
+  .task-item{padding:8px 14px 8px 32px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
   .task-item:last-child{border-bottom:none}
-  .task-item a{color:#2563eb;text-decoration:none;font-size:13px}
+  .task-item a{color:var(--accent);text-decoration:none;font-size:13px}
   .task-item a:hover{text-decoration:underline}
+  .task-name-pending{color:var(--text-muted);font-size:13px}
   .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0}
-  .status-dot.done{background:#5a9e6f}
-  .status-dot.pending{background:#c08a4b}
+  .status-dot.done{background:#10b981}
+  .status-dot.pending{background:#f59e0b}
   .status-label{font-size:11px;font-weight:500}
-  .status-label.done{color:#5a9e6f}
-  .status-label.pending{color:#c08a4b}
-  .empty{padding:20px;color:#999;font-size:13px;text-align:center}
+  .status-label.done{color:#10b981}
+  .status-label.pending{color:#f59e0b}
+  .empty{padding:20px;color:var(--text-muted);font-size:13px;text-align:center}
   .pagination{display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap}
-  .pagination a,.pagination span{padding:4px 10px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px;text-decoration:none;color:#333}
-  .pagination a:hover{background:#f0f0f0}
-  .pagination .active{background:#2563eb;color:#fff;border-color:#2563eb}
-  @media(prefers-color-scheme:dark){
-    body{background:#1a1a2e;color:#e0e0e0}
-    h1{color:#fff}
-    .project{background:#16213e;border-color:#333}
-    .project-header{background:#1a1a2e;border-color:#333}
-    .project-header:hover{background:#222}
-    .task-item{border-color:#2a2a3e}
-    .task-item a{color:#60a5fa}
-    .toolbar input,.toolbar select{background:#222;border-color:#444;color:#e0e0e0}
-    .pagination a,.pagination span{background:#222;border-color:#444;color:#e0e0e0}
-    .pagination .active{background:#2563eb;border-color:#2563eb}
-  }
+  .pagination a,.pagination span{padding:5px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;text-decoration:none;color:var(--text);background:var(--bg);transition:all var(--transition)}
+  .pagination a:hover{background:var(--bg-hover);border-color:var(--accent)}
+  .pagination .active{background:var(--accent);color:#fff;border-color:var(--accent)}
 </style></head><body>
 <div class="container">
-<h1>📄 TopoCode Documents</h1>
+<h1>TopoCode 文档</h1>
 <div class="toolbar">
   <form method="get" action="/" style="display:flex;gap:8px;flex:1;align-items:center">
     <input type="text" name="search" placeholder="搜索项目/任务..." value="__Q_ESC__">
-    <button type="submit" style="padding:6px 14px;border:1px solid #d0d0d0;border-radius:6px;background:#fff;cursor:pointer;font-size:12px">搜索</button>
+    <button type="submit">搜索</button>
   </form>
   <select onchange="location.href='/?search='+encodeURIComponent('__Q_ESC__')+'&page=1&page_size='+this.value">
     <option value="50"__PS_50__>50条/页</option>
@@ -696,7 +672,7 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
             if t["hasDoc"]:
                 html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span class="status-label {dot_class}">已生成</span></div>'
             else:
-                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span style="color:#999;font-size:13px">{esc(t["name"])}</span><span class="status-label {dot_class}">未生成</span></div>'
+                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span class="task-name-pending">{esc(t["name"])}</span><span class="status-label {dot_class}">未生成</span></div>'
         if last_proj is not None:
             html += '</div></div>'
         if total == 0:
@@ -731,6 +707,41 @@ def _resolve_project_db(task_id: str):
     if not task_row:
         raise HTTPException(404, f"Task {task_id} not found")
     return task_row["project_id"], multi_db.get_project_db(task_row["project_id"])
+
+
+def resolve_project_by_doc_id(doc_id: str) -> str | None:
+    """根据 doc_id 定位 project_id。三步：快速路径 → 映射表 → 兜底遍历。"""
+    if not multi_db:
+        return None
+    # 1. 快速路径：doc_id 前缀解析
+    task_id = _extract_task_id_from_doc_id(doc_id)
+    if task_id:
+        row = multi_db.main_db.fetchone(
+            "SELECT project_id FROM analysis_tasks WHERE id = ?", (task_id,)
+        )
+        if row:
+            return row["project_id"]
+    # 2. 查映射表
+    row = multi_db.main_db.fetchone(
+        "SELECT project_id FROM doc_project_map WHERE doc_id = ?", (doc_id,)
+    )
+    if row:
+        return row["project_id"]
+    # 3. 兜底：遍历项目库（首次后写入缓存，后续瞬回）
+    projects = multi_db.main_db.fetchall("SELECT id FROM projects")
+    for proj in projects:
+        pid = proj["id"]
+        try:
+            pdb = multi_db.get_project_db(pid)
+            if pdb.fetchone("SELECT 1 FROM report_subdocs WHERE id=?", (doc_id,)):
+                multi_db.main_db.execute(
+                    "INSERT OR IGNORE INTO doc_project_map (doc_id, project_id, task_id) VALUES (?, ?, ?)",
+                    (doc_id, pid, task_id or ""),
+                )
+                return pid
+        except Exception:
+            continue
+    return None
 
 
 def _extract_task_id_from_doc_id(doc_id: str) -> str | None:
@@ -1315,6 +1326,26 @@ def _make_session_id():
     return f"chat_{uuid.uuid4().hex[:12]}"
 
 
+def _create_chat_session(title: str, project_id: str = "") -> str:
+    """创建新会话并插入 system 消息，返回 session_id。"""
+    sid = _make_session_id()
+    now = __import__("datetime").datetime.now().isoformat()
+    metadata = json.dumps({"module": "web_chat", "model_id": ""}, ensure_ascii=False)
+    _sdb().execute(
+        "INSERT INTO llm_sessions (id, module_type, project_id, title, metadata, created_at, updated_at) "
+        "VALUES (?, 'ai_assistant', ?, ?, ?, ?, ?)",
+        (sid, project_id or None, title, metadata, now, now),
+    )
+    # 插入基础 system 消息
+    sys_content = "你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。"
+    _sdb().execute(
+        "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+        "VALUES (?, ?, 'system', ?, '{}', ?)",
+        (_make_message_id(), sid, sys_content, now),
+    )
+    return sid
+
+
 def _make_message_id():
     return f"msg_{uuid.uuid4().hex[:12]}"
 
@@ -1364,6 +1395,11 @@ async def create_chat_session(request: Request):
         system_parts = [
             "你是 TopoCode 架构分析助手，帮助用户理解和分析项目代码架构。",
             "你可以使用工具查询项目数据，回答用户关于架构、代码、设计的问题。",
+            "可用命令: /overview (生成架构概览), /analyze_components (组件分析), "
+            "/presummary (文件预摘要), /pipeline (完整流水线). 支持参数: "
+            "--force (重新生成), -L zh/en (输出语言), "
+            "-j N (并发数, 1-5, 默认1, 如 /pipeline -j 2). "
+            "overview 命令不支持 -j 参数, 只有一个并发.",
         ]
         if refs:
             ref_context = resolve_refs_to_context(refs, multi_db)
@@ -1587,169 +1623,246 @@ async def send_chat_message(session_id: str, request: Request):
             if ref_context:
                 context_messages.append({"role": "system", "content": ref_context})
 
+        # ── 多轮工具调用 ──
+        from web_tools import get_web_tool_definitions
+        tool_defs = get_web_tool_definitions(tool_names) if has_tools else None
+        import queue as _queue
+        import threading
+
+        def _llm_round(messages, tools, chunk_q, force_tool_choice=False):
+            """单次 LLM 调用（在独立线程中运行）。统一走 direct HTTP。"""
+            _log = logger.info
+            try:
+                model_cfg = multi_db.main_db.fetchone(
+                    "SELECT * FROM model_configs WHERE id = ?", (model_id,)
+                )
+                if not model_cfg:
+                    _log(f"[LLM-round] model not found: {model_id}")
+                    chunk_q.put({"type": "error", "message": f"Model not found: {model_id}"})
+                    chunk_q.put({"type": "done"})
+                    return
+                md = dict(model_cfg)
+                has_t = bool(tools)
+                _log(f"[LLM-round] model={md.get('model','')} provider={md.get('provider','')} has_tools={has_t} force_choice={force_tool_choice} msg_count={len(messages)}")
+
+                import requests as _req
+                base_url = md.get('url', '').rstrip('/')
+                if base_url.endswith('/v1'):
+                    base_url = base_url[:-3]
+                payload = {
+                    'model': md.get('model', ''),
+                    'messages': messages,
+                    'stream': True,
+                }
+                if tools:
+                    payload['tools'] = tools
+                    if force_tool_choice:
+                        payload['tool_choice'] = 'auto'
+                if md.get('temperature') is not None:
+                    payload['temperature'] = md['temperature']
+                payload['max_tokens'] = md.get('max_tokens', 16384)
+                headers = {'Content-Type': 'application/json'}
+                api_key = md.get('api_key', '')
+                if api_key:
+                    headers['Authorization'] = f'Bearer {api_key}'
+                timeout = md.get('timeout', 300)
+                _log(f"[LLM-round] POST {base_url}/v1/chat/completions  timeout={timeout}s")
+                resp = _req.post(
+                    f'{base_url}/v1/chat/completions',
+                    json=payload, headers=headers, stream=True, timeout=timeout,
+                )
+                _log(f"[LLM-round] HTTP status={resp.status_code}")
+                if resp.status_code != 200:
+                    err_body = resp.text[:300]
+                    _log(f"[LLM-round] HTTP error: {err_body}")
+                    chunk_q.put({'type': 'error', 'message': f'API error {resp.status_code}: {err_body}'})
+                    chunk_q.put({'type': 'done'})
+                    return
+                line_count = 0
+                for line_bytes in resp.iter_lines():
+                    if not line_bytes:
+                        continue
+                    line = line_bytes.decode('utf-8')
+                    if not line.startswith('data: '):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == '[DONE]':
+                        _log(f"[LLM-round] [DONE] after {line_count} lines")
+                        break
+                    line_count += 1
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get('choices', [{}])[0].get('delta', {})
+                        chunk = delta.get('content', '')
+                        reasoning = delta.get('reasoning_content', '')
+                        if reasoning and line_count == 1:
+                            _log(f"[LLM-round] first reasoning token: {reasoning[:60]}...")
+                        if chunk and line_count == 1:
+                            _log(f"[LLM-round] first content token: {chunk[:60]}...")
+                        if reasoning:
+                            chunk_q.put({"type": "reasoning", "text": reasoning})
+                        if chunk:
+                            chunk_q.put(chunk)
+                        tc = delta.get('tool_calls')
+                        if tc:
+                            _log(f"[LLM-round] tool_calls in delta: {json.dumps(tc)[:200]}")
+                            chunk_q.put({'type': 'tool_calls', 'data': json.dumps(tc)})
+                    except Exception as e:
+                        _log(f"[LLM-round] parse error at line {line_count}: {e} | data={data_str[:100]}")
+                        pass
+                chunk_q.put({'type': 'done'})
+                _log(f"[LLM-round] complete ({line_count} data lines)")
+            except Exception as e:
+                _log(f"[LLM-round] exception: {e}")
+                import traceback
+                _log(traceback.format_exc())
+                chunk_q.put({"type": "error", "message": str(e)})
+
         async def event_stream():
             queue: asyncio.Queue = asyncio.Queue()
-            llm_service = LLMService(multi_db)
-            if hasattr(llm_service, '_server') is False or llm_service._server is None:
-                try:
-                    llm_service._server = zmq_server
-                except Exception:
-                    pass
+            loop = asyncio.get_event_loop()
+            executor = web_tool_executor
+            _log = logger.info
 
-            async def _run_llm():
-                try:
-                    model_cfg = multi_db.main_db.fetchone(
-                        "SELECT * FROM model_configs WHERE id = ?", (model_id,)
-                    )
-                    if not model_cfg:
-                        await queue.put({"type": "error", "message": f"Model not found: {model_id}"})
-                        await queue.put({"type": "done"})
-                        return
-
-                    model_dict = dict(model_cfg)
-                    import queue as _queue
+            async def _producer():
+                ctx_msgs = list(context_messages)
+                for round_idx in range(5):
+                    force_choice = round_idx == 0 and bool(tool_defs)
                     chunk_q = _queue.Queue()
-                    loop = asyncio.get_event_loop()
                     full_content = ""
-                    tool_calls_raw = []
+                    tc_raw = []
 
-                    def _http_stream():
-                        try:
-                            from llm_service import get_provider
-                            provider_impl = get_provider(model_dict.get("provider", "ollama"))
-                            if provider_impl is None:
-                                raise ValueError(f"Unknown provider: {model_dict.get('provider')}")
+                    _log(f"[producer] === ROUND {round_idx} start === tools={bool(tool_defs)} force_choice={force_choice} ctx_msgs={len(ctx_msgs)}")
+                    t = threading.Thread(target=_llm_round, args=(ctx_msgs, tool_defs, chunk_q, force_choice), daemon=True)
+                    t.start()
 
-                            if has_tools and tool_names:
-                                from web_tools import get_web_tool_definitions
-                                tool_defs = get_web_tool_definitions(tool_names)
-                                if tool_defs:
-                                    # 将 tools payload 注入到 model_config，provider 以 chat 模式调用时不处理 tools
-                                    # 但我们用 mode='chat' 并让 provider 忽略 tools 参数
-                                    # 改为：直构造 HTTP 请求复用 provider 的流式解析能力
-                                    import requests as _requests
-                                    base_url = model_dict.get('url', '').rstrip('/')
-                                    if base_url.endswith('/v1'):
-                                        base_url = base_url[:-3]
-                                    payload = {
-                                        'model': model_dict.get('model', ''),
-                                        'messages': context_messages,
-                                        'stream': True,
-                                        'tools': tool_defs,
-                                        'tool_choice': 'auto',
-                                    }
-                                    if model_dict.get('temperature') is not None:
-                                        payload['temperature'] = model_dict['temperature']
-                                    payload['max_tokens'] = model_dict.get('max_tokens', 16384)
-                                    headers = {'Content-Type': 'application/json'}
-                                    api_key = model_dict.get('api_key', '')
-                                    if api_key:
-                                        headers['Authorization'] = f'Bearer {api_key}'
-                                    timeout = model_dict.get('timeout', 300)
-                                    resp = _requests.post(
-                                        f'{base_url}/v1/chat/completions',
-                                        json=payload, headers=headers, stream=True, timeout=timeout,
-                                    )
-                                    if resp.status_code != 200:
-                                        chunk_q.put({'type': 'error', 'message': f'API error {resp.status_code}: {resp.text[:200]}'})
-                                        chunk_q.put({'type': 'done', 'content': ''})
-                                        return
-                                    for line_bytes in resp.iter_lines():
-                                        if not line_bytes:
-                                            continue
-                                        line = line_bytes.decode('utf-8')
-                                        if not line.startswith('data: '):
-                                            continue
-                                        data_str = line[6:].strip()
-                                        if data_str == '[DONE]':
-                                            break
-                                        try:
-                                            import json as _jj
-                                            data = _jj.loads(data_str)
-                                            delta = data.get('choices', [{}])[0].get('delta', {})
-                                            chunk = delta.get('content', '')
-                                            reasoning = delta.get('reasoning_content', '')
-                                            if reasoning:
-                                                chunk_q.put({"type": "reasoning", "text": reasoning})
-                                            if chunk:
-                                                chunk_q.put(chunk)
-                                            tc = delta.get('tool_calls')
-                                            if tc:
-                                                chunk_q.put({'type': 'tool_calls', 'data': _jj.dumps(tc)})
-                                            if data.get('usage'):
-                                                pass
-                                        except Exception:
-                                            pass
-                                    chunk_q.put({'type': 'done', 'content': ''})
-                                    return
-                            # 无 tools → 走标准 provider 路径
-                            provider_impl.chat_stream(
-                                model_dict, context_messages, chunk_q,
-                                None, "chat",
-                            )
-                        except Exception as e:
-                            chunk_q.put({"type": "error", "message": str(e)})
-
-                    import threading
-                    thread = threading.Thread(target=_http_stream, daemon=True)
-                    thread.start()
-
+                    drain_count = 0
+                    # tool_calls 按 index 合并增量（OpenAI 流式格式）
+                    tc_by_idx = {}
                     while True:
                         try:
                             item = await loop.run_in_executor(None, chunk_q.get, True, 0.15)
                         except _queue.Empty:
                             continue
-
-                        if isinstance(item, dict) and item.get("type") == "done":
-                            break
-                        if isinstance(item, dict) and item.get("type") == "error":
-                            await queue.put({"type": "error", "message": item.get("message", "")})
-                            await queue.put({"type": "done"})
-                            return
-                        if isinstance(item, dict) and item.get("type") == "tool_calls":
-                            tool_calls_raw.append(item.get("data", ""))
-                        if isinstance(item, dict) and item.get("type") == "reasoning":
-                            await queue.put({"type": "reasoning", "text": item.get("text", "")})
-                        if isinstance(item, str):
+                        drain_count += 1
+                        if isinstance(item, dict):
+                            if item.get("type") == "done":
+                                _log(f"[producer] round {round_idx} drain done: {drain_count} items, full_content_len={len(full_content)}, tc_indexes={list(tc_by_idx.keys())}")
+                                break
+                            if item.get("type") == "error":
+                                _log(f"[producer] round {round_idx} error: {item.get('message','')}")
+                                await queue.put({"type": "error", "message": item.get("message", "")})
+                                await queue.put({"type": "done"})
+                                return
+                            if item.get("type") == "tool_calls":
+                                tc_delta_list = json.loads(item.get("data", "[]"))
+                                for td in tc_delta_list:
+                                    idx = td.get("index", 0)
+                                    acc = tc_by_idx.setdefault(idx, {})
+                                    if "id" in td:
+                                        acc["id"] = td["id"]
+                                    if "type" in td:
+                                        acc["type"] = td["type"]
+                                    fn = td.get("function", {})
+                                    if fn:
+                                        acc.setdefault("function", {})
+                                        if "name" in fn:
+                                            acc["function"]["name"] = fn["name"]
+                                        if "arguments" in fn:
+                                            acc["function"]["arguments"] = acc["function"].get("arguments", "") + fn["arguments"]
+                            if item.get("type") == "reasoning":
+                                await queue.put({"type": "reasoning", "text": item.get("text", "")})
+                            if item.get("type") == "chunk" and not force_choice:
+                                await queue.put({"type": "chunk", "text": item.get("text", "")})
+                        elif isinstance(item, str):
                             full_content += item
-                            await queue.put({"type": "chunk", "text": item})
+                            if not force_choice:
+                                await queue.put({"type": "chunk", "text": item})
 
-                    thread.join(timeout=5)
+                    t.join(timeout=5)
+                    parsed = []
+                    for v in tc_by_idx.values():
+                        try:
+                            args = json.loads(v.get("function", {}).get("arguments", "{}"))
+                        except Exception:
+                            args = {}
+                        parsed.append({"id": v.get("id", ""), "name": v.get("function", {}).get("name", ""), "arguments": args})
+                    _log(f"[producer] round {round_idx} parsed: {len(parsed)} tool calls, full_content_len={len(full_content)}")
 
-                    if tool_calls_raw and has_tools:
-                        parsed = _parse_tool_calls_simple(tool_calls_raw)
-                        if parsed:
-                            executor = web_tool_executor
-                            for tc in parsed:
-                                t_name = tc.get("name", "")
-                                t_args = tc.get("arguments", {})
-                                await queue.put({"type": "tool_call", "name": t_name, "arguments": t_args})
-                                result = executor.execute(t_name, t_args)
-                                await queue.put({"type": "tool_result", "name": t_name, "result": result})
+                    if not parsed:
+                        _log(f"[producer] round {round_idx} no tool calls → finalize")
+                        if full_content.strip():
+                            _sdb().execute(
+                                "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                                "VALUES (?, ?, 'assistant', ?, '{}', ?)",
+                                (_make_message_id(), session_id, full_content.strip(), now),
+                            )
+                        if round_idx == 0 and tool_defs and full_content.strip():
+                            _log(f"[producer] emit suppressed first-round chunks: {len(full_content)} chars")
+                            await queue.put({"type": "chunk", "text": full_content.strip()})
+                        await queue.put({"type": "done", "content": full_content.strip()})
+                        _log(f"[producer] done: content_len={len(full_content.strip())}")
+                        return
 
-                    if full_content.strip():
+                    _log(f"[producer] executing {len(parsed)} tool(s): {[p.get('name','') for p in parsed]}")
+                    tool_msgs = []
+                    for tc_item in parsed:
+                        t_name = tc_item.get("name", "")
+                        t_args = tc_item.get("arguments", {})
+                        tc_id = tc_item.get("id", "")
+                        _log(f"[producer] tool_call: {t_name} id={tc_id} args={json.dumps(t_args)[:200]}")
+                        await queue.put({"type": "tool_call", "name": t_name, "arguments": t_args})
+                        try:
+                            result = executor.execute(t_name, t_args)
+                            _log(f"[producer] tool_result: {t_name} ok")
+                        except Exception as e:
+                            result = {"error": str(e)}
+                            _log(f"[producer] tool_result: {t_name} error: {e}")
+                        await queue.put({"type": "tool_result", "name": t_name, "result": result})
+
+                        result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
                         _sdb().execute(
                             "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
-                            "VALUES (?, ?, 'assistant', ?, '{}', ?)",
-                            (_make_message_id(), session_id, full_content.strip(), now),
+                            "VALUES (?, ?, 'tool', ?, ?, ?)",
+                            (_make_message_id(), session_id, result_str, json.dumps({"tool_call_id": tc_id}), now),
                         )
+                        tool_msgs.append({"role": "tool", "content": result_str, "tool_call_id": tc_id})
 
-                    await queue.put({"type": "done", "content": full_content.strip()})
+                    asst_tc_payload = [{
+                        "id": p.get("id", ""),
+                        "type": "function",
+                        "function": {"name": p.get("name",""), "arguments": json.dumps(p.get("arguments",{}), ensure_ascii=False)}
+                    } for p in parsed]
+                    _log(f"[producer] ctx_msgs extended: +1 assistant(tool_calls) + {len(tool_msgs)} tool(s)")
+                    ctx_msgs.append({"role": "assistant", "content": full_content.strip() or "", "tool_calls": asst_tc_payload})
+                    ctx_msgs.extend(tool_msgs)
+                    # 也保存到 DB
+                    asst_id = _make_message_id()
+                    tc_meta = json.dumps({"tool_calls": [{"name": p.get("name",""), "arguments": p.get("arguments",{})} for p in parsed]}, ensure_ascii=False)
+                    _sdb().execute(
+                        "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                        "VALUES (?, ?, 'assistant', ?, ?, ?)",
+                        (asst_id, session_id, full_content.strip() or "", tc_meta, now),
+                    )
 
-                except Exception as e:
-                    logger.error(f"[SSE] streaming error: {e}")
-                    await queue.put({"type": "error", "message": str(e)})
-                    await queue.put({"type": "done"})
+                _log(f"[producer] max rounds reached without final response")
+                await queue.put({"type": "error", "message": "工具调用次数过多，请简化问题"})
+                await queue.put({"type": "done"})
 
-            asyncio.create_task(_run_llm())
-
+            asyncio.create_task(_producer())
+            _log(f"[event_stream] producer task started, waiting for events...")
+            event_count = 0
             while True:
                 event = await queue.get()
+                event_count += 1
+                _log(f"[event_stream] -> SSE event #{event_count}: type={event.get('type')} keys={list(event.keys())}")
                 if event["type"] == "done":
                     yield f"event: done\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    _log(f"[event_stream] done, total {event_count} events")
                     break
                 elif event["type"] == "error":
                     yield f"event: error\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    _log(f"[event_stream] error, abort")
                     break
                 elif event["type"] == "chunk":
                     yield f"event: chunk\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -1782,7 +1895,7 @@ def _parse_tool_calls_simple(raw_parts: list) -> list:
                     args = json.loads(args_raw)
                 else:
                     args = args_raw
-                result.append({"name": func.get("name", ""), "arguments": args})
+                result.append({"id": tc.get("id", ""), "name": func.get("name", ""), "arguments": args})
             return result
         elif isinstance(parsed, dict):
             func = parsed.get("function", {})
@@ -1791,7 +1904,7 @@ def _parse_tool_calls_simple(raw_parts: list) -> list:
                 args = json.loads(args_raw)
             else:
                 args = args_raw
-            return [{"name": func.get("name", ""), "arguments": args}]
+            return [{"id": parsed.get("id", ""), "name": func.get("name", ""), "arguments": args}]
     except (json.JSONDecodeError, AttributeError):
         pass
     return []
@@ -2156,6 +2269,83 @@ async def batch_send_notes(request: Request):
                     continue
                 raise
         return first or {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/notes/execute-draft")
+async def execute_draft(request: Request):
+    """从 viewer 草稿直接执行发送，不创建 DB note 记录。"""
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        refs = body.get("refs", [])
+        user_text = body.get("userText", "").strip()
+        session_id = body.get("sessionId") or body.get("session_id")
+
+        if not refs:
+            raise HTTPException(422, "refs is required")
+
+        project_id = refs[0].get("projectId", "")
+        task_id = refs[0].get("taskId", "")
+
+        # 直接构造上下文（draft refs 不含 type 字段，不走 resolve_refs_to_context）
+        context_parts = []
+        for ref in refs:
+            label = ref.get("label", "")
+            text = ref.get("text", "")
+            pid = ref.get("projectId", "")
+            tid = ref.get("taskId", "")
+            cid = ref.get("componentId", "")
+            meta = []
+            if pid: meta.append(f"项目:{pid[:12]}")
+            if tid: meta.append(f"任务:{tid[:10]}")
+            if cid: meta.append(f"组件:{cid[:10]}")
+            if label: meta.append(f"来源:{label}")
+            s = " | ".join(meta)
+            if text: s += "\n" + text
+            context_parts.append(s)
+        resolved = "\n\n".join(context_parts) if context_parts else "（引用材料为空）"
+
+        if not session_id:
+            title = "便签分析"
+            if project_id:
+                proj = multi_db.main_db.fetchone(
+                    "SELECT name FROM projects WHERE id = ?", (project_id,)
+                )
+                if proj:
+                    title = proj["name"] + " - 便签分析"
+            session_id = _create_chat_session(title, task_id or project_id)
+
+        # 插入 system 消息（引用上下文）
+        sys_id = uuid.uuid4().hex[:16]
+        from datetime import datetime as _dt
+        now = _dt.now().isoformat()
+        multi_db.sessions_db.execute(
+            "INSERT INTO llm_messages (id, session_id, role, content, created_at) VALUES (?, ?, 'system', ?, ?)",
+            (sys_id, session_id, resolved, now),
+        )
+
+        # 插入 user 消息
+        user_msg_id = uuid.uuid4().hex[:16]
+        content = user_text or "分析这些内容"
+        multi_db.sessions_db.execute(
+            "INSERT INTO llm_messages (id, session_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)",
+            (user_msg_id, session_id, content, now),
+        )
+
+        # 更新 session 消息数
+        cnt = multi_db.sessions_db.fetchone(
+            "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id=?", (session_id,)
+        )
+        if cnt:
+            multi_db.sessions_db.execute(
+                "UPDATE llm_sessions SET message_count=? WHERE id=?", (cnt["c"], session_id)
+            )
+
+        return {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
     except HTTPException:
         raise
     except Exception as e:

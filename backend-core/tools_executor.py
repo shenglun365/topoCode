@@ -209,9 +209,10 @@ class ToolExecutor:
                     (file_id,)
                 )
             elif file_path:
+                qpath = os.path.relpath(file_path, root_path) if root_path and os.path.isabs(file_path) else file_path
                 row = project_db.fetchone(
                     "SELECT id, file_path as path, language FROM source_files WHERE file_path = ?",
-                    (file_path,)
+                    (qpath,)
                 )
             if not row:
                 return {"error": f"File not found: {file_id or file_path}"}

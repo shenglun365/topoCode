@@ -5,22 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TopoOne Document Viewer</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.0/dist/cytoscape.min.js"></script>
 <style>
-  :root { --bg: #fff; --text: #333; --border: #ddd; --accent: #3b82f6; --bg-code: #f5f5f5; --bg-secondary: #f8f9fa; --text-muted: #999; }
+  :root {
+    --bg: #ffffff; --bg-secondary: #f7f7f8; --bg-hover: #f0f0f2; --bg-code: #f4f4f5;
+    --text: #1a1a1a; --text-secondary: #6b6b76; --text-muted: #8e8e98;
+    --border: #e4e4e7; --accent: #4d6bfe; --accent-hover: #3a56d4; --accent-light: rgba(77,107,254,0.08);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04); --shadow-md: 0 4px 16px rgba(0,0,0,0.06);
+    --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-full: 9999px;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: "JetBrains Mono", "Fira Code", monospace;
+    --transition: 0.2s ease;
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1a1a2e; --text: #e0e0e0; --border: #333; --accent: #60a5fa; --bg-code: #16213e; --bg-secondary: #1e1e3a; --text-muted: #777; }
+    :root {
+      --bg: #212121; --bg-secondary: #2d2d2d; --bg-hover: #3d3d3d; --bg-code: #2a2a2a;
+      --text: #e8e8e8; --text-secondary: #a0a0a0; --text-muted: #6b6b6b;
+      --border: #3d3d3d; --accent: #60a5fa; --accent-hover: #3b82f6; --accent-light: rgba(96,165,250,0.12);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.2); --shadow-md: 0 4px 16px rgba(0,0,0,0.3);
+    }
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; overflow: hidden; height: 100vh; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; overflow: hidden; height: 100vh; -webkit-font-smoothing: antialiased; }
   .header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg); height: 40px; flex-shrink: 0; }
-  .header .title { font-weight: 600; font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .header a { color: var(--accent); text-decoration: none; font-size: 12px; }
-  .header a:hover { text-decoration: underline; }
-  .header .toggle-btn { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 13px; color: var(--text-muted); }
-  .header .toggle-btn:hover { background: var(--bg-code); color: var(--text); }
-  .header .toggle-btn.active { color: var(--accent); border-color: var(--accent); }
+  .header .title { font-weight: 500; font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .header a { color: var(--accent); text-decoration: none; font-size: 12px; display: inline-flex; align-items: center; gap: 2px; padding: 3px 6px; border-radius: var(--radius-sm); transition: background var(--transition); }
+  .header a:hover { background: var(--bg-hover); text-decoration: none; }
+  .header .toggle-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 5px; cursor: pointer; color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center; transition: all var(--transition); }
+  .header .toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
+  .header .toggle-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-light); }
+  .header .toggle-btn svg { display: block; }
   .doc-layout { display: flex; height: calc(100vh - 40px); }
   .doc-left { overflow-y: auto; overflow-x: hidden; position: relative; min-width: 0; display: flex; flex-direction: column; }
   .doc-left .content { padding: 16px 20px 120px; max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
@@ -204,53 +223,91 @@
   /* Right panel separator */
   .right-panel-hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
   /* Notes panel */
-  .notes-panel{position:fixed;top:40px;right:0;width:320px;height:calc(100vh - 40px);background:var(--bg);border-left:1px solid var(--border);z-index:50;display:flex;flex-direction:column;box-shadow:-2px 0 12px rgba(0,0,0,0.1)}
-  .notes-panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600}
-  .notes-close{background:none;border:none;font-size:14px;cursor:pointer;color:var(--text-muted);padding:4px}
-  .notes-close:hover{color:var(--text)}
-  .notes-toolbar{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border)}
-  .notes-btn-new,.notes-btn-flush{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;transition:background .15s}
-  .notes-btn-new:hover,.notes-btn-flush:hover{background:var(--accent-hover)}
-  .notes-list{flex:1;overflow-y:auto;padding:6px 10px}
-  .notes-empty{padding:24px;text-align:center;font-size:13px;color:var(--text-muted)}
-  .note-card{background:var(--bg-secondary);border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:background .15s;border-left:3px solid #f59e0b}
-  .note-card:hover{background:var(--bg-hover)}
-  .note-card.sent{border-left-color:#10b981}
-  .note-card .title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .note-card .meta{font-size:11px;color:var(--text-muted);display:flex;gap:8px;align-items:center}
-  .note-card .meta .refs{background:var(--bg-tertiary);padding:1px 6px;border-radius:4px}
-  .note-card .actions{display:flex;gap:4px;margin-top:4px;opacity:0;transition:opacity .15s}
-  .note-card:hover .actions{opacity:1}
-  .note-card .actions button{background:none;border:none;font-size:11px;color:var(--text-secondary);cursor:pointer;padding:2px 8px;border-radius:4px}
-  .note-card .actions button:hover{background:var(--bg-tertiary);color:var(--accent)}
-  .note-card .actions .del:hover{color:#ef4444}
-  .note-card.selected{background:var(--accent-light);border-left-color:var(--accent)}
+  /* ---- 便签弹窗 ---- */
+  .note-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease}
+  .note-modal{background:var(--bg);border-radius:var(--radius-lg);box-shadow:0 8px 32px rgba(0,0,0,0.25);width:780px;max-width:92vw;height:85vh;max-height:85vh;display:flex;flex-direction:column;animation:slideUp .2s ease}
+  .note-modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .note-modal-header h2{font-size:16px;font-weight:600;color:var(--text)}
+  .note-modal-header .close{background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;padding:2px 6px;border-radius:4px}
+  .note-modal-header .close:hover{color:var(--text);background:var(--bg-hover)}
+  .note-modal-filter{display:flex;gap:8px;padding:8px 20px;border-bottom:1px solid var(--border);align-items:center;flex-shrink:0;flex-wrap:wrap}
+  .note-modal-filter select{padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;background:var(--bg);color:var(--text);outline:none}
+  .note-modal-filter .info{font-size:12px;color:var(--text-muted);margin-left:auto}
+  .note-modal-body{flex:1;overflow-y:auto;padding:8px 20px}
+  .note-draft-card{border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:8px;padding:10px 12px;background:var(--bg-secondary);transition:border-color var(--transition)}
+  .note-draft-card:hover{border-color:var(--accent)}
+  .note-draft-card .draft-header{display:flex;align-items:flex-start;gap:8px}
+  .note-draft-card .draft-header .cbox{margin-top:3px;flex-shrink:0}
+  .note-draft-card .draft-header .draft-seq{font-size:11px;color:var(--accent);font-weight:600;min-width:28px;flex-shrink:0;padding-top:2px}
+  .note-draft-card .draft-header .draft-meta{flex:1;font-size:12px;color:var(--text-secondary);line-height:1.5;min-width:0}
+  .note-draft-card .draft-header .draft-meta .ref-id{display:inline-block;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:4px;font-size:11px;margin:1px 3px 1px 0}
+  .note-draft-card .draft-header .draft-meta .ref-id.muted{opacity:0.5}
+  .note-draft-card .draft-body{margin-top:6px;margin-left:36px}
+  .note-draft-card .draft-body textarea{width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:var(--font);color:var(--text);background:var(--bg);outline:none;resize:vertical;min-height:36px;transition:border-color var(--transition)}
+  .note-draft-card .draft-body textarea:focus{border-color:var(--accent)}
+  .note-draft-card .draft-actions{display:flex;gap:4px;margin-top:4px;margin-left:36px}
+  .note-draft-card .draft-actions button{background:none;border:none;font-size:11px;color:var(--text-muted);cursor:pointer;padding:2px 6px;border-radius:4px}
+  .note-draft-card .draft-actions button:hover{background:var(--bg-hover);color:var(--text)}
+  .note-draft-card .draft-actions .del:hover{color:#ef4444}
+  .note-draft-card .draft-actions .del{color:var(--text-muted)}
+  .note-modal-user-text{padding:10px 20px;border-top:1px solid var(--border);flex-shrink:0}
+  .note-modal-user-text textarea{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-md);font-size:14px;font-family:var(--font);color:var(--text);background:var(--bg);outline:none;resize:none;min-height:56px;transition:border-color var(--transition)}
+  .note-modal-user-text textarea:focus{border-color:var(--accent)}
+  .note-modal-user-text .hint{font-size:11px;color:var(--text-muted);margin-top:4px}
+  .note-modal-footer{display:flex;align-items:center;gap:8px;padding:10px 20px 14px;border-top:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+  .note-modal-footer .checkbox-label{font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer;margin-right:auto}
+  .note-modal-footer .checkbox-label input{cursor:pointer}
+  .note-modal-footer .btn{background:none;border:1px solid var(--border);border-radius:var(--radius-md);padding:6px 14px;font-size:12px;cursor:pointer;color:var(--text);transition:all var(--transition)}
+  .note-modal-footer .btn:hover{background:var(--bg-hover)}
+  .note-modal-footer .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .note-modal-footer .btn-primary:hover{background:var(--accent-hover)}
+  .note-modal-footer .btn-secondary{background:var(--bg-secondary);color:var(--text);border-color:var(--border)}
+  .note-modal-footer .btn-secondary:hover{background:var(--bg-hover)}
+  /* ---- session selector (inline) ---- */
+  .session-selector{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;margin:8px 20px 0;flex-shrink:0}
+  .session-selector .ss-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .session-selector .ss-row:last-child{margin-bottom:0}
+  .session-selector .ss-row label{font-size:12px;color:var(--text-secondary);min-width:60px}
+  .session-selector .ss-row select,.session-selector .ss-row input{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;background:var(--bg);color:var(--text);outline:none}
+  .session-selector .ss-row input:focus,.session-selector .ss-row select:focus{border-color:var(--accent)}
+  .session-selector .ss-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
+  /* ---- text selection toolbar ---- */
+  .sel-toolbar{position:fixed;z-index:999;display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-md);padding:3px;animation:fadeIn .1s ease;pointer-events:auto}
+  .sel-toolbar button{background:none;border:none;padding:4px 10px;font-size:12px;cursor:pointer;border-radius:4px;color:var(--text);white-space:nowrap}
+  .sel-toolbar button:hover{background:var(--bg-hover);color:var(--accent)}
+  /* ---- dot badge on toggle button ---- */
+  .toggle-btn{position:relative}
+  .toggle-btn .dot-badge{display:none;position:absolute;top:1px;right:1px;width:7px;height:7px;background:#ef4444;border-radius:50%;box-shadow:0 0 0 2px var(--bg)}
+  .toggle-btn .dot-badge.show{display:block}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+  .toggle-btn.pulse{animation:pulse .4s ease 3}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 </style>
 </head>
 <body>
 <div class="header">
   <span class="title" id="docTitle">TopoCode Documents</span>
-  <button class="toggle-btn" id="toggleNotes" title="便签簿">&#x1F4DD;</button>
-  <button class="toggle-btn active" id="toggleLeft" title="切换文档栏">&#x1F4C4;</button>
-  <button class="toggle-btn active" id="toggleRight" title="切换结构图栏">&#x1F517;</button>
-  <a href="javascript:void(0)" id="notesLink">&#x1F4DD; 便签</a>
-  <a href="/chat" target="_blank" id="chatLink">&#x1F4AC; AI 对话</a>
-  <a href="/" id="backLink">&larr; 返回首页</a>
+  <button class="toggle-btn" id="toggleNotes" title="便签簿">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+    <span class="dot-badge" id="notesDot"></span>
+  </button>
+  <button class="toggle-btn active" id="toggleLeft" title="切换文档栏">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+  </button>
+  <button class="toggle-btn active" id="toggleRight" title="切换结构图栏">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><circle cx="5" cy="19" r="2"/><line x1="12" y1="9" x2="17" y2="7"/><line x1="12" y1="15" x2="17" y2="17"/><line x1="12" y1="9" x2="7" y2="7"/><line x1="12" y1="15" x2="7" y2="17"/></svg>
+  </button>
+  <a href="/chat" target="_blank" id="chatLink">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    AI助手
+  </a>
+  <a href="/" id="backLink">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+    返回
+  </a>
 </div>
 
-<div class="notes-panel" id="notesPanel" style="display:none">
-  <div class="notes-panel-header">
-    <span>&#x1F4DD; 便签簿</span>
-    <button class="notes-close" id="notesClose">&#x2715;</button>
-  </div>
-  <div class="notes-toolbar">
-    <button class="notes-btn-new" id="notesBtnNew">+ 新建便签</button>
-    <button class="notes-btn-flush" id="notesBtnSend" style="display:none">&#x1F4E4; 发送</button>
-  </div>
-  <div class="notes-list" id="notesList">
-    <div class="notes-empty">暂无便签</div>
-  </div>
-</div>
 
 <div class="doc-layout" id="docLayout">
   <div class="doc-left" id="docLeft">
@@ -317,6 +374,11 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
             <span>打开文档</span>
           </div>
+          <div class="ctx-divider"></div>
+          <div class="ctx-item" data-action="note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span>存入便签</span>
+          </div>
         </div>
       </div>
       <div class="tab-content" id="tabHeatmap">
@@ -336,6 +398,57 @@
         <button class="toc-toggle" id="fileCommToggle" title="社区索引">&#x2630;</button>
         <div class="toc-panel" id="fileCommPanel"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Notes modal -->
+<div class="note-overlay" id="notesModal" style="display:none">
+  <div class="note-modal">
+    <div class="note-modal-header">
+      <h2>便签簿</h2>
+      <button class="close" id="notesModalClose">&times;</button>
+    </div>
+    <div class="note-modal-filter">
+      <select id="notesFilterProj"><option value="">全部项目</option></select>
+      <select id="notesFilterSort"><option value="seq">序号 ↑</option><option value="time">时间 ↓</option></select>
+      <span class="info" id="notesCount">0 条</span>
+    </div>
+    <div class="note-modal-body" id="notesDraftList"></div>
+    <div class="note-modal-user-text">
+      <textarea id="notesUserText" placeholder="请描述分析需求，可用 #1 #2 指代上面的引用材料..." rows="2"></textarea>
+      <div class="hint">提示: 用 #序号 引用上面的材料</div>
+    </div>
+    <div class="note-modal-footer">
+      <label class="checkbox-label"><input type="checkbox" id="notesAutoDelete" checked> 发送后自动删除</label>
+      <button class="btn btn-secondary" id="notesBtnDelete">删除选中</button>
+      <button class="btn" id="notesBtnCancel">取消</button>
+      <button class="btn btn-secondary" id="notesBtnManual">手工处理</button>
+      <button class="btn btn-primary" id="notesBtnExec">立即执行</button>
+    </div>
+  </div>
+</div>
+<!-- Session selector template (cloned when needed) -->
+<div id="sessionSelectorTmpl" style="display:none">
+  <div class="session-selector">
+    <div class="ss-row">
+      <label>模式</label>
+      <select class="ss-mode">
+        <option value="new">创建新会话</option>
+        <option value="existing">已有会话</option>
+      </select>
+    </div>
+    <div class="ss-row ss-existing" style="display:none">
+      <label>搜索</label>
+      <input type="text" class="ss-search" placeholder="搜索会话标题...">
+    </div>
+    <div class="ss-row ss-existing" style="display:none">
+      <label>会话</label>
+      <select class="ss-list" size="4"></select>
+    </div>
+    <div class="ss-actions">
+      <button class="btn ss-cancel">取消</button>
+      <button class="btn btn-primary ss-confirm">确认发送</button>
     </div>
   </div>
 </div>
@@ -1602,7 +1715,7 @@ const GraphView = {
       console.log('[G-load-cy] renderNodes=' + renderNodes.length + ' renderEdges=' + renderEdges.length);
 
       var nodeStyle = isComponent
-        ? { label: 'data(label)', 'font-size': '10px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#3b82f6', width: 30, height: 30 }
+        ? { label: 'data(label)', 'font-size': '10px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#4d6bfe', width: 30, height: 30 }
         : { label: 'data(label)', 'font-size': '8px', 'text-valign': 'center', 'text-halign': 'center', color: cssText, 'background-color': '#8b5cf6', width: 20, height: 20, 'text-wrap': 'wrap', 'text-max-width': '80px' };
 
       g_cy = cytoscape({
@@ -2505,66 +2618,98 @@ async function loadTaskDocs(tid) {
 
 load();
 
-// ==================== 便签 (Notes) ====================
+// ==================== DOM dialogs (replaces alert/confirm/prompt) ====================
 
-var notesData = [];
-var notesPanelVisible = false;
-
-function toggleNotesPanel() {
-  notesPanelVisible = !notesPanelVisible;
-  document.getElementById('notesPanel').style.display = notesPanelVisible ? 'flex' : 'none';
-  if (notesPanelVisible) loadNotesList();
+function showToast(msg, duration) {
+  duration = duration || 3000;
+  var el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--text,#333);color:var(--bg,#fff);padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);max-width:80vw;text-align:center;animation:fadeIn .2s ease;pointer-events:none';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(function() { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(function() { el.remove(); }, 300); }, duration);
 }
 
-async function loadNotesList() {
+function showConfirm(msg, onConfirm, onCancel) {
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9998;display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg,#fff);border-radius:12px;padding:20px 24px;min-width:300px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.15)';
+  box.innerHTML = '<div style="font-size:14px;margin-bottom:16px;line-height:1.6">' + msg + '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button id="_confirm_ok" style="padding:6px 18px;border:none;border-radius:6px;background:var(--accent,#4d6bfe);color:#fff;font-size:13px;cursor:pointer">确定</button>' +
+    '<button id="_confirm_cancel" style="padding:6px 18px;border:1px solid var(--border,#ddd);border-radius:6px;background:var(--bg,#fff);color:var(--text,#333);font-size:13px;cursor:pointer">取消</button></div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  overlay.querySelector('#_confirm_ok').onclick = function() { overlay.remove(); if (onConfirm) onConfirm(); };
+  overlay.querySelector('#_confirm_cancel').onclick = function() { overlay.remove(); if (onCancel) onCancel(); };
+}
+
+function showPrompt(title, defaultVal, onConfirm, onCancel) {
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9998;display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg,#fff);border-radius:12px;padding:20px 24px;min-width:340px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.15)';
+  var escVal = (defaultVal || '').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  box.innerHTML = '<div style="font-size:14px;font-weight:500;margin-bottom:10px">' + title + '</div>' +
+    '<input id="_prompt_input" type="text" value="' + escVal + '" style="width:100%;padding:8px 12px;border:1px solid var(--border,#ddd);border-radius:6px;font-size:14px;color:var(--text,#333);background:var(--bg,#fff);outline:none;margin-bottom:16px;box-sizing:border-box">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button id="_prompt_ok" style="padding:6px 18px;border:none;border-radius:6px;background:var(--accent,#4d6bfe);color:#fff;font-size:13px;cursor:pointer">确定</button>' +
+    '<button id="_prompt_cancel" style="padding:6px 18px;border:1px solid var(--border,#ddd);border-radius:6px;background:var(--bg,#fff);color:var(--text,#333);font-size:13px;cursor:pointer">取消</button></div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  var input = overlay.querySelector('#_prompt_input');
+  input.focus();
+  input.select();
+  overlay.querySelector('#_prompt_ok').onclick = function() { var val = input.value; overlay.remove(); if (onConfirm) onConfirm(val); };
+  overlay.querySelector('#_prompt_cancel').onclick = function() { overlay.remove(); if (onCancel) onCancel(); };
+  input.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); overlay.querySelector('#_prompt_ok').click(); } });
+}
+
+// ==================== 便签草稿 (Note Drafts) ====================
+
+const DRAFTS_KEY = 'topo_notes_drafts';
+var _drafts = [];
+var _draftSeq = 1;
+var _sesCache = [];
+
+function loadDrafts() {
   try {
-    var r = await fetch('/api/notes');
-    var d = await r.json();
-    notesData = d.notes || [];
-    renderNotesList();
-  } catch(e) { console.error('notes load:', e); }
+    var raw = localStorage.getItem(DRAFTS_KEY);
+    _drafts = raw ? JSON.parse(raw) : [];
+    _draftSeq = _drafts.reduce(function(m, d){return Math.max(m, d.seq||0)}, 0) + 1;
+  } catch(e) { _drafts = []; }
+  return _drafts;
+}
+function saveDrafts() {
+  try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(_drafts)); } catch(e) {}
+  updateDotBadge();
+}
+function updateDotBadge() {
+  var dot = document.getElementById('notesDot');
+  if (!dot) return;
+  var has = _drafts.some(function(d){return d.status==='draft'||d.status==='pending'});
+  dot.classList.toggle('show', has);
 }
 
-function renderNotesList() {
-  var list = document.getElementById('notesList');
-  if (!notesData.length) {
-    list.innerHTML = '<div class="notes-empty">暂无便签<br><span style="font-size:11px">在文档区浏览时可加入引用</span></div>';
-    return;
-  }
-  var html = '';
-  notesData.forEach(function(n) {
-    var cls = n.status === 'sent' ? 'note-card sent' : 'note-card';
-    var refsCount = (n.refs || []).length;
-    html += '<div class="' + cls + '" data-id="' + n.id + '">' +
-      '<div class="title">' + escHtml(n.title || '无标题') + '</div>' +
-      '<div class="meta"><span class="refs">' + refsCount + '项引用</span><span>' + (n.status === 'sent' ? '已发送' : '草稿') + '</span></div>' +
-      '<div class="actions">' +
-        (n.status === 'draft' ? '<button class="send" data-id="' + n.id + '">发送</button>' : '') +
-        '<button class="add-ref" data-id="' + n.id + '">+ 加入当前页</button>' +
-        '<button class="del" data-id="' + n.id + '">删除</button>' +
-      '</div></div>';
-  });
-  list.innerHTML = html;
+function makeRefId() { return 'ref_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
-  // bind events
-  list.querySelectorAll('.send').forEach(function(btn) {
-    btn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      sendNote(this.dataset.id);
-    });
-  });
-  list.querySelectorAll('.add-ref').forEach(function(btn) {
-    btn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      addCurrentContextToNote(this.dataset.id);
-    });
-  });
-  list.querySelectorAll('.del').forEach(function(btn) {
-    btn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      deleteNote(this.dataset.id);
-    });
-  });
+function addRefToDraft(ref) {
+  loadDrafts();
+  var target = null;
+  for (var i = _drafts.length - 1; i >= 0; i--) {
+    if (_drafts[i].status === 'draft') { target = _drafts[i]; break; }
+  }
+  if (!target) {
+    target = {id:'draft_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), seq:_draftSeq++, status:'draft', createdAt:new Date().toISOString(), refs:[], userText:''};
+    _drafts.push(target);
+  }
+  ref._id = makeRefId();
+  target.refs.push(ref);
+  saveDrafts();
+  var btn = document.getElementById('toggleNotes');
+  if (btn) { btn.classList.remove('pulse'); void btn.offsetWidth; btn.classList.add('pulse'); setTimeout(function(){btn.classList.remove('pulse')}, 1200); }
+  var seqLabel = target.seq;
+  showToast('已存入便签草稿 #' + seqLabel);
 }
 
 function escHtml(t) {
@@ -2574,110 +2719,355 @@ function escHtml(t) {
 }
 
 function getCurrentContextRef() {
-  var refs = [];
-  if (S.commId) {
-    refs.push({
-      type: 'community_doc',
-      taskId: S.taskId || '',
-      commId: S.commId,
-      edgeType: S.et || 'CALL',
-      label: S.commLabel || S.commId
-    });
+  if (!S.commId && !S.taskId && !S.projectId) return null;
+  return {
+    projectId: S.projectId || '',
+    taskId: S.taskId || '',
+    componentId: S.commId || '',
+    label: (S.commLabel || S.commId || '当前页面') + (S.taskId ? ' ['+S.taskId.slice(0,8)+']' : '')
+  };
+}
+
+// ---- 弹窗 ----
+
+function openNotesModal() {
+  loadDrafts();
+  var modal = document.getElementById('notesModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  populateProjectFilter();
+  renderDrafts();
+  document.getElementById('notesUserText').value = '';
+  document.getElementById('notesAutoDelete').checked = true;
+  var oldSs = modal.querySelector('.session-selector');
+  if (oldSs) oldSs.remove();
+}
+function closeNotesModal() {
+  document.getElementById('notesModal').style.display = 'none';
+}
+
+function populateProjectFilter() {
+  var sel = document.getElementById('notesFilterProj');
+  var cur = sel.value;
+  var pids = {};
+  _drafts.forEach(function(d){(d.refs||[]).forEach(function(r){if(r.projectId)pids[r.projectId]=true})});
+  var keys = Object.keys(pids);
+  sel.innerHTML = '<option value="">全部项目</option>' + keys.map(function(k){return '<option value="'+escHtml(k)+'">'+escHtml(k.slice(0,12))+'</option>'}).join('');
+  if (cur) sel.value = cur;
+}
+
+function renderDrafts() {
+  var list = document.getElementById('notesDraftList');
+  var filterProj = document.getElementById('notesFilterProj').value;
+  var sortMode = document.getElementById('notesFilterSort').value;
+  var filtered = _drafts.filter(function(d){return d.status==='draft'||d.status==='pending'});
+  if (filterProj) {
+    filtered = filtered.filter(function(d){return (d.refs||[]).some(function(r){return r.projectId===filterProj})});
   }
-  return refs;
-}
-
-async function addCurrentContextToNote(noteId) {
-  var ref = getCurrentContextRef();
-  if (!ref.length) { alert('请先浏览社区文档或结构图'); return; }
-  try {
-    // get current note refs
-    var r = await fetch('/api/notes/' + noteId);
-    var d = await r.json();
-    var existing = d.refs || [];
-    // merge
-    existing = existing.concat(ref);
-    await fetch('/api/notes/' + noteId, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ refs: existing })
+  if (sortMode === 'time') {
+    filtered.sort(function(a,b){return b.createdAt.localeCompare(a.createdAt)});
+  } else {
+    filtered.sort(function(a,b){return (a.seq||0)-(b.seq||0)});
+  }
+  document.getElementById('notesCount').textContent = filtered.length + ' 条';
+  if (!filtered.length) {
+    list.innerHTML = '<div style="padding:40px;text-align:center;font-size:13px;color:var(--text-muted)">暂无草稿<br><span style="font-size:12px">在文档区选中文本后可存入便签</span></div>';
+    return;
+  }
+  var html = '';
+  filtered.forEach(function(d) {
+    (d.refs||[]).forEach(function(r, ri) {
+      html += '<div class="note-draft-card" data-draft="'+d.id+'" data-ref="'+ri+'">' +
+        '<div class="draft-header">' +
+          '<input type="checkbox" class="cbox" data-draft="'+d.id+'" data-ref="'+ri+'">' +
+          '<span class="draft-seq">#' + d.seq + '</span>' +
+          '<div class="draft-meta">' +
+            (r.projectId ? '<span class="ref-id">' + escHtml(r.projectId.slice(0,12)) + '</span>' : '') +
+            (r.taskId ? '<span class="ref-id '+(r.projectId?'muted':'')+'">' + escHtml(r.taskId.slice(0,10)) + '</span>' : '') +
+            (r.componentId ? '<span class="ref-id '+(r.taskId||r.projectId?'muted':'')+'">' + escHtml(r.componentId.slice(0,10)) + '</span>' : '') +
+            (r.label ? '<span style="font-size:11px;color:var(--text-muted);margin-left:4px">' + escHtml(r.label.slice(0,40)) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="draft-body">' +
+          '<textarea data-draft="'+d.id+'" data-ref="'+ri+'" placeholder="引用原文（可编辑）..." rows="1">' + escHtml(r.text||'') + '</textarea>' +
+        '</div>' +
+        '<div class="draft-actions">' +
+          '<button class="del" data-draft="'+d.id+'" data-ref="'+ri+'">删除</button>' +
+        '</div>' +
+      '</div>';
     });
-    loadNotesList();
-  } catch(e) { alert('加入失败: ' + e.message); }
-}
+  });
+  list.innerHTML = html;
 
-async function createNoteFromContext() {
-  var ref = getCurrentContextRef();
-  var title = prompt('便签标题:', S.commLabel || '便签');
-  if (!title) return;
-  try {
-    await fetch('/api/notes', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ title: title, refs: ref, content: '' })
+  list.querySelectorAll('.note-draft-card textarea').forEach(function(ta) {
+    ta.addEventListener('input', function() {
+      var d = _drafts.find(function(x){return x.id===this.dataset.draft});
+      if (d && d.refs[parseInt(this.dataset.ref)]) d.refs[parseInt(this.dataset.ref)].text = this.value;
+      saveDrafts();
+      this.style.height='auto';this.style.height=Math.max(36,this.scrollHeight)+'px';
     });
-    loadNotesList();
-    if (!notesPanelVisible) toggleNotesPanel();
-  } catch(e) { alert('创建失败: ' + e.message); }
-}
-
-async function deleteNote(id) {
-  if (!confirm('删除此便签？')) return;
-  try {
-    await fetch('/api/notes/' + id, { method: 'DELETE' });
-    loadNotesList();
-  } catch(e) { console.error('notes delete:', e); }
-}
-
-async function sendNote(noteId) {
-  try {
-    // First, ensure there's a chat session or create one
-    var r = await fetch('/api/notes/' + noteId + '/send', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({})
+  });
+  list.querySelectorAll('.note-draft-card .del').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var d = _drafts.find(function(x){return x.id===this.dataset.draft});
+      if (d) { d.refs.splice(parseInt(this.dataset.ref), 1); if (!d.refs.length) _drafts.splice(_drafts.indexOf(d), 1); }
+      saveDrafts(); renderDrafts();
     });
-    var d = await r.json();
-    if (d.sessionId) {
-      // Open chat with session
-      window.open('/chat?sessionId=' + d.sessionId, '_blank');
-      loadNotesList();
+  });
+}
+
+// ---- 选中文本工具栏 ----
+
+var _selBar = null;
+var _selTimer = null;
+document.addEventListener('selectionchange', function() {
+  clearTimeout(_selTimer);
+  _selTimer = setTimeout(function() {
+    var sel = window.getSelection();
+    var el = sel && sel.anchorNode && sel.anchorNode.parentElement;
+    var inDoc = el && (el.closest('#content') || el.closest('.panel-content'));
+    if (!inDoc || !sel || sel.isCollapsed || !sel.toString().trim()) {
+      removeSelBar();
+      return;
     }
-  } catch(e) { alert('发送失败: ' + e.message); }
+    showSelBar(sel);
+  }, 150);
+});
+document.addEventListener('mousedown', function(e) {
+  if (_selBar && !_selBar.contains(e.target)) removeSelBar();
+});
+function showSelBar(sel) {
+  removeSelBar();
+  var text = sel.toString().trim();
+  if (!text) return;
+  var range = sel.getRangeAt(0);
+  var rect = range.getBoundingClientRect();
+  _selBar = document.createElement('div');
+  _selBar.className = 'sel-toolbar';
+  _selBar.innerHTML = '<button data-action="copy">复制</button><button data-action="note">存入便签</button>';
+  document.body.appendChild(_selBar);
+  var bw = _selBar.offsetWidth;
+  var left = Math.max(4, Math.min(rect.left + (rect.width - bw) / 2, window.innerWidth - bw - 4));
+  var top = rect.top - _selBar.offsetHeight - 6;
+  if (top < 0) top = rect.bottom + 6;
+  _selBar.style.left = left + 'px';
+  _selBar.style.top = top + 'px';
+  _selBar.querySelector('[data-action="copy"]').onclick = function() {
+    navigator.clipboard.writeText(text).then(function(){showToast('已复制');removeSelBar()}).catch(function(){showToast('复制失败');removeSelBar()});
+  };
+  _selBar.querySelector('[data-action="note"]').onclick = function() {
+    var ref = getCurrentContextRef();
+    if (!ref) { showToast('当前页面缺少项目信息，无法存入便签'); removeSelBar(); return; }
+    ref.text = text.slice(0, 2000);
+    addRefToDraft(ref);
+    removeSelBar();
+  };
+}
+function removeSelBar() {
+  if (_selBar) { _selBar.remove(); _selBar = null; }
 }
 
-// Event binding
-document.getElementById('toggleNotes').addEventListener('click', toggleNotesPanel);
-document.getElementById('notesClose').addEventListener('click', function() { notesPanelVisible = false; document.getElementById('notesPanel').style.display = 'none'; });
-document.getElementById('notesLink').addEventListener('click', function(e) { e.preventDefault(); toggleNotesPanel(); });
-document.getElementById('notesBtnNew').addEventListener('click', createNoteFromContext);
+// ---- "撕便签" 按钮（打开弹窗）----
 
-// Add "撕便签" button to community doc content area
 (function() {
   var orig = window.loadCommunityDoc;
   if (orig) {
     window.loadCommunityDoc = function() {
-      orig.apply(this, arguments);
-      // Will add note button after content loads
-      setTimeout(addNoteButtonToDoc, 100);
+      var p = orig.apply(this, arguments);
+      if (p && p.then) {
+        p.then(function() { setTimeout(addNoteButtonToDoc, 50); });
+      } else {
+        setTimeout(addNoteButtonToDoc, 100);
+      }
     };
   }
 })();
-
 function addNoteButtonToDoc() {
   var content = document.getElementById('content');
   if (!content) return;
   var header = content.querySelector('h1');
   if (!header) return;
   var btn = document.createElement('button');
-  btn.textContent = '📎 撕便签';
+  btn.textContent = '\uD83D\uDCCE 撕便签';
   btn.style.cssText = 'margin-left:8px;padding:2px 10px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);cursor:pointer';
-  btn.onclick = createNoteFromContext;
+  btn.onclick = function() { loadDrafts(); openNotesModal(); };
   header.appendChild(btn);
 }
 
-// Poll notes periodically (for cross-tab updates)
-setInterval(loadNotesList, 10000);
+// ---- Graph 右键 "存入便签" ----
+
+document.querySelector('#graphContextMenu [data-action="note"]')?.addEventListener('click', function() {
+  var menu = document.getElementById('graphContextMenu');
+  var nid = menu._ctxNodeId;
+  if (!nid || !S.taskId) return;
+  menu.style.display = 'none';
+  var node = g_cy.getElementById(nid);
+  var label = node.length ? (node.data('label') || nid) : nid;
+  var isExternal = !!menu._ctxIsExt;
+  var ref = {
+    projectId: S.projectId || '',
+    taskId: S.taskId || '',
+    componentId: nid,
+    label: label.slice(0, 60)
+  };
+  addRefToDraft(ref);
+});
+
+// ---- 会话选择器 ----
+
+function showSessionSelector(onConfirm) {
+  loadSessionsList();
+  var modal = document.getElementById('notesModal');
+  var tmpl = document.getElementById('sessionSelectorTmpl');
+  var ss = tmpl.cloneNode(true);
+  ss.id = ''; ss.style.display = 'block';
+  var userText = modal.querySelector('.note-modal-user-text');
+  userText.parentNode.insertBefore(ss, userText.nextSibling);
+
+  var modeSel = ss.querySelector('.ss-mode');
+  var existingRows = ss.querySelectorAll('.ss-existing');
+  var searchInput = ss.querySelector('.ss-search');
+  var listSel = ss.querySelector('.ss-list');
+
+  function toggleMode() {
+    var show = modeSel.value === 'existing';
+    existingRows.forEach(function(r){r.style.display = show ? '' : 'none'});
+    if (show) { searchInput.focus(); filterSessions(); }
+  }
+  modeSel.addEventListener('change', toggleMode);
+
+  function filterSessions() {
+    var q = (searchInput.value || '').toLowerCase();
+    listSel.innerHTML = _sesCache.map(function(s){
+      var match = !q || (s.title||'').toLowerCase().indexOf(q) >= 0;
+      return match ? '<option value="'+escHtml(s.id)+'">'+escHtml((s.title||'未命名').slice(0,40))+'</option>' : '';
+    }).join('') || '<option value="" disabled>未找到会话</option>';
+  }
+  searchInput.addEventListener('input', filterSessions);
+
+  ss.querySelector('.ss-cancel').addEventListener('click', function(){ss.remove()});
+  ss.querySelector('.ss-confirm').addEventListener('click', function() {
+    var sessionId = null;
+    if (modeSel.value === 'existing') {
+      sessionId = listSel.value;
+      if (!sessionId) { showToast('请选择一个会话'); return; }
+    }
+    ss.remove();
+    onConfirm(sessionId);
+  });
+  toggleMode();
+}
+
+async function loadSessionsList() {
+  try { var r = await fetch('/api/chat/sessions'); var d = await r.json(); _sesCache = d.sessions || []; } catch(e) { _sesCache = []; }
+}
+
+// ---- 执行 / 手工 ----
+
+function getSelectedRefs() {
+  var refs = [];
+  var cboxes = document.querySelectorAll('#notesDraftList .cbox:checked');
+  cboxes.forEach(function(cb) {
+    var d = _drafts.find(function(x){return x.id===cb.dataset.draft});
+    if (d && d.refs[parseInt(cb.dataset.ref)]) refs.push(d.refs[parseInt(cb.dataset.ref)]);
+  });
+  return refs;
+}
+function removeSelectedRefs() {
+  var cboxes = document.querySelectorAll('#notesDraftList .cbox:checked');
+  var toRemove = [];
+  cboxes.forEach(function(cb) {
+    var di = _drafts.findIndex(function(x){return x.id===cb.dataset.draft});
+    if (di >= 0) {
+      var ri = parseInt(cb.dataset.ref);
+      _drafts[di].refs.splice(ri, 1);
+      if (!_drafts[di].refs.length) toRemove.push(di);
+    }
+  });
+  toRemove.sort(function(a,b){return b-a}).forEach(function(i){_drafts.splice(i,1)});
+  saveDrafts(); renderDrafts();
+}
+
+async function executeDrafts() {
+  // 刷新 textarea 到 _drafts
+  document.querySelectorAll('#notesDraftList textarea').forEach(function(ta){
+    var d = _drafts.find(function(x){return x.id===ta.dataset.draft});
+    if (d && d.refs[parseInt(ta.dataset.ref)]) d.refs[parseInt(ta.dataset.ref)].text = ta.value;
+  });
+  var refs = getSelectedRefs();
+  if (!refs.length) { showToast('请勾选要发送的引用材料'); return; }
+  var userText = document.getElementById('notesUserText').value.trim();
+  var autoDelete = document.getElementById('notesAutoDelete').checked;
+  showSessionSelector(async function(sessionId) {
+    try {
+      var r = await fetch('/api/notes/execute-draft', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({refs: refs, userText: userText, sessionId: sessionId})
+      });
+      var d = await r.json();
+      if (d.sessionId) {
+        if (autoDelete) removeSelectedRefs();
+        closeNotesModal();
+        window.open('/chat?sessionId=' + d.sessionId, '_blank');
+      }
+    } catch(e) { showToast('发送失败: ' + e.message); }
+  });
+}
+
+function manualDrafts() {
+  // 先刷新所有 textarea 到 _drafts
+  document.querySelectorAll('#notesDraftList textarea').forEach(function(ta){
+    var d = _drafts.find(function(x){return x.id===ta.dataset.draft});
+    if (d && d.refs[parseInt(ta.dataset.ref)]) d.refs[parseInt(ta.dataset.ref)].text = ta.value;
+  });
+  var refs = getSelectedRefs();
+  if (!refs.length) { showToast('请勾选要发送的引用材料'); return; }
+  var userText = document.getElementById('notesUserText').value.trim();
+  loadDrafts();
+  var cboxes = document.querySelectorAll('#notesDraftList .cbox:checked');
+  var pendingItems = [];
+  cboxes.forEach(function(cb) {
+    var d = _drafts.find(function(x){return x.id===cb.dataset.draft});
+    if (d) { pendingItems.push({draftId: d.id, refIdx: parseInt(cb.dataset.ref), userText: userText}); }
+  });
+  if (pendingItems.length) {
+    var nd = {id:'draft_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), seq:_draftSeq++, status:'pending', createdAt:new Date().toISOString(), refs:[], userText:userText};
+    pendingItems.forEach(function(pi) {
+      var d = _drafts.find(function(x){return x.id===pi.draftId});
+      if (d && d.refs[pi.refIdx]) { nd.refs.push(d.refs[pi.refIdx]); d.refs.splice(pi.refIdx, 1); }
+    });
+    _drafts = _drafts.filter(function(d){return d.refs.length>0});
+    _drafts.push(nd);
+    saveDrafts();
+    closeNotesModal();
+    try { new BroadcastChannel('topo_notes_drafts').postMessage({type:'pending_notes'}); } catch(e) {}
+    showToast('已转交到 AI 对话页的便签栏');
+  }
+}
+
+// ---- 事件绑定 ----
+
+document.getElementById('toggleNotes').addEventListener('click', function() { loadDrafts(); openNotesModal(); });
+document.getElementById('notesModalClose').addEventListener('click', closeNotesModal);
+document.getElementById('notesFilterProj').addEventListener('change', renderDrafts);
+document.getElementById('notesFilterSort').addEventListener('change', renderDrafts);
+document.getElementById('notesBtnDelete').addEventListener('click', function() { removeSelectedRefs(); });
+document.getElementById('notesBtnCancel').addEventListener('click', closeNotesModal);
+document.getElementById('notesBtnManual').addEventListener('click', manualDrafts);
+document.getElementById('notesBtnExec').addEventListener('click', executeDrafts);
+document.getElementById('notesUserText').addEventListener('input', function(){this.style.height='auto';this.style.height=Math.max(56,this.scrollHeight)+'px'});
+
+loadDrafts();
+setInterval(function(){
+  loadDrafts();
+  if (document.getElementById('notesModal').style.display === 'flex') renderDrafts();
+  updateDotBadge();
+}, 30000);
+try { new BroadcastChannel('topo_notes_drafts').onmessage = function(e) {
+  if (e.data && e.data.type === 'pending_notes') { loadDrafts(); updateDotBadge(); }
+}; } catch(e) {}
+
 </script>
 </body>
 </html>

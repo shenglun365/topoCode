@@ -114,6 +114,16 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .reasoning-toggle .arrow{font-size:10px;transition:transform .2s}
 .reasoning-toggle .arrow.open{transform:rotate(90deg)}
 .reasoning-content{font-size:13px;color:var(--text-secondary);padding:10px 14px;background:var(--bg-hover);border-radius:8px;margin:4px 0 10px;white-space:pre-wrap;line-height:1.5;max-height:300px;overflow-y:auto;border-left:3px solid var(--accent)}
+.tool-toggle{font-size:13px;color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px}
+.tool-toggle:hover{color:var(--accent)}
+.tool-toggle .arrow{font-size:10px;transition:transform .2s}
+.tool-toggle .arrow.open{transform:rotate(90deg)}
+.tool-detail{padding:10px 14px;background:var(--bg-hover);border-radius:8px;margin:4px 0 10px;border-left:3px solid #f59e0b}
+.tool-call-item{margin-bottom:8px}
+.tool-call-item:last-child{margin-bottom:0}
+.tool-call-name{font-size:13px;font-weight:500;color:var(--text);margin-bottom:4px}
+.tool-detail .tool-label{font-size:11px;color:var(--text-muted);margin-bottom:2px}
+.tool-detail pre{font-size:12px;color:var(--text-secondary);margin:2px 0 6px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto}
 .input-area{padding:0 24px 24px;flex-shrink:0;display:flex;flex-direction:column;align-items:center}
 .input-wrapper{max-width:820px;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);transition:border-color var(--transition),box-shadow var(--transition);padding:6px 8px 6px 16px}
 .input-wrapper:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
@@ -179,6 +189,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <div class="sidebar-tab" :class="{active:tab==='notes'}" @click="switchNotesTab">便签</div>
     </div>
     <div class="sidebar-content" v-if="tab==='chat'">
+      <button class="btn-new" @click="createSession">+ 新建会话</button>
       <div v-for="s in sessions" :key="s.id" class="session-item" :class="{active:s.id===currentId}" @click="switchSession(s.id)">
         <span class="title">{{ s.title }}</span>
         <button class="del-btn" @click.stop="deleteSession(s.id)">×</button>
@@ -194,7 +205,15 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
         <button v-if="n.status==='draft'" class="send-btn" @click.stop="sendNote(n)">发送</button>
         <button class="del-btn" @click.stop="deleteNote(n.id)">×</button>
       </div>
-      <div v-if="!notes.length" class="note-empty">暂无便签</div>
+      <div v-if="!notes.length && !pendingDrafts.length" class="note-empty">暂无便签</div>
+      <div v-if="pendingDrafts.length" style="border-top:1px solid var(--border);margin:8px 10px 0;padding-top:8px">
+        <div style="font-size:12px;font-weight:500;color:var(--text-muted);margin-bottom:6px">待处理草稿</div>
+        <div v-for="d in pendingDrafts" :key="d.id" class="note-item" style="border-left-color:#f59e0b">
+          <span class="title" style="color:var(--text)">#{{ d.seq }}</span>
+          <span class="ref-count">{{ d.refs.length }}项</span>
+          <button class="send-btn" style="opacity:1" @click.stop="execPendingDraft(d)">执行</button>
+        </div>
+      </div>
     </div>
   </aside>
 
@@ -223,6 +242,19 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
               <span v-else>查看思考过程</span>
             </div>
             <div v-if="m.role==='assistant'&&m.reasoning&&m.showReasoning" class="reasoning-content">{{ m.reasoning }}</div>
+            <div v-if="m.role==='assistant'&&m.toolCalls?.length" class="tool-toggle" @click="m.showToolCalls=!m.showToolCalls">
+              <span class="arrow" :class="{open:m.showToolCalls}">▶</span>
+              <span>调用 {{ m.toolCalls.length }} 个工具</span>
+            </div>
+            <div v-if="m.role==='assistant'&&m.toolCalls?.length&&m.showToolCalls" class="tool-detail">
+              <div v-for="tc in m.toolCalls" :key="tc.name" class="tool-call-item">
+                <div class="tool-call-name">🔧 {{ tc.name }}</div>
+                <div class="tool-label">参数</div>
+                <pre>{{ JSON.stringify(tc.arguments, null, 2) }}</pre>
+                <div v-if="tc.result" class="tool-label" style="margin-top:6px">执行结果</div>
+                <pre v-if="tc.result">{{ typeof tc.result==='string' ? tc.result : JSON.stringify(tc.result, null, 2) }}</pre>
+              </div>
+            </div>
             <div class="bubble" v-html="renderMd(m.content)" :ref="el=>onBubbleUpdate(el,i)"></div>
           </div>
         </div>
@@ -252,30 +284,30 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       </div>
     </div>
   </main>
-</div>
 
-<!-- modal -->
-<div class="modal-overlay" v-if="showNewNote" @click.self="showNewNote=false">
-  <div class="modal">
-    <div class="modal-header">
-      <h2>{{ editNote ? '编辑便签' : '新建便签' }}</h2>
-      <button class="modal-close" @click="showNewNote=false">×</button>
-    </div>
-    <div class="modal-body">
-      <label>标题</label>
-      <input v-model="noteForm.title" placeholder="便签标题">
-      <label>备注内容</label>
-      <textarea v-model="noteForm.content" placeholder="你想针对这些材料分析什么？" rows="3"></textarea>
-      <label>引用材料 ({{ noteForm.refs.length }}项)</label>
-      <div v-if="!noteForm.refs.length" style="font-size:13px;color:var(--text-muted);margin-bottom:8px">暂无引用，在文档区浏览时可加入</div>
-      <div v-for="(r,ri) in noteForm.refs" :key="ri" class="ref-tag">
-        {{ r.label || r.type }}
-        <span class="rm" @click="noteForm.refs.splice(ri,1)">×</span>
+  <!-- modal -->
+  <div class="modal-overlay" v-if="showNewNote" @click.self="showNewNote=false">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>{{ editNote ? '编辑便签' : '新建便签' }}</h2>
+        <button class="modal-close" @click="showNewNote=false">×</button>
       </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn" @click="showNewNote=false">取消</button>
-      <button class="btn-primary btn" @click="saveNote">{{ editNote ? '保存' : '创建' }}</button>
+      <div class="modal-body">
+        <label>标题</label>
+        <input v-model="noteForm.title" placeholder="便签标题">
+        <label>备注内容</label>
+        <textarea v-model="noteForm.content" placeholder="你想针对这些材料分析什么？" rows="3"></textarea>
+        <label>引用材料 ({{ noteForm.refs.length }}项)</label>
+        <div v-if="!noteForm.refs.length" style="font-size:13px;color:var(--text-muted);margin-bottom:8px">暂无引用，在文档区浏览时可加入</div>
+        <div v-for="(r,ri) in noteForm.refs" :key="ri" class="ref-tag">
+          {{ r.label || r.type }}
+          <span class="rm" @click="noteForm.refs.splice(ri,1)">×</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="showNewNote=false">取消</button>
+        <button class="btn-primary btn" @click="saveNote">{{ editNote ? '保存' : '创建' }}</button>
+      </div>
     </div>
   </div>
 </div>
@@ -293,6 +325,35 @@ createApp({
     const streaming=ref(false);const msgArea=ref(null);const tab=ref('chat')
     const showNewNote=ref(false);const editNote=ref(null)
     const noteForm=ref({title:'',content:'',refs:[]})
+    const pendingDrafts=ref([])
+    const PENDING_KEY='topo_notes_drafts'
+    function showToast(msg){
+      var el=document.createElement('div');el.textContent=msg
+      el.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.2);max-width:80vw;text-align:center;pointer-events:none'
+      document.body.appendChild(el);setTimeout(function(){el.remove()},3000)
+    }
+    function loadPendingDrafts(){
+      try{const raw=localStorage.getItem(PENDING_KEY);const all=raw?JSON.parse(raw):[]
+        pendingDrafts.value=all.filter(function(d){return d.status==='pending'})
+      }catch(e){pendingDrafts.value=[]}
+    }
+    async function execPendingDraft(d){
+      if(!d.refs||!d.refs.length){showToast('草稿无引用');return}
+      let sid=currentId.value
+      if(!sid){
+        const r=await fetch('/api/chat/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'便签分析 #'+d.seq,modelId:currentModel.value})})
+        const dd=await r.json();sid=dd.id
+        sessions.value.unshift({id:dd.id,title:dd.title,projectId:dd.projectId,modelId:dd.modelId,messageCount:0})
+        currentId.value=dd.id
+      }
+      await fetch('/api/notes/execute-draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refs:d.refs,userText:d.userText||'',sessionId:sid})})
+      // 更新 localStorage
+      try{const raw=localStorage.getItem(PENDING_KEY);const all=raw?JSON.parse(raw):[]
+        const idx=all.findIndex(function(x){return x.id===d.id})
+        if(idx>=0)all.splice(idx,1);localStorage.setItem(PENDING_KEY,JSON.stringify(all))
+      }catch(e){}
+      loadPendingDrafts();loadMessages()
+    }
     const currentTitle=computed(()=>{const s=sessions.value.find(x=>x.id===currentId.value);return s?s.title:'TopoCode AI'})
 
     function renderMd(t){return t?marked.parse(t):''}
@@ -367,7 +428,7 @@ createApp({
     }
 
     // notes
-    function switchNotesTab(){tab.value='notes';loadNotes()}
+    function switchNotesTab(){tab.value='notes';loadNotes();loadPendingDrafts()}
     function initNoteForm(n){noteForm.value={title:n?.title||'',content:n?.content||'',refs:n?.refs?[...n.refs]:[]}}
     async function saveNote(){
       if(editNote.value){
@@ -400,11 +461,13 @@ createApp({
       if(!text||streaming.value||!currentId.value)return
       input.value='';streaming.value=true
       messages.value.push({id:'u'+Date.now(),role:'user',content:text});scrollBottom()
-      const mid=messages.value.push({id:'a'+Date.now(),role:'assistant',content:'',reasoning:'',showReasoning:false,_drawn:false})-1
+      const mid=messages.value.push({id:'a'+Date.now(),role:'assistant',content:'',reasoning:'',showReasoning:false,toolCalls:[],showToolCalls:false,_drawn:false})-1
       try{
+        console.log('[chat] sending message', text.slice(0,60))
         const resp=await fetch('/api/chat/sessions/'+currentId.value+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:text,modelId:currentModel.value||undefined})})
         if(!resp.ok){messages.value[mid].content='请求失败: '+resp.status;streaming.value=false;return}
-        const reader=resp.body.getReader();const decoder=new TextDecoder();let buf=''
+        console.log('[chat] SSE response status:', resp.status)
+        const reader=resp.body.getReader();const decoder=new TextDecoder();let buf='';let sseCount=0
         while(true){
           const{done,value}=await reader.read()
           if(done)break
@@ -412,12 +475,17 @@ createApp({
           const lines=buf.split('\n');buf=lines.pop()||''
           for(const line of lines){
             if(line.startsWith('event:')||!line.startsWith('data: '))continue
+            sseCount++
             try{
               const data=JSON.parse(line.slice(6))
+              if(sseCount<=5||data.type==='done'||data.type==='tool_call'||data.type==='tool_result')console.log('[chat] SSE #'+sseCount, data.type, data.text?data.text.slice(0,40):JSON.stringify(data).slice(0,80))
               if(data.type==='chunk'&&data.text)messages.value[mid].content+=data.text
               if(data.type==='reasoning'&&data.text)messages.value[mid].reasoning+=data.text
               if(data.type==='error')messages.value[mid].content='错误: '+(data.message||'')
+              if(data.type==='tool_call'){if(!messages.value[mid].toolCalls)messages.value[mid].toolCalls=[];messages.value[mid].toolCalls.push({name:data.name,arguments:data.arguments,result:null})}
+              if(data.type==='tool_result'){const tc=messages.value[mid].toolCalls?.find(t=>t.name===data.name);if(tc)tc.result=data.result}
               if(data.type==='done'){
+                console.log('[chat] SSE done, total events:', sseCount, 'final content length:', (data.content||'').length)
                 if(data.content)messages.value[mid].content=data.content
                 messages.value[mid]._drawn=false
                 nextTick(()=>{const bs=msgArea.value?.querySelectorAll('.message.assistant .bubble');if(bs)renderDiagrams(bs[bs.length-1])})
@@ -438,11 +506,14 @@ createApp({
       try{new BroadcastChannel('topocode_notes').onmessage=function(e){
         if(e.data&&e.data.type==='note_arrived'&&e.data.sessionId===currentId.value)loadMessages()
       }}catch(e){}
+      try{new BroadcastChannel('topo_notes_drafts').onmessage=function(e){
+        if(e.data&&e.data.type==='pending_notes')loadPendingDrafts()
+      }}catch(e){}
     })
 
-    return{sessions,messages,models,notes,currentId,currentModel,currentTitle,input,streaming,msgArea,tab,showNewNote,editNote,noteForm,
+    return{sessions,messages,models,notes,currentId,currentModel,currentTitle,input,streaming,msgArea,tab,showNewNote,editNote,noteForm,pendingDrafts,
       renderMd,onBubbleUpdate,createSession,switchSession,deleteSession,onModelChange,send,
-      loadNotes,switchNotesTab,initNoteForm,saveNote,deleteNote,sendNote}
+      loadNotes,switchNotesTab,initNoteForm,saveNote,deleteNote,sendNote,execPendingDraft}
   }
 }).mount('#app')
 </script>

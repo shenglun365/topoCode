@@ -153,6 +153,14 @@ def setup_handlers(multi_db):
             (doc_id, tid, et, cid, data["title"], data["content"], data.get("template_id"), now, now)
         )
         pdb.conn.commit()
+        # 更新 doc_project_map 映射
+        try:
+            multi_db.main_db.execute(
+                "INSERT OR REPLACE INTO doc_project_map (doc_id, project_id, task_id) VALUES (?, ?, ?)",
+                (doc_id, pid, tid),
+            )
+        except Exception:
+            pass
 
     def _handle_file_summary(data):
         pid, pdb = _get_project_db(data)

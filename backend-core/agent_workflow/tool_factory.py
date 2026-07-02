@@ -59,11 +59,13 @@ def build_agentic_component_tools(
     return tools
 
 
-def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, project_summary) -> ToolRegistry:
+def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
+                         project_summary, concurrency=1, subagent_concurrency=1) -> ToolRegistry:
     """构建流水线工具集 (PipelineWorkflow 专用)"""
     from .tools import AgentTool, ToolResult
     import logging
     _log = logging.getLogger(__name__)
+    _sub_conc = max(1, min(int(subagent_concurrency), 5))
 
     class EnsureSummaryTool(AgentTool):
         name = "pipeline_ensure_summary"
@@ -125,12 +127,12 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                     sub_tools = build_agentic_component_tools(
                         project_root=project_root, project_db=project_db,
                         path_sandbox=ps, project_id=pid, task_id=task_id,
-                        multi_db=multi_db, concurrency=1,
+                        multi_db=multi_db, concurrency=RunPreSummaryTool._sub_conc,
                     )
 
                     from .workflows.pre_summary import PreSummaryWorkflow
                     workflow = PreSummaryWorkflow()
-                    context = {"task_id": task_id, "files": files}
+                    context = {"task_id": task_id, "files": files, "subagent_concurrency": RunPreSummaryTool._sub_conc}
                     sandbox = _AS(project_root, max_tokens=0, timeout_seconds=0)
 
                     def _run(_ce=ce):
@@ -213,7 +215,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                     sub_tools = build_agentic_component_tools(
                         project_root=project_root, project_db=project_db,
                         path_sandbox=ps, project_id=pid, task_id=task_id,
-                        multi_db=multi_db, concurrency=1,
+                        multi_db=multi_db, concurrency=RunComponentAnalysisTool._sub_conc,
                     )
 
                     comp_edge_lv = {}
@@ -259,6 +261,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
                         "project_summary": project_summary or "",
                         "max_turns": 30,
                         "_save_fn": _save_fn,
+                        "subagent_concurrency": RunComponentAnalysisTool._sub_conc,
                     }
                     sandbox = _AS(project_root, max_tokens=32768, timeout_seconds=900)
 
@@ -305,6 +308,10 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid, proje
             except Exception as e:
                 _log.warning(f"[Pipeline] component analysis failed: {e}")
                 return ToolResult.fail(str(e))
+
+    # 在函数作用域设置类属性（避免类体闭包作用域问题）
+    RunPreSummaryTool._sub_conc = _sub_conc
+    RunComponentAnalysisTool._sub_conc = _sub_conc
 
     class RunOverviewTool(AgentTool):
         name = "pipeline_run_overview"

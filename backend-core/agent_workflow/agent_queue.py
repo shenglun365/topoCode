@@ -115,6 +115,7 @@ class AgentTaskState:
 class AgentTaskManager:
     def __init__(self, max_concurrency: int = 3, min_concurrency: int = 1, max_concurrency_cap: int = 10):
         self._max = max(min_concurrency, min(max_concurrency, max_concurrency_cap))
+        self._sem = threading.BoundedSemaphore(self._max)
         self._tasks: dict[str, AgentTaskState] = {}
         self._lock = threading.Lock()
         self._running = 0
@@ -208,6 +209,16 @@ class AgentTaskManager:
 
         if on_complete:
             self._callbacks[agent_id] = on_complete
+
+        # 等待并发槽位（无可用槽位时阻塞）
+        logger.info(f"[AgentQueue] waiting slot for {agent_id} task={task_id} running={self.running_count}/{self._max}")
+        acquired = self._sem.acquire(timeout=86400)  # 24h timeout as safety net
+        if not acquired:
+            logger.warning(f"[AgentQueue] {agent_id} failed to acquire slot within 24h")
+            with self._lock:
+                self._tasks[agent_id].status = TaskState.FAILED
+                self._tasks[agent_id].error = "timeout waiting for slot"
+            return agent_id
 
         thread = threading.Thread(
             target=self._run_agent,
@@ -362,6 +373,7 @@ class AgentTaskManager:
                     s.finished_at = time.time()
 
         finally:
+            self._sem.release()
             with self._lock:
                 self._running = max(0, self._running - 1)
 

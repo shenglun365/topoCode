@@ -77,7 +77,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         logger.info(f"[LLM_REQ] {self.PROVIDER_NAME} 请求: {_json.dumps(_log_payload, ensure_ascii=False)}")
 
         full_content = ""
-        tool_calls_parts = []
+        tool_calls_by_idx = {}
         usage_data = {}
 
         try:
@@ -98,8 +98,8 @@ class OpenAICompatProvider(BaseLLMProvider):
                     continue
                 data_str = line[6:].strip()
                 if data_str == '[DONE]':
-                    if tool_calls_parts:
-                        chunk_queue.put({'type': 'tool_calls', 'data': ''.join(tool_calls_parts)})
+                    if tool_calls_by_idx:
+                        chunk_queue.put({'type': 'tool_calls', 'data': _json.dumps(list(tool_calls_by_idx.values()))})
                     break
                 try:
                     data = _json.loads(data_str)
@@ -118,7 +118,17 @@ class OpenAICompatProvider(BaseLLMProvider):
 
                     tc = delta.get('tool_calls')
                     if tc:
-                        tool_calls_parts.append(_json.dumps(tc))
+                        for tcd in tc:
+                            idx = tcd.get("index", 0)
+                            acc = tool_calls_by_idx.setdefault(idx, {})
+                            if "id" in tcd: acc["id"] = tcd["id"]
+                            if "type" in tcd: acc["type"] = tcd["type"]
+                            fn = tcd.get("function", {})
+                            if fn:
+                                acc.setdefault("function", {})
+                                if "name" in fn: acc["function"]["name"] = fn["name"]
+                                if "arguments" in fn:
+                                    acc["function"]["arguments"] = acc["function"].get("arguments", "") + fn["arguments"]
                 except _json.JSONDecodeError:
                     continue
 

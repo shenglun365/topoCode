@@ -343,7 +343,7 @@ class LLMService:
                 batch_text = ""
                 batch_idx = 0
                 last_pub = time.monotonic()
-                tool_calls_raw = []  # 累积 tool_call JSON 片段
+                tool_calls_merged = None  # provider 已按 index 合并好的 tool_calls
 
                 while True:
                     try:
@@ -379,7 +379,8 @@ class LLMService:
                         raise RuntimeError(item.get('message', 'Unknown streaming error'))
 
                     if isinstance(item, dict) and item.get('type') == 'tool_calls':
-                        tool_calls_raw.append(item.get('data', ''))
+                        # provider（如 openai_compat）已按 index 合并好，直接使用
+                        tool_calls_merged = json.loads(item.get('data', '[]'))
 
                     # 文本 chunk
                     if isinstance(item, str):
@@ -400,8 +401,8 @@ class LLMService:
                 thread.join(timeout=5)
 
                 # ===== Tools Calling 检测 =====
-                if tool_round < max_tool_rounds and tool_calls_raw:
-                    tool_calls = self._parse_tool_calls(tool_calls_raw)
+                if tool_round < max_tool_rounds and tool_calls_merged:
+                    tool_calls = self._parse_tool_calls_merged(tool_calls_merged)
                     if tool_calls:
                         from tools_executor import ToolExecutor
                         executor = ToolExecutor(self.multi_db)
@@ -552,10 +553,9 @@ class LLMService:
             self._server.publish(topic, event_type, data)
 
     def _parse_tool_calls(self, raw_parts: List[str]) -> List[Dict[str, Any]]:
-        """解析累积的 tool_call JSON 片段"""
+        """解析累积的 tool_call JSON 片段（旧格式，保留兼容）"""
         try:
             raw = ''.join(raw_parts)
-            # 尝试解析为 JSON 数组或单个对象
             parsed = json.loads(raw)
             if isinstance(parsed, list):
                 return [{'name': tc.get('function', {}).get('name', ''),
@@ -568,6 +568,28 @@ class LLMService:
         except (json.JSONDecodeError, AttributeError):
             pass
         return []
+
+    def _parse_tool_calls_by_idx(self, by_idx: dict) -> List[Dict[str, Any]]:
+        """从按 index 合并后的 dict 解析 tool_calls（流式安全）"""
+        result = []
+        for v in by_idx.values():
+            try:
+                args = json.loads(v.get("function", {}).get("arguments", "{}"))
+            except Exception:
+                args = {}
+            result.append({"name": v.get("function", {}).get("name", ""), "arguments": args})
+        return result
+
+    def _parse_tool_calls_merged(self, tc_list: list) -> List[Dict[str, Any]]:
+        """从 provider 已合并好的 tool_calls 列表解析。"""
+        result = []
+        for tc in tc_list:
+            try:
+                args = json.loads(tc.get("function", {}).get("arguments", "{}"))
+            except Exception:
+                args = {}
+            result.append({"name": tc.get("function", {}).get("name", ""), "arguments": args})
+        return result
 
     def _validate_structured_output(
         self,

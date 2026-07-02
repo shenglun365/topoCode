@@ -272,7 +272,7 @@ def create_default_router(
         workflow_class=OverviewWorkflow,
         tool_builder=_build_overview_tools,
         context_transformer=_overview_context_transform,
-        description="生成整体架构概览文档。Agent 可读取社区分析结果、文件预摘要、源码文件等，输出架构总览 Markdown",
+        description="生成整体架构概览文档。Agent 可读取社区分析结果、文件预摘要、源码文件等，输出架构总览 Markdown。支持参数: --force (强制重新生成), -L zh/en (输出语言)",
         sandbox_builder=lambda root: AgentSandbox(root, max_tokens=8192, timeout_seconds=600),
     ))
 
@@ -300,7 +300,7 @@ def create_default_router(
         workflow_class=AgenticComponentAnalystWorkflow,
         tool_builder=_build_agentic_component_tools,
         context_transformer=_agentic_component_context_transform,
-        description="Agentic 多轮分析组件，LLM 可自主调用 read_file / search_content 等工具读取文件后分析",
+        description="Agentic 多轮分析组件，LLM 可自主调用 read_file / search_content 等工具读取文件后分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新分析)",
     ))
 
     # ── presummary_files 路由（文件预摘要） ──
@@ -323,7 +323,27 @@ def create_default_router(
         workflow_class=PreSummaryWorkflow,
         tool_builder=_build_presummary_tools,
         context_transformer=None,
-        description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析",
+        description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新生成)",
+        sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
+    ))
+
+    # ── pipeline 路由（完整流水线） ──
+    def _build_pipeline_tools(ctx: dict) -> ToolRegistry:
+        from .tool_factory import build_pipeline_tools
+        pid = ctx.get("project_id", "")
+        tid = ctx.get("task_id", "")
+        return build_pipeline_tools(
+            multi_db, project_db, project_root, tid, pid, project_summary,
+            concurrency=ctx.get("concurrency", 1),
+            subagent_concurrency=ctx.get("subagent_concurrency", 1),
+        )
+
+    from .workflows.pipeline import PipelineWorkflow
+    router.register("pipeline", RouteEntry(
+        workflow_class=PipelineWorkflow,
+        tool_builder=_build_pipeline_tools,
+        context_transformer=None,
+        description="流水线整体激活：项目摘要->预摘要->组件分析->架构分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新生成), -L zh/en (输出语言)",
         sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
     ))
 

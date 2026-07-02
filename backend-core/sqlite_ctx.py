@@ -174,6 +174,16 @@ class SQLiteContext:
             return
         self.conn.executemany(sql, params_list)
 
+    def executescript(self, sql: str):
+        """执行 SQL 脚本（DDL 迁移用）— 通过 WriteQueue 串行化（有 WQ 时）；否则直连。"""
+        if self._wq and self._label:
+            stmts = [s.strip() for s in sql.split(";") if s.strip()]
+            if stmts:
+                items = [(s, (), True) for s in stmts]
+                self._wq.execute_batch(self._label, items)
+        else:
+            self.conn.executescript(sql)
+
     def commit(self):
         """提交事务。WriteQueue 模式下单句写入已自提交，此为兼容空操作。"""
         if self._wq and self._label:
@@ -574,6 +584,15 @@ MAIN_DB_TABLES_SQL = """
         manually_edited INTEGER DEFAULT 0,
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    -- ============================================
+    -- doc_project_map — doc_id → project_id 映射（加速文档查找，避免遍历所有项目库）
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS doc_project_map (
+        doc_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        task_id TEXT NOT NULL
     );
 """
 
@@ -1162,7 +1181,7 @@ class MultiDBManager:
 
         # 项目库 LRU 缓存 (max=10)
         self._project_db_cache: OrderedDict[str, SQLiteContext] = OrderedDict()
-        self._project_db_max = 10
+        self._project_db_max = 100
         self._project_db_idle_timeout = 300  # 5 分钟无访问则自动关闭
         self._project_db_last_used: dict[str, float] = {}
 
@@ -1192,7 +1211,7 @@ class MultiDBManager:
 
     def _init_main_tables(self):
         """初始化主库表"""
-        self.main_db.conn.executescript(MAIN_DB_TABLES_SQL)
+        self.main_db.executescript(MAIN_DB_TABLES_SQL)
         self._migrate_main_tables()
 
     def _migrate_main_tables(self):
@@ -1259,8 +1278,8 @@ class MultiDBManager:
                 if col_name not in existing:
                     self.main_db.execute(f'ALTER TABLE {table} ADD COLUMN "{col_name}" {col_type}')
 
-        # 迁移: 创建新表（project_groups + project_group_map）
-        self.main_db.conn.executescript("""
+        # 迁移: 创建新表（project_groups + project_group_map + doc_project_map）
+        self.main_db.executescript("""
             CREATE TABLE IF NOT EXISTS project_groups (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -1290,12 +1309,12 @@ class MultiDBManager:
 
     def _init_knowledge_tables(self):
         """初始化知识库表"""
-        self.knowledge_db.conn.executescript(KNOWLEDGE_DB_TABLES_SQL)
+        self.knowledge_db.executescript(KNOWLEDGE_DB_TABLES_SQL)
         self.knowledge_db.conn.commit()
 
     def _init_sessions_tables(self):
         """初始化会话库表"""
-        self.sessions_db.conn.executescript(SESSIONS_DB_TABLES_SQL)
+        self.sessions_db.executescript(SESSIONS_DB_TABLES_SQL)
         self.sessions_db.conn.commit()
 
     def _project_db_path(self, project_id: str, project_root: str = None) -> str:
@@ -1330,8 +1349,7 @@ class MultiDBManager:
         if self._is_remote:
             self._write_queue.execute_sync(label, PROJECT_DB_TABLES_SQL, (), timeout=60)
         else:
-            project_db.conn.executescript(PROJECT_DB_TABLES_SQL)
-            project_db.conn.commit()
+            project_db.executescript(PROJECT_DB_TABLES_SQL)
         return project_db
 
     def _migrate_project_db(self, project_db: SQLiteContext):
@@ -1363,25 +1381,31 @@ class MultiDBManager:
             pass
 
         # 迁移旧 component_analysis 数据到 community_llm_results（兼容旧库）
-        # 从社区组件 ID 中解析真实 edge_type（comm-xxx-incl-... → INCLUDE, comm-xxx-call-... → CALL）
-        # 注意：预期内失败（表不存在），用裸连接绕过 WriteQueue 避免 ERROR 日志
+        # 先检查表是否存在，避免 WQ 误报 ERROR 日志
         try:
-            project_db.conn.execute("""
-                INSERT OR IGNORE INTO community_llm_results
-                    (task_id, edge_type, comm_lv, comm_id, name, summary, component_type, status, created_at)
-                SELECT
-                    task_id,
-                    CASE
-                        WHEN component_type='community' AND component_id LIKE 'comm-%-incl-%' THEN 'INCLUDE'
-                        WHEN component_type='community' AND component_id LIKE 'comm-%-call-%' THEN 'CALL'
-                        ELSE ''
-                    END,
-                    'L0', component_id, analyzed_name, functional_summary,
-                    component_type, status, analyzed_at
-                FROM component_analysis
-            """)
+            has_ca = project_db.fetchone(
+                "SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='component_analysis'"
+            )["c"] > 0
         except Exception:
-            pass
+            has_ca = False
+        if has_ca:
+            try:
+                project_db.execute("""
+                    INSERT OR IGNORE INTO community_llm_results
+                        (task_id, edge_type, comm_lv, comm_id, name, summary, component_type, status, created_at)
+                    SELECT
+                        task_id,
+                        CASE
+                            WHEN component_type='community' AND component_id LIKE 'comm-%-incl-%' THEN 'INCLUDE'
+                            WHEN component_type='community' AND component_id LIKE 'comm-%-call-%' THEN 'CALL'
+                            ELSE ''
+                        END,
+                        'L0', component_id, analyzed_name, functional_summary,
+                        component_type, status, analyzed_at
+                    FROM component_analysis
+                """)
+            except Exception:
+                pass
         # 修复已迁移但 edge_type='' 的数据（component_analysis 表已不存在的旧迁移数据）
         try:
             project_db.execute("""
@@ -1587,11 +1611,13 @@ class MultiDBManager:
             self._project_db_last_used[project_id] = time.time()
             return self._project_db_cache[project_id]
 
-        # 如果缓存已满，关闭最久未用的连接
+        # 如果超出容量，只打 warning 不强制关闭（防止误关其他协程正在用的连接）
         if len(self._project_db_cache) >= self._project_db_max:
-            oldest_id, oldest_db = self._project_db_cache.popitem(last=False)
-            oldest_db.close()
-            self._project_db_last_used.pop(oldest_id, None)
+            logger.warning(
+                f"[get_project_db] project DB cache size {len(self._project_db_cache)} "
+                f"exceeds limit {self._project_db_max}. Idle connections will be closed by "
+                f"_evict_idle_project_dbs()."
+            )
 
         # 检查项目库文件是否存在 — 优先从项目根目录查找
         try:

@@ -53,10 +53,10 @@ const HELP_TEXT = [
   '|------|------|',
   '| `/help` / `/帮助` | 显示本帮助 |',
   '| `/select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`~/`--l5` 按条件自动选取；`--clear` 清除已选；`--unanalyzed` 只选未分析组件 |',
-  '| `/presummary [--force]` | 文件预摘要（Agent 模式），按 P0→P1→P2 顺序执行。`--force` 强制覆盖已有缓存 |',
-  '| `/analyze [--force] [-L zh/en]` | 组件分析（Agent 多轮模式），默认分析所有 L0~L5 组件。`--force` 强制覆盖已分析组件。依赖校验：预摘要需完成，高层级分析需先完成 |',
-  '| `/overview [--force] [-L zh/en]` | 生成整体架构概览文档。`--force` 强制覆盖已生成内容 |',
-  '| `/pipeline [--force] [-L zh/en]` | 流水线整体激活。顺序执行：项目摘要 → 预摘要(P0→P1→P2) → 组件分析(L0→L5) → 整体架构分析。`--force` 强制覆盖所有；默认跳过已完成。支持暂停 ⏸ / 恢复 ▶ |',
+  '| `/presummary [-j N] [--force]` | 文件预摘要（Agent 模式），按 P0→P1→P2 顺序执行。`--force` 强制覆盖已有缓存。`-j N` 并发数 1-5（默认 1） |',
+  '| `/analyze [-j N] [--force] [-L zh/en]` | 组件分析（Agent 多轮模式），默认分析所有 L0~L5 组件。`--force` 强制覆盖已分析组件。`-j N` 并发数 1-5（默认 1） |',
+  '| `/overview [--force] [-L zh/en]` | 生成整体架构概览文档。`--force` 强制覆盖已生成内容。不支持 -j 参数 |',
+  '| `/pipeline [-j N] [--force] [-L zh/en]` | 流水线整体激活。顺序执行：项目摘要 → 预摘要(P0→P1→P2) → 组件分析(L0→L5) → 整体架构分析。`--force` 强制覆盖所有。`-j N` 并发数 1-5（默认 1）|',
   '',
   '### 模式',
   '- **自由对话**：输入 TopoCode 使用相关问题，AI 基于内置文档回复',
@@ -352,7 +352,7 @@ async function handleSend() {
     }
     // /analyze — 批量分析组件（Agent 多轮模式，默认全量 L0~L5）
     if (/^\/analyze(?:_components)?\b/i.test(text)) {
-      const VALID_AC_FLAGS = ['--force', '-L']
+      const VALID_AC_FLAGS = ['--force', '-L', '-j', '--concurrency']
       const tokens = text.split(/\s+/).slice(1)
       const unknown = _validateFlags(tokens, VALID_AC_FLAGS)
       if (unknown.length > 0) {
@@ -363,6 +363,7 @@ async function handleSend() {
       }
       const force = text.includes('--force')
       const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
+      const concurrency = Math.max(1, Math.min(5, parseInt(text.match(/(?:^|\s)(?:-j|--concurrency)\s+(\d+)/i)?.[1] || '1', 10)))
       const taskId = resolveTaskId()
       if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
 
@@ -393,31 +394,32 @@ async function handleSend() {
       userInput.value = ''
       const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
       const forceHint = force ? '，强制覆盖' : '（跳过已分析）'
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的 Agent 多轮分析任务${langHint}${forceHint}：${compNames}。请到「任务」面板查看进度。`)
+      addMessage('system', `已提交 ${selectedComps.length} 个组件的 Agent 多轮分析任务${langHint}${forceHint}${concurrency > 1 ? `（并发 ${concurrency}）` : ''}：${compNames}。请到「任务」面板查看进度。`)
       if (selectionStore.selecting) selectionStore.toggleSelecting()
-      communityStore.triggerComponentAnalysis(taskId, selectedComps, language, 1, true, 30, '', 1, 'deep', force)
+      communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, true, 30, '', concurrency, 'deep', force)
         .catch(e => addMessage('error', String(e)))
       return
     }
-    // /presummary [--force] — 预摘要 P0→P1→P2（Agent 模式）
+    // /presummary [-j N] [--force] — 预摘要 P0→P1→P2（Agent 模式）
     if (/^\/presummary\b/i.test(text)) {
-      const VALID_PS_FLAGS = ['--force']
+      const VALID_PS_FLAGS = ['--force', '-j', '--concurrency']
       const tokens = text.split(/\s+/).slice(1)
       const unknown = _validateFlags(tokens, VALID_PS_FLAGS)
       const force = text.includes('--force')
+      const concurrency = Math.max(1, Math.min(5, parseInt(text.match(/(?:^|\s)(?:-j|--concurrency)\s+(\d+)/i)?.[1] || '1', 10)))
       if (unknown.length > 0) {
-        // 兼容旧子命令: 忽略未知参数，提示用户
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', '预摘要默认按 P0→P1→P2 顺序执行。可用参数: --force（强制覆盖已有缓存）')
+        addMessage('system', `未知参数: ${unknown.join('、')}。可用参数: -j N (并发1-5), --force`)
         return
       }
       addMessage('user', text)
       userInput.value = ''
       const taskId = resolveTaskId()
       if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      addMessage('system', '预摘要 P0→P1→P2 已启动（Agent 模式）。请到「任务」面板查看进度。')
-      communityStore.startPreSummaryPipeline(taskId, ['P0', 'P1', 'P2'], 0, 1)
+      const hint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
+      addMessage('system', `预摘要 P0→P1→P2 已启动${hint}。请到「任务」面板查看进度。`)
+      communityStore.startPreSummaryPipeline(taskId, ['P0', 'P1', 'P2'], 0, concurrency)
         .catch((e: any) => addMessage('system', `启动失败: ${e.message || e}`))
       return
     }
@@ -447,27 +449,29 @@ async function handleSend() {
         .catch(e => addMessage('error', String(e)))
       return
     }
-    // /pipeline [--force] — 流水线整体激活
+    // /pipeline [-j N] [--force] — 流水线整体激活
     if (/^\/pipeline\b/i.test(text)) {
-      const VALID_PIPE_FLAGS = ['--force', '-L']
+      const VALID_PIPE_FLAGS = ['--force', '-L', '-j', '--concurrency']
       const tokens = text.split(/\s+/).slice(1)
       const unknown = _validateFlags(tokens, VALID_PIPE_FLAGS)
       if (unknown.length > 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', `未知参数: ${unknown.join('、')}。可用: --force, -L zh/en`)
+        addMessage('system', `未知参数: ${unknown.join('、')}。可用: -j N (并发1-5), --force, -L zh/en`)
         return
       }
       const force = text.includes('--force')
       const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
+      const concurrency = Math.max(1, Math.min(5, parseInt(text.match(/(?:^|\s)(?:-j|--concurrency)\s+(\d+)/i)?.[1] || '1', 10)))
       addMessage('user', text)
       userInput.value = ''
       const tid = resolveTaskId()
       if (!tid) { addMessage('system', '未找到激活的任务。'); return }
       const forceHint = force ? '（强制覆盖所有）' : '（跳过已完成）'
       const langHint = language === 'zh' ? '中文' : language === 'en' ? 'English' : ''
-      addMessage('system', `流水线已启动${forceHint}${langHint ? ` | ${langHint}` : ''}。顺序执行：项目摘要 → 预摘要 P0→P1→P2 → 组件分析 L0→L5 → 整体架构分析。请到「任务」面板查看进度。`)
-      communityStore.startPipeline(tid, force, language)
+      const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
+      addMessage('system', `流水线已启动${forceHint}${langHint ? ` | ${langHint}` : ''}${concHint}。顺序执行：项目摘要 → 预摘要 P0→P1→P2 → 组件分析 L0→L5 → 整体架构分析。请到「任务」面板查看进度。`)
+      communityStore.startPipeline(tid, force, language, concurrency)
         .catch(e => addMessage('error', String(e)))
       return
     }
