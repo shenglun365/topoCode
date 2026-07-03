@@ -60,12 +60,14 @@ def build_agentic_component_tools(
 
 
 def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
-                         project_summary, concurrency=1, subagent_concurrency=1) -> ToolRegistry:
+                         project_summary, concurrency=1, subagent_concurrency=1,
+                         component_timeout=60) -> ToolRegistry:
     """构建流水线工具集 (PipelineWorkflow 专用)"""
     from .tools import AgentTool, ToolResult
     import logging
     _log = logging.getLogger(__name__)
     _sub_conc = max(1, min(int(subagent_concurrency), 5))
+    _timeout_sec = max(0, int(component_timeout)) * 60  # 分钟→秒, 0=不限时
 
     class EnsureSummaryTool(AgentTool):
         name = "pipeline_ensure_summary"
@@ -118,7 +120,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                     if ce and ce.is_set():
                         _log.info(f"[Pipeline] preSummary cancelled at {batch}")
                         break
-                    files = _pipeline_get_batch_files(project_db, task_id, batch, force, project_root)
+                    files = _pipeline_get_batch_files(project_db, task_id, pid, batch, force, project_root)
                     if not files:
                         sub_results.append(f"{batch}: 0 文件 (全缓存)")
                         continue
@@ -291,7 +293,10 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                                 _log.info(f"[Pipeline] component analysis cancelled at {level}")
                                 break
                         else:
-                            future.result(timeout=3600)
+                            if _timeout_sec > 0:
+                                future.result(timeout=_timeout_sec)
+                            else:
+                                future.result()
 
                     completed_levels += 1
                     total_components += len(components)
@@ -312,6 +317,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
     # 在函数作用域设置类属性（避免类体闭包作用域问题）
     RunPreSummaryTool._sub_conc = _sub_conc
     RunComponentAnalysisTool._sub_conc = _sub_conc
+    RunComponentAnalysisTool._timeout_sec = _timeout_sec
 
     class RunOverviewTool(AgentTool):
         name = "pipeline_run_overview"
@@ -400,7 +406,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
     return registry
 
 
-def _pipeline_get_batch_files(project_db, task_id: str, batch: str, force: bool, project_root: str = "") -> list:
+def _pipeline_get_batch_files(project_db, task_id: str, project_id: str, batch: str, force: bool, project_root: str = "") -> list:
     try:
         from task_manager import _compute_file_ranks
 
@@ -418,8 +424,8 @@ def _pipeline_get_batch_files(project_db, task_id: str, batch: str, force: bool,
         if not force:
             cached = set()
             rows = project_db.execute(
-                "SELECT file_path FROM file_summaries WHERE task_id=? AND summary IS NOT NULL",
-                (task_id,)
+                "SELECT file_path FROM file_summaries WHERE project_id=? AND summary IS NOT NULL",
+                (project_id,)
             ).fetchall()
             cached = {r[0] for r in rows}
             files = [f for f in files if f not in cached]
@@ -434,7 +440,7 @@ def _pipeline_get_level_components(project_db, task_id: str, level: str, force: 
     for et in edge_types:
         rows = project_db.execute(
             "SELECT comm_id, file_count, node_count, quality_score FROM community_hierarchy "
-            "WHERE task_id=? AND edge_type=? AND comm_lv=? ORDER BY node_count DESC LIMIT 200",
+            "WHERE task_id=? AND edge_type=? AND comm_lv=? ORDER BY node_count DESC",
             (task_id, et, level)
         ).fetchall()
         if not force:
@@ -453,4 +459,7 @@ def _pipeline_get_level_components(project_db, task_id: str, level: str, force: 
                 "level": level, "edgeType": et,
                 "metadata": {"fileCount": row[1], "nodeCount": row[2], "qualityScore": row[3] or 0},
             })
-    return results[:100]
+    return results
+
+
+

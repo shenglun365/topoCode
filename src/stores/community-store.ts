@@ -834,7 +834,14 @@ export const useCommunityStore = defineStore('community', () => {
       interval: 1500,
       fetcher: () => ipc.analysis.getAgentProgress({ agentTaskId }),
       onData: (progress) => {
-        if (!progress.found) return
+        if (!progress.found) {
+          const t = tasks.value[taskId]
+          if (t && t.agentTasks[taskIdx]) {
+            updateAgentTask(taskId, taskIdx, { status: 'failed', message: '任务已中断（后端进程重启）' })
+          }
+          controlDispatcher.unregister(controlKey)
+          return
+        }
         const t = tasks.value[taskId]
         if (!t || !t.agentTasks[taskIdx]) {
           controlDispatcher.unregister(controlKey)
@@ -961,8 +968,14 @@ export const useCommunityStore = defineStore('community', () => {
 
   async function cancelAgentTask(taskId: string, agentTaskId: string) {
     try {
-      await ipc.analysis.cancelAgentTask({ agentTaskId })
-      // 不立即改状态 — 等 backend 真正停止后，由 agent polling 检测到 CANCELLED 再更新 UI
+      const result = await ipc.analysis.cancelAgentTask({ agentTaskId })
+      if (!result.cancelled) {
+        const t = tasks.value[taskId]
+        if (t) {
+          const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
+          if (idx >= 0) updateAgentTask(taskId, idx, { status: 'cancelled', message: '任务已中断' })
+        }
+      }
       // 取消 presummary 管线队友
       const t = tasks.value[taskId]
       if (t) {
@@ -1079,7 +1092,7 @@ export const useCommunityStore = defineStore('community', () => {
     return await ipc.analysis.rerunFileSummary({ taskId, file_path: filePath })
   }
 
-  async function startPipeline(taskId: string, force = false, language = '', concurrency = 1) {
+  async function startPipeline(taskId: string, force = false, language = '', concurrency = 1, componentTimeout?: number) {
     const t = ensureTask(taskId)
     const idx = t.agentTasks.length
     const subConc = Math.max(1, Math.min(5, concurrency))
@@ -1091,6 +1104,7 @@ export const useCommunityStore = defineStore('community', () => {
         taskId, force: force || undefined, language: language || undefined,
         concurrency: subConc > 1 ? subConc : undefined,
         subagent_concurrency: subConc > 1 ? subConc : undefined,
+        component_timeout: componentTimeout,
       })
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId

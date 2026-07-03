@@ -338,10 +338,16 @@ class AgentTaskManager:
                     s.runtime = runtime
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            result = None
             try:
                 result = loop.run_until_complete(runtime.run(workflow, context))
+            except (Exception, asyncio.CancelledError) as e:
+                logger.warning(f"[AgentQueue] {agent_id} runtime error: {e}")
             finally:
-                loop.close()
+                try:
+                    loop.close()
+                except Exception:
+                    pass
                 # 清理 runtime 引用
                 with self._lock:
                     s2 = self._tasks.get(agent_id)
@@ -354,16 +360,19 @@ class AgentTaskManager:
                     if getattr(runtime, '_cancelled', False):
                         s.status = TaskState.CANCELLED
                         s.error = "cancelled"
-                    elif not result.success:
+                    elif result and not result.success:
                         s.status = TaskState.FAILED
                         s.error = result.error or "unknown error"
-                    elif result.steps_completed < result.steps_total and result.steps_completed > 0:
+                    elif result and result.steps_completed < result.steps_total and result.steps_completed > 0:
                         s.status = TaskState.PARTIAL
-                    else:
+                    elif result:
                         s.status = TaskState.COMPLETED
+                    else:
+                        s.status = TaskState.FAILED
+                        s.error = "runtime produced no result"
                     s.finished_at = time.time()
 
-        except Exception as e:
+        except BaseException as e:
             logger.exception(f"[AgentQueue] {agent_id} crash: {e}")
             with self._lock:
                 s = self._tasks.get(agent_id)

@@ -1,5 +1,9 @@
 """
-import_service.py — 导入后台线程：JSONL 解析 → 新项目创建 + 数据重映射 + ZMQ 进度
+import_service.py — 导入后台线程：JSONL 解析 → 新项目创建/恢复 + 数据重映射 + ZMQ 进度
+
+两种模式:
+  - "share" (默认): 创建新项目，保留原始 task_id（仅冲突时重映射并联动切换引用）
+  - "restore": 校验 projectId 一致后覆盖原项目，保留 task_id 和原始状态
 """
 import json
 import logging
@@ -20,16 +24,35 @@ IMPORT_STATUS_RUNNING = "running"
 IMPORT_STATUS_DONE = "done"
 IMPORT_STATUS_ERROR = "error"
 
+IMPORT_MODE_SHARE = "share"
+IMPORT_MODE_RESTORE = "restore"
+
 _import_tasks: dict[str, dict] = {}
 _import_lock = threading.Lock()
 
 
-def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
-    """后台导入线程 — 只允许创建新项目"""
+def _clear_project_analysis_data(project_db, table_names: list[str]):
+    """清空项目库中指定的分析数据表（用于 restore 覆盖模式）"""
+    for table in table_names:
+        try:
+            project_db.execute(f"DELETE FROM {table}")
+        except Exception:
+            pass
+    project_db.commit()
+
+
+def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
+                   import_mode: str = IMPORT_MODE_SHARE,
+                   target_project_id: str = "",
+                   cleanup_archive: bool = False):
+    """后台导入线程"""
     t0 = time.time()
     tmp_dir = None
     try:
         main_db = multi_db.main_db
+
+        if not target_project_id:
+            raise ValueError("必须指定目标项目 ID")
 
         _update_status(import_id, IMPORT_STATUS_RUNNING, 0, "解压导入包")
 
@@ -53,40 +76,51 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
             with open(proj_path, "r", encoding="utf-8") as f:
                 proj_info = json.load(f)
 
+        original_project_id = manifest.get("projectId", "")
         import_name = proj_info.get("name", manifest.get("projectName", "Imported Project"))
         import_language = proj_info.get("language", "Unknown")
-
-        # ── 创建新项目（同名自动加后缀） ──
-        project_id = f"proj-{uuid.uuid4().hex[:8]}"
-        base_name = import_name
-        suffix = 1
-        while main_db.fetchone("SELECT id FROM projects WHERE name = ?", (base_name,)):
-            base_name = f"{import_name}-{suffix}"
-            suffix += 1
-
         now = datetime.now().isoformat()
-        main_db.insert("projects", {
-            "id": project_id,
-            "name": base_name,
-            "root_path": "",
-            "language": import_language,
-            "file_count": 0,
-            "status": "synced",
-            "needs_resync": 1,
-            "has_file_changes": 0,
-            "is_sample": 0,
-            "created_at": now,
-            "updated_at": now,
-        })
-        logger.info(f"[Import] created project {project_id} ({base_name})")
+        is_restore = import_mode == IMPORT_MODE_RESTORE
 
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 10, "创建项目库")
+        # ── projectId 校验 ──
+        if is_restore:
+            if original_project_id != target_project_id:
+                raise ValueError(
+                    f"导入包的项目 ID ({original_project_id}) "
+                    f"与当前项目 ID ({target_project_id}) 不一致，拒绝导入"
+                )
 
-        # ── 创建项目 DB ──
-        project_db = multi_db.init_project_db(project_id)
+        # ── 获取目标项目 ──
+        existing_project = main_db.fetchone(
+            "SELECT * FROM projects WHERE id = ?", (target_project_id,)
+        )
+        if not existing_project:
+            raise ValueError(f"目标项目不存在: {target_project_id}")
+
+        project_id = existing_project["id"]
+        base_name = existing_project["name"]
+        logger.info(f"[Import] {import_mode} mode: writing to project {project_id} ({base_name})")
+        _update_status(import_id, IMPORT_STATUS_RUNNING, 5,
+                       f"{'覆盖' if is_restore else '写入'}现有项目 {base_name}")
+
+        # ── 清空旧的分析数据 ──
+        clear_tables = [
+            "source_files", "graph_node", "graph_edge", "graph_doc",
+            "community_hierarchy", "community_llm_results", "report_subdocs",
+            "file_summaries", "file_hashes",
+        ]
+        project_db = multi_db.get_project_db(project_id)
         multi_db._migrate_project_db(project_db)
+        _clear_project_analysis_data(project_db, clear_tables)
 
-        # ── 读取 JSONL，统计行数 ──
+        # 删除旧的任务记录
+        old_tasks = main_db.fetchall(
+            "SELECT id FROM analysis_tasks WHERE project_id = ?", (project_id,)
+        )
+        for ot in old_tasks:
+            main_db.delete("analysis_tasks", "id = ?", (ot["id"],))
+
+        # ── 读取 JSONL 配置 ──
         jsonl_files = {
             "source_files": {"table": "source_files", "cols": None},
             "graph_nodes": {"table": "graph_node", "cols": None},
@@ -98,8 +132,8 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
             "file_summaries": {"table": "file_summaries", "cols": None},
         }
 
-        # ── 读取 tasks.jsonl，重映射 task_id ──
-        task_map = {}  # old_task_id → new_task_id
+        # ── 读取 tasks.jsonl，确定 task_id 映射 ──
+        task_map = {}
         imported_tasks = []
         tasks_path = os.path.join(tmp_dir, "tasks.jsonl")
         if os.path.exists(tasks_path):
@@ -110,11 +144,25 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
                         continue
                     old_task = json.loads(line)
                     old_id = old_task.get("id", "")
-                    new_id = f"task-{uuid.uuid4().hex[:12]}"
-                    task_map[old_id] = new_id
+
+                    # restore 模式：保留原始 task_id
+                    # share 模式：保留原始 task_id，但检查是否与全局已有任务冲突
+                    new_id = old_id
+                    if not is_restore:
+                        existing = main_db.fetchone(
+                            "SELECT id FROM analysis_tasks WHERE id = ?", (old_id,)
+                        )
+                        if existing:
+                            new_id = f"task-{uuid.uuid4().hex[:12]}"
+                            logger.info(f"[Import] task_id conflict: {old_id} -> {new_id}")
+
+                    if new_id != old_id:
+                        task_map[old_id] = new_id
+
                     old_task["id"] = new_id
                     old_task["project_id"] = project_id
-                    old_task["status"] = "done"
+                    if not is_restore:
+                        old_task["status"] = "done"
                     if "created_at" not in old_task:
                         old_task["created_at"] = now
                     if "updated_at" not in old_task:
@@ -151,20 +199,22 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
                     if not line:
                         continue
                     row = json.loads(line)
-                    # 重映射 task_id
-                    if "task_id" in row:
-                        old_tid = row["task_id"]
-                        row["task_id"] = task_map.get(old_tid, old_tid)
-                    # 清理 project_id 字段
+                    # task_id 冲突重映射（task_map 有值才替换）
+                    if "task_id" in row and row["task_id"] in task_map:
+                        row["task_id"] = task_map[row["task_id"]]
+                    # 设置 project_id
                     if "project_id" in row:
                         row["project_id"] = project_id
+                    # md5_hash 只在 source_files.jsonl 中存在（用于 file_hashes），
+                    # source_files 表本身没有此列，移除避免 INSERT 失败
+                    if table == "source_files" and "md5_hash" in row:
+                        del row["md5_hash"]
                     rows.append(row)
 
             if not rows:
                 step += 1
                 continue
 
-            # 批量插入
             if rows:
                 _bulk_insert(project_db, table, rows)
 
@@ -205,11 +255,6 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
 
         # ── 更新 project 统计 ──
         _update_status(import_id, IMPORT_STATUS_RUNNING, 96, "更新项目信息")
-        source_count = main_db.fetchone(
-            "SELECT COUNT(*) AS cnt FROM source_files WHERE project_id = ? AND language != 'directory'",
-            (project_id,)
-        ) if False else 0  # source_files 在 project DB, 不通过 main_db
-        # 用 project DB 统计
         try:
             cnt_row = project_db.fetchone(
                 "SELECT COUNT(*) AS cnt FROM source_files WHERE language != 'directory'"
@@ -246,6 +291,13 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn):
     finally:
         if tmp_dir and os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir, ignore_errors=True)
+        # 清理上传的临时 copy（HTTP 上传路径传 cleanup_archive=True）
+        if cleanup_archive and archive_path and os.path.exists(archive_path):
+            try:
+                os.remove(archive_path)
+                logger.info(f"[Import] cleaned up archive: {archive_path}")
+            except Exception as e:
+                logger.warning(f"[Import] failed to clean up archive: {e}")
 
 
 def _bulk_insert(project_db, table: str, rows: list[dict]):
@@ -291,10 +343,23 @@ def _update_status(import_id: str, status: str, progress: int,
                 _import_tasks[import_id]["result"] = result
 
 
-def start_import(multi_db, archive_path: str, publish_fn) -> str:
-    """启动导入后台任务，返回 import_id"""
+def start_import(multi_db, archive_path: str, publish_fn,
+                 import_mode: str = IMPORT_MODE_SHARE,
+                 target_project_id: str = "",
+                 cleanup_archive: bool = False) -> str:
+    """启动导入后台任务，返回 import_id
+
+    import_mode:
+      - "share" (默认): 写入 target_project_id 项目，保留原始 task_id（仅冲突时重映射）
+      - "restore": 校验 target_project_id 与导入包一致后覆盖
+
+    target_project_id: 写入目标的项目 ID（share/restore 都需要）
+    cleanup_archive: 导入完成后是否删除源 zip（HTTP 上传路径使用）
+    """
     if not os.path.exists(archive_path):
         raise FileNotFoundError(f"Archive not found: {archive_path}")
+    if import_mode not in (IMPORT_MODE_SHARE, IMPORT_MODE_RESTORE):
+        raise ValueError(f"Invalid import_mode: {import_mode}")
 
     import_id = f"import-{uuid.uuid4().hex[:12]}"
     with _import_lock:
@@ -307,7 +372,8 @@ def start_import(multi_db, archive_path: str, publish_fn) -> str:
         }
     thread = threading.Thread(
         target=_import_worker,
-        args=(import_id, multi_db, archive_path, publish_fn),
+        args=(import_id, multi_db, archive_path, publish_fn, import_mode,
+              target_project_id, cleanup_archive),
         daemon=True,
     )
     thread.start()

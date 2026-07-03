@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   // ==================== 对话框 ====================
   dialog: {
     openDirectory: () => ipcRenderer.invoke('dialog:open-directory'),
+    openFile: (filters?: { name: string; extensions: string[] }[]) =>
+      ipcRenderer.invoke('dialog:open-file', filters || []),
   },
 
   // ==================== 环境变量 (白名单) ====================
@@ -539,8 +541,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'system.exportProject', params: { projectId, taskIds } }),
     exportStatus: (exportId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'system.exportStatus', params: { exportId } }),
-    importProjectArchive: (archivePath: string) =>
-      ipcRenderer.invoke('ipc:call', { method: 'system.importProjectArchive', params: { archivePath } }),
+    importProjectArchive: (archivePath: string, importMode?: string, projectId?: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.importProjectArchive', params: { archivePath, importMode, projectId } }),
     importStatus: (importId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'system.importStatus', params: { importId } }),
     verifyFiles: (projectId: string) =>

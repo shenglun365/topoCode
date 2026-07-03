@@ -37,6 +37,15 @@ from skills import get_skill_registry
 
 app = FastAPI(title="TopoOne Web Viewer")
 
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
@@ -2479,13 +2488,15 @@ async def start_import(request: Request):
         file = form.get("file")
         if not file:
             raise HTTPException(422, "file is required")
+        mode = form.get("mode", "share")
         import_path = os.path.join(multi_db.data_dir, "imports")
         os.makedirs(import_path, exist_ok=True)
         local_path = os.path.join(import_path, f"upload-{uuid.uuid4().hex[:12]}.zip")
         content = await file.read()
         with open(local_path, "wb") as f:
             f.write(content)
-        import_id = _import_svc.start_import(multi_db, local_path, _publish)
+        import_id = _import_svc.start_import(multi_db, local_path, _publish,
+                                              import_mode=mode, cleanup_archive=True)
         return {"importId": import_id, "status": "running"}
     except HTTPException:
         raise

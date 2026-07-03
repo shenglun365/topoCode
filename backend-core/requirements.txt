@@ -27,6 +27,7 @@ requests==2.34.2
 # Web 服务 (浏览器端文档浏览)
 fastapi==0.136.3
 uvicorn==0.48.0
+python-multipart==0.0.32
 
 # 工具库
 pydantic==2.13.4

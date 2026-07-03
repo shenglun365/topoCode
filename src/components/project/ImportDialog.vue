@@ -4,13 +4,17 @@ import { useI18n } from 'vue-i18n'
 import { ArrowUpTrayIcon } from '@heroicons/vue/24/outline'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
+import { useAnalysisStore } from '@/stores/analysis'
 
 const { t } = useI18n()
 const router = useRouter()
 const projectStore = useProjectStore()
+const analysisStore = useAnalysisStore()
 
+const props = withDefaults(defineProps<{ projectId?: string }>(), { projectId: '' })
 const emit = defineEmits<{ close: [] }>()
 
+const importMode = ref('share')
 const uploading = ref(false)
 const progress = ref(0)
 const message = ref('')
@@ -24,35 +28,20 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
 })
 
-async function handleFileSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-
-  if (!file.name.endsWith('.zip')) {
-    error.value = t('project.importNeedZip', '请选择 .zip 格式的导出包')
-    return
-  }
-
-  uploading.value = true
-  error.value = ''
-  const baseUrl = `http://127.0.0.1:3456`
-
+async function pickAndImport() {
+  const filters = [{ name: 'Structure Analysis Export', extensions: ['zip'] }]
   try {
-    const formData = new FormData()
-    formData.append('file', file)
+    const filePath = await (window.api as any).dialog.openFile(filters)
+    if (!filePath) return
 
-    const resp = await fetch(`${baseUrl}/api/import`, { method: 'POST', body: formData })
-    if (!resp.ok) {
-      const errData = await resp.json().catch(() => null)
-      throw new Error(errData?.detail || `HTTP ${resp.status}`)
-    }
-    const data = await resp.json()
-    const importId = data.importId
+    uploading.value = true
+    error.value = ''
 
+    const result = await (window.api as any).system.importProjectArchive(filePath, importMode.value, props.projectId)
+    const importId = result.importId
     startPolling(importId)
   } catch (e: any) {
-    error.value = e.message || '上传失败'
+    error.value = e.message || '导入失败'
     uploading.value = false
   }
 }
@@ -70,6 +59,19 @@ function startPolling(importId: string) {
         uploading.value = false
         newProjectId.value = status.result?.projectId || ''
         newProjectName.value = status.result?.projectName || ''
+        // 自动刷新：导入完成后延迟短暂时间后导航/刷新
+        setTimeout(async () => {
+          if (newProjectId.value) {
+            await projectStore.loadProjects()
+            projectStore.selectProject(newProjectId.value)
+            // 如果导入到已有项目（restore），刷新任务列表
+            if (props.projectId && newProjectId.value === props.projectId) {
+              await analysisStore.loadTasks(props.projectId)
+            }
+            router.push('/code')
+          }
+          emit('close')
+        }, 500)
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
         error.value = status.message || '导入失败'
@@ -79,15 +81,6 @@ function startPolling(importId: string) {
       // ignore
     }
   }, 10000)
-}
-
-async function goToProject() {
-  if (newProjectId.value) {
-    await projectStore.loadProjects()
-    projectStore.selectProject(newProjectId.value)
-    router.push('/code')
-  }
-  emit('close')
 }
 
 function close() {
@@ -108,10 +101,19 @@ function close() {
         <div v-if="!uploading && !done" class="upload-area">
           <div class="upload-icon"><ArrowUpTrayIcon class="icon-lg" /></div>
           <div class="upload-hint">{{ t('project.importHint', '选择之前导出的结构分析包 (.zip)') }}</div>
-          <label class="upload-btn-label">
-            <input type="file" accept=".zip" class="file-input" @change="handleFileSelect">
-            <span class="btn btn-primary btn-sm">{{ t('project.selectFile', '选择文件') }}</span>
-          </label>
+          <div class="mode-selector">
+            <label class="mode-option">
+              <input v-model="importMode" type="radio" value="share" class="mode-radio">
+              <span class="mode-label">{{ t('project.importModeShare', '作为新项目导入（分享）') }}</span>
+            </label>
+            <label class="mode-option">
+              <input v-model="importMode" type="radio" value="restore" class="mode-radio">
+              <span class="mode-label">{{ t('project.importModeRestore', '覆盖原项目（恢复备份）') }}</span>
+            </label>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="pickAndImport">
+            {{ t('project.selectFile', '选择文件') }}
+          </button>
           <div v-if="error" class="error-msg">{{ error }}</div>
         </div>
 
@@ -151,8 +153,12 @@ function close() {
 .upload-icon { color: var(--text-muted); }
 .icon-lg { width: 40px; height: 40px; }
 .upload-hint { font-size: 12px; color: var(--text-muted); text-align: center; }
-.file-input { display: none; }
-.upload-btn-label { cursor: pointer; }
+
+.mode-selector { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 0 8px; }
+.mode-option { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 6px; border-radius: 4px; font-size: 11px; }
+.mode-option:hover { background: var(--bg-tertiary); }
+.mode-radio { accent-color: var(--accent); width: 14px; height: 14px; }
+.mode-label { color: var(--text-primary); }
 .error-msg { padding: 6px 16px; font-size: 11px; color: var(--error); text-align: center; }
 .progress-section { padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
 .progress-bar-track { height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }

@@ -64,8 +64,9 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
         project_name = project.get("name", project_id)
         _rel = _make_rel(project_root)
 
-        # 创建导出目录
-        exports_dir = os.path.join(project_root, ".topocode", EXPORT_DIR_NAME)
+        # 创建导出目录（对导入项目 root_path="" 则 fallback 到 data_dir）
+        base_export_dir = project_root if project_root else multi_db.data_dir
+        exports_dir = os.path.join(base_export_dir, ".topocode", EXPORT_DIR_NAME)
         os.makedirs(exports_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in project_name)
@@ -96,7 +97,8 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
         _update_status(export_id, EXPORT_STATUS_RUNNING, 0, f"导出 {len(all_tasks)} 个任务")
 
         task_id_list = [t["id"] for t in all_tasks]
-        total_steps = 7 + len(all_tasks) * 6
+        # 实际步数: 3(manifest+project.json+source_files) + n*8(task+7table) + 1(更新manifest)
+        total_steps = 4 + len(all_tasks) * 8
         step = 0
 
         def _progress(msg, inc=1):

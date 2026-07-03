@@ -20,7 +20,7 @@ import { useProjectStore } from '@/stores/project'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useStatusStore } from '@/stores/status'
 import { useNavigationStore } from '@/stores/navigation'
-import ImportDialog from '@/components/project/ImportDialog.vue'
+
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('SH-005')
@@ -107,13 +107,10 @@ function onDropdownMouseLeave() {
 const showAbout = ref(false)
 const showExitConfirm = ref(false)
 const showDuplicateDialog = ref(false)
-const showImportStructureDialog = ref(false)
-
 type MenuItem = { label?: string; shortcut?: string; action?: string; divider?: boolean }
 const menus: Record<string, MenuItem[]> = {
   file: [
     { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O', action: 'import' },
-    { label: t('shell.topBar.importStructure'), shortcut: '', action: 'importStructure' },
     { divider: true } as any,
     { label: t('shell.topBar.goHome'), shortcut: '' },
     { divider: true } as any,
@@ -138,8 +135,6 @@ async function handleMenuItemClick(item: any) {
   closeMenu()
   if (item.action === 'import') {
     await handleFileImport()
-  } else if (item.action === 'importStructure') {
-    showImportStructureDialog.value = true
   } else if (item.action === 'goHome') {
     router.push('/home')
     navigation.navigateTo('home')
@@ -458,11 +453,6 @@ onMounted(() => {
       </div>
     </Teleport>
 
-    <!-- 导入结构分析 -->
-    <ImportDialog
-      v-if="showImportStructureDialog"
-      @close="showImportStructureDialog = false"
-    />
   </div>
 </template>
 

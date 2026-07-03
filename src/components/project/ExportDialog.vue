@@ -28,6 +28,7 @@ const message = ref('')
 const done = ref(false)
 const downloadUrl = ref('')
 const error = ref('')
+const httpBase = ref('http://localhost:3456')
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
@@ -38,6 +39,10 @@ onMounted(async () => {
       name: t.name,
       checked: true,
     }))
+    try {
+      const port = await (window.api as any).system.getHttpPort()
+      if (port) httpBase.value = `http://localhost:${port}`
+    } catch { /* use default */ }
   } catch (e) {
     error.value = '加载任务列表失败'
   } finally {
@@ -72,7 +77,6 @@ async function startExport() {
 }
 
 function startPolling() {
-  const baseUrl = `http://127.0.0.1:3456`
   pollTimer = setInterval(async () => {
     try {
       const status = await (window.api as any).system.exportStatus(exportId.value)
@@ -83,7 +87,7 @@ function startPolling() {
         if (pollTimer) clearInterval(pollTimer)
         done.value = true
         exporting.value = false
-        downloadUrl.value = `${baseUrl}/api/export/${exportId.value}/download`
+        downloadUrl.value = `${httpBase.value}/api/export/${exportId.value}/download`
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
         error.value = status.message || '导出失败'

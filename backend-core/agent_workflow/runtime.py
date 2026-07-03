@@ -518,162 +518,184 @@ class AgentRuntime:
             final_response: Optional[str] = None
             comp_turns = 0
 
-            for turn in range(effective_max_turns):
-                self._sync_cancel()
-                if self._pause_event.is_set() and not self._actually_paused:
-                    self._actually_paused = True
-                    self._notify_state("paused")
-                while self._pause_event.is_set():
-                    await asyncio.sleep(0.2)
-                    self._sync_cancel()
-                    if self._cancelled:
-                        break
-                if self._actually_paused:
-                    self._actually_paused = False
-                    self._notify_state("running")
-                self._sync_cancel()
-                if self._cancelled or self._sandbox.budget.exhausted():
-                    break
-
-                try:
-                    response = await self._run_agentic_chat(
-                        messages, tools_schema, strategy, workflow.max_turn_timeout,
+            for attempt in range(2):
+                if attempt > 0:
+                    logger.info(f"[AgentRuntime] comp={comp_id} retry attempt {attempt} with enhanced prompt")
+                    system_prompt = workflow.get_system_prompt(comp, project_summary, detail_level=analysis_mode)
+                    system_prompt += (
+                        "\n\n【重要】前一次输出的 JSON 格式不符合要求。"
+                        "本次必须输出包含 'name'（名称≤20字）和 'summary'（功能概要100-2000字）字段的有效 JSON。"
                     )
-                except asyncio.TimeoutError:
-                    logger.warning(f"[AgentRuntime] comp={comp_id} turn {turn} timeout")
-                    if not final_response:
-                        final_response = ""
-                    break
-                except asyncio.CancelledError:
-                    logger.info(f"[AgentRuntime] comp={comp_id} turn {turn} cancelled")
-                    break
-                except Exception as e:
-                    logger.warning(f"[AgentRuntime] comp={comp_id} turn {turn} failed: {e}, retrying...")
-                    await asyncio.sleep(1)
+                    user_context = comp.get("context", "")
+                    if not user_context:
+                        user_context = f"组件ID: {comp_id}\n组件名称: {comp_name}\n组件类型: {comp.get('type', 'community')}"
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_context},
+                    ]
+                    self._reset_detection_state()
+                    final_response = None
+                    comp_turns = 0
+
+                for turn in range(effective_max_turns):
+                    self._sync_cancel()
+                    if self._pause_event.is_set() and not self._actually_paused:
+                        self._actually_paused = True
+                        self._notify_state("paused")
+                    while self._pause_event.is_set():
+                        await asyncio.sleep(0.2)
+                        self._sync_cancel()
+                        if self._cancelled:
+                            break
+                    if self._actually_paused:
+                        self._actually_paused = False
+                        self._notify_state("running")
+                    self._sync_cancel()
+                    if self._cancelled or self._sandbox.budget.exhausted():
+                        break
+
                     try:
                         response = await self._run_agentic_chat(
                             messages, tools_schema, strategy, workflow.max_turn_timeout,
                         )
-                    except asyncio.CancelledError:
-                        logger.info(f"[AgentRuntime] comp={comp_id} turn {turn} cancelled (retry)")
-                        break
-                    except Exception as e2:
-                        logger.warning(f"[AgentRuntime] comp={comp_id} retry also failed: {e2}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[AgentRuntime] comp={comp_id} turn {turn} timeout")
                         if not final_response:
                             final_response = ""
                         break
+                    except asyncio.CancelledError:
+                        logger.info(f"[AgentRuntime] comp={comp_id} turn {turn} cancelled")
+                        break
+                    except Exception as e:
+                        logger.warning(f"[AgentRuntime] comp={comp_id} turn {turn} failed: {e}, retrying...")
+                        await asyncio.sleep(1)
+                        try:
+                            response = await self._run_agentic_chat(
+                                messages, tools_schema, strategy, workflow.max_turn_timeout,
+                            )
+                        except asyncio.CancelledError:
+                            logger.info(f"[AgentRuntime] comp={comp_id} turn {turn} cancelled (retry)")
+                            break
+                        except Exception as e2:
+                            logger.warning(f"[AgentRuntime] comp={comp_id} retry also failed: {e2}")
+                            if not final_response:
+                                final_response = ""
+                            break
 
-                total_tokens += response.tokens_used or 0
-                comp_turns = turn + 1
+                    total_tokens += response.tokens_used or 0
+                    comp_turns = turn + 1
 
-                # ── 死循环检测 ──
-                if response.tool_calls:
-                    if self._detect_tool_call_loop(response.tool_calls):
-                        self._loop_warning_count += 1
-                        if self._loop_warning_count >= 2:
-                            logger.warning(f"[AgentRuntime] comp={comp_id} 工具死循环，强制退出")
+                    # ── 死循环检测 ──
+                    if response.tool_calls:
+                        if self._detect_tool_call_loop(response.tool_calls):
+                            self._loop_warning_count += 1
+                            if self._loop_warning_count >= 2:
+                                logger.warning(f"[AgentRuntime] comp={comp_id} 工具死循环，强制退出")
+                                final_response = self._build_agentic_fallback(comp, messages)
+                                break
+                            logger.info(f"[AgentRuntime] comp={comp_id} 工具死循环，推送提醒")
+                            messages.append({
+                                "role": "user",
+                                "content": "你在重复相同的工具调用。请根据已有结果直接输出最终 JSON 分析结果。"
+                            })
+                            continue
+                    # ── 低质量内容检测 ──
+                    elif response.content and _is_low_quality_content(response.content):
+                        self._content_warning_count += 1
+                        if self._content_warning_count >= 2:
+                            logger.warning(f"[AgentRuntime] comp={comp_id} 连续低质量内容，强制退出")
                             final_response = self._build_agentic_fallback(comp, messages)
                             break
-                        logger.info(f"[AgentRuntime] comp={comp_id} 工具死循环，推送提醒")
+                        logger.info(f"[AgentRuntime] comp={comp_id} 低质量内容，推送提醒")
                         messages.append({
                             "role": "user",
-                            "content": "你在重复相同的工具调用。请根据已有结果直接输出最终 JSON 分析结果。"
+                            "content": "请输出有意义的分析内容，不要输出空白或重复字符。"
                         })
                         continue
-                # ── 低质量内容检测 ──
-                elif response.content and _is_low_quality_content(response.content):
-                    self._content_warning_count += 1
-                    if self._content_warning_count >= 2:
-                        logger.warning(f"[AgentRuntime] comp={comp_id} 连续低质量内容，强制退出")
-                        final_response = self._build_agentic_fallback(comp, messages)
-                        break
-                    logger.info(f"[AgentRuntime] comp={comp_id} 低质量内容，推送提醒")
-                    messages.append({
-                        "role": "user",
-                        "content": "请输出有意义的分析内容，不要输出空白或重复字符。"
-                    })
-                    continue
 
-                if not response.tool_calls:
-                    if response.content:
-                        final_response = response.content
+                    if not response.tool_calls:
+                        if response.content:
+                            final_response = response.content
+                            break
+                        # 模型返回空内容 + 无工具调用 → 引导输出 JSON（最多引导 1 次）
+                        if turn < effective_max_turns - 1:
+                            logger.info(f"[AgentRuntime] comp={comp_id} push: 引导输出 JSON")
+                            messages.append({
+                                "role": "user",
+                                "content": "请根据已有的所有工具结果，直接输出最终 JSON 分析结果。"
+                            })
+                            continue
+                        final_response = ""
                         break
-                    # 模型返回空内容 + 无工具调用 → 引导输出 JSON（最多引导 1 次）
-                    if turn < effective_max_turns - 1:
-                        logger.info(f"[AgentRuntime] comp={comp_id} push: 引导输出 JSON")
+
+                    # 最后一轮：不执行工具，用已有 content（可能为空）退出
+                    if turn == effective_max_turns - 1:
+                        logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮，忽略工具调用")
+                        final_response = response.content or ""
+                        break
+
+                    # 执行本轮工具调用
+                    tool_results: list[dict] = []
+                    for tc in response.tool_calls[:3]:
+                        tool = self._tools.get(tc.name)
+                        if tool:
+                            tool.cancel_event = self._cancel_event
+                        # 防御性参数修复：XML fallback 解析可能将数组保留为 JSON 字符串
+                        sanitized = {}
+                        for k, v in tc.arguments.items():
+                            if isinstance(v, str):
+                                try:
+                                    parsed = json.loads(v)
+                                    if isinstance(parsed, (list, dict)):
+                                        sanitized[k] = parsed
+                                        continue
+                                except Exception:
+                                    pass
+                            sanitized[k] = v
+                        try:
+                            result = await tool.execute(**sanitized) if tool else ToolResult.fail(f"Unknown tool: {tc.name}")
+                            logger.info(f"[AgentRuntime] agentic tool={tc.name} args={tc.arguments} success={result.success} tokens={result.tokens_used or 0}")
+                            if result.success and result.data and isinstance(result.data, str):
+                                result.data = self._sandbox.content.sanitize(result.data)
+                        except Exception as e:
+                            result = ToolResult.fail(str(e))
+                        total_tokens += result.tokens_used or 0
+                        tool_results.append({
+                            "tool_call_id": tc.id or f"call_{comp_idx}_{turn}_{len(tool_results)}",
+                            "name": tc.name,
+                            "content": str(result.data or result.error or ""),
+                        })
+
+                    # 追加 tool_calls + tool results 到 messages
+                    assistant_msg: dict = {"role": "assistant", "content": None}
+                    if tool_results:
+                        assistant_msg["tool_calls"] = [
+                            {"id": tr["tool_call_id"], "type": "function",
+                             "function": {"name": tr["name"], "arguments": json.dumps(tc.arguments)}}
+                            for tr, tc in zip(tool_results, response.tool_calls)
+                        ]
+                    messages.append(assistant_msg)
+                    for tr in tool_results:
+                        messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"],
+                                         "content": tr["content"][:2000]})
+
+                    # 倒数第二轮：追加提醒，让模型在最后一轮直接输出 JSON
+                    if turn == effective_max_turns - 2:
+                        logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮提醒")
                         messages.append({
                             "role": "user",
-                            "content": "请根据已有的所有工具结果，直接输出最终 JSON 分析结果。"
+                            "content": "这是最后一轮。请根据已有的所有信息，直接输出最终 JSON 分析结果，不要再调用工具。"
                         })
-                        continue
-                    final_response = ""
+
+                if self._cancelled:
                     break
-
-                # 最后一轮：不执行工具，用已有 content（可能为空）退出
-                if turn == effective_max_turns - 1:
-                    logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮，忽略工具调用")
-                    final_response = response.content or ""
+                if final_response and self._is_valid_json_output(final_response):
                     break
-
-                # 执行本轮工具调用
-                tool_results: list[dict] = []
-                for tc in response.tool_calls[:3]:
-                    tool = self._tools.get(tc.name)
-                    if tool:
-                        tool.cancel_event = self._cancel_event
-                    # 防御性参数修复：XML fallback 解析可能将数组保留为 JSON 字符串
-                    sanitized = {}
-                    for k, v in tc.arguments.items():
-                        if isinstance(v, str):
-                            try:
-                                parsed = json.loads(v)
-                                if isinstance(parsed, (list, dict)):
-                                    sanitized[k] = parsed
-                                    continue
-                            except Exception:
-                                pass
-                        sanitized[k] = v
-                    try:
-                        result = await tool.execute(**sanitized) if tool else ToolResult.fail(f"Unknown tool: {tc.name}")
-                        logger.info(f"[AgentRuntime] agentic tool={tc.name} args={tc.arguments} success={result.success} tokens={result.tokens_used or 0}")
-                        if result.success and result.data and isinstance(result.data, str):
-                            result.data = self._sandbox.content.sanitize(result.data)
-                    except Exception as e:
-                        result = ToolResult.fail(str(e))
-                    total_tokens += result.tokens_used or 0
-                    tool_results.append({
-                        "tool_call_id": tc.id or f"call_{comp_idx}_{turn}_{len(tool_results)}",
-                        "name": tc.name,
-                        "content": str(result.data or result.error or ""),
-                    })
-
-                # 追加 tool_calls + tool results 到 messages
-                assistant_msg: dict = {"role": "assistant", "content": None}
-                if tool_results:
-                    assistant_msg["tool_calls"] = [
-                        {"id": tr["tool_call_id"], "type": "function",
-                         "function": {"name": tr["name"], "arguments": json.dumps(tc.arguments)}}
-                        for tr, tc in zip(tool_results, response.tool_calls)
-                    ]
-                messages.append(assistant_msg)
-                for tr in tool_results:
-                    messages.append({"role": "tool", "tool_call_id": tr["tool_call_id"],
-                                     "content": tr["content"][:2000]})
-
-                # 倒数第二轮：追加提醒，让模型在最后一轮直接输出 JSON
-                if turn == effective_max_turns - 2:
-                    logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮提醒")
-                    messages.append({
-                        "role": "user",
-                        "content": "这是最后一轮。请根据已有的所有信息，直接输出最终 JSON 分析结果，不要再调用工具。"
-                    })
 
             # 保存当前组件结果
             self._save_component_result(comp, final_response or "", context)
             comp_success = bool(final_response)
             if not comp_success and comp_turns > 0:
-                # 模型执行了工具调用但未返回有效最终输出（如超出上下文窗口）
-                # 用最后一条有意义的消息作为回退内容
                 fallback_text = self._build_agentic_fallback(comp, messages)
                 if fallback_text:
                     final_response = fallback_text
@@ -709,6 +731,50 @@ class AgentRuntime:
             message=f"完成: {len(components)} 组件, {total_turns} 轮",
         )
         return final
+
+    def _is_valid_json_output(self, text: str) -> bool:
+        if not text or not text.strip():
+            return False
+        try:
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(lines[1:]) if len(lines) > 1 else cleaned
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
+                cleaned = cleaned.strip()
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:].strip()
+            parsed = json.loads(cleaned)
+            item = parsed
+            if isinstance(item, dict) and "components" in item:
+                items = item["components"]
+                if isinstance(items, list) and items:
+                    item = items[0]
+            if isinstance(item, list) and item:
+                item = item[0]
+            if isinstance(item, dict):
+                name = item.get("name")
+                summary = item.get("summary") or item.get("functional_summary", "")
+                return bool(name and summary and len(summary) > 10)
+        except Exception:
+            pass
+        try:
+            import re
+            for pattern in [r'(\{.*\})', r'(\[.*\])']:
+                match = re.search(pattern, text, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group(1))
+                    item = parsed
+                    if isinstance(item, list) and item:
+                        item = item[0]
+                    if isinstance(item, dict):
+                        name = item.get("name")
+                        summary = item.get("summary") or item.get("functional_summary", "")
+                        return bool(name and summary and len(summary) > 10)
+        except Exception:
+            pass
+        return False
 
     def _save_component_result(self, component: dict, output: str, context: dict):
         """保存单个组件的分析结果到 DB"""

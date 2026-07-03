@@ -8,6 +8,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 import uuid
 from typing import Dict, Callable, Any, Optional
 
@@ -108,6 +109,10 @@ class ZMQServer:
         # 运行状态
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._loop_thread: Optional[threading.Thread] = None
+        self._ipc_sem: Optional[asyncio.Semaphore] = None
+        self._publish_queue: Optional[asyncio.Queue] = None
+        self._poller: Optional[zmq.asyncio.Poller] = None
 
     def register(self, name: str):
         """注册方法装饰器"""
@@ -144,66 +149,67 @@ class ZMQServer:
     _noisy_methods = {"backend.ping", "analysis.getAgentProgress", "report.listSubDocs", "analysis.getPreSummaryStatus"}
 
     async def _process_request(self, frames):
-        """处理请求并发送响应（独立任务，不受轮询超时限制）"""
-        token = None
-        try:
-            # ROUTER: frames[0] = peer identity, frames[1..] = 业务帧
-            # 新协议(5帧): [identity, request_id, trace_id, method_name, params_json]
-            # 旧协议(4帧): [identity, request_id, method_name, params_json] (兼容)
-            if len(frames) < 4:
-                logger.error(f"[ROUTER] invalid frame count: {len(frames)}, expected >= 4")
-                return
-            identity = frames[0]
-            request_id = frames[1].decode("utf-8")
-            if len(frames) >= 5:
-                trace_id = frames[2].decode("utf-8")
-                method_name = frames[3].decode("utf-8")
-                params = json.loads(frames[4])
-            else:
-                trace_id = request_id  # 旧协议：用 request_id 作为 trace_id
-                method_name = frames[2].decode("utf-8")
-                params = json.loads(frames[3])
-            token = current_call_id.set(trace_id)
-            api_id = get_rpc_id(method_name)
+        """处理请求并发送响应（独立任务，受并发信号量保护）"""
+        async with self._ipc_sem:
+            token = None
+            try:
+                # ROUTER: frames[0] = peer identity, frames[1..] = 业务帧
+                # 新协议(5帧): [identity, request_id, trace_id, method_name, params_json]
+                # 旧协议(4帧): [identity, request_id, method_name, params_json] (兼容)
+                if len(frames) < 4:
+                    logger.error(f"[ROUTER] invalid frame count: {len(frames)}, expected >= 4")
+                    return
+                identity = frames[0]
+                request_id = frames[1].decode("utf-8")
+                if len(frames) >= 5:
+                    trace_id = frames[2].decode("utf-8")
+                    method_name = frames[3].decode("utf-8")
+                    params = json.loads(frames[4])
+                else:
+                    trace_id = request_id  # 旧协议：用 request_id 作为 trace_id
+                    method_name = frames[2].decode("utf-8")
+                    params = json.loads(frames[3])
+                token = current_call_id.set(trace_id)
+                api_id = get_rpc_id(method_name)
 
-            if method_name not in self._noisy_methods:
-                logger.info(f"[{api_id}][{trace_id[:8]}] → {method_name} {_brief_params(params)}")
+                if method_name not in self._noisy_methods:
+                    logger.info(f"[{api_id}][{trace_id[:8]}] → {method_name} {_brief_params(params)}")
 
-            # 调用注册的方法
-            if method_name not in self.methods:
-                logger.warning(f"[{api_id}][{trace_id[:8]}] Method not found: {method_name}")
-                error = {"code": -32601, "message": f"Method not found: {method_name}"}
-                result = None
-            else:
-                try:
-                    method = self.methods[method_name]
-                    result = method(**params)
-                    if asyncio.iscoroutine(result):
-                        result = await result
-                    error = None
-                except Exception as e:
-                    logger.exception(f"[{api_id}][{trace_id[:8]}] Error in {method_name}: {e}")
+                # 调用注册的方法
+                if method_name not in self.methods:
+                    logger.warning(f"[{api_id}][{trace_id[:8]}] Method not found: {method_name}")
+                    error = {"code": -32601, "message": f"Method not found: {method_name}"}
                     result = None
-                    error = {"code": -32000, "message": str(e)}
+                else:
+                    try:
+                        method = self.methods[method_name]
+                        result = method(**params)
+                        if asyncio.iscoroutine(result):
+                            result = await result
+                        error = None
+                    except Exception as e:
+                        logger.exception(f"[{api_id}][{trace_id[:8]}] Error in {method_name}: {e}")
+                        result = None
+                        error = {"code": -32000, "message": str(e)}
 
-            # 发送响应: [IDENTITY, REQUEST_ID, RESULT_JSON, ERROR_JSON]
-            await self.dealer.send_multipart([
-                identity,
-                request_id.encode("utf-8"),
-                json.dumps(result, default=str).encode("utf-8"),
-                json.dumps(error, default=str).encode("utf-8"),
-            ])
+                # 发送响应: [IDENTITY, REQUEST_ID, RESULT_JSON, ERROR_JSON]
+                await self.dealer.send_multipart([
+                    identity,
+                    request_id.encode("utf-8"),
+                    json.dumps(result, default=str).encode("utf-8"),
+                    json.dumps(error, default=str).encode("utf-8"),
+                ])
 
-            if error:
-                logger.warning(f"[{api_id}][{trace_id[:8]}] ← {method_name} error: {error.get('message', '')[:200]}")
-            elif method_name not in self._noisy_methods:
-                logger.info(f"[{api_id}][{trace_id[:8]}] ← {method_name} ok")
+                if error:
+                    logger.warning(f"[{api_id}][{trace_id[:8]}] ← {method_name} error: {error.get('message', '')[:200]}")
+                elif method_name not in self._noisy_methods:
+                    logger.info(f"[{api_id}][{trace_id[:8]}] ← {method_name} ok")
 
-        except Exception as e:
-            logger.exception(f"[ROUTER] Error processing request")
-        finally:
-            if token is not None:
-                current_call_id.reset(token)
+            except Exception as e:
+                logger.exception(f"[ROUTER] Error processing request")
+            finally:
+                if token is not None:
+                    current_call_id.reset(token)
 
     async def handle_request(self):
         """接收请求并派发到独立任务处理"""
@@ -211,35 +217,56 @@ class ZMQServer:
         if frames:
             asyncio.create_task(self._process_request(frames))
 
+    async def _publish_worker(self):
+        """在事件循环中消费发布队列，避免线程直接操作 ZMQ PUB socket"""
+        while self._running:
+            try:
+                topic, event_type, data = await self._publish_queue.get()
+                try:
+                    self.pub.send_multipart([
+                        topic.encode("utf-8"),
+                        event_type.encode("utf-8"),
+                        json.dumps(data, default=str).encode("utf-8"),
+                    ], flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    pass
+                except Exception:
+                    pass
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
     def publish(self, topic: str, event_type: str, data: dict):
-        """发布事件（线程安全） — 同时发送到前端 ZMQ PUB + 内部总线"""
-        # 1) 内部总线：后端模块可订阅此事件
+        """发布事件（线程安全） — 通过队列中继到事件循环线程"""
         try:
             self.bus.publish(f"{topic}.{event_type}", data)
         except Exception:
             pass
-        # 2) 前端 ZMQ PUB（线程安全，NOBLOCK 避免线程池中 event loop 冲突）
-        if self.pub is None:
+        if self.pub is None or self._publish_queue is None:
             return
         try:
-            self.pub.send_multipart([
-                topic.encode("utf-8"),
-                event_type.encode("utf-8"),
-                json.dumps(data, default=str).encode("utf-8"),
-            ], flags=zmq.NOBLOCK)
-            if not (topic == 'llm' and event_type == 'chunk'):
-                logger.debug(f"Published: {topic}.{event_type}")
-        except zmq.Again:
-            if not (topic == 'llm' and event_type == 'chunk'):
-                logger.debug(f"Publish dropped (NOBLOCK): {topic}.{event_type}")
-        except Exception as e:
-            logger.debug(f"Publish failed (expected during shutdown): {e}")
+            if threading.current_thread() is self._loop_thread:
+                self._publish_queue.put_nowait((topic, event_type, data))
+            else:
+                self._loop.call_soon_threadsafe(
+                    self._publish_queue.put_nowait, (topic, event_type, data))
+        except Exception:
+            pass
 
     async def run(self):
-        """运行服务器"""
+        """运行服务器 — 使用 Poller 而非 wait_for，避免 pyzmq asyncio cancellation 问题"""
         self._running = True
         self._loop = asyncio.get_running_loop()
+        self._loop_thread = threading.current_thread()
+        self._ipc_sem = asyncio.Semaphore(10)
+        self._publish_queue = asyncio.Queue()
+        self._poller = zmq.asyncio.Poller()
+        self._poller.register(self.dealer, zmq.POLLIN)
         self.bus.start()
+
+        # 启动发布队列消费协程
+        pub_worker = asyncio.create_task(self._publish_worker())
         logger.info("ZMQ Server started")
 
         # 注册后端状态事件
@@ -252,17 +279,26 @@ class ZMQServer:
         try:
             while self._running:
                 try:
-                    frames = await asyncio.wait_for(
-                        self.dealer.recv_multipart(), timeout=10.0
-                    )
-                except asyncio.TimeoutError:
-                    continue  # 定期检查 _running
-                if frames and len(frames) >= 4:
-                    asyncio.create_task(self._process_request(frames))
+                    events = dict(await self._poller.poll(100))
+                except zmq.ZMQError:
+                    await asyncio.sleep(0.1)
+                    continue
+                if events.get(self.dealer) == zmq.POLLIN:
+                    try:
+                        frames = await self.dealer.recv_multipart()
+                    except zmq.ZMQError:
+                        continue
+                    if frames and len(frames) >= 4:
+                        asyncio.create_task(self._process_request(frames))
         except (asyncio.CancelledError, Exception):
             logger.debug("Server loop exited")
         finally:
             self._running = False
+            pub_worker.cancel()
+            try:
+                await pub_worker
+            except asyncio.CancelledError:
+                pass
             try:
                 self.publish("backend", "status", {"status": "stopped"})
             except Exception:

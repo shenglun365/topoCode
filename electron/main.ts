@@ -102,6 +102,15 @@ function setupIPC() {
     return result.filePaths[0] || null
   })
 
+  ipcMain.handle('dialog:open-file', async (_, filters: { name: string; extensions: string[] }[]) => {
+    const win = windowManager.getFocusedWindow() || windowManager.getMainWindow()
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openFile'],
+      filters: filters || [{ name: 'All Files', extensions: ['*'] }],
+    })
+    return result.filePaths[0] || null
+  })
+
   // ---- 文件读取 ----
   // Allowed directories for file access
   const allowedDirs: Set<string> = new Set()

@@ -6,6 +6,7 @@ import {
   FolderIcon,
   Cog6ToothIcon,
   ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
   CheckCircleIcon,
 } from '@heroicons/vue/24/outline'
 import { useProjectStore } from '@/stores/project'
@@ -16,6 +17,7 @@ import TaskListPanel from '@/components/analysis/TaskListPanel.vue'
 import TaskCreateForm from '@/components/analysis/TaskCreateForm.vue'
 import ClearCacheDialog from '@/components/project/ClearCacheDialog.vue'
 import ExportDialog from '@/components/project/ExportDialog.vue'
+import ImportDialog from '@/components/project/ImportDialog.vue'
 import FileVerifyDialog from '@/components/project/FileVerifyDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
 import { useCommunityStore } from '@/stores/community-store'
@@ -30,6 +32,7 @@ const settingsStore = useSettingsStore()
 
 const showClearCacheDialog = ref(false)
 const showExportDialog = ref(false)
+const showImportDialog = ref(false)
 const showVerifyDialog = ref(false)
 const selectedProject = projectStore.selectedProject
 
@@ -143,6 +146,13 @@ function onClearCacheDone() {
         <div style="flex:1;" />
         <button
           class="btn btn-ghost btn-sm"
+          @click="showImportDialog = true"
+        >
+          <ArrowUpTrayIcon class="w-4 h-4" />
+          <span>{{ t('project.importStructure', '导入') }}</span>
+        </button>
+        <button
+          class="btn btn-ghost btn-sm"
           @click="showExportDialog = true"
         >
           <ArrowDownTrayIcon class="w-4 h-4" />
@@ -219,6 +229,13 @@ function onClearCacheDone() {
       v-if="showClearCacheDialog"
       :project-id="projectStore.selectedProjectId!"
       @close="onClearCacheDone"
+    />
+
+    <!-- 导入结构分析弹窗 -->
+    <ImportDialog
+      v-if="showImportDialog"
+      :project-id="projectStore.selectedProjectId!"
+      @close="showImportDialog = false"
     />
 
     <!-- 导出结构分析弹窗 -->

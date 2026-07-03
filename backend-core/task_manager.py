@@ -201,6 +201,24 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         from agent_workflow.agent_queue import get_global_queue
         return get_global_queue()
 
+    # ── 启动清扫：标记进程重启后残留的 running 任务 ────────────
+    try:
+        _store = TaskStore(multi_db.main_db)
+        _stale = _store._db.execute(
+            "SELECT id FROM analysis_tasks WHERE status='running'"
+        ).fetchall()
+        if _stale:
+            logger.warning(f"[startup] Found {len(_stale)} stale running tasks, marking as error")
+            _store._db.execute(
+                "UPDATE analysis_tasks SET status='error', error='进程重启，任务已中断' WHERE status='running'"
+            )
+            _store._db.execute(
+                "UPDATE analysis_task_runs SET status='error', error='进程重启', finished_at=datetime('now') WHERE status='running'"
+            )
+            _store._db.commit()
+    except Exception as _e:
+        logger.warning(f"[startup] failed to clean stale tasks: {_e}")
+
     @server.register("analysis.listTasks")
     def list_tasks(project_id=None, projectId=None):
         pid = project_id or projectId
@@ -2367,7 +2385,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.startPipeline")
     def start_pipeline(task_id=None, taskId=None, force=False, language=None,
-                       concurrency=None, subagent_concurrency=None):
+                       concurrency=None, subagent_concurrency=None,
+                       component_timeout=None, componentTimeout=None):
         """启动流水线整体激活 (PipelineWorkflow 入口)"""
         tid = task_id or taskId
         if not tid:
@@ -2375,7 +2394,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         conc = max(1, min(int(concurrency or 1), 5))
         raw_sub = subagent_concurrency if subagent_concurrency is not None else conc
         sub_conc = max(1, min(int(raw_sub), 5))
-        logger.info(f"[startPipeline] task_id={tid} force={force} lang={language} concurrency={conc} subagent={sub_conc}")
+        comp_timeout = component_timeout if component_timeout is not None else (componentTimeout or 60)
+        comp_timeout = max(0, min(int(comp_timeout), 600))
+        logger.info(f"[startPipeline] task_id={tid} force={force} lang={language} concurrency={conc} subagent={sub_conc} timeout={comp_timeout}min")
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -2397,6 +2418,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "language": language or "",
                 "concurrency": conc,
                 "subagent_concurrency": sub_conc,
+                "component_timeout": comp_timeout,
             }
             result = mgr.dispatch("pipeline", tid, context,
                                   project_id=pid, project_root=project_root,
@@ -2409,7 +2431,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         from agent_workflow.sandbox import AgentSandbox
 
         tools = build_pipeline_tools(multi_db, project_db, project_root, tid, pid, project_summary,
-                                     concurrency=conc, subagent_concurrency=sub_conc)
+                                     concurrency=conc, subagent_concurrency=sub_conc,
+                                     component_timeout=comp_timeout)
 
         router = RouterHarness(project_root=project_root, multi_db=multi_db)
         router.register("pipeline", RouteEntry(

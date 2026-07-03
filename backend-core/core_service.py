@@ -685,12 +685,24 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return export_service.get_export_status(exportId)
 
     @server.register("system.importProjectArchive")
-    def import_project_archive(archivePath: str):
-        """导入结构分析数据包（JSONL zip，仅允许创建新项目）"""
+    def import_project_archive(archivePath: str, importMode: str = "share",
+                               projectId: str = ""):
+        """导入结构分析数据包（JSONL zip）
+
+        importMode:
+          - "share": 写入当前项目，保留原始 task_id（仅冲突时重映射）
+          - "restore": 校验 projectId 一致后覆盖，保留 task_id 和原始状态
+
+        projectId: 导入到的目标项目 ID（share/restore 都需要）
+        """
         import import_service
+        if not projectId:
+            raise ValueError("projectId is required")
         import_id = import_service.start_import(
             multi_db, archivePath,
-            lambda ch, ev, data: server.publish(ch, ev, data)
+            lambda ch, ev, data: server.publish(ch, ev, data),
+            import_mode=importMode,
+            target_project_id=projectId,
         )
         return {"importId": import_id}
 
