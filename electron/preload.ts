@@ -546,6 +546,10 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'system.exportProject', params: { projectId, taskIds } }),
     exportStatus: (exportId: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'system.exportStatus', params: { exportId } }),
+    exportRemoveArchive: (archivePath: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.exportRemoveArchive', params: { archivePath } }),
+    exportCleanupOld: (projectId: string) =>
+      ipcRenderer.invoke('ipc:call', { method: 'system.exportCleanupOld', params: { projectId } }),
     importProjectArchive: (archivePath: string, importMode?: string, projectId?: string) =>
       ipcRenderer.invoke('ipc:call', { method: 'system.importProjectArchive', params: { archivePath, importMode, projectId } }),
     importStatus: (importId: string) =>

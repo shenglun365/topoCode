@@ -4,10 +4,14 @@ import { useI18n } from 'vue-i18n'
 import {
   UserIcon,
   ArrowDownTrayIcon,
+  CurrencyDollarIcon,
+  DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
 import { useResourceStore } from '@/stores/resource-store'
 import { useAuthStore } from '@/stores/auth-store'
 import ProfileTab from '@/components/user/ProfileTab.vue'
+import AccountTab from '@/components/user/AccountTab.vue'
+import OrderTab from '@/components/user/OrderTab.vue'
 import ResourceCard from '@/components/resource/ResourceCard.vue'
 import ResourceDetail from '@/components/resource/ResourceDetail.vue'
 import { useComponentId } from '@/composables/useComponentId'
@@ -17,11 +21,13 @@ const { t } = useI18n()
 const resourceStore = useResourceStore()
 const authStore = useAuthStore()
 
-const activeTab = ref<'profile' | 'resource'>('profile')
+const activeTab = ref<'profile' | 'account' | 'order' | 'resource'>('profile')
 const showDetail = ref(false)
 
 const tabs = [
   { id: 'profile' as const, key: 'settings.profile', icon: UserIcon },
+  { id: 'account' as const, key: 'auth.account', icon: CurrencyDollarIcon },
+  { id: 'order' as const, key: 'auth.order', icon: DocumentTextIcon },
   { id: 'resource' as const, key: 'settings.resourceCenter', icon: ArrowDownTrayIcon },
 ]
 
@@ -68,6 +74,14 @@ onMounted(async () => {
 
     <div v-if="activeTab === 'profile'" style="flex:1; overflow:auto; padding:24px;">
       <ProfileTab />
+    </div>
+
+    <div v-else-if="activeTab === 'account'" style="flex:1; overflow:auto; padding:24px;">
+      <AccountTab @recharge="() => {}" />
+    </div>
+
+    <div v-else-if="activeTab === 'order'" style="flex:1; overflow:auto; padding:24px;">
+      <OrderTab />
     </div>
 
     <div v-else-if="activeTab === 'resource'" style="flex:1; overflow:auto; padding:24px;">

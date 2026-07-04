@@ -1,4 +1,4 @@
-import type { UserProfile } from '@/types'
+import type { UserProfile, TransactionRecord } from '@/types'
 import { getDeviceId } from '@/utils/device-id'
 import { mockUser, mockToken } from '@/utils/mock'
 
@@ -97,6 +97,36 @@ export const authService = {
       return { referred_count: 3, active_count: 2, total_points_awarded: 150 }
     }
     return request('/api/user/referral-stats', {
+      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
+    })
+  },
+
+  async getAccountInfo(token: string): Promise<{ balance: number; points: number }> {
+    if (USE_MOCK) {
+      await delay()
+      return { balance: 120, points: 150 }
+    }
+    return request('/api/user/account-info', {
+      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
+    })
+  },
+
+  async getTransactions(token: string): Promise<TransactionRecord[]> {
+    if (USE_MOCK) {
+      await delay()
+      return [
+        { id: 1, type: 'recharge', currency: 'balance', amount: 100, balance_after: 100, description: '余额充值', created_at: '2026-06-28T10:30:00' },
+        { id: 2, type: 'consume', currency: 'points', amount: -30, balance_after: 120, description: '兑换资源：Spring Boot 电商微服务架构分析', created_at: '2026-06-25T14:20:00' },
+        { id: 3, type: 'consume', currency: 'balance', amount: -49, balance_after: 51, description: '购买资源：Unity 游戏客户端架构分析', created_at: '2026-06-22T09:15:00' },
+        { id: 4, type: 'reward', currency: 'points', amount: 50, balance_after: 150, description: '邀请奖励：好友完成注册', created_at: '2026-06-20T16:00:00' },
+        { id: 5, type: 'recharge', currency: 'balance', amount: 50, balance_after: 100, description: '余额充值', created_at: '2026-06-18T11:00:00' },
+        { id: 6, type: 'consume', currency: 'points', amount: -20, balance_after: 100, description: '兑换资源：React 18 大型前端项目依赖分析', created_at: '2026-06-15T08:30:00' },
+        { id: 7, type: 'reward', currency: 'points', amount: 100, balance_after: 120, description: '邀请奖励：好友首次登录', created_at: '2026-06-10T20:00:00' },
+        { id: 8, type: 'consume', currency: 'points', amount: -15, balance_after: 20, description: '兑换资源：Vue 3 组件库架构分析', created_at: '2026-06-05T13:45:00' },
+        { id: 9, type: 'reward', currency: 'points', amount: 35, balance_after: 35, description: '新手任务奖励', created_at: '2026-06-01T09:00:00' },
+      ]
+    }
+    return request('/api/user/transactions', {
       headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
     })
   },

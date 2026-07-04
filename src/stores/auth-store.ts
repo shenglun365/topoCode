@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { UserProfile } from '@/types'
+import type { UserProfile, TransactionRecord } from '@/types'
 import { authService } from '@/services/auth-service'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -10,6 +10,9 @@ export const useAuthStore = defineStore('auth', () => {
   const error = ref<string | null>(null)
   const referralCode = ref('')
   const points = ref(0)
+  const balance = ref(0)
+  const transactions = ref<TransactionRecord[]>([])
+  const loadingTransactions = ref(false)
   const referralStats = ref({ referred_count: 0, active_count: 0, total_points_awarded: 0 })
   const shareLink = ref('')
 
@@ -24,6 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = JSON.parse(savedUser)
         referralCode.value = user.value?.referral_code || ''
         points.value = user.value?.points || 0
+        balance.value = user.value?.balance || 0
       } catch {
         clearSession()
       }
@@ -35,6 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = u
     referralCode.value = u.referral_code || ''
     points.value = u.points || 0
+    balance.value = u.balance || 0
     localStorage.setItem('topocode_token', t)
     localStorage.setItem('topocode_user', JSON.stringify(u))
   }
@@ -44,6 +49,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     referralCode.value = ''
     points.value = 0
+    balance.value = 0
+    transactions.value = []
     referralStats.value = { referred_count: 0, active_count: 0, total_points_awarded: 0 }
     shareLink.value = ''
     localStorage.removeItem('topocode_token')
@@ -113,12 +120,32 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {}
   }
 
+  async function fetchAccountInfo() {
+    if (!token.value) return
+    try {
+      const info = await authService.getAccountInfo(token.value)
+      balance.value = info.balance
+      points.value = info.points
+    } catch {}
+  }
+
+  async function fetchTransactions() {
+    if (!token.value) return
+    loadingTransactions.value = true
+    try {
+      transactions.value = await authService.getTransactions(token.value)
+    } catch {} finally {
+      loadingTransactions.value = false
+    }
+  }
+
   loadSession()
 
   return {
     user, token, loading, error, isAuthenticated,
-    referralCode, points, referralStats, shareLink,
+    referralCode, points, balance, transactions, loadingTransactions, referralStats, shareLink,
     login, register, logout, fetchProfile,
     loadReferralInfo, loadReferralStats,
+    fetchAccountInfo, fetchTransactions,
   }
 })

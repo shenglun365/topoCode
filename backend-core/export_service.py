@@ -255,3 +255,47 @@ def start_export(multi_db, project_id: str, task_ids: Optional[list[str]],
 def get_export_status(export_id: str) -> Optional[dict]:
     with _export_lock:
         return _export_tasks.get(export_id)
+
+
+def remove_archive(archive_path: str) -> bool:
+    """导出完成后删除 zip 文件"""
+    try:
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
+            logger.info(f"[Export] removed archive: {archive_path}")
+            return True
+    except Exception as e:
+        logger.warning(f"[Export] failed to remove archive {archive_path}: {e}")
+    return False
+
+
+def cleanup_old_archives(multi_db, project_id: str, days: int = 7):
+    """删除指定项目 exports/ 目录下 N 天前的旧 zip 文件"""
+    try:
+        project = multi_db.main_db.fetchone(
+            "SELECT root_path FROM projects WHERE id = ?", (project_id,)
+        )
+        if not project:
+            return
+        project_root = project.get("root_path", "") or ""
+        base_dir = project_root if project_root else multi_db.data_dir
+        exports_dir = os.path.join(base_dir, ".topocode", EXPORT_DIR_NAME)
+        if not os.path.isdir(exports_dir):
+            return
+        now = time.time()
+        cutoff = now - days * 86400
+        removed = 0
+        for fname in os.listdir(exports_dir):
+            if not fname.endswith(".zip"):
+                continue
+            fpath = os.path.join(exports_dir, fname)
+            if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+                try:
+                    os.remove(fpath)
+                    removed += 1
+                except Exception:
+                    pass
+        if removed:
+            logger.info(f"[Export] cleaned {removed} old archives from {exports_dir}")
+    except Exception as e:
+        logger.warning(f"[Export] cleanup_old_archives error: {e}")

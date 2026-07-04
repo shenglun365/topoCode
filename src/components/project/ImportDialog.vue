@@ -36,6 +36,8 @@ async function pickAndImport() {
 
     uploading.value = true
     error.value = ''
+    message.value = ''
+    progress.value = 0
 
     const result = await (window.api as any).system.importProjectArchive(filePath, importMode.value, props.projectId)
     const importId = result.importId

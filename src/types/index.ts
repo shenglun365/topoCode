@@ -248,6 +248,18 @@ export interface UserProfile {
   avatar?: string
   referral_code?: string
   points?: number
+  balance?: number
+  created_at: string
+}
+
+/** 交易/订单记录 */
+export interface TransactionRecord {
+  id: number
+  type: 'recharge' | 'consume' | 'reward'
+  currency: 'balance' | 'points'
+  amount: number
+  balance_after: number
+  description: string
   created_at: string
 }
 

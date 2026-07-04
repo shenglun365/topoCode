@@ -48,17 +48,21 @@ const isSettingsPage = computed(() => route.path === '/home' || route.path === '
 const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user' || route.path === '/settings')
 const isAuthPage = computed(() => route.path === '/login' || route.path === '/register')
 
-const showSuccessBanner = ref(false)
+const showStartupDialog = ref(true)
+const startupPhase = ref<'loading' | 'success' | 'error'>('loading')
 const showErrorOverlay = ref(false)
 const startingSince = ref(0)
 
 function onBackendReady() {
-  // 仅非 error 状态显示成功横幅
   if (statusStore.backend.status !== 'error') {
-    showSuccessBanner.value = true
+    startupPhase.value = 'success'
     showErrorOverlay.value = false
-    setTimeout(() => { showSuccessBanner.value = false }, 2000)
+    setTimeout(() => { showStartupDialog.value = false }, 1500)
   }
+}
+
+function dismissStartup() {
+  showStartupDialog.value = false
 }
 
 function dismissError() {
@@ -77,17 +81,21 @@ async function retryBackend() {
 onMounted(async () => {
   try {
     const st: any = await window.api!.backend.getStatus()
-    if (st) {
-      statusStore.setBackendStatus(st)
-      if (st.status === 'error') {
-        showErrorOverlay.value = true
-      } else if (st.status === 'running') {
-        onBackendReady()
-      } else if (st.status === 'starting') {
-        startingSince.value = Date.now()
+      if (st) {
+        statusStore.setBackendStatus(st)
+        if (st.status === 'error') {
+          startupPhase.value = 'error'
+          showErrorOverlay.value = true
+          showStartupDialog.value = false
+        } else if (st.status === 'running') {
+          onBackendReady()
+        } else if (st.status === 'starting') {
+          startupPhase.value = 'loading'
+          showStartupDialog.value = true
+          startingSince.value = Date.now()
+        }
       }
-    }
-      } catch (_) {}
+        } catch (_) {}
 
   // 订阅后端推送事件
   try {
@@ -103,12 +111,14 @@ onMounted(async () => {
         const wasRunning = statusStore.backend.status === 'running'
         statusStore.setBackendStatus(st, true)
         if (st.status === 'error') {
+          startupPhase.value = 'error'
           showErrorOverlay.value = true
-          showSuccessBanner.value = false
+          showStartupDialog.value = false
         } else if (st.status === 'running') {
-          if (!wasRunning) onBackendReady()
+          if (!wasRunning && showStartupDialog.value) onBackendReady()
         } else if (st.status === 'starting') {
           if (!startingSince.value) startingSince.value = Date.now()
+          startupPhase.value = 'loading'
         }
       }
     },
@@ -117,9 +127,6 @@ onMounted(async () => {
 })
 
 const startingElapsed = computed(() => startingSince.value ? Date.now() - startingSince.value : 0)
-const showStartingWarning = computed(() =>
-  statusStore.backend.status === 'starting' && startingElapsed.value > 8000
-)
 
 // 同步路由切换和功能组切换
 watch(
@@ -144,19 +151,29 @@ onUnmounted(() => {
       class="cmp-id"
     >{{ componentId }}</span>
 
-    <!-- 后端状态提示条 -->
+    <!-- 后端启动弹窗 -->
     <div
-      v-if="showSuccessBanner"
-      class="backend-error-banner banner-success"
+      v-if="showStartupDialog"
+      class="backend-startup-overlay"
+      @click.self="dismissStartup"
     >
-      <span>✓ 本地后端服务已连接</span>
-    </div>
-    <div
-      v-if="statusStore.backend.status === 'starting'"
-      class="backend-error-banner banner-warning"
-    >
-      <span>⏳ 本地后端服务启动中，请等待...</span>
-      <span class="backend-error-msg">如长时间未响应，请查看日志：~/.config/topoone-ui/logs/（Linux）或 ~/Library/Application Support/topoone-ui/logs/（macOS）</span>
+      <div
+        class="backend-startup-modal"
+        :class="'phase-' + startupPhase"
+      >
+        <template v-if="startupPhase === 'loading'">
+          <div class="startup-spinner" />
+          <p class="startup-title">本地后端服务启动中...</p>
+        </template>
+        <template v-else-if="startupPhase === 'success'">
+          <div class="startup-icon success">✓</div>
+          <p class="startup-title">后端服务已启动</p>
+          <button
+            class="startup-btn"
+            @click="dismissStartup"
+          >关闭</button>
+        </template>
+      </div>
     </div>
 
     <!-- 后端异常 DOM 弹窗覆盖 -->
@@ -292,25 +309,76 @@ onUnmounted(() => {
   position: relative;
 }
 
-.backend-error-banner {
+/* ---- 后端启动弹窗 ---- */
+.backend-startup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 16px;
-  background: #e81123;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+.backend-startup-modal {
+  max-width: 360px;
+  width: 90vw;
+  padding: 2rem;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.backend-startup-modal.phase-success {
+  border-color: var(--success);
+}
+.startup-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.startup-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.startup-icon.success {
+  background: var(--success);
   color: #fff;
-  font-size: 12px;
-  flex-shrink: 0;
 }
-.backend-error-banner.banner-warning {
-  background: #d4941e;
+.startup-title {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  margin: 0;
 }
-.backend-error-banner.banner-success {
-  background: #28a745;
+.startup-btn {
+  padding: 0.4rem 1.25rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.backend-error-msg {
-  opacity: 0.85;
-  font-family: monospace;
+.startup-btn:hover {
+  border-color: var(--accent);
 }
 
 /* ---- 后端异常弹窗 ---- */

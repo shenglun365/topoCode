@@ -27,6 +27,7 @@ const progress = ref(0)
 const message = ref('')
 const done = ref(false)
 const downloadUrl = ref('')
+const archivePath = ref('')
 const error = ref('')
 const httpBase = ref('http://localhost:3456')
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -88,6 +89,7 @@ function startPolling() {
         done.value = true
         exporting.value = false
         downloadUrl.value = `${httpBase.value}/api/export/${exportId.value}/download`
+        archivePath.value = status.result?.archivePath || ''
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
         error.value = status.message || '导出失败'
@@ -99,15 +101,40 @@ function startPolling() {
   }, 10000)
 }
 
+async function handleDownload() {
+  try {
+    const resp = await fetch(downloadUrl.value)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = downloadUrl.value.split('/').pop() || 'export.zip'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    if (archivePath.value) {
+      await (window.api as any).system.exportRemoveArchive(archivePath.value)
+    }
+  } catch (e: any) {
+    console.error('[Export] download failed:', e)
+  }
+  close()
+}
+
 function close() {
   if (pollTimer) clearInterval(pollTimer)
+  if (done.value && archivePath.value) {
+    (window.api as any).system.exportRemoveArchive(archivePath.value).catch(() => {})
+  }
   emit('close')
 }
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="dialog-overlay" @click.self="close">
+    <div class="dialog-overlay">
       <div class="dialog-card">
         <div class="dialog-header">
           <span class="dialog-title">{{ t('project.exportStructure', '导出结构分析') }}</span>
@@ -155,7 +182,7 @@ function close() {
           <div v-if="error" class="error-msg">{{ error }}</div>
           <div class="dialog-footer" style="justify-content:flex-end">
             <template v-if="done">
-              <a :href="downloadUrl" class="btn btn-primary btn-sm" download @click="close">
+              <a class="btn btn-primary btn-sm" @click.prevent="handleDownload">
                 <ArrowDownTrayIcon class="icon-sm" /> {{ t('project.downloadExport', '下载') }}
               </a>
             </template>

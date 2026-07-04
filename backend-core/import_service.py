@@ -77,6 +77,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                 proj_info = json.load(f)
 
         original_project_id = manifest.get("projectId", "")
+        original_root = proj_info.get("rootPath", "") or ""
         import_name = proj_info.get("name", manifest.get("projectName", "Imported Project"))
         import_language = proj_info.get("language", "Unknown")
         now = datetime.now().isoformat()
@@ -215,6 +216,17 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                             if row["id"].startswith(f"overall-{old_tid}"):
                                 row["id"] = f"overall-{new_tid}"
                                 break
+                    # graph_edge INCLUDE 边的 source_id/target_id 为 file:/abs/path 格式，
+                    # 去掉 file: 前缀和原项目根路径转成相对路径，避免空项目导入后因 project_root=""
+                    # 导致 community_data._rel 无法归一化匹配 graph_doc.node_list
+                    if table == "graph_edge" and row.get("kind") == "imports":
+                        for col in ("source_id", "target_id"):
+                            val = row.get(col, "")
+                            if val.startswith("file:") and original_root:
+                                val = val[5:]
+                                if val.startswith(original_root):
+                                    val = val[len(original_root):]
+                                row[col] = val.lstrip("/")
                     rows.append(row)
 
             if not rows:

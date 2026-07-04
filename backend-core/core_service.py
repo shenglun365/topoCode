@@ -684,6 +684,17 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         import export_service
         return export_service.get_export_status(exportId)
 
+    @server.register("system.exportRemoveArchive")
+    def export_remove_archive(archivePath: str):
+        import export_service
+        return {"ok": export_service.remove_archive(archivePath)}
+
+    @server.register("system.exportCleanupOld")
+    def export_cleanup_old(projectId: str):
+        import export_service
+        export_service.cleanup_old_archives(multi_db, projectId)
+        return {"ok": True}
+
     @server.register("system.importProjectArchive")
     def import_project_archive(archivePath: str, importMode: str = "share",
                                projectId: str = ""):

@@ -134,6 +134,9 @@ async function handleSelectProject(id: string) {
   await projectStore.selectProject(id)
   router.push('/code')
   navigation.navigateTo('code')
+  try {
+    await (window.api as any).system.exportCleanupOld(id)
+  } catch { /* ignore */ }
 }
 
 const PARSER_LANGUAGES = new Set([
