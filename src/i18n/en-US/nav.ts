@@ -1,6 +1,7 @@
 export default { nav: {
   home: 'Home',
   code: 'Code Analysis',
+  userCenter: 'User Center',
   projects: 'Projects',
   analysis: 'Analysis',
   knowledge: 'Knowledge',

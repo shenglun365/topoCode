@@ -32,3 +32,9 @@ python-multipart==0.0.32
 # 工具库
 pydantic==2.13.4
 pydantic-settings==2.14.1
+
+# 缓存存储
+diskcache==5.6.3
+
+# 列式数据库
+duckdb>=0.10.0

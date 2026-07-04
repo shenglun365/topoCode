@@ -24,7 +24,7 @@ export default { shell: {
     zoomIn: 'Zoom In',
     zoomOut: 'Zoom Out',
     resetZoom: 'Reset Zoom',
-    importProject: 'Import Project',
+    importProject: 'Import Source Project',
     importStructure: 'Import Structure Analysis',
     exit: 'Exit',
     restartBackend: 'Restart Backend',

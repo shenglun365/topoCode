@@ -386,6 +386,11 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'model.deleteUsageStatsByCondition', params: { model_id: params.modelId, start_date: params.startDate, end_date: params.endDate } }),
   },
 
+  // ==================== 设备指纹 ====================
+  device: {
+    getId: () => ipcRenderer.invoke('device:getId'),
+  },
+
   // ==================== 后端管理 ====================
   backend: {
     start: () => ipcRenderer.invoke('ipc:call', { method: 'backend.start', params: {} }),

@@ -104,7 +104,7 @@ function close() {
           <div class="mode-selector">
             <label class="mode-option">
               <input v-model="importMode" type="radio" value="share" class="mode-radio">
-              <span class="mode-label">{{ t('project.importModeShare', '作为新项目导入（分享）') }}</span>
+              <span class="mode-label">{{ t('project.importModeShare', '写入当前项目（分享）') }}</span>
             </label>
             <label class="mode-option">
               <input v-model="importMode" type="radio" value="restore" class="mode-radio">

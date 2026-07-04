@@ -149,14 +149,14 @@ function onClearCacheDone() {
           @click="showImportDialog = true"
         >
           <ArrowUpTrayIcon class="w-4 h-4" />
-          <span>{{ t('project.importStructure', '导入') }}</span>
+          <span>{{ t('project.importStructure', '导入分析结果') }}</span>
         </button>
         <button
           class="btn btn-ghost btn-sm"
           @click="showExportDialog = true"
         >
           <ArrowDownTrayIcon class="w-4 h-4" />
-          <span>{{ t('project.exportStructure', '导出') }}</span>
+          <span>{{ t('project.exportStructure', '导出分析结果') }}</span>
         </button>
         <button
           class="btn btn-ghost btn-sm"

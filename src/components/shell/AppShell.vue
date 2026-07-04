@@ -35,6 +35,7 @@ const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
     '/knowledge': 'knowledge',
     '/coder': 'coder',
     '/user': 'home',
+    '/settings': 'home',
 }
 
 // 当前功能组
@@ -43,8 +44,9 @@ const currentFuncGroup = computed(() => {
 })
 
 // 是否隐藏左右侧栏
-const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user')
-const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user')
+const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user' || route.path === '/settings')
+const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user' || route.path === '/settings')
+const isAuthPage = computed(() => route.path === '/login' || route.path === '/register')
 
 const showSuccessBanner = ref(false)
 const showErrorOverlay = ref(false)
@@ -202,18 +204,18 @@ onUnmounted(() => {
     </div>
 
     <!-- 顶部菜单栏 -->
-    <TopBar v-show="!panelStore.isFullscreen" />
+    <TopBar v-show="!panelStore.isFullscreen && !isAuthPage" />
 
     <!-- 主内容行 -->
     <div class="app-row2">
       <!-- 活动栏 -->
-      <ActivityBar v-show="!panelStore.isFullscreen" />
+      <ActivityBar v-show="!panelStore.isFullscreen && !isAuthPage" />
 
       <!-- 左侧面板 -->
       <LeftPanel v-show="!hideLeftPanel && !panelStore.isFullscreen" />
 
       <!-- 主内容区 -->
-      <main class="content-area">
+      <main class="content-area" :class="{ 'auth-fullscreen': isAuthPage }">
         <div class="content-body">
           <router-view v-slot="{ Component }">
             <keep-alive>
@@ -227,11 +229,11 @@ onUnmounted(() => {
       </main>
 
       <!-- 右侧面板（设置页隐藏，全屏时用户可手动开启） -->
-      <RightPanel v-show="!isSettingsPage" />
+      <RightPanel v-show="!isSettingsPage && !isAuthPage" />
     </div>
 
     <!-- 底部状态栏 -->
-    <StatusBar v-show="!panelStore.isFullscreen" />
+    <StatusBar v-show="!panelStore.isFullscreen && !isAuthPage" />
 
     <!-- 新手引导 -->
     <OnboardingTour />
@@ -279,6 +281,9 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-primary);
+}
+.content-area.auth-fullscreen {
+  height: 100vh;
 }
 
 .content-body {

@@ -741,6 +741,9 @@ export interface IPCAPI {
     warn: (source: string, message: string, data?: any) => void
     error: (source: string, message: string, data?: any) => void
   }
+  device: {
+    getId: () => Promise<string>
+  }
 }
 
 // ==================== Window 扩展 ====================

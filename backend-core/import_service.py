@@ -1,8 +1,8 @@
 """
-import_service.py — 导入后台线程：JSONL 解析 → 新项目创建/恢复 + 数据重映射 + ZMQ 进度
+import_service.py — 导入后台线程：JSONL 解析 → 写入/恢复 + 数据重映射 + ZMQ 进度
 
 两种模式:
-  - "share" (默认): 创建新项目，保留原始 task_id（仅冲突时重映射并联动切换引用）
+  - "share" (默认): 写入当前项目，保留原始 task_id（仅冲突时重映射）
   - "restore": 校验 projectId 一致后覆盖原项目，保留 task_id 和原始状态
 """
 import json

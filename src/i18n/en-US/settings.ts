@@ -115,6 +115,11 @@ export default { settings: {
   techStack: 'Tech Stack',
   systemInfo: 'System Info',
   licenseInfo: 'License Info',
+  profile: 'Profile',
+  resourceCenter: 'Resource Center',
+  resourceCenterDesc: 'Browse and download importable structure analysis packages',
+  noResources: 'No resources available',
+  resourceLoginHint: 'Log in to download resources',
   importConfig: 'Import Settings',
   import: {
     ignoreMode: 'Ignore Mode',

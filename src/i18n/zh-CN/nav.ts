@@ -1,6 +1,7 @@
 export default { nav: {
   home: '首页',
   code: '代码解析',
+  userCenter: '用户中心',
   projects: '项目',
   analysis: '架构分析',
   knowledge: '知识库',

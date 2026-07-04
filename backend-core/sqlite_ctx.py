@@ -1667,13 +1667,16 @@ class MultiDBManager:
             project_root = row["root_path"] if row else None
         except Exception:
             project_root = None
-        db_path = self._project_db_path(project_id, project_root)
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        for suffix in ['-wal', '-shm']:
-            wal_path = db_path + suffix
-            if os.path.exists(wal_path):
-                os.remove(wal_path)
+        try:
+            db_path = self._project_db_path(project_id, project_root)
+            if os.path.exists(db_path):
+                os.remove(db_path)
+            for suffix in ['-wal', '-shm']:
+                wal_path = db_path + suffix
+                if os.path.exists(wal_path):
+                    os.remove(wal_path)
+        except ValueError as e:
+            logger.warning(f"[delete_project_db] {e}")
 
     def compute_md5(self, file_path: str) -> str:
         """计算文件的 MD5 哈希"""

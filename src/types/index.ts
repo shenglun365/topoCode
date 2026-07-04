@@ -3,7 +3,7 @@
    ======================================== */
 
 /** 页面类型 */
-export type PageType = 'home' | 'code' | 'analysis' | 'knowledge' | 'user';
+export type PageType = 'home' | 'code' | 'analysis' | 'knowledge' | 'user' | 'settings';
 
 /** 内置主题类型 */
 export type ThemeType = 'dark' | 'light';
@@ -237,6 +237,50 @@ export interface APIResponse<T = unknown> {
   code: number;
   message: string;
   data: T;
+}
+
+/** 用户信息 */
+export interface UserProfile {
+  id: number
+  username: string
+  email: string
+  phone?: string
+  avatar?: string
+  referral_code?: string
+  points?: number
+  created_at: string
+}
+
+/** 免费资源 */
+export interface Resource {
+  id: number
+  title: string
+  description: string
+  category: string
+  thumbnail_url: string
+  download_count: number
+  is_free: boolean
+  pricing_model: 'free' | 'points' | 'paid' | 'subscription' | 'custom'
+  points_cost: number
+  price_cny: number
+  subscription_tier: string
+  created_at: string
+}
+
+/** 注册表单 */
+export interface RegisterForm {
+  username: string
+  email: string
+  phone?: string
+  email_code: string
+  sms_code?: string
+  password: string
+}
+
+/** 登录表单 */
+export interface LoginForm {
+  email: string
+  password: string
 }
 
 /** 错误类型 */

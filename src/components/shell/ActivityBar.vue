@@ -8,9 +8,11 @@ import {
   LightBulbIcon,
   BookOpenIcon,
   Cog6ToothIcon,
+  UserIcon,
 } from '@heroicons/vue/24/outline'
 import { useNavigationStore } from '@/stores/navigation'
 import { usePanelStore } from '@/stores/panel'
+import { useAuthStore } from '@/stores/auth-store'
 import type { PageType } from '@/types'
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -25,7 +27,8 @@ const iconMap = {
   code: FolderIcon,
   analysis: LightBulbIcon,
   knowledge: BookOpenIcon,
-  user: Cog6ToothIcon,
+  user: UserIcon,
+  settings: Cog6ToothIcon,
 }
 
 const activities = [
@@ -36,12 +39,19 @@ const activities = [
 ]
 
 const bottomActivities = [
-  { page: 'user' as PageType, key: 'nav.settings' },
+  { page: 'user' as PageType, key: 'nav.userCenter' },
+  { page: 'settings' as PageType, key: 'nav.settings' },
 ]
 
+const authStore = useAuthStore()
 const currentPage = computed(() => navigation.currentPage)
 
 function navigateTo(page: PageType) {
+  if (page === 'settings') {
+    navigation.navigateTo('settings')
+    router.push('/settings')
+    return
+  }
   navigation.navigateTo(page)
   if (page === 'analysis' && panelStore.leftCollapsed) {
     panelStore.setLeftCollapsed(false)
@@ -76,7 +86,10 @@ function navigateTo(page: PageType) {
       v-for="activity in bottomActivities"
       :key="activity.page"
       class="activity-item"
-      :class="{ active: currentPage === activity.page }"
+      :class="{
+        active: currentPage === activity.page,
+        'user-authenticated': activity.page === 'user' && authStore.isAuthenticated,
+      }"
       :title="t(activity.key)"
       @click="navigateTo(activity.page)"
     >
@@ -136,6 +149,10 @@ function navigateTo(page: PageType) {
   height: 20px;
   background: var(--accent);
   border-radius: 0 2px 2px 0;
+}
+
+.activity-item.user-authenticated {
+  color: color-mix(in srgb, var(--success) 70%, transparent);
 }
 
 .activity-spacer {

@@ -22,7 +22,8 @@ export const useNavigationStore = defineStore('navigation', () => {
       code: '代码解析',
       analysis: '代码分析',
       knowledge: '知识库',
-      user: '设置',
+      user: '用户中心',
+      settings: '设置',
     }
     breadcrumbs.value = [
       { label: 'TopoCode', page: 'home' },

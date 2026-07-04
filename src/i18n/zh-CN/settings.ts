@@ -120,6 +120,11 @@ export default { settings: {
   techStack: '技术栈',
   systemInfo: '系统信息',
   licenseInfo: '许可证信息',
+  profile: '个人资料',
+  resourceCenter: '资源中心',
+  resourceCenterDesc: '浏览和下载可导入的结构分析包',
+  noResources: '暂无资源',
+  resourceLoginHint: '登录后可下载资源',
   importConfig: '导入设置',
   import: {
     ignoreMode: '忽略模式',

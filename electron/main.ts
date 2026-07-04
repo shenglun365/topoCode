@@ -169,6 +169,24 @@ function setupIPC() {
     return process.env[key] || null
   })
 
+  // ---- 设备指纹 ----
+  const { machineId } = (() => {
+    const crypto = require('node:crypto')
+    const p = require('node:path')
+    const fs = require('node:fs')
+    const idFile = p.join(app.getPath('userData'), '.device-id')
+    let id = ''
+    try {
+      id = fs.readFileSync(idFile, 'utf-8').trim()
+    } catch {}
+    if (!id || id.length < 16) {
+      id = crypto.randomUUID()
+      try { fs.writeFileSync(idFile, id, 'utf-8') } catch {}
+    }
+    return { machineId: id }
+  })()
+  ipcMain.handle('device:getId', () => machineId)
+
   // ---- 存储 ----
   const store: Record<string, any> = {}
 

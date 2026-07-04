@@ -345,6 +345,7 @@ async function testCurrentForm() {
         type: form.value.type || 'chat',
         temperature: form.value.temperature,
         maxTokens: form.value.maxTokens,
+        apiKey: form.value.apiKey || undefined,
       })
       const result = await window.api!.settings.testModel(saved.id)
       dialogTestResult.value = result.status === 'connected' ? 'success' : 'error'

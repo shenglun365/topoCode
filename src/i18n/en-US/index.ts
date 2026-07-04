@@ -1,5 +1,6 @@
 import ai from './ai'
 import analysis from './analysis'
+import auth from './auth'
 import animation from './animation'
 import code from './code'
 import common from './common'
@@ -22,6 +23,7 @@ import visualization from './visualization'
 export default {
   ...ai,
   ...analysis,
+  ...auth,
   ...animation,
   ...code,
   ...common,

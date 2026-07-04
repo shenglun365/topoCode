@@ -1193,7 +1193,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.updateModel")
     def update_model(id: str, **kwargs):
-        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "maxRequestsPerDay", "maxTokensPerDay"}
+        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "apiKey", "maxRequestsPerDay", "maxTokensPerDay"}
         data = {}
         for k, v in kwargs.items():
             if k == "isDefault":
@@ -1207,7 +1207,8 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             elif k == "maxTokensPerDay":
                 data["max_tokens_per_day"] = int(v) if v else 0
             elif k == "apiKey":
-                data["api_key"] = v
+                if v:
+                    data["api_key"] = v
             elif k == "url":
                 clean_url = v.rstrip('/')
                 if clean_url.endswith('/v1'):
@@ -1226,7 +1227,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.testModel")
     async def test_model(id: str):
-        """测试模型连接 — 真实调用 LLM API"""
+        """测试模型连接 — 真实调用 LLM API（云端发 chat 请求验证 apiKey）"""
         model = main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (id,))
         if not model:
             raise ValueError(f"Model not found: {id}")
@@ -1235,22 +1236,32 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         start = __import__('time').time()
         try:
             base = model['url'].rstrip('/')
-            # 兼容旧数据中 URL 末尾带 /v1 的情况
             if base.endswith('/v1'):
                 base = base[:-3]
+            headers = {'Content-Type': 'application/json'}
+            api_key = model.get('api_key')
+            if api_key:
+                headers['Authorization'] = f"Bearer {api_key}"
             if model.get('provider') == 'ollama':
                 resp = req.post(f"{base}/api/tags", timeout=10)
                 if resp.status_code != 200:
                     return {"status": "error", "latency": 0, "error": f"Ollama API {resp.status_code}"}
             else:
-                headers = {'Content-Type': 'application/json'}
-                if model.get('api_key'):
-                    headers['Authorization'] = f"Bearer {model['api_key']}"
-                resp = req.get(f"{base}/v1/models", headers=headers, timeout=10)
+                if not api_key:
+                    return {"status": "error", "latency": 0, "error": "未设置 API Key"}
+                payload = {
+                    "model": model["model"],
+                    "messages": [{"role": "user", "content": "test"}],
+                    "max_tokens": 1,
+                    "stream": False,
+                }
+                resp = req.post(f"{base}/v1/chat/completions",
+                                json=payload, headers=headers, timeout=15)
+                if resp.status_code == 401:
+                    return {"status": "error", "latency": 0, "error": "API Key 无效 (401)"}
                 if resp.status_code != 200:
                     return {"status": "error", "latency": 0, "error": f"API {resp.status_code}"}
             latency = int((__import__('time').time() - start) * 1000)
-            # 只更新 status，不写入 latency 字段（表结构可能不含该列）
             try:
                 main_db.update("model_configs", {"status": "connected"}, "id = ?", (id,))
             except Exception:
