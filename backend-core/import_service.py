@@ -209,6 +209,12 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                     # source_files 表本身没有此列，移除避免 INSERT 失败
                     if table == "source_files" and "md5_hash" in row:
                         del row["md5_hash"]
+                    # report_subdocs 中概览文档 id 为 overall-{task_id}，task_id 重映射后需同步更新
+                    if task_map and table == "report_subdocs" and "id" in row:
+                        for old_tid, new_tid in task_map.items():
+                            if row["id"].startswith(f"overall-{old_tid}"):
+                                row["id"] = f"overall-{new_tid}"
+                                break
                     rows.append(row)
 
             if not rows:
