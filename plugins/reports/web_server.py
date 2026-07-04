@@ -2345,14 +2345,21 @@ async def execute_draft(request: Request):
             (user_msg_id, session_id, content, now),
         )
 
-        # 更新 session 消息数
+        # 更新 session 消息数（存到 metadata JSON 字段中）
         cnt = multi_db.sessions_db.fetchone(
             "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id=?", (session_id,)
         )
         if cnt:
-            multi_db.sessions_db.execute(
-                "UPDATE llm_sessions SET message_count=? WHERE id=?", (cnt["c"], session_id)
+            row = multi_db.sessions_db.fetchone(
+                "SELECT metadata FROM llm_sessions WHERE id=?", (session_id,)
             )
+            if row:
+                meta = json.loads(row["metadata"]) if row["metadata"] else {}
+                meta["message_count"] = cnt["c"]
+                multi_db.sessions_db.execute(
+                    "UPDATE llm_sessions SET metadata=?, updated_at=? WHERE id=?",
+                    (json.dumps(meta, ensure_ascii=False), now, session_id),
+                )
 
         return {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
     except HTTPException:

@@ -346,7 +346,8 @@ createApp({
         sessions.value.unshift({id:dd.id,title:dd.title,projectId:dd.projectId,modelId:dd.modelId,messageCount:0})
         currentId.value=dd.id
       }
-      await fetch('/api/notes/execute-draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refs:d.refs,userText:d.userText||'',sessionId:sid})})
+      const er = await fetch('/api/notes/execute-draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refs:d.refs,userText:d.userText||'',sessionId:sid})})
+      if(!er.ok){showToast('便签发送失败');return}
       // 更新 localStorage
       try{const raw=localStorage.getItem(PENDING_KEY);const all=raw?JSON.parse(raw):[]
         const idx=all.findIndex(function(x){return x.id===d.id})

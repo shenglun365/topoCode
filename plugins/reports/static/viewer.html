@@ -375,6 +375,11 @@
             <span>打开文档</span>
           </div>
           <div class="ctx-divider"></div>
+          <div class="ctx-item" data-action="center-view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg>
+            <span>中心视图</span>
+          </div>
+          <div class="ctx-divider"></div>
           <div class="ctx-item" data-action="note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             <span>存入便签</span>
@@ -483,8 +488,41 @@ const S = {
   // right panel nav
   commStack: [],         // [{cid, name}] breadcrumb trail
   commParent: '',        // current parent for community-children API
+  // center view mode
+  centerNodes: [],       // 中心节点 ID 列表
 };
 let g_cy = null;         // Cytoscape instance
+
+// 节点手动隐藏/显示跟踪（与中心模式共存，最后操作优先）
+var _manualHidden = new Set();
+var _manualShown = new Set();
+
+// 中心模式过滤：显示中心节点 + 与任一中心节点相连的节点
+function applyCenterMode() {
+  if (!g_cy) return;
+  if (S.centerNodes.length === 0) {
+    g_cy.nodes().show();
+    _manualHidden.forEach(function(id) {
+      var n = g_cy.getElementById(id);
+      if (n.length) n.hide();
+    });
+    GraphView._refreshFilter();
+    return;
+  }
+  var visible = new Set(S.centerNodes);
+  S.centerNodes.forEach(function(cid) {
+    var cn = g_cy.getElementById(cid);
+    if (!cn.length) return;
+    cn.neighbourhood().forEach(function(n) { visible.add(n.id()); });
+  });
+  g_cy.nodes().forEach(function(n) {
+    var id = n.id();
+    if (_manualHidden.has(id)) { n.hide(); return; }
+    if (_manualShown.has(id)) { n.show(); return; }
+    if (visible.has(id)) { n.show(); } else { n.hide(); }
+  });
+  GraphView._refreshFilter();
+}
 
 // URL globals (read once at init)
 const g_url = new URLSearchParams(location.search);
@@ -2058,44 +2096,62 @@ const GraphView = {
     var toggleAllBtn = document.getElementById('graphFilterToggleAll');
     toggleAllBtn.onclick = function() {
       if (!g_cy) return;
-      var hidden = g_cy.nodes(':hidden');
       var total = g_cy.nodes();
+      // 中心模式下只操作可见节点，不影响其他节点的手动状态
+      var candidates = S.centerNodes.length > 0
+        ? total.filter(function(n) { return !n.hidden(); })
+        : total;
+      var hidden = candidates.filter(function(n) { return n.hidden(); });
       if (hidden.length === 0) {
-        // 全显示 → 隐藏孤立；无孤立节点则不操作，保持状态
-        var isolated = total.filter(function(n) { return n.degree(false) === 0; });
+        var isolated = candidates.filter(function(n) { return n.degree(false) === 0; });
         if (isolated.length > 0) {
           isolated.hide();
+          isolated.forEach(function(n) { _manualHidden.add(n.id()); });
           this.textContent = '\u9690\u85cf\u5168\u90e8';
           this.title = '\u9690\u85cf\u6240\u6709\u8282\u70b9';
         }
       } else {
-        var hasNonIsoHidden = total.some(function(n) { return n.hidden() && n.degree(false) > 0; });
+        var hasNonIsoHidden = candidates.some(function(n) { return n.hidden() && n.degree(false) > 0; });
         if (!hasNonIsoHidden) {
-          // 隐藏孤立 → 隐藏全部
-          total.hide();
+          candidates.hide();
+          candidates.forEach(function(n) { _manualHidden.add(n.id()); });
           this.textContent = '\u663e\u793a\u5168\u90e8';
           this.title = '\u663e\u793a\u6240\u6709\u8282\u70b9';
         } else {
-          // 隐藏全部 → 显示全部
           total.show();
+          _manualHidden.clear();
+          _manualShown.clear();
           this.textContent = '\u9690\u85cf\u5b64\u7acb';
           this.title = '\u9690\u85cf\u5b64\u7acb\u8282\u70b9\uff08\u65e0\u8fde\u7ebf\uff09';
         }
       }
+      if (S.centerNodes.length > 0) {
+        applyCenterMode();
+      }
       GraphView._refreshFilter();
     };
 
-    // reset positions button
+    // reset positions & clear filters button
     var resetBtn = document.getElementById('graphTbReset');
     if (resetBtn) resetBtn.onclick = function(e) {
       e.stopPropagation();
       if (!g_cy || !S.taskId) return;
+      S.centerNodes = [];
+      _manualHidden.clear();
+      _manualShown.clear();
+      g_cy.nodes().show();
       API.graphLayoutDelete(S.taskId, S.cid || '', S.et, S.gran || 'component', S.depth || 1).catch(function() {});
       var ly = g_cy.layout({ name: 'cose', animate: false, nodeRepulsion: 8000, idealEdgeLength: 100, numIter: 4000, fit: false, nodeOverlap: 20, padding: 20 });
       ly.run();
       g_cy.resize();
       var conn = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
       if (!conn.empty()) g_cy.center(conn); else g_cy.center();
+      var toggleBtn = document.getElementById('graphFilterToggleAll');
+      if (toggleBtn) {
+        toggleBtn.textContent = '\u9690\u85cf\u5b64\u7acb';
+        toggleBtn.title = '\u9690\u85cf\u5b64\u7acb\u8282\u70b9\uff08\u65e0\u8fde\u7ebf\uff09';
+      }
+      GraphView._refreshFilter();
     };
   },
   _refreshFilter() {
@@ -2136,7 +2192,15 @@ const GraphView = {
         var nid = this.dataset.nid;
         var node = g_cy.getElementById(nid);
         if (node.length) {
-          if (node.hidden()) node.show(); else node.hide();
+          if (node.hidden()) {
+            node.show();
+            _manualHidden.delete(nid);
+            _manualShown.add(nid);
+          } else {
+            node.hide();
+            _manualHidden.add(nid);
+            _manualShown.delete(nid);
+          }
           self._refreshFilter();
         }
       };
@@ -2155,12 +2219,16 @@ const GraphView = {
 
       var drillItem = menu.querySelector('[data-action="drilldown"]');
       var docItem = menu.querySelector('[data-action="doc"]');
+      var centerItem = menu.querySelector('[data-action="center-view"]');
 
       if (!isExternal && nodeId !== S.cid && node.data('hasChildren') !== false) {
         drillItem.style.display = '';
       } else {
         drillItem.style.display = 'none';
       }
+
+      var isCenter = S.centerNodes.indexOf(nodeId) >= 0;
+      centerItem.querySelector('span').textContent = isCenter ? '\u53D6\u6D88\u4E2D\u5FC3' : '\u4E2D\u5FC3\u89C6\u56FE';
 
       menu._ctxNodeId = nodeId;
       menu._ctxIsExt = !!isExternal;
@@ -2232,6 +2300,19 @@ const GraphView = {
       history.replaceState(null, '', '/doc?' + u.toString());
       console.log('[ctx-doc] URL: cid=' + commId.slice(0,30) + ' cn=' + label.slice(0,20) + ' pc=' + (u.get('pc') || '-').slice(0,50));
       loadCommunityDoc(S.taskId, commId, et);
+    };
+
+    menu.querySelector('[data-action="center-view"]').onclick = function() {
+      var nid = menu._ctxNodeId;
+      if (!nid || !g_cy) return;
+      menu.style.display = 'none';
+      var idx = S.centerNodes.indexOf(nid);
+      if (idx >= 0) {
+        S.centerNodes.splice(idx, 1);
+      } else {
+        S.centerNodes.push(nid);
+      }
+      applyCenterMode();
     };
   },
 
@@ -2888,9 +2969,28 @@ function addNoteButtonToDoc() {
   var header = content.querySelector('h1');
   if (!header) return;
   var btn = document.createElement('button');
-  btn.textContent = '\uD83D\uDCCE 撕便签';
+  btn.textContent = '\uD83D\uDCCE 写便签';
   btn.style.cssText = 'margin-left:8px;padding:2px 10px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);cursor:pointer';
-  btn.onclick = function() { loadDrafts(); openNotesModal(); };
+  btn.onclick = function() {
+    loadDrafts();
+    var cid = S.commId || S.cid || g_communityId || '';
+    var cname = S.commLabel || (document.querySelector('h1') ? document.querySelector('h1').textContent.trim() : '') || cid;
+    openNotesModal();
+    if (cid) {
+      var ref = {
+        projectId: S.projectId || '',
+        taskId: S.taskId || '',
+        componentId: cid,
+        label: cname.slice(0, 60),
+        text: '\u7EC4\u4EF6\uFF1A' + cname + '\uFF08ID: ' + cid + '\uFF09'
+      };
+      addRefToDraft(ref);
+    }
+    setTimeout(function() {
+      var ut = document.getElementById('notesUserText');
+      if (ut) { ut.focus(); ut.placeholder = '\u8BF7\u8F93\u5165\u5173\u4E8E\u8BE5\u7EC4\u4EF6\u7684\u5206\u6790\u9700\u6C42...'; }
+    }, 100);
+  };
   header.appendChild(btn);
 }
 

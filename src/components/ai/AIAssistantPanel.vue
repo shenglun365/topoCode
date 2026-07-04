@@ -36,7 +36,7 @@ const chatSession = useChatSession()
 
 const DEFAULT_SYSTEM_PROMPT = [
   '你是 TopoCode 使用助手，仅回答关于 TopoCode 软件功能和使用方法的问题。',
-  '用户可输入 /help 或 /帮助 查看全部可用命令和完整使用指南。',
+  '应用内AI助手，负责解答软件使用问题。输入/help 查看可用指令',
   '对于用户关于所分析项目的架构/代码/设计等具体研究问题，请回复：',
   '> 这个问题需要结合您的项目上下文进行深入分析，',
   '> 请通过 **Web AI 助手** 进行探讨：',
@@ -65,6 +65,36 @@ const HELP_TEXT = [
   '- **流水线模式**：`/pipeline` 一键完成全部分析流程',
 ].join('\n')
 
+const CODE_HELP_TEXT = [
+  '## 代码解析使用指南',
+  '',
+  '### 1. 浏览项目文件',
+  '- 左侧**文件树**展示项目的目录和文件结构，目录逐层展开（懒加载）',
+  '- 点击文件名在右侧查看源码，支持语法高亮',
+  '- 文件树顶部搜索框可按文件名快速筛选',
+  '',
+  '### 2. 创建分析任务',
+  '- 点击工具栏 **"新建任务"** 打开任务配置表单',
+  '- 选择要扫描的**语言类型**（Python、JavaScript 等）和**目录范围**',
+  '- 选择**报告类型**：依赖分析（dependency）、调用链分析（call chain）',
+  '- 点击确定后任务自动进入队列执行，可在任务列表查看进度',
+  '',
+  '### 3. 管理任务',
+  '- 任务列表中可查看各任务的状态、进度和结果',
+  '- 支持对已完成/失败的任务**重新执行**，对运行中的任务**停止**',
+  '- 点击任务行的**"结构分析"** 跳转至架构分析页面查看详细报告',
+  '',
+  '### 4. 数据管理',
+  '- **导入分析结果**：工具栏 "导入" 按钮，选择之前导出的 .zip 存档',
+  '- **导出分析结果**：工具栏 "导出" 按钮，勾选要导出的任务后下载',
+  '- **校验文件**：工具栏 "校验" 按钮，检查文件 hash 是否与分析数据一致',
+  '- **清理缓存**：工具栏 ⚙️ 菜单 → 清理缓存，按类别选择性清除',
+  '',
+  '### 5. 更多帮助',
+  '- 关于项目架构的深入分析，请切换至**架构分析**功能组',
+  '- 在任意页面可向本 AI 助手提问软件使用问题',
+].join('\n')
+
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -90,7 +120,23 @@ function escapeHtml(text: string): string {
 
 function renderMarkdown(text: string): string {
   if (!text) return ''
-  return md.render(text)
+  const html = md.render(text)
+  return html.replace(
+    /<code>(\/[^<]+)<\/code>/g,
+    (_, cmd) => `<code class="cmd-click" data-cmd="${cmd.replace(/"/g, '&quot;')}">${cmd}</code>`
+  )
+}
+
+function handleMessagesClick(e: MouseEvent) {
+  const codeEl = (e.target as HTMLElement).closest('.cmd-click') as HTMLElement | null
+  if (!codeEl) return
+  const cmd = codeEl.getAttribute('data-cmd')
+  if (!cmd) return
+  userInput.value = cmd
+  nextTick(() => {
+    const ta = document.querySelector('.ai-textarea') as HTMLTextAreaElement | null
+    ta?.focus()
+  })
 }
 
 function formatMessageContent(msg: Message): string {
@@ -114,6 +160,8 @@ const userInput = ref('')
 
 /* ---- 指令联想 ---- */
 const CMD_HISTORY_KEY = 'ai-command-history'
+const ARCH_CMDS = ['/select', '/presummary', '/analyze', '/analyze_components', '/overview', '/pipeline', '/retry']
+
 const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/select --l3',
   '/presummary', '/presummary --force',
   '/analyze', '/analyze --force', '/analyze_components', '/analyze_components --force',
@@ -206,6 +254,34 @@ function resolveTaskId(): string | null {
 }
 const hasAnalysisContext = computed(() => !!resolveTaskId())
 
+const pageLabel = computed(() => {
+  if (currentPage.value === 'code') return '代码解析'
+  if (currentPage.value === 'analysis') return '架构分析'
+  return ''
+})
+
+function buildContextMessage(): string {
+  const parts: string[] = []
+  if (currentPage.value === 'code') {
+    parts.push('代码解析')
+  } else if (currentPage.value === 'analysis') {
+    parts.push('架构分析')
+  } else {
+    parts.push('自由对话')
+  }
+  const projectName = projectStore.selectedProject?.name
+  if (projectName) {
+    parts.push(`项目「${projectName}」`)
+  }
+  if (currentPage.value === 'analysis') {
+    const taskName = projectStore.activeTab?.title
+    if (taskName) {
+      parts.push(`任务「${taskName}」`)
+    }
+  }
+  return `当前上下文：${parts.join(' → ')}`
+}
+
 // 会话 key 变化 → 自动保存旧会话 + 加载新会话
 watch(sessionKey, (newKey, oldKey) => {
   if (!newKey) return
@@ -217,6 +293,7 @@ watch(sessionKey, (newKey, oldKey) => {
   if (saved.length > 0) {
     messages.value = saved as Message[]
   } else {
+    addMessage('system', buildContextMessage())
     addMessage('system', t('ai.assistantWelcome'))
     addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
   }
@@ -294,6 +371,15 @@ async function handleSend() {
   // /cmd 指令检测
   if (text.startsWith('/')) {
     recordCommand(text)
+
+    // 代码解析页拦截结构分析指令
+    if (currentPage.value === 'code' && ARCH_CMDS.some(cmd => text.toLowerCase().startsWith(cmd))) {
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('system', '该指令属于**架构分析**功能组。请点击左侧导航栏的「架构分析」图标切换页面后使用。')
+      return
+    }
+
     // /select — 切换组件选择模式 或 按条件自动选取
     const selectRe = /^\/select(?:\s+(.+))?$/i
     const selectMatch = text.match(selectRe)
@@ -426,7 +512,8 @@ async function handleSend() {
     if (/^\/help$/i.test(text) || text === '/帮助') {
       addMessage('user', text)
       userInput.value = ''
-      addMessage('assistant', HELP_TEXT)
+      const helpContent = currentPage.value === 'code' ? CODE_HELP_TEXT : HELP_TEXT
+      addMessage('assistant', helpContent)
       return
     }
     // /overview — 生成整体架构概览
@@ -560,6 +647,9 @@ function clearChat() {
   const key = sessionKey.value
   if (key) chatSession.clearSession(key)
   messages.value = []
+  addMessage('system', buildContextMessage())
+  addMessage('system', t('ai.assistantWelcome'))
+  addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
 }
 
 onMounted(() => {
@@ -572,6 +662,7 @@ onMounted(() => {
       }
     }
     if (messages.value.length === 0) {
+      addMessage('system', buildContextMessage())
       addMessage('system', t('ai.assistantWelcome'))
       addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
     }
@@ -608,10 +699,22 @@ onMounted(() => {
 
     <!-- 对话区域 -->
     <template v-else>
+      <!-- 上下文条 -->
+      <div
+        v-if="currentPage === 'code' || currentPage === 'analysis'"
+        class="ai-context-bar"
+      >
+        <span class="ai-context-label">{{ pageLabel }}</span>
+        <span
+          v-if="projectStore.selectedProject?.name"
+          class="ai-context-project"
+        >{{ projectStore.selectedProject.name }}</span>
+      </div>
       <!-- 消息列表 -->
       <div
         ref="scrollRef"
         class="ai-messages"
+        @click="handleMessagesClick"
       >
         <div
           v-if="hasMoreMessages"
@@ -762,6 +865,24 @@ onMounted(() => {
   text-decoration: underline;
   cursor: pointer;
   margin-top: 4px;
+}
+
+.ai-context-bar {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.ai-context-label {
+  font-weight: 600;
+}
+.ai-context-project {
+  color: var(--accent);
 }
 
 .ai-messages {
@@ -1013,6 +1134,15 @@ onMounted(() => {
   font-size: 0.85em;
   background: var(--bg-tertiary);
   padding: 0.1em 0.3em; border-radius: 3px;
+}
+.ai-message-assistant .ai-message-bubble :deep(code.cmd-click) {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.ai-message-assistant .ai-message-bubble :deep(code.cmd-click:hover) {
+  background: var(--accent-bg, #e0e7ff);
 }
 .ai-message-assistant .ai-message-bubble :deep(pre) {
   background: var(--bg-tertiary); border: 1px solid var(--border);

@@ -41,3 +41,5 @@ tmp-module-build/
 
 # topocode project analysis cache
 .topocode/
+doc/
+docs/
