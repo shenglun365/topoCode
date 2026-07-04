@@ -2361,7 +2361,71 @@ async def execute_draft(request: Request):
                     (json.dumps(meta, ensure_ascii=False), now, session_id),
                 )
 
-        return {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
+        # 触发 AI 自动回复
+        assistant_msg_id = None
+        try:
+            sess_row = multi_db.sessions_db.fetchone(
+                "SELECT metadata FROM llm_sessions WHERE id = ?", (session_id,)
+            )
+            model_id = ""
+            if sess_row:
+                sess_meta = json.loads(sess_row["metadata"]) if sess_row["metadata"] else {}
+                model_id = sess_meta.get("model_id", "")
+            if not model_id:
+                default_row = multi_db.main_db.fetchone(
+                    "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
+                )
+                if default_row and default_row["value"]:
+                    model_id = default_row["value"]
+            if model_id:
+                model_cfg = multi_db.main_db.fetchone(
+                    "SELECT * FROM model_configs WHERE id = ?", (model_id,)
+                )
+                if model_cfg:
+                    md = dict(model_cfg)
+                    base_url = md.get("url", "").rstrip("/")
+                    if base_url.endswith("/v1"):
+                        base_url = base_url[:-3]
+                    msgs = multi_db.sessions_db.fetchall(
+                        "SELECT role, content FROM llm_messages WHERE session_id = ? ORDER BY created_at",
+                        (session_id,),
+                    )
+                    context_messages = [{"role": m["role"], "content": m["content"]} for m in msgs]
+                    import requests as _req
+                    payload = {
+                        "model": md.get("model", ""),
+                        "messages": context_messages,
+                        "stream": False,
+                        "max_tokens": md.get("max_tokens", 16384),
+                    }
+                    if md.get("temperature") is not None:
+                        payload["temperature"] = md["temperature"]
+                    _headers = {"Content-Type": "application/json"}
+                    api_key = md.get("api_key", "")
+                    if api_key:
+                        _headers["Authorization"] = f"Bearer {api_key}"
+                    timeout = md.get("timeout", 300)
+                    resp = _req.post(
+                        f"{base_url}/v1/chat/completions",
+                        json=payload, headers=_headers, timeout=timeout,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choices = data.get("choices", [])
+                        if choices and choices[0].get("message", {}).get("content"):
+                            assistant_content = choices[0]["message"]["content"]
+                            assistant_msg_id = uuid.uuid4().hex[:16]
+                            multi_db.sessions_db.execute(
+                                "INSERT INTO llm_messages (id, session_id, role, content, created_at) VALUES (?, ?, 'assistant', ?, ?)",
+                                (assistant_msg_id, session_id, assistant_content, now),
+                            )
+        except Exception as e:
+            logger.warning(f"[execute-draft] auto-reply failed: {e}")
+
+        result = {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
+        if assistant_msg_id:
+            result["assistantMsgId"] = assistant_msg_id
+        return result
     except HTTPException:
         raise
     except Exception as e:

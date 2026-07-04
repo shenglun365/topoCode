@@ -493,6 +493,15 @@ const S = {
 };
 let g_cy = null;         // Cytoscape instance
 
+// 原子状态更新：合并变更到 S 并自动同步 URL，同时保持 cid/docCommId 一致
+function updateS(changes) {
+  if ('cid' in changes && !('docCommId' in changes)) {
+    changes.docCommId = changes.cid;
+  }
+  Object.assign(S, changes);
+  syncURL();
+}
+
 // 节点手动隐藏/显示跟踪（与中心模式共存，最后操作优先）
 var _manualHidden = new Set();
 var _manualShown = new Set();
@@ -500,6 +509,7 @@ var _manualShown = new Set();
 // 中心模式过滤：显示中心节点 + 与任一中心节点相连的节点
 function applyCenterMode() {
   if (!g_cy) return;
+  g_cy.nodes().removeClass('center-highlight');
   if (S.centerNodes.length === 0) {
     g_cy.nodes().show();
     _manualHidden.forEach(function(id) {
@@ -520,6 +530,10 @@ function applyCenterMode() {
     if (_manualHidden.has(id)) { n.hide(); return; }
     if (_manualShown.has(id)) { n.show(); return; }
     if (visible.has(id)) { n.show(); } else { n.hide(); }
+  });
+  S.centerNodes.forEach(function(cid) {
+    var cn = g_cy.getElementById(cid);
+    if (cn.length) cn.addClass('center-highlight');
   });
   GraphView._refreshFilter();
 }
@@ -721,8 +735,8 @@ function clampFloatPosition(floatId) {
 const Layout = {
   init() {
     var self = this;
-    document.getElementById('toggleLeft').onclick = function() { S.left = !S.left; self.apply(); syncURL(); };
-    document.getElementById('toggleRight').onclick = function() { S.right = !S.right; self.apply(); syncURL(); };
+    document.getElementById('toggleLeft').onclick = function() { updateS({left: !S.left}); self.apply(); };
+    document.getElementById('toggleRight').onclick = function() { updateS({right: !S.right}); self.apply(); };
     var resizer = document.getElementById('docResizer');
     var left = document.getElementById('docLeft');
     var right = document.getElementById('docRight');
@@ -956,8 +970,7 @@ const LeftBreadcrumb = {
           var u = new URLSearchParams();
           u.set('taskId', g_taskId);
           u.set('docId', 'overall-' + g_taskId);
-          S.page = 'doc';
-          S.filePath = '';
+          updateS({page: 'doc', filePath: ''});
           history.replaceState(null, '', '/doc?' + u.toString());
           loadDoc('overall-' + g_taskId);
           return;
@@ -968,8 +981,7 @@ const LeftBreadcrumb = {
           var cidET = (cid.indexOf('-incl-') >= 0) ? 'INCLUDE' :
                        (cid.indexOf('-call-') >= 0) ? 'CALL' :
                        cur.get('edgeType') || curEt;
-          S.page = 'doc';
-          S.filePath = '';
+          updateS({page: 'doc', filePath: ''});
           // 写入正确的 edgeType 到 URL
           var u2 = new URLSearchParams(location.search);
           u2.set('edgeType', cidET);
@@ -988,9 +1000,7 @@ const LeftBreadcrumb = {
           if (backPc) u.set('pc', backPc); else u.delete('pc');
           u.set('cn', backCn || backCid);
           u.set('edgeType', backEt);
-          S.page = 'doc';
-          S.filePath = '';
-          syncURL();
+          updateS({page: 'doc', filePath: ''});
           history.replaceState(null, '', '/doc?' + u.toString());
           S.docChain = [];
           loadCommunityDoc(g_taskId, backCid, backEt);
@@ -1082,10 +1092,7 @@ const DocContent = {
         a.href = '#';
         a.onclick = function(e) {
           e.preventDefault();
-          S.cid = parts[1];
-          S.et = parts[0];
-          S.tab = 'graph';
-          syncURL();
+          updateS({cid: parts[1], et: parts[0], tab: 'graph'});
           RightPanel.renderPanel();
           RightPanel.switchTab('graph');
           RightPanel.loadViz();
@@ -1205,9 +1212,8 @@ const DocContent = {
           e.preventDefault(); e.stopPropagation();
           console.log('[hd-click] cid=' + cid + ' et=' + et + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' hText=' + hText.slice(0, 30));
           if (cid === S.cid || !cid) return;
-          S.gran = 'component'; S.et = et; S.depth = 1;
           S.commParent = cid;
-          S.cid = cid;
+          updateS({gran: 'component', et: et, depth: 1, cid: cid, tab: 'graph'});
           // Preserve existing path: push if not already in stack
           var found = false;
           for (var i = 0; i < S.commStack.length; i++) {
@@ -1218,8 +1224,6 @@ const DocContent = {
           }
           if (!found) S.commStack.push({cid: cid, name: hText});
           console.log('[hd-click] after push S.commStack=' + JSON.stringify(S.commStack.map(function(x){return x.cid+':'+(x.name||'').slice(0,20)})));
-          S.tab = 'graph';
-          syncURL();
           RightPanel.switchTab('graph');
           RightPanel.renderPanel();
         };
@@ -1399,10 +1403,8 @@ const FileList = {
         if (e.target.closest('.file-action-link')) return;
         var fp = this.dataset.path;
         var fcid = this.dataset.commid;
-        S.page = 'file-summary';
-        S.filePath = fp;
         S.fileCommId = fcid;
-        syncURL();
+        updateS({page: 'file-summary', filePath: fp});
         FilePreview.render(fp, fcid);
         LeftBreadcrumb.render();
         LeftToc.render(fcid);
@@ -1413,10 +1415,8 @@ const FileList = {
         e.stopPropagation();
         var fp = this.dataset.path;
         var fcid = this.dataset.commid;
-        S.page = 'file-summary';
-        S.filePath = fp;
         S.fileCommId = fcid;
-        syncURL();
+        updateS({page: 'file-summary', filePath: fp});
         FilePreview.render(fp, fcid);
         LeftBreadcrumb.render();
         LeftToc.render(fcid);
@@ -1503,13 +1503,12 @@ const RightBreadcrumb = {
         if (idx < 0) {
           S.commStack = [];
           S.commParent = '';
-          S.cid = '';
+          updateS({cid: ''});
         } else {
           S.commStack = S.commStack.slice(0, idx + 1);
           S.commParent = S.commStack[idx].cid;
-          S.cid = S.commParent;
+          updateS({cid: S.commParent});
         }
-        syncURL();
         RightPanel.refresh();
       };
     });
@@ -1521,8 +1520,7 @@ const RightPanel = {
   _data: null, // cached community-children for current level
 
   switchTab(tab) {
-    S.tab = tab;
-    syncURL();
+    updateS({tab});
     document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
     var map = { graph: 'tabGraph', heatmap: 'tabHeatmap' };
     var el = document.getElementById(map[tab]);
@@ -1615,8 +1613,7 @@ const RightPanel = {
         if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
           S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
         }
-        S.cid = '';
-        syncURL();
+        updateS({cid: '', gran: S.gran});
         RightPanel.loadViz();
         RightPanel.renderPanel();
       };
@@ -1637,10 +1634,9 @@ const RightPanel = {
         if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
           S.gran = 'component';
         }
-        S.cid = '';
         S.commParent = '';
         S.commStack = [];
-        syncURL();
+        updateS({cid: '', et: S.et, gran: S.gran});
         RightPanel.renderPanel();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
@@ -1649,8 +1645,7 @@ const RightPanel = {
     });
     var ds = document.getElementById('depthSelect');
     if (ds) ds.onchange = function() {
-      S.depth = parseInt(this.value) || 1;
-      syncURL();
+      updateS({depth: parseInt(this.value) || 1});
       RightPanel.loadViz();
     };
     var ts = document.getElementById('layoutTimeoutSelect');
@@ -1691,11 +1686,9 @@ const RightPanel = {
       el.onclick = function() {
         var cid = this.dataset.cid;
         var name = this.dataset.name;
-        S.cid = cid;
-        S.depth = 1;
         S.commParent = cid;
         S.commStack.push({cid: cid, name: name});
-        syncURL();
+        updateS({cid: cid, depth: 1});
         RightPanel.loadCommTree();
         RightPanel.loadViz();
         RightBreadcrumb.render();
@@ -1779,6 +1772,7 @@ const GraphView = {
           { selector: 'edge', style: { width: 1, 'line-color': '#999', 'target-arrow-color': '#999', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
           { selector: 'edge[bidirectional]', style: { 'source-arrow-shape': 'triangle', 'source-arrow-color': '#999' } },
           { selector: 'node:selected', style: { 'border-width': 2, 'border-color': '#ff6b6b' } },
+          { selector: '.center-highlight', style: { 'border-width': 4, 'border-color': '#4d6bfe', 'border-opacity': 1 } },
         ],
         layout: null,
         userZoomingEnabled: true, userPanningEnabled: true, minZoom: 0.15, maxZoom: 4,
@@ -1890,23 +1884,20 @@ const GraphView = {
         console.log('[dbclick] nodeId=' + nodeId.slice(0,30) + ' isExternal=' + extNode + ' hasChildren=' + hc + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' isComp=' + isComponent);
         if (isExternal) {
           if (!extNode && nodeId !== S.cid) {
-            S.cid = nodeId;
-            S.depth = 1;
             S.commParent = nodeId;
             S.commStack.push({cid: nodeId, name: evt.target.data('label')});
+            updateS({cid: nodeId, depth: 1});
           }
         } else if (isComponent) {
           if (nodeId === S.cid) return;
-          S.cid = nodeId;
-          S.depth = 1;
           S.commParent = nodeId;
           S.commStack.push({cid: nodeId, name: evt.target.data('label')});
-          // Leaf community → show file-level deps/calls
           if (evt.target.data('hasChildren') === false) {
-            S.gran = 'file';
+            updateS({cid: nodeId, depth: 1, gran: 'file'});
+          } else {
+            updateS({cid: nodeId, depth: 1});
           }
         }
-        syncURL();
         RightPanel.renderPanel();
         RightPanel.loadViz();
       });
@@ -2260,15 +2251,14 @@ const GraphView = {
       if (nid === S.cid) return;
       // File mode: no drill-down
       if (S.gran === 'file') return;
-      S.cid = nid;
-      S.depth = 1;
       S.commParent = nid;
       S.commStack.push({cid: nid, name: label});
       // Leaf community → show file-level deps/calls
       if (node.data('hasChildren') === false) {
-        S.gran = 'file';
+        updateS({cid: nid, depth: 1, gran: 'file'});
+      } else {
+        updateS({cid: nid, depth: 1});
       }
-      syncURL();
       RightPanel.renderPanel();
       RightPanel.loadViz();
     };
@@ -2285,7 +2275,7 @@ const GraphView = {
                S.et;
       var label = node.data('label') || commId;
       console.log('[ctx-doc] nid=' + nid + ' label=' + label.slice(0,20) + ' S.et=' + et + ' S.commStack=' + S.commStack.length);
-      S.docCommId = commId;
+      updateS({docCommId: commId});
       // Append current cn/cid to pc, then set new as cn/communityId
       var u = new URLSearchParams(location.search);
       var prevCid = u.get('communityId') || '';
@@ -2539,11 +2529,9 @@ const HeatmapView = {
       el.onclick = function() {
         var cid = this.dataset.cid;
         if (!cid) return;
-        S.cid = cid;
-        S.depth = 1;
         S.commParent = cid;
         S.commStack.push({cid: cid, name: this.textContent});
-        syncURL();
+        updateS({cid: cid, depth: 1});
         RightPanel.renderPanel();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
@@ -2650,8 +2638,8 @@ async function loadDoc(id) {
 async function loadCommunityDoc(tid, cid, et) {
   var content = document.getElementById('content');
   content.innerHTML = '<div class="loading">Loading community document...</div>';
-  S.docCommId = cid;
-  console.log('[loadDoc] tid=' + tid.slice(0,8) + ' cid=' + cid + ' et=' + et + ' S.docCommId=' + S.docCommId);
+  updateS({docCommId: cid, cid: cid, et: et});
+  console.log('[loadDoc] tid=' + tid.slice(0,8) + ' cid=' + cid + ' et=' + et + ' S.docCommId=' + S.docCommId + ' S.cid=' + S.cid);
 
   // 如果是文件页面，直接渲染文件预摘要
   if (S.page === 'file-summary') {
