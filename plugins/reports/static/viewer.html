@@ -584,12 +584,11 @@ function syncURL() {
   if (S.docCommId) p.set('communityId', S.docCommId);
   else if (curCommId) p.set('communityId', curCommId);
   else if (g_communityId) p.set('communityId', g_communityId);
-  var curET = p.get('edgeType');
-  if (curET) p.set('edgeType', curET); else if (g_edgeType) p.set('edgeType', g_edgeType);
+  p.set('edgeType', S.et);
   if (!S.left) p.set('left', '0'); else p.delete('left');
   if (!S.right) p.set('right', '0'); else p.delete('right');
   if (S.tab !== 'graph') p.set('tab', S.tab); else p.delete('tab');
-  if (S.et !== 'INCLUDE') p.set('et', S.et); else p.delete('et');
+  p.delete('et');
   if (S.cid) p.set('cid', S.cid); else p.delete('cid');
   if (S.lv) p.set('lv', S.lv); else p.delete('lv');
   if (S.size !== 10) p.set('size', String(S.size)); else p.delete('size');
@@ -735,8 +734,8 @@ function clampFloatPosition(floatId) {
 const Layout = {
   init() {
     var self = this;
-    document.getElementById('toggleLeft').onclick = function() { updateS({left: !S.left}); self.apply(); };
-    document.getElementById('toggleRight').onclick = function() { updateS({right: !S.right}); self.apply(); };
+    document.getElementById('toggleLeft').onclick = function() { S.left = !S.left; self.apply(); syncURL(); };
+    document.getElementById('toggleRight').onclick = function() { S.right = !S.right; self.apply(); syncURL(); };
     var resizer = document.getElementById('docResizer');
     var left = document.getElementById('docLeft');
     var right = document.getElementById('docRight');
@@ -970,7 +969,8 @@ const LeftBreadcrumb = {
           var u = new URLSearchParams();
           u.set('taskId', g_taskId);
           u.set('docId', 'overall-' + g_taskId);
-          updateS({page: 'doc', filePath: ''});
+          S.page = 'doc';
+          S.filePath = '';
           history.replaceState(null, '', '/doc?' + u.toString());
           loadDoc('overall-' + g_taskId);
           return;
@@ -981,7 +981,8 @@ const LeftBreadcrumb = {
           var cidET = (cid.indexOf('-incl-') >= 0) ? 'INCLUDE' :
                        (cid.indexOf('-call-') >= 0) ? 'CALL' :
                        cur.get('edgeType') || curEt;
-          updateS({page: 'doc', filePath: ''});
+          S.page = 'doc';
+          S.filePath = '';
           // 写入正确的 edgeType 到 URL
           var u2 = new URLSearchParams(location.search);
           u2.set('edgeType', cidET);
@@ -1000,7 +1001,9 @@ const LeftBreadcrumb = {
           if (backPc) u.set('pc', backPc); else u.delete('pc');
           u.set('cn', backCn || backCid);
           u.set('edgeType', backEt);
-          updateS({page: 'doc', filePath: ''});
+          S.page = 'doc';
+          S.filePath = '';
+          syncURL();
           history.replaceState(null, '', '/doc?' + u.toString());
           S.docChain = [];
           loadCommunityDoc(g_taskId, backCid, backEt);
@@ -1092,7 +1095,10 @@ const DocContent = {
         a.href = '#';
         a.onclick = function(e) {
           e.preventDefault();
-          updateS({cid: parts[1], et: parts[0], tab: 'graph'});
+          S.cid = parts[1];
+          S.et = parts[0];
+          S.tab = 'graph';
+          syncURL();
           RightPanel.renderPanel();
           RightPanel.switchTab('graph');
           RightPanel.loadViz();
@@ -1211,9 +1217,12 @@ const DocContent = {
         ib.onclick = function(e) {
           e.preventDefault(); e.stopPropagation();
           console.log('[hd-click] cid=' + cid + ' et=' + et + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' hText=' + hText.slice(0, 30));
-          if (cid === S.cid || !cid) return;
+          if (!cid) return;
           S.commParent = cid;
-          updateS({gran: 'component', et: et, depth: 1, cid: cid, tab: 'graph'});
+          S.gran = 'component'; S.et = et; S.depth = 1;
+          S.cid = cid;
+          S.tab = 'graph';
+          syncURL();
           // Preserve existing path: push if not already in stack
           var found = false;
           for (var i = 0; i < S.commStack.length; i++) {
@@ -1403,8 +1412,10 @@ const FileList = {
         if (e.target.closest('.file-action-link')) return;
         var fp = this.dataset.path;
         var fcid = this.dataset.commid;
+        S.page = 'file-summary';
+        S.filePath = fp;
         S.fileCommId = fcid;
-        updateS({page: 'file-summary', filePath: fp});
+        syncURL();
         FilePreview.render(fp, fcid);
         LeftBreadcrumb.render();
         LeftToc.render(fcid);
@@ -1415,8 +1426,10 @@ const FileList = {
         e.stopPropagation();
         var fp = this.dataset.path;
         var fcid = this.dataset.commid;
+        S.page = 'file-summary';
+        S.filePath = fp;
         S.fileCommId = fcid;
-        updateS({page: 'file-summary', filePath: fp});
+        syncURL();
         FilePreview.render(fp, fcid);
         LeftBreadcrumb.render();
         LeftToc.render(fcid);
@@ -1503,12 +1516,13 @@ const RightBreadcrumb = {
         if (idx < 0) {
           S.commStack = [];
           S.commParent = '';
-          updateS({cid: ''});
+          S.cid = '';
         } else {
           S.commStack = S.commStack.slice(0, idx + 1);
           S.commParent = S.commStack[idx].cid;
-          updateS({cid: S.commParent});
+          S.cid = S.commParent;
         }
+        syncURL();
         RightPanel.refresh();
       };
     });
@@ -1520,7 +1534,8 @@ const RightPanel = {
   _data: null, // cached community-children for current level
 
   switchTab(tab) {
-    updateS({tab});
+    S.tab = tab;
+    syncURL();
     document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
     var map = { graph: 'tabGraph', heatmap: 'tabHeatmap' };
     var el = document.getElementById(map[tab]);
@@ -1613,7 +1628,9 @@ const RightPanel = {
         if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
           S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
         }
-        updateS({cid: '', gran: S.gran});
+        S.cid = '';
+        syncURL();
+        RightPanel.loadViz();
         RightPanel.loadViz();
         RightPanel.renderPanel();
       };
@@ -1636,7 +1653,8 @@ const RightPanel = {
         }
         S.commParent = '';
         S.commStack = [];
-        updateS({cid: '', et: S.et, gran: S.gran});
+        S.cid = '';
+        syncURL();
         RightPanel.renderPanel();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
@@ -2945,6 +2963,7 @@ function removeSelBar() {
       var p = orig.apply(this, arguments);
       if (p && p.then) {
         p.then(function() { setTimeout(addNoteButtonToDoc, 50); });
+        return p;
       } else {
         setTimeout(addNoteButtonToDoc, 100);
       }
