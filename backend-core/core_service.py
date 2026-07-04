@@ -1227,7 +1227,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.testModel")
     async def test_model(id: str):
-        """测试模型连接 — 真实调用 LLM API（云端发 chat 请求验证 apiKey）"""
+        """测试模型连接 — 自适应 API Key，如实返回服务端错误"""
         model = main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (id,))
         if not model:
             raise ValueError(f"Model not found: {id}")
@@ -1242,13 +1242,10 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             api_key = model.get('api_key')
             if api_key:
                 headers['Authorization'] = f"Bearer {api_key}"
+
             if model.get('provider') == 'ollama':
                 resp = req.post(f"{base}/api/tags", timeout=10)
-                if resp.status_code != 200:
-                    return {"status": "error", "latency": 0, "error": f"Ollama API {resp.status_code}"}
             else:
-                if not api_key:
-                    return {"status": "error", "latency": 0, "error": "未设置 API Key"}
                 payload = {
                     "model": model["model"],
                     "messages": [{"role": "user", "content": "test"}],
@@ -1257,19 +1254,28 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 }
                 resp = req.post(f"{base}/v1/chat/completions",
                                 json=payload, headers=headers, timeout=15)
-                if resp.status_code == 401:
-                    return {"status": "error", "latency": 0, "error": "API Key 无效 (401)"}
-                if resp.status_code != 200:
-                    return {"status": "error", "latency": 0, "error": f"API {resp.status_code}"}
+
             latency = int((__import__('time').time() - start) * 1000)
-            try:
-                main_db.update("model_configs", {"status": "connected"}, "id = ?", (id,))
-            except Exception:
-                pass
-            return {"status": "connected", "latency": latency, "model": model["model"]}
+
+            if resp.status_code == 200:
+                try:
+                    main_db.update("model_configs", {"status": "connected"}, "id = ?", (id,))
+                except Exception:
+                    pass
+                return {"status": "connected", "latency": latency, "model": model["model"]}
+            else:
+                msg = f"HTTP {resp.status_code}"
+                try:
+                    body = resp.json()
+                    if "error" in body:
+                        msg = str(body["error"])
+                    elif "message" in body:
+                        msg = str(body["message"])
+                except Exception:
+                    msg = resp.text[:200] if resp.text else msg
+                return {"status": "error", "latency": latency, "error": msg}
+
         except Exception as e:
-            model['status'] = 'error'
-            main_db.update("model_configs", {"status": "error"}, "id = ?", (id,))
             return {"status": "error", "latency": 0, "error": str(e)}
 
     @server.register("settings.getAgents")

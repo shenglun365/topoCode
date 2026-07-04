@@ -14,11 +14,23 @@ tree-sitter-javascript==0.23.1
 tree-sitter-typescript==0.23.2
 tree-sitter-go==0.23.4
 tree-sitter-java==0.23.5
+tree-sitter-rust>=0.23
+tree-sitter-c-sharp>=0.23
+tree-sitter-swift>=0.23
+tree-sitter-ruby>=0.23
+tree-sitter-kotlin>=0.23
+tree-sitter-php>=0.23
+tree-sitter-dart-orchard>=0.23
+tree-sitter-scala>=0.23
+tree-sitter-lua>=0.23
+tree-sitter-luau>=0.23
+tree-sitter-objc>=0.23
 
 # 图计算 (调用链/依赖图/知识图谱)
 networkx==3.4.2
 python-louvain==0.16
 leidenalg>=0.10
+python-igraph>=0.11
 numpy>=1.24,<3.0
 
 # HTTP 客户端 (PlantUML 远程渲染)
@@ -38,3 +50,12 @@ diskcache==5.6.3
 
 # 列式数据库
 duckdb>=0.10.0
+
+# 系统监控 (进程资源管理)
+psutil>=6.0
+
+# TOML 解析 (Python < 3.11 回退)
+tomli>=2.0
+
+# 开发及测试依赖
+pytest>=8.0

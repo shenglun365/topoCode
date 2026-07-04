@@ -307,17 +307,17 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
 
 
 def _bulk_insert(project_db, table: str, rows: list[dict]):
-    """通用批量插入，自动推断列名"""
+    """通用批量插入，自动推断列名（收集所有行的列名并集）"""
     if not rows:
         return
-    col_names = list(rows[0].keys())
+    col_names = list({k for row in rows for k in row.keys()})
     placeholders = ",".join(["?"] * len(col_names))
     cols = ",".join(f'"{c}"' for c in col_names)
     sql = f"INSERT OR REPLACE INTO {table} ({cols}) VALUES ({placeholders})"
     batch_size = 500
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
-        params = [tuple(r.get(c, "") for c in col_names) for r in batch]
+        params = [tuple(r.get(c) for c in col_names) for r in batch]
         project_db.executemany(sql, params)
     project_db.conn.commit()
 
