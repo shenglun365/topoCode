@@ -48,12 +48,13 @@ BUILTIN_SKILLS: dict[str, Skill] = {
         title="架构探索",
         description="浏览社区层级、查看社区分析详情和结构图",
         icon="🏗",
-        tools=[
-            "web_get_architecture_overview",
-            "web_get_community_tree",
-            "web_get_community_detail",
-            "web_get_community_graph",
-        ],
+            tools=[
+                "web_get_architecture_overview",
+                "web_get_community_tree",
+                "web_get_community_detail",
+                "web_get_community_graph",
+                "web_set_session_title",
+            ],
         context_prompt=(
             "项目架构按社区层级组织（L0-L5），"
             "用户可以查询各层级的社区详情、子图结构和组件关系。"
@@ -67,7 +68,7 @@ BUILTIN_SKILLS: dict[str, Skill] = {
         icon="📄",
         tools=["web_read_file", "web_get_file_summary", "web_get_community_files"],
         context_prompt="用户可以读取项目源码文件和文件摘要。",
-        default=False,
+        default=True,
     ),
     "symbol_analyzer": Skill(
         name="symbol_analyzer",

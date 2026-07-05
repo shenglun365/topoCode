@@ -21,6 +21,28 @@ logger = logging.getLogger(__name__)
 
 MAX_RESULT_LENGTH = 8000
 
+
+def _is_empty_result(result: dict) -> bool:
+    """检测工具返回结果是否为空（无有效数据），用于触发跳过提示"""
+    if not result:
+        return True
+    if result.get("found") is False:
+        return True
+    if result.get("total") == 0 and "projects" in result:
+        return True
+    if result.get("total") == 0 and "tasks" in result:
+        return True
+    if not result.get("nodes") and not result.get("edges") and ("nodes" in result or "edges" in result):
+        return True
+    if result.get("levels") is not None and len(result.get("levels", [])) == 0:
+        return True
+    if result.get("files") is not None and len(result.get("files", [])) == 0:
+        return True
+    if result.get("data") is not None and len(result.get("data", [])) == 0:
+        return True
+    return False
+
+
 REF_TYPES = {
     "project", "task", "community_doc", "community_graph",
     "source_file", "symbol", "ast_node", "subgraph", "archive",
@@ -33,28 +55,11 @@ WEB_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "web_list_projects",
-            "description": "列出所有已分析的项目",
+            "description": "列出所有已分析的项目（含名称、ID、根路径、创建时间）",
             "parameters": {
                 "type": "object",
                 "properties": {},
                 "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "web_get_project",
-            "description": "获取单个项目的详细信息",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "projectId": {
-                        "type": "string",
-                        "description": "项目 ID",
-                    },
-                },
-                "required": ["projectId"],
             },
         },
     },
@@ -313,6 +318,21 @@ WEB_TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_set_session_title",
+            "description": "当你理解了用户的问题和对话主题后，调用此工具为会话设置一个有意义的标题（10字以内）。调用一次即可。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sessionId": {"type": "string", "description": "当前会话 ID"},
+                    "title": {"type": "string", "description": "会话标题（10字以内）"},
+                },
+                "required": ["sessionId", "title"],
+            },
+        },
+    },
 ]
 
 WEB_TOOL_MAP = {t["function"]["name"]: t for t in WEB_TOOL_DEFINITIONS}
@@ -334,8 +354,7 @@ class WebToolExecutor:
         self.multi_db = multi_db
         self._handlers = {
             "web_list_projects": self._list_projects,
-            "web_get_project": self._get_project,
-            "web_get_task_list": self._get_task_list,
+        "web_get_task_list": self._get_task_list,
             "web_get_architecture_overview": self._get_architecture_overview,
             "web_get_community_tree": self._get_community_tree,
             "web_get_community_detail": self._get_community_detail,
@@ -348,56 +367,50 @@ class WebToolExecutor:
             "web_get_call_chain": self._get_call_chain,
             "web_search_archives": self._search_archives,
             "web_save_archive": self._save_archive,
+            "web_set_session_title": self._set_session_title,
         }
 
     def execute(self, tool_name: str, args: dict) -> dict:
         handler = self._handlers.get(tool_name)
         if not handler:
-            return {"error": f"Unknown tool: {tool_name}"}
+            return {"error": f"Unknown tool: {tool_name}", "skip": True}
         try:
             result = handler(args)
             result_str = json.dumps(result, ensure_ascii=False, default=str)
             if len(result_str) > MAX_RESULT_LENGTH:
                 result_str = result_str[:MAX_RESULT_LENGTH] + "\n...(truncated)"
                 return {"content": result_str, "truncated": True}
+            # 空结果标记：让 LLM 知道此路径无有效数据，跳过
+            if _is_empty_result(result):
+                result["_skip"] = True
+                result["_message"] = "此工具未返回有效数据，请跳过此路径，尝试其他方法"
             return result
         except Exception as e:
             logger.error(f"[WebToolExecutor] {tool_name} failed: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "skip": True, "_message": f"工具 {tool_name} 执行失败，请跳过此路径"}
 
     def _resolve_task(self, task_id: str) -> tuple:
         task = self.multi_db.main_db.fetchone(
             "SELECT project_id FROM analysis_tasks WHERE id = ?", (task_id,)
         )
         if not task:
+            task = self.multi_db.main_db.fetchone(
+                "SELECT project_id FROM analysis_tasks WHERE id LIKE ?", (task_id + '%',)
+            )
+        if not task:
             raise ValueError(f"Task {task_id} not found")
         return task["project_id"], self.multi_db.get_project_db(task["project_id"])
 
     def _list_projects(self, args: dict) -> dict:
         rows = self.multi_db.main_db.fetchall(
-            "SELECT id, name, root_path FROM projects ORDER BY updated_at DESC"
+            "SELECT id, name, root_path, created_at FROM projects ORDER BY updated_at DESC"
         )
         return {
             "projects": [
-                {"id": r["id"], "name": r["name"], "rootPath": r["root_path"]}
+                {"id": r["id"], "name": r["name"], "rootPath": r["root_path"], "createdAt": r["created_at"]}
                 for r in rows
             ],
             "total": len(rows),
-        }
-
-    def _get_project(self, args: dict) -> dict:
-        pid = args.get("projectId", "")
-        row = self.multi_db.main_db.fetchone(
-            "SELECT id, name, root_path, created_at FROM projects WHERE id = ?",
-            (pid,),
-        )
-        if not row:
-            return {"error": f"Project {pid} not found"}
-        return {
-            "id": row["id"],
-            "name": row["name"],
-            "rootPath": row["root_path"],
-            "createdAt": row["created_at"],
         }
 
     def _get_task_list(self, args: dict) -> dict:
@@ -692,6 +705,20 @@ class WebToolExecutor:
         )
         return {"id": aid, "ok": True}
 
+    def _set_session_title(self, args: dict) -> dict:
+        session_id = args.get("sessionId", "")
+        title = args.get("title", "").strip()
+        if not session_id or not title:
+            return {"error": "sessionId and title are required", "skip": True}
+        title = title[:20]
+        from datetime import datetime as _dt
+        now = _dt.now().isoformat()
+        self.multi_db.sessions_db.execute(
+            "UPDATE llm_sessions SET title = ?, updated_at = ? WHERE id = ?",
+            (title, now, session_id),
+        )
+        return {"ok": True, "title": title}
+
 
 # ==================== 引用解析 ====================
 
@@ -710,6 +737,18 @@ def resolve_refs_to_context(refs: list[dict], multi_db: MultiDBManager) -> str:
                     parts.append(text)
             except Exception as e:
                 parts.append(f"引用「{label}」加载失败: {e}")
+        elif not t:
+            # draft refs（无 type 字段）：直接使用 label + text
+            meta = []
+            if ref.get("projectName"): meta.append(f"项目:{ref['projectName']}")
+            elif ref.get("projectId"): meta.append(f"项目:{ref['projectId'][:12]}")
+            if ref.get("taskId"): meta.append(f"任务:{ref['taskId'][:10]}")
+            if ref.get("componentId"): meta.append(f"组件:{ref['componentId'][:10]}")
+            if label: meta.append(f"来源:{label}")
+            s = " | ".join(meta)
+            text = ref.get("text", "")
+            if text: s += "\n" + text
+            if s: parts.append(s)
         else:
             parts.append(f"引用「{label}」")
     return "\n\n".join(parts) if parts else ""

@@ -13,7 +13,7 @@ export const useStatusStore = defineStore('status', () => {
   const encoding = ref('UTF-8')
   const zoom = ref(100)
   const httpPort = ref(3456)
-  const httpHost = ref('127.0.0.1')
+  const httpHost = ref('0.0.0.0')
 
   // Getters
   const statusBar = reactive<StatusBarState>({

@@ -58,7 +58,7 @@ class BackendApp:
         os.makedirs(data_dir, exist_ok=True)
         self.data_dir = data_dir
         self.http_port = http_port
-        self.http_host = http_host or '127.0.0.1'
+        self.http_host = http_host or '0.0.0.0'
         self.multi_db = MultiDBManager(data_dir)
 
         dealer_port = int(os.environ.get('ZMQ_DEALER_PORT', '5671'))

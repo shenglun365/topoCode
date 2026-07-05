@@ -47,6 +47,7 @@ app.add_middleware(
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # ==================== PlantUML 缓存 ====================
@@ -167,11 +168,16 @@ async def get_doc(doc_id: str):
         )
         if not doc:
             raise HTTPException(404, f"Document {doc_id} not found")
+        proj_row = multi_db.main_db.fetchone(
+            "SELECT name FROM projects WHERE id = ?", (pid,)
+        )
+        project_name = proj_row["name"] if proj_row else ""
         logger.info(f"=== Document URL: http://127.0.0.1:{http_port}/doc?docId={doc_id} ===")
         return {
             "id": doc["id"],
             "taskId": doc["task_id"],
             "projectId": pid,
+            "projectName": project_name,
             "title": doc["title"],
             "content": doc["content"],
             "createdAt": doc["created_at"],
@@ -196,11 +202,12 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
         raise HTTPException(503, "Backend not ready")
     try:
         task = multi_db.main_db.fetchone(
-            "SELECT project_id FROM analysis_tasks WHERE id = ?", (tid,)
+            "SELECT t.project_id, p.name AS project_name FROM analysis_tasks t JOIN projects p ON t.project_id = p.id WHERE t.id = ?", (tid,)
         )
         if not task:
             raise HTTPException(404, "Task not found")
         pid = task["project_id"]
+        project_name = task["project_name"]
         pdb = multi_db.get_project_db(pid)
         row = pdb.fetchone(
             "SELECT name, summary, comm_lv FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_id=?",
@@ -208,15 +215,16 @@ async def get_community_doc(task_id: str = Query(None), taskId: str = Query(None
         )
         if not row:
             name = cid
-            parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "",
+            parts = [f"# {name}", "", f"**ID**: {cid}  **\u7c7b\u578b**: {et}", "",
                      "\u8be5\u7ec4\u4ef6\u6682\u65e0 LLM \u5206\u6790\u7ed3\u679c\uff0c\u8bf7\u5148\u901a\u8fc7 AI \u52a9\u624b\u8fd0\u884c\u7ec4\u4ef6\u5206\u6790\u3002"]
         else:
             name = row.get("name") or cid
-            parts = [f"# {name}", "", f"**ID**: {cid}  **类型**: {et}", "", row.get("summary") or ""]
+            parts = [f"# {name}", "", f"**ID**: {cid}  **\u7c7b\u578b**: {et}", "", row.get("summary") or ""]
         return {
             "id": f"community-{tid}-{et}-{cid}",
             "taskId": tid,
             "projectId": pid,
+            "projectName": project_name,
             "title": name,
             "content": "\n".join(parts),
             "createdAt": "",
@@ -1409,6 +1417,10 @@ async def create_chat_session(request: Request):
             "--force (重新生成), -L zh/en (输出语言), "
             "-j N (并发数, 1-5, 默认1, 如 /pipeline -j 2). "
             "overview 命令不支持 -j 参数, 只有一个并发.",
+            "注意：每次消息最多可以进行 30 次工具调用。请在此限制内规划分析路径，"
+            "避免不必要的重复查询。当获取足够信息后应及时输出结论。"
+            "如果某个工具返回空结果或无有效数据，说明该路径不可行，请跳过并尝试其他方法。"
+            "不要重复调用返回相同结果的工具。如果已获取足够信息，直接输出结论。",
         ]
         if refs:
             ref_context = resolve_refs_to_context(refs, multi_db)
@@ -1507,6 +1519,8 @@ async def get_chat_session(session_id: str):
                     "role": m["role"],
                     "content": m["content"],
                     "refs": json.loads(m["metadata"]).get("refs", []) if m["metadata"] else [],
+                    "reasoning": json.loads(m["metadata"]).get("reasoning", "") if m["metadata"] else "",
+                    "toolCalls": json.loads(m["metadata"]).get("tool_calls", []) if m["metadata"] else [],
                     "createdAt": m["created_at"],
                 }
                 for m in messages
@@ -1594,6 +1608,46 @@ async def send_chat_message(session_id: str, request: Request):
         active_skills = meta.get("active_skills", [])
 
         now = __import__("datetime").datetime.now().isoformat()
+
+        # ref 上下文持久化到 DB（插在 user 消息之前）
+        if refs:
+            ref_context = resolve_refs_to_context(refs, multi_db)
+            if ref_context:
+                _sdb().execute(
+                    "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                    "VALUES (?, ?, 'system', ?, '{}', ?)",
+                    (_make_message_id(), session_id, ref_context, now),
+                )
+            # 注入当前会话上下文（refs 中的项目/任务/组件信息）
+            first = refs[0]
+            ctx_parts = []
+            if first.get("projectName") or first.get("projectId"):
+                name = first.get("projectName", "")
+                pid = first.get("projectId", "")
+                ctx_parts.append(f"项目：{name}" + (f"（ID: {pid}）" if pid else ""))
+            else:
+                ctx_parts.append(f"项目ID：{session.get('project_id', '')}")
+            if first.get("taskId"):
+                ctx_parts.append(f"任务ID：{first['taskId']}")
+            if first.get("componentId"):
+                ctx_parts.append(f"组件ID：{first['componentId']}")
+            ctx_parts.append(f"会话ID：{session_id}")
+            ctx_parts.append("每轮消息最多 30 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。")
+            ctx_msg = "；".join(ctx_parts)
+            _sdb().execute(
+                "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                "VALUES (?, ?, 'system', ?, '{}', ?)",
+                (_make_message_id(), session_id, ctx_msg, now),
+            )
+
+        # 无 refs 时也注入会话上下文（sessionId 用于标题工具）
+        if not refs:
+            _sdb().execute(
+                "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
+                "VALUES (?, ?, 'system', ?, '{}', ?)",
+                (_make_message_id(), session_id, f"会话ID：{session_id}；每轮消息最多 30 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。", now),
+            )
+
         msg_meta = json.dumps({"refs": refs} if refs else {})
         _sdb().execute(
             "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
@@ -1626,11 +1680,6 @@ async def send_chat_message(session_id: str, request: Request):
             (session_id,),
         )
         context_messages = [{"role": m["role"], "content": m["content"]} for m in msgs]
-
-        if refs:
-            ref_context = resolve_refs_to_context(refs, multi_db)
-            if ref_context:
-                context_messages.append({"role": "system", "content": ref_context})
 
         # ── 多轮工具调用 ──
         from web_tools import get_web_tool_definitions
@@ -1733,9 +1782,11 @@ async def send_chat_message(session_id: str, request: Request):
             executor = web_tool_executor
             _log = logger.info
 
+            TOOL_ROUND_LIMIT = 30
+
             async def _producer():
                 ctx_msgs = list(context_messages)
-                for round_idx in range(5):
+                for round_idx in range(TOOL_ROUND_LIMIT):
                     force_choice = round_idx == 0 and bool(tool_defs)
                     chunk_q = _queue.Queue()
                     full_content = ""
@@ -1861,26 +1912,30 @@ async def send_chat_message(session_id: str, request: Request):
             asyncio.create_task(_producer())
             _log(f"[event_stream] producer task started, waiting for events...")
             event_count = 0
-            while True:
-                event = await queue.get()
-                event_count += 1
-                _log(f"[event_stream] -> SSE event #{event_count}: type={event.get('type')} keys={list(event.keys())}")
-                if event["type"] == "done":
-                    yield f"event: done\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    _log(f"[event_stream] done, total {event_count} events")
-                    break
-                elif event["type"] == "error":
-                    yield f"event: error\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    _log(f"[event_stream] error, abort")
-                    break
-                elif event["type"] == "chunk":
-                    yield f"event: chunk\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                elif event["type"] == "reasoning":
-                    yield f"event: reasoning\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                elif event["type"] == "tool_call":
-                    yield f"event: tool_call\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                elif event["type"] == "tool_result":
-                    yield f"event: tool_result\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            try:
+                while True:
+                    event = await queue.get()
+                    event_count += 1
+                    _log(f"[event_stream] -> SSE event #{event_count}: type={event.get('type')} keys={list(event.keys())}")
+                    if event["type"] == "done":
+                        yield f"event: done\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        _log(f"[event_stream] done, total {event_count} events")
+                        break
+                    elif event["type"] == "error":
+                        yield f"event: error\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        _log(f"[event_stream] error, abort")
+                        break
+                    elif event["type"] == "chunk":
+                        yield f"event: chunk\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "reasoning":
+                        yield f"event: reasoning\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "tool_call":
+                        yield f"event: tool_call\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event["type"] == "tool_result":
+                        yield f"event: tool_result\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            finally:
+                # 流结束后检查是否需要自动生成标题
+                _check_auto_title(session_id)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -1888,6 +1943,97 @@ async def send_chat_message(session_id: str, request: Request):
         raise
     except Exception as e:
         raise HTTPException(500, f"Chat error: {e}")
+
+
+def _check_auto_title(session_id: str):
+    """检查会话是否已有标题，若无则自动生成"""
+    try:
+        row = _sdb().fetchone(
+            "SELECT title FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        if not row:
+            return
+        title = row["title"] or ""
+        # 默认标题（新建会话、便签分析）→ 需要自动生成
+        if title and not title.startswith("新对话") and not title.startswith("便签分析"):
+            return
+        msgs = _sdb().fetchall(
+            "SELECT role, content FROM llm_messages WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY created_at",
+            (session_id,),
+        )
+        if len(msgs) < 2:
+            return
+        context = "\n".join([f"{'用户' if m['role'] == 'user' else '助手'}: {m['content'][:500]}" for m in msgs[-4:]])
+        prompt = f"根据以下对话内容，用5-8个字概括对话主题作为会话标题，只返回标题本身，不要有其他内容。\n\n{context}"
+        _do_auto_title(session_id, prompt)
+    except Exception as e:
+        logger.warning(f"[auto-title] _check_auto_title error: {e}")
+
+
+def _do_auto_title(session_id: str, prompt: str):
+    """在后台线程中调用 LLM 生成标题"""
+    try:
+        model_id = ""
+        default_row = multi_db.main_db.fetchone(
+            "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
+        )
+        if default_row and default_row["value"]:
+            model_id = default_row["value"]
+        if not model_id:
+            return
+        model_cfg = multi_db.main_db.fetchone(
+            "SELECT * FROM model_configs WHERE id = ?", (model_id,)
+        )
+        if not model_cfg:
+            return
+        md = dict(model_cfg)
+        base_url = md.get("url", "").rstrip("/")
+        if base_url.endswith("/v1"):
+            base_url = base_url[:-3]
+        import requests as _req
+        payload = {
+            "model": md.get("model", ""),
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "max_tokens": 32,
+            "temperature": 0.1,
+        }
+        _headers = {"Content-Type": "application/json"}
+        api_key = md.get("api_key", "")
+        if api_key:
+            _headers["Authorization"] = f"Bearer {api_key}"
+        resp = _req.post(
+            f"{base_url}/v1/chat/completions",
+            json=payload, headers=_headers, timeout=30,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            choices = data.get("choices", [])
+            if choices and choices[0].get("message", {}).get("content"):
+                title = choices[0]["message"]["content"].strip().strip('"').strip("'").strip()
+                if title and len(title) <= 30:
+                    from datetime import datetime as _dt
+                    now = _dt.now().isoformat()
+                    _sdb().execute(
+                        "UPDATE llm_sessions SET title = ?, updated_at = ? WHERE id = ?",
+                        (title, now, session_id),
+                    )
+                    logger.info(f"[auto-title] set title '{title}' for session {session_id[:16]}")
+    except Exception as e:
+        logger.warning(f"[auto-title] _do_auto_title error: {e}")
+
+
+def _resolve_default_model_id() -> str:
+    """获取默认模型 ID"""
+    try:
+        row = multi_db.main_db.fetchone(
+            "SELECT id FROM model_configs WHERE is_default = 1 AND status = 'connected' LIMIT 1"
+        )
+        if row:
+            return row["id"]
+    except Exception:
+        pass
+    return ""
 
 
 def _parse_tool_calls_simple(raw_parts: list) -> list:
@@ -1941,6 +2087,42 @@ async def get_chat_messages(session_id: str, limit: int = Query(50), offset: int
             ],
             "total": len(rows),
         }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/chat/sessions/{session_id}/messages")
+async def delete_chat_messages(session_id: str, message_id: str = Query(None)):
+    """删除会话中的一条或多条消息（支持逗号分隔的 message_id）"""
+    _require_chat_ready()
+    try:
+        ids = [m.strip() for m in (message_id or "").split(",") if m.strip()]
+        if not ids:
+            raise HTTPException(422, "message_id is required")
+        placeholders = ",".join("?" * len(ids))
+        _sdb().execute(
+            f"DELETE FROM llm_messages WHERE session_id = ? AND id IN ({placeholders})",
+            (session_id, *ids),
+        )
+        # 更新 session 消息数
+        cnt = _sdb().fetchone(
+            "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id = ? AND role IN ('user', 'assistant')",
+            (session_id,),
+        )
+        count = cnt["c"] // 2 if cnt else 0
+        row = _sdb().fetchone(
+            "SELECT metadata FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        if row:
+            meta = json.loads(row["metadata"]) if row["metadata"] else {}
+            meta["message_count"] = count
+            _sdb().execute(
+                "UPDATE llm_sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(meta, ensure_ascii=False), __import__("datetime").datetime.now().isoformat(), session_id),
+            )
+        return {"ok": True, "deleted": len(ids)}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -2361,71 +2543,8 @@ async def execute_draft(request: Request):
                     (json.dumps(meta, ensure_ascii=False), now, session_id),
                 )
 
-        # 触发 AI 自动回复
-        assistant_msg_id = None
-        try:
-            sess_row = multi_db.sessions_db.fetchone(
-                "SELECT metadata FROM llm_sessions WHERE id = ?", (session_id,)
-            )
-            model_id = ""
-            if sess_row:
-                sess_meta = json.loads(sess_row["metadata"]) if sess_row["metadata"] else {}
-                model_id = sess_meta.get("model_id", "")
-            if not model_id:
-                default_row = multi_db.main_db.fetchone(
-                    "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
-                )
-                if default_row and default_row["value"]:
-                    model_id = default_row["value"]
-            if model_id:
-                model_cfg = multi_db.main_db.fetchone(
-                    "SELECT * FROM model_configs WHERE id = ?", (model_id,)
-                )
-                if model_cfg:
-                    md = dict(model_cfg)
-                    base_url = md.get("url", "").rstrip("/")
-                    if base_url.endswith("/v1"):
-                        base_url = base_url[:-3]
-                    msgs = multi_db.sessions_db.fetchall(
-                        "SELECT role, content FROM llm_messages WHERE session_id = ? ORDER BY created_at",
-                        (session_id,),
-                    )
-                    context_messages = [{"role": m["role"], "content": m["content"]} for m in msgs]
-                    import requests as _req
-                    payload = {
-                        "model": md.get("model", ""),
-                        "messages": context_messages,
-                        "stream": False,
-                        "max_tokens": md.get("max_tokens", 16384),
-                    }
-                    if md.get("temperature") is not None:
-                        payload["temperature"] = md["temperature"]
-                    _headers = {"Content-Type": "application/json"}
-                    api_key = md.get("api_key", "")
-                    if api_key:
-                        _headers["Authorization"] = f"Bearer {api_key}"
-                    timeout = md.get("timeout", 300)
-                    resp = _req.post(
-                        f"{base_url}/v1/chat/completions",
-                        json=payload, headers=_headers, timeout=timeout,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        choices = data.get("choices", [])
-                        if choices and choices[0].get("message", {}).get("content"):
-                            assistant_content = choices[0]["message"]["content"]
-                            assistant_msg_id = uuid.uuid4().hex[:16]
-                            multi_db.sessions_db.execute(
-                                "INSERT INTO llm_messages (id, session_id, role, content, created_at) VALUES (?, ?, 'assistant', ?, ?)",
-                                (assistant_msg_id, session_id, assistant_content, now),
-                            )
-        except Exception as e:
-            logger.warning(f"[execute-draft] auto-reply failed: {e}")
 
-        result = {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
-        if assistant_msg_id:
-            result["assistantMsgId"] = assistant_msg_id
-        return result
+        return {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -2649,7 +2768,7 @@ def create_app(multi_db_instance, zmq_server_instance=None) -> FastAPI:
 # ==================== 启动入口 ====================
 
 
-async def start_http_server(multi_db_instance, port: int = 3456, host: str = '127.0.0.1',
+async def start_http_server(multi_db_instance, port: int = 3456, host: str = '0.0.0.0',
                             cache_path: str = None, zmq_server_instance: object = None):
     global multi_db, http_port, zmq_server, web_tool_executor
     http_port = port

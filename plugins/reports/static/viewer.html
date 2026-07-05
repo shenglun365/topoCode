@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.0/dist/cytoscape.min.js"></script>
+<script src="/static/store.js"></script>
 <style>
   :root {
     --bg: #ffffff; --bg-secondary: #f7f7f8; --bg-hover: #f0f0f2; --bg-code: #f4f4f5;
@@ -48,25 +49,19 @@
   #forceGraph { position: relative; flex: 1; min-height: 0; }
   .doc-resizer { width: 6px; cursor: col-resize; background: var(--border); flex-shrink: 0; position: relative; }
   .doc-resizer:hover, .doc-resizer:active { background: var(--accent); }
-  .right-tabs { display: flex; gap: 2px; }
-  .right-tabs button { padding: 2px 8px; font-size: 10px; border: 1px solid var(--border); background: var(--bg); border-radius: 3px; cursor: pointer; color: var(--text-muted); }
-  .right-tabs button:hover { background: var(--bg-code); color: var(--text); }
-  .right-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .tab-sep { color: var(--border); font-size: 14px; user-select: none; padding: 0 2px; }
-  .granularity-tabs { display: flex; gap: 2px; }
-  .granularity-tabs button { padding: 2px 8px; font-size: 10px; border: 1px solid var(--border); background: var(--bg); border-radius: 3px; cursor: pointer; color: var(--text-muted); }
-  .granularity-tabs button:hover { color: var(--text); }
-  .granularity-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .viz-container { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
   .viz-container .tab-content { display: none; width: 100%; flex: 1; min-height: 0; }
   .viz-container .tab-content.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .heatmap-controls { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .heatmap-controls select { padding: 2px 4px; font-size: 11px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); color: var(--text); }
-  #heatmapContent { padding: 8px; overflow: auto; flex: 1; min-height: 0; display: flex; justify-content: center; align-items: flex-start; }
-  #heatmapContent table { border-collapse: collapse; font-size: 10px; }
+  #heatmapContent { padding: 8px; overflow: auto; flex: 1; min-height: 0; }
+  #heatmapContent table { border-collapse: separate; border-spacing: 0; font-size: 10px; }
   #heatmapContent td { border: 1px solid var(--border); padding: 2px 4px; text-align: center; min-width: 20px; }
-  #heatmapContent th { border: 1px solid var(--border); padding: 2px 6px; font-weight: 500; font-size: 9px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: sticky; background: var(--bg); z-index: 1; }
-  #heatmapContent th:first-child { left: 0; z-index: 2; }
+  #heatmapContent th { border: 1px solid var(--border); padding: 2px 6px; font-weight: 500; font-size: 9px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--bg); }
+  #heatmapContent .hm-row-hdr { position: sticky; left: 0; z-index: 2; min-width: 60px; max-width: 160px; border-right: 2px solid var(--border); }
+  #heatmapContent .hm-col-hdr { position: sticky; top: 0; z-index: 1; border-bottom: 2px solid var(--border); }
+  #heatmapContent thead th:first-child { position: sticky; top: 0; left: 0; z-index: 3; min-width: 20px; max-width: 20px; border-right: 2px solid var(--border); border-bottom: 2px solid var(--border); }
   .content h1 { font-size: 1.5em; margin: 0.5em 0 0.25em; }
   .content h2 { font-size: 1.2em; margin: 0.4em 0 0.2em; }
   .content h3 { font-size: 1.05em; margin: 0.3em 0 0.15em; }
@@ -87,8 +82,8 @@
   #fileCommFloat { top: 44px; left: auto; }
   .toc-float:hover { opacity: 1; }
   .toc-float.dragging { cursor: grabbing; }
-  .toc-toggle { width: 30px; height: 30px; border: 1px solid var(--border); background: var(--bg); border-radius: 5px; cursor: pointer; font-size: 15px; color: var(--text); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
-  .toc-toggle:hover { background: var(--bg-code); }
+.toc-toggle { width: 30px; height: 30px; border: 1px solid var(--accent); background: var(--accent-light); border-radius: 5px; cursor: pointer; font-size: 15px; color: var(--accent); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.toc-toggle:hover { background: var(--accent); color: #fff; }
   .toc-panel { display: none; margin-top: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; max-width: 260px; min-width: 200px; min-height: 60px; max-height: 50vh; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.12); font-size: 13px; }
   .toc-panel.open { display: block; }
   .toc-panel .toc-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
@@ -159,7 +154,7 @@
   .file-action-link:hover { text-decoration: underline; }
   .toc-empty { font-size: 11px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
   /* Graph toolbar */
-  .graph-toolbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 10; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); min-width: 140px; user-select: none; }
+  .graph-toolbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 100; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); min-width: 140px; user-select: none; }
   .graph-toolbar.collapsed .graph-toolbar-body { display: none; }
   .graph-toolbar-header { display: flex; align-items: center; gap: 6px; padding: 3px 8px; cursor: move; border-bottom: 1px solid var(--border); }
   .graph-toolbar.collapsed .graph-toolbar-header { border-bottom: none; }
@@ -167,13 +162,15 @@
   .graph-toolbar-title { font-size: 10px; color: var(--text-muted); flex: 1; }
   .graph-toolbar-collapse { width: 18px; height: 18px; padding: 0; font-size: 12px; line-height: 1; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 3px; }
   .graph-toolbar-collapse:hover { background: var(--bg-code); color: var(--text); }
-  .graph-toolbar-body { display: flex; gap: 4px; padding: 4px 6px; }
+  .graph-toolbar-body { display: flex; gap: 4px; padding: 3px 6px; background: var(--bg); border: 1px solid var(--border); border-top: none; border-radius: 0 0 6px 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
   .graph-tb-btn { padding: 2px 8px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-secondary); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
   .graph-tb-btn:hover { border-color: var(--accent); color: var(--text); }
   .graph-tb-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .graph-tb-btn.active:hover { opacity: 0.9; }
+  .graph-tb-btn.tb-disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+  .graph-tb-btn.tb-disabled:hover { border-color: var(--border); color: var(--text-muted); }
   /* Graph filter panel — draggable, hover-to-reveal */
-  .graph-filter-panel { position: absolute; right: 8px; top: 60px; width: 220px; max-height: 320px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 11; display: none; flex-direction: column; opacity: 0.25; transition: opacity 0.2s; pointer-events: auto; }
+  .graph-filter-panel { position: absolute; right: 8px; top: 60px; width: 220px; max-height: 320px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; display: none; flex-direction: column; opacity: 0.25; transition: opacity 0.2s; }
   .graph-filter-panel.open { display: flex; }
   .graph-filter-panel.open:hover { opacity: 1; }
   .graph-filter-header { display: flex; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--border); cursor: move; }
@@ -324,28 +321,30 @@
   <div class="doc-right" id="docRight">
     <div class="viz-container">
       <div class="breadcrumb" id="rightBreadcrumb"></div>
+      <div class="graph-toolbar" id="graphToolbar">
+        <div class="graph-toolbar-header" id="graphToolbarHeader">
+          <span class="graph-toolbar-title" id="graphToolbarTitle">图操作</span>
+          <button class="graph-toolbar-collapse" id="graphToolbarCollapse">−</button>
+        </div>
+        <div class="graph-toolbar-body" id="graphToolbarBody">
+          <button class="graph-tb-btn active" id="graphTbMode" title="跟随模式：拖拽节点时关联节点跟随移动（点击切换为独立模式）">跟随</button>
+          <button class="graph-tb-btn active" id="graphTbEdges" title="显示连线">连线</button>
+          <button class="graph-tb-btn active" id="graphTbGran" title="当前为组件形态，点击切换为文件形态">组件形态</button>
+          <button class="graph-tb-btn active" id="graphTbTab" title="当前为关系图，点击切换为热力图">关系图</button>
+          <button class="graph-tb-btn" id="graphTbFilter" title="筛选器">筛选</button>
+          <button class="graph-tb-btn" id="graphTbReset" title="重置节点位置为初始布局">复原</button>
+        </div>
+      </div>
+      <div class="graph-filter-panel" id="graphFilterPanel">
+        <button class="graph-filter-close" id="graphFilterClose">✕</button>
+        <div class="graph-filter-header">
+          <span class="graph-filter-drag-icon">⠿</span>
+          <input type="text" class="graph-filter-search" id="graphFilterSearch" placeholder="搜索节点...">
+          <button class="graph-filter-btn graph-filter-toggle" id="graphFilterToggleAll" title="隐藏孤立节点（无连线）">隐藏孤立</button>
+        </div>
+        <div class="graph-filter-list" id="graphFilterList"></div>
+      </div>
       <div class="tab-content active" id="tabGraph">
-        <div class="graph-toolbar" id="graphToolbar">
-          <div class="graph-toolbar-header" id="graphToolbarHeader">
-            <span class="graph-toolbar-title" id="graphToolbarTitle">图操作</span>
-            <button class="graph-toolbar-collapse" id="graphToolbarCollapse">−</button>
-          </div>
-          <div class="graph-toolbar-body" id="graphToolbarBody">
-            <button class="graph-tb-btn active" id="graphTbMode" title="跟随模式：拖拽节点时关联节点跟随移动（点击切换为独立模式）">跟随</button>
-            <button class="graph-tb-btn active" id="graphTbEdges" title="显示连线">连线</button>
-            <button class="graph-tb-btn" id="graphTbFilter" title="筛选器">筛选</button>
-            <button class="graph-tb-btn" id="graphTbReset" title="重置节点位置为初始布局">复原</button>
-          </div>
-        </div>
-        <div class="graph-filter-panel" id="graphFilterPanel">
-          <button class="graph-filter-close" id="graphFilterClose">✕</button>
-          <div class="graph-filter-header">
-            <span class="graph-filter-drag-icon">⠿</span>
-            <input type="text" class="graph-filter-search" id="graphFilterSearch" placeholder="搜索节点...">
-            <button class="graph-filter-btn graph-filter-toggle" id="graphFilterToggleAll" title="隐藏孤立节点（无连线）">隐藏孤立</button>
-          </div>
-          <div class="graph-filter-list" id="graphFilterList"></div>
-        </div>
         <div id="forceGraph">
           <div id="cyContainer" style="position:absolute;inset:0"></div>
           <div class="graph-overlay" id="graphLoading" style="display:none">
@@ -467,40 +466,61 @@ mermaid.initialize({ startOnLoad: false, theme: (window.matchMedia('(prefers-col
 // ============================================================
 // 1. State Manager
 // ============================================================
-const S = {
+// 状态初始化：通过 StateStore（localStorage + URL + 默认值）
+StateStore.init({
   left: true, right: true,
-  tab: 'graph',          // 'graph'|'heatmap'
-  et: 'INCLUDE',          // 'INCLUDE'|'CALL'|'EXTERNAL_INCLUDE'|'EXTERNAL_CALL'
-  cid: '',               // current community id
-  gran: 'component',     // 'component'|'file'
-  depth: 1,              // 展开深度 1-5
+  tab: 'graph',
+  et: 'INCLUDE',
+  cid: '',
+  gran: 'component',
+  depth: 1,
   lv: '',
   size: 10,
-  // derived
-  projectId: '',
-  taskId: '',
+  layoutTimeout: 60000,
+  page: 'doc',
+  filePath: '',
+  fileCommId: '',
+  commStack: [],
+  commParent: '',
+  centerNodes: [],
+  docChain: [],
+  docCommId: '',
   locale: 'zh-CN',
+  projectId: '',
+  projectName: '',
   docTitle: '',
-  // file summary
-  page: 'doc',           // 'doc'|'file-summary'
-  filePath: '',          // current file path
-  fileCommId: '',        // community the file belongs to
-  // right panel nav
-  commStack: [],         // [{cid, name}] breadcrumb trail
-  commParent: '',        // current parent for community-children API
-  // center view mode
-  centerNodes: [],       // 中心节点 ID 列表
-};
+  cn: '',       // 社区显示名称（面包屑用）
+  pc: ''        // 父级链（面包屑用）
+});
+var S = StateStore.state;  // 读引用，写必须走 StateStore.commit()
+
+// URL globals (read once at init)
+const g_url = new URLSearchParams(location.search);
+const g_taskId = g_url.get('taskId') || '';
+const g_docId = g_url.get('docId') || '';
+const g_communityId = g_url.get('communityId') || '';
+const g_edgeType = g_url.get('edgeType') || 'CALL';
+
+// 约束（URL/localStorage 可能有不一致值）
+if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
+  StateStore.commit({gran: 'component'});
+}
+// 聊天链接带上 taskId 确保便签隔离
+var chatLink = document.getElementById('chatLink');
+if (chatLink && S.taskId) chatLink.href = '/chat?taskId=' + encodeURIComponent(S.taskId);
+
+if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
+  StateStore.commit({et: S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL'});
+}
+var _fid = g_url.get('fileId') || '';
+if (_fid) {
+  StateStore.commit({page: 'file-summary', filePath: _fid});
+}
+
 let g_cy = null;         // Cytoscape instance
 
-// 原子状态更新：合并变更到 S 并自动同步 URL，同时保持 cid/docCommId 一致
-function updateS(changes) {
-  if ('cid' in changes && !('docCommId' in changes)) {
-    changes.docCommId = changes.cid;
-  }
-  Object.assign(S, changes);
-  syncURL();
-}
+// 右侧面包屑根节点入口时的 et（返回根节点时恢复）
+var _rootEntryEt = '';
 
 // 节点手动隐藏/显示跟踪（与中心模式共存，最后操作优先）
 var _manualHidden = new Set();
@@ -538,66 +558,7 @@ function applyCenterMode() {
   GraphView._refreshFilter();
 }
 
-// URL globals (read once at init)
-const g_url = new URLSearchParams(location.search);
-const g_taskId = g_url.get('taskId') || '';
-const g_docId = g_url.get('docId') || '';
-const g_communityId = g_url.get('communityId') || '';
-const g_edgeType = g_url.get('edgeType') || 'CALL';
 
-// Restore S from URL
-S.left = g_url.get('left') !== '0';
-S.right = g_url.get('right') !== '0';
-S.tab = g_url.get('tab') || 'graph';
-S.et = g_url.get('et') || g_edgeType || 'INCLUDE';
-S.cid = g_url.get('cid') || '';
-S.lv = g_url.get('lv') || '';
-S.size = parseInt(g_url.get('size')) || 10;
-S.gran = g_url.get('gran') || 'component';
-S.depth = parseInt(g_url.get('depth')) || 1;
-S.layoutTimeout = parseInt(g_url.get('ltimeout')) || 60000;
-// 文档区面包屑链（图→文档时累加）
-S.docChain = [];
-S.docCommId = '';  // 文档区的 communityId（图→文档时更新）
-// 外部依赖/调用强制组件模式，文件模式强制内部类型
-if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
-  S.gran = 'component';
-}
-if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
-  S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
-}
-var _fid = g_url.get('fileId') || '';
-if (_fid) {
-  S.page = 'file-summary';
-  S.filePath = _fid;
-} else {
-  S.page = 'doc';
-}
-
-
-function syncURL() {
-  var p = new URLSearchParams(location.search);
-  if (g_taskId) p.set('taskId', g_taskId);
-  var curDocId = p.get('docId');
-  var curCommId = p.get('communityId');
-  if (curDocId && !curCommId) p.set('docId', curDocId); else { p.delete('docId'); }
-  if (S.docCommId) p.set('communityId', S.docCommId);
-  else if (curCommId) p.set('communityId', curCommId);
-  else if (g_communityId) p.set('communityId', g_communityId);
-  p.set('edgeType', S.et);
-  if (!S.left) p.set('left', '0'); else p.delete('left');
-  if (!S.right) p.set('right', '0'); else p.delete('right');
-  if (S.tab !== 'graph') p.set('tab', S.tab); else p.delete('tab');
-  p.delete('et');
-  if (S.cid) p.set('cid', S.cid); else p.delete('cid');
-  if (S.lv) p.set('lv', S.lv); else p.delete('lv');
-  if (S.size !== 10) p.set('size', String(S.size)); else p.delete('size');
-  if (S.gran !== 'component') p.set('gran', S.gran); else p.delete('gran');
-  if (S.depth !== 1) p.set('depth', String(S.depth)); else p.delete('depth');
-  if (S.layoutTimeout !== 60000) p.set('ltimeout', String(S.layoutTimeout)); else p.delete('ltimeout');
-  if (S.filePath) p.set('fileId', S.filePath); else p.delete('fileId');
-  history.replaceState(null, '', '/doc?' + p.toString());
-}
 
 // ============================================================
 // 2. API Client
@@ -734,8 +695,8 @@ function clampFloatPosition(floatId) {
 const Layout = {
   init() {
     var self = this;
-    document.getElementById('toggleLeft').onclick = function() { S.left = !S.left; self.apply(); syncURL(); };
-    document.getElementById('toggleRight').onclick = function() { S.right = !S.right; self.apply(); syncURL(); };
+    document.getElementById('toggleLeft').onclick = function() { StateStore.commit({left: !S.left}); self.apply(); };
+    document.getElementById('toggleRight').onclick = function() { StateStore.commit({right: !S.right}); self.apply(); };
     var resizer = document.getElementById('docResizer');
     var left = document.getElementById('docLeft');
     var right = document.getElementById('docRight');
@@ -909,10 +870,10 @@ function makeDraggable(el, boundsKey, storageKey) {
 const LeftBreadcrumb = {
   render() {
     var cur = new URLSearchParams(location.search);
-    var cid = cur.get('communityId') || '';
-    var cn = cur.get('cn') || cid;
-    var pcRaw = cur.get('pc') || '';
-    var curEt = cur.get('edgeType') || 'CALL';
+    var cid = S.docCommId || S.cid || cur.get('cid') || '';
+    var cn = S.cn || cur.get('cn') || cid;
+    var pcRaw = S.pc || cur.get('pc') || '';
+    var curEt = S.et || cur.get('edgeType') || 'CALL';
     var el = document.getElementById('leftBreadcrumb');
     var isFile = S.page === 'file-summary';
     console.log('[L-bread] cid=' + cid + ' cn=' + cn.slice(0, 20) + ' pc=' + (pcRaw || '-').slice(0, 40) + ' dc=' + (S.docChain||[]).length);
@@ -969,8 +930,7 @@ const LeftBreadcrumb = {
           var u = new URLSearchParams();
           u.set('taskId', g_taskId);
           u.set('docId', 'overall-' + g_taskId);
-          S.page = 'doc';
-          S.filePath = '';
+          StateStore.commit({page: 'doc', filePath: '', cid: '', cn: '', pc: ''});
           history.replaceState(null, '', '/doc?' + u.toString());
           loadDoc('overall-' + g_taskId);
           return;
@@ -981,14 +941,9 @@ const LeftBreadcrumb = {
           var cidET = (cid.indexOf('-incl-') >= 0) ? 'INCLUDE' :
                        (cid.indexOf('-call-') >= 0) ? 'CALL' :
                        cur.get('edgeType') || curEt;
-          S.page = 'doc';
-          S.filePath = '';
-          // 写入正确的 edgeType 到 URL
-          var u2 = new URLSearchParams(location.search);
-          u2.set('edgeType', cidET);
-          history.replaceState(null, '', '/doc?' + u2.toString());
+          StateStore.commit({et: cidET, page: 'doc', filePath: ''});
           S.docChain = [];
-          loadCommunityDoc(g_taskId, cid, cidET);
+          loadCommunityDoc(g_taskId, cid, cidET, true);
           return;
         }
         var backCid = this.dataset.backCid;
@@ -996,17 +951,9 @@ const LeftBreadcrumb = {
         var backCn = this.dataset.backCn;
         var backEt = this.dataset.backEt;
         if (backCid) {
-          var u = new URLSearchParams(location.search);
-          u.set('communityId', backCid);
-          if (backPc) u.set('pc', backPc); else u.delete('pc');
-          u.set('cn', backCn || backCid);
-          u.set('edgeType', backEt);
-          S.page = 'doc';
-          S.filePath = '';
-          syncURL();
-          history.replaceState(null, '', '/doc?' + u.toString());
+          StateStore.commit({cn: backCn, pc: backPc, et: backEt, page: 'doc', filePath: ''});
           S.docChain = [];
-          loadCommunityDoc(g_taskId, backCid, backEt);
+          loadCommunityDoc(g_taskId, backCid, backEt, true);
         }
       };
     });
@@ -1095,10 +1042,7 @@ const DocContent = {
         a.href = '#';
         a.onclick = function(e) {
           e.preventDefault();
-          S.cid = parts[1];
-          S.et = parts[0];
-          S.tab = 'graph';
-          syncURL();
+          StateStore.commit({cid: parts[1], et: parts[0], tab: 'graph'});
           RightPanel.renderPanel();
           RightPanel.switchTab('graph');
           RightPanel.loadViz();
@@ -1162,7 +1106,7 @@ const DocContent = {
     var callIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 16l-4-4 4-4"/></svg>';
     var graphIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="14" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8" y1="8" x2="16" y2="4"/><line x1="8" y1="13" x2="4" y2="16"/><line x1="16" y1="13" x2="20" y2="16"/></svg>';
 
-    var isRoot = !g_communityId && !(new URLSearchParams(location.search)).get('communityId');
+    var isRoot = !S.cid && !g_communityId && !(new URLSearchParams(location.search)).get('communityId');
     console.log('[hd-btn] isRoot=' + isRoot + ' g_cid=' + g_communityId + ' urlCid=' + (new URLSearchParams(location.search)).get('communityId'));
 
     var selector = isRoot ? 'h1' : 'h1, h2, h3, h4';
@@ -1218,11 +1162,10 @@ const DocContent = {
           e.preventDefault(); e.stopPropagation();
           console.log('[hd-click] cid=' + cid + ' et=' + et + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' hText=' + hText.slice(0, 30));
           if (!cid) return;
+          // 记录根节点 et（在 S.et 被改变前）
+          if (S.commStack.length === 0) _rootEntryEt = S.et;
           S.commParent = cid;
-          S.gran = 'component'; S.et = et; S.depth = 1;
-          S.cid = cid;
-          S.tab = 'graph';
-          syncURL();
+          StateStore.commit({gran: 'component', et: et, depth: 1, cid: cid, tab: 'graph'});
           // Preserve existing path: push if not already in stack
           var found = false;
           for (var i = 0; i < S.commStack.length; i++) {
@@ -1231,7 +1174,7 @@ const DocContent = {
               found = true; break;
             }
           }
-          if (!found) S.commStack.push({cid: cid, name: hText});
+          if (!found) S.commStack.push({cid: cid, name: hText, et: et});
           console.log('[hd-click] after push S.commStack=' + JSON.stringify(S.commStack.map(function(x){return x.cid+':'+(x.name||'').slice(0,20)})));
           RightPanel.switchTab('graph');
           RightPanel.renderPanel();
@@ -1256,10 +1199,10 @@ const LeftToc = {
     panel.innerHTML = '';
 
     var curUrl = new URLSearchParams(location.search);
-    var curCid = curUrl.get('communityId') || '';
-    var pid = parentCid || curCid;
+    var curCid = S.docCommId || S.cid || curUrl.get('cid') || '';
+     var pid = parentCid || curCid;
     var isRoot = !pid;
-    var curEt = curUrl.get('edgeType') || 'CALL';
+    var curEt = S.et || curUrl.get('edgeType') || 'CALL';
     var ets = isRoot ? ['INCLUDE', 'CALL'] : [curEt];
     var hasContent = false;
     var tasks = ets.map(function(et) {
@@ -1294,25 +1237,17 @@ const LeftToc = {
         var cid = this.dataset.cid;
         var et = this.dataset.et;
         var name = this.dataset.name;
-        var curUrl = new URLSearchParams(location.search);
-        var prevPc = curUrl.get('pc') || '';
-        var prevCn = curUrl.get('cn') || '';
-        var prevCid = curUrl.get('communityId') || '';
-        var prevEt = curUrl.get('edgeType') || 'CALL';
+        // 构建父级链（当前 URL 中的 communityId 作为新链的前一节点）
+        var curPc = S.pc || '';
+        var curCid = S.docCommId || S.cid || '';
+        var curCn = S.cn || '';
         var chain = [];
-        if (prevPc) chain.push(prevPc);
-        if (prevCid && prevCn) chain.push(prevCn + '|' + prevCid + '|' + prevEt);
+        if (curPc) chain.push(curPc);
+        if (curCid && curCn && curCid !== cid) chain.push(curCn + '|' + curCid + '|' + (S.et || et));
         var pcStr = chain.join(',');
-        var p = new URLSearchParams(location.search);
-        p.set('taskId', S.taskId);
-        p.set('communityId', cid);
-        p.set('edgeType', et);
-        p.set('cn', name);
-        if (pcStr) p.set('pc', pcStr); else p.delete('pc');
-        p.delete('docId');
-        history.replaceState(null, '', '/doc?' + p.toString());
+        StateStore.commit({cn: name, pc: pcStr, et: et, page: 'doc', filePath: ''});
         S.taskId = S.taskId || g_taskId;
-        loadCommunityDoc(S.taskId, cid, et);
+        loadCommunityDoc(S.taskId, cid, et, true);
       };
     });
   }
@@ -1412,10 +1347,8 @@ const FileList = {
         if (e.target.closest('.file-action-link')) return;
         var fp = this.dataset.path;
         var fcid = this.dataset.commid;
-        S.page = 'file-summary';
-        S.filePath = fp;
         S.fileCommId = fcid;
-        syncURL();
+        StateStore.commit({page: 'file-summary', filePath: fp});
         FilePreview.render(fp, fcid);
         LeftBreadcrumb.render();
         LeftToc.render(fcid);
@@ -1426,10 +1359,8 @@ const FileList = {
         e.stopPropagation();
         var fp = this.dataset.path;
         var fcid = this.dataset.commid;
-        S.page = 'file-summary';
-        S.filePath = fp;
         S.fileCommId = fcid;
-        syncURL();
+        StateStore.commit({page: 'file-summary', filePath: fp});
         FilePreview.render(fp, fcid);
         LeftBreadcrumb.render();
         LeftToc.render(fcid);
@@ -1494,9 +1425,10 @@ const RightBreadcrumb = {
   render() {
     var el = document.getElementById('rightBreadcrumb');
     var etLabels = { INCLUDE: '\u5185\u90e8\u4f9d\u8d56', EXTERNAL_INCLUDE: '\u5916\u90e8\u4f9d\u8d56', CALL: '\u5185\u90e8\u8c03\u7528', EXTERNAL_CALL: '\u5916\u90e8\u8c03\u7528' };
-    var etLabel = etLabels[S.et] || S.et;
+    var rootEt = _rootEntryEt || S.et;
+    var etLabel = etLabels[rootEt] || rootEt;
   var h = '<span class="bc-link" data-idx="-1"><span class="bc-level">L0</span> ' + etLabel + '</span>';
-  console.log('[R-bread] S.et=' + S.et + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' stack=' + S.commStack.length);
+  console.log('[R-bread] S.et=' + S.et + ' rootEt=' + _rootEntryEt + ' S.cid=' + S.cid + ' S.gran=' + S.gran + ' stack=' + S.commStack.length);
   for (var i = 0; i < S.commStack.length; i++) {
     var item = S.commStack[i];
     if (!item.cid) { console.log('[R-bread] SKIP empty cid at ' + i); continue; }
@@ -1504,9 +1436,9 @@ const RightBreadcrumb = {
     var lv = _cid_level(item.cid);
     h += ' <span style="color:var(--text-muted)">\u203a</span> ';
     if (i < S.commStack.length - 1) {
-      h += '<span class="bc-link" data-idx="' + i + '"><span class="bc-level">' + lv + '</span> ' + escapeHtml(dName.slice(0, 24)) + '</span>';
+      h += '<span class="bc-link" data-idx="' + i + '"><span class="bc-level">' + lv + '</span> ' + escapeHtml(dName.slice(0, 24)) + ' <span class="bc-level" style="background:var(--accent-light);color:var(--accent)">' + (etLabels[item.et] || item.et || '') + '</span></span>';
     } else {
-      h += '<span style="color:var(--text)"><span class="bc-level">' + lv + '</span> ' + escapeHtml(dName.slice(0, 24)) + '</span>';
+      h += '<span style="color:var(--text)"><span class="bc-level">' + lv + '</span> ' + escapeHtml(dName.slice(0, 24)) + ' <span class="bc-level" style="background:var(--accent-light);color:var(--accent)">' + (etLabels[item.et] || item.et || '') + '</span></span>';
     }
   }
     el.innerHTML = h;
@@ -1516,13 +1448,15 @@ const RightBreadcrumb = {
         if (idx < 0) {
           S.commStack = [];
           S.commParent = '';
-          S.cid = '';
+          if (_rootEntryEt) S.et = _rootEntryEt;
+          _rootEntryEt = '';
+          StateStore.commit({cid: '', et: S.et});
         } else {
           S.commStack = S.commStack.slice(0, idx + 1);
           S.commParent = S.commStack[idx].cid;
-          S.cid = S.commParent;
+          var targetEt = S.commStack[idx].et || S.et;
+          StateStore.commit({cid: S.commParent, et: targetEt});
         }
-        syncURL();
         RightPanel.refresh();
       };
     });
@@ -1534,12 +1468,29 @@ const RightPanel = {
   _data: null, // cached community-children for current level
 
   switchTab(tab) {
-    S.tab = tab;
-    syncURL();
+    StateStore.commit({tab: tab});
     document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
     var map = { graph: 'tabGraph', heatmap: 'tabHeatmap' };
     var el = document.getElementById(map[tab]);
     if (el) el.classList.add('active');
+    // 同步图类型切换按钮文案
+    var btn = document.getElementById('graphTbTab');
+    if (btn) {
+      btn.classList.add('active');
+      if (tab === 'heatmap') {
+        btn.textContent = '\u70ed\u529b\u56fe';
+        btn.title = '\u5f53\u524d\u4e3a\u70ed\u529b\u56fe\uff0c\u70b9\u51fb\u5207\u6362\u4e3a\u5173\u7cfb\u56fe';
+      } else {
+        btn.textContent = '\u5173\u7cfb\u56fe';
+        btn.title = '\u5f53\u524d\u4e3a\u5173\u7cfb\u56fe\uff0c\u70b9\u51fb\u5207\u6362\u4e3a\u70ed\u529b\u56fe';
+      }
+    }
+    // 热力图时禁用图操作按钮，切回关系图恢复
+    var isHeat = tab === 'heatmap';
+    ['graphTbMode','graphTbEdges','graphTbGran','graphTbFilter','graphTbReset'].forEach(function(id) {
+      var b = document.getElementById(id);
+      if (b) { b.disabled = isHeat; b.classList.toggle('tb-disabled', isHeat); }
+    });
     this.loadViz();
   },
 
@@ -1550,6 +1501,11 @@ const RightPanel = {
   },
 
   async init() {
+    // 图起始点：无钻取状态时使用文档社区
+    if (!S.cid && S.docCommId) S.cid = S.docCommId;
+    // 图操作工具栏始终需要事件绑定（不依赖 graph 数据）
+    console.log('[Tb] RightPanel.init calling _initToolbar');
+    GraphView._initToolbar();
     // Toolbar + comm tree live in #fileCommPanel
     this.renderPanel();
     // Listeners for toggle
@@ -1569,19 +1525,8 @@ const RightPanel = {
     console.log('[R-panel] S.tab=' + S.tab + ' S.cid=' + S.cid + ' S.et=' + S.et + ' S.gran=' + S.gran + ' S.depth=' + S.depth);
     var panel = document.getElementById('fileCommPanel');
     var isExt = S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL';
-    // Row 1: granularity + viz tabs
+    // Row 1: edge type tabs
     var h = '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;margin-bottom:2px;padding-bottom:3px;border-bottom:1px solid var(--border);flex-wrap:wrap">';
-    if (!isExt) {
-      h += '<div class="granularity-tabs">';
-      h += '<button class="gran-tab' + (S.gran === 'component' ? ' active' : '') + '" data-gran="component">\u7ec4\u4ef6</button>';
-      h += '<button class="gran-tab' + (S.gran === 'file' ? ' active' : '') + '" data-gran="file">\u6587\u4ef6</button>';
-      h += '</div>';
-      h += '<span class="tab-sep">|</span>';
-    }
-    h += '<div class="right-tabs">';
-    h += '<button class="viz-tab' + (S.tab === 'graph' ? ' active' : '') + '" data-tab="graph">\u5173\u7cfb\u56fe</button>';
-    h += '<button class="viz-tab' + (S.tab === 'heatmap' ? ' active' : '') + '" data-tab="heatmap">\u70ed\u529b</button>';
-    h += '</div></div>';
     // Row 2: edge type tabs
     h += '<div class="right-panel-toolbar" style="display:flex;align-items:center;gap:4px;padding-top:2px;flex-wrap:wrap">';
     h += '<div class="et-tabs">';
@@ -1619,29 +1564,6 @@ const RightPanel = {
   },
 
   attachToolbarHandlers(panel) {
-    panel.querySelectorAll('.gran-tab').forEach(function(btn) {
-      btn.onclick = function() {
-        panel.querySelectorAll('.gran-tab').forEach(function(b) { b.classList.remove('active'); });
-        this.classList.add('active');
-        S.gran = this.dataset.gran;
-        // 文件模式 → 切换到内部类型
-        if (S.gran === 'file' && (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL')) {
-          S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
-        }
-        S.cid = '';
-        syncURL();
-        RightPanel.loadViz();
-        RightPanel.loadViz();
-        RightPanel.renderPanel();
-      };
-    });
-    panel.querySelectorAll('.viz-tab').forEach(function(btn) {
-      btn.onclick = function() {
-        panel.querySelectorAll('.viz-tab').forEach(function(b) { b.classList.remove('active'); });
-        this.classList.add('active');
-        RightPanel.switchTab(this.dataset.tab);
-      };
-    });
     panel.querySelectorAll('.et-tab').forEach(function(btn) {
       btn.onclick = function() {
         panel.querySelectorAll('.et-tab').forEach(function(b) { b.classList.remove('active'); });
@@ -1653,8 +1575,8 @@ const RightPanel = {
         }
         S.commParent = '';
         S.commStack = [];
-        S.cid = '';
-        syncURL();
+        _rootEntryEt = S.et;
+        StateStore.commit({cid: '', et: S.et, gran: S.gran});
         RightPanel.renderPanel();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
@@ -1663,13 +1585,12 @@ const RightPanel = {
     });
     var ds = document.getElementById('depthSelect');
     if (ds) ds.onchange = function() {
-      updateS({depth: parseInt(this.value) || 1});
+      StateStore.commit({depth: parseInt(this.value) || 1});
       RightPanel.loadViz();
     };
     var ts = document.getElementById('layoutTimeoutSelect');
     if (ts) ts.onchange = function() {
-      S.layoutTimeout = parseInt(this.value) * 1000;
-      syncURL();
+      StateStore.commit({layoutTimeout: parseInt(this.value) * 1000});
     };
   },
 
@@ -1705,8 +1626,9 @@ const RightPanel = {
         var cid = this.dataset.cid;
         var name = this.dataset.name;
         S.commParent = cid;
-        S.commStack.push({cid: cid, name: name});
-        updateS({cid: cid, depth: 1});
+        if (S.commStack.length === 0) _rootEntryEt = S.et;
+        S.commStack.push({cid: cid, name: name, et: S.et});
+        StateStore.commit({cid: cid, depth: 1});
         RightPanel.loadCommTree();
         RightPanel.loadViz();
         RightBreadcrumb.render();
@@ -1903,17 +1825,19 @@ const GraphView = {
         if (isExternal) {
           if (!extNode && nodeId !== S.cid) {
             S.commParent = nodeId;
-            S.commStack.push({cid: nodeId, name: evt.target.data('label')});
-            updateS({cid: nodeId, depth: 1});
+            if (S.commStack.length === 0) _rootEntryEt = S.et;
+            S.commStack.push({cid: nodeId, name: evt.target.data('label'), et: S.et});
+            StateStore.commit({cid: nodeId, depth: 1});
           }
         } else if (isComponent) {
           if (nodeId === S.cid) return;
           S.commParent = nodeId;
-          S.commStack.push({cid: nodeId, name: evt.target.data('label')});
+          if (S.commStack.length === 0) _rootEntryEt = S.et;
+          S.commStack.push({cid: nodeId, name: evt.target.data('label'), et: S.et});
           if (evt.target.data('hasChildren') === false) {
-            updateS({cid: nodeId, depth: 1, gran: 'file'});
+            StateStore.commit({cid: nodeId, depth: 1, gran: 'file'});
           } else {
-            updateS({cid: nodeId, depth: 1});
+            StateStore.commit({cid: nodeId, depth: 1});
           }
         }
         RightPanel.renderPanel();
@@ -1963,19 +1887,21 @@ const GraphView = {
     var fp = document.getElementById('graphFilterPanel');
     if (!tb || !hdr) return;
 
+    console.log('[Tb] _initToolbar START', {tb: !!tb, hdr: !!hdr, fp: !!fp});
     // 阻止工具栏点击冒泡到画布
-    tb.onmousedown = function(e) { e.stopPropagation(); };
-    tb.onclick = function(e) { e.stopPropagation(); };
+    tb.onmousedown = function(e) { console.log('[Tb] tb.mousedown target=' + e.target.id + ' tag=' + e.target.tagName); e.stopPropagation(); };
+    tb.onclick = function(e) { console.log('[Tb] tb.click target=' + e.target.id + ' tag=' + e.target.tagName + ' btn=' + e.target.closest('button')?.id); e.stopPropagation(); };
 
     // --- collapse ---
     var collapseBtn = document.getElementById('graphToolbarCollapse');
     collapseBtn.onclick = function(e) {
+      console.log('[Tb] collapseBtn.click');
       e.stopPropagation();
       tb.classList.toggle('collapsed');
       this.textContent = tb.classList.contains('collapsed') ? '+' : '\u2212';
     };
 
-    // --- drag (整个 header 可拖动) ---
+    // --- drag ---
     var dragOn = false, sx = 0, sy = 0, ox = 0, oy = 0;
     hdr.onmousedown = function(e) {
       if (e.target.closest('button')) return;
@@ -2027,6 +1953,7 @@ const GraphView = {
     // --- 跟随 (linked) / 独立 (locked) 模式 (按钮切换) ---
     var btnMode = document.getElementById('graphTbMode');
     btnMode.onclick = function(e) {
+      console.log('[Tb] btnMode.click locked=' + btnMode.classList.contains('active'));
       e.stopPropagation();
       var locked = btnMode.classList.contains('active');
       if (locked) {
@@ -2042,40 +1969,43 @@ const GraphView = {
 
     function _isLocked() { return !btnMode.classList.contains('active'); }
 
-    // grab: locked 模式 — 锁定其它节点
-    g_cy.on('grab', 'node', function(evt) {
-      if (_isLocked()) {
-        var grabbed = evt.target;
-        g_cy.nodes().forEach(function(n) { if (!n.same(grabbed)) n.lock(); });
-      }
-    });
-    g_cy.on('free', 'node', function() {
-      if (_isLocked() && g_cy) g_cy.nodes().unlock();
-    });
-    // drag → linked 模式: 关联节点跟随
-    var dragPrevPos = null;
-    g_cy.on('drag', 'node', function(evt) {
-      if (_isLocked()) return;
-      var node = evt.target;
-      var pos = node.position();
-      if (!dragPrevPos) { dragPrevPos = { x: pos.x, y: pos.y }; return; }
-      var dx = pos.x - dragPrevPos.x;
-      var dy = pos.y - dragPrevPos.y;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
-      dragPrevPos = { x: pos.x, y: pos.y };
-      var neighbors = node.closedNeighborhood().nodes().filter(function(n) { return !n.same(node); });
-      if (neighbors.length > 0) {
-        console.log('[Viewer-drag] grabbed=' + node.id() + ' pos=(' + pos.x.toFixed(1) + ',' + pos.y.toFixed(1) + ') dx=' + dx.toFixed(1) + ' dy=' + dy.toFixed(1) + ' neighbours=' + neighbors.length);
-      }
-      neighbors.forEach(function(n) {
-        var np = n.position();
-        var nx = np.x + dx * 0.7;
-        var ny = np.y + dy * 0.7;
-        console.log('[Viewer-drag]   -> ' + n.id() + ' (' + np.x.toFixed(1) + ',' + np.y.toFixed(1) + ') -> (' + nx.toFixed(1) + ',' + ny.toFixed(1) + ') delta=(' + (dx * 0.7).toFixed(1) + ',' + (dy * 0.7).toFixed(1) + ')');
-        n.position({ x: nx, y: ny });
+    // ---- Cytoscape 实例相关（g_cy 可能为 null） ----
+    if (g_cy) {
+      // grab: locked 模式 — 锁定其它节点
+      g_cy.on('grab', 'node', function(evt) {
+        if (_isLocked()) {
+          var grabbed = evt.target;
+          g_cy.nodes().forEach(function(n) { if (!n.same(grabbed)) n.lock(); });
+        }
       });
-    });
-    g_cy.on('free', 'node', function() { dragPrevPos = null; });
+      g_cy.on('free', 'node', function() {
+        if (_isLocked() && g_cy) g_cy.nodes().unlock();
+      });
+      // drag → linked 模式: 关联节点跟随
+      var dragPrevPos = null;
+      g_cy.on('drag', 'node', function(evt) {
+        if (_isLocked()) return;
+        var node = evt.target;
+        var pos = node.position();
+        if (!dragPrevPos) { dragPrevPos = { x: pos.x, y: pos.y }; return; }
+        var dx = pos.x - dragPrevPos.x;
+        var dy = pos.y - dragPrevPos.y;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+        dragPrevPos = { x: pos.x, y: pos.y };
+        var neighbors = node.closedNeighborhood().nodes().filter(function(n) { return !n.same(node); });
+        if (neighbors.length > 0) {
+          console.log('[Viewer-drag] grabbed=' + node.id() + ' pos=(' + pos.x.toFixed(1) + ',' + pos.y.toFixed(1) + ') dx=' + dx.toFixed(1) + ' dy=' + dy.toFixed(1) + ' neighbours=' + neighbors.length);
+        }
+        neighbors.forEach(function(n) {
+          var np = n.position();
+          var nx = np.x + dx * 0.7;
+          var ny = np.y + dy * 0.7;
+          console.log('[Viewer-drag]   -> ' + n.id() + ' (' + np.x.toFixed(1) + ',' + np.y.toFixed(1) + ') -> (' + nx.toFixed(1) + ',' + ny.toFixed(1) + ') delta=(' + (dx * 0.7).toFixed(1) + ',' + (dy * 0.7).toFixed(1) + ')');
+          n.position({ x: nx, y: ny });
+        });
+      });
+      g_cy.on('free', 'node', function() { dragPrevPos = null; });
+    }
 
     // --- show/hide edges ---
     var btnEdges = document.getElementById('graphTbEdges');
@@ -2083,6 +2013,7 @@ const GraphView = {
       g_cy.edges().hide();
     }
     btnEdges.onclick = function(e) {
+      console.log('[Tb] btnEdges.click');
       e.stopPropagation();
       if (!g_cy) return;
       var hidden = btnEdges.classList.contains('active');
@@ -2096,6 +2027,7 @@ const GraphView = {
     // --- filter panel ---
     var btnFilter = document.getElementById('graphTbFilter');
     btnFilter.onclick = function(e) {
+      console.log('[Tb] btnFilter.click');
       e.stopPropagation();
       fp.classList.toggle('open');
       if (fp.classList.contains('open')) GraphView._refreshFilter();
@@ -2143,6 +2075,7 @@ const GraphView = {
     // reset positions & clear filters button
     var resetBtn = document.getElementById('graphTbReset');
     if (resetBtn) resetBtn.onclick = function(e) {
+      console.log('[Tb] resetBtn.click');
       e.stopPropagation();
       if (!g_cy || !S.taskId) return;
       S.centerNodes = [];
@@ -2162,6 +2095,64 @@ const GraphView = {
       }
       GraphView._refreshFilter();
     };
+
+    // --- 组件/文件形态切换按钮 ---
+    var btnGran = document.getElementById('graphTbGran');
+    if (btnGran) {
+      function _updateGranBtn() {
+        if (S.gran === 'file') {
+          btnGran.classList.add('active');
+          btnGran.textContent = '\u6587\u4ef6\u5f62\u6001';
+          btnGran.title = '\u5f53\u524d\u4e3a\u6587\u4ef6\u5f62\u6001\uff0c\u70b9\u51fb\u5207\u6362\u4e3a\u7ec4\u4ef6\u5f62\u6001';
+        } else {
+          btnGran.classList.remove('active');
+          btnGran.textContent = '\u7ec4\u4ef6\u5f62\u6001';
+          btnGran.title = '\u5f53\u524d\u4e3a\u7ec4\u4ef6\u5f62\u6001\uff0c\u70b9\u51fb\u5207\u6362\u4e3a\u6587\u4ef6\u5f62\u6001';
+        }
+      }
+      _updateGranBtn();
+      btnGran.onclick = function(e) {
+        console.log('[Tb] btnGran.click');
+        e.stopPropagation();
+        if (S.gran === 'component') {
+          S.gran = 'file';
+          if (S.et === 'EXTERNAL_INCLUDE' || S.et === 'EXTERNAL_CALL') {
+            S.et = S.et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL';
+          }
+        } else {
+          S.gran = 'component';
+        }
+        StateStore.commit({gran: S.gran, et: S.et});
+        _updateGranBtn();
+        RightPanel.loadViz();
+        RightPanel.renderPanel();
+      };
+    }
+
+    // --- 关系图/热力图切换按钮 ---
+    var btnTab = document.getElementById('graphTbTab');
+    if (btnTab) {
+      function _updateTabBtn() {
+        if (S.tab === 'heatmap') {
+          btnTab.classList.add('active');
+          btnTab.textContent = '\u70ed\u529b\u56fe';
+          btnTab.title = '\u5f53\u524d\u4e3a\u70ed\u529b\u56fe\uff0c\u70b9\u51fb\u5207\u6362\u4e3a\u5173\u7cfb\u56fe';
+        } else {
+          btnTab.classList.add('active');
+          btnTab.textContent = '\u5173\u7cfb\u56fe';
+          btnTab.title = '\u5f53\u524d\u4e3a\u5173\u7cfb\u56fe\uff0c\u70b9\u51fb\u5207\u6362\u4e3a\u70ed\u529b\u56fe';
+        }
+      }
+      _updateTabBtn();
+      btnTab.onclick = function(e) {
+        console.log('[Tb] btnTab.click');
+        e.stopPropagation();
+        var newTab = S.tab === 'graph' ? 'heatmap' : 'graph';
+        RightPanel.switchTab(newTab);
+        _updateTabBtn();
+      };
+    }
+    console.log('[Tb] _initToolbar DONE g_cy=' + !!g_cy);
   },
   _refreshFilter() {
     var list = document.getElementById('graphFilterList');
@@ -2270,12 +2261,13 @@ const GraphView = {
       // File mode: no drill-down
       if (S.gran === 'file') return;
       S.commParent = nid;
-      S.commStack.push({cid: nid, name: label});
+      if (S.commStack.length === 0) _rootEntryEt = S.et;
+      S.commStack.push({cid: nid, name: label, et: S.et});
       // Leaf community → show file-level deps/calls
       if (node.data('hasChildren') === false) {
-        updateS({cid: nid, depth: 1, gran: 'file'});
+        StateStore.commit({cid: nid, depth: 1, gran: 'file'});
       } else {
-        updateS({cid: nid, depth: 1});
+        StateStore.commit({cid: nid, depth: 1});
       }
       RightPanel.renderPanel();
       RightPanel.loadViz();
@@ -2293,21 +2285,16 @@ const GraphView = {
                S.et;
       var label = node.data('label') || commId;
       console.log('[ctx-doc] nid=' + nid + ' label=' + label.slice(0,20) + ' S.et=' + et + ' S.commStack=' + S.commStack.length);
-      updateS({docCommId: commId});
-      // Append current cn/cid to pc, then set new as cn/communityId
-      var u = new URLSearchParams(location.search);
-      var prevCid = u.get('communityId') || '';
-      var prevCn = u.get('cn') || '';
-      if (prevCid && prevCid !== commId) {
-        var oldPc = u.get('pc') || '';
-        var newSeg = (prevCn || prevCid) + '|' + prevCid + '|' + et;
-        u.set('pc', oldPc ? oldPc + ',' + newSeg : newSeg);
-      }
-      u.set('communityId', commId);
-      u.set('cn', label);
-      history.replaceState(null, '', '/doc?' + u.toString());
-      console.log('[ctx-doc] URL: cid=' + commId.slice(0,30) + ' cn=' + label.slice(0,20) + ' pc=' + (u.get('pc') || '-').slice(0,50));
-      loadCommunityDoc(S.taskId, commId, et);
+      // Build parent chain
+      var curPc = S.pc || '';
+      var curCid = S.docCommId || S.cid || '';
+      var curCn = S.cn || '';
+      var chain = [];
+      if (curPc) chain.push(curPc);
+      if (curCid && curCn && curCid !== commId) chain.push(curCn + '|' + curCid + '|' + S.et);
+      var pcStr = chain.join(',');
+      StateStore.commit({docCommId: commId, cn: label, pc: pcStr, et: et});
+      loadCommunityDoc(S.taskId, commId, et, true);
     };
 
     menu.querySelector('[data-action="center-view"]').onclick = function() {
@@ -2548,8 +2535,9 @@ const HeatmapView = {
         var cid = this.dataset.cid;
         if (!cid) return;
         S.commParent = cid;
-        S.commStack.push({cid: cid, name: this.textContent});
-        updateS({cid: cid, depth: 1});
+        if (S.commStack.length === 0) _rootEntryEt = S.et;
+        S.commStack.push({cid: cid, name: this.textContent, et: S.et});
+        StateStore.commit({cid: cid, depth: 1});
         RightPanel.renderPanel();
         RightPanel.loadCommTree();
         RightPanel.loadViz();
@@ -2614,8 +2602,12 @@ async function load() {
   document.getElementById('heatmapSize').onchange = function() { HeatmapView.load(); };
 
   // Route
+  var routeCid = S.docCommId || S.cid;
   if (g_communityId && g_taskId) {
-    await loadCommunityDoc(g_taskId, g_communityId, g_edgeType);
+    await loadCommunityDoc(g_taskId, g_communityId, g_edgeType, true);
+  } else if (routeCid && g_taskId) {
+    // 新版精简 URL：cid 参数代替 communityId
+    await loadCommunityDoc(g_taskId, routeCid, S.et || g_edgeType, true);
   } else if (!g_docId && !g_taskId) {
     document.getElementById('content').innerHTML = '<p>No document specified.</p>';
     return;
@@ -2635,13 +2627,13 @@ async function load() {
 async function loadDoc(id) {
   var content = document.getElementById('content');
   // 如果有文件状态但无社区ID，重置
-  if (S.page !== 'doc' && !g_communityId) { S.page = 'doc'; S.filePath = ''; }
+  if (S.page !== 'doc' && !g_communityId) { StateStore.commit({page: 'doc', filePath: ''}); }
   content.innerHTML = '<div class="loading">Loading document...</div>';
-  S.taskId = g_taskId;
+  // loadDoc 始终加载总体文档，无社区上下文，清空 cid/cn/pc/docCommId
+  StateStore.commit({taskId: g_taskId, cid: '', cn: '', pc: '', docCommId: ''});
   try {
     var doc = await API.doc(id);
-    S.projectId = doc.projectId || '';
-    S.taskId = doc.taskId || g_taskId;
+    StateStore.commit({projectId: doc.projectId || '', projectName: doc.projectName || '', taskId: doc.taskId || g_taskId, cn: doc.title || '', pc: ''});
     DocContent.render(doc.content || '');
   } catch(e) {
     content.innerHTML = '<div class="error-msg">Failed: ' + e.message + '</div>';
@@ -2653,10 +2645,15 @@ async function loadDoc(id) {
   }
 }
 
-async function loadCommunityDoc(tid, cid, et) {
+async function loadCommunityDoc(tid, cid, et, skipCid) {
   var content = document.getElementById('content');
   content.innerHTML = '<div class="loading">Loading community document...</div>';
-  updateS({docCommId: cid, cid: cid, et: et});
+  // 跨任务切换时清理旧上下文
+  if (tid !== S.taskId) {
+    StateStore.commit({cid: skipCid ? S.cid : cid, cn: '', pc: '', docCommId: cid, et: et, taskId: tid});
+  } else {
+    StateStore.commit({cid: skipCid ? S.cid : cid, docCommId: cid, et: et});
+  }
   console.log('[loadDoc] tid=' + tid.slice(0,8) + ' cid=' + cid + ' et=' + et + ' S.docCommId=' + S.docCommId + ' S.cid=' + S.cid);
 
   // 如果是文件页面，直接渲染文件预摘要
@@ -2669,9 +2666,7 @@ async function loadCommunityDoc(tid, cid, et) {
 
   try {
     var doc = await API.communityDoc(tid, cid, et);
-    S.projectId = doc.projectId || '';
-    S.taskId = doc.taskId || tid;
-    syncURL();
+    StateStore.commit({projectId: doc.projectId || '', projectName: doc.projectName || '', taskId: doc.taskId || tid, cn: doc.title || cid});
     DocContent.render(doc.content || '');
     LeftBreadcrumb.render();
     LeftToc.render(cid);
@@ -2694,7 +2689,12 @@ async function loadCommunityDoc(tid, cid, et) {
 
 async function loadTaskDocs(tid) {
   document.getElementById('content').innerHTML = '<div class="loading">Loading documents...</div>';
-  S.taskId = tid;
+  // 跨任务切换时清理社区上下文
+  if (tid !== S.taskId) {
+    StateStore.commit({taskId: tid, cid: '', cn: '', pc: ''});
+  } else {
+    StateStore.commit({taskId: tid});
+  }
   try {
     if (g_docId) { await loadDoc(g_docId); return; }
     await loadDoc('overall-' + tid);
@@ -2754,21 +2754,26 @@ function showPrompt(title, defaultVal, onConfirm, onCancel) {
 
 // ==================== 便签草稿 (Note Drafts) ====================
 
-const DRAFTS_KEY = 'topo_notes_drafts';
 var _drafts = [];
 var _draftSeq = 1;
+var _draftRefSeq = 1;
 var _sesCache = [];
 
 function loadDrafts() {
-  try {
-    var raw = localStorage.getItem(DRAFTS_KEY);
-    _drafts = raw ? JSON.parse(raw) : [];
-    _draftSeq = _drafts.reduce(function(m, d){return Math.max(m, d.seq||0)}, 0) + 1;
-  } catch(e) { _drafts = []; }
+  _drafts = NotesStore.list();
+  _draftSeq = (_drafts.length > 0 ? Math.max.apply(null, _drafts.map(function(d){return d.seq||0})) : 0) + 1;
+  _draftRefSeq = 1;
+  _drafts.forEach(function(d){(d.refs||[]).forEach(function(r){if (r.seq === undefined) r.seq = _draftRefSeq++; else if (r.seq >= _draftRefSeq) _draftRefSeq = r.seq + 1;})});
+  console.log('[Notes] loadDrafts', {count: _drafts.length, seq: _draftSeq, pending: _drafts.filter(function(d){return d.status==='pending'}).length});
   return _drafts;
 }
 function saveDrafts() {
-  try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(_drafts)); } catch(e) {}
+  try {
+    NotesStore._save(_drafts);
+    console.log('[Notes] saveDrafts', {count: _drafts.length});
+  } catch(e) {
+    console.warn('[Notes] saveDrafts ERROR', e.message);
+  }
   updateDotBadge();
 }
 function updateDotBadge() {
@@ -2781,6 +2786,7 @@ function updateDotBadge() {
 function makeRefId() { return 'ref_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
 function addRefToDraft(ref) {
+  console.log('[Notes] addRefToDraft', {label:(ref.label||'').slice(0,40), componentId:ref.componentId, text:(ref.text||'').slice(0,30)});
   loadDrafts();
   var target = null;
   for (var i = _drafts.length - 1; i >= 0; i--) {
@@ -2789,10 +2795,15 @@ function addRefToDraft(ref) {
   if (!target) {
     target = {id:'draft_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), seq:_draftSeq++, status:'draft', createdAt:new Date().toISOString(), refs:[], userText:''};
     _drafts.push(target);
+    console.log('[Notes] addRefToDraft new draft', {id:target.id, seq:target.seq});
+  } else {
+    console.log('[Notes] addRefToDraft existing draft', {id:target.id, seq:target.seq, refsBefore:target.refs.length});
   }
   ref._id = makeRefId();
+  ref.seq = _draftRefSeq++;
   target.refs.push(ref);
   saveDrafts();
+  if (document.getElementById('notesDraftList')) renderDrafts();
   var btn = document.getElementById('toggleNotes');
   if (btn) { btn.classList.remove('pulse'); void btn.offsetWidth; btn.classList.add('pulse'); setTimeout(function(){btn.classList.remove('pulse')}, 1200); }
   var seqLabel = target.seq;
@@ -2806,18 +2817,20 @@ function escHtml(t) {
 }
 
 function getCurrentContextRef() {
-  if (!S.commId && !S.taskId && !S.projectId) return null;
+  if (!S.cid && !S.taskId && !S.projectId) return null;
   return {
     projectId: S.projectId || '',
+    projectName: S.projectName || '',
     taskId: S.taskId || '',
-    componentId: S.commId || '',
-    label: (S.commLabel || S.commId || '当前页面') + (S.taskId ? ' ['+S.taskId.slice(0,8)+']' : '')
+    componentId: S.cid || '',
+    label: (S.cid || '当前页面') + (S.taskId ? ' ['+S.taskId.slice(0,8)+']' : '')
   };
 }
 
 // ---- 弹窗 ----
 
 function openNotesModal() {
+  console.log('[Notes] openNotesModal');
   loadDrafts();
   var modal = document.getElementById('notesModal');
   if (!modal) return;
@@ -2828,22 +2841,25 @@ function openNotesModal() {
   document.getElementById('notesAutoDelete').checked = true;
   var oldSs = modal.querySelector('.session-selector');
   if (oldSs) oldSs.remove();
+  console.log('[Notes] openNotesModal DONE, drafts=' + _drafts.length);
 }
 function closeNotesModal() {
+  console.log('[Notes] closeNotesModal');
   document.getElementById('notesModal').style.display = 'none';
 }
 
 function populateProjectFilter() {
   var sel = document.getElementById('notesFilterProj');
   var cur = sel.value;
-  var pids = {};
-  _drafts.forEach(function(d){(d.refs||[]).forEach(function(r){if(r.projectId)pids[r.projectId]=true})});
-  var keys = Object.keys(pids);
-  sel.innerHTML = '<option value="">全部项目</option>' + keys.map(function(k){return '<option value="'+escHtml(k)+'">'+escHtml(k.slice(0,12))+'</option>'}).join('');
+  var projMap = {};
+  _drafts.forEach(function(d){(d.refs||[]).forEach(function(r){if(r.projectId && !projMap[r.projectId])projMap[r.projectId]=r.projectName||r.projectId})});
+  var keys = Object.keys(projMap);
+  sel.innerHTML = '<option value="">全部项目</option>' + keys.map(function(k){return '<option value="'+escHtml(k)+'">'+escHtml(projMap[k])+' ('+escHtml(k.slice(0,12))+')</option>'}).join('');
   if (cur) sel.value = cur;
 }
 
 function renderDrafts() {
+  console.log('[Notes] renderDrafts START', {draftSeq: _draftSeq, totalDrafts: _drafts.length, draftStatuses: _drafts.map(function(d){return d.status})});
   var list = document.getElementById('notesDraftList');
   var filterProj = document.getElementById('notesFilterProj').value;
   var sortMode = document.getElementById('notesFilterSort').value;
@@ -2867,11 +2883,11 @@ function renderDrafts() {
       html += '<div class="note-draft-card" data-draft="'+d.id+'" data-ref="'+ri+'">' +
         '<div class="draft-header">' +
           '<input type="checkbox" class="cbox" data-draft="'+d.id+'" data-ref="'+ri+'">' +
-          '<span class="draft-seq">#' + d.seq + '</span>' +
+          '<span class="draft-seq">#' + r.seq + '</span>' +
           '<div class="draft-meta">' +
-            (r.projectId ? '<span class="ref-id">' + escHtml(r.projectId.slice(0,12)) + '</span>' : '') +
-            (r.taskId ? '<span class="ref-id '+(r.projectId?'muted':'')+'">' + escHtml(r.taskId.slice(0,10)) + '</span>' : '') +
-            (r.componentId ? '<span class="ref-id '+(r.taskId||r.projectId?'muted':'')+'">' + escHtml(r.componentId.slice(0,10)) + '</span>' : '') +
+            (r.projectName ? '<span class="ref-id">' + escHtml(r.projectName) + '</span>' : r.projectId ? '<span class="ref-id">' + escHtml(r.projectId.slice(0,12)) + '</span>' : '') +
+            (r.taskId ? '<span class="ref-id '+(r.projectId||r.projectName?'muted':'')+'">' + escHtml(r.taskId.slice(0,10)) + '</span>' : '') +
+            (r.componentId ? '<span class="ref-id '+(r.taskId||r.projectId||r.projectName?'muted':'')+'">' + escHtml(r.componentId.slice(0,10)) + '</span>' : '') +
             (r.label ? '<span style="font-size:11px;color:var(--text-muted);margin-left:4px">' + escHtml(r.label.slice(0,40)) + '</span>' : '') +
           '</div>' +
         '</div>' +
@@ -2888,17 +2904,24 @@ function renderDrafts() {
 
   list.querySelectorAll('.note-draft-card textarea').forEach(function(ta) {
     ta.addEventListener('input', function() {
-      var d = _drafts.find(function(x){return x.id===this.dataset.draft});
-      if (d && d.refs[parseInt(this.dataset.ref)]) d.refs[parseInt(this.dataset.ref)].text = this.value;
+      var taEl = this;
+      var d = _drafts.find(function(x){return x.id===taEl.dataset.draft});
+      if (d && d.refs[parseInt(taEl.dataset.ref)]) d.refs[parseInt(taEl.dataset.ref)].text = taEl.value;
       saveDrafts();
-      this.style.height='auto';this.style.height=Math.max(36,this.scrollHeight)+'px';
+      taEl.style.height='auto';taEl.style.height=Math.max(36,taEl.scrollHeight)+'px';
     });
   });
   list.querySelectorAll('.note-draft-card .del').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      var d = _drafts.find(function(x){return x.id===this.dataset.draft});
-      if (d) { d.refs.splice(parseInt(this.dataset.ref), 1); if (!d.refs.length) _drafts.splice(_drafts.indexOf(d), 1); }
+      var btnEl = this;
+      var d = _drafts.find(function(x){return x.id===btnEl.dataset.draft});
+      if (d) { d.refs.splice(parseInt(btnEl.dataset.ref), 1); if (!d.refs.length) _drafts.splice(_drafts.indexOf(d), 1); }
       saveDrafts(); renderDrafts();
+    });
+  });
+  list.querySelectorAll('.note-draft-card .cbox').forEach(function(cb) {
+    cb.addEventListener('keydown', function(e) {
+      if (e.key === ' ' || e.key === 'Space' || e.key === 'Enter') e.preventDefault();
     });
   });
 }
@@ -2980,12 +3003,13 @@ function addNoteButtonToDoc() {
   btn.style.cssText = 'margin-left:8px;padding:2px 10px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);cursor:pointer';
   btn.onclick = function() {
     loadDrafts();
-    var cid = S.commId || S.cid || g_communityId || '';
-    var cname = S.commLabel || (document.querySelector('h1') ? document.querySelector('h1').textContent.trim() : '') || cid;
+    var cid = S.cid || g_communityId || '';
+    var cname = (document.querySelector('h1') ? document.querySelector('h1').textContent.trim() : '') || cid;
     openNotesModal();
     if (cid) {
       var ref = {
         projectId: S.projectId || '',
+        projectName: S.projectName || '',
         taskId: S.taskId || '',
         componentId: cid,
         label: cname.slice(0, 60),
@@ -3013,6 +3037,7 @@ document.querySelector('#graphContextMenu [data-action="note"]')?.addEventListen
   var isExternal = !!menu._ctxIsExt;
   var ref = {
     projectId: S.projectId || '',
+    projectName: S.projectName || '',
     taskId: S.taskId || '',
     componentId: nid,
     label: label.slice(0, 60)
@@ -3095,7 +3120,8 @@ function removeSelectedRefs() {
   saveDrafts(); renderDrafts();
 }
 
-async function executeDrafts() {
+function executeDrafts() {
+  console.log('[Notes] executeDrafts START');
   // 刷新 textarea 到 _drafts
   document.querySelectorAll('#notesDraftList textarea').forEach(function(ta){
     var d = _drafts.find(function(x){return x.id===ta.dataset.draft});
@@ -3105,20 +3131,30 @@ async function executeDrafts() {
   if (!refs.length) { showToast('请勾选要发送的引用材料'); return; }
   var userText = document.getElementById('notesUserText').value.trim();
   var autoDelete = document.getElementById('notesAutoDelete').checked;
-  showSessionSelector(async function(sessionId) {
+  console.log('[Notes] executeDrafts', {refCount: refs.length, userText: userText, autoDelete: autoDelete});
+  showSessionSelector(function(sessionId) {
+    console.log('[exec-flow] viewer executeDrafts: \u9009\u62e9\u2192' + (sessionId ? '\u5df2\u6709\u4f1a\u8bdd ' + sessionId.slice(0,12) : '\u65b0\u5efa\u4f1a\u8bdd'));
+    var taskId = S.taskId || '';
+    var key = 'topo_exec_pending_' + taskId;
+    var storeData = {refs: refs, userText: userText || '\u5206\u6790\u8fd9\u4e9b\u5185\u5bb9', sessionId: sessionId, autoDelete: autoDelete, ts: Date.now()};
+    console.log('[exec-flow] viewer executeDrafts: localStorage key=' + key, {refs: refs.length, userTextLen: storeData.userText.length, sessionId: !!sessionId});
     try {
-      var r = await fetch('/api/notes/execute-draft', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({refs: refs, userText: userText, sessionId: sessionId})
-      });
-      var d = await r.json();
-      if (d.sessionId) {
-        if (autoDelete) removeSelectedRefs();
-        closeNotesModal();
-        window.open('/chat?sessionId=' + d.sessionId, '_blank');
-      }
-    } catch(e) { showToast('发送失败: ' + e.message); }
+      localStorage.setItem(key, JSON.stringify(storeData));
+    } catch(e) { showToast('\u4fdd\u5b58\u5931\u8d25: ' + e.message); return; }
+    // \u805a\u7126\u5df2\u6709\u7a97\u53e3\u6216\u65b0\u5efa
+    var chatUrl = '/chat' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : '');
+    var existing = window.open('', 'topo_chat');
+    if (existing && !existing.closed && existing.location && existing.location.href !== 'about:blank') {
+      existing.focus();
+      console.log('[exec-flow] viewer executeDrafts: \u5df2\u6709\u7a97\u53e3\u2192\u805a\u7126');
+    } else {
+      if (existing) existing.close();
+      window.open(chatUrl, 'topo_chat');
+      console.log('[exec-flow] viewer executeDrafts: \u65b0\u7a97\u53e3\u2192' + chatUrl);
+    }
+    if (autoDelete) removeSelectedRefs();
+    closeNotesModal();
+    showToast('\u5df2\u53d1\u9001\u5230 AI \u5bf9\u8bdd\u9875');
   });
 }
 
@@ -3148,14 +3184,14 @@ function manualDrafts() {
     _drafts.push(nd);
     saveDrafts();
     closeNotesModal();
-    try { new BroadcastChannel('topo_notes_drafts').postMessage({type:'pending_notes'}); } catch(e) {}
+    try { NotesStore._channel && NotesStore._channel.postMessage({type:'notes'}); } catch(e) {}
     showToast('已转交到 AI 对话页的便签栏');
   }
 }
 
 // ---- 事件绑定 ----
 
-document.getElementById('toggleNotes').addEventListener('click', function() { loadDrafts(); openNotesModal(); });
+document.getElementById('toggleNotes').addEventListener('click', function() { console.log('[Notes] toggleNotes clicked'); loadDrafts(); openNotesModal(); });
 document.getElementById('notesModalClose').addEventListener('click', closeNotesModal);
 document.getElementById('notesFilterProj').addEventListener('change', renderDrafts);
 document.getElementById('notesFilterSort').addEventListener('change', renderDrafts);
@@ -3171,9 +3207,6 @@ setInterval(function(){
   if (document.getElementById('notesModal').style.display === 'flex') renderDrafts();
   updateDotBadge();
 }, 30000);
-try { new BroadcastChannel('topo_notes_drafts').onmessage = function(e) {
-  if (e.data && e.data.type === 'pending_notes') { loadDrafts(); updateDotBadge(); }
-}; } catch(e) {}
 
 </script>
 </body>

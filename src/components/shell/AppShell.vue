@@ -155,7 +155,6 @@ onUnmounted(() => {
     <div
       v-if="showStartupDialog"
       class="backend-startup-overlay"
-      @click.self="dismissStartup"
     >
       <div
         class="backend-startup-modal"
