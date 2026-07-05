@@ -502,10 +502,10 @@ function createRealIPC() {
       getModels: async () => {
         return await api.settings.getModels()
       },
-      addModel: async (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number }) => {
+      addModel: async (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number }) => {
         return await api.settings.addModel(params)
       },
-      updateModel: async (params: { id: string; name?: string; temperature?: number; maxTokens?: number }) => {
+      updateModel: async (params: { id: string; name?: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number }) => {
         return await api.settings.updateModel(params)
       },
       removeModel: async (id: string) => {

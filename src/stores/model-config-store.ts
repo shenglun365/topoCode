@@ -13,6 +13,8 @@ export const useModelConfigStore = defineStore('modelConfig', () => {
       type: raw.type, status: raw.status,
       isDefault: raw.isDefault ?? Boolean(raw.is_default ?? false),
       temperature: raw.temperature, maxTokens: raw.maxTokens ?? raw.max_tokens,
+      frequencyPenalty: raw.frequencyPenalty ?? raw.frequency_penalty,
+      presencePenalty: raw.presencePenalty ?? raw.presence_penalty,
       apiKey: raw.apiKey || raw.api_key || '', latency: raw.latency,
       maxRequestsPerDay: raw.maxRequestsPerDay ?? raw.max_requests_per_day ?? 0,
       maxTokensPerDay: raw.maxTokensPerDay ?? raw.max_tokens_per_day ?? 0,
@@ -27,7 +29,7 @@ export const useModelConfigStore = defineStore('modelConfig', () => {
 
   async function addModel(params: {
     name: string; provider: string; model: string; url: string;
-    type: string; temperature?: number; maxTokens?: number; isDefault?: boolean
+    type: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; isDefault?: boolean
   }) {
     const raw = await ipc.settings.addModel(params)
     const model = normalizeModel(raw)
@@ -37,7 +39,7 @@ export const useModelConfigStore = defineStore('modelConfig', () => {
 
   async function updateModel(params: {
     id: string; name?: string; provider?: string; model?: string; url?: string;
-    temperature?: number; maxTokens?: number; isDefault?: boolean; apiKey?: string
+    temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; isDefault?: boolean; apiKey?: string
   }) {
     const raw = await ipc.settings.updateModel(params)
     const model = normalizeModel(raw)

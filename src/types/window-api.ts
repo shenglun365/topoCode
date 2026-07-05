@@ -58,6 +58,8 @@ interface ModelConfigInfo {
   isDefault?: boolean
   temperature?: number
   maxTokens?: number
+  frequencyPenalty?: number
+  presencePenalty?: number
 }
 
 /* Window.api is declared in @/types/ipc.ts via IPCAPI */

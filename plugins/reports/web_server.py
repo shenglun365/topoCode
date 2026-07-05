@@ -1417,7 +1417,7 @@ async def create_chat_session(request: Request):
             "--force (重新生成), -L zh/en (输出语言), "
             "-j N (并发数, 1-5, 默认1, 如 /pipeline -j 2). "
             "overview 命令不支持 -j 参数, 只有一个并发.",
-            "注意：每次消息最多可以进行 30 次工具调用。请在此限制内规划分析路径，"
+            "注意：每次消息最多可以进行 50 次工具调用。请在此限制内规划分析路径，"
             "避免不必要的重复查询。当获取足够信息后应及时输出结论。"
             "如果某个工具返回空结果或无有效数据，说明该路径不可行，请跳过并尝试其他方法。"
             "不要重复调用返回相同结果的工具。如果已获取足够信息，直接输出结论。",
@@ -1632,7 +1632,7 @@ async def send_chat_message(session_id: str, request: Request):
             if first.get("componentId"):
                 ctx_parts.append(f"组件ID：{first['componentId']}")
             ctx_parts.append(f"会话ID：{session_id}")
-            ctx_parts.append("每轮消息最多 30 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。")
+            ctx_parts.append("每轮消息最多 50 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。")
             ctx_msg = "；".join(ctx_parts)
             _sdb().execute(
                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
@@ -1645,7 +1645,7 @@ async def send_chat_message(session_id: str, request: Request):
             _sdb().execute(
                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                 "VALUES (?, ?, 'system', ?, '{}', ?)",
-                (_make_message_id(), session_id, f"会话ID：{session_id}；每轮消息最多 30 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。", now),
+                (_make_message_id(), session_id, f"会话ID：{session_id}；每轮消息最多 50 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。", now),
             )
 
         msg_meta = json.dumps({"refs": refs} if refs else {})
@@ -1718,6 +1718,10 @@ async def send_chat_message(session_id: str, request: Request):
                         payload['tool_choice'] = 'auto'
                 if md.get('temperature') is not None:
                     payload['temperature'] = md['temperature']
+                if md.get('frequency_penalty') is not None:
+                    payload['frequency_penalty'] = md['frequency_penalty']
+                if md.get('presence_penalty') is not None:
+                    payload['presence_penalty'] = md['presence_penalty']
                 payload['max_tokens'] = md.get('max_tokens', 16384)
                 headers = {'Content-Type': 'application/json'}
                 api_key = md.get('api_key', '')
@@ -1782,7 +1786,7 @@ async def send_chat_message(session_id: str, request: Request):
             executor = web_tool_executor
             _log = logger.info
 
-            TOOL_ROUND_LIMIT = 30
+            TOOL_ROUND_LIMIT = 50
 
             async def _producer():
                 ctx_msgs = list(context_messages)
@@ -1916,7 +1920,10 @@ async def send_chat_message(session_id: str, request: Request):
                 while True:
                     event = await queue.get()
                     event_count += 1
-                    _log(f"[event_stream] -> SSE event #{event_count}: type={event.get('type')} keys={list(event.keys())}")
+                    if event["type"] in ("chunk", "reasoning") and event_count > 5 and event_count % 500 != 0:
+                        pass
+                    else:
+                        _log(f"[event_stream] -> SSE event #{event_count}: type={event.get('type')} keys={list(event.keys())}")
                     if event["type"] == "done":
                         yield f"event: done\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                         _log(f"[event_stream] done, total {event_count} events")
@@ -1952,19 +1959,24 @@ def _check_auto_title(session_id: str):
             "SELECT title FROM llm_sessions WHERE id = ?", (session_id,)
         )
         if not row:
+            logger.info(f"[auto-title] _check: session {session_id[:16]} not found")
             return
         title = row["title"] or ""
+        logger.info(f"[auto-title] _check: session {session_id[:16]} title='{title[:30]}'")
         # 默认标题（新建会话、便签分析）→ 需要自动生成
         if title and not title.startswith("新对话") and not title.startswith("便签分析"):
+            logger.info(f"[auto-title] _check: title already set, skip")
             return
         msgs = _sdb().fetchall(
             "SELECT role, content FROM llm_messages WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY created_at",
             (session_id,),
         )
         if len(msgs) < 2:
+            logger.info(f"[auto-title] _check: only {len(msgs)} messages, need 2, skip")
             return
+        logger.info(f"[auto-title] _check: calling _do_auto_title with {len(msgs)} messages")
         context = "\n".join([f"{'用户' if m['role'] == 'user' else '助手'}: {m['content'][:500]}" for m in msgs[-4:]])
-        prompt = f"根据以下对话内容，用5-8个字概括对话主题作为会话标题，只返回标题本身，不要有其他内容。\n\n{context}"
+        prompt = f"为以下对话生成一个5-8个字的标题。直接输出标题，不要输出其他任何内容。\n\n{context}"
         _do_auto_title(session_id, prompt)
     except Exception as e:
         logger.warning(f"[auto-title] _check_auto_title error: {e}")
@@ -1980,47 +1992,117 @@ def _do_auto_title(session_id: str, prompt: str):
         if default_row and default_row["value"]:
             model_id = default_row["value"]
         if not model_id:
+            # 回退：找 is_default 模型
+            default_model = multi_db.main_db.fetchone(
+                "SELECT id FROM model_configs WHERE is_default = 1 AND status = 'connected' LIMIT 1"
+            )
+            if default_model:
+                model_id = default_model["id"]
+        if not model_id:
+            logger.warning(f"[auto-title] _do: no default model found for session {session_id[:16]}")
             return
+        logger.info(f"[auto-title] _do: using model_id={model_id[:16]}, prompt_len={len(prompt)}")
         model_cfg = multi_db.main_db.fetchone(
             "SELECT * FROM model_configs WHERE id = ?", (model_id,)
         )
         if not model_cfg:
+            logger.warning(f"[auto-title] _do: model {model_id[:16]} not found in configs")
             return
         md = dict(model_cfg)
         base_url = md.get("url", "").rstrip("/")
         if base_url.endswith("/v1"):
             base_url = base_url[:-3]
         import requests as _req
+        ctx = prompt.split(chr(10)*2, 1)[1] if chr(10)*2 in prompt else prompt
         payload = {
             "model": md.get("model", ""),
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": "你是一个简洁的标题生成助手。根据对话内容，用不超过16个字概括主题作为标题。只输出标题本身，严禁输出思考过程、分析或任何其他文字。"},
+                {"role": "user", "content": f"对话内容：{ctx}"},
+            ],
             "stream": False,
-            "max_tokens": 32,
+            "max_tokens": md.get('max_tokens', 16384),
             "temperature": 0.1,
         }
+        if md.get('frequency_penalty') is not None:
+            payload['frequency_penalty'] = md['frequency_penalty']
+        if md.get('presence_penalty') is not None:
+            payload['presence_penalty'] = md['presence_penalty']
         _headers = {"Content-Type": "application/json"}
         api_key = md.get("api_key", "")
         if api_key:
             _headers["Authorization"] = f"Bearer {api_key}"
+        logger.info(f"[auto-title] _do: POST {base_url}/v1/chat/completions")
         resp = _req.post(
             f"{base_url}/v1/chat/completions",
             json=payload, headers=_headers, timeout=30,
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            choices = data.get("choices", [])
-            if choices and choices[0].get("message", {}).get("content"):
-                title = choices[0]["message"]["content"].strip().strip('"').strip("'").strip()
-                if title and len(title) <= 30:
-                    from datetime import datetime as _dt
-                    now = _dt.now().isoformat()
-                    _sdb().execute(
-                        "UPDATE llm_sessions SET title = ?, updated_at = ? WHERE id = ?",
-                        (title, now, session_id),
-                    )
-                    logger.info(f"[auto-title] set title '{title}' for session {session_id[:16]}")
+        if resp.status_code != 200:
+            logger.warning(f"[auto-title] _do: LLM returned status {resp.status_code}, body={resp.text[:200]}")
+            return
+        data = resp.json()
+        choices = data.get("choices", [])
+        raw = ""
+        if choices:
+            msg = choices[0].get("message", {})
+            raw = (msg.get("content", "") or msg.get("reasoning_content", "") or "").strip()
+        # 推理模型可能在 content 中输出大量思考过程，从中提取标题
+        title = _extract_title_from_llm_output(raw)
+        if title and 2 <= len(title) <= 16:
+            from datetime import datetime as _dt
+            now = _dt.now().isoformat()
+            _sdb().execute(
+                "UPDATE llm_sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (title, now, session_id),
+            )
+            logger.info(f"[auto-title] set title '{title}' for session {session_id[:16]}")
+        else:
+            # 回退：用用户首条消息截断为标题
+            fallback = _fallback_title(session_id, raw[:80])
+            if fallback:
+                from datetime import datetime as _dt
+                now = _dt.now().isoformat()
+                _sdb().execute(
+                    "UPDATE llm_sessions SET title = ?, updated_at = ? WHERE id = ?",
+                    (fallback, now, session_id),
+                )
+                logger.info(f"[auto-title] fallback title '{fallback}' for session {session_id[:16]}")
+            else:
+                logger.warning(f"[auto-title] _do: no valid title, raw='{raw[:80]}'")
     except Exception as e:
         logger.warning(f"[auto-title] _do_auto_title error: {e}")
+
+
+def _extract_title_from_llm_output(raw: str) -> str:
+    """从 LLM 输出中提取标题"""
+    if not raw:
+        return ""
+    lines = [l.strip().strip('"').strip("'").strip() for l in raw.split('\n') if l.strip()]
+    for l in reversed(lines):
+        if 2 <= len(l) <= 20 and not l.startswith('-') and not l.startswith('*') and not l.startswith('#'):
+            return l
+    if lines:
+        last = lines[-1]
+        if 2 <= len(last) <= 30:
+            return last
+    return ""
+
+
+def _fallback_title(session_id: str, llm_hint: str) -> str:
+    """LLM 标题生成失败时的回退：取用户首条消息前 16 字"""
+    try:
+        row = _sdb().fetchone(
+            "SELECT content FROM llm_messages WHERE session_id = ? AND role = 'user' ORDER BY created_at LIMIT 1",
+            (session_id,),
+        )
+        if row and row["content"]:
+            text = row["content"].strip()
+            if len(text) <= 16:
+                return text
+            return text[:16] + "…"
+    except Exception:
+        pass
+    return ""
 
 
 def _resolve_default_model_id() -> str:

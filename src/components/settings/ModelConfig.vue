@@ -53,6 +53,8 @@ const form = ref({
   type: 'local' as 'local' | 'cloud',
   temperature: 0.7,
   maxTokens: 4096,
+  frequencyPenalty: 0.0,
+  presencePenalty: 0.0,
   isDefault: false,
   apiKey: '',
 })
@@ -212,6 +214,8 @@ function openAddDialog() {
     type: 'local',
     temperature: 0.7,
     maxTokens: 4096,
+    frequencyPenalty: 0.0,
+    presencePenalty: 0.0,
     isDefault: modelConfigStore.models.length === 0,
     apiKey: '',
   }
@@ -230,6 +234,8 @@ function openEditDialog(config: ModelConfigItem) {
     type: config.type,
     temperature: config.temperature ?? 0.7,
     maxTokens: config.maxTokens ?? 4096,
+    frequencyPenalty: config.frequencyPenalty ?? 0.0,
+    presencePenalty: config.presencePenalty ?? 0.0,
     isDefault: config.isDefault,
     apiKey: config.apiKey || '',
   }
@@ -252,6 +258,8 @@ async function saveModel() {
       url: form.value.url,
       temperature: form.value.temperature,
       maxTokens: form.value.maxTokens,
+      frequencyPenalty: form.value.frequencyPenalty,
+      presencePenalty: form.value.presencePenalty,
       isDefault: form.value.isDefault,
       apiKey: form.value.apiKey || undefined,
     })
@@ -264,6 +272,8 @@ async function saveModel() {
       type: string
       temperature?: number
       maxTokens?: number
+      frequencyPenalty?: number
+      presencePenalty?: number
       apiKey?: string
       isDefault?: boolean
     } = {
@@ -275,6 +285,8 @@ async function saveModel() {
     }
     if (form.value.temperature != null) addParams.temperature = form.value.temperature
     if (form.value.maxTokens != null) addParams.maxTokens = form.value.maxTokens
+    if (form.value.frequencyPenalty != null) addParams.frequencyPenalty = form.value.frequencyPenalty
+    if (form.value.presencePenalty != null) addParams.presencePenalty = form.value.presencePenalty
     if (form.value.apiKey) addParams.apiKey = form.value.apiKey
     if (form.value.isDefault) addParams.isDefault = true
 
@@ -345,6 +357,8 @@ async function testCurrentForm() {
         type: form.value.type || 'chat',
         temperature: form.value.temperature,
         maxTokens: form.value.maxTokens,
+        frequencyPenalty: form.value.frequencyPenalty,
+        presencePenalty: form.value.presencePenalty,
         apiKey: form.value.apiKey || undefined,
       })
       const result = await window.api!.settings.testModel(saved.id)
@@ -513,6 +527,20 @@ initUsageStats()
                     style="font-size:9px;"
                   >
                     {{ t('settings.modelMaxTokens') }}: {{ fmt(config.maxTokens) }}
+                  </span>
+                  <span
+                    v-if="config.frequencyPenalty !== undefined"
+                    class="badge badge-gray"
+                    style="font-size:9px;"
+                  >
+                    FP: {{ fmt(config.frequencyPenalty) }}
+                  </span>
+                  <span
+                    v-if="config.presencePenalty !== undefined"
+                    class="badge badge-gray"
+                    style="font-size:9px;"
+                  >
+                    PP: {{ fmt(config.presencePenalty) }}
                   </span>
                 </div>
               </div>
@@ -731,7 +759,7 @@ initUsageStats()
           </div>
 
           <div class="form-field">
-            <label class="field-label">{{ t('settings.modelTemperature') }}</label>
+            <label class="field-label">{{ t('settings.modelTemperature') }} <span style="font-size:11px;color:var(--text-muted)">(temperature)</span></label>
             <input
               v-model.number="form.temperature"
               type="number"
@@ -743,12 +771,36 @@ initUsageStats()
           </div>
 
           <div class="form-field">
-            <label class="field-label">{{ t('settings.modelMaxTokens') }}</label>
+            <label class="field-label">{{ t('settings.modelMaxTokens') }} <span style="font-size:11px;color:var(--text-muted)">(max_tokens)</span></label>
             <input
               v-model.number="form.maxTokens"
               type="number"
               step="256"
               min="256"
+              class="field-input"
+            >
+          </div>
+
+          <div class="form-field">
+            <label class="field-label">{{ t('settings.modelFrequencyPenalty') }} <span style="font-size:11px;color:var(--text-muted)">(frequency_penalty)</span></label>
+            <input
+              v-model.number="form.frequencyPenalty"
+              type="number"
+              step="0.1"
+              min="-2"
+              max="2"
+              class="field-input"
+            >
+          </div>
+
+          <div class="form-field">
+            <label class="field-label">{{ t('settings.modelPresencePenalty') }} <span style="font-size:11px;color:var(--text-muted)">(presence_penalty)</span></label>
+            <input
+              v-model.number="form.presencePenalty"
+              type="number"
+              step="0.1"
+              min="-2"
+              max="2"
               class="field-input"
             >
           </div>

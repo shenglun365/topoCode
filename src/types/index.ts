@@ -165,6 +165,8 @@ export interface ModelConfig {
   model: string;
   temperature?: number;
   maxTokens?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
   isDefault?: boolean;
   status: 'online' | 'offline' | 'error';
   latency?: number;

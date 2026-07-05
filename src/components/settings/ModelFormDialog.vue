@@ -28,6 +28,8 @@ const emit = defineEmits<{
     type: string
     temperature?: number
     maxTokens?: number
+    frequencyPenalty?: number
+    presencePenalty?: number
     apiKey?: string
     isDefault?: boolean
   }]
@@ -68,6 +70,8 @@ const form = ref({
   type: 'local' as 'local' | 'cloud',
   temperature: 0.7,
   maxTokens: 4096,
+  frequencyPenalty: 0.0,
+  presencePenalty: 0.0,
   isDefault: false,
   apiKey: '',
 })
@@ -89,6 +93,8 @@ watch(() => props.show, (val) => {
         type: props.config.type,
         temperature: props.config.temperature ?? 0.7,
         maxTokens: props.config.maxTokens ?? 4096,
+        frequencyPenalty: props.config.frequencyPenalty ?? 0.0,
+        presencePenalty: props.config.presencePenalty ?? 0.0,
         isDefault: props.config.isDefault,
         apiKey: props.config.apiKey || '',
       }
@@ -102,6 +108,8 @@ watch(() => props.show, (val) => {
         type: meta.group,
         temperature: 0.7,
         maxTokens: 4096,
+        frequencyPenalty: 0.0,
+        presencePenalty: 0.0,
         isDefault: emptyModelCount.value === 0,
         apiKey: '',
       }
@@ -228,7 +236,7 @@ function close() {
           </div>
 
           <div class="form-field">
-            <label class="field-label">{{ t('settings.modelTemperature') }}</label>
+            <label class="field-label">{{ t('settings.modelTemperature') }} <span style="font-size:11px;color:var(--text-muted)">(temperature)</span></label>
             <input
               v-model.number="form.temperature"
               type="number"
@@ -240,12 +248,36 @@ function close() {
           </div>
 
           <div class="form-field">
-            <label class="field-label">{{ t('settings.modelMaxTokens') }}</label>
+            <label class="field-label">{{ t('settings.modelMaxTokens') }} <span style="font-size:11px;color:var(--text-muted)">(max_tokens)</span></label>
             <input
               v-model.number="form.maxTokens"
               type="number"
               step="256"
               min="256"
+              class="field-input"
+            >
+          </div>
+
+          <div class="form-field">
+            <label class="field-label">{{ t('settings.modelFrequencyPenalty') }} <span style="font-size:11px;color:var(--text-muted)">(frequency_penalty)</span></label>
+            <input
+              v-model.number="form.frequencyPenalty"
+              type="number"
+              step="0.1"
+              min="-2"
+              max="2"
+              class="field-input"
+            >
+          </div>
+
+          <div class="form-field">
+            <label class="field-label">{{ t('settings.modelPresencePenalty') }} <span style="font-size:11px;color:var(--text-muted)">(presence_penalty)</span></label>
+            <input
+              v-model.number="form.presencePenalty"
+              type="number"
+              step="0.1"
+              min="-2"
+              max="2"
               class="field-input"
             >
           </div>

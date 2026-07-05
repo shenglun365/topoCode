@@ -348,6 +348,8 @@ MAIN_DB_TABLES_SQL = """
         is_default INTEGER DEFAULT 0,
         temperature REAL DEFAULT 0.7,
         max_tokens INTEGER DEFAULT 4096,
+        frequency_penalty REAL DEFAULT 0.0,
+        presence_penalty REAL DEFAULT 0.0,
         timeout INTEGER DEFAULT 30000,
         extra_config TEXT,
         created_at TEXT DEFAULT (datetime('now')),
@@ -1233,6 +1235,8 @@ class MultiDBManager:
                 ("context_window", "INTEGER DEFAULT 8192"),
                 ("max_requests_per_day", "INTEGER DEFAULT 0"),
                 ("max_tokens_per_day", "INTEGER DEFAULT 0"),
+                ("frequency_penalty", "REAL DEFAULT 0.0"),
+                ("presence_penalty", "REAL DEFAULT 0.0"),
             ],
             "task_config_history": [
                 ("scopes", "TEXT"),

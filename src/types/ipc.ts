@@ -325,6 +325,8 @@ export interface ModelConfigItem {
   isDefault: boolean
   temperature?: number
   maxTokens?: number
+  frequencyPenalty?: number
+  presencePenalty?: number
   latency?: number
   apiKey?: string
   maxRequestsPerDay?: number
@@ -584,8 +586,8 @@ export interface IPCAPI {
   // 设置配置
   settings: {
     getModels: () => Promise<ModelConfigItem[]>
-    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; apiKey?: string; isDefault?: boolean }) => Promise<ModelConfigItem>
-    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; isDefault?: boolean; apiKey?: string; maxRequestsPerDay?: number; maxTokensPerDay?: number }) => Promise<ModelConfigItem>
+    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; apiKey?: string; isDefault?: boolean }) => Promise<ModelConfigItem>
+    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; isDefault?: boolean; apiKey?: string; maxRequestsPerDay?: number; maxTokensPerDay?: number }) => Promise<ModelConfigItem>
     removeModel: (id: string) => Promise<void>
     testModel: (id: string) => Promise<{ status: string; latency: number; model: string }>
     getAgents: () => Promise<AgentConfigItem[]>

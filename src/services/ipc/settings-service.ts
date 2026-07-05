@@ -8,9 +8,9 @@ export interface SettingsService {
   getModels(): Promise<ModelConfigDTO[]>
   addModel(params: {
     name: string; provider: string; model: string; url: string;
-    type: string; temperature?: number; maxTokens?: number
+    type: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number
   }): Promise<ModelConfigDTO>
-  updateModel(params: { id: string; name?: string; temperature?: number; maxTokens?: number }): Promise<ModelConfigDTO>
+  updateModel(params: { id: string; name?: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number }): Promise<ModelConfigDTO>
   removeModel(id: string): Promise<void>
   testModel(id: string): Promise<ModelTestResult>
   getAgents(): Promise<AgentConfigDTO[]>
