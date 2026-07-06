@@ -46,10 +46,11 @@ var StateStore = {
     var url = new URLSearchParams(location.search);
     var urlTaskId = url.get('taskId') || '';
     var urlCid = url.get('cid') || url.get('communityId') || '';
+    var urlGc = url.get('gc') || '';
     var urlEt = url.get('edgeType') || url.get('et') || '';
     var urlCn = url.get('cn') || '';
     var urlPc = url.get('pc') || '';
-    log('init URL params', {taskId: urlTaskId, cid: urlCid, et: urlEt, cn: urlCn, pc: urlPc});
+    log('init URL params', {taskId: urlTaskId, cid: urlCid, gc: urlGc, et: urlEt, cn: urlCn, pc: urlPc});
 
     // 按 taskId 隔离 localStorage 和 BroadcastChannel
     this._key = 'topo_viewer_state' + (urlTaskId ? '_' + urlTaskId : '');
@@ -79,10 +80,11 @@ var StateStore = {
 
     if (urlTaskId) this.state.taskId = urlTaskId;
     if (urlCid) this.state.docCommId = urlCid;
+    if (urlGc) { this.state.cid = urlGc; } else if (urlCid) { this.state.cid = urlCid; }
     if (urlEt) this.state.edgeType = urlEt;
     if (urlCn) this.state.cn = urlCn;
     if (urlPc) this.state.pc = urlPc;
-    log('init URL override applied', {taskId: this.state.taskId, cid: this.state.cid, et: this.state.et, cn: this.state.cn, pc: this.state.pc});
+    log('init URL override applied', {taskId: this.state.taskId, cid: this.state.cid, docCommId: this.state.docCommId, et: this.state.et, cn: this.state.cn, pc: this.state.pc});
 
     this._save();
     this._syncURL();
@@ -104,13 +106,18 @@ var StateStore = {
   _syncURL: function() {
     var p = new URLSearchParams();
     var prev = window.location.href;
+    // 保留当前 URL 中的 docId（由 loadDoc 手动设置，仅总体文档时有效）
+    var curDocId = new URLSearchParams(prev.split('?')[1]||'').get('docId');
     if (this.state.taskId) p.set('taskId', this.state.taskId);
     if (this.state.docCommId) p.set('cid', this.state.docCommId);
+    // 仅当无社区文档上下文时保留 docId（总体文档模式）
+    if (curDocId && !this.state.docCommId) p.set('docId', curDocId);
+    if (this.state.cid && this.state.cid !== this.state.docCommId) p.set('gc', this.state.cid);
     if (this.state.edgeType && this.state.edgeType !== 'INCLUDE') p.set('edgeType', this.state.edgeType);
     var qs = p.toString();
     var newUrl = '/doc' + (qs ? '?' + qs : '');
     history.replaceState(null, '', newUrl);
-    log('_syncURL', {from: prev.slice(0,80), to: newUrl, stateCid: this.state.cid, stateCn: this.state.cn, statePc: this.state.pc});
+    log('_syncURL', {from: prev.slice(0,80), to: newUrl, stateCid: this.state.cid, stateDocCommId: this.state.docCommId, stateCn: this.state.cn, statePc: this.state.pc});
   },
 
   _save: function() {
@@ -118,7 +125,7 @@ var StateStore = {
     for (var k in this.state) data[k] = this.state[k];
     delete data.taskId;
     var keys = Object.keys(data);
-    log('_save', {keys: keys.join(','), cid: data.cid, cn: data.cn, pc: data.pc, et: data.et});
+    log('_save', {keys: keys.join(','), cid: data.cid, docCommId: data.docCommId, cn: data.cn, pc: data.pc, et: data.et});
     _save(this._key, data);
   },
 

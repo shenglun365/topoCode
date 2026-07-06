@@ -1794,6 +1794,7 @@ async def send_chat_message(session_id: str, request: Request):
                     force_choice = round_idx == 0 and bool(tool_defs)
                     chunk_q = _queue.Queue()
                     full_content = ""
+                    full_reasoning = ""
                     tc_raw = []
 
                     _log(f"[producer] === ROUND {round_idx} start === tools={bool(tool_defs)} force_choice={force_choice} ctx_msgs={len(ctx_msgs)}")
@@ -1835,6 +1836,7 @@ async def send_chat_message(session_id: str, request: Request):
                                         if "arguments" in fn:
                                             acc["function"]["arguments"] = acc["function"].get("arguments", "") + fn["arguments"]
                             if item.get("type") == "reasoning":
+                                full_reasoning += item.get("text", "")
                                 await queue.put({"type": "reasoning", "text": item.get("text", "")})
                             if item.get("type") == "chunk" and not force_choice:
                                 await queue.put({"type": "chunk", "text": item.get("text", "")})
@@ -1856,10 +1858,13 @@ async def send_chat_message(session_id: str, request: Request):
                     if not parsed:
                         _log(f"[producer] round {round_idx} no tool calls → finalize")
                         if full_content.strip():
+                            _meta = {}
+                            if full_reasoning.strip():
+                                _meta["reasoning"] = full_reasoning.strip()
                             _sdb().execute(
                                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
-                                "VALUES (?, ?, 'assistant', ?, '{}', ?)",
-                                (_make_message_id(), session_id, full_content.strip(), now),
+                                "VALUES (?, ?, 'assistant', ?, ?, ?)",
+                                (_make_message_id(), session_id, full_content.strip(), json.dumps(_meta), now),
                             )
                         if round_idx == 0 and tool_defs and full_content.strip():
                             _log(f"[producer] emit suppressed first-round chunks: {len(full_content)} chars")
@@ -1902,7 +1907,10 @@ async def send_chat_message(session_id: str, request: Request):
                     ctx_msgs.extend(tool_msgs)
                     # 也保存到 DB
                     asst_id = _make_message_id()
-                    tc_meta = json.dumps({"tool_calls": [{"name": p.get("name",""), "arguments": p.get("arguments",{})} for p in parsed]}, ensure_ascii=False)
+                    tc_meta_dict = {"tool_calls": [{"name": p.get("name",""), "arguments": p.get("arguments",{})} for p in parsed]}
+                    if full_reasoning.strip():
+                        tc_meta_dict["reasoning"] = full_reasoning.strip()
+                    tc_meta = json.dumps(tc_meta_dict, ensure_ascii=False)
                     _sdb().execute(
                         "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                         "VALUES (?, ?, 'assistant', ?, ?, ?)",

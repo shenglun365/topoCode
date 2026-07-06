@@ -430,15 +430,39 @@ createApp({
       try{
         const r=await fetch('/api/chat/sessions/'+currentId.value);const d=await r.json()
         console.log('[exec-flow] chat loadMessages: id=' + (currentId.value||'').slice(0,12) + ' messages=' + (d.messages?.length||0))
-        if(d.messages)messages.value=d.messages.filter(m=>m.role!=='system'&&m.role!=='tool').map(function(m){
-          // \u4ece\u63a5\u53e3\u8fd4\u56de\u7684 toolCalls/\u91cd\u5efa\u5c55\u5f00\u72b6\u6001
-          if(m.role==='assistant'){
-            m.showReasoning=false
-            m.showToolCalls=false
-            m._drawn=false
+        if(d.messages){
+          var raw = d.messages.filter(function(m){return m.role!=='system'&&m.role!=='tool'}).map(function(m){
+            if(m.role==='assistant'){
+              m.showReasoning=false
+              m.showToolCalls=false
+              m._drawn=false
+            }
+            return m
+          })
+          // 合并 content="" 的 tool_call 中间消息到下一个非空 assistant 消息
+          var merged = []
+          var pendingTc = []
+          for(var i=0;i<raw.length;i++){
+            var m=raw[i]
+            if(m.role==='assistant' && !m.content && m.toolCalls?.length){
+              // 空内容 tool_call 消息：累积 toolCalls，不加入 merged
+              for(var t=0;t<m.toolCalls.length;t++) pendingTc.push(m.toolCalls[t])
+            }else{
+              if(m.role==='assistant' && pendingTc.length){
+                // 下一条非空 assistant：追加累积的 toolCalls
+                if(!m.toolCalls) m.toolCalls=[]
+                for(var t=0;t<pendingTc.length;t++) m.toolCalls.push(pendingTc[t])
+                pendingTc=[]
+              }
+              merged.push(m)
+            }
           }
-          return m
-        })
+          // 如果末尾还有残留的 toolCalls（没有后续非空消息），追加到 merged 末尾
+          if(pendingTc.length){
+            merged.push({id:'merged_'+Date.now(),role:'assistant',content:'',reasoning:'',showReasoning:false,toolCalls:pendingTc,showToolCalls:false,_drawn:false,createdAt:''})
+          }
+          messages.value=merged
+        }
         if(d.modelId)currentModel.value=d.modelId;await nextTick();scrollBottom()
       }catch(e){console.error(e)}
     }
@@ -623,9 +647,7 @@ createApp({
       NotesStore.init(p.get('taskId')||'')
       NotesStore.subscribe(function(){ loadPendingDrafts() })
       loadModels()
-      if(sid){console.log('[exec-flow] chat onMounted: URL\u6709sessionId=' + sid.slice(0,12));currentId.value=sid;loadMessages()}else{loadSessions()}
-      // 检查是否有 pending execute（从 viewer 发送过来）
-      _checkPendingExecute()
+      if(sid){console.log('[exec-flow] chat onMounted: URL\u6709sessionId=' + sid.slice(0,12));currentId.value=sid;loadMessages();_checkPendingExecute()}else{loadSessions().then(function(){_checkPendingExecute()})}
       // storage \u4e8b\u4ef6\u76d1\u542c\uff1aviewer \u5199\u5165 localStorage \u540e\u89e6\u53d1
       window.addEventListener('storage', function(e) {
         if (e.key && e.key.indexOf('topo_exec_pending_') === 0) {

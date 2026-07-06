@@ -55,3 +55,6 @@ plugins/community/.deps/
 # doc
 doc/
 docs/
+
+# Landing page / marketing site (not served by app)
+website/

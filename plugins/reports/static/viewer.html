@@ -260,14 +260,16 @@
   .note-modal-footer .btn-primary:hover{background:var(--accent-hover)}
   .note-modal-footer .btn-secondary{background:var(--bg-secondary);color:var(--text);border-color:var(--border)}
   .note-modal-footer .btn-secondary:hover{background:var(--bg-hover)}
-  /* ---- session selector (inline) ---- */
-  .session-selector{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;margin:8px 20px 0;flex-shrink:0}
-  .session-selector .ss-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-  .session-selector .ss-row:last-child{margin-bottom:0}
-  .session-selector .ss-row label{font-size:12px;color:var(--text-secondary);min-width:60px}
-  .session-selector .ss-row select,.session-selector .ss-row input{flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;background:var(--bg);color:var(--text);outline:none}
-  .session-selector .ss-row input:focus,.session-selector .ss-row select:focus{border-color:var(--accent)}
-  .session-selector .ss-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:8px}
+  /* ---- inline session list (new flow) ---- */
+  .note-modal-sessions{flex-shrink:0;padding:0 20px;max-height:200px;overflow:hidden}
+  .note-modal-sessions .sessions-scroll{max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg)}
+  .note-modal-sessions .sessions-scroll .si{padding:8px 12px;font-size:12px;cursor:pointer;color:var(--text);border-bottom:1px solid var(--border);transition:background .15s}
+  .note-modal-sessions .sessions-scroll .si:last-child{border-bottom:none}
+  .note-modal-sessions .sessions-scroll .si:hover{background:var(--bg-hover)}
+  .note-modal-sessions .sessions-scroll .si.selected{background:var(--accent);color:#fff}
+  .note-modal-sessions .sessions-scroll .si .si-title{font-weight:500}
+  .note-modal-sessions .sessions-scroll .si .si-meta{font-size:11px;opacity:.7;margin-top:2px}
+  .note-modal-sessions .sessions-scroll .si-new{border-top:1px dashed var(--border);color:var(--accent);font-weight:500;text-align:center}
   /* ---- text selection toolbar ---- */
   .sel-toolbar{position:fixed;z-index:999;display:flex;gap:2px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-md);padding:3px;animation:fadeIn .1s ease;pointer-events:auto}
   .sel-toolbar button{background:none;border:none;padding:4px 10px;font-size:12px;cursor:pointer;border-radius:4px;color:var(--text);white-space:nowrap}
@@ -423,6 +425,9 @@
       <textarea id="notesUserText" placeholder="请描述分析需求，可用 #1 #2 指代上面的引用材料..." rows="2"></textarea>
       <div class="hint">提示: 用 #序号 引用上面的材料</div>
     </div>
+    <div class="note-modal-sessions" id="noteSessionList" style="display:none">
+      <div class="sessions-scroll" id="noteSessionScroll"></div>
+    </div>
     <div class="note-modal-footer">
       <label class="checkbox-label"><input type="checkbox" id="notesAutoDelete" checked> 发送后自动删除</label>
       <button class="btn btn-secondary" id="notesBtnDelete">删除选中</button>
@@ -432,31 +437,6 @@
     </div>
   </div>
 </div>
-<!-- Session selector template (cloned when needed) -->
-<div id="sessionSelectorTmpl" style="display:none">
-  <div class="session-selector">
-    <div class="ss-row">
-      <label>模式</label>
-      <select class="ss-mode">
-        <option value="new">创建新会话</option>
-        <option value="existing">已有会话</option>
-      </select>
-    </div>
-    <div class="ss-row ss-existing" style="display:none">
-      <label>搜索</label>
-      <input type="text" class="ss-search" placeholder="搜索会话标题...">
-    </div>
-    <div class="ss-row ss-existing" style="display:none">
-      <label>会话</label>
-      <select class="ss-list" size="4"></select>
-    </div>
-    <div class="ss-actions">
-      <button class="btn ss-cancel">取消</button>
-      <button class="btn btn-primary ss-confirm">确认发送</button>
-    </div>
-  </div>
-</div>
-
 <script>
 // ============================================================
 // 0. Libraries
@@ -930,7 +910,7 @@ const LeftBreadcrumb = {
           var u = new URLSearchParams();
           u.set('taskId', g_taskId);
           u.set('docId', 'overall-' + g_taskId);
-          StateStore.commit({page: 'doc', filePath: '', cid: '', cn: '', pc: ''});
+          StateStore.commit({page: 'doc', filePath: '', cn: '', pc: ''});
           history.replaceState(null, '', '/doc?' + u.toString());
           loadDoc('overall-' + g_taskId);
           return;
@@ -1200,7 +1180,7 @@ const LeftToc = {
 
     var curUrl = new URLSearchParams(location.search);
     var curCid = S.docCommId || S.cid || curUrl.get('cid') || '';
-     var pid = parentCid || curCid;
+     var pid = parentCid !== undefined ? parentCid : curCid;
     var isRoot = !pid;
     var curEt = S.et || curUrl.get('edgeType') || 'CALL';
     var ets = isRoot ? ['INCLUDE', 'CALL'] : [curEt];
@@ -2601,18 +2581,18 @@ async function load() {
 
   document.getElementById('heatmapSize').onchange = function() { HeatmapView.load(); };
 
-  // Route
+  // Route — docId 优先于 routeCid（总体文档覆盖社区推断路由）
   var routeCid = S.docCommId || S.cid;
   if (g_communityId && g_taskId) {
     await loadCommunityDoc(g_taskId, g_communityId, g_edgeType, true);
+  } else if (g_docId) {
+    await loadDoc(g_docId);
   } else if (routeCid && g_taskId) {
     // 新版精简 URL：cid 参数代替 communityId
     await loadCommunityDoc(g_taskId, routeCid, S.et || g_edgeType, true);
   } else if (!g_docId && !g_taskId) {
     document.getElementById('content').innerHTML = '<p>No document specified.</p>';
     return;
-  } else if (g_docId) {
-    await loadDoc(g_docId);
   } else if (g_taskId) {
     await loadTaskDocs(g_taskId);
   }
@@ -2630,7 +2610,7 @@ async function loadDoc(id) {
   if (S.page !== 'doc' && !g_communityId) { StateStore.commit({page: 'doc', filePath: ''}); }
   content.innerHTML = '<div class="loading">Loading document...</div>';
   // loadDoc 始终加载总体文档，无社区上下文，清空 cid/cn/pc/docCommId
-  StateStore.commit({taskId: g_taskId, cid: '', cn: '', pc: '', docCommId: ''});
+  StateStore.commit({taskId: g_taskId, cn: '', pc: '', docCommId: ''});
   try {
     var doc = await API.doc(id);
     StateStore.commit({projectId: doc.projectId || '', projectName: doc.projectName || '', taskId: doc.taskId || g_taskId, cn: doc.title || '', pc: ''});
@@ -2640,8 +2620,14 @@ async function loadDoc(id) {
   }
   if (S.taskId) {
     LeftBreadcrumb.render();
-    LeftToc.render();
+    LeftToc.render('');
     Layout.apply();
+  }
+  // 确保 URL 包含 docId，刷新时路由走 loadDoc 而非 loadCommunityDoc
+  var docUrl = new URLSearchParams(location.search);
+  if (!docUrl.get('docId')) {
+    docUrl.set('docId', id);
+    history.replaceState(null, '', '/doc?' + docUrl.toString());
   }
 }
 
@@ -2758,6 +2744,7 @@ var _drafts = [];
 var _draftSeq = 1;
 var _draftRefSeq = 1;
 var _sesCache = [];
+var _execState = null; // { step, refs, userText, autoDelete, sessionId }
 
 function loadDrafts() {
   _drafts = NotesStore.list();
@@ -2839,8 +2826,9 @@ function openNotesModal() {
   renderDrafts();
   document.getElementById('notesUserText').value = '';
   document.getElementById('notesAutoDelete').checked = true;
-  var oldSs = modal.querySelector('.session-selector');
-  if (oldSs) oldSs.remove();
+  _execState = null;
+  _hideSessionList();
+  _resetExecBtn();
   console.log('[Notes] openNotesModal DONE, drafts=' + _drafts.length);
 }
 function closeNotesModal() {
@@ -3045,55 +3033,6 @@ document.querySelector('#graphContextMenu [data-action="note"]')?.addEventListen
   addRefToDraft(ref);
 });
 
-// ---- 会话选择器 ----
-
-function showSessionSelector(onConfirm) {
-  loadSessionsList();
-  var modal = document.getElementById('notesModal');
-  var tmpl = document.getElementById('sessionSelectorTmpl');
-  var ss = tmpl.cloneNode(true);
-  ss.id = ''; ss.style.display = 'block';
-  var userText = modal.querySelector('.note-modal-user-text');
-  userText.parentNode.insertBefore(ss, userText.nextSibling);
-
-  var modeSel = ss.querySelector('.ss-mode');
-  var existingRows = ss.querySelectorAll('.ss-existing');
-  var searchInput = ss.querySelector('.ss-search');
-  var listSel = ss.querySelector('.ss-list');
-
-  function toggleMode() {
-    var show = modeSel.value === 'existing';
-    existingRows.forEach(function(r){r.style.display = show ? '' : 'none'});
-    if (show) { searchInput.focus(); filterSessions(); }
-  }
-  modeSel.addEventListener('change', toggleMode);
-
-  function filterSessions() {
-    var q = (searchInput.value || '').toLowerCase();
-    listSel.innerHTML = _sesCache.map(function(s){
-      var match = !q || (s.title||'').toLowerCase().indexOf(q) >= 0;
-      return match ? '<option value="'+escHtml(s.id)+'">'+escHtml((s.title||'未命名').slice(0,40))+'</option>' : '';
-    }).join('') || '<option value="" disabled>未找到会话</option>';
-  }
-  searchInput.addEventListener('input', filterSessions);
-
-  ss.querySelector('.ss-cancel').addEventListener('click', function(){ss.remove()});
-  ss.querySelector('.ss-confirm').addEventListener('click', function() {
-    var sessionId = null;
-    if (modeSel.value === 'existing') {
-      sessionId = listSel.value;
-      if (!sessionId) { showToast('请选择一个会话'); return; }
-    }
-    ss.remove();
-    onConfirm(sessionId);
-  });
-  toggleMode();
-}
-
-async function loadSessionsList() {
-  try { var r = await fetch('/api/chat/sessions'); var d = await r.json(); _sesCache = d.sessions || []; } catch(e) { _sesCache = []; }
-}
-
 // ---- 执行 / 手工 ----
 
 function getSelectedRefs() {
@@ -3120,9 +3059,36 @@ function removeSelectedRefs() {
   saveDrafts(); renderDrafts();
 }
 
+// ---- 三步执行流 ----
+
+async function loadSessionsList() {
+  try { var r = await fetch('/api/chat/sessions'); var d = await r.json(); _sesCache = d.sessions || []; } catch(e) { _sesCache = []; }
+}
+
+function _hideSessionList() {
+  document.getElementById('noteSessionList').style.display = 'none';
+  document.getElementById('noteSessionScroll').innerHTML = '';
+}
+
+function _resetExecBtn() {
+  var btn = document.getElementById('notesBtnExec');
+  btn.textContent = '立即执行';
+  btn.classList.remove('btn-secondary');
+  btn.classList.add('btn-primary');
+}
+
 function executeDrafts() {
-  console.log('[Notes] executeDrafts START');
-  // 刷新 textarea 到 _drafts
+  // Step 2: 确认执行
+  if (_execState && _execState.step === 'confirm') {
+    _doExecute();
+    return;
+  }
+  // 选择会话阶段，按钮不响应
+  if (_execState && _execState.step === 'select') {
+    return;
+  }
+
+  // Step 0→1: 首次点击，校验并显示会话列表
   document.querySelectorAll('#notesDraftList textarea').forEach(function(ta){
     var d = _drafts.find(function(x){return x.id===ta.dataset.draft});
     if (d && d.refs[parseInt(ta.dataset.ref)]) d.refs[parseInt(ta.dataset.ref)].text = ta.value;
@@ -3130,32 +3096,70 @@ function executeDrafts() {
   var refs = getSelectedRefs();
   if (!refs.length) { showToast('请勾选要发送的引用材料'); return; }
   var userText = document.getElementById('notesUserText').value.trim();
+  if (!userText) { showToast('请输入分析需求'); return; }
   var autoDelete = document.getElementById('notesAutoDelete').checked;
-  console.log('[Notes] executeDrafts', {refCount: refs.length, userText: userText, autoDelete: autoDelete});
-  showSessionSelector(function(sessionId) {
-    console.log('[exec-flow] viewer executeDrafts: \u9009\u62e9\u2192' + (sessionId ? '\u5df2\u6709\u4f1a\u8bdd ' + sessionId.slice(0,12) : '\u65b0\u5efa\u4f1a\u8bdd'));
-    var taskId = S.taskId || '';
-    var key = 'topo_exec_pending_' + taskId;
-    var storeData = {refs: refs, userText: userText || '\u5206\u6790\u8fd9\u4e9b\u5185\u5bb9', sessionId: sessionId, autoDelete: autoDelete, ts: Date.now()};
-    console.log('[exec-flow] viewer executeDrafts: localStorage key=' + key, {refs: refs.length, userTextLen: storeData.userText.length, sessionId: !!sessionId});
-    try {
-      localStorage.setItem(key, JSON.stringify(storeData));
-    } catch(e) { showToast('\u4fdd\u5b58\u5931\u8d25: ' + e.message); return; }
-    // \u805a\u7126\u5df2\u6709\u7a97\u53e3\u6216\u65b0\u5efa
-    var chatUrl = '/chat' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : '');
-    var existing = window.open('', 'topo_chat');
-    if (existing && !existing.closed && existing.location && existing.location.href !== 'about:blank') {
-      existing.focus();
-      console.log('[exec-flow] viewer executeDrafts: \u5df2\u6709\u7a97\u53e3\u2192\u805a\u7126');
-    } else {
-      if (existing) existing.close();
-      window.open(chatUrl, 'topo_chat');
-      console.log('[exec-flow] viewer executeDrafts: \u65b0\u7a97\u53e3\u2192' + chatUrl);
-    }
-    if (autoDelete) removeSelectedRefs();
-    closeNotesModal();
-    showToast('\u5df2\u53d1\u9001\u5230 AI \u5bf9\u8bdd\u9875');
+
+  // 保存状态进入选择阶段
+  _execState = { step: 'select', refs: refs, userText: userText, autoDelete: autoDelete, sessionId: null };
+
+  // 按钮 → 选择会话（不可点击）
+  var btn = document.getElementById('notesBtnExec');
+  btn.textContent = '选择会话';
+  btn.classList.remove('btn-primary');
+  btn.classList.add('btn-secondary');
+
+  // 显示会话列表并加载
+  var container = document.getElementById('noteSessionList');
+  var scroll = document.getElementById('noteSessionScroll');
+  container.style.display = 'block';
+  scroll.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:12px">加载中...</div>';
+
+  loadSessionsList().then(function() {
+    var html = '';
+    _sesCache.forEach(function(s) {
+      html += '<div class="si" data-id="' + escHtml(s.id) + '">' +
+        '<div class="si-title">' + escHtml((s.title || '未命名').slice(0,40)) + '</div>' +
+        '<div class="si-meta">' + escHtml(s.id.slice(0,12)) + '</div></div>';
+    });
+    html += '<div class="si si-new" data-id="">+ 创建新会话</div>';
+    scroll.innerHTML = html;
+
+    scroll.querySelectorAll('.si').forEach(function(el) {
+      el.addEventListener('click', function() {
+        scroll.querySelectorAll('.si').forEach(function(x){x.classList.remove('selected')});
+        el.classList.add('selected');
+        _execState.sessionId = el.dataset.id || null;
+        _execState.step = 'confirm';
+        var b = document.getElementById('notesBtnExec');
+        b.textContent = '确认执行';
+        b.classList.remove('btn-secondary');
+        b.classList.add('btn-primary');
+      });
+    });
   });
+}
+
+function _doExecute() {
+  var state = _execState;
+  _execState = null;
+  _hideSessionList();
+  _resetExecBtn();
+
+  var taskId = S.taskId || '';
+  var key = 'topo_exec_pending_' + taskId;
+  var storeData = {refs: state.refs, userText: state.userText, sessionId: state.sessionId, autoDelete: state.autoDelete, ts: Date.now()};
+  console.log('[exec-flow] executeDrafts: key=' + key, {refs: state.refs.length, userTextLen: state.userText.length, sessionId: state.sessionId});
+  try {
+    localStorage.setItem(key, JSON.stringify(storeData));
+  } catch(e) { showToast('保存失败: ' + e.message); return; }
+
+  var chatUrl = '/chat' + (taskId ? '?taskId=' + encodeURIComponent(taskId) : '');
+  window.open(chatUrl);
+  console.log('[exec-flow] executeDrafts: 新窗口→' + chatUrl);
+
+  if (state.autoDelete) removeSelectedRefs();
+  closeNotesModal();
+  showToast('已发送到 AI 对话页');
 }
 
 function manualDrafts() {
