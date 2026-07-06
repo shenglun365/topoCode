@@ -10,7 +10,7 @@
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script src="/static/store.js"></script>
+<script src="/static/store.js?v=20260706"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 .hljs{background:var(--bg-code)!important;color:var(--code-text)!important}
@@ -63,6 +63,9 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .session-item .title,.note-item .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .del-btn{opacity:0;background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 6px;border-radius:4px;font-size:13px;transition:opacity var(--transition)}
 .session-item:hover .del-btn,.note-item:hover .del-btn{opacity:1}
+.copy-id-btn{display:none;font-size:11px;padding:2px 5px;border-radius:4px;border:none;background:transparent;color:var(--text-muted);cursor:pointer;font-family:var(--font-mono);white-space:nowrap}
+*:hover>.copy-id-btn{display:inline-block}
+.copy-id-btn:hover{background:var(--accent-light);color:var(--accent)}
 .del-btn:hover{background:var(--bg-hover);color:#ef4444}
 .note-item{padding:8px 10px;flex-wrap:wrap;border-left:3px solid transparent}
 .note-item .status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
@@ -104,6 +107,14 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .message-actions button{background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer;padding:2px 6px;border-radius:4px}
 .message-actions button:hover{background:var(--bg-hover);color:var(--text-secondary)}
 .message-actions .del-msg:hover{color:#ef4444}
+.message-actions .msg-act-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:3px 5px;border-radius:4px;display:inline-flex;align-items:center}
+.message-actions .msg-act-btn:hover{background:var(--bg-hover);color:var(--text-secondary)}
+.del-wrap{position:relative}
+.del-menu{position:absolute;bottom:100%;right:0;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:0 -2px 12px rgba(0,0,0,0.1);z-index:10;display:flex;flex-direction:column;min-width:100px;margin-bottom:4px}
+.del-menu .dm-item{background:none;border:none;padding:8px 14px;font-size:12px;cursor:pointer;color:var(--text);text-align:left;white-space:nowrap}
+.del-menu .dm-item:hover{background:var(--bg-hover)}
+.del-menu .dm-single:hover{color:#ef4444}
+.del-menu .dm-batch{color:var(--accent);border-top:1px solid var(--border)}
 .delete-mode .message-actions{opacity:1!important}
 .message .cbox-wrap{position:absolute;left:-28px;top:8px;display:none}
 .delete-mode .message .cbox-wrap{display:block}
@@ -126,6 +137,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .reasoning-toggle:hover{color:var(--accent)}
 .reasoning-toggle .arrow{font-size:10px;transition:transform .2s}
 .reasoning-toggle .arrow.open{transform:rotate(90deg)}
+.reasoning-toggle .reasoning-tokens{font-size:11px;color:var(--text-muted);opacity:0.7;margin-left:2px}
 .reasoning-content{font-size:13px;color:var(--text-secondary);padding:10px 14px;background:var(--bg-hover);border-radius:8px;margin:4px 0 10px;white-space:pre-wrap;line-height:1.5;max-height:300px;overflow-y:auto;border-left:3px solid var(--accent)}
 .tool-toggle{font-size:13px;color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px}
 .tool-toggle:hover{color:var(--accent)}
@@ -140,12 +152,30 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .input-area{padding:0 24px 24px;flex-shrink:0;display:flex;flex-direction:column;align-items:center}
 .input-wrapper{max-width:820px;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);transition:border-color var(--transition),box-shadow var(--transition);padding:6px 8px 6px 16px}
 .input-wrapper:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
-.input-row{display:flex;align-items:flex-end;gap:8px}
+.input-row{display:flex;align-items:flex-end;gap:8px}.input-row .autocomplete-wrap{flex:1;position:relative}
 .input-row textarea{flex:1;border:none;outline:none;resize:none;font-family:var(--font);font-size:15px;line-height:1.5;padding:8px 0;min-height:52px;max-height:200px;color:var(--text);background:transparent}
+.input-row .autocomplete-wrap textarea{width:100%}
 .input-row textarea::placeholder{color:var(--text-muted)}
 .input-row .btn-send{background:var(--accent);color:#fff;border:none;width:34px;height:34px;border-radius:var(--radius-full);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background var(--transition),opacity var(--transition);flex-shrink:0;font-size:16px}
 .input-row .btn-send:hover{background:var(--accent-hover)}
 .input-row .btn-send:disabled{opacity:0.4;cursor:not-allowed}
+.input-row .btn-send .send-icon,.input-row .btn-send .stop-icon{display:flex}
+.input-row .btn-send.stop-btn{background:#ef4444}
+.input-row .btn-send.stop-btn:hover{background:#dc2626}
+.input-row .btn-send.stop-btn .send-icon{display:none}
+.input-row .btn-send:not(.stop-btn) .stop-icon{display:none}
+/* ---- autocomplete ---- */
+.autocomplete-wrap{position:relative}
+.autocomplete-panel{position:absolute;bottom:100%;left:0;right:0;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:0 -4px 16px rgba(0,0,0,0.1);max-height:200px;overflow-y:auto;z-index:100;display:none;margin-bottom:4px}
+.autocomplete-panel.open{display:block}
+.autocomplete-panel .ac-item{padding:8px 14px;font-size:13px;cursor:pointer;color:var(--text);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.autocomplete-panel .ac-item:last-child{border-bottom:none}
+.autocomplete-panel .ac-item:hover,.autocomplete-panel .ac-item.active{background:var(--accent);color:#fff}
+.autocomplete-panel .ac-item .ac-trigger{font-weight:600;font-family:var(--font-mono);font-size:12px;opacity:0.7;min-width:80px}
+.autocomplete-panel .ac-item .ac-hint{font-size:12px;opacity:0.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.autocomplete-panel .ac-item:hover .ac-trigger,.autocomplete-panel .ac-item.active .ac-trigger,
+.autocomplete-panel .ac-item:hover .ac-hint,.autocomplete-panel .ac-item.active .ac-hint{opacity:1}
+.autocomplete-panel .ac-loading{padding:12px;text-align:center;font-size:12px;color:var(--text-muted)}
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)}
 .empty-state .logo{width:36px;height:36px;opacity:0.25}
 .empty-state h1{font-size:22px;color:var(--text-secondary);font-weight:500}
@@ -205,6 +235,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <button class="btn-new" @click="createSession">+ 新建会话</button>
       <div v-for="s in sessions" :key="s.id" class="session-item" :class="{active:s.id===currentId}" @click="switchSession(s.id)">
         <span class="title">{{ s.title }}</span>
+        <button class="copy-id-btn" @click.stop="copyId(s.id)" title="复制会话ID"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
         <button class="del-btn" @click.stop="deleteSession(s.id)">×</button>
       </div>
       <div v-if="!sessions.length" class="note-empty">暂无对话</div>
@@ -238,6 +269,13 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
           <option value="">选择模型</option>
           <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}<template v-if="m.isDefault"> ★</template></option>
         </select>
+        <select v-model="contextLimit" title="上下文容量限制（Token）">
+          <option :value="16000">16K</option>
+          <option :value="32000">32K</option>
+          <option :value="64000">64K</option>
+          <option :value="128000">128K</option>
+          <option :value="256000">256K</option>
+        </select>
       </div>
     </header>
 
@@ -251,7 +289,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
             <div v-if="m.role==='assistant'&&m.reasoning" class="reasoning-toggle" @click="m.showReasoning=!m.showReasoning">
               <span class="arrow" :class="{open:m.showReasoning}">▶</span>
               <span v-if="m.showReasoning">收起思考过程</span>
-              <span v-else>查看思考过程</span>
+              <span v-else>查看思考过程<span v-if="m.reasoning.length>10" class="reasoning-tokens">（{{ Math.round(m.reasoning.length/2) }} tokens）</span></span>
             </div>
             <div v-if="m.role==='assistant'&&m.reasoning&&m.showReasoning" class="reasoning-content">{{ m.reasoning }}</div>
             <div v-if="m.role==='assistant'&&m.toolCalls?.length" class="tool-toggle" @click="m.showToolCalls=!m.showToolCalls">
@@ -269,7 +307,15 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
             </div>
             <div class="bubble" v-html="renderMd(m.content)" :ref="el=>onBubbleUpdate(el,i)"></div>
             <div class="message-actions" v-if="m.id">
-              <button class="del-msg" @click="deleteMessage(m.id)">删除</button>
+              <button class="msg-act-btn" @click="copyMessageContent(m)" title="复制消息内容"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+              <button class="msg-act-btn" @click="quoteMessage(m)" title="引用此消息"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
+              <div class="del-wrap">
+                <button class="del-msg" @click.stop="showDeleteMenu(m.id)">删除</button>
+                <div v-if="activeDeleteMsg===m.id" class="del-menu" @click.stop>
+                  <button class="dm-item dm-single" @click="confirmSingleDelete(m.id)">删除此条</button>
+                  <button class="dm-item dm-batch" @click="enterBatchMode">批量删除</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -297,8 +343,14 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
     <div class="input-area">
       <div class="input-wrapper">
         <div class="input-row">
-          <textarea v-model="input" @keydown.enter.exact="send" placeholder="给 TopoCode 发送消息…" rows="2" :disabled="streaming"></textarea>
-          <button class="btn-send" :disabled="!input.trim()||streaming" @click="send">↑</button>
+          <div class="autocomplete-wrap">
+            <textarea v-model="input" @keydown.enter.exact="send" @keydown="onInputKeydown" @input="onInputChange" placeholder="给 TopoCode 发送消息…" rows="2" :disabled="streaming" id="chatTextarea"></textarea>
+            <div class="autocomplete-panel" id="acPanel"></div>
+          </div>
+          <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && (!input.trim()||!currentId)" @click="streaming ? stopStream() : send()">
+            <svg class="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            <svg class="stop-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -331,7 +383,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 marked.setOptions({gfm:true,breaks:true,langPrefix:'language-',
   highlight:function(c,l){if(l&&hljs.getLanguage(l)){try{return hljs.highlight(c,{language:l}).value}catch(e){}}return c}})
 
-const{createApp,ref,computed,nextTick,onMounted}=Vue
+const{createApp,ref,computed,nextTick,onMounted,watch}=Vue
 
 createApp({
   setup(){
@@ -340,6 +392,9 @@ createApp({
     const streaming=ref(false);const msgArea=ref(null);const tab=ref('chat')
     const viewNoteData=ref(null)
     const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
+    const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
+    watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
+    const activeDeleteMsg=ref(null)
     const allSelected=computed(function(){return selectedIds.value.size===messages.value.filter(function(m){return m.id}).length&&selectedIds.value.size>0})
     function toggleSelect(id){
       const s=selectedIds.value
@@ -364,6 +419,11 @@ createApp({
     function loadPendingDrafts(){
       pendingDrafts.value=NotesStore.list().filter(function(d){return d.status==='pending'})
     }
+    function copyId(text){
+      try{navigator.clipboard.writeText(text).then(function(){showToast('已复制: '+text.slice(0,20)+(text.length>20?'…':''))})}catch(e){
+        var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('已复制')
+      }
+    }
     async function execPendingDraft(d){
       if(!d.refs||!d.refs.length){showToast('草稿无引用');return}
       if(!currentId.value){
@@ -382,6 +442,115 @@ createApp({
       try{NotesStore._save(all)}catch(e){}
       loadPendingDrafts()
       send()
+    }
+    // ---- autocomplete ----
+    const AC_COMMANDS=[
+      {trigger:'/compress',hint:'压缩当前会话'},
+      {trigger:'/compress --session',hint:'压缩指定会话'},
+      {trigger:'/compress --save',hint:'压缩并保存到知识库'},
+      {trigger:'/help',hint:'显示帮助'},
+    ]
+    const AC_REF_TYPES=[
+      {trigger:'@community:',hint:'社区ID',searchType:'community'},
+      {trigger:'@project:',hint:'项目ID',searchType:'project'},
+      {trigger:'@task:',hint:'任务ID',searchType:'task'},
+      {trigger:'@file:',hint:'文件路径',searchType:'file'},
+      {trigger:'@symbol:',hint:'符号名称',searchType:'symbol'},
+      {trigger:'@session:',hint:'会话ID',searchType:'session'},
+      {trigger:'@archive:',hint:'归档ID',searchType:'archive'},
+    ]
+    var _acIdx=-1
+    var _currentAbort=null
+    function onInputChange(){
+      var ta=document.getElementById('chatTextarea');if(!ta)return
+      var val=ta.value||''
+      var panel=document.getElementById('acPanel')
+      // 获取光标前的最近单词，判断触发类型
+      var cursorPos=ta.selectionStart
+      var beforeCursor=val.slice(0,cursorPos)
+      var slashMatch=beforeCursor.match(/(\/(compress|help)(?:\s+(--\w+)?)?)$/)
+      var atMatch=beforeCursor.match(/@(\w*:?)(\w*)$/)
+      if(slashMatch){
+        var prefix=slashMatch[1]||''
+        var items=AC_COMMANDS.filter(function(c){return c.trigger.indexOf(prefix)===0||prefix.indexOf(c.trigger)===0})
+          .slice(0,8)
+        _renderAC(panel,items,prefix,function(item){_insertAC(ta,prefix,item.trigger+' ')})
+        return
+      }
+      if(atMatch){
+        var atPrefix=atMatch[0]
+        // 如果已输入冒号，搜索具体内容
+        if(atPrefix.indexOf(':')>0){
+          var colonIdx=atPrefix.indexOf(':')
+          var refType=atPrefix.slice(1,colonIdx)
+          var searchQ=atPrefix.slice(colonIdx+1)
+          var matched=AC_REF_TYPES.find(function(r){return r.trigger.slice(1,-1)===refType})
+          if(matched && matched.searchType && searchQ.length>=1){
+            panel.innerHTML='<div class="ac-loading">搜索中…</div>'
+            panel.classList.add('open')
+            _acIdx=-1
+            var taskParam=matched.searchType==='community'||matched.searchType==='symbol'?'&taskId='+encodeURIComponent(new URLSearchParams(location.search).get('taskId')||''):''
+            fetch('/api/chat/autocomplete?type='+matched.searchType+'&q='+encodeURIComponent(searchQ)+taskParam)
+              .then(function(r){return r.json()})
+              .then(function(d){
+                var results=d.results||[]
+                _renderAC(panel,results,atPrefix,function(item){
+                  _insertAC(ta,atPrefix,item.value+' ')
+                })
+              })
+              .catch(function(){panel.classList.remove('open')})
+            return
+          }
+        }
+        // 还没输入冒号，提示 ref type
+        var typePrefix=atPrefix.slice(1)
+        var items=AC_REF_TYPES.filter(function(r){
+          var t=r.trigger.slice(1,-1)
+          return t.indexOf(typePrefix)===0
+        }).slice(0,8)
+        _renderAC(panel,items,atPrefix,function(item){_insertAC(ta,atPrefix,item.trigger)})
+        return
+      }
+      panel.classList.remove('open')
+    }
+    function onInputKeydown(e){
+      var panel=document.getElementById('acPanel')
+      if(!panel.classList.contains('open'))return
+      if(e.key==='ArrowDown'){e.preventDefault();_acIdx=Math.min(_acIdx+1,panel.querySelectorAll('.ac-item').length-1);_highlightAC(panel)}
+      else if(e.key==='ArrowUp'){e.preventDefault();_acIdx=Math.max(_acIdx-1,0);_highlightAC(panel)}
+      else if(e.key==='Enter'||e.key==='Tab'){
+        var item=panel.querySelector('.ac-item.active')
+        if(item){e.preventDefault();item.click()}
+      }
+      else if(e.key==='Escape'){panel.classList.remove('open')}
+    }
+    function _renderAC(panel,items,prefix,onPick){
+      if(!items.length){panel.classList.remove('open');return}
+      var html=''
+      for(var i=0;i<items.length;i++){
+        var it=items[i];var label=it.label||it.trigger||''
+        var hint=it.hint||''
+        html+='<div class="ac-item" data-idx="'+i+'"><span class="ac-trigger">'+label+'</span><span class="ac-hint">'+hint+'</span></div>'
+      }
+      panel.innerHTML=html
+      panel.classList.add('open')
+      _acIdx=0;_highlightAC(panel)
+      panel.querySelectorAll('.ac-item').forEach(function(el){
+        el.addEventListener('click',function(){onPick(items[parseInt(this.dataset.idx)])})
+      })
+    }
+    function _highlightAC(panel){
+      panel.querySelectorAll('.ac-item').forEach(function(el,i){el.classList.toggle('active',i===_acIdx)})
+    }
+    function _insertAC(ta,oldStr,newStr){
+      var val=ta.value||''
+      var pos=ta.selectionStart
+      var start=val.lastIndexOf(oldStr,pos)
+      if(start<0)start=pos-oldStr.length
+      ta.value=val.slice(0,start)+newStr+val.slice(pos)
+      ta.selectionStart=ta.selectionEnd=start+newStr.length
+      ta.focus()
+      document.getElementById('acPanel').classList.remove('open')
     }
     const currentTitle=computed(()=>{const s=sessions.value.find(x=>x.id===currentId.value);return s?s.title:'TopoCode AI'})
 
@@ -520,6 +689,41 @@ createApp({
         loadMessages()
       }catch(e){console.error(e)}
     }
+    // delete menu
+    function showDeleteMenu(id){
+      if(streaming.value)return
+      activeDeleteMsg.value=activeDeleteMsg.value===id?null:id
+    }
+    async function confirmSingleDelete(id){
+      if(!currentId.value||!id)return
+      activeDeleteMsg.value=null
+      try{
+        await fetch('/api/chat/sessions/'+currentId.value+'/messages?message_id='+encodeURIComponent(id),{method:'DELETE'})
+        loadMessages()
+      }catch(e){console.error(e)}
+    }
+    function enterBatchMode(){
+      activeDeleteMsg.value=null
+      deleteMode.value=true
+    }
+    // close menu on outside click
+    document.addEventListener('click',function(){activeDeleteMsg.value=null})
+    // message actions
+    function copyMessageContent(m){
+      var prefix=m.role==='user'?'用户':'AI'
+      var text=(m.content||'').slice(0,4000)
+      var full=prefix+'：'+text
+      try{navigator.clipboard.writeText(full).then(function(){showToast('已复制消息内容')})}catch(e){
+        var ta=document.createElement('textarea');ta.value=full;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('已复制')
+      }
+    }
+    function quoteMessage(m){
+      var prefix=m.role==='user'?'用户说':'AI说'
+      var text=(m.content||'').slice(0,200)
+      var ref='@'+m.role+':'+m.id
+      input.value='> '+prefix+'：'+text+'\n\n'+'引用自 '+ref+' \n'+input.value
+      var ta=document.getElementById('chatTextarea');if(ta){ta.focus();ta.selectionStart=ta.selectionEnd=0}
+    }
 
     // notes
     function switchNotesTab(){tab.value='notes';loadNotes();loadPendingDrafts()}
@@ -528,6 +732,13 @@ createApp({
     }
     async function deleteNote(id){
       try{await fetch('/api/notes/'+id,{method:'DELETE'});loadNotes()}catch(e){}
+    }
+    function stopStream(){
+      if(_currentAbort){
+        _currentAbort.abort()
+        fetch('/api/chat/sessions/'+currentId.value+'/stream/abort',{method:'POST'}).catch(function(){})
+        _currentAbort=null
+      }
     }
     async function send(ev){
       console.log('[exec-flow] chat send: \u5165\u53e3',{textLen:input.value.trim().length,streaming:streaming.value,cid:!!currentId.value,model:currentModel.value||'null',refsCount:pendingRefs.value.length})
@@ -545,12 +756,14 @@ createApp({
       input.value='';streaming.value=true
       messages.value.push({id:'u'+Date.now(),role:'user',content:text});scrollBottom()
       const mid=messages.value.push({id:'a'+Date.now(),role:'assistant',content:'',reasoning:'',showReasoning:false,toolCalls:[],showToolCalls:false,_drawn:false})-1
+      const abortCtl=new AbortController()
+      _currentAbort=abortCtl
       try{
         console.log('[chat] sending message', text.slice(0,60))
-        const body={content:text,modelId:currentModel.value||undefined}
+        const body={content:text,modelId:currentModel.value||undefined,contextLimit:contextLimit.value||undefined}
         if(pendingRefs.value.length)body.refs=pendingRefs.value
-        const resp=await fetch('/api/chat/sessions/'+currentId.value+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-        if(!resp.ok){messages.value[mid].content='请求失败: '+resp.status;streaming.value=false;pendingRefs.value=[];return}
+        const resp=await fetch('/api/chat/sessions/'+currentId.value+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:abortCtl.signal})
+        if(!resp.ok){messages.value[mid].content='请求失败: '+resp.status;streaming.value=false;pendingRefs.value=[];_currentAbort=null;return}
         console.log('[chat] SSE response status:', resp.status)
         const reader=resp.body.getReader();const decoder=new TextDecoder();let buf='';let sseCount=0
         while(true){
@@ -579,7 +792,15 @@ createApp({
           }
           scrollBottom()
         }
-      }catch(e){messages.value[mid].content='网络错误: '+e.message}
+      }catch(e){
+        if(e.name==='AbortError'){
+          console.log('[chat] stream aborted by user')
+          messages.value[mid].content+='\n\n*(已停止)*'
+        }else{
+          messages.value[mid].content='网络错误: '+e.message
+        }
+      }
+      _currentAbort=null
       pendingRefs.value=[];streaming.value=false;scrollBottom();loadSessions()
     }
     function scrollBottom(){nextTick(()=>{if(msgArea.value)msgArea.value.scrollTop=msgArea.value.scrollHeight})}
@@ -664,7 +885,8 @@ createApp({
     return{sessions,messages,models,notes,currentId,currentModel,currentTitle,input,streaming,msgArea,tab,viewNoteData,pendingDrafts,
       renderMd,onBubbleUpdate,createSession,switchSession,deleteSession,onModelChange,send,
       loadNotes,switchNotesTab,viewNote,deleteNote,execPendingDraft,
-      deleteMode,selectedIds,allSelected,toggleSelect,selectAll,exitDeleteMode,deleteMessage,deleteSelected}
+      deleteMode,selectedIds,allSelected,toggleSelect,selectAll,exitDeleteMode,deleteMessage,deleteSelected,
+      contextLimit,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream}
   }
 }).mount('#app')
 </script>

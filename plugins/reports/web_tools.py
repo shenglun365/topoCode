@@ -333,6 +333,185 @@ WEB_TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search_conversation_history",
+            "description": "搜索当前会话或指定会话的对话历史。当需要回顾更早的讨论内容时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "会话ID，不传则搜索当前会话。可使用 @session:xxx 格式指定其他会话"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词，搜索 user 和 assistant 消息内容"
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    # ── conversation_analyst ──
+    {
+        "type": "function",
+        "function": {
+            "name": "web_list_sessions",
+            "description": "列出所有会话，支持按项目、状态过滤。获取会话列表后可进一步查看详情。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string", "description": "项目ID，过滤该项目下的会话"},
+                    "status": {"type": "string", "enum": ["active", "archived"], "description": "会话状态"},
+                    "limit": {"type": "integer", "description": "返回条数（默认 20，最大 100）"},
+                    "offset": {"type": "integer", "description": "分页偏移"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_get_session_info",
+            "description": "获取指定会话的元信息：标题、状态、模型、消息数、创建时间、活跃技能等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "会话ID"},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search_across_sessions",
+            "description": "跨所有会话搜索消息内容。支持按关键词、项目过滤。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"},
+                    "project_id": {"type": "string", "description": "限定项目ID"},
+                    "limit": {"type": "integer", "description": "每会话返回条数（默认 5）"},
+                    "session_limit": {"type": "integer", "description": "搜索的会话数上限（默认 10）"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_get_session_messages",
+            "description": "获取指定会话的全部或部分消息。支持按角色过滤和分页。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "会话ID"},
+                    "role": {"type": "string", "enum": ["user", "assistant", "tool", "all"], "description": "过滤角色"},
+                    "limit": {"type": "integer", "description": "返回条数（默认 50，最大 200）"},
+                    "offset": {"type": "integer", "description": "分页偏移"},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_summarize_session",
+            "description": "基于指定会话的全部消息，生成结构化摘要。可用于压缩长会话、提取关键信息。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "要摘要的会话ID"},
+                    "max_length": {"type": "integer", "description": "摘要最大字数（默认 500）"},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_extract_topics",
+            "description": "从指定会话中提取讨论的主题、涉及的项目/社区/文件/符号等关键实体。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "会话ID"},
+                    "detail": {"type": "string", "enum": ["brief", "full"], "description": "详细程度"},
+                },
+                "required": ["session_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_compare_sessions",
+            "description": "对比多个会话的讨论主题、涉及资源和关键结论。可用于发现跨会话的知识关联。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_ids": {"type": "string", "description": "会话ID列表，逗号分隔，如 chat_xxx,chat_yyy"},
+                    "aspect": {"type": "string", "enum": ["topic", "resource", "conclusion"], "description": "对比维度"},
+                },
+                "required": ["session_ids"],
+            },
+        },
+    },
+    # ── knowledge_keeper 增强 ──
+    {
+        "type": "function",
+        "function": {
+            "name": "web_list_archives",
+            "description": "列出知识归档，支持按分类、标签过滤。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string", "description": "限定项目ID"},
+                    "category": {"type": "string", "description": "归档分类（如 compress / note / insight）"},
+                    "tag": {"type": "string", "description": "按标签过滤"},
+                    "limit": {"type": "integer", "description": "返回条数（默认 20，最大 100）"},
+                    "offset": {"type": "integer", "description": "分页偏移"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_delete_archive",
+            "description": "删除指定的知识归档。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "archive_id": {"type": "string", "description": "归档ID"},
+                },
+                "required": ["archive_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_update_archive",
+            "description": "更新指定归档的分类和标签。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "archive_id": {"type": "string", "description": "归档ID"},
+                    "category": {"type": "string", "description": "新分类"},
+                    "tags": {"type": "string", "description": "新标签，逗号分隔"},
+                },
+                "required": ["archive_id"],
+            },
+        },
+    },
 ]
 
 WEB_TOOL_MAP = {t["function"]["name"]: t for t in WEB_TOOL_DEFINITIONS}
@@ -347,11 +526,24 @@ def get_web_tool_definitions(tool_names=None):
 # ==================== 工具执行器 ====================
 
 
+import re as _re
+_RE_TYPE_PREFIX = _re.compile(r'^@\w+:(.+)')
+
+def _strip_ref_prefix(val: str) -> str:
+    """精确去除 @type: 前缀，仅当字符串以 @type: 开头时才剥离。"""
+    if isinstance(val, str):
+        m = _RE_TYPE_PREFIX.match(val)
+        if m:
+            return m.group(1)
+    return val
+
+
 class WebToolExecutor:
     """Web AI 对话的工具执行器"""
 
-    def __init__(self, multi_db: MultiDBManager):
+    def __init__(self, multi_db: MultiDBManager, current_session_id: str = ""):
         self.multi_db = multi_db
+        self._current_session_id = current_session_id
         self._handlers = {
             "web_list_projects": self._list_projects,
         "web_get_task_list": self._get_task_list,
@@ -368,6 +560,17 @@ class WebToolExecutor:
             "web_search_archives": self._search_archives,
             "web_save_archive": self._save_archive,
             "web_set_session_title": self._set_session_title,
+            "web_search_conversation_history": self._search_conversation_history,
+            "web_list_sessions": self._list_sessions,
+            "web_get_session_info": self._get_session_info,
+            "web_search_across_sessions": self._search_across_sessions,
+            "web_get_session_messages": self._get_session_messages,
+            "web_summarize_session": self._summarize_session,
+            "web_extract_topics": self._extract_topics,
+            "web_compare_sessions": self._compare_sessions,
+            "web_list_archives": self._list_archives,
+            "web_delete_archive": self._delete_archive,
+            "web_update_archive": self._update_archive,
         }
 
     def execute(self, tool_name: str, args: dict) -> dict:
@@ -705,8 +908,59 @@ class WebToolExecutor:
         )
         return {"id": aid, "ok": True}
 
+    def _search_conversation_history(self, args: dict) -> dict:
+        session_id = _strip_ref_prefix(args.get("session_id", self._current_session_id or ""))
+        query = args.get("query", "")
+        limit = min(args.get("limit", 10), 50)
+
+        # 空 query + 指定 session_id：返回该会话的全部消息（LLM 试探会话内容）
+        if not query and session_id:
+            try:
+                rows = self.multi_db.sessions_db.fetchall(
+                    "SELECT role, content, created_at FROM llm_messages "
+                    "WHERE session_id = ? ORDER BY created_at LIMIT 50",
+                    (session_id,),
+                )
+                if not rows:
+                    return {"found": False, "results": [], "total": 0, "message": "会话无消息记录"}
+                results = []
+                for r in rows:
+                    c = (r["content"] or "")[:800]
+                    if c:
+                        results.append({
+                            "role": r["role"],
+                            "content": c,
+                            "createdAt": r["created_at"],
+                        })
+                return {"found": True, "results": results, "total": len(results)}
+            except Exception as e:
+                return {"error": str(e), "skip": True}
+
+        if not query:
+            return {"error": "query is required", "skip": True}
+
+        try:
+            rows = self.multi_db.sessions_db.fetchall(
+                "SELECT role, content, created_at FROM llm_messages "
+                "WHERE session_id = ? AND role IN ('user', 'assistant') "
+                "AND content LIKE ? ORDER BY created_at DESC LIMIT ?",
+                (session_id, f"%{query}%", limit),
+            )
+            results = []
+            for r in rows:
+                c = (r["content"] or "")[:800]
+                if c:
+                    results.append({
+                        "role": r["role"],
+                        "content": c,
+                        "createdAt": r["created_at"],
+                    })
+            return {"found": len(results) > 0, "results": results, "total": len(results)}
+        except Exception as e:
+            return {"error": str(e), "skip": True}
+
     def _set_session_title(self, args: dict) -> dict:
-        session_id = args.get("sessionId", "")
+        session_id = _strip_ref_prefix(args.get("sessionId", ""))
         title = args.get("title", "").strip()
         if not session_id or not title:
             return {"error": "sessionId and title are required", "skip": True}
@@ -718,6 +972,231 @@ class WebToolExecutor:
             (title, now, session_id),
         )
         return {"ok": True, "title": title}
+
+    # ── conversation_analyst tools ──
+
+    def _list_sessions(self, args: dict) -> dict:
+        project_id = args.get("project_id", "")
+        status = args.get("status", "")
+        limit = min(args.get("limit", 20), 100)
+        offset = args.get("offset", 0)
+        where = []
+        params = []
+        if project_id:
+            where.append("project_id = ?"); params.append(project_id)
+        if status:
+            where.append("status = ?"); params.append(status)
+        w = (" WHERE " + " AND ".join(where)) if where else ""
+        rows = self.multi_db.sessions_db.fetchall(
+            f"SELECT id, title, project_id, status, metadata, created_at, updated_at "
+            f"FROM llm_sessions{w} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        )
+        return {"sessions": [
+            {"id": r["id"], "title": r["title"], "projectId": r["project_id"],
+             "status": r["status"], "createdAt": r["created_at"], "updatedAt": r["updated_at"]}
+            for r in rows
+        ], "total": len(rows)}
+
+    def _get_session_info(self, args: dict) -> dict:
+        session_id = _strip_ref_prefix(args.get("session_id", ""))
+        if not session_id:
+            return {"error": "session_id is required", "skip": True}
+        row = self.multi_db.sessions_db.fetchone(
+            "SELECT id, title, project_id, status, metadata, created_at, updated_at "
+            "FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        if not row:
+            return {"error": "Session not found", "skip": True}
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        cnt = self.multi_db.sessions_db.fetchone(
+            "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id = ?", (session_id,)
+        )
+        return {
+            "id": row["id"], "title": row["title"],
+            "projectId": row["project_id"], "status": row["status"],
+            "modelId": meta.get("model_id", ""),
+            "activeSkills": meta.get("active_skills", []),
+            "messageCount": cnt["c"] if cnt else 0,
+            "createdAt": row["created_at"], "updatedAt": row["updated_at"],
+        }
+
+    def _search_across_sessions(self, args: dict) -> dict:
+        query = args.get("query", "")
+        if not query:
+            return {"error": "query is required", "skip": True}
+        project_id = args.get("project_id", "")
+        limit = min(args.get("limit", 5), 20)
+        session_limit = min(args.get("session_limit", 10), 50)
+        where = "1=1"
+        params = []
+        if project_id:
+            where += " AND project_id = ?"; params.append(project_id)
+        sessions = self.multi_db.sessions_db.fetchall(
+            f"SELECT id, title FROM llm_sessions WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            (*params, session_limit),
+        )
+        results = []
+        for s in sessions:
+            rows = self.multi_db.sessions_db.fetchall(
+                "SELECT role, content, created_at FROM llm_messages "
+                "WHERE session_id = ? AND role IN ('user', 'assistant') "
+                "AND content LIKE ? ORDER BY created_at DESC LIMIT ?",
+                (s["id"], f"%{query}%", limit),
+            )
+            for r in rows:
+                c = (r["content"] or "")[:600]
+                if c:
+                    results.append({
+                        "session_id": s["id"],
+                        "session_title": s["title"],
+                        "role": r["role"], "content": c,
+                        "createdAt": r["created_at"],
+                    })
+        return {"found": len(results) > 0, "results": results, "total": len(results)}
+
+    def _get_session_messages(self, args: dict) -> dict:
+        session_id = _strip_ref_prefix(args.get("session_id", ""))
+        if not session_id:
+            return {"error": "session_id is required", "skip": True}
+        role = args.get("role", "all")
+        limit = min(args.get("limit", 50), 200)
+        offset = args.get("offset", 0)
+        where = "session_id = ?"
+        params = [session_id]
+        if role and role != "all":
+            where += " AND role = ?"; params.append(role)
+        rows = self.multi_db.sessions_db.fetchall(
+            f"SELECT id, role, content, metadata, created_at FROM llm_messages "
+            f"WHERE {where} ORDER BY created_at LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        )
+        return {"messages": [
+            {"id": r["id"], "role": r["role"], "content": (r["content"] or "")[:2000],
+             "createdAt": r["created_at"]}
+            for r in rows
+        ], "total": len(rows)}
+
+    def _summarize_session(self, args: dict) -> dict:
+        session_id = _strip_ref_prefix(args.get("session_id", ""))
+        if not session_id:
+            return {"error": "session_id is required", "skip": True}
+        max_length = min(args.get("max_length", 500), 2000)
+        rows = self.multi_db.sessions_db.fetchall(
+            "SELECT role, content FROM llm_messages "
+            "WHERE session_id = ? AND role IN ('user', 'assistant') "
+            "ORDER BY created_at LIMIT 100",
+            (session_id,),
+        )
+        if not rows:
+            return {"found": False, "summary": "会话无消息记录"}
+        conv_text = "\n".join(
+            f"[{'用户' if r['role']=='user' else 'AI'}] {(r['content'] or '')[:2000]}"
+            for r in rows
+        )
+        return {"found": True, "summary": f"会话 {session_id[:12]}：\n{conv_text[:max_length * 4]}",
+                "message_count": len(rows)}
+
+    def _extract_topics(self, args: dict) -> dict:
+        session_id = _strip_ref_prefix(args.get("session_id", ""))
+        if not session_id:
+            return {"error": "session_id is required", "skip": True}
+        detail = args.get("detail", "brief")
+        rows = self.multi_db.sessions_db.fetchall(
+            "SELECT role, content, metadata FROM llm_messages "
+            "WHERE session_id = ? AND role IN ('user', 'assistant') "
+            "ORDER BY created_at LIMIT 100",
+            (session_id,),
+        )
+        topics = set()
+        resources = set()
+        for r in rows:
+            content = r["content"] or ""
+            for kw in ["struct ", "class ", "function ", "module ", "社区", "文件", "协议", "驱动"]:
+                if kw in content:
+                    topics.add(kw.rstrip())
+                    break
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+            for tc in meta.get("tool_calls", []):
+                if tc.get("name"):
+                    resources.add(tc["name"])
+        return {
+            "found": True,
+            "topics": list(topics) if detail == "brief" else list(topics)[:10],
+            "resources": list(resources)[:10],
+            "message_count": len(rows),
+        }
+
+    def _compare_sessions(self, args: dict) -> dict:
+        session_ids_str = args.get("session_ids", "")
+        ids = [s.strip() for s in session_ids_str.split(",") if s.strip()]
+        if len(ids) < 2:
+            return {"error": "至少需要两个会话ID", "skip": True}
+        aspect = args.get("aspect", "topic")
+        sessions_info = []
+        for sid in ids[:5]:
+            row = self.multi_db.sessions_db.fetchone(
+                "SELECT title FROM llm_sessions WHERE id = ?", (sid.strip(),)
+            )
+            title = row["title"] if row else sid[:12]
+            cnt = self.multi_db.sessions_db.fetchone(
+                "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id = ?", (sid.strip(),)
+            )
+            sessions_info.append({"id": sid.strip(), "title": title, "messageCount": cnt["c"] if cnt else 0})
+        return {"found": True, "aspect": aspect, "sessions": sessions_info}
+
+    # ── knowledge_keeper enhanced tools ──
+
+    def _list_archives(self, args: dict) -> dict:
+        project_id = args.get("project_id", "")
+        category = args.get("category", "")
+        tag = args.get("tag", "")
+        limit = min(args.get("limit", 20), 100)
+        offset = args.get("offset", 0)
+        where = []
+        params = []
+        if project_id:
+            where.append("project_id = ?"); params.append(project_id)
+        if category:
+            where.append("category = ?"); params.append(category)
+        if tag:
+            where.append("tags LIKE ?"); params.append(f"%{tag}%")
+        w = (" WHERE " + " AND ".join(where)) if where else ""
+        rows = self.multi_db.main_db.fetchall(
+            f"SELECT id, session_id, project_id, title, content, category, tags, source, created_at "
+            f"FROM chat_archives{w} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        )
+        return {"archives": [{
+            "id": r["id"], "title": r["title"], "category": r["category"],
+            "tags": r["tags"], "content": (r["content"] or "")[:500],
+            "createdAt": r["created_at"],
+        } for r in rows], "total": len(rows)}
+
+    def _delete_archive(self, args: dict) -> dict:
+        archive_id = args.get("archive_id", "")
+        if not archive_id:
+            return {"error": "archive_id is required", "skip": True}
+        self.multi_db.main_db.execute("DELETE FROM chat_archives WHERE id = ?", (archive_id,))
+        return {"ok": True, "deleted": archive_id}
+
+    def _update_archive(self, args: dict) -> dict:
+        archive_id = args.get("archive_id", "")
+        if not archive_id:
+            return {"error": "archive_id is required", "skip": True}
+        updates = []
+        params = []
+        if args.get("category"):
+            updates.append("category = ?"); params.append(args["category"])
+        if "tags" in args:
+            updates.append("tags = ?"); params.append(args.get("tags", ""))
+        if not updates:
+            return {"error": "没有要更新的字段", "skip": True}
+        params.append(archive_id)
+        self.multi_db.main_db.execute(
+            f"UPDATE chat_archives SET {', '.join(updates)} WHERE id = ?", params
+        )
+        return {"ok": True}
 
 
 # ==================== 引用解析 ====================
@@ -885,6 +1364,34 @@ def _resolve_archive_ref(ref: dict, multi_db: MultiDBManager) -> str:
     )
 
 
+def _resolve_session_ref(ref: dict, multi_db: MultiDBManager) -> str:
+    """加载目标会话的消息作为上下文"""
+    session_id = ref.get("id", "")
+    if not session_id:
+        return ""
+    sess = multi_db.sessions_db.fetchone(
+        "SELECT title, project_id FROM llm_sessions WHERE id = ?", (session_id,)
+    )
+    if not sess:
+        logger.info(f"[resolve_session] session={session_id[:12]} not found")
+        return f"（会话 {session_id[:12]} 不存在或已被删除）"
+    rows = multi_db.sessions_db.fetchall(
+        "SELECT role, content FROM llm_messages "
+        "WHERE session_id = ? ORDER BY created_at LIMIT 50",
+        (session_id,),
+    )
+    logger.info(f"[resolve_session] session={session_id[:12]} title={sess['title']} rows={len(rows)}")
+    if not rows:
+        return f"（会话 {session_id[:12]}「{sess['title'] or '未命名'}」无消息记录）"
+    parts = [f"以下是对话 {session_id[:12]}「{sess['title'] or '未命名'}」的内容："]
+    for r in rows:
+        role_label = {"user": "用户", "assistant": "AI", "tool": "工具", "system": "系统"}.get(r["role"], r["role"])
+        content = (r["content"] or "")[:1000]
+        if content:
+            parts.append(f"[{role_label}] {content}")
+    return "\n".join(parts)
+
+
 _REF_RESOLVERS = {
     "project": _resolve_project_ref,
     "task": _resolve_task_ref,
@@ -893,4 +1400,5 @@ _REF_RESOLVERS = {
     "source_file": _resolve_source_file_ref,
     "symbol": _resolve_symbol_ref,
     "archive": _resolve_archive_ref,
+    "session": _resolve_session_ref,
 }

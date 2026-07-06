@@ -23,6 +23,11 @@ multi_db = None
 zmq_server = None  # ZMQ server for pub events
 plantuml_cache_db: Optional[sqlite3.Connection] = None
 http_port = 3456
+
+# 管理活动中止状态（keyed by session_id）
+import threading as _threading
+_active_streams: dict = {}
+_active_streams_lock = _threading.Lock()
 web_tool_executor = None
 
 # 统一数据模块
@@ -1417,10 +1422,12 @@ async def create_chat_session(request: Request):
             "--force (重新生成), -L zh/en (输出语言), "
             "-j N (并发数, 1-5, 默认1, 如 /pipeline -j 2). "
             "overview 命令不支持 -j 参数, 只有一个并发.",
-            "注意：每次消息最多可以进行 50 次工具调用。请在此限制内规划分析路径，"
-            "避免不必要的重复查询。当获取足够信息后应及时输出结论。"
+            "注意：每次消息最多可以进行 50 次工具调用。请在此限制内规划分析路径。"
+            "工具的调用必须使用可用工具列表中提供的精确名称，禁止猜测或编造工具名。"
+            "如果无合适工具可用，直接告知用户无法处理，不要循环尝试不存在的工具。"
             "如果某个工具返回空结果或无有效数据，说明该路径不可行，请跳过并尝试其他方法。"
-            "不要重复调用返回相同结果的工具。如果已获取足够信息，直接输出结论。",
+            "不要重复调用返回相同结果的工具。如果已获取足够信息，直接输出结论。"
+            "如果多次尝试后仍无法获取需要的信息，直接告知用户当前的能力限制。",
         ]
         if refs:
             ref_context = resolve_refs_to_context(refs, multi_db)
@@ -1585,6 +1592,268 @@ async def delete_chat_session(session_id: str):
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/chat/sessions/{session_id}/stream/abort")
+async def abort_chat_stream(session_id: str):
+    """中止正在进行的 LLM 流"""
+    _require_chat_ready()
+    with _active_streams_lock:
+        resp = _active_streams.pop(session_id, None)
+    if resp:
+        resp.close()
+        logger.info(f"[abort] closed HTTP connection for session {session_id[:16]}")
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 统一上下文管理
+# ═══════════════════════════════════════════════════════════════
+
+import re as _re
+
+class ReferenceParser:
+    """解析 @type:id 引用、隐式 ID、便签 refs"""
+
+    ID_PATTERNS = [
+        (r'\b(comm-\w+)\b', 'community'),
+        (r'\b(proj-\w+)\b', 'project'),
+        (r'\b(task-\w+)\b', 'task'),
+        (r'\b(chat_\w+)\b', 'session'),
+        (r'\b(arch_\w+)\b', 'archive'),
+    ]
+
+    @staticmethod
+    def parse(user_content: str, body_refs: list = None) -> list:
+        parsed = []
+        for match in _re.finditer(r'@(\w+):([^\s,;，。！？\n]+)', user_content):
+            parsed.append({"type": match.group(1), "id": match.group(2), "source": "explicit"})
+        for pattern, ref_type in ReferenceParser.ID_PATTERNS:
+            for match in _re.finditer(pattern, user_content):
+                id_val = match.group(1)
+                if not any(r.get("type") == ref_type and r.get("id") == id_val for r in parsed):
+                    parsed.append({"type": ref_type, "id": id_val, "source": "implicit"})
+        if body_refs:
+            for br in body_refs:
+                pr = ReferenceParser._infer_ref_type(br)
+                if pr:
+                    key = (pr["type"], pr["id"])
+                    if not any((r.get("type"), r.get("id")) == key for r in parsed):
+                        parsed.append({**pr, "source": "refs"})
+        return parsed
+
+    @staticmethod
+    def _infer_ref_type(ref: dict) -> dict | None:
+        if ref.get("type"):
+            return {"type": ref["type"], "id": ref.get("id", "")}
+        if ref.get("componentId"):
+            return {"type": "community", "id": ref["componentId"]}
+        if ref.get("projectId"):
+            return {"type": "project", "id": ref["projectId"]}
+        if ref.get("taskId"):
+            return {"type": "task", "id": ref["taskId"]}
+        return None
+
+
+class TokenBudget:
+    """上下文 Token 预算管理"""
+
+    CHARS_PER_TOKEN = 2
+
+    @classmethod
+    def estimate(cls, text: str) -> int:
+        return max(1, len(text) // cls.CHARS_PER_TOKEN)
+
+    @classmethod
+    def estimate_msgs(cls, messages: list[dict]) -> int:
+        return sum(cls.estimate(m.get("content", "")) for m in messages)
+
+    @classmethod
+    def trim(cls, messages: list[dict], max_context: int = 16000, reserve: int = 4000) -> list[dict]:
+        """在预算内保留高优先级消息"""
+        budget = max_context - reserve
+        if budget <= 0:
+            return messages[-8:] if len(messages) > 8 else messages
+        system_msgs = [m for m in messages if m["role"] == "system"]
+        dialog_msgs = [m for m in messages if m["role"] != "system"]
+        base_tokens = cls.estimate_msgs(system_msgs)
+        if base_tokens > budget:
+            return system_msgs
+        remaining = budget - base_tokens
+        keep = []
+        for m in reversed(dialog_msgs):
+            if remaining <= 0:
+                break
+            tok = cls.estimate(m.get("content", ""))
+            if tok <= remaining:
+                keep.insert(0, m)
+                remaining -= tok
+        return system_msgs + keep
+
+
+class ContextAssembler:
+    """构建三层上下文"""
+
+    def __init__(self, session_id: str, sdb):
+        self.session_id = session_id
+        self.sdb = sdb
+
+    def build(self, db_messages: list[dict], parsed_refs: list = None,
+              context_limit: int = 32000) -> list[dict]:
+        l1 = self._build_l1(parsed_refs)
+        merged = self._merge(db_messages, l1)
+        return TokenBudget.trim(merged, context_limit)
+
+    def _build_l1(self, parsed_refs: list = None) -> list[dict]:
+        msgs = []
+        if parsed_refs:
+            context = resolve_refs_to_context(parsed_refs, multi_db)
+            if context:
+                msgs.append({"role": "system", "content": context})
+        session = self.sdb.fetchone(
+            "SELECT metadata FROM llm_sessions WHERE id = ?", (self.session_id,)
+        )
+        if session:
+            meta = json.loads(session["metadata"]) if session["metadata"] else {}
+            summary = meta.get("compressed_summary", "")
+            if summary:
+                msgs.append({"role": "system", "content":
+                    f"以下是对本对话早期内容的结构化摘要：\n{summary}"})
+        return msgs
+
+    def _merge(self, db_msgs: list[dict], l1_msgs: list[dict]) -> list[dict]:
+        if not l1_msgs:
+            return db_msgs
+        system_msgs = [m for m in db_msgs if m["role"] == "system"]
+        dialog_msgs = [m for m in db_msgs if m["role"] != "system"]
+        return system_msgs + l1_msgs + dialog_msgs
+
+
+class SessionCompressor:
+    """处理 /compress 指令"""
+
+    PROMPT_TEMPLATE = """请将以下对话压缩为结构化摘要：
+
+要求：
+1. 提取关键信息：涉及的项目/社区/文件/符号，核心结论和分析结果
+2. 格式：
+## 主题
+[一句话概括]
+## 关键内容
+- 要点1
+- 要点2
+## 涉及的资源
+- 社区: @community:xxx
+- 文件: @file:path/to/file
+
+3. 控制在 300 字以内，保留引用标记
+
+== 对话内容 ==
+{text}"""
+
+    def __init__(self, sdb, llm_service=None):
+        self.sdb = sdb
+        self.service = llm_service
+
+    @classmethod
+    def parse_args(cls, content: str) -> dict:
+        args = {"target_ids": [], "save": False, "category": ""}
+        m = _re.search(r'--session\s+(\S+)', content)
+        if m:
+            args["target_ids"] = [x.strip() for x in m.group(1).split(",")]
+        if "--save" in content:
+            args["save"] = True
+        m = _re.search(r'--category\s+(\S+)', content)
+        if m:
+            args["category"] = m.group(1).strip()
+        return args
+
+    def _load_messages(self, session_ids: list[str]) -> str:
+        parts = []
+        for sid in session_ids:
+            rows = self.sdb.fetchall(
+                "SELECT role, content FROM llm_messages "
+                "WHERE session_id = ? AND role IN ('user', 'assistant') "
+                "ORDER BY created_at LIMIT 100",
+                (sid,),
+            )
+            if rows:
+                parts.append(f"--- 会话 {sid} ---")
+                for r in rows:
+                    role_label = "用户" if r["role"] == "user" else "AI"
+                    content = (r["content"] or "")[:2000]
+                    parts.append(f"[{role_label}] {content}")
+        return "\n\n".join(parts) if parts else "（无对话内容）"
+
+    def _save_summary(self, summary_text: str, current_id: str,
+                      target_ids: list[str], to_archive: bool, category: str = ""):
+        meta_key = "compressed_summary"
+        session = self.sdb.fetchone(
+            "SELECT metadata FROM llm_sessions WHERE id = ?", (current_id,)
+        )
+        if session:
+            meta = json.loads(session["metadata"]) if session["metadata"] else {}
+            meta[meta_key] = summary_text
+            now = __import__("datetime").datetime.now().isoformat()
+            self.sdb.execute(
+                "UPDATE llm_sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(meta, ensure_ascii=False), now, current_id),
+            )
+        if to_archive:
+            archive_id = f"arch_{_make_message_id()}"
+            project_row = self.sdb.fetchone(
+                "SELECT project_id FROM llm_sessions WHERE id = ?",
+                (target_ids[0] if target_ids else current_id,),
+            )
+            pid = project_row["project_id"] if project_row else ""
+            self.sdb.execute(
+                "INSERT INTO chat_archives (id, session_id, project_id, title, content, "
+                "category, tags, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (archive_id, target_ids[0] if target_ids else current_id,
+                 pid, "会话摘要", summary_text,
+                 category or "compress", ",".join(target_ids or [current_id]),
+                 "auto_compress", __import__("datetime").datetime.now().isoformat()),
+            )
+
+    async def execute(self, content: str, current_session_id: str) -> str:
+        args = self.parse_args(content)
+        target_ids = args["target_ids"] or [current_session_id]
+        conversation_text = self._load_messages(target_ids)
+        summary = await self._llm_compress(conversation_text)
+        self._save_summary(summary, current_session_id, target_ids, args["save"], args["category"])
+        return summary
+
+    async def _llm_compress(self, text: str) -> str:
+        try:
+            import aiohttp
+            model_id = _resolve_default_model_id()
+            configs = _sdb().fetchall("SELECT model_id, api_base, api_key, model_name FROM model_configs")
+            cfg = next((c for c in configs if c["model_id"] == model_id), None)
+            if not cfg:
+                cfg = configs[0] if configs else None
+            if not cfg:
+                return "（无可用模型）"
+            base_url = (cfg["api_base"] or "").rstrip("/")
+            api_key = cfg.get("api_key") or "sk-no-key"
+            model_name = cfg.get("model_name") or model_id
+            payload = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": self.PROMPT_TEMPLATE.format(text=text[:40000])}],
+                "stream": False,
+                "max_tokens": 1000,
+            }
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(f"{base_url}/v1/chat/completions",
+                                     json=payload, headers=headers, timeout=30) as resp:
+                    data = await resp.json()
+                    choices = data.get("choices", [])
+                    if choices:
+                        return choices[0].get("message", {}).get("content", "")[:2000]
+        except Exception as e:
+            logger.info(f"[compress] LLM call failed: {e}")
+        return "（压缩失败）"
+
+
+
 @app.post("/api/chat/sessions/{session_id}/messages")
 async def send_chat_message(session_id: str, request: Request):
     """发消息 + SSE 流式回复（核心端点）"""
@@ -1595,6 +1864,21 @@ async def send_chat_message(session_id: str, request: Request):
         refs = body.get("refs", [])
         model_id = body.get("modelId") or body.get("model_id", "")
         streaming = body.get("stream", True)
+        context_limit = body.get("contextLimit", 0)  # 0 = use model default
+
+        # ── Phase 0: 指令检测 ──
+        if content.startswith("/compress"):
+            compressor = SessionCompressor(_sdb())
+            summary = await compressor.execute(content, session_id)
+            # 返回 SSE 流
+            async def _compress_stream():
+                yield f"data: {json.dumps({'type': 'chunk', 'text': summary[:100]})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': summary})}\n\n"
+            return StreamingResponse(_compress_stream(), media_type="text/event-stream")
+
+        # ── Phase 1: 引用解析 ──
+        parsed_refs = ReferenceParser.parse(content, refs)
+        logger.info(f"[context] parsed {len(parsed_refs)} refs: {parsed_refs[:3]}")
 
         session = _sdb().fetchone(
             "SELECT id, project_id, metadata FROM llm_sessions WHERE id = ?", (session_id,)
@@ -1605,11 +1889,13 @@ async def send_chat_message(session_id: str, request: Request):
         meta = json.loads(session["metadata"]) if session["metadata"] else {}
         if not model_id:
             model_id = meta.get("model_id", "")
+        if not context_limit:
+            context_limit = meta.get("context_limit", 32000)
         active_skills = meta.get("active_skills", [])
 
         now = __import__("datetime").datetime.now().isoformat()
 
-        # ref 上下文持久化到 DB（插在 user 消息之前）
+        # 引用上下文持久化到 DB（插在 user 消息之前）
         if refs:
             ref_context = resolve_refs_to_context(refs, multi_db)
             if ref_context:
@@ -1632,7 +1918,7 @@ async def send_chat_message(session_id: str, request: Request):
             if first.get("componentId"):
                 ctx_parts.append(f"组件ID：{first['componentId']}")
             ctx_parts.append(f"会话ID：{session_id}")
-            ctx_parts.append("每轮消息最多 50 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。")
+            ctx_parts.append("每轮消息最多 50 次工具调用。工具名必须使用可用工具列表中提供的精确名称，禁止猜测或编造工具名。如果无合适工具可用，直接告知用户无法处理，不要循环尝试不存在的工具。")
             ctx_msg = "；".join(ctx_parts)
             _sdb().execute(
                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
@@ -1645,7 +1931,7 @@ async def send_chat_message(session_id: str, request: Request):
             _sdb().execute(
                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                 "VALUES (?, ?, 'system', ?, '{}', ?)",
-                (_make_message_id(), session_id, f"会话ID：{session_id}；每轮消息最多 50 次工具调用，请在此限制内完成分析并及时输出结论。如果工具返回空结果或无有效数据，跳过该路径，不要重复调用。", now),
+                (_make_message_id(), session_id, f"会话ID：{session_id}；每轮消息最多 50 次工具调用。工具名必须使用可用工具列表中提供的精确名称，禁止猜测或编造工具名。如果无合适工具可用，直接告知用户无法处理，不要循环尝试不存在的工具。", now),
             )
 
         msg_meta = json.dumps({"refs": refs} if refs else {})
@@ -1680,6 +1966,21 @@ async def send_chat_message(session_id: str, request: Request):
             (session_id,),
         )
         context_messages = [{"role": m["role"], "content": m["content"]} for m in msgs]
+
+        # ── Phase 2: 上下文优化（注入 L1 + TokenBudget） ──
+        assembler = ContextAssembler(session_id, _sdb())
+        context_messages = assembler.build(context_messages, parsed_refs, context_limit)
+        logger.info(f"[context] after assembly: {len(context_messages)} msgs, "
+                    f"~{TokenBudget.estimate_msgs(context_messages)} tokens")
+
+        # ── 工具名注入上下文（LLM 在 reasoning 阶段可见，避免猜测工具名） ──
+        if has_tools:
+            tool_descriptions = registry.collect_tool_descriptions(active_skills)
+            if tool_descriptions:
+                context_messages.append({
+                    "role": "system",
+                    "content": "可用工具列表：\n" + tool_descriptions
+                })
 
         # ── 多轮工具调用 ──
         from web_tools import get_web_tool_definitions
@@ -1740,50 +2041,77 @@ async def send_chat_message(session_id: str, request: Request):
                     chunk_q.put({'type': 'error', 'message': f'API error {resp.status_code}: {err_body}'})
                     chunk_q.put({'type': 'done'})
                     return
+                with _active_streams_lock:
+                    _active_streams[session_id] = resp
                 line_count = 0
-                for line_bytes in resp.iter_lines():
-                    if not line_bytes:
-                        continue
-                    line = line_bytes.decode('utf-8')
-                    if not line.startswith('data: '):
-                        continue
-                    data_str = line[6:].strip()
-                    if data_str == '[DONE]':
-                        _log(f"[LLM-round] [DONE] after {line_count} lines")
-                        break
-                    line_count += 1
-                    try:
-                        data = json.loads(data_str)
-                        delta = data.get('choices', [{}])[0].get('delta', {})
-                        chunk = delta.get('content', '')
-                        reasoning = delta.get('reasoning_content', '')
-                        if reasoning and line_count == 1:
-                            _log(f"[LLM-round] first reasoning token: {reasoning[:60]}...")
-                        if chunk and line_count == 1:
-                            _log(f"[LLM-round] first content token: {chunk[:60]}...")
-                        if reasoning:
-                            chunk_q.put({"type": "reasoning", "text": reasoning})
-                        if chunk:
-                            chunk_q.put(chunk)
-                        tc = delta.get('tool_calls')
-                        if tc:
-                            _log(f"[LLM-round] tool_calls in delta: {json.dumps(tc)[:200]}")
-                            chunk_q.put({'type': 'tool_calls', 'data': json.dumps(tc)})
-                    except Exception as e:
-                        _log(f"[LLM-round] parse error at line {line_count}: {e} | data={data_str[:100]}")
-                        pass
-                chunk_q.put({'type': 'done'})
-                _log(f"[LLM-round] complete ({line_count} data lines)")
+                reasoning_only_count = 0
+                MAX_REASONING_LINES = 3000
+                try:
+                    for line_bytes in resp.iter_lines():
+                        if not line_bytes:
+                            continue
+                        line = line_bytes.decode('utf-8')
+                        if not line.startswith('data: '):
+                            continue
+                        data_str = line[6:].strip()
+                        if data_str == '[DONE]':
+                            _log(f"[LLM-round] [DONE] after {line_count} lines")
+                            break
+                        line_count += 1
+                        try:
+                            data = json.loads(data_str)
+                            delta = data.get('choices', [{}])[0].get('delta', {})
+                            chunk = delta.get('content', '')
+                            reasoning = delta.get('reasoning_content', '')
+                            if reasoning and line_count == 1:
+                                _log(f"[LLM-round] first reasoning token: {reasoning[:60]}...")
+                            if chunk and line_count == 1:
+                                _log(f"[LLM-round] first content token: {chunk[:60]}...")
+                            if reasoning and not chunk:
+                                reasoning_only_count += 1
+                                if reasoning_only_count > MAX_REASONING_LINES:
+                                    _log(f"[LLM-round] reasoning-only lines exceed {MAX_REASONING_LINES}, force break")
+                                    break
+                            else:
+                                reasoning_only_count = 0
+                            if reasoning:
+                                chunk_q.put({"type": "reasoning", "text": reasoning})
+                            if chunk:
+                                chunk_q.put(chunk)
+                            tc = delta.get('tool_calls')
+                            if tc:
+                                _log(f"[LLM-round] tool_calls in delta: {json.dumps(tc)[:200]}")
+                                chunk_q.put({'type': 'tool_calls', 'data': json.dumps(tc)})
+                        except Exception as e:
+                            _log(f"[LLM-round] parse error at line {line_count}: {e} | data={data_str[:100]}")
+                            pass
+                    _log(f"[LLM-round] complete ({line_count} data lines)")
+                except Exception as e:
+                    _log(f"[LLM-round] exception: {e}")
+                    with _active_streams_lock:
+                        _is_aborted = session_id not in _active_streams
+                    if _is_aborted:
+                        chunk_q.put({"type": "aborted"})
+                    else:
+                        import traceback
+                        _log(traceback.format_exc())
+                        chunk_q.put({"type": "error", "message": str(e)})
+                finally:
+                    with _active_streams_lock:
+                        _active_streams.pop(session_id, None)
+                    chunk_q.put({'type': 'done'})
             except Exception as e:
-                _log(f"[LLM-round] exception: {e}")
+                _log(f"[LLM-round] outer exception: {e}")
                 import traceback
                 _log(traceback.format_exc())
                 chunk_q.put({"type": "error", "message": str(e)})
+                chunk_q.put({"type": "done"})
 
         async def event_stream():
             queue: asyncio.Queue = asyncio.Queue()
             loop = asyncio.get_event_loop()
             executor = web_tool_executor
+            executor._current_session_id = session_id
             _log = logger.info
 
             TOOL_ROUND_LIMIT = 50
@@ -1818,6 +2146,10 @@ async def send_chat_message(session_id: str, request: Request):
                                 _log(f"[producer] round {round_idx} error: {item.get('message','')}")
                                 await queue.put({"type": "error", "message": item.get("message", "")})
                                 await queue.put({"type": "done"})
+                                return
+                            if item.get("type") == "aborted":
+                                _log(f"[producer] round {round_idx} aborted by user")
+                                await queue.put({"type": "done", "content": ""})
                                 return
                             if item.get("type") == "tool_calls":
                                 tc_delta_list = json.loads(item.get("data", "[]"))
@@ -1857,6 +2189,11 @@ async def send_chat_message(session_id: str, request: Request):
 
                     if not parsed:
                         _log(f"[producer] round {round_idx} no tool calls → finalize")
+                        # Qwen3.6 等模型把全部输出放 reasoning_content，此时 content 为空
+                        if not full_content.strip() and full_reasoning.strip():
+                            _log(f"[producer] content empty, using reasoning as content fallback ({len(full_reasoning)} chars)")
+                            full_content = full_reasoning
+                            full_reasoning = ""
                         if full_content.strip():
                             _meta = {}
                             if full_reasoning.strip():
@@ -2189,11 +2526,46 @@ async def delete_chat_messages(session_id: str, message_id: str = Query(None)):
         ids = [m.strip() for m in (message_id or "").split(",") if m.strip()]
         if not ids:
             raise HTTPException(422, "message_id is required")
+        # 先记录被删除消息的时间戳，用于清理关联的 tool 消息
+        timestamps = []
+        for _id in ids:
+            row = _sdb().fetchone(
+                "SELECT created_at FROM llm_messages WHERE id = ? AND session_id = ?",
+                (_id, session_id),
+            )
+            if row:
+                timestamps.append(row["created_at"])
         placeholders = ",".join("?" * len(ids))
         _sdb().execute(
             f"DELETE FROM llm_messages WHERE session_id = ? AND id IN ({placeholders})",
             (session_id, *ids),
         )
+        # 删除关联的 tool 消息（位于被删除消息与下一条非 tool 消息之间）
+        for ts in timestamps:
+            next_row = _sdb().fetchone(
+                "SELECT MIN(created_at) AS next_ts FROM llm_messages "
+                "WHERE session_id = ? AND role IN ('user', 'assistant') "
+                "AND created_at > ?",
+                (session_id, ts),
+            )
+            next_ts = next_row["next_ts"] if next_row and next_row["next_ts"] else "9999-12-31"
+            _sdb().execute(
+                "DELETE FROM llm_messages WHERE session_id = ? AND role = 'tool' "
+                "AND created_at >= ? AND created_at < ?",
+                (session_id, ts, next_ts),
+            )
+            prev_row = _sdb().fetchone(
+                "SELECT MAX(created_at) AS prev_ts FROM llm_messages "
+                "WHERE session_id = ? AND role IN ('user', 'assistant') "
+                "AND created_at < ?",
+                (session_id, ts),
+            )
+            if prev_row and prev_row["prev_ts"]:
+                _sdb().execute(
+                    "DELETE FROM llm_messages WHERE session_id = ? AND role = 'tool' "
+                    "AND created_at > ? AND created_at < ?",
+                    (session_id, prev_row["prev_ts"], ts),
+                )
         # 更新 session 消息数
         cnt = _sdb().fetchone(
             "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id = ? AND role IN ('user', 'assistant')",
@@ -2215,6 +2587,73 @@ async def delete_chat_messages(session_id: str, message_id: str = Query(None)):
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# 自动补全
+
+@app.get("/api/chat/autocomplete")
+async def chat_autocomplete(
+    type: str = Query(...), q: str = Query(...),
+    taskId: str = Query(None), projectId: str = Query(None),
+):
+    """搜索联想：community / file / symbol / session"""
+    _require_chat_ready()
+    try:
+        results = []
+        if type == "community" and q:
+            tid = taskId or ""
+            rows = _sdb().fetchall(
+                "SELECT DISTINCT comm_name, comm_id, comm_lv FROM community_llm_results "
+                "WHERE task_id = ? AND comm_name LIKE ? LIMIT 10",
+                (tid, f"%{q}%"),
+            )
+            for r in rows:
+                results.append({
+                    "label": f"{r['comm_name']} ({r['comm_lv']})",
+                    "value": r["comm_id"],
+                    "type": "community",
+                })
+        elif type == "file" and q:
+            pid = projectId or ""
+            rows = _sdb().fetchall(
+                "SELECT DISTINCT file_path FROM file_summaries "
+                "WHERE project_id = ? AND file_path LIKE ? LIMIT 10",
+                (pid, f"%{q}%"),
+            )
+            for r in rows:
+                results.append({
+                    "label": r["file_path"],
+                    "value": r["file_path"],
+                    "type": "file",
+                })
+        elif type == "symbol" and q:
+            rows = _sdb().fetchall(
+                "SELECT name, kind FROM graph_node WHERE name LIKE ? LIMIT 10",
+                (f"%{q}%",),
+            )
+            seen = set()
+            for r in rows:
+                if r["name"] not in seen:
+                    seen.add(r["name"])
+                    results.append({
+                        "label": f"{r['name']} ({r['kind'] or 'symbol'})",
+                        "value": r["name"],
+                        "type": "symbol",
+                    })
+        elif type == "session" and q:
+            rows = _sdb().fetchall(
+                "SELECT id, title FROM llm_sessions WHERE id LIKE ? OR title LIKE ? LIMIT 10",
+                (f"%{q}%", f"%{q}%"),
+            )
+            for r in rows:
+                results.append({
+                    "label": f"{r['title'] or '未命名'} ({r['id'][:12]}...)",
+                    "value": r["id"],
+                    "type": "session",
+                })
+        return {"results": results}
+    except Exception as e:
+        return {"results": [], "error": str(e)}
 
 
 # 归档

@@ -11,7 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.0/dist/cytoscape.min.js"></script>
-<script src="/static/store.js"></script>
+<script src="/static/store.js?v=20260706"></script>
 <style>
   :root {
     --bg: #ffffff; --bg-secondary: #f7f7f8; --bg-hover: #f0f0f2; --bg-code: #f4f4f5;
@@ -247,6 +247,9 @@
   .note-draft-card .draft-actions button:hover{background:var(--bg-hover);color:var(--text)}
   .note-draft-card .draft-actions .del:hover{color:#ef4444}
   .note-draft-card .draft-actions .del{color:var(--text-muted)}
+  .note-draft-card .draft-meta .copy-id-btn{display:none;font-size:11px;padding:1px 4px;border:none;background:none;cursor:pointer;vertical-align:middle;border-radius:3px}
+  .note-draft-card .draft-meta:hover .copy-id-btn{display:inline-block}
+  .note-draft-card .draft-meta .copy-id-btn:hover{background:var(--accent-light)}
   .note-modal-user-text{padding:10px 20px;border-top:1px solid var(--border);flex-shrink:0}
   .note-modal-user-text textarea{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-md);font-size:14px;font-family:var(--font);color:var(--text);background:var(--bg);outline:none;resize:none;min-height:56px;transition:border-color var(--transition)}
   .note-modal-user-text textarea:focus{border-color:var(--accent)}
@@ -367,6 +370,11 @@
           </div>
         </div>
         <div id="graphContextMenu">
+          <div class="ctx-item" data-action="copy-node">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            <span>复制节点信息</span>
+          </div>
+          <div class="ctx-divider"></div>
           <div class="ctx-item" data-action="drilldown">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
             <span>下钻 (查看下级)</span>
@@ -451,6 +459,7 @@ StateStore.init({
   left: true, right: true,
   tab: 'graph',
   et: 'INCLUDE',
+  docEt: '',
   cid: '',
   gran: 'component',
   depth: 1,
@@ -596,10 +605,10 @@ const API = {
     return this._get('/api/external-stats?taskId=' + encodeURIComponent(tid));
   },
   communityDoc(tid, cid, et) {
-    return this._get('/api/community-doc?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
+    return this._get('/api/community-doc?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.docEt || 'INCLUDE')));
   },
   communityFiles(tid, cid, et) {
-    return this._get('/api/community-files?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.et)));
+    return this._get('/api/community-files?taskId=' + encodeURIComponent(tid) + '&communityId=' + encodeURIComponent(cid) + '&edgeType=' + encodeURIComponent(baseET(et || S.docEt || 'INCLUDE')));
   },
   graphLayoutLoad(tid, cid, et, gran, depth) {
     return this._get('/api/graph-layout?taskId=' + encodeURIComponent(tid) + '&commId=' + encodeURIComponent(cid || '') + '&edgeType=' + encodeURIComponent(et) + '&gran=' + encodeURIComponent(gran || 'component') + '&depth=' + (depth || 1));
@@ -625,6 +634,7 @@ function _cid_level(cid) { var parts = (cid || '').split('-'); for (var i = 0; i
 function _hueSatLight(depth, hue) { var t=[[80,55],[70,65],[55,78],[40,88],[30,94]]; var v=t[Math.min(depth,4)]; return 'hsl('+hue+', '+v[0]+'%, '+v[1]+'%)'; }
 function _parentCommId(cid) { var p=(cid||'').split('-');for(var i=0;i<p.length;i++){if(/^L\d+$/.test(p[i])){var lv=parseInt(p[i].substring(1));if(lv===0)return null;var r=p.slice(0,i);r.push('L'+(lv-1));var s=p.slice(i+1);s.pop();if(lv===1)s.shift();else if(lv===2)r.push('L0');return r.concat(s).join('-');}}return null; }
 function _stableHue(id) { var h=0;for(var i=0;i<id.length;i++){h=((h<<5)-h)+id.charCodeAt(i);h|=0;}h=Math.abs(h);return ((h*2654435761)^(h>>>16))%360; }
+function _deriveCommEt(cid) { return (cid||'').indexOf('-call-') >= 0 ? 'CALL' : 'INCLUDE'; }
 
 // ============================================================
 // 4. Layout
@@ -850,10 +860,10 @@ function makeDraggable(el, boundsKey, storageKey) {
 const LeftBreadcrumb = {
   render() {
     var cur = new URLSearchParams(location.search);
-    var cid = S.docCommId || S.cid || cur.get('cid') || '';
+    var cid = S.docCommId || cur.get('cid') || '';
     var cn = S.cn || cur.get('cn') || cid;
     var pcRaw = S.pc || cur.get('pc') || '';
-    var curEt = S.et || cur.get('edgeType') || 'CALL';
+    var curEt = S.docEt || _deriveCommEt(cid) || cur.get('edgeType') || 'INCLUDE';
     var el = document.getElementById('leftBreadcrumb');
     var isFile = S.page === 'file-summary';
     console.log('[L-bread] cid=' + cid + ' cn=' + cn.slice(0, 20) + ' pc=' + (pcRaw || '-').slice(0, 40) + ' dc=' + (S.docChain||[]).length);
@@ -1086,7 +1096,7 @@ const DocContent = {
     var callIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 16l-4-4 4-4"/></svg>';
     var graphIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="14" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><line x1="8" y1="8" x2="16" y2="4"/><line x1="8" y1="13" x2="4" y2="16"/><line x1="16" y1="13" x2="20" y2="16"/></svg>';
 
-    var isRoot = !S.cid && !g_communityId && !(new URLSearchParams(location.search)).get('communityId');
+    var isRoot = !S.docCommId && !g_communityId && !(new URLSearchParams(location.search)).get('communityId');
     console.log('[hd-btn] isRoot=' + isRoot + ' g_cid=' + g_communityId + ' urlCid=' + (new URLSearchParams(location.search)).get('communityId'));
 
     var selector = isRoot ? 'h1' : 'h1, h2, h3, h4';
@@ -1116,7 +1126,7 @@ const DocContent = {
 
       var ets = isRoot ? ['INCLUDE', 'CALL'] : Object.keys(commLinks).slice(0, 1);
       if (ets.length === 0) {
-        if (m) ets = isRoot ? ['INCLUDE', 'CALL'] : [S.et];
+        if (m) ets = isRoot ? ['INCLUDE', 'CALL'] : [S.docEt || 'INCLUDE'];
         else {
           console.log('[hd-btn] SKIP ' + hTag + ' "' + h.textContent.trim().slice(0, 30) + '" no ets m=' + JSON.stringify(m) + ' commLinks=' + JSON.stringify(commLinks));
           return;
@@ -1179,10 +1189,10 @@ const LeftToc = {
     panel.innerHTML = '';
 
     var curUrl = new URLSearchParams(location.search);
-    var curCid = S.docCommId || S.cid || curUrl.get('cid') || '';
+    var curCid = S.docCommId || curUrl.get('cid') || '';
      var pid = parentCid !== undefined ? parentCid : curCid;
     var isRoot = !pid;
-    var curEt = S.et || curUrl.get('edgeType') || 'CALL';
+    var curEt = S.docEt || curUrl.get('docEt') || curUrl.get('edgeType') || 'INCLUDE';
     var ets = isRoot ? ['INCLUDE', 'CALL'] : [curEt];
     var hasContent = false;
     var tasks = ets.map(function(et) {
@@ -1219,13 +1229,13 @@ const LeftToc = {
         var name = this.dataset.name;
         // 构建父级链（当前 URL 中的 communityId 作为新链的前一节点）
         var curPc = S.pc || '';
-        var curCid = S.docCommId || S.cid || '';
+        var curCid = S.docCommId || '';
         var curCn = S.cn || '';
         var chain = [];
-        if (curPc) chain.push(curPc);
-        if (curCid && curCn && curCid !== cid) chain.push(curCn + '|' + curCid + '|' + (S.et || et));
+    if (curPc) chain.push(curPc);
+    if (curCid && curCn && curCid !== cid) chain.push(curCn + '|' + curCid + '|' + (S.docEt || et));
         var pcStr = chain.join(',');
-        StateStore.commit({cn: name, pc: pcStr, et: et, page: 'doc', filePath: ''});
+        StateStore.commit({cn: name, pc: pcStr, docEt: et, page: 'doc', filePath: ''});
         S.taskId = S.taskId || g_taskId;
         loadCommunityDoc(S.taskId, cid, et, true);
       };
@@ -1354,7 +1364,7 @@ const FilePreview = {
   async render(filePath, commId) {
     var content = document.getElementById('content');
     var curUrl = new URLSearchParams(location.search);
-    var curEt = curUrl.get('edgeType') || S.et || 'CALL';
+    var curEt = curUrl.get('edgeType') || curUrl.get('docEt') || S.docEt || 'INCLUDE';
     var tid = S.taskId || g_taskId;
     var parts = filePath.split('/');
     var fname = parts[parts.length - 1] || filePath;
@@ -1481,8 +1491,6 @@ const RightPanel = {
   },
 
   async init() {
-    // 图起始点：无钻取状态时使用文档社区
-    if (!S.cid && S.docCommId) S.cid = S.docCommId;
     // 图操作工具栏始终需要事件绑定（不依赖 graph 数据）
     console.log('[Tb] RightPanel.init calling _initToolbar');
     GraphView._initToolbar();
@@ -1771,8 +1779,16 @@ const GraphView = {
         g_cy.zoom(1.0);
         var conn = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
         if (!conn.empty()) g_cy.center(conn); else g_cy.center();
-        GraphView._loadLayout().then(function() {
+        GraphView._loadLayout().then(function(saved) {
           if (!g_cy) return;
+          if (!saved) {
+            var nds = {};
+            g_cy.nodes().forEach(function(n) {
+              var p = n.position();
+              nds[n.id()] = {x: Math.round(p.x*10)/10, y: Math.round(p.y*10)/10};
+            });
+            API.graphLayoutSave(S.taskId, S.cid||'', S.et, S.gran||'component', S.depth||1, nds).catch(function(){});
+          }
           var cn2 = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
           if (!cn2.empty()) g_cy.center(cn2); else g_cy.center();
         });
@@ -2229,6 +2245,34 @@ const GraphView = {
     });
     if (g_cy) g_cy.on('tap', function() { menu.style.display = 'none'; });
 
+    menu.querySelector('[data-action="copy-node"]').onclick = function() {
+      var nid = menu._ctxNodeId;
+      if (!nid || !g_cy) return;
+      menu.style.display = 'none';
+      var node = g_cy.getElementById(nid);
+      if (!node.length) return;
+      var label = node.data('label') || nid;
+      var info = {
+        projectId: S.projectId || '',
+        projectName: S.projectName || '',
+        taskId: S.taskId || '',
+        nodeId: nid,
+        nodeName: label
+      };
+      var text = JSON.stringify(info, null, 2);
+      try { navigator.clipboard.writeText(text); } catch(e) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      showToast('已复制节点信息');
+    };
+
     menu.querySelector('[data-action="drilldown"]').onclick = function() {
       var nid = menu._ctxNodeId;
       if (!nid || !g_cy) return;
@@ -2262,18 +2306,18 @@ const GraphView = {
       var commId = nid;
       var et = (commId.indexOf('-incl-') >= 0) ? 'INCLUDE' :
                (commId.indexOf('-call-') >= 0) ? 'CALL' :
-               S.et;
+               (S.docEt || 'INCLUDE');
       var label = node.data('label') || commId;
-      console.log('[ctx-doc] nid=' + nid + ' label=' + label.slice(0,20) + ' S.et=' + et + ' S.commStack=' + S.commStack.length);
+      console.log('[ctx-doc] nid=' + nid + ' label=' + label.slice(0,20) + ' et=' + et + ' S.commStack=' + S.commStack.length);
       // Build parent chain
       var curPc = S.pc || '';
-      var curCid = S.docCommId || S.cid || '';
+      var curCid = S.docCommId || '';
       var curCn = S.cn || '';
       var chain = [];
       if (curPc) chain.push(curPc);
-      if (curCid && curCn && curCid !== commId) chain.push(curCn + '|' + curCid + '|' + S.et);
+      if (curCid && curCn && curCid !== commId) chain.push(curCn + '|' + curCid + '|' + S.docEt);
       var pcStr = chain.join(',');
-      StateStore.commit({docCommId: commId, cn: label, pc: pcStr, et: et});
+      StateStore.commit({docCommId: commId, cn: label, pc: pcStr, docEt: et});
       loadCommunityDoc(S.taskId, commId, et, true);
     };
 
@@ -2292,7 +2336,7 @@ const GraphView = {
   },
 
   async _loadLayout() {
-    if (!g_cy || !S.taskId) return;
+    if (!g_cy || !S.taskId) return false;
     try {
       var data = await API.graphLayoutLoad(S.taskId, S.cid || '', S.et, S.gran || 'component', S.depth || 1);
       if (data.found && data.nodes) {
@@ -2300,8 +2344,10 @@ const GraphView = {
           var pos = data.nodes[n.id()];
           if (pos) n.position({x: pos.x, y: pos.y});
         });
+        return true;
       }
-    } catch(e) { /* ignore */ }
+      return false;
+    } catch(e) { return false; }
   },
 
   _applyExternalHeat() {
@@ -2582,14 +2628,14 @@ async function load() {
   document.getElementById('heatmapSize').onchange = function() { HeatmapView.load(); };
 
   // Route — docId 优先于 routeCid（总体文档覆盖社区推断路由）
-  var routeCid = S.docCommId || S.cid;
+  var routeCid = S.docCommId;
   if (g_communityId && g_taskId) {
     await loadCommunityDoc(g_taskId, g_communityId, g_edgeType, true);
   } else if (g_docId) {
     await loadDoc(g_docId);
   } else if (routeCid && g_taskId) {
     // 新版精简 URL：cid 参数代替 communityId
-    await loadCommunityDoc(g_taskId, routeCid, S.et || g_edgeType, true);
+    await loadCommunityDoc(g_taskId, routeCid, S.docEt || _deriveCommEt(routeCid) || g_edgeType, true);
   } else if (!g_docId && !g_taskId) {
     document.getElementById('content').innerHTML = '<p>No document specified.</p>';
     return;
@@ -2610,7 +2656,7 @@ async function loadDoc(id) {
   if (S.page !== 'doc' && !g_communityId) { StateStore.commit({page: 'doc', filePath: ''}); }
   content.innerHTML = '<div class="loading">Loading document...</div>';
   // loadDoc 始终加载总体文档，无社区上下文，清空 cid/cn/pc/docCommId
-  StateStore.commit({taskId: g_taskId, cn: '', pc: '', docCommId: ''});
+  StateStore.commit({taskId: g_taskId, cn: '', pc: '', docCommId: '', cid: ''});
   try {
     var doc = await API.doc(id);
     StateStore.commit({projectId: doc.projectId || '', projectName: doc.projectName || '', taskId: doc.taskId || g_taskId, cn: doc.title || '', pc: ''});
@@ -2636,11 +2682,11 @@ async function loadCommunityDoc(tid, cid, et, skipCid) {
   content.innerHTML = '<div class="loading">Loading community document...</div>';
   // 跨任务切换时清理旧上下文
   if (tid !== S.taskId) {
-    StateStore.commit({cid: skipCid ? S.cid : cid, cn: '', pc: '', docCommId: cid, et: et, taskId: tid});
+    StateStore.commit({cid: skipCid ? S.cid : cid, cn: '', pc: '', docCommId: cid, docEt: et, taskId: tid});
   } else {
-    StateStore.commit({cid: skipCid ? S.cid : cid, docCommId: cid, et: et});
+    StateStore.commit({cid: skipCid ? S.cid : cid, docCommId: cid, docEt: et});
   }
-  console.log('[loadDoc] tid=' + tid.slice(0,8) + ' cid=' + cid + ' et=' + et + ' S.docCommId=' + S.docCommId + ' S.cid=' + S.cid);
+  console.log('[loadDoc] tid=' + tid.slice(0,8) + ' cid=' + cid + ' et=' + et + ' S.docCommId=' + S.docCommId + ' S.cid=' + S.cid + ' S.docEt=' + S.docEt);
 
   // 如果是文件页面，直接渲染文件预摘要
   if (S.page === 'file-summary') {
@@ -2666,7 +2712,7 @@ async function loadCommunityDoc(tid, cid, et, skipCid) {
     }
     // curEt is the edgeType from URL
     var curUrl = new URLSearchParams(location.search);
-    var curEt = curUrl.get('edgeType') || et || 'CALL';
+    var curEt = curUrl.get('docEt') || curUrl.get('edgeType') || et || 'INCLUDE';
     FileList.load(tid, cid, curEt);
   } catch(e) {
     content.innerHTML = '<div class="error-msg">Failed: ' + e.message + '</div>';
@@ -2868,6 +2914,7 @@ function renderDrafts() {
   var html = '';
   filtered.forEach(function(d) {
     (d.refs||[]).forEach(function(r, ri) {
+      var copyBtn = '<button class="copy-id-btn" data-copy="' + escAttr(r.componentId || r.taskId || r.projectId || '') + '" title="复制ID"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>';
       html += '<div class="note-draft-card" data-draft="'+d.id+'" data-ref="'+ri+'">' +
         '<div class="draft-header">' +
           '<input type="checkbox" class="cbox" data-draft="'+d.id+'" data-ref="'+ri+'">' +
@@ -2877,6 +2924,7 @@ function renderDrafts() {
             (r.taskId ? '<span class="ref-id '+(r.projectId||r.projectName?'muted':'')+'">' + escHtml(r.taskId.slice(0,10)) + '</span>' : '') +
             (r.componentId ? '<span class="ref-id '+(r.taskId||r.projectId||r.projectName?'muted':'')+'">' + escHtml(r.componentId.slice(0,10)) + '</span>' : '') +
             (r.label ? '<span style="font-size:11px;color:var(--text-muted);margin-left:4px">' + escHtml(r.label.slice(0,40)) + '</span>' : '') +
+            copyBtn +
           '</div>' +
         '</div>' +
         '<div class="draft-body">' +
@@ -2910,6 +2958,15 @@ function renderDrafts() {
   list.querySelectorAll('.note-draft-card .cbox').forEach(function(cb) {
     cb.addEventListener('keydown', function(e) {
       if (e.key === ' ' || e.key === 'Space' || e.key === 'Enter') e.preventDefault();
+    });
+  });
+  list.querySelectorAll('.note-draft-card .copy-id-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var text = this.dataset.copy;
+      if (!text) return;
+      try { navigator.clipboard.writeText(text).then(function(){ showToast('已复制: ' + text.slice(0,20) + (text.length > 20 ? '…' : '')); }) }
+      catch(e) { var ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('已复制'); }
     });
   });
 }

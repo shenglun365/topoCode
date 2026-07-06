@@ -902,6 +902,17 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     service = LLMService(multi_db)
     service._server = server  # 用于 ZMQ PUB 推送
 
+    # 启动时清理所有 _inline_ 临时会话（无项目关联的一次性会话）
+    try:
+        _sdb = multi_db.sessions_db
+        _count = _sdb.execute(
+            "DELETE FROM llm_sessions WHERE module_type = 'project_analysis'"
+        ).rowcount
+        if _count:
+            logger.info(f"[LLMService] Startup cleanup: deleted {_count} inline session(s)")
+    except Exception as _e:
+        logger.warning(f"[LLMService] Startup cleanup failed: {_e}")
+
     from prompt_manager import PromptManager
     pm = PromptManager(multi_db)
 

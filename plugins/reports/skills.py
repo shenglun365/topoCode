@@ -54,6 +54,7 @@ BUILTIN_SKILLS: dict[str, Skill] = {
                 "web_get_community_detail",
                 "web_get_community_graph",
                 "web_set_session_title",
+                "web_search_conversation_history",
             ],
         context_prompt=(
             "项目架构按社区层级组织（L0-L5），"
@@ -85,11 +86,37 @@ BUILTIN_SKILLS: dict[str, Skill] = {
     "knowledge_keeper": Skill(
         name="knowledge_keeper",
         title="知识归档",
-        description="保存和检索对话中产生的分析结论",
+        description="管理和检索对话中产生的分析结论",
         icon="💾",
-        tools=["web_search_archives", "web_save_archive"],
-        context_prompt="用户可以检索历史对话的归档知识，也可以将当前结论存入归档。",
+        tools=[
+            "web_search_archives",
+            "web_save_archive",
+            "web_list_archives",
+            "web_delete_archive",
+            "web_update_archive",
+        ],
+        context_prompt="用户可以检索、管理和保存历史归档知识。",
         default=False,
+    ),
+    "conversation_analyst": Skill(
+        name="conversation_analyst",
+        title="会话分析",
+        description="检索、分析和对比历史对话记录",
+        icon="💬",
+        tools=[
+            "web_list_sessions",
+            "web_get_session_info",
+            "web_search_across_sessions",
+            "web_get_session_messages",
+            "web_summarize_session",
+            "web_extract_topics",
+            "web_compare_sessions",
+        ],
+        context_prompt=(
+            "用户可以检索历史对话记录，对多个会话进行搜索、摘要和对比分析。"
+            "可以获取指定会话的全部消息，提取讨论主题，生成结构化摘要。"
+        ),
+        default=True,
     ),
 }
 
@@ -136,6 +163,15 @@ class SkillRegistry:
             if sk and sk.context_prompt:
                 parts.append(sk.context_prompt)
         return "\n".join(parts) if parts else ""
+
+    def collect_tool_descriptions(self, active_skills: list[str]) -> str:
+        """收集 active_skills 的工具名+用途描述（给 LLM 参考，避免猜测工具名）"""
+        parts = []
+        for sk_name in active_skills:
+            sk = self._skills.get(sk_name)
+            if sk and sk.tools:
+                parts.append(f"- {sk.title}（{sk.description}）: {', '.join(sk.tools)}")
+        return "\n".join(parts)
 
     def to_frontend_list(self) -> list[dict]:
         """返回前端可展示的 Skills 列表"""
