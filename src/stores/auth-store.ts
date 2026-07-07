@@ -72,6 +72,21 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function loginWithCode(params: { email?: string; phone?: string; code: string }): Promise<boolean> {
+    loading.value = true
+    error.value = null
+    try {
+      const result = await authService.login(email, password)
+      saveSession(result.token, result.user)
+      return true
+    } catch (e: any) {
+      error.value = e.message || '登录失败'
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function register(username: string, email: string, password: string, emailCode: string, phone?: string, smsCode?: string, referralCode?: string): Promise<boolean> {
     loading.value = true
     error.value = null
@@ -86,7 +101,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function logout() {
+  async function logout() {
+    if (token.value) {
+      try {
+        await authService.logout(token.value)
+      } catch { /* ignore */ }
+    }
     clearSession()
   }
 
@@ -144,7 +164,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     user, token, loading, error, isAuthenticated,
     referralCode, points, balance, transactions, loadingTransactions, referralStats, shareLink,
-    login, register, logout, fetchProfile,
+    login, loginWithCode, register, logout, fetchProfile,
     loadReferralInfo, loadReferralStats,
     fetchAccountInfo, fetchTransactions,
   }

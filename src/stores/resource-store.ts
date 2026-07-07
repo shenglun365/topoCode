@@ -1,47 +1,73 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Resource } from '@/types'
+import type { Resource, ResourceCategory, ResourceListMeta } from '@/types'
 import { resourceService } from '@/services/resource-service'
 
 export const useResourceStore = defineStore('resource', () => {
   const resources = ref<Resource[]>([])
   const currentResource = ref<Resource | null>(null)
   const loading = ref(false)
-  const categories = ref<string[]>(['全部'])
-  const activeCategory = ref('全部')
+  const meta = ref<ResourceListMeta | null>(null)
+  const activeCategoryKey = ref('')
+  const ownedMode = ref(false)
   const pagination = ref({ page: 1, total: 0, pageSize: 12 })
 
-  const filteredResources = computed(() => {
-    if (activeCategory.value === '全部') return resources.value
-    return resources.value.filter(r => r.category === activeCategory.value)
+  const categories = computed<ResourceCategory[]>(() => {
+    return meta.value?.categories || []
   })
 
-  async function fetchResources() {
+  const activeCategory = computed(() => {
+    return categories.value.find(c => c.key === activeCategoryKey.value)
+  })
+
+  const filteredResources = computed(() => {
+    if (ownedMode.value) return resources.value
+    if (!activeCategoryKey.value) return resources.value
+    return resources.value.filter(r => r.category === activeCategoryKey.value)
+  })
+
+  async function fetchResources(owned?: boolean, token?: string) {
     loading.value = true
     try {
-      const result = await resourceService.list({ page: pagination.value.page, category: activeCategory.value === '全部' ? undefined : activeCategory.value })
+      const params: any = { page: pagination.value.page }
+      if (owned) {
+        params.owned = true
+        params.token = token
+      } else if (activeCategoryKey.value) {
+        params.category = activeCategoryKey.value
+      }
+      const result = await resourceService.list(params)
       resources.value = result.items
+      meta.value = result.meta
       pagination.value.total = result.total
-      const cats = new Set<string>()
-      cats.add('全部')
-      result.items.forEach(r => cats.add(r.category))
-      categories.value = Array.from(cats)
     } finally {
       loading.value = false
     }
   }
 
-  async function fetchDetail(id: number) {
+  async function fetchDetail(id: number, token?: string) {
     loading.value = true
     try {
-      currentResource.value = await resourceService.detail(id)
+      currentResource.value = await resourceService.detail(id, token)
     } finally {
       loading.value = false
     }
   }
 
-  function setCategory(cat: string) {
-    activeCategory.value = cat
+  function setCategory(key: string) {
+    activeCategoryKey.value = key
+    ownedMode.value = false
+    pagination.value.page = 1
+
+    const cat = categories.value.find(c => c.key === key)
+    if (cat?.scope === 'owned') {
+      ownedMode.value = true
+    }
+  }
+
+  function clearOwned() {
+    ownedMode.value = false
+    activeCategoryKey.value = ''
     pagination.value.page = 1
   }
 
@@ -50,7 +76,9 @@ export const useResourceStore = defineStore('resource', () => {
   }
 
   return {
-    resources, currentResource, loading, categories, activeCategory, pagination,
-    filteredResources, fetchResources, fetchDetail, setCategory, getDownloadUrl,
+    resources, currentResource, loading, meta,
+    categories, activeCategory, activeCategoryKey, ownedMode, pagination,
+    filteredResources, fetchResources, fetchDetail,
+    setCategory, clearOwned, getDownloadUrl,
   }
 })

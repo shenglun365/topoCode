@@ -1034,7 +1034,8 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         # v2: inject user custom instructions
         from instruction_manager import InstructionManager
         im = InstructionManager()
-        messages = im.inject(messages, scope="all")
+        scope = "report" if template_id else "chat"
+        messages = im.inject(messages, scope=scope)
 
         extra_meta = {}
         if template_id:

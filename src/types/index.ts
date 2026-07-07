@@ -279,6 +279,37 @@ export interface Resource {
   price_cny: number
   subscription_tier: string
   created_at: string
+  theme?: ResourceTheme
+}
+
+/** 资源主题（服务端下发的展示提示） */
+export interface ResourceTheme {
+  color?: string | null
+  badge_text?: string | null
+  badge_style?: 'new' | 'hot' | 'sale' | 'promo' | null
+  featured?: boolean
+  icon_url?: string | null
+  owned?: boolean
+}
+
+/** 资源分类定义（服务端下发） */
+export interface ResourceCategory {
+  key: string
+  label: string
+  color?: string | null
+  scope?: string | null
+  auth_required?: boolean
+  icon?: string | null
+  count?: number
+}
+
+/** 资源列表元信息（服务端下发） */
+export interface ResourceListMeta {
+  _version: string
+  categories: ResourceCategory[]
+  styles: Record<string, string>
+  feature_flags: Record<string, boolean>
+  labels: Record<string, string>
 }
 
 /** 注册表单 */

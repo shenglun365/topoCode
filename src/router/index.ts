@@ -55,6 +55,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/RegisterPage.vue'),
     meta: { title: '注册', hideShell: true },
   },
+  {
+    path: '/reset-password',
+    name: 'ResetPassword',
+    component: () => import('@/pages/ResetPasswordPage.vue'),
+    meta: { title: '重置密码', hideShell: true },
+  },
 ]
 
 const router = createRouter({

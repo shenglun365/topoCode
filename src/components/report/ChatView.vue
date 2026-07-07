@@ -85,11 +85,16 @@ async function handleSend() {
   const assistantMsg = addMessage('assistant', '')
 
   try {
-    const fullContent = await chat({
-      messages: messages.value
+    // 注入系统提示词定义角色和范围
+    const sendMessages = [
+      { role: 'system', content: t('ai.chatSystemPrompt') },
+      ...messages.value
         .filter(m => m.role !== 'system' && !m.toolCalls)
-        .slice(-20) // last 20 messages for context
+        .slice(-20)
         .map(m => ({ role: m.role, content: m.content })),
+    ]
+    const fullContent = await chat({
+      messages: sendMessages,
       onChunk(chunk: string) {
         assistantMsg.content += chunk
         // Basic Markdown rendering — convert ```mermaid / ```plantuml blocks
@@ -132,7 +137,7 @@ function handleQuickAction(prompt: string) {
 function clearChat() {
   messages.value = []
   if (llmConfigured.value) {
-    addMessage('system', t('chat.welcome', '你好！我是 topocode Agent。我可以帮你分析项目架构、生成文档、检查代码质量。'))
+    addMessage('system', t('ai.chatWelcome'))
   }
 }
 
@@ -156,13 +161,13 @@ function _renderMarkdownInline(text: string): string {
 
 onMounted(() => {
   if (llmConfigured.value) {
-    addMessage('system', t('chat.welcome', '你好！我是 topocode Agent。我可以帮你分析项目架构、生成文档、检查代码质量。'))
+    addMessage('system', t('ai.chatWelcome'))
   }
 })
 
 watch(llmConfigured, (val) => {
   if (val && messages.value.length === 0) {
-    addMessage('system', t('chat.welcome', '你好！我是 topocode Agent。'))
+    addMessage('system', t('ai.chatWelcome'))
   }
 })
 </script>

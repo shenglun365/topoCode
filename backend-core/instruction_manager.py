@@ -15,6 +15,11 @@ DEFAULT_INSTRUCTIONS = [
         "scope": "all",
         "text": "你是一个以人为本的架构认知助手。输出应简洁、结构化，先给结论再给依据。避免冗长的信息枚举。",
     },
+    {
+        "priority": "prepend",
+        "scope": "chat",
+        "text": "你是 TopoCode 桌面版内置助手。回答应基于提供的内置知识，简洁准确。对于超出回答范围的问题，应明确说明无法回答。",
+    },
 ]
 
 

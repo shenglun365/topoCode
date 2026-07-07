@@ -34,66 +34,15 @@ const navigationStore = useNavigationStore()
 const selectionStore = useComponentSelectionStore()
 const chatSession = useChatSession()
 
-const DEFAULT_SYSTEM_PROMPT = [
-  '你是 TopoCode 使用助手，仅回答关于 TopoCode 软件功能和使用方法的问题。',
-  '应用内AI助手，负责解答软件使用问题。输入/help 查看可用指令',
-  '对于用户关于所分析项目的架构/代码/设计等具体研究问题，请回复：',
-  '> 这个问题需要结合您的项目上下文进行深入分析，',
-  '> 请通过 **Web AI 助手** 进行探讨：',
-  '> http://localhost:3456/chat',
-  '',
-  '对话使用中文回复。保持简洁。',
-].join('\n')
-
-const HELP_TEXT = [
-  '## 可用命令',
-  '',
-  '### 对话指令（直接输入）',
-  '| 指令 | 说明 |',
-  '|------|------|',
-  '| `/help` / `/帮助` | 显示本帮助 |',
-  '| `/select [--all/--include/--call/--l0~/--l5/--clear/--unanalyzed]` | 无参数时切换选择模式；`--all` 全选所有社区；`--include`/`--call`/`--l0`~/`--l5` 按条件自动选取；`--clear` 清除已选；`--unanalyzed` 只选未分析组件 |',
-  '| `/presummary [-j N] [--force]` | 文件预摘要（Agent 模式），按 P0→P1→P2 顺序执行。`--force` 强制覆盖已有缓存。`-j N` 并发数 1-5（默认 1） |',
-  '| `/analyze [-j N] [--force] [-L zh/en]` | 组件分析（Agent 多轮模式），默认分析所有 L0~L5 组件。`--force` 强制覆盖已分析组件。`-j N` 并发数 1-5（默认 1） |',
-  '| `/overview [--force] [-L zh/en]` | 生成整体架构概览文档。`--force` 强制覆盖已生成内容。不支持 -j 参数 |',
-  '| `/pipeline [-j N] [--force] [-L zh/en]` | 流水线整体激活。顺序执行：项目摘要 → 预摘要(P0→P1→P2) → 组件分析(L0→L5) → 整体架构分析。`--force` 强制覆盖所有。`-j N` 并发数 1-5（默认 1）|',
-  '',
-  '### 模式',
-  '- **自由对话**：输入 TopoCode 使用相关问题，AI 基于内置文档回复',
-  '- **项目分析**：关于项目架构/代码的深入问题，请使用 **Web AI 助手** http://localhost:3456/chat',
-  '- **组件选择模式**：输入 `/select` 或点击输入栏 📎 按钮切换。无参数时手动点选；支持 `/select --include --l0` 等参数自动选取。选中后输入 `/analyze` 启动分析',
-  '- **流水线模式**：`/pipeline` 一键完成全部分析流程',
-].join('\n')
-
-const CODE_HELP_TEXT = [
-  '## 代码解析使用指南',
-  '',
-  '### 1. 浏览项目文件',
-  '- 左侧**文件树**展示项目的目录和文件结构，目录逐层展开（懒加载）',
-  '- 点击文件名在右侧查看源码，支持语法高亮',
-  '- 文件树顶部搜索框可按文件名快速筛选',
-  '',
-  '### 2. 创建分析任务',
-  '- 点击工具栏 **"新建任务"** 打开任务配置表单',
-  '- 选择要扫描的**语言类型**（Python、JavaScript 等）和**目录范围**',
-  '- 选择**报告类型**：依赖分析（dependency）、调用链分析（call chain）',
-  '- 点击确定后任务自动进入队列执行，可在任务列表查看进度',
-  '',
-  '### 3. 管理任务',
-  '- 任务列表中可查看各任务的状态、进度和结果',
-  '- 支持对已完成/失败的任务**重新执行**，对运行中的任务**停止**',
-  '- 点击任务行的**"结构分析"** 跳转至架构分析页面查看详细报告',
-  '',
-  '### 4. 数据管理',
-  '- **导入分析结果**：工具栏 "导入" 按钮，选择之前导出的 .zip 存档',
-  '- **导出分析结果**：工具栏 "导出" 按钮，勾选要导出的任务后下载',
-  '- **校验文件**：工具栏 "校验" 按钮，检查文件 hash 是否与分析数据一致',
-  '- **清理缓存**：工具栏 ⚙️ 菜单 → 清理缓存，按类别选择性清除',
-  '',
-  '### 5. 更多帮助',
-  '- 关于项目架构的深入分析，请切换至**架构分析**功能组',
-  '- 在任意页面可向本 AI 助手提问软件使用问题',
-].join('\n')
+function buildSystemPrompt(): string {
+  const docKeys = [
+    'docProject', 'docAnalysisTask', 'docArchAnalysis',
+    'docCodeAnalysis', 'docCache', 'docSettings',
+    'docGroups', 'docTroubleshooting',
+  ]
+  const docs = docKeys.map(k => t(`ai.${k}` as any)).join('\n\n')
+  return t('ai.systemPromptRole') + '\n\n' + t('ai.systemPromptScope') + '\n\n' + docs
+}
 
 const md = new MarkdownIt({
   html: true,
@@ -295,7 +244,7 @@ watch(sessionKey, (newKey, oldKey) => {
   } else {
     addMessage('system', buildContextMessage())
     addMessage('system', t('ai.assistantWelcome'))
-    addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+    addMessage('system', t('ai.helpHint'))
   }
 })
 
@@ -512,7 +461,7 @@ async function handleSend() {
     if (/^\/help$/i.test(text) || text === '/帮助') {
       addMessage('user', text)
       userInput.value = ''
-      const helpContent = currentPage.value === 'code' ? CODE_HELP_TEXT : HELP_TEXT
+      const helpContent = currentPage.value === 'code' ? t('ai.helpCode') : t('ai.helpCommands')
       addMessage('assistant', helpContent)
       return
     }
@@ -584,7 +533,7 @@ async function handleSend() {
 
   // 构建发送消息：system prompts + 对话历史（不含 system）
   const sendMessages: Array<{ role: string; content: string }> = []
-  sendMessages.push({ role: 'system', content: DEFAULT_SYSTEM_PROMPT })
+  sendMessages.push({ role: 'system', content: buildSystemPrompt() })
   const selCtx = selectionStore.getContextForAI()
   if (selCtx) {
     sendMessages.push({ role: 'system', content: selCtx })
@@ -664,7 +613,7 @@ onMounted(() => {
     if (messages.value.length === 0) {
       addMessage('system', buildContextMessage())
       addMessage('system', t('ai.assistantWelcome'))
-      addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+      addMessage('system', t('ai.helpHint'))
     }
   }
 })
