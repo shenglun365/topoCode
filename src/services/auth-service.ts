@@ -1,71 +1,90 @@
-import type { UserProfile, TransactionRecord } from '@/types'
-import { getDeviceId } from '@/utils/device-id'
-import { mockUser, mockToken } from '@/utils/mock'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
-const USE_MOCK = (import.meta.env.DEV || !window.navigator.onLine) && !import.meta.env.VITE_DISABLE_MOCK
-
-interface ApiResponse<T> {
-  success: boolean
-  message: string
-  data: T
-}
-
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Device-Id': getDeviceId(),
-  }
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.message || `HTTP ${res.status}`)
-  }
-  const json: ApiResponse<T> = await res.json()
-  if (!json.success) {
-    throw new Error(json.message || '请求失败')
-  }
-  return json.data
-}
+import type { TransactionRecord } from '@/types'
+import { request } from '@/utils/http'
 
 function delay(ms = 400): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
 }
 
+const USE_MOCK = (import.meta.env.DEV || !window.navigator.onLine) && !import.meta.env.VITE_DISABLE_MOCK
+
 export const authService = {
-  async login(email: string, password: string): Promise<{ token: string; user: any }> {
-    if (USE_MOCK) {
-      await delay()
-      if (email === 'demo@example.com' && password === 'demo123') {
-        const u = { ...mockUser, referral_code: 'ABC12345', points: 150 }
-        return { token: mockToken, user: u }
-      }
-      throw new Error('邮箱或密码错误')
-    }
-    return request('/topoapi/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    })
-  },
-
-  async loginWithCode(params: { email?: string; phone?: string; code: string }): Promise<{ token: string; user: any }> {
-    if (USE_MOCK) {
-      await delay()
-      if (params.email === 'demo@example.com' && params.code === '123456') {
-        return { token: mockToken, user: { ...mockUser, points: 150 } }
-      }
-      throw new Error('验证码错误或已过期')
-    }
-    return request('/topoapi/auth/login-with-code', {
-      method: 'POST',
-      body: JSON.stringify(params),
-    })
-  },
-
-  async register(username: string, email: string, password: string, emailCode: string, phone?: string, smsCode?: string, referralCode?: string): Promise<void> {
+  async sendCode(account: string): Promise<void> {
     if (USE_MOCK) {
       await delay()
       return
+    }
+    await request('/topoapi/auth/send-code', {
+      method: 'POST',
+      body: JSON.stringify({ account }),
+    })
+  },
+
+  async login(account: string, password: string): Promise<{ token: string; user: any }> {
+    if (USE_MOCK) {
+      await delay()
+      return {
+        token: 'mock-jwt-token-for-development',
+        user: {
+          id: 1,
+          username: account.split('@')[0],
+          email: account.includes('@') ? account : `${account}@phone.mock`,
+          phone: account.includes('@') ? '' : account,
+          avatar: '',
+          referral_code: 'ABC12345',
+          points: 150,
+          has_password: true,
+          created_at: new Date().toISOString(),
+        },
+      }
+    }
+    return request('/topoapi/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ account, password }),
+    })
+  },
+
+  async loginWithCode(account: string, code: string): Promise<{ token: string; user: any }> {
+    if (USE_MOCK) {
+      await delay()
+      return {
+        token: 'mock-jwt-token-for-development',
+        user: {
+          id: 1,
+          username: account.split('@')[0],
+          email: account.includes('@') ? account : `${account}@phone.mock`,
+          phone: account.includes('@') ? '' : account,
+          avatar: '',
+          referral_code: 'ABC12345',
+          points: 150,
+          has_password: true,
+          created_at: new Date().toISOString(),
+        },
+      }
+    }
+    return request('/topoapi/auth/login-with-code', {
+      method: 'POST',
+      body: JSON.stringify({ account, code }),
+    })
+  },
+
+  async register(username: string, email: string, password: string, emailCode: string, phone?: string, smsCode?: string, referralCode?: string): Promise<{ token: string; user: any }> {
+    if (USE_MOCK) {
+      await delay()
+      return {
+        token: 'mock-jwt-token-for-development',
+        user: {
+          id: 1,
+          username,
+          email,
+          phone: phone || '',
+          avatar: '',
+          referral_code: 'ABC12345',
+          points: 0,
+          balance: 0,
+          has_password: false,
+          created_at: new Date().toISOString(),
+        },
+      }
     }
     return request('/topoapi/auth/register', {
       method: 'POST',
@@ -78,7 +97,7 @@ export const authService = {
       await delay()
       return
     }
-    return request('/topoapi/auth/forgot-password', {
+    await request('/topoapi/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify({ email }),
     })
@@ -89,78 +108,60 @@ export const authService = {
       await delay()
       return
     }
-    return request('/topoapi/auth/reset-password', {
+    await request('/topoapi/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({ email, code, new_password: newPassword }),
     })
   },
 
-  async sendEmailCode(email: string): Promise<void> {
+  async fetchProfile(): Promise<any> {
     if (USE_MOCK) {
       await delay()
-      return
+      return {
+        id: 1,
+        username: 'mock_user',
+        email: 'mock@example.com',
+        phone: '',
+        avatar: '',
+        referral_code: 'ABC12345',
+        points: 150,
+        has_password: true,
+        created_at: '2026-06-15T00:00:00',
+      }
     }
-    return request('/topoapi/auth/send-email-code', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    })
+    return request('/topoapi/user/profile')
   },
 
-  async sendSmsCode(phone: string): Promise<void> {
+  async getReferralInfo(): Promise<{ referral_code: string; points_balance: number; random_share_link: string }> {
     if (USE_MOCK) {
       await delay()
-      return
+      const paths = ['/share/a', '/share/b', '/share/c']
+      const randomPath = paths[Math.floor(Math.random() * paths.length)]
+      return { referral_code: 'ABC12345', points_balance: 150, random_share_link: `https://topocode.cn${randomPath}` }
     }
-    return request('/topoapi/auth/send-sms-code', {
-      method: 'POST',
-      body: JSON.stringify({ phone }),
-    })
+    return request('/topoapi/user/referral-info')
   },
 
-  async fetchProfile(token: string): Promise<any> {
+  async getReferralStats(): Promise<{ total_referred: number; total_earned: number }> {
     if (USE_MOCK) {
       await delay()
-      return { ...mockUser, referral_code: 'ABC12345', points: 150 }
+      return { total_referred: 3, total_earned: 150 }
     }
-    return request('/topoapi/user/profile', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
-    })
+    return request('/topoapi/user/referral-stats')
   },
 
-  async getReferralInfo(token: string): Promise<{ referral_code: string; points_balance: number; share_link: string }> {
+  async getAccountInfo(): Promise<{ balance: number; points: number; total_recharged: number; total_consumed: number; total_points_rewarded: number }> {
     if (USE_MOCK) {
       await delay()
-      return { referral_code: 'ABC12345', points_balance: 150, share_link: 'https://topocode.cn/register?ref=ABC12345' }
+      return { balance: 120, points: 150, total_recharged: 170, total_consumed: 49, total_points_rewarded: 185 }
     }
-    return request('/topoapi/user/referral-info', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
-    })
+    return request('/topoapi/user/account-info')
   },
 
-  async getReferralStats(token: string): Promise<{ referred_count: number; active_count: number; total_points_awarded: number }> {
+  async getTransactions(params?: { page?: number; page_size?: number; type?: string; currency?: string }): Promise<{ total: number; page: number; page_size: number; items: TransactionRecord[] }> {
     if (USE_MOCK) {
       await delay()
-      return { referred_count: 3, active_count: 2, total_points_awarded: 150 }
-    }
-    return request('/topoapi/user/referral-stats', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
-    })
-  },
-
-  async getAccountInfo(token: string): Promise<{ balance: number; points: number }> {
-    if (USE_MOCK) {
-      await delay()
-      return { balance: 120, points: 150 }
-    }
-    return request('/topoapi/user/account-info', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
-    })
-  },
-
-  async getTransactions(token: string): Promise<TransactionRecord[]> {
-    if (USE_MOCK) {
-      await delay()
-      return [
+      const items: TransactionRecord[] = [
         { id: 1, type: 'recharge', currency: 'balance', amount: 100, balance_after: 100, description: '余额充值', created_at: '2026-06-28T10:30:00' },
         { id: 2, type: 'consume', currency: 'points', amount: -30, balance_after: 120, description: '兑换资源：Spring Boot 电商微服务架构分析', created_at: '2026-06-25T14:20:00' },
         { id: 3, type: 'consume', currency: 'balance', amount: -49, balance_after: 51, description: '购买资源：Unity 游戏客户端架构分析', created_at: '2026-06-22T09:15:00' },
@@ -171,21 +172,99 @@ export const authService = {
         { id: 8, type: 'consume', currency: 'points', amount: -15, balance_after: 20, description: '兑换资源：Vue 3 组件库架构分析', created_at: '2026-06-05T13:45:00' },
         { id: 9, type: 'reward', currency: 'points', amount: 35, balance_after: 35, description: '新手任务奖励', created_at: '2026-06-01T09:00:00' },
       ]
+      let filtered = items
+      if (params?.type) {
+        filtered = filtered.filter(t => t.type === params.type)
+      }
+      if (params?.currency) {
+        filtered = filtered.filter(t => t.currency === params.currency)
+      }
+      const p = params?.page || 1
+      const ps = params?.page_size || 20
+      const start = (p - 1) * ps
+      return { total: filtered.length, page: p, page_size: ps, items: filtered.slice(start, start + ps) }
     }
-    const resp = await request<{ total: number; page: number; page_size: number; items: TransactionRecord[] }>('/topoapi/user/transactions', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
-    })
-    return resp.items
+    const q = new URLSearchParams()
+    if (params?.page) q.set('page', String(params.page))
+    if (params?.page_size) q.set('page_size', String(params.page_size))
+    if (params?.type) q.set('type', params.type)
+    if (params?.currency) q.set('currency', params.currency)
+    return request(`/topoapi/user/transactions?${q}`)
   },
 
-  async logout(token: string): Promise<void> {
+  async updateProfile(data: { username?: string }): Promise<any> {
+    if (USE_MOCK) {
+      await delay()
+      return { id: 1, username: data.username || 'mock_user', email: 'mock@example.com', phone: '' }
+    }
+    return request('/topoapi/user/profile', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  async setPassword(newPassword: string): Promise<void> {
+    if (USE_MOCK) {
+      await delay()
+      return
+    }
+    await request('/topoapi/user/set-password', {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    })
+  },
+
+  async sendChangeCode(target?: string): Promise<{ message: string }> {
+    if (USE_MOCK) {
+      await delay()
+      return { message: '验证码已发送' }
+    }
+    return request('/topoapi/user/send-change-code', {
+      method: 'POST',
+      body: target ? JSON.stringify({ target }) : undefined,
+    })
+  },
+
+  async verifyChangeCode(code: string): Promise<void> {
+    if (USE_MOCK) {
+      await delay()
+      return
+    }
+    await request('/topoapi/user/verify-change-code', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    })
+  },
+
+  async bindEmail(email: string, code: string): Promise<void> {
+    if (USE_MOCK) {
+      await delay()
+      return
+    }
+    await request('/topoapi/user/bind-email', {
+      method: 'POST',
+      body: JSON.stringify({ email, code }),
+    })
+  },
+
+  async bindPhone(phone: string, code: string): Promise<void> {
+    if (USE_MOCK) {
+      await delay()
+      return
+    }
+    await request('/topoapi/user/bind-phone', {
+      method: 'POST',
+      body: JSON.stringify({ phone, code }),
+    })
+  },
+
+  async logout(): Promise<void> {
     if (USE_MOCK) {
       await delay()
       return
     }
     await request('/topoapi/auth/logout', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
     })
   },
 }

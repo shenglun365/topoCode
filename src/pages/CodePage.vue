@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import {
@@ -35,6 +35,7 @@ const showExportDialog = ref(false)
 const showImportDialog = ref(false)
 const showVerifyDialog = ref(false)
 const selectedProject = projectStore.selectedProject
+const isResourceProject = computed(() => selectedProject?.id?.startsWith?.('TOPORES_ID:'))
 
 onMounted(() => {
   navigation.navigateTo('code')
@@ -145,6 +146,7 @@ function onClearCacheDone() {
         >{{ t('project.synced') }}</span>
         <div style="flex:1;" />
         <button
+          v-if="!isResourceProject"
           class="btn btn-ghost btn-sm"
           @click="showImportDialog = true"
         >
@@ -152,6 +154,7 @@ function onClearCacheDone() {
           <span>{{ t('project.importStructure', '导入分析结果') }}</span>
         </button>
         <button
+          v-if="!isResourceProject"
           class="btn btn-ghost btn-sm"
           @click="showExportDialog = true"
         >
@@ -159,6 +162,7 @@ function onClearCacheDone() {
           <span>{{ t('project.exportStructure', '导出分析结果') }}</span>
         </button>
         <button
+          v-if="!isResourceProject"
           class="btn btn-ghost btn-sm"
           @click="showVerifyDialog = true"
         >
@@ -166,6 +170,7 @@ function onClearCacheDone() {
           <span>{{ t('project.verifyFiles', '校验') }}</span>
         </button>
         <button
+          v-if="!isResourceProject"
           class="btn btn-ghost btn-sm"
           @click="showMenu"
         >

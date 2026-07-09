@@ -40,6 +40,7 @@ const analysisStore = useAnalysisStore()
 const projectStore = useProjectStore()
 const navigation = useNavigationStore()
 
+const isResourceProject = computed(() => props.projectId?.startsWith?.('TOPORES_ID:'))
 const detailTask = ref<AnalysisTask | null>(null)
 const deleteConfirm = ref<string | null>(null)
 
@@ -302,6 +303,7 @@ function getConfigSummary(task: AnalysisTask): string {
         {{ t('analysis.taskList') }}
       </h2>
       <button
+        v-if="!isResourceProject"
         class="btn btn-primary btn-sm"
         @click="emit('createTask')"
       >
@@ -426,7 +428,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status === 'running' || task.status === 'stopping'"
+            v-if="!isResourceProject && (task.status === 'running' || task.status === 'stopping')"
             class="btn btn-ghost btn-xs"
             :class="{ 'btn-warning': task.status === 'running' }"
             :title="task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask')"
@@ -439,7 +441,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status === 'pending'"
+            v-if="!isResourceProject && task.status === 'pending'"
             class="btn btn-ghost btn-xs btn-primary"
             :title="t('analysis.runTask')"
             :disabled="analysisStore.isTaskLoading(task.id)"
@@ -450,7 +452,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status !== 'running' && !['pending','done'].includes(task.status)"
+            v-if="!isResourceProject && task.status !== 'running' && !['pending','done'].includes(task.status)"
             class="btn btn-ghost btn-xs"
             :title="t('analysis.rerunTask')"
             :disabled="analysisStore.isTaskLoading(task.id)"
@@ -461,7 +463,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status !== 'running'"
+            v-if="!isResourceProject && task.status !== 'running'"
             class="btn btn-ghost btn-xs"
             :title="t('analysis.editTask')"
             @click="onEditTask(task.id)"
@@ -471,7 +473,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="task.status !== 'running'"
+            v-if="!isResourceProject && task.status !== 'running'"
             class="btn btn-ghost btn-xs btn-danger"
             :title="t('analysis.deleteTask')"
             @click="onDeleteTask(task.id)"

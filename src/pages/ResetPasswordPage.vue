@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth-store'
 import { authService } from '@/services/auth-service'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
+const auth = useAuthStore()
 
-const step = ref<'email' | 'reset' | 'done'>('email')
+const isSetPassword = route.query.set === '1' && auth.isAuthenticated && !auth.user?.has_password
 
-const email = ref('')
+const step = ref<'account' | 'reset' | 'done'>(isSetPassword ? 'reset' : 'account')
+const account = ref('')
 const code = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -35,11 +39,11 @@ function startCountdown() {
 }
 
 async function sendCode() {
-  if (!email.value) { errorMsg.value = '请填写邮箱'; return }
+  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
   codeSending.value = true
   errorMsg.value = ''
   try {
-    await authService.forgotPassword(email.value)
+    await authService.sendCode(account.value)
     startCountdown()
     step.value = 'reset'
   } catch (e: any) {
@@ -50,7 +54,10 @@ async function sendCode() {
 }
 
 const canSubmit = computed(() => {
-  return code.value.length > 0 && newPassword.value.length >= 6 && newPassword.value === confirmPassword.value
+  if (!newPassword.value || newPassword.value.length < 6) return false
+  if (newPassword.value !== confirmPassword.value) return false
+  if (!isSetPassword && !code.value) return false
+  return true
 })
 
 async function handleReset() {
@@ -58,10 +65,14 @@ async function handleReset() {
   loading.value = true
   errorMsg.value = ''
   try {
-    await authService.resetPassword(email.value, code.value, newPassword.value)
+    if (isSetPassword) {
+      await authService.setPassword(newPassword.value)
+    } else {
+      await authService.resetPassword(account.value, code.value, newPassword.value)
+    }
     step.value = 'done'
   } catch (e: any) {
-    errorMsg.value = e.message || '重置失败'
+    errorMsg.value = e.message || '操作失败'
   } finally {
     loading.value = false
   }
@@ -73,11 +84,11 @@ async function handleReset() {
     <div class="auth-card">
       <div class="auth-logo">◆</div>
 
-      <template v-if="step === 'email'">
-        <h1 class="auth-title">{{ t('auth.resetPwdTitle', '重置密码') }}</h1>
+      <template v-if="step === 'account'">
+        <h1 class="auth-title">重置密码</h1>
         <form @submit.prevent="sendCode">
           <div class="field">
-            <input v-model="email" type="email" class="input" placeholder="邮箱" autocomplete="email">
+            <input v-model="account" class="input" placeholder="邮箱 / 手机号" autocomplete="username">
           </div>
           <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
           <button type="submit" class="btn btn-primary btn-full" :disabled="codeSending">
@@ -87,14 +98,14 @@ async function handleReset() {
       </template>
 
       <template v-if="step === 'reset'">
-        <h1 class="auth-title">重置密码</h1>
+        <h1 class="auth-title">{{ isSetPassword ? '设置密码' : '重置密码' }}</h1>
         <form @submit.prevent="handleReset">
-          <div class="field">
-            <input v-model="email" type="email" class="input" placeholder="邮箱" disabled>
+          <div v-if="!isSetPassword" class="field">
+            <input :value="account" class="input" disabled>
           </div>
-          <div class="field">
+          <div v-if="!isSetPassword" class="field">
             <div class="code-row">
-              <input v-model="code" class="input flex-1" placeholder="邮箱验证码" maxlength="6">
+              <input v-model="code" class="input flex-1" placeholder="验证码" maxlength="6">
               <button type="button" class="btn btn-sm btn-ghost code-btn" :disabled="codeSending || codeSent" @click="sendCode">
                 {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : '重新发送' }}
               </button>
@@ -108,13 +119,13 @@ async function handleReset() {
           </div>
           <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
           <button type="submit" class="btn btn-primary btn-full" :disabled="loading || !canSubmit">
-            {{ loading ? '重置中...' : '重置密码' }}
+            {{ loading ? '处理中...' : (isSetPassword ? '设置密码' : '重置密码') }}
           </button>
         </form>
       </template>
 
       <template v-if="step === 'done'">
-        <h1 class="auth-title">密码已重置</h1>
+        <h1 class="auth-title">{{ isSetPassword ? '密码已设置' : '密码已重置' }}</h1>
         <p class="done-hint">请使用新密码登录</p>
         <button class="btn btn-primary btn-full" @click="router.push('/login')">去登录</button>
       </template>

@@ -5,6 +5,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 // ==================== API 定义 ====================
 
 contextBridge.exposeInMainWorld('api', {
+  // ==================== 通用 ZMQ 调用 ====================
+  call: (method: string, params: Record<string, any>) =>
+    ipcRenderer.invoke('ipc:call', { method, params }),
+
   // ==================== 应用控制 ====================
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
@@ -58,9 +62,10 @@ contextBridge.exposeInMainWorld('api', {
     TOPCODE_UI_DEBUG: process.env.TOPCODE_UI_DEBUG || null,
   },
 
-  // ==================== 外部链接 ====================
+  // ==================== 外部链接 / 文件管理 ====================
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
+    openPath: (dirPath: string) => ipcRenderer.invoke('shell:open-path', dirPath),
   },
 
   // ==================== 存储 ====================
@@ -406,6 +411,7 @@ contextBridge.exposeInMainWorld('api', {
     setHttpConfig: (config: { host: string; port: number }) => ipcRenderer.invoke('backend:setHttpConfig', config),
     saveHttpConfig: (config: { host?: string; port?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'backend.saveHttpConfig', params: config }),
+    setResourceDir: (dirPath: string) => ipcRenderer.invoke('backend:set-resource-dir', dirPath),
 
     // 事件订阅
     onStatusChange: (callback: (data: any) => void) => {
@@ -532,6 +538,7 @@ contextBridge.exposeInMainWorld('api', {
   fs: {
     addAllowedDir: (dirPath: string) => ipcRenderer.invoke('fs:add-allowed-dir', dirPath),
     readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
+    downloadUrl: (url: string) => ipcRenderer.invoke('file:download-url', url),
   },
 
   // ==================== 系统 ====================

@@ -10,8 +10,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const loginMode = ref<'password' | 'code'>('password')
-const email = ref('')
-const phone = ref('')
+const account = ref('')
 const password = ref('')
 const code = ref('')
 const loading = ref(false)
@@ -36,18 +35,11 @@ function startCountdown() {
 
 async function sendCode() {
   if (codeSending.value || codeSent.value) return
+  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
   codeSending.value = true
   errorMsg.value = ''
   try {
-    if (email.value) {
-      await authService.sendEmailCode(email.value)
-    } else if (phone.value) {
-      await authService.sendSmsCode(phone.value)
-    } else {
-      errorMsg.value = '请填写邮箱或手机号'
-      codeSending.value = false
-      return
-    }
+    await authService.sendCode(account.value)
     startCountdown()
   } catch (e: any) {
     errorMsg.value = e.message || '发送失败'
@@ -67,13 +59,12 @@ function toggleMode() {
 async function handleLogin() {
   errorMsg.value = ''
 
+  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
+
   if (loginMode.value === 'password') {
-    if (!email.value || !password.value) {
-      errorMsg.value = '请填写邮箱和密码'
-      return
-    }
+    if (!password.value) { errorMsg.value = '请填写密码'; return }
     loading.value = true
-    const ok = await auth.login(email.value, password.value)
+    const ok = await auth.login(account.value, password.value)
     loading.value = false
     if (ok) {
       router.push('/')
@@ -81,20 +72,9 @@ async function handleLogin() {
       errorMsg.value = auth.error || '邮箱或密码错误'
     }
   } else {
-    if (!email.value && !phone.value) {
-      errorMsg.value = '请填写邮箱或手机号'
-      return
-    }
-    if (!code.value) {
-      errorMsg.value = '请填写验证码'
-      return
-    }
+    if (!code.value) { errorMsg.value = '请填写验证码'; return }
     loading.value = true
-    const ok = await auth.loginWithCode({
-      email: email.value || undefined,
-      phone: phone.value || undefined,
-      code: code.value,
-    })
+    const ok = await auth.loginWithCode(account.value, code.value)
     loading.value = false
     if (ok) {
       router.push('/')
@@ -112,11 +92,7 @@ async function handleLogin() {
       <h1 class="auth-title">{{ t('auth.login', 'TopoCode 登录') }}</h1>
       <form @submit.prevent="handleLogin">
         <div class="field">
-          <input v-model="email" type="email" class="input" :placeholder="t('auth.email', '邮箱')" autocomplete="email">
-        </div>
-        <div v-if="loginMode === 'code'" class="field">
-          <p class="field-hint">{{ t('auth.orUsePhone', '或使用手机号') }}</p>
-          <input v-model="phone" class="input" :placeholder="t('auth.phoneHint', '手机号')" autocomplete="tel">
+          <input v-model="account" class="input" placeholder="邮箱 / 手机号" autocomplete="username">
         </div>
         <div v-if="loginMode === 'password'" class="field">
           <input v-model="password" type="password" class="input" :placeholder="t('auth.password', '密码')" autocomplete="current-password">
@@ -205,12 +181,6 @@ async function handleLogin() {
   white-space: nowrap;
   flex-shrink: 0;
   font-size: 11px;
-}
-.field-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  margin-bottom: 6px;
-  text-align: left;
 }
 .error {
   color: var(--error);

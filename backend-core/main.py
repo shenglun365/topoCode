@@ -16,6 +16,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from datetime import datetime
 
 from config import TOPO_MODE
@@ -99,7 +100,10 @@ class BackendApp:
         plugins_found = self.plugin_manager.discover()
         if plugins_found:
             logger.info(f"Discovered {len(plugins_found)} plugins: {[p.name for p in plugins_found]}")
-            self.plugin_manager.install_all_requirements()
+            threading.Thread(
+                target=self.plugin_manager.install_all_requirements,
+                daemon=True,
+            ).start()
             for p in plugins_found:
                 self.plugin_manager.load_plugin(p.name)
             self.plugin_manager.register_all_methods(self.server, self.multi_db)

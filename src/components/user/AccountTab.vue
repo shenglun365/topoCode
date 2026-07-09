@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth-store'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const refreshing = ref(false)
 
 function fmtBalance(n: number): string {
   return t('auth.balanceAmount', { amount: n.toFixed(2) })
 }
 function fmtPoints(n: number): string {
   return t('auth.pointsAmount', { amount: String(n) })
+}
+
+async function refreshAccount() {
+  refreshing.value = true
+  try {
+    await auth.fetchAccountInfo()
+  } finally {
+    refreshing.value = false
+  }
 }
 
 onMounted(async () => {
@@ -22,7 +32,12 @@ onMounted(async () => {
 
 <template>
   <div class="account-tab" v-if="auth.isAuthenticated">
-    <h2 class="section-title">{{ t('auth.accountSummary', '账户概览') }}</h2>
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+      <h2 class="section-title" style="margin-bottom:0;">{{ t('auth.accountSummary', '账户概览') }}</h2>
+      <button class="btn btn-ghost btn-icon btn-xs" @click="refreshAccount" :disabled="refreshing" title="刷新">
+        <svg class="icon-refresh" :class="{ spinning: refreshing }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+      </button>
+    </div>
 
     <div class="cards">
       <div class="account-card balance-card">
@@ -36,20 +51,20 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="summary">
-      <div class="summary-item">
-        <span class="summary-label">{{ t('auth.totalRecharged', '累计充值') }}</span>
-        <span class="summary-value">¥170.00</span>
+      <div class="summary">
+        <div class="summary-item">
+          <span class="summary-label">{{ t('auth.totalRecharged', '累计充值') }}</span>
+          <span class="summary-value">¥{{ auth.totalRecharged.toFixed(2) }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">{{ t('auth.totalConsumed', '累计消费') }}</span>
+          <span class="summary-value">¥{{ auth.totalConsumed.toFixed(2) }}</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">{{ t('auth.totalPointsRewarded', '累计获得积分') }}</span>
+          <span class="summary-value">{{ auth.totalPointsRewarded }}</span>
+        </div>
       </div>
-      <div class="summary-item">
-        <span class="summary-label">{{ t('auth.totalConsumed', '累计消费') }}</span>
-        <span class="summary-value">¥49.00</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-label">{{ t('auth.totalPointsRewarded', '累计获得积分') }}</span>
-        <span class="summary-value">185</span>
-      </div>
-    </div>
   </div>
   <div v-else class="not-logged-in">
     <p>{{ t('auth.loginHint', '登录后可查看账户信息') }}</p>
@@ -64,7 +79,6 @@ onMounted(async () => {
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 16px;
   color: var(--text-primary);
 }
 .cards {
@@ -147,4 +161,7 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
 }
+.icon-refresh { width: 16px; height: 16px; }
+.icon-refresh.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -30,12 +30,6 @@ onMounted(async () => {
   themeStore.init()
   await modelConfigStore.loadModels()
   document.documentElement.style.fontSize = settingsStore.fontSize + 'px'
-  setTimeout(() => {
-    const defaultModel = modelConfigStore.models.find(m => m.isDefault)
-    if (defaultModel) {
-      modelConfigStore.testModel(defaultModel.id)
-    }
-  }, 2000)
 })
 </script>
 

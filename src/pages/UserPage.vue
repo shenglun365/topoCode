@@ -7,8 +7,12 @@ import {
   CurrencyDollarIcon,
   DocumentTextIcon,
 } from '@heroicons/vue/24/outline'
+import { useRouter } from 'vue-router'
 import { useResourceStore } from '@/stores/resource-store'
+import { useProjectStore } from '@/stores/project'
 import { useAuthStore } from '@/stores/auth-store'
+import { resourceService } from '@/services/resource-service'
+import { API_BASE } from '@/utils/http'
 import ProfileTab from '@/components/user/ProfileTab.vue'
 import AccountTab from '@/components/user/AccountTab.vue'
 import OrderTab from '@/components/user/OrderTab.vue'
@@ -19,12 +23,109 @@ import type { ResourceListMeta } from '@/types'
 
 const { showId, componentId } = useComponentId('PG-005')
 const { t } = useI18n()
+const router = useRouter()
 const resourceStore = useResourceStore()
+const projectStore = useProjectStore()
 const authStore = useAuthStore()
 
 const activeTab = ref<'profile' | 'account' | 'order' | 'resource'>('profile')
 const showDetail = ref(false)
 const pageUserRef = ref<HTMLElement | null>(null)
+const downloadError = ref('')
+const downloadLimitDialog = ref(false)
+const downloadLimitMsg = ref('')
+
+// 自动导入状态
+const importing = ref(false)
+const importProgress = ref(0)
+const importMessage = ref('')
+const importDone = ref(false)
+const newProjectId = ref('')
+const newProjectName = ref('')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+let errorTimer: ReturnType<typeof setTimeout> | null = null
+function showError(msg: string) {
+  downloadError.value = msg
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => { downloadError.value = '' }, 4000)
+}
+function showDownloadLimitDialog(msg: string) {
+  downloadLimitMsg.value = msg
+  downloadLimitDialog.value = true
+}
+
+async function autoDownloadAndImport(resourceId: number) {
+  importing.value = true
+  importProgress.value = 0
+  importMessage.value = '正在获取下载地址...'
+  importDone.value = false
+  try {
+    // 1. 获取下载信息
+    const info = await resourceService.getDownloadInfo(resourceId)
+    const url = info.oss_url || `${API_BASE}${info.redirect_url}`
+    importMessage.value = '正在下载资源包...'
+    // 2. 通过 Electron 主进程下载到临时文件
+    const filePath = await (window.api as any).fs.downloadUrl(url)
+    importMessage.value = '正在导入项目...'
+    importProgress.value = 50
+    // 3. 创建项目并导入
+    const detail = resourceStore.currentResource
+    const result = await (window.api as any).call('resource.importProject', {
+      archivePath: filePath,
+      resourceId: String(resourceId),
+      name: detail?.title || `资源 ${resourceId}`,
+      resourceProjectsDir: '',
+    })
+    // 4. 轮询导入进度
+    startPollingImport(result.importId)
+  } catch (err: any) {
+    importing.value = false
+    const msg = err.message || '下载失败'
+    if (msg.includes('下载次数已达上限') || msg.includes('联系客服申诉')) {
+      showDownloadLimitDialog(msg)
+    } else {
+      showError(msg)
+    }
+  }
+}
+
+function startPollingImport(importId: string) {
+  if (pollTimer) clearInterval(pollTimer)
+  pollTimer = setInterval(async () => {
+    try {
+      const status = await (window.api as any).system.importStatus(importId)
+      if (!status) return
+      importProgress.value = status.progress || 0
+      importMessage.value = status.message || ''
+      if (status.status === 'done') {
+        if (pollTimer) clearInterval(pollTimer)
+        importing.value = false
+        importDone.value = false
+        showDetail.value = false
+        newProjectId.value = status.result?.projectId || ''
+        newProjectName.value = status.result?.projectName || ''
+        setTimeout(async () => {
+          if (newProjectId.value) {
+            await projectStore.loadProjects()
+            projectStore.selectProject(newProjectId.value)
+            router.push('/code')
+          }
+        }, 500)
+      } else if (status.status === 'error') {
+        if (pollTimer) clearInterval(pollTimer)
+        importing.value = false
+        showError(status.message || '导入失败')
+      }
+    } catch { /* ignore */ }
+  }, 10000)
+}
+
+function closeImportDialog() {
+  if (pollTimer) clearInterval(pollTimer)
+  importing.value = false
+  importDone.value = false
+}
 
 const tabs = [
   { id: 'profile' as const, key: 'settings.profile', icon: UserIcon },
@@ -56,12 +157,11 @@ function handleDetailDownload(id: number) {
     window.location.href = '/#/login'
     return
   }
-  const token = authStore.token
-  if (token) {
-    resourceStore.getDownloadUrl(id, token).then(url => {
-      window.open(url, '_blank')
-    })
-  }
+  autoDownloadAndImport(id)
+}
+
+function refreshResources() {
+  resourceStore.fetchResources(resourceStore.ownedMode, authStore.token || undefined)
 }
 
 async function switchResourceCategory(catKey: string) {
@@ -109,8 +209,13 @@ onMounted(async () => {
 
     <div v-else-if="activeTab === 'resource'" style="flex:1; overflow:auto; padding:24px;">
       <div style="margin-bottom:16px;">
-        <h2 style="font-size:16px; font-weight:600; margin-bottom:4px;">{{ t('settings.resourceCenter', '资源中心') }}</h2>
-        <p style="font-size:12px; color:var(--text-muted);">{{ t('settings.resourceCenterDesc', '浏览和下载可导入的结构分析包') }}</p>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h2 style="font-size:16px; font-weight:600;">{{ t('settings.resourceCenter', '资源中心') }}</h2>
+          <button class="btn btn-ghost btn-icon btn-xs" @click="refreshResources" :disabled="resourceStore.loading" title="刷新">
+            <svg class="icon-refresh" :class="{ spinning: resourceStore.loading }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+          </button>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">{{ t('settings.resourceCenterDesc', '浏览和下载可导入的结构分析包') }}</p>
       </div>
       <div v-if="resourceStore.meta?.feature_flags?.show_category_filter !== false" style="display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
         <template v-for="cat in resourceStore.categories" :key="cat.key">
@@ -122,6 +227,13 @@ onMounted(async () => {
             <span v-if="cat.scope === 'owned' && cat.count !== undefined" style="margin-left:3px; font-size:10px; opacity:0.7;">({{ cat.count }})</span>
           </button>
         </template>
+        <button v-if="authStore.isAuthenticated"
+          class="btn btn-sm"
+          :class="resourceStore.activeCategoryKey === 'owned' ? 'btn-primary' : 'btn-ghost'"
+          @click="switchResourceCategory('owned')"
+          style="color:var(--success);">
+          已购
+        </button>
         <div v-if="!authStore.isAuthenticated" style="display:inline-flex; gap:4px; align-items:center;">
           <span style="font-size:11px; color:var(--text-muted);">{{ resourceStore.meta?.labels?.login_hint || '登录后可下载资源' }}</span>
           <router-link to="/login" class="btn btn-primary btn-xs">{{ t('auth.login', '登录') }}</router-link>
@@ -142,6 +254,50 @@ onMounted(async () => {
       :show="showDetail"
       @close="showDetail = false"
       @download="handleDetailDownload" />
+
+    <Teleport to="body">
+      <div v-if="downloadError" class="toast">{{ downloadError }}</div>
+    </Teleport>
+
+    <!-- 下载次数上限弹窗 -->
+    <Teleport to="body">
+      <div v-if="downloadLimitDialog" class="dialog-overlay" @click.self="downloadLimitDialog = false">
+        <div class="limit-dialog">
+          <div class="limit-dialog-icon">⚠️</div>
+          <div class="limit-dialog-title">下载次数已达上限</div>
+          <div class="limit-dialog-msg">{{ downloadLimitMsg }}</div>
+          <div class="limit-dialog-actions">
+            <button class="btn btn-primary btn-sm" @click="downloadLimitDialog = false">
+              知道了
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 自动导入进度弹窗 -->
+    <Teleport to="body">
+      <div v-if="importing || importDone" class="dialog-overlay">
+        <div class="import-dialog">
+          <div v-if="!importDone">
+            <div class="import-spinner" />
+            <div class="import-title">正在导入资源...</div>
+            <div class="import-progress-bar">
+              <div class="import-progress-fill" :style="{ width: importProgress + '%' }" />
+            </div>
+            <div class="import-msg">{{ importMessage }}</div>
+          </div>
+          <div v-else>
+            <div class="import-done-icon">✓</div>
+            <div class="import-title">导入完成</div>
+            <div class="import-msg">{{ newProjectName }}</div>
+            <div class="import-actions">
+              <button class="btn btn-primary btn-sm" @click="closeImportDialog">关闭</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -165,4 +321,47 @@ onMounted(async () => {
 }
 .user-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
 .user-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.icon-refresh { width: 16px; height: 16px; }
+.icon-refresh.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast {
+  position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+  padding: 8px 20px; background: var(--accent); color: #fff;
+  border-radius: 6px; font-size: 12px; z-index: 99999;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.dialog-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 10000;
+}
+.import-dialog {
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 10px; padding: 28px 32px; max-width: 360px; width: 90vw;
+  text-align: center;
+}
+.import-spinner {
+  width: 28px; height: 28px; margin: 0 auto 12px;
+  border: 3px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: import-spin 0.8s linear infinite;
+}
+@keyframes import-spin { to { transform: rotate(360deg); } }
+.import-done-icon {
+  width: 40px; height: 40px; margin: 0 auto 12px; border-radius: 50%;
+  background: var(--success); color: #fff; font-size: 20px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.import-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; }
+.import-progress-bar { height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; margin-bottom: 8px; }
+.import-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+.import-msg { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+.import-actions { display: flex; justify-content: center; gap: 6px; }
+.limit-dialog {
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px; max-width: 380px; width: 90vw;
+  text-align: center;
+}
+.limit-dialog-icon { font-size: 32px; margin-bottom: 8px; }
+.limit-dialog-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.limit-dialog-msg { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px; }
+.limit-dialog-actions { display: flex; justify-content: center; }
 </style>

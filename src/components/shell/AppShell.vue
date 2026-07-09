@@ -45,7 +45,7 @@ const currentFuncGroup = computed(() => {
 
 // 是否隐藏左右侧栏
 const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user' || route.path === '/settings')
-const hideLeftPanel = computed(() => route.path === '/home' || route.path === '/code' || route.path === '/user' || route.path === '/settings')
+const hideLeftPanel = computed(() => ['/home', '/code', '/user', '/settings', '/login', '/register', '/reset-password'].includes(route.path))
 const isAuthPage = computed(() => route.path === '/login' || route.path === '/register')
 
 const showStartupDialog = ref(true)

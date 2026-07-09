@@ -141,7 +141,10 @@ const suggestions = computed(() => {
   if (!input.startsWith('/')) return []
   const prefix = input.toLowerCase()
   if (prefix === '/') return commandHistory.value.slice(0, 5)
-  const matched = USER_COMMANDS.filter(c => c.toLowerCase().startsWith(prefix))
+  const available = isResourceProject.value
+    ? USER_COMMANDS.filter(c => !ARCH_CMDS.some(ac => c.startsWith(ac)))
+    : USER_COMMANDS
+  const matched = available.filter(c => c.toLowerCase().startsWith(prefix))
   matched.sort((a, b) => {
     const ia = commandHistory.value.indexOf(a)
     const ib = commandHistory.value.indexOf(b)
@@ -193,6 +196,7 @@ const llmConfigured = computed(() => isLLMConfigured())
 const currentPage = computed<SessionPage>(() => navigationStore.currentPage as SessionPage || 'home')
 const sessionProjectId = computed(() => projectStore.selectedProjectId || '')
 const sessionTaskId = computed(() => projectStore.activeTab?.taskId || '')
+const isResourceProject = computed(() => projectStore.selectedProjectId?.startsWith?.('TOPORES_ID:'))
 
 const sessionKey = computed(() =>
   chatSession.buildKey(currentPage.value, sessionProjectId.value, sessionTaskId.value)
@@ -326,6 +330,14 @@ async function handleSend() {
       addMessage('user', text)
       userInput.value = ''
       addMessage('system', '该指令属于**架构分析**功能组。请点击左侧导航栏的「架构分析」图标切换页面后使用。')
+      return
+    }
+
+    // 资源项目拦截所有解析指令（不允许重新分析）
+    if (isResourceProject.value && ARCH_CMDS.some(cmd => text.toLowerCase().startsWith(cmd))) {
+      addMessage('user', text)
+      userInput.value = ''
+      addMessage('system', '资源中心下载的项目不支持重新分析。如有疑问，请咨询客服。')
       return
     }
 

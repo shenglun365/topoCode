@@ -20,9 +20,7 @@ function downloadLabel(r: Resource): string {
       ? (lbl.points_exchange || '{cost} 积分兑换').replace('{cost}', String(r.points_cost))
       : (lbl.points_insufficient || '积分不足（需 {cost}）').replace('{cost}', String(r.points_cost))
   }
-  if (r.pricing_model === 'paid') return `¥${r.price_cny} 购买`
-  if (r.pricing_model === 'subscription') return '订阅会员'
-  if (r.pricing_model === 'custom') return '联系客服'
+  if (r.pricing_model === 'paid' || r.pricing_model === 'subscription' || r.pricing_model === 'custom') return '暂未开通'
   return lbl.download || '下载'
 }
 
@@ -38,8 +36,8 @@ function pricingInfo(r: Resource): string {
   if (r.pricing_model === 'free') return lbl.free || '免费'
   if (r.pricing_model === 'points') return (lbl.points_exchange || '{cost} 积分').replace('{cost}', String(r.points_cost))
   if (r.pricing_model === 'paid') return `¥${r.price_cny}`
-  if (r.pricing_model === 'subscription') return '需要订阅会员'
-  if (r.pricing_model === 'custom') return '专属定制'
+  if (r.pricing_model === 'subscription') return '暂未开通'
+  if (r.pricing_model === 'custom') return '暂未开通'
   return ''
 }
 

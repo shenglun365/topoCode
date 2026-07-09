@@ -251,17 +251,21 @@ export interface UserProfile {
   referral_code?: string
   points?: number
   balance?: number
+  has_password?: boolean
   created_at: string
 }
 
 /** 交易/订单记录 */
 export interface TransactionRecord {
   id: number
+  user_id?: number
   type: 'recharge' | 'consume' | 'reward'
   currency: 'balance' | 'points'
   amount: number
   balance_after: number
   description: string
+  ref_type?: string
+  ref_id?: number | null
   created_at: string
 }
 

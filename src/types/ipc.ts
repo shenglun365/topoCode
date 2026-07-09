@@ -626,6 +626,7 @@ export interface IPCAPI {
     getHttpConfig: () => Promise<{ host: string; port: number }>
     setHttpConfig: (config: { host: string; port: number }) => Promise<void>
     saveHttpConfig: (config: { host?: string; port?: number }) => Promise<{ success: boolean }>
+    setResourceDir: (dirPath: string) => Promise<{ success: boolean }>
     testPort: (port: number) => Promise<PortTestResult>
     ping: () => Promise<PingResult>
     onStatusChange: (cb: (data: BackendStatusEvent) => void) => void
@@ -731,10 +732,11 @@ export interface IPCAPI {
     listSavedPositionKeys: (params: { projectId: string }) => Promise<{ keys: SavedPositionKey[] }>
   }
 
+  call: (method: string, params: Record<string, any>) => Promise<any>
   dialog: { openDirectory: () => Promise<string | null> }
-  shell: { openExternal: (url: string) => Promise<void> }
+  shell: { openExternal: (url: string) => Promise<void>; openPath: (dirPath: string) => Promise<string> }
   store: { get: (key: string) => Promise<any>; set: (key: string, value: any) => Promise<boolean> }
-  fs: { addAllowedDir: (dirPath: string) => Promise<void>; readFile: (filePath: string) => Promise<string> }
+  fs: { addAllowedDir: (dirPath: string) => Promise<void>; readFile: (filePath: string) => Promise<string>; downloadUrl: (url: string) => Promise<string> }
   on: (channel: string, callback: (...args: any[]) => void) => () => void
   removeListener: (channel: string, callback: (...args: any[]) => void) => void
   log: {

@@ -7,6 +7,8 @@ import { useStatusStore } from '@/stores/status'
 import { useAnalysisStore } from '@/stores/analysis'
 import i18n from '@/i18n'
 
+const DEFAULT_RESOURCE_DIR = ''
+
 export const useSettingsStore = defineStore('settings', () => {
   const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent'>('ai')
   const loading = ref(false)
@@ -14,6 +16,29 @@ export const useSettingsStore = defineStore('settings', () => {
   const fontSize = ref(14)
   const autoSaveInterval = ref(60)
   const projectPageSize = ref(50)
+
+  // 资源项目目录
+  const resourceProjectsDir = ref(localStorage.getItem('resourceProjectsDir') || DEFAULT_RESOURCE_DIR)
+  const resourceDirHistory = ref<string[]>(JSON.parse(localStorage.getItem('resourceDirHistory') || '[]'))
+  function setResourceProjectsDir(dir: string, autoMigrate = false) {
+    resourceProjectsDir.value = dir
+    localStorage.setItem('resourceProjectsDir', dir)
+    // 更新历史（去重，保留最近 5 条）
+    const hist = resourceDirHistory.value.filter(d => d !== dir)
+    hist.unshift(dir)
+    resourceDirHistory.value = hist.slice(0, 5)
+    localStorage.setItem('resourceDirHistory', JSON.stringify(resourceDirHistory.value))
+    // 通知后端
+    if (window.api?.backend?.setResourceDir) {
+      window.api.backend.setResourceDir(dir).catch((e: any) =>
+        console.warn('[settings] setResourceDir failed:', e)
+      )
+    }
+  }
+  function restoreResourceDir(index: number) {
+    const dir = resourceDirHistory.value[index]
+    if (dir) setResourceProjectsDir(dir)
+  }
 
   // 导入配置
   const importConfig = ref<ImportConfig>({
@@ -153,9 +178,11 @@ export const useSettingsStore = defineStore('settings', () => {
     backendStatus, pythonMemoryLimit, memoryLimitPending,
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
     importConfig, importConfigLoading,
+    resourceProjectsDir, resourceDirHistory,
     setProjectPageSize, initLocale, setLocale, setActiveTab,
     restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,
     loadImportConfig, saveImportConfig,
+    setResourceProjectsDir, restoreResourceDir,
   }
 })

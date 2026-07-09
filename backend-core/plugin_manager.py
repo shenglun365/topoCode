@@ -24,9 +24,15 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# PyPI 包名与 Python import 名不一致的手动映射（键用下划线格式，与 dep_base 一致）
+_PACKAGE_IMPORT_MAP = {
+    'python_louvain': 'community',
+}
 
 
 class PluginInfo:
@@ -58,6 +64,7 @@ class PluginManager:
     def __init__(self):
         self._plugins: Dict[str, PluginInfo] = {}
         self._loaded: set = set()
+        self._dep_ready: Dict[str, threading.Event] = {}
 
     # ========================== 扫描 ==========================
 
@@ -153,6 +160,7 @@ class PluginManager:
         """安装插件依赖 (pip install --target)"""
         info = self._plugins.get(name)
         if not info or not info.dependencies:
+            self._mark_dep_ready(name)
             return True
 
         # 兼容两种格式:
@@ -167,13 +175,17 @@ class PluginManager:
             deps = []
 
         for dep in deps:
+            target = target_dir or os.path.join(info.dir_path, '.deps')
+            if target not in sys.path and os.path.isdir(target):
+                sys.path.insert(0, target)
+            dep_base = dep.replace('-', '_').split('>')[0].split('=')[0].split('<')[0]
+            import_name = _PACKAGE_IMPORT_MAP.get(dep_base, dep_base)
             try:
-                __import__(dep.replace('-', '_').split('>')[0].split('=')[0].split('<')[0])
+                __import__(import_name)
                 continue
             except ImportError:
                 pass
             try:
-                target = target_dir or os.path.join(info.dir_path, '.deps')
                 os.makedirs(target, exist_ok=True)
                 subprocess.check_call(
                     [sys.executable, '-m', 'pip', 'install', dep, '--target', target, '--quiet'],
@@ -184,8 +196,15 @@ class PluginManager:
                 logger.info(f"Installed dependency '{dep}' for plugin '{name}'")
             except subprocess.CalledProcessError as e:
                 logger.error(f"Failed to install dependency '{dep}' for plugin '{name}': {e}")
+                self._mark_dep_ready(name)
                 return False
+
+        self._mark_dep_ready(name)
         return True
+
+    def _mark_dep_ready(self, name: str):
+        ev = self._dep_ready.pop(name, None) or self._dep_ready.setdefault(name, threading.Event())
+        ev.set()
 
     def install_all_requirements(self):
         """安装所有已发现插件的依赖"""

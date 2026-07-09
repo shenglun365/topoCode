@@ -1,15 +1,8 @@
 import type { Resource, ResourceListMeta } from '@/types'
-import { getDeviceId } from '@/utils/device-id'
 import { mockResources } from '@/utils/mock'
+import { request, API_BASE } from '@/utils/http'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 const USE_MOCK = (import.meta.env.DEV || !window.navigator.onLine) && !import.meta.env.VITE_DISABLE_MOCK
-
-interface ApiResponse<T> {
-  success: boolean
-  message: string
-  data: T
-}
 
 export interface ResourceListResult {
   total: number
@@ -37,25 +30,6 @@ function defaultMeta(): ResourceListMeta {
     feature_flags: {},
     labels: {},
   }
-}
-
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Device-Id': getDeviceId(),
-  }
-  const existingHeaders = (options.headers as Record<string, string>) || {}
-  Object.assign(headers, existingHeaders)
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.message || `HTTP ${res.status}`)
-  }
-  const json: ApiResponse<T> = await res.json()
-  if (!json.success) {
-    throw new Error(json.message || '请求失败')
-  }
-  return json.data
 }
 
 function delay(ms = 300): Promise<void> {
@@ -125,14 +99,9 @@ export const resourceService = {
     if (params?.category) q.set('category', params.category)
     if (params?.owned) q.set('owned', 'true')
 
-    const headers: Record<string, string> = {}
-    if (params?.token) {
-      headers['Authorization'] = `Bearer ${params.token}`
-    }
-
     const result = await request<{
       total: number; page: number; page_size: number; meta: ResourceListMeta; items: any[]
-    }>(`/topoapi/resources?${q}`, { headers })
+    }>(`/topoapi/resources?${q}`)
     return {
       total: result.total,
       page: result.page,
@@ -152,22 +121,31 @@ export const resourceService = {
         theme: { color: undefined, badge_text: null, badge_style: null, featured: false, icon_url: null, owned: false },
       }
     }
-    const headers: Record<string, string> = {}
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
-    const result = await request<any>(`/topoapi/resources/${id}`, { headers })
+    const result = await request<any>(`/topoapi/resources/${id}`)
     return addPricingDefaults(result)
   },
 
   async getDownloadUrl(id: number, token: string): Promise<string> {
     if (USE_MOCK) {
       await delay()
-      return 'https://example.com/mock-download.zip'
+      return `${API_BASE}/dl/mock-ticket-123`
     }
-    const res = await request<{ url: string }>(`/topoapi/resources/${id}/download`, {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Device-Id': getDeviceId() },
-    })
-    return res.url
+    const res = await request<{ redirect_url: string; oss_url?: string }>(
+      `/topoapi/resources/${id}/download`,
+      { method: 'POST' },
+    )
+    return res.oss_url || `${API_BASE}${res.redirect_url}`
+  },
+
+  async getDownloadInfo(id: number): Promise<{ redirect_url: string; oss_url?: string; expires_at?: string }> {
+    return request<{ redirect_url: string; oss_url?: string; expires_at?: string }>(
+      `/topoapi/resources/${id}/download`,
+      { method: 'POST' },
+    )
+  },
+
+  async getImportStatus(importId: string): Promise<{ status: string; progress: number; message: string; result?: { projectId: string; projectName: string } }> {
+    const result = await (window.api as any).system?.importStatus?.(importId)
+    return result || { status: '', progress: 0, message: '' }
   },
 }

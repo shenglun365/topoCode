@@ -717,6 +717,51 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         )
         return {"importId": import_id}
 
+    @server.register("resource.importProject")
+    def resource_import_project(archivePath: str, resourceId: str, name: str = "",
+                                resourceProjectsDir: str = ""):
+        """资源中心导入：创建项目 + 导入数据
+
+        创建 ID 为 TOPORES_ID:{resourceId} 的项目，然后导入分析数据。
+        """
+        import import_service
+        project_id = f"TOPORES_ID:{resourceId}"
+        now = datetime.now().isoformat()
+
+        # 检查是否已存在（重复导入 = 重置）
+        existing = main_db.fetchone("SELECT id FROM projects WHERE id = ?", (project_id,))
+        if existing:
+            multi_db.delete_project_db(project_id)
+            main_db.delete("projects", "id = ?", (project_id,))
+
+        # 创建项目库（资源项目使用 data_dir 下的 resource-projects/{resourceId}）
+        base_dir = resourceProjectsDir or os.path.join(multi_db.data_dir, "resource-projects")
+        project_root = os.path.join(base_dir, resourceId)
+        os.makedirs(project_root, exist_ok=True)
+        multi_db.init_project_db(project_id, project_root=project_root)
+
+        # 写入主库
+        main_db.insert("projects", {
+            "id": project_id,
+            "name": name or f"资源 {resourceId}",
+            "root_path": project_root,
+            "language": "",
+            "file_count": 0,
+            "status": "synced",
+            "needs_resync": 0,
+            "has_file_changes": 0,
+            "is_sample": 0,
+            "last_sync": now,
+        })
+
+        import_id = import_service.start_import(
+            multi_db, archivePath,
+            lambda ch, ev, data: server.publish(ch, ev, data),
+            import_mode="share",
+            target_project_id=project_id,
+        )
+        return {"importId": import_id, "projectId": project_id}
+
     @server.register("system.importStatus")
     def import_status(importId: str):
         import import_service
@@ -1518,8 +1563,16 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 updated_at TEXT DEFAULT (datetime('now')),
                 UNIQUE(model_id, date)
             )""")
-            main_db.execute("CREATE INDEX IF NOT EXISTS idx_mdu_model ON model_daily_usage(model_id)")
-            main_db.execute("CREATE INDEX IF NOT EXISTS idx_mdu_date ON model_daily_usage(date)")
+        # 确保索引存在（每次调用都执行，兼容旧版本升级）
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_mdu_model ON model_daily_usage(model_id)",
+            "CREATE INDEX IF NOT EXISTS idx_mdu_date ON model_daily_usage(date)",
+            "CREATE INDEX IF NOT EXISTS idx_mdu_model_date ON model_daily_usage(model_id, date)",
+        ]:
+            try:
+                main_db.execute(idx_sql)
+            except Exception:
+                pass
 
     @server.register("model.getUsageStats")
     def get_usage_stats(model_id: str = None, start_date: str = None, end_date: str = None):

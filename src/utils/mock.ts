@@ -827,19 +827,6 @@ export const taskTypeLabels: Record<string, { name: string; desc: string }> = {
   'ai-chat': { name: 'AI 问答', desc: '自然语言问答、辅助理解' },
 }
 
-/** Mock 用户 */
-export const mockUser = {
-  id: 1,
-  username: 'demo_user',
-  email: 'demo@example.com',
-  phone: '13800138000',
-  avatar: '',
-  created_at: '2026-06-15T00:00:00',
-}
-
-/** Mock JWT */
-export const mockToken = 'mock-jwt-token-for-development'
-
 /** Mock 免费资源列表 */
 export const mockResources = [
   {

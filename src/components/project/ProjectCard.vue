@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon,
+  BookOpenIcon,
+  ArrowPathIcon,
   EllipsisVerticalIcon,
   PencilIcon,
   TrashIcon,
@@ -46,7 +48,12 @@ async function loadStorageStats() {
   }
 }
 
-onMounted(loadStorageStats)
+onMounted(async () => {
+  // 延迟加载存储统计，避免启动时 N 个项目同时打开 DB
+  await nextTick()
+  const timer = setTimeout(loadStorageStats, 2000)
+  onUnmounted(() => clearTimeout(timer))
+})
 onUnmounted(() => {
   if (pinnedWarningTimer) clearTimeout(pinnedWarningTimer)
 })
@@ -91,6 +98,9 @@ const pathConfirmMessage = ref('')
 
 // 示例项目
 const isSample = computed(() => !!props.project.isSample)
+
+// 资源中心导入的项目
+const isResourceProject = computed(() => props.project.id?.startsWith?.('TOPORES_ID:'))
 
 function getStatusBadge(status: string): string {
   switch (status) {
@@ -315,6 +325,31 @@ async function handleClearCache() {
   showClearCacheDialog.value = true
 }
 
+async function handleResetProject() {
+  hideMenu()
+  // TODO: 调后端 reimport API 重置项目
+  const resourceId = props.project.id?.replace('TOPORES_ID:', '')
+  if (!resourceId) return
+  try {
+    await (window.api as any)?.system?.importProjectArchive?.('reimport:' + resourceId)
+    console.log('[ProjectCard] reset project:', resourceId)
+  } catch (e) {
+    console.error('[ProjectCard] reset failed:', e)
+  }
+}
+
+async function handleDeleteBackup() {
+  hideMenu()
+  const resourceId = props.project.id?.replace('TOPORES_ID:', '')
+  if (!resourceId) return
+  try {
+    await (window.api as any)?.system?.importProjectArchive?.('delete_backup:' + resourceId)
+    console.log('[ProjectCard] delete backup:', resourceId)
+  } catch (e) {
+    console.error('[ProjectCard] delete backup failed:', e)
+  }
+}
+
 async function onClearCacheDone() {
   showClearCacheDialog.value = false
   await projectStore.loadProjects()
@@ -374,10 +409,16 @@ async function handleResyncFromDialog() {
         class="flex items-center gap-2"
         style="min-width:0;"
       >
-        <FolderIcon class="w-4 h-4 text-accent shrink-0" />
+        <component :is="isResourceProject ? BookOpenIcon : FolderIcon" class="w-4 h-4 shrink-0" :class="isResourceProject ? 'text-green-500' : 'text-accent'" />
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
         </span>
+        <!-- 资源项目 badge -->
+        <span
+          v-if="isResourceProject"
+          class="badge badge-green"
+          style="font-size:8px;"
+        >资源</span>
         <!-- 分组 badge -->
         <span
           v-if="project.group"
@@ -503,6 +544,7 @@ async function handleResyncFromDialog() {
         </div>
         <!-- 修改路径 -->
         <div
+          v-if="!isResourceProject"
           class="context-menu-item"
           @click="handleChangePath"
         >
@@ -511,16 +553,35 @@ async function handleResyncFromDialog() {
         </div>
         <!-- 检查变更 -->
         <div
+          v-if="!isResourceProject"
           class="context-menu-item"
           @click="handleCheckChanges"
         >
           <MagnifyingGlassIcon class="w-4 h-4" />
           <span>{{ t('project.checkChanges') }}</span>
         </div>
-        <div class="context-menu-divider" />
+        <!-- 资源项目操作 -->
+        <template v-if="isResourceProject">
+          <div class="context-menu-divider" />
+          <div
+            class="context-menu-item"
+            @click="handleResetProject"
+          >
+            <ArrowPathIcon class="w-4 h-4" />
+            <span>{{ t('project.resetProject', '重置项目') }}</span>
+          </div>
+          <div
+            class="context-menu-item"
+            @click="handleDeleteBackup"
+          >
+            <ArchiveBoxXMarkIcon class="w-4 h-4" />
+            <span>{{ t('project.deleteBackup', '删除备份') }}</span>
+          </div>
+          <div class="context-menu-divider" />
+        </template>
         <!-- 清除缓存 -->
         <div
-          v-if="!isSample"
+          v-if="!isSample && !isResourceProject"
           class="context-menu-item context-menu-item-warning"
           @click="handleClearCache"
         >

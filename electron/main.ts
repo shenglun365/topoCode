@@ -1,6 +1,6 @@
 /** Electron Main Process - 入口 + IPC 处理 (多窗口支持) */
 
-import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import { app, ipcMain, dialog, shell, BrowserWindow, net } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { windowManager } from './window-manager'
@@ -156,6 +156,43 @@ function setupIPC() {
     await shell.openExternal(url)
   })
 
+  // ---- 在文件管理器中打开路径 ----
+  ipcMain.handle('shell:open-path', async (_, dirPath: string) => {
+    console.log(`[shell:open-path] ${dirPath}`)
+    return shell.openPath(dirPath)
+  })
+
+  // ---- 从 URL 下载文件到临时目录 ----
+  ipcMain.handle('file:download-url', async (_, url: string) => {
+    console.log(`[file:download-url] downloading ${url.substring(0, 80)}...`)
+    const path = await import('node:path')
+    const os = await import('node:os')
+    const fs = await import('node:fs')
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'topoone-dl-'))
+    const ext = url.includes('.zip') ? '.zip' : '.tmp'
+    const dest = path.join(tmpDir, `resource${ext}`)
+    await new Promise<void>((resolve, reject) => {
+      const req = net.request(url)
+      req.on('response', (res) => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`Download failed: HTTP ${res.statusCode}`))
+          return
+        }
+        const chunks: Buffer[] = []
+        res.on('data', (chunk: Buffer) => chunks.push(chunk))
+        res.on('end', () => {
+          fs.writeFileSync(dest, Buffer.concat(chunks))
+          resolve()
+        })
+        res.on('error', reject)
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    console.log(`[file:download-url] saved to ${dest}`)
+    return dest
+  })
+
   // ---- 系统 ----
   ipcMain.handle('system:get-app-data-path', () => {
     return app.getPath('userData')
@@ -197,6 +234,11 @@ function setupIPC() {
   ipcMain.handle('store:set', (_, key: string, value: any) => {
     store[key] = value
     return true
+  })
+
+  // ---- 资源项目目录配置 ----
+  ipcMain.handle('backend:set-resource-dir', async (_, dirPath: string) => {
+    return zmqRouter.call('backend.setResourceDir', { dirPath })
   })
 
   // ---- ZeroMQ RPC 调用 ----

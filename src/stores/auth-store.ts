@@ -11,9 +11,15 @@ export const useAuthStore = defineStore('auth', () => {
   const referralCode = ref('')
   const points = ref(0)
   const balance = ref(0)
+  const totalRecharged = ref(0)
+  const totalConsumed = ref(0)
+  const totalPointsRewarded = ref(0)
   const transactions = ref<TransactionRecord[]>([])
   const loadingTransactions = ref(false)
-  const referralStats = ref({ referred_count: 0, active_count: 0, total_points_awarded: 0 })
+  const transactionTotal = ref(0)
+  const transactionPage = ref(1)
+  const transactionPageSize = ref(20)
+  const referralStats = ref({ total_referred: 0, total_earned: 0 })
   const shareLink = ref('')
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
@@ -50,18 +56,23 @@ export const useAuthStore = defineStore('auth', () => {
     referralCode.value = ''
     points.value = 0
     balance.value = 0
+    totalRecharged.value = 0
+    totalConsumed.value = 0
+    totalPointsRewarded.value = 0
     transactions.value = []
-    referralStats.value = { referred_count: 0, active_count: 0, total_points_awarded: 0 }
+    transactionTotal.value = 0
+    transactionPage.value = 1
+      referralStats.value = { total_referred: 0, total_earned: 0 }
     shareLink.value = ''
     localStorage.removeItem('topocode_token')
     localStorage.removeItem('topocode_user')
   }
 
-  async function login(email: string, password: string): Promise<boolean> {
+  async function login(account: string, password: string): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
-      const result = await authService.login(email, password)
+      const result = await authService.login(account, password)
       saveSession(result.token, result.user)
       return true
     } catch (e: any) {
@@ -72,15 +83,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function loginWithCode(params: { email?: string; phone?: string; code: string }): Promise<boolean> {
+  async function loginWithCode(account: string, code: string): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
-      const result = await authService.login(email, password)
+      const result = await authService.loginWithCode(account, code)
       saveSession(result.token, result.user)
       return true
     } catch (e: any) {
-      error.value = e.message || '登录失败'
+      error.value = e.message || '验证码错误或已过期'
       return false
     } finally {
       loading.value = false
@@ -91,7 +102,8 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true
     error.value = null
     try {
-      await authService.register(username, email, password, emailCode, phone, smsCode, referralCode)
+      const result = await authService.register(username, email, password, emailCode, phone, smsCode, referralCode)
+      saveSession(result.token, result.user)
       return true
     } catch (e: any) {
       error.value = e.message || '注册失败'
@@ -102,18 +114,16 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
-    if (token.value) {
-      try {
-        await authService.logout(token.value)
-      } catch { /* ignore */ }
-    }
+    try {
+      await authService.logout()
+    } catch { /* ignore */ }
     clearSession()
   }
 
   async function fetchProfile() {
     if (!token.value) return
     try {
-      const profile = await authService.fetchProfile(token.value)
+      const profile = await authService.fetchProfile()
       user.value = profile
       referralCode.value = profile.referral_code || ''
       points.value = profile.points || 0
@@ -126,34 +136,40 @@ export const useAuthStore = defineStore('auth', () => {
   async function loadReferralInfo() {
     if (!token.value) return
     try {
-      const info = await authService.getReferralInfo(token.value)
+      const info = await authService.getReferralInfo()
       referralCode.value = info.referral_code
       points.value = info.points_balance
-      shareLink.value = info.share_link
+      shareLink.value = info.random_share_link + `?ref=${info.referral_code}`
     } catch {}
   }
 
   async function loadReferralStats() {
     if (!token.value) return
     try {
-      referralStats.value = await authService.getReferralStats(token.value)
+      referralStats.value = await authService.getReferralStats()
     } catch {}
   }
 
   async function fetchAccountInfo() {
     if (!token.value) return
     try {
-      const info = await authService.getAccountInfo(token.value)
+      const info = await authService.getAccountInfo()
       balance.value = info.balance
       points.value = info.points
+      totalRecharged.value = info.total_recharged
+      totalConsumed.value = info.total_consumed
+      totalPointsRewarded.value = info.total_points_rewarded
     } catch {}
   }
 
-  async function fetchTransactions() {
+  async function fetchTransactions(params?: { page?: number; type?: string; currency?: string }) {
     if (!token.value) return
     loadingTransactions.value = true
     try {
-      transactions.value = await authService.getTransactions(token.value)
+      const result = await authService.getTransactions({ ...params, page_size: transactionPageSize.value })
+      transactions.value = result.items
+      transactionTotal.value = result.total
+      transactionPage.value = result.page
     } catch {} finally {
       loadingTransactions.value = false
     }
@@ -163,7 +179,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user, token, loading, error, isAuthenticated,
-    referralCode, points, balance, transactions, loadingTransactions, referralStats, shareLink,
+    referralCode, points, balance, totalRecharged, totalConsumed, totalPointsRewarded, transactions, loadingTransactions, transactionTotal, transactionPage, transactionPageSize, referralStats, shareLink,
     login, loginWithCode, register, logout, fetchProfile,
     loadReferralInfo, loadReferralStats,
     fetchAccountInfo, fetchTransactions,

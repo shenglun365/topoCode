@@ -59,9 +59,13 @@ export const useResourceStore = defineStore('resource', () => {
     ownedMode.value = false
     pagination.value.page = 1
 
-    const cat = categories.value.find(c => c.key === key)
-    if (cat?.scope === 'owned') {
+    if (key === 'owned') {
       ownedMode.value = true
+    } else {
+      const cat = categories.value.find(c => c.key === key)
+      if (cat?.scope === 'owned') {
+        ownedMode.value = true
+      }
     }
   }
 

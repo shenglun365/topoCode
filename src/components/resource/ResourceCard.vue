@@ -36,9 +36,7 @@ function actionLabel(r: Resource): string {
   if (r.pricing_model === 'points') {
     return lbl.points_exchange?.replace('{cost}', String(r.points_cost)) || `${r.points_cost} 积分`
   }
-  if (r.pricing_model === 'paid') return `¥${r.price_cny}`
-  if (r.pricing_model === 'subscription') return lbl.download || '下载'
-  return lbl.download || '下载'
+  return '暂未开通'
 }
 </script>
 
@@ -48,6 +46,7 @@ function actionLabel(r: Resource): string {
       <span class="category-badge">{{ resource.category }}</span>
       <span v-if="pricingLabel(resource)" class="price-badge">{{ pricingLabel(resource) }}</span>
       <span v-if="badgeText" class="badge-hot">{{ badgeText }}</span>
+      <span v-if="resource.theme?.owned" class="badge-owned">已购</span>
     </div>
     <div class="card-body">
       <h3 class="card-title">{{ resource.title }}</h3>
@@ -79,6 +78,11 @@ function actionLabel(r: Resource): string {
   position: absolute; top: 4px; right: 4px;
   font-size: 9px; padding: 1px 6px; border-radius: 4px;
   background: #ef4444; color: #fff; font-weight: 600;
+}
+.badge-owned {
+  position: absolute; bottom: 4px; right: 4px;
+  font-size: 9px; padding: 2px 8px; border-radius: 4px;
+  background: rgba(34,197,94,0.85); color: #fff; font-weight: 600;
 }
 .card-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }

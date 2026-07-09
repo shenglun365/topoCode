@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   CpuChipIcon,
@@ -393,8 +393,10 @@ function onProviderChange(provider: string) {
   }
 }
 
-// 初始化用量统计
-initUsageStats()
+// 延迟加载用量统计，避免启动时阻塞
+onMounted(() => {
+  setTimeout(initUsageStats, 3000)
+})
 </script>
 
 <template>
