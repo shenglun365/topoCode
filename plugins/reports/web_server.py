@@ -105,9 +105,13 @@ async def list_projects():
     if not multi_db:
         raise HTTPException(503, "Backend not ready")
     try:
-        from core_service import register_project_methods
         projects = multi_db.main_db.fetchall("SELECT id, name, root_path FROM projects")
-        return [{"id": p["id"], "name": p["name"], "rootPath": p["root_path"]} for p in projects]
+        return [{
+            "id": p["id"],
+            "name": p["name"],
+            "rootPath": p["root_path"],
+            "isResource": p["id"].startswith("TOPORES_ID:"),
+        } for p in projects]
     except Exception as e:
         logger.error(f"list_projects error: {e}")
         return []
@@ -566,7 +570,13 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
         offset = (max(1, page) - 1) * ps
         q = search or ''
 
-        # 查所有任务，按项目分组
+        # 查所有项目（含无任务项目），附加任务列表
+        all_projects = multi_db.main_db.fetchall(
+            "SELECT id, name FROM projects "
+            "WHERE (? = '' OR name LIKE ?) "
+            "ORDER BY name",
+            (q, f'%{q}%')
+        )
         all_tasks = multi_db.main_db.fetchall(
             "SELECT t.id, t.name, t.status, t.project_id, p.name AS project_name "
             "FROM analysis_tasks t JOIN projects p ON t.project_id = p.id "
@@ -575,30 +585,38 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
             (q, f'%{q}%', f'%{q}%')
         )
 
-        # 按项目分组，每项目一次批量查询 overall doc
+        # 按项目分组任务
         tasks_by_pid = defaultdict(list)
         for t in all_tasks:
             tasks_by_pid[t["project_id"]].append(t)
 
         projects_map = {}
-        for pid, tasks in tasks_by_pid.items():
-            proj_name = tasks[0]["project_name"]
+        for proj in all_projects:
+            pid = proj["id"]
+            tasks = tasks_by_pid.get(pid, [])
             overall_ids = [f"overall-{t['id']}" for t in tasks]
             has_doc_set = set()
             try:
-                pdb = multi_db.get_project_db(pid)
-                ph = ",".join("?" * len(overall_ids))
-                rows = pdb.fetchall(
-                    f"SELECT id FROM report_subdocs WHERE id IN ({ph})", overall_ids
-                )
-                has_doc_set = {r["id"].replace("overall-", "") for r in rows}
+                if tasks:
+                    pdb = multi_db.get_project_db(pid)
+                    ph = ",".join("?" * len(overall_ids))
+                    rows = pdb.fetchall(
+                        f"SELECT id FROM report_subdocs WHERE id IN ({ph})", overall_ids
+                    )
+                    has_doc_set = {r["id"].replace("overall-", "") for r in rows}
             except Exception:
                 pass
             proj_tasks = []
             for t in tasks:
                 has_ov = t["id"] in has_doc_set
                 proj_tasks.append({"id": t["id"], "name": t["name"], "status": t["status"], "hasDoc": has_ov})
-            projects_map[pid] = {"name": proj_name, "tasks": proj_tasks, "has_doc": len(has_doc_set) > 0}
+            is_resource = pid.startswith("TOPORES_ID:")
+            projects_map[pid] = {
+                "name": proj["name"],
+                "tasks": proj_tasks,
+                "has_doc": len(has_doc_set) > 0,
+                "is_resource": is_resource,
+            }
 
         # 排序：有文档的靠前，其余按项目名
         proj_list = sorted(projects_map.values(), key=lambda x: (not x["has_doc"], x["name"]))
@@ -606,8 +624,11 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
         # 分页：所有任务扁平化后分页
         flat_tasks = []
         for proj in proj_list:
-            for t in proj["tasks"]:
-                flat_tasks.append((proj["name"], t))
+            if proj["tasks"]:
+                for t in proj["tasks"]:
+                    flat_tasks.append((proj, t))
+            else:
+                flat_tasks.append((proj, None))
         total = len(flat_tasks)
         page_tasks = flat_tasks[offset:offset + ps]
         total_pages = max(1, (total + ps - 1) // ps)
@@ -659,6 +680,8 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
   .status-label.done{color:#10b981}
   .status-label.pending{color:#f59e0b}
   .empty{padding:20px;color:var(--text-muted);font-size:13px;text-align:center}
+  .badge{display:inline-block;padding:1px 6px;font-size:9px;font-weight:600;border-radius:4px;vertical-align:middle}
+  .badge-resource{background:rgba(34,197,94,0.15);color:#22c55e}
   .pagination{display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap}
   .pagination a,.pagination span{padding:5px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;text-decoration:none;color:var(--text);background:var(--bg);transition:all var(--transition)}
   .pagination a:hover{background:var(--bg-hover);border-color:var(--accent)}
@@ -677,24 +700,28 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
     <option value="200"__PS_200__>200条/页</option>
   </select>
   <span class="info">共 __TOTAL__ 条</span>
+  <a href="/chat" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:4px;transition:background .15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>AI助手</a>
 </div>"""
         html = html.replace('__Q_ESC__', q_esc).replace('__TOTAL__', total_str)
         html = html.replace('__PS_50__', ps_sel_50).replace('__PS_100__', ps_sel_100).replace('__PS_200__', ps_sel_200)
 
-        last_proj = None
-        shown = 0
-        for proj_name, t in page_tasks:
-            shown += 1
-            if proj_name != last_proj:
-                if last_proj is not None:
+        last_pid = None
+        for proj, t in page_tasks:
+            pid = proj["id"]
+            if pid != last_pid:
+                if last_pid is not None:
                     html += '</div></div>'
-                html += f'<div class="project"><div class="project-header" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.arrow\').classList.toggle(\'open\')"><span class="arrow">▶</span> {esc(proj_name)}</div><div class="project-tasks open">'
-                last_proj = proj_name
-            dot_class = 'done' if t["hasDoc"] else 'pending'
-            if t["hasDoc"]:
-                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span class="status-label {dot_class}">已生成</span></div>'
+                resource_badge = '<span class="badge badge-resource">资源</span>' if proj["is_resource"] else ''
+                html += f'<div class="project"><div class="project-header" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.arrow\').classList.toggle(\'open\')"><span class="arrow">▶</span> {esc(proj["name"])} {resource_badge}</div><div class="project-tasks open">'
+                last_pid = pid
+            if t is None:
+                html += f'<div class="task-item" style="color:var(--text-muted);font-size:12px;">资源项目 — 无需分析任务</div>'
             else:
-                html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span class="task-name-pending">{esc(t["name"])}</span><span class="status-label {dot_class}">未生成</span></div>'
+                dot_class = 'done' if t["hasDoc"] else 'pending'
+                if t["hasDoc"]:
+                    html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span class="status-label {dot_class}">已生成</span></div>'
+                else:
+                    html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span class="task-name-pending">{esc(t["name"])}</span><span class="status-label {dot_class}">未生成</span></div>'
         if last_proj is not None:
             html += '</div></div>'
         if total == 0:

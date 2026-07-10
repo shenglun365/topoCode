@@ -460,16 +460,7 @@ function formatDate(dateStr: string): string {
         </button>
 
       </div>
-      <div class="referral-stats">
-        <div class="stat-item">
-          <span class="stat-value">{{ auth.referralStats.total_referred }}</span>
-          <span class="stat-label">{{ t('auth.referredCount', '邀请人数') }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-value">+{{ auth.referralStats.total_earned }}</span>
-          <span class="stat-label">{{ t('auth.rewardPoints', '奖励积分') }}</span>
-        </div>
-      </div>
+
     </div>
 
     <div class="actions">
@@ -627,14 +618,6 @@ function formatDate(dateStr: string): string {
 }
 .share-btn:hover { border-color: var(--accent); color: var(--accent); }
 .share-icon { width: 16px; height: 16px; display: block; }
-.referral-stats {
-  display: flex; gap: 16px; justify-content: center;
-  padding-top: 12px; border-top: 1px solid var(--border);
-}
-.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.stat-value { font-size: 18px; font-weight: 700; color: var(--accent); }
-.stat-label { font-size: 10px; color: var(--text-muted); }
-
 .actions { margin-top: 24px; display: flex; gap: 8px; }
 .login-hint { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
 .unauthenticated .actions { justify-content: center; }

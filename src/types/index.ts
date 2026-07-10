@@ -283,6 +283,7 @@ export interface Resource {
   price_cny: number
   subscription_tier: string
   created_at: string
+  status?: 'published' | 'offline'
   theme?: ResourceTheme
 }
 

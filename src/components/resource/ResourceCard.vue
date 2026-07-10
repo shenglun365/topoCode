@@ -46,7 +46,10 @@ function actionLabel(r: Resource): string {
       <span class="category-badge">{{ resource.category }}</span>
       <span v-if="pricingLabel(resource)" class="price-badge">{{ pricingLabel(resource) }}</span>
       <span v-if="badgeText" class="badge-hot">{{ badgeText }}</span>
-      <span v-if="resource.theme?.owned" class="badge-owned">已购</span>
+      <div v-if="resource.status === 'offline' || resource.theme?.owned" class="badges-bottom">
+        <span v-if="resource.status === 'offline' && resource.theme?.owned" class="badge-offline">已下架</span>
+        <span v-if="resource.theme?.owned" class="badge-owned">已购</span>
+      </div>
     </div>
     <div class="card-body">
       <h3 class="card-title">{{ resource.title }}</h3>
@@ -56,7 +59,7 @@ function actionLabel(r: Resource): string {
           <ArrowDownTrayIcon class="w-3 h-3" />
           {{ resource.download_count }}
         </span>
-        <span class="btn-download">{{ actionLabel(resource) }}</span>
+        <span v-if="resource.status !== 'offline'" class="btn-download">{{ actionLabel(resource) }}</span>
       </div>
     </div>
   </div>
@@ -79,8 +82,15 @@ function actionLabel(r: Resource): string {
   font-size: 9px; padding: 1px 6px; border-radius: 4px;
   background: #ef4444; color: #fff; font-weight: 600;
 }
-.badge-owned {
+.badges-bottom {
   position: absolute; bottom: 4px; right: 4px;
+  display: flex; gap: 4px;
+}
+.badge-offline {
+  font-size: 9px; padding: 2px 8px; border-radius: 4px;
+  background: rgba(156,163,175,0.85); color: #fff; font-weight: 600;
+}
+.badge-owned {
   font-size: 9px; padding: 2px 8px; border-radius: 4px;
   background: rgba(34,197,94,0.85); color: #fff; font-weight: 600;
 }

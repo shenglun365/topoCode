@@ -11,6 +11,7 @@ import { useRouter } from 'vue-router'
 import { useResourceStore } from '@/stores/resource-store'
 import { useProjectStore } from '@/stores/project'
 import { useAuthStore } from '@/stores/auth-store'
+import { useSettingsStore } from '@/stores/settings-store'
 import { resourceService } from '@/services/resource-service'
 import { API_BASE } from '@/utils/http'
 import ProfileTab from '@/components/user/ProfileTab.vue'
@@ -27,6 +28,7 @@ const router = useRouter()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 const authStore = useAuthStore()
+const settingsStore = useSettingsStore()
 
 const activeTab = ref<'profile' | 'account' | 'order' | 'resource'>('profile')
 const showDetail = ref(false)
@@ -75,7 +77,7 @@ async function autoDownloadAndImport(resourceId: number) {
       archivePath: filePath,
       resourceId: String(resourceId),
       name: detail?.title || `资源 ${resourceId}`,
-      resourceProjectsDir: '',
+      resourceProjectsDir: settingsStore.resourceProjectsDir,
     })
     // 4. 轮询导入进度
     startPollingImport(result.importId)
@@ -148,8 +150,13 @@ watch(() => resourceStore.meta, (meta: ResourceListMeta | null) => {
 })
 
 async function handleResourceCardClick(id: number) {
-  resourceStore.fetchDetail(id, authStore.token || undefined)
   showDetail.value = true
+  try {
+    await resourceStore.fetchDetail(id, authStore.token || undefined)
+  } catch {
+    showDetail.value = false
+    showError('资源不存在')
+  }
 }
 
 function handleDetailDownload(id: number) {
@@ -162,6 +169,29 @@ function handleDetailDownload(id: number) {
 
 function refreshResources() {
   resourceStore.fetchResources(resourceStore.ownedMode, authStore.token || undefined)
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function onSearchInput(e: Event) {
+  const value = (e.target as HTMLInputElement).value
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    resourceStore.setSearch(value)
+    doFetch()
+  }, 300)
+}
+
+function onSortChange(by: string, order: string) {
+  resourceStore.setSort(by, order)
+  doFetch()
+}
+
+function doFetch() {
+  if (resourceStore.ownedMode) {
+    resourceStore.fetchResources(true, authStore.token || undefined)
+  } else {
+    resourceStore.fetchResources()
+  }
 }
 
 async function switchResourceCategory(catKey: string) {
@@ -217,6 +247,21 @@ onMounted(async () => {
         </div>
         <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">{{ t('settings.resourceCenterDesc', '浏览和下载可导入的结构分析包') }}</p>
       </div>
+      <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input class="search-input" type="text" :placeholder="t('settings.searchResource', '搜索资源')" @input="onSearchInput">
+        </div>
+        <select class="sort-select" :value="resourceStore.sortBy" @change="onSortChange(($event.target as HTMLSelectElement).value, resourceStore.sortOrder)">
+          <option value="time">{{ t('settings.sortByTime', '时间') }}</option>
+          <option value="name">{{ t('settings.sortByName', '名称') }}</option>
+          <option value="downloads">{{ t('settings.sortByDownloads', '下载量') }}</option>
+        </select>
+        <select class="sort-select" :value="resourceStore.sortOrder" @change="onSortChange(resourceStore.sortBy, ($event.target as HTMLSelectElement).value)">
+          <option value="desc">{{ t('settings.sortDesc', '倒序') }}</option>
+          <option value="asc">{{ t('settings.sortAsc', '正序') }}</option>
+        </select>
+      </div>
       <div v-if="resourceStore.meta?.feature_flags?.show_category_filter !== false" style="display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
         <template v-for="cat in resourceStore.categories" :key="cat.key">
           <button v-if="!cat.auth_required || authStore.isAuthenticated"
@@ -230,8 +275,7 @@ onMounted(async () => {
         <button v-if="authStore.isAuthenticated"
           class="btn btn-sm"
           :class="resourceStore.activeCategoryKey === 'owned' ? 'btn-primary' : 'btn-ghost'"
-          @click="switchResourceCategory('owned')"
-          style="color:var(--success);">
+          @click="switchResourceCategory('owned')">
           已购
         </button>
         <div v-if="!authStore.isAuthenticated" style="display:inline-flex; gap:4px; align-items:center;">
@@ -364,4 +408,25 @@ onMounted(async () => {
 .limit-dialog-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
 .limit-dialog-msg { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px; }
 .limit-dialog-actions { display: flex; justify-content: center; }
+.search-wrap {
+  position: relative; display: flex; align-items: center;
+}
+.search-icon {
+  position: absolute; left: 8px; width: 14px; height: 14px;
+  color: var(--text-muted); pointer-events: none;
+}
+.search-input {
+  padding: 6px 8px 6px 28px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg-primary);
+  color: var(--text-primary); font-size: 12px; width: 200px;
+  outline: none;
+}
+.search-input:focus { border-color: var(--accent); }
+.search-input::placeholder { color: var(--text-muted); }
+.sort-select {
+  padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg-primary);
+  color: var(--text-primary); font-size: 12px; outline: none; cursor: pointer;
+}
+.sort-select:focus { border-color: var(--accent); }
 </style>

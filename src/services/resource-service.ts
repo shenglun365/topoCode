@@ -73,13 +73,26 @@ const MOCK_META: ResourceListMeta = {
 }
 
 export const resourceService = {
-  async list(params?: { page?: number; category?: string; owned?: boolean; token?: string }): Promise<ResourceListResult> {
+  async list(params?: { page?: number; category?: string; owned?: boolean; token?: string; q?: string; sort_by?: string; sort_order?: string }): Promise<ResourceListResult> {
     if (USE_MOCK) {
       await delay()
       let items = [...mockResources].map(addPricingDefaults) as Resource[]
+      if (params?.q) {
+        const keyword = params.q.toLowerCase()
+        items = items.filter(r => r.title.toLowerCase().includes(keyword) || r.description.toLowerCase().includes(keyword))
+      }
       if (params?.category) {
         items = items.filter(r => r.category === params.category)
       }
+      const sortBy = params?.sort_by || 'time'
+      const sortOrder = params?.sort_order || 'desc'
+      items.sort((a, b) => {
+        let cmp = 0
+        if (sortBy === 'name') cmp = a.title.localeCompare(b.title)
+        else if (sortBy === 'downloads') cmp = a.download_count - b.download_count
+        else cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        return sortOrder === 'desc' ? -cmp : cmp
+      })
       const page = params?.page || 1
       const pageSize = 12
       const start = (page - 1) * pageSize
@@ -98,6 +111,9 @@ export const resourceService = {
     if (params?.page) q.set('page', String(params.page))
     if (params?.category) q.set('category', params.category)
     if (params?.owned) q.set('owned', 'true')
+    if (params?.q) q.set('q', params.q)
+    if (params?.sort_by) q.set('sort_by', params.sort_by)
+    if (params?.sort_order) q.set('sort_order', params.sort_order)
 
     const result = await request<{
       total: number; page: number; page_size: number; meta: ResourceListMeta; items: any[]

@@ -10,6 +10,9 @@ export const useResourceStore = defineStore('resource', () => {
   const meta = ref<ResourceListMeta | null>(null)
   const activeCategoryKey = ref('')
   const ownedMode = ref(false)
+  const searchQuery = ref('')
+  const sortBy = ref('time')
+  const sortOrder = ref('desc')
   const pagination = ref({ page: 1, total: 0, pageSize: 12 })
 
   const categories = computed<ResourceCategory[]>(() => {
@@ -36,6 +39,9 @@ export const useResourceStore = defineStore('resource', () => {
       } else if (activeCategoryKey.value) {
         params.category = activeCategoryKey.value
       }
+      if (searchQuery.value) params.q = searchQuery.value
+      if (sortBy.value) params.sort_by = sortBy.value
+      if (sortOrder.value) params.sort_order = sortOrder.value
       const result = await resourceService.list(params)
       resources.value = result.items
       meta.value = result.meta
@@ -49,6 +55,9 @@ export const useResourceStore = defineStore('resource', () => {
     loading.value = true
     try {
       currentResource.value = await resourceService.detail(id, token)
+    } catch (e) {
+      currentResource.value = null
+      throw e
     } finally {
       loading.value = false
     }
@@ -79,10 +88,23 @@ export const useResourceStore = defineStore('resource', () => {
     return resourceService.getDownloadUrl(id, token)
   }
 
+  function setSearch(q: string) {
+    searchQuery.value = q
+    pagination.value.page = 1
+  }
+
+  function setSort(by: string, order: string) {
+    sortBy.value = by
+    sortOrder.value = order
+    pagination.value.page = 1
+  }
+
   return {
     resources, currentResource, loading, meta,
-    categories, activeCategory, activeCategoryKey, ownedMode, pagination,
+    categories, activeCategory, activeCategoryKey, ownedMode,
+    searchQuery, sortBy, sortOrder, pagination,
     filteredResources, fetchResources, fetchDetail,
     setCategory, clearOwned, getDownloadUrl,
+    setSearch, setSort,
   }
 })

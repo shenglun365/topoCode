@@ -34,8 +34,7 @@ const showClearCacheDialog = ref(false)
 const showExportDialog = ref(false)
 const showImportDialog = ref(false)
 const showVerifyDialog = ref(false)
-const selectedProject = projectStore.selectedProject
-const isResourceProject = computed(() => selectedProject?.id?.startsWith?.('TOPORES_ID:'))
+const isResourceProject = computed(() => projectStore.selectedProject?.id?.startsWith?.('TOPORES_ID:'))
 
 onMounted(() => {
   navigation.navigateTo('code')

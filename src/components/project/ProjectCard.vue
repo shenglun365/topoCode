@@ -413,12 +413,6 @@ async function handleResyncFromDialog() {
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
         </span>
-        <!-- 资源项目 badge -->
-        <span
-          v-if="isResourceProject"
-          class="badge badge-green"
-          style="font-size:8px;"
-        >资源</span>
         <!-- 分组 badge -->
         <span
           v-if="project.group"

@@ -1356,6 +1356,15 @@ class MultiDBManager:
             project_db.executescript(PROJECT_DB_TABLES_SQL)
         return project_db
 
+    def _table_exists(self, project_db: SQLiteContext, table: str) -> bool:
+        try:
+            row = project_db.fetchone(
+                "SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            )
+            return row["c"] > 0 if row else False
+        except Exception:
+            return False
+
     def _migrate_project_db(self, project_db: SQLiteContext):
         """迁移项目库表 - v2 重设计: 重建 graph_node + 新增 graph_edge + file_count"""
         # 为新版 graph_node 补充字段
@@ -1432,25 +1441,27 @@ class MultiDBManager:
         except Exception:
             pass
 
-        # 为 graph_doc 添加 file_count 列（如不存在则忽略）
-        try:
-            cursor = project_db.execute("PRAGMA table_info(graph_doc)")
-            gd_cols = {row[1] for row in cursor.fetchall()}
-            if 'file_count' not in gd_cols:
-                project_db.execute("ALTER TABLE graph_doc ADD COLUMN file_count INTEGER DEFAULT 0")
-            if 'metadata' not in gd_cols:
-                project_db.execute("ALTER TABLE graph_doc ADD COLUMN metadata TEXT DEFAULT '{}'")
-        except Exception:
-            pass
+        # 为 graph_doc 添加 file_count 列（表不存在则跳过）
+        if self._table_exists(project_db, "graph_doc"):
+            try:
+                cursor = project_db.execute("PRAGMA table_info(graph_doc)")
+                gd_cols = {row[1] for row in cursor.fetchall()}
+                if 'file_count' not in gd_cols:
+                    project_db.execute("ALTER TABLE graph_doc ADD COLUMN file_count INTEGER DEFAULT 0")
+                if 'metadata' not in gd_cols:
+                    project_db.execute("ALTER TABLE graph_doc ADD COLUMN metadata TEXT DEFAULT '{}'")
+            except Exception:
+                pass
 
-        # 为 community_hierarchy 添加 file_count 列（如不存在则忽略）
-        try:
-            cursor = project_db.execute("PRAGMA table_info(community_hierarchy)")
-            ch_cols = {row[1] for row in cursor.fetchall()}
-            if 'file_count' not in ch_cols:
-                project_db.execute("ALTER TABLE community_hierarchy ADD COLUMN file_count INTEGER DEFAULT 0")
-        except Exception:
-            pass
+        # 为 community_hierarchy 添加 file_count 列（表不存在则跳过）
+        if self._table_exists(project_db, "community_hierarchy"):
+            try:
+                cursor = project_db.execute("PRAGMA table_info(community_hierarchy)")
+                ch_cols = {row[1] for row in cursor.fetchall()}
+                if 'file_count' not in ch_cols:
+                    project_db.execute("ALTER TABLE community_hierarchy ADD COLUMN file_count INTEGER DEFAULT 0")
+            except Exception:
+                pass
 
         # 新建 graph_edge 表
         try:
@@ -1517,33 +1528,37 @@ class MultiDBManager:
         except Exception:
             pass
 
-        # 性能索引: graph_doc JOIN + community_hierarchy ORDER BY
-        try:
-            project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_doc_join ON graph_doc(task_id, edge_type, comm_id)")
-        except Exception:
-            pass
-        try:
-            project_db.execute("CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv, comm_id)")
-        except Exception:
-            pass
+        # 性能索引: graph_doc JOIN + community_hierarchy ORDER BY（表不存在则跳过）
+        if self._table_exists(project_db, "graph_doc"):
+            try:
+                project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_doc_join ON graph_doc(task_id, edge_type, comm_id)")
+            except Exception:
+                pass
+            try:
+                project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_doc_parent ON graph_doc(task_id, edge_type, parent_comm_id)")
+            except Exception:
+                pass
         # 深度展开索引: parent_comm_id
-        try:
-            project_db.execute("CREATE INDEX IF NOT EXISTS idx_graph_doc_parent ON graph_doc(task_id, edge_type, parent_comm_id)")
-        except Exception:
-            pass
-        try:
-            project_db.execute("CREATE INDEX IF NOT EXISTS idx_comm_hier_parent ON community_hierarchy(task_id, edge_type, parent_comm_id)")
-        except Exception:
-            pass
-        # LLM 结果排序 + 子文档排序
-        try:
-            project_db.execute("CREATE INDEX IF NOT EXISTS idx_llm_res_sort ON community_llm_results(task_id, edge_type, comm_lv, comm_id)")
-        except Exception:
-            pass
-        try:
-            project_db.execute("CREATE INDEX IF NOT EXISTS idx_subdoc_sort ON report_subdocs(task_id, comm_id, created_at)")
-        except Exception:
-            pass
+        if self._table_exists(project_db, "community_hierarchy"):
+            try:
+                project_db.execute("CREATE INDEX IF NOT EXISTS idx_comm_hier_lv ON community_hierarchy(task_id, edge_type, comm_lv, comm_id)")
+            except Exception:
+                pass
+            try:
+                project_db.execute("CREATE INDEX IF NOT EXISTS idx_comm_hier_parent ON community_hierarchy(task_id, edge_type, parent_comm_id)")
+            except Exception:
+                pass
+        # LLM 结果排序 + 子文档排序（表不存在则跳过）
+        if self._table_exists(project_db, "community_llm_results"):
+            try:
+                project_db.execute("CREATE INDEX IF NOT EXISTS idx_llm_res_sort ON community_llm_results(task_id, edge_type, comm_lv, comm_id)")
+            except Exception:
+                pass
+        if self._table_exists(project_db, "report_subdocs"):
+            try:
+                project_db.execute("CREATE INDEX IF NOT EXISTS idx_subdoc_sort ON report_subdocs(task_id, comm_id, created_at)")
+            except Exception:
+                pass
 
         # file_hashes 表（导入导出校验用）
         try:
@@ -1560,30 +1575,32 @@ class MultiDBManager:
         project_db.conn.commit()
 
         # ===== 去重 + 防重复索引（graph_doc + community_hierarchy）=====
-        try:
-            project_db.execute("""
-                DELETE FROM graph_doc WHERE id NOT IN (
-                    SELECT MIN(id) FROM graph_doc GROUP BY task_id, edge_type, comm_id
-                )
-            """)
-        except Exception:
-            pass
-        try:
-            project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_doc_unique ON graph_doc(task_id, edge_type, comm_id)")
-        except Exception:
-            pass
-        try:
-            project_db.execute("""
-                DELETE FROM community_hierarchy WHERE id NOT IN (
-                    SELECT MIN(id) FROM community_hierarchy GROUP BY task_id, edge_type, comm_lv, comm_id
-                )
-            """)
-        except Exception:
-            pass
-        try:
-            project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_comm_hier_unique ON community_hierarchy(task_id, edge_type, comm_lv, comm_id)")
-        except Exception:
-            pass
+        if self._table_exists(project_db, "graph_doc"):
+            try:
+                project_db.execute("""
+                    DELETE FROM graph_doc WHERE id NOT IN (
+                        SELECT MIN(id) FROM graph_doc GROUP BY task_id, edge_type, comm_id
+                    )
+                """)
+            except Exception:
+                pass
+            try:
+                project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_doc_unique ON graph_doc(task_id, edge_type, comm_id)")
+            except Exception:
+                pass
+        if self._table_exists(project_db, "community_hierarchy"):
+            try:
+                project_db.execute("""
+                    DELETE FROM community_hierarchy WHERE id NOT IN (
+                        SELECT MIN(id) FROM community_hierarchy GROUP BY task_id, edge_type, comm_lv, comm_id
+                    )
+                """)
+            except Exception:
+                pass
+            try:
+                project_db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_comm_hier_unique ON community_hierarchy(task_id, edge_type, comm_lv, comm_id)")
+            except Exception:
+                pass
         project_db.conn.commit()
 
     def _evict_idle_project_dbs(self):
