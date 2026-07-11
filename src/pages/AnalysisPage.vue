@@ -187,15 +187,6 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         :task-id="activeTab.taskId!"
       />
     </template>
-
-    <!-- Agent 对话面板（浮动按钮触发） -->
-    <div
-      v-if="showChatPanel"
-      class="chat-panel"
-    >
-      <ChatView />
-    </div>
-
     <template v-else-if="isSubDocTab && activeTab">
       <SubDocViewer
         :key="activeTab.id"
@@ -211,6 +202,14 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
         @navigate-community="openCommunityDetail"
       />
     </template>
+
+    <!-- Agent 对话面板（浮动按钮触发） -->
+    <div
+      v-if="showChatPanel"
+      class="chat-panel"
+    >
+      <ChatView />
+    </div>
   </div>
 </template>
 
