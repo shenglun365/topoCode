@@ -12,4 +12,4 @@ class FileListIngredient(ContextIngredient):
     def format(self, data: list[str]) -> str:
         if not data:
             return ""
-        return f"文件列表 ({len(data)}): {', '.join(data)}"
+        return f"Files ({len(data)}): {', '.join(data)}"

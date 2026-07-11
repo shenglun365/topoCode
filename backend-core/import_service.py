@@ -52,9 +52,9 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
         main_db = multi_db.main_db
 
         if not target_project_id:
-            raise ValueError("必须指定目标项目 ID")
+            raise ValueError("Must specify target project ID")
 
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 0, "解压导入包")
+        _update_status(import_id, IMPORT_STATUS_RUNNING, 0, "Extracting archive")
 
         # ── 解压 ──
         tmp_dir = tempfile.mkdtemp(prefix=f"import_{import_id}_")
@@ -64,7 +64,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
         # ── 验证 manifest ──
         manifest_path = os.path.join(tmp_dir, "manifest.json")
         if not os.path.exists(manifest_path):
-            raise ValueError("导入包缺少 manifest.json")
+            raise ValueError("Archive missing manifest.json")
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
         logger.info(f"[Import] manifest: {json.dumps(manifest, ensure_ascii=False)[:200]}")
@@ -87,8 +87,8 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
         if is_restore:
             if original_project_id != target_project_id:
                 raise ValueError(
-                    f"导入包的项目 ID ({original_project_id}) "
-                    f"与当前项目 ID ({target_project_id}) 不一致，拒绝导入"
+                    f"Archive project ID ({original_project_id}) "
+                    f"does not match target project ID ({target_project_id}), rejecting import"
                 )
 
         # ── 获取目标项目 ──
@@ -96,13 +96,13 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
             "SELECT * FROM projects WHERE id = ?", (target_project_id,)
         )
         if not existing_project:
-            raise ValueError(f"目标项目不存在: {target_project_id}")
+            raise ValueError(f"Target project not found: {target_project_id}")
 
         project_id = existing_project["id"]
         base_name = existing_project["name"]
         logger.info(f"[Import] {import_mode} mode: writing to project {project_id} ({base_name})")
         _update_status(import_id, IMPORT_STATUS_RUNNING, 5,
-                       f"{'覆盖' if is_restore else '写入'}现有项目 {base_name}")
+                       f"{'Overwriting' if is_restore else 'Writing to'} existing project {base_name}")
 
         # ── 清空旧的分析数据 ──
         clear_tables = [
@@ -171,9 +171,9 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                     imported_tasks.append(old_task)
 
         if not imported_tasks:
-            raise ValueError("导入包中没有任务数据 (tasks.jsonl 为空)")
+            raise ValueError("Archive has no task data (tasks.jsonl is empty)")
 
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 15, f"即将导入 {len(imported_tasks)} 个任务")
+        _update_status(import_id, IMPORT_STATUS_RUNNING, 15, f"About to import {len(imported_tasks)} tasks")
 
         # ── 写入 tasks ──
         for task in imported_tasks:
@@ -183,7 +183,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
         # ── 统计总步骤 ──
         total_steps = 1 + len(jsonl_files)
         step = 1
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 20, "导入分析数据")
+        _update_status(import_id, IMPORT_STATUS_RUNNING, 20, "Importing analysis data")
 
         # ── 逐类型导入到 project DB ──
         total_rows = 0
@@ -239,16 +239,16 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
             total_rows += len(rows)
             pct = 20 + int(step / total_steps * 70)
             _update_status(import_id, IMPORT_STATUS_RUNNING, pct,
-                           f"已导入 {label} ({len(rows)} 条)")
+                           f"Imported {label} ({len(rows)} rows)")
             publish_fn("import", "import.progress", {
                 "importId": import_id,
                 "progress": pct,
-                "message": f"已导入 {label} ({len(rows)} 条)",
+                "message": f"Imported {label} ({len(rows)} rows)",
             })
             step += 1
 
         # ── file_hashes 表 ──
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 93, "写入文件哈希索引")
+        _update_status(import_id, IMPORT_STATUS_RUNNING, 93, "Writing file hash index")
         _ensure_file_hashes_table(project_db)
         source_path = os.path.join(tmp_dir, "source_files.jsonl")
         if os.path.exists(source_path):
@@ -272,7 +272,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
             logger.info(f"[Import] wrote {len(hash_rows)} file hashes")
 
         # ── 更新 project 统计 ──
-        _update_status(import_id, IMPORT_STATUS_RUNNING, 96, "更新项目信息")
+        _update_status(import_id, IMPORT_STATUS_RUNNING, 96, "Updating project info")
         try:
             cnt_row = project_db.fetchone(
                 "SELECT COUNT(*) AS cnt FROM source_files WHERE language != 'directory'"
@@ -289,7 +289,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
 
         elapsed = time.time() - t0
         _update_status(import_id, IMPORT_STATUS_DONE, 100,
-                       f"导入完成，共 {total_rows} 条数据，耗时 {elapsed:.1f}s",
+                       f"Import complete: {total_rows} rows, {elapsed:.1f}s",
                        result={
                            "projectId": project_id,
                            "projectName": base_name,
@@ -386,7 +386,7 @@ def start_import(multi_db, archive_path: str, publish_fn,
             "id": import_id,
             "status": IMPORT_STATUS_PENDING,
             "progress": 0,
-            "message": "排队中",
+            "message": "Queued",
             "result": None,
         }
     thread = threading.Thread(

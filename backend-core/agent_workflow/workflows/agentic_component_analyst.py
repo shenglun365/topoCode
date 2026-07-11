@@ -15,24 +15,24 @@ logger = logging.getLogger(__name__)
 
 
 class AgenticComponentAnalystWorkflow(AgenticWorkflow):
-    """Agentic 组件分析 — LLM 自主调用工具逐组件分析"""
+    """Agentic component analysis — LLM autonomously calls tools to analyze components"""
 
     name = "agentic_component_analyst"
-    description = "LLM 自主调用工具逐组件分析，可读取文件、搜索符号，最终输出组件名称和功能概要"
+    description = "LLM autonomously calls tools to analyze components per-component, can read files, search symbols, outputs component name and functional summary"
 
     max_turns: int = 30
 
     input_schema = {
-        "task_id": "str — 分析任务 ID",
-        "components": "[{id, name, type, metadata, context, parent_summary}] — 待分析组件列表",
-        "language": "str — 输出语言 (zh/en/空)",
-        "concurrency": "int — 并发数 (1-5，当前置1随组件迭代)",
-        "project_summary": "str — 项目摘要",
+        "task_id": "str — analysis task ID",
+        "components": "[{id, name, type, metadata, context, parent_summary}] — component list to analyze",
+        "language": "str — output language (zh/en/empty)",
+        "concurrency": "int — concurrency (1-5, currently forced to 1 per component iteration)",
+        "project_summary": "str — project summary",
     }
     output_schema = {
-        "component_results": "[{component_id, output_text, turns}] — 逐组件结果",
-        "success": "int — 成功数",
-        "failed": "int — 失败数",
+        "component_results": "[{component_id, output_text, turns}] — per-component results",
+        "success": "int — success count",
+        "failed": "int — failure count",
     }
 
     def get_system_prompt(self, component: dict, project_summary: str = "",
@@ -43,53 +43,53 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
         metadata = component.get("metadata", {})
 
         is_deep = detail_level == "deep"
-        summary_range = "500-2000字" if is_deep else "100-300字"
+        summary_range = "500-2000 chars" if is_deep else "100-300 chars"
 
         base_prompt = (
-                "你是代码架构分析专家。通过系统化的工具调用分析组件。\n\n"
-                "## 核心规则：用 summarize_file 代替 read_file\n"
-                "summarize_file 是读取文件的**默认方式**。它一次可处理最多 10 个文件并自动摘要，"
-                "结果会被缓存，后续轮次不消耗 token。\n"
-                "read_file 只能在你认为某个文件的摘要**明显不充分**时才使用，且每次只能读一个文件。\n"
-                "**不要逐文件调用 read_file** — 这效率极低且浪费上下文。\n\n"
-                "分析流程：\n"
-                "  Step 1 — 结构探索：\n"
-                "    调用 get_community_subgraph 了解组件拓扑结构\n"
-                "    调用 search_symbols 发现关键函数/类定义\n"
+                "You are a code architecture analysis expert. Analyze components through systematic tool calls.\n\n"
+                "## Core Rule: Use summarize_file instead of read_file\n"
+                "summarize_file is the **default way** to read files. It can process up to 10 files at once with auto-summary, "
+                "results are cached and consume no tokens in subsequent turns.\n"
+                "read_file should only be used when you think a file's summary is **clearly insufficient**, and only one file per call.\n"
+                "**Do not call read_file per file** — this is extremely inefficient and wastes context.\n\n"
+                "Analysis Process:\n"
+                "  Step 1 — Structure Exploration:\n"
+                "    Call get_community_subgraph to understand component topology\n"
+                "    Call search_symbols to discover key function/class definitions\n"
                 "\n"
-                "  Step 2 — 文件摘要（**必须用 summarize_file**）：\n"
-                "    根据 Step 1 的发现确定关键文件，用 summarize_file 批量读取\n"
-                "    示例: summarize_file(path=[\"src/a.cpp\", \"src/b.h\"], focus=\"关注接口定义\")\n"
-                "    将所有需要读的文件一次性或分批传给 summarize_file\n"
+                "  Step 2 — File Summary (**must use summarize_file**):\n"
+                "    Based on Step 1 findings, identify key files and batch read with summarize_file\n"
+                "    Example: summarize_file(path=[\"src/a.cpp\", \"src/b.h\"], focus=\"focus on interface definitions\")\n"
+                "    Pass all files to summarize_file at once or in batches\n"
                 "\n"
-                "  Step 3 — 综合输出（**必须执行**）：\n"
-                "    综合所有信息，**必须**输出 JSON，不得输出其他文本。\n"
-                "    如果信息不足，继续调用工具获取更多信息。\n"
-                "    收到工具结果后，不要再调用工具，直接输出 JSON。\n"
-                "    JSON 格式：\n"
-                "    {{\"name\": \"有实际语义的名称（≤20字）\", "
-                f"\"summary\": \"功能概要（{summary_range}）\", "
-                "\"role\": \"架构角色（≤3词）\", "
-                "\"key_files\": [{{\"path\": \"...\", \"summary\": \"该文件功能\"}}], "
-                "\"depends_on\": [\"其他组件或外部包\"]}}\n\n"
-                f"当前分析的组件: {cname} (ID: {cid})\n"
+                "  Step 3 — Final Output (**required**):\n"
+                "    Combine all information, **must** output JSON, no other text.\n"
+                "    If information is insufficient, continue calling tools for more info.\n"
+                "    After receiving tool results, do not call more tools, directly output JSON.\n"
+                "    JSON format:\n"
+                "    {{\"name\": \"semantic name (≤20 chars)\", "
+                f"\"summary\": \"functional summary ({summary_range})\", "
+                "\"role\": \"architecture role (≤3 words)\", "
+                "\"key_files\": [{{\"path\": \"...\", \"summary\": \"file function\"}}], "
+                "\"depends_on\": [\"other components or external packages\"]}}\n\n"
+                f"Currently analyzing component: {cname} (ID: {cid})\n"
             )
 
         parts = [base_prompt]
         if metadata:
-            parts.append(f"元数据: 节点数={metadata.get('nodeCount','?')}, "
-                         f"文件数={metadata.get('fileCount','?')}, "
-                         f"质量分={metadata.get('qualityScore','?')}")
+            parts.append(f"Metadata: nodes={metadata.get('nodeCount','?')}, "
+                         f"files={metadata.get('fileCount','?')}, "
+                         f"quality_score={metadata.get('qualityScore','?')}")
         if project_summary:
-            parts.append(f"项目摘要: {project_summary[:500]}")
+            parts.append(f"Project Summary: {project_summary[:500]}")
         if parent_summary:
-            parts.append(f"父组件概要: {parent_summary[:500]}")
+            parts.append(f"Parent Summary: {parent_summary[:500]}")
 
         parts.append(
-            "重要提示：\n"
-            "- 必须给出有实际语义的名称，不能是社区编号\n"
-            "- **禁止逐文件调用 read_file**，一律用 summarize_file 批量读取\n"
-            "- 分析完成后只输出 JSON，不要包含其他文本"
+            "Important Notes:\n"
+            "- Must provide a semantically meaningful name, not a community ID\n"
+            "- **Do not call read_file per file**, always use summarize_file for batch reads\n"
+            "- Only output JSON upon completion, no other text"
         )
         return "\n".join(parts)
 
@@ -113,5 +113,5 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
                 "failed": total - success_count,
                 "total": total,
             },
-            summary=f"Agentic 逐组件分析完成: {success_count}/{total} 成功",
+            summary=f"Agentic per-component analysis complete: {success_count}/{total} succeeded",
         )

@@ -210,10 +210,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if _stale:
             logger.warning(f"[startup] Found {len(_stale)} stale running tasks, marking as error")
             _store._db.execute(
-                "UPDATE analysis_tasks SET status='error', error='进程重启，任务已中断' WHERE status='running'"
+                "UPDATE analysis_tasks SET status='error', error='Process restarted, task interrupted' WHERE status='running'"
             )
             _store._db.execute(
-                "UPDATE analysis_task_runs SET status='error', error='进程重启', finished_at=datetime('now') WHERE status='running'"
+                "UPDATE analysis_task_runs SET status='error', error='Process restarted', finished_at=datetime('now') WHERE status='running'"
             )
             _store._db.commit()
     except Exception as _e:
@@ -418,17 +418,17 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             before = project_db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             project_db.execute(f"DELETE FROM {table}")
             deleted_tables[table] = before
-            logger.info(f"[analysis.clearProjectCache] 删除 {table}: {before} 条记录")
+            logger.info(f"[analysis.clearProjectCache] deleted {table}: {before} records")
         project_db.commit()
 
         # 先清理 WAL 文件，再 VACUUM 回收磁盘空间
         project_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         import os
         proj_db_path = project_db.db_path
-        logger.info(f"[analysis.clearProjectCache] VACUUM 项目库 {project_id} (尺寸: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)...")
+        logger.info(f"[analysis.clearProjectCache] VACUUM project DB {project_id} (size: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)...")
         project_db.execute("VACUUM")
         project_db.commit()
-        logger.info(f"[analysis.clearProjectCache] VACUUM 完成 (尺寸: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)")
+        logger.info(f"[analysis.clearProjectCache] VACUUM done (size: {os.path.getsize(proj_db_path)/1024/1024:.1f} MB)")
 
         # 清除主库中的任务（连带 runs/reports/history）
         task_store = TaskStore(multi_db.main_db)
@@ -441,10 +441,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         # VACUUM 主库
         multi_db.main_db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         main_db_path = os.path.join(multi_db.data_dir, "topoone.db")
-        logger.info(f"[analysis.clearProjectCache] VACUUM 主库 (尺寸: {os.path.getsize(main_db_path)/1024/1024:.1f} MB)...")
+        logger.info(f"[analysis.clearProjectCache] VACUUM main DB (size: {os.path.getsize(main_db_path)/1024/1024:.1f} MB)...")
         multi_db.main_db.execute("VACUUM")
         multi_db.main_db.commit()
-        logger.info(f"[analysis.clearProjectCache] VACUUM 主库完成 (尺寸: {os.path.getsize(main_db_path)/1024/1024:.1f} MB)")
+        logger.info(f"[analysis.clearProjectCache] VACUUM main DB done (size: {os.path.getsize(main_db_path)/1024/1024:.1f} MB)")
 
         logger.info(
             f"[analysis.clearProjectCache] project={project_id}, "
@@ -527,15 +527,15 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             if not is_task_executing(tid):
                 # 孤儿任务（后端重启后残留），直接恢复为 error
                 logger.warning(f"[analysis.stopTask] task={tid} is orphan (not executing), recovering to error")
-                store.update_task_status(tid, "error", error="任务执行中断（后端异常终止）")
+                store.update_task_status(tid, "error", error="Task execution interrupted (backend terminated abnormally)")
                 # 同时修复对应的 run 记录
                 store._db.execute(
-                    "UPDATE analysis_task_runs SET status='error', error='执行中断', finished_at=datetime('now') WHERE task_id=? AND status='running'",
+                    "UPDATE analysis_task_runs SET status='error', error='Execution interrupted', finished_at=datetime('now') WHERE task_id=? AND status='running'",
                     (tid,),
                 )
                 store._db.commit()
                 server.publish("task", "error", {
-                    "taskId": tid, "error": "执行中断（后端异常终止）",
+                    "taskId": tid, "error": "Execution interrupted (backend terminated abnormally)",
                 })
                 return {"taskId": tid, "status": "error"}
 
@@ -2281,14 +2281,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     (tid, et, lv)
                 ).fetchone()[0]
                 if analyzed < comm_count:
-                    missing.append(f"{et} {lv}: {analyzed}/{comm_count} 未分析")
+                    missing.append(f"{et} {lv}: {analyzed}/{comm_count} not analyzed")
         if missing:
-            raise ValueError(f"前置依赖不满足: {'; '.join(missing)}。请先用 /analyze_components 分析后再试。")
+            raise ValueError(f"Prerequisites not met: {'; '.join(missing)}. Please run /analyze_components first.")
 
         # ── 检查是否已生成（跳过）──
         if not force:
             existing = project_db.execute(
-                "SELECT id FROM report_subdocs WHERE task_id=? AND comm_id='overall' AND (title='架构概览文档' OR template_id='overview')",
+                "SELECT id FROM report_subdocs WHERE task_id=? AND comm_id='overall' AND (title='Architecture Overview Document' OR template_id='overview')",
                 (tid,)
             ).fetchone()
             if existing:
@@ -2327,7 +2327,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 overview = (state_dict.get("result") or {}).get("overview", "")
                 if overview:
                     from report_tree_service import save_overall_doc
-                    save_overall_doc(multi_db, tid, "架构概览文档", overview)
+                    save_overall_doc(multi_db, tid, "Architecture Overview Document", overview)
                     logger.info(f"[startOverview] saved overview doc for task {tid}, len={len(overview)}")
             except Exception as e:
                 logger.warning(f"[startOverview] failed to save overview doc: {e}")
@@ -2438,7 +2438,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         router.register("pipeline", RouteEntry(
             workflow_class=PipelineWorkflow,
             tool_builder=lambda ctx: tools,
-            description="流水线整体激活：项目摘要->预摘要->组件分析->架构分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新生成), -L zh/en (输出语言)",
+            description="Pipeline execution: project summary -> pre-summary -> component analysis -> architecture analysis. Options: -j N (concurrency 1-5, default 1), --force (force regenerate), -L zh/en (output language)",
             sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
         ))
 
@@ -2659,7 +2659,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if limit > 0:
             batch_files = batch_files[:limit]
         if not batch_files:
-            return {"success": False, "error": f"批次 {batch} 无文件"}
+            return {"success": False, "error": f"no files in batch {batch}"}
 
         # 查询已缓存文件集（路径格式：项目相对路径，与 _compute_file_ranks 和 SubAgent 一致）
         cached_paths: set[str] = set()
@@ -2909,9 +2909,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             try:
                 turns = int(raw_turns)
             except (TypeError, ValueError):
-                return {"success": False, "error": f"max_turns 必须是整数 (1-30)，收到: {raw_turns}"}
+                return {"success": False, "error": f"max_turns must be an integer (1-30), got: {raw_turns}"}
         if turns < 1 or turns > 30:
-            return {"success": False, "error": f"max_turns 必须在 1-30 之间，收到: {turns}"}
+            return {"success": False, "error": f"max_turns must be between 1-30, got: {turns}"}
 
         # 解析分析模式
         mode = str(analysis_mode or analysisMode or "quick").lower()
@@ -2926,9 +2926,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     "SELECT id FROM model_configs WHERE id=?", (summary_model,)
                 )
                 if not sm:
-                    return {"success": False, "error": f"摘要模型未配置: {summary_model}"}
+                    return {"success": False, "error": f"summary model not configured: {summary_model}"}
             except Exception as e:
-                return {"success": False, "error": f"摘要模型校验失败: {e}"}
+                return {"success": False, "error": f"summary model validation failed: {e}"}
 
         try:
             store = TaskStore(multi_db.main_db)
@@ -3016,7 +3016,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 # 确定 edge label
                 parts = cid.split("-")
                 edge_kind = parts[2] if len(parts) > 2 and parts[0] == "comm" else "incl"
-                edge_label = {"incl": "依赖关系 (INCLUDE)", "call": "调用关系 (CALL)"}.get(edge_kind, "关系")
+                edge_label = {"incl": "Dependency (INCLUDE)", "call": "Call relation (CALL)"}.get(edge_kind, "relation")
 
                 # 构建社区元数据（供 CommunityInfoIngredient）
                 comm_meta = {
@@ -3052,9 +3052,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
                 if agentic_mode:
                     context_text += (
-                        f"\n任务ID: {tid}"
-                        f"\n工具引导: 使用 summarize_file 读取并摘要关键文件; "
-                        f"get_community_subgraph 查看完整子图结构"
+                        f"\nTask ID: {tid}"
+                        f"\nTool guide: use summarize_file to read and summarize key files; "
+                        f"get_community_subgraph to view the complete subgraph structure"
                     )
 
                 enriched_comps.append({
@@ -3459,9 +3459,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         """返回当前 Agent 路由、技能、工具的元数据"""
         return {
             "routes": [
-                {"action": "overview", "workflow": "OverviewWorkflow", "description": "生成整体架构概览文档"},
-                {"action": "analyze_components", "workflow": "AgenticComponentAnalystWorkflow", "description": "Agent 多轮组件分析"},
-                {"action": "presummary_files", "workflow": "PreSummaryWorkflow", "description": "文件预摘要批量缓存"},
+                {"action": "overview", "workflow": "OverviewWorkflow", "description": "Generate overall architecture overview document"},
+                {"action": "analyze_components", "workflow": "AgenticComponentAnalystWorkflow", "description": "Agent multi-turn component analysis"},
+                {"action": "presummary_files", "workflow": "PreSummaryWorkflow", "description": "File pre-summary batch cache"},
             ],
             "skills": [
                 {"name": "skill_generate_arch_overview", "description": "Generate architecture overview", "steps": 3},
@@ -3492,7 +3492,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             ],
         }
 
-    logger.info("[task_manager] 所有 analysis.* 方法已注册")
+    logger.info("[task_manager] all analysis.* methods registered")
 
     # 启动时恢复孤儿任务（后端异常终止后残留的 running 状态）
     try:
@@ -3506,9 +3506,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             oname = row[1]
             if not is_task_executing(oid):
                 logger.warning(f"[startup] Recovering orphan task {oid} ({oname}) -> error")
-                orphan_store.update_task_status(oid, "error", error="任务执行中断（后端异常终止）")
+                orphan_store.update_task_status(oid, "error", error="Task execution interrupted (backend terminated abnormally)")
                 orphan_store._db.execute(
-                    "UPDATE analysis_task_runs SET status='error', error='执行中断', finished_at=datetime('now') WHERE task_id=? AND status='running'",
+                    "UPDATE analysis_task_runs SET status='error', error='Execution interrupted', finished_at=datetime('now') WHERE task_id=? AND status='running'",
                     (oid,),
                 )
                 orphan_store._db.commit()

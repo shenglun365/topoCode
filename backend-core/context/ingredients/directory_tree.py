@@ -32,4 +32,4 @@ class DirectoryTreeIngredient(ContextIngredient):
     def format(self, data: list[str]) -> str:
         if not data:
             return ""
-        return "目录结构:\n" + "\n".join(data)
+        return "Directory structure:\n" + "\n".join(data)

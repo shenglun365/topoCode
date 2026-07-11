@@ -85,12 +85,12 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 ).fetchone()
                 if existing and existing[0] and not force:
                     _log.info(f"[Pipeline] summary already exists for {pid}")
-                    return ToolResult.ok({"summary": "项目摘要 ✅ 已存在"})
+                    return ToolResult.ok({"summary": "Project summary already exists"})
 
                 from core_service import _do_generate_project_summary
                 await _do_generate_project_summary(multi_db, pid)
                 _log.info(f"[Pipeline] generated project summary for {pid}")
-                return ToolResult.ok({"summary": "项目摘要 ✅ 已生成"})
+                return ToolResult.ok({"summary": "Project summary generated"})
             except Exception as e:
                 _log.warning(f"[Pipeline] ensure summary failed: {e}")
                 return ToolResult.fail(str(e))
@@ -122,7 +122,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         break
                     files = _pipeline_get_batch_files(project_db, task_id, pid, batch, force, project_root)
                     if not files:
-                        sub_results.append(f"{batch}: 0 文件 (全缓存)")
+                        sub_results.append(f"{batch}: 0 files (all cached)")
                         continue
 
                     ps = PathSandbox(project_root) if project_root else None
@@ -170,7 +170,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                     sub_results.append(f"{batch}: {result.steps_completed}/{result.steps_total}")
                     _log.info(f"[Pipeline] preSummary {batch}: {result.steps_completed}/{result.steps_total}")
 
-                summary = f"文件预摘要 ✅ {' | '.join(sub_results)}"
+                summary = f"File pre-summary OK {' | '.join(sub_results)}"
                 _log.info(f"[Pipeline] preSummary done: {summary}")
                 return ToolResult.ok({
                     "sub_step": len(batches), "sub_total": len(batches),
@@ -209,7 +209,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         break
                     components = _pipeline_get_level_components(project_db, task_id, level, force)
                     if not components:
-                        sub_results.append(f"{level}: 0 组件 (全已分析)")
+                        sub_results.append(f"{level}: 0 components (all analyzed)")
                         completed_levels += 1
                         continue
 
@@ -300,10 +300,10 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
 
                     completed_levels += 1
                     total_components += len(components)
-                    sub_results.append(f"{level}: {len(components)} 组件")
+                    sub_results.append(f"{level}: {len(components)} components")
                     _log.info(f"[Pipeline] component {level}: {len(components)} components done")
 
-                summary = f"组件分析 ✅ {' | '.join(sub_results)}"
+                summary = f"Component analysis OK {' | '.join(sub_results)}"
                 _log.info(f"[Pipeline] component analysis done: {summary}")
                 return ToolResult.ok({
                     "sub_step": completed_levels, "sub_total": len(levels),
@@ -388,12 +388,12 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 if overview:
                     try:
                         from report_tree_service import save_overall_doc
-                        save_overall_doc(multi_db, task_id, "架构概览文档", overview)
+                        save_overall_doc(multi_db, task_id, "Architecture Overview", overview)
                     except Exception as e2:
                         _log.warning(f"[Pipeline] save overview failed: {e2}")
 
                 _log.info(f"[Pipeline] overview done")
-                return ToolResult.ok({"overview_done": bool(overview), "summary": "整体架构分析 ✅ 已生成" if overview else "整体架构分析 ⚠️ 无内容"})
+                return ToolResult.ok({"overview_done": bool(overview), "summary": "Overall architecture analysis generated" if overview else "Overall architecture analysis: no content"})
             except Exception as e:
                 _log.warning(f"[Pipeline] overview failed: {e}")
                 return ToolResult.fail(str(e))

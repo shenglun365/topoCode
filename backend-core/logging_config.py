@@ -10,11 +10,19 @@
   TOPOCODE_LOG_DIR=~/.topocode/logs
   TOPOCODE_LOG_LEVEL=DEBUG|INFO|WARN|ERROR
 """
+import io
 import logging
 import os
 import sys
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
+
+# Ensure UTF-8 stdout on Windows (avoids garbled Chinese in console)
+if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 from config import LOG_DIR, LOG_LEVEL
 

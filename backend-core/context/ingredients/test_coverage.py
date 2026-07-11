@@ -22,4 +22,4 @@ class TestCoverageIngredient(ContextIngredient):
         if total == 0:
             return ""
         ratio = test / total
-        return f"## 测试覆盖\n总文件 {total}, 测试文件 {test} ({ratio:.1%})"
+        return f"## Test Coverage\nTotal files {total}, test files {test} ({ratio:.1%})"

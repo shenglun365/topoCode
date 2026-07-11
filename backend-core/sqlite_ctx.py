@@ -1680,6 +1680,12 @@ class MultiDBManager:
 
     def delete_project_db(self, project_id: str):
         """关闭连接 + 删除项目库文件（仅新架构 .topocode/data/project.db）"""
+        # Force checkpoint to release WAL lock before closing (required on Windows)
+        if project_id in self._project_db_cache:
+            try:
+                self._project_db_cache[project_id].execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
         self.close_project_db(project_id)
         try:
             row = self.main_db.execute(

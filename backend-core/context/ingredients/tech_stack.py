@@ -6,7 +6,7 @@ from ..ingredient import ContextIngredient
 
 
 class TechStackIngredient(ContextIngredient):
-    """从项目构建文件提取技术栈。"""
+    """Extract tech stack from project build files."""
     name = "tech_stack"
 
     def collect(self, ctx) -> list[str]:
@@ -36,7 +36,7 @@ class TechStackIngredient(ContextIngredient):
             lines.append("• Java / Maven")
         # go.mod
         if os.path.isfile(os.path.join(root, "go.mod")):
-            lines.append("• Go 模块")
+            lines.append("• Go module")
         # requirements.txt / pyproject.toml
         if os.path.isfile(os.path.join(root, "requirements.txt")):
             lines.append("• Python (requirements.txt)")
@@ -47,4 +47,4 @@ class TechStackIngredient(ContextIngredient):
     def format(self, data: list[str]) -> str:
         if not data:
             return ""
-        return "## 技术栈\n" + "\n".join(data)
+        return "## Tech Stack\n" + "\n".join(data)

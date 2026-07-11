@@ -201,7 +201,7 @@ class AgentRuntime:
         self._sandbox.budget.start()
 
         # 1. Plan
-        self._report(status=AgentStatus.PLANNING, message=f"规划中: {workflow.name}")
+        self._report(status=AgentStatus.PLANNING, message=f"Planning: {workflow.name}")
         try:
             steps = workflow.plan(context)
         except Exception as e:
@@ -270,7 +270,7 @@ class AgentRuntime:
                 status=AgentStatus.RUNNING,
                 step_current=i + 1,
                 step_total=len(steps),
-                message=f"执行: {step.description}",
+                message=f"Executing: {step.description}",
             )
 
             MAX_RETRIES = 2
@@ -396,7 +396,7 @@ class AgentRuntime:
             step_total=len(steps),
             tokens_used=self._sandbox.budget.tokens_used,
             elapsed_sec=self._sandbox.budget.elapsed,
-            message=f"完成: {completed_count}/{len(steps)} 步骤成功, {failed_count} 失败",
+            message=f"Complete: {completed_count}/{len(steps)} steps succeeded, {failed_count} failed",
             failed_count=failed_count,
             retry_count=retry_count,
         )
@@ -459,7 +459,7 @@ class AgentRuntime:
             StepProgress(
                 step_index=i,
                 step_total=len(components),
-                description=f"分析组件: {comp.get('name', comp.get('id', f'comp-{i}'))[:40]}",
+                description=f"Analyzing component: {comp.get('name', comp.get('id', f'comp-{i}'))[:40]}",
             )
             for i, comp in enumerate(components)
         ]
@@ -500,7 +500,7 @@ class AgentRuntime:
                 status=AgentStatus.RUNNING,
                 step_current=c_idx + 1,
                 step_total=len(components),
-                message=f"分析组件 {c_idx+1}/{len(components)}: {comp_name[:30]}",
+                message=f"Analyzing component {c_idx+1}/{len(components)}: {comp_name[:30]}",
             )
 
             # 构建单组件消息
@@ -508,7 +508,7 @@ class AgentRuntime:
                                                         detail_level=analysis_mode)
             user_context = comp.get("context", "")
             if not user_context:
-                user_context = f"组件ID: {comp_id}\n组件名称: {comp_name}\n组件类型: {comp.get('type', 'community')}"
+                user_context = f"Component ID: {comp_id}\nComponent Name: {comp_name}\nComponent Type: {comp.get('type', 'community')}"
 
             messages: list[dict] = [
                 {"role": "system", "content": system_prompt},
@@ -523,12 +523,12 @@ class AgentRuntime:
                     logger.info(f"[AgentRuntime] comp={comp_id} retry attempt {attempt} with enhanced prompt")
                     system_prompt = workflow.get_system_prompt(comp, project_summary, detail_level=analysis_mode)
                     system_prompt += (
-                        "\n\n【重要】前一次输出的 JSON 格式不符合要求。"
-                        "本次必须输出包含 'name'（名称≤20字）和 'summary'（功能概要100-2000字）字段的有效 JSON。"
+                        "\n\n[IMPORTANT] Previous JSON output did not meet requirements. "
+                        "This time you must output valid JSON with 'name' (≤20 chars) and 'summary' (100-2000 chars) fields."
                     )
                     user_context = comp.get("context", "")
                     if not user_context:
-                        user_context = f"组件ID: {comp_id}\n组件名称: {comp_name}\n组件类型: {comp.get('type', 'community')}"
+                        user_context = f"Component ID: {comp_id}\nComponent Name: {comp_name}\nComponent Type: {comp.get('type', 'community')}"
                     messages = [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_context},
@@ -590,26 +590,26 @@ class AgentRuntime:
                         if self._detect_tool_call_loop(response.tool_calls):
                             self._loop_warning_count += 1
                             if self._loop_warning_count >= 2:
-                                logger.warning(f"[AgentRuntime] comp={comp_id} 工具死循环，强制退出")
+                                logger.warning(f"[AgentRuntime] comp={comp_id} tool loop detected, force exit")
                                 final_response = self._build_agentic_fallback(comp, messages)
                                 break
-                            logger.info(f"[AgentRuntime] comp={comp_id} 工具死循环，推送提醒")
+                            logger.info(f"[AgentRuntime] comp={comp_id} tool loop detected, pushing reminder")
                             messages.append({
                                 "role": "user",
-                                "content": "你在重复相同的工具调用。请根据已有结果直接输出最终 JSON 分析结果。"
+                                "content": "You are repeating the same tool calls. Please directly output the final JSON analysis based on existing results."
                             })
                             continue
                     # ── 低质量内容检测 ──
                     elif response.content and _is_low_quality_content(response.content):
                         self._content_warning_count += 1
                         if self._content_warning_count >= 2:
-                            logger.warning(f"[AgentRuntime] comp={comp_id} 连续低质量内容，强制退出")
+                            logger.warning(f"[AgentRuntime] comp={comp_id} repeated low-quality content, force exit")
                             final_response = self._build_agentic_fallback(comp, messages)
                             break
-                        logger.info(f"[AgentRuntime] comp={comp_id} 低质量内容，推送提醒")
+                        logger.info(f"[AgentRuntime] comp={comp_id} low-quality content, pushing reminder")
                         messages.append({
                             "role": "user",
-                            "content": "请输出有意义的分析内容，不要输出空白或重复字符。"
+                            "content": "Please output meaningful analysis content, do not output blank or repeated characters."
                         })
                         continue
 
@@ -619,10 +619,10 @@ class AgentRuntime:
                             break
                         # 模型返回空内容 + 无工具调用 → 引导输出 JSON（最多引导 1 次）
                         if turn < effective_max_turns - 1:
-                            logger.info(f"[AgentRuntime] comp={comp_id} push: 引导输出 JSON")
+                            logger.info(f"[AgentRuntime] comp={comp_id} push: guide to output JSON")
                             messages.append({
                                 "role": "user",
-                                "content": "请根据已有的所有工具结果，直接输出最终 JSON 分析结果。"
+                                "content": "Based on all existing tool results, directly output the final JSON analysis result."
                             })
                             continue
                         final_response = ""
@@ -630,7 +630,7 @@ class AgentRuntime:
 
                     # 最后一轮：不执行工具，用已有 content（可能为空）退出
                     if turn == effective_max_turns - 1:
-                        logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮，忽略工具调用")
+                        logger.info(f"[AgentRuntime] comp={comp_id} last turn, ignoring tool calls")
                         final_response = response.content or ""
                         break
 
@@ -681,10 +681,10 @@ class AgentRuntime:
 
                     # 倒数第二轮：追加提醒，让模型在最后一轮直接输出 JSON
                     if turn == effective_max_turns - 2:
-                        logger.info(f"[AgentRuntime] comp={comp_id} 最后一轮提醒")
+                        logger.info(f"[AgentRuntime] comp={comp_id} last turn reminder")
                         messages.append({
                             "role": "user",
-                            "content": "这是最后一轮。请根据已有的所有信息，直接输出最终 JSON 分析结果，不要再调用工具。"
+                            "content": "This is the last turn. Based on all existing information, directly output the final JSON analysis, do not call any more tools."
                         })
 
                 if self._cancelled:
@@ -728,7 +728,7 @@ class AgentRuntime:
             status=self._status,
             step_current=len(components),
             step_total=len(components),
-            message=f"完成: {len(components)} 组件, {total_turns} 轮",
+            message=f"Complete: {len(components)} components, {total_turns} turns",
         )
         return final
 
@@ -825,9 +825,9 @@ class AgentRuntime:
                 role = item.get("role", "")
                 kf = item.get("key_files", [])
                 deps = item.get("depends_on", [])
-                summary_parts = [f"## 功能概要\n{raw_summary}"]
+                summary_parts = [f"## Functional Summary\n{raw_summary}"]
                 if role:
-                    summary_parts.append(f"\n**架构角色**: {role}")
+                    summary_parts.append(f"\n**Architecture Role**: {role}")
                 if kf:
                     files_lines = []
                     for f in kf[:10]:
@@ -841,10 +841,10 @@ class AgentRuntime:
                         elif isinstance(f, str):
                             files_lines.append(f"- `{f}`")
                     if files_lines:
-                        summary_parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
+                        summary_parts.append(f"\n**Key Files**:\n" + "\n".join(files_lines))
                 if deps:
                     deps_md = ", ".join(deps[:10])
-                    summary_parts.append(f"\n**依赖组件**: {deps_md}")
+                    summary_parts.append(f"\n**Dependencies**: {deps_md}")
                 enhanced_summary = "\n".join(summary_parts)
                 save_fn({
                     "task_id": context.get("task_id", ""),
@@ -878,9 +878,9 @@ class AgentRuntime:
                             role = item.get("role", "")
                             kf = item.get("key_files", [])
                             deps = item.get("depends_on", [])
-                            summary_parts = [f"## 功能概要\n{raw_summary}"]
+                            summary_parts = [f"## Functional Summary\n{raw_summary}"]
                             if role:
-                                summary_parts.append(f"\n**架构角色**: {role}")
+                                summary_parts.append(f"\n**Architecture Role**: {role}")
                             if kf:
                                 files_lines = []
                                 for f in kf[:10]:
@@ -894,10 +894,10 @@ class AgentRuntime:
                                     elif isinstance(f, str):
                                         files_lines.append(f"- `{f}`")
                                 if files_lines:
-                                    summary_parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
+                                    summary_parts.append(f"\n**Key Files**:\n" + "\n".join(files_lines))
                             if deps:
                                 deps_md = ", ".join(deps[:10])
-                                summary_parts.append(f"\n**依赖组件**: {deps_md}")
+                                summary_parts.append(f"\n**Dependencies**: {deps_md}")
                             enhanced_summary = "\n".join(summary_parts)
                             save_fn({
                                 "task_id": context.get("task_id", ""),
@@ -968,11 +968,11 @@ class AgentRuntime:
                 unique_files.append(f)
         files_preview = "\n".join(f"- `{f}`" for f in unique_files[:10])
         parts = [
-            f"组件: {cname}",
-            f"分析状态: 已处理 {len(unique_files)} 个文件，但 LLM 未返回结构化分析结果",
+            f"Component: {cname}",
+            f"Analysis status: processed {len(unique_files)} files, but LLM did not return structured analysis results",
         ]
         if files_preview:
-            parts.append(f"\n已处理文件:\n{files_preview}")
+            parts.append(f"\nProcessed files:\n{files_preview}")
         return "\n".join(parts)
 
     @property

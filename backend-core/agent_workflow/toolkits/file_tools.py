@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 class ReadFileTool(AgentTool):
-    """读取指定文件内容"""
+    """Read specified file content"""
 
     name = "read_file"
-    description = "读取指定文件的完整内容（自动截断超过 5000 字符的部分）"
+    description = "Read full content of specified file (auto-truncates beyond 5000 chars)"
     category = "io"
     llm_visible = True
 
@@ -34,7 +34,7 @@ class ReadFileTool(AgentTool):
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "文件路径（绝对路径，或相对于项目根目录的相对路径）",
+                            "description": "File path (absolute, or relative to project root)",
                         },
                     },
                     "required": ["path"],
@@ -44,7 +44,7 @@ class ReadFileTool(AgentTool):
 
     async def execute(self, path: str = "", **kwargs) -> ToolResult:
         try:
-            # 兼容 LLM 可能传入的 file_path / filepath 等参数名
+            # Compatible with LLM possibly passing file_path / filepath etc.
             if not path:
                 path = kwargs.get("file_path", kwargs.get("filepath", kwargs.get("filename", "")))
             abs_path = path
@@ -53,14 +53,14 @@ class ReadFileTool(AgentTool):
             if self._path_sandbox:
                 abs_path = self._path_sandbox.validate_read(abs_path)
             if not os.path.isfile(abs_path) and self._project_root:
-                # 精确路径未命中 → basename 模糊匹配兜底
+                # Exact path miss → fallback to basename fuzzy match
                 from ..path_utils import resolve_file
                 resolved = resolve_file(path, self._project_root)
                 if resolved:
                     abs_path = resolved
             if not os.path.isfile(abs_path):
                 logger.warning(f"[ReadFileTool] file not found: {path} (resolved: {abs_path})")
-                return ToolResult.fail(f"文件不存在: {path}")
+                return ToolResult.fail(f"File not found: {path}")
             try:
                 with open(abs_path, "r", encoding="utf-8") as f:
                     content = f.read(10000)
@@ -68,7 +68,7 @@ class ReadFileTool(AgentTool):
                 with open(abs_path, "r", encoding="latin-1") as f:
                     content = f.read(10000)
             if len(content) >= 10000:
-                content += "\n\n...（文件过长已截断）"
+                content += "\n\n...(file too long, truncated)"
             return ToolResult.ok(data=content)
         except Exception as e:
             logger.warning(f"[ReadFileTool] failed: {e}")
@@ -76,10 +76,10 @@ class ReadFileTool(AgentTool):
 
 
 class SearchContentTool(AgentTool):
-    """在文件内容中搜索关键字或正则表达式"""
+    """Search for keywords or regex patterns in file content"""
 
     name = "search_content"
-    description = "在文件中搜索关键字或正则表达式，返回匹配行及其行号（最多 50 行）"
+    description = "Search for keywords or regex in files, returns matching lines with line numbers (max 50 lines)"
     category = "io"
     llm_visible = True
 
@@ -98,11 +98,11 @@ class SearchContentTool(AgentTool):
                     "properties": {
                         "pattern": {
                             "type": "string",
-                            "description": "搜索关键字或正则表达式",
+                            "description": "Search keyword or regex pattern",
                         },
                         "path": {
                             "type": "string",
-                            "description": "文件路径（可选，不指定则在项目内所有常见源码文件中搜索）",
+                            "description": "File path (optional, searches all common source files if not specified)",
                         },
                     },
                     "required": ["pattern"],
@@ -138,7 +138,7 @@ class SearchContentTool(AgentTool):
                             target_paths.append(os.path.join(root, f))
 
             if not target_paths:
-                return ToolResult.fail(f"未找到匹配的文件: {path or '(project root)'}")
+                return ToolResult.fail(f"No matching files found: {path or '(project root)'}")
 
             results: list[str] = []
             for fp in target_paths[:200]:
@@ -156,7 +156,7 @@ class SearchContentTool(AgentTool):
                     break
 
             if not results:
-                return ToolResult.fail(f"未找到匹配 '{pattern}' 的内容")
+                return ToolResult.fail(f"Content not found matching '{pattern}'")
             return ToolResult.ok(data="\n".join(results))
         except Exception as e:
             logger.warning(f"[SearchContentTool] failed: {e}")
@@ -164,10 +164,10 @@ class SearchContentTool(AgentTool):
 
 
 class SummarizeFileTool(AgentTool):
-    """读取并摘要文件（LLM 可见），利用缓存避免重复 LLM 调用"""
+    """Read and summarize files (LLM visible), uses cache to avoid repeated LLM calls"""
 
     name = "summarize_file"
-    description = "读取一个或多个文件并生成功能摘要（≤10个文件）。已摘要的文件自动复用缓存。适用于快速了解大量文件的功能。"
+    description = "Read one or more files and generate functional summaries (≤10 files). Already summarized files auto-use cache. Useful for quickly understanding many files."
     category = "io"
     llm_visible = True
 
@@ -196,15 +196,15 @@ class SummarizeFileTool(AgentTool):
                         "path": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "要摘要的文件路径列表（绝对或相对路径，≤10个）",
+                            "description": "List of file paths to summarize (absolute or relative, ≤10)",
                         },
                         "focus": {
                             "type": "string",
-                            "description": "摘要侧重点，如'关注函数接口定义'（可选）",
+                            "description": "Summary focus, e.g. 'focus on function interface definitions' (optional)",
                         },
                         "force_refresh": {
                             "type": "boolean",
-                            "description": "忽略缓存，强制重新读取并摘要（可选，默认 false）",
+                            "description": "Ignore cache, force re-read and re-summarize (optional, default false)",
                         },
                     },
                     "required": ["path"],
@@ -220,7 +220,7 @@ class SummarizeFileTool(AgentTool):
             files = files[:10]
 
             if not files:
-                return ToolResult.fail("未指定文件路径")
+                return ToolResult.fail("No file path specified")
 
             from ..path_utils import to_abs
             safe_files = []
@@ -232,7 +232,7 @@ class SummarizeFileTool(AgentTool):
                     safe_files.append(abs_path)
 
             if not self._project_db or not self._project_id:
-                return ToolResult.fail("文件摘要功能未配置 project_db")
+                return ToolResult.fail("File summary feature not configured: missing project_db")
 
             from ..file_summary_cache import FileSummaryCache
             from ..sub_agent import SubAgent
@@ -264,15 +264,15 @@ class SummarizeFileTool(AgentTool):
                 tag = ""
                 if s.get("cached"):
                     ct = s.get("cached_at", "")
-                    tag = f" (缓存{', ' + ct if ct else ''})"
+                    tag = f" (cached{', ' + ct if ct else ''})"
                 lines.append(f"======== {fp_short}{tag} ========\n{s['summary']}\n")
             lines.append(
-                f"[摘要统计: {result.files_processed} 文件, "
-                f"缓存命中 {result.cache_hits}, "
-                f"缓存未命中 {result.cache_misses}, "
-                f"节省 ~{result.tokens_saved} tokens, "
-                f"消耗 {result.tokens_used} tokens"
-                + (f", 失败 {result.failed} 个" if result.failed else "")
+                f"[Summary stats: {result.files_processed} files, "
+                f"cache hits {result.cache_hits}, "
+                f"cache misses {result.cache_misses}, "
+                f"saved ~{result.tokens_saved} tokens, "
+                f"consumed {result.tokens_used} tokens"
+                + (f", failed {result.failed}" if result.failed else "")
                 + "]"
             )
 

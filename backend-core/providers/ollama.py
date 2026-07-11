@@ -1,6 +1,6 @@
-"""Ollama LLM Provider — BaseLLMProvider 实现
+"""Ollama LLM Provider — BaseLLMProvider implementation
 
-Ollama 原生 API: POST /api/chat
+Ollama native API: POST /api/chat
 """
 
 import json as _json
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(BaseLLMProvider):
-    """Ollama API (自定义) 聊天补全"""
+    """Ollama API (custom) chat completion"""
 
     supports_tools = True
 
@@ -57,7 +57,7 @@ class OllamaProvider(BaseLLMProvider):
                 for m in payload.get('messages', [])
             ],
         }
-        logger.info(f"[LLM_REQ] Ollama 请求: {_json.dumps(_log_payload, ensure_ascii=False)}")
+        logger.info(f"[LLM_REQ] Ollama request: {_json.dumps(_log_payload, ensure_ascii=False)}")
 
         try:
             resp = requests.post(f'{base_url}/api/chat', json=payload, stream=True, timeout=timeout)
@@ -131,14 +131,14 @@ class OllamaProvider(BaseLLMProvider):
                 'total_tokens': (prompt_eval_count or 0) + (eval_count or 0),
             }
 
-        # 解析 Ollama 原生 tool_calls 格式
+        # Parse Ollama native tool_calls format
         raw_calls = msg.get('tool_calls', [])
         tool_calls = []
         for tc in raw_calls:
             fn = tc.get('function', {})
             name = fn.get('name', '')
             args_raw = fn.get('arguments', {})
-            # Ollama 的 arguments 是 dict，OpenAI 的是 JSON string，统一转为 string
+            # Ollama arguments is a dict, OpenAI's is a JSON string; unify to string
             arguments_str = _json.dumps(args_raw) if isinstance(args_raw, dict) else str(args_raw)
             tool_calls.append({
                 "id": tc.get("id", ""),

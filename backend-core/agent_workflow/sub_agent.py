@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 _MIN_SUMMARY_LEN = 30
 
 _KIND_LABELS = {
-    "function": "函数", "method": "方法", "class": "类",
-    "struct": "结构体", "enum": "枚举", "interface": "接口",
-    "variable": "变量", "import": "导入", "field": "字段",
-    "property": "属性",
+    "function": "function", "method": "method", "class": "class",
+    "struct": "struct", "enum": "enum", "interface": "interface",
+    "variable": "variable", "import": "import", "field": "field",
+    "property": "property",
 }
 
 _MAX_PER_KIND = 30  # 结构化展示时每类最多展示的符号数
@@ -43,13 +43,13 @@ class SubAgentResult:
 
 
 def _is_valid_summary(summary: str) -> bool:
-    """判断摘要质量是否达到缓存标准。"""
+    """Check if summary quality meets cache threshold."""
     if not summary:
         return False
     if len(summary) < _MIN_SUMMARY_LEN:
         return False
     # 排除错误占位符
-    bad_markers = ["(无法读取)", "摘要失败", "无法读取文件"]
+    bad_markers = ["(unreadable)", "summary failed", "cannot read file"]
     return not any(m in summary for m in bad_markers)
 
 
@@ -153,7 +153,7 @@ class SubAgent:
 
             # ── 按文件大小分流: >10KB + AST 有数据 → 结构化提取 ──
             if self._should_use_structure(fp):
-                logger.info(f"[FileCache] MISS: {rel} → 结构化提取 (AST)")
+                logger.info(f"[FileCache] MISS: {rel} → structured extraction (AST)")
                 header = self._read_file_header(abs_fp, 2000)
                 structure = self._extract_structure(abs_fp)
                 if structure:
@@ -174,17 +174,17 @@ class SubAgent:
                                 total_tokens += tokens or 0
                         except Exception as e:
                             logger.warning(f"[FileCache] SUMMARIZE-ERR: {rel}: {e}")
-                            summary = f"摘要失败: {e}"
+                            summary = f"summary failed: {e}"
                             async with lock:
                                 failed += 1
                 else:
                     # AST 无数据，回退到文件读取
-                    logger.info(f"[FileCache] MISS: {rel} → AST 无数据, 回退全文读取")
+                    logger.info(f"[FileCache] MISS: {rel} → AST empty, fallback to full read")
                     content = await asyncio.to_thread(self._read_file, abs_fp)
                     if content is None:
                         async with lock:
                             failed += 1
-                        return {"path": fp, "summary": "(无法读取)", "cached": False,
+                        return {"path": fp, "summary": "(unreadable)", "cached": False,
                                 "cached_at": ""}
                     async with lock:
                         total_read_chars += len(content)
@@ -200,18 +200,18 @@ class SubAgent:
                                 total_tokens += tokens or 0
                         except Exception as e:
                             logger.warning(f"[FileCache] SUMMARIZE-ERR: {rel}: {e}")
-                            summary = f"摘要失败: {e}"
+                            summary = f"summary failed: {e}"
                             async with lock:
                                 failed += 1
             else:
                 # ≤ 10KB → 直接读取文件
-                logger.info(f"[FileCache] MISS: {rel} → reading + LLM摘要")
+                logger.info(f"[FileCache] MISS: {rel} → reading + LLM summary")
                 content = await asyncio.to_thread(self._read_file, abs_fp)
                 if content is None:
                     logger.warning(f"[FileCache] READ-ERR: {rel} (file not found)")
                     async with lock:
                         failed += 1
-                    return {"path": fp, "summary": f"(无法读取)", "cached": False,
+                    return {"path": fp, "summary": f"(unreadable)", "cached": False,
                             "cached_at": ""}
                 async with lock:
                     total_read_chars += len(content)
@@ -227,7 +227,7 @@ class SubAgent:
                             total_tokens += tokens or 0
                     except Exception as e:
                         logger.warning(f"[FileCache] SUMMARIZE-ERR: {rel}: {e}")
-                        summary = f"摘要失败: {e}"
+                        summary = f"summary failed: {e}"
                         async with lock:
                             failed += 1
 
@@ -289,18 +289,18 @@ class SubAgent:
             except Exception:
                 return None
         if len(content) >= 10000:
-            content += "\n\n...（文件过长已截断）"
+            content += "\n\n...(file too long, truncated)"
         return content
 
     def _read_file_header(self, path: str, max_chars: int = 2000) -> str:
-        """读取文件头部（注释+imports），最多 max_chars 字符。"""
+        """Read file header (comments+imports), at most max_chars chars."""
         content = self._read_file(path)
         if not content:
             return ""
         return content[:max_chars]
 
     def _should_use_structure(self, path: str) -> bool:
-        """有 AST 数据时使用结构化提取，无数据时回退全文读取。"""
+        """Use structured extraction when AST data available, fallback to full read otherwise."""
         if not self._project_db or not self._task_id:
             return False
         try:
@@ -380,10 +380,10 @@ class SubAgent:
         rel_path = to_rel(structure["file_path"], self._project_root)
 
         lines = [
-            f"## 文件符号结构: {rel_path}  ({structure['symbol_count']} 个符号)\n",
+            f"## File Symbol Structure: {rel_path}  ({structure['symbol_count']} symbols)\n",
         ]
         if header:
-            lines.append(f"### 文件头部\n```\n{header.strip()[:2000]}\n```\n")
+            lines.append(f"### File Header\n```\n{header.strip()[:2000]}\n```\n")
 
         for kind, kind_symbols in structure["by_kind"].items():
             count = len(kind_symbols)
@@ -395,7 +395,7 @@ class SubAgent:
                 sig = (s.get("signature") or "")[:120]
                 doc = (s.get("docstring") or "")[:80]
                 vis = s.get("visibility", "")
-                is_exp = "导出" if s.get("is_exported") else ""
+                is_exp = "exported" if s.get("is_exported") else ""
                 line_range = f"L{s.get('start_line', '?')}-{s.get('end_line', '?')}"
                 parts = [f"`{name}`"]
                 if sid:
@@ -415,24 +415,24 @@ class SubAgent:
                 if doc:
                     lines.append(f"     doc: \"{doc}\"")
             if count > _MAX_PER_KIND:
-                lines.append(f"  ... 还有 {count - _MAX_PER_KIND} 个 {label}")
+                lines.append(f"  ... {count - _MAX_PER_KIND} more {label}")
             lines.append("")
 
         if edges:
-            lines.append(f"### 内部调用关系 ({len(edges)} 条)")
+            lines.append(f"### Internal Call Relations ({len(edges)})")
             for e in edges[:30]:
                 lines.append(f"- {e}")
 
         lines.append(
-            "\n> 使用 get_symbol_code(file_path=\"...\", name=\"符号名\") "
-            "获取完整代码。"
-            " 使用 get_symbol_detail(symbol_id=\"...\") 查看元数据。"
+            "\n> Use get_symbol_code(file_path=\"...\", name=\"symbol_name\") "
+            "to get full code. "
+            "Use get_symbol_detail(symbol_id=\"...\") to view metadata."
         )
         return "\n".join(lines)
 
     async def _summarize(self, content: str, filepath: str, focus: str = "",
                          is_structure: bool = False) -> tuple[str, int]:
-        """调用 LLM 对文件内容进行结构化摘要。"""
+        """Call LLM for structured summary of file content."""
         # ── 文件元上下文（导出/导入/引用方/类型） ──
         meta_header = ""
         try:
@@ -452,28 +452,28 @@ class SubAgent:
             pass
 
         intro = (
-            "你是代码分析助手。请根据以下信息，生成该文件的摘要。"
-            "按固定格式输出，每行一条：\n"
-            "[类型] module\n"
-            "[用途] 一句话说明文件功能（30字内）\n"
-            "[导出] 关键函数/类名，逗号分隔\n"
-            "[依赖] 外部包或文件依赖\n"
-            "[说明] 详细说明功能（100字以内）\n\n"
+            "You are a code analysis assistant. Generate a summary for the file based on the information below. "
+            "Output in fixed format, one per line:\n"
+            "[Type] module\n"
+            "[Purpose] One sentence describing file function (within 30 chars)\n"
+            "[Exports] Key function/class names, comma separated\n"
+            "[Dependencies] External packages or file dependencies\n"
+            "[Description] Detailed functional description (within 100 chars)\n\n"
         )
         prompt = meta_header + intro
         if focus:
-            prompt += f"摘要侧重点: {focus}\n\n"
-        prompt += f"文件路径: {filepath}\n"
-        content_label = "文件符号结构" if is_structure else "文件内容"
+            prompt += f"Summary focus: {focus}\n\n"
+        prompt += f"File path: {filepath}\n"
+        content_label = "Symbol structure" if is_structure else "File content"
         prompt += f"{content_label}:\n```\n{content[:40000]}\n```\n\n"
-        prompt += "请用中文输出摘要："
+        prompt += "Please output the summary:"
 
         model = self._model_id
         if not model:
             from .tool_calling.strategy import _resolve_model_id
             model = _resolve_model_id(self._multi_db)
         if not model:
-            raise RuntimeError("无法解析摘要模型 ID")
+            raise RuntimeError("Unable to resolve summary model ID")
 
         from llm_service import LLMService
         service = LLMService(self._multi_db)

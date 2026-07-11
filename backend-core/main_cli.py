@@ -143,7 +143,7 @@ def _cmd_installer(args):
         installer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(installer)
     except Exception as e:
-        print(f"无法加载 installer 插件: {e}")
+        print(f"Failed to load installer plugin: {e}")
 
     if args.command == "detect":
         installer._cmd_detect()
@@ -163,17 +163,17 @@ def _cmd_query(args):
         store_dir = os.path.join(project_root, ".topocode", "data")
         db_path = os.path.join(store_dir, "project.db")
         if not os.path.exists(db_path):
-            print(f"项目未初始化: {project_root}")
+            print(f"Project not initialized: {project_root}")
             return
         db = SQLiteContext(db_path)
         from analysis_context import AnalysisContext
         rows = db.execute("SELECT DISTINCT task_id FROM graph_node LIMIT 1").fetchall()
         if not rows:
-            print("未找到分析数据，请先运行 topocode init")
+            print("No analysis data found, please run topocode init first")
             return
         ctx = AnalysisContext(db, rows[0][0])
     except Exception as e:
-        print(f"加载分析数据失败: {e}")
+        print(f"Failed to load analysis data: {e}")
         return
 
     if args.command == "community":
@@ -189,13 +189,13 @@ def _cmd_query(args):
         layer = ctx.get_project_layer()
         result = {"what": layer.what, "how": layer.how, "why": layer.why, "detail": layer.detail}
     elif args.command == "diff":
-        result = {"message": "Diff 需要 SnapshotStore 数据。使用 --snapshot 模式运行分析。"}
+        result = {"message": "Diff requires SnapshotStore data. Run analysis with --snapshot mode."}
     elif args.command == "quality":
-        result = {"message": "MCP 功能已关闭"}
+        result = {"message": "MCP functionality is disabled"}
     elif args.command == "status":
         result = ctx.get_summary()
     else:
-        result = {"error": f"未知命令: {args.command}"}
+        result = {"error": f"Unknown command: {args.command}"}
 
     if use_json:
         import json
@@ -211,14 +211,14 @@ def _cmd_project(args):
     store_dir = os.path.join(project_root, ".topocode", "data")
     if args.command == "init":
         os.makedirs(store_dir, exist_ok=True)
-        print(f"topocode 项目已初始化: {project_root}")
-        print("使用 'topocode status' 查看分析状态。")
+        print(f"topocode project initialized: {project_root}")
+        print("Use 'topocode status' to view analysis status.")
     elif args.command == "uninit":
         import shutil
         topo_dir = os.path.join(project_root, ".topocode")
         if os.path.exists(topo_dir):
             shutil.rmtree(topo_dir)
-            print(f"已清除: {topo_dir}")
+            print(f"Cleared: {topo_dir}")
 
 
 def _cmd_arch(args):
@@ -227,22 +227,22 @@ def _cmd_arch(args):
     store_dir = os.path.join(project_root, ".topocode", "data")
     db_path = os.path.join(store_dir, "project.db")
     if not os.path.exists(db_path):
-        print(f"项目未初始化: {project_root}")
+        print(f"Project not initialized: {project_root}")
         return
 
     action = getattr(args, "arch_action", None)
     if not action:
-        print("使用: topocode arch [analyze|overview|export|list]")
+        print("Usage: topocode arch [analyze|overview|export|list]")
         return
 
-    print(f"[arch] {action} — 功能开发中 (AgentRuntime 已完成, 待集成)")
-    print(f"  项目: {project_root}")
+    print(f"[arch] {action} — feature in development (AgentRuntime complete, pending integration)")
+    print(f"  project: {project_root}")
     if action == "analyze":
-        print(f"  层级: {getattr(args, 'level', 'L0')}")
-        print(f"  类型: {getattr(args, 'edge_type', 'INCLUDE')}")
+        print(f"  level: {getattr(args, 'level', 'L0')}")
+        print(f"  type: {getattr(args, 'edge_type', 'INCLUDE')}")
     elif action == "export":
-        print(f"  格式: {getattr(args, 'format', 'md')}")
-        print(f"  输出: {getattr(args, 'output') or '.topocode/architecture/'}")
+        print(f"  format: {getattr(args, 'format', 'md')}")
+        print(f"  output: {getattr(args, 'output') or '.topocode/architecture/'}")
 
 
 def _cmd_track(args):
@@ -251,33 +251,33 @@ def _cmd_track(args):
     store_dir = os.path.join(project_root, ".topocode", "data")
     db_path = os.path.join(store_dir, "project.db")
     if not os.path.exists(db_path):
-        print(f"项目未初始化: {project_root}")
+        print(f"Project not initialized: {project_root}")
         return
 
     action = getattr(args, "track_action", None)
     if not action:
-        print("使用: topocode track [start|stop|list|status]")
+        print("Usage: topocode track [start|stop|list|status]")
         return
 
-    print(f"[track] {action} — 功能开发中 (ArchSentinel 已完成, 待集成)")
-    print(f"  项目: {project_root}")
+    print(f"[track] {action} — feature in development (ArchSentinel complete, pending integration)")
+    print(f"  project: {project_root}")
     if action == "start":
         tag = getattr(args, "tag", "") or f"v-auto-{int(time.time())}"
-        print(f"  标签: {tag}")
+        print(f"  tag: {tag}")
     elif action == "list":
-        print(f"  显示最近 {getattr(args, 'limit', 10)} 条记录")
+        print(f"  showing last {getattr(args, 'limit', 10)} records")
 
 
 def _cmd_diff(args):
     """版本差异命令。"""
     project_root = os.path.abspath(args.project_root)
-    print(f"[diff] — 功能开发中")
+    print(f"[diff] — feature in development")
     if args.diff_action == "snapshots":
-        print("  列出可用快照...")
+        print("  listing available snapshots...")
     elif args.diff_action == "compare":
         frm = getattr(args, "from_version", "") or "latest-previous"
         to = getattr(args, "to_version", "") or "current"
-        print(f"  对比: {frm} → {to}")
+        print(f"  comparing: {frm} → {to}")
 
 
 if __name__ == "__main__":

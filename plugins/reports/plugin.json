@@ -1,8 +1,8 @@
 {
   "id": "reports",
-  "name": "文档预览服务",
+  "name": "Reports",
   "version": "1.0.0",
-  "description": "FastAPI HTTP 服务，支持文档浏览、PlantUML 渲染",
+  "description": "FastAPI HTTP server for document viewing, PlantUML rendering",
   "entry": "plugin_entry",
   "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
   "dependencies": {

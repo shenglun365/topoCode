@@ -23,4 +23,4 @@ class ImportExternalIngredient(ContextIngredient):
     def format(self, data: list[str]) -> str:
         if not data:
             return ""
-        return f"外部依赖: {', '.join(data)}"
+        return f"External dependencies: {', '.join(data)}"

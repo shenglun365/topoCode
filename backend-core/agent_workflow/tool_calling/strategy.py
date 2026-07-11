@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 def _sanitize_tool_args(args: dict) -> dict:
-    """规范化模型端的工具调用参数，避免下游工具感知序列化差异。
+    """Normalize tool call arguments from model to avoid downstream serialization differences.
 
-    Qwen3.5 MTP 可能不严格遵循 OpenAI schema，
-    例如将数组序列化为 JSON 字符串: '["a","b"]' 而非原生 ["a","b"]。
+    Qwen3.5 MTP may not strictly follow OpenAI schema,
+    e.g. serializing arrays as JSON strings: '["a","b"]' instead of native ["a","b"].
     """
     sanitized = {}
     for k, v in args.items():
@@ -171,16 +171,16 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
             if fb_calls:
                 tool_calls = fb_calls
                 finish_reason = "tool_calls"
-                logger.info(f"[NativeStrategy] 从 reasoning_content 解析到 {len(fb_calls)} 个 XML 工具调用")
+                logger.info(f"[NativeStrategy] parsed {len(fb_calls)} XML tool calls from reasoning_content")
             else:
                 clean = extract_fallback_content(reasoning_content)
                 if clean:
                     content = clean
-                    logger.info(f"[NativeStrategy] 从 reasoning_content 提取 fallback 文本: {len(clean)} 字符")
+                    logger.info(f"[NativeStrategy] extracted fallback text from reasoning_content: {len(clean)} chars")
                 else:
-                    logger.warning(f"[NativeStrategy] reasoning_content 无有效内容 (len={len(reasoning_content)})")
+                    logger.warning(f"[NativeStrategy] reasoning_content has no valid content (len={len(reasoning_content)})")
         elif not tool_calls and not content:
-            logger.warning("[NativeStrategy] LLM 返回空内容且无 tool_calls")
+            logger.warning("[NativeStrategy] LLM returned empty content with no tool_calls")
 
         # 清理模型输出格式（去除代码围栏等）
         content = clean_model_content(content)
@@ -239,16 +239,16 @@ class TextFallbackToolCallingStrategy(ToolCallingStrategy):
                 desc = fn.get("description", "")
                 params = fn.get("parameters", {})
                 props = params.get("properties", {})
-                param_desc = "，".join(
+                param_desc = ", ".join(
                     f"{k}: {v.get('description', '')}"
                     for k, v in props.items()
                 )
-                tools_lines.append(f"- {name}: {desc}" + (f"（参数: {param_desc}）" if param_desc else ""))
+                tools_lines.append(f"- {name}: {desc}" + (f" (params: {param_desc})" if param_desc else ""))
             tools_text = (
-                "\n\n可用的工具：\n" + "\n".join(tools_lines)
-                + "\n\n当需要调用工具时，使用以下格式：\n"
+                "\n\nAvailable tools:\n" + "\n".join(tools_lines)
+                + "\n\nWhen you need to call a tool, use the following format:\n"
                 + "[TOOL_CALL: tool_name]\n{\"arg1\": \"val1\"}\n[/TOOL_CALL]\n"
-                + "当分析完成时，直接输出最终结果。"
+                + "When analysis is complete, directly output the final result."
             )
             for i in range(len(prepared) - 1, -1, -1):
                 if prepared[i].get("role") == "system":
@@ -325,10 +325,10 @@ def create_strategy(
     # 自动判断：Provider 声明 supports_tools 则用 native，否则 fallback
     if model_id and multi_db:
         if _resolve_provider_capabilities(multi_db, model_id):
-            logger.info(f"[ToolCalling] 选择 NativeStrategy (model={model_id})")
+            logger.info(f"[ToolCalling] selected NativeStrategy (model={model_id})")
             return NativeToolCallingStrategy()
 
-    logger.info(f"[ToolCalling] 选择 TextFallbackStrategy (model={model_id or 'unknown'})")
+    logger.info(f"[ToolCalling] selected TextFallbackStrategy (model={model_id or 'unknown'})")
     return TextFallbackToolCallingStrategy()
 
 

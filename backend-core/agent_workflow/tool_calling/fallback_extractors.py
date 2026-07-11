@@ -94,7 +94,7 @@ def extract_fallback_tool_calls(text: str) -> list[ToolCall]:
     for parser in _PARSERS:
         calls = parser(text)
         if calls:
-            logger.debug(f"[fallback_extractors] {parser.__name__} 匹配到 {len(calls)} 个工具调用")
+            logger.debug(f"[fallback_extractors] {parser.__name__} matched {len(calls)} tool calls")
             return calls
     return []
 

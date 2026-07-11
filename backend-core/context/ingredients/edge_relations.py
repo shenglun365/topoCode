@@ -31,9 +31,9 @@ class EdgeRelationsIngredient(ContextIngredient):
     def format(self, data: dict) -> str:
         parts = []
         if data.get("lines"):
-            parts.append(f"边关系列表 ({len(data['lines'])} 条): {'; '.join(data['lines'])}")
+            parts.append(f"Edge relations ({len(data['lines'])}): {'; '.join(data['lines'])}")
         out_cnt = data.get("out", 0)
         in_cnt = data.get("in", 0)
         if out_cnt or in_cnt:
-            parts.append(f"调用方向: 本→外 {out_cnt} 次, 外→本 {in_cnt} 次")
+            parts.append(f"Call direction: local→external {out_cnt}, external→local {in_cnt}")
         return "\n".join(parts)

@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 class _AnalyzeComponentTool(AgentTool):
-    """分析单个组件: LLM → name + summary → 立即写入 SQLite"""
+    """Analyze single component: LLM → name + summary → write to SQLite immediately"""
 
     name = "analyze_component"
-    description = "使用 LLM 分析单个组件，提取名称和功能概要，并持久化到 SQLite"
+    description = "Use LLM to analyze a single component, extract name and functional summary, persist to SQLite"
     category = "analysis"
 
     def __init__(self, llm_chat_fn: Callable, render_prompt: Callable = None,
@@ -34,18 +34,18 @@ class _AnalyzeComponentTool(AgentTool):
     async def _analyze_single(self, component: dict, task_id: str = "",
                                project_summary: str = "", parent_summary: str = "",
                                language: str = "") -> ToolResult:
-        """分析单个组件（内部方法，供 execute 和 batch tool 共用）"""
+        """Analyze single component (internal method, shared by execute and batch tool)"""
         comp_id = component.get("id", "")
         comp_name = component.get("name", comp_id)
         comp_type = component.get("type", "community")
         metadata = component.get("metadata", {})
         ctx = component.get("context", "")
 
-        type_label = "社区模块" if comp_type == "community" else "外部依赖包"
+        type_label = "community module" if comp_type == "community" else "external dependency"
         if not ctx:
-            ctx_parts = [f"组件ID: {comp_id}", f"组件名称: {comp_name}", f"组件类型: {type_label}"]
+            ctx_parts = [f"Component ID: {comp_id}", f"Component Name: {comp_name}", f"Component Type: {type_label}"]
             if metadata:
-                ctx_parts.append(f"元数据: {metadata}")
+                ctx_parts.append(f"Metadata: {metadata}")
             ctx = "\n".join(ctx_parts)
 
             logger.info(
@@ -62,28 +62,28 @@ class _AnalyzeComponentTool(AgentTool):
                 })
             else:
                 analysis_mode = component.get("analysis_mode", "quick")
-                summary_range = "500-2000字" if analysis_mode == "deep" else "100-300字"
+                summary_range = "500-2000 chars" if analysis_mode == "deep" else "100-300 chars"
                 max_tok = 2000 if analysis_mode == "deep" else 1200
                 system_text = (
-                    "你是代码架构分析专家。基于提供的组件上下文数据（文件列表、关键符号、边关系），"
-                    "分析该软件组件模块的功能与架构角色。\n\n"
-                    "以 JSON 格式输出，包含以下字段：\n"
-                    '- name: 有实际语义的组件名称（≤20字），根据功能命名，'
-                    '如 OpenVinoBackend / FlashAttentionOp / ModelOptimizerPass；'
-                    '严禁返回原始社区编号（如 L0-0007、comm-xxx）作为名称\n'
-                    f'- summary: 功能概要（{summary_range}）\n'
-                    '- role: 架构角色（≤3词，如 ConfigLoader / RequestRouter / DataAccessLayer）\n'
-                    '- key_files: 关键文件及其功能概要数组（Top 10）\n'
-                    '  格式: [{"path": "src/foo.cpp", "summary": "实现矩阵乘法运算"}, ...]\n'
-                    '- depends_on: 依赖的其他组件或外部包数组\n'
-                    "**只输出 JSON，禁止输出任何其他内容**（包括分析过程、思考过程、解释说明）。直接输出 JSON 对象，不要用 ```json 代码块包裹。"
+                    "You are a code architecture analysis expert. Based on the provided component context data (file list, key symbols, edge relations), "
+                    "analyze the function and architecture role of this software component module.\n\n"
+                    "Output in JSON format with the following fields:\n"
+                    '- name: Semantically meaningful component name (≤20 chars), named by function, '
+                    'e.g. OpenVinoBackend / FlashAttentionOp / ModelOptimizerPass; '
+                    'do NOT return raw community IDs (e.g. L0-0007, comm-xxx) as name\n'
+                    f'- summary: Functional summary ({summary_range})\n'
+                    '- role: Architecture role (≤3 words, e.g. ConfigLoader / RequestRouter / DataAccessLayer)\n'
+                    '- key_files: Key files and their functional summaries array (Top 10)\n'
+                    '  Format: [{"path": "src/foo.cpp", "summary": "Implements matrix multiplication"}, ...]\n'
+                    '- depends_on: Array of other components or external packages\n'
+                    "**Only output JSON, no other content** (including analysis process, thought process, explanations). Directly output JSON object, do not wrap in ```json code blocks."
                 )
                 if project_summary:
-                    system_text += f"\n\n项目摘要：{project_summary[:500]}"
+                    system_text += f"\n\nProject Summary: {project_summary[:500]}"
                 if parent_summary:
-                    system_text += f"\n\n父组件功能概要：{parent_summary[:300]}"
+                    system_text += f"\n\nParent Component Summary: {parent_summary[:300]}"
                 if language == "zh":
-                    system_text += "\n\n请用中文输出 name 和 summary。"
+                    system_text += "\n\nOutput name and summary in Chinese."
                 elif language == "en":
                     system_text += "\n\nOutput name and summary in English."
                 messages = [
@@ -105,7 +105,7 @@ class _AnalyzeComponentTool(AgentTool):
                                      "functional_summary": "", "status": "failed"})
                     except Exception:
                         pass
-                return ToolResult.fail("LLM 调用超时（120s）", componentId=comp_id)
+                return ToolResult.fail("LLM call timed out (120s)", componentId=comp_id)
             text = resp if isinstance(resp, str) else str(resp)
             parsed = parse_structured_response(text, comp_name)
             parse_error = parsed.pop("_parse_error", False)
@@ -132,7 +132,7 @@ class _AnalyzeComponentTool(AgentTool):
                 or analyzed_name.startswith('comm-')
             )
             if is_bad_name and not parse_error_reason:
-                parse_error_reason = f"LLM 返回的名称「{analyzed_name}」无实际语义，需重新分析"
+                parse_error_reason = f"LLM returned name '{analyzed_name}' has no semantic meaning, needs re-analysis"
 
             comp_status = "failed" if (parse_error or is_bad_name) else "completed"
 
@@ -171,15 +171,15 @@ class _AnalyzeComponentTool(AgentTool):
     async def execute(self, component: dict, project_summary: str = "",
                       parent_summary: str = "", language: str = "",
                       task_id: str = "", **kwargs) -> ToolResult:
-        """委托给 _analyze_single（单组件，保持向后兼容）"""
+        """Delegate to _analyze_single (single component, backward compatible)"""
         return await self._analyze_single(component, task_id, project_summary, parent_summary, language)
 
 
 class _AnalyzeComponentBatchTool(AgentTool):
-    """批量分析组件，内部并发执行 LLM 调用"""
+    """Batch analyze components, internally concurrent LLM calls"""
 
     name = "analyze_component_batch"
-    description = "批量分析组件，按指定并发数并行调用 LLM 并持久化到 SQLite"
+    description = "Batch analyze components, call LLM in parallel with specified concurrency, persist to SQLite"
     category = "analysis"
 
     def __init__(self, llm_chat_fn: Callable, render_prompt: Callable = None,
@@ -216,7 +216,7 @@ class _AnalyzeComponentBatchTool(AgentTool):
             else:
                 failures += 1
 
-        msg = f"成功 {successes}/{len(components)}, 失败 {failures}"
+        msg = f"Succeeded {successes}/{len(components)}, Failed {failures}"
         if failures > 0 and successes == 0:
             return ToolResult.fail(msg)
         if failures > 0:
@@ -231,10 +231,10 @@ class _AnalyzeComponentBatchTool(AgentTool):
 
 
 class ComponentAnalystWorkflow(AgentWorkflow):
-    """按需组件分析工作流 — 仅分析用户选中的组件"""
+    """On-demand component analysis workflow — only analyze user-selected components"""
 
     name = "component_analyst"
-    description = "按需 LLM 分析选中的组件，提取名称和功能概要，持久化到 SQLite"
+    description = "On-demand LLM analysis of selected components, extract name and functional summary, persist to SQLite"
 
     def plan(self, context: dict) -> list[AgentStep]:
         components = context.get("components", [])
@@ -261,7 +261,7 @@ class ComponentAnalystWorkflow(AgentWorkflow):
                     "concurrency": concurrency,
                     "project_summary": project_summary,
                 },
-                description=f"分析组件: {start}-{end}/{len(components)}",
+                description=f"Analyzing components: {start}-{end}/{len(components)}",
             ))
 
         return steps
@@ -270,5 +270,5 @@ class ComponentAnalystWorkflow(AgentWorkflow):
         return WorkflowResult(
             success=True,
             data={"completed": True},
-            summary="组件分析完成",
+            summary="Component analysis complete",
         )

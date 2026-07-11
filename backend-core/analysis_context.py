@@ -1,10 +1,10 @@
-"""AnalysisContext — 统一上下文管理器。
+"""AnalysisContext — unified context manager.
 
-为内置 Agent 提供层次化的项目分析数据访问。
-四个认知层级: project → community → file → symbol。
-每个层级提供"干了什么"（功能）、"怎么干的"（逻辑）、"为什么这么干"（因果）三层结构化描述。
+Provides hierarchical project analysis data access for built-in Agents.
+Four cognitive levels: project → community → file → symbol.
+Each level provides three-layer structured description: "what" (function), "how" (logic), "why" (causality).
 
-用法:
+Usage:
     ctx = AnalysisContext(project_db, task_id)
     layers = ctx.get_downward_path(["project", "comm-xxx", "src/api/handler.ts", "authenticate"])
     prompt = ctx.format_for_llm(layers, direction="top-down")
@@ -20,54 +20,54 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# 社区节点数阈值（低于此阈值的社区视为"小社区"，在摘要中降权）
+# Community node count threshold (communities below this threshold are considered "small communities", downweighted in summaries)
 SMALL_COMMUNITY_THRESHOLD = 6
 
-# 缓存大小
+# Cache size
 _CACHE_SIZE = 128
 
 
 @dataclass
 class ContextLayer:
-    """一层上下文的抽象表示。
+    """Abstract representation of a context layer.
 
-    每一层都包含三个维度的信息：
-      - what: 干了什么（功能描述）
-      - how: 怎么干的（逻辑描述）
-      - why: 为什么这么干（因果/约束/权衡）
+    Each layer contains three dimensions of information:
+      - what: functionality description
+      - how: logic description
+      - why: causality/constraints/trade-offs
     """
 
     level: str  # "project" | "community" | "file" | "symbol"
-    layer_id: str  # 该层唯一标识 (task_id, comm_id, file_path, symbol_name)
-    name: str  # 显示名
+    layer_id: str  # unique identifier for this layer (task_id, comm_id, file_path, symbol_name)
+    name: str  # display name
 
-    # 三层描述
-    what: str = ""  # 功能描述
-    how: str = ""  # 逻辑描述
-    why: str = ""  # 因果描述
+    # Three-layer descriptions
+    what: str = ""  # functionality description
+    how: str = ""  # logic description
+    why: str = ""  # causality description
 
-    # 结构化详情（原始数据）
+    # Structured details (raw data)
     detail: dict[str, Any] = field(default_factory=dict)
 
-    # 子层 ID 列表
+    # Child layer ID list
     children: list[str] = field(default_factory=list)
 
-    # 元数据
+    # Metadata
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class AnalysisContext:
-    """统一上下文管理器。
+    """Unified context manager.
 
-    基于 AnalysisStore 构建层次化的项目认知模型。
-    所有方法均为只读查询，不修改数据。
+    Builds a hierarchical project cognition model based on AnalysisStore.
+    All methods are read-only queries; they do not modify data.
     """
 
     def __init__(self, project_db, task_id: str):
         """
         Args:
-            project_db: SQLiteContext 实例
-            task_id: 分析任务 ID
+            project_db: SQLiteContext instance
+            task_id: analysis task ID
         """
         from store.analysis_store import AnalysisStore
         self._store = AnalysisStore(project_db)
@@ -75,11 +75,11 @@ class AnalysisContext:
         self._project_root = getattr(project_db, 'project_root', None) or ""
 
     # ═══════════════════════════════════════════
-    # 项目层
+    # Project Level
     # ═══════════════════════════════════════════
 
     def get_project_layer(self) -> ContextLayer:
-        """构建项目级上下文：整体统计、社区分布、语言分布。"""
+        """Build project-level context: overall statistics, community distribution, language distribution."""
         nodes = self._store.get_graph_nodes(self._task_id)
         file_nodes = [n for n in nodes if n.get("kind") == "file"]
         languages = {}
@@ -93,20 +93,20 @@ class AnalysisContext:
         total_symbols = sum(1 for n in nodes if n.get("kind") not in ("file", "import"))
 
         what = (
-            f"项目包含 {len(file_nodes)} 个文件，{total_symbols} 个符号，"
-            f"分布在 {len(incl_comms)} 个依赖社区和 {len(call_comms)} 个调用社区中"
+            f"Project contains {len(file_nodes)} files, {total_symbols} symbols, "
+            f"distributed across {len(incl_comms)} dependency communities and {len(call_comms)} call communities"
         )
-        how = f"主要语言: {', '.join(f'{k}({v})' for k, v in sorted(languages.items(), key=lambda x: -x[1])[:5])}"
-        why = f"依赖社区反映模块间的静态依赖关系，调用社区反映运行时的调用聚类。两者结合可评估架构的耦合度和内聚度。"
+        how = f"Main languages: {', '.join(f'{k}({v})' for k, v in sorted(languages.items(), key=lambda x: -x[1])[:5])}"
+        why = f"Dependency communities reflect static dependency relationships between modules; call communities reflect runtime call clustering. Combining both assesses architecture coupling and cohesion."
 
-        # 子层：所有 L0 社区
+        # Child layers: all L0 communities
         children = [c.get("comm_id", "") for c in incl_comms if c.get("comm_id")]
         children += [c.get("comm_id", "") for c in call_comms if c.get("comm_id")]
 
         return ContextLayer(
             level="project",
             layer_id=self._task_id,
-            name="项目总览",
+            name="Project Overview",
             what=what,
             how=how,
             why=why,
@@ -121,26 +121,26 @@ class AnalysisContext:
         )
 
     # ═══════════════════════════════════════════
-    # 社区层
+    # Community Level
     # ═══════════════════════════════════════════
 
     @lru_cache(maxsize=_CACHE_SIZE)
     def _get_node_map(self) -> dict[str, dict]:
-        """构建 node_id → node dict 的映射（带缓存）。"""
+        """Build node_id → node dict mapping (with cache)."""
         nodes = self._store.get_graph_nodes(self._task_id)
         return {n.get("id", ""): n for n in nodes}
 
     def get_community_layer(self, comm_id: str, depth: int = 1) -> ContextLayer:
-        """构建社区级上下文：节点、边、Hub、子社区。
+        """Build community-level context: nodes, edges, hubs, sub-communities.
 
         Args:
-            comm_id: 社区 ID
-            depth: 子社区展开深度 (1=仅直达子社区, 2=孙子社区)
+            comm_id: community ID
+            depth: sub-community expansion depth (1=direct children only, 2=grandchildren)
         """
         communities = self._store.get_communities(self._task_id)
         comm = next((c for c in communities if c.get("comm_id") == comm_id), None)
         if not comm:
-            return ContextLayer(level="community", layer_id=comm_id, name=comm_id, what="未找到该社区")
+            return ContextLayer(level="community", layer_id=comm_id, name=comm_id, what="Community not found")
 
         node_list = self._parse_json_list(comm.get("node_list", "[]"))
         edge_list = self._parse_json_list(comm.get("edge_list", "[]"))
@@ -150,7 +150,7 @@ class AnalysisContext:
         edge_count = len(edge_list)
         edge_type = comm.get("edge_type", "INCLUDE")
 
-        # 识别 Hub 节点（高 degree）
+        # Identify hub nodes (high degree)
         degree: dict[str, int] = {}
         for e in edge_list:
             src = e if isinstance(e, str) else e.get("source_id", e.get("source", ""))
@@ -160,7 +160,7 @@ class AnalysisContext:
         hub_threshold = max(5, node_count * 0.3)
         hubs = [nid for nid, d in degree.items() if d > hub_threshold]
 
-        # 子社区
+        # Sub-communities
         children = self._store.get_communities(self._task_id, edge_type=edge_type)
         child_comms = [
             c.get("comm_id", "")
@@ -169,20 +169,20 @@ class AnalysisContext:
         ]
 
         hub_names = [node_map.get(h, {}).get("name", h) for h in hubs[:5]]
-        child_summary = f"，包含 {len(child_comms)} 个子社区" if child_comms else "，无显著子社区"
+        child_summary = f", containing {len(child_comms)} sub-communities" if child_comms else ", no significant sub-communities"
 
         what = (
-            f"社区 '{comm_id}' 包含 {node_count} 个节点、{edge_count} 条 {edge_type} 边，"
-            f"是 {'依赖' if edge_type == 'INCLUDE' else '调用'}关系社区{child_summary}"
+            f"Community '{comm_id}' contains {node_count} nodes, {edge_count} {edge_type} edges, "
+            f"is a {'dependency' if edge_type == 'INCLUDE' else 'call'} relationship community{child_summary}"
         )
         how = (
-            f"Hub 节点: {', '.join(hub_names[:3]) if hub_names else '无显著 Hub'}。"
-            f"社区由 {node_count} 个紧密关联的符号组成"
+            f"Hub nodes: {', '.join(hub_names[:3]) if hub_names else 'No significant hubs'}."
+            f" Community consists of {node_count} tightly related symbols"
         )
         why = (
-            f"该社区的形成原因需结合 {edge_type} 边的分布分析。"
-            f"Hub 节点 ({len(hubs)} 个) 是社区的骨架——它们是社区凝聚力的来源，"
-            f"也是潜在的架构瓶颈。"
+            f"The formation of this community needs to be analyzed in conjunction with {edge_type} edge distribution."
+            f" Hub nodes ({len(hubs)}) are the community's backbone — they are the source of community cohesion,"
+            f" and also potential architecture bottlenecks."
         )
 
         return ContextLayer(
@@ -204,16 +204,16 @@ class AnalysisContext:
         )
 
     # ═══════════════════════════════════════════
-    # 文件层
+    # File Level
     # ═══════════════════════════════════════════
 
     def get_file_layer(self, file_path: str) -> ContextLayer:
-        """构建文件级上下文：符号列表、导入/导出、行数。"""
+        """Build file-level context: symbol list, imports/exports, line count."""
         nodes = self._store.get_graph_nodes(self._task_id)
         file_nodes = [n for n in nodes if n.get("file_path") == file_path]
 
         if not file_nodes:
-            # 宽松匹配
+            # Loose matching
             file_nodes = [n for n in nodes if file_path in (n.get("file_path") or "")]
 
         kinds: dict[str, int] = {}
@@ -226,17 +226,17 @@ class AnalysisContext:
         functions = [n.get("name") for n in file_nodes if n.get("kind") in ("function", "method")]
 
         what = (
-            f"文件 '{file_path}' 包含 {len(file_nodes)} 个符号"
-            + (f"，其中 {len(exported)} 个公开导出" if exported else "")
+            f"File '{file_path}' contains {len(file_nodes)} symbols"
+            + (f", {len(exported)} publicly exported" if exported else "")
         )
         kind_str = ", ".join(f"{k}({v})" for k, v in sorted(kinds.items(), key=lambda x: -x[1]))
-        how = f"符号类型分布: {kind_str}" if kind_str else "无类型分布信息"
+        how = f"Symbol type distribution: {kind_str}" if kind_str else "No type distribution info"
 
         rel_nodes = [n for n in nodes if n.get("file_path") == file_path
                      and n.get("kind") in ("function", "method", "class")]
         why = (
-            f"该文件在项目中的角色由 {len(functions)} 个函数/方法定义。"
-            + (f" 公开符号 ({', '.join(exported[:5])}) 是外部依赖该文件的入口。" if exported else "")
+            f"This file's role in the project is defined by {len(functions)} functions/methods."
+            + (f" Public symbols ({', '.join(exported[:5])}) are the entry points for external dependencies on this file." if exported else "")
         )
 
         return ContextLayer(
@@ -254,19 +254,19 @@ class AnalysisContext:
                 "imports": imports[:5],
                 "functions": functions[:10],
             },
-            children=functions[:20],  # 子层: 关键函数名
+            children=functions[:20],  # child layers: key function names
         )
 
     # ═══════════════════════════════════════════
-    # 符号层
+    # Symbol Level
     # ═══════════════════════════════════════════
 
     def get_symbol_layer(self, symbol_name: str) -> ContextLayer:
-        """构建符号级上下文：签名、调用者、被调用者、所属社区。"""
+        """Build symbol-level context: signature, callers, callees, community."""
         node_map = self._get_node_map()
         edges = self._store.get_graph_edges(self._task_id)
 
-        # 查找目标节点
+        # Find target node
         target_node = None
         for nid, node in node_map.items():
             if node.get("name") == symbol_name:
@@ -278,7 +278,7 @@ class AnalysisContext:
 
         if not target_node:
             return ContextLayer(
-                level="symbol", layer_id=symbol_name, name=symbol_name, what=f"未找到符号 '{symbol_name}'"
+                level="symbol", layer_id=symbol_name, name=symbol_name, what=f"Symbol '{symbol_name}' not found"
             )
 
         node_id = target_node.get("id", "")
@@ -286,7 +286,7 @@ class AnalysisContext:
         signature = target_node.get("signature", "")
         file_path = target_node.get("file_path", "")
 
-        # 调用者 (calls edges where target_id == node_id)
+        # Callers (calls edges where target_id == node_id)
         callers = []
         callees = []
         for e in edges:
@@ -297,15 +297,15 @@ class AnalysisContext:
                 tgt_node = node_map.get(e.get("target_id", ""), {})
                 callees.append(tgt_node.get("name", e.get("target_id", "")))
 
-        what = f"符号 '{symbol_name}' 类型为 {kind}" + (f"，签名: {signature}" if signature else "")
+        what = f"Symbol '{symbol_name}' type is {kind}" + (f", signature: {signature}" if signature else "")
         how = (
-            f"被 {len(callers)} 个函数调用" + (f" ({', '.join(callers[:5])})" if callers else "，未被调用")
-            + f"，调用了 {len(callees)} 个函数"
+            f"Called by {len(callers)} functions" + (f" ({', '.join(callers[:5])})" if callers else ", not called")
+            + f", calls {len(callees)} functions"
             + (f" ({', '.join(callees[:5])})" if callees else "")
         )
         why = (
-            f"该符号在文件 '{file_path}' 中定义。"
-            + (f" 作为被 {len(callers)} 个调用者依赖的节点，修改它会影响调用链路。" if callers else "")
+            f"This symbol is defined in file '{file_path}'."
+            + (f" As a node depended on by {len(callers)} callers, modifying it will affect the call chain." if callers else "")
         )
 
         return ContextLayer(
@@ -330,18 +330,18 @@ class AnalysisContext:
         )
 
     # ═══════════════════════════════════════════
-    # 路径遍历
+    # Path Traversal
     # ═══════════════════════════════════════════
 
     def get_downward_path(self, path: list[str]) -> list[ContextLayer]:
-        """自顶向下路径遍历。
+        """Top-down path traversal.
 
         Args:
-            path: 路径描述，如 ["project", "comm-xxx", "src/api/handler.ts", "authenticate"]
-                  第一条必须是 "project"
+            path: path description, e.g. ["project", "comm-xxx", "src/api/handler.ts", "authenticate"]
+                  first entry must be "project"
 
         Returns:
-            按路径顺序的 ContextLayer 列表
+            List of ContextLayer in path order
         """
         layers: list[ContextLayer] = []
         for i, segment in enumerate(path):
@@ -356,9 +356,9 @@ class AnalysisContext:
         return layers
 
     def get_upward_path(self, start_symbol: str) -> list[ContextLayer]:
-        """自底向上路径遍历。
+        """Bottom-up path traversal.
 
-        从符号出发 → 所属文件 → 所属社区 → 项目总览。
+        From symbol → source file → community → project overview.
         """
         layer = self.get_symbol_layer(start_symbol)
         if not layer.detail:
@@ -367,7 +367,7 @@ class AnalysisContext:
         file_path = layer.detail.get("file_path", "")
         node_id = layer.layer_id
 
-        # 查找符号所属的社区
+        # Find the community the symbol belongs to
         communities = self._store.get_communities(self._task_id)
         symbol_comm = None
         for comm in communities:
@@ -388,18 +388,18 @@ class AnalysisContext:
         return layers
 
     # ═══════════════════════════════════════════
-    # LLM 格式化
+    # LLM Formatting
     # ═══════════════════════════════════════════
 
     def format_for_llm(self, layers: list[ContextLayer], direction: str = "top-down") -> str:
-        """将上下文层级格式化为 LLM prompt 文本。
+        """Format context layers as LLM prompt text.
 
         Args:
-            layers: ContextLayer 列表
-            direction: "top-down" 或 "bottom-up"
+            layers: List of ContextLayer
+            direction: "top-down" or "bottom-up"
 
         Returns:
-            结构化的 prompt 文本
+            Structured prompt text
         """
         if direction == "top-down":
             return self._format_top_down(layers)
@@ -407,46 +407,46 @@ class AnalysisContext:
             return self._format_bottom_up(layers)
 
     def _format_top_down(self, layers: list[ContextLayer]) -> str:
-        """自顶向下格式化：从项目总览逐层细化到源码。"""
+        """Format top-down: from project overview down to source code."""
         parts: list[str] = []
         indent = 0
         for i, layer in enumerate(layers):
             prefix = "  " * indent
-            level_label = {"project": "项目", "community": "社区", "file": "文件", "symbol": "符号"}.get(
+            level_label = {"project": "Project", "community": "Community", "file": "File", "symbol": "Symbol"}.get(
                 layer.level, layer.level
             )
             parts.append(f"{prefix}## {level_label}: {layer.name}")
-            parts.append(f"{prefix}  - 功能: {layer.what}")
+            parts.append(f"{prefix}  - What: {layer.what}")
             if layer.how:
-                parts.append(f"{prefix}  - 逻辑: {layer.how}")
+                parts.append(f"{prefix}  - How: {layer.how}")
             if layer.why:
-                parts.append(f"{prefix}  - 因果: {layer.why}")
+                parts.append(f"{prefix}  - Why: {layer.why}")
             parts.append("")
             indent += 1
         return "\n".join(parts)
 
     def _format_bottom_up(self, layers: list[ContextLayer]) -> str:
-        """自底向上格式化：从源码细节逐层抽象到架构总览。"""
+        """Format bottom-up: from source code details up to architecture overview."""
         parts: list[str] = []
         for i, layer in enumerate(layers):
-            level_label = {"project": "项目", "community": "社区", "file": "文件", "symbol": "符号"}.get(
+            level_label = {"project": "Project", "community": "Community", "file": "File", "symbol": "Symbol"}.get(
                 layer.level, layer.level
             )
-            parts.append(f"## [{level_label}层] {layer.name}")
+            parts.append(f"## [{level_label}] {layer.name}")
             parts.append(f"  {layer.what}")
-            if layer.how and i > 0:  # 底层更关注实现
-                parts.append(f"  实现逻辑: {layer.how}")
+            if layer.how and i > 0:  # lower layers focus more on implementation
+                parts.append(f"  Implementation: {layer.how}")
             if layer.why:
-                parts.append(f"  设计因果: {layer.why}")
+                parts.append(f"  Design rationale: {layer.why}")
             parts.append("")
         return "\n".join(parts)
 
     # ═══════════════════════════════════════════
-    # 工具方法
+    # Utility Methods
     # ═══════════════════════════════════════════
 
     def check_ready(self, task_id: str | None = None) -> bool:
-        """确认分析数据是否已就绪。"""
+        """Check if analysis data is ready."""
         tid = task_id or self._task_id
         try:
             count = self._store.count_graph_nodes(tid)
@@ -455,7 +455,7 @@ class AnalysisContext:
             return False
 
     def get_summary(self) -> dict:
-        """获取分析数据摘要统计。"""
+        """Get analysis data summary statistics."""
         try:
             total_nodes = self._store.count_graph_nodes(self._task_id)
             total_edges = len(self._store.get_graph_edges(self._task_id))
@@ -474,7 +474,7 @@ class AnalysisContext:
 
     @staticmethod
     def _parse_json_list(raw) -> list:
-        """解析 JSON 字符串或已解码的列表。"""
+        """Parse JSON string or already-decoded list."""
         if isinstance(raw, list):
             return raw
         if isinstance(raw, str) and raw.strip():
@@ -486,7 +486,7 @@ class AnalysisContext:
 
     @staticmethod
     def _parse_json_dict(raw) -> dict:
-        """解析 JSON 字符串或已解码的字典。"""
+        """Parse JSON string or already-decoded dict."""
         if isinstance(raw, dict):
             return raw
         if isinstance(raw, str) and raw.strip():

@@ -35,6 +35,12 @@ export default { shell: {
     about: '关于',
     guide: '新手引导',
     exitConfirm: '关闭程序将中断正在执行的分析任务，确认退出？',
+    updateAvailable: '有新版本可用',
+    updateCurrentVersion: '当前版本',
+    updateLatestVersion: '最新版本',
+    updateLatest: '已是最新版本',
+    updateCheckFailed: '版本检测失败',
+    updateDownloadFrom: '从',
   },
   activityBar: {
     home: '首页',

@@ -21,4 +21,4 @@ class EntryPointsIngredient(ContextIngredient):
         lines = []
         for r in data:
             lines.append(f"- {r['file_path']} → {r['name']}()")
-        return "## 入口点\n" + "\n".join(lines)
+        return "## Entry Points\n" + "\n".join(lines)

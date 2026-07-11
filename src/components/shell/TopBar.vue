@@ -36,7 +36,8 @@ const statusStore = useStatusStore()
 const navigation = useNavigationStore()
 
 // ── 配置 ──
-const DOCS_URL = 'https://opencode.ai'
+const DOCS_URL = 'https://topocode.cn/guide.html'
+const APP_VERSION = '0.1.0'
 
 // ── 无边框窗口控制 ──
 const isMaximized = ref(false)
@@ -105,6 +106,10 @@ function onDropdownMouseLeave() {
 
 // ── 弹窗 ──
 const showAbout = ref(false)
+const showAboutVersion = ref('')
+const checkingVersion = ref(false)
+const versionInfo = ref<{ latest_version: string; has_update: boolean; download_urls: Record<string, string> } | null>(null)
+const showVersionDialog = ref(false)
 const showExitConfirm = ref(false)
 const showDuplicateDialog = ref(false)
 type MenuItem = { label?: string; shortcut?: string; action?: string; divider?: boolean }
@@ -157,11 +162,31 @@ async function handleMenuItemClick(item: any) {
     window.open(DOCS_URL, '_blank')
   } else if (item.action === 'about') {
     showAbout.value = true
+    showAboutVersion.value = APP_VERSION
   }
 }
 
 function openDocs() {
   window.open(DOCS_URL, '_blank')
+}
+
+async function checkVersion() {
+  checkingVersion.value = true
+  versionInfo.value = null
+  try {
+    const data = await (window.api as any).call('app.checkVersion', { current: APP_VERSION })
+    versionInfo.value = data
+    showVersionDialog.value = true
+  } catch {
+    versionInfo.value = null
+    showVersionDialog.value = true
+  } finally {
+    checkingVersion.value = false
+  }
+}
+
+function hasUpdate(): boolean {
+  return versionInfo.value?.has_update === true
 }
 
 async function handleFileImport() {
@@ -361,31 +386,84 @@ onMounted(() => {
             </button>
           </div>
           <div class="modal-body about-body">
-            <div class="about-icon">
-              ◆
-            </div>
-            <div class="about-name">
-              TopoCode
-            </div>
-            <div class="about-version">
-              v1.0.0
-            </div>
-            <div class="about-desc">
-              {{ t('settings.aboutTagline') }}
-            </div>
+            <div class="about-icon">◆</div>
+            <div class="about-name">TopoCode</div>
+            <div class="about-version">v{{ showAboutVersion }}</div>
+            <div class="about-desc">{{ t('settings.aboutTagline') }}</div>
             <div class="about-section">
               <span class="about-label">{{ t('common.author') }}</span>
               <span>TopoCode Team</span>
             </div>
             <div class="about-section">
               <span class="about-label">{{ t('shell.topBar.contact') }}</span>
-              <a href="mailto:support@opencode.ai">support@opencode.ai</a>
+              <a href="mailto:topocode@163.com">topocode@163.com</a>
             </div>
             <button
               class="btn btn-ghost btn-sm"
-              @click="openDocs(); showAbout = false"
+              :disabled="checkingVersion"
+              @click="checkVersion"
             >
-              {{ t('shell.topBar.checkUpdate') }}
+              {{ checkingVersion ? t('common.loading') : t('shell.topBar.checkUpdate') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 版本更新弹窗 -->
+    <Teleport to="body">
+      <div
+        v-if="showVersionDialog"
+        class="modal-overlay"
+        @click.self="showVersionDialog = false"
+      >
+        <div class="modal update-modal">
+          <div class="modal-header">
+            <span class="modal-title">{{ t('shell.topBar.checkUpdate') }}</span>
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="showVersionDialog = false"
+            >
+              <XMarkIcon class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <template v-if="versionInfo">
+              <div v-if="hasUpdate()" class="update-available">
+                <div class="update-icon">📦</div>
+                <div class="update-title">{{ t('shell.topBar.updateAvailable') }}</div>
+                <div class="update-desc">
+                  {{ t('shell.topBar.updateCurrentVersion') }}: v{{ showAboutVersion }}<br>
+                  {{ t('shell.topBar.updateLatestVersion') }}: v{{ versionInfo.latest_version }}
+                </div>
+                <div class="update-downloads">
+                  <a
+                    v-for="(url, name) in versionInfo.download_urls"
+                    :key="name"
+                    :href="url"
+                    target="_blank"
+                    class="btn btn-primary btn-sm"
+                    @click="showVersionDialog = false"
+                  >{{ t('shell.topBar.updateDownloadFrom') }} {{ name }}</a>
+                </div>
+              </div>
+              <div v-else class="update-current">
+                <div class="update-icon">✅</div>
+                <div class="update-title">{{ t('shell.topBar.updateLatest') }}</div>
+                <div class="update-desc">v{{ versionInfo.latest_version }}</div>
+              </div>
+            </template>
+            <div v-else class="update-error">
+              <div class="update-icon">⚠️</div>
+              <div class="update-title">{{ t('shell.topBar.updateCheckFailed') }}</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="showVersionDialog = false"
+            >
+              {{ t('common.close') }}
             </button>
           </div>
         </div>
@@ -688,6 +766,15 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-primary);
 }
+
+.update-modal { width: 400px; }
+.update-available,
+.update-current,
+.update-error { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.update-icon { font-size: 32px; }
+.update-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.update-desc { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+.update-downloads { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
 </style>
 
 <!-- 无边框窗口拖拽（unscoped） -->

@@ -1,8 +1,8 @@
 {
   "id": "community",
-  "name": "社区分析",
+  "name": "Community Analysis",
   "version": "1.0.0",
-  "description": "Louvain 社区检测、模块度计算、枢纽节点分析",
+  "description": "Louvain community detection, modularity computation, hub node analysis",
   "entry": "plugin_entry",
   "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
   "dependencies": {

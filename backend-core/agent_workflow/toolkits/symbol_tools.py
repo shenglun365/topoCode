@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _rel_path(path: str, project_root: Optional[str]) -> str:
-    """将绝对路径转为相对路径（减少 LLM 上下文 token 开销）"""
+    """Convert absolute path to relative path (reduce LLM context token cost)"""
     if project_root and os.path.isabs(path):
         try:
             return os.path.relpath(path, project_root)
@@ -23,10 +23,10 @@ def _rel_path(path: str, project_root: Optional[str]) -> str:
 
 
 class GetSymbolDetailTool(AgentTool):
-    """获取指定符号的详细信息"""
+    """Get detailed info for a specific symbol"""
 
     name = "get_symbol_detail"
-    description = "获取指定符号的详细信息：类型、签名、代码片段、所在文件路径"
+    description = "Get detailed symbol info: type, signature, code snippet, file path"
     category = "query"
     llm_visible = True
 
@@ -45,7 +45,7 @@ class GetSymbolDetailTool(AgentTool):
                     "properties": {
                         "symbol_id": {
                             "type": "string",
-                            "description": "符号的唯一标识 ID（graph_node.id）",
+                            "description": "Unique symbol ID (graph_node.id)",
                         },
                     },
                     "required": ["symbol_id"],
@@ -55,13 +55,13 @@ class GetSymbolDetailTool(AgentTool):
 
     async def execute(self, symbol_id: str = "", **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
             row = self._db.execute(
                 "SELECT * FROM graph_node WHERE id = ?", (symbol_id,)
             ).fetchone()
             if not row:
-                return ToolResult.fail(f"符号未找到: {symbol_id}")
+                return ToolResult.fail(f"Symbol not found: {symbol_id}")
             d = dict(row)
             if "file_path" in d:
                 d["file_path"] = _rel_path(d["file_path"], self._project_root)
@@ -72,10 +72,10 @@ class GetSymbolDetailTool(AgentTool):
 
 
 class SearchSymbolsTool(AgentTool):
-    """按名称搜索代码符号"""
+    """Search code symbols by name"""
 
     name = "search_symbols"
-    description = "按名称搜索代码符号（函数、类、方法等），返回匹配的符号列表"
+    description = "Search code symbols by name (functions, classes, methods, etc.), returns matching symbol list"
     category = "query"
     llm_visible = True
 
@@ -94,15 +94,15 @@ class SearchSymbolsTool(AgentTool):
                     "properties": {
                         "pattern": {
                             "type": "string",
-                            "description": "符号名称关键字（支持 LIKE 模糊匹配）",
+                            "description": "Symbol name keyword (supports LIKE fuzzy matching)",
                         },
                         "kind": {
                             "type": "string",
-                            "description": "符号类型过滤: function / method / class / variable（可选）",
+                            "description": "Symbol type filter: function / method / class / variable (optional)",
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "最大返回数量（默认 20）",
+                            "description": "Max number of results (default 20)",
                         },
                     },
                     "required": ["pattern"],
@@ -112,15 +112,15 @@ class SearchSymbolsTool(AgentTool):
 
     async def execute(self, pattern: str = "", kind: str = "", limit: int = 20, **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
-            # 兼容 LLM 可能传入字符串类型的数值参数
+            # Compatible with LLM possibly passing string-typed numeric params
             if not isinstance(limit, int):
                 try:
                     limit = int(limit)
                 except (TypeError, ValueError):
                     limit = 20
-            # 支持 | 分隔多个模式（OR 搜索）
+            # Support | delimited multiple patterns (OR search)
             patterns = [p.strip() for p in pattern.split("|") if p.strip()] or [pattern]
             clauses = []
             params: list[Any] = []
@@ -134,7 +134,7 @@ class SearchSymbolsTool(AgentTool):
             sql += f" ORDER BY name LIMIT {min(limit, 100)}"
             rows = self._db.execute(sql, params).fetchall()
             if not rows:
-                return ToolResult.fail(f"未找到匹配 '{pattern}' 的符号")
+                return ToolResult.fail(f"No symbols matching '{pattern}'")
             results = [
                 f"{r['name']} ({r['kind']}) — {_rel_path(r['file_path'], self._project_root)}"
                 for r in rows
@@ -146,14 +146,14 @@ class SearchSymbolsTool(AgentTool):
 
 
 class GetSymbolCodeTool(AgentTool):
-    """获取指定符号的完整源代码（支持 ID / name+file / line+file 三种查找）"""
+    """Get full source code for a symbol (supports ID / name+file / line+file lookups)"""
 
     name = "get_symbol_code"
     description = (
-        "获取指定符号的完整源代码片段。支持三种查找方式："
-        "1) symbol_id: 精确查找 (graph_node.id)；"
-        "2) file_path + name: 按文件名+符号名查找；"
-        "3) file_path + line: 按文件名+行号范围查找"
+        "Get full source code snippet for a symbol. Supports three lookup methods:"
+        "1) symbol_id: exact lookup (graph_node.id);"
+        "2) file_path + name: lookup by file name + symbol name;"
+        "3) file_path + line: lookup by file name + line number range"
     )
     category = "query"
     llm_visible = True
@@ -173,19 +173,19 @@ class GetSymbolCodeTool(AgentTool):
                     "properties": {
                         "symbol_id": {
                             "type": "string",
-                            "description": "符号 ID (graph_node.id, 结构化输出中可见)"
+                            "description": "Symbol ID (graph_node.id, visible in structured output)"
                         },
                         "file_path": {
                             "type": "string",
-                            "description": "文件路径 (配合 name 或 line)"
+                            "description": "File path (use with name or line)"
                         },
                         "name": {
                             "type": "string",
-                            "description": "符号名称 (配合 file_path)"
+                            "description": "Symbol name (use with file_path)"
                         },
                         "line": {
                             "type": "integer",
-                            "description": "行号 (配合 file_path, 返回包含该行的符号)"
+                            "description": "Line number (use with file_path, returns symbol containing that line)"
                         },
                     },
                 },
@@ -195,12 +195,12 @@ class GetSymbolCodeTool(AgentTool):
     async def execute(self, symbol_id: str = "", file_path: str = "",
                       name: str = "", line: int = 0, **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
             row = None
             method = ""
 
-            # 1. symbol_id 主键
+            # 1. symbol_id primary key
             if symbol_id:
                 method = "symbol_id"
                 row = self._db.execute(
@@ -227,9 +227,9 @@ class GetSymbolCodeTool(AgentTool):
                 ).fetchone()
 
             if not row:
-                hint = ("未找到符号。可尝试: "
-                        "1) get_symbol_code(file_path=\"...\", name=\"函数名\") 按名称查找; "
-                        "2) search_symbols(pattern=\"...\") 搜索符号后再用 symbol_id 精确查找")
+                hint = ("Symbol not found. Try: "
+                        "1) get_symbol_code(file_path=\"...\", name=\"function_name\") to search by name; "
+                        "2) search_symbols(pattern=\"...\") to find symbols then use symbol_id for exact lookup")
                 return ToolResult.fail(hint)
 
             d = dict(row)
@@ -243,7 +243,7 @@ class GetSymbolCodeTool(AgentTool):
 
             if not os.path.isfile(abs_path):
                 return ToolResult.fail(
-                    f"文件不在磁盘。使用 get_symbol_detail(symbol_id=\"{d['id']}\") 查看元数据"
+                    f"File not on disk. Use get_symbol_detail(symbol_id=\"{d['id']}\") to view metadata"
                 )
 
             start = max(1, d.get("start_line", 1) - 3)

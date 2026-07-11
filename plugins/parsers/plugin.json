@@ -1,8 +1,8 @@
 {
   "id": "parsers",
-  "name": "语言解析器",
+  "name": "Parsers",
   "version": "1.0.0",
-  "description": "11 种编程语言的 AST 解析、符号提取、调用图、依赖图",
+  "description": "AST parsing, symbol extraction, call graph, dependency graph for 18+ languages",
   "entry": "plugin_entry",
   "platforms": ["linux-x64", "win-x64", "darwin-x64", "darwin-arm64"],
   "dependencies": {

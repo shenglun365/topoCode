@@ -94,7 +94,7 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
         if not all_tasks:
             raise ValueError(f"No tasks found for project {project_id}")
 
-        _update_status(export_id, EXPORT_STATUS_RUNNING, 0, f"导出 {len(all_tasks)} 个任务")
+        _update_status(export_id, EXPORT_STATUS_RUNNING, 0, f"Exporting {len(all_tasks)} tasks")
 
         task_id_list = [t["id"] for t in all_tasks]
         # 实际步数: 3(manifest+project.json+source_files) + n*8(task+7table) + 1(更新manifest)
@@ -119,7 +119,7 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
             "taskIds": task_id_list,
             "counts": {},
         }
-        _progress("写入 manifest")
+        _progress("Writing manifest")
 
         # ── project.json ──
         proj_info = {
@@ -129,7 +129,7 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
         }
         with open(os.path.join(tmp_dir, "project.json"), "w", encoding="utf-8") as f:
             json.dump(proj_info, f, ensure_ascii=False)
-        _progress("写入 project.json")
+        _progress("Writing project.json")
 
         # ── source_files.jsonl (含 MD5) ──
         all_source = project_db.fetchall(
@@ -145,14 +145,14 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
                 f.write(json.dumps(d, ensure_ascii=False, default=str) + "\n")
                 source_count += 1
         manifest["counts"]["source_files"] = source_count
-        _progress(f"source_files ({source_count} 条, 含 MD5)")
+        _progress(f"source_files ({source_count} rows, with MD5)")
 
         # 逐 task 导出分析数据
         for tid in task_id_list:
             task_info = next(t for t in all_tasks if t["id"] == tid)
             _write_jsonl(task_id=tid, label="tasks", rows=[dict(task_info)],
                          tmp_dir=tmp_dir, key_fields=["id"])
-            _progress(f"task {tid[:8]} 配置")
+            _progress(f"task {tid[:8]} config")
 
             for table, label in [
                 ("graph_node", "graph_nodes"),
@@ -171,12 +171,12 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
                              tmp_dir=tmp_dir, key_fields=None if label == "communities" else None)
                 manifest["counts"].setdefault(label, 0)
                 manifest["counts"][label] += count
-                _progress(f"{label} ({count} 条)")
+                _progress(f"{label} ({count} rows)")
 
         # 重新写入 manifest（含最终计数）
         with open(os.path.join(tmp_dir, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
-        _progress("更新 manifest")
+        _progress("Updating manifest")
 
         # ── 打包 zip ──
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -188,7 +188,7 @@ def _export_worker(export_id: str, multi_db, project_id: str, task_ids: Optional
 
         elapsed = time.time() - t0
         _update_status(export_id, EXPORT_STATUS_DONE, 100,
-                       f"导出完成，共 {step} 步，耗时 {elapsed:.1f}s",
+                       f"Export complete: {step} steps, {elapsed:.1f}s",
                        result={"archivePath": archive_path, "size": os.path.getsize(archive_path)})
         publish_fn("export", "export.done", {
             "exportId": export_id,
@@ -240,7 +240,7 @@ def start_export(multi_db, project_id: str, task_ids: Optional[list[str]],
             "id": export_id,
             "status": EXPORT_STATUS_PENDING,
             "progress": 0,
-            "message": "排队中",
+            "message": "Queued",
             "result": None,
         }
     thread = threading.Thread(

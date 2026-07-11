@@ -20,4 +20,4 @@ class ExportedSymbolsIngredient(ContextIngredient):
         if not data:
             return ""
         items = [f"{n}({k})" for n, k in data[:15]]
-        return f"公开接口: {', '.join(items)}"
+        return f"Public interface: {', '.join(items)}"

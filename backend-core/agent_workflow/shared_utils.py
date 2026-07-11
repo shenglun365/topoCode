@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_json_from_text(text: str) -> dict | None:
-    """从可能包含推理文本的 LLM 输出中尝试提取 JSON 对象/数组。"""
+    """Attempt to extract JSON object/array from LLM output possibly containing reasoning text."""
     # 优先尝试从 { 到 } 提取最外层对象
     for pattern in [r'(\{.*\})', r'(\[.*\])']:
         match = _re.search(pattern, text, _re.DOTALL)
@@ -24,7 +24,7 @@ def _extract_json_from_text(text: str) -> dict | None:
 
 
 def parse_structured_response(text: str, fallback_name: str = "") -> dict:
-    """从 LLM 响应中提取 JSON，出错时尝试从纯文本恢复或正则提取。返回 dict 含 parsed 和 _parse_error 字段。"""
+    """Extract JSON from LLM response, fallback to plain text or regex extraction on error. Returns dict with parsed and _parse_error fields."""
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -51,20 +51,20 @@ def parse_structured_response(text: str, fallback_name: str = "") -> dict:
     return {
         "name": name, "summary": summary, "role": "", "key_files": [], "depends_on": [],
         "_parse_error": is_bad,
-        "_error_reason": "LLM 返回格式错误，无法解析结构化 JSON" if is_bad else "",
+        "_error_reason": "LLM returned format error, unable to parse structured JSON" if is_bad else "",
     }
 
 
 def build_markdown_summary(name: str, summary: str, role: str,
                              key_files: list, depends_on: list) -> str:
-    """将结构化分析结果拼接为增强 Markdown summary。
+    """Build enhanced Markdown summary from structured analysis results.
 
-    key_files 可以是 str 列表（旧格式）或 dict 列表（含 path/summary 字段）。
+    key_files can be a list of str (old format) or dict (with path/summary fields).
     """
     parts = []
-    parts.append(f"## 功能概要\n{summary}")
+    parts.append(f"## Functional Summary\n{summary}")
     if role:
-        parts.append(f"\n**架构角色**: {role}")
+        parts.append(f"\n**Architecture Role**: {role}")
     if key_files:
         files_lines = []
         for kf in key_files[:10]:
@@ -78,8 +78,8 @@ def build_markdown_summary(name: str, summary: str, role: str,
             else:
                 files_lines.append(f"- `{kf}`")
         if files_lines:
-            parts.append(f"\n**关键文件**:\n" + "\n".join(files_lines))
+            parts.append(f"\n**Key Files**:\n" + "\n".join(files_lines))
     if depends_on:
         deps_md = ", ".join(depends_on[:10])
-        parts.append(f"\n**依赖组件**: {deps_md}")
+        parts.append(f"\n**Dependencies**: {deps_md}")
     return "\n".join(parts)

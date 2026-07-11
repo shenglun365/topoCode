@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 class _GenerateOverviewTool(AgentTool):
-    """生成整体架构概览 — 预加载社区结果 + 文件摘要，单次 LLM 调用"""
+    """Generate overall architecture overview — preload community results + file summaries, single LLM call"""
 
     name = "generate_overview"
-    description = "基于项目上下文、社区分析结果和文件摘要，生成整体架构概览 Markdown"
+    description = "Generate overall architecture overview Markdown based on project context, community analysis results and file summaries"
     category = "analysis"
 
     def __init__(self, multi_db, project_db, task_id):
@@ -25,7 +25,7 @@ class _GenerateOverviewTool(AgentTool):
     def _format_comm(self, rows: list, label: str) -> str:
         from collections import Counter
         total = len(rows)
-        # 过滤：跳过 name/summary 为空的行
+        # Filter: skip rows where name/summary is empty
         valid = [r for r in rows if r.get("name") and r.get("summary")]
         skipped = total - len(valid)
         if skipped:
@@ -34,34 +34,34 @@ class _GenerateOverviewTool(AgentTool):
         if not valid:
             return ""
 
-        # 层级统计
+        # Level statistics
         lv_counts = Counter(r.get("comm_lv", "?") for r in valid)
         lv_summary = ", ".join(f"{k}={v}" for k, v in sorted(lv_counts.items()))
         logger.info("[Overview] %s: total=%d valid=%d levels=%s",
                     label, total, len(valid), lv_summary)
 
-        # L0/L1 优先，最多 25 条；其余最多 10 条
+        # L0/L1 priority, max 25; others max 10
         priority = [r for r in valid if r.get("comm_lv") in ("L0", "L1")][:25]
         others = [r for r in valid if r not in priority][:10]
         selected = priority + others
         remaining = len(valid) - len(selected)
 
-        lines = [f"\n## {label} ({len(valid)} 个已分析, 层级: {lv_summary})\n"]
+        lines = [f"\n## {label} ({len(valid)} analyzed, levels: {lv_summary})\n"]
         for i, c in enumerate(selected):
             name = (c.get("name") or c.get("comm_id") or f"comm-{i}").strip()
             lv = c.get("comm_lv", "?")
             summary = c.get("summary") or ""
             truncated = len(summary) > 2000
             summary = summary[:2000] + "…" if truncated else summary
-            lines.append(f"### {i+1}. {name} (层级: {lv})")
+            lines.append(f"### {i+1}. {name} (Level: {lv})")
             lines.append(summary)
         if remaining > 0:
-            lines.append(f"\n... 还有 {remaining} 个社区（L2+）")
+            lines.append(f"\n... {remaining} more communities (L2+)")
         return "\n".join(lines)
 
     async def execute(self, project_name: str = "", project_summary: str = "",
                       **kwargs) -> ToolResult:
-        # 获取 project_id（用于 file_summaries 降级查询）
+        # Get project_id (for file_summaries fallback query)
         _project_id = ""
         try:
             row = self._multi_db.main_db.fetchone(
@@ -74,7 +74,7 @@ class _GenerateOverviewTool(AgentTool):
             logger.warning(f"[Overview] cannot get project_id: {e}")
 
         try:
-            # ── 1. 加载社区分析结果 ──
+            # ── 1. Load community analysis results ──
             from store.analysis_store import AnalysisStore
             store = AnalysisStore(self._project_db)
             communities_include = store.list_llm_results(self._task_id, "INCLUDE")
@@ -82,12 +82,12 @@ class _GenerateOverviewTool(AgentTool):
             logger.info("[Overview] loaded communities: INCLUDE=%d CALL=%d",
                         len(communities_include), len(communities_call))
 
-            context_parts = [f"# 项目: {project_name or '-'}"]
+            context_parts = [f"# Project: {project_name or '-'}"]
             if project_summary:
-                context_parts.append(f"\n## 项目概要\n{project_summary}\n")
+                context_parts.append(f"\n## Project Summary\n{project_summary}\n")
 
-            incl_text = self._format_comm(communities_include, "INCLUDE (依赖包含)")
-            call_text = self._format_comm(communities_call, "CALL (调用)")
+            incl_text = self._format_comm(communities_include, "INCLUDE (dependency includes)")
+            call_text = self._format_comm(communities_call, "CALL (calls)")
             if incl_text:
                 context_parts.append(incl_text)
             if call_text:
@@ -95,7 +95,7 @@ class _GenerateOverviewTool(AgentTool):
             logger.info("[Overview] context: INCLUDE=%dchars CALL=%dchars",
                         len(incl_text or ""), len(call_text or ""))
 
-            # ── 2. 加载文件摘要 ──
+            # ── 2. Load file summaries ──
             summary_count = 0
             try:
                 ranked = self._project_db.execute(
@@ -105,12 +105,12 @@ class _GenerateOverviewTool(AgentTool):
                 if ranked:
                     paths = [r["file_path"] for r in ranked]
                     placeholders = ",".join("?" * len(paths))
-                    # 先按 task_id 查
+                    # Query by task_id first
                     summaries = self._project_db.execute(
                         f"SELECT file_path, summary FROM file_summaries WHERE task_id=? AND file_path IN ({placeholders}) LIMIT 20",
                         (self._task_id, *paths)
                     ).fetchall()
-                    # 降级：按 project_id 查
+                    # Fallback: query by project_id
                     if not summaries and _project_id:
                         logger.info("[Overview] file_summaries by task_id=0, fallback to project_id=%s", _project_id)
                         summaries = self._project_db.execute(
@@ -119,7 +119,7 @@ class _GenerateOverviewTool(AgentTool):
                         ).fetchall()
                     summary_count = len(summaries)
                     if summaries:
-                        context_parts.append("\n## 关键文件摘要\n")
+                        context_parts.append("\n## Key File Summaries\n")
                         for s in summaries:
                             fp = s["file_path"]
                             text = (s["summary"] or "")[:300]
@@ -133,22 +133,22 @@ class _GenerateOverviewTool(AgentTool):
             logger.info("[Overview] context total=%d chars (communities=%d+%d, files=%d)",
                         len(context_text), len(communities_include), len(communities_call), summary_count)
 
-            # ── 3. LLM 生成 ──
+            # ── 3. LLM generation ──
             llm_fn = create_llm_chat_fn(self._multi_db)
             prompt = (
-                "你是一个代码架构分析专家。请根据以下项目信息生成一份整体架构概览 Markdown 文档。\n\n"
+                "You are a code architecture analysis expert. Generate an overall architecture overview Markdown document based on the following project information.\n\n"
                 "{context}\n\n"
-                "请生成一份结构化的架构概览文档，包括：\n"
-                "1. 项目整体架构描述（基于社区分析结果总结）\n"
-                "2. 核心模块及其职责\n"
-                "3. 模块间的分层与依赖关系\n"
-                "4. 主要设计模式与架构风格\n\n"
-                "要求：\n"
-                "- 社区名称已基于代码功能命名，请直接使用这些名称描述各模块\n"
-                "- 不得输出原始 comm_id（如 comm-xxx-xxx 格式的 ID）\n"
-                "- 每引用一个模块时，请使用其社区名称\n"
-                "- 不要使用反引号 ` 包裹模块名称\n"
-                "- 请用中文输出。"
+                "Generate a structured architecture overview document including:\n"
+                "1. Overall project architecture description (summarized from community analysis results)\n"
+                "2. Core modules and their responsibilities\n"
+                "3. Module layering and dependency relationships\n"
+                "4. Design patterns and architecture style\n\n"
+                "Requirements:\n"
+                "- Community names are already named based on code functionality, use these names to describe modules\n"
+                "- Do not output raw comm_ids (e.g. comm-xxx-xxx format IDs)\n"
+                "- When referencing a module, use its community name\n"
+                "- Do not wrap module names in backticks `\n"
+                "- Output in Chinese."
             ).format(context=context_text)
 
             messages = [{"role": "user", "content": prompt}]
@@ -164,10 +164,10 @@ class _GenerateOverviewTool(AgentTool):
 
 
 class OverviewWorkflow(AgentWorkflow):
-    """整体架构概览生成工作流 — 强制 Agent 模式"""
+    """Overall architecture overview generation workflow — forced Agent mode"""
 
     name = "overview"
-    description = "生成整体架构概览文档。Agent 可读取社区分析结果、文件预摘要、源码文件等，输出架构总览 Markdown"
+    description = "Generate overall architecture overview document. Agent reads community analysis results, file pre-summaries, source files etc., outputs architecture overview Markdown"
 
     def plan(self, context: dict) -> list[AgentStep]:
         return [AgentStep(
@@ -176,7 +176,7 @@ class OverviewWorkflow(AgentWorkflow):
                 "project_name": context.get("project_name", ""),
                 "project_summary": context.get("project_summary", ""),
             },
-            description="生成整体架构概览",
+            description="Generate overall architecture overview",
         )]
 
     def finalize(self, results: dict[str, Any]) -> WorkflowResult:
@@ -184,5 +184,5 @@ class OverviewWorkflow(AgentWorkflow):
         return WorkflowResult(
             success=True,
             data={"overview": overview},
-            summary="架构概览生成完成",
+            summary="Architecture overview generation complete",
         )

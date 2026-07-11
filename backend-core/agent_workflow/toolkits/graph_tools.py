@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _rel_path(path: str, project_root: Optional[str]) -> str:
-    """将绝对路径转为相对路径（减少 LLM 上下文 token 开销）"""
+    """Convert absolute path to relative path (reduce LLM context token cost)"""
     if project_root and os.path.isabs(path):
         try:
             return os.path.relpath(path, project_root)
@@ -23,10 +23,10 @@ def _rel_path(path: str, project_root: Optional[str]) -> str:
 
 
 class GetCommunitySubgraphTool(AgentTool):
-    """获取社区分析的子图结构"""
+    """Get subgraph structure from community analysis"""
 
     name = "get_community_subgraph"
-    description = "获取社区分析的子图结构：包含指定社区内的所有节点和边，支持按深度展开"
+    description = "Get subgraph structure of a community: includes all nodes and edges, supports depth expansion"
     category = "graph"
     llm_visible = True
 
@@ -43,11 +43,11 @@ class GetCommunitySubgraphTool(AgentTool):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "task_id": {"type": "string", "description": "分析任务 ID"},
-                        "comm_id": {"type": "string", "description": "社区分组 ID"},
-                        "comm_lv": {"type": "string", "description": "社区层级 (L0/L1/L2)", "default": "L2"},
-                        "edge_type": {"type": "string", "description": "边类型 (CALL/INCLUDE)", "default": "CALL"},
-                        "depth": {"type": "integer", "description": "展开深度 (1-4)，默认 2", "default": 2},
+                        "task_id": {"type": "string", "description": "Analysis task ID"},
+                        "comm_id": {"type": "string", "description": "Community group ID"},
+                        "comm_lv": {"type": "string", "description": "Community level (L0/L1/L2)", "default": "L2"},
+                        "edge_type": {"type": "string", "description": "Edge type (CALL/INCLUDE)", "default": "CALL"},
+                        "depth": {"type": "integer", "description": "Expand depth (1-4), default 2", "default": 2},
                     },
                     "required": ["task_id", "comm_id"],
                 },
@@ -58,16 +58,16 @@ class GetCommunitySubgraphTool(AgentTool):
                       comm_lv: str = "", edge_type: str = "",
                       depth: int = 2, **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
-            # 兼容 LLM 传入字符串类型的 depth
+            # Compatible with LLM passing string-typed depth
             if not isinstance(depth, int):
                 try:
                     depth = int(depth)
                 except (TypeError, ValueError):
                     depth = 2
 
-            # 当模型错误地将 comm_id 传给 task_id 时，自动从 communify 记录中解析真实 task_id
+            # When model mistakenly passes comm_id to task_id, auto-resolve real task_id from community records
             if task_id and task_id.startswith("comm-"):
                 resolved = self._db.execute(
                     "SELECT task_id FROM graph_doc WHERE comm_id=? LIMIT 1",
@@ -105,7 +105,7 @@ class GetCommunitySubgraphTool(AgentTool):
                         if d.get("node_list"):
                             try:
                                 nodes = json.loads(d["node_list"])
-                                # 字符串条目是文件路径，转为相对路径
+                                # String entries are file paths, convert to relative paths
                                 result["nodes"].extend(
                                     _rel_path(n, self._project_root) if isinstance(n, str) else n
                                     for n in nodes
@@ -121,17 +121,17 @@ class GetCommunitySubgraphTool(AgentTool):
                         data=json.dumps(result, ensure_ascii=False, default=str)[:8000]
                     )
 
-            return ToolResult.fail(f"未找到子图: {comm_id}")
+            return ToolResult.fail(f"Subgraph not found: {comm_id}")
         except Exception as e:
             logger.warning(f"[GetCommunitySubgraphTool] failed: {e}")
             return ToolResult.fail(str(e))
 
 
 class GetCallChainTool(AgentTool):
-    """获取两个符号之间的调用链路"""
+    """Get call chain between two symbols"""
 
     name = "get_call_chain"
-    description = "获取两个符号之间的调用链路（含中间节点），支持限制最大深度"
+    description = "Get call chain between two symbols (with intermediate nodes), supports max depth limit"
     category = "graph"
     llm_visible = True
 
@@ -147,10 +147,10 @@ class GetCallChainTool(AgentTool):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "from_symbol_id": {"type": "string", "description": "起始符号 ID"},
-                        "to_symbol_id": {"type": "string", "description": "目标符号 ID"},
-                        "task_id": {"type": "string", "description": "分析任务 ID"},
-                        "max_depth": {"type": "integer", "description": "最大深度，默认 5", "default": 5},
+                        "from_symbol_id": {"type": "string", "description": "Source symbol ID"},
+                        "to_symbol_id": {"type": "string", "description": "Target symbol ID"},
+                        "task_id": {"type": "string", "description": "Analysis task ID"},
+                        "max_depth": {"type": "integer", "description": "Max depth, default 5", "default": 5},
                     },
                     "required": ["from_symbol_id", "to_symbol_id", "task_id"],
                 },
@@ -160,7 +160,7 @@ class GetCallChainTool(AgentTool):
     async def execute(self, from_symbol_id: str = "", to_symbol_id: str = "",
                       task_id: str = "", max_depth: int = 5, **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
             from_id = from_symbol_id
             to_id = to_symbol_id
@@ -192,17 +192,17 @@ class GetCallChainTool(AgentTool):
                     ).fetchone()
                     node_names.append(f"{row['name'] if row else nid} ({row['kind'] if row else '?'})")
                 return ToolResult.ok(data=" → ".join(node_names))
-            return ToolResult.fail(f"未找到从 {from_id} 到 {to_id} 的调用链路")
+            return ToolResult.fail(f"Call chain not found from {from_id} to {to_id}")
         except Exception as e:
             logger.warning(f"[GetCallChainTool] failed: {e}")
             return ToolResult.fail(str(e))
 
 
 class GetASTNodeTool(AgentTool):
-    """获取指定 AST 节点的详细代码内容"""
+    """Get detailed code content for a specific AST node"""
 
     name = "get_ast_node"
-    description = "获取指定 AST 节点的详细代码内容（含所在文件和行号范围）"
+    description = "Get detailed code content for an AST node (with file path and line range)"
     category = "graph"
     llm_visible = True
 
@@ -220,11 +220,11 @@ class GetASTNodeTool(AgentTool):
                     "properties": {
                         "node_id": {
                             "type": "string",
-                            "description": "AST 节点 ID（base_node 的 node_id）",
+                            "description": "AST node ID (base_node node_id)",
                         },
                         "file_id": {
                             "type": "string",
-                            "description": "文件 ID（与 node_id 配合精确定位）",
+                            "description": "File ID (works with node_id for precise location)",
                         },
                     },
                     "required": ["node_id"],
@@ -234,7 +234,7 @@ class GetASTNodeTool(AgentTool):
 
     async def execute(self, node_id: str = "", file_id: str = "", **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
             sql = "SELECT * FROM base_node WHERE node_id=?"
             params: list[Any] = [node_id]
@@ -243,7 +243,7 @@ class GetASTNodeTool(AgentTool):
                 params.append(file_id)
             row = self._db.execute(sql, params).fetchone()
             if not row:
-                return ToolResult.fail(f"AST 节点未找到: {node_id}")
+                return ToolResult.fail(f"AST node not found: {node_id}")
             d = dict(row)
             code = d.get("code") or d.get("content") or ""
             return ToolResult.ok(data=json.dumps({

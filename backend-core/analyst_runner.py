@@ -48,7 +48,7 @@ async def _run_next_task():
         try:
             await coro
         except Exception as e:
-            logger.error(f"[QUEUE] 任务执行异常: {e}", exc_info=True)
+            logger.error(f"[QUEUE] Task execution failed: {e}", exc_info=True)
         finally:
             _task_queue.task_done()
 
@@ -655,13 +655,13 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
         pattern_type=pattern_type, pattern=pattern,
     )
     total = len(files)
-    ctx.log(f"共 {total} 个文件待分析")
+    ctx.log(f"Total {total} files to analyze")
 
     if total == 0:
-        ctx.log("没有文件需要分析")
+        ctx.log("No files to analyze")
         return ctx
 
-    ctx.log(f"清理任务 {task_id} 的旧数据")
+    ctx.log(f"Clearing old data for task {task_id}")
     a_store.clear_task_data(task_id)
 
     files_by_lang = {}
@@ -671,7 +671,7 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
             files_by_lang.setdefault(lang, []).append(f)
 
     ctx.language_stats = {lang: len(fl) for lang, fl in files_by_lang.items()}
-    ctx.log(f"语言分布: {ctx.language_stats}")
+    ctx.log(f"Language distribution: {ctx.language_stats}")
 
     def _parse_one(lang, f, abs_path):
         if should_stop(task_id):
@@ -706,16 +706,16 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
             abs_path = os.path.join(ctx.proj_path, f["file_path"]) if ctx.proj_path else f["file_path"]
             all_tasks.append((lang, f, abs_path))
 
-    ctx.log(f"共 {len(all_tasks)} 个文件待解析")
+    ctx.log(f"Total {len(all_tasks)} files to parse")
 
     ctx.report_progress(5)
-    ctx.log("Step 1: AST 解析开始")
+    ctx.log("Step 1: AST parsing started")
 
     with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as file_executor:
         batch_size = PARSE_WORKERS * 2
         for batch_start in range(0, len(all_tasks), batch_size):
             if should_stop(task_id):
-                ctx.log("检测到停止标志，中断解析")
+                ctx.log("Stop signal detected, aborting parsing")
                 ctx.stopped = True
                 return ctx
 
@@ -731,7 +731,7 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
                 try:
                     status, table = future.result()
                 except Exception as e:
-                    ctx.log(f"解析任务异常: {e}")
+                    ctx.log(f"Parse task failed: {e}")
                     continue
 
                 if status == "ok" and table:
@@ -750,17 +750,17 @@ def _step1_parse_ast(ctx: PipelineContext) -> PipelineContext:
                     ctx.report_progress(round(scaled, 2))
 
     if should_stop(task_id):
-        ctx.log("AST 解析被用户停止")
+        ctx.log("AST parsing stopped by user")
         ctx.stopped = True
         return ctx
 
     # 批量写入所有节点的 graph_node（移出线程池，减少 SQLite 锁竞争）
     if ctx.all_tables:
-        ctx.log(f"批量写入 {len(ctx.all_tables)} 个文件的解析结果到 graph_node ...")
+        ctx.log(f"Writing parse results for {len(ctx.all_tables)} files to graph_node ...")
         for table in ctx.all_tables:
             ctx.emitter.write_nodes(table)
 
-    ctx.log(f"AST 解析完成 - 处理 {ctx.processed} 个文件，跳过 {ctx.skipped} 个")
+    ctx.log(f"AST parsing complete - processed {ctx.processed} files, skipped {ctx.skipped}")
     ctx.report_progress(65)
     return ctx
 
@@ -770,7 +770,7 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
     from parsers.core.resolver import ResolutionEngine
     import time as _time
 
-    ctx.log("Step 2: 跨文件引用解析开始")
+    ctx.log("Step 2: Cross-file reference resolution started")
     _t0 = _time.perf_counter()
 
     _total_refs = sum(len(t.unresolved_refs) for t in ctx.all_tables)
@@ -805,7 +805,7 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
                                               stop_check=lambda: should_stop(ctx.task_id),
                                               edge_callback=_on_edge_batch)
         _t1 = _time.perf_counter()
-        ctx.log(f"跨文件引用解析耗时: {_t1 - _t0:.1f}s")
+        ctx.log(f"Cross-file reference resolution: {_t1 - _t0:.1f}s")
 
         # Write remaining edges from the returned list (only non-empty when resolve finishes without callback)
         if ctx.resolved_edges:
@@ -829,7 +829,7 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
         ctx.total_implements_edges = _edge_counts["implements"]
         ctx.total_type_of_edges = _edge_counts["type_refs"]
 
-        ctx.log(f"引用解析完成: calls={ctx.total_call_edges}, imports={ctx.total_dep_edges}, "
+        ctx.log(f"Reference resolution complete: calls={ctx.total_call_edges}, imports={ctx.total_dep_edges}, "
                 f"extends={ctx.total_extends_edges}, implements={ctx.total_implements_edges}, "
                 f"type_refs={ctx.total_type_of_edges}")
 
@@ -845,15 +845,15 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
                     cb_count = sum(1 for e in pattern_edges if e.kind.value == "callback")
                     call_count = sum(1 for e in pattern_edges if e.kind.value == "calls")
                     ctx.total_call_edges += call_count
-                    ctx.log(f"模式增强: {len(pattern_edges)} 条补充边 (callback={cb_count}, calls={call_count}) 耗时 {(_time.perf_counter() - _t2)*1000:.0f}ms")
+                    ctx.log(f"Pattern enhancement: {len(pattern_edges)} supplementary edges (callback={cb_count}, calls={call_count}) in {(_time.perf_counter() - _t2)*1000:.0f}ms")
             except Exception as e:
-                ctx.log(f"模式增强失败: {e}")
+                ctx.log(f"Pattern enhancement failed: {e}")
 
         if should_stop(ctx.task_id):
-            ctx.log("Step 2: 检测到停止标志，跨文件引用解析被中断")
+            ctx.log("Step 2: Stop signal detected, cross-file reference resolution interrupted")
             ctx.stopped = True
     except Exception as e:
-        ctx.log(f"引用解析失败: {e}")
+        ctx.log(f"Reference resolution failed: {e}")
 
     ctx.report_progress(72.0)
     return ctx
@@ -861,7 +861,7 @@ def _step2_resolve_references(ctx: PipelineContext) -> PipelineContext:
 
 def _step3_extract_imports(ctx: PipelineContext) -> PipelineContext:
     """Step 2.5: 文件依赖提取 — 进度 72→74"""
-    ctx.log("Step 2.5: 文件依赖提取开始")
+    ctx.log("Step 2.5: File dependency extraction started")
     import time as _time
     _t0 = _time.perf_counter()
 
@@ -871,7 +871,7 @@ def _step3_extract_imports(ctx: PipelineContext) -> PipelineContext:
             ctx.report_progress(round(pct, 2))
 
     if should_stop(ctx.task_id):
-        ctx.log("Step 2.5: 检测到停止标志，跳过依赖提取")
+        ctx.log("Step 2.5: Stop signal detected, skipping dependency extraction")
         ctx.report_progress(74.0)
         return ctx
 
@@ -881,18 +881,18 @@ def _step3_extract_imports(ctx: PipelineContext) -> PipelineContext:
             progress_callback=_on_import_progress,
             stop_check=lambda: should_stop(ctx.task_id),
         )
-        ctx.log(f"文件依赖提取耗时: {_time.perf_counter() - _t0:.1f}s, 共 {len(import_edges)} 条依赖边")
+        ctx.log(f"File dependency extraction: {_time.perf_counter() - _t0:.1f}s, {len(import_edges)} dependency edges")
         if import_edges:
             _t1 = _time.perf_counter()
             ctx.emitter.write_edges(import_edges)
-            ctx.log(f"依赖边写入耗时: {_time.perf_counter() - _t1:.1f}s")
+            ctx.log(f"Writing dependency edges: {_time.perf_counter() - _t1:.1f}s")
             ctx.total_dep_edges = len(import_edges)
-            ctx.log(f"文件依赖提取完成: {ctx.total_dep_edges} 条依赖边")
+            ctx.log(f"File dependency extraction complete: {ctx.total_dep_edges} dependency edges")
     except Exception as e:
-        ctx.log(f"文件依赖提取失败: {e}")
+        ctx.log(f"File dependency extraction failed: {e}")
 
     if should_stop(ctx.task_id):
-        ctx.log("Step 2.5: 检测到停止标志，依赖提取被中断")
+        ctx.log("Step 2.5: Stop signal detected, dependency extraction interrupted")
         ctx.stopped = True
 
     ctx.report_progress(74.0)
@@ -901,10 +901,10 @@ def _step3_extract_imports(ctx: PipelineContext) -> PipelineContext:
 
 def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
     """Step 3: 框架感知 + 动态合成 — 进度 74→77"""
-    ctx.log("Step 3: 框架感知 + 动态合成开始")
+    ctx.log("Step 3: Framework awareness + dynamic synthesis started")
 
     if should_stop(ctx.task_id):
-        ctx.log("Step 3: 检测到停止标志，跳过框架合成")
+        ctx.log("Step 3: Stop signal detected, skipping framework synthesis")
         ctx.stopped = True
         ctx.report_progress(77.0)
         return ctx
@@ -916,12 +916,12 @@ def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
             ctx.emitter.write_edges(framework_edges)
             ctx.total_framework_edges = len(framework_edges)
             ctx.framework_edges_list = framework_edges
-            ctx.log(f"框架感知完成: {ctx.total_framework_edges} 条框架边")
+            ctx.log(f"Framework awareness complete: {ctx.total_framework_edges} framework edges")
     except Exception as e:
-        ctx.log(f"框架感知失败: {e}")
+        ctx.log(f"Framework awareness failed: {e}")
 
     if should_stop(ctx.task_id):
-        ctx.log("Step 3: 检测到停止标志，跳过动态合成")
+        ctx.log("Step 3: Stop signal detected, skipping dynamic synthesis")
         ctx.stopped = True
         ctx.report_progress(77.0)
         return ctx
@@ -936,9 +936,9 @@ def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
         if synthetic_edges:
             ctx.emitter.write_edges(synthetic_edges)
             ctx.total_synthetic_edges = len(synthetic_edges)
-            ctx.log(f"动态合成完成: {ctx.total_synthetic_edges} 条合成边")
+            ctx.log(f"Dynamic synthesis complete: {ctx.total_synthetic_edges} synthetic edges")
     except Exception as e:
-        ctx.log(f"动态合成失败: {e}")
+        ctx.log(f"Dynamic synthesis failed: {e}")
 
     ctx.report_progress(77.0)
     return ctx
@@ -946,7 +946,7 @@ def _step4_synthesize_frameworks(ctx: PipelineContext) -> PipelineContext:
 
 def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
     """Step 4: 社区分析 (Louvain) — 进度 77→99"""
-    ctx.log("Step 4: 社区分析开始")
+    ctx.log("Step 4: Community analysis started")
 
     try:
         from community_analysis import analyze_communities as _analyze_communities
@@ -957,7 +957,7 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
         logger.warning("community_analysis plugin not available, community analysis will be skipped")
 
     if should_stop(ctx.task_id):
-        ctx.log("Step 4: 检测到停止标志，跳过社区分析")
+        ctx.log("Step 4: Stop signal detected, skipping community analysis")
         ctx.stopped = True
         ctx.report_progress(99.0)
         return ctx
@@ -979,15 +979,15 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
                 best = a_store.get_best_community(task_id, "INCLUDE")
                 if best:
                     ctx.best_dep_community_id = best["comm_id"]
-                ctx.log(f"INCLUDE 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
-                        f" (枢纽={ctx.total_hubs}, 孤立={ctx.total_orphans})")
+                ctx.log(f"INCLUDE community analysis complete: {comm_result.get('community_count', 0)} communities"
+                        f" (hubs={ctx.total_hubs}, orphans={ctx.total_orphans})")
             except Exception as e:
-                ctx.log(f"INCLUDE 社区分析失败: {e}")
+                ctx.log(f"INCLUDE community analysis failed: {e}")
         else:
-            ctx.log("社区分析插件未安装，跳过 INCLUDE")
+            ctx.log("Community analysis plugin not installed, skipping INCLUDE")
 
     if should_stop(ctx.task_id):
-        ctx.log("Step 4: 检测到停止标志，跳过 CALL 社区分析")
+        ctx.log("Step 4: Stop signal detected, skipping CALL community analysis")
         ctx.stopped = True
         ctx.report_progress(99.0)
         return ctx
@@ -1008,12 +1008,12 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
                 best = a_store.get_best_community(task_id, "CALL")
                 if best:
                     ctx.best_call_community_id = best["comm_id"]
-                ctx.log(f"CALL 社区分析完成: {comm_result.get('community_count', 0)} 个社区"
-                        f" (枢纽={ctx.total_hubs}, 孤立={ctx.total_orphans})")
+                ctx.log(f"CALL community analysis complete: {comm_result.get('community_count', 0)} communities"
+                        f" (hubs={ctx.total_hubs}, orphans={ctx.total_orphans})")
             except Exception as e:
-                ctx.log(f"CALL 社区分析失败: {e}")
+                ctx.log(f"CALL community analysis failed: {e}")
         else:
-            ctx.log("社区分析插件未安装，跳过 CALL")
+            ctx.log("Community analysis plugin not installed, skipping CALL")
 
     ctx.report_progress(99.0)
     return ctx
@@ -1021,7 +1021,7 @@ def _step5_detect_communities(ctx: PipelineContext) -> PipelineContext:
 
 def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
     """Step 5: 结果汇总 + 报告写入 — 设置 progress=99（100 在 AI 摘要完成后由 _execute_task 设置）"""
-    ctx.log("Step 5: 结果汇总")
+    ctx.log("Step 5: Result summary")
     duration_ms = int((time.time() - ctx.start_time) * 1000)
     a_store = ctx.analysis_store
     node_count = a_store.count_graph_nodes(ctx.task_id)
@@ -1049,13 +1049,13 @@ def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
         "best_dep_community_id": ctx.best_dep_community_id,
         "logs": ctx.logs,
         "summary": (
-            f"分析完成: {ctx.processed} 个文件, {node_count} 个符号节点, "
-            f"{ctx.total_call_edges} 调用, {ctx.total_dep_edges} 依赖, "
-            f"{ctx.total_extends_edges} 继承, {ctx.total_implements_edges} 实现, "
-            f"{ctx.total_communities} 个社区"
-            f"{f', {ctx.total_hubs} 枢纽' if ctx.total_hubs else ''}"
-            f"{f', {ctx.total_orphans} 孤立' if ctx.total_orphans else ''}"
-            f", 耗时 {duration_ms}ms"
+            f"Analysis complete: {ctx.processed} files, {node_count} symbol nodes, "
+            f"{ctx.total_call_edges} calls, {ctx.total_dep_edges} dependencies, "
+            f"{ctx.total_extends_edges} extends, {ctx.total_implements_edges} implements, "
+            f"{ctx.total_communities} communities"
+            f"{f', {ctx.total_hubs} hubs' if ctx.total_hubs else ''}"
+            f"{f', {ctx.total_orphans} orphans' if ctx.total_orphans else ''}"
+            f", {duration_ms}ms"
         ),
     }
 
@@ -1063,7 +1063,7 @@ def _step6_generate_summary(ctx: PipelineContext) -> Dict[str, Any]:
     task_store = TaskStore(ctx.multi_db.main_db)
     task_store.upsert_report(report)
     ctx.report_progress(99.0)
-    ctx.log(f"分析完成，耗时 {duration_ms}ms")
+    ctx.log(f"Analysis complete, {duration_ms}ms")
     return report
 
 
@@ -1085,7 +1085,7 @@ def _do_parse(server, multi_db, task_id: str, run_id: str,
         return {"files_processed": ctx.processed, "skipped_files": ctx.skipped, "stopped": True}
 
     node_count = ctx.analysis_store.count_graph_nodes(task_id)
-    ctx.log(f"节点总数: {node_count}")
+    ctx.log(f"Total nodes: {node_count}")
 
     # Step 2: 跨文件引用解析 (65→72%)
     ctx = _step2_resolve_references(ctx)
@@ -1163,11 +1163,11 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
                 try:
                     from core_service import _do_generate_project_summary
                     await _do_generate_project_summary(multi_db, pid)
-                    logger.info(f"[EXECUTE] 项目概要自动生成完成: task={task_id}")
+                    logger.info(f"[EXECUTE] Project summary auto-generated: task={task_id}")
                 except Exception as _e:
-                    logger.warning(f"[EXECUTE] 项目概要自动生成失败: {_e}")
+                    logger.warning(f"[EXECUTE] Project summary auto-generation failed: {_e}")
             else:
-                logger.info(f"[EXECUTE] 项目概要自动生成跳过: task={task_id} 无 project_id")
+                logger.info(f"[EXECUTE] Project summary auto-generation skipped: task={task_id} no project_id")
 
             # AI 摘要完成后（不论成败），标记任务完成
             try:
@@ -1186,7 +1186,7 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
         return result
 
     except Exception as e:
-        logger.error(f"[EXECUTE] 任务 {task_id} 执行失败: {e}", exc_info=True)
+        logger.error(f"[EXECUTE] Task {task_id} execution failed: {e}", exc_info=True)
 
         from store.task_store import TaskStore
         task_store = TaskStore(multi_db.main_db)

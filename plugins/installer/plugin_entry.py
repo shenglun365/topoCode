@@ -25,7 +25,7 @@ def _import_targets():
 def _cmd_detect():
     detect_all, TARGETS, _ = _import_targets()
     detected = detect_all()
-    print(f"已安装的 AI Coding Agents ({len(detected)}/{len(TARGETS)}):")
+    print(f"AI Coding Agents installed ({len(detected)}/{len(TARGETS)}):")
     for tid in sorted(TARGETS.keys()):
         marker = "[x]" if tid in detected else "[ ]"
         print(f"  {marker} {TARGETS[tid].name} ({tid})")
@@ -38,17 +38,17 @@ def _cmd_install(agents: list = None, global_: bool = False):
     if not agents:
         agents = detect_all()
         if not agents:
-            print("未检测到任何已安装的 AI Coding Agent。")
+            print("No AI Coding Agents detected.")
             return
 
     for agent_id in agents:
         target = get_target(agent_id)
         if not target:
-            print(f"  [skip] 未知 agent: {agent_id}")
+            print(f"  [skip] unknown agent: {agent_id}")
             continue
         try:
             path = target.install(global_=global_)
-            scope = "全局" if global_ else "项目"
+            scope = "global" if global_ else "project"
             print(f"  [ok] {target.name} ({scope}) -> {path}")
         except Exception as e:
             print(f"  [err] {target.name}: {e}")
@@ -63,14 +63,14 @@ def _cmd_uninstall(agents: list = None, global_: bool = False):
     for agent_id in agents:
         target = get_target(agent_id)
         if not target:
-            print(f"  [skip] 未知 agent: {agent_id}")
+            print(f"  [skip] unknown agent: {agent_id}")
             continue
         try:
             path = target.uninstall(global_=global_)
             if path:
-                print(f"  [ok] {target.name} -> 已从 {path} 移除")
+                print(f"  [ok] {target.name} -> removed from {path}")
             else:
-                print(f"  [skip] {target.name} -> 未找到配置")
+                print(f"  [skip] {target.name} -> config not found")
         except Exception as e:
             print(f"  [err] {target.name}: {e}")
 

@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 class PreSummaryWorkflow(AgentWorkflow):
-    """文件预摘要工作流 — 批量摘要文件到缓存"""
+    """File pre-summary workflow — batch summarize files to cache"""
 
     name = "presummary_files"
-    description = "对指定文件列表执行批量预摘要，结果写入 file_summaries 缓存"
+    description = "Batch pre-summarize specified files, results written to file_summaries cache"
 
     def plan(self, context: dict) -> list[AgentStep]:
         files = context.get("files", [])
@@ -25,7 +25,7 @@ class PreSummaryWorkflow(AgentWorkflow):
             logger.warning("[PreSummaryWorkflow] no files to summarize")
             return []
 
-        # 断点续传：跳过已缓存文件
+        # Resume: skip already cached files
         cached = context.get("cached_paths") or set()
         uncached = [fp for fp in files if fp not in cached]
         skipped = len(files) - len(uncached)
@@ -39,9 +39,9 @@ class PreSummaryWorkflow(AgentWorkflow):
         for i in range(0, len(uncached), concurrency):
             batch = uncached[i:i + concurrency]
             if len(batch) == 1:
-                desc = f"预摘要: {batch[0]}"
+                desc = f"Pre-summary: {batch[0]}"
             else:
-                desc = f"预摘要: {batch[0]} 等 {len(batch)} 个文件"
+                desc = f"Pre-summary: {batch[0]} and {len(batch)} files"
             steps.append(AgentStep(
                 tool="summarize_file",
                 args={"path": batch},
@@ -63,7 +63,7 @@ class PreSummaryWorkflow(AgentWorkflow):
             success=has_content,
             steps_completed=1 if has_content else 0,
             steps_total=1,
-            error=None if has_content else "所有文件摘要步骤均失败，请检查 LLM 模型配置或日志中的 [SummarizeFileTool] / [SubAgent] 错误",
-            summary=f"预摘要: {'成功' if has_content else '失败'}",
+            error=None if has_content else "All file summary steps failed, check LLM model configuration or [SummarizeFileTool] / [SubAgent] errors in logs",
+            summary=f"Pre-summary: {'succeeded' if has_content else 'failed'}",
             data={"failed_count": failed_count},
         )

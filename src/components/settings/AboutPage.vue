@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { ref } from 'vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('ST-008')
 const { t } = useI18n()
+const appVersion = '0.1.0'
 </script>
 
 <template>
@@ -29,7 +31,7 @@ const { t } = useI18n()
       >
         {{ t('settings.aboutTagline') }}
       </div>
-      <span class="badge badge-blue">v0.1.0 beta</span>
+      <span class="badge badge-blue">v{{ appVersion }}</span>
       <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">
         <div>topocode@163.com</div>
         <div>

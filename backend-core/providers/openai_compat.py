@@ -1,13 +1,13 @@
-"""OpenAI-Compatible LLM Provider — BaseLLMProvider 实现
+"""OpenAI-Compatible LLM Provider — BaseLLMProvider implementation
 
-所有使用 OpenAI 格式 API 的提供商共用此基类:
+All providers using OpenAI-format API share this base class:
 - OpenAI (GPT-4, GPT-4o, GPT-3.5)
 - DeepSeek (V2, V3, R1)
 - Groq (LLaMA, Mixtral)
-- LM Studio (本地模型, OpenAI-compatible 模式)
+- LM Studio (local models, OpenAI-compatible mode)
 - Together AI, Fireworks AI, ...
 
-API 格式: POST /v1/chat/completions
+API format: POST /v1/chat/completions
 """
 
 import json as _json
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatProvider(BaseLLMProvider):
-    """OpenAI 兼容 API 聊天补全 — 基类"""
+    """OpenAI-compatible API chat completion — base class"""
 
     PROVIDER_NAME = 'openai-compat'
     supports_tools = True
@@ -74,7 +74,7 @@ class OpenAICompatProvider(BaseLLMProvider):
                 for m in payload.get('messages', [])
             ],
         }
-        logger.info(f"[LLM_REQ] {self.PROVIDER_NAME} 请求: {_json.dumps(_log_payload, ensure_ascii=False)}")
+        logger.info(f"[LLM_REQ] {self.PROVIDER_NAME} request: {_json.dumps(_log_payload, ensure_ascii=False)}")
 
         full_content = ""
         tool_calls_by_idx = {}
@@ -185,7 +185,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         content = msg.get('content', '')
         usage = data.get('usage', {})
 
-        # 解析原生 tool_calls
+        # Parse native tool_calls
         raw_calls = msg.get('tool_calls', [])
         tool_calls = []
         if raw_calls:
@@ -211,7 +211,7 @@ class OpenAICompatProvider(BaseLLMProvider):
 
 
 class OllamaProvider(OpenAICompatProvider):
-    """Ollama 也支持 OpenAI 兼容 API (/v1/chat/completions)"""
+    """Ollama also supports OpenAI-compatible API (/v1/chat/completions)"""
 
     PROVIDER_NAME = 'Ollama'
 

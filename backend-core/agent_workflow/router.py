@@ -137,20 +137,20 @@ class RouterHarness:
             desc = entry.description or entry.workflow_class.description or action
             routes_desc.append(f"- {action}: {desc}")
 
-        prompt = f"""你是架构分析路由分类器。根据用户的自然语言请求，判断应执行哪个操作。
+        prompt = f"""You are an architecture analysis route classifier. Based on the user's natural language request, determine which action to execute.
 
-可用操作:
+Available actions:
 {routes_desc}
 
-请返回 JSON，格式:
-{{"action": <操作名>, "params": {{提取的参数}}, "confidence": <0.0-1.0>}}
+Return JSON in format:
+{{"action": <action_name>, "params": {{extracted params}}, "confidence": <0.0-1.0>}}
 
-规则:
-- action 必须是可用操作之一
-- params 从用户文本中提取 (level, edge_type, all, tag 等)
-- 如果无法确定，返回 confidence=0，action="unknown"
+Rules:
+- action must be one of the available actions
+- params extracted from user text (level, edge_type, all, tag, etc.)
+- If uncertain, return confidence=0, action="unknown"
 
-用户请求: "{natural_language}"
+User request: "{natural_language}"
 JSON:"""
 
         import asyncio
@@ -160,7 +160,7 @@ JSON:"""
             resp = loop.run_until_complete(
                 llm_chat_fn(
                     messages=[
-                        {"role": "system", "content": "你是路由分类器。只输出 JSON，不要解释。"},
+                        {"role": "system", "content": "You are a route classifier. Only output JSON, no explanation."},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.0,
@@ -215,14 +215,14 @@ JSON:"""
         if action == "unknown" or confidence < 0.5:
             available = self.routes
             raise ValueError(
-                f"无法理解您的请求。可用操作: {available}。请尝试更明确的描述。"
+                f"Cannot understand your request. Available actions: {available}. Please try a more specific description."
             )
 
         if confidence < 0.7:
             available = self.routes
             raise ValueError(
-                f"不确定您的意图 (置信度={confidence:.0%})。可用操作: {available}。"
-                f"请明确选择: {', '.join(available)}"
+                f"Uncertain about your intent (confidence={confidence:.0%}). Available actions: {available}. "
+                f"Please specify: {', '.join(available)}"
             )
 
         merged_context = dict(context)
@@ -272,7 +272,7 @@ def create_default_router(
         workflow_class=OverviewWorkflow,
         tool_builder=_build_overview_tools,
         context_transformer=_overview_context_transform,
-        description="生成整体架构概览文档。Agent 可读取社区分析结果、文件预摘要、源码文件等，输出架构总览 Markdown。支持参数: --force (强制重新生成), -L zh/en (输出语言)",
+        description="Generate overall architecture overview document. Agent reads community analysis results, file pre-summaries, source files etc., outputs architecture overview Markdown. Supports: --force (force regenerate), -L zh/en (output language)",
         sandbox_builder=lambda root: AgentSandbox(root, max_tokens=8192, timeout_seconds=600),
     ))
 
@@ -300,7 +300,7 @@ def create_default_router(
         workflow_class=AgenticComponentAnalystWorkflow,
         tool_builder=_build_agentic_component_tools,
         context_transformer=_agentic_component_context_transform,
-        description="Agentic 多轮分析组件，LLM 可自主调用 read_file / search_content 等工具读取文件后分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新分析)",
+        description="Agentic multi-turn component analysis, LLM autonomously calls read_file / search_content etc. to read files then analyze. Supports: -j N (concurrency 1-5, default 1), --force (force re-analysis)",
     ))
 
     # ── presummary_files 路由（文件预摘要） ──
@@ -323,7 +323,7 @@ def create_default_router(
         workflow_class=PreSummaryWorkflow,
         tool_builder=_build_presummary_tools,
         context_transformer=None,
-        description="文件预摘要: 批量摘要文件到缓存，加速后续组件分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新生成)",
+        description="File pre-summary: batch summarize files to cache, accelerate subsequent component analysis. Supports: -j N (concurrency 1-5, default 1), --force (force regenerate)",
         sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
     ))
 
@@ -343,7 +343,7 @@ def create_default_router(
         workflow_class=PipelineWorkflow,
         tool_builder=_build_pipeline_tools,
         context_transformer=None,
-        description="流水线整体激活：项目摘要->预摘要->组件分析->架构分析。支持参数: -j N (并发数1-5, 默认1), --force (强制重新生成), -L zh/en (输出语言)",
+        description="Pipeline: project summary -> pre-summary -> component analysis -> architecture analysis. Supports: -j N (concurrency 1-5, default 1), --force (force regenerate), -L zh/en (output language)",
         sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
     ))
 

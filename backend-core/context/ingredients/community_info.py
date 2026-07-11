@@ -18,18 +18,18 @@ class CommunityInfoIngredient(ContextIngredient):
         return parts
 
     def format(self, data: dict) -> str:
-        lines = [f"组件ID: {data.get('id', '')}"]
+        lines = [f"Component ID: {data.get('id', '')}"]
         nc = data.get("node_count")
         if nc:
-            lines.append(f"节点数: {nc}")
+            lines.append(f"Nodes: {nc}")
         fc = data.get("file_count")
         if fc:
-            lines.append(f"文件数: {fc}")
+            lines.append(f"Files: {fc}")
         qs = data.get("quality_score")
         if qs is not None:
-            lines.append(f"质量分: {qs:.4f}")
+            lines.append(f"Quality: {qs:.4f}")
         ec = data.get("edge_count")
         el = data.get("edge_label")
         if ec:
-            lines.append(f"边数: {ec} ({el})" if el else f"边数: {ec}")
+            lines.append(f"Edges: {ec} ({el})" if el else f"Edges: {ec}")
         return "\n".join(lines)

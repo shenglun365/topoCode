@@ -35,6 +35,12 @@ export default { shell: {
     about: 'About',
     guide: 'Guide',
     exitConfirm: 'Closing the application will interrupt running analysis tasks. Are you sure you want to exit?',
+    updateAvailable: 'Update Available',
+    updateCurrentVersion: 'Current Version',
+    updateLatestVersion: 'Latest Version',
+    updateLatest: 'You are up to date',
+    updateCheckFailed: 'Version check failed',
+    updateDownloadFrom: 'Download from',
   },
   activityBar: {
     home: 'Home',

@@ -337,7 +337,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         import asyncio
         import time
 
-        logger.info(f"[import] ===== 开始导入项目: {path} =====")
+        logger.info(f"[import] ===== import started: {path} =====")
         t0 = time.time()
 
         if not os.path.isdir(path):
@@ -350,26 +350,26 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         # 加载多种 ignore 文件 (.gitignore, .dockerignore, .npmignore, .ignore 等)
         extra_ignore_files = import_config.get("extra_ignore_files", [])
         ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
-        logger.info(f"[import] 加载 ignore 文件: {ignore_filenames}")
+        logger.info(f"[import] loading ignore files: {ignore_filenames}")
         gitignore = MultiIgnoreParser().load_files(path, ignore_filenames)
-        logger.info(f"[import] ignore 文件加载完成, 耗时 {time.time() - t0:.2f}s")
+        logger.info(f"[import] ignore files loaded, elapsed {time.time() - t0:.2f}s")
 
         # 创建项目库
         project_id = f"proj-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
-        logger.info(f"[import] 创建项目库: {project_id}")
+        logger.info(f"[import] creating project db: {project_id}")
         project_db = multi_db.init_project_db(project_id, project_root=os.path.abspath(path))
-        logger.info(f"[import] 项目库创建完成, 耗时 {time.time() - t0:.2f}s")
+        logger.info(f"[import] project db created, elapsed {time.time() - t0:.2f}s")
 
         # 单次遍历：同时完成语言检测和文件扫描
-        logger.info(f"[import] 开始扫描文件...")
+        logger.info(f"[import] starting file scan...")
         scan_t0 = time.time()
         file_count, language = await _scan_and_import(project_db, path, gitignore, server, project_id, extra_patterns=effective_patterns)
         scan_elapsed = time.time() - scan_t0
-        logger.info(f"[import] 扫描完成: {file_count} 个文件, 主语言={language}, 耗时 {scan_elapsed:.2f}s")
+        logger.info(f"[import] scan complete: {file_count} files, language={language}, elapsed {scan_elapsed:.2f}s")
 
         # 插入主库
-        logger.info(f"[import] 写入主库 projects 表...")
+        logger.info(f"[import] writing to main projects table...")
         main_db.insert("projects", {
             "id": project_id,
             "name": os.path.basename(path),
@@ -392,7 +392,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             "phase": "done",
         })
         total_elapsed = time.time() - t0
-        logger.info(f"[import] ===== 导入完成: {project_id}, {file_count} 文件, 总耗时 {total_elapsed:.2f}s =====")
+        logger.info(f"[import] ===== import complete: {project_id}, {file_count} files, total {total_elapsed:.2f}s =====")
 
         return main_db.fetchone("SELECT * FROM projects WHERE id = ?", (project_id,))
 
@@ -743,7 +743,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         # 写入主库
         main_db.insert("projects", {
             "id": project_id,
-            "name": name or f"资源 {resourceId}",
+            "name": name or f"Resource {resourceId}",
             "root_path": project_root,
             "language": "",
             "file_count": 0,
@@ -952,7 +952,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             if not parent:
                 raise ValueError("Parent group not found")
             if parent.get('depth', 0) >= 3:
-                raise ValueError("分组层级不能超过4层（建议控制在2-3层）")
+                raise ValueError("Group nesting exceeds max 4 levels (recommend 2-3)")
             depth = parent['depth'] + 1
         else:
             depth = 0
@@ -980,14 +980,14 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if parent_id is not None:
             # 不能把自己设为子节点（防止循环）
             if parent_id == id:
-                raise ValueError("不能将自己设为父分组")
+                raise ValueError("Cannot set group as its own parent")
             # 校验层级
             if parent_id:
                 parent = main_db.fetchone("SELECT * FROM project_groups WHERE id = ?", (parent_id,))
                 if not parent:
                     raise ValueError("Parent group not found")
                 if parent.get('depth', 0) >= 3:
-                    raise ValueError("分组层级不能超过4层")
+                    raise ValueError("Group nesting exceeds max 4 levels")
             updates.append("parent_id = ?")
             updates.append("depth = ?")
             params.append(parent_id)
@@ -1213,7 +1213,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             (name, provider),
         )
         if existing:
-            logger.info(f"[addModel] 模型已存在，自动更新: {existing['id']} ({name}/{provider})")
+            logger.info(f"[addModel] model already exists, auto-updating: {existing['id']} ({name}/{provider})")
             return update_model(existing["id"], **kwargs,
                               name=name, provider=provider, model=model, url=url, type=type)
 
@@ -1756,6 +1756,24 @@ def register_backend_methods(server: ZMQServer, multi_db: MultiDBManager, plugin
     def ping():
         return {"pong": True, "timestamp": datetime.now().isoformat()}
 
+    @server.register("app.checkVersion")
+    def check_version(current: str = ""):
+        """检查应用版本更新"""
+        rows = main_db.fetchall(
+            "SELECT key, value FROM app_config WHERE key IN ('latest_version', 'download_url_github', 'download_url_gitee')"
+        )
+        config = {r["key"]: r["value"] for r in rows}
+        latest = config.get("latest_version", current)
+        has_update = latest > current if current and latest else False
+        return {
+            "latest_version": latest,
+            "has_update": has_update,
+            "download_urls": {
+                "github": config.get("download_url_github", ""),
+                "gitee": config.get("download_url_gitee", ""),
+            },
+        }
+
     @server.register("backend.testPort")
     def test_port(port: int):
         """测试端口是否可用"""
@@ -1981,7 +1999,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
         try:
             entries = list(os.scandir(current_path))
         except PermissionError:
-            logger.warning(f"[import] 权限拒绝: {current_path}")
+            logger.warning(f"[import] permission denied: {current_path}")
             return
 
         for entry in entries:
@@ -1990,7 +2008,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 await asyncio.sleep(0)
                 elapsed = time.time() - scan_t0
                 progress_pct = min(int(file_count / total_estimate * 100), 99)
-                logger.info(f"[import] 扫描进度: {file_count}/{total_estimate} ({progress_pct}%), {dir_count} 目录, {ignored_count} 忽略, 耗时 {elapsed:.1f}s")
+                logger.info(f"[import] scan progress: {file_count}/{total_estimate} ({progress_pct}%), {dir_count} dirs, {ignored_count} ignored, elapsed {elapsed:.1f}s")
                 if server and project_id:
                     server.publish("project", "import.progress", {
                         "path": root_path,
@@ -2052,34 +2070,34 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
 
     # 快速统计总文件数（用于进度百分比）
     total_estimate = 0
-    logger.info(f"[import] 快速估算文件总数...")
+    logger.info(f"[import] estimating file count...")
     try:
         for dirpath, dirnames, filenames in os.walk(root_path):
             total_estimate += len(filenames)
     except Exception:
         total_estimate = 0
     if total_estimate > 0:
-        logger.info(f"[import] 估算总文件数: {total_estimate}")
+        logger.info(f"[import] estimated file count: {total_estimate}")
     else:
         total_estimate = 1  # 避免除零
 
     # 执行扫描
-    logger.info(f"[import] 开始递归扫描目录: {root_path}")
+    logger.info(f"[import] starting recursive scan: {root_path}")
     await _scan_dir(root_path)
     scan_elapsed = time.time() - scan_t0
-    logger.info(f"[import] 扫描完成: {file_count} 文件, {dir_count} 目录, {ignored_count} 忽略, 耗时 {scan_elapsed:.2f}s")
+    logger.info(f"[import] scan complete: {file_count} files, {dir_count} dirs, {ignored_count} ignored, elapsed {scan_elapsed:.2f}s")
 
     # 打印语言分布 Top 10
     if lang_counts:
         sorted_langs = sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         lang_summary = ", ".join(f"{ext}={cnt}" for ext, cnt in sorted_langs)
-        logger.info(f"[import] 语言分布 Top10: {lang_summary}")
+        logger.info(f"[import] language distribution Top10: {lang_summary}")
 
     # 批量写入（executemany 已通过 WriteQueue execute_batch 自管理事务）
     if batch_records:
         write_t0 = time.time()
         num_batches = (len(batch_records) + BATCH_SIZE - 1) // BATCH_SIZE
-        logger.info(f"[import] 开始批量写入: {len(batch_records)} 条记录, {num_batches} 批次 (每批 {BATCH_SIZE} 条)")
+        logger.info(f"[import] starting batch write: {len(batch_records)} records, {num_batches} batches ({BATCH_SIZE} per batch)")
         try:
             for i in range(0, len(batch_records), BATCH_SIZE):
                 chunk = batch_records[i:i + BATCH_SIZE]
@@ -2091,7 +2109,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                 )
                 batch_num = i // BATCH_SIZE + 1
                 elapsed = time.time() - write_t0
-                logger.info(f"[import] 写入进度: 批次 {batch_num}/{num_batches}, 已写入 {min(i + BATCH_SIZE, len(batch_records))}/{len(batch_records)}, 耗时 {elapsed:.2f}s")
+                logger.info(f"[import] write progress: batch {batch_num}/{num_batches}, written {min(i + BATCH_SIZE, len(batch_records))}/{len(batch_records)}, elapsed {elapsed:.2f}s")
                 if server and project_id:
                     write_pct = int(batch_num / num_batches * 10) + 90  # 90→100
                     server.publish("project", "import.progress", {
@@ -2105,7 +2123,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                         "totalBatches": num_batches,
                     })
         except Exception as e:
-            logger.error(f"[import] 批量写入失败: {e}")
+            logger.error(f"[import] batch write failed: {e}")
             raise
 
     # 确定主要语言（仅统计系统可解析的语言类型，避免将 HTML/JSON/Markdown 等误识别为主语言）
@@ -2131,7 +2149,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
             primary_language = LANG_MAP_DISPLAY.get(primary_ext, "Unknown")
 
     total_elapsed = time.time() - scan_t0
-    logger.info(f"[import] _scan_and_import 完成: {file_count} 文件, 主语言={primary_language}, 总耗时 {total_elapsed:.2f}s")
+    logger.info(f"[import] _scan_and_import done: {file_count} files, language={primary_language}, total {total_elapsed:.2f}s")
 
     return file_count, primary_language
 
@@ -2566,19 +2584,19 @@ async def _do_generate_project_summary(multi_db, project_id: str):
 
     # Build prompt
     prompt = (
-        "你是一个代码架构分析专家。请根据以下项目的 README 和依赖信息，"
-        "生成一段 500 字以内的项目概要。\n\n"
-        "要求：\n"
-        "1. 只提取功能性、技术栈、需求场景等对架构分析有用的信息\n"
-        "2. 忽略无关的安装说明、贡献指南、许可信息等\n"
-        "3. 用中文回答，简洁扼要\n"
-        "4. 字数控制在 500 字以内\n\n"
+        "You are a code architecture analysis expert. Based on the following project's README and dependency info, "
+        "generate a project summary within 500 characters.\n\n"
+        "Requirements:\n"
+        "1. Only extract info useful for architecture analysis: functionality, tech stack, requirements scenario\n"
+        "2. Ignore unrelated installation instructions, contribution guides, license info etc.\n"
+        "3. Answer concisely\n"
+        "4. Keep within 500 characters\n\n"
     )
     if readme_text:
         prompt += f"## README\n{readme_text}\n\n"
     if deps_text:
-        prompt += f"## 依赖文件\n{deps_text}\n\n"
-    prompt += "请输出项目概要："
+        prompt += f"## Dependencies\n{deps_text}\n\n"
+    prompt += "Please output a project summary:"
     logger.info(f"[generateProjectSummary] prompt built, total_len={len(prompt)}")
 
     # LLM call
@@ -2608,7 +2626,7 @@ async def _do_generate_project_summary(multi_db, project_id: str):
         logger.info(f"[generateProjectSummary] summary final_len={len(summary)}, preview={summary[:120]!r}")
     except Exception as e:
         logger.error(f"[generateProjectSummary] LLM call failed: {e}")
-        raise RuntimeError(f"生成项目概要失败: {e}")
+        raise RuntimeError(f"Failed to generate project summary: {e}")
 
     # Write to DB
     now = datetime.now().isoformat()

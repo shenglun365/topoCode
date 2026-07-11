@@ -24,5 +24,5 @@ class FileCentralityIngredient(ContextIngredient):
     def format(self, data: list[dict]) -> str:
         if not data:
             return ""
-        items = [f"{r['file_path']} ({r['refs']}次)" for r in data]
-        return f"核心文件（按引用数）: {'; '.join(items)}"
+        items = [f"{r['file_path']} ({r['refs']} refs)" for r in data]
+        return f"Core files (by reference count): {'; '.join(items)}"

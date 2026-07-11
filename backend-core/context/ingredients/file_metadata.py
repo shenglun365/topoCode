@@ -24,7 +24,7 @@ def _classify_file(filepath: str) -> str:
 
 
 class FileMetadataIngredient(ContextIngredient):
-    """单文件的导出符号/导入/引用方/类型。"""
+    """Single file's exported symbols/imports/callers/type."""
     name = "file_metadata"
 
     def collect(self, ctx) -> dict:
@@ -61,20 +61,20 @@ class FileMetadataIngredient(ContextIngredient):
     def format(self, data: dict) -> str:
         parts = []
         ft = data.get("type", "module")
-        parts.append(f"[类型] {ft}")
+        parts.append(f"[Type] {ft}")
 
         exports = data.get("exports", [])
         if exports:
             items = [f"{r['name']}({r['kind']})" for r in exports[:10]]
-            parts.append(f"[导出] {', '.join(items)}")
+            parts.append(f"[Exports] {', '.join(items)}")
 
         imports = data.get("imports", [])
         if imports:
-            parts.append(f"[导入] {', '.join(imports[:15])}")
+            parts.append(f"[Imports] {', '.join(imports[:15])}")
 
         callers = data.get("callers", [])
         if callers:
             rels = [os.path.relpath(r, "/") for r in callers]  # simplified
-            parts.append(f"[引用方] {'; '.join(rels)}")
+            parts.append(f"[Callers] {'; '.join(rels)}")
 
         return "\n".join(parts)

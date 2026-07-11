@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 class GetEdgeDetailTool(AgentTool):
-    """获取指定边的详细信息"""
+    """Get detailed info for a specific edge"""
 
     name = "get_edge_detail"
-    description = "获取指定边的详细信息：调用关系、依赖类型、数据流方向"
+    description = "Get detailed edge info: call relations, dependency type, data flow direction"
     category = "graph"
     llm_visible = True
 
@@ -33,7 +33,7 @@ class GetEdgeDetailTool(AgentTool):
                     "properties": {
                         "edge_id": {
                             "type": "string",
-                            "description": "边的唯一标识 ID",
+                            "description": "Unique edge ID",
                         },
                     },
                     "required": ["edge_id"],
@@ -43,14 +43,14 @@ class GetEdgeDetailTool(AgentTool):
 
     async def execute(self, edge_id: str = "", **kwargs) -> ToolResult:
         if not self._db:
-            return ToolResult.fail("数据库未初始化")
+            return ToolResult.fail("Database not initialized")
         try:
             row = self._db.execute(
                 "SELECT * FROM dependencies WHERE id=?",
                 (edge_id,)
             ).fetchone()
             if not row:
-                return ToolResult.fail(f"边未找到: {edge_id}")
+                return ToolResult.fail(f"Edge not found: {edge_id}")
             d = dict(row)
             source = self._db.execute(
                 "SELECT name, kind FROM graph_node WHERE id=?",

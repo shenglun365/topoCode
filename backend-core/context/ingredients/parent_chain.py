@@ -28,7 +28,7 @@ class ParentChainIngredient(ContextIngredient):
             ).fetchone()
             if row:
                 results.append(
-                    f"祖级组件 L{current_lv}（{row['name'] or parent_cid}）: {(row['summary'] or '')[:300]}"
+                    f"Ancestor component L{current_lv} ({row['name'] or parent_cid}): {(row['summary'] or '')[:300]}"
                 )
         return results
 

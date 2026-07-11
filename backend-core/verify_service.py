@@ -56,7 +56,7 @@ def _verify_worker(verify_id: str, multi_db, project_id: str, publish_fn):
         hash_rows = project_db.fetchall("SELECT file_path, md5_hash FROM file_hashes")
         if not hash_rows:
             _update_status(verify_id, VERIFY_STATUS_DONE, 100,
-                           "无文件哈希记录", result={
+                           "No file hash records", result={
                                "total": 0, "matched": 0, "mismatch": 0,
                                "missing": 0, "matchRate": 0, "details": [],
                            })
@@ -99,7 +99,7 @@ def _verify_worker(verify_id: str, multi_db, project_id: str, publish_fn):
             if (i + 1) % 50 == 0 or i == total - 1:
                 pct = int((i + 1) / total * 100)
                 _update_status(verify_id, VERIFY_STATUS_RUNNING, pct,
-                               f"校验中 {i + 1}/{total}")
+                               f"Verifying {i + 1}/{total}")
 
         match_rate = round(matched / total * 100, 1) if total > 0 else 0
         result = {
@@ -113,7 +113,7 @@ def _verify_worker(verify_id: str, multi_db, project_id: str, publish_fn):
 
         elapsed = time.time() - t0
         _update_status(verify_id, VERIFY_STATUS_DONE, 100,
-                       f"比对完成，匹配率 {match_rate}%，耗时 {elapsed:.1f}s",
+                       f"Comparison complete: match rate {match_rate}%, {elapsed:.1f}s",
                        result=result)
         publish_fn("verify", "verify.done", {
             "verifyId": verify_id,
@@ -149,7 +149,7 @@ def start_verify(multi_db, project_id: str, publish_fn) -> str:
             "id": verify_id,
             "status": VERIFY_STATUS_RUNNING,
             "progress": 0,
-            "message": "排队中",
+            "message": "Queued",
             "result": None,
         }
     thread = threading.Thread(
