@@ -127,23 +127,17 @@ topoOne-ui/
 
 ### 1. 安装前端依赖
 
-> **Electron 安装说明**：`npm install` 会自动下载 Electron 二进制文件（~150MB），
-> 默认从 GitHub Releases 下载。建议设置国内镜像加速：
-> ```bash
-> # 设置 Electron 国内镜像（推荐）
-> export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-> # Windows 使用 set 命令：
-> # set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
-> ```
-
 ```bash
-# 使用国内 npm 镜像（推荐）
-npm config set registry https://registry.npmmirror.com
-npm install
+# 使用国内镜像安装（一行命令，不修改环境变量）
+ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/" \
+  npm install --registry=https://registry.npmmirror.com
 
-# 或使用 pnpm（更快）
-npm install -g pnpm
-pnpm install
+# Windows PowerShell 使用：
+# $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+# npm install --registry=https://registry.npmmirror.com
+
+# 或使用 pnpm（更快，无需全局安装）
+# npx pnpm install --registry=https://registry.npmmirror.com
 ```
 
 ### 2. 创建 Python 虚拟环境并安装依赖
@@ -151,30 +145,25 @@ pnpm install
 > `npm run dev` 会自动检测项目根目录下的虚拟环境（`.venv/` 或 `venv/`），优先使用其中的 Python 解释器。
 
 ```bash
-# 在项目主目录创建虚拟环境（推荐 .venv）
-python3 -m venv .venv
+# 创建虚拟环境并一行命令安装依赖（不污染全局 Python）
+python3 -m venv .venv && \
+  source .venv/bin/activate && \
+  cd backend-core && \
+  pip install -r requirements.txt \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    --trusted-host pypi.tuna.tsinghua.edu.cn
 
-# 激活虚拟环境
-# Linux / macOS:
-source .venv/bin/activate
-# Windows:
-# .venv\Scripts\activate
+# Windows PowerShell：
+# python3 -m venv .venv; `
+#   .venv\Scripts\Activate.ps1; `
+#   cd backend-core; `
+#   pip install -r requirements.txt `
+#     -i https://pypi.tuna.tsinghua.edu.cn/simple `
+#     --trusted-host pypi.tuna.tsinghua.edu.cn
 
-# 安装后端依赖
-cd backend-core
-
-# 使用国内 pip 镜像（推荐）
-pip install -r requirements.txt \
-  -i https://pypi.tuna.tsinghua.edu.cn/simple \
-  --trusted-host pypi.tuna.tsinghua.edu.cn
-
-# 或使用阿里云镜像
-pip install -r requirements.txt \
-  -i https://mirrors.aliyun.com/pypi/simple/ \
-  --trusted-host mirrors.aliyun.com
-
-# 安装完成后可退出虚拟环境
-# deactivate
+# 或使用阿里云镜像（替换上述 -i 和 --trusted-host 参数）：
+#   -i https://mirrors.aliyun.com/pypi/simple/
+#   --trusted-host mirrors.aliyun.com
 ```
 
 ### 3. 运行开发模式

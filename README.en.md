@@ -141,7 +141,15 @@ topoOne-ui/
 ### 1. Install Frontend Dependencies
 
 ```bash
+# Single command, no environment variable pollution
 npm install
+
+# Use mirror registry in China (one-shot, no config changes):
+# ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/" \
+#   npm install --registry=https://registry.npmmirror.com
+
+# Or use pnpm (faster, no global install required):
+# npx pnpm install
 ```
 
 ### 2. Create Python Virtual Environment & Install Dependencies
@@ -149,21 +157,22 @@ npm install
 > `npm run dev` will automatically detect a virtual environment (`.venv/` or `venv/`) in the project root and prefer its Python interpreter.
 
 ```bash
-# Create virtual environment in project root
-python3 -m venv .venv
+# Single command — creates venv, installs deps, no global pollution
+python3 -m venv .venv && \
+  source .venv/bin/activate && \
+  cd backend-core && \
+  pip install -r requirements.txt
 
-# Activate virtual environment
-# Linux / macOS:
-source .venv/bin/activate
-# Windows:
-# .venv\Scripts\activate
+# Windows PowerShell:
+# python3 -m venv .venv; `
+#   .venv\Scripts\Activate.ps1; `
+#   cd backend-core; `
+#   pip install -r requirements.txt
 
-# Install backend dependencies
-cd backend-core
-pip install -r requirements.txt
-
-# Deactivate when done
-# deactivate
+# Use mirror in China (replace the pip line above):
+#   pip install -r requirements.txt \
+#     -i https://pypi.tuna.tsinghua.edu.cn/simple \
+#     --trusted-host pypi.tuna.tsinghua.edu.cn
 ```
 
 ### 3. Run in Development Mode

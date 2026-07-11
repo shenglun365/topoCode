@@ -202,7 +202,6 @@ export default { report: {
 
   externalPackages: 'external packages',
   fileCount: 'files',
-  totalFiles: 'Total Files',
   externalImports: 'external imports',
   externalApis: 'external APIs',
   externalCalls: 'external calls',

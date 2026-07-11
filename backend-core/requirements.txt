@@ -5,7 +5,7 @@ pyzmq==27.1.0
 
 # SQLite (built-in, no extra dependency needed)
 
-# Tree-sitter (代码解析)
+# Tree-sitter (code parsing)
 tree-sitter==0.23.2
 tree-sitter-c==0.23.4
 tree-sitter-cpp==0.23.4
@@ -14,48 +14,48 @@ tree-sitter-javascript==0.23.1
 tree-sitter-typescript==0.23.2
 tree-sitter-go==0.23.4
 tree-sitter-java==0.23.5
-tree-sitter-rust>=0.23
-tree-sitter-c-sharp>=0.23
-tree-sitter-swift>=0.23
-tree-sitter-ruby>=0.23
-tree-sitter-kotlin>=0.23
-tree-sitter-php>=0.23
-tree-sitter-dart-orchard>=0.23
-tree-sitter-scala>=0.23
-tree-sitter-lua>=0.23
-tree-sitter-luau>=0.23
-tree-sitter-objc>=0.23
+tree-sitter-rust>=0.20
+tree-sitter-c-sharp>=0.20
+tree-sitter-swift>=0.7
+tree-sitter-ruby>=0.20
+tree-sitter-kotlin>=0.20
+tree-sitter-php>=0.20
+tree-sitter-dart-orchard>=0.3
+tree-sitter-scala>=0.20
+tree-sitter-lua>=0.4
+tree-sitter-luau>=0.20
+tree-sitter-objc>=0.20
 
-# 图计算 (调用链/依赖图/知识图谱)
+# Graph computation (call chain / dependency graph / knowledge graph)
 networkx==3.4.2
 python-louvain==0.16
 leidenalg>=0.10
 python-igraph>=0.11
 numpy>=1.24,<3.0
 
-# HTTP 客户端 (PlantUML 远程渲染)
+# HTTP client (PlantUML remote rendering)
 requests==2.34.2
 
-# Web 服务 (浏览器端文档浏览)
+# Web server (browser document browsing)
 fastapi==0.136.3
 uvicorn==0.48.0
 python-multipart==0.0.32
 
-# 工具库
+# Utilities
 pydantic==2.13.4
 pydantic-settings==2.14.1
 
-# 缓存存储
+# Cache storage
 diskcache==5.6.3
 
-# 列式数据库
+# Column-oriented database
 duckdb>=0.10.0
 
-# 系统监控 (进程资源管理)
+# System monitoring (process resource management)
 psutil>=6.0
 
-# TOML 解析 (Python < 3.11 回退)
+# TOML parsing (Python < 3.11 fallback)
 tomli>=2.0
 
-# 开发及测试依赖
+# Development & test dependencies
 pytest>=8.0

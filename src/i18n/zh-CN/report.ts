@@ -233,7 +233,6 @@ export default { report: {
 
   externalPackages: '个外部包',
   fileCount: '个文件',
-  totalFiles: '总文件',
   externalImports: '条外部导入',
   externalApis: '个外部API',
   externalCalls: '条外部调用',
