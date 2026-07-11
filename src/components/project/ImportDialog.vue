@@ -43,7 +43,7 @@ async function pickAndImport() {
     const importId = result.importId
     startPolling(importId)
   } catch (e: any) {
-    error.value = e.message || '导入失败'
+    error.value = e.message || t('project.import.importFailed')
     uploading.value = false
   }
 }
@@ -76,7 +76,7 @@ function startPolling(importId: string) {
         }, 500)
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
-        error.value = status.message || '导入失败'
+        error.value = status.message || t('project.import.importFailed')
         uploading.value = false
       }
     } catch {
@@ -93,50 +93,109 @@ function close() {
 
 <template>
   <Teleport to="body">
-    <div class="dialog-overlay" @click.self="close">
+    <div
+      class="dialog-overlay"
+      @click.self="close"
+    >
       <div class="dialog-card">
         <div class="dialog-header">
           <span class="dialog-title">{{ t('project.importStructure', '导入结构分析') }}</span>
-          <button v-if="!uploading && !done" class="dialog-close" @click="close">&times;</button>
+          <button
+            v-if="!uploading && !done"
+            class="dialog-close"
+            @click="close"
+          >
+            &times;
+          </button>
         </div>
 
-        <div v-if="!uploading && !done" class="upload-area">
-          <div class="upload-icon"><ArrowUpTrayIcon class="icon-lg" /></div>
-          <div class="upload-hint">{{ t('project.importHint', '选择之前导出的结构分析包 (.zip)') }}</div>
+        <div
+          v-if="!uploading && !done"
+          class="upload-area"
+        >
+          <div class="upload-icon">
+            <ArrowUpTrayIcon class="icon-lg" />
+          </div>
+          <div class="upload-hint">
+            {{ t('project.importHint', '选择之前导出的结构分析包 (.zip)') }}
+          </div>
           <div class="mode-selector">
             <label class="mode-option">
-              <input v-model="importMode" type="radio" value="share" class="mode-radio">
+              <input
+                v-model="importMode"
+                type="radio"
+                value="share"
+                class="mode-radio"
+              >
               <span class="mode-label">{{ t('project.importModeShare', '写入当前项目（分享）') }}</span>
             </label>
             <label class="mode-option">
-              <input v-model="importMode" type="radio" value="restore" class="mode-radio">
+              <input
+                v-model="importMode"
+                type="radio"
+                value="restore"
+                class="mode-radio"
+              >
               <span class="mode-label">{{ t('project.importModeRestore', '覆盖原项目（恢复备份）') }}</span>
             </label>
           </div>
-          <button class="btn btn-primary btn-sm" @click="pickAndImport">
+          <button
+            class="btn btn-primary btn-sm"
+            @click="pickAndImport"
+          >
             {{ t('project.selectFile', '选择文件') }}
           </button>
-          <div v-if="error" class="error-msg">{{ error }}</div>
+          <div
+            v-if="error"
+            class="error-msg"
+          >
+            {{ error }}
+          </div>
         </div>
 
-        <div v-else class="progress-section">
+        <div
+          v-else
+          class="progress-section"
+        >
           <div class="progress-bar-track">
-            <div class="progress-bar-fill" :style="{ width: progress + '%' }" />
+            <div
+              class="progress-bar-fill"
+              :style="{ width: progress + '%' }"
+            />
           </div>
           <div class="progress-info">
             <span v-if="!done">{{ message || t('common.processing', '处理中...') }}</span>
-            <span v-else class="done-text">
+            <span
+              v-else
+              class="done-text"
+            >
               {{ t('project.importDone', '导入完成') }}: {{ newProjectName }}
             </span>
           </div>
-          <div v-if="error" class="error-msg">{{ error }}</div>
-          <div class="dialog-footer" style="justify-content:flex-end">
+          <div
+            v-if="error"
+            class="error-msg"
+          >
+            {{ error }}
+          </div>
+          <div
+            class="dialog-footer"
+            style="justify-content:flex-end"
+          >
             <template v-if="done">
-              <button class="btn btn-primary btn-sm" @click="goToProject">
+              <button
+                class="btn btn-primary btn-sm"
+                @click="goToProject"
+              >
                 {{ t('project.goToProject', '查看项目') }}
               </button>
             </template>
-            <button class="btn btn-ghost btn-sm" @click="close">{{ t('common.close') }}</button>
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="close"
+            >
+              {{ t('common.close') }}
+            </button>
           </div>
         </div>
       </div>

@@ -27,5 +27,12 @@ export default { render: {
   renderWorkerCount: '渲染 Worker 数',
   renderWorkerBusy: '渲染 Worker 繁忙',
   renderWorkerIdle: '渲染 Worker 空闲',
+  applyAndRender: '应用并渲染',
+  inputMermaidSyntax: '输入 Mermaid 语法',
+  inputMermaidToRender: '输入 Mermaid 语法以开始渲染',
+  layoutComputing: '布局计算中...',
+  layoutFailed: '布局计算失败',
+  renderComplete: '渲染完成',
+  waitingGraphData: '等待图数据...',
 },
 }

@@ -12,6 +12,7 @@
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.0/dist/cytoscape.min.js"></script>
 <script src="/static/store.js?v=20260706"></script>
+<script src="/static/i18n.js?v=20260711"></script>
 <style>
   :root {
     --bg: #ffffff; --bg-secondary: #f7f7f8; --bg-hover: #f0f0f2; --bg-code: #f4f4f5;
@@ -289,24 +290,24 @@
 </head>
 <body>
 <div class="header">
-  <span class="title" id="docTitle">TopoCode Documents</span>
-  <button class="toggle-btn" id="toggleNotes" title="便签簿">
+  <span class="title" id="docTitle" data-i18n="viewer.title">TopoCode Documents</span>
+  <button class="toggle-btn" id="toggleNotes" data-i18n-title="viewer.notes">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
     <span class="dot-badge" id="notesDot"></span>
   </button>
-  <button class="toggle-btn active" id="toggleLeft" title="切换文档栏">
+  <button class="toggle-btn active" id="toggleLeft" data-i18n-title="viewer.toggleDoc">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
   </button>
-  <button class="toggle-btn active" id="toggleRight" title="切换结构图栏">
+  <button class="toggle-btn active" id="toggleRight" data-i18n-title="viewer.toggleGraph">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><circle cx="5" cy="19" r="2"/><line x1="12" y1="9" x2="17" y2="7"/><line x1="12" y1="15" x2="17" y2="17"/><line x1="12" y1="9" x2="7" y2="7"/><line x1="12" y1="15" x2="7" y2="17"/></svg>
   </button>
   <a href="/chat" target="_blank" id="chatLink">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-    AI助手
+    <span data-i18n="viewer.aiAssistant">AI Assistant</span>
   </a>
   <a href="/" id="backLink">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:2px"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-    返回
+    <span data-i18n="viewer.back">Back</span>
   </a>
 </div>
 
@@ -328,24 +329,24 @@
       <div class="breadcrumb" id="rightBreadcrumb"></div>
       <div class="graph-toolbar" id="graphToolbar">
         <div class="graph-toolbar-header" id="graphToolbarHeader">
-          <span class="graph-toolbar-title" id="graphToolbarTitle">图操作</span>
+           <span class="graph-toolbar-title" id="graphToolbarTitle" data-i18n="viewer.graphOps">Graph</span>
           <button class="graph-toolbar-collapse" id="graphToolbarCollapse">−</button>
         </div>
         <div class="graph-toolbar-body" id="graphToolbarBody">
-          <button class="graph-tb-btn active" id="graphTbMode" title="跟随模式：拖拽节点时关联节点跟随移动（点击切换为独立模式）">跟随</button>
-          <button class="graph-tb-btn active" id="graphTbEdges" title="显示连线">连线</button>
-          <button class="graph-tb-btn active" id="graphTbGran" title="当前为组件形态，点击切换为文件形态">组件形态</button>
-          <button class="graph-tb-btn active" id="graphTbTab" title="当前为关系图，点击切换为热力图">关系图</button>
-          <button class="graph-tb-btn" id="graphTbFilter" title="筛选器">筛选</button>
-          <button class="graph-tb-btn" id="graphTbReset" title="重置节点位置为初始布局">复原</button>
+          <button class="graph-tb-btn active" id="graphTbMode" data-i18n-title="viewer.followMode" data-i18n="viewer.follow">Follow</button>
+          <button class="graph-tb-btn active" id="graphTbEdges" data-i18n-title="viewer.showEdges" data-i18n="viewer.edges">Edges</button>
+          <button class="graph-tb-btn active" id="graphTbGran" data-i18n-title="viewer.componentMode" data-i18n="viewer.componentModeLabel">Components</button>
+          <button class="graph-tb-btn active" id="graphTbTab" data-i18n-title="viewer.graphView" data-i18n="viewer.graphViewLabel">Graph</button>
+          <button class="graph-tb-btn" id="graphTbFilter" data-i18n-title="viewer.filter" data-i18n="common.filter">Filter</button>
+          <button class="graph-tb-btn" id="graphTbReset" data-i18n-title="viewer.resetLayout" data-i18n="viewer.resetLayoutLabel">Reset</button>
         </div>
       </div>
       <div class="graph-filter-panel" id="graphFilterPanel">
         <button class="graph-filter-close" id="graphFilterClose">✕</button>
         <div class="graph-filter-header">
           <span class="graph-filter-drag-icon">⠿</span>
-          <input type="text" class="graph-filter-search" id="graphFilterSearch" placeholder="搜索节点...">
-          <button class="graph-filter-btn graph-filter-toggle" id="graphFilterToggleAll" title="隐藏孤立节点（无连线）">隐藏孤立</button>
+          <input type="text" class="graph-filter-search" id="graphFilterSearch" data-i18n-placeholder="viewer.searchNode" placeholder="Search nodes...">
+          <button class="graph-filter-btn graph-filter-toggle" id="graphFilterToggleAll" data-i18n-title="viewer.hideOrphan" data-i18n="viewer.hideOrphanLabel">Hide Orphans</button>
         </div>
         <div class="graph-filter-list" id="graphFilterList"></div>
       </div>
@@ -353,45 +354,40 @@
         <div id="forceGraph">
           <div id="cyContainer" style="position:absolute;inset:0"></div>
           <div class="graph-overlay" id="graphLoading" style="display:none">
-            <div class="graph-overlay-box"><div class="spinner"></div><span id="graphLoadingText">\u6b63\u5728\u8ba1\u7b97\u5e03\u5c40...</span></div>
+            <div class="graph-overlay-box"><div class="spinner"></div><span id="graphLoadingText" data-i18n="common.loading">Loading...</span></div>
           </div>
           <div class="graph-error" id="graphError" style="display:none">
             <div class="graph-error-box">
               <button class="graph-error-close" id="graphErrorClose">\u2715</button>
-              <div class="title">\u5e03\u5c40\u8ba1\u7b97\u8d85\u65f6</div>
+              <div class="title" data-i18n="common.error">Error</div>
               <div class="msg" id="graphErrorMsg"></div>
-              <ul class="suggest">
-                <li>\u9009\u62e9\u66f4\u5177\u4f53\u7684\u793e\u533a\uff0c\u7f29\u5c0f\u67e5\u8be2\u8303\u56f4</li>
-                <li>\u964d\u4f4e\u751f\u6210\u6df1\u5ea6\uff08depth \u53c2\u6570\uff09</li>
-                <li>\u5728\u53f3\u4fa7\u9762\u677f\u4e2d\u589e\u5927\u201c\u8d85\u65f6\u201d\u8bbe\u7f6e</li>
-              </ul>
-              <button class="btn" id="graphErrorDismiss">\u77e5\u9053\u4e86</button>
+              <button class="btn" id="graphErrorDismiss" data-i18n="common.ok">OK</button>
             </div>
           </div>
         </div>
         <div id="graphContextMenu">
           <div class="ctx-item" data-action="copy-node">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            <span>复制节点信息</span>
+            <span data-i18n="viewer.copyNodeInfo">Copy Node Info</span>
           </div>
           <div class="ctx-divider"></div>
           <div class="ctx-item" data-action="drilldown">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
-            <span>下钻 (查看下级)</span>
+            <span data-i18n="viewer.drillDown">Drill Down</span>
           </div>
           <div class="ctx-item" data-action="doc">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            <span>打开文档</span>
+            <span data-i18n="viewer.openDoc">Open Doc</span>
           </div>
           <div class="ctx-divider"></div>
           <div class="ctx-item" data-action="center-view">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg>
-            <span>中心视图</span>
+            <span data-i18n="viewer.centerView">Center View</span>
           </div>
           <div class="ctx-divider"></div>
           <div class="ctx-item" data-action="note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            <span>存入便签</span>
+            <span data-i18n="viewer.saveNote">Save to Notes</span>
           </div>
         </div>
       </div>
@@ -409,7 +405,7 @@
         <div id="heatmapContent"></div>
       </div>
       <div class="toc-float" id="fileCommFloat">
-        <button class="toc-toggle" id="fileCommToggle" title="社区索引">&#x2630;</button>
+        <button class="toc-toggle" id="fileCommToggle" data-i18n-title="viewer.communityIndex">&#x2630;</button>
         <div class="toc-panel" id="fileCommPanel"></div>
       </div>
     </div>
@@ -420,28 +416,28 @@
 <div class="note-overlay" id="notesModal" style="display:none">
   <div class="note-modal">
     <div class="note-modal-header">
-      <h2>便签簿</h2>
+      <h2 data-i18n="viewer.notesTitle">Notes</h2>
       <button class="close" id="notesModalClose">&times;</button>
     </div>
     <div class="note-modal-filter">
-      <select id="notesFilterProj"><option value="">全部项目</option></select>
-      <select id="notesFilterSort"><option value="seq">序号 ↑</option><option value="time">时间 ↓</option></select>
-      <span class="info" id="notesCount">0 条</span>
+      <select id="notesFilterProj"><option value="" data-i18n="viewer.allProjects">All Projects</option></select>
+      <select id="notesFilterSort"><option value="seq" data-i18n="viewer.orderBy">Order</option><option value="time" data-i18n="viewer.orderByTime">Time</option></select>
+      <span class="info" id="notesCount">0 <span data-i18n="chat.itemsCount">items</span></span>
     </div>
     <div class="note-modal-body" id="notesDraftList"></div>
     <div class="note-modal-user-text">
-      <textarea id="notesUserText" placeholder="请描述分析需求，可用 #1 #2 指代上面的引用材料..." rows="2"></textarea>
-      <div class="hint">提示: 用 #序号 引用上面的材料</div>
+      <textarea id="notesUserText" data-i18n-placeholder="viewer.notePlaceholder" placeholder="Describe analysis needs..." rows="2"></textarea>
+      <div class="hint" data-i18n="viewer.noteHint">Tip: use #number to reference materials</div>
     </div>
     <div class="note-modal-sessions" id="noteSessionList" style="display:none">
       <div class="sessions-scroll" id="noteSessionScroll"></div>
     </div>
     <div class="note-modal-footer">
-      <label class="checkbox-label"><input type="checkbox" id="notesAutoDelete" checked> 发送后自动删除</label>
-      <button class="btn btn-secondary" id="notesBtnDelete">删除选中</button>
-      <button class="btn" id="notesBtnCancel">取消</button>
-      <button class="btn btn-secondary" id="notesBtnManual">手工处理</button>
-      <button class="btn btn-primary" id="notesBtnExec">立即执行</button>
+      <label class="checkbox-label"><input type="checkbox" id="notesAutoDelete" checked> <span data-i18n="viewer.autoDelete">Auto-delete after sending</span></label>
+      <button class="btn btn-secondary" id="notesBtnDelete" data-i18n="viewer.deleteSelected">Delete Selected</button>
+      <button class="btn" id="notesBtnCancel" data-i18n="common.cancel">Cancel</button>
+      <button class="btn btn-secondary" id="notesBtnManual" data-i18n="viewer.manualProcess">Manual</button>
+      <button class="btn btn-primary" id="notesBtnExec" data-i18n="viewer.executeNow">Execute</button>
     </div>
   </div>
 </div>
@@ -629,7 +625,7 @@ const API = {
 // ============================================================
 function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function escapeAttr(s) { return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-function _(key) { var m = { 'zh-CN': { tocTitle: '子组件目录', noDoc: '未解析' }, 'en-US': { tocTitle: 'Sub-Components', noDoc: 'unresolved' } }[S.locale]; return (m && m[key]) || key; }
+function _(key) { return window.__(key) || key; }
 function _cid_level(cid) { var parts = (cid || '').split('-'); for (var i = 0; i < parts.length; i++) { if (/^L\d+$/.test(parts[i])) return parts[i]; } return 'L0'; }
 function _hueSatLight(depth, hue) { var t=[[80,55],[70,65],[55,78],[40,88],[30,94]]; var v=t[Math.min(depth,4)]; return 'hsl('+hue+', '+v[0]+'%, '+v[1]+'%)'; }
 function _parentCommId(cid) { var p=(cid||'').split('-');for(var i=0;i<p.length;i++){if(/^L\d+$/.test(p[i])){var lv=parseInt(p[i].substring(1));if(lv===0)return null;var r=p.slice(0,i);r.push('L'+(lv-1));var s=p.slice(i+1);s.pop();if(lv===1)s.shift();else if(lv===2)r.push('L0');return r.concat(s).join('-');}}return null; }
@@ -1253,7 +1249,7 @@ const FileList = {
   async load(tid, cid, et) {
     var container = document.getElementById('fileListSection');
     if (!container) return;
-    container.innerHTML = '<div class="file-list-loading">加载文件列表...</div>';
+    container.innerHTML = '<div class="file-list-loading">' + __('viewer.loadingFiles') + '</div>';
     try {
       var data = await API.communityFiles(tid, cid, et);
       this._files = data.files || [];
@@ -1262,7 +1258,7 @@ const FileList = {
       this._query = '';
       this.render();
     } catch(e) {
-      container.innerHTML = '<div class="file-list-error">加载失败: ' + e.message + '</div>';
+      container.innerHTML = '<div class="file-list-error">' + __('viewer.loadFailed') + e.message + '</div>';
     }
   },
   _filtered() {
@@ -2270,7 +2266,7 @@ const GraphView = {
         document.execCommand('copy');
         document.body.removeChild(ta);
       }
-      showToast('已复制节点信息');
+      showToast(__('viewer.copiedInfo'));
     };
 
     menu.querySelector('[data-action="drilldown"]').onclick = function() {
@@ -2582,7 +2578,24 @@ async function load() {
     var r = await fetch('/api/template-locale');
     if (r.ok) { var d = await r.json(); if (d.locale === 'en-US' || d.locale === 'zh-CN') S.locale = d.locale; }
   } catch(e) {}
-  document.getElementById('tocToggle').title = _('tocTitle');
+  window.__setLocale(S.locale);
+  // Apply i18n to all data-i18n and data-i18n-title elements
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    var text = _(key);
+    if (text !== key) el.textContent = text;
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n-title');
+    var text = _(key);
+    if (text !== key) el.title = text;
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n-placeholder');
+    var text = _(key);
+    if (text !== key) el.placeholder = text;
+  });
+  document.getElementById('tocToggle').title = _('viewer.subComponents');
   document.getElementById('tocToggle').onclick = function() {
     var p = document.getElementById('tocPanel');
     p.classList.toggle('open');
@@ -2840,7 +2853,7 @@ function addRefToDraft(ref) {
   var btn = document.getElementById('toggleNotes');
   if (btn) { btn.classList.remove('pulse'); void btn.offsetWidth; btn.classList.add('pulse'); setTimeout(function(){btn.classList.remove('pulse')}, 1200); }
   var seqLabel = target.seq;
-  showToast('已存入便签草稿 #' + seqLabel);
+  showToast(__('viewer.copiedToNote') + seqLabel);
 }
 
 function escHtml(t) {
@@ -2856,7 +2869,7 @@ function getCurrentContextRef() {
     projectName: S.projectName || '',
     taskId: S.taskId || '',
     componentId: S.cid || '',
-    label: (S.cid || '当前页面') + (S.taskId ? ' ['+S.taskId.slice(0,8)+']' : '')
+    label: (S.cid || __('viewer.currentPage')) + (S.taskId ? ' ['+S.taskId.slice(0,8)+']' : '')
   };
 }
 
@@ -2906,9 +2919,9 @@ function renderDrafts() {
   } else {
     filtered.sort(function(a,b){return (a.seq||0)-(b.seq||0)});
   }
-  document.getElementById('notesCount').textContent = filtered.length + ' 条';
+  document.getElementById('notesCount').textContent = filtered.length + ' ' + __('chat.itemsCount');
   if (!filtered.length) {
-    list.innerHTML = '<div style="padding:40px;text-align:center;font-size:13px;color:var(--text-muted)">暂无草稿<br><span style="font-size:12px">在文档区选中文本后可存入便签</span></div>';
+    list.innerHTML = '<div style="padding:40px;text-align:center;font-size:13px;color:var(--text-muted)">' + __('viewer.noDraft') + '<br><span style="font-size:12px">' + __('viewer.draftHint') + '</span></div>';
     return;
   }
   var html = '';
@@ -2965,8 +2978,8 @@ function renderDrafts() {
       e.stopPropagation();
       var text = this.dataset.copy;
       if (!text) return;
-      try { navigator.clipboard.writeText(text).then(function(){ showToast('已复制: ' + text.slice(0,20) + (text.length > 20 ? '…' : '')); }) }
-      catch(e) { var ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('已复制'); }
+      try { navigator.clipboard.writeText(text).then(function(){ showToast(__('common.copySuccess') + ': ' + text.slice(0,20) + (text.length > 20 ? '…' : '')); }) }
+      catch(e) { var ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast(__('common.copySuccess')); }
     });
   });
 }
@@ -3008,11 +3021,11 @@ function showSelBar(sel) {
   _selBar.style.left = left + 'px';
   _selBar.style.top = top + 'px';
   _selBar.querySelector('[data-action="copy"]').onclick = function() {
-    navigator.clipboard.writeText(text).then(function(){showToast('已复制');removeSelBar()}).catch(function(){showToast('复制失败');removeSelBar()});
+    navigator.clipboard.writeText(text).then(function(){showToast(__('common.copySuccess'));removeSelBar()}).catch(function(){showToast(__('common.copyFailed'));removeSelBar()});
   };
   _selBar.querySelector('[data-action="note"]').onclick = function() {
     var ref = getCurrentContextRef();
-    if (!ref) { showToast('当前页面缺少项目信息，无法存入便签'); removeSelBar(); return; }
+    if (!ref) { showToast(__('common.operationFailed')); removeSelBar(); return; }
     ref.text = text.slice(0, 2000);
     addRefToDraft(ref);
     removeSelBar();

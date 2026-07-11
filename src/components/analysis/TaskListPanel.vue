@@ -203,7 +203,7 @@ async function validateFileCount(task: AnalysisTask): Promise<boolean> {
   const cached = taskFileCounts.value[key]
   if (cached && cached.count > 0) {
     if (cached.count > FILE_LIMIT_BLOCK) {
-      fileCountExceedMessage.value = `文件数 ${cached.count} 超过 ${FILE_LIMIT_BLOCK}，请先削减解析范围`
+      fileCountExceedMessage.value = t('analysis.fileCountExceed', { count: cached.count, limit: FILE_LIMIT_BLOCK })
       showFileCountExceedDialog.value = true
       return false
     }
@@ -220,7 +220,7 @@ async function validateFileCount(task: AnalysisTask): Promise<boolean> {
     const count = result.totalFiles
     taskFileCounts.value[key] = { count, loading: false }
     if (count > FILE_LIMIT_BLOCK) {
-      fileCountExceedMessage.value = `文件数 ${count} 超过 ${FILE_LIMIT_BLOCK}，请先削减解析范围`
+      fileCountExceedMessage.value = t('analysis.fileCountExceed', { count, limit: FILE_LIMIT_BLOCK })
       showFileCountExceedDialog.value = true
       return false
     }
@@ -373,7 +373,6 @@ function getConfigSummary(task: AnalysisTask): string {
             />
             <span class="task-name">{{ task.name }}</span>
             <span class="task-type-badge">{{ task.type }}</span>
-
           </div>
           <div class="task-progress-group">
             <span
@@ -435,8 +434,14 @@ function getConfigSummary(task: AnalysisTask): string {
             :disabled="task.status === 'stopping'"
             @click="onStopTask(task.id)"
           >
-            <span v-if="task.status === 'stopping'" class="loading-spinner" />
-            <StopIcon v-else class="w-3.5 h-3.5" />
+            <span
+              v-if="task.status === 'stopping'"
+              class="loading-spinner"
+            />
+            <StopIcon
+              v-else
+              class="w-3.5 h-3.5"
+            />
             <span>{{ task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask') }}</span>
           </button>
 
@@ -491,7 +496,7 @@ function getConfigSummary(task: AnalysisTask): string {
             @click="onOpenAnalysis(task)"
           >
             <DocumentTextIcon class="w-3.5 h-3.5" />
-            <span>结构分析</span>
+            <span>{{ t('report.structuralReport') }}</span>
           </button>
         </div>
       </div>

@@ -52,10 +52,10 @@ const reportItemsByProject = ref<Map<string, ReportItem[]>>(new Map())
 
 // 报告类型映射
 const typeMap: Record<string, string> = {
-  dependency: '内部依赖分析',
-  callChain: '内部调用分析',
-  dataFlow: '数据流分析',
-  architecture: '架构分析',
+  dependency: t('analysis.taskType.internalDependency'),
+  callChain: t('analysis.taskType.internalCall'),
+  dataFlow: t('analysis.taskType.dataFlow'),
+  architecture: t('analysis.taskType.architecture'),
 }
 
   // 加载项目的已完成报告（使用独立 IPC 调用，不覆盖共享的 analysisStore.tasks）
@@ -71,7 +71,7 @@ const typeMap: Record<string, string> = {
         items.push({
           taskId: task.id,
           type: 'analysisReport',
-          typeName: '结构分析',
+          typeName: t('analysis.taskType.structural'),
           taskName,
           updatedAt: task.updatedAt,
         })

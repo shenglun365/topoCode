@@ -92,7 +92,7 @@ function handleOpenPreSummary(taskId: string) {
   funcGroup.openTab('analysis', {
     id,
     kind: 'preSummaryFiles',
-    title: '文件预摘要',
+    title: t('analysis.presummary'),
     taskId,
     projectId: projectStore.selectedProjectId || undefined,
   } as any)

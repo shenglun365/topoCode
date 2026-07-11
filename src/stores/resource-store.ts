@@ -3,6 +3,14 @@ import { ref, computed } from 'vue'
 import type { Resource, ResourceCategory, ResourceListMeta } from '@/types'
 import { resourceService } from '@/services/resource-service'
 
+const DEFAULT_CATEGORIES: ResourceCategory[] = [
+  { key: '', label: '全部' },
+  { key: '__prerelease__', label: '即将上线', color: '#f59e0b' },
+  { key: '__free__', label: '免费', color: '#10b981' },
+  { key: '__points__', label: '积分兑换', color: '#3b82f6' },
+  { key: '已购', label: '已购资源', color: '#22c55e', scope: 'owned' },
+]
+
 export const useResourceStore = defineStore('resource', () => {
   const resources = ref<Resource[]>([])
   const currentResource = ref<Resource | null>(null)
@@ -16,7 +24,20 @@ export const useResourceStore = defineStore('resource', () => {
   const pagination = ref({ page: 1, total: 0, pageSize: 12 })
 
   const categories = computed<ResourceCategory[]>(() => {
-    return meta.value?.categories || []
+    const serverCats = meta.value?.categories
+    if (!serverCats || serverCats.length === 0) return DEFAULT_CATEGORIES
+    // Merge default special categories with server categories (server wins for same key)
+    const merged = [...DEFAULT_CATEGORIES]
+    const existingKeys = new Set(DEFAULT_CATEGORIES.map(c => c.key))
+    for (const cat of serverCats) {
+      if (existingKeys.has(cat.key)) {
+        const idx = merged.findIndex(c => c.key === cat.key)
+        if (idx >= 0) merged[idx] = cat
+      } else {
+        merged.push(cat)
+      }
+    }
+    return merged
   })
 
   const activeCategory = computed(() => {
@@ -26,6 +47,7 @@ export const useResourceStore = defineStore('resource', () => {
   const filteredResources = computed(() => {
     if (ownedMode.value) return resources.value
     if (!activeCategoryKey.value) return resources.value
+    if (activeCategoryKey.value.startsWith('__')) return resources.value
     return resources.value.filter(r => r.category === activeCategoryKey.value)
   })
 

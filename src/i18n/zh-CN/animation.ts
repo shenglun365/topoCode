@@ -37,5 +37,7 @@ export default { animation: {
   morph: '变形',
   flow: '流动',
   custom: '自定义',
+  sequenceHint: '提示：动画序列名称需与场景中的 animate 定义一致',
+  supportedEffects: '支持的效果：',
 },
 }

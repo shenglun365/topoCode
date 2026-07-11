@@ -443,7 +443,7 @@ watch(() => props.taskId, () => {
             @click="toggleCollapse('task')"
           >
             <PlusIcon class="w-3 h-3" />
-            <span>架构概览: {{ task?.name || '-' }}</span>
+            <span>{{ t('report.architectureOverviewLabel', { name: task?.name || '-' }) }}</span>
           </button>
         </div>
 
@@ -465,7 +465,7 @@ watch(() => props.taskId, () => {
         >
           <div class="section-header">
             <ChartBarIcon class="w-4 h-4" />
-            <span>{{ t('report.architectureOverview', '架构概览') }}</span>
+            <span>{{ t('report.architectureOverview') }}</span>
             <div class="header-spacer" />
             <button
               class="collapse-btn"
@@ -485,19 +485,19 @@ watch(() => props.taskId, () => {
               :class="{ 'summary-empty': !overviewDocId }"
               @click="openOverviewDoc"
             >
-              <span class="card-label">架构概览</span>
+              <span class="card-label">{{ t('report.architectureOverview') }}</span>
               <span
                 v-if="overviewLoading"
                 class="card-value card-summary-empty"
-              >{{ t('common.loading', '加载中...') }}</span>
+              >{{ t('common.loading') }}</span>
               <span
                 v-else-if="overviewDocId"
                 class="card-value"
-              >              ><span class="status-text status-green">已生成 可查看</span></span>
+              >              ><span class="status-text status-green">{{ t('report.generatedViewable') }}</span></span>
               <span
                 v-else
                 class="card-value card-summary-empty"
-              ><span class="status-text status-orange">未生成</span></span>
+              ><span class="status-text status-orange">{{ t('report.notGenerated') }}</span></span>
             </div>
             <div class="summary-card">
               <span class="card-label">{{ t('analysis.taskStatus') }}</span>
@@ -543,11 +543,17 @@ watch(() => props.taskId, () => {
               <template v-else-if="preSummaryStatus">
                 <div class="ps-summary-stat">
                   {{ t('report.preSummaryProgress') }}: {{ preSummaryStatus.cached_count }}/{{ preSummaryStatus.total_files }}
-                  <span v-if="preSummaryStatus.total_files > 0" class="presummary-pct">
+                  <span
+                    v-if="preSummaryStatus.total_files > 0"
+                    class="presummary-pct"
+                  >
                     ({{ Math.round(preSummaryStatus.cached_count / preSummaryStatus.total_files * 100) }}%)
                   </span>
-                  <span v-if="preSummaryStatus.failed_count" class="presummary-failed">
-                    失败: {{ preSummaryStatus.failed_count }}
+                  <span
+                    v-if="preSummaryStatus.failed_count"
+                    class="presummary-failed"
+                  >
+                    {{ t('report.failedCount', { count: preSummaryStatus.failed_count }) }}
                   </span>
                 </div>
                 <div class="ps-batches-compact">
@@ -569,7 +575,6 @@ watch(() => props.taskId, () => {
                   >
                     P2: {{ preSummaryStatus.counts?.P2 || 0 }} ({{ preSummaryStatus.counts?.P2 ? Math.round((preSummaryStatus.batch_cached?.P2 || 0) / preSummaryStatus.counts.P2 * 100) : 0 }}%)
                   </span>
-
                 </div>
               </template>
               <template v-else>

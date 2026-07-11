@@ -842,6 +842,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-06-15',
+    like_count: 42,
+    dislike_count: 3,
   },
   {
     id: 2,
@@ -856,6 +858,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-06-10',
+    like_count: 28,
+    dislike_count: 1,
   },
   {
     id: 3,
@@ -870,6 +874,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-06-08',
+    like_count: 56,
+    dislike_count: 2,
   },
   {
     id: 4,
@@ -884,6 +890,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-06-05',
+    like_count: 35,
+    dislike_count: 0,
   },
   {
     id: 5,
@@ -898,6 +906,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-06-01',
+    like_count: 19,
+    dislike_count: 1,
   },
   {
     id: 6,
@@ -912,6 +922,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-05-28',
+    like_count: 23,
+    dislike_count: 0,
   },
   {
     id: 7,
@@ -926,6 +938,8 @@ export const mockResources = [
     price_cny: 49,
     subscription_tier: '',
     created_at: '2026-05-20',
+    like_count: 12,
+    dislike_count: 4,
   },
   {
     id: 8,
@@ -940,6 +954,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-05-15',
+    like_count: 15,
+    dislike_count: 0,
   },
   {
     id: 9,
@@ -954,6 +970,8 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-05-10',
+    like_count: 31,
+    dislike_count: 2,
   },
   {
     id: 10,
@@ -968,5 +986,26 @@ export const mockResources = [
     price_cny: 0,
     subscription_tier: '',
     created_at: '2026-05-05',
+    like_count: 20,
+    dislike_count: 1,
+  },
+  {
+    id: 11,
+    title: 'Rust 异步运行时架构分析（即将上线）',
+    description: 'Tokio + async-std 异步运行时源码架构分析，涵盖任务调度、IO 驱动、定时器等核心模块依赖关系。',
+    category: '云原生',
+    thumbnail_url: '',
+    download_count: 0,
+    is_free: true,
+    pricing_model: 'free',
+    points_cost: 0,
+    price_cny: 0,
+    subscription_tier: '',
+    created_at: '2026-07-01',
+    status: 'prerelease',
+    is_prerelease: true,
+    oss_url: '',
+    like_count: 0,
+    dislike_count: 0,
   },
 ]

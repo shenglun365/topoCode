@@ -35,14 +35,14 @@ function startCountdown() {
 
 async function sendCode() {
   if (codeSending.value || codeSent.value) return
-  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
+  if (!account.value) { errorMsg.value = t('auth.validation.requireAccount'); return }
   codeSending.value = true
   errorMsg.value = ''
   try {
     await authService.sendCode(account.value)
     startCountdown()
   } catch (e: any) {
-    errorMsg.value = e.message || '发送失败'
+    errorMsg.value = e.message || t('common.sendFailed')
   } finally {
     codeSending.value = false
   }
@@ -59,27 +59,27 @@ function toggleMode() {
 async function handleLogin() {
   errorMsg.value = ''
 
-  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
+      if (!account.value) { errorMsg.value = t('auth.validation.requireAccount'); return }
 
   if (loginMode.value === 'password') {
-    if (!password.value) { errorMsg.value = '请填写密码'; return }
+      if (!password.value) { errorMsg.value = t('auth.validation.requirePassword'); return }
     loading.value = true
     const ok = await auth.login(account.value, password.value)
     loading.value = false
     if (ok) {
       router.push('/')
     } else {
-      errorMsg.value = auth.error || '邮箱或密码错误'
+      errorMsg.value = auth.error || t('auth.error.invalidCredentials')
     }
   } else {
-    if (!code.value) { errorMsg.value = '请填写验证码'; return }
+      if (!code.value) { errorMsg.value = t('auth.validation.requireCode'); return }
     loading.value = true
     const ok = await auth.loginWithCode(account.value, code.value)
     loading.value = false
     if (ok) {
       router.push('/')
     } else {
-      errorMsg.value = auth.error || '验证码错误或已过期'
+      errorMsg.value = auth.error || t('auth.error.invalidCode')
     }
   }
 }
@@ -88,38 +88,91 @@ async function handleLogin() {
 <template>
   <div class="auth-page">
     <div class="auth-card">
-      <div class="auth-logo">◆</div>
-      <h1 class="auth-title">{{ t('auth.login', 'TopoCode 登录') }}</h1>
+      <div class="auth-logo">
+        ◆
+      </div>
+      <h1 class="auth-title">
+        {{ t('auth.login') }}
+      </h1>
       <form @submit.prevent="handleLogin">
         <div class="field">
-          <input v-model="account" class="input" placeholder="邮箱 / 手机号" autocomplete="username">
+          <input
+            v-model="account"
+            class="input"
+          :placeholder="t('auth.placeholder.account')"
+          autocomplete="username"
+          >
         </div>
-        <div v-if="loginMode === 'password'" class="field">
-          <input v-model="password" type="password" class="input" :placeholder="t('auth.password', '密码')" autocomplete="current-password">
+        <div
+          v-if="loginMode === 'password'"
+          class="field"
+        >
+          <input
+            v-model="password"
+            type="password"
+            class="input"
+            :placeholder="t('auth.password')"
+            autocomplete="current-password"
+          >
         </div>
-        <div v-if="loginMode === 'code'" class="field">
+        <div
+          v-if="loginMode === 'code'"
+          class="field"
+        >
           <div class="code-row">
-            <input v-model="code" class="input flex-1" :placeholder="t('auth.verificationCode', '验证码')" maxlength="6" autocomplete="one-time-code">
-            <button type="button" class="btn btn-sm btn-ghost code-btn" :disabled="codeSending || codeSent" @click="sendCode">
-              {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : t('auth.sendCode', '发送验证码') }}
+            <input
+              v-model="code"
+              class="input flex-1"
+              :placeholder="t('auth.placeholder.verificationCode')"
+              maxlength="6"
+              autocomplete="one-time-code"
+            >
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost code-btn"
+              :disabled="codeSending || codeSent"
+              @click="sendCode"
+            >
+              {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : t('auth.sendCode') }}
             </button>
           </div>
         </div>
-        <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
-        <button type="submit" class="btn btn-primary btn-full" :disabled="loading">
-          {{ loading ? t('common.loading', '登录中...') : t('auth.loginBtn', '登录') }}
+        <div
+          v-if="errorMsg"
+          class="error"
+        >
+          {{ errorMsg }}
+        </div>
+        <button
+          type="submit"
+          class="btn btn-primary btn-full"
+          :disabled="loading"
+        >
+          {{ loading ? t('common.loading') : t('auth.loginBtn') }}
         </button>
       </form>
-      <div class="toggle-mode" @click="toggleMode">
-        {{ loginMode === 'password' ? t('auth.useCodeLogin', '使用验证码登录') : t('auth.usePasswordLogin', '使用密码登录') }}
+      <div
+        class="toggle-mode"
+        @click="toggleMode"
+      >
+        {{ loginMode === 'password' ? t('auth.useCodeLogin') : t('auth.usePasswordLogin') }}
       </div>
       <div class="auth-links">
-        <router-link to="/register">{{ t('auth.noAccount', '没有账号？立即注册') }}</router-link>
+        <router-link to="/register">
+          {{ t('auth.noAccount') }}
+        </router-link>
         <span class="sep">|</span>
-        <router-link to="/reset-password" class="link-muted">{{ t('auth.forgotPassword', '忘记密码') }}</router-link>
+        <router-link
+          to="/reset-password"
+          class="link-muted"
+        >
+          {{ t('auth.forgotPassword') }}
+        </router-link>
       </div>
       <div class="auth-back">
-        <router-link to="/">{{ t('auth.backHome', '← 返回首页') }}</router-link>
+        <router-link to="/">
+          {{ t('auth.backHome') }}
+        </router-link>
       </div>
     </div>
   </div>

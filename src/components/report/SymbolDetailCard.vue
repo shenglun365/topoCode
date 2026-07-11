@@ -43,17 +43,17 @@ const llmAvailable = isLLMConfigured()
 
 const typeLabel = computed(() => {
   const map: Record<string, string> = {
-    function: '函数',
-    class: '类',
-    method: '方法',
-    macro: '宏',
+    function: t('report.symbol.type.function'),
+    class: t('report.symbol.type.class'),
+    method: t('report.symbol.type.method'),
+    macro: t('report.symbol.type.macro'),
   }
   return map[props.symbolType] || props.symbolType
 })
 
 const displayCode = computed(() => {
   if (props.codeSnippet.length > 2000) {
-    return props.codeSnippet.substring(0, 2000) + '\n// ... (代码过长，可调用 LLM 压缩)'
+    return props.codeSnippet.substring(0, 2000) + '\n' + t('report.symbol.codeTooLongHint')
   }
   return props.codeSnippet
 })

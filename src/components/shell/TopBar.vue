@@ -324,8 +324,14 @@ onMounted(() => {
           :title="t(isMaximized ? 'common.restore' : 'common.maximize')"
           @click="onMaximize"
         >
-          <Square2StackIcon v-if="!isMaximized" class="w-3.5 h-3.5" />
-          <ArrowsPointingInIcon v-else class="w-3.5 h-3.5" />
+          <Square2StackIcon
+            v-if="!isMaximized"
+            class="w-3.5 h-3.5"
+          />
+          <ArrowsPointingInIcon
+            v-else
+            class="w-3.5 h-3.5"
+          />
         </div>
         <div
           class="win-btn win-btn-close"
@@ -368,18 +374,18 @@ onMounted(() => {
               {{ t('settings.aboutTagline') }}
             </div>
             <div class="about-section">
-              <span class="about-label">作者</span>
+              <span class="about-label">{{ t('common.author') }}</span>
               <span>TopoCode Team</span>
             </div>
             <div class="about-section">
-              <span class="about-label">联系方式</span>
+              <span class="about-label">{{ t('shell.topBar.contact') }}</span>
               <a href="mailto:support@opencode.ai">support@opencode.ai</a>
             </div>
             <button
               class="btn btn-ghost btn-sm"
               @click="openDocs(); showAbout = false"
             >
-              检查版本升级
+              {{ t('shell.topBar.checkUpdate') }}
             </button>
           </div>
         </div>
@@ -452,7 +458,6 @@ onMounted(() => {
         </div>
       </div>
     </Teleport>
-
   </div>
 </template>
 

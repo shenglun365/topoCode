@@ -12,7 +12,6 @@ import type {
   ModelConfigItem,
   AgentConfigItem,
   SkillConfigItem,
-  BackendStatus,
   ImportConfig,
   TaskProgressEvent,
   TaskCompleteEvent,
@@ -21,8 +20,6 @@ import type {
   TaskConfigUpdate,
   ScanOptions,
   GitInfo,
-  PositionEntry,
-  NodePosition,
 } from '@/types/ipc'
 
 /**
@@ -147,22 +144,6 @@ function createRealIPC() {
       },
       checkImportStatus: async (params: { projectId: string }) => {
         return await api.project.checkImportStatus(params)
-      },
-    },
-
-    // 图位置
-    graph: {
-      savePositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; positions: any[]; snapshotId?: string }) => {
-        return await api.graph.savePositions(params)
-      },
-      loadPositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string; snapshotId?: string }) => {
-        return await api.graph.loadPositions(params)
-      },
-      clearPositions: async (params: { taskId: string; edgeType: string; drillKey: string; layoutType: string }) => {
-        return await api.graph.clearPositions(params)
-      },
-      listSavedPositionKeys: async (params: { projectId: string }) => {
-        return await api.graph.listSavedPositionKeys(params)
       },
     },
 
@@ -631,48 +612,6 @@ function createRealIPC() {
       },
     },
 
-    // ==================== 系统 ====================
-    system: {
-      selectDirectory: async () => {
-        return await api.system.selectDirectory()
-      },
-      getAppDataPath: async () => {
-        return await api.system.getAppDataPath()
-      },
-      get: async (key: string) => {
-        return await api.system.get(key)
-      },
-      set: async (key: string, val: any) => {
-        return await api.system.set(key, val)
-      },
-      getHttpPort: async () => {
-        return await api.system.getHttpPort()
-      },
-      exportProject: async (projectId: string, taskIds?: string[]) => {
-        return await api.system.exportProject(projectId, taskIds)
-      },
-      exportStatus: async (exportId: string) => {
-        return await api.system.exportStatus(exportId)
-      },
-      importProjectArchive: async (archivePath: string) => {
-        return await api.system.importProjectArchive(archivePath)
-      },
-      importStatus: async (importId: string) => {
-        return await api.system.importStatus(importId)
-      },
-      verifyFiles: async (projectId: string) => {
-        return await api.system.verifyFiles(projectId)
-      },
-      verifyStatus: async (verifyId: string) => {
-        return await api.system.verifyStatus(verifyId)
-      },
-    },
 
-    // ==================== 渲染服务 ====================
-    render: {
-      renderPlantuml: async (params: { code: string; format?: string; useRemote?: boolean }) => {
-        return await api.render.renderPlantuml(params)
-      },
-    },
   }
 }

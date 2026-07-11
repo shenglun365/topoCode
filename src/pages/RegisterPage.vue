@@ -35,14 +35,14 @@ function startCountdown() {
 }
 
 async function sendCode() {
-  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
+  if (!account.value) { errorMsg.value = t('auth.validation.requireAccount'); return }
   codeSending.value = true
   errorMsg.value = ''
   try {
     await authService.sendCode(account.value)
     startCountdown()
   } catch (e: any) {
-    errorMsg.value = e.message || '发送失败'
+    errorMsg.value = e.message || t('common.sendFailed')
   } finally {
     codeSending.value = false
   }
@@ -71,7 +71,7 @@ async function handleRegister() {
   if (ok) {
     router.push('/user')
   } else {
-    errorMsg.value = auth.error || '注册失败'
+    errorMsg.value = auth.error || t('auth.error.registrationFailed')
   }
 }
 
@@ -83,32 +83,68 @@ function close() {
 <template>
   <div class="auth-page">
     <div class="auth-card">
-      <button class="close-btn" @click="close">✕</button>
-      <div class="auth-logo">◆</div>
-      <h1 class="auth-title">{{ t('auth.register', '创建账号') }}</h1>
+      <button
+        class="close-btn"
+        @click="close"
+      >
+        ✕
+      </button>
+      <div class="auth-logo">
+        ◆
+      </div>
+      <h1 class="auth-title">
+        {{ t('auth.register') }}
+      </h1>
 
       <form @submit.prevent="handleRegister">
         <div class="field">
           <div class="code-row">
-            <input v-model="account" class="input flex-1" placeholder="邮箱 / 手机号" autocomplete="username">
-            <button type="button" class="btn btn-sm btn-ghost code-btn" :disabled="codeSending || codeSent" @click="sendCode">
-              {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : '发送验证码' }}
+            <input
+              v-model="account"
+              class="input flex-1"
+              :placeholder="t('auth.placeholder.account')"
+              autocomplete="username"
+            >
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost code-btn"
+              :disabled="codeSending || codeSent"
+              @click="sendCode"
+            >
+              {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : t('auth.sendCode') }}
             </button>
           </div>
         </div>
 
         <div class="field">
-          <input v-model="code" class="input" placeholder="验证码" maxlength="6" autocomplete="one-time-code">
+          <input
+            v-model="code"
+            class="input"
+            :placeholder="t('auth.placeholder.verificationCode')"
+            maxlength="6"
+            autocomplete="one-time-code"
+          >
         </div>
 
-        <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
-        <button type="submit" class="btn btn-primary btn-full" :disabled="loading || !canSubmit">
-          {{ loading ? '注册中...' : '注册' }}
+        <div
+          v-if="errorMsg"
+          class="error"
+        >
+          {{ errorMsg }}
+        </div>
+        <button
+          type="submit"
+          class="btn btn-primary btn-full"
+          :disabled="loading || !canSubmit"
+        >
+          {{ loading ? t('auth.registering') : t('auth.registerBtn') }}
         </button>
       </form>
 
       <div class="auth-links">
-        <router-link to="/login">已有账号？去登录</router-link>
+          <router-link to="/login">
+            {{ t('auth.hasAccountGoLogin') }}
+        </router-link>
       </div>
     </div>
   </div>

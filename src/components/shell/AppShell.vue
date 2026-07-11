@@ -162,15 +162,23 @@ onUnmounted(() => {
       >
         <template v-if="startupPhase === 'loading'">
           <div class="startup-spinner" />
-          <p class="startup-title">本地后端服务启动中...</p>
+          <p class="startup-title">
+            {{ t('shell.backend.starting') }}
+          </p>
         </template>
         <template v-else-if="startupPhase === 'success'">
-          <div class="startup-icon success">✓</div>
-          <p class="startup-title">后端服务已启动</p>
+          <div class="startup-icon success">
+            ✓
+          </div>
+          <p class="startup-title">
+            {{ t('shell.backend.started') }}
+          </p>
           <button
             class="startup-btn"
             @click="dismissStartup"
-          >关闭</button>
+          >
+            {{ t('common.close') }}
+          </button>
         </template>
       </div>
     </div>
@@ -185,11 +193,11 @@ onUnmounted(() => {
           ⚠
         </div>
         <h2 class="backend-error-title">
-          本地后端服务异常
+          {{ t('shell.backend.error') }}
         </h2>
         <div class="backend-error-body">
           <p class="backend-error-desc">
-            后端 Python 进程未能正常启动或已意外退出，应用功能受限。
+            {{ t('shell.backend.errorDesc') }}
           </p>
           <p
             v-if="statusStore.backend.error"
@@ -198,8 +206,8 @@ onUnmounted(() => {
             {{ statusStore.backend.error }}
           </p>
           <p class="backend-error-hint">
-            可能的原因：Python 依赖缺失、数据库文件损坏、端口被占用。
-            <br>请检查终端输出的错误日志后重试。
+            {{ t('shell.backend.possibleCauses') }}
+            <br>{{ t('shell.backend.retryHint') }}
           </p>
         </div>
         <div class="backend-error-actions">
@@ -207,13 +215,13 @@ onUnmounted(() => {
             class="backend-error-btn primary"
             @click="retryBackend"
           >
-            重试启动
+            {{ t('shell.backend.retry') }}
           </button>
           <button
             class="backend-error-btn"
             @click="dismissError"
           >
-            关闭提示
+            {{ t('shell.backend.dismiss') }}
           </button>
         </div>
       </div>
@@ -231,7 +239,10 @@ onUnmounted(() => {
       <LeftPanel v-show="!hideLeftPanel && !panelStore.isFullscreen" />
 
       <!-- 主内容区 -->
-      <main class="content-area" :class="{ 'auth-fullscreen': isAuthPage }">
+      <main
+        class="content-area"
+        :class="{ 'auth-fullscreen': isAuthPage }"
+      >
         <div class="content-body">
           <router-view v-slot="{ Component }">
             <keep-alive>
@@ -255,21 +266,43 @@ onUnmounted(() => {
     <OnboardingTour />
 
     <!-- 全局确认弹窗（替代 confirm()） -->
-    <div v-if="confirmState.visible" class="confirm-overlay" @click.self="confirmResolve(confirmState.choices ? null : false)">
+    <div
+      v-if="confirmState.visible"
+      class="confirm-overlay"
+      @click.self="confirmResolve(confirmState.choices ? null : false)"
+    >
       <div class="confirm-box">
         <p>{{ confirmState.message }}</p>
-        <div v-if="confirmState.choices" class="confirm-actions">
+        <div
+          v-if="confirmState.choices"
+          class="confirm-actions"
+        >
           <button
             v-for="c in confirmState.choices"
             :key="c.value"
             class="confirm-btn"
             :class="'confirm-btn-' + (c.variant || 'primary')"
             @click="confirmResolve(c.value)"
-          >{{ c.label }}</button>
+          >
+            {{ c.label }}
+          </button>
         </div>
-        <div v-else class="confirm-actions">
-          <button class="confirm-btn confirm-btn-primary" @click="confirmResolve(true)">{{ t('common.confirm') }}</button>
-          <button class="confirm-btn" @click="confirmResolve(false)">{{ t('common.cancel') }}</button>
+        <div
+          v-else
+          class="confirm-actions"
+        >
+          <button
+            class="confirm-btn confirm-btn-primary"
+            @click="confirmResolve(true)"
+          >
+            {{ t('common.confirm') }}
+          </button>
+          <button
+            class="confirm-btn"
+            @click="confirmResolve(false)"
+          >
+            {{ t('common.cancel') }}
+          </button>
         </div>
       </div>
     </div>

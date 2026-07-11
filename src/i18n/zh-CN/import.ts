@@ -28,5 +28,6 @@ export default { import: {
   sortByType: '按类型',
   filterHint: '导入时将自动过滤非项目依赖文件',
   filterSettings: '配置过滤规则',
+  fileCountExceed: '文件数量过多',
 },
 }

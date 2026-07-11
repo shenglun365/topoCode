@@ -208,22 +208,22 @@ function sumFileCount(steps: any[], statuses: string[]): number {
 
 const statusLabel = (status: string) => {
   const map: Record<string, string> = {
-    queued: '排队中', running: '运行中', paused: '已暂停', completed: '已完成',
-    partial: '部分完成', failed: '已失败', cancelled: '已取消',
-    skipped: '已跳过', unknown: '未知',
+    queued: t('report.agent.status.queued'), running: t('report.agent.status.running'), paused: t('report.agent.status.paused'), completed: t('report.agent.status.completed'),
+    partial: t('report.agent.status.partial'), failed: t('report.agent.status.failed'), cancelled: t('report.agent.status.cancelled'),
+    skipped: t('report.agent.status.skipped'), unknown: t('report.agent.status.unknown'),
   }
-  return map[status] || '未知'
+  return map[status] || t('report.agent.status.unknown')
 }
 
 const actionLabel = (action: string) => {
   const map: Record<string, string> = {
-    analyze_components: '组件分析',
-    agentic_analyze_components: '智能组件分析',
-    overview: '架构概览',
-    analyze_all: '全量分析',
-    analyzeCommFiles: '文件分析',
-    presummary_files: '文件预摘要',
-    pipeline: '流水线',
+    analyze_components: t('report.agent.actionType.component'),
+    agentic_analyze_components: t('report.agent.actionType.smartComponent'),
+    overview: t('report.agent.actionType.overview'),
+    analyze_all: t('report.agent.actionType.pipeline'),
+    analyzeCommFiles: t('report.agent.actionType.file'),
+    presummary_files: t('report.agent.actionType.presummary'),
+    pipeline: t('report.agent.actionType.pipeline'),
   }
   return map[action] || action
 }
@@ -250,7 +250,7 @@ const actionLabel = (action: string) => {
         :title="t('report.clearHistory', '清除历史')"
         @click="clearHistory"
       >
-        清除
+        {{ t('common.clear') }}
       </button>
     </div>
     <div
@@ -287,7 +287,7 @@ const actionLabel = (action: string) => {
         <button
           v-if="task.status === 'running' || task.status === 'queued'"
           class="atl-pause-btn"
-          title="暂停此任务"
+          :title="t('report.agent.pauseTask')"
           @click="onPauseTask(taskId, task.id)"
         >
           <PauseIcon class="w-3 h-3" />
@@ -295,7 +295,7 @@ const actionLabel = (action: string) => {
         <button
           v-if="task.status === 'paused'"
           class="atl-resume-btn"
-          title="恢复此任务"
+          :title="t('report.agent.resumeTask')"
           @click="onResumeTask(taskId, task.id)"
         >
           <PlayIcon class="w-3 h-3" />
@@ -304,12 +304,18 @@ const actionLabel = (action: string) => {
           v-if="task.status === 'running' || task.status === 'queued'"
           class="atl-stop-btn"
           :class="{ 'atl-stopping': cancellingTaskId === task.id }"
-          :title="cancellingTaskId === task.id ? '正在停止...' : '停止此任务（等待当前 LLM 请求结束后完全终止）'"
+          :title="cancellingTaskId === task.id ? t('report.agent.stopping') : t('report.agent.stopTask')"
           :disabled="cancellingTaskId === task.id"
           @click="onCancelTask(taskId, task.id)"
         >
-          <ClockIcon v-if="cancellingTaskId === task.id" class="w-3 h-3" />
-          <StopIcon v-else class="w-3 h-3" />
+          <ClockIcon
+            v-if="cancellingTaskId === task.id"
+            class="w-3 h-3"
+          />
+          <StopIcon
+            v-else
+            class="w-3 h-3"
+          />
         </button>
       </div>
       <div
@@ -326,20 +332,16 @@ const actionLabel = (action: string) => {
         class="atl-steps"
       >
         <div class="atl-step-compact">
-          <span>已完成 </span>
+          <span>{{ t('report.agent.status.completed') }} </span>
           <span class="atl-compact-count">{{ sumFileCount(task.steps, ['done']) }}</span>
           <span>/{{ sumFileCount(task.steps, ['done','failed','pending','running']) }}</span>
-          <span class="atl-compact-detail">
-            （完成{{ sumFileCount(task.steps, ['done']) }}
-            / 失败{{ sumFileCount(task.steps, ['failed']) }}
-            / 剩余{{ sumFileCount(task.steps, ['pending','running']) }}）
-          </span>
+          <span class="atl-compact-detail">{{ t('report.agent.stepSummary', { done: sumFileCount(task.steps, ['done']), failed: sumFileCount(task.steps, ['failed']), remaining: sumFileCount(task.steps, ['pending','running']) }) }}</span>
         </div>
         <div
           v-if="task.steps.find(s => s.status === 'running')"
           class="atl-step-current"
         >
-          <span>当前: </span>
+          <span>{{ t('report.agent.current') }}</span>
           <span>{{ task.steps.find(s => s.status === 'running')?.description }}</span>
         </div>
       </div>
@@ -352,7 +354,7 @@ const actionLabel = (action: string) => {
         class="atl-more-btn"
         @click="loadMore"
       >
-        加载更多
+        {{ t('common.loadMore') }}
       </button>
     </div>
     <div

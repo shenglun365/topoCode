@@ -26,7 +26,7 @@ async function browseResourceDir() {
 }
 
 function openInFileManager(dir: string) {
-  ;(window.api as any)?.shell?.openPath(dir)
+  (window.api as any)?.shell?.openPath(dir)
 }
 
 const memoryLimitStatusClass = computed(() => {
@@ -193,8 +193,12 @@ function openHttpPage() {
         :value="aiLanguage"
         @change="setAiLanguage(($event.target as HTMLSelectElement).value)"
       >
-        <option value="zh-CN">简体中文</option>
-        <option value="en-US">English</option>
+        <option value="zh-CN">
+          {{ t('settings.simplifiedChinese') }}
+        </option>
+        <option value="en-US">
+          English
+        </option>
       </select>
       <span class="form-hint">{{ t('settings.aiAnalysisLanguageHint', 'LLM 分析输出内容的语言（与界面语言独立）') }}</span>
     </div>
@@ -373,48 +377,85 @@ function openHttpPage() {
     <!-- 资源项目存储位置 -->
     <div style="margin-top:16px;">
       <h3 style="font-size:13px; font-weight:600; margin-bottom:12px;">
-        资源项目
+        {{ t('settings.resourceStorage') }}
       </h3>
-      <div class="card" style="padding:14px;">
-        <div class="form-group" style="margin-bottom:12px;">
-          <label class="form-label">资源项目存储位置</label>
+      <div
+        class="card"
+        style="padding:14px;"
+      >
+        <div
+          class="form-group"
+          style="margin-bottom:12px;"
+        >
+          <label class="form-label">{{ t('settings.resourceStorageLabel') }}</label>
           <div style="display:flex; gap:6px; align-items:center;">
             <input
               class="input"
               style="flex:1; padding:6px 10px; font-size:12px;"
               :value="settingsStore.resourceProjectsDir"
               readonly
-              placeholder="默认: ~/.topocode/resource-projects/"
+              :placeholder="t('settings.resourceStoragePlaceholder')"
             >
-            <button class="btn btn-ghost btn-sm" @click="browseResourceDir">
-              浏览
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="browseResourceDir"
+            >
+              {{ t('common.open') }}
             </button>
           </div>
           <div style="margin-top:4px;">
             <label style="display:flex; align-items:center; gap:6px; font-size:11px; cursor:pointer;">
-              <input type="checkbox" v-model="autoMigrate" style="accent-color:var(--accent);">
-              自动迁移已有数据到新目录
+              <input
+                v-model="autoMigrate"
+                type="checkbox"
+                style="accent-color:var(--accent);"
+              >
+              {{ t('settings.resourceStorageMigrate') }}
             </label>
           </div>
           <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-            资源下载后的备份文件同样存储在该目录下
+            {{ t('settings.resourceStorageBackupHint') }}
           </div>
         </div>
 
         <!-- 历史记录 -->
-        <div v-if="settingsStore.resourceDirHistory.length > 1" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border);">
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">最近使用的目录：</div>
-          <div v-for="(dir, i) in settingsStore.resourceDirHistory" :key="i" style="display:flex; align-items:center; gap:4px; padding:2px 0;">
+        <div
+          v-if="settingsStore.resourceDirHistory.length > 1"
+          style="margin-top:8px; padding-top:8px; border-top:1px solid var(--border);"
+        >
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">
+            {{ t('settings.resourceStorageRecent') }}
+          </div>
+          <div
+            v-for="(dir, i) in settingsStore.resourceDirHistory"
+            :key="i"
+            style="display:flex; align-items:center; gap:4px; padding:2px 0;"
+          >
             <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ dir }}</span>
-            <button class="btn btn-ghost btn-icon btn-xs" title="在文件夹中打开" @click="openInFileManager(dir)">
-              <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <button
+              class="btn btn-ghost btn-icon btn-xs"
+              :title="t('settings.resourceStorageOpenFolder')"
+              @click="openInFileManager(dir)"
+            >
+              <svg
+                class="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              ><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
             </button>
-            <button class="btn btn-ghost btn-xs" style="font-size:10px;" @click="settingsStore.restoreResourceDir(i)" :disabled="dir === settingsStore.resourceProjectsDir">
-              恢复
+            <button
+              class="btn btn-ghost btn-xs"
+              style="font-size:10px;"
+              :disabled="dir === settingsStore.resourceProjectsDir"
+              @click="settingsStore.restoreResourceDir(i)"
+            >
+              {{ t('settings.resourceStorageRestore') }}
             </button>
           </div>
           <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
-            如不迁移，需手动将旧目录内容复制到新目录，否则已有项目将无法访问。
+            {{ t('settings.resourceStorageMigrateHint') }}
           </div>
         </div>
       </div>

@@ -282,6 +282,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
             file_count = 0
         main_db.update("projects", {
             "file_count": file_count,
+            "language": import_language,
             "status": "synced",
             "updated_at": datetime.now().isoformat(),
         }, "id = ?", (project_id,))

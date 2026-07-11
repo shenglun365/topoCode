@@ -1,97 +1,265 @@
-# TopoOne
+# TopoCode
 
-> **English**: [README.en.md](README.en.md) | 源码架构分析与报告生成工具
+> **English** · [English](README.en.md)
 
-自动解析项目源码结构，生成多层级的组件依赖图、调用关系分析、AI 架构分析报告。
+> 源码架构分析与理解工具 —— 提升人的架构认知水平。
+
+TopoCode 是一个面向开发者的**代码架构分析与学习工具**。它通过静态代码解析、依赖图计算、社区发现算法和 AI 辅助分析，帮助开发者快速理解陌生项目的架构设计、模块划分和代码组织方式。
+
+---
+
+> **隐私说明**：除用户自行配置的云端 LLM API 外，TopoCode 的代码解析、图计算、架构分析、Web 文档服务等所有功能均在**本地运行**，项目源码和解析数据不会上传至任何外部服务器，确保用户数据隐私安全。
 
 ## 功能特性
 
-- **多语言源码解析** — Tree-sitter AST 解析，支持 C/C++、Python、JavaScript/TypeScript、Go、Java 等
-- **架构分析** — 符号提取 → 调用图 → 依赖图 → Louvain 社区发现
-- **AI 分析** — LLM 组件命名/摘要/图表，架构文档自动生成
-- **可视化** — D3.js 力导向图、Mermaid / PlantUML 图表
-- **报告生成** — 可编排的流水线：验证 → 概要 → 社区分析 → 整体架构
-- **子文档管理** — Markdown 预览/编辑，支持按社区查看
+- **项目导入与管理** — 支持本地目录导入、文件树浏览、分组管理
+- **多语言代码解析** — 基于 Tree-sitter 的 AST 解析，支持 18+ 编程语言
+- **架构可视化** — 依赖图/调用图/社区结构图（D3.js / Cytoscape），支持交互式浏览
+- **社区发现** — Louvain / Leiden 算法自动识别代码模块（社区）结构
+- **AI 架构分析** — LLM 驱动的工作流，自动分析组件功能、生成架构概览文档
+- **交互式 AI 助手** — 基于项目上下文的智能问答，支持工具调用（符号搜索、文件读取等），通过本地 Web 端口提供浏览器端对话界面
+- **知识库** — 分析文档持久化存储、分类管理和四维标签体系
+- **Web 文档服务** — 本地 HTTP 服务（默认 3456 端口），浏览器中浏览架构文档和使用 AI 对话
+- **多语言支持** — 中文 / English 界面与 AI 分析输出
+
+---
 
 ## 技术栈
 
-| 层 | 技术 |
+| 层级 | 技术 |
 |---|---|
-| 前端框架 | Electron + Vue 3 + TypeScript + Vite |
-| 状态管理 | Pinia |
-| 可视化 | D3.js、Mermaid、Pixi.js |
-| 后端服务 | Python 3.10+、ZeroMQ |
-| 源码解析 | Tree-sitter |
-| 图计算 | NetworkX、python-louvain |
-| AI 集成 | 兼容 OpenAI / Ollama / LM Studio |
+| **前端框架** | Vue 3 + TypeScript + Pinia + Vue Router |
+| **UI 样式** | Tailwind CSS + SCSS + Heroicons |
+| **可视化** | D3.js + Cytoscape + Mermaid + PlantUML + PixiJS |
+| **桌面端** | Electron + electron-builder |
+| **后端语言** | Python 3.10+ |
+| **IPC 通信** | ZeroMQ (pyzmq) |
+| **代码解析** | Tree-sitter (18+ 语言) |
+| **图计算** | NetworkX + python-louvain + leidenalg + python-igraph |
+| **Web 服务** | FastAPI + Uvicorn |
+| **AI 推理** | OpenAI / Ollama / LM Studio 兼容接口 |
+| **数据库** | SQLite + DuckDB |
 
-## 环境要求
+---
 
-- **Node.js** >= 18
-- **npm** >= 9
+## 使用教程
+
+详细的使用流程请参考：
+- [中文使用教程](docs/usage-guide-zh.md)
+- [English Usage Guide](docs/usage-guide-en.md)
+
+---
+
+## 目录结构
+
+```
+topoOne-ui/
+├── src/                          # 前端 Vue 3 应用
+│   ├── components/               # UI 组件
+│   │   ├── ai/                   # AI 助手面板
+│   │   ├── analysis/             # 分析任务相关
+│   │   ├── knowledge/            # 知识库
+│   │   ├── project/              # 项目管理
+│   │   ├── report/               # 架构报告
+│   │   ├── settings/             # 设置页
+│   │   ├── shell/                # 应用壳 (ActivityBar, TopBar, StatusBar)
+│   │   └── visualization/        # 可视化组件
+│   ├── composables/              # 组合式函数
+│   ├── pages/                    # 路由页面
+│   ├── router/                   # 路由配置
+│   ├── services/                 # IPC 服务 (ZeroMQ 调用)
+│   ├── stores/                   # Pinia 状态管理
+│   ├── i18n/                     # 国际化 (zh-CN / en-US)
+│   └── types/                    # TypeScript 类型定义
+├── electron/                     # Electron 主进程
+│   ├── main.ts                   # 主进程入口 + IPC 处理
+│   ├── preload.ts                # contextBridge 安全桥接
+│   ├── window-manager.ts         # 多窗口管理
+│   ├── python-bridge.ts          # Python 后端进程管理
+│   ├── zmq-router.ts             # ZeroMQ 消息路由
+│   └── updater.ts                # 自动更新
+├── backend-core/                 # Python 后端
+│   ├── main.py                   # 后端入口 (单进程 / 分布式)
+│   ├── zmq_server.py             # ZeroMQ RPC 服务
+│   ├── core_service.py           # 核心业务方法注册
+│   ├── llm_service.py            # LLM 推理服务
+│   ├── task_manager.py           # 分析任务管理器
+│   ├── sqlite_ctx.py             # SQLite 多数据库管理
+│   ├── agent_workflow/           # AI Agent 工作流
+│   │   ├── workflows/            # 预定义工作流 (overview, component 等)
+│   │   ├── toolkits/             # 工具集 (文件、符号、图)
+│   │   └── runtime.py            # Agent 运行时
+│   ├── prompt_manager.py         # Prompt 模板管理
+│   ├── providers/                # LLM 提供商适配 (OpenAI, Ollama)
+│   ├── messaging/                # 内部消息总线
+│   ├── ingest/                   # 数据 ingest 管道
+│   ├── data_layer/               # 数据访问层 (cache, duckdb)
+│   └── store/                    # 持久化存储
+├── plugins/                      # 插件系统
+│   ├── parsers/                  # 代码解析器 (Tree-sitter)
+│   ├── community/                # 社区发现算法
+│   ├── reports/                  # Web 文档服务 (FastAPI)
+│   └── installer/                # AI 编码工具安装器
+├── build/                        # 构建脚本
+├── scripts/                      # 开发调试脚本
+└── tests/                        # 单元测试
+```
+
+---
+
+## 安装与运行
+
+### 推荐运行环境
+
+- **CPU**: 4 核心及以上
+- **内存**: 16 GB 及以上
+- **系统**: Linux / macOS / Windows（物理机或虚拟机均可）
+- **硬盘**: 至少 10 GB 可用空间（用于存储解析数据和知识库）
+
+> **本地模型硬件要求**：运行 Qwen3.6-9B-Q4 量化等本地模型建议 **NVIDIA RTX 4060 Ti 16GB 或以上** 显卡。如果没有独立 GPU，本地模型将使用 CPU 推理，速度会慢得多。如果仅使用云端模型（如 DeepSeek V4 Flash），4 核 8G 配置也可满足基本使用。
+
+### 前置要求
+
+- **Node.js** >= 20.0.0
 - **Python** >= 3.10
+- **npm** 或 **pnpm**
+- **pip**
 
-## 快速开始
+### 1. 安装前端依赖
+
+> **Electron 安装说明**：`npm install` 会自动下载 Electron 二进制文件（~150MB），
+> 默认从 GitHub Releases 下载。建议设置国内镜像加速：
+> ```bash
+> # 设置 Electron 国内镜像（推荐）
+> export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+> # Windows 使用 set 命令：
+> # set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+> ```
 
 ```bash
-# 1. 安装前端依赖
+# 使用国内 npm 镜像（推荐）
+npm config set registry https://registry.npmmirror.com
 npm install
 
-# 2. 创建并激活 Python 虚拟环境
+# 或使用 pnpm（更快）
+npm install -g pnpm
+pnpm install
+```
+
+### 2. 创建 Python 虚拟环境并安装依赖
+
+> `npm run dev` 会自动检测项目根目录下的虚拟环境（`.venv/` 或 `venv/`），优先使用其中的 Python 解释器。
+
+```bash
+# 在项目主目录创建虚拟环境（推荐 .venv）
 python3 -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
 
-# 3. 安装后端依赖
-pip install -r backend-core/requirements.txt
+# 激活虚拟环境
+# Linux / macOS:
+source .venv/bin/activate
+# Windows:
+# .venv\Scripts\activate
 
-# 4. 开发模式运行
+# 安装后端依赖
+cd backend-core
+
+# 使用国内 pip 镜像（推荐）
+pip install -r requirements.txt \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple \
+  --trusted-host pypi.tuna.tsinghua.edu.cn
+
+# 或使用阿里云镜像
+pip install -r requirements.txt \
+  -i https://mirrors.aliyun.com/pypi/simple/ \
+  --trusted-host mirrors.aliyun.com
+
+# 安装完成后可退出虚拟环境
+# deactivate
+```
+
+### 3. 运行开发模式
+
+```bash
+# 启动前端 Vite 开发服务器 + Electron
 npm run dev
 
-# 5. 打包
-npm run dist:linux  # Linux
-npm run dist:mac    # macOS
-npm run dist:win    # Windows
+# 仅启动 Vite 前端（浏览器中开发）
+npm run dev:vite
+
+# 调试模式（更多日志输出）
+npm run dev:debug
 ```
 
-## 项目结构
+首次启动时会自动启动 Python 后端进程。前端访问地址: `http://localhost:5173`
 
-```
-topoone-ui/
-├── src/                    # Vue 3 前端
-│   ├── components/         # 组件 (15 个分组)
-│   ├── pages/              # 页面 (6 个)
-│   ├── stores/             # Pinia 状态 (22 个)
-│   ├── services/           # IPC 服务层
-│   ├── types/              # TypeScript 类型
-│   ├── i18n/               # 国际化 (zh-CN/en-US)
-│   ├── router/             # 路由
-│   └── styles/             # 全局样式
-├── backend-core/           # Python 后端
-│   ├── main.py             # 入口 + 插件发现 + 方法注册
-│   ├── zmq_server.py       # ZMQ RPC 服务器
-│   ├── core_service.py     # 项目/分组/知识库/设置
-│   ├── task_manager.py     # 分析任务 + 社区操作
-│   ├── llm_service.py      # LLM 网关 + 会话管理
-│   ├── prompt_manager.py   # 提示词模板 (3 种 mode)
-│   ├── analyst_runner.py   # 6 步解析流水线
-│   ├── report_tree_service.py # 报告文档持久化
-│   ├── sqlite_ctx.py       # SQLite 连接管理 (4 库)
-│   ├── config/             # 提示词模板 JSON
-│   ├── store/              # 数据库 CRUD 层
-│   ├── providers/          # LLM 提供者实现
-│   ├── change_tracker/     # 变更追踪
-│   └── mcp_server/         # MCP 协议桥
-├── electron/               # Electron 主进程
-│   ├── main.ts             # IPC 路由 + 窗口管理
-│   ├── preload.ts          # contextBridge 暴露 API
-│   ├── zmq-router.ts       # ZMQ RPC + 事件订阅
-│   └── python-bridge.ts    # Python 子进程管理
-├── plugins/                # 后端插件
-├── docs/                   # 文档
-└── build/                  # 构建脚本
+### 4. 构建生产版本
+
+```bash
+npm run build
+
+# 打包为桌面应用
+npm run dist:linux   # Linux
+npm run dist:win     # Windows
+npm run dist:mac     # macOS
+npm run dist:all     # 全平台
 ```
 
-## License
+---
 
-Apache-2.0 License
+## 配置 LLM
+
+启动应用后，在 **设置 → 模型配置** 中添加 LLM 模型。支持任何兼容 OpenAI API 格式的提供商。
+
+### 模型选择建议
+
+| 用途 | 推荐方案 | 说明 |
+|---|---|---|
+| **架构解析 (Agent 工作流)** | 本地模型 Qwen3.6-9B 及以上 (Ollama / LM Studio) | 架构解析需要大量 token，涉及多轮工具调用和文件摘要。**建议本地部署**，节省费用且保证响应速度 |
+| **AI Chat 对话** | 云端高级模型，如 **DeepSeek V4 Flash** | 交互式对话对模型能力要求较高，DeepSeek V4 Flash 性价比优异。也可根据需求选择 GPT-4o / Claude 等 |
+
+### 常见配置
+
+- **Ollama 本地模型**: `http://localhost:11434`
+- **OpenAI 协议兼容**（支持所有兼容 OpenAI API 格式的模型服务，如 DeepSeek、Qwen 等）: `https://api.openai.com`
+- **DeepSeek**: `https://api.deepseek.com`
+- **LM Studio**: `http://localhost:1234`
+
+---
+
+## Web 文档服务 & AI 助手
+
+应用运行后，**AI 助手交互界面和文档浏览均通过本地 Web 服务提供**，默认监听 `http://localhost:3456`：
+
+- `/` — 项目文档首页
+- `/doc` — 文档查看器（支持 Mermaid / PlantUML 渲染）
+- `/chat` — AI 对话界面（无需 Electron，浏览器即可使用 AI 助手）
+
+可通过 **设置 → 通用设置** 修改 HTTP 端口与绑定地址。
+
+---
+
+## 开发
+
+```bash
+# 代码检查
+npm run type-check    # TypeScript 类型检查
+npm run lint          # ESLint 代码风格检查
+
+# 测试
+npm run test          # 前端测试
+cd backend-core && python -m pytest tests/  # 后端测试
+```
+
+---
+
+## 许可证
+
+[Apache License 2.0](LICENSE)
+
+---
+
+## 联系我们
+
+- 开发者邮箱: **topocode@163.com**
+- 项目地址: [https://github.com/topocode/topoone-ui](https://github.com/topocode/topoone-ui)
+- 问题反馈: [https://github.com/topocode/topoone-ui/issues](https://github.com/topocode/topoone-ui/issues)

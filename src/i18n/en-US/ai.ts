@@ -5,6 +5,78 @@ export default {
     placeholder: 'Ask a question... (Shift+Enter for new line)',
     you: 'You',
     ai: 'AI',
+    commands: {
+      help: '/help',
+    },
+    context: {
+      codeAnalysis: 'Code Analysis',
+      architectureAnalysis: 'Architecture Analysis',
+      freeChat: 'Free Chat',
+      project: 'Project "{name}"',
+      task: 'Task "{name}"',
+      currentContext: 'Current context: {parts}',
+    },
+    pipeline: {
+      completed: 'Pipeline execution completed',
+      firstSuccess: 'First success: {completed} steps',
+      retrySuccess: 'Success after retry: ({retries} retries total)',
+      executionFailed: 'Execution failed: (content not written)',
+      retryCount: '(retried {count} times)',
+      retryHint: 'Use /retry to re-execute (skips successful tasks by default, --force to overwrite).',
+      forceOverwriteAll: '(force overwrite all)',
+      skipCompleted: '(skip completed)',
+      started: 'Pipeline started{hint}. Order: project summary → pre-summary P0→P1→P2 → component analysis L0→L5 → overall architecture analysis. Check the Task panel for progress.',
+    },
+    errors: {
+      noActiveTask: 'No active task found.',
+      noCommunityList: 'Community list not loaded yet. Please open the structure graph on the left first.',
+      noMatchingCommunity: 'No matching community found.',
+      noComponents: 'No components found. Please open the structure graph on the left first.',
+      startFailed: 'Start failed: {msg}',
+    },
+    select: {
+      modeActive: 'Activated',
+      modeExited: 'Exited',
+      modeStatus: 'Component selection mode {status}. Select components in the structure graph or tag view, then enter an analysis request.',
+      cleared: 'Cleared all component selections.',
+      componentsSelected: '{count} components selected. Enter /analyze to start batch analysis...',
+      etcMore: ' and {count} more',
+      count: '{count}',
+      typeCommunity: 'Community',
+      typeExternal: 'External Package',
+      removeRef: 'Remove Reference',
+      exitMode: 'Exit Component Selection Mode',
+      selectComponent: 'Select Component',
+    },
+    analyze: {
+      forceOverwrite: ', force overwrite',
+      skipAnalyzed: '(skip analyzed)',
+      submitted: 'Submitted {count} components for Agent multi-round analysis{hint}: {names}. Check the Task panel for progress.',
+    },
+    presummary: {
+      started: 'Pre-summary P0→P1→P2 started{hint}. Check the Task panel for progress.',
+    },
+    overview: {
+      started: 'Architecture overview generation task started, please check back later...',
+    },
+    retry: {
+      forceOverwriteAll: '(force overwrite all)',
+      skipSuccessful: '(skip successful steps)',
+      started: 'Re-execution started{hint}. Check the Task panel for progress.',
+    },
+    messages: {
+      showEarlier: 'Show earlier messages ({count})',
+    },
+    helpEntry: {
+      hint: 'Type /help to see all available commands and modes',
+    },
+    langHint: {
+      zh: '(中文)',
+      en: '(English)',
+    },
+    common: {
+      concurrency: '(concurrency {n})',
+    },
   },
   ai: {
     assistantTitle: 'AI Assistant',

@@ -1,5 +1,3 @@
-import { pollingRegistry } from './polling-registry'
-
 export interface ControlPollConfig {
   interval: number
   fetcher: () => Promise<any>
@@ -31,18 +29,11 @@ class ControlDispatcher {
       return
     }
     this.entries.set(key, config)
-    pollingRegistry.register({
-      key,
-      category: 'control',
-      interval: config.interval,
-      status: 'running',
-    })
     this.scheduleNext(key, config.interval)
   }
 
   unregister(key: string) {
     this.entries.delete(key)
-    pollingRegistry.unregister(key)
     this.clearTimer(key)
   }
 
@@ -55,17 +46,12 @@ class ControlDispatcher {
   }
 
   private execute(key: string, config: ControlPollConfig) {
-    pollingRegistry.update(key, { lastRunAt: Date.now(), status: 'running' })
-
-    // 调度为微任务，不阻塞下一轮心跳的 setTimeout 注册
     Promise.resolve().then(() => config.fetcher())
       .then((data) => {
         config.onData?.(data)
-        pollingRegistry.update(key, { lastData: data, error: undefined })
       })
       .catch((err) => {
         config.onError?.(err)
-        pollingRegistry.update(key, { error: err?.message || String(err) })
       })
 
     // 同步注册下一轮心跳——不受上方微任务影响

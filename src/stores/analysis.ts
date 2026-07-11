@@ -31,7 +31,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   )
 
   const filteredTasks = computed(() => {
-    let result = filter.value.status.includes('all')
+    const result = filter.value.status.includes('all')
       ? tasks.value
       : tasks.value.filter(t => filter.value.status.includes(t.status))
     return [...result].sort((a, b) => ((b.createdAt || '') > (a.createdAt || '') ? 1 : -1))

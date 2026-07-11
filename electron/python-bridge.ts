@@ -331,6 +331,19 @@ export class PythonBridge {
     const candidates = process.platform === 'win32' ? ['python', 'python3', 'py'] : ['python3', 'python']
     const candidatePaths: string[] = []
 
+    // 优先检测项目根目录虚拟环境
+    const projectRoot = !app.isPackaged
+      ? join(__dirname, '..')
+      : process.resourcesPath || ''
+    if (projectRoot) {
+      const venvPy = process.platform === 'win32'
+        ? join(projectRoot, '.venv', 'Scripts', 'python.exe')
+        : join(projectRoot, '.venv', 'bin', 'python3')
+      if (existsSync(venvPy)) {
+        candidatePaths.push(venvPy)
+      }
+    }
+
     for (const cmd of candidates) {
       try {
         const { execSync } = require('child_process')

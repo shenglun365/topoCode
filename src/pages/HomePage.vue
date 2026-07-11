@@ -36,6 +36,12 @@ const groupFilterRef = ref<InstanceType<typeof GroupFilter> | null>(null)
 const showDuplicateDialog = ref(false)
 const showFileCountExceedDialog = ref(false)
 const fileCountExceedInfo = ref({ projectName: '', language: '', count: 0 })
+const fileCountExceedMessage = computed(() => t('project.fileCountExceed', {
+  name: fileCountExceedInfo.value.projectName,
+  language: fileCountExceedInfo.value.language,
+  count: fileCountExceedInfo.value.count,
+  limit: FILE_LIMIT_BLOCK,
+}))
 
 // 分页
 const currentPage = ref(1)
@@ -455,7 +461,7 @@ onMounted(async () => {
           <span>{{ t('import.fileCountExceed', '文件数量过多') }}</span>
         </div>
         <div class="confirm-body">
-          {{ `项目 "${fileCountExceedInfo.projectName}" 中 ${fileCountExceedInfo.language} 文件数量为 ${fileCountExceedInfo.count}，超过 10000 个文件限制，无法自动创建解析任务。请手动筛选语言类型和目录范围后再创建任务。` }}
+          {{ fileCountExceedMessage }}
         </div>
         <div class="confirm-actions">
           <button

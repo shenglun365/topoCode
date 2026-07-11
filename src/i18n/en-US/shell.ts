@@ -1,6 +1,8 @@
 export default { shell: {
   topBar: {
     file: 'File',
+    contact: 'Contact',
+    checkUpdate: 'Check for Updates',
     edit: 'Edit',
     view: 'View',
     tools: 'Tools',
@@ -32,6 +34,7 @@ export default { shell: {
     documentation: 'Documentation',
     about: 'About',
     guide: 'Guide',
+    exitConfirm: 'Closing the application will interrupt running analysis tasks. Are you sure you want to exit?',
   },
   activityBar: {
     home: 'Home',
@@ -80,6 +83,16 @@ export default { shell: {
     symbolsPending: 'Pending analysis module completion',
     float: 'Pop Out',
     dock: 'Dock',
+  },
+  backend: {
+    starting: 'Local backend service starting...',
+    started: 'Backend service started',
+    error: 'Backend Service Error',
+    errorDesc: 'The backend Python process failed to start or has unexpectedly exited. Application functionality is limited.',
+    possibleCauses: 'Possible causes: missing Python dependencies, corrupted database file, port already in use.',
+    retryHint: 'Please check the error logs in the terminal and try again.',
+    retry: 'Restart',
+    dismiss: 'Dismiss',
   },
 },
 }

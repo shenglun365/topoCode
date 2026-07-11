@@ -45,7 +45,7 @@ onMounted(async () => {
       if (port) httpBase.value = `http://localhost:${port}`
     } catch { /* use default */ }
   } catch (e) {
-    error.value = '加载任务列表失败'
+    error.value = t('project.export.loadFailed')
   } finally {
     loading.value = false
   }
@@ -72,7 +72,7 @@ async function startExport() {
     exportId.value = result.exportId
     startPolling()
   } catch (e: any) {
-    error.value = e.message || '导出失败'
+    error.value = e.message || t('project.export.exportFailed')
     exporting.value = false
   }
 }
@@ -92,7 +92,7 @@ function startPolling() {
         archivePath.value = status.result?.archivePath || ''
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
-        error.value = status.message || '导出失败'
+        error.value = status.message || t('project.export.exportFailed')
         exporting.value = false
       }
     } catch {
@@ -138,55 +138,118 @@ function close() {
       <div class="dialog-card">
         <div class="dialog-header">
           <span class="dialog-title">{{ t('project.exportStructure', '导出结构分析') }}</span>
-          <button v-if="!exporting" class="dialog-close" @click="close">&times;</button>
+          <button
+            v-if="!exporting"
+            class="dialog-close"
+            @click="close"
+          >
+            &times;
+          </button>
         </div>
 
-        <div v-if="loading" class="dialog-loading">
+        <div
+          v-if="loading"
+          class="dialog-loading"
+        >
           <div class="spinner" /><span>{{ t('common.loading') }}...</span>
         </div>
 
         <template v-else-if="!exporting && !done">
-          <div class="dialog-hint">{{ t('project.exportSelectHint', '选择要导出的分析任务') }}</div>
+          <div class="dialog-hint">
+            {{ t('project.exportSelectHint', '选择要导出的分析任务') }}
+          </div>
           <div class="select-all-row">
             <label class="cb-row">
-              <input v-model="allChecked" type="checkbox" class="cb" @change="toggleAll">
+              <input
+                v-model="allChecked"
+                type="checkbox"
+                class="cb"
+                @change="toggleAll"
+              >
               <span class="cb-label">{{ t('common.selectAll', '全选') }} ({{ tasks.length }})</span>
             </label>
           </div>
           <div class="task-list">
-            <label v-for="task in tasks" :key="task.id" class="cb-row">
-              <input v-model="task.checked" type="checkbox" class="cb">
+            <label
+              v-for="task in tasks"
+              :key="task.id"
+              class="cb-row"
+            >
+              <input
+                v-model="task.checked"
+                type="checkbox"
+                class="cb"
+              >
               <span class="cb-label">{{ task.name }}</span>
             </label>
           </div>
-          <div v-if="error" class="error-msg">{{ error }}</div>
+          <div
+            v-if="error"
+            class="error-msg"
+          >
+            {{ error }}
+          </div>
           <div class="dialog-footer">
             <span class="selected-info">{{ t('project.exportSelected', { n: selectedCount() }) }}</span>
             <div class="dialog-actions">
-              <button class="btn btn-ghost btn-sm" @click="close">{{ t('common.cancel') }}</button>
-              <button class="btn btn-primary btn-sm" :disabled="selectedCount() === 0" @click="startExport">
+              <button
+                class="btn btn-ghost btn-sm"
+                @click="close"
+              >
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                class="btn btn-primary btn-sm"
+                :disabled="selectedCount() === 0"
+                @click="startExport"
+              >
                 {{ t('project.exportAction', '导出') }}
               </button>
             </div>
           </div>
         </template>
 
-        <div v-else class="progress-section">
+        <div
+          v-else
+          class="progress-section"
+        >
           <div class="progress-bar-track">
-            <div class="progress-bar-fill" :style="{ width: progress + '%' }" />
+            <div
+              class="progress-bar-fill"
+              :style="{ width: progress + '%' }"
+            />
           </div>
           <div class="progress-info">
             <span v-if="!done">{{ message || t('common.processing', '处理中...') }}</span>
-            <span v-else class="done-text">{{ t('project.exportDone', '导出完成') }}</span>
+            <span
+              v-else
+              class="done-text"
+            >{{ t('project.exportDone', '导出完成') }}</span>
           </div>
-          <div v-if="error" class="error-msg">{{ error }}</div>
-          <div class="dialog-footer" style="justify-content:flex-end">
+          <div
+            v-if="error"
+            class="error-msg"
+          >
+            {{ error }}
+          </div>
+          <div
+            class="dialog-footer"
+            style="justify-content:flex-end"
+          >
             <template v-if="done">
-              <a class="btn btn-primary btn-sm" @click.prevent="handleDownload">
+              <a
+                class="btn btn-primary btn-sm"
+                @click.prevent="handleDownload"
+              >
                 <ArrowDownTrayIcon class="icon-sm" /> {{ t('project.downloadExport', '下载') }}
               </a>
             </template>
-            <button class="btn btn-ghost btn-sm" @click="close">{{ t('common.close') }}</button>
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="close"
+            >
+              {{ t('common.close') }}
+            </button>
           </div>
         </div>
       </div>

@@ -66,19 +66,36 @@ const tabs = [
 
 <template>
   <div class="page-settings">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
     <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
-      <div v-for="tab in tabs" :key="tab.id"
-        class="settings-tab" :class="{ active: settingsStore.activeTab === tab.id }"
-        @click="settingsStore.setActiveTab(tab.id)">
-        <component :is="tab.icon" class="w-4 h-4" />
+      <div
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="settings-tab"
+        :class="{ active: settingsStore.activeTab === tab.id }"
+        @click="settingsStore.setActiveTab(tab.id)"
+      >
+        <component
+          :is="tab.icon"
+          class="w-4 h-4"
+        />
         <span>{{ t(tab.key) }}</span>
       </div>
       <div style="flex:1;" />
       <div style="display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text-muted);">
-        <span class="status-dot" :class="'status-' + statusStore.backend.status" />
+        <span
+          class="status-dot"
+          :class="'status-' + statusStore.backend.status"
+        />
         <span>{{ t('settings.pythonBackend') }}</span>
-        <button class="btn btn-ghost btn-sm" style="padding:2px 6px; font-size:10px;" @click="showRestartConfirm = true">
+        <button
+          class="btn btn-ghost btn-sm"
+          style="padding:2px 6px; font-size:10px;"
+          @click="showRestartConfirm = true"
+        >
           <ArrowPathIcon class="w-3 h-3" />
           <span>{{ t('common.restart') }}</span>
         </button>
@@ -94,21 +111,49 @@ const tabs = [
       <AboutPage v-else-if="settingsStore.activeTab === 'about'" />
     </div>
     <Teleport to="body">
-      <div v-if="showRestartConfirm" class="modal-overlay" @click.self="showRestartConfirm = false">
-        <div class="modal" style="width:380px;">
+      <div
+        v-if="showRestartConfirm"
+        class="modal-overlay"
+        @click.self="showRestartConfirm = false"
+      >
+        <div
+          class="modal"
+          style="width:380px;"
+        >
           <div class="modal-header">
             <span class="modal-title">{{ t('common.restart') }}</span>
-            <button class="btn btn-ghost btn-xs" @click="showRestartConfirm = false"><XMarkIcon class="w-4 h-4" /></button>
+            <button
+              class="btn btn-ghost btn-xs"
+              @click="showRestartConfirm = false"
+            >
+              <XMarkIcon class="w-4 h-4" />
+            </button>
           </div>
           <div class="modal-body">
-            <p style="font-size:13px;color:var(--text-primary);">确认重启 Python 后端服务？</p>
-            <p v-if="runningTaskCount > 0" style="font-size:12px;color:var(--warning);margin-top:8px;">
+            <p style="font-size:13px;color:var(--text-primary);">
+              {{ t('settings.restartBackendConfirm') }}
+            </p>
+            <p
+              v-if="runningTaskCount > 0"
+              style="font-size:12px;color:var(--warning);margin-top:8px;"
+            >
               {{ t('common.restartBlockedTasks', { count: runningTaskCount }) }}
             </p>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-ghost btn-sm" @click="showRestartConfirm = false">{{ t('common.cancel') }}</button>
-            <button :disabled="runningTaskCount > 0" class="btn btn-primary btn-sm" @click="handleRestart">确定</button>
+            <button
+              class="btn btn-ghost btn-sm"
+              @click="showRestartConfirm = false"
+            >
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              :disabled="runningTaskCount > 0"
+              class="btn btn-primary btn-sm"
+              @click="handleRestart"
+            >
+               {{ t('common.confirm') }}
+            </button>
           </div>
         </div>
       </div>

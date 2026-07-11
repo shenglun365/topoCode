@@ -41,7 +41,7 @@ function buildSystemPrompt(): string {
     'docGroups', 'docTroubleshooting',
   ]
   const docs = docKeys.map(k => t(`ai.${k}` as any)).join('\n\n')
-  return t('ai.systemPromptRole') + '\n\n' + t('ai.systemPromptScope') + '\n\n' + docs
+  return     t('systemPromptRole') + '\n\n' + t('systemPromptScope') + '\n\n' + docs
 }
 
 const md = new MarkdownIt({
@@ -111,7 +111,7 @@ const userInput = ref('')
 const CMD_HISTORY_KEY = 'ai-command-history'
 const ARCH_CMDS = ['/select', '/presummary', '/analyze', '/analyze_components', '/overview', '/pipeline', '/retry']
 
-const USER_COMMANDS = ['/help', '/帮助', '/select', '/select --unanalyzed', '/select --l3',
+const USER_COMMANDS = ['/help', t('aiAssistant.commands.help'), '/select', '/select --unanalyzed', '/select --l3',
   '/presummary', '/presummary --force',
   '/analyze', '/analyze --force', '/analyze_components', '/analyze_components --force',
   '/overview', '/overview --force',
@@ -208,31 +208,31 @@ function resolveTaskId(): string | null {
 const hasAnalysisContext = computed(() => !!resolveTaskId())
 
 const pageLabel = computed(() => {
-  if (currentPage.value === 'code') return '代码解析'
-  if (currentPage.value === 'analysis') return '架构分析'
+  if (currentPage.value === 'code') return t('aiAssistant.context.codeAnalysis')
+  if (currentPage.value === 'analysis') return t('aiAssistant.context.architectureAnalysis')
   return ''
 })
 
 function buildContextMessage(): string {
   const parts: string[] = []
   if (currentPage.value === 'code') {
-    parts.push('代码解析')
+    parts.push(t('aiAssistant.context.codeAnalysis'))
   } else if (currentPage.value === 'analysis') {
-    parts.push('架构分析')
+    parts.push(t('aiAssistant.context.architectureAnalysis'))
   } else {
-    parts.push('自由对话')
+    parts.push(t('aiAssistant.context.freeChat'))
   }
   const projectName = projectStore.selectedProject?.name
   if (projectName) {
-    parts.push(`项目「${projectName}」`)
+    parts.push(t('aiAssistant.context.project', { name: projectName }))
   }
   if (currentPage.value === 'analysis') {
     const taskName = projectStore.activeTab?.title
     if (taskName) {
-      parts.push(`任务「${taskName}」`)
+      parts.push(t('aiAssistant.context.task', { name: taskName }))
     }
   }
-  return `当前上下文：${parts.join(' → ')}`
+  return t('aiAssistant.context.currentContext', { parts: parts.join(' → ') })
 }
 
 // 会话 key 变化 → 自动保存旧会话 + 加载新会话
@@ -248,7 +248,7 @@ watch(sessionKey, (newKey, oldKey) => {
   } else {
     addMessage('system', buildContextMessage())
     addMessage('system', t('ai.assistantWelcome'))
-    addMessage('system', t('ai.helpHint'))
+    addMessage('system', t('helpHint'))
   }
 })
 
@@ -269,24 +269,24 @@ watch(pipelineSummary, (summary) => {
 
   const s = summary.stats
   const lines: string[] = [
-    '📊 流水线执行完成',
+    '📊 ' + t('aiAssistant.pipeline.completed'),
     '──────────────────',
-    `✅ 首次成功:     ${s.completed} 步`,
+    '✅ ' + t('aiAssistant.pipeline.firstSuccess', { completed: s.completed }),
   ]
   if (s.retried_completed > 0) {
-    lines.push(`⚠️ 重试后成功:   ${s.retried_completed} 步（累计重试 ${s.total_retries} 次）`)
+    lines.push('⚠️ ' + t('aiAssistant.pipeline.retrySuccess', { retries: s.total_retries }))
   }
   if (s.failed > 0) {
-    lines.push(`❌ 执行失败:     ${s.failed} 步（内容未写入）`)
+    lines.push('❌ ' + t('aiAssistant.pipeline.executionFailed'))
     lines.push('')
     for (const fs of (s.step_details || [])) {
       if (fs.status !== 'failed') continue
       lines.push(`  • ${fs.description}`)
       if (fs.last_error) lines.push(`    → ${fs.last_error.slice(0, 80)}`)
-      if (fs.retries_used > 0) lines.push(`    (重试 ${fs.retries_used} 次)`)
+      if (fs.retries_used > 0) lines.push(t('aiAssistant.pipeline.retryCount', { count: fs.retries_used }))
     }
   }
-  lines.push('', '使用 /retry 命令重新执行（默认跳过成功任务，--force 强制覆盖）。')
+  lines.push('', t('aiAssistant.pipeline.retryHint'))
 
   addMessage('system', lines.join('\n'))
   pipelineSummary.value = null  // 清除，避免重复
@@ -351,13 +351,13 @@ async function handleSend() {
       if (!args) {
         // 无参数：切换选择模式（原行为）
         selectionStore.toggleSelecting()
-        const status = selectionStore.selecting ? '已激活' : '已退出'
-        addMessage('system', `组件选择模式 ${status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。`)
+        const status = selectionStore.selecting ? t('aiAssistant.select.modeActive') : t('aiAssistant.select.modeExited')
+        addMessage('system', t('aiAssistant.select.modeStatus', { status }))
         return
       }
       if (/^--clear$/i.test(args)) {
         selectionStore.clearAll()
-        addMessage('system', '已清除所有组件选择。')
+        addMessage('system', t('aiAssistant.select.cleared'))
         return
       }
       // 校验未知参数
@@ -369,9 +369,9 @@ async function handleSend() {
       }
       // 按条件自动选取社区
       const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      if (!taskId) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
       const taskComs = communityStore.tasks[taskId]?.communities || []
-      if (taskComs.length === 0) { addMessage('system', '社区列表尚未加载，请先打开左侧结构图。'); return }
+      if (taskComs.length === 0) { addMessage('system', t('aiAssistant.errors.noCommunityList')); return }
       const edgeFilter = args.match(/--(include|call)/i)?.[1]?.toUpperCase()
       const levelFilters = [...args.matchAll(/--l(\d+)/gi)].map(m => 'L' + m[1])
       const wantAll = /--all/i.test(args)
@@ -384,7 +384,7 @@ async function handleSend() {
         }
         return true
       })
-      if (matching.length === 0) { addMessage('system', '未找到匹配的社区。'); return }
+      if (matching.length === 0) { addMessage('system', t('aiAssistant.errors.noMatchingCommunity')); return }
       if (!selectionStore.selecting) selectionStore.toggleSelecting()
       selectionStore.clearAll()
       selectionStore.selectMany(matching.map(c => ({
@@ -394,7 +394,7 @@ async function handleSend() {
         taskId,
         metadata: { nodeCount: c.nodeCount, fileCount: c.fileCount, qualityScore: c.qualityScore ?? undefined },
       })))
-      addMessage('system', `已选中 ${matching.length} 个组件。可输入 /analyze 启动批量分析，或点选加减组件后发送消息。`)
+      addMessage('system', t('aiAssistant.select.componentsSelected', { count: matching.length }))
       return
     }
     // /analyze — 批量分析组件（Agent 多轮模式，默认全量 L0~L5）
@@ -412,7 +412,7 @@ async function handleSend() {
       const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
       const concurrency = Math.max(1, Math.min(5, parseInt(text.match(/(?:^|\s)(?:-j|--concurrency)\s+(\d+)/i)?.[1] || '1', 10)))
       const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
+      if (!taskId) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
 
       // 获取组件：用户已选择或默认全量 L0~L5
       let selectedComps: any[] = []
@@ -430,18 +430,19 @@ async function handleSend() {
       if (selectedComps.length === 0) {
         addMessage('user', text)
         userInput.value = ''
-        addMessage('system', '未找到组件。请先打开左侧结构图加载社区列表。')
+        addMessage('system', t('aiAssistant.errors.noComponents'))
         return
       }
       const MAX_COMPONENTS = 100
       if (selectedComps.length > MAX_COMPONENTS) selectedComps.length = MAX_COMPONENTS
 
-      const compNames = selectedComps.slice(0, 5).map(r => r.name).join('、') + (selectedComps.length > 5 ? `等${selectedComps.length}个` : '')
+      const compNames = selectedComps.slice(0, 5).map(r => r.name).join('、') + (selectedComps.length > 5 ? t('aiAssistant.select.etcMore', { count: selectedComps.length }) : '')
       addMessage('user', text)
       userInput.value = ''
-      const langHint = language === 'zh' ? '（中文）' : language === 'en' ? '（English）' : ''
-      const forceHint = force ? '，强制覆盖' : '（跳过已分析）'
-      addMessage('system', `已提交 ${selectedComps.length} 个组件的 Agent 多轮分析任务${langHint}${forceHint}${concurrency > 1 ? `（并发 ${concurrency}）` : ''}：${compNames}。请到「任务」面板查看进度。`)
+      const langHint = language === 'zh' ? t('aiAssistant.langHint.zh') : language === 'en' ? t('aiAssistant.langHint.en') : ''
+      const forceHint = force ? t('aiAssistant.analyze.forceOverwrite') : t('aiAssistant.analyze.skipAnalyzed')
+      const concHint = concurrency > 1 ? t('aiAssistant.common.concurrency', { n: concurrency }) : ''
+      addMessage('system', t('aiAssistant.analyze.submitted', { count: selectedComps.length, hint: langHint + forceHint + concHint, names: compNames }))
       if (selectionStore.selecting) selectionStore.toggleSelecting()
       communityStore.triggerComponentAnalysis(taskId, selectedComps, language, concurrency, true, 30, '', concurrency, 'deep', force)
         .catch(e => addMessage('error', String(e)))
@@ -463,17 +464,17 @@ async function handleSend() {
       addMessage('user', text)
       userInput.value = ''
       const taskId = resolveTaskId()
-      if (!taskId) { addMessage('system', '未找到激活的任务。'); return }
-      const hint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
-      addMessage('system', `预摘要 P0→P1→P2 已启动${hint}。请到「任务」面板查看进度。`)
+      if (!taskId) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
+      const hint = concurrency > 1 ? t('aiAssistant.common.concurrency', { n: concurrency }) : ''
+      addMessage('system', t('aiAssistant.presummary.started', { hint }))
       communityStore.startPreSummaryPipeline(taskId, ['P0', 'P1', 'P2'], 0, concurrency)
-        .catch((e: any) => addMessage('system', `启动失败: ${e.message || e}`))
+        .catch((e: any) => addMessage('system', t('aiAssistant.errors.startFailed', { msg: e.message || e })))
       return
     }
-    if (/^\/help$/i.test(text) || text === '/帮助') {
+      if (/^\/help$/i.test(text) || text === t('aiAssistant.commands.help')) {
       addMessage('user', text)
       userInput.value = ''
-      const helpContent = currentPage.value === 'code' ? t('ai.helpCode') : t('ai.helpCommands')
+      const helpContent = currentPage.value === 'code' ? t('helpCode') : t('helpCommands')
       addMessage('assistant', helpContent)
       return
     }
@@ -491,8 +492,8 @@ async function handleSend() {
       addMessage('user', text)
       userInput.value = ''
       const tid = resolveTaskId()
-      if (!tid) { addMessage('system', '未找到激活的任务。'); return }
-      addMessage('system', '架构概览生成任务已启动，请稍后查看结果...')
+      if (!tid) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
+      addMessage('system', t('aiAssistant.overview.started'))
       communityStore.triggerOverview(tid, text.includes('--force'))
         .catch(e => addMessage('error', String(e)))
       return
@@ -514,11 +515,12 @@ async function handleSend() {
       addMessage('user', text)
       userInput.value = ''
       const tid = resolveTaskId()
-      if (!tid) { addMessage('system', '未找到激活的任务。'); return }
-      const forceHint = force ? '（强制覆盖所有）' : '（跳过已完成）'
-      const langHint = language === 'zh' ? '中文' : language === 'en' ? 'English' : ''
-      const concHint = concurrency > 1 ? `（并发 ${concurrency}）` : ''
-      addMessage('system', `流水线已启动${forceHint}${langHint ? ` | ${langHint}` : ''}${concHint}。顺序执行：项目摘要 → 预摘要 P0→P1→P2 → 组件分析 L0→L5 → 整体架构分析。请到「任务」面板查看进度。`)
+      if (!tid) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
+      const forceHint = force ? t('aiAssistant.pipeline.forceOverwriteAll') : t('aiAssistant.pipeline.skipCompleted')
+      const langHint = language === 'zh' ? t('aiAssistant.langHint.zh') : language === 'en' ? t('aiAssistant.langHint.en') : ''
+      const concHint = concurrency > 1 ? t('aiAssistant.common.concurrency', { n: concurrency }) : ''
+      const hint = forceHint + (langHint ? ` | ${langHint}` : '') + concHint
+      addMessage('system', t('aiAssistant.pipeline.started', { hint }))
       communityStore.startPipeline(tid, force, language, concurrency)
         .catch(e => addMessage('error', String(e)))
       return
@@ -528,9 +530,9 @@ async function handleSend() {
       addMessage('user', text)
       userInput.value = ''
       const tid = resolveTaskId()
-      if (!tid) { addMessage('system', '未找到激活的任务。'); return }
-      const hint = force ? '（强制覆盖所有）' : '（跳过成功步骤）'
-      addMessage('system', `重新执行已启动${hint}。请到「任务」面板查看进度。`)
+      if (!tid) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
+      const hint = force ? t('aiAssistant.retry.forceOverwriteAll') : t('aiAssistant.retry.skipSuccessful')
+      addMessage('system', t('aiAssistant.retry.started', { hint }))
       communityStore.startPipeline(tid, force)
         .catch(e => addMessage('error', String(e)))
       return
@@ -564,7 +566,7 @@ async function handleSend() {
     })
     assistantMsg.isStreaming = false
   } catch (err: any) {
-    assistantMsg.content = err.message || '请求失败'
+    assistantMsg.content = err.message || t('common.requestFailed')
     assistantMsg.role = 'error'
     assistantMsg.isStreaming = false
   } finally {
@@ -610,7 +612,7 @@ function clearChat() {
   messages.value = []
   addMessage('system', buildContextMessage())
   addMessage('system', t('ai.assistantWelcome'))
-  addMessage('system', '输入 /help 或 /帮助 查看全部可用命令和模式')
+  addMessage('system', t('aiAssistant.helpEntry.hint'))
 }
 
 onMounted(() => {
@@ -625,7 +627,7 @@ onMounted(() => {
     if (messages.value.length === 0) {
       addMessage('system', buildContextMessage())
       addMessage('system', t('ai.assistantWelcome'))
-      addMessage('system', t('ai.helpHint'))
+      addMessage('system', t('helpHint'))
     }
   }
 })
@@ -682,7 +684,7 @@ onMounted(() => {
           class="ai-messages-more"
           @click="showMoreMessages"
         >
-          显示更早消息 ({{ messages.length - messagePageSize }} 条)
+          {{ t('aiAssistant.messages.showEarlier', { count: messages.length - messagePageSize }) }}
         </div>
         <div
           v-for="msg in displayedMessages"
@@ -701,32 +703,32 @@ onMounted(() => {
         v-if="selectionStore.selectedCount > 0"
         class="ai-selection-refs"
       >
-        <span class="ai-selection-label">📎 {{ selectionStore.selectedCount }}个</span>
+        <span class="ai-selection-label">📎 {{ t('aiAssistant.select.count', { count: selectionStore.selectedCount }) }}</span>
         <div class="ai-selection-chips">
           <span
             v-for="ref in selectionStore.selectedList.slice(0, 20)"
             :key="ref.id"
             class="ai-selection-chip"
-            :title="`${ref.type === 'community' ? '社区' : '外部包'}: ${ref.id}`"
+            :title="`${ref.type === 'community' ? t('aiAssistant.select.typeCommunity') : t('aiAssistant.select.typeExternal')}: ${ref.id}`"
           >
             <span class="ai-selection-chip-type">{{ ref.type === 'community' ? '▣' : '▨' }}</span>
             <span class="ai-selection-chip-name">{{ ref.name }}</span>
             <button
               class="ai-selection-chip-remove"
-              title="移除引用"
+              :title="t('aiAssistant.select.removeRef')"
               @click="selectionStore.deselect(ref.id)"
             >×</button>
           </span>
           <span
             v-if="selectionStore.selectedCount > 20"
             class="ai-selection-more"
-          >+{{ selectionStore.selectedCount - 20 }}...</span>
+                     >+{{ t('aiAssistant.select.count', { count: selectionStore.selectedCount - 20 }) }}...</span>
         </div>
         <button
           class="ai-selection-clear"
           @click="selectionStore.clearAll()"
         >
-          清空
+          {{ t('common.clear') }}
         </button>
       </div>
 
@@ -756,34 +758,33 @@ onMounted(() => {
             <span class="ai-suggest-cmd">{{ cmd }}</span>
           </div>
         </div>
-          <div class="ai-input-actions">
-            <div class="ai-actions-left">
-              <button
-                class="ai-action-btn"
-                :class="{ 'ai-btn-hidden': messages.length === 0 }"
-                :title="t('ai.clearChat')"
-                @click="clearChat"
-              >
-                <TrashIcon class="w-4 h-4" />
-              </button>
-              <button
-                class="ai-action-btn"
-                :class="{ 'ai-select-active': selectionStore.selecting }"
-                :title="selectionStore.selecting ? '退出组件选择模式' : '选择组件'"
-                @click="selectionStore.toggleSelecting()"
-              >
-                <CursorArrowRippleIcon class="w-4 h-4" />
-              </button>
-            </div>
+        <div class="ai-input-actions">
+          <div class="ai-actions-left">
             <button
-              class="ai-send-btn"
-              :disabled="!userInput.trim() || streaming"
-              @click="handleSend"
+              class="ai-action-btn"
+              :class="{ 'ai-btn-hidden': messages.length === 0 }"
+              :title="t('ai.clearChat')"
+              @click="clearChat"
             >
-              <PaperAirplaneIcon class="w-4 h-4" />
+              <TrashIcon class="w-4 h-4" />
+            </button>
+            <button
+              class="ai-action-btn"
+              :class="{ 'ai-select-active': selectionStore.selecting }"
+              :title="selectionStore.selecting ? t('aiAssistant.select.exitMode') : t('aiAssistant.select.selectComponent')"
+              @click="selectionStore.toggleSelecting()"
+            >
+              <CursorArrowRippleIcon class="w-4 h-4" />
             </button>
           </div>
-
+          <button
+            class="ai-send-btn"
+            :disabled="!userInput.trim() || streaming"
+            @click="handleSend"
+          >
+            <PaperAirplaneIcon class="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </template>
   </div>

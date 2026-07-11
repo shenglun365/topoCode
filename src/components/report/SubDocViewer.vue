@@ -109,17 +109,17 @@ function buildChildList(): string[] {
   const allChildren = communityStore.tasks[props.taskId]?.communities
     ?.filter(c => c.parentId === props.parentCommId) ?? []
   if (allChildren.length === 0) return parts
-  parts.push('', '---', '', `## 子组件（${allChildren.length}）`, '')
+  parts.push('', '---', '', `## ${t('report.structuralReport')}（${allChildren.length}）`, '')
   const includeChildren = allChildren.filter(c => c.edgeType === 'INCLUDE')
   const callChildren = allChildren.filter(c => c.edgeType === 'CALL')
   if (includeChildren.length > 0) {
-    parts.push('', `### 依赖分析（${includeChildren.length}）`, '')
+    parts.push('', `### ${t('report.edgeType.dependency')}（${includeChildren.length}）`, '')
     for (const c of includeChildren) {
       parts.push(`- [${communityLabel(c)}](##community:${c.edgeType}:${c.communityId})`)
     }
   }
   if (callChildren.length > 0) {
-    parts.push('', `### 调用分析（${callChildren.length}）`, '')
+    parts.push('', `### ${t('report.edgeType.call')}（${callChildren.length}）`, '')
     for (const c of callChildren) {
       parts.push(`- [${communityLabel(c)}](##community:${c.edgeType}:${c.communityId})`)
     }
@@ -194,7 +194,7 @@ async function loadDoc() {
         console.log('[SubDocViewer] fallback to hint for', props.parentCommId)
         doc.value = {
           id: '', title: props.parentCommId,
-          content: `# ${props.parentCommId}\n\n该组件暂无 LLM 分析结果，请先通过 AI 助手运行组件分析。` + (childMarkdown ? '\n' + childMarkdown : ''),
+          content: `# ${props.parentCommId}\n\n${t('report.noLlmResultHint')}` + (childMarkdown ? '\n' + childMarkdown : ''),
           templateId: '', createdAt: '', updatedAt: '',
         }
       }

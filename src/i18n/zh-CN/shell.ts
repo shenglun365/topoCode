@@ -1,6 +1,8 @@
 export default { shell: {
   topBar: {
     file: '文件',
+    contact: '联系方式',
+    checkUpdate: '检查版本升级',
     edit: '编辑',
     view: '查看',
     tools: '工具',
@@ -81,6 +83,16 @@ export default { shell: {
     symbolsPending: 'AI 助手已集成到右侧栏',
     float: '弹出窗口',
     dock: '停靠',
+  },
+  backend: {
+    starting: '本地后端服务启动中...',
+    started: '后端服务已启动',
+    error: '本地后端服务异常',
+    errorDesc: '后端 Python 进程未能正常启动或已意外退出，应用功能受限。',
+    possibleCauses: '可能的原因：Python 依赖缺失、数据库文件损坏、端口被占用。',
+    retryHint: '请检查终端输出的错误日志后重试。',
+    retry: '重试启动',
+    dismiss: '关闭提示',
   },
 },
 }

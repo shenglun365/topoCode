@@ -51,7 +51,7 @@ async function startVerify() {
     verifyId.value = res.verifyId
     startPolling()
   } catch (e: any) {
-    error.value = e.message || '校验失败'
+    error.value = e.message || t('project.verify.verifyFailed')
     verifying.value = false
   }
 }
@@ -69,7 +69,7 @@ function startPolling() {
         result.value = status.result
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
-        error.value = status.message || '校验失败'
+        error.value = status.message || t('project.verify.verifyFailed')
         verifying.value = false
       }
     } catch {
@@ -104,67 +104,154 @@ function statusColor(status: string) {
 
 <template>
   <Teleport to="body">
-    <div class="dialog-overlay" @click.self="close">
+    <div
+      class="dialog-overlay"
+      @click.self="close"
+    >
       <div class="dialog-card">
         <div class="dialog-header">
           <span class="dialog-title">{{ t('project.verifyFiles', '文件比对') }}</span>
-          <button class="dialog-close" @click="close">&times;</button>
+          <button
+            class="dialog-close"
+            @click="close"
+          >
+            &times;
+          </button>
         </div>
 
-        <div v-if="loading" class="dialog-loading">
+        <div
+          v-if="loading"
+          class="dialog-loading"
+        >
           <div class="spinner" /><span>{{ t('common.loading') }}...</span>
         </div>
 
-        <div v-else-if="verifying" class="progress-section">
+        <div
+          v-else-if="verifying"
+          class="progress-section"
+        >
           <div class="progress-bar-track">
-            <div class="progress-bar-fill" :style="{ width: progress + '%' }" />
+            <div
+              class="progress-bar-fill"
+              :style="{ width: progress + '%' }"
+            />
           </div>
-          <div class="progress-info">{{ message || t('common.processing', '处理中...') }}</div>
+          <div class="progress-info">
+            {{ message || t('common.processing', '处理中...') }}
+          </div>
         </div>
 
-        <div v-else-if="error" class="error-section">
-          <div class="error-msg">{{ error }}</div>
+        <div
+          v-else-if="error"
+          class="error-section"
+        >
+          <div class="error-msg">
+            {{ error }}
+          </div>
         </div>
 
         <template v-else-if="result">
           <div class="result-summary">
-            <div class="match-ring" :class="{ 'high': result.matchRate >= 80, 'mid': result.matchRate >= 50 && result.matchRate < 80, 'low': result.matchRate < 50 }">
-              <svg viewBox="0 0 120 120" class="ring-svg">
-                <circle cx="60" cy="60" r="52" fill="none" stroke="var(--bg-tertiary)" stroke-width="8" />
-                <circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" stroke-width="8"
+            <div
+              class="match-ring"
+              :class="{ 'high': result.matchRate >= 80, 'mid': result.matchRate >= 50 && result.matchRate < 80, 'low': result.matchRate < 50 }"
+            >
+              <svg
+                viewBox="0 0 120 120"
+                class="ring-svg"
+              >
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  fill="none"
+                  stroke="var(--bg-tertiary)"
+                  stroke-width="8"
+                />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="8"
                   :stroke-dasharray="`${result.matchRate / 100 * 327} 327`"
-                  transform="rotate(-90, 60, 60)" stroke-linecap="round" />
+                  transform="rotate(-90, 60, 60)"
+                  stroke-linecap="round"
+                />
               </svg>
-              <div class="match-rate-text">{{ result.matchRate }}%</div>
+              <div class="match-rate-text">
+                {{ result.matchRate }}%
+              </div>
             </div>
             <div class="stats">
-              <div class="stat-row"><CheckCircleIcon class="stat-icon matched" /><span>{{ t('project.verifyMatched', '匹配') }}: {{ result.matched }}</span></div>
-              <div class="stat-row"><XCircleIcon class="stat-icon mismatched" /><span>{{ t('project.verifyMismatch', '不匹配') }}: {{ result.mismatch }}</span></div>
-              <div class="stat-row"><QuestionMarkCircleIcon class="stat-icon missing" /><span>{{ t('project.verifyMissing', '缺失') }}: {{ result.missing }}</span></div>
+              <div class="stat-row">
+                <CheckCircleIcon class="stat-icon matched" /><span>{{ t('project.verifyMatched', '匹配') }}: {{ result.matched }}</span>
+              </div>
+              <div class="stat-row">
+                <XCircleIcon class="stat-icon mismatched" /><span>{{ t('project.verifyMismatch', '不匹配') }}: {{ result.mismatch }}</span>
+              </div>
+              <div class="stat-row">
+                <QuestionMarkCircleIcon class="stat-icon missing" /><span>{{ t('project.verifyMissing', '缺失') }}: {{ result.missing }}</span>
+              </div>
             </div>
           </div>
 
           <div class="filter-bar">
-            <select v-model="filterStatus" class="filter-select">
-              <option value="all">{{ t('common.all', '全部') }} ({{ result.total }})</option>
-              <option value="matched">{{ t('project.verifyMatched', '匹配') }} ({{ result.matched }})</option>
-              <option value="mismatch">{{ t('project.verifyMismatch', '不匹配') }} ({{ result.mismatch }})</option>
-              <option value="missing">{{ t('project.verifyMissing', '缺失') }} ({{ result.missing }})</option>
+            <select
+              v-model="filterStatus"
+              class="filter-select"
+            >
+              <option value="all">
+                {{ t('common.all', '全部') }} ({{ result.total }})
+              </option>
+              <option value="matched">
+                {{ t('project.verifyMatched', '匹配') }} ({{ result.matched }})
+              </option>
+              <option value="mismatch">
+                {{ t('project.verifyMismatch', '不匹配') }} ({{ result.mismatch }})
+              </option>
+              <option value="missing">
+                {{ t('project.verifyMissing', '缺失') }} ({{ result.missing }})
+              </option>
             </select>
           </div>
 
           <div class="detail-list">
-            <div v-for="d in filteredDetails()" :key="d.filePath" class="detail-row" :class="d.status">
-              <component :is="statusIcon(d.status)" class="detail-icon" :style="{ color: statusColor(d.status) }" />
+            <div
+              v-for="d in filteredDetails()"
+              :key="d.filePath"
+              class="detail-row"
+              :class="d.status"
+            >
+              <component
+                :is="statusIcon(d.status)"
+                class="detail-icon"
+                :style="{ color: statusColor(d.status) }"
+              />
               <span class="detail-path">{{ d.filePath }}</span>
             </div>
-            <div v-if="filteredDetails().length === 0" class="empty-detail">{{ t('common.noData', '无数据') }}</div>
+            <div
+              v-if="filteredDetails().length === 0"
+              class="empty-detail"
+            >
+              {{ t('common.noData', '无数据') }}
+            </div>
           </div>
         </template>
 
         <div class="dialog-footer">
-          <button class="btn btn-ghost btn-sm" @click="close">{{ t('common.close') }}</button>
-          <button v-if="result" class="btn btn-primary btn-sm" @click="startVerify">
+          <button
+            class="btn btn-ghost btn-sm"
+            @click="close"
+          >
+            {{ t('common.close') }}
+          </button>
+          <button
+            v-if="result"
+            class="btn btn-primary btn-sm"
+            @click="startVerify"
+          >
             <ArrowPathIcon class="icon-sm" /> {{ t('common.refresh') }}
           </button>
         </div>

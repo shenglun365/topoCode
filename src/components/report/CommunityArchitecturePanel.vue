@@ -120,22 +120,22 @@ function openCommunityDoc(item: CommunityItem) {
           <span class="arch-stats-coverage">{{ t('report.coverage', '覆盖率') }} <strong>{{ props.coveragePercent }}%</strong> {{ props.coveredFileCount }}/{{ props.totalScopeFiles }}</span>
         </template>
         <template v-else-if="commEdgeType === 'EXTERNAL_INCLUDE' && props.externalStats">
-          <span class="arch-stats-count">{{ props.externalStats.totalExternalDeps || 0 }}</span> 个外部包
+          <span class="arch-stats-count">{{ props.externalStats.totalExternalDeps || 0 }}</span>{{ t('report.externalPackages') }}
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">{{ props.externalStats.uniqueExternalDepFiles }} 个文件</span>
+          <span class="arch-stats-coverage">{{ props.externalStats.uniqueExternalDepFiles }}{{ t('report.fileCount') }}</span>
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">总文件 {{ props.totalScopeFiles }}</span>
+          <span class="arch-stats-coverage">{{ t('report.totalFiles') }} {{ props.totalScopeFiles }}</span>
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">{{ props.externalStats.totalExternalDeps }} 条外部导入</span>
+          <span class="arch-stats-coverage">{{ props.externalStats.totalExternalDeps }}{{ t('report.externalImports') }}</span>
         </template>
         <template v-else-if="commEdgeType === 'EXTERNAL_CALL' && props.externalStats">
-          <span class="arch-stats-count">{{ props.externalStats.totalExternalCalls || 0 }}</span> 个外部API
+          <span class="arch-stats-count">{{ props.externalStats.totalExternalCalls || 0 }}</span>{{ t('report.externalApis') }}
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">{{ props.externalStats.uniqueExternalCallFiles }} 个文件</span>
+          <span class="arch-stats-coverage">{{ props.externalStats.uniqueExternalCallFiles }}{{ t('report.fileCount') }}</span>
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">总文件 {{ props.totalScopeFiles }}</span>
+          <span class="arch-stats-coverage">{{ t('report.totalFiles') }} {{ props.totalScopeFiles }}</span>
           <span class="arch-stats-divider">|</span>
-          <span class="arch-stats-coverage">{{ props.externalStats.totalExternalCalls }} 条外部调用</span>
+          <span class="arch-stats-coverage">{{ props.externalStats.totalExternalCalls }}{{ t('report.externalCalls') }}</span>
         </template>
       </span>
       <div class="header-spacer" />

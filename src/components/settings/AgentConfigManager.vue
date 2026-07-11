@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ipc } from '@/services/ipc'
+
+const { t } = useI18n()
 
 const activeSubTab = ref<'routes' | 'skills' | 'tools'>('routes')
 const config = ref<{ routes: any[]; skills: any[]; tools: any[] }>({ routes: [], skills: [], tools: [] })
@@ -11,7 +14,7 @@ onMounted(async () => {
   try {
     config.value = await ipc.analysis.getAgentConfig()
   } catch (e: any) {
-    error.value = e?.message || '加载失败'
+    error.value = e?.message || t('common.loadFailed')
   } finally {
     loading.value = false
   }
@@ -38,34 +41,83 @@ const tabs = [
       </button>
     </div>
 
-    <div v-if="loading" class="agcfg-loading">加载中...</div>
-    <div v-else-if="error" class="agcfg-error">{{ error }}</div>
+    <div
+      v-if="loading"
+      class="agcfg-loading"
+    >
+      {{ t('common.loading') }}
+    </div>
+    <div
+      v-else-if="error"
+      class="agcfg-error"
+    >
+      {{ error }}
+    </div>
 
     <template v-else>
       <!-- Routes -->
-      <div v-if="activeSubTab === 'routes'" class="agcfg-list">
-        <div v-for="r in config.routes" :key="r.action" class="agcfg-item">
-          <div class="agcfg-item-name">{{ r.action }}</div>
-          <div class="agcfg-item-workflow">{{ r.workflow }}</div>
-          <div class="agcfg-item-desc">{{ r.description }}</div>
+      <div
+        v-if="activeSubTab === 'routes'"
+        class="agcfg-list"
+      >
+        <div
+          v-for="r in config.routes"
+          :key="r.action"
+          class="agcfg-item"
+        >
+          <div class="agcfg-item-name">
+            {{ r.action }}
+          </div>
+          <div class="agcfg-item-workflow">
+            {{ r.workflow }}
+          </div>
+          <div class="agcfg-item-desc">
+            {{ r.description }}
+          </div>
         </div>
       </div>
 
       <!-- Skills -->
-      <div v-if="activeSubTab === 'skills'" class="agcfg-list">
-        <div v-for="s in config.skills" :key="s.name" class="agcfg-item">
-          <div class="agcfg-item-name">{{ s.name }}</div>
-          <div class="agcfg-item-meta">{{ s.steps }} 步骤</div>
-          <div class="agcfg-item-desc">{{ s.description }}</div>
+      <div
+        v-if="activeSubTab === 'skills'"
+        class="agcfg-list"
+      >
+        <div
+          v-for="s in config.skills"
+          :key="s.name"
+          class="agcfg-item"
+        >
+          <div class="agcfg-item-name">
+            {{ s.name }}
+          </div>
+          <div class="agcfg-item-meta">
+            {{ t('settings.agent.stepCount', { count: s.steps }) }}
+          </div>
+          <div class="agcfg-item-desc">
+            {{ s.description }}
+          </div>
         </div>
       </div>
 
       <!-- Tools -->
-      <div v-if="activeSubTab === 'tools'" class="agcfg-list">
-        <div v-for="t in config.tools" :key="t.name" class="agcfg-item">
-          <div class="agcfg-item-name">{{ t.name }}</div>
-          <div class="agcfg-item-meta">{{ t.category }} | {{ t.llm_visible ? 'LLM可见' : '内部' }}</div>
-          <div class="agcfg-item-desc">{{ t.description }}</div>
+      <div
+        v-if="activeSubTab === 'tools'"
+        class="agcfg-list"
+      >
+        <div
+          v-for="t in config.tools"
+          :key="t.name"
+          class="agcfg-item"
+        >
+          <div class="agcfg-item-name">
+            {{ t.name }}
+          </div>
+          <div class="agcfg-item-meta">
+            {{ t.category }} | {{ t.llm_visible ? t('settings.agent.llmVisible') : t('settings.agent.internal') }}
+          </div>
+          <div class="agcfg-item-desc">
+            {{ t.description }}
+          </div>
         </div>
       </div>
     </template>

@@ -60,31 +60,31 @@ function showDownloadLimitDialog(msg: string) {
 async function autoDownloadAndImport(resourceId: number) {
   importing.value = true
   importProgress.value = 0
-  importMessage.value = '正在获取下载地址...'
+  importMessage.value = t('resource.import.gettingUrl')
   importDone.value = false
   try {
     // 1. 获取下载信息
     const info = await resourceService.getDownloadInfo(resourceId)
     const url = info.oss_url || `${API_BASE}${info.redirect_url}`
-    importMessage.value = '正在下载资源包...'
+    importMessage.value = t('resource.import.downloading')
     // 2. 通过 Electron 主进程下载到临时文件
     const filePath = await (window.api as any).fs.downloadUrl(url)
-    importMessage.value = '正在导入项目...'
+    importMessage.value = t('resource.import.importing')
     importProgress.value = 50
     // 3. 创建项目并导入
     const detail = resourceStore.currentResource
     const result = await (window.api as any).call('resource.importProject', {
       archivePath: filePath,
       resourceId: String(resourceId),
-      name: detail?.title || `资源 ${resourceId}`,
+      name: detail?.title || `${t('resource.center')} #${resourceId}`,
       resourceProjectsDir: settingsStore.resourceProjectsDir,
     })
     // 4. 轮询导入进度
     startPollingImport(result.importId)
   } catch (err: any) {
     importing.value = false
-    const msg = err.message || '下载失败'
-    if (msg.includes('下载次数已达上限') || msg.includes('联系客服申诉')) {
+    const msg = err.message || t('resource.import.downloadFailed')
+    if (msg.includes(t('resource.import.downloadLimitReached')) || msg.includes(t('resource.import.contactSupport'))) {
       showDownloadLimitDialog(msg)
     } else {
       showError(msg)
@@ -117,7 +117,7 @@ function startPollingImport(importId: string) {
       } else if (status.status === 'error') {
         if (pollTimer) clearInterval(pollTimer)
         importing.value = false
-        showError(status.message || '导入失败')
+        showError(status.message || t('resource.import.importFailed'))
       }
     } catch { /* ignore */ }
   }, 10000)
@@ -155,7 +155,7 @@ async function handleResourceCardClick(id: number) {
     await resourceStore.fetchDetail(id, authStore.token || undefined)
   } catch {
     showDetail.value = false
-    showError('资源不存在')
+    showError(t('resource.error.notFound'))
   }
 }
 
@@ -165,6 +165,19 @@ function handleDetailDownload(id: number) {
     return
   }
   autoDownloadAndImport(id)
+}
+
+const ESSENTIAL_KEYS = ['', '__prerelease__', '__free__', '__points__', '已购']
+const CATEGORY_LABEL_KEYS: Record<string, string> = {
+  '': 'resource.categoryAll',
+  '__prerelease__': 'resource.categoryPrerelease',
+  '__free__': 'resource.categoryFree',
+  '__points__': 'resource.categoryPoints',
+  '已购': 'resource.owned',
+}
+function catLabel(cat: { key: string; label: string }): string {
+  const i18nKey = CATEGORY_LABEL_KEYS[cat.key]
+  return i18nKey ? t(i18nKey) : cat.label
 }
 
 function refreshResources() {
@@ -178,7 +191,7 @@ function onSearchInput(e: Event) {
   searchTimer = setTimeout(() => {
     resourceStore.setSearch(value)
     doFetch()
-  }, 300)
+  }, 600)
 }
 
 function onSortChange(by: string, order: string) {
@@ -213,82 +226,199 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div ref="pageUserRef" class="page-user">
-    <span v-if="showId" class="cmp-id">{{ componentId }}</span>
+  <div
+    ref="pageUserRef"
+    class="page-user"
+  >
+    <span
+      v-if="showId"
+      class="cmp-id"
+    >{{ componentId }}</span>
 
     <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
-      <div v-for="tab in tabs" :key="tab.id"
-        class="user-tab" :class="{ active: activeTab === tab.id }"
-        @click="activeTab = tab.id">
-        <component :is="tab.icon" class="w-4 h-4" />
+      <div
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="user-tab"
+        :class="{ active: activeTab === tab.id }"
+        @click="activeTab = tab.id"
+      >
+        <component
+          :is="tab.icon"
+          class="w-4 h-4"
+        />
         <span>{{ t(tab.key) }}</span>
       </div>
     </div>
 
-    <div v-if="activeTab === 'profile'" style="flex:1; overflow:auto; padding:24px;">
+    <div
+      v-if="activeTab === 'profile'"
+      style="flex:1; overflow:auto; padding:24px;"
+    >
       <ProfileTab />
     </div>
 
-    <div v-else-if="activeTab === 'account'" style="flex:1; overflow:auto; padding:24px;">
+    <div
+      v-else-if="activeTab === 'account'"
+      style="flex:1; overflow:auto; padding:24px;"
+    >
       <AccountTab @recharge="() => {}" />
     </div>
 
-    <div v-else-if="activeTab === 'order'" style="flex:1; overflow:auto; padding:24px;">
+    <div
+      v-else-if="activeTab === 'order'"
+      style="flex:1; overflow:auto; padding:24px;"
+    >
       <OrderTab />
     </div>
 
-    <div v-else-if="activeTab === 'resource'" style="flex:1; overflow:auto; padding:24px;">
+    <div
+      v-else-if="activeTab === 'resource'"
+      style="flex:1; overflow:auto; padding:24px;"
+    >
       <div style="margin-bottom:16px;">
         <div style="display:flex; align-items:center; gap:8px;">
-          <h2 style="font-size:16px; font-weight:600;">{{ t('settings.resourceCenter', '资源中心') }}</h2>
-          <button class="btn btn-ghost btn-icon btn-xs" @click="refreshResources" :disabled="resourceStore.loading" title="刷新">
-            <svg class="icon-refresh" :class="{ spinning: resourceStore.loading }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+          <h2 style="font-size:16px; font-weight:600;">
+            {{ t('settings.resourceCenter', '资源中心') }}
+          </h2>
+          <button
+            class="btn btn-ghost btn-icon btn-xs"
+            :disabled="resourceStore.loading"
+            :title="t('common.refresh')"
+            @click="refreshResources"
+          >
+            <svg
+              class="icon-refresh"
+              :class="{ spinning: resourceStore.loading }"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /></svg>
           </button>
         </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">{{ t('settings.resourceCenterDesc', '浏览和下载可导入的结构分析包') }}</p>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+          {{ t('settings.resourceCenterDesc', '浏览和下载可导入的结构分析包') }}
+        </p>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap;">
         <div class="search-wrap">
-          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input class="search-input" type="text" :placeholder="t('settings.searchResource', '搜索资源')" @input="onSearchInput">
+          <svg
+            class="search-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          ><circle
+            cx="11"
+            cy="11"
+            r="8"
+          /><path d="m21 21-4.35-4.35" /></svg>
+          <input
+            class="search-input"
+            type="text"
+            :placeholder="t('settings.searchResource', '搜索资源')"
+            @input="onSearchInput"
+          >
         </div>
-        <select class="sort-select" :value="resourceStore.sortBy" @change="onSortChange(($event.target as HTMLSelectElement).value, resourceStore.sortOrder)">
-          <option value="time">{{ t('settings.sortByTime', '时间') }}</option>
-          <option value="name">{{ t('settings.sortByName', '名称') }}</option>
-          <option value="downloads">{{ t('settings.sortByDownloads', '下载量') }}</option>
+        <select
+          class="sort-select"
+          :value="resourceStore.sortBy"
+          @change="onSortChange(($event.target as HTMLSelectElement).value, resourceStore.sortOrder)"
+        >
+          <option value="time">
+            {{ t('settings.sortByTime', '时间') }}
+          </option>
+          <option value="name">
+            {{ t('settings.sortByName', '名称') }}
+          </option>
+          <option value="downloads">
+            {{ t('settings.sortByDownloads', '下载量') }}
+          </option>
         </select>
-        <select class="sort-select" :value="resourceStore.sortOrder" @change="onSortChange(resourceStore.sortBy, ($event.target as HTMLSelectElement).value)">
-          <option value="desc">{{ t('settings.sortDesc', '倒序') }}</option>
-          <option value="asc">{{ t('settings.sortAsc', '正序') }}</option>
+        <select
+          class="sort-select"
+          :value="resourceStore.sortOrder"
+          @change="onSortChange(resourceStore.sortBy, ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="desc">
+            {{ t('settings.sortDesc', '倒序') }}
+          </option>
+          <option value="asc">
+            {{ t('settings.sortAsc', '正序') }}
+          </option>
         </select>
       </div>
-      <div v-if="resourceStore.meta?.feature_flags?.show_category_filter !== false" style="display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
-        <template v-for="cat in resourceStore.categories" :key="cat.key">
-          <button v-if="!cat.auth_required || authStore.isAuthenticated"
+      <div
+        v-if="resourceStore.meta?.feature_flags?.show_category_filter !== false"
+        style="display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; align-items:center;"
+      >
+        <button
+          v-for="key in ESSENTIAL_KEYS"
+          :key="key"
+          class="btn btn-sm"
+          :class="resourceStore.activeCategoryKey === key ? 'btn-primary' : 'btn-ghost'"
+          @click="switchResourceCategory(key)"
+        >
+          {{ catLabel({ key, label: '' }) }}
+        </button>
+        <template
+          v-for="cat in resourceStore.categories"
+          :key="'xtra-' + cat.key"
+        >
+          <button
+            v-if="!ESSENTIAL_KEYS.includes(cat.key)"
             class="btn btn-sm"
             :class="resourceStore.activeCategoryKey === cat.key ? 'btn-primary' : 'btn-ghost'"
-            @click="switchResourceCategory(cat.key)">
+            @click="switchResourceCategory(cat.key)"
+          >
             {{ cat.label }}
-            <span v-if="cat.scope === 'owned' && cat.count !== undefined" style="margin-left:3px; font-size:10px; opacity:0.7;">({{ cat.count }})</span>
+            <span
+              v-if="cat.count !== undefined"
+              style="margin-left:3px; font-size:10px; opacity:0.7;"
+            >({{ cat.count }})</span>
           </button>
         </template>
-        <button v-if="authStore.isAuthenticated"
-          class="btn btn-sm"
-          :class="resourceStore.activeCategoryKey === 'owned' ? 'btn-primary' : 'btn-ghost'"
-          @click="switchResourceCategory('owned')">
-          已购
-        </button>
-        <div v-if="!authStore.isAuthenticated" style="display:inline-flex; gap:4px; align-items:center;">
+        <div
+          v-if="!authStore.isAuthenticated"
+          style="display:inline-flex; gap:4px; align-items:center;"
+        >
           <span style="font-size:11px; color:var(--text-muted);">{{ resourceStore.meta?.labels?.login_hint || '登录后可下载资源' }}</span>
-          <router-link to="/login" class="btn btn-primary btn-xs">{{ t('auth.login', '登录') }}</router-link>
+          <router-link
+            to="/login"
+            class="btn btn-primary btn-xs"
+          >
+            {{ t('auth.login', '登录') }}
+          </router-link>
         </div>
       </div>
-      <div v-if="resourceStore.loading" style="text-align:center; padding:40px; color:var(--text-muted);">{{ t('common.loading') }}...</div>
-      <div v-else-if="resourceStore.filteredResources.length === 0" style="text-align:center; padding:40px; color:var(--text-muted);">{{ t('settings.noResources', '暂无资源') }}</div>
-      <div v-else style="display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--rc-card-max-w, 220px),1fr)); gap:var(--rc-card-gap, 12px);">
-        <ResourceCard v-for="r in resourceStore.filteredResources" :key="r.id"
-          :resource="r" :meta="resourceStore.meta || { _version: '0', categories: [], styles: {}, feature_flags: {}, labels: {} }"
-          @download="handleResourceCardClick" />
+      <div
+        v-if="resourceStore.loading"
+        style="text-align:center; padding:40px; color:var(--text-muted);"
+      >
+        {{ t('common.loading') }}...
+      </div>
+      <div
+        v-else-if="resourceStore.filteredResources.length === 0"
+        style="text-align:center; padding:40px; color:var(--text-muted);"
+      >
+        {{ t('settings.noResources', '暂无资源') }}
+      </div>
+      <div
+        v-else
+        style="display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--rc-card-max-w, 220px),1fr)); gap:var(--rc-card-gap, 12px);"
+      >
+        <ResourceCard
+          v-for="r in resourceStore.filteredResources"
+          :key="r.id"
+          :resource="r"
+          :meta="resourceStore.meta || { _version: '0', categories: [], styles: {}, feature_flags: {}, labels: {} }"
+          @download="handleResourceCardClick"
+        />
       </div>
     </div>
 
@@ -297,22 +427,41 @@ onMounted(async () => {
       :meta="resourceStore.meta"
       :show="showDetail"
       @close="showDetail = false"
-      @download="handleDetailDownload" />
+      @download="handleDetailDownload"
+    />
 
     <Teleport to="body">
-      <div v-if="downloadError" class="toast">{{ downloadError }}</div>
+      <div
+        v-if="downloadError"
+        class="toast"
+      >
+        {{ downloadError }}
+      </div>
     </Teleport>
 
     <!-- 下载次数上限弹窗 -->
     <Teleport to="body">
-      <div v-if="downloadLimitDialog" class="dialog-overlay" @click.self="downloadLimitDialog = false">
+      <div
+        v-if="downloadLimitDialog"
+        class="dialog-overlay"
+        @click.self="downloadLimitDialog = false"
+      >
         <div class="limit-dialog">
-          <div class="limit-dialog-icon">⚠️</div>
-          <div class="limit-dialog-title">下载次数已达上限</div>
-          <div class="limit-dialog-msg">{{ downloadLimitMsg }}</div>
+          <div class="limit-dialog-icon">
+            ⚠️
+          </div>
+          <div class="limit-dialog-title">
+            {{ t('resource.import.downloadLimitReached') }}
+          </div>
+          <div class="limit-dialog-msg">
+            {{ downloadLimitMsg }}
+          </div>
           <div class="limit-dialog-actions">
-            <button class="btn btn-primary btn-sm" @click="downloadLimitDialog = false">
-              知道了
+            <button
+              class="btn btn-primary btn-sm"
+              @click="downloadLimitDialog = false"
+            >
+              {{ t('common.gotIt') }}
             </button>
           </div>
         </div>
@@ -321,22 +470,43 @@ onMounted(async () => {
 
     <!-- 自动导入进度弹窗 -->
     <Teleport to="body">
-      <div v-if="importing || importDone" class="dialog-overlay">
+      <div
+        v-if="importing || importDone"
+        class="dialog-overlay"
+      >
         <div class="import-dialog">
           <div v-if="!importDone">
             <div class="import-spinner" />
-            <div class="import-title">正在导入资源...</div>
-            <div class="import-progress-bar">
-              <div class="import-progress-fill" :style="{ width: importProgress + '%' }" />
+            <div class="import-title">
+              {{ t('resource.import.importingResource') }}
             </div>
-            <div class="import-msg">{{ importMessage }}</div>
+            <div class="import-progress-bar">
+              <div
+                class="import-progress-fill"
+                :style="{ width: importProgress + '%' }"
+              />
+            </div>
+            <div class="import-msg">
+              {{ importMessage }}
+            </div>
           </div>
           <div v-else>
-            <div class="import-done-icon">✓</div>
-            <div class="import-title">导入完成</div>
-            <div class="import-msg">{{ newProjectName }}</div>
+            <div class="import-done-icon">
+              ✓
+            </div>
+            <div class="import-title">
+              {{ t('resource.import.completed') }}
+            </div>
+            <div class="import-msg">
+              {{ newProjectName }}
+            </div>
             <div class="import-actions">
-              <button class="btn btn-primary btn-sm" @click="closeImportDialog">关闭</button>
+              <button
+                class="btn btn-primary btn-sm"
+                @click="closeImportDialog"
+              >
+                 {{ t('common.close') }}
+              </button>
             </div>
           </div>
         </div>

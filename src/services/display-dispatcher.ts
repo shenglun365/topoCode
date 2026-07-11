@@ -1,5 +1,3 @@
-import { pollingRegistry } from './polling-registry'
-
 export interface DisplayPollConfig {
   interval: number
   fetcher: () => Promise<any>
@@ -17,12 +15,6 @@ class DisplayDispatcher {
       return
     }
     this.entries.set(key, config)
-    pollingRegistry.register({
-      key,
-      category: 'display',
-      interval: config.interval,
-      status: 'running',
-    })
     this.execute(key)
     this.startTimer(key, config.interval)
   }
@@ -30,7 +22,6 @@ class DisplayDispatcher {
   unregister(key: string) {
     this.clearTimer(key)
     this.entries.delete(key)
-    pollingRegistry.unregister(key)
   }
 
   has(key: string): boolean {
@@ -39,7 +30,6 @@ class DisplayDispatcher {
 
   pause(key: string) {
     this.clearTimer(key)
-    pollingRegistry.update(key, { status: 'paused' })
   }
 
   resume(key: string) {
@@ -47,7 +37,6 @@ class DisplayDispatcher {
     if (!config) return
     this.execute(key)
     this.startTimer(key, config.interval)
-    pollingRegistry.update(key, { status: 'running' })
   }
 
   getActiveKeys(): string[] {
@@ -57,15 +46,12 @@ class DisplayDispatcher {
   private execute(key: string) {
     const config = this.entries.get(key)
     if (!config) return
-    pollingRegistry.update(key, { lastRunAt: Date.now() })
     config.fetcher()
       .then((data) => {
         config.onData?.(data)
-        pollingRegistry.update(key, { lastData: data, error: undefined })
       })
       .catch((err) => {
         config.onError?.(err)
-        pollingRegistry.update(key, { error: err?.message || String(err) })
       })
   }
 

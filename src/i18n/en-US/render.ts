@@ -27,5 +27,12 @@ export default { render: {
   renderWorkerCount: 'Render Worker Count',
   renderWorkerBusy: 'Render Worker Busy',
   renderWorkerIdle: 'Render Worker Idle',
+  applyAndRender: 'Apply & Render',
+  inputMermaidSyntax: 'Input Mermaid syntax',
+  inputMermaidToRender: 'Input Mermaid syntax to start rendering',
+  layoutComputing: 'Computing layout...',
+  layoutFailed: 'Layout computation failed',
+  renderComplete: 'Render Complete',
+  waitingGraphData: 'Waiting for graph data...',
 },
 }

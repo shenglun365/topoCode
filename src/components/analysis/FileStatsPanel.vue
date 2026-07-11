@@ -471,7 +471,7 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
               :title="unsupportedTooltip"
             >
               <ExclamationTriangleIcon class="w-3 h-3" />
-              <span class="unsupported-text">不支持</span>
+              <span class="unsupported-text">{{ t('analysis.unsupported') }}</span>
             </span>
           </span>
           <span class="stat-count">{{ count }}</span>

@@ -133,10 +133,16 @@ function getStatusIcon(status: string) {
         </div>
         <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
           {{ task.current || 0 }}/{{ task.total || 0 }} {{ t('common.file') }}
-          <span v-if="task.progress != null" style="margin-left:6px;">
+          <span
+            v-if="task.progress != null"
+            style="margin-left:6px;"
+          >
             {{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%
           </span>
-          <span v-if="task.eta" style="margin-left:4px; opacity:0.7;">
+          <span
+            v-if="task.eta"
+            style="margin-left:4px; opacity:0.7;"
+          >
             {{ task.eta }}
           </span>
         </div>

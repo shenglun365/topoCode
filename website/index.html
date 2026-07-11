@@ -118,104 +118,103 @@
 const i18n = {
   zh: {
     lang: '中文',
-        nav: { features: '功能', preview: '预览', stack: '技术栈', docs: '文档', github: 'GitHub', gitee: 'Gitee', docsUrl: '../website/guide.html' },
+    nav: { features: '功能', preview: '预览', stack: '技术栈', docs: '文档', github: 'GitHub', gitee: 'Gitee', docsUrl: 'guide.html' },
     hero: {
-      badge: 'v0.1.0 beta — 开源 · Apache-2.0',
+      badge: 'v0.2.0 beta — 开源 · Apache-2.0',
       title: 'TopoCode',
       subtitle: '源码架构分析与学习工具',
-      desc: '自动解析项目源码结构，生成多层级的组件依赖图、调用链分析、架构分析报告，支持 AI 辅助分析。',
+      desc: '本地运行 · 自动解析项目源码结构，生成多层级的组件依赖图、调用链分析、架构分析报告，支持 Web 端 AI 助手。',
       ctaFeatures: '了解功能',
-      screenshot: '产品截图待添加 · images/hero-screenshot.png',
     },
+    privacy: '除您自行配置的云端 LLM API 外，代码解析、图计算、架构分析、Web 文档服务等所有功能均在<strong>本地运行</strong>，项目源码和解析数据不会上传至任何外部服务器。',
     features: {
-      title: '核心能力', desc: '从源码解析到架构洞察，一站式完成',
-      card1: { title: '多语言源码解析', desc: '基于 Tree-sitter 的 AST 解析引擎，支持 11 种编程语言的语法树构建。' },
-      card2: { title: '架构分析引擎', desc: '6 步分析管道：符号提取 → 调用图 → 依赖图 → Louvain 社区发现。', items: ['函数/类符号提取', '调用链关系分析', '模块依赖图构建', 'Louvain 社区检测'] },
-      card3: { title: 'AI 辅助报告生成', desc: '基于 LLM 的架构分析，自动生成组件文档和架构报告。', items: ['社区 AI 解读', '结构化报告生成', 'Mermaid/PlantUML 图表', '多轮对话分析'] },
+      title: '核心能力',
+      desc: '从源码解析到架构洞察，一站式完成',
+      card1: { title: '多语言源码解析', desc: '基于 Tree-sitter 的 AST 解析引擎，支持 18+ 编程语言的语法树构建。' },
+      card2: { title: '架构分析引擎', desc: '符号提取 → 调用图 → 依赖图 → Louvain/Leiden 社区发现。', items: ['函数/类符号提取', '调用链关系分析', '模块依赖图构建', 'Louvain 社区检测'] },
+      card3: { title: 'AI 辅助分析', desc: 'LLM 驱动的架构分析，自动生成组件文档和架构报告。', items: ['社区 AI 解读', '结构化报告生成', 'Mermaid/PlantUML 图表', 'Web AI Chat 对话'] },
     },
     moreFeatures: {
-      title: '更多特性', desc: '未来版本逐步添加，当前尚未支持',
-      card4: { title: '多维度可视化', desc: 'D3.js 力导向图、Mermaid 架构图、PlantUML 图表、Pixi.js 高性能渲染，多引擎覆盖。' },
-      card5: { title: '知识库管理', desc: '知识图谱、多维分类（生命周期/技术栈/抽象层/用途）、TopoScript 动画教学引擎，构建团队代码知识体系。' },
-      card6: { title: '多项目管理', desc: '项目分组（M:N 关系）、文件树浏览、分析任务管理（收藏/固定/标签），同时管理多个代码仓库。' },
+      title: '更多特性',
+      desc: '持续开发中',
+      card4: { title: 'Web 文档服务', desc: '本地 HTTP 服务（端口 3456），浏览器中浏览架构文档、社区结构图、使用 AI 助手。' },
+      card5: { title: '知识库管理', desc: '四维标签分类（生命周期/技术栈/抽象层/用途），分析文档持久化存储和检索。' },
+      card6: { title: '多项目管理', desc: '项目分组（M:N 关系）、文件树浏览、分析任务管理。' },
     },
-    workflow: { title: '分析工作流', desc: '从导入项目到生成架构报告，仅需几步',
-      steps: ['导入项目', '创建任务', '执行分析', '生成报告'],
-      stepDescs: ['拖拽或选择本地源码目录', '配置分析范围和参数', '6 步管道自动完成', 'LLM 辅助架构报告输出'],
-    },
-    demo: { title: '产品预览', desc: 'VS Code 风格界面，专注代码分析',
-      items: [
-        { title: '项目导入与文件浏览', img: 'images/screenshot-home-project-list.png' },
-        { title: '社区图谱与 AI 分析', img: 'images/screenshot-analysis-community-graph.png' },
-        { title: 'AI 助手对话 (待开发)', img: 'images/screenshot-ai-chat-sessions.png' },
-        { title: '知识库与图谱 (待开发)', img: 'images/screenshot-knowledge-graph.png' },
-      ],
-    },
+    workflow: { title: '分析工作流', desc: '从导入项目到 AI 架构分析，仅需几步', steps: ['导入项目', '创建任务', '执行解析', 'AI 分析'], stepDescs: ['选择本地源码目录', '配置分析范围和参数', 'AST 解析 + 社区发现', 'LLM 生成架构报告'] },
+    demo: { title: '产品截图', desc: '界面概览，截图待补充', items: [{ title: '项目导入与文件树', img: 'images/guide/zh/project-import.png' }, { title: '社区图谱与 AI 分析', img: 'images/guide/zh/community-graph.png' }, { title: 'Web AI 对话', img: 'images/guide/zh/ai-chat.png' }, { title: '文档查看器', img: 'images/guide/zh/subdoc-viewer.png' }] },
     tech: { title: '技术栈', desc: '现代桌面应用技术体系', frontend: '前端', backend: '后端', stats: ['支持语言', 'IPC 方法', '总代码行数'] },
-    download: { title: '获取源码', desc: '开源 · Apache-2.0', repo: '仓库地址', githubLabel: 'GitHub', giteeLabel: 'Gitee', alt: '克隆源码', alt2: '参照', alt3: '从源码构建' },
-    footer: { license: 'Apache-2.0 许可', docs: '文档' },
+    download: { title: '获取源码', desc: '开源 · Apache-2.0' },
+    footer: { license: 'Apache-2.0 许可', email: 'topocode@163.com' },
   },
   en: {
     lang: 'English',
-        nav: { features: 'Features', preview: 'Preview', stack: 'Stack', docs: 'Docs', github: 'GitHub', gitee: 'Gitee', docsUrl: '../website/guide.html' },
+    nav: { features: 'Features', preview: 'Preview', stack: 'Stack', docs: 'Docs', github: 'GitHub', gitee: 'Gitee', docsUrl: 'guide.html' },
     hero: {
-      badge: 'v0.1.0 beta — Open Source · Apache-2.0',
+      badge: 'v0.2.0 beta — Open Source · Apache-2.0',
       title: 'TopoCode',
       subtitle: 'Source Code Architecture Analysis & Learning Tool',
-      desc: 'Automatically parse project source code, generate multi-level component dependency graphs, call chain analysis, and architecture reports with AI assistance.',
+      desc: 'Runs locally · Automatically parse project source code, generate multi-level component dependency graphs, call chain analysis, and architecture reports with browser-based AI chat.',
       ctaFeatures: 'Explore Features',
-      screenshot: 'Screenshot placeholder · images/hero-screenshot.png',
     },
+    privacy: 'Except for user-configured cloud LLM APIs, all features — code parsing, graph computing, architecture analysis, web service — run <strong>locally</strong>. Your source code and data never leave your machine.',
     features: {
-      title: 'Core Features', desc: 'From source parsing to architectural insights, all in one place',
-      card1: { title: 'Multi-language Parsing', desc: 'Tree-sitter based AST parser engine supporting 11 programming languages.' },
-      card2: { title: 'Architecture Analysis Engine', desc: '6-step pipeline: Symbol extraction → Call graph → Dependency graph → Louvain community detection.', items: ['Function/class symbol extraction', 'Call chain analysis', 'Module dependency graph', 'Louvain community detection'] },
-      card3: { title: 'AI-powered Reports', desc: 'LLM-driven architecture analysis that generates component docs and reports automatically.', items: ['Community AI analysis', 'Structured report generation', 'Mermaid/PlantUML diagrams', 'Multi-turn chat analysis'] },
+      title: 'Core Features',
+      desc: 'From source parsing to architectural insights, all in one place',
+      card1: { title: 'Multi-language Parsing', desc: 'Tree-sitter based AST parser engine supporting 18+ programming languages.' },
+      card2: { title: 'Architecture Engine', desc: '6-step pipeline: Symbol extraction → Call graph → Dependency graph → Community detection.', items: ['Function/class symbol extraction', 'Call chain analysis', 'Module dependency graph', 'Louvain community detection'] },
+      card3: { title: 'AI-powered Analysis', desc: 'LLM-driven architecture analysis with web-based AI chat.', items: ['Community AI analysis', 'Structured report generation', 'Mermaid/PlantUML diagrams', 'Web AI Chat interface'] },
     },
     moreFeatures: {
-      title: 'More Features', desc: 'Coming in future versions — not yet available',
-      card4: { title: 'Multi-dimensional Visualization', desc: 'D3.js force-directed graphs, Mermaid architecture diagrams, PlantUML charts, Pixi.js high-performance rendering.' },
-      card5: { title: 'Knowledge Base', desc: 'Knowledge graphs, multi-dimensional classification, TopoScript animation engine for team knowledge management.' },
-      card6: { title: 'Multi-project Management', desc: 'Project grouping (M:N), file tree browsing, task management for multiple repositories.' },
+      title: 'More Features',
+      desc: 'Under active development',
+      card4: { title: 'Web Document Service', desc: 'Local HTTP service (port 3456) for browsing docs, community graphs, and AI chat.' },
+      card5: { title: 'Knowledge Base', desc: '4-dimensional tagging, persistent document storage and retrieval.' },
+      card6: { title: 'Multi-project', desc: 'Project groups, file tree browsing, task management.' },
     },
-    workflow: { title: 'Analysis Workflow', desc: 'From importing a project to generating an architecture report in a few steps',
-      steps: ['Import Project', 'Create Task', 'Run Analysis', 'Generate Report'],
-      stepDescs: ['Drag & drop or select a local directory', 'Configure analysis scope and parameters', '6-step pipeline runs automatically', 'LLM-assisted architecture report output'],
-    },
-    demo: { title: 'Preview', desc: 'VS Code-style interface, focused on code analysis',
-      items: [
-        { title: 'Project Import & File Tree', img: 'images/screenshot-home-project-list.png' },
-        { title: 'Community Graph & AI Analysis', img: 'images/screenshot-analysis-community-graph.png' },
-        { title: 'AI Chat Assistant (Planning)', img: 'images/screenshot-ai-chat-sessions.png' },
-        { title: 'Knowledge Base & Graph (Planning)', img: 'images/screenshot-knowledge-graph.png' },
-      ],
-    },
-    tech: { title: 'Tech Stack', desc: 'Modern desktop application technology', frontend: 'Frontend', backend: 'Backend', stats: ['Languages', 'IPC Methods', 'Lines of Code'] },
-    download: { title: 'Get the Source', desc: 'Open Source · Apache-2.0', repo: 'Repository', githubLabel: 'GitHub', giteeLabel: 'Gitee', alt: 'Clone the source', alt2: ', read the', alt3: 'to build from source' },
-    footer: { license: 'Apache-2.0 License', docs: 'Docs' },
+    workflow: { title: 'Workflow', desc: 'From project import to AI analysis in a few steps', steps: ['Import', 'Create Task', 'Parse', 'AI Analysis'], stepDescs: ['Select a local source directory', 'Configure scope and parameters', 'AST parsing + community detection', 'LLM generates architecture report'] },
+    demo: { title: 'Screenshots', desc: 'Interface overview, screenshots coming', items: [{ title: 'Project Import & File Tree', img: 'images/guide/en/project-import.png' }, { title: 'Community Graph & AI', img: 'images/guide/en/community-graph.png' }, { title: 'Web AI Chat', img: 'images/guide/en/ai-chat.png' }, { title: 'Document Viewer', img: 'images/guide/en/subdoc-viewer.png' }] },
+    tech: { title: 'Tech Stack', desc: 'Modern desktop technology', frontend: 'Frontend', backend: 'Backend', stats: ['Languages', 'IPC Methods', 'Lines of Code'] },
+    download: { title: 'Get the Source', desc: 'Open Source · Apache-2.0' },
+    footer: { license: 'Apache-2.0 License', email: 'topocode@163.com' },
   }
 }
 
 let lang = 'zh'
 
 function t(path) {
-  return path.split('.').reduce((o, k) => o && o[k], i18n[lang])
+  var keys = path.split('.')
+  var o = i18n[lang]
+  for (var i = 0; i < keys.length; i++) {
+    if (!o) return path
+    o = o[keys[i]]
+  }
+  return o !== undefined ? o : path
 }
 
 function applyLang() {
   document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.dataset.i18n
-    el.textContent = t(key)
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n')
+    var val = t(key)
+    if (val !== key) el.textContent = val
   })
-  document.querySelectorAll('[data-i18n-html]').forEach(el => {
-    el.innerHTML = t(el.dataset.i18nHtml)
+  document.querySelectorAll('[data-i18n-html]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n-html')
+    var val = t(key)
+    if (val !== key) el.innerHTML = val
   })
-  document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.lang === lang)
+  document.querySelectorAll('.lang-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-lang') === lang)
   })
-  document.querySelectorAll('[data-i18n-href]').forEach(el => {
-    el.href = t(el.dataset.i18nHref)
+  document.querySelectorAll('[data-i18n-href]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n-href')
+    var val = t(key)
+    if (val !== key) el.href = val
+  })
+  // update HTML nav links that have data-zh / data-en
+  document.querySelectorAll('[data-zh]').forEach(function(el) {
+    el.textContent = el.getAttribute('data-' + lang)
   })
 }
 
@@ -229,11 +228,7 @@ function switchLang(l) {
 <nav class="glass fixed top-0 left-0 right-0 z-50 border-b border-[#d0d7de]">
   <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
     <a href="#" class="flex items-center gap-3 text-lg font-bold tracking-tight text-[#1f2328] no-underline">
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-        <rect x="2" y="2" width="24" height="24" rx="6" stroke="#0969da" stroke-width="2.5" fill="none"/>
-        <path d="M8 14L12 10L16 14L20 10" stroke="#8250df" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-        <path d="M8 18L12 14L16 18L20 14" stroke="#1a7f37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      </svg>
+      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09-.06.18-.12.28-.17.06-.04.13-.07.2-.11.1-.05.2-.1.3-.15.07-.03.14-.07.21-.1.1-.04.2-.08.31-.12.08-.03.15-.06.23-.08l.3-.1c.06-.02.13-.04.19-.06.13-.04.26-.07.4-.1.06-.02.12-.03.18-.04.15-.03.3-.06.46-.08.05-.01.11-.02.16-.02.14-.02.28-.04.43-.05.07 0 .14-.01.21-.02.04 0 .09 0 .14-.01.12.04.24.09.36.14.26.1.5.24.74.39.07.04.13.08.2.13.05.03.1.06.15.1.06.04.12.09.18.14.04.03.08.07.12.1.06.06.13.12.19.18.03.03.06.06.09.09.08.08.15.17.23.26.02.03.05.06.07.09.24-.1.5-.18.76-.24.08-.02.16-.04.24-.06.08-.02.17-.04.25-.05.09-.02.18-.03.27-.05.09-.01.18-.02.27-.03.1-.01.2-.02.3-.02h.02c.22-.02.44-.02.66-.02.22 0 .44 0 .66.02h.02c.1 0 .2.01.3.02.09.01.18.02.27.03.09.02.18.03.27.05.08.01.16.03.24.06.07.02.14.04.22.06.1.03.2.07.3.11.07.03.13.06.2.09.08.04.16.08.23.12.09.05.17.1.25.16.05.04.11.07.16.11.03.02.06.05.09.07.02.01.03.03.05.04z"/></svg>
       TopoCode
     </a>
 
@@ -241,7 +236,8 @@ function switchLang(l) {
       <a href="#features" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline" data-i18n="nav.features">功能</a>
       <a href="#demo" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline" data-i18n="nav.preview">预览</a>
       <a href="#tech" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline" data-i18n="nav.stack">技术栈</a>
-      <a data-i18n-href="nav.docsUrl" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline" data-i18n="nav.docs">文档</a>
+      <a href="guide.html" data-i18n-href="nav.docsUrl" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline" data-i18n="nav.docs">文档</a>
+      <a href="mailto:topocode@163.com" class="hidden sm:inline text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline">topocode@163.com</a>
 
       <div class="flex items-center gap-1 border-l border-[#d0d7de] ml-2 pl-3">
         <button class="lang-btn active" data-lang="zh" onclick="switchLang('zh')">中文</button>
@@ -249,13 +245,8 @@ function switchLang(l) {
       </div>
 
       <a href="https://github.com/shenglun365/topoCode" target="_blank" rel="noopener" class="flex items-center gap-1.5 text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline whitespace-nowrap">
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        GitHub
-      </a>
-      <a href="https://gitee.com/shenglun365/topocode" target="_blank" rel="noopener" class="flex items-center gap-1.5 text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline whitespace-nowrap">
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09-.06.18-.12.28-.17.06-.04.13-.07.2-.11.1-.05.2-.1.3-.15.07-.03.14-.07.21-.1.1-.04.2-.08.31-.12.08-.03.15-.06.23-.08l.3-.1c.06-.02.13-.04.19-.06.13-.04.26-.07.4-.1.06-.02.12-.03.18-.04.15-.03.3-.06.46-.08.05-.01.11-.02.16-.02.14-.02.28-.04.43-.05.07 0 .14-.01.21-.02.04 0 .09 0 .14-.01.12.04.24.09.36.14.26.1.5.24.74.39.07.04.13.08.2.13.05.03.1.06.15.1.06.04.12.09.18.14.04.03.08.07.12.1.06.06.13.12.19.18.03.03.06.06.09.09.08.08.15.17.23.26.02.03.05.06.07.09.24-.1.5-.18.76-.24.08-.02.16-.04.24-.06.08-.02.17-.04.25-.05.09-.02.18-.03.27-.05.09-.01.18-.02.27-.03.1-.01.2-.02.3-.02h.02c.22-.02.44-.02.66-.02.22 0 .44 0 .66.02h.02c.1 0 .2.01.3.02.09.01.18.02.27.03.09.02.18.03.27.05.08.01.16.03.24.06.07.02.14.04.22.06.1.03.2.07.3.11.07.03.13.06.2.09.08.04.16.08.23.12.09.05.17.1.25.16.05.04.11.07.16.11.03.02.06.05.09.07.02.01.03.03.05.04z"/></svg>
-        Gitee
-      </a>
+      <a href="https://github.com/shenglun365/topoCode" target="_blank" rel="noopener" class="flex items-center gap-1.5 text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline whitespace-nowrap">GitHub</a>
+      <a href="https://gitee.com/shenglun365/topocode" target="_blank" rel="noopener" class="flex items-center gap-1.5 text-[#656d76] hover:text-[#1f2328] transition text-sm font-medium no-underline whitespace-nowrap">Gitee</a>
     </div>
   </div>
 </nav>
@@ -278,21 +269,25 @@ function switchLang(l) {
 
     <div class="flex flex-wrap items-center justify-center gap-4">
       <a href="https://github.com/shenglun365/topoCode" target="_blank" rel="noopener" class="btn-primary text-base no-underline">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09-.06.18-.12.28-.17.06-.04.13-.07.2-.11.1-.05.2-.1.3-.15.07-.03.14-.07.21-.1.1-.04.2-.08.31-.12.08-.03.15-.06.23-.08l.3-.1c.06-.02.13-.04.19-.06.13-.04.26-.07.4-.1.06-.02.12-.03.18-.04.15-.03.3-.06.46-.08.05-.01.11-.02.16-.02.14-.02.28-.04.43-.05.07 0 .14-.01.21-.02.04 0 .09 0 .14-.01.12.04.24.09.36.14.26.1.5.24.74.39.07.04.13.08.2.13.05.03.1.06.15.1.06.04.12.09.18.14.04.03.08.07.12.1.06.06.13.12.19.18.03.03.06.06.09.09.08.08.15.17.23.26.02.03.05.06.07.09.24-.1.5-.18.76-.24.08-.02.16-.04.24-.06.08-.02.17-.04.25-.05.09-.02.18-.03.27-.05.09-.01.18-.02.27-.03.1-.01.2-.02.3-.02h.02c.22-.02.44-.02.66-.02.22 0 .44 0 .66.02h.02c.1 0 .2.01.3.02.09.01.18.02.27.03.09.02.18.03.27.05.08.01.16.03.24.06.07.02.14.04.22.06.1.03.2.07.3.11.07.03.13.06.2.09.08.04.16.08.23.12.09.05.17.1.25.16.05.04.11.07.16.11.03.02.06.05.09.07.02.01.03.03.05.04z"/></svg>
         GitHub
       </a>
       <a href="https://gitee.com/shenglun365/topocode" target="_blank" rel="noopener" class="btn-primary text-base no-underline" style="background:#8250df">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09-.06.18-.12.28-.17.06-.04.13-.07.2-.11.1-.05.2-.1.3-.15.07-.03.14-.07.21-.1.1-.04.2-.08.31-.12.08-.03.15-.06.23-.08l.3-.1c.06-.02.13-.04.19-.06.13-.04.26-.07.4-.1.06-.02.12-.03.18-.04.15-.03.3-.06.46-.08.05-.01.11-.02.16-.02.14-.02.28-.04.43-.05.07 0 .14-.01.21-.02.04 0 .09 0 .14-.01.12.04.24.09.36.14.26.1.5.24.74.39.07.04.13.08.2.13.05.03.1.06.15.1.06.04.12.09.18.14.04.03.08.07.12.1.06.06.13.12.19.18.03.03.06.06.09.09.08.08.15.17.23.26.02.03.05.06.07.09.24-.1.5-.18.76-.24.08-.02.16-.04.24-.06.08-.02.17-.04.25-.05.09-.02.18-.03.27-.05.09-.01.18-.02.27-.03.1-.01.2-.02.3-.02h.02c.22-.02.44-.02.66-.02.22 0 .44 0 .66.02h.02c.1 0 .2.01.3.02.09.01.18.02.27.03.09.02.18.03.27.05.08.01.16.03.24.06.07.02.14.04.22.06.1.03.2.07.3.11.07.03.13.06.2.09.08.04.16.08.23.12.09.05.17.1.25.16.05.04.11.07.16.11.03.02.06.05.09.07.02.01.03.03.05.04z"/></svg>
-        Gitee
-      </a>
-      <a href="#features" class="btn-secondary text-base no-underline">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09-.06.18-.12.28-.17.06-.04.13-.07.2-.11.1-.05.2-.1.3-.15.07-.03.14-.07.21-.1.1-.04.2-.08.31-.12.08-.03.15-.06.23-.08l.3-.1c.06-.02.13-.04.19-.06.13-.04.26-.07.4-.1.06-.02.12-.03.18-.04.15-.03.3-.06.46-.08.05-.01.11-.02.16-.02.14-.02.28-.04.43-.05.07 0 .14-.01.21-.02.04 0 .09 0 .14-.01.12.04.24.09.36.14.26.1.5.24.74.39.07.04.13.08.2.13.05.03.1.06.15.1.06.04.12.09.18.14.04.03.08.07.12.1.06.06.13.12.19.18.03.03.06.06.09.09.08.08.15.17.23.26.02.03.05.06.07.09.24-.1.5-.18.76-.24.08-.02.16-.04.24-.06.08-.02.17-.04.25-.05.09-.02.18-.03.27-.05.09-.01.18-.02.27-.03.1-.01.2-.02.3-.02h.02c.22-.02.44-.02.66-.02.22 0 .44 0 .66.02h.02c.1 0 .2.01.3.02.09.01.18.02.27.03.09.02.18.03.27.05.08.01.16.03.24.06.07.02.14.04.22.06.1.03.2.07.3.11.07.03.13.06.2.09.08.04.16.08.23.12.09.05.17.1.25.16.05.04.11.07.16.11.03.02.06.05.09.07.02.01.03.03.05.04z"#features" class="btn-secondary text-base no-underline">
         <span data-i18n="hero.ctaFeatures">了解功能</span>
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
       </a>
     </div>
 
     <div class="mt-16 flex justify-center">
-      <img src="images/hero-screenshot.png" alt="TopoCode 产品截图" class="w-full max-w-3xl rounded-xl border border-[#d0d7de] shadow-lg" onerror="this.style.display='none'">
+      <div class="screenshot-placeholder w-full max-w-3xl rounded-xl border border-[#d0d7de] shadow-lg" style="aspect-ratio:16/10;font-size:16px">截图待补充 · images/hero-screenshot.png</div>
+    </div>
+
+    <!-- Privacy Notice -->
+    <div class="mt-10 mx-auto max-w-2xl text-center">
+      <div class="bg-[#e8f4fd] border border-[#93c5fd] rounded-xl px-6 py-4 text-sm text-[#1e40af] leading-relaxed fade-in fade-in-d4">
+        <span data-i18n-html="privacy">除您自行配置的云端 LLM API 外，所有功能均在<strong>本地运行</strong>，项目源码和解析数据不会上传至任何外部服务器。</span>
+      </div>
     </div>
   </div>
 </section>
@@ -316,6 +311,7 @@ function switchLang(l) {
         <div class="flex flex-wrap gap-2">
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">C</span>
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">C++</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">C#</span>
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Java</span>
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Python</span>
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Go</span>
@@ -323,7 +319,12 @@ function switchLang(l) {
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Rust</span>
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">PHP</span>
           <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Swift</span>
-          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">C#</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Kotlin</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Dart</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Ruby</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Scala</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">Lua</span>
+          <span class="text-xs px-2.5 py-1 bg-[#f6f8fa] border border-[#d0d7de] rounded text-[#656d76] font-mono">ObjC</span>
         </div>
       </div>
 
@@ -518,7 +519,7 @@ function switchLang(l) {
 
     <div class="grid md:grid-cols-3 gap-8 text-center">
       <div class="fade-in fade-in-d1">
-        <div class="text-3xl font-bold text-[#0969da] mb-1">11</div>
+        <div class="text-3xl font-bold text-[#0969da] mb-1">18+</div>
         <div class="text-sm text-[#656d76]" data-i18n="tech.stats.0">支持语言</div>
       </div>
       <div class="fade-in fade-in-d2">
@@ -541,12 +542,12 @@ function switchLang(l) {
 
     <div class="flex flex-wrap justify-center gap-6 mb-8 fade-in fade-in-d2">
       <a href="https://github.com/shenglun365/topoCode" target="_blank" rel="noopener" class="btn-download !px-8 !py-6 flex-col gap-3">
-        <svg class="w-10 h-10 text-[#0969da]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        <svg class="w-8 h-8 text-[#0969da]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         <span class="text-lg font-semibold">GitHub</span>
         <span class="text-sm text-[#656d76] font-normal">github.com/shenglun365/topoCode</span>
       </a>
       <a href="https://gitee.com/shenglun365/topocode" target="_blank" rel="noopener" class="btn-download !px-8 !py-6 flex-col gap-3">
-        <svg class="w-10 h-10 text-[#8250df]" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09-.06.18-.12.28-.17.06-.04.13-.07.2-.11.1-.05.2-.1.3-.15.07-.03.14-.07.21-.1.1-.04.2-.08.31-.12.08-.03.15-.06.23-.08l.3-.1c.06-.02.13-.04.19-.06.13-.04.26-.07.4-.1.06-.02.12-.03.18-.04.15-.03.3-.06.46-.08.05-.01.11-.02.16-.02.14-.02.28-.04.43-.05.07 0 .14-.01.21-.02.04 0 .09 0 .14-.01.12.04.24.09.36.14.26.1.5.24.74.39.07.04.13.08.2.13.05.03.1.06.15.1.06.04.12.09.18.14.04.03.08.07.12.1.06.06.13.12.19.18.03.03.06.06.09.09.08.08.15.17.23.26.02.03.05.06.07.09.24-.1.5-.18.76-.24.08-.02.16-.04.24-.06.08-.02.17-.04.25-.05.09-.02.18-.03.27-.05.09-.01.18-.02.27-.03.1-.01.2-.02.3-.02h.02c.22-.02.44-.02.66-.02.22 0 .44 0 .66.02h.02c.1 0 .2.01.3.02.09.01.18.02.27.03.09.02.18.03.27.05.08.01.16.03.24.06.07.02.14.04.22.06.1.03.2.07.3.11.07.03.13.06.2.09.08.04.16.08.23.12.09.05.17.1.25.16.05.04.11.07.16.11.03.02.06.05.09.07.02.01.03.03.05.04z"/></svg>
+        <svg class="w-8 h-8 text-[#8250df]" viewBox="0 0 24 24" fill="currentColor"><path d="M11.984 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0011.984 0zm6.09 7.53c.01.37-.01.74-.04 1.11v.01a7.55 7.55 0 01-1.83 4.14c-.12.13-.24.26-.37.38a7.487 7.487 0 01-5.27 2.2 7.46 7.46 0 01-2.41-.4c-.05-.02-.11-.04-.16-.06a7.44 7.44 0 01-1.12-.5c-.14-.08-.28-.17-.41-.26-.25-.17-.49-.36-.71-.56l.01-.01c-.25-.23-.48-.48-.69-.74a7.46 7.46 0 01-1.03-1.58c-.04-.09-.08-.18-.11-.27a7.46 7.46 0 01-.5-2.36v-.01a7.46 7.46 0 01.5-2.36c.03-.09.07-.18.11-.27.08-.18.17-.37.27-.55.07-.11.14-.23.22-.34.05-.07.1-.14.15-.21a7.46 7.46 0 011.33-1.49c.143-.12.29-.24.44-.35.09-.07.18-.14.28-.2a7.46 7.46 0 011.49-.82c.1-.04.2-.08.31-.12a7.455 7.455 0 012.36-.5 7.46 7.46 0 012.36.5c.11.04.21.08.31.12.14.06.27.13.41.2.08.04.16.09.24.14l.02.01c.07.04.13.09.2.14.04.03.09.06.13.1.09.07.18.14.27.22.05.05.1.09.15.14.08.08.16.16.23.24.05.06.1.11.15.17.08.1.15.2.22.3.04.06.08.12.12.18.06.1.12.2.17.31.03.06.06.12.09.18.06.14.11.28.16.42.02.06.04.12.06.18.04.15.07.3.1.46.01.06.02.12.03.18.02.16.04.33.05.5 0 .06.01.12.01.19.01.17.02.33.02.5 0 .01 0 .02-.01.04a7.46 7.46 0 01-.19 1.5c-.02.09-.04.18-.07.27a7.46 7.46 0 01-1.73 3.16l-.01.01a7.46 7.46 0 01-2.99 1.96c-.44.15-.9.26-1.37.31-.09.01-.18.02-.27.03-.43.04-.87.05-1.31.03-.29 0-.58-.02-.86-.05-.09-.01-.18-.02-.27-.03-.44-.06-.87-.15-1.29-.28-.03-.01-.06-.02-.09-.03-.04-.01-.09-.03-.13-.05a7.47 7.47 0 01-1.55-.76c-.04-.02-.08-.05-.11-.07-.24-.16-.47-.34-.69-.53a7.43 7.43 0 01-.61-.62c-.06-.06-.11-.13-.17-.19-.17-.2-.33-.42-.48-.64-.02-.03-.04-.06-.06-.09-.11-.17-.22-.35-.31-.53-.04-.08-.08-.16-.12-.24-.08-.18-.16-.37-.22-.56-.03-.08-.05-.16-.08-.24-.06-.2-.1-.4-.14-.61l-.02-.08a7.483 7.483 0 01-.27-1.65v-.01c0-.06-.01-.12-.01-.18-.01-.17-.02-.33-.02-.5 0-.01 0-.02.01-.04 0 0 .01 0 .01-.01.24-2.06 1.16-3.94 2.58-5.34.08-.08.15-.16.23-.24A7.46 7.46 0 017.93 5.1c.09-.08.18-.16.28-.24.05-.04.1-.08.15-.12.08-.06.17-.12.26-.18.06-.04.12-.08.18-.11.09... (line truncated to 2000 chars)
         <span class="text-lg font-semibold">Gitee</span>
         <span class="text-sm text-[#656d76] font-normal">gitee.com/shenglun365/topocode</span>
       </a>
@@ -573,9 +574,9 @@ function switchLang(l) {
     <div class="flex items-center gap-6 text-sm text-[#656d76]">
       <span data-i18n="footer.license">Apache-2.0 许可</span>
       <a href="https://github.com/shenglun365/topoCode" target="_blank" rel="noopener" class="hover:text-[#1f2328] transition no-underline text-[#656d76]">GitHub</a>
-      <a href="https://gitee.com/shenglun365/topocode" target="_blank" rel="noopener" class="hover:text-[#1f2328] transition no-underline text-[#656d76]">Gitee</a>
       <a data-i18n-href="nav.docsUrl" class="hover:text-[#1f2328] transition no-underline text-[#656d76]" data-i18n="footer.docs">文档</a>
       <a href="mailto:topocode@163.com" class="hover:text-[#1f2328] transition no-underline text-[#656d76]">topocode@163.com</a>
+      <span class="text-[#afb8c1] text-xs"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener" class="hover:text-[#1f2328] transition no-underline text-[#afb8c1]">京ICP备13051542号</a> | <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener" class="hover:text-[#1f2328] transition no-underline text-[#afb8c1]">京ICP备13051542号-2</a></span>
     </div>
   </div>
 </footer>

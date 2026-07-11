@@ -68,7 +68,7 @@ async function handleAIExplain() {
       class="cmp-id"
     >{{ componentId }}</span>
     <div class="card-header">
-      <span class="edge-type-badge">{{ edgeType === 'CALL' ? '调用关系' : '依赖关系' }}</span>
+      <span class="edge-type-badge">{{ edgeType === 'CALL' ? t('report.edgeType.call') : t('report.edgeType.dependency') }}</span>
     </div>
 
     <div class="edge-flow">
@@ -85,22 +85,22 @@ async function handleAIExplain() {
       v-if="callSiteNode"
       class="edge-meta"
     >
-      <span class="meta-label">调用位置:</span>
+      <span class="meta-label">{{ t('report.callSite') }}:</span>
       <span class="meta-value">{{ callSiteNode }}</span>
     </div>
     <div
       v-if="includePath"
       class="edge-meta"
     >
-      <span class="meta-label">包含路径:</span>
+      <span class="meta-label">{{ t('report.includePath') }}:</span>
       <span class="meta-value">{{ includePath }}</span>
     </div>
     <div
       v-if="isSystem !== undefined"
       class="edge-meta"
     >
-      <span class="meta-label">系统头文件:</span>
-      <span class="meta-value">{{ isSystem ? '是' : '否' }}</span>
+      <span class="meta-label">{{ t('report.systemHeader') }}:</span>
+      <span class="meta-value">{{ isSystem ? t('common.yes') : t('common.no') }}</span>
     </div>
 
     <!-- AI 解释 -->

@@ -129,7 +129,9 @@ watch(() => props.taskId, loadFiles)
           class="ps-batch-tab"
           :class="{ 'ps-batch-active': activeBatch === b }"
           @click="switchBatch(b)"
-        >{{ t(`report.preSummaryBatch${b}`) }}</button>
+        >
+          {{ t(`report.preSummaryBatch${b}`) }}
+        </button>
       </div>
       <div class="ps-spacer" />
       <div class="ps-search">
@@ -138,7 +140,7 @@ watch(() => props.taskId, loadFiles)
           class="ps-search-input"
           :placeholder="t('report.preSummarySearch')"
           @input="onSearchInput"
-        />
+        >
       </div>
     </div>
 
@@ -159,11 +161,21 @@ watch(() => props.taskId, loadFiles)
       >
         <thead>
           <tr>
-            <th class="ps-col-path">{{ t('file.filePath') || '文件路径' }}</th>
-            <th class="ps-col-num">{{ t('report.preSummaryScore') }}</th>
-            <th class="ps-col-num">{{ t('report.preSummarySize') }}</th>
-            <th class="ps-col-status">{{ t('report.preSummaryCachedLabel') }}</th>
-            <th class="ps-col-action">操作</th>
+            <th class="ps-col-path">
+              {{ t('file.filePath') }}
+            </th>
+            <th class="ps-col-num">
+              {{ t('report.preSummaryScore') }}
+            </th>
+            <th class="ps-col-num">
+              {{ t('report.preSummarySize') }}
+            </th>
+            <th class="ps-col-status">
+              {{ t('report.preSummaryCachedLabel') }}
+            </th>
+            <th class="ps-col-action">
+              {{ t('common.actions') }}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -176,8 +188,12 @@ watch(() => props.taskId, loadFiles)
             <td class="ps-cell-path">
               <span class="ps-path-text">{{ f.file_path }}</span>
             </td>
-            <td class="ps-cell-num">{{ f.score?.toFixed(1) ?? '-' }}</td>
-            <td class="ps-cell-num">{{ formatSize(f.size) }}</td>
+            <td class="ps-cell-num">
+              {{ f.score?.toFixed(1) ?? '-' }}
+            </td>
+            <td class="ps-cell-num">
+              {{ formatSize(f.size) }}
+            </td>
             <td class="ps-cell-status">
               <span
                 v-if="f.has_summary"
@@ -193,7 +209,9 @@ watch(() => props.taskId, loadFiles)
                 class="ps-delete-btn"
                 :title="t('report.preSummaryDelete')"
                 @click.stop="openDetail(f.file_path)"
-              >{{ t('report.preSummaryViewDetails') || '详情' }}</button>
+              >
+                {{ t('report.preSummaryViewDetails') }}
+              </button>
             </td>
           </tr>
         </tbody>
@@ -201,11 +219,15 @@ watch(() => props.taskId, loadFiles)
       <div
         v-else-if="!loading"
         class="ps-empty"
-      >{{ t('report.preSummaryNoFiles') }}</div>
+      >
+        {{ t('report.preSummaryNoFiles') }}
+      </div>
       <div
         v-else
         class="ps-empty ps-loading"
-      >{{ t('common.loading') }}</div>
+      >
+        {{ t('common.loading') }}
+      </div>
     </div>
 
     <!-- Pagination -->
@@ -214,13 +236,17 @@ watch(() => props.taskId, loadFiles)
         class="ps-page-btn"
         :disabled="currentPage <= 1"
         @click="prevPage"
-      >◀</button>
+      >
+        ◀
+      </button>
       <span class="ps-page-info">{{ t('report.preSummaryPage', { current: currentPage, total: totalPages }) }}</span>
       <button
         class="ps-page-btn"
         :disabled="currentPage >= totalPages"
         @click="nextPage"
-      >▶</button>
+      >
+        ▶
+      </button>
     </div>
 
     <!-- Detail dialog -->

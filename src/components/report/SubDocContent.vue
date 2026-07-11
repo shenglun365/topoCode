@@ -32,12 +32,12 @@ const renderedContent = computed(() => {
         if (/\]\(##community:CALL:/.test(line)) callLines.push(line)
         else if (/\]\(##community:INCLUDE:/.test(line)) includeLines.push(line)
       }
-      const parts: string[] = [`## 子组件（${count}）`]
+      const parts: string[] = [`## ${t('report.structuralReport')}（${count}）`]
       if (includeLines.length > 0) {
-        parts.push('', `### 依赖分析（${includeLines.length}）`, '', ...includeLines)
+        parts.push('', `### ${t('report.edgeType.dependency')}（${includeLines.length}）`, '', ...includeLines)
       }
       if (callLines.length > 0) {
-        parts.push('', `### 调用分析（${callLines.length}）`, '', ...callLines)
+        parts.push('', `### ${t('report.edgeType.call')}（${callLines.length}）`, '', ...callLines)
       }
       return parts.join('\n')
     })
@@ -46,7 +46,7 @@ const renderedContent = computed(() => {
     const blk = diagramBlocks.value[diagIdx]
     const id = blk ? blk.id : `diagram-${diagIdx}`
     diagIdx++
-    return `<div class="diagram-placeholder" id="inline-${id}" data-lang="${lang}"><div class="diagram-loading">${lang === 'mermaid' ? 'Mermaid' : 'PlantUML'} 渲染中...</div></div>`
+    return `<div class="diagram-placeholder" id="inline-${id}" data-lang="${lang}"><div class="diagram-loading">${lang === 'mermaid' ? 'Mermaid' : 'PlantUML'} ${t('report.diagram.rendering')}</div></div>`
   })
 
   html = html.replace(/^\s*\|(.+)\|\n\s*\|[-:| ]+\|\n((?:\s*\|.+\|\n?)*)/gm,
@@ -168,7 +168,7 @@ onUnmounted(() => {
     class="loading-state"
   >
     <div class="loading-spinner" />
-    <span class="text-muted">加载中...</span>
+    <span class="text-muted">{{ t('common.loading') }}</span>
   </div>
   <div
     v-else-if="content"

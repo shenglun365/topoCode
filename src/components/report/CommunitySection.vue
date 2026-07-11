@@ -113,7 +113,7 @@ function commName(item: CommunityItem): string {
       <span class="comm-stat">{{ t('report.communityMinNodes') }}: {{ commStats.minNodes }}</span>
       <span
         class="comm-stat quality-stat"
-        :title="'质量分反映社区内聚度，分值越高组件间区分度越好。平均约 ' + (commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-')"
+        :title="t('report.qualityScoreTooltip')"
       >
         {{ t('report.communityAvgQuality') }}: {{ commStats.avgQuality ? commStats.avgQuality.toFixed(3) : '-' }}
         <span class="quality-hint">ⓘ</span>
@@ -124,7 +124,7 @@ function commName(item: CommunityItem): string {
       <input
         v-model="communitySearch"
         type="text"
-        placeholder="搜索组件名称/ID..."
+        :placeholder="t('report.searchCommunity')"
         class="comm-search-input"
       >
     </div>
@@ -136,7 +136,7 @@ function commName(item: CommunityItem): string {
           :key="item.id"
           class="community-chip"
           :class="{ 'has-result': item.status === 'completed' && !!(item.name) && item.name !== item.communityId }"
-          :title="`${item.communityId} (${item.nodeCount} 节点, 质量: ${item.qualityScore ?? '-'})`"
+          :title="t('report.communityTooltip', { id: item.communityId, nodes: item.nodeCount, quality: item.qualityScore ?? '-' })"
           @click="emit('select-community', item)"
         >
           <span class="chip-name">{{ commName(item) }}</span>

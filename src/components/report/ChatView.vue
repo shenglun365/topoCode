@@ -45,9 +45,9 @@ const llmConfigured = computed(() => isLLMConfigured())
 
 // Quick actions
 const quickActions = [
-  { key: 'overview', label: '查看架构总览', prompt: '分析项目架构总览，识别关键子系统和依赖关系' },
-  { key: 'quality', label: '代码质量检查', prompt: '检查代码架构质量，找出循环依赖、Hub过载等风险' },
-  { key: 'doc', label: '生成架构文档', prompt: '为当前项目生成完整的架构文档' },
+  { key: 'overview', label: t('report.quickAction.overview'), prompt: t('report.quickAction.overviewPrompt') },
+  { key: 'quality', label: t('report.quickAction.quality'), prompt: t('report.quickAction.qualityPrompt') },
+  { key: 'doc', label: t('report.quickAction.doc'), prompt: t('report.quickAction.docPrompt') },
 ]
 
 function scrollToBottom() {
@@ -109,7 +109,7 @@ async function handleSend() {
     assistantMsg.isStreaming = false
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      assistantMsg.content = assistantMsg.content || '(已取消)'
+      assistantMsg.content = assistantMsg.content || t('report.agent.cancelled')
     } else {
       assistantMsg.content = err.message || t('chat.requestFailed', '请求失败')
       assistantMsg.role = 'error'

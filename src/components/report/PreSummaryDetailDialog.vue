@@ -76,12 +76,14 @@ onMounted(loadSummary)
         <button
           class="psd-close-btn"
           @click="emit('close')"
-        >✕</button>
+        >
+          ✕
+        </button>
       </div>
       <div class="psd-body">
         <div class="psd-meta">
           <div class="psd-meta-row">
-            <span class="psd-meta-label">{{ t('file.filePath') || '文件路径' }}</span>
+            <span class="psd-meta-label">{{ t('file.filePath') }}</span>
             <span class="psd-meta-value psd-path">{{ filePath }}</span>
           </div>
           <div class="psd-meta-row">
@@ -90,16 +92,20 @@ onMounted(loadSummary)
           </div>
           <div class="psd-meta-row">
             <span class="psd-meta-label">{{ t('report.preSummaryScore') }}</span>
-            <span class="psd-meta-value">{{ summaryLen }} 字符</span>
+            <span class="psd-meta-value">{{ summaryLen }} {{ t('report.preSummaryChars') }}</span>
           </div>
         </div>
         <div class="psd-divider" />
         <div class="psd-content">
           <template v-if="loading">
-            <div class="psd-loading">{{ t('common.loading') }}</div>
+            <div class="psd-loading">
+              {{ t('common.loading') }}
+            </div>
           </template>
           <template v-else-if="!found">
-            <div class="psd-not-found">{{ t('report.preSummaryNotCached') }}</div>
+            <div class="psd-not-found">
+              {{ t('report.preSummaryNotCached') }}
+            </div>
           </template>
           <template v-else>
             <pre class="psd-summary-text">{{ summary }}</pre>
@@ -111,21 +117,39 @@ onMounted(loadSummary)
           class="psd-btn psd-btn-danger"
           :disabled="!found || deleting"
           @click="handleDelete"
-        >{{ deleting ? '...' : t('report.preSummaryDelete') }}</button>
+        >
+          {{ deleting ? '...' : t('report.preSummaryDelete') }}
+        </button>
         <div class="psd-spacer" />
         <button
           class="psd-btn"
           @click="emit('close')"
-        >{{ t('report.preSummaryClose') }}</button>
+        >
+          {{ t('report.preSummaryClose') }}
+        </button>
       </div>
 
       <!-- 确认删除弹窗 -->
-      <div v-if="showDeleteConfirm" class="psd-overlay" @click.self="showDeleteConfirm = false">
+      <div
+        v-if="showDeleteConfirm"
+        class="psd-overlay"
+        @click.self="showDeleteConfirm = false"
+      >
         <div class="psd-confirm-box">
           <p>{{ t('report.preSummaryDeleteConfirm') }}</p>
           <div class="psd-confirm-actions">
-            <button class="psd-btn psd-btn-danger" @click="doDelete">{{ t('common.confirm') }}</button>
-            <button class="psd-btn" @click="showDeleteConfirm = false">{{ t('common.cancel') }}</button>
+            <button
+              class="psd-btn psd-btn-danger"
+              @click="doDelete"
+            >
+              {{ t('common.confirm') }}
+            </button>
+            <button
+              class="psd-btn"
+              @click="showDeleteConfirm = false"
+            >
+              {{ t('common.cancel') }}
+            </button>
           </div>
         </div>
       </div>

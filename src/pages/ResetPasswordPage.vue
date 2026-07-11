@@ -39,7 +39,7 @@ function startCountdown() {
 }
 
 async function sendCode() {
-  if (!account.value) { errorMsg.value = '请填写邮箱或手机号'; return }
+  if (!account.value) { errorMsg.value = t('auth.validation.requireAccount'); return }
   codeSending.value = true
   errorMsg.value = ''
   try {
@@ -47,7 +47,7 @@ async function sendCode() {
     startCountdown()
     step.value = 'reset'
   } catch (e: any) {
-    errorMsg.value = e.message || '发送失败'
+    errorMsg.value = e.message || t('common.sendFailed')
   } finally {
     codeSending.value = false
   }
@@ -72,7 +72,7 @@ async function handleReset() {
     }
     step.value = 'done'
   } catch (e: any) {
-    errorMsg.value = e.message || '操作失败'
+    errorMsg.value = e.message || t('common.operationFailed')
   } finally {
     loading.value = false
   }
@@ -82,56 +82,131 @@ async function handleReset() {
 <template>
   <div class="auth-page">
     <div class="auth-card">
-      <div class="auth-logo">◆</div>
+      <div class="auth-logo">
+        ◆
+      </div>
 
       <template v-if="step === 'account'">
-        <h1 class="auth-title">重置密码</h1>
+        <h1 class="auth-title">
+          {{ t('auth.resetPassword') }}
+        </h1>
         <form @submit.prevent="sendCode">
           <div class="field">
-            <input v-model="account" class="input" placeholder="邮箱 / 手机号" autocomplete="username">
+            <input
+              v-model="account"
+              class="input"
+              :placeholder="t('auth.placeholder.account')"
+              autocomplete="username"
+            >
           </div>
-          <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
-          <button type="submit" class="btn btn-primary btn-full" :disabled="codeSending">
-            {{ codeSending ? '发送中...' : '发送验证码' }}
+          <div
+            v-if="errorMsg"
+            class="error"
+          >
+            {{ errorMsg }}
+          </div>
+          <button
+            type="submit"
+            class="btn btn-primary btn-full"
+            :disabled="codeSending"
+          >
+            {{ codeSending ? t('auth.sending') : t('auth.sendCode') }}
           </button>
         </form>
       </template>
 
       <template v-if="step === 'reset'">
-        <h1 class="auth-title">{{ isSetPassword ? '设置密码' : '重置密码' }}</h1>
+        <h1 class="auth-title">
+          {{ isSetPassword ? t('auth.setPassword') : t('auth.resetPassword') }}
+        </h1>
         <form @submit.prevent="handleReset">
-          <div v-if="!isSetPassword" class="field">
-            <input :value="account" class="input" disabled>
+          <div
+            v-if="!isSetPassword"
+            class="field"
+          >
+            <input
+              :value="account"
+              class="input"
+              disabled
+            >
           </div>
-          <div v-if="!isSetPassword" class="field">
+          <div
+            v-if="!isSetPassword"
+            class="field"
+          >
             <div class="code-row">
-              <input v-model="code" class="input flex-1" placeholder="验证码" maxlength="6">
-              <button type="button" class="btn btn-sm btn-ghost code-btn" :disabled="codeSending || codeSent" @click="sendCode">
-                {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : '重新发送' }}
+              <input
+                v-model="code"
+                class="input flex-1"
+                :placeholder="t('auth.placeholder.verificationCode')"
+                maxlength="6"
+              >
+              <button
+                type="button"
+                class="btn btn-sm btn-ghost code-btn"
+                :disabled="codeSending || codeSent"
+                @click="sendCode"
+              >
+                {{ codeSending ? '...' : codeSent ? `${codeCountdown}s` : t('auth.resend') }}
               </button>
             </div>
           </div>
           <div class="field">
-            <input v-model="newPassword" type="password" class="input" placeholder="新密码（至少6位）" autocomplete="new-password">
+            <input
+              v-model="newPassword"
+              type="password"
+              class="input"
+              :placeholder="t('auth.placeholder.newPassword')"
+              autocomplete="new-password"
+            >
           </div>
           <div class="field">
-            <input v-model="confirmPassword" type="password" class="input" placeholder="确认新密码" autocomplete="new-password">
+            <input
+              v-model="confirmPassword"
+              type="password"
+              class="input"
+              :placeholder="t('auth.placeholder.confirmPassword')"
+              autocomplete="new-password"
+            >
           </div>
-          <div v-if="errorMsg" class="error">{{ errorMsg }}</div>
-          <button type="submit" class="btn btn-primary btn-full" :disabled="loading || !canSubmit">
-            {{ loading ? '处理中...' : (isSetPassword ? '设置密码' : '重置密码') }}
+          <div
+            v-if="errorMsg"
+            class="error"
+          >
+            {{ errorMsg }}
+          </div>
+          <button
+            type="submit"
+            class="btn btn-primary btn-full"
+            :disabled="loading || !canSubmit"
+          >
+            {{ loading ? t('common.processing') : (isSetPassword ? t('auth.setPassword') : t('auth.resetPassword')) }}
           </button>
         </form>
       </template>
 
       <template v-if="step === 'done'">
-        <h1 class="auth-title">{{ isSetPassword ? '密码已设置' : '密码已重置' }}</h1>
-        <p class="done-hint">请使用新密码登录</p>
-        <button class="btn btn-primary btn-full" @click="router.push('/login')">去登录</button>
+        <h1 class="auth-title">
+          {{ isSetPassword ? t('auth.passwordSet') : t('auth.passwordReset') }}
+        </h1>
+        <p class="done-hint">
+          {{ t('auth.useNewPasswordToLogin') }}
+        </p>
+        <button
+          class="btn btn-primary btn-full"
+          @click="router.push('/login')"
+        >
+          {{ t('auth.goToLogin') }}
+        </button>
       </template>
 
-      <div v-if="step !== 'done'" class="auth-back">
-        <router-link to="/login">← 返回登录</router-link>
+      <div
+        v-if="step !== 'done'"
+        class="auth-back"
+      >
+        <router-link to="/login">
+          {{ t('auth.backHome') }}
+        </router-link>
       </div>
     </div>
   </div>

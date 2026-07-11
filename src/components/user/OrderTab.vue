@@ -87,11 +87,33 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="order-tab" v-if="auth.isAuthenticated">
+  <div
+    v-if="auth.isAuthenticated"
+    class="order-tab"
+  >
     <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
-      <h2 class="section-title" style="margin-bottom:0;">{{ t('auth.orderHistory', '交易记录') }}</h2>
-      <button class="btn btn-ghost btn-icon btn-xs" @click="refreshOrders" :disabled="refreshing || auth.loadingTransactions" title="刷新">
-        <svg class="icon-refresh" :class="{ spinning: refreshing || auth.loadingTransactions }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+      <h2
+        class="section-title"
+        style="margin-bottom:0;"
+      >
+        {{ t('auth.orderHistory', '交易记录') }}
+      </h2>
+      <button
+        class="btn btn-ghost btn-icon btn-xs"
+        :disabled="refreshing || auth.loadingTransactions"
+        :title="t('common.refresh')"
+        @click="refreshOrders"
+      >
+        <svg
+          class="icon-refresh"
+          :class="{ spinning: refreshing || auth.loadingTransactions }"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /></svg>
       </button>
     </div>
 
@@ -106,12 +128,27 @@ onMounted(() => {
         class="filter-btn"
         :class="{ active: filterType === f.id }"
         @click="applyFilter(f.id)"
-      >{{ t(f.key) }}</button>
+      >
+        {{ t(f.key) }}
+      </button>
     </div>
 
-    <div v-if="auth.loadingTransactions" class="loading">{{ t('common.loading') }}...</div>
-    <div v-else-if="auth.transactions.length === 0" class="empty">{{ t('settings.noResources', '暂无记录') }}</div>
-    <table v-else class="order-table">
+    <div
+      v-if="auth.loadingTransactions"
+      class="loading"
+    >
+      {{ t('common.loading') }}...
+    </div>
+    <div
+      v-else-if="auth.transactions.length === 0"
+      class="empty"
+    >
+      {{ t('settings.noResources', '暂无记录') }}
+    </div>
+    <table
+      v-else
+      class="order-table"
+    >
       <thead>
         <tr>
           <th>{{ t('auth.orderDate', '时间') }}</th>
@@ -123,29 +160,79 @@ onMounted(() => {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="tx in auth.transactions" :key="tx.id">
-          <td class="cell-date">{{ formatDate(tx.created_at) }}</td>
-          <td><span class="badge" :class="'badge-' + (tx.type === 'consume' ? 'red' : 'green')">{{ typeLabel(tx.type) }}</span></td>
+        <tr
+          v-for="tx in auth.transactions"
+          :key="tx.id"
+        >
+          <td class="cell-date">
+            {{ formatDate(tx.created_at) }}
+          </td>
+          <td>
+            <span
+              class="badge"
+              :class="'badge-' + (tx.type === 'consume' ? 'red' : 'green')"
+            >{{ typeLabel(tx.type) }}</span>
+          </td>
           <td>{{ currencyLabel(tx.currency) }}</td>
-          <td :style="amountStyle(tx.amount)">{{ tx.amount > 0 ? '+' : '' }}{{ tx.amount }}</td>
+          <td :style="amountStyle(tx.amount)">
+            {{ tx.amount > 0 ? '+' : '' }}{{ tx.amount }}
+          </td>
           <td>{{ tx.currency === 'balance' ? '¥' : '' }}{{ tx.balance_after }}</td>
-          <td class="cell-desc">{{ tx.description }}</td>
+          <td class="cell-desc">
+            {{ tx.description }}
+          </td>
         </tr>
       </tbody>
     </table>
 
-    <div v-if="auth.transactions.length > 0 && totalPages > 1" class="pagination">
-      <button class="page-btn" :disabled="auth.transactionPage <= 1" @click="goPage(auth.transactionPage - 1)">‹</button>
-      <template v-for="p in pageItems" :key="p">
-        <span v-if="typeof p === 'string'" class="page-ellipsis">{{ p }}</span>
-        <button v-else class="page-btn" :class="{ active: p === auth.transactionPage }" @click="goPage(p)">{{ p }}</button>
+    <div
+      v-if="auth.transactions.length > 0 && totalPages > 1"
+      class="pagination"
+    >
+      <button
+        class="page-btn"
+        :disabled="auth.transactionPage <= 1"
+        @click="goPage(auth.transactionPage - 1)"
+      >
+        ‹
+      </button>
+      <template
+        v-for="p in pageItems"
+        :key="p"
+      >
+        <span
+          v-if="typeof p === 'string'"
+          class="page-ellipsis"
+        >{{ p }}</span>
+        <button
+          v-else
+          class="page-btn"
+          :class="{ active: p === auth.transactionPage }"
+          @click="goPage(p)"
+        >
+          {{ p }}
+        </button>
       </template>
-      <button class="page-btn" :disabled="auth.transactionPage >= totalPages" @click="goPage(auth.transactionPage + 1)">›</button>
+      <button
+        class="page-btn"
+        :disabled="auth.transactionPage >= totalPages"
+        @click="goPage(auth.transactionPage + 1)"
+      >
+        ›
+      </button>
     </div>
   </div>
-  <div v-else class="not-logged-in">
+  <div
+    v-else
+    class="not-logged-in"
+  >
     <p>{{ t('auth.loginHint', '登录后可查看交易记录') }}</p>
-    <router-link to="/login" class="btn btn-primary btn-sm">{{ t('auth.login', '登录') }}</router-link>
+    <router-link
+      to="/login"
+      class="btn btn-primary btn-sm"
+    >
+      {{ t('auth.login', '登录') }}
+    </router-link>
   </div>
 </template>
 

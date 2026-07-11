@@ -561,10 +561,32 @@ def _find_file_alternatives(project_id: str, path: str) -> list:
 # ==================== 静态页面 ====================
 
 
+# i18n for index page
+_INDEX_I18N = {
+    'zh-CN': {
+        'title': 'TopoCode 文档', 'search_placeholder': '搜索项目/任务...', 'search': '搜索',
+        'per_page_50': '50条/页', 'per_page_100': '100条/页', 'per_page_200': '200条/页',
+        'total': '共 {n} 条', 'ai': 'AI助手',
+        'no_task': '资源项目 — 无需分析任务',
+        'generated': '已生成', 'not_generated': '未生成', 'no_matches': '暂无匹配结果',
+    },
+    'en-US': {
+        'title': 'TopoCode Documents', 'search_placeholder': 'Search projects/tasks...', 'search': 'Search',
+        'per_page_50': '50/page', 'per_page_100': '100/page', 'per_page_200': '200/page',
+        'total': 'Total {n}', 'ai': 'AI Assistant',
+        'no_task': 'Resource — no analysis',
+        'generated': 'Done', 'not_generated': 'Pending', 'no_matches': 'No matches',
+    },
+}
+
 @app.get("/", response_class=HTMLResponse)
-async def index(search: str = Query(None), page: int = Query(1), page_size: int = Query(50)):
+async def index(request: Request, search: str = Query(None), page: int = Query(1), page_size: int = Query(50)):
+    # Detect locale
+    lang = request.headers.get('Accept-Language', 'zh-CN')
+    locale = 'zh-CN' if lang.startswith('zh') else 'en-US'
+    _ = _INDEX_I18N.get(locale, _INDEX_I18N['zh-CN'])
     if not multi_db:
-        return HTMLResponse('<html><body><h1>TopoCode</h1><p>Backend not ready</p></body></html>')
+        return HTMLResponse(f'<html><body><h1>TopoCode</h1><p>Backend not ready</p></body></html>')
     try:
         ps = max(10, min(200, page_size))
         offset = (max(1, page) - 1) * ps
@@ -612,6 +634,7 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
                 proj_tasks.append({"id": t["id"], "name": t["name"], "status": t["status"], "hasDoc": has_ov})
             is_resource = pid.startswith("TOPORES_ID:")
             projects_map[pid] = {
+                "id": pid,
                 "name": proj["name"],
                 "tasks": proj_tasks,
                 "has_doc": len(has_doc_set) > 0,
@@ -680,29 +703,37 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
   .status-label.done{color:#10b981}
   .status-label.pending{color:#f59e0b}
   .empty{padding:20px;color:var(--text-muted);font-size:13px;text-align:center}
-  .badge{display:inline-block;padding:1px 6px;font-size:9px;font-weight:600;border-radius:4px;vertical-align:middle}
-  .badge-resource{background:rgba(34,197,94,0.15);color:#22c55e}
+  .badge{display:inline-block;padding:1px 6px;font-size:10px;font-weight:600;border-radius:4px;vertical-align:middle}
+  .badge-resource{background:#e8f4fd;color:#2563eb;border:1px solid #93c5fd}
   .pagination{display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap}
   .pagination a,.pagination span{padding:5px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;text-decoration:none;color:var(--text);background:var(--bg);transition:all var(--transition)}
   .pagination a:hover{background:var(--bg-hover);border-color:var(--accent)}
   .pagination .active{background:var(--accent);color:#fff;border-color:var(--accent)}
 </style></head><body>
 <div class="container">
-<h1>TopoCode 文档</h1>
+<h1>__TITLE__</h1>
 <div class="toolbar">
   <form method="get" action="/" style="display:flex;gap:8px;flex:1;align-items:center">
-    <input type="text" name="search" placeholder="搜索项目/任务..." value="__Q_ESC__">
-    <button type="submit">搜索</button>
+    <input type="text" name="search" placeholder="__SEARCH_PLACEHOLDER__" value="__Q_ESC__">
+    <button type="submit">__SEARCH__</button>
   </form>
   <select onchange="location.href='/?search='+encodeURIComponent('__Q_ESC__')+'&page=1&page_size='+this.value">
-    <option value="50"__PS_50__>50条/页</option>
-    <option value="100"__PS_100__>100条/页</option>
-    <option value="200"__PS_200__>200条/页</option>
+    <option value="50"__PS_50__>__P50__</option>
+    <option value="100"__PS_100__>__P100__</option>
+    <option value="200"__PS_200__>__P200__</option>
   </select>
-  <span class="info">共 __TOTAL__ 条</span>
-  <a href="/chat" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:4px;transition:background .15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>AI助手</a>
+  <span class="info">__TOTAL_LABEL__</span>
+  <a href="/chat" target="_blank" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:4px;transition:background .15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>__AI__</a>
 </div>"""
-        html = html.replace('__Q_ESC__', q_esc).replace('__TOTAL__', total_str)
+        html = html.replace('__Q_ESC__', q_esc)
+        html = html.replace('__TITLE__', _['title'])
+        html = html.replace('__SEARCH_PLACEHOLDER__', _['search_placeholder'])
+        html = html.replace('__SEARCH__', _['search'])
+        html = html.replace('__P50__', _['per_page_50'])
+        html = html.replace('__P100__', _['per_page_100'])
+        html = html.replace('__P200__', _['per_page_200'])
+        html = html.replace('__TOTAL_LABEL__', _['total'].replace('{n}', total_str))
+        html = html.replace('__AI__', _['ai'])
         html = html.replace('__PS_50__', ps_sel_50).replace('__PS_100__', ps_sel_100).replace('__PS_200__', ps_sel_200)
 
         last_pid = None
@@ -711,21 +742,21 @@ async def index(search: str = Query(None), page: int = Query(1), page_size: int 
             if pid != last_pid:
                 if last_pid is not None:
                     html += '</div></div>'
-                resource_badge = '<span class="badge badge-resource">资源</span>' if proj["is_resource"] else ''
+                resource_badge = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="#22c55e" style="width:14px;height:14px;vertical-align:middle;margin-right:3px"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/></svg><span class="badge badge-resource">资源中心导入</span>' if proj["is_resource"] else ''
                 html += f'<div class="project"><div class="project-header" onclick="this.nextElementSibling.classList.toggle(\'open\');this.querySelector(\'.arrow\').classList.toggle(\'open\')"><span class="arrow">▶</span> {esc(proj["name"])} {resource_badge}</div><div class="project-tasks open">'
                 last_pid = pid
             if t is None:
-                html += f'<div class="task-item" style="color:var(--text-muted);font-size:12px;">资源项目 — 无需分析任务</div>'
+                html += f'<div class="task-item" style="color:var(--text-muted);font-size:12px;">{_["no_task"]}</div>'
             else:
                 dot_class = 'done' if t["hasDoc"] else 'pending'
                 if t["hasDoc"]:
-                    html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span class="status-label {dot_class}">已生成</span></div>'
+                    html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><a href="/doc?taskId={esc(t["id"])}&docId=overall-{esc(t["id"])}">{esc(t["name"])}</a><span class="status-label {dot_class}">{_["generated"]}</span></div>'
                 else:
-                    html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span class="task-name-pending">{esc(t["name"])}</span><span class="status-label {dot_class}">未生成</span></div>'
-        if last_proj is not None:
+                    html += f'<div class="task-item"><span class="status-dot {dot_class}"></span><span class="task-name-pending">{esc(t["name"])}</span><span class="status-label {dot_class}">{_["not_generated"]}</span></div>'
+        if last_pid is not None:
             html += '</div></div>'
         if total == 0:
-            html += '<div class="empty">暂无匹配结果</div>'
+            html += f'<div class="empty">{_["no_matches"]}</div>'
 
         # 分页
         if total_pages > 1:

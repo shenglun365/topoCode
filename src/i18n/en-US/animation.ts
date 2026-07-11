@@ -37,5 +37,7 @@ export default { animation: {
   morph: 'Morph',
   flow: 'Flow',
   custom: 'Custom',
+  sequenceHint: 'Hint: Sequence names must match animate definitions in the scene',
+  supportedEffects: 'Supported effects:',
 },
 }

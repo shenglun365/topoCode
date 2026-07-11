@@ -40,6 +40,9 @@ const MOCK_META: ResourceListMeta = {
   _version: '1',
   categories: [
     { key: '', label: '全部' },
+    { key: '__prerelease__', label: '即将上线', color: '#f59e0b' },
+    { key: '__free__', label: '免费', color: '#10b981' },
+    { key: '__points__', label: '积分兑换', color: '#3b82f6' },
     { key: '微服务', label: '微服务', color: '#6366f1' },
     { key: '前端', label: '前端', color: '#3b82f6' },
     { key: '云原生', label: '云原生', color: '#06b6d4' },
@@ -69,6 +72,9 @@ const MOCK_META: ResourceListMeta = {
     publish_date: '发布时间',
     close: '关闭',
     login_hint: '登录后可下载资源',
+    offline: '已下架',
+    owned: '已购',
+    not_available: '暂未开通',
   },
 }
 
@@ -77,12 +83,24 @@ export const resourceService = {
     if (USE_MOCK) {
       await delay()
       let items = [...mockResources].map(addPricingDefaults) as Resource[]
+      // 非 owned 列表自动过滤，仅显示 free/points
+      if (!params?.owned) {
+        items = items.filter(r => r.pricing_model === 'free' || r.pricing_model === 'points')
+      }
       if (params?.q) {
         const keyword = params.q.toLowerCase()
         items = items.filter(r => r.title.toLowerCase().includes(keyword) || r.description.toLowerCase().includes(keyword))
       }
       if (params?.category) {
-        items = items.filter(r => r.category === params.category)
+        if (params.category === '__prerelease__') {
+          items = items.filter(r => r.is_prerelease || r.status === 'prerelease')
+        } else if (params.category === '__free__') {
+          items = items.filter(r => r.pricing_model === 'free')
+        } else if (params.category === '__points__') {
+          items = items.filter(r => r.pricing_model === 'points')
+        } else {
+          items = items.filter(r => r.category === params.category)
+        }
       }
       const sortBy = params?.sort_by || 'time'
       const sortOrder = params?.sort_order || 'desc'
@@ -163,5 +181,19 @@ export const resourceService = {
   async getImportStatus(importId: string): Promise<{ status: string; progress: number; message: string; result?: { projectId: string; projectName: string } }> {
     const result = await (window.api as any).system?.importStatus?.(importId)
     return result || { status: '', progress: 0, message: '' }
+  },
+
+  async vote(resourceId: number, vote: number): Promise<{ like_count: number; dislike_count: number }> {
+    return request<any>(
+      `/topoapi/resources/${resourceId}/vote`,
+      { method: 'POST', body: JSON.stringify({ vote }) },
+    )
+  },
+
+  async createComment(resourceId: number, content: string): Promise<{ id: number; content: string }> {
+    return request<any>(
+      `/topoapi/resources/${resourceId}/comments`,
+      { method: 'POST', body: JSON.stringify({ content }) },
+    )
   },
 }

@@ -194,7 +194,7 @@ function handleExternalTagClick(name: string, count: number) {
           'selected': selectionStore.isSelected(item.communityId),
           'selecting': selectionStore.selecting,
         }"
-        :title="`${item.communityId} (${item.nodeCount} 节点${item.qualityScore ? ', 质量: ' + (item.qualityScore * 100).toFixed(0) + '%' : ''})`"
+        :title="`${item.communityId} (${t('report.communityTooltip', { nodeCount: item.nodeCount, qualityScore: item.qualityScore ? (item.qualityScore * 100).toFixed(0) + '%' : '' })}`"
         @click="handleTagClick(item)"
       >
         <span class="tag-name">{{ commName(item) }}</span>

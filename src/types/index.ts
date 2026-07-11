@@ -283,7 +283,12 @@ export interface Resource {
   price_cny: number
   subscription_tier: string
   created_at: string
-  status?: 'published' | 'offline'
+  status?: 'published' | 'prerelease' | 'offline'
+  is_prerelease?: boolean
+  oss_url?: string
+  like_count?: number
+  dislike_count?: number
+  my_vote?: number
   theme?: ResourceTheme
 }
 

@@ -5,6 +5,78 @@ export default {
     placeholder: '输入问题... (Shift+Enter 换行)',
     you: '你',
     ai: 'AI',
+    commands: {
+      help: '/帮助',
+    },
+    context: {
+      codeAnalysis: '代码解析',
+      architectureAnalysis: '架构分析',
+      freeChat: '自由对话',
+      project: '项目「{name}」',
+      task: '任务「{name}」',
+      currentContext: '当前上下文：{parts}',
+    },
+    pipeline: {
+      completed: '流水线执行完成',
+      firstSuccess: '首次成功: {completed} 步',
+      retrySuccess: '重试后成功:（累计重试 {retries} 次）',
+      executionFailed: '执行失败:（内容未写入）',
+      retryCount: '（重试 {count} 次）',
+      retryHint: '使用 /retry 命令重新执行（默认跳过成功任务，--force 强制覆盖）。',
+      forceOverwriteAll: '（强制覆盖所有）',
+      skipCompleted: '（跳过已完成）',
+      started: '流水线已启动{hint}。顺序执行：项目摘要 → 预摘要 P0→P1→P2 → 组件分析 L0→L5 → 整体架构分析。请到「任务」面板查看进度。',
+    },
+    errors: {
+      noActiveTask: '未找到激活的任务。',
+      noCommunityList: '社区列表尚未加载，请先打开左侧结构图。',
+      noMatchingCommunity: '未找到匹配的社区。',
+      noComponents: '未找到组件。请先打开左侧结构图加载社区列表。',
+      startFailed: '启动失败: {msg}',
+    },
+    select: {
+      modeActive: '已激活',
+      modeExited: '已退出',
+      modeStatus: '组件选择模式 {status}。在左侧结构图或标签视图中点选组件，选中后输入分析请求。',
+      cleared: '已清除所有组件选择。',
+      componentsSelected: '已选中 {count} 个组件。可输入 /analyze 启动批量分析...',
+      etcMore: '等{count}个',
+      count: '{count}个',
+      typeCommunity: '社区',
+      typeExternal: '外部包',
+      removeRef: '移除引用',
+      exitMode: '退出组件选择模式',
+      selectComponent: '选择组件',
+    },
+    analyze: {
+      forceOverwrite: '，强制覆盖',
+      skipAnalyzed: '（跳过已分析）',
+      submitted: '已提交 {count} 个组件的 Agent 多轮分析任务{hint}：{names}。请到「任务」面板查看进度。',
+    },
+    presummary: {
+      started: '预摘要 P0→P1→P2 已启动{hint}。请到「任务」面板查看进度。',
+    },
+    overview: {
+      started: '架构概览生成任务已启动，请稍后查看结果...',
+    },
+    retry: {
+      forceOverwriteAll: '（强制覆盖所有）',
+      skipSuccessful: '（跳过成功步骤）',
+      started: '重新执行已启动{hint}。请到「任务」面板查看进度。',
+    },
+    messages: {
+      showEarlier: '显示更早消息 ({count} 条)',
+    },
+    helpEntry: {
+      hint: '输入 /help 或 /帮助 查看全部可用命令和模式',
+    },
+    langHint: {
+      zh: '（中文）',
+      en: '（English）',
+    },
+    common: {
+      concurrency: '（并发 {n}）',
+    },
   },
   ai: {
     assistantTitle: 'AI 助手',

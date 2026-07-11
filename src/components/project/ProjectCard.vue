@@ -366,7 +366,7 @@ async function handleCheckChanges() {
     changesResult.value = result
   } catch (err: any) {
     console.error('Failed to check changes:', err)
-    changesError.value = err?.message || '检查失败'
+    changesError.value = err?.message || t('project.changes.checkFailed')
   } finally {
     changesLoading.value = false
   }
@@ -409,7 +409,11 @@ async function handleResyncFromDialog() {
         class="flex items-center gap-2"
         style="min-width:0;"
       >
-        <component :is="isResourceProject ? BookOpenIcon : FolderIcon" class="w-4 h-4 shrink-0" :class="isResourceProject ? 'text-green-500' : 'text-accent'" />
+        <component
+          :is="isResourceProject ? BookOpenIcon : FolderIcon"
+          class="w-4 h-4 shrink-0"
+          :class="isResourceProject ? 'text-green-500' : 'text-accent'"
+        />
         <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
         </span>
@@ -628,7 +632,7 @@ async function handleResyncFromDialog() {
       <template #message>
         <div class="edit-info-dialog">
           <div class="edit-info-field">
-            <label class="edit-info-label">{{ t('project.projectName') || '项目名称' }}</label>
+            <label class="edit-info-label">{{ t('project.projectName') }}</label>
             <input
               v-model="editNameInput"
               class="edit-info-input"
@@ -701,7 +705,7 @@ async function handleResyncFromDialog() {
     >
       <div class="changes-dialog">
         <div class="changes-dialog-header">
-          <span class="changes-dialog-title">文件变更检查 — {{ project.name || project.rootPath || project.path }}</span>
+          <span class="changes-dialog-title">          {{ t('project.changes.title') }} — {{ project.name || project.rootPath || project.path }}</span>
           <button
             v-if="!changesLoading"
             class="btn-close"
@@ -716,7 +720,7 @@ async function handleResyncFromDialog() {
           class="changes-dialog-loading"
         >
           <div class="spinner" />
-          <span>正在扫描文件变更...</span>
+          <span>{{ t('project.changes.scanning') }}</span>
         </div>
 
         <div
@@ -732,7 +736,7 @@ async function handleResyncFromDialog() {
               class="btn btn-primary btn-sm"
               @click="changesDialogVisible = false"
             >
-              关闭
+              {{ t('common.close') }}
             </button>
           </div>
         </div>
@@ -750,7 +754,7 @@ async function handleResyncFromDialog() {
               class="btn btn-primary btn-sm"
               @click="changesDialogVisible = false"
             >
-              关闭
+              {{ t('common.close') }}
             </button>
           </div>
         </div>
@@ -765,21 +769,21 @@ async function handleResyncFromDialog() {
               :class="{ active: changesActiveTab === 'modified' }"
               @click="changesActiveTab = 'modified'"
             >
-              修改 ({{ changesResult.modified.length }})
+              {{ t('project.changes.modified', { count: changesResult.modified.length }) }}
             </button>
             <button
               class="changes-tab"
               :class="{ active: changesActiveTab === 'added' }"
               @click="changesActiveTab = 'added'"
             >
-              新增 ({{ changesResult.added.length }})
+              {{ t('project.changes.added', { count: changesResult.added.length }) }}
             </button>
             <button
               class="changes-tab"
               :class="{ active: changesActiveTab === 'deleted' }"
               @click="changesActiveTab = 'deleted'"
             >
-              删除 ({{ changesResult.deleted.length }})
+              {{ t('project.changes.deleted', { count: changesResult.deleted.length }) }}
             </button>
           </div>
           <div class="changes-file-list">
@@ -806,7 +810,7 @@ async function handleResyncFromDialog() {
               v-if="changesResult[changesActiveTab].length === 0"
               class="changes-file-empty"
             >
-              无变更文件
+              {{ t('project.changes.noChanges') }}
             </div>
           </div>
           <div class="changes-dialog-actions">
@@ -814,7 +818,7 @@ async function handleResyncFromDialog() {
               class="btn btn-ghost btn-sm"
               @click="changesDialogVisible = false"
             >
-              关闭
+              {{ t('common.close') }}
             </button>
             <button
               class="btn btn-primary btn-sm"
