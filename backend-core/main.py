@@ -19,6 +19,10 @@ import sys
 import threading
 from datetime import datetime
 
+# Windows: zmq.asyncio needs SelectorEventLoop (ProactorEventLoop is incompatible)
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from config import TOPO_MODE
 from logging_config import setup_logging
 from sqlite_ctx import MultiDBManager
