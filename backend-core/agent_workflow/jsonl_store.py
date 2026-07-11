@@ -12,12 +12,16 @@ JSONL 追加写入工具。
 
 import json
 import os
-import fcntl
+import threading
 import time
 import logging
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# In-process file lock — all JSONL writes happen within a single Python process,
+# so threading.Lock provides sufficient concurrency protection across all platforms.
+_jsonl_lock = threading.Lock()
 
 
 def ensure_arch_dir(project_root: str) -> str:
@@ -44,13 +48,10 @@ def append_jsonl(project_root: str, filename: str, entry: dict) -> bool:
         filepath = os.path.join(arch_dir, filename)
         line = json.dumps(entry, ensure_ascii=False) + "\n"
 
-        with open(filepath, "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
+        with _jsonl_lock:
+            with open(filepath, "a") as f:
                 f.write(line)
                 f.flush()
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
         return True
     except Exception as e:
