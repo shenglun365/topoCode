@@ -3,6 +3,7 @@
 import sqlite3
 import json
 import os
+import sys
 import hashlib
 import logging
 import threading
@@ -1680,13 +1681,19 @@ class MultiDBManager:
 
     def delete_project_db(self, project_id: str):
         """关闭连接 + 删除项目库文件（仅新架构 .topocode/data/project.db）"""
-        # Force checkpoint to release WAL lock before closing (required on Windows)
+        # Force checkpoint + switch off WAL mode to release file handles (required on Windows)
         if project_id in self._project_db_cache:
             try:
-                self._project_db_cache[project_id].execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                db = self._project_db_cache[project_id]
+                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                db.execute("PRAGMA journal_mode=DELETE")
             except Exception:
                 pass
         self.close_project_db(project_id)
+
+        if sys.platform == 'win32':
+            time.sleep(0.1)  # Windows needs a tick to release file handles
+
         try:
             row = self.main_db.execute(
                 "SELECT root_path FROM projects WHERE id = ?", (project_id,)
@@ -1694,14 +1701,23 @@ class MultiDBManager:
             project_root = row["root_path"] if row else None
         except Exception:
             project_root = None
+
+        def _remove_with_retry(path: str, max_retries: int = 3):
+            for attempt in range(max_retries):
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                    return
+                except PermissionError:
+                    if attempt < max_retries - 1:
+                        time.sleep(0.2)
+
         try:
             db_path = self._project_db_path(project_id, project_root)
-            if os.path.exists(db_path):
-                os.remove(db_path)
+            # Remove WAL/SHM first (they may hold locks on Windows)
             for suffix in ['-wal', '-shm']:
-                wal_path = db_path + suffix
-                if os.path.exists(wal_path):
-                    os.remove(wal_path)
+                _remove_with_retry(db_path + suffix)
+            _remove_with_retry(db_path)
         except ValueError as e:
             logger.warning(f"[delete_project_db] {e}")
 
