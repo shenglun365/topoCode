@@ -60,7 +60,7 @@ class _GenerateOverviewTool(AgentTool):
         return "\n".join(lines)
 
     async def execute(self, project_name: str = "", project_summary: str = "",
-                      **kwargs) -> ToolResult:
+                      language: str = "", **kwargs) -> ToolResult:
         # Get project_id (for file_summaries fallback query)
         _project_id = ""
         try:
@@ -134,6 +134,9 @@ class _GenerateOverviewTool(AgentTool):
                         len(context_text), len(communities_include), len(communities_call), summary_count)
 
             # ── 3. LLM generation ──
+            from prompt_manager import PromptManager
+            pm = PromptManager(self._multi_db)
+            lang_instr = pm.get_language_instruction(language)
             llm_fn = create_llm_chat_fn(self._multi_db)
             prompt = (
                 "You are a code architecture analysis expert. Generate an overall architecture overview Markdown document based on the following project information.\n\n"
@@ -148,7 +151,7 @@ class _GenerateOverviewTool(AgentTool):
                 "- Do not output raw comm_ids (e.g. comm-xxx-xxx format IDs)\n"
                 "- When referencing a module, use its community name\n"
                 "- Do not wrap module names in backticks `\n"
-                "- Output in Chinese."
+                f"- {lang_instr}"
             ).format(context=context_text)
 
             messages = [{"role": "user", "content": prompt}]
@@ -175,6 +178,7 @@ class OverviewWorkflow(AgentWorkflow):
             args={
                 "project_name": context.get("project_name", ""),
                 "project_summary": context.get("project_summary", ""),
+                "language": context.get("language", ""),
             },
             description="Generate overall architecture overview",
         )]

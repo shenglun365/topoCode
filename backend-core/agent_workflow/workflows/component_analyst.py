@@ -190,7 +190,7 @@ class _AnalyzeComponentBatchTool(AgentTool):
 
     async def execute(self, components: list, task_id: str = "",
                       concurrency: int = 1, project_summary: str = "",
-                      **kwargs) -> ToolResult:
+                      language: str = "", **kwargs) -> ToolResult:
         sem = asyncio.Semaphore(concurrency)
         master = _AnalyzeComponentTool(self._chat, self._render, self._save)
 
@@ -200,7 +200,7 @@ class _AnalyzeComponentBatchTool(AgentTool):
                     comp, task_id=task_id,
                     project_summary=project_summary,
                     parent_summary=comp.get("parent_summary", ""),
-                    language=comp.get("language", ""),
+                    language=comp.get("language", language),
                 )
 
         tasks = [analyze_one(c) for c in components]
@@ -260,6 +260,7 @@ class ComponentAnalystWorkflow(AgentWorkflow):
                     "task_id": tid,
                     "concurrency": concurrency,
                     "project_summary": project_summary,
+                    "language": language,
                 },
                 description=f"Analyzing components: {start}-{end}/{len(components)}",
             ))

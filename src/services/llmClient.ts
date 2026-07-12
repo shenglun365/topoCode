@@ -23,6 +23,7 @@ export interface ChatOptions {
   mode?: 'chat' | 'tools' | 'structured'
   onChunk?: (chunk: string) => void
   signal?: AbortSignal
+  locale?: string
 }
 
 export function chat(options: ChatOptions): Promise<string> {
@@ -57,6 +58,7 @@ export function chat(options: ChatOptions): Promise<string> {
         templateId: options.templateId,
         variables: options.variables,
         mode: options.mode || 'chat',
+        locale: options.locale || '',
       })
 
       if (aborted) {

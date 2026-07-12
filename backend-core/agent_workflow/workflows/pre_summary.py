@@ -34,6 +34,7 @@ class PreSummaryWorkflow(AgentWorkflow):
             return []
 
         concurrency = context.get("subagent_concurrency", 1) or 1
+        language = context.get("language", "")
 
         steps = []
         for i in range(0, len(uncached), concurrency):
@@ -44,7 +45,7 @@ class PreSummaryWorkflow(AgentWorkflow):
                 desc = f"Pre-summary: {batch[0]} and {len(batch)} files"
             steps.append(AgentStep(
                 tool="summarize_file",
-                args={"path": batch},
+                args={"path": batch, "language": language},
                 description=desc,
             ))
 

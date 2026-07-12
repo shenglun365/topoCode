@@ -36,7 +36,7 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
     }
 
     def get_system_prompt(self, component: dict, project_summary: str = "",
-                           detail_level: str = "quick") -> str:
+                           detail_level: str = "quick", language: str = "") -> str:
         cid = component.get("id", "?")
         cname = component.get("name", cid)
         parent_summary = component.get("parent_summary", "")
@@ -84,6 +84,11 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
             parts.append(f"Project Summary: {project_summary[:500]}")
         if parent_summary:
             parts.append(f"Parent Summary: {parent_summary[:500]}")
+
+        from prompt_manager import PromptManager
+        pm = PromptManager()
+        lang_instr = pm.get_language_instruction(language)
+        parts.append(lang_instr)
 
         parts.append(
             "Important Notes:\n"

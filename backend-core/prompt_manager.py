@@ -79,6 +79,11 @@ class PromptManager:
         logger.info(f"[PromptManager] Default template locale set to: {locale}")
         return {'success': True, 'locale': locale}
 
+    def get_language_instruction(self, locale: str = "") -> str:
+        """返回 LLM 输出语言指令。locale 为空时回退到 default_template_locale。"""
+        effective = locale or self.get_default_locale()
+        return "Output in Chinese." if effective.startswith("zh") else "Output in English."
+
     def _init_from_config(self):
         """从配置文件导入/更新模板到数据库"""
         if not os.path.exists(CONFIG_FILE):

@@ -1004,6 +1004,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         tools: Optional[List[str]] = None,
         output_schema: Optional[Dict[str, Any]] = None,
         outputSchema: Optional[Dict[str, Any]] = None,
+        locale: str = "",
     ):
         """统一流式对话入口"""
         from zmq_server import current_call_id
@@ -1030,6 +1031,17 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         if not messages:
             raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
+
+        # 自由对话（无 template_id）注入默认语言指令
+        if not template_id:
+            lang_instr = pm.get_language_instruction(locale)
+            has_lang_instr = any(
+                isinstance(m, dict) and m.get("role") == "system" and "Output in" in (m.get("content", "") or "")
+                for m in messages
+            )
+            if not has_lang_instr:
+                logger.info(f"[llm.chat] injecting language instruction: {lang_instr}")
+                messages.insert(0, {"role": "system", "content": lang_instr})
 
         # v2: inject user custom instructions
         from instruction_manager import InstructionManager

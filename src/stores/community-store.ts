@@ -738,7 +738,7 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
-  async function triggerOverview(taskId: string, force = false) {
+  async function triggerOverview(taskId: string, force = false, language = '') {
     const t = ensureTask(taskId)
     const idx = t.agentTasks.length
     const actionLabel = 'overview'
@@ -746,7 +746,7 @@ export const useCommunityStore = defineStore('community', () => {
     t.agentTasks[idx].status = 'running'
 
     try {
-      const result = await ipc.analysis.startOverview({ taskId, force: force || undefined })
+      const result = await ipc.analysis.startOverview({ taskId, force: force || undefined, language: language || undefined })
       if (result.success && result.agentTaskId) {
         cancelAgentPolling(taskId)
         t.agentTasks[idx].id = result.agentTaskId

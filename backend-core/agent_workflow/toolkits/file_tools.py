@@ -212,7 +212,7 @@ class SummarizeFileTool(AgentTool):
             },
         }
 
-    async def execute(self, path=None, focus: str = "", force_refresh: bool = False, **kwargs) -> ToolResult:
+    async def execute(self, path=None, focus: str = "", force_refresh: bool = False, language: str = "", **kwargs) -> ToolResult:
         try:
             files = path or kwargs.get("paths", kwargs.get("files", []))
             if isinstance(files, str):
@@ -255,6 +255,7 @@ class SummarizeFileTool(AgentTool):
                 focus=focus,
                 force_refresh=bool(force_refresh),
                 max_concurrent=self._concurrency,
+                language=language,
             )
 
             lines = []

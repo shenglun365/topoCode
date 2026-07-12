@@ -2249,12 +2249,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return _cb
 
     @server.register("analysis.startOverview")
-    def start_overview(task_id=None, taskId=None, force=False):
+    def start_overview(task_id=None, taskId=None, force=False, language=None):
         """启动整体架构概览生成 (OverviewWorkflow 入口)"""
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
-        logger.info(f"[startOverview] task_id={tid}")
+        lang = language or ""
+        logger.info(f"[startOverview] task_id={tid} language={lang or '(default)'}")
 
         store = TaskStore(multi_db.main_db)
         task = store.get_task(tid)
@@ -2302,6 +2303,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "task_id": tid, "project_id": pid,
                 "project_name": project_name,
                 "project_summary": project_summary,
+                "language": lang,
             }
             result = mgr.dispatch("overview", tid, context,
                                   project_id=pid, project_root=project_root,
@@ -2318,6 +2320,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "task_id": tid, "project_id": pid,
             "project_name": project_name,
             "project_summary": project_summary,
+            "language": lang,
         }
 
         # ── 完成回调：保存概览文档 ──

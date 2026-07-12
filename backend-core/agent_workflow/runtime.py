@@ -506,6 +506,9 @@ class AgentRuntime:
             # 构建单组件消息
             system_prompt = workflow.get_system_prompt(comp, project_summary,
                                                         detail_level=analysis_mode)
+            from prompt_manager import PromptManager
+            lang_instr = PromptManager(self._multi_db).get_language_instruction(context.get("language", ""))
+            system_prompt += f"\n\n{lang_instr}"
             user_context = comp.get("context", "")
             if not user_context:
                 user_context = f"Component ID: {comp_id}\nComponent Name: {comp_name}\nComponent Type: {comp.get('type', 'community')}"
@@ -522,8 +525,9 @@ class AgentRuntime:
                 if attempt > 0:
                     logger.info(f"[AgentRuntime] comp={comp_id} retry attempt {attempt} with enhanced prompt")
                     system_prompt = workflow.get_system_prompt(comp, project_summary, detail_level=analysis_mode)
+                    system_prompt += f"\n\n{lang_instr}\n"
                     system_prompt += (
-                        "\n\n[IMPORTANT] Previous JSON output did not meet requirements. "
+                        "\n[IMPORTANT] Previous JSON output did not meet requirements. "
                         "This time you must output valid JSON with 'name' (≤20 chars) and 'summary' (100-2000 chars) fields."
                     )
                     user_context = comp.get("context", "")

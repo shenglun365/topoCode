@@ -26,28 +26,29 @@ class PipelineWorkflow(AgentWorkflow):
     def plan(self, context: dict) -> list[AgentStep]:
         task_id = context.get("task_id", "")
         force = context.get("force", False)
+        language = context.get("language", "")
         self._context = context
 
         return [
             AgentStep(
                 tool="pipeline_ensure_summary",
                 description="[流水线] 项目摘要",
-                args={"task_id": task_id, "force": force},
+                args={"task_id": task_id, "force": force, "language": language},
             ),
             AgentStep(
                 tool="pipeline_run_presummary",
                 description="[流水线] 文件预摘要 P0→P1→P2",
-                args={"task_id": task_id, "batches": ["P0", "P1", "P2"], "force": force},
+                args={"task_id": task_id, "batches": ["P0", "P1", "P2"], "force": force, "language": language},
             ),
             AgentStep(
                 tool="pipeline_run_component_analysis",
                 description="[流水线] 组件分析 L0→L5",
-                args={"task_id": task_id, "levels": ["L0", "L1", "L2", "L3", "L4", "L5"], "force": force},
+                args={"task_id": task_id, "levels": ["L0", "L1", "L2", "L3", "L4", "L5"], "force": force, "language": language},
             ),
             AgentStep(
                 tool="pipeline_run_overview",
                 description="[流水线] 整体架构分析",
-                args={"task_id": task_id, "force": force},
+                args={"task_id": task_id, "force": force, "language": language},
             ),
         ]
 

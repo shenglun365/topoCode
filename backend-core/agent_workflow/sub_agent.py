@@ -83,6 +83,7 @@ class SubAgent:
         focus: str = "",
         max_concurrent: int = 1,
         force_refresh: bool = False,
+        language: str = "",
     ) -> SubAgentResult:
         """并行读取文件并摘要。上限 10 个文件。
 
@@ -169,7 +170,7 @@ class SubAgent:
                             return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
                         try:
                             summary, tokens = await self._summarize(
-                                text, rel, focus, is_structure=True)
+                                text, rel, focus, is_structure=True, language=language)
                             async with lock:
                                 total_tokens += tokens or 0
                         except Exception as e:
@@ -195,7 +196,7 @@ class SubAgent:
                                 failed += 1
                             return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
                         try:
-                            summary, tokens = await self._summarize(content, rel, focus)
+                            summary, tokens = await self._summarize(content, rel, focus, language=language)
                             async with lock:
                                 total_tokens += tokens or 0
                         except Exception as e:
@@ -203,9 +204,9 @@ class SubAgent:
                             summary = f"summary failed: {e}"
                             async with lock:
                                 failed += 1
-            else:
-                # ≤ 10KB → 直接读取文件
-                logger.info(f"[FileCache] MISS: {rel} → reading + LLM summary")
+                else:
+                    # ≤ 10KB → 直接读取文件
+                    logger.info(f"[FileCache] MISS: {rel} → reading + LLM summary")
                 content = await asyncio.to_thread(self._read_file, abs_fp)
                 if content is None:
                     logger.warning(f"[FileCache] READ-ERR: {rel} (file not found)")
@@ -222,7 +223,7 @@ class SubAgent:
                             failed += 1
                         return {"path": fp, "summary": "(cancelled)", "cached": False, "cached_at": ""}
                     try:
-                        summary, tokens = await self._summarize(content, rel, focus)
+                        summary, tokens = await self._summarize(content, rel, focus, language=language)
                         async with lock:
                             total_tokens += tokens or 0
                     except Exception as e:
@@ -431,7 +432,7 @@ class SubAgent:
         return "\n".join(lines)
 
     async def _summarize(self, content: str, filepath: str, focus: str = "",
-                         is_structure: bool = False) -> tuple[str, int]:
+                         is_structure: bool = False, language: str = "") -> tuple[str, int]:
         """Call LLM for structured summary of file content."""
         # ── 文件元上下文（导出/导入/引用方/类型） ──
         meta_header = ""
@@ -451,6 +452,9 @@ class SubAgent:
         except Exception:
             pass
 
+        from prompt_manager import PromptManager
+        lang_instr = PromptManager(self._multi_db).get_language_instruction(language)
+
         intro = (
             "You are a code analysis assistant. Generate a summary for the file based on the information below. "
             "Output in fixed format, one per line:\n"
@@ -466,6 +470,7 @@ class SubAgent:
         prompt += f"File path: {filepath}\n"
         content_label = "Symbol structure" if is_structure else "File content"
         prompt += f"{content_label}:\n```\n{content[:40000]}\n```\n\n"
+        prompt += f"{lang_instr}\n"
         prompt += "Please output the summary:"
 
         model = self._model_id

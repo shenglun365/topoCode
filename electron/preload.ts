@@ -182,7 +182,7 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCrossCommunityEdges', params }),
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getCommunityNodeLists', params }),
-    startOverview: (params: { taskId: string; force?: boolean }) =>
+    startOverview: (params: { taskId: string; force?: boolean; language?: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.startOverview', params }),
     getAgentProgress: (params: { agentTaskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentProgress', params }),
@@ -462,6 +462,7 @@ contextBridge.exposeInMainWorld('api', {
       variables?: Record<string, any>
       tools?: string[]
       outputSchema?: Record<string, any>
+      locale?: string
     }) =>
       ipcRenderer.invoke('ipc:call', { method: 'llm.chat', params }),
     abortChat: (params: { requestId: string }) =>

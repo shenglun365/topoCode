@@ -2529,14 +2529,14 @@ def _parse_toml_deps(full_path: str) -> Dict[str, str]:
     return deps
 
 
-async def _do_generate_project_summary(multi_db, project_id: str):
+async def _do_generate_project_summary(multi_db, project_id: str, language: str = ""):
     """Standalone project summary generator — usable from both RPC handler and analyst pipeline."""
     import os
     from datetime import datetime
     main_db = multi_db.main_db
 
     pid = project_id
-    logger.info(f"[generateProjectSummary] ENTRY pid={pid}")
+    logger.info(f"[generateProjectSummary] ENTRY pid={pid} language={language or '(default)'}")
     project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
     if not project:
         raise ValueError(f"Project not found: {pid}")
@@ -2582,6 +2582,9 @@ async def _do_generate_project_summary(multi_db, project_id: str):
     else:
         logger.info(f"[generateProjectSummary] no dep files found")
 
+    from prompt_manager import PromptManager
+    lang_instr = PromptManager(multi_db).get_language_instruction(language)
+
     # Build prompt
     prompt = (
         "You are a code architecture analysis expert. Based on the following project's README and dependency info, "
@@ -2596,6 +2599,7 @@ async def _do_generate_project_summary(multi_db, project_id: str):
         prompt += f"## README\n{readme_text}\n\n"
     if deps_text:
         prompt += f"## Dependencies\n{deps_text}\n\n"
+    prompt += f"{lang_instr}\n"
     prompt += "Please output a project summary:"
     logger.info(f"[generateProjectSummary] prompt built, total_len={len(prompt)}")
 

@@ -493,8 +493,10 @@ async function handleSend() {
       userInput.value = ''
       const tid = resolveTaskId()
       if (!tid) { addMessage('system', t('aiAssistant.errors.noActiveTask')); return }
-      addMessage('system', t('aiAssistant.overview.started'))
-      communityStore.triggerOverview(tid, text.includes('--force'))
+      const language = text.match(/-L\s+(zh|en)/i)?.[1] || ''
+      const langHint = language === 'zh' ? t('aiAssistant.langHint.zh') : language === 'en' ? t('aiAssistant.langHint.en') : ''
+      addMessage('system', t('aiAssistant.overview.started') + (langHint ? ` | ${langHint}` : ''))
+      communityStore.triggerOverview(tid, text.includes('--force'), language)
         .catch(e => addMessage('error', String(e)))
       return
     }
@@ -557,12 +559,14 @@ async function handleSend() {
   sendMessages.push(...history)
 
   try {
+    const locale = (await (window.api as any)?.promptTemplate?.getDefaultLocale())?.locale || ''
     await chat({
       messages: sendMessages,
       onChunk(chunk: string) {
         assistantMsg.content += chunk
         scrollToBottom()
       },
+      locale,
     })
     assistantMsg.isStreaming = false
   } catch (err: any) {

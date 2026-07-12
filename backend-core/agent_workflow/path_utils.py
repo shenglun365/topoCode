@@ -5,10 +5,11 @@ logger = logging.getLogger(__name__)
 
 
 def to_rel(path: str, root: str) -> str:
-    """任意路径 → 项目相对路径（供内部流转使用）"""
+    """任意路径 → 项目相对路径（供内部流转使用），返回值统一使用正斜杠。"""
     if not path or not root:
         return path
-    return os.path.relpath(path, root) if os.path.isabs(path) else path
+    rel = os.path.relpath(path, root) if os.path.isabs(path) else path
+    return rel.replace('\\', '/')
 
 
 def to_abs(path: str, root: str) -> str:

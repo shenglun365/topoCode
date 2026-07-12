@@ -78,7 +78,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
         def to_openai_schema(self, filter_names=None):
             return None
 
-        async def execute(self, task_id: str, force: bool = False) -> ToolResult:
+        async def execute(self, task_id: str, force: bool = False, language: str = "") -> ToolResult:
             try:
                 existing = multi_db.main_db.execute(
                     "SELECT summary FROM projects WHERE id=?", (pid,)
@@ -88,7 +88,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                     return ToolResult.ok({"summary": "Project summary already exists"})
 
                 from core_service import _do_generate_project_summary
-                await _do_generate_project_summary(multi_db, pid)
+                await _do_generate_project_summary(multi_db, pid, language=language)
                 _log.info(f"[Pipeline] generated project summary for {pid}")
                 return ToolResult.ok({"summary": "Project summary generated"})
             except Exception as e:
@@ -104,7 +104,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
         def to_openai_schema(self, filter_names=None):
             return None
 
-        async def execute(self, task_id: str, batches: list[str], force: bool = False) -> ToolResult:
+        async def execute(self, task_id: str, batches: list[str], force: bool = False, language: str = "") -> ToolResult:
             try:
                 from .sandbox import PathSandbox, AgentSandbox as _AS
                 from .runtime import AgentRuntime
@@ -134,7 +134,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
 
                     from .workflows.pre_summary import PreSummaryWorkflow
                     workflow = PreSummaryWorkflow()
-                    context = {"task_id": task_id, "files": files, "subagent_concurrency": RunPreSummaryTool._sub_conc}
+                    context = {"task_id": task_id, "files": files, "language": language, "subagent_concurrency": RunPreSummaryTool._sub_conc}
                     sandbox = _AS(project_root, max_tokens=0, timeout_seconds=0)
 
                     def _run(_ce=ce):
@@ -190,7 +190,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
         def to_openai_schema(self, filter_names=None):
             return None
 
-        async def execute(self, task_id: str, levels: list[str], force: bool = False) -> ToolResult:
+        async def execute(self, task_id: str, levels: list[str], force: bool = False, language: str = "") -> ToolResult:
             try:
                 from .sandbox import PathSandbox, AgentSandbox as _AS
                 from .runtime import AgentRuntime
@@ -264,6 +264,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         "max_turns": 30,
                         "_save_fn": _save_fn,
                         "subagent_concurrency": RunComponentAnalysisTool._sub_conc,
+                        "language": language,
                     }
                     sandbox = _AS(project_root, max_tokens=32768, timeout_seconds=900)
 
@@ -328,7 +329,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
         def to_openai_schema(self, filter_names=None):
             return None
 
-        async def execute(self, task_id: str, force: bool = False) -> ToolResult:
+        async def execute(self, task_id: str, force: bool = False, language: str = "") -> ToolResult:
             try:
                 from .sandbox import AgentSandbox as _AS
                 from .runtime import AgentRuntime
@@ -352,7 +353,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 sub_tools = _TR()
                 sub_tools.register(_GenerateOverviewTool(multi_db, project_db, task_id))
                 workflow = OverviewWorkflow()
-                context = {"task_id": task_id, "project_summary": project_summary or ""}
+                context = {"task_id": task_id, "project_summary": project_summary or "", "language": language}
                 sandbox = _AS(project_root, max_tokens=8192, timeout_seconds=600)
 
                 def _run(_ce=ce):
