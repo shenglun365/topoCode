@@ -23,6 +23,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import StarLogo from './StarLogo.vue'
 
 import { useComponentId } from '@/composables/useComponentId'
+import { version as APP_VERSION } from '../../../package.json'
 
 const { showId, componentId } = useComponentId('SH-005')
 const { t } = useI18n()
@@ -38,7 +39,6 @@ const navigation = useNavigationStore()
 
 // ── 配置 ──
 const DOCS_URL = 'https://topocode.cn/guide.html'
-const APP_VERSION = '0.1.0'
 
 // ── 无边框窗口控制 ──
 const isMaximized = ref(false)

@@ -85,11 +85,6 @@ class AgenticComponentAnalystWorkflow(AgenticWorkflow):
         if parent_summary:
             parts.append(f"Parent Summary: {parent_summary[:500]}")
 
-        from prompt_manager import PromptManager
-        pm = PromptManager()
-        lang_instr = pm.get_language_instruction(language)
-        parts.append(lang_instr)
-
         parts.append(
             "Important Notes:\n"
             "- Must provide a semantically meaningful name, not a community ID\n"

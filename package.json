@@ -1,6 +1,6 @@
 {
   "name": "topoone-ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "TopoCode - 源码架构分析与学习工具",

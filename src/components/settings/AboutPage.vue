@@ -3,10 +3,10 @@ import { useI18n } from 'vue-i18n'
 import { ref } from 'vue'
 import { useComponentId } from '@/composables/useComponentId'
 import StarLogo from '@/components/shell/StarLogo.vue'
+import { version as appVersion } from '../../../package.json'
 
 const { showId, componentId } = useComponentId('ST-008')
 const { t } = useI18n()
-const appVersion = '0.1.0'
 </script>
 
 <template>
