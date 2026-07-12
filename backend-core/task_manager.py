@@ -702,6 +702,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         dir_tree: dict = {}
         for dir_path in all_paths:
             if dir_path:
+                dir_path = dir_path.replace('\\', '/')
                 parts = dir_path.split("/")
                 current = dir_tree
                 for part in parts[:-1]:  # 跳过文件名，只处理目录
@@ -713,6 +714,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         dir_counts: dict = {}
         for dir_path in dir_count_paths:
             if dir_path:
+                dir_path = dir_path.replace('\\', '/')
                 parts = dir_path.split("/")
                 current = dir_counts
                 # 遍历所有目录层级，每层计数 +1
