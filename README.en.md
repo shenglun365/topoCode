@@ -3,7 +3,10 @@
 > **中文** · [中文](README.md)
 
 <p align="center">
-  <img src="assets/star-logo-en.svg" alt="TopoCode" width="660">
+  <picture>
+    <source srcset="assets/star-logo-en.svg" type="image/svg+xml">
+    <img src="docs/logo-en.png" alt="TopoCode" width="660">
+  </picture>
 </p>
 
 > Source Code Architecture Analysis & Learning Tool — Elevate your architectural cognition.

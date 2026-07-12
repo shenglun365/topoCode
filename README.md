@@ -3,7 +3,10 @@
 > **English** · [English](README.en.md)
 
 <p align="center">
-  <img src="assets/star-logo-zh.svg" alt="TopoCode" width="660">
+  <picture>
+    <source srcset="assets/star-logo-zh.svg" type="image/svg+xml">
+    <img src="docs/logo-zh.png" alt="TopoCode" width="660">
+  </picture>
 </p>
 
 > 源码架构分析与理解工具 —— 提升人的架构认知水平。
