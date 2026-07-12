@@ -61,7 +61,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 // Directory multi-select (tree structure)
-const selectedScopes = ref<string[]>(props.selectedScopes ? [...props.selectedScopes] : [])
+const selectedScopes = ref<string[]>(props.selectedScopes ? [...props.selectedScopes].map(p => p.replace(/\\/g, '/')) : [])
 const expandedDirs = ref<Set<string>>(new Set())
 const dirTreeRef = ref<HTMLElement | null>(null)
 
@@ -96,6 +96,16 @@ const maxCount = computed(() => {
   if (!stats.value || !stats.value.extensions) return 1
   return Math.max(...Object.values(stats.value.extensions), 1)
 })
+
+/**
+ * 递归规范化目录树路径（反斜杠 → 正斜杠）
+ */
+function normalizeDirTree(nodes: DirTreeNode[]) {
+  for (const node of nodes) {
+    node.path = node.path.replace(/\\/g, '/')
+    if (node.children) normalizeDirTree(node.children)
+  }
+}
 
 /**
  * 获取所有子目录的路径
@@ -326,6 +336,8 @@ async function loadStats() {
       }
     }
 
+    // 跨平台路径规范化：后端可能返回 Windows 反斜杠路径
+    normalizeDirTree(result.directories)
     stats.value = result
 
     // Recommend top 5 extensions
@@ -356,7 +368,7 @@ function debouncedLoadStats() {
 
 // Sync local refs with props — 仅值不同时更新，避免重复触发 loadStats
 watch(() => props.selectedScopes, (val) => {
-  const arr = val || []
+  const arr = (val || []).map(p => p.replace(/\\/g, '/'))
   if (JSON.stringify(arr) !== JSON.stringify(selectedScopes.value)) {
     selectedScopes.value = [...arr]
   }
