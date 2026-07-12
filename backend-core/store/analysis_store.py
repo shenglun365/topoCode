@@ -662,6 +662,7 @@ class AnalysisStore:
                  component_type, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, insert_rows)
+        self._db.commit()
         logger.info("[AnalysisStore] bulk_insert_llm_results DONE count=%d", len(results))
 
     def list_llm_results(self, task_id: str, edge_type: str) -> List[Dict]:
