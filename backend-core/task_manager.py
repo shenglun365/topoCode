@@ -109,7 +109,7 @@ def _compute_file_ranks(task_id: str, project_db, components: list,
     if file_to_comms:
         try:
             rel_keys = [
-                _os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp
+                (_os.path.relpath(fp, project_root) if project_root and _os.path.isabs(fp) else fp).replace('\\', '/')
                 for fp in file_to_comms
             ]
             logger.info("[_compute_file_ranks] size_query project_root=%r n_files=%d first_abs=%r first_rel=%r",
