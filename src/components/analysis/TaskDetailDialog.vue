@@ -478,14 +478,14 @@ function formatRunStatusColor(status: string): string {
               <div class="loading-spinner" />
             </div>
             <div
-              v-else-if="logs.length === 0"
+              v-show="!loadingLogs && logs.length === 0"
               class="logs-empty"
             >
               <ClockIcon class="w-4 h-4" />
               <span>{{ t('analysis.noLogs') }}</span>
             </div>
             <div
-              v-else
+              v-show="!loadingLogs && logs.length > 0"
               class="logs-container"
             >
               <div
