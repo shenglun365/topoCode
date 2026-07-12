@@ -459,10 +459,10 @@ class SubAgent:
             "You are a code analysis assistant. Generate a summary for the file based on the information below. "
             "Output in fixed format, one per line:\n"
             "[Type] module\n"
-            "[Purpose] One sentence describing file function (within 30 chars)\n"
+            "[Purpose] One sentence describing file function\n"
             "[Exports] Key function/class names, comma separated\n"
             "[Dependencies] External packages or file dependencies\n"
-            "[Description] Detailed functional description (within 100 chars)\n\n"
+            "[Description] Detailed functional description\n\n"
         )
         prompt = meta_header + intro
         if focus:
