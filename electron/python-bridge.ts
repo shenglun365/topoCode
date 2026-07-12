@@ -253,6 +253,22 @@ export class PythonBridge {
     })
   }
 
+  /** 同步强杀 Python 进程（SIGINT/崩溃保底） */
+  killSync(): void {
+    if (process.platform === 'win32') {
+      try {
+        const { execSync } = require('child_process')
+        execSync('taskkill /F /T /IM python.exe 2>nul', { stdio: 'ignore' })
+      } catch { /* already dead */ }
+    } else {
+      if (this.process && this.process.pid) {
+        try {
+          process.kill(-this.process.pid, 'SIGKILL')
+        } catch { /* already dead */ }
+      }
+    }
+  }
+
   async restart(): Promise<BackendStatus> {
     await this.stop()
     return this.start()

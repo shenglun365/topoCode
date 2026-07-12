@@ -346,12 +346,17 @@ app.on('window-all-closed', () => {
   }
 })
 
+// SIGINT (Ctrl+C) 时同步杀 Python 进程，防止 Electron 退出后 Python 残留
+process.on('SIGINT', () => {
+  console.log('[Main] SIGINT received, killing Python backend...')
+  pythonBridge.killSync()
+})
+
 // 应用退出前清理 — 等待后端优雅停止
 app.on('will-quit', (event) => {
   windowManager.cleanup()
   zmqRouter.close()
 
-  // 延迟退出，等待后端进程停止
   event.preventDefault()
   pythonBridge.destroy().finally(() => {
     app.exit()
