@@ -232,7 +232,7 @@ async function openInBrowser() {
     console.warn('[SubDocViewer] openInBrowser aborted: no docId available')
     return
   }
-  const url = `http://127.0.0.1:${httpPort.value}/doc?docId=${docId}`
+  const url = `http://127.0.0.1:${httpPort.value}/doc?taskId=${props.taskId}&docId=${docId}`
   console.log('[SubDocViewer] openInBrowser url:', url)
   window.api!.shell.openExternal(url)
     .then(() => console.log('[SubDocViewer] openExternal success'))
