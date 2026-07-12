@@ -233,7 +233,10 @@ export class PythonBridge {
       if (process.platform === 'win32') {
         try {
           const { execSync } = require('child_process')
-          execSync(`taskkill /F /PID ${proc.pid} 2>nul`, { stdio: 'ignore' })
+          execSync(`taskkill /F /T /PID ${proc.pid} 2>nul`, { stdio: 'ignore' })
+          setTimeout(() => {
+            execSync('taskkill /F /IM python.exe 2>nul', { stdio: 'ignore' })
+          }, 3000)
         } catch { /* already dead */ }
       } else {
         try { proc.kill('SIGTERM') } catch { /* already dead */ }
