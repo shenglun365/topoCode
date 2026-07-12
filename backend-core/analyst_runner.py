@@ -182,7 +182,7 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
         lang = table.language or ""
         for node in table.nodes:
             if node.kind.value == "file":
-                fp = _rel(node.file_path)
+                fp = _rel(node.file_path).replace('\\', '/')
                 file_index[fp] = node.id
                 file_language[fp] = lang
                 # 反向索引: node.id → file_path（用于语言族校验）
@@ -219,7 +219,7 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
             logger.info("[_extract_import_dependencies] stopped at import %d/%d", idx, _total_imports)
             break
         module_name = imp.get("name", "").strip()
-        source_file = imp.get("file_path", "")
+        source_file = imp.get("file_path", "").replace('\\', '/')
         source_id = imp.get("id", "")
 
         if not module_name or not source_file:
@@ -238,12 +238,12 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
             target_id = file_index[module_name]
         # 2. 相对路径: ./foo, ../bar
         elif module_name.startswith("./") or module_name.startswith("../"):
-            candidate = os.path.normpath(os.path.join(source_dir, module_name))
+            candidate = os.path.normpath(os.path.join(source_dir, module_name)).replace('\\', '/')
             target_id = file_index.get(candidate) or suffix_index.get(candidate)
         # 3. C/C++ 风格: 尝试从源文件目录解析相对路径 (如 "header.h", "dir/header.h")
         #     Go 项目跳过: import "fmt" 非文件包含，同目录易误中 (fmt.go)
         if not target_id and not go_mod_prefix:
-            candidate = os.path.normpath(os.path.join(source_dir, module_name))
+            candidate = os.path.normpath(os.path.join(source_dir, module_name)).replace('\\', '/')
             target_id = file_index.get(candidate) or suffix_index.get(candidate)
         # 3.5 Python 点式相对导入: .module, ..module, ...module
         #     路径式相对 (./ ../) 已在步骤2处理，此处仅处理纯点前缀
