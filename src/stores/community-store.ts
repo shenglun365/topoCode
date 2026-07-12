@@ -146,10 +146,10 @@ export const useCommunityStore = defineStore('community', () => {
     const key = _inflightKey(taskId, 'loadCommunities')
     const existing = _inflightLoads.get(key)
     if (existing) {
-      console.log('[community-store] loadCommunities reuse inflight', { taskId, key })
+      // console.log('[community-store] loadCommunities reuse inflight', { taskId, key })
       return existing
     }
-    console.log('[community-store] loadCommunities start', { taskId, projectId })
+    // console.log('[community-store] loadCommunities start', { taskId, projectId })
 
     const promise = (async () => {
       const t = ensureTask(taskId)
@@ -161,7 +161,7 @@ export const useCommunityStore = defineStore('community', () => {
           ipc.analysis.listCommunityResults(taskId, 'CALL').catch((e: any) => { console.warn('[community-store] listCommunityResults CALL failed', e?.message); return ({ results: [] }) }),
           ipc.analysis.listCommunityResults(taskId, 'INCLUDE').catch((e: any) => { console.warn('[community-store] listCommunityResults INCLUDE failed', e?.message); return ({ results: [] }) }),
         ])
-        console.log('[community-store] loadCommunities 4 requests done', { taskId, ms: Date.now() - _t0 })
+        // console.log('[community-store] loadCommunities 4 requests done', { taskId, ms: Date.now() - _t0 })
         const llmMap: Record<string, any> = {}
         for (const rRaw of [...(callResults?.results || []), ...(depResults?.results || [])]) {
           const r = rRaw as Record<string, unknown>
@@ -267,7 +267,7 @@ export const useCommunityStore = defineStore('community', () => {
     const key = _inflightKey(taskId, 'loadCommunitiesFromDashboard')
     const existing = _inflightLoads.get(key)
     if (existing) return existing
-    console.log('[community-store] loadCommunitiesFromDashboard start', { taskId, hasCallLevels: !!dash?.callLevels, hasDepLevels: !!dash?.depLevels })
+    // console.log('[community-store] loadCommunitiesFromDashboard start', { taskId, hasCallLevels: !!dash?.callLevels, hasDepLevels: !!dash?.depLevels })
 
     const promise = (async () => {
       const t = ensureTask(taskId)
@@ -1055,7 +1055,7 @@ export const useCommunityStore = defineStore('community', () => {
     t.agentTasks[idx].status = 'running'
 
     try {
-      console.log('[pipeline] calling startPreSummaryPipeline taskId=%s batches=%o limit=%d conc=%d', taskId, batches, limit, conc)
+      // console.log('[pipeline] calling startPreSummaryPipeline taskId=%s batches=%o limit=%d conc=%d', taskId, batches, limit, conc)
       const result = await ipc.analysis.startPreSummaryPipeline({ taskId, batches, limit, subagentConcurrency: conc })
       // console.log('[pipeline] response success=%s agentTaskId=%s fileCount=%s', result.success, result.agentTaskId, result.fileCount)
       if (result.success && result.agentTaskId) {

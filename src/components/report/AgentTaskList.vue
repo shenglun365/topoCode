@@ -83,7 +83,7 @@ function transformHistory(h: any) {
     steps,
     createdAt: h.created_at || '',
   }
-  console.log('[transformHistory] agent=%s action=%s status=%s steps=%d', h.agent_id, h.action, h.status, steps.length)
+  // console.log('[transformHistory] agent=%s action=%s status=%s steps=%d', h.agent_id, h.action, h.status, steps.length)
   return task
 }
 
@@ -129,14 +129,14 @@ async function refresh() {
             createdAt: h.created_at || '',
           })
           communityStore.ensureAgentPolling(taskId.value)
-          console.log('[refresh] injected history agent into store: %s', h.agent_id)
+          // console.log('[refresh] injected history agent into store: %s', h.agent_id)
         }
       }
     }
   }
-  const liveLen = liveTasks.value.length
-  const historyLen = historyTasks.value.length
-  console.log('[AgentTaskList] refreshed: live=%d history=%d all=%d', liveLen, historyLen, liveLen + historyLen)
+  // const liveLen = liveTasks.value.length
+  // const historyLen = historyTasks.value.length
+  // console.log('[AgentTaskList] refreshed: live=%d history=%d all=%d', liveLen, historyLen, liveLen + historyLen)
 }
 
 async function clearHistory() {
@@ -161,12 +161,12 @@ watch(liveTaskKeys, () => {
   const tasks = liveTasks.value
   const hasPresummary = tasks.some(t => t.action === 'presummary_files')
   const hasRunning = tasks.some(t => t.status === 'running' || t.status === 'queued')
-  console.log('[watchLive] hasRunning=%s hasPresummary=%s timer=%s tasks=%d', hasRunning, hasPresummary, historyPollTimer ? 'active' : 'none', tasks.length)
+  // console.log('[watchLive] hasRunning=%s hasPresummary=%s timer=%s tasks=%d', hasRunning, hasPresummary, historyPollTimer ? 'active' : 'none', tasks.length)
   if ((hasRunning || hasPresummary) && !historyPollTimer) {
-    console.log('[watchLive] starting 3s history poll')
+    // console.log('[watchLive] starting 3s history poll')
     historyPollTimer = setInterval(() => { refresh() }, 3000)
   } else if (!hasRunning && !hasPresummary && historyPollTimer) {
-    console.log('[watchLive] stopping history poll')
+    // console.log('[watchLive] stopping history poll')
     clearInterval(historyPollTimer)
     historyPollTimer = null
   }

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useDiagramRenderer } from '@/composables/useDiagramRenderer'
 import { useComponentId } from '@/composables/useComponentId'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   content: string
