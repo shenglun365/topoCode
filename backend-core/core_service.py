@@ -578,7 +578,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
                 for filename in filenames:
                     full_path = os.path.join(dirpath, filename)
-                    rel_path = os.path.relpath(full_path, root_path)
+                    rel_path = os.path.relpath(full_path, root_path).replace('\\', '/')
                     if should_ignore_file(rel_path, multi_ignore,
                                           extra_patterns=effective_patterns):
                         continue
@@ -2025,7 +2025,7 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                         "phase": "scan",
                     })
 
-            rel_path = os.path.relpath(entry.path, root_path)
+            rel_path = os.path.relpath(entry.path, root_path).replace('\\', '/')
 
             # 跳过被忽略的文件/目录
             if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):
@@ -2170,7 +2170,7 @@ def _scan_file_tree(project_db: SQLiteContext, root_path: str, current_path: str
     file_count = 0
     try:
         for entry in os.scandir(current_path):
-            rel_path = os.path.relpath(entry.path, root_path)
+            rel_path = os.path.relpath(entry.path, root_path).replace('\\', '/')
 
             # 跳过被忽略的文件/目录
             if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):
@@ -2291,7 +2291,7 @@ def _build_file_tree(files: list, include_children: bool = True) -> list:
     # 按层级分组
     tree = {}
     for f in files:
-        parts = f["file_path"].split(os.sep)
+        parts = f["file_path"].replace('\\', '/').split('/')
         current = tree
         for part in parts[:-1]:
             if part not in current:
@@ -2804,7 +2804,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
             if sf:
                 name = sf['file_name']
                 if not name:
-                    name = sf['file_path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
+                    name = sf['file_path'].replace('\\', '/').rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
                 return {"id": node_str, "name": name, "filePath": sf['file_path'], "type": "file"}
 
             # 如果 node_str 是文件名（如 "app.ts"），通过 name_map 查找
@@ -2852,7 +2852,7 @@ def register_report_methods(server: ZMQServer, multi_db: MultiDBManager):
                 if sf:
                     name = sf['file_name']
                     if not name:
-                        name = sf['file_path'].rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
+                        name = sf['file_path'].replace('\\', '/').rsplit('/', 1)[-1].rsplit('.', 1)[0] or node_str
                     return name
                 return node_str
 

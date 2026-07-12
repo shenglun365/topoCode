@@ -736,7 +736,7 @@ class WebToolExecutor:
                     seen.add(nid)
                     files.append({
                         "path": nid,
-                        "name": nid.split("/")[-1] if "/" in nid else nid,
+                        "name": nid.replace('\\', '/').split("/")[-1] if "/" in nid.replace('\\', '/') else nid,
                     })
         return {"files": files, "total": len(files)}
 

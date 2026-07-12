@@ -262,17 +262,17 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
             parts = Path(source_dir).parts
             if up_levels < len(parts):
                 if up_levels > 0:
-                    base = str(Path(*parts[:len(parts) - up_levels]))
+                    base = str(Path(*parts[:len(parts) - up_levels])).replace('\\', '/')
                 else:
                     base = source_dir
                 if rel_path:
-                    base = os.path.join(base, rel_path)
+                    base = os.path.join(base, rel_path).replace('\\', '/')
                 # 依次尝试: 后缀匹配(无扩展名) / .py 文件 / __init__.py 包
                 target_id = suffix_index.get(base)
                 if not target_id:
                     target_id = file_index.get(base + ".py")
                 if not target_id:
-                    init_path = os.path.join(base, "__init__.py")
+                    init_path = os.path.join(base, "__init__.py").replace('\\', '/')
                     target_id = file_index.get(init_path)
                     if not target_id:
                         target_id = suffix_index.get(os.path.splitext(init_path)[0])
@@ -306,7 +306,7 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                     is_super = mod_raw.startswith('super::')
                     if mod_raw.startswith('crate::'):
                         mod_raw = mod_raw[7:]
-                        base_dirs.append(os.path.join(crate_root, 'src'))
+                        base_dirs.append(os.path.join(crate_root, 'src').replace('\\', '/'))
                     elif mod_raw.startswith('self::'):
                         mod_raw = mod_raw[6:]
                         base_dirs.append(src_dir)
@@ -317,11 +317,11 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                             mod_raw = mod_raw[7:]
                         base = src_dir
                         for _ in range(up):
-                            base = str(Path(base).parent)
+                            base = str(Path(base).parent).replace('\\', '/')
                         base_dirs.append(base)
                     else:
                         base_dirs.append(src_dir)
-                        base_dirs.append(os.path.join(crate_root, 'src'))
+                        base_dirs.append(os.path.join(crate_root, 'src').replace('\\', '/'))
 
                     path_part = mod_raw.replace('::', '/').rstrip('/')
                     segments = path_part.split('/')
@@ -331,11 +331,11 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                         for i in range(len(segments), 0, -1):
                             partial = '/'.join(segments[:i])
                             candidates = [
-                                os.path.join(base, partial + '.rs'),
-                                os.path.join(base, partial, 'mod.rs'),
+                                os.path.join(base, partial + '.rs').replace('\\', '/'),
+                                os.path.join(base, partial, 'mod.rs').replace('\\', '/'),
                             ]
                             for cand in candidates:
-                                cand_norm = os.path.normpath(cand)
+                                cand_norm = cand
                                 target_id = file_index.get(cand_norm)
                                 if target_id:
                                     break
@@ -352,12 +352,12 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                                 break
                             # 父模块文件: 在 base / .. 的同名 .rs 或 base / mod.rs
                             parent_candidates = [
-                                os.path.normpath(str(Path(base)) + '.rs'),
-                                os.path.normpath(os.path.join(base, 'mod.rs')),
+                                (str(Path(base)) + '.rs').replace('\\', '/'),
+                                os.path.join(base, 'mod.rs').replace('\\', '/'),
                             ]
                             # 另外: 如果当前在 src/ 下，父模块可能是 lib.rs / main.rs
-                            src_dir_abs = os.path.join(crate_root, 'src')
-                            if os.path.normpath(base) == os.path.normpath(src_dir_abs):
+                            src_dir_abs = os.path.join(crate_root, 'src').replace('\\', '/')
+                            if base == src_dir_abs:
                                 parent_candidates.extend([
                                     os.path.join(src_dir_abs, 'lib.rs'),
                                     os.path.join(src_dir_abs, 'main.rs'),
@@ -389,12 +389,9 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
                 pkg_name = inner.split("/")[-1]
                 # 候选使用相对路径匹配 file_index (DB 和索引都用相对路径)
                 candidates = [
-                    # 单文件包: pkg/foo.go
                     inner + ".go",
-                    # 目录包: pkg/foo/foo.go
-                    os.path.join(inner, pkg_name + ".go"),
-                    # 测试文件: pkg/foo/foo_test.go
-                    os.path.join(inner, pkg_name + "_test.go"),
+                    os.path.join(inner, pkg_name + ".go").replace('\\', '/'),
+                    os.path.join(inner, pkg_name + "_test.go").replace('\\', '/'),
                 ]
                 for cand in candidates:
                     target_id = file_index.get(cand)
@@ -423,7 +420,7 @@ def _extract_import_dependencies(analysis_store, task_id: str, all_tables, proj_
             while len(inner_parts) > 1:
                 inner_parts.pop()
                 inner_path = "/".join(inner_parts)
-                candidate = os.path.join(proj_path, inner_path + ".java")
+                candidate = os.path.join(proj_path, inner_path + ".java").replace('\\', '/')
                 target_id = file_index.get(candidate)
                 if not target_id:
                     target_id = suffix_index.get(inner_path)

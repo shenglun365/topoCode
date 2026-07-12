@@ -35,7 +35,7 @@ def _make_rel(project_root: str):
             p = p[5:]
         if project_root and p.startswith(project_root):
             p = p[len(project_root):]
-        return p.lstrip('/')
+        return p.lstrip('/').replace('\\', '/')
     return _rel
 
 
@@ -295,6 +295,7 @@ def extract_file_nodes(raw_rows, et: str, _rel, name_map: dict):
                     nid = str(node_id)
                 if _bad_id(nid):
                     continue
+                nid = nid.replace('\\', '/')
                 clean = nid.split(':')[0] if ':' in nid else nid
                 if clean and clean not in nodes:
                     label = clean.split("/")[-1] if "/" in clean else clean
@@ -302,10 +303,10 @@ def extract_file_nodes(raw_rows, et: str, _rel, name_map: dict):
         else:
             for node_id in raw:
                 if isinstance(node_id, dict):
-                    nid = str(node_id.get("id", ""))
+                    nid = str(node_id.get("id", "")).replace('\\', '/')
                     label = node_id.get("name", "") or nid.split("/")[-1] if "/" in nid else nid
                 else:
-                    nid = str(node_id)
+                    nid = str(node_id).replace('\\', '/')
                     label = nid.split("/")[-1] if "/" in nid else nid
                 if _bad_id(nid):
                     continue
@@ -322,6 +323,7 @@ def extract_file_edges(raw_rows, et: str, _rel, existing_nodes: dict):
 
     def _add_node(fid, cid, clv):
         if fid not in nodes:
+            fid = fid.replace('\\', '/')
             label = fid.split("/")[-1] if "/" in fid else fid
             nodes[fid] = {"id": fid, "label": label, "commId": cid, "commLv": clv}
 
@@ -567,8 +569,8 @@ def extract_external_calls(db, task_id: str):
     )
     call_map = {}
     for row in rows:
-        sid = row["source_id"] or ""
-        fp = row["file_path"] or sid
+        sid = (row["source_id"] or "").replace('\\', '/')
+        fp = (row["file_path"] or sid).replace('\\', '/')
         meta_str = row["metadata"] or "{}"
         try:
             meta = json.loads(meta_str)

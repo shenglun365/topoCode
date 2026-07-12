@@ -242,7 +242,7 @@ class AnalysisContext:
         return ContextLayer(
             level="file",
             layer_id=file_path,
-            name=file_path.split("/")[-1] if "/" in file_path else file_path,
+            name=file_path.replace('\\', '/').split("/")[-1] if "/" in file_path.replace('\\', '/') else file_path,
             what=what,
             how=how,
             why=why,

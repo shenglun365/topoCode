@@ -1846,7 +1846,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 p = p[5:]
             if project_root and p.startswith(project_root):
                 p = p[len(project_root):]
-            return p.lstrip('/')
+            return p.lstrip('/').replace('\\', '/')
 
         # 4. Resolve edge source/target to community keys
         def resolve_key(raw_id, edge_kind, sym_map, file_comm):
@@ -2197,7 +2197,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             pass
         nodes = []
         for fp in sorted(file_nodes):
-            fname = fp.rstrip("/").split("/")[-1] if "/" in fp else fp
+            fname = fp.replace('\\', '/').rstrip("/").split("/")[-1] if "/" in fp.replace('\\', '/') else fp
             nodes.append({"id": fp, "label": fname, "filePath": fp})
         return {"nodes": nodes, "edges": file_edges}
 

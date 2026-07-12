@@ -13,7 +13,7 @@ class DirectoryTreeIngredient(ContextIngredient):
             return []
         dir_tree = Counter()
         for fp in ctx.file_paths:
-            d = ctx.resolve_path(os.path.dirname(fp))
+            d = ctx.resolve_path(os.path.dirname(fp)).replace('\\', '/')
             if d and d != '.':
                 parts = d.split('/')
                 for i in range(1, len(parts) + 1):
