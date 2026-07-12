@@ -348,7 +348,7 @@ MAIN_DB_TABLES_SQL = """
         status TEXT DEFAULT 'offline' CHECK(status IN ('offline', 'online', 'error')),
         is_default INTEGER DEFAULT 0,
         temperature REAL DEFAULT 0.7,
-        max_tokens INTEGER DEFAULT 4096,
+        max_tokens INTEGER DEFAULT 16384,
         frequency_penalty REAL DEFAULT 0.0,
         presence_penalty REAL DEFAULT 0.0,
         timeout INTEGER DEFAULT 30000,

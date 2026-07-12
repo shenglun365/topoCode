@@ -25,6 +25,7 @@ class OllamaProvider(BaseLLMProvider):
         chunk_queue,
         tools=None,
         mode='chat',
+        max_tokens=None,
     ):
         base_url = model_config['url'].rstrip('/')
         if base_url.endswith('/v1'):
@@ -37,8 +38,9 @@ class OllamaProvider(BaseLLMProvider):
         }
         if model_config.get('temperature') is not None:
             payload['options']['temperature'] = model_config['temperature']
-        if model_config.get('max_tokens') is not None:
-            payload['options']['num_predict'] = model_config['max_tokens']
+        mt = max_tokens if max_tokens is not None else model_config.get('max_tokens')
+        if mt is not None:
+            payload['options']['num_predict'] = mt
         if mode == 'tools' and tools:
             payload['tools'] = tools
 
@@ -102,6 +104,7 @@ class OllamaProvider(BaseLLMProvider):
         mode,
         tools=None,
         output_schema=None,
+        max_tokens=None,
     ):
         payload = {
             'model': model_config['model'],
@@ -111,6 +114,9 @@ class OllamaProvider(BaseLLMProvider):
         }
         if model_config.get('temperature') is not None:
             payload['options']['temperature'] = model_config['temperature']
+        mt = max_tokens if max_tokens is not None else model_config.get('max_tokens')
+        if mt is not None:
+            payload['options']['num_predict'] = mt
         if mode == 'tools' and tools:
             payload['tools'] = tools
         resp = requests.post(

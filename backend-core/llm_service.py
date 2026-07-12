@@ -235,6 +235,7 @@ class LLMService:
         output_schema: Optional[Dict[str, Any]] = None,
         template_id: Optional[str] = None,
         extra_meta: Optional[Dict[str, Any]] = None,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """发起流式 LLM 请求，立即返回 requestId，chunks 通过 ZMQ PUB 推送"""
         from zmq_server import current_call_id
@@ -254,7 +255,7 @@ class LLMService:
 
         # 后台启动流式任务
         task = asyncio.create_task(
-            self._execute_streaming(request_id, session_id, messages, model, mode, tools, output_schema, template_id, extra_meta)
+            self._execute_streaming(request_id, session_id, messages, model, mode, tools, output_schema, template_id, extra_meta, max_tokens)
         )
         # 存储以便 abort
         if not hasattr(self, '_active_streams'):
@@ -289,6 +290,7 @@ class LLMService:
         output_schema: Optional[Dict[str, Any]],
         template_id: Optional[str] = None,
         extra_meta: Optional[Dict[str, Any]] = None,
+        max_tokens: Optional[int] = None,
     ):
         """后台协程: 执行流式 LLM 调用 + Tools Calling loop"""
         _start_time = time.monotonic()
@@ -333,7 +335,7 @@ class LLMService:
                     if provider_impl is None:
                         raise ValueError(f"Unknown LLM provider '{provider}'. Available: {list_providers()}")
                     thread_token_data = provider_impl.chat_stream(
-                        model, messages, chunk_queue, tools, mode
+                        model, messages, chunk_queue, tools, mode, max_tokens=max_tokens
                     )
 
                 thread = threading.Thread(target=_http_stream, daemon=True)
@@ -639,13 +641,14 @@ class LLMService:
         self,
         messages: List[Dict[str, str]],
         model_id: str,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """同步非流式调用 LLM，直接返回文本内容"""
         model = _get_model_by_id(self.multi_db, model_id)
         if not model:
             raise ValueError(f"Model not found: {model_id}")
         self._check_usage_limits(model_id)
-        result = await self._sync_call_for_retry(model, messages, 'chat', None, None)
+        result = await self._sync_call_for_retry(model, messages, 'chat', None, None, max_tokens=max_tokens)
         content = result.get('content', '')
         # 记录用量统计（使用 API 返回的实际 token 数据）
         try:
@@ -671,6 +674,7 @@ class LLMService:
         mode: str,
         tools: Optional[List[str]],
         output_schema: Optional[Dict[str, Any]],
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """结构化输出重试: 同步调用 LLM (非流式)
         Returns: {'content': str, 'usage': dict}
@@ -683,7 +687,7 @@ class LLMService:
             raise ValueError(f"Unknown LLM provider '{provider}'. Available: {list_providers()}")
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, provider_impl.chat_sync, model, messages, mode, tools, output_schema
+            None, lambda: provider_impl.chat_sync(model, messages, mode, tools, output_schema, max_tokens=max_tokens)
         )
 
     # 分析报告重跑/重新生成等操作不写入会话记录
@@ -1005,6 +1009,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         output_schema: Optional[Dict[str, Any]] = None,
         outputSchema: Optional[Dict[str, Any]] = None,
         locale: str = "",
+        max_tokens: Optional[int] = None,
     ):
         """统一流式对话入口"""
         from zmq_server import current_call_id
@@ -1059,7 +1064,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         return await service.streaming_chat(
             session_id, messages, model_id, mode, tools, output_schema,
-            template_id=template_id, extra_meta=extra_meta,
+            template_id=template_id, extra_meta=extra_meta, max_tokens=max_tokens,
         )
 
     @server.register('llm.abortChat')

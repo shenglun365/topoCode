@@ -15,11 +15,12 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     def chat_stream(
         self,
-        model_config: Dict[str, Any],
-        messages: List[Dict[str, str]],
+        model_config,
+        messages,
         chunk_queue,
         tools: Optional[List[str]] = None,
         mode: str = 'chat',
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """在独立线程中运行: 流式调用 LLM，逐 chunk 放入队列
         Returns: token info dict {prompt_tokens, completion_tokens, total_tokens}
@@ -33,5 +34,6 @@ class BaseLLMProvider(ABC):
         mode: str,
         tools: Optional[List[str]],
         output_schema: Optional[Dict[str, Any]],
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """非流式调用 LLM，返回 {'content': str, 'usage': dict}"""

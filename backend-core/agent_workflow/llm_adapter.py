@@ -40,6 +40,7 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
             content = await service.sync_chat(
                 messages=messages,
                 model_id=model,
+                max_tokens=max_tokens,
             )
 
             latency_ms = int((time.time() - start_ts) * 1000)

@@ -134,6 +134,7 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
                 mode="tools" if tool_payload else "chat",
                 tools=tool_payload,
                 output_schema=None,
+                max_tokens=max_tokens,
             )
         except Exception as e:
             logger.warning(f"[NativeStrategy] chat failed: {e}, falling back to text")
