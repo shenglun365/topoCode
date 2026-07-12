@@ -204,9 +204,9 @@ class SubAgent:
                             summary = f"summary failed: {e}"
                             async with lock:
                                 failed += 1
-                else:
-                    # ≤ 10KB → 直接读取文件
-                    logger.info(f"[FileCache] MISS: {rel} → reading + LLM summary")
+            else:
+                # ≤ 10KB → 直接读取文件
+                logger.info(f"[FileCache] MISS: {rel} → reading + LLM summary")
                 content = await asyncio.to_thread(self._read_file, abs_fp)
                 if content is None:
                     logger.warning(f"[FileCache] READ-ERR: {rel} (file not found)")
