@@ -322,25 +322,19 @@ const actionLabel = (action: string) => {
         {{ t('common.loadMore') }}
       </button>
     </div>
-    <div
-      v-if="cancelFeedback"
-      class="atl-toast"
-    >
-      {{ cancelFeedback }}
-    </div>
   </div>
 </template>
 
 <style scoped>
-.atl-container { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
-.atl-header { display: flex; align-items: center; gap: 0.4rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
+.atl-container { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; contain: content; }
+.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; contain: layout style; will-change: transform; }
+.atl-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
 .atl-project { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); }
 .atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: 3px; }
 .atl-clear-btn { margin-left: auto; font-size: 0.6rem; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: 3px; padding: 0.05rem 0.4rem; cursor: pointer; }
 .atl-clear-btn:hover { color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
 .atl-empty { font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 1rem; font-style: italic; }
 .atl-loading { font-size: 0.7rem; text-align: center; padding: 1rem; }
-.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; }
 .atl-task-success { border-color: var(--success, #22c55e); background: color-mix(in srgb, var(--success, #22c55e) 5%, transparent); }
 .atl-task-fail { border-color: var(--danger, #ef4444); background: color-mix(in srgb, var(--danger, #ef4444) 5%, transparent); }
 .atl-task-skipped { border-color: var(--warning, #f59e0b); background: color-mix(in srgb, var(--warning, #f59e0b) 5%, transparent); }

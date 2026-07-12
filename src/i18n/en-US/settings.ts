@@ -149,6 +149,7 @@ export default { settings: {
   },
   aboutTopoCode: 'About TopoCode',
   aboutTagline: 'Source code architecture analysis and learning tool',
+  aboutSubtitle: 'AI · Architecture · Knowledge · Private',
   pythonEnv: 'Python Environment',
   license: 'License',
   licenseText: 'This software is released under the Apache-2.0 License, free to use, modify and distribute',

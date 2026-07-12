@@ -2,6 +2,10 @@
 
 > **English** · [English](README.en.md)
 
+<p align="center">
+  <img src="assets/star-logo-zh.svg" alt="TopoCode" width="660">
+</p>
+
 > 源码架构分析与理解工具 —— 提升人的架构认知水平。
 
 TopoCode 是一个面向开发者的**代码架构分析与学习工具**。它通过静态代码解析、依赖图计算、社区发现算法和 AI 辅助分析，帮助开发者快速理解陌生项目的架构设计、模块划分和代码组织方式。

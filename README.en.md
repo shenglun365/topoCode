@@ -2,6 +2,10 @@
 
 > **中文** · [中文](README.md)
 
+<p align="center">
+  <img src="assets/star-logo-en.svg" alt="TopoCode" width="660">
+</p>
+
 > Source Code Architecture Analysis & Learning Tool — Elevate your architectural cognition.
 
 TopoCode is a **code architecture analysis and learning tool** for developers. Through static code parsing, dependency graph computation, community detection algorithms, and AI-assisted analysis, it helps developers quickly understand the architecture design, module decomposition, and code organization of unfamiliar projects.

@@ -154,6 +154,7 @@ export default { settings: {
   },
   aboutTopoCode: '关于 TopoCode',
   aboutTagline: '源码架构分析与学习工具',
+  aboutSubtitle: 'AI · 架构 · 知识 · 私有化',
   pythonEnv: 'Python 环境',
   license: '许可证',
   licenseText: '本软件基于 Apache-2.0 许可证发布，可自由使用、修改和分发',

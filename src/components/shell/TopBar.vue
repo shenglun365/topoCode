@@ -20,6 +20,7 @@ import { useProjectStore } from '@/stores/project'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useStatusStore } from '@/stores/status'
 import { useNavigationStore } from '@/stores/navigation'
+import StarLogo from './StarLogo.vue'
 
 import { useComponentId } from '@/composables/useComponentId'
 
@@ -113,7 +114,7 @@ const showVersionDialog = ref(false)
 const showExitConfirm = ref(false)
 const showDuplicateDialog = ref(false)
 type MenuItem = { label?: string; shortcut?: string; action?: string; divider?: boolean }
-const menus: Record<string, MenuItem[]> = {
+const menus = computed<Record<string, MenuItem[]>>(() => ({
   file: [
     { label: t('shell.topBar.importProject'), shortcut: 'Ctrl+O', action: 'import' },
     { divider: true } as any,
@@ -134,7 +135,7 @@ const menus: Record<string, MenuItem[]> = {
     { divider: true } as any,
     { label: t('shell.topBar.about'), shortcut: '', action: 'about' },
   ],
-}
+}))
 
 async function handleMenuItemClick(item: any) {
   closeMenu()
@@ -386,17 +387,16 @@ onMounted(() => {
             </button>
           </div>
           <div class="modal-body about-body">
-            <div class="about-icon">◆</div>
-            <div class="about-name">TopoCode</div>
-            <div class="about-version">v{{ showAboutVersion }}</div>
-            <div class="about-desc">{{ t('settings.aboutTagline') }}</div>
-            <div class="about-section">
-              <span class="about-label">{{ t('common.author') }}</span>
-              <span>TopoCode Team</span>
-            </div>
-            <div class="about-section">
-              <span class="about-label">{{ t('shell.topBar.contact') }}</span>
-              <a href="mailto:topocode@163.com">topocode@163.com</a>
+            <StarLogo :version="showAboutVersion" />
+            <div class="about-info">
+              <div class="about-section">
+                <span class="about-label">{{ t('common.author') }}</span>
+                <span>TopoCode Team</span>
+              </div>
+              <div class="about-section">
+                <span class="about-label">{{ t('shell.topBar.contact') }}</span>
+                <a href="mailto:topocode@163.com">topocode@163.com</a>
+              </div>
             </div>
             <button
               class="btn btn-ghost btn-sm"
@@ -700,10 +700,6 @@ onMounted(() => {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
-.about-modal {
-  width: 380px;
-}
-
 .modal-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
@@ -723,42 +719,31 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+.about-modal {
+  width: 420px;
+}
+
 .about-body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   text-align: center;
+  padding: 16px 20px 20px;
 }
 
-.about-icon {
-  font-size: 36px;
-  color: var(--accent);
-}
-
-.about-name {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.about-version {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.about-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
-  max-width: 280px;
-  line-height: 1.5;
+.about-info {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  margin-top: 4px;
 }
 
 .about-section {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 

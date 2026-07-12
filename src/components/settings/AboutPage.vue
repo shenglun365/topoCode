@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { ref } from 'vue'
 import { useComponentId } from '@/composables/useComponentId'
+import StarLogo from '@/components/shell/StarLogo.vue'
 
 const { showId, componentId } = useComponentId('ST-008')
 const { t } = useI18n()
@@ -14,25 +15,15 @@ const appVersion = '0.1.0'
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
-    <h2 style="font-size:16px; font-weight:600; margin-bottom:16px;">
-      {{ t('settings.aboutTopoCode') }}
-    </h2>
+
+    <div class="about-logo">
+      <StarLogo :version="appVersion" />
+    </div>
 
     <div
       class="card"
       style="padding:16px; margin-bottom:12px;"
     >
-      <div style="font-size:16px; font-weight:700; margin-bottom:2px;">
-        TopoCode
-      </div>
-      <div
-        class="text-muted"
-        style="font-size:12px; margin-bottom:8px;"
-      >
-        {{ t('settings.aboutTagline') }}
-      </div>
-      <span class="badge badge-blue">v{{ appVersion }}</span>
-      <div style="margin-top:10px; font-size:12px; color:var(--text-muted);">
         <div>topocode@163.com</div>
         <div>
           <a
@@ -41,7 +32,13 @@ const appVersion = '0.1.0'
             style="color:var(--accent);"
           >github.com/shenglun365/topoCode</a>
         </div>
-      </div>
+        <div>
+          <a
+            href="https://gitee.com/shenglun365/topoCode"
+            target="_blank"
+            style="color:var(--accent);"
+          >gitee.com/shenglun365/topoCode</a>
+        </div>
     </div>
 
     <div
@@ -115,5 +112,8 @@ const appVersion = '0.1.0'
 <style scoped>
 .about-page {
   max-width: 600px;
+}
+.about-logo {
+  margin-bottom: 16px;
 }
 </style>
