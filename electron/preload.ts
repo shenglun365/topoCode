@@ -188,10 +188,7 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentProgress', params }),
     cancelAgentTask: (params: { agentTaskId: string }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.cancelAgentTask', params }),
-    pauseAgentTask: (params: { agentTaskId: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.pauseAgentTask', params }),
-    resumeAgentTask: (params: { agentTaskId: string }) =>
-      ipcRenderer.invoke('ipc:call', { method: 'analysis.resumeAgentTask', params }),
+
     getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) =>
       ipcRenderer.invoke('ipc:call', { method: 'analysis.getAgentTaskHistory', params }),
     clearAgentTaskHistory: (params: { taskId: string }) =>

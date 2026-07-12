@@ -154,7 +154,7 @@ function close() {
           <div class="spinner" /><span>{{ t('common.loading') }}...</span>
         </div>
 
-        <template v-else-if="!exporting && !done">
+        <template v-if="!exporting && !done && !loading">
           <div class="dialog-hint">
             {{ t('project.exportSelectHint', '选择要导出的分析任务') }}
           </div>
@@ -210,7 +210,7 @@ function close() {
         </template>
 
         <div
-          v-else
+          v-if="!loading && (exporting || done)"
           class="progress-section"
         >
           <div class="progress-bar-track">
@@ -220,9 +220,9 @@ function close() {
             />
           </div>
           <div class="progress-info">
-            <span v-if="!done">{{ message || t('common.processing', '处理中...') }}</span>
+            <span v-show="!done">{{ message || t('common.processing', '处理中...') }}</span>
             <span
-              v-else
+              v-show="done"
               class="done-text"
             >{{ t('project.exportDone', '导出完成') }}</span>
           </div>

@@ -64,7 +64,7 @@ async function testModelStatus() {
     </div>
 
     <div
-      v-if="status.astStatus"
+      v-show="status.astStatus"
       class="status-item"
     >
       <span>{{ status.astStatus }}</span>

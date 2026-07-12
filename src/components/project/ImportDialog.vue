@@ -101,7 +101,7 @@ function close() {
         <div class="dialog-header">
           <span class="dialog-title">{{ t('project.importStructure', '导入结构分析') }}</span>
           <button
-            v-if="!uploading && !done"
+            v-show="!uploading && !done"
             class="dialog-close"
             @click="close"
           >
@@ -110,7 +110,7 @@ function close() {
         </div>
 
         <div
-          v-if="!uploading && !done"
+          v-show="!uploading && !done"
           class="upload-area"
         >
           <div class="upload-icon">
@@ -154,7 +154,7 @@ function close() {
         </div>
 
         <div
-          v-else
+          v-if="uploading || done"
           class="progress-section"
         >
           <div class="progress-bar-track">
@@ -164,9 +164,9 @@ function close() {
             />
           </div>
           <div class="progress-info">
-            <span v-if="!done">{{ message || t('common.processing', '处理中...') }}</span>
+            <span v-show="!done">{{ message || t('common.processing', '处理中...') }}</span>
             <span
-              v-else
+              v-show="done"
               class="done-text"
             >
               {{ t('project.importDone', '导入完成') }}: {{ newProjectName }}

@@ -2364,28 +2364,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         ok = mgr.cancel(aid)
         return {"cancelled": ok}
 
-    @server.register("analysis.pauseAgentTask")
-    def pause_agent_task(agent_task_id=None, agentTaskId=None):
-        aid = agent_task_id or agentTaskId
-        if not aid:
-            raise ValueError("agent_task_id is required")
-        mgr = _agent_mgr()
-        if _agent_proxy is not None:
-            return mgr.pause(aid)
-        ok = mgr.pause(aid)
-        return {"paused": ok}
-
-    @server.register("analysis.resumeAgentTask")
-    def resume_agent_task(agent_task_id=None, agentTaskId=None):
-        aid = agent_task_id or agentTaskId
-        if not aid:
-            raise ValueError("agent_task_id is required")
-        mgr = _agent_mgr()
-        if _agent_proxy is not None:
-            return mgr.resume(aid)
-        ok = mgr.resume(aid)
-        return {"resumed": ok}
-
     @server.register("analysis.startPipeline")
     def start_pipeline(task_id=None, taskId=None, force=False, language=None,
                        concurrency=None, subagent_concurrency=None,
@@ -2730,6 +2708,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         try:
             from agent_workflow.sub_agent import SubAgent
             SubAgent.reset_failed(tid)
+            multi_db.cache_store.reset_ps_failed(tid)
         except Exception:
             pass
 

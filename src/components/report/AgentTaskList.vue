@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCommunityStore } from '@/stores/community-store'
 import { useProjectStore } from '@/stores/project'
-import { PauseIcon, PlayIcon, StopIcon, ClockIcon } from '@heroicons/vue/24/outline'
+import { StopIcon, ClockIcon } from '@heroicons/vue/24/outline'
 
 const { t } = useI18n()
 const communityStore = useCommunityStore()
@@ -13,26 +13,8 @@ const taskId = computed(() => projectStore.activeTab?.taskId || '')
 const projectName = computed(() => projectStore.selectedProject?.name || '')
 const taskName = computed(() => projectStore.activeTab?.title || taskId.value || '')
 
-const cancellingTaskId = ref<string | null>(null)
-const cancelFeedback = ref('')
-
 function onCancelTask(taskIdVal: string, agentId: string) {
-  if (cancellingTaskId.value === agentId) return
-  cancellingTaskId.value = agentId
-  cancelFeedback.value = '正在停止，等待当前 LLM 请求结束后完全终止'
   communityStore.cancelAgentTask(taskIdVal, agentId)
-    .catch(() => { cancelFeedback.value = '停止失败，请重试' })
-    .finally(() => { setTimeout(() => { cancellingTaskId.value = null }, 1000) })
-  setTimeout(() => { cancelFeedback.value = '' }, 5000)
-}
-
-function onPauseTask(taskIdVal: string, agentId: string) {
-  communityStore.pauseAgentTask(taskIdVal, agentId)
-    .catch(() => {})
-}
-
-function onResumeTask(taskIdVal: string, agentId: string) {
-  communityStore.resumeAgentTask(taskIdVal, agentId)
     .catch(() => {})
 }
 
@@ -208,7 +190,7 @@ function sumFileCount(steps: any[], statuses: string[]): number {
 
 const statusLabel = (status: string) => {
   const map: Record<string, string> = {
-    queued: t('report.agent.status.queued'), running: t('report.agent.status.running'), paused: t('report.agent.status.paused'), completed: t('report.agent.status.completed'),
+    queued: t('report.agent.status.queued'), running: t('report.agent.status.running'), stopping: t('report.agent.status.stopping', '停止中'), completed: t('report.agent.status.completed'),
     partial: t('report.agent.status.partial'), failed: t('report.agent.status.failed'), cancelled: t('report.agent.status.cancelled'),
     skipped: t('report.agent.status.skipped'), unknown: t('report.agent.status.unknown'),
   }
@@ -273,7 +255,7 @@ const actionLabel = (action: string) => {
         'atl-task-success': task.status === 'completed',
         'atl-task-fail': task.status === 'failed' || task.status === 'partial',
         'atl-task-skipped': task.status === 'skipped',
-        'atl-task-paused': task.status === 'paused',
+        'atl-task-paused': task.status === 'stopping',
       }"
     >
       <div class="atl-task-header">
@@ -281,45 +263,28 @@ const actionLabel = (action: string) => {
         <span class="atl-action">{{ actionLabel(task.action) }}</span>
         <span class="atl-status-text">{{ task.status }}</span>
         <span
-          v-if="task.progress !== undefined"
+          v-show="task.progress !== undefined"
           class="atl-progress"
         >{{ task.progress }}%</span>
         <button
-          v-if="task.status === 'running' || task.status === 'queued'"
-          class="atl-pause-btn"
-          :title="t('report.agent.pauseTask')"
-          @click="onPauseTask(taskId, task.id)"
-        >
-          <PauseIcon class="w-3 h-3" />
-        </button>
-        <button
-          v-if="task.status === 'paused'"
-          class="atl-resume-btn"
-          :title="t('report.agent.resumeTask')"
-          @click="onResumeTask(taskId, task.id)"
-        >
-          <PlayIcon class="w-3 h-3" />
-        </button>
-        <button
-          v-if="task.status === 'running' || task.status === 'queued'"
+          v-show="task.status === 'running' || task.status === 'queued'"
           class="atl-stop-btn"
-          :class="{ 'atl-stopping': cancellingTaskId === task.id }"
-          :title="cancellingTaskId === task.id ? t('report.agent.stopping') : t('report.agent.stopTask')"
-          :disabled="cancellingTaskId === task.id"
+          :title="t('report.agent.stopTask')"
           @click="onCancelTask(taskId, task.id)"
         >
-          <ClockIcon
-            v-if="cancellingTaskId === task.id"
-            class="w-3 h-3"
-          />
-          <StopIcon
-            v-else
-            class="w-3 h-3"
-          />
+          <StopIcon class="w-3 h-3" />
+        </button>
+        <button
+          v-show="task.status === 'stopping'"
+          class="atl-stop-btn atl-stopping"
+          :title="t('report.agent.stopping', '停止中')"
+          disabled
+        >
+          <ClockIcon class="w-3 h-3" />
         </button>
       </div>
       <div
-        v-if="task.status === 'running'"
+        v-show="task.status === 'running'"
         class="atl-progress-bar"
       >
         <div
@@ -328,7 +293,7 @@ const actionLabel = (action: string) => {
         />
       </div>
       <div
-        v-if="task.steps && task.steps.length > 0"
+        v-show="task.steps && task.steps.length > 0"
         class="atl-steps"
       >
         <div class="atl-step-compact">
@@ -338,7 +303,7 @@ const actionLabel = (action: string) => {
           <span class="atl-compact-detail">{{ t('report.agent.stepSummary', { done: sumFileCount(task.steps, ['done']), failed: sumFileCount(task.steps, ['failed']), remaining: sumFileCount(task.steps, ['pending','running']) }) }}</span>
         </div>
         <div
-          v-if="task.steps.find(s => s.status === 'running')"
+          v-show="task.steps.find(s => s.status === 'running')"
           class="atl-step-current"
         >
           <span>{{ t('report.agent.current') }}</span>

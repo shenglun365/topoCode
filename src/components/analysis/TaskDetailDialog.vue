@@ -275,7 +275,7 @@ function formatRunStatusColor(status: string): string {
                 </span>
               </div>
               <div
-                v-if="task.progress != null"
+                v-show="task.progress != null"
                 class="info-row"
               >
                 <span class="info-label">{{ t('analysis.progress') }}</span>
@@ -472,7 +472,7 @@ function formatRunStatusColor(status: string): string {
               </select>
             </div>
             <div
-              v-if="loadingLogs"
+              v-show="loadingLogs"
               class="logs-loading"
             >
               <div class="loading-spinner" />

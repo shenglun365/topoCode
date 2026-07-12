@@ -509,8 +509,7 @@ export interface IPCAPI {
     startOverview: (params: { taskId: string; force?: boolean }) => Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; skipped?: boolean; error?: string }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; file_current?: number; file_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string; file_count?: number }>; error?: string }>
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
-    pauseAgentTask: (params: { agentTaskId: string }) => Promise<{ paused: boolean }>
-    resumeAgentTask: (params: { agentTaskId: string }) => Promise<{ resumed: boolean }>
+
     getAgentTaskHistory: (params: { taskId: string; offset?: number; limit?: number }) => Promise<{ results: Array<{ project_id: string; task_id: string; agent_id: string; action: string; status: string; steps: string | null; message: string; error: string | null; created_at: string | null; finished_at: string | null }>; total: number }>
     clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
     // 预摘要

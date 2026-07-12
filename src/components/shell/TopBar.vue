@@ -159,15 +159,15 @@ async function handleMenuItemClick(item: any) {
     const pct = await window.api?.window.resetZoom()
     if (pct) statusStore.setZoom(pct)
   } else if (item.action === 'docs') {
-    window.open(DOCS_URL, '_blank')
+    await window.api?.shell.openExternal(DOCS_URL)
   } else if (item.action === 'about') {
     showAbout.value = true
     showAboutVersion.value = APP_VERSION
   }
 }
 
-function openDocs() {
-  window.open(DOCS_URL, '_blank')
+async function openDocs() {
+  await window.api?.shell.openExternal(DOCS_URL)
 }
 
 async function checkVersion() {

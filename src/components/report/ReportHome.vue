@@ -487,15 +487,15 @@ watch(() => props.taskId, () => {
             >
               <span class="card-label">{{ t('report.architectureOverview') }}</span>
               <span
-                v-if="overviewLoading"
+                v-show="overviewLoading"
                 class="card-value card-summary-empty"
               >{{ t('common.loading') }}</span>
               <span
-                v-else-if="overviewDocId"
+                v-show="!overviewLoading && !!overviewDocId"
                 class="card-value"
               >              ><span class="status-text status-green">{{ t('report.generatedViewable') }}</span></span>
               <span
-                v-else
+                v-show="!overviewLoading && !overviewDocId"
                 class="card-value card-summary-empty"
               ><span class="status-text status-orange">{{ t('report.notGenerated') }}</span></span>
             </div>

@@ -250,7 +250,7 @@ watch(llmConfigured, (val) => {
             </div>
 
             <div
-              v-if="msg.isStreaming"
+              v-show="msg.isStreaming"
               class="stream-dot"
             >
               ●
@@ -286,14 +286,14 @@ watch(llmConfigured, (val) => {
           @keydown="handleKeydown"
         />
         <button
-          v-if="streaming"
+          v-show="streaming"
           class="btn-stop"
           @click="stopStreaming"
         >
           <StopIcon class="btn-icon" />
         </button>
         <button
-          v-else
+          v-show="!streaming"
           class="btn-send"
           :disabled="!userInput.trim()"
           @click="handleSend"

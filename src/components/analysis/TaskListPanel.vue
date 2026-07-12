@@ -382,7 +382,7 @@ function getConfigSummary(task: AnalysisTask): string {
               {{ getStatusLabel(task.status) }}
             </span>
             <div
-              v-if="task.status === 'running'"
+              v-show="task.status === 'running'"
               class="task-progress-bar"
             >
               <div
@@ -391,7 +391,7 @@ function getConfigSummary(task: AnalysisTask): string {
               />
             </div>
             <span
-              v-if="task.progress != null"
+              v-show="task.progress != null"
               class="task-progress-text"
             >{{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%</span>
             <span
@@ -427,7 +427,7 @@ function getConfigSummary(task: AnalysisTask): string {
           </button>
 
           <button
-            v-if="!isResourceProject && (task.status === 'running' || task.status === 'stopping')"
+            v-show="!isResourceProject && (task.status === 'running' || task.status === 'stopping')"
             class="btn btn-ghost btn-xs"
             :class="{ 'btn-warning': task.status === 'running' }"
             :title="task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask')"
@@ -435,11 +435,11 @@ function getConfigSummary(task: AnalysisTask): string {
             @click="onStopTask(task.id)"
           >
             <span
-              v-if="task.status === 'stopping'"
+              v-show="task.status === 'stopping'"
               class="loading-spinner"
             />
             <StopIcon
-              v-else
+              v-show="task.status !== 'stopping'"
               class="w-3.5 h-3.5"
             />
             <span>{{ task.status === 'stopping' ? t('analysis.stoppingTask') : t('analysis.stopTask') }}</span>

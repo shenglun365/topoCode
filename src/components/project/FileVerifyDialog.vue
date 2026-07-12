@@ -127,7 +127,7 @@ function statusColor(status: string) {
         </div>
 
         <div
-          v-else-if="verifying"
+          v-show="verifying"
           class="progress-section"
         >
           <div class="progress-bar-track">
@@ -142,7 +142,7 @@ function statusColor(status: string) {
         </div>
 
         <div
-          v-else-if="error"
+          v-show="error"
           class="error-section"
         >
           <div class="error-msg">
@@ -150,7 +150,7 @@ function statusColor(status: string) {
           </div>
         </div>
 
-        <template v-else-if="result">
+        <template v-if="result">
           <div class="result-summary">
             <div
               class="match-ring"

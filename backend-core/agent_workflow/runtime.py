@@ -107,21 +107,16 @@ class AgentRuntime:
         sandbox: AgentSandbox,
         memory: Optional[AgentMemory] = None,
         on_progress: Optional[ProgressCallback] = None,
-        on_state_change: Optional[Callable[[str], None]] = None,
         multi_db: Optional[Any] = None,
     ):
         self._tools = tools
         self._sandbox = sandbox
         self._memory = memory or AgentMemory()
         self._on_progress = on_progress
-        self._on_state_change = on_state_change
         self._multi_db = multi_db
         self._cancelled = False
-        self._paused = False
         self._cancel_event = threading.Event()
-        self._pause_event = threading.Event()
         self._status = AgentStatus.IDLE
-        self._actually_paused = False  # True only when runtime is in the pause loop
         self._task_id = ""
         self._steps: list[StepProgress] = []
         self._tool_call_history: list[tuple] = []
@@ -147,7 +142,7 @@ class AgentRuntime:
         self._content_warning_count = 0
 
     def cancel(self):
-        """取消当前执行。状态在运行时实际退出循环后由 on_state_change 通知。"""
+        """取消当前执行。设置标志后，运行时在下一个安全点退出。"""
         self._cancelled = True
         self._cancel_event.set()
         logger.info("[AgentRuntime] cancelled by user (flag set)")
@@ -156,28 +151,6 @@ class AgentRuntime:
         """将 threading.Event 同步到 boolean 标志（跨线程安全）。"""
         if self._cancel_event.is_set():
             self._cancelled = True
-
-    def pause(self):
-        """暂停当前执行（在下一步/轮边界生效）。状态在进入暂停循环后由 on_state_change 通知。"""
-        self._paused = True
-        self._pause_event.set()
-        self._actually_paused = False
-        logger.info("[AgentRuntime] paused by user (flag set)")
-
-    def resume(self):
-        """恢复暂停的执行"""
-        self._paused = False
-        self._pause_event.clear()
-        self._actually_paused = False
-        logger.info("[AgentRuntime] resumed by user")
-
-    def _notify_state(self, state: str):
-        """通过 on_state_change 回调通知外部当前状态变化（仅在实际进入/离开暂停时调用）。"""
-        if self._on_state_change:
-            try:
-                self._on_state_change(state)
-            except Exception as e:
-                logger.warning(f"[AgentRuntime] on_state_change callback error: {e}")
 
     async def run(self, workflow: AgentWorkflow, context: dict) -> WorkflowResult:
         """
@@ -234,21 +207,6 @@ class AgentRuntime:
 
         for i, step in enumerate(steps):
             self._sync_cancel()
-            if self._cancelled:
-                break
-            if self._pause_event.is_set() and not self._actually_paused:
-                self._actually_paused = True
-                self._notify_state("paused")
-            while self._pause_event.is_set():
-                await asyncio.sleep(0.2)
-                self._sync_cancel()
-                if self._cancelled:
-                    break
-            if self._actually_paused:
-                self._actually_paused = False
-                self._notify_state("running")
-
-                self._sync_cancel()
             if self._cancelled:
                 break
             if self._sandbox.budget.exhausted():
@@ -404,7 +362,7 @@ class AgentRuntime:
         return final
 
     async def _run_agentic_chat(self, messages, tools_schema, strategy, timeout):
-        """运行 agentic_chat，每 2s 轮询 self._cancelled / self._paused。"""
+        """运行 agentic_chat，每 2s 轮询 self._cancelled。"""
         from .tool_calling import agentic_chat
         chat_task = asyncio.create_task(
             agentic_chat(messages, tools=tools_schema, multi_db=self._multi_db, strategy=strategy)
@@ -416,22 +374,6 @@ class AgentRuntime:
                 if self._cancelled:
                     chat_task.cancel()
                     raise asyncio.CancelledError("cancelled by user")
-                if self._pause_event.is_set():
-                    # LLM 请求在后台继续，但暂停等待
-                    if self._pause_event.is_set() and not self._actually_paused:
-                        self._actually_paused = True
-                        self._notify_state("paused")
-                    while self._pause_event.is_set():
-                        await asyncio.sleep(0.2)
-                        self._sync_cancel()
-                        if self._cancelled:
-                            chat_task.cancel()
-                            raise asyncio.CancelledError("cancelled by user")
-                    if self._actually_paused:
-                        self._actually_paused = False
-                        self._notify_state("running")
-                    # 恢复后重新计算剩余超时
-                    remaining = min(remaining, timeout)
                 done, _ = await asyncio.wait([chat_task], timeout=min(2.0, remaining))
                 if done:
                     return chat_task.result()
@@ -472,20 +414,6 @@ class AgentRuntime:
         total_turns = 0
 
         for c_idx, comp in enumerate(components):
-            self._sync_cancel()
-            if self._cancelled:
-                break
-            if self._pause_event.is_set() and not self._actually_paused:
-                self._actually_paused = True
-                self._notify_state("paused")
-            while self._pause_event.is_set():
-                await asyncio.sleep(0.2)
-                self._sync_cancel()
-                if self._cancelled:
-                    break
-            if self._actually_paused:
-                self._actually_paused = False
-                self._notify_state("running")
             self._sync_cancel()
             if self._cancelled:
                 break
@@ -542,18 +470,6 @@ class AgentRuntime:
                     comp_turns = 0
 
                 for turn in range(effective_max_turns):
-                    self._sync_cancel()
-                    if self._pause_event.is_set() and not self._actually_paused:
-                        self._actually_paused = True
-                        self._notify_state("paused")
-                    while self._pause_event.is_set():
-                        await asyncio.sleep(0.2)
-                        self._sync_cancel()
-                        if self._cancelled:
-                            break
-                    if self._actually_paused:
-                        self._actually_paused = False
-                        self._notify_state("running")
                     self._sync_cancel()
                     if self._cancelled or self._sandbox.budget.exhausted():
                         break

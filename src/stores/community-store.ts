@@ -969,40 +969,32 @@ export const useCommunityStore = defineStore('community', () => {
   async function cancelAgentTask(taskId: string, agentTaskId: string) {
     try {
       const result = await ipc.analysis.cancelAgentTask({ agentTaskId })
-      if (!result.cancelled) {
-        const t = tasks.value[taskId]
-        if (t) {
-          const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
-          if (idx >= 0) updateAgentTask(taskId, idx, { status: 'cancelled', message: '任务已中断' })
-        }
+      const t = tasks.value[taskId]
+      if (!t) return
+      const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
+      if (idx < 0) return
+      if (result.cancelled) {
+        // 后端已接受停止请求 → 标记 stopping，等待 polling 更新为最终状态
+        updateAgentTask(taskId, idx, { status: 'stopping', message: '正在停止，等待当前 LLM 请求结束后完全终止' })
+        // 保底：30 秒后若仍为 stopping，强制标记 cancelled
+        setTimeout(() => {
+          const t2 = tasks.value[taskId]
+          if (t2) {
+            const idx2 = t2.agentTasks.findIndex(at => at.id === agentTaskId)
+            if (idx2 >= 0 && t2.agentTasks[idx2].status === 'stopping') {
+              updateAgentTask(taskId, idx2, { status: 'cancelled', message: '停止超时，已强制终止' })
+            }
+          }
+        }, 30000)
+      } else {
+        // 任务已处于完成状态
+        updateAgentTask(taskId, idx, { status: 'cancelled', message: '任务已中断' })
       }
       // 取消 presummary 管线队友
-      const t = tasks.value[taskId]
-      if (t) {
-        for (const at of t.agentTasks) {
-          if (at.id !== agentTaskId && at.action === 'presummary_files' && (at.status === 'running' || at.status === 'queued')) {
-            try { await ipc.analysis.cancelAgentTask({ agentTaskId: at.id }) } catch {}
-          }
+      for (const at of t.agentTasks) {
+        if (at.id !== agentTaskId && at.action === 'presummary_files' && (at.status === 'running' || at.status === 'queued')) {
+          try { await ipc.analysis.cancelAgentTask({ agentTaskId: at.id }) } catch {}
         }
-      }
-    } catch {}
-  }
-
-  async function pauseAgentTask(taskId: string, agentTaskId: string) {
-    try {
-      await ipc.analysis.pauseAgentTask({ agentTaskId })
-      // 不立即改状态 — 等 backend 真正暂停后，由 agent polling 检测到 PAUSED 再更新 UI
-    } catch {}
-  }
-
-  async function resumeAgentTask(taskId: string, agentTaskId: string) {
-    try {
-      await ipc.analysis.resumeAgentTask({ agentTaskId })
-      const t = tasks.value[taskId]
-      if (t) {
-        const idx = t.agentTasks.findIndex(at => at.id === agentTaskId)
-        if (idx >= 0) updateAgentTask(taskId, idx, { status: 'running' })
-        _pollAgentProgress(taskId, idx, agentTaskId, 0)
       }
     } catch {}
   }
@@ -1129,7 +1121,7 @@ export const useCommunityStore = defineStore('community', () => {
     pushError, clearErrorLogs, clearTask,
     addAgentTask, updateAgentTask, updateAgentStep, triggerComponentAnalysis,
     loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
-    cancelAgentPolling, cancelAgentTask, pauseAgentTask, resumeAgentTask, ensureAgentPolling,
+    cancelAgentPolling, cancelAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary, startPreSummaryPipeline,
     getFileSummary, deleteFileSummary, rerunFileSummary, startPipeline,
   }

@@ -163,11 +163,7 @@ class AgentTaskManager:
                             agent_id=aid, task_id=d.get("task_id", ""),
                             status=TaskState.FAILED, created_at=d.get("created_at", 0),
                         )
-                        if d.get("status") == "paused":
-                            s.status = TaskState.PAUSED
-                            s.error = "进程重启，任务已暂停（无法恢复）"
-                        else:
-                            s.error = "进程重启，任务已丢失"
+                        s.error = "进程重启，任务已丢失"
                         s.finished_at = time.time()
                         self._tasks[aid] = s
             _os.remove(self._persist_path)
@@ -258,44 +254,6 @@ class AgentTaskManager:
 
         return True
 
-    def pause(self, agent_id: str) -> bool:
-        """暂停任务。通知 runtime 暂停，不立即改状态 — 由 runtime 在真正暂停时通过回调更新。"""
-        with self._lock:
-            state = self._tasks.get(agent_id)
-        if not state:
-            return False
-        if state.status not in (TaskState.RUNNING, TaskState.QUEUED):
-            return False
-
-        logger.info(f"[AgentQueue] pause requested for {agent_id}")
-        self._save_persisted()
-
-        if state.runtime:
-            state.runtime.pause()
-        else:
-            # 没有 runtime（queued 状态）→ 立即标记
-            state.status = TaskState.PAUSED
-
-        return True
-
-    def resume(self, agent_id: str) -> bool:
-        """恢复暂停的任务。"""
-        with self._lock:
-            state = self._tasks.get(agent_id)
-        if not state:
-            return False
-        if state.status != TaskState.PAUSED:
-            return False
-
-        state.status = TaskState.RUNNING
-        self._save_persisted()
-        logger.info(f"[AgentQueue] resumed {agent_id}")
-
-        if state.runtime:
-            state.runtime.resume()
-
-        return True
-
     def _run_agent(self, agent_id: str, workflow: AgentWorkflow, context: dict,
                    tools: ToolRegistry, sandbox: AgentSandbox, multi_db=None):
         with self._lock:
@@ -315,22 +273,10 @@ class AgentTaskManager:
                 if s:
                     s.progress = progress
 
-        def state_change_cb(new_state: str):
-            """由 runtime 在真正进入/离开暂停时调用。"""
-            with self._lock:
-                s = self._tasks.get(agent_id)
-                if s:
-                    if new_state == "paused":
-                        s.status = TaskState.PAUSED
-                        logger.info(f"[AgentQueue] {agent_id} actually paused")
-                    elif new_state == "running":
-                        s.status = TaskState.RUNNING
-                        logger.info(f"[AgentQueue] {agent_id} resumed/continuing")
-
         try:
             import asyncio
             runtime = AgentRuntime(tools, sandbox, on_progress=progress_cb,
-                                   on_state_change=state_change_cb, multi_db=multi_db)
+                                   multi_db=multi_db)
             # 暴露 runtime 引用给 cancel()，使其能立即中止
             with self._lock:
                 s = self._tasks.get(agent_id)

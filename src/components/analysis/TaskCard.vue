@@ -122,7 +122,7 @@ function getStatusIcon(status: string) {
 
       <!-- 进度条 (进行中) -->
       <div
-        v-if="task.status === 'running'"
+        v-show="task.status === 'running'"
         class="mt-2"
       >
         <div class="progress-bar">
@@ -134,7 +134,7 @@ function getStatusIcon(status: string) {
         <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
           {{ task.current || 0 }}/{{ task.total || 0 }} {{ t('common.file') }}
           <span
-            v-if="task.progress != null"
+            v-show="task.progress != null"
             style="margin-left:6px;"
           >
             {{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%
@@ -191,7 +191,7 @@ function getStatusIcon(status: string) {
         <!-- 操作按钮 -->
         <div class="flex gap-2">
           <button
-            v-if="task.status === 'pending' || task.status === 'done'"
+            v-show="task.status === 'pending' || task.status === 'done'"
             class="btn btn-primary btn-sm"
             @click.stop="emit('run', task.id)"
           >
@@ -199,7 +199,7 @@ function getStatusIcon(status: string) {
             <span>{{ task.status === 'done' ? t('common.retry') : t('common.start') }}</span>
           </button>
           <button
-            v-if="task.status === 'running'"
+            v-show="task.status === 'running'"
             class="btn btn-secondary btn-sm"
             @click.stop="emit('stop', task.id)"
           >

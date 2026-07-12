@@ -113,16 +113,6 @@ class RouterHarness:
             return self._queue.cancel(agent_id)
         return False
 
-    def pause(self, agent_id: str) -> bool:
-        if self._queue:
-            return self._queue.pause(agent_id)
-        return False
-
-    def resume(self, agent_id: str) -> bool:
-        if self._queue:
-            return self._queue.resume(agent_id)
-        return False
-
     # ─── LLM 推理路由 ───
 
     def classify(self, natural_language: str, llm_chat_fn: callable) -> dict:

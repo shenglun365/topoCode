@@ -248,12 +248,6 @@ class RemoteAgentManager:
     def cancel(self, agent_id: str) -> dict:
         return self._send("cancel", {"agent_id": agent_id}, timeout=10.0)
 
-    def pause(self, agent_id: str) -> dict:
-        return self._send("pause", {"agent_id": agent_id}, timeout=10.0)
-
-    def resume(self, agent_id: str) -> dict:
-        return self._send("resume", {"agent_id": agent_id}, timeout=10.0)
-
     def get_history(self, task_id: str, offset: int = 0, limit: int = 10) -> dict:
         return self._send("get_history", {"task_id": task_id, "offset": offset, "limit": limit}, timeout=10.0)
 

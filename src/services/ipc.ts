@@ -298,12 +298,6 @@ function createRealIPC() {
       cancelAgentTask: async (params: { agentTaskId: string }) => {
         return await api.analysis.cancelAgentTask(params)
       },
-      pauseAgentTask: async (params: { agentTaskId: string }) => {
-        return await api.analysis.pauseAgentTask(params)
-      },
-      resumeAgentTask: async (params: { agentTaskId: string }) => {
-        return await api.analysis.resumeAgentTask(params)
-      },
       getAgentTaskHistory: async (params: { taskId: string; offset?: number; limit?: number }) => {
         return await api.analysis.getAgentTaskHistory(params)
       },
