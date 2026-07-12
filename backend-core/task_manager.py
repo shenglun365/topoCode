@@ -42,8 +42,8 @@ def _resolve_node_list_items(items: list, task_id: str, project_db) -> dict[str,
     for item in items:
         if not item or not isinstance(item, str):
             continue
-        if _os.path.isabs(item) or '/' in item:
-            result[item] = [item]
+        if _os.path.isabs(item) or '/' in item or '\\' in item:
+            result[item] = [item.replace('\\', '/')]
         else:
             unresolved_ids.append(item)
     if unresolved_ids:
@@ -2659,7 +2659,10 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if limit > 0:
             batch_files = batch_files[:limit]
         if not batch_files:
-            return {"success": False, "error": f"no files in batch {batch}"}
+            logger.info("[startPreSummary] no files in batch %s, skipping", batch)
+            if on_complete:
+                on_complete({"status": "completed", "failed_count": 0})
+            return {"success": True, "skipped": True, "fileCount": 0}
 
         # 查询已缓存文件集（路径格式：项目相对路径，与 _compute_file_ranks 和 SubAgent 一致）
         cached_paths: set[str] = set()
