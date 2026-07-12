@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 def _rel_path(path: str, project_root: Optional[str]) -> str:
-    """Convert absolute path to relative path (reduce LLM context token cost)"""
+    """Convert absolute path to relative path (reduce LLM context token cost). 统一正斜杠。"""
     if project_root and os.path.isabs(path):
         try:
-            return os.path.relpath(path, project_root)
+            return os.path.relpath(path, project_root).replace('\\', '/')
         except ValueError:
             return path
     return path

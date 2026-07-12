@@ -823,7 +823,7 @@ export const useCommunityStore = defineStore('community', () => {
     // 清除同一 agent 的旧 polling（兜底）
     if (controlDispatcher.has(controlKey)) controlDispatcher.unregister(controlKey)
 
-    console.log('[poll] register taskId=%s agent=%s idx=%d key=%s', taskId, agentTaskId, taskIdx, controlKey)
+    // console.log('[poll] register taskId=%s agent=%s idx=%d key=%s', taskId, agentTaskId, taskIdx, controlKey)
 
     let lastDoneCount = 0
     let lastCommunityReload = 0
@@ -873,9 +873,9 @@ export const useCommunityStore = defineStore('community', () => {
             message: msg,
           })
         }
-        if (progress.status && stepTotal > 0) {
-          console.log('[poll] agent=%s status=%s step=%d/%d pct=%d', agentTaskId, progress.status, stepCurrent, stepTotal, pct)
-        }
+        // if (progress.status && stepTotal > 0) {
+        //   console.log('[poll] agent=%s status=%s step=%d/%d pct=%d', agentTaskId, progress.status, stepCurrent, stepTotal, pct)
+        // }
         if (progress.steps) {
           const doneCount = progress.steps.filter(s => s.status === 'done').length
           if (doneCount > lastDoneCount && taskId) {
@@ -959,7 +959,7 @@ export const useCommunityStore = defineStore('community', () => {
       if (at.status === 'running' && at.id) {
         const controlKey = `agent-progress:${taskId}:${at.id}`
         if (!controlDispatcher.has(controlKey)) {
-          console.log('[ensurePolling] starting poll for agent=%s idx=%d', at.id, i)
+          // console.log('[ensurePolling] starting poll for agent=%s idx=%d', at.id, i)
           _pollAgentProgress(taskId, i, at.id, 0)
         }
       }
@@ -1057,14 +1057,14 @@ export const useCommunityStore = defineStore('community', () => {
     try {
       console.log('[pipeline] calling startPreSummaryPipeline taskId=%s batches=%o limit=%d conc=%d', taskId, batches, limit, conc)
       const result = await ipc.analysis.startPreSummaryPipeline({ taskId, batches, limit, subagentConcurrency: conc })
-      console.log('[pipeline] response success=%s agentTaskId=%s fileCount=%s', result.success, result.agentTaskId, result.fileCount)
+      // console.log('[pipeline] response success=%s agentTaskId=%s fileCount=%s', result.success, result.agentTaskId, result.fileCount)
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
         updateAgentTask(taskId, idx, { progress: 0, message: `文件数: ${result.fileCount || 0}` })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
-        console.log('[pipeline] polling started for agent=%s idx=%d', result.agentTaskId, idx)
+        // console.log('[pipeline] polling started for agent=%s idx=%d', result.agentTaskId, idx)
       } else {
-        console.log('[pipeline] no agentTaskId returned, keeping placeholder for history poll')
+        // console.log('[pipeline] no agentTaskId returned, keeping placeholder for history poll')
         updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `全缓存，等待后续批次…` })
       }
       return result
