@@ -88,6 +88,17 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
     for neighbors in graph.values():
         all_nodes.update(neighbors)
 
+    # 分析过滤后节点格式
+    community_ready = all_nodes - hub_nodes - orphan_nodes
+    fp_nodes = [n for n in community_ready if '/' in n or '\\' in n]
+    id_nodes = [n for n in community_ready if '/' not in n and '\\' not in n]
+    bs_nodes = [n for n in community_ready if '\\' in n]
+    logger.info(
+        f"[COMMUNITY] {edge_type}: 过滤后 {len(all_nodes)} 节点, "
+        f"入社区={len(community_ready)}, HUB={len(hub_nodes)}, ORPHAN={len(orphan_nodes)}, "
+        f"社区文件路径={len(fp_nodes)}, ID-fallback={len(id_nodes)}, 含反斜杠={len(bs_nodes)}"
+    )
+
     if len(all_nodes) < min_node_cnt:
         logger.info(
             f"[COMMUNITY] {edge_type}: 过滤后节点数 {len(all_nodes)} < {min_node_cnt}"
@@ -225,14 +236,30 @@ def analyze_communities(task_id: str, analysis_store, edge_type: str,
 def _build_node_lookup(analysis_store, task_id: str) -> dict:
     """从 graph_node 表构建 node_id → (file_path, name) 映射 (v2)"""
     lookup = {}
+    file_path_count = 0
+    empty_path_count = 0
+    path_samples = []
     try:
         nodes = analysis_store.get_graph_nodes(task_id)
         for n in nodes:
             nid = n.get("id", "")
             if nid:
-                lookup[nid] = (n.get("file_path", ""), n.get("name", ""))
+                fp = n.get("file_path", "")
+                lookup[nid] = (fp, n.get("name", ""))
+                if fp:
+                    file_path_count += 1
+                    if len(path_samples) < 5:
+                        path_samples.append((nid[:16], fp))
+                else:
+                    empty_path_count += 1
     except Exception:
         pass
+    logger.info(
+        f"[COMMUNITY] _build_node_lookup: total={len(lookup)}, "
+        f"with_file_path={file_path_count}, empty_path={empty_path_count}"
+    )
+    if path_samples:
+        logger.info(f"[COMMUNITY] node_lookup 样例: {path_samples}")
     return lookup
 
 
@@ -324,12 +351,36 @@ def _build_graph(edges: List[Dict], edge_type: str, *,
     for neighbors in graph.values():
         all_nodes.update(neighbors)
 
-    log_msg = (
+    # 节点路径格式分析：统计是 file_path 还是 fallback ID
+    path_nodes = [n for n in all_nodes if '/' in n or '\\' in n]
+    id_nodes = [n for n in all_nodes if '/' not in n and '\\' not in n]
+    backslash_nodes = [n for n in all_nodes if '\\' in n]
+    logger.info(
         f"[COMMUNITY] _build_graph: edge_type={edge_type}, "
         f"edges_in={len(edges)}, edges_used={len(graph)//2}, skipped={skipped}"
         f", nodes={len(all_nodes)}"
+        f", file_path_nodes={len(path_nodes)}, fallback_id_nodes={len(id_nodes)}"
     )
-    logger.info(log_msg)
+    if backslash_nodes and len(backslash_nodes) < 20:
+        logger.info(f"[COMMUNITY] 含反斜杠节点({len(backslash_nodes)}): {sorted(backslash_nodes)}")
+    elif backslash_nodes:
+        logger.info(f"[COMMUNITY] 含反斜杠节点: {len(backslash_nodes)} 个, 前10: {sorted(backslash_nodes)[:10]}")
+    if id_nodes:
+        logger.info(f"[COMMUNITY] ID-fallback 节点({len(id_nodes)}): {sorted(id_nodes)[:10]}")
+
+    # 节点度分布（分桶统计）
+    degree_bins = {"0": 0, "1-2": 0, "3-5": 0, "6-10": 0, "11-20": 0, "21-50": 0, "51-100": 0, "100+": 0}
+    for node in all_nodes:
+        deg = len(graph.get(node, set()))
+        if deg == 0: degree_bins["0"] += 1
+        elif deg <= 2: degree_bins["1-2"] += 1
+        elif deg <= 5: degree_bins["3-5"] += 1
+        elif deg <= 10: degree_bins["6-10"] += 1
+        elif deg <= 20: degree_bins["11-20"] += 1
+        elif deg <= 50: degree_bins["21-50"] += 1
+        elif deg <= 100: degree_bins["51-100"] += 1
+        else: degree_bins["100+"] += 1
+    logger.info(f"[COMMUNITY] 节点度分布(前HUB): {dict(degree_bins)}")
 
     # 过滤枢纽和孤立节点
     filtered_graph, hub_nodes, orphan_nodes = _filter_hubs_and_orphans(graph, edge_directions)
@@ -372,6 +423,12 @@ def _filter_hubs_and_orphans(graph: Dict[str, Set[str]],
     total_nodes = len(all_nodes)
     hub_threshold = max(HUB_MIN_DEGREE, int(total_nodes * HUB_DEGREE_RATIO))
 
+    # 度分布日志（含 HUB 前）
+    top_degrees = sorted(degrees.items(), key=lambda x: -x[1])[:10]
+    logger.info(
+        f"[COMMUNITY] 度分布 top10: {[(n[:40], d) for n, d in top_degrees]}"
+    )
+
     # 第一阶段：识别枢纽
     hub_nodes = set()
     for node, deg in degrees.items():
@@ -379,10 +436,17 @@ def _filter_hubs_and_orphans(graph: Dict[str, Set[str]],
             hub_nodes.add(node)
 
     if hub_nodes:
+        hub_details = [(n[:40], degrees[n]) for n in sorted(hub_nodes, key=lambda x: -degrees[x])]
         logger.info(
             f"[COMMUNITY] 枢纽节点: {len(hub_nodes)}/{total_nodes}"
-            f" (threshold={hub_threshold})"
-            f" 示例: {list(hub_nodes)[:5]}"
+            f" (threshold={hub_threshold}, total_nodes={total_nodes}, "
+            f"HUB_MIN_DEGREE={HUB_MIN_DEGREE}, HUB_DEGREE_RATIO={HUB_DEGREE_RATIO})"
+            f" 详情: {hub_details}"
+        )
+    else:
+        logger.info(
+            f"[COMMUNITY] 无枢纽节点 (threshold={hub_threshold}, "
+            f"max_deg={max(degrees.values()) if degrees else 0})"
         )
 
     # 第二阶段：构建排除枢纽的图，识别孤立节点
@@ -394,15 +458,41 @@ def _filter_hubs_and_orphans(graph: Dict[str, Set[str]],
         filtered_neighbors = {n for n in neighbors if n not in hub_nodes}
         remaining_degrees[node] = len(filtered_neighbors)
 
+    # 移除 HUB 后度分布
+    rem_bins = {"0": 0, "1-2": 0, "3-5": 0, "6-10": 0, "11-20": 0, "21+": 0}
+    for deg in remaining_degrees.values():
+        if deg == 0: rem_bins["0"] += 1
+        elif deg <= 2: rem_bins["1-2"] += 1
+        elif deg <= 5: rem_bins["3-5"] += 1
+        elif deg <= 10: rem_bins["6-10"] += 1
+        elif deg <= 20: rem_bins["11-20"] += 1
+        else: rem_bins["21+"] += 1
+    logger.info(f"[COMMUNITY] 移除枢纽后度分布: {dict(rem_bins)}")
+
+    # 检查仅通过 HUB 连接的文件
+    only_via_hub = 0
+    for node, deg in remaining_degrees.items():
+        if deg == 0:
+            orig_deg = degrees.get(node, 0)
+            if orig_deg > 0:
+                only_via_hub += 1
+    logger.info(
+        f"[COMMUNITY] 移除枢纽后度归零节点: 原度>0={only_via_hub}, 原度=0={sum(1 for n, d in remaining_degrees.items() if d==0 and degrees.get(n,0)==0)}"
+    )
+
     orphan_nodes = set()
     for node, deg in remaining_degrees.items():
         if deg <= ORPHAN_MAX_DEGREE:
             orphan_nodes.add(node)
 
     if orphan_nodes:
+        orphan_paths = sorted(orphan_nodes)[:20]
+        orphan_id_nodes = [n for n in orphan_nodes if '/' not in n and '\\' not in n]
         logger.info(
             f"[COMMUNITY] 孤立节点: {len(orphan_nodes)}/{total_nodes}"
             f" (max_deg={ORPHAN_MAX_DEGREE})"
+            f" 样例: {orphan_paths}"
+            f" 含ID-fallback={len(orphan_id_nodes)}"
         )
 
     # 构建最终图
