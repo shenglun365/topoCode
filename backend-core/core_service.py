@@ -1237,7 +1237,9 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "status": "offline",
             "is_default": 1 if kwargs.get("isDefault") else 0,
             "temperature": kwargs.get("temperature", 0.7),
-            "max_tokens": kwargs.get("maxTokens", 4096),
+            "max_tokens": kwargs.get("maxTokens", 16384),
+            "frequency_penalty": kwargs.get("frequencyPenalty", 0.0),
+            "presence_penalty": kwargs.get("presencePenalty", 0.0),
             "created_at": now,
             "updated_at": now,
         }
@@ -1249,7 +1251,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.updateModel")
     def update_model(id: str, **kwargs):
-        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "apiKey", "maxRequestsPerDay", "maxTokensPerDay"}
+        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "apiKey", "maxRequestsPerDay", "maxTokensPerDay", "frequencyPenalty", "presencePenalty"}
         data = {}
         for k, v in kwargs.items():
             if k == "isDefault":
@@ -1258,6 +1260,10 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 data["is_default"] = 1 if v else 0
             elif k == "maxTokens":
                 data["max_tokens"] = v
+            elif k == "frequencyPenalty":
+                data["frequency_penalty"] = v
+            elif k == "presencePenalty":
+                data["presence_penalty"] = v
             elif k == "maxRequestsPerDay":
                 data["max_requests_per_day"] = int(v) if v else 0
             elif k == "maxTokensPerDay":
