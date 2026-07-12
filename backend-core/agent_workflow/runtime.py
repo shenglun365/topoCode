@@ -780,7 +780,7 @@ class AgentRuntime:
                 logger.warning(f"[AgentRuntime] _save_component_result: parsed JSON lacks 'name': {item}")
 
         except Exception as e:
-            logger.warning(f"[AgentRuntime] _save_component_result: JSON parse failed: {e}")
+            logger.warning(f"[AgentRuntime] _save_component_result: JSON parse failed: {e}, raw_text={text[:3000]}")
             # 尝试从推理文本中正则提取 JSON
             try:
                 import re
@@ -843,7 +843,7 @@ class AgentRuntime:
                     "functional_summary": "",
                     "status": "failed",
                 })
-                logger.warning(f"[AgentRuntime] _save_component_result: fallback save as failed for {cid}, text_len={len(output)}")
+                logger.warning(f"[AgentRuntime] _save_component_result: fallback save as failed for {cid}, text_len={len(output)}, output={output[:3000]}")
         except Exception as e:
             logger.warning(f"[AgentRuntime] save failed for {cid}: {e}")
 
