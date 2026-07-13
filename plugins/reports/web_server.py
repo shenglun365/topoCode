@@ -905,7 +905,7 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
             if not p: return p
             if p.startswith('file:'): p = p[5:]
             if project_root and p.startswith(project_root): p = p[len(project_root):]
-            return p.lstrip('/')
+            return p.lstrip('/').replace('\\', '/')
 
         # 构建 file_path → comm_id 映射（用于 scope 过滤）
         file_comm = {}
