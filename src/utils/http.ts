@@ -24,13 +24,33 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   const existingHeaders = (options.headers as Record<string, string>) || {}
   Object.assign(headers, existingHeaders)
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+
+  // 懒续期：服务端通过 X-Refresh-Token 下发新 token
+  const refreshedToken = res.headers.get('X-Refresh-Token')
+  if (refreshedToken) {
+    localStorage.setItem('topocode_token', refreshedToken)
+    window.dispatchEvent(new CustomEvent('auth:token-refreshed', { detail: { token: refreshedToken } }))
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.message || `HTTP ${res.status}`)
+    const msg = body.message || `HTTP ${res.status}`
+    if (res.status === 401 || /(未登录|token.*过期|登录.*过期|token.*invalid)/i.test(msg)) {
+      localStorage.removeItem('topocode_token')
+      localStorage.removeItem('topocode_user')
+      window.dispatchEvent(new CustomEvent('auth:expired', { detail: { message: msg } }))
+    }
+    throw new Error(msg)
   }
   const json: ApiResponse<T> = await res.json()
   if (!json.success) {
-    throw new Error(json.message || '请求失败')
+    const msg = json.message || '请求失败'
+    if (/(未登录|token.*过期|登录.*过期|token.*invalid)/i.test(msg)) {
+      localStorage.removeItem('topocode_token')
+      localStorage.removeItem('topocode_user')
+      window.dispatchEvent(new CustomEvent('auth:expired', { detail: { message: msg } }))
+    }
+    throw new Error(msg)
   }
   return json.data
 }

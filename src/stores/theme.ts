@@ -278,6 +278,7 @@ export const useThemeStore = defineStore('theme', () => {
 
     // 内置主题走 CSS 选择器
     if (themeId === 'dark' || themeId === 'light') {
+      resetCssVars()
       document.documentElement.setAttribute('data-theme', themeId)
       localStorage.setItem('theme', themeId)
       localStorage.setItem(ACTIVE_KEY, themeId)

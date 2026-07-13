@@ -123,6 +123,13 @@ function startPollingImport(importId: string) {
   }, 10000)
 }
 
+// 登录过期自动切到个人资料页（显示登录提示）
+watch(() => authStore.authExpired, (val) => {
+  if (val) {
+    activeTab.value = 'profile'
+  }
+})
+
 function closeImportDialog() {
   if (pollTimer) clearInterval(pollTimer)
   importing.value = false
@@ -249,6 +256,32 @@ onMounted(async () => {
         />
         <span>{{ t(tab.key) }}</span>
       </div>
+    </div>
+
+    <div
+      v-if="authStore.authExpired"
+      class="auth-expired-banner"
+    >
+      <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 8v4" />
+        <path d="M12 16h.01" />
+      </svg>
+      <span class="banner-text">{{ t('auth.sessionExpired', '登录已过期，请重新登录') }}</span>
+      <router-link
+        to="/login"
+        class="btn btn-primary btn-xs"
+        style="flex-shrink:0;"
+      >
+        {{ t('auth.login', '登录') }}
+      </router-link>
+      <button
+        class="btn btn-ghost btn-icon btn-xs"
+        style="flex-shrink:0;"
+        @click="authStore.authExpired = false"
+      >
+        ✕
+      </button>
     </div>
 
     <div
@@ -599,4 +632,26 @@ onMounted(async () => {
   color: var(--text-primary); font-size: 12px; outline: none; cursor: pointer;
 }
 .sort-select:focus { border-color: var(--accent); }
+.auth-expired-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 8px 16px 0;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.banner-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--error);
+  flex-shrink: 0;
+}
+.banner-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--error);
+}
 </style>

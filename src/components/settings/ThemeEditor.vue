@@ -339,23 +339,23 @@ function applyPreset(presetColors: ThemeColors) {
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- 底部操作 -->
-      <div class="editor-footer">
-        <button
-          class="btn btn-secondary"
-          @click="handleCancel"
-        >
-          {{ t('common.cancel') }}
-        </button>
-        <button
-          class="btn btn-primary"
-          @click="handleSave"
-        >
-          <PencilIcon class="w-4 h-4" />
-          <span>{{ mode === 'create' ? t('theme.createTheme') : t('theme.saveChanges') }}</span>
-        </button>
-      </div>
+    <!-- 底部操作 -->
+    <div class="editor-footer">
+      <button
+        class="btn btn-secondary"
+        @click="handleCancel"
+      >
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        class="btn btn-primary"
+        @click="handleSave"
+      >
+        <PencilIcon class="w-4 h-4" />
+        <span>{{ mode === 'create' ? t('theme.createTheme') : t('theme.saveChanges') }}</span>
+      </button>
     </div>
   </div>
 </template>
@@ -365,6 +365,7 @@ function applyPreset(presetColors: ThemeColors) {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .editor-header {

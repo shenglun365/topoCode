@@ -23,6 +23,17 @@ export const useAuthStore = defineStore('auth', () => {
   const shareLink = ref('')
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
+  const authExpired = ref(false)
+
+  function setupAuthListener() {
+    window.addEventListener('auth:expired', () => {
+      clearSession()
+      authExpired.value = true
+    })
+    window.addEventListener('auth:token-refreshed', ((e: CustomEvent) => {
+      token.value = e.detail.token
+    }) as EventListener)
+  }
 
   function loadSession() {
     const savedToken = localStorage.getItem('topocode_token')
@@ -38,9 +49,11 @@ export const useAuthStore = defineStore('auth', () => {
         clearSession()
       }
     }
+    setupAuthListener()
   }
 
   function saveSession(t: string, u: any) {
+    authExpired.value = false
     token.value = t
     user.value = u
     referralCode.value = u.referral_code || ''
@@ -178,7 +191,7 @@ export const useAuthStore = defineStore('auth', () => {
   loadSession()
 
   return {
-    user, token, loading, error, isAuthenticated,
+    user, token, loading, error, isAuthenticated, authExpired,
     referralCode, points, balance, totalRecharged, totalConsumed, totalPointsRewarded, transactions, loadingTransactions, transactionTotal, transactionPage, transactionPageSize, referralStats, shareLink,
     login, loginWithCode, register, logout, fetchProfile,
     loadReferralInfo, loadReferralStats,

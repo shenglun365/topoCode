@@ -4,7 +4,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useThemeStore } from '@/stores/theme'
-import type { CustomTheme, ThemeColors, ThemeFonts } from '@/types'
+import type { CustomTheme } from '@/types'
 import ThemeEditor from './ThemeEditor.vue'
 import {
   PlusIcon,
@@ -62,8 +62,14 @@ function handleCreate() {
 }
 
 function handleEdit(theme: CustomTheme) {
+  let target = theme
+  if (theme.isBuiltIn) {
+    const dup = themeStore.duplicateTheme(theme.id)
+    if (!dup) return
+    target = dup
+  }
   editorMode.value = 'edit'
-  editingTheme.value = theme
+  editingTheme.value = target
   showEditor.value = true
 }
 
@@ -248,6 +254,13 @@ onMounted(() => {
               @click.stop="handlePreview(theme)"
             >
               <PaintBrushIcon class="w-4 h-4" />
+            </button>
+            <button
+              class="action-btn"
+              :title="t('common.edit')"
+              @click.stop="handleEdit(theme)"
+            >
+              <PencilIcon class="w-4 h-4" />
             </button>
             <button
               class="action-btn"
@@ -510,7 +523,7 @@ onMounted(() => {
     <Teleport to="body">
       <div
         v-if="showDeleteConfirm"
-        class="dialog-overlay"
+        class="modal-overlay"
         @click.self="showDeleteConfirm = null"
       >
         <div class="confirm-dialog">
@@ -772,12 +785,14 @@ defineExpose({ getPreviewStyle })
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .editor-modal {
   width: 700px;
   max-width: 100%;
   max-height: 85vh;
+  min-height: 0;
 }
 
 .preview-modal {
@@ -788,6 +803,30 @@ defineExpose({ getPreviewStyle })
 .import-modal {
   width: 500px;
   max-width: 100%;
+}
+
+.confirm-dialog {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 8px);
+  padding: 20px;
+  max-width: 400px;
+  width: 90vw;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.confirm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .preview-header, .import-header {

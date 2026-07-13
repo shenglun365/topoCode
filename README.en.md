@@ -136,6 +136,33 @@ topoOne-ui/
 
 > **Local model hardware requirements**: Running local models like Qwen3.6-9B-Q4 (quantized) requires **NVIDIA RTX 4060 Ti 16 GB or above**. Without a dedicated GPU, local models will fall back to CPU inference, which is significantly slower. If using only cloud models (e.g., DeepSeek V4 Flash), 4-core / 8 GB RAM is sufficient for basic usage.
 
+> **GUI runtime notice**: This application includes Electron GUI components. When running on a headless VM, cloud server, or command-line-only system without a desktop environment, you must manually install a virtual display service for graphics rendering. Physical machines or systems with an existing desktop environment require no additional setup.
+
+### Environment & Virtual Display Reference
+
+| System Environment | Desktop | Required Action | Install Command |
+|---|---|---|---|
+| Physical machine / Workstation (Windows / macOS / Linux Desktop) | Pre-installed | None | — |
+| Linux Server (Ubuntu / Debian) | None | Install xvfb | `sudo apt install xvfb` |
+| Linux Server (CentOS / RHEL / Fedora) | None | Install Xvfb | `sudo yum install xorg-x11-server-Xvfb` |
+| Cloud Server / VM (headless) | None | Install xvfb | Same as above, choose based on distro |
+| WSL 1/2 | None | Install VcXsrv + configure DISPLAY | Install VcXsrv on Windows, run `export DISPLAY=:0` in WSL |
+| Docker Container | None | Use xvfb-run | `xvfb-run npm run dev` |
+
+### LLM Analysis Time Estimates
+
+Architecture analysis duration depends on **codebase size**, **LLM performance**, and **concurrency settings**. Typical estimates (single concurrency, 50 tokens/s):
+
+| Phase | Est. Time | Notes |
+|---|---|---|
+| **Syntax Parsing + Component Relationship Analysis** | 2–5 min | Static analysis, no LLM required |
+| **5,000 Source Files Analysis** | 10–20 min | File traversal and basic metadata extraction |
+| **File Pre-summary** | ~1 min / file | Hundreds of files may take hours; LLM-intensive |
+| **Component Analysis** | 1–5 min / component | Depends on component size, multi-turn LLM dialogue |
+| **Overall Architecture Generation** | 1–5 min | Synthesizes summaries into architecture overview |
+
+> **Tip**: Create an account and visit **User Center → Resource Center** to download pre-analyzed architecture content. The resource center is updated regularly with popular projects — saving you local processing time.
+
 ## Prerequisites
 
 - **Node.js** >= 20.0.0
