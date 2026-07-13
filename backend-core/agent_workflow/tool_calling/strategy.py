@@ -22,6 +22,26 @@ from .fallback_extractors import (
 logger = logging.getLogger(__name__)
 
 
+def _extract_json_from_reasoning(text: str) -> str:
+    """从 reasoning_content 中尝试提取 JSON 片段。"""
+    if not text:
+        return ""
+    import re as _re
+    for pat in [
+        r'```(?:json)?\s*(\{[\s\S]*?"name"[\s\S]*?"summary"[\s\S]*?\})\s*```',
+        r'(\{[\s\S]*?"name"\s*:\s*"[^"]+"[\s\S]*?"summary"\s*:\s*"[^"]+[\s\S]*?\})',
+    ]:
+        m = _re.search(pat, text, _re.DOTALL)
+        if m:
+            try:
+                candidate = m.group(1)
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+    return ""
+
+
 def _sanitize_tool_args(args: dict) -> dict:
     """Normalize tool call arguments from model to avoid downstream serialization differences.
 
@@ -174,12 +194,17 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
                 finish_reason = "tool_calls"
                 logger.info(f"[NativeStrategy] parsed {len(fb_calls)} XML tool calls from reasoning_content")
             else:
-                clean = extract_fallback_content(reasoning_content)
-                if clean:
-                    content = clean
-                    logger.info(f"[NativeStrategy] extracted fallback text from reasoning_content: {len(clean)} chars")
+                json_content = _extract_json_from_reasoning(reasoning_content)
+                if json_content:
+                    content = json_content
+                    logger.info(f"[NativeStrategy] extracted JSON from reasoning_content: {len(content)} chars")
                 else:
-                    logger.warning(f"[NativeStrategy] reasoning_content has no valid content (len={len(reasoning_content)})")
+                    clean = extract_fallback_content(reasoning_content)
+                    if clean:
+                        content = clean
+                        logger.info(f"[NativeStrategy] extracted fallback text from reasoning_content: {len(clean)} chars")
+                    else:
+                        logger.warning(f"[NativeStrategy] reasoning_content has no valid content (len={len(reasoning_content)})")
         elif not tool_calls and not content:
             logger.warning("[NativeStrategy] LLM returned empty content with no tool_calls")
 
