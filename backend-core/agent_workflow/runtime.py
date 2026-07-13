@@ -635,6 +635,10 @@ class AgentRuntime:
                         final_response = json_text
                         comp_success = True
                         logger.info(f"[AgentRuntime] comp={comp_id} JSON conversion from reasoning_content OK, len={len(json_text)}")
+                    elif json_text:
+                        logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion returned non-JSON: {json_text[:200]}")
+                    else:
+                        logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion returned empty content")
                 except Exception as e:
                     logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion failed: {e}")
             if not comp_success and comp_turns > 0:

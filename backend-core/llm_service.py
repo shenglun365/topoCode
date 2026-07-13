@@ -650,6 +650,8 @@ class LLMService:
         self._check_usage_limits(model_id)
         result = await self._sync_call_for_retry(model, messages, 'chat', None, None, max_tokens=max_tokens)
         content = result.get('content', '')
+        if not content:
+            content = result.get('reasoning_content', '') or ''
         # 记录用量统计（使用 API 返回的实际 token 数据）
         try:
             if model.get('id'):
