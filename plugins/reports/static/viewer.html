@@ -640,6 +640,7 @@ const API = {
 // ============================================================
 function escapeHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function escapeAttr(s) { return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+var escAttr = escapeAttr;
 function _(key) { return window.__(key) || key; }
 function _cid_level(cid) { var parts = (cid || '').split('-'); for (var i = 0; i < parts.length; i++) { if (/^L\d+$/.test(parts[i])) return parts[i]; } return 'L0'; }
 function _hueSatLight(depth, hue) { var t=[[80,55],[70,65],[55,78],[40,88],[30,94]]; var v=t[Math.min(depth,4)]; return 'hsl('+hue+', '+v[0]+'%, '+v[1]+'%)'; }
@@ -2953,6 +2954,13 @@ function populateProjectFilter() {
 function renderDrafts() {
   console.log('[Notes] renderDrafts START', {draftSeq: _draftSeq, totalDrafts: _drafts.length, draftStatuses: _drafts.map(function(d){return d.status})});
   var list = document.getElementById('notesDraftList');
+  // 保存 checkbox 选中状态（re-render 后恢复，防止 30s 轮询/输入等操作丢失勾选）
+  var checkedMap = {};
+  if (list) {
+    list.querySelectorAll('.cbox:checked').forEach(function(cb) {
+      checkedMap[cb.dataset.draft + ':' + cb.dataset.ref] = true;
+    });
+  }
   var filterProj = document.getElementById('notesFilterProj').value;
   var sortMode = document.getElementById('notesFilterSort').value;
   var filtered = _drafts.filter(function(d){return d.status==='draft'||d.status==='pending'});
@@ -2995,6 +3003,10 @@ function renderDrafts() {
     });
   });
   list.innerHTML = html;
+  // 恢复 checkbox 选中状态
+  list.querySelectorAll('.cbox').forEach(function(cb) {
+    if (checkedMap[cb.dataset.draft + ':' + cb.dataset.ref]) cb.checked = true;
+  });
 
   list.querySelectorAll('.note-draft-card textarea').forEach(function(ta) {
     ta.addEventListener('input', function() {
@@ -3161,16 +3173,21 @@ function getSelectedRefs() {
 }
 function removeSelectedRefs() {
   var cboxes = document.querySelectorAll('#notesDraftList .cbox:checked');
-  var toRemove = [];
+  // 按 draft 分组收集 ref 索引，倒序删除避免 splice 导致索引偏移
+  var group = {};
   cboxes.forEach(function(cb) {
-    var di = _drafts.findIndex(function(x){return x.id===cb.dataset.draft});
-    if (di >= 0) {
-      var ri = parseInt(cb.dataset.ref);
-      _drafts[di].refs.splice(ri, 1);
-      if (!_drafts[di].refs.length) toRemove.push(di);
-    }
+    var key = cb.dataset.draft;
+    if (!group[key]) group[key] = [];
+    group[key].push(parseInt(cb.dataset.ref));
   });
-  toRemove.sort(function(a,b){return b-a}).forEach(function(i){_drafts.splice(i,1)});
+  Object.keys(group).forEach(function(did) {
+    var di = _drafts.findIndex(function(x){return x.id === did});
+    if (di < 0) return;
+    group[did].sort(function(a,b){return b-a}).forEach(function(ri) {
+      _drafts[di].refs.splice(ri, 1);
+    });
+    if (!_drafts[di].refs.length) _drafts.splice(di, 1);
+  });
   saveDrafts(); renderDrafts();
 }
 
@@ -3272,7 +3289,22 @@ function _doExecute() {
   window.open(chatUrl);
   console.log('[exec-flow] executeDrafts: 新窗口→' + chatUrl);
 
-  if (state.autoDelete) removeSelectedRefs();
+  if (state.autoDelete) {
+    // 从 _drafts 中移除已发送的 ref（按 ref._id 匹配，而非 DOM checkbox，避免 checkbox 状态丢失后删不掉）
+    state.refs.forEach(function(sr) {
+      for (var di = 0; di < _drafts.length; di++) {
+        var d = _drafts[di];
+        if (d.status !== 'draft' && d.status !== 'pending') continue;
+        var ri = d.refs.findIndex(function(r){return r._id === sr._id});
+        if (ri >= 0) {
+          d.refs.splice(ri, 1);
+          if (!d.refs.length) { _drafts.splice(di, 1); di--; }
+          break;
+        }
+      }
+    });
+    saveDrafts();
+  }
   closeNotesModal();
   showToast('已发送到 AI 对话页');
 }

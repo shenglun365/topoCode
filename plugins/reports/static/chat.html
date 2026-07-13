@@ -256,8 +256,8 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <div v-if="!notes.length && !pendingDrafts.length" class="note-empty">{{__('chat.noNotes')}}</div>
       <div v-if="pendingDrafts.length" style="border-top:1px solid var(--border);margin:8px 10px 0;padding-top:8px">
         <div style="font-size:12px;font-weight:500;color:var(--text-muted);margin-bottom:6px">{{__('chat.pendingDrafts')}}</div>
-        <div v-for="d in pendingDrafts" :key="d.id" class="note-item" style="border-left-color:#f59e0b">
-          <span class="title" style="color:var(--text)">#{{ d.seq }}</span>
+        <div v-for="d in pendingDrafts" :key="d.id" class="note-item note-pending" style="border-left-color:#f59e0b" :title="noteTooltip(d)">
+          <span class="title" style="color:var(--text)">{{ notePreview(d) }}</span>
           <span class="ref-count">{{ d.refs.length }}{{__('chat.items')}}</span>
           <button class="send-btn" style="opacity:1" @click.stop="execPendingDraft(d)">{{__('chat.execute')}}</button>
         </div>
@@ -439,6 +439,18 @@ createApp({
     }
     function loadPendingDrafts(){
       pendingDrafts.value=NotesStore.list().filter(function(d){return d.status==='pending'})
+    }
+    function notePreview(d){
+      var t=(d.userText||'').trim()
+      return t.slice(0,10)+(t.length>10?'…':'')
+    }
+    function noteTooltip(d){
+      var parts=[]
+      parts.push('#'+(d.seq||'')+' 引用: '+(d.refs?d.refs.length:0)+' 项')
+      if(d.userText) parts.push('需求: '+d.userText)
+      if(d.createdAt) parts.push('时间: '+d.createdAt.slice(0,16).replace('T',' '))
+      if(d.refs) d.refs.forEach(function(r,i){parts.push((i+1)+'. '+(r.label||r.text||'(空)').slice(0,30))})
+      return parts.join('\n')
     }
     function copyId(text){
       try{navigator.clipboard.writeText(text).then(function(){showToast('已复制: '+text.slice(0,20)+(text.length>20?'…':''))})}catch(e){
@@ -893,9 +905,12 @@ createApp({
       if(sid){console.log('[exec-flow] chat onMounted: URL\u6709sessionId=' + sid.slice(0,12));currentId.value=sid;loadMessages();_checkPendingExecute()}else{loadSessions().then(function(){_checkPendingExecute()})}
       // storage \u4e8b\u4ef6\u76d1\u542c\uff1aviewer \u5199\u5165 localStorage \u540e\u89e6\u53d1
       window.addEventListener('storage', function(e) {
-        if (e.key && e.key.indexOf('topo_exec_pending_') === 0) {
+        if (!e.key) return;
+        if (e.key.indexOf('topo_exec_pending_') === 0) {
           console.log('[exec-flow] chat storage \u4e8b\u4ef6 key=' + e.key.slice(0,50))
           _checkPendingExecute()
+        } else if (e.key.indexOf('topo_notes') === 0) {
+          loadPendingDrafts()
         }
       })
       try{new BroadcastChannel('topocode_notes').onmessage=function(e){
@@ -908,7 +923,7 @@ createApp({
       renderMd,onBubbleUpdate,createSession,switchSession,deleteSession,onModelChange,send,
       loadNotes,switchNotesTab,viewNote,deleteNote,execPendingDraft,
       deleteMode,selectedIds,allSelected,toggleSelect,selectAll,exitDeleteMode,deleteMessage,deleteSelected,
-      contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream}
+      contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip}
   }
 }).mount('#app')
 </script>
