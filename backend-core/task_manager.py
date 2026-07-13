@@ -2946,7 +2946,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 pass
             try:
                 rows = project_db.execute(
-                    "SELECT comm_id, component_type FROM community_llm_results WHERE task_id=?",
+                    "SELECT comm_id, component_type, status, name FROM community_llm_results WHERE task_id=?",
                     (tid,)
                 ).fetchall()
                 for r in rows:
@@ -2956,17 +2956,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
             # ── 跳过已分析组件（除非 force=True）──
             if not force:
-                analyzed_ids = set(existing_results.keys())
+                def _skip(cid):
+                    row = existing_results.get(cid) or existing_results.get(f"community:{cid}")
+                    if not row:
+                        return False
+                    # 只有 status=completed 且 name 非空才算有效分析
+                    return row.get("status") != "failed" and row.get("name")
                 filtered = []
                 for c in comps:
-                    cid = c.get("id", "")
-                    if c.get("type") == "community" and cid.startswith("comm-"):
-                        if cid in analyzed_ids or f"community:{cid}" in analyzed_ids:
-                            continue
-                    else:
-                        key = f"{c.get('type', '')}:{cid}"
-                        if key in analyzed_ids:
-                            continue
+                    if _skip(c.get("id", "")):
+                        continue
                     filtered.append(c)
                 skipped = len(comps) - len(filtered)
                 comps = filtered
@@ -3444,13 +3443,27 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     @server.register("agent.getConfig")
     def get_agent_config():
         """返回当前 Agent 路由、技能、工具的元数据"""
-        return {
-            "routes": [
-                {"action": "overview", "workflow": "OverviewWorkflow", "description": "Generate overall architecture overview document"},
-                {"action": "analyze_components", "workflow": "AgenticComponentAnalystWorkflow", "description": "Agent multi-turn component analysis"},
-                {"action": "presummary_files", "workflow": "PreSummaryWorkflow", "description": "File pre-summary batch cache"},
-            ],
-            "skills": [
+        # 从 DB 读取已注册的技能，fallback 到硬编码列表
+        skills = []
+        try:
+            rows = multi_db.main_db.execute(
+                "SELECT name, description, category, config FROM skill_configs WHERE enabled = 1 ORDER BY name"
+            ).fetchall()
+            for r in rows:
+                name = r["name"] if isinstance(r, dict) else r[0]
+                desc = r["description"] if isinstance(r, dict) else r[1]
+                config_str = r["config"] if isinstance(r, dict) else r[3]
+                steps = 1
+                if config_str:
+                    try:
+                        import json
+                        cfg = json.loads(config_str)
+                        steps = cfg.get("steps", 1)
+                    except Exception:
+                        pass
+                skills.append({"name": name, "description": desc or "", "steps": steps})
+        except Exception:
+            skills = [
                 {"name": "skill_generate_arch_overview", "description": "Generate architecture overview", "steps": 3},
                 {"name": "skill_analyze_community", "description": "Analyze a community in depth", "steps": 4},
                 {"name": "skill_fix_mermaid", "description": "Fix Mermaid diagram syntax", "steps": 2},
@@ -3464,7 +3477,14 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 {"name": "skill_batch_analyze_communities", "description": "Batch analyze communities", "steps": 5},
                 {"name": "skill_track_ai_session", "description": "Track AI session", "steps": 2},
                 {"name": "skill_audit_changes", "description": "Audit changes", "steps": 3},
+            ]
+        return {
+            "routes": [
+                {"action": "overview", "workflow": "OverviewWorkflow", "description": "Generate overall architecture overview document"},
+                {"action": "analyze_components", "workflow": "AgenticComponentAnalystWorkflow", "description": "Agent multi-turn component analysis"},
+                {"action": "presummary_files", "workflow": "PreSummaryWorkflow", "description": "File pre-summary batch cache"},
             ],
+            "skills": skills,
             "tools": [
                 {"name": "read_file", "description": "Read source file content", "category": "file", "llm_visible": True},
                 {"name": "search_content", "description": "Search file content by pattern", "category": "file", "llm_visible": True},

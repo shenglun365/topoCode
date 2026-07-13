@@ -8,6 +8,7 @@ import os
 from typing import Any, Optional
 
 from ..tools import AgentTool, ToolResult
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,12 @@ def _rel_path(path: str, project_root: Optional[str]) -> str:
     return path
 
 
+@register_skill(
+    name="skill_explore_graph",
+    description="Explore community subgraph — get nodes, edges and structure of a code community",
+    steps=1,
+    category="graph",
+)
 class GetCommunitySubgraphTool(AgentTool):
     """Get subgraph structure from community analysis"""
 

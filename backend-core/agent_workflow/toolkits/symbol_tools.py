@@ -8,6 +8,7 @@ import os
 from typing import Any, Optional
 
 from ..tools import AgentTool, ToolResult
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,12 @@ class GetSymbolDetailTool(AgentTool):
             return ToolResult.fail(str(e))
 
 
+@register_skill(
+    name="skill_search_symbols",
+    description="Search code symbols by name — find functions, classes, methods across the project",
+    steps=1,
+    category="query",
+)
 class SearchSymbolsTool(AgentTool):
     """Search code symbols by name"""
 

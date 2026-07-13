@@ -38,21 +38,36 @@ const loading = ref(false)
 const filterLocale = ref<string>(settingsStore.locale || 'zh-CN')
 const filterMode = ref('')
 
-// 显示所有已注册的模板（共 12 组）
+// 显示所有已注册的模板（隐藏 P2/P3 未接入模板，不删除）
 const VISIBLE_TEMPLATE_IDS = new Set([
-  'src_to_pseudocode',
-  'community_name',
   'edge_explain',
   'source_explain',
   'report_overall_architecture',
   'community_analyze',
-  'agent_analyze_community',
   'agent_analyze_component',
-  'agentic_analyze_component',
   'agent_generate_overview',
-  'agent_summarize_changes',
   'agent_explain_community',
 ])
+
+// 使用场景映射
+interface SceneInfo {
+  labelKey: string
+}
+
+const TEMPLATE_SCENES: Record<string, SceneInfo> = {
+  edge_explain:                { labelKey: 'templateSceneEdgeExplain' },
+  source_explain:              { labelKey: 'templateSceneSymbolExplain' },
+  community_analyze:           { labelKey: 'templateSceneBatchCommunity' },
+  agent_analyze_component:     { labelKey: 'templateSceneAgentComponent' },
+  agent_explain_community:     { labelKey: 'templateSceneCommunityExplain' },
+  report_overall_architecture: { labelKey: 'templateSceneOverallArch' },
+  agent_generate_overview:     { labelKey: 'templateSceneOverallArch' },
+}
+
+function sceneFor(tmpl: TemplateItem): SceneInfo | null {
+  const baseId = tmpl.base_id || tmpl.id.replace(/__.*$/, '')
+  return TEMPLATE_SCENES[baseId] || null
+}
 
 const editDialog = ref(false)
 const editing = ref<Partial<TemplateItem>>({})
@@ -311,6 +326,10 @@ onMounted(() => {
             {{ tmpl.name }}
           </div>
           <div class="template-meta">
+            <span
+              v-if="sceneFor(tmpl)"
+              class="badge badge-scene"
+            >{{ t(`settings.${sceneFor(tmpl)!.labelKey}`) }}</span>
             <span class="badge badge-mode">{{ tmpl.mode }}</span>
             <span
               v-if="tmpl.module_type"
@@ -703,6 +722,11 @@ onMounted(() => {
 .badge-builtin {
   background: #dcfce7;
   color: #166534;
+}
+.badge-scene {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
 }
 
 /* 基本信息表单网格 — 两列 */

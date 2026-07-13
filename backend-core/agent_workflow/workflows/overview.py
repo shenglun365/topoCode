@@ -6,8 +6,17 @@ from typing import Any
 from ..llm_adapter import create_llm_chat_fn
 from ..tools import AgentTool, ToolResult
 from ..workflows.base import AgentWorkflow, AgentStep, WorkflowResult
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
+
+
+@register_skill(
+    name="skill_generate_arch_overview",
+    description="Generate overall architecture overview document",
+    steps=3,
+    category="analysis",
+)
 
 
 class _GenerateOverviewTool(AgentTool):
@@ -138,24 +147,12 @@ class _GenerateOverviewTool(AgentTool):
             pm = PromptManager(self._multi_db)
             lang_instr = pm.get_language_instruction(language)
             llm_fn = create_llm_chat_fn(self._multi_db)
-            prompt = (
-                "You are a code architecture analysis expert. Generate an overall architecture overview Markdown document based on the following project information.\n\n"
-                "{context}\n\n"
-                "Generate a structured architecture overview document including:\n"
-                "1. Overall project architecture description (summarized from community analysis results)\n"
-                "2. Core modules and their responsibilities\n"
-                "3. Module layering and dependency relationships\n"
-                "4. Design patterns and architecture style\n\n"
-                "Requirements:\n"
-                "- Community names are already named based on code functionality, use these names to describe modules\n"
-                "- Do not output raw comm_ids (e.g. comm-xxx-xxx format IDs)\n"
-                "- When referencing a module, use its community name\n"
-                "- Do not wrap module names in backticks `\n"
-                f"- {lang_instr}"
-            ).format(context=context_text)
-
-            messages = [{"role": "user", "content": prompt}]
-            logger.info("[Overview] calling LLM with prompt=%d chars", len(prompt))
+            result = pm.render("agent_generate_overview", {
+                "context": context_text,
+                "lang_instr": lang_instr,
+            })
+            messages = result['messages']
+            logger.info("[Overview] calling LLM with prompt=%d chars", len(context_text))
             resp = await llm_fn(messages=messages, temperature=0.3, max_tokens=8192)
             overview = resp if isinstance(resp, str) else str(resp or "")
             logger.info("[Overview] LLM response=%d chars", len(overview))

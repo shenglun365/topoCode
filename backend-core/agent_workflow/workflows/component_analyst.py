@@ -14,10 +14,17 @@ from typing import Any, Callable
 from ..tools import AgentTool, ToolResult
 from ..workflows.base import AgentWorkflow, AgentStep, WorkflowResult
 from ..shared_utils import parse_structured_response, build_markdown_summary
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
 
 
+@register_skill(
+    name="skill_analyze_community",
+    description="Analyze a community in depth — extract component name, functional summary, architecture role",
+    steps=4,
+    category="analysis",
+)
 class _AnalyzeComponentTool(AgentTool):
     """Analyze single component: LLM → name + summary → write to SQLite immediately"""
 

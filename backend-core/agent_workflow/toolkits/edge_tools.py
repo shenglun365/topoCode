@@ -7,10 +7,17 @@ import logging
 from typing import Any, Optional
 
 from ..tools import AgentTool, ToolResult
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
 
 
+@register_skill(
+    name="skill_analyze_relations",
+    description="Analyze code relations — get detailed edge info including call relations and dependency types",
+    steps=1,
+    category="graph",
+)
 class GetEdgeDetailTool(AgentTool):
     """Get detailed info for a specific edge"""
 

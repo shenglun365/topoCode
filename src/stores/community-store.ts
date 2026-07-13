@@ -182,7 +182,7 @@ export const useCommunityStore = defineStore('community', () => {
                 avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
                 maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
                 coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
-                status: saved ? 'completed' : ('pending' as any),
+                status: saved?.status === 'completed' ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
                 name: saved?.name || item.id,
@@ -204,7 +204,7 @@ export const useCommunityStore = defineStore('community', () => {
                 avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
                 maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
                 coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
-                status: saved ? 'completed' : ('pending' as any),
+                status: saved?.status === 'completed' ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
                 name: saved?.name || item.id,
@@ -228,7 +228,7 @@ export const useCommunityStore = defineStore('community', () => {
               continue
             }
             const saved = llmMap[existing.communityId]
-            if (saved) {
+            if (saved && saved.status === 'completed') {
               existing.status = 'completed'
               existing.name = saved.name || existing.communityId
               existing.summary = saved.summary || undefined
@@ -241,7 +241,7 @@ export const useCommunityStore = defineStore('community', () => {
         }
         for (const c of Array.from(newCommMap.values())) {
           const saved = llmMap[c.communityId]
-          if (saved) {
+          if (saved && saved.status === 'completed') {
             c.status = 'completed'
             c.name = saved.name || c.communityId
             c.summary = saved.summary || undefined
@@ -296,7 +296,7 @@ export const useCommunityStore = defineStore('community', () => {
                 avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
                 maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
                 coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
-                status: saved ? 'completed' : ('pending' as any),
+                status: saved?.status === 'completed' ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
                 name: saved?.name || item.id,
@@ -318,7 +318,7 @@ export const useCommunityStore = defineStore('community', () => {
                 avgCoreness: (item as any).metadata?.avgCoreness ?? 0,
                 maxCoreness: (item as any).metadata?.maxCoreness ?? 0,
                 coreNodeRatio: (item as any).metadata?.coreNodeRatio ?? 0,
-                status: saved ? 'completed' : ('pending' as any),
+                status: saved?.status === 'completed' ? 'completed' : ('pending' as any),
                 selected: false,
                 parentId: item.parentCommId ?? undefined,
                 name: saved?.name || item.id,

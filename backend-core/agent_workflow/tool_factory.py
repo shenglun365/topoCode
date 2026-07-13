@@ -447,7 +447,7 @@ def _pipeline_get_level_components(project_db, task_id: str, level: str, force: 
         if not force:
             analyzed_ids = set()
             arows = project_db.execute(
-                "SELECT comm_id FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv=? AND status='completed'",
+                "SELECT comm_id FROM community_llm_results WHERE task_id=? AND edge_type=? AND comm_lv=? AND status='completed' AND name IS NOT NULL AND name != ''",
                 (task_id, et, level)
             ).fetchall()
             analyzed_ids = {r[0] for r in arows}

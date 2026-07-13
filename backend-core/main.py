@@ -104,14 +104,16 @@ class BackendApp:
         plugins_found = self.plugin_manager.discover()
         if plugins_found:
             logger.info(f"Discovered {len(plugins_found)} plugins: {[p.name for p in plugins_found]}")
-            threading.Thread(
-                target=self.plugin_manager.install_all_requirements,
-                daemon=True,
-            ).start()
             for p in plugins_found:
                 self.plugin_manager.load_plugin(p.name)
             self.plugin_manager.register_all_methods(self.server, self.multi_db)
-            logger.info(f"Total methods after plugin registration: {len(self.server.methods)}")
+
+        # 同步 @register_skill 装饰器注册的技能到 skill_configs 表
+        try:
+            from agent_workflow.skill_registry import sync_skills_to_db
+            sync_skills_to_db(self.multi_db)
+        except Exception as e:
+            logger.warning(f"Failed to sync skills to DB: {e}")
 
         # 注册 ingest 消费端 handler
         from ingest import setup_handlers

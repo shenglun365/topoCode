@@ -10,8 +10,17 @@ import logging
 from typing import Any, Optional
 
 from .base import AgenticWorkflow, WorkflowResult
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
+
+
+@register_skill(
+    name="skill_batch_analyze_communities",
+    description="Batch analyze communities — analyze all L0/L1/L2 communities with LLM",
+    steps=5,
+    category="analysis",
+)
 
 
 class AgenticComponentAnalystWorkflow(AgenticWorkflow):

@@ -740,8 +740,18 @@ class AgentRuntime:
                 item = item[0]
             if isinstance(item, dict) and item.get("name"):
                 cid = component.get("id") or item.get("component_id") or item.get("id") or ""
-                # 构建含关键文件和依赖的增强摘要
                 raw_summary = item.get("summary") or item.get("functional_summary") or ""
+                if not raw_summary.strip():
+                    save_fn({
+                        "task_id": context.get("task_id", ""),
+                        "component_id": cid,
+                        "component_type": component.get("type", "community"),
+                        "analyzed_name": item.get("name", ""),
+                        "functional_summary": "",
+                        "status": "failed",
+                    })
+                    logger.warning(f"[AgentRuntime] _save_component_result: empty summary for {cid}, saving as failed")
+                    return
                 role = item.get("role", "")
                 kf = item.get("key_files", [])
                 deps = item.get("depends_on", [])
@@ -795,6 +805,17 @@ class AgentRuntime:
                         if isinstance(item, dict) and item.get("name"):
                             cid = component.get("id") or item.get("component_id") or item.get("id") or ""
                             raw_summary = item.get("summary") or item.get("functional_summary") or ""
+                            if not raw_summary.strip():
+                                save_fn({
+                                    "task_id": context.get("task_id", ""),
+                                    "component_id": cid,
+                                    "component_type": component.get("type", "community"),
+                                    "analyzed_name": item.get("name", ""),
+                                    "functional_summary": "",
+                                    "status": "failed",
+                                })
+                                logger.warning(f"[AgentRuntime] _save_component_result: regex extraction empty summary for {cid}, saving as failed")
+                                return
                             role = item.get("role", "")
                             kf = item.get("key_files", [])
                             deps = item.get("depends_on", [])

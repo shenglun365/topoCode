@@ -7,10 +7,17 @@ import os
 from typing import Optional
 
 from ..tools import AgentTool, ToolResult
+from ..skill_registry import register_skill
 
 logger = logging.getLogger(__name__)
 
 
+@register_skill(
+    name="skill_read_source_file",
+    description="Read source file content — get full content of any project source file",
+    steps=1,
+    category="io",
+)
 class ReadFileTool(AgentTool):
     """Read specified file content"""
 
