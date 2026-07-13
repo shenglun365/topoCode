@@ -109,6 +109,18 @@ class BackendApp:
             self.plugin_manager.register_all_methods(self.server, self.multi_db)
 
         # 同步 @register_skill 装饰器注册的技能到 skill_configs 表
+        # 先导入所有含 @register_skill 的模块，确保装饰器在 sync 前触发
+        try:
+            from agent_workflow.workflows import overview as _  # noqa: F811
+            from agent_workflow.workflows import component_analyst as _  # noqa: F811
+            from agent_workflow.workflows import agentic_component_analyst as _  # noqa: F811
+            from agent_workflow.toolkits import file_tools as _  # noqa: F811
+            from agent_workflow.toolkits import symbol_tools as _  # noqa: F811
+            from agent_workflow.toolkits import graph_tools as _  # noqa: F811
+            from agent_workflow.toolkits import edge_tools as _  # noqa: F811
+        except Exception as e:
+            logger.warning(f"Failed to import skill modules: {e}")
+
         try:
             from agent_workflow.skill_registry import sync_skills_to_db
             sync_skills_to_db(self.multi_db)
