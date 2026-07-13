@@ -45,6 +45,7 @@
         enabled: '已启用', disabled: '已禁用',
         manual: '手动', auto: '自动',
         selectAll: '全选', deselectAll: '取消全选',
+        fontSize: '字体大小',
       },
       // nav / shell
       nav: {
@@ -212,6 +213,7 @@
         enabled: 'Enabled', disabled: 'Disabled',
         manual: 'Manual', auto: 'Auto',
         selectAll: 'Select All', deselectAll: 'Deselect All',
+        fontSize: 'Font Size',
       },
       nav: {
         home: 'Home', code: 'Code', analysis: 'Analysis',

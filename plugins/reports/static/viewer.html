@@ -42,6 +42,8 @@
   .header .toggle-btn:hover { background: var(--bg-hover); color: var(--text); }
   .header .toggle-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-light); }
   .header .toggle-btn svg { display: block; }
+.header select { font-size: 11px; padding: 2px 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); cursor: pointer; outline: none; }
+.header select:focus { border-color: var(--accent); }
   .doc-layout { display: flex; height: calc(100vh - 40px); }
   .doc-left { overflow-y: auto; overflow-x: hidden; position: relative; min-width: 0; display: flex; flex-direction: column; }
   .doc-left .content { padding: 16px 20px 120px; max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
@@ -63,6 +65,7 @@
   #heatmapContent .hm-row-hdr { position: sticky; left: 0; z-index: 2; min-width: 60px; max-width: 160px; border-right: 2px solid var(--border); }
   #heatmapContent .hm-col-hdr { position: sticky; top: 0; z-index: 1; border-bottom: 2px solid var(--border); }
   #heatmapContent thead th:first-child { position: sticky; top: 0; left: 0; z-index: 3; min-width: 20px; max-width: 20px; border-right: 2px solid var(--border); border-bottom: 2px solid var(--border); }
+  .content { font-size: var(--content-font-size, 14px); }
   .content h1 { font-size: 1.5em; margin: 0.5em 0 0.25em; }
   .content h2 { font-size: 1.2em; margin: 0.4em 0 0.2em; }
   .content h3 { font-size: 1.05em; margin: 0.3em 0 0.15em; }
@@ -291,6 +294,12 @@
 <body>
 <div class="header">
   <span class="title" id="docTitle" data-i18n="viewer.title">TopoCode Documents</span>
+  <select id="fontSizeSelect" data-i18n-title="common.fontSize" title="Font Size">
+    <option value="13">13px</option>
+    <option value="15" selected>15px</option>
+    <option value="18">18px</option>
+    <option value="21">21px</option>
+  </select>
   <button class="toggle-btn" id="toggleNotes" data-i18n-title="viewer.notes">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
     <span class="dot-badge" id="notesDot"></span>
@@ -2595,6 +2604,20 @@ async function load() {
     var text = _(key);
     if (text !== key) el.placeholder = text;
   });
+  // 字体大小初始化
+  ;(function() {
+    var saved = parseInt(localStorage.getItem('topoone-font-size') || '15');
+    var sel = document.getElementById('fontSizeSelect');
+    if (sel) {
+      sel.value = saved;
+      document.documentElement.style.setProperty('--content-font-size', saved + 'px');
+      sel.addEventListener('change', function() {
+        var v = parseInt(this.value);
+        document.documentElement.style.setProperty('--content-font-size', v + 'px');
+        try { localStorage.setItem('topoone-font-size', String(v)); } catch(e) {}
+      });
+    }
+  })();
   document.getElementById('tocToggle').title = _('viewer.subComponents');
   document.getElementById('tocToggle').onclick = function() {
     var p = document.getElementById('tocPanel');

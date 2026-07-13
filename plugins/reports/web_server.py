@@ -1373,7 +1373,7 @@ async def list_models():
         raise HTTPException(503, "Backend not ready")
     try:
         rows = multi_db.main_db.fetchall(
-            "SELECT id, name, provider, model, is_default, type FROM model_configs WHERE status = 'connected'"
+            "SELECT id, name, provider, model, is_default, type FROM model_configs ORDER BY is_default DESC, name"
         )
         result = []
         for r in rows:
