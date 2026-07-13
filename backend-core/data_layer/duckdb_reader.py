@@ -75,7 +75,7 @@ class DuckDBReader:
         self._attach_project(pid)
         pdb = self._pdb_name(pid)
         _rel = (lambda ap: _os.path.relpath(ap, project_root)
-                if project_root and ap.startswith(project_root) else ap)
+                if project_root and ap.lower().startswith(project_root.lower()) else ap)
 
         # 收集 L0 文件
         l0_files = set()

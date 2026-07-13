@@ -43,7 +43,7 @@ def _make_rel(project_root: str):
             return p
         if p.startswith("file:"):
             p = p[5:]
-        if project_root and p.startswith(project_root):
+        if project_root and p.lower().startswith(project_root.lower()):
             p = p[len(project_root):]
         return p.lstrip("/")
     return _rel

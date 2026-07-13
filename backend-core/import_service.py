@@ -224,9 +224,62 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                             val = row.get(col, "")
                             if val.startswith("file:") and original_root:
                                 val = val[5:]
-                                if val.startswith(original_root):
+                                if val.lower().startswith(original_root.lower()):
                                     val = val[len(original_root):]
                                 row[col] = val.lstrip("/")
+                    # graph_doc.node_list/edge_list 同样归一化，否则运行时 _rel 产生绝对路径 key，
+                    # 与 graph_edge 归一化后的相对路径不匹配，跨社区边全部丢失
+                    if table == "graph_doc":
+                        _orig_lower = original_root.lower()
+                        def _norm_path(pv):
+                            if not pv or not pv.startswith("file:") or not original_root:
+                                return pv
+                            pv = pv[5:]
+                            if pv.lower().startswith(_orig_lower):
+                                pv = pv[len(original_root):]
+                            return pv.lstrip("/")
+                        for jcol in ("node_list", "edge_list"):
+                            raw = row.get(jcol, "")
+                            if not raw:
+                                continue
+                            try:
+                                data = json.loads(raw) if isinstance(raw, str) else raw
+                            except Exception:
+                                continue
+                            if not isinstance(data, list):
+                                continue
+                            changed = False
+                            for item in data:
+                                if jcol == "node_list":
+                                    if isinstance(item, str):
+                                        nv = _norm_path(item)
+                                        if nv != item:
+                                            data[data.index(item)] = nv
+                                            changed = True
+                                    elif isinstance(item, dict):
+                                        oid = item.get("id", "")
+                                        nid = _norm_path(oid)
+                                        if nid != oid:
+                                            item["id"] = nid
+                                            changed = True
+                                else:
+                                    if isinstance(item, dict):
+                                        for ecol in ("source", "target"):
+                                            ov = item.get(ecol, "")
+                                            nv = _norm_path(ov)
+                                            if nv != ov:
+                                                item[ecol] = nv
+                                                changed = True
+                                    elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                                        for eidx in range(2):
+                                            ov = item[eidx]
+                                            if isinstance(ov, str):
+                                                nv = _norm_path(ov)
+                                                if nv != ov:
+                                                    item[eidx] = nv
+                                                    changed = True
+                            if changed:
+                                row[jcol] = json.dumps(data, ensure_ascii=False)
                     rows.append(row)
 
             if not rows:

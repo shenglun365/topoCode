@@ -729,7 +729,7 @@ class WebToolExecutor:
                 nodes = [nodes]
             for n in nodes:
                 nid = str(n) if isinstance(n, str) else str(n.get("id", ""))
-                if project_root and nid.startswith(project_root):
+                if project_root and nid.lower().startswith(project_root.lower()):
                     nid = nid[len(project_root):]
                 nid = nid.lstrip("/")
                 if nid and nid not in seen:

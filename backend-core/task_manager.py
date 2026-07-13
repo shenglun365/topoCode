@@ -1844,7 +1844,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 return p
             if p.startswith('file:'):
                 p = p[5:]
-            if project_root and p.startswith(project_root):
+            if project_root and p.lower().startswith(project_root.lower()):
                 p = p[len(project_root):]
             return p.lstrip('/').replace('\\', '/')
 
@@ -2800,7 +2800,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 优先用相对路径查找（file_summaries 存储格式）
         query_path = file_path
-        if project_root and file_path.startswith(project_root):
+        if project_root and file_path.lower().startswith(project_root.lower()):
             query_path = file_path[len(project_root):].lstrip("/")
 
         from agent_workflow.file_summary_cache import FileSummaryCache
@@ -2832,7 +2832,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         # 标准化为相对路径（同 get_file_summary 的兼容逻辑）
         query_path = file_path
-        if project_root and file_path.startswith(project_root):
+        if project_root and file_path.lower().startswith(project_root.lower()):
             query_path = file_path[len(project_root):].lstrip("/")
 
         from agent_workflow.file_summary_cache import FileSummaryCache
