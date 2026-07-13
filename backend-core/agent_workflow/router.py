@@ -154,7 +154,7 @@ JSON:"""
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.0,
-                    max_tokens=200,
+                    max_tokens=None,
                 )
             )
         finally:

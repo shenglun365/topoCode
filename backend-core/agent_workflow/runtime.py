@@ -624,21 +624,43 @@ class AgentRuntime:
                         "fields: name (≤20 chars), summary (100-2000 chars), role (≤3 words), "
                         "key_files (array of {path, summary}), depends_on (array of strings).\n\n"
                         f"Analysis text:\n{final_response}\n\n"
-                        "Output ONLY the JSON object, no other text."
+                        "Return ONLY a raw JSON object. NO thinking, NO reasoning, NO markdown fences. "
+                        "Do NOT include any text before or after the JSON."
                     )
                     llm_fn = create_llm_chat_fn(self._multi_db)
                     json_text = await llm_fn(
                         messages=[{"role": "user", "content": json_prompt}],
-                        temperature=0.1, max_tokens=4096,
+                        temperature=0.1, max_tokens=None,
                     )
-                    if json_text and self._is_valid_json_output(json_text):
-                        final_response = json_text
-                        comp_success = True
-                        logger.info(f"[AgentRuntime] comp={comp_id} JSON conversion from reasoning_content OK, len={len(json_text)}")
-                    elif json_text:
-                        logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion returned non-JSON: {json_text[:200]}")
-                    else:
+                    if not json_text:
                         logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion returned empty content")
+                    else:
+                        text = json_text.strip()
+                        # 先尝试完整解析
+                        if self._is_valid_json_output(text):
+                            final_response = text
+                            comp_success = True
+                            logger.info(f"[AgentRuntime] comp={comp_id} JSON conversion OK, len={len(text)}")
+                        else:
+                            # 尝试从返回文本中正则提取 JSON
+                            import re as _re
+                            extracted = None
+                            for pat in [r'(\{[\s\S]*?"name"[\s\S]*?"summary"[\s\S]*?\})', r'(\{.*\})']:
+                                m = _re.search(pat, text, _re.DOTALL)
+                                if m:
+                                    try:
+                                        candidate = m.group(1)
+                                        json.loads(candidate)
+                                        extracted = candidate
+                                        break
+                                    except json.JSONDecodeError:
+                                        continue
+                            if extracted:
+                                final_response = extracted
+                                comp_success = True
+                                logger.info(f"[AgentRuntime] comp={comp_id} JSON conversion extracted from response, len={len(extracted)}")
+                            else:
+                                logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion returned non-JSON: {text[:200]}")
                 except Exception as e:
                     logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion failed: {e}")
             if not comp_success and comp_turns > 0:
