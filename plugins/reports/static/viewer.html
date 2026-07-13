@@ -296,9 +296,11 @@
   <span class="title" id="docTitle" data-i18n="viewer.title">TopoCode Documents</span>
   <select id="fontSizeSelect" data-i18n-title="common.fontSize" title="Font Size">
     <option value="13">13px</option>
-    <option value="15" selected>15px</option>
-    <option value="18">18px</option>
-    <option value="21">21px</option>
+    <option value="15">15px</option>
+    <option value="18" selected>18px</option>
+    <option value="22">22px</option>
+    <option value="26">26px</option>
+    <option value="32">32px</option>
   </select>
   <button class="toggle-btn" id="toggleNotes" data-i18n-title="viewer.notes">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -1884,6 +1886,19 @@ const GraphView = {
       cyContainer.innerHTML = '<div class="error-msg">\u52a0\u8f7d\u5173\u7cfb\u56fe\u5931\u8d25: ' + e.message + '</div>';
     }
   },
+  updateFontSize(basePx) {
+    if (!g_cy) return;
+    var b = Math.max(6, basePx);
+    var mode = S.gran === 'component' ? 0.71 : 0.57;
+    g_cy.style()
+      .selector('node')
+      .style('font-size', Math.round(b * mode) + 'px')
+      .update();
+    g_cy.style()
+      .selector('node[isExternal]')
+      .style('font-size', Math.round(b * 0.64) + 'px')
+      .update();
+  },
   _initToolbar() {
     var tb = document.getElementById('graphToolbar');
     var hdr = document.getElementById('graphToolbarHeader');
@@ -2608,7 +2623,7 @@ async function load() {
   });
   // 字体大小初始化
   ;(function() {
-    var saved = parseInt(localStorage.getItem('topoone-font-size') || '15');
+    var saved = parseInt(localStorage.getItem('topoone-font-size') || '18');
     var sel = document.getElementById('fontSizeSelect');
     if (sel) {
       sel.value = saved;
@@ -2617,6 +2632,7 @@ async function load() {
         var v = parseInt(this.value);
         document.documentElement.style.setProperty('--content-font-size', v + 'px');
         try { localStorage.setItem('topoone-font-size', String(v)); } catch(e) {}
+        if (typeof g_cy !== 'undefined' && g_cy) GraphView.updateFontSize(v);
       });
     }
   })();
