@@ -277,11 +277,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
           <option :value="128000">128K</option>
           <option :value="256000">256K</option>
         </select>
-        <select v-model.number="fontSize" :title="__('common.fontSize')">
-          <option :value="13">13px</option>
-          <option :value="15">15px</option>
-          <option :value="18">18px</option>
-          <option :value="21">21px</option>
+        <select v-model="fontSize" @change="onFontSizeChange" :title="__('common.fontSize')">
+          <option value="13">13px</option>
+          <option value="15">15px</option>
+          <option value="18">18px</option>
+          <option value="21">21px</option>
         </select>
       </div>
     </header>
@@ -401,11 +401,13 @@ createApp({
     const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
     const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
     watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
-    const fontSize=ref(parseInt(localStorage.getItem('topoone-font-size')||'15'))
-    watch(fontSize,function(val){
+    const fontSize=ref(localStorage.getItem('topoone-font-size')||'15')
+    function applyFontSize(val){
       document.documentElement.style.setProperty('--content-font-size',val+'px')
-      try{localStorage.setItem('topoone-font-size',String(val))}catch(e){}
-    })
+      try{localStorage.setItem('topoone-font-size',val)}catch(e){}
+    }
+    function onFontSizeChange(){applyFontSize(fontSize.value)}
+    watch(fontSize,function(val){applyFontSize(val)})
     const activeDeleteMsg=ref(null)
     const allSelected=computed(function(){return selectedIds.value.size===messages.value.filter(function(m){return m.id}).length&&selectedIds.value.size>0})
     function toggleSelect(id){
@@ -875,7 +877,7 @@ createApp({
     }
 
     onMounted(()=>{
-      document.documentElement.style.setProperty('--content-font-size',fontSize.value+'px')
+      applyFontSize(fontSize.value)
       const p=new URLSearchParams(location.search);const sid=p.get('sessionId')
       // 按 taskId 隔离便签
       NotesStore.init(p.get('taskId')||'')
@@ -899,7 +901,7 @@ createApp({
       renderMd,onBubbleUpdate,createSession,switchSession,deleteSession,onModelChange,send,
       loadNotes,switchNotesTab,viewNote,deleteNote,execPendingDraft,
       deleteMode,selectedIds,allSelected,toggleSelect,selectAll,exitDeleteMode,deleteMessage,deleteSelected,
-      contextLimit,fontSize,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream}
+      contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream}
   }
 }).mount('#app')
 </script>
