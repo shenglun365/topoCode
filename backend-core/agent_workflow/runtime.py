@@ -613,13 +613,36 @@ class AgentRuntime:
                     break
 
             # 保存当前组件结果
-            self._save_component_result(comp, final_response or "", context)
-            comp_success = bool(final_response)
+            comp_success = self._is_valid_json_output(final_response or "")
+            # 如果 final_response 非空但不是有效 JSON（如从 reasoning_content 提取的文本），
+            # 尝试用 LLM 直接转换文本到 JSON
+            if not comp_success and final_response and comp_turns > 0:
+                try:
+                    from .llm_adapter import create_llm_chat_fn
+                    json_prompt = (
+                        "Convert the following component analysis text to JSON format with "
+                        "fields: name (≤20 chars), summary (100-2000 chars), role (≤3 words), "
+                        "key_files (array of {path, summary}), depends_on (array of strings).\n\n"
+                        f"Analysis text:\n{final_response}\n\n"
+                        "Output ONLY the JSON object, no other text."
+                    )
+                    llm_fn = create_llm_chat_fn(self._multi_db)
+                    json_text = await llm_fn(
+                        messages=[{"role": "user", "content": json_prompt}],
+                        temperature=0.1, max_tokens=4096,
+                    )
+                    if json_text and self._is_valid_json_output(json_text):
+                        final_response = json_text
+                        comp_success = True
+                        logger.info(f"[AgentRuntime] comp={comp_id} JSON conversion from reasoning_content OK, len={len(json_text)}")
+                except Exception as e:
+                    logger.warning(f"[AgentRuntime] comp={comp_id} JSON conversion failed: {e}")
             if not comp_success and comp_turns > 0:
                 fallback_text = self._build_agentic_fallback(comp, messages)
                 if fallback_text:
                     final_response = fallback_text
                     comp_success = True
+            self._save_component_result(comp, final_response or "", context)
             component_results.append({
                 "component_id": comp_id,
                 "output_text": final_response or "",
