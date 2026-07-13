@@ -908,7 +908,11 @@ export const useCommunityStore = defineStore('community', () => {
           controlDispatcher.unregister(controlKey)
           if (progress.status !== 'failed' && progress.status !== 'cancelled' && taskId) {
             const pid = useProjectStore().selectedProjectId
-            if (pid) loadCommunities(taskId, pid).catch(() => {})
+            if (pid) {
+              loadCommunities(taskId, pid).catch(() => {})
+              // 延迟加载：等待 ingest consumer 完成异步写入 DB
+              setTimeout(() => loadCommunities(taskId, pid).catch(() => {}), 3000)
+            }
           }
           // 流水线完成时发出统计，供 AI 面板注入汇总消息
           if (progress.stats && taskId) {
