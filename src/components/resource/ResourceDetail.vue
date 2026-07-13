@@ -111,7 +111,10 @@ const dislikeActive = computed(() => props.resource?.my_vote === -1)
           </button>
         </div>
         <div class="modal-body">
-          <div v-if="isPrerelease" class="prerelease-banner">
+          <div
+            v-if="isPrerelease"
+            class="prerelease-banner"
+          >
             {{ t('resource.prerelease') }}
           </div>
           <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
@@ -156,9 +159,17 @@ const dislikeActive = computed(() => props.resource?.my_vote === -1)
             </button>
           </div>
 
-          <div v-if="auth.isAuthenticated" class="comment-section">
-            <div class="comment-title">{{ t('resource.comment.title') }}</div>
-            <div v-if="commentSubmitted" class="comment-hint">
+          <div
+            v-if="auth.isAuthenticated"
+            class="comment-section"
+          >
+            <div class="comment-title">
+              {{ t('resource.comment.title') }}
+            </div>
+            <div
+              v-if="commentSubmitted"
+              class="comment-hint"
+            >
               {{ t('resource.comment.submitted') }}
             </div>
             <template v-if="!commentSubmitted">

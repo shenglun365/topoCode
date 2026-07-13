@@ -99,8 +99,8 @@ async function handleLogin() {
           <input
             v-model="account"
             class="input"
-          :placeholder="t('auth.placeholder.account')"
-          autocomplete="username"
+            :placeholder="t('auth.placeholder.account')"
+            autocomplete="username"
           >
         </div>
         <div

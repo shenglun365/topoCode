@@ -152,7 +152,7 @@ const tabs = [
               class="btn btn-primary btn-sm"
               @click="handleRestart"
             >
-               {{ t('common.confirm') }}
+              {{ t('common.confirm') }}
             </button>
           </div>
         </div>

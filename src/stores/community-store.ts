@@ -74,6 +74,9 @@ const _requestVersions = new Map<string, number>()
 // 流水线完成统计，供 AI 助手注入汇总消息
 export const pipelineSummary = ref<{ taskId: string; stats: any } | null>(null)
 
+/** Agent 完成信号（计数器），ReportHome 等组件 watch 此值以刷新独立数据（概览文档、仪表盘） */
+export const agentCompletedSignal = ref(0)
+
 function _nextVersion(key: string): number {
   const v = (_requestVersions.get(key) || 0) + 1
   _requestVersions.set(key, v)
@@ -906,6 +909,7 @@ export const useCommunityStore = defineStore('community', () => {
         }
         if (isCompleted) {
           controlDispatcher.unregister(controlKey)
+          agentCompletedSignal.value++
           if (progress.status !== 'failed' && progress.status !== 'cancelled' && taskId) {
             const pid = useProjectStore().selectedProjectId
             if (pid) {

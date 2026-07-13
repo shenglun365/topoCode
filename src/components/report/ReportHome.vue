@@ -13,7 +13,7 @@ import { useProjectStore } from '@/stores/project'
 import { useAnalysisStore } from '@/stores/analysis'
 
 import { useReportStore } from '@/stores/report-store'
-import { useCommunityStore, type CommunityItem } from '@/stores/community-store'
+import { useCommunityStore, type CommunityItem, agentCompletedSignal } from '@/stores/community-store'
 import { ipc } from '@/services/ipc'
 import { displayDispatcher } from '@/services/display-dispatcher'
 import ProjectSummaryCard from '@/components/home/ProjectSummaryCard.vue'
@@ -392,6 +392,20 @@ watch(() => props.taskId, () => {
   stopOverviewPoll()
   reportStore.invalidateDashboard(props.taskId)
   loadData()
+})
+// agent 完成时刷新概览文档和仪表盘（不依赖初始 7s 轮询窗口）
+watch(agentCompletedSignal, () => {
+  loadOverviewDoc(true)
+  if (props.taskId) {
+    reportStore.invalidateDashboard(props.taskId)
+    reportStore.loadDashboard(props.taskId).then((dash) => {
+      if (dash) {
+        setPreSummaryFromDashboard(dash)
+        fileStats.value = dash.fileStats?.extensions || {}
+      }
+    })
+    reportStore.checkReportExists(props.taskId)
+  }
 })
 </script>
 

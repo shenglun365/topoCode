@@ -142,8 +142,8 @@ function close() {
       </form>
 
       <div class="auth-links">
-          <router-link to="/login">
-            {{ t('auth.hasAccountGoLogin') }}
+        <router-link to="/login">
+          {{ t('auth.hasAccountGoLogin') }}
         </router-link>
       </div>
     </div>

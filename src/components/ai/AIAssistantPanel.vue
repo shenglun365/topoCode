@@ -726,7 +726,7 @@ onMounted(() => {
           <span
             v-if="selectionStore.selectedCount > 20"
             class="ai-selection-more"
-                     >+{{ t('aiAssistant.select.count', { count: selectionStore.selectedCount - 20 }) }}...</span>
+          >+{{ t('aiAssistant.select.count', { count: selectionStore.selectedCount - 20 }) }}...</span>
         </div>
         <button
           class="ai-selection-clear"

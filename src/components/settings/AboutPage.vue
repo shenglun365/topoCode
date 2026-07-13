@@ -24,21 +24,21 @@ const { t } = useI18n()
       class="card"
       style="padding:16px; margin-bottom:12px;"
     >
-        <div>topocode@163.com</div>
-        <div>
-          <a
-            href="https://github.com/shenglun365/topoCode"
-            target="_blank"
-            style="color:var(--accent);"
-          >github.com/shenglun365/topoCode</a>
-        </div>
-        <div>
-          <a
-            href="https://gitee.com/shenglun365/topoCode"
-            target="_blank"
-            style="color:var(--accent);"
-          >gitee.com/shenglun365/topoCode</a>
-        </div>
+      <div>topocode@163.com</div>
+      <div>
+        <a
+          href="https://github.com/shenglun365/topoCode"
+          target="_blank"
+          style="color:var(--accent);"
+        >github.com/shenglun365/topoCode</a>
+      </div>
+      <div>
+        <a
+          href="https://gitee.com/shenglun365/topoCode"
+          target="_blank"
+          style="color:var(--accent);"
+        >gitee.com/shenglun365/topoCode</a>
+      </div>
     </div>
 
     <div

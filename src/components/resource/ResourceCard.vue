@@ -66,10 +66,10 @@ const isFree = computed(() => props.resource.pricing_model === 'free')
         class="badge-hot"
       >{{ badgeText }}</span>
       <div class="badges-bottom">
-          <span
-            v-if="isPrerelease"
-            class="badge-prerelease"
-          >{{ t('resource.prerelease') }}</span>
+        <span
+          v-if="isPrerelease"
+          class="badge-prerelease"
+        >{{ t('resource.prerelease') }}</span>
         <span
           v-if="resource.status === 'offline' && resource.theme?.owned"
           class="badge-offline"

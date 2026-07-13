@@ -262,8 +262,20 @@ onMounted(async () => {
       v-if="authStore.authExpired"
       class="auth-expired-banner"
     >
-      <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10" />
+      <svg
+        class="banner-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r="10"
+        />
         <path d="M12 8v4" />
         <path d="M12 16h.01" />
       </svg>
@@ -538,7 +550,7 @@ onMounted(async () => {
                 class="btn btn-primary btn-sm"
                 @click="closeImportDialog"
               >
-                 {{ t('common.close') }}
+                {{ t('common.close') }}
               </button>
             </div>
           </div>

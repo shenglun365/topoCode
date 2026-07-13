@@ -429,9 +429,16 @@ onMounted(() => {
           </div>
           <div class="modal-body">
             <template v-if="versionInfo">
-              <div v-if="hasUpdate()" class="update-available">
-                <div class="update-icon">📦</div>
-                <div class="update-title">{{ t('shell.topBar.updateAvailable') }}</div>
+              <div
+                v-if="hasUpdate()"
+                class="update-available"
+              >
+                <div class="update-icon">
+                  📦
+                </div>
+                <div class="update-title">
+                  {{ t('shell.topBar.updateAvailable') }}
+                </div>
                 <div class="update-desc">
                   {{ t('shell.topBar.updateCurrentVersion') }}: v{{ showAboutVersion }}<br>
                   {{ t('shell.topBar.updateLatestVersion') }}: v{{ versionInfo.latest_version }}
@@ -447,15 +454,31 @@ onMounted(() => {
                   >{{ t('shell.topBar.updateDownloadFrom') }} {{ name }}</a>
                 </div>
               </div>
-              <div v-else class="update-current">
-                <div class="update-icon">✅</div>
-                <div class="update-title">{{ t('shell.topBar.updateLatest') }}</div>
-                <div class="update-desc">v{{ versionInfo.latest_version }}</div>
+              <div
+                v-else
+                class="update-current"
+              >
+                <div class="update-icon">
+                  ✅
+                </div>
+                <div class="update-title">
+                  {{ t('shell.topBar.updateLatest') }}
+                </div>
+                <div class="update-desc">
+                  v{{ versionInfo.latest_version }}
+                </div>
               </div>
             </template>
-            <div v-else class="update-error">
-              <div class="update-icon">⚠️</div>
-              <div class="update-title">{{ t('shell.topBar.updateCheckFailed') }}</div>
+            <div
+              v-else
+              class="update-error"
+            >
+              <div class="update-icon">
+                ⚠️
+              </div>
+              <div class="update-title">
+                {{ t('shell.topBar.updateCheckFailed') }}
+              </div>
             </div>
           </div>
           <div class="modal-footer">
