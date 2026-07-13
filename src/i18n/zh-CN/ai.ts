@@ -58,6 +58,7 @@ export default {
     },
     overview: {
       started: '架构概览生成任务已启动，请稍后查看结果...',
+      pendingAnalysis: '组件分析尚未完成，无法生成架构概览。请先执行 /analyze 或 /pipeline 完成组件分析后再试。',
     },
     retry: {
       forceOverwriteAll: '（强制覆盖所有）',

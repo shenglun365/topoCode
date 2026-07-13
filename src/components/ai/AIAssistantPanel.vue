@@ -497,7 +497,14 @@ async function handleSend() {
       const langHint = language === 'zh' ? t('aiAssistant.langHint.zh') : language === 'en' ? t('aiAssistant.langHint.en') : ''
       addMessage('system', t('aiAssistant.overview.started') + (langHint ? ` | ${langHint}` : ''))
       communityStore.triggerOverview(tid, text.includes('--force'), language)
-        .catch(e => addMessage('error', String(e)))
+        .catch((e: any) => {
+          const msg = String(e?.message || e || '')
+          if (/Prerequisites not met|Please run.*analyze_components/i.test(msg)) {
+            addMessage('system', t('aiAssistant.overview.pendingAnalysis'))
+          } else {
+            addMessage('error', msg)
+          }
+        })
       return
     }
     // /pipeline [-j N] [--force] — 流水线整体激活

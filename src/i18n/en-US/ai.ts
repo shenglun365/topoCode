@@ -58,6 +58,7 @@ export default {
     },
     overview: {
       started: 'Architecture overview generation task started, please check back later...',
+      pendingAnalysis: 'Component analysis is not yet complete. Please run /analyze or /pipeline first.',
     },
     retry: {
       forceOverwriteAll: '(force overwrite all)',
