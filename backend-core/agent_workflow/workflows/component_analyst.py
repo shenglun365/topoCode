@@ -70,7 +70,7 @@ class _AnalyzeComponentTool(AgentTool):
             else:
                 analysis_mode = component.get("analysis_mode", "quick")
                 summary_range = "500-2000 chars" if analysis_mode == "deep" else "100-300 chars"
-                max_tok = 2000 if analysis_mode == "deep" else 1200
+                max_tok = None
                 system_text = (
                     "You are a code architecture analysis expert. Based on the provided component context data (file list, key symbols, edge relations), "
                     "analyze the function and architecture role of this software component module.\n\n"

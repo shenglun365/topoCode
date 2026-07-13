@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def create_llm_chat_fn(multi_db, model_id: str = "") -> Callable:
     """
 
     async def _chat(messages: list[dict], temperature: float = 0.3,
-                    max_tokens: int = 2000, **kwargs) -> str:
+                    max_tokens: Optional[int] = None, **kwargs) -> str:
         start_ts = time.time()
         try:
             from llm_service import LLMService

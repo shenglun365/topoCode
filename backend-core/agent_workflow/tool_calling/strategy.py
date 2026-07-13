@@ -53,7 +53,7 @@ class ToolCallingStrategy(ABC):
         multi_db,
         model_id: str = "",
         temperature: float = 0.3,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
     ) -> AgentChatResponse:
         """向 LLM 发送消息并返回结构化响应"""
         ...
@@ -84,7 +84,7 @@ class NativeToolCallingStrategy(ToolCallingStrategy):
         multi_db,
         model_id: str = "",
         temperature: float = 0.3,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
     ) -> AgentChatResponse:
         from llm_service import LLMService
         service = LLMService(multi_db) if multi_db else None
@@ -224,7 +224,7 @@ class TextFallbackToolCallingStrategy(ToolCallingStrategy):
         multi_db,
         model_id: str = "",
         temperature: float = 0.3,
-        max_tokens: int = 4096,
+        max_tokens: Optional[int] = None,
     ) -> AgentChatResponse:
         from llm_service import LLMService
         from agent_workflow.llm_adapter import create_llm_chat_fn

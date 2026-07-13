@@ -21,7 +21,7 @@ async def agentic_chat(
     model_id: str = "",
     strategy: Optional[ToolCallingStrategy] = None,
     temperature: float = 0.3,
-    max_tokens: int = 4096,
+    max_tokens: Optional[int] = None,
 ) -> AgentChatResponse:
     """
     统一 Agentic 聊天函数。
