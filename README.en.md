@@ -9,9 +9,9 @@
   </picture>
 </p>
 
-> Source Code Architecture Analysis & Learning Tool — Elevate your architectural cognition.
+> Source Code Architecture Deep Analysis Tool — An "analysis microscope" for "deep code learning" that elevates your architectural cognition.
 
-TopoCode is a **code architecture analysis and learning tool** for developers. Through static code parsing, dependency graph computation, community detection algorithms, and AI-assisted analysis, it helps developers quickly understand the architecture design, module decomposition, and code organization of unfamiliar projects.
+TopoCode is not a one-shot efficiency tool that generates architecture diagrams from a single prompt. It is a platform that helps you understand project architecture **layer by layer and improve your architectural cognition**. Through static code parsing, dependency graph computation, community detection algorithms, and AI-assisted analysis, it uncovers the design logic and module relationships behind the code — helping developers truly understand the architecture of unfamiliar projects.
 
 ---
 
@@ -25,7 +25,7 @@ TopoCode is a **code architecture analysis and learning tool** for developers. T
 - **Community Detection** — Louvain / Leiden algorithms for automatic code module (community) identification
 - **AI Architecture Analysis** — LLM-powered workflows that automatically analyze component functions and generate architecture overview documents
 - **Interactive AI Assistant** — Context-aware Q&A with tool-calling capabilities (symbol search, file reading, etc.), accessible via the local web port in any browser
-- **Knowledge Base** — Persistent storage of analysis documents with categorized management and 4-dimensional tagging
+- **Knowledge Base** — Persistent storage of analysis documents (categorization pending). A key focus for future iterations — the goal is to evolve into an **external brain** that aligns with your cognition. Beyond static storage, it will support multiple integration methods to command other agent tools, closing the loop of **store → analyze → use**
 - **Web Document Service & AI Chat** — Local HTTP server (default port 3456) for browsing architecture documents and using the AI assistant in a browser
 - **Internationalization** — Chinese / English interface and AI analysis output
 

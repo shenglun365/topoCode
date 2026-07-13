@@ -513,7 +513,7 @@ Text selected in the document viewer is automatically saved to notes. In the Cha
 
 > Screenshot: `docs/images/usage/en/knowledge-chat.png`
 
-The Knowledge Base feature is used for persistent storage and management of architecture analysis documents.
+The Knowledge Base feature provides persistent storage and management of architecture analysis documents. It is a key focus for future iterations — the goal is to evolve into an **external brain** that aligns with your cognition. Beyond static storage, it will support multiple integration methods to command other agent tools, closing the loop of **store → analyze → use**.
 
 ### 9.1 Knowledge Base Entry
 
@@ -523,7 +523,6 @@ The Knowledge Base feature is used for persistent storage and management of arch
 ### 9.2 Document Management
 
 - **View** — browse saved architecture analysis documents
-- **Categorize** — classify by lifecycle, tech stack, abstraction level, and purpose
 - **Search** — search document content by keyword
 - **Edit** — modify document content and tags
 
