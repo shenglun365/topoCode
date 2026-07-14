@@ -295,6 +295,9 @@ function createRealIPC() {
       getAgentProgress: async (params: { agentTaskId: string }) => {
         return await api.analysis.getAgentProgress(params)
       },
+      getProgressStats: async (params: { taskId: string }) => {
+        return await api.analysis.getProgressStats(params)
+      },
       cancelAgentTask: async (params: { agentTaskId: string }) => {
         return await api.analysis.cancelAgentTask(params)
       },

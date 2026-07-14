@@ -99,6 +99,10 @@ class AgentProgress:
     weighted_progress: float = 0.0
     weighted_total: int = 0
     weighted_done: int = 0
+    total_files: int = 0
+    total_comps: int = 0
+    done_files: int = 0
+    done_comps: int = 0
 
 
 ProgressCallback = Callable[[AgentProgress], None]
@@ -151,6 +155,10 @@ class AgentRuntime:
         self._weighted_total: int = 0
         self._weighted_done: int = 0
         self._weighted_progress: float = 0.0
+        self._total_files: int = 0
+        self._total_comps: int = 0
+        self._done_files: int = 0
+        self._done_comps: int = 0
         self._tool_call_history: list[tuple] = []
         self._loop_warning_count: int = 0
         self._content_warning_count: int = 0
@@ -265,6 +273,17 @@ class AgentRuntime:
                 else:
                     self._weighted_total += 30
 
+        # Use estimated total weight from pipeline context for stable denominator
+        est = context.get("_estimated_total_weight")
+        if est and est > self._weighted_total:
+            self._weighted_total = est
+        # Fallback: ensure minimum total for pipelines (DB queries may return 0)
+        # 1000 ≈ 30 files × 30 + buffer — prevents premature 100% from cached items
+        if self._weighted_total < 1000:
+            self._weighted_total = 1000
+        self._total_files = context.get("_total_files", 0)
+        self._total_comps = context.get("_total_comps", 0)
+
         # 2. Execute each step
         self._status = AgentStatus.RUNNING
         results: dict[str, Any] = {}
@@ -290,6 +309,8 @@ class AgentRuntime:
                 failed_count += 1
                 continue
             tool.cancel_event = self._cancel_event
+            if step.tool.startswith('pipeline_'):
+                tool._forward_log = self._report_item
 
             self._steps[i].status = "running"
             # Emit start logs for items known at plan time
@@ -1117,6 +1138,10 @@ class AgentRuntime:
                 weighted_progress=self._weighted_progress,
                 weighted_total=self._weighted_total,
                 weighted_done=self._weighted_done,
+                total_files=self._total_files,
+                total_comps=self._total_comps,
+                done_files=self._done_files,
+                done_comps=self._done_comps,
             )
             try:
                 self._on_progress(progress)
@@ -1140,6 +1165,12 @@ class AgentRuntime:
                     existing = log
                     break
 
+        # Track per-type completed counts (stable, not derived from taskLogs)
+        if status == 'success' and (not existing or existing.status != 'success'):
+            if type_ == 'file':
+                self._done_files += 1
+            elif type_ == 'component':
+                self._done_comps += 1
         if existing:
             existing.status = status
             existing.endTime = now_iso if not end_time else end_time
@@ -1158,18 +1189,15 @@ class AgentRuntime:
             self._report()
 
     def _calc_weighted(self):
-        total = 0
         done = 0
         for log in self._item_logs:
-            w = WEIGHT_MAP.get(log.type, 30)
-            total += w
             if log.status in ('success', 'failed'):
-                done += w
-        if total == 0 and self._weighted_total > 0:
-            total = self._weighted_total
-        self._weighted_total = total
+                done += WEIGHT_MAP.get(log.type, 30)
         self._weighted_done = done
-        self._weighted_progress = round(min(done, total) / total * 100, 1) if total > 0 else 0.0
+        if self._weighted_total > 0:
+            self._weighted_progress = round(min(done, self._weighted_total) / self._weighted_total * 100, 1)
+        else:
+            self._weighted_progress = 0.0
 
     @staticmethod
     def _needs_rate_limit(tool_name: str) -> bool:

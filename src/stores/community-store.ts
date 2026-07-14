@@ -66,6 +66,10 @@ interface CommunityTaskRuntime {
     progress: number; message: string; createdAt: string
     taskLogs: Array<{ id: string; type: string; name: string; status: string; startTime: string; endTime: string | null; error: string | null }>
     weightedProgress: number
+    totalFiles: number
+    totalComps: number
+    doneFiles: number
+    doneComps: number
   }>
 }
 
@@ -716,6 +720,20 @@ export const useCommunityStore = defineStore('community', () => {
 
   /* ---- Agent task management ---- */
 
+  /** 移除指定 action 类型的已终态 agent，避免残留卡片 */
+  const _TERMINAL = new Set(['completed', 'failed', 'cancelled', 'skipped', 'partial'])
+  function _cleanTerminalAgents(taskId: string, action: string) {
+    const t = tasks.value[taskId]
+    if (!t) return
+    for (const at of t.agentTasks) {
+      if (at.action === action && _TERMINAL.has(at.status)) {
+        const ck = `agent-progress:${taskId}:${at.id}`
+        if (controlDispatcher.has(ck)) controlDispatcher.unregister(ck)
+      }
+    }
+    t.agentTasks = t.agentTasks.filter(at => at.action !== action || !_TERMINAL.has(at.status))
+  }
+
   function addAgentTask(taskId: string, action: string, steps: string[]) {
     const t = ensureTask(taskId)
     const id = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
@@ -723,7 +741,7 @@ export const useCommunityStore = defineStore('community', () => {
       id, action, status: 'queued',
       steps: steps.map(s => ({ description: s, status: 'pending' as const })),
       progress: 0, message: '', createdAt: new Date().toISOString(),
-      taskLogs: [], weightedProgress: 0,
+      taskLogs: [], weightedProgress: 0, totalFiles: 0, totalComps: 0, doneFiles: 0, doneComps: 0,
     })
     return id
   }
@@ -746,6 +764,7 @@ export const useCommunityStore = defineStore('community', () => {
 
   async function triggerOverview(taskId: string, force = false, language = '') {
     const t = ensureTask(taskId)
+    _cleanTerminalAgents(taskId, 'overview')
     const idx = t.agentTasks.length
     const actionLabel = 'overview'
     addAgentTask(taskId, actionLabel, ['架构概览生成中...'])
@@ -773,9 +792,10 @@ export const useCommunityStore = defineStore('community', () => {
   async function triggerComponentAnalysis(taskId: string | null, components: ComponentRef[], language = '', concurrency = 1, agentic = false, maxTurns = 30, summaryModelId = '', subagentConcurrency = 1, analysisMode = 'quick', force = false) {
     if (!taskId || !components.length) return
     const t = ensureTask(taskId)
+    const actionLabel = agentic ? 'agentic_analyze_components' : 'analyze_components'
+    _cleanTerminalAgents(taskId, actionLabel)
     const steps = components.map(c => `分析组件: ${c.name} (${c.type === 'community' ? '社区' : '外部包'})`)
     const idx = t.agentTasks.length
-    const actionLabel = agentic ? 'agentic_analyze_components' : 'analyze_components'
     addAgentTask(taskId, actionLabel, steps)
     t.agentTasks[idx].status = 'running'
 
@@ -853,59 +873,52 @@ export const useCommunityStore = defineStore('community', () => {
           controlDispatcher.unregister(controlKey)
           return
         }
-        const fileCurrent = progress.file_current || 0
-        const fileTotal = progress.file_total || 0
         const stepCurrent = progress.step_current || 0
         const stepTotal = progress.step_total || 0
-        const pct = progress.weighted_progress != null
-          ? Math.round(progress.weighted_progress)
-          : (fileTotal ? Math.round(fileCurrent / fileTotal * 100) : (stepTotal ? Math.round(stepCurrent / stepTotal * 100) : 0))
-        const weightedPct = progress.weighted_progress ?? pct
         const allStepsDone = progress.steps && progress.steps.length > 0 &&
           progress.steps.every(s => s.status === 'done' || s.status === 'failed')
         const isCompleted = progress.status === 'completed' || progress.status === 'partial' ||
-          progress.status === 'failed' || progress.status === 'cancelled' ||
-          ((fileTotal ? (fileCurrent >= fileTotal) : (stepCurrent >= stepTotal)) && pct === 100 && allStepsDone)
+          progress.status === 'failed' || progress.status === 'cancelled'
         const msg = (!progress.message && stepTotal === 0 && stepCurrent === 0)
           ? '正在启动…' : (progress.message || '')
         const newStatus = isCompleted
           ? (progress.status === 'failed' ? 'failed' :
              progress.status === 'cancelled' ? 'cancelled' : 'completed')
           : (progress.status || 'running')
-        if (pct !== _lastPct || msg !== _lastMsg || newStatus !== _lastStatus) {
-          _lastPct = pct
-          _lastMsg = msg
+        if (newStatus !== _lastStatus || msg !== _lastMsg) {
           _lastStatus = newStatus
+          _lastMsg = msg
           updateAgentTask(taskId, taskIdx, {
             status: newStatus,
-            progress: pct,
             message: msg,
           })
         }
         // Sync item_logs
         const agent = t.agentTasks[taskIdx]
         if (progress.item_logs && progress.item_logs.length > 0) {
+          console.log('[CS] poll item_logs', { taskIdx, agentTaskId, itemLogsCount: progress.item_logs.length, existingLogs: agent.taskLogs.length })
           const existingMap = new Map(agent.taskLogs.map(l => [l.id, l]))
           for (const log of progress.item_logs) {
             const existing = existingMap.get(log.id)
             if (existing) {
               if (existing.status !== log.status || existing.endTime !== log.endTime) {
+                console.log('[CS] taskLogs update', { id: log.id, type: log.type, name: log.name, fromStatus: existing.status, toStatus: log.status })
                 existing.status = log.status
                 existing.endTime = log.endTime
                 if (log.error) existing.error = log.error
               }
             } else {
+              console.log('[CS] taskLogs push', { id: log.id, type: log.type, name: log.name, status: log.status })
               agent.taskLogs.push({ ...log })
               existingMap.set(log.id, log)
             }
           }
           // Trim to last 100 logs to avoid unbounded growth
           if (agent.taskLogs.length > 100) {
+            const before = agent.taskLogs.length
             agent.taskLogs = agent.taskLogs.slice(-100)
+            console.log('[CS] taskLogs slice', { before, after: agent.taskLogs.length })
           }
-        }
-        if (weightedPct !== agent.weightedProgress) {
-          agent.weightedProgress = weightedPct
         }
         if (progress.steps) {
           const doneCount = progress.steps.filter(s => s.status === 'done').length
@@ -977,6 +990,39 @@ export const useCommunityStore = defineStore('community', () => {
     }
   }
 
+  let _statsPollKey = ''
+
+  async function getProgressStats(taskId: string) {
+    try {
+      return await ipc.analysis.getProgressStats({ taskId })
+    } catch { return null }
+  }
+
+  function _pollProgressStats(taskId: string) {
+    // 停止旧轮询
+    if (_statsPollKey && controlDispatcher.has(_statsPollKey)) {
+      controlDispatcher.unregister(_statsPollKey)
+    }
+    _statsPollKey = `progress-stats:${taskId}`
+    controlDispatcher.register(_statsPollKey, {
+      interval: 3000,
+      fetcher: () => ipc.analysis.getProgressStats({ taskId }),
+      onData: (stats) => {
+        if (!stats || !stats.found) return
+        const t = tasks.value[taskId]
+        if (!t || t.agentTasks.length === 0) return
+        for (const agent of t.agentTasks) {
+          agent.doneFiles = stats.doneFiles
+          agent.totalFiles = stats.totalFiles
+          agent.doneComps = stats.doneComps
+          agent.totalComps = stats.totalComps
+          agent.weightedProgress = stats.weightedProgress
+          agent.progress = Math.round(stats.weightedProgress)
+        }
+      },
+    })
+  }
+
   async function loadAgentTaskHistory(taskId: string, offset = 0, limit = 10) {
     try {
       const resp = await ipc.analysis.getAgentTaskHistory({ taskId, offset, limit })
@@ -985,13 +1031,27 @@ export const useCommunityStore = defineStore('community', () => {
     } catch { return [] }
   }
 
+  const _completedTaskLogs = new Map<string, any[]>()
+
+  function getCachedTaskLogs(agentId: string): any[] {
+    return _completedTaskLogs.get(agentId) || []
+  }
+
   async function clearAgentTaskHistory(taskId: string) {
     try {
       await ipc.analysis.clearAgentTaskHistory({ taskId })
       agentTaskHistoryOffset.value[taskId] = 0
       agentTaskHistoryTotal.value[taskId] = 0
       const t = tasks.value[taskId]
-      if (t) t.agentTasks = t.agentTasks.filter(at => at.status === 'running' || at.status === 'queued')
+      if (t) {
+        const toCache = t.agentTasks.filter(at => at.status !== 'running' && at.status !== 'queued')
+        console.log('[CS] clearAgentTaskHistory caching', { taskId, count: toCache.length, agentTasksBefore: t.agentTasks.length })
+        for (const at of toCache) {
+          _completedTaskLogs.set(at.id, at.taskLogs)
+        }
+        t.agentTasks = t.agentTasks.filter(at => at.status === 'running' || at.status === 'queued')
+        console.log('[CS] clearAgentTaskHistory done', { taskId, agentTasksAfter: t.agentTasks.length })
+      }
       return true
     } catch { return false }
   }
@@ -1053,6 +1113,8 @@ export const useCommunityStore = defineStore('community', () => {
   }
   async function startPreSummary(taskId: string, batch = 'P0', limit = 0, subagentConcurrency = 1) {
     const t = ensureTask(taskId)
+    // 清理已终态的 presummary_files agent
+    _cleanTerminalAgents(taskId, 'presummary_files')
     const conc = Math.max(1, Math.min(10, subagentConcurrency))
     const concHint = conc > 1 ? ` (并发 ${conc})` : ''
     const stepDesc = `${limit > 0 ? `预摘要 ${batch} (限 ${limit} 个文件)` : `预摘要 ${batch}`}${concHint}`
@@ -1063,7 +1125,9 @@ export const useCommunityStore = defineStore('community', () => {
     try {
       const result = await ipc.analysis.startPreSummary({ taskId, batch, limit, subagentConcurrency: conc })
       if (result.allCached) {
+        console.log('[CS] startPreSummary allCached, splice idx=%d agentTasks before=%d', idx, t.agentTasks.length)
         t.agentTasks.splice(idx, 1)
+        console.log('[CS] startPreSummary after splice agentTasks=%d', t.agentTasks.length)
         return result
       }
       if (result.success && result.agentTaskId) {
@@ -1081,6 +1145,8 @@ export const useCommunityStore = defineStore('community', () => {
   }
   async function startPreSummaryPipeline(taskId: string, batches: string[], limit = 0, subagentConcurrency = 1) {
     const t = ensureTask(taskId)
+    // 清理已终态的 presummary_files agent
+    _cleanTerminalAgents(taskId, 'presummary_files')
     const conc = Math.max(1, Math.min(10, subagentConcurrency))
     const concHint = conc > 1 ? ` (并发 ${conc})` : ''
     const stepDesc = `预摘要 ${batches.join('→')} (${batches.length} 批次${concHint})`
@@ -1089,6 +1155,9 @@ export const useCommunityStore = defineStore('community', () => {
     const stale = (t.agentTasks || []).filter(a =>
       a.action === 'presummary_files' && (a.status === 'running' || a.status === 'queued')
     )
+    if (stale.length > 0) {
+      console.log('[CS] cancelling stale presummary agents', { count: stale.length, ids: stale.map(s => s.id).join(',') })
+    }
     for (const s of stale) {
       const controlKey = `agent-progress:${taskId}:${s.id}`
       if (controlDispatcher.has(controlKey)) controlDispatcher.unregister(controlKey)
@@ -1131,6 +1200,8 @@ export const useCommunityStore = defineStore('community', () => {
 
   async function startPipeline(taskId: string, force = false, language = '', concurrency = 1, componentTimeout?: number) {
     const t = ensureTask(taskId)
+    // 清理上次残留的 pipeline agent（有且应只有一个）
+    t.agentTasks = t.agentTasks.filter(at => at.action !== 'pipeline')
     const idx = t.agentTasks.length
     const subConc = Math.max(1, Math.min(5, concurrency))
     const concHint = subConc > 1 ? `（并发 ${subConc}）` : ''
@@ -1153,6 +1224,7 @@ export const useCommunityStore = defineStore('community', () => {
         t.agentTasks[idx].id = result.agentTaskId
         updateAgentTask(taskId, idx, { progress: 0, message: '流水线启动中...' })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
+        _pollProgressStats(taskId)
       } else {
         updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
       }
@@ -1171,9 +1243,9 @@ export const useCommunityStore = defineStore('community', () => {
     toggleSelect, selectAll, selectIncomplete, deselectAll, syncSelections, restoreSelections, triggerOverview,
     pushError, clearErrorLogs, clearTask,
     addAgentTask, updateAgentTask, updateAgentStep, triggerComponentAnalysis,
-    loadAgentTaskHistory, clearAgentTaskHistory, agentTaskHistoryOffset, agentTaskHistoryTotal,
+    loadAgentTaskHistory, clearAgentTaskHistory, getCachedTaskLogs, agentTaskHistoryOffset, agentTaskHistoryTotal,
     cancelAgentPolling, cancelAgentTask, ensureAgentPolling,
     getPreSummaryStatus, listPreSummaryFiles, startPreSummary, startPreSummaryPipeline,
-    getFileSummary, deleteFileSummary, rerunFileSummary, startPipeline,
+    getFileSummary, deleteFileSummary, rerunFileSummary, startPipeline, getProgressStats,
   }
 })

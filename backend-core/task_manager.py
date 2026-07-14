@@ -2357,6 +2357,72 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             return {"found": False}
         return {**result, "found": True}
 
+    @server.register("analysis.getProgressStats")
+    def get_progress_stats(task_id=None, taskId=None):
+        """纯 DB 查询的任务执行统计，不依赖内存状态"""
+        tid = task_id or taskId
+        if not tid:
+            raise ValueError("task_id is required")
+        store = TaskStore(multi_db.main_db)
+        task = store.get_task(tid)
+        if not task:
+            return {"taskId": tid, "found": False}
+        pid = task["project_id"]
+        project_db = multi_db.get_project_db(pid)
+        if not project_db:
+            return {"taskId": tid, "found": False}
+
+        done_files = 0
+        total_files = 0
+        done_comps = 0
+        total_comps = 0
+
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(DISTINCT file_path) FROM graph_node WHERE task_id=? AND kind='file'", (tid,)
+            ).fetchone()
+            if row: total_files = row[0]
+        except Exception:
+            pass
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(*) FROM file_summaries WHERE project_id=? AND summary IS NOT NULL", (pid,)
+            ).fetchone()
+            if row: done_files = row[0]
+        except Exception:
+            pass
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(DISTINCT comm_id) FROM community_hierarchy WHERE task_id=? AND comm_lv='L0'", (tid,)
+            ).fetchone()
+            if row: total_comps = row[0]
+        except Exception:
+            pass
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(*) FROM community_llm_results WHERE task_id=? AND status='completed' AND name IS NOT NULL AND name != ''", (tid,)
+            ).fetchone()
+            if row: done_comps = row[0]
+        except Exception:
+            pass
+
+        total_weight = max(60, 60 + total_files * 30 + total_comps * 120 + 180)
+        done_weight = done_files * 30 + done_comps * 120
+        if total_weight > 0:
+            weighted_progress = round(min(done_weight, total_weight) / total_weight * 100, 1)
+        else:
+            weighted_progress = 0.0
+
+        return {
+            "taskId": tid,
+            "found": True,
+            "totalFiles": total_files,
+            "doneFiles": done_files,
+            "totalComps": total_comps,
+            "doneComps": done_comps,
+            "weightedProgress": weighted_progress,
+        }
+
     @server.register("analysis.cancelAgentTask")
     def cancel_agent_task(agent_task_id=None, agentTaskId=None):
         aid = agent_task_id or agentTaskId
@@ -2427,6 +2493,27 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
         ))
 
+        # Pre-compute total and cached counts for stable progress denominator
+        _total_files = 0
+        _total_comps = 0
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(DISTINCT file_path) as cnt FROM graph_node WHERE task_id=? AND kind='file'", (tid,)
+            ).fetchone()
+            if row: _total_files = row["cnt"]
+        except Exception:
+            pass
+        try:
+            row = project_db.execute(
+                "SELECT COUNT(DISTINCT comm_id) as cnt FROM community_hierarchy WHERE task_id=? AND comm_lv='L0'",
+                (tid,)
+            ).fetchone()
+            if row: _total_comps = row["cnt"]
+        except Exception:
+            pass
+        _est_weight = max(60, 60 + _total_files * 30 + _total_comps * 120 + 180)
+        logger.info(f"[Pipeline] total files={_total_files} comps={_total_comps} est_weight={_est_weight}")
+
         context = {
             "task_id": tid, "project_id": pid,
             "project_name": project_name,
@@ -2435,6 +2522,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "language": language or "",
             "concurrency": conc,
             "subagent_concurrency": sub_conc,
+            "_estimated_total_weight": _est_weight,
+            "_total_files": _total_files,
+            "_total_comps": _total_comps,
         }
 
         def _on_pipeline_complete(state_dict):

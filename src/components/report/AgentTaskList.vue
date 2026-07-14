@@ -36,15 +36,22 @@ const liveTasks = computed(() => {
 })
 
 // 仅追踪影响列表结构的属性（id + status），不追踪 progress/message
-const liveTaskKeys = computed(() =>
-  liveTasks.value.map(t => `${t.id}:${t.status}:${t.createdAt}`).join('|')
-)
+let _lastLiveKeys = ''
+const liveTaskKeys = computed(() => {
+  const keys = liveTasks.value.map(t => `${t.id}:${t.status}:${t.createdAt}`).join('|')
+  if (keys !== _lastLiveKeys) {
+    console.log('[AT] liveTaskKeys changed', { from: _lastLiveKeys, to: keys, count: liveTasks.value.length })
+    _lastLiveKeys = keys
+  }
+  return keys
+})
 
 // 合并 live + history，按 agent_id 去重（live 优先）
 const allTasks = computed(() => {
   void liveTaskKeys.value  // 仅列表结构变化才触发重建
   const live = liveTasks.value
   const history = historyTasks.value
+  console.log('[AT] allTasks recompute', { live: live.length, history: history.length, liveKeys: liveTaskKeys.value })
   const seen = new Set<string>()
   const merged: any[] = []
   // live 优先
@@ -74,6 +81,8 @@ const hasMore = computed(() => pageSize.value < allTasks.value.length)
 function transformHistory(h: any) {
   let steps: any[] = []
   try { steps = h.steps ? JSON.parse(h.steps) : [] } catch {}
+  const cachedLogs = communityStore.getCachedTaskLogs(h.agent_id)
+  console.log('[AT] transformHistory', { agent: h.agent_id, action: h.action, status: h.status, cachedLogsLen: cachedLogs.length })
   const task = {
     id: h.agent_id,
     action: h.action,
@@ -82,10 +91,13 @@ function transformHistory(h: any) {
     message: h.message || '',
     steps,
     createdAt: h.created_at || '',
-    taskLogs: [],
+    taskLogs: cachedLogs,
     weightedProgress: 0,
+    totalFiles: 0,
+    totalComps: 0,
+    doneFiles: 0,
+    doneComps: 0,
   }
-  // console.log('[transformHistory] agent=%s action=%s status=%s steps=%d', h.agent_id, h.action, h.status, steps.length)
   return task
 }
 
@@ -104,6 +116,7 @@ async function loadHistory(cursor: number) {
     }
   }
   historyLoaded.value = true
+  console.log('[AT] loadHistory done', { cursor, resultsCount: results.length, historyTasksLen: historyTasks.value.length })
 }
 
 async function loadMore() {
@@ -115,7 +128,9 @@ async function loadMore() {
 async function refresh() {
   pageSize.value = 10
   historyLoaded.value = false
+  console.log('[AT] refresh start historyLoaded=false')
   await loadHistory(0)
+  console.log('[AT] refresh done historyLoaded=true')
   // 将 history 中新发现的 running presummary_files agent 注入 store，启动轮询
   const t = communityStore.tasks[taskId.value]
   if (t) {
@@ -129,7 +144,7 @@ async function refresh() {
             progress: 0, message: h.message || '',
             steps: [],
             createdAt: h.created_at || '',
-            taskLogs: [], weightedProgress: 0,
+            taskLogs: [], weightedProgress: 0, totalFiles: 0, totalComps: 0, doneFiles: 0, doneComps: 0,
           })
           communityStore.ensureAgentPolling(taskId.value)
           // console.log('[refresh] injected history agent into store: %s', h.agent_id)
@@ -144,12 +159,15 @@ async function refresh() {
 
 async function clearHistory() {
   if (!taskId.value) return
+  const before = communityStore.tasks[taskId.value]?.agentTasks?.length || 0
   await communityStore.clearAgentTaskHistory(taskId.value)
   // 同时清理 store 中非 running 的 live agent
   const t = communityStore.tasks[taskId.value]
   if (t) {
     t.agentTasks = t.agentTasks.filter(at => at.status === 'running' || at.status === 'queued')
   }
+  const after = communityStore.tasks[taskId.value]?.agentTasks?.length || 0
+  console.log('[AT] clearHistory', { taskId: taskId.value, before, after })
   historyTasks.value = []
   pageSize.value = 10
 }
@@ -185,9 +203,25 @@ watch(taskId, (newId, oldId) => {
   }
 })
 
-function getLastLogs(task: any): any[] {
+function completedPhases(task: any): any[] {
   const logs = task.taskLogs || []
-  return logs.slice(-3)
+  return logs.filter((l: any) =>
+    (l.status === 'success' || l.status === 'failed') &&
+    (l.type === 'project_summary' || l.type === 'project_overview' || l.type === 'phase')
+  ).slice(-3)
+}
+
+function rollingFileLogs(task: any): any[] {
+  const logs = task.taskLogs || []
+  const fileLogs = logs.filter((l: any) => l.type === 'file' || l.type === 'component')
+  const running = fileLogs.filter((l: any) => l.status === 'running').reverse()
+  const done = fileLogs.filter((l: any) => l.status === 'success' || l.status === 'failed').reverse()
+  // Last 5 completed + up to 5 running
+  const result = [...done.slice(0, 5), ...running.slice(0, 5)].slice(0, 10)
+  if (task.id && task.action === 'pipeline') {
+    console.log('[AT] rollingFileLogs', { taskId: task.id, totalLogs: logs.length, fileLogs: fileLogs.length, done: done.length, running: running.length, result: result.length, resultNames: result.map((r: any) => r.name).join(', ') })
+  }
+  return result
 }
 
 function getLogCounts(task: any): { done: number; failed: number; total: number } {
@@ -330,18 +364,32 @@ const actionLabel = (action: string) => {
         />
       </div>
       <div class="atl-task-logs">
-        <div
-          v-if="task.taskLogs && task.taskLogs.length > 0"
-          class="atl-log-count"
-        >
-          {{ getLogCounts(task).done }}/{{ getLogCounts(task).total }} {{ t('report.agent.completed', '已完成') }}
-          <span
-            v-if="getLogCounts(task).failed > 0"
-            class="atl-log-count-failed"
-          >({{ getLogCounts(task).failed }} {{ t('report.agent.logsFailed', '失败') }})</span>
+        <div class="atl-log-count">
+          <span>{{ t('report.agent.progress', '进度') }}: {{ task.progress }}%</span>
         </div>
         <div
-          v-for="log in getLastLogs(task)"
+          v-if="task.totalFiles > 0"
+          class="atl-log-breakdown"
+        >
+          {{ t('report.agent.files', '文件') }}: {{ task.doneFiles || 0 }}/{{ task.totalFiles }}
+        </div>
+        <div
+          v-if="task.totalComps > 0"
+          class="atl-log-breakdown"
+        >
+          {{ t('report.agent.components', '组件') }}: {{ task.doneComps || 0 }}/{{ task.totalComps }}
+        </div>
+        <div
+          v-for="log in completedPhases(task)"
+          :key="log.id + '-phase'"
+          class="atl-log-entry atl-log-success"
+        >
+          <span class="atl-log-icon">{{ logIcon(log.status) }}</span>
+          <span class="atl-log-time">{{ formatTime(log.startTime) }}</span>
+          <span class="atl-log-name">{{ log.name }}</span>
+        </div>
+        <div
+          v-for="log in rollingFileLogs(task)"
           :key="log.id"
           class="atl-log-entry"
           :class="'atl-log-' + log.status"
@@ -375,7 +423,7 @@ const actionLabel = (action: string) => {
 
 <style scoped>
 .atl-container { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; contain: content; }
-.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; min-height: 4.5rem; contain: layout style; will-change: transform; }
+.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; min-height: 6.5rem; contain: layout style; will-change: transform; }
 .atl-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
 .atl-project { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); }
 .atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: 3px; }
@@ -483,6 +531,7 @@ const actionLabel = (action: string) => {
 .atl-log-retry .atl-log-name { color: var(--warning, #f59e0b); }
 .atl-log-count { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); padding: 0.05rem 0; }
 .atl-log-count-failed { color: var(--danger, #ef4444); margin-left: 0.25rem; }
+.atl-log-breakdown { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); padding: 0.05rem 0; margin-left: 0.5rem; }
 .atl-log-fallback { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; color: var(--text-muted); padding: 0.05rem 0; white-space: nowrap; overflow: hidden; }
 .atl-log-fallback .atl-log-name { color: var(--text-muted); }
 .atl-more { text-align: center; padding: 0.25rem; }
