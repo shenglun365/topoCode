@@ -1882,7 +1882,7 @@ const GraphView = {
       GraphView._initToolbar();
       GraphView._initContextMenu();
 
-      // 阻止浏览器默认右键菜单（完整覆盖节点+背景区域）
+      // 阻止浏览器默认右键菜单
       document.getElementById('cyContainer').addEventListener('contextmenu', function(e) {
         e.preventDefault();
       });
@@ -2240,9 +2240,10 @@ const GraphView = {
     var menu = document.getElementById('graphContextMenu');
     if (!menu || !g_cy) return;
 
-    g_cy.on('cxttap', 'node', function(evt) {
-      var oe = evt.originalEvent;
-      if (oe) oe.preventDefault();
+    var _menuTimer = null;
+
+    g_cy.on('tap', 'node', function(evt) {
+      evt.stopPropagation();
       var node = evt.target;
       var nodeId = node.id();
       var isExternal = node.data('isExternal');
@@ -2263,8 +2264,8 @@ const GraphView = {
       menu._ctxNodeId = nodeId;
       menu._ctxIsExt = !!isExternal;
 
-      var mx = oe ? oe.clientX : 0;
-      var my = oe ? oe.clientY : 0;
+      var pos = node.renderedPosition();
+      var mx = pos.x, my = pos.y;
       var mw = menu.offsetWidth || 130;
       var mh = menu.offsetHeight || 60;
       if (mx + mw > window.innerWidth) mx = window.innerWidth - mw - 4;
@@ -2272,16 +2273,36 @@ const GraphView = {
       menu.style.left = Math.max(0, mx) + 'px';
       menu.style.top = Math.max(0, my) + 'px';
       menu.style.display = 'block';
+
+      if (_menuTimer) clearTimeout(_menuTimer);
+      _menuTimer = setTimeout(function() { menu.style.display = 'none'; _menuTimer = null; }, 15000);
     });
 
-    document.addEventListener('click', function(e) {
-      if (!menu.contains(e.target)) menu.style.display = 'none';
+    // Background tap -> hide
+    g_cy.on('tap', function() {
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
+      menu.style.display = 'none';
     });
-    if (g_cy) g_cy.on('tap', function() { menu.style.display = 'none'; });
+
+    // Drag -> hide
+    g_cy.on('dragfree', function() {
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
+      menu.style.display = 'none';
+    });
+
+    // Click outside cy container -> hide
+    document.addEventListener('click', function(e) {
+      if (menu.style.display !== 'block') return;
+      var cyContainer = document.getElementById('cyContainer');
+      if (cyContainer && cyContainer.contains(e.target)) return;
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
+      menu.style.display = 'none';
+    });
 
     menu.querySelector('[data-action="copy-node"]').onclick = function() {
       var nid = menu._ctxNodeId;
       if (!nid || !g_cy) return;
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
       menu.style.display = 'none';
       var node = g_cy.getElementById(nid);
       if (!node.length) return;
@@ -2310,6 +2331,7 @@ const GraphView = {
     menu.querySelector('[data-action="drilldown"]').onclick = function() {
       var nid = menu._ctxNodeId;
       if (!nid || !g_cy) return;
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
       menu.style.display = 'none';
       var node = g_cy.getElementById(nid);
       if (!node.length) return;
@@ -2334,6 +2356,7 @@ const GraphView = {
     menu.querySelector('[data-action="doc"]').onclick = function() {
       var nid = menu._ctxNodeId;
       if (!nid || !g_cy || !S.taskId) return;
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
       menu.style.display = 'none';
       var node = g_cy.getElementById(nid);
       if (!node.length) return;
@@ -2358,6 +2381,7 @@ const GraphView = {
     menu.querySelector('[data-action="center-view"]').onclick = function() {
       var nid = menu._ctxNodeId;
       if (!nid || !g_cy) return;
+      if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
       menu.style.display = 'none';
       var idx = S.centerNodes.indexOf(nid);
       if (idx >= 0) {
@@ -3159,7 +3183,7 @@ function addNoteButtonToDoc() {
   header.appendChild(btn);
 }
 
-// ---- Graph 右键 "存入便签" ----
+// ---- Graph 节点菜单 "存入便签" ----
 
 document.querySelector('#graphContextMenu [data-action="note"]')?.addEventListener('click', function() {
   var menu = document.getElementById('graphContextMenu');
