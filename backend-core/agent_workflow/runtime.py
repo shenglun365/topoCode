@@ -239,6 +239,31 @@ class AgentRuntime:
                 file_count=fc, item_names=items,
             ))
             file_total += fc
+            # Estimate weighted total from step content
+            if items:
+                if s.tool.startswith('summarize_'):
+                    per_item = WEIGHT_MAP['file']
+                elif s.tool.startswith('analyze_'):
+                    per_item = WEIGHT_MAP['component']
+                elif s.tool == 'generate_overview':
+                    per_item = WEIGHT_MAP['project_overview']
+                elif s.tool.startswith('pipeline_ensure_summary'):
+                    per_item = WEIGHT_MAP['project_summary']
+                else:
+                    per_item = 30
+                self._weighted_total += len(items) * per_item
+            elif fc > 0:
+                self._weighted_total += fc * 30
+            else:
+                # Single step with no item breakdown
+                if s.tool == 'generate_overview':
+                    self._weighted_total += WEIGHT_MAP['project_overview']
+                elif s.tool.startswith('pipeline_ensure_summary'):
+                    self._weighted_total += WEIGHT_MAP['project_summary']
+                elif s.tool.startswith('pipeline_'):
+                    self._weighted_total += 30  # pipeline phase placeholder
+                else:
+                    self._weighted_total += 30
 
         # 2. Execute each step
         self._status = AgentStatus.RUNNING
@@ -267,7 +292,7 @@ class AgentRuntime:
             tool.cancel_event = self._cancel_event
 
             self._steps[i].status = "running"
-            # Emit start logs for each item in this step
+            # Emit start logs for items known at plan time
             item_type = 'phase'
             if self._steps[i].item_names:
                 if step.tool.startswith('summarize_'):
@@ -280,8 +305,9 @@ class AgentRuntime:
                     item_type = 'project_summary'
                 for log_name in self._steps[i].item_names:
                     self._report_item(item_type, log_name, 'running', batch=True)
+            elif step.tool.startswith('pipeline_'):
+                pass
             else:
-                # No per-item names → use step description as a single log entry
                 if step.tool.startswith('pipeline_ensure_summary'):
                     item_type = 'project_summary'
                 elif step.tool == 'generate_overview':
@@ -357,14 +383,34 @@ class AgentRuntime:
 
             file_current += self._steps[i].file_count
 
-            # Emit end logs for each item
-            end_status = 'success' if self._steps[i].status == 'done' else 'failed'
-            end_error = self._steps[i].last_error if end_status == 'failed' else None
-            if self._steps[i].item_names:
+            # Emit end logs — prefer sub-agent item_logs if returned
+            result_data = result.data if isinstance(result.data, dict) else None if result else None
+            sub_item_logs = (result_data or {}).get("item_logs", None) if result_data else None
+            if sub_item_logs:
+                logger.info(f"[DW] step{i} END injecting {len(sub_item_logs)} sub-item_logs from tool={step.tool}")
+                for item in sub_item_logs:
+                    self._report_item(
+                        item["type"], item["name"], item["status"],
+                        start_time=item.get("startTime", ""),
+                        end_time=item.get("endTime", ""),
+                        error=item.get("error"),
+                        batch=True,
+                    )
+            elif self._steps[i].item_names:
+                end_status = 'success' if self._steps[i].status == 'done' else 'failed'
+                end_error = self._steps[i].last_error if end_status == 'failed' else None
                 for log_name in self._steps[i].item_names:
                     self._report_item(item_type, log_name, end_status, error=end_error, batch=True)
             else:
-                self._report_item(item_type, step.description, end_status, error=end_error, batch=True)
+                i_type = item_type
+                if i_type == 'phase':
+                    if step.tool == 'generate_overview':
+                        i_type = 'project_overview'
+                    elif step.tool.startswith('pipeline_ensure_summary'):
+                        i_type = 'project_summary'
+                end_status = 'success' if self._steps[i].status == 'done' else 'failed'
+                end_error = self._steps[i].last_error if end_status == 'failed' else None
+                self._report_item(i_type, step.description, end_status, error=end_error, batch=True)
 
             self._report(
                 status=AgentStatus.RUNNING,
@@ -481,6 +527,7 @@ class AgentRuntime:
                 description=f"Analyzing component: {cname}",
                 item_names=[cname],
             ))
+        self._weighted_total = len(components) * WEIGHT_MAP.get('component', 120)
 
         from .tool_calling import agentic_chat, create_strategy
         strategy = create_strategy(multi_db=self._multi_db)
@@ -1114,13 +1161,15 @@ class AgentRuntime:
         total = 0
         done = 0
         for log in self._item_logs:
-            w = WEIGHT_MAP.get(log.type, 0)
+            w = WEIGHT_MAP.get(log.type, 30)
             total += w
             if log.status in ('success', 'failed'):
                 done += w
+        if total == 0 and self._weighted_total > 0:
+            total = self._weighted_total
         self._weighted_total = total
         self._weighted_done = done
-        self._weighted_progress = round(done / total * 100, 1) if total > 0 else 0.0
+        self._weighted_progress = round(min(done, total) / total * 100, 1) if total > 0 else 0.0
 
     @staticmethod
     def _needs_rate_limit(tool_name: str) -> bool:

@@ -190,6 +190,13 @@ function getLastLogs(task: any): any[] {
   return logs.slice(-3)
 }
 
+function getLogCounts(task: any): { done: number; failed: number; total: number } {
+  const logs = task.taskLogs || []
+  const done = logs.filter((l: any) => l.status === 'success').length
+  const failed = logs.filter((l: any) => l.status === 'failed').length
+  return { done, failed, total: logs.length }
+}
+
 function logIcon(status: string): string {
   const map: Record<string, string> = {
     running: '▶', success: '✓', failed: '✗', retry: '↻',
@@ -324,6 +331,16 @@ const actionLabel = (action: string) => {
       </div>
       <div class="atl-task-logs">
         <div
+          v-if="task.taskLogs && task.taskLogs.length > 0"
+          class="atl-log-count"
+        >
+          {{ getLogCounts(task).done }}/{{ getLogCounts(task).total }} {{ t('report.agent.completed', '已完成') }}
+          <span
+            v-if="getLogCounts(task).failed > 0"
+            class="atl-log-count-failed"
+          >({{ getLogCounts(task).failed }} {{ t('report.agent.logsFailed', '失败') }})</span>
+        </div>
+        <div
           v-for="log in getLastLogs(task)"
           :key="log.id"
           class="atl-log-entry"
@@ -332,7 +349,6 @@ const actionLabel = (action: string) => {
           <span class="atl-log-icon">{{ logIcon(log.status) }}</span>
           <span class="atl-log-time">{{ formatTime(log.startTime) }}</span>
           <span class="atl-log-name">{{ log.name }}</span>
-          <span class="atl-log-status">{{ logStatusText(log.status) }}</span>
         </div>
         <div
           v-if="(!task.taskLogs || task.taskLogs.length === 0) && task.steps && task.steps.length > 0"
@@ -465,7 +481,8 @@ const actionLabel = (action: string) => {
 .atl-log-success .atl-log-name { color: var(--success, #22c55e); }
 .atl-log-failed .atl-log-name { color: var(--danger, #ef4444); }
 .atl-log-retry .atl-log-name { color: var(--warning, #f59e0b); }
-.atl-log-status { flex-shrink: 0; font-size: 0.6rem; }
+.atl-log-count { font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono); padding: 0.05rem 0; }
+.atl-log-count-failed { color: var(--danger, #ef4444); margin-left: 0.25rem; }
 .atl-log-fallback { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; color: var(--text-muted); padding: 0.05rem 0; white-space: nowrap; overflow: hidden; }
 .atl-log-fallback .atl-log-name { color: var(--text-muted); }
 .atl-more { text-align: center; padding: 0.25rem; }

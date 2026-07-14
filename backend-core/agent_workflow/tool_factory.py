@@ -115,6 +115,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 sub_results = []
                 total_files = 0
                 completed_files = 0
+                _all_item_logs = []
 
                 for batch in batches:
                     if ce and ce.is_set():
@@ -145,7 +146,8 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                             runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
                             if _ce:
                                 runtime._cancel_event = _ce
-                            return loop.run_until_complete(runtime.run(workflow, context))
+                            wf_result = loop.run_until_complete(runtime.run(workflow, context))
+                            return wf_result, runtime
                         finally:
                             loop.close()
 
@@ -154,28 +156,35 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         if ce:
                             while not ce.is_set():
                                 try:
-                                    result = future.result(timeout=1.0)
+                                    wf_result, sub_runtime = future.result(timeout=1.0)
                                     break
                                 except _TimeoutError:
                                     continue
-                            if ce.is_set():
-                                future.cancel()
-                                _log.info(f"[Pipeline] preSummary cancelled at {batch}")
-                                break
                         else:
-                            result = future.result(timeout=7200)
+                            wf_result, sub_runtime = future.result(timeout=7200)
 
-                    completed_files += result.steps_completed
-                    total_files += result.steps_total
-                    sub_results.append(f"{batch}: {result.steps_completed}/{result.steps_total}")
-                    _log.info(f"[Pipeline] preSummary {batch}: {result.steps_completed}/{result.steps_total}")
+                    completed_files += wf_result.steps_completed
+                    total_files += wf_result.steps_total
+                    sub_results.append(f"{batch}: {wf_result.steps_completed}/{wf_result.steps_total}")
+                    _log.info(f"[Pipeline] preSummary {batch}: {wf_result.steps_completed}/{wf_result.steps_total}")
+                    # Collect per-file logs from sub-agent (sub-agent recorded them via _report_item)
+                    for log in sub_runtime._item_logs:
+                        _all_item_logs.append({
+                            "type": log.type, "name": log.name, "status": log.status,
+                            "startTime": log.startTime, "endTime": log.endTime,
+                            "error": log.error,
+                        })
+                    _log.info(f"[DW] preSummary batch={batch} sub_item_logs={len(sub_runtime._item_logs)} collected={len(_all_item_logs)}")
 
+                    if ce and ce.is_set():
+                        _log.info(f"[Pipeline] preSummary cancelled at {batch}")
+                        break
                 summary = f"File pre-summary OK {' | '.join(sub_results)}"
                 _log.info(f"[Pipeline] preSummary done: {summary}")
                 return ToolResult.ok({
                     "sub_step": len(batches), "sub_total": len(batches),
                     "files_completed": completed_files, "files_total": total_files,
-                    "summary": summary,
+                    "summary": summary, "item_logs": _all_item_logs,
                 })
             except Exception as e:
                 _log.warning(f"[Pipeline] preSummary failed: {e}")
@@ -202,6 +211,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 sub_results = []
                 total_components = 0
                 completed_levels = 0
+                _all_item_logs = []
 
                 for level in levels:
                     if ce and ce.is_set():
@@ -276,7 +286,8 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                             runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
                             if _ce:
                                 runtime._cancel_event = _ce
-                            return loop.run_until_complete(runtime.run(workflow, context))
+                            wf_result = loop.run_until_complete(runtime.run(workflow, context))
+                            return wf_result, runtime
                         finally:
                             loop.close()
 
@@ -285,31 +296,38 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         if ce:
                             while not ce.is_set():
                                 try:
-                                    future.result(timeout=1.0)
+                                    wf_result, sub_runtime = future.result(timeout=1.0)
                                     break
                                 except _TimeoutError:
                                     continue
-                            if ce.is_set():
-                                future.cancel()
-                                _log.info(f"[Pipeline] component analysis cancelled at {level}")
-                                break
                         else:
                             if _timeout_sec > 0:
-                                future.result(timeout=_timeout_sec)
+                                wf_result, sub_runtime = future.result(timeout=_timeout_sec)
                             else:
-                                future.result()
+                                wf_result, sub_runtime = future.result()
 
                     completed_levels += 1
                     total_components += len(components)
                     sub_results.append(f"{level}: {len(components)} components")
                     _log.info(f"[Pipeline] component {level}: {len(components)} components done")
+                    # Collect per-component logs from sub-agent (sub-agent recorded them via _report_item)
+                    for log in sub_runtime._item_logs:
+                        _all_item_logs.append({
+                            "type": log.type, "name": log.name, "status": log.status,
+                            "startTime": log.startTime, "endTime": log.endTime,
+                            "error": log.error,
+                        })
+                    _log.info(f"[DW] compAnalysis level={level} sub_item_logs={len(sub_runtime._item_logs)} collected={len(_all_item_logs)}")
 
+                    if ce and ce.is_set():
+                        _log.info(f"[Pipeline] component analysis cancelled at {level}")
+                        break
                 summary = f"Component analysis OK {' | '.join(sub_results)}"
                 _log.info(f"[Pipeline] component analysis done: {summary}")
                 return ToolResult.ok({
                     "sub_step": completed_levels, "sub_total": len(levels),
                     "components_total": total_components,
-                    "summary": summary,
+                    "summary": summary, "item_logs": _all_item_logs,
                 })
             except Exception as e:
                 _log.warning(f"[Pipeline] component analysis failed: {e}")
@@ -364,8 +382,8 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
                         if _ce:
                             runtime._cancel_event = _ce
-                        result = loop.run_until_complete(runtime.run(workflow, context))
-                        return result
+                        wf_result = loop.run_until_complete(runtime.run(workflow, context))
+                        return wf_result, runtime
                     finally:
                         loop.close()
 
@@ -374,18 +392,28 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                     if ce:
                         while not ce.is_set():
                             try:
-                                result = future.result(timeout=1.0)
+                                wf_result, sub_runtime = future.result(timeout=1.0)
                                 break
                             except _TimeoutError:
                                 continue
                         if ce.is_set():
-                            future.cancel()
                             _log.info(f"[Pipeline] overview cancelled")
-                            return ToolResult.ok({"skipped": True, "reason": "cancelled"})
+                            # Collect whatever the sub-agent finished
+                            item_logs = []
+                            try:
+                                for log in sub_runtime._item_logs:
+                                    item_logs.append({
+                                        "type": log.type, "name": log.name, "status": log.status,
+                                        "startTime": log.startTime, "endTime": log.endTime,
+                                        "error": log.error,
+                                    })
+                            except Exception:
+                                pass
+                            return ToolResult.ok({"skipped": True, "reason": "cancelled", "item_logs": item_logs})
                     else:
-                        result = future.result(timeout=3600)
+                        wf_result, sub_runtime = future.result(timeout=3600)
 
-                overview = (result.data or {}).get("overview", "")
+                overview = (wf_result.data or {}).get("overview", "")
                 if overview:
                     try:
                         from report_tree_service import save_overall_doc
@@ -393,8 +421,25 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                     except Exception as e2:
                         _log.warning(f"[Pipeline] save overview failed: {e2}")
 
-                _log.info(f"[Pipeline] overview done")
-                return ToolResult.ok({"overview_done": bool(overview), "summary": "Overall architecture analysis generated" if overview else "Overall architecture analysis: no content"})
+                _log.info(f"[Pipeline] overview done wf_result.success={wf_result.success}")
+                item_logs = []
+                for log in sub_runtime._item_logs:
+                    item_logs.append({
+                        "type": log.type, "name": log.name, "status": log.status,
+                        "startTime": log.startTime, "endTime": log.endTime,
+                        "error": log.error,
+                    })
+                if not item_logs:
+                    item_logs.append({
+                        "type": "project_overview", "name": "Architecture Overview",
+                        "status": "success" if wf_result.success else "failed",
+                        "startTime": "", "endTime": "",
+                    })
+                _log.info(f"[DW] overview sub_item_logs={len(sub_runtime._item_logs)} collected={len(item_logs)}")
+                return ToolResult.ok({
+                    "overview_done": bool(overview), "summary": "Overall architecture analysis generated" if overview else "Overall architecture analysis: no content",
+                    "item_logs": item_logs,
+                })
             except Exception as e:
                 _log.warning(f"[Pipeline] overview failed: {e}")
                 return ToolResult.fail(str(e))
