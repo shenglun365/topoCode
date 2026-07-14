@@ -261,7 +261,7 @@ function currentStepDesc(task: any): string {
 
 const statusLabel = (status: string) => {
   const map: Record<string, string> = {
-    queued: t('report.agent.status.queued'), running: t('report.agent.status.running'), stopping: t('report.agent.status.stopping', '停止中'), completed: t('report.agent.status.completed'),
+    queued: t('report.agent.status.queued'), running: t('report.agent.status.running'), stopping: t('report.agent.stopping'), completed: t('report.agent.status.completed'),
     partial: t('report.agent.status.partial'), failed: t('report.agent.status.failed'), cancelled: t('report.agent.status.cancelled'),
     skipped: t('report.agent.status.skipped'), unknown: t('report.agent.status.unknown'),
   }

@@ -260,6 +260,9 @@ export default { report: {
     resumeTask: 'Resume this task',
     stopping: 'Stopping...',
     stopTask: 'Stop this task (terminates after current LLM request completes)',
+    progress: 'Progress',
+    files: 'Files',
+    components: 'Components',
     current: 'Current: ',
     stepSummary: '(done {done} / failed {failed} / remaining {remaining})',
     status: {

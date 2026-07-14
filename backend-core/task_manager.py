@@ -2393,7 +2393,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             pass
         try:
             row = project_db.execute(
-                "SELECT COUNT(DISTINCT comm_id) FROM community_hierarchy WHERE task_id=? AND comm_lv='L0'", (tid,)
+                "SELECT COUNT(DISTINCT comm_id) FROM community_hierarchy WHERE task_id=?", (tid,)
             ).fetchone()
             if row: total_comps = row[0]
         except Exception:
@@ -2505,7 +2505,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             pass
         try:
             row = project_db.execute(
-                "SELECT COUNT(DISTINCT comm_id) as cnt FROM community_hierarchy WHERE task_id=? AND comm_lv='L0'",
+                "SELECT COUNT(DISTINCT comm_id) as cnt FROM community_hierarchy WHERE task_id=?",
                 (tid,)
             ).fetchone()
             if row: _total_comps = row["cnt"]

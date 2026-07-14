@@ -275,6 +275,9 @@ export default { report: {
     resumeTask: '恢复此任务',
     stopping: '正在停止...',
     stopTask: '停止此任务（等待当前 LLM 请求结束后完全终止）',
+    progress: '进度',
+    files: '文件',
+    components: '组件',
     current: '当前: ',
     stepSummary: '（完成 {done} / 失败 {failed} / 剩余 {remaining}）',
     status: {
