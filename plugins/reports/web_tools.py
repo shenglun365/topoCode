@@ -691,7 +691,7 @@ class WebToolExecutor:
         proj = self.multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj["root_path"] + "/") if proj and proj["root_path"] else ""
+        project_root = (proj["root_path"].replace('\\', '/') + "/") if proj and proj["root_path"] else ""
         if gran == "component":
             result = cd.get_community_graph_component(
                 pdb, task_id, et, comm_id, comm_id, project_root, depth=depth
@@ -710,7 +710,7 @@ class WebToolExecutor:
         proj = self.multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj["root_path"] + "/") if proj and proj["root_path"] else ""
+        project_root = (proj["root_path"].replace('\\', '/') + "/") if proj and proj["root_path"] else ""
 
         rows = pdb.fetchall(
             "SELECT node_list FROM graph_doc WHERE task_id=? AND edge_type=? AND comm_id=?",

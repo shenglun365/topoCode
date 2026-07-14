@@ -38,13 +38,15 @@ def _md5_file(file_path: str) -> str:
 
 
 def _make_rel(project_root: str):
+    __root = project_root.replace('\\', '/') if project_root else ''
     def _rel(p):
         if not p:
             return p
         if p.startswith("file:"):
             p = p[5:]
-        if project_root and p.lower().startswith(project_root.lower()):
-            p = p[len(project_root):]
+        p = p.replace('\\', '/')
+        if __root and p.lower().startswith(__root.lower()):
+            p = p[len(__root):]
         return p.lstrip("/")
     return _rel
 

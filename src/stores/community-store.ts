@@ -62,8 +62,10 @@ interface CommunityTaskRuntime {
   /** Agent 任务队列 */
   agentTasks: Array<{
     id: string; action: string; status: 'queued'|'running'|'completed'|'partial'|'failed'|'cancelled'
-    steps: Array<{ description: string; status: 'pending'|'running'|'done'|'failed' }>
+    steps: Array<{ description: string; status: 'pending'|'running'|'done'|'failed'; file_count?: number }>
     progress: number; message: string; createdAt: string
+    taskLogs: Array<{ id: string; type: string; name: string; status: string; startTime: string; endTime: string | null; error: string | null }>
+    weightedProgress: number
   }>
 }
 
@@ -721,6 +723,7 @@ export const useCommunityStore = defineStore('community', () => {
       id, action, status: 'queued',
       steps: steps.map(s => ({ description: s, status: 'pending' as const })),
       progress: 0, message: '', createdAt: new Date().toISOString(),
+      taskLogs: [], weightedProgress: 0,
     })
     return id
   }
@@ -854,7 +857,10 @@ export const useCommunityStore = defineStore('community', () => {
         const fileTotal = progress.file_total || 0
         const stepCurrent = progress.step_current || 0
         const stepTotal = progress.step_total || 0
-        const pct = fileTotal ? Math.round(fileCurrent / fileTotal * 100) : (stepTotal ? Math.round(stepCurrent / stepTotal * 100) : 0)
+        const pct = progress.weighted_progress != null
+          ? Math.round(progress.weighted_progress)
+          : (fileTotal ? Math.round(fileCurrent / fileTotal * 100) : (stepTotal ? Math.round(stepCurrent / stepTotal * 100) : 0))
+        const weightedPct = progress.weighted_progress ?? pct
         const allStepsDone = progress.steps && progress.steps.length > 0 &&
           progress.steps.every(s => s.status === 'done' || s.status === 'failed')
         const isCompleted = progress.status === 'completed' || progress.status === 'partial' ||
@@ -876,9 +882,31 @@ export const useCommunityStore = defineStore('community', () => {
             message: msg,
           })
         }
-        // if (progress.status && stepTotal > 0) {
-        //   console.log('[poll] agent=%s status=%s step=%d/%d pct=%d', agentTaskId, progress.status, stepCurrent, stepTotal, pct)
-        // }
+        // Sync item_logs
+        const agent = t.agentTasks[taskIdx]
+        if (progress.item_logs && progress.item_logs.length > 0) {
+          const existingMap = new Map(agent.taskLogs.map(l => [l.id, l]))
+          for (const log of progress.item_logs) {
+            const existing = existingMap.get(log.id)
+            if (existing) {
+              if (existing.status !== log.status || existing.endTime !== log.endTime) {
+                existing.status = log.status
+                existing.endTime = log.endTime
+                if (log.error) existing.error = log.error
+              }
+            } else {
+              agent.taskLogs.push({ ...log })
+              existingMap.set(log.id, log)
+            }
+          }
+          // Trim to last 100 logs to avoid unbounded growth
+          if (agent.taskLogs.length > 100) {
+            agent.taskLogs = agent.taskLogs.slice(-100)
+          }
+        }
+        if (weightedPct !== agent.weightedProgress) {
+          agent.weightedProgress = weightedPct
+        }
         if (progress.steps) {
           const doneCount = progress.steps.filter(s => s.status === 'done').length
           if (doneCount > lastDoneCount && taskId) {
@@ -886,7 +914,6 @@ export const useCommunityStore = defineStore('community', () => {
             const pid = useProjectStore().selectedProjectId
             if (pid) loadCommunities(taskId, pid).catch(() => {})
           }
-          const agent = t.agentTasks[taskIdx]
           const runtimeSteps = progress.steps || []
           while ((agent.steps || []).length < runtimeSteps.length) {
             const idx = agent.steps.length
@@ -897,7 +924,17 @@ export const useCommunityStore = defineStore('community', () => {
             })
           }
           for (let i = 0; i < runtimeSteps.length; i++) {
-            updateAgentStep(taskId, taskIdx, i + stepOffset, runtimeSteps[i].status, runtimeSteps[i].file_count || 1)
+            const rt = runtimeSteps[i]
+            const local = agent.steps[i + stepOffset]
+            if (!local) continue
+            const localFileCount = (local as any).file_count ?? 1
+            if (local.status !== rt.status || local.description !== rt.description || localFileCount !== (rt.file_count || 1)) {
+              local.status = rt.status as any
+              if (rt.description && local.description !== rt.description) {
+                local.description = rt.description
+              }
+              ;(local as any).file_count = rt.file_count || 1
+            }
           }
         }
         // 定时刷新社区数据（长时间运行的步骤，如流水线组件分析，内部子任务完成时前端无感知）
@@ -1097,7 +1134,13 @@ export const useCommunityStore = defineStore('community', () => {
     const idx = t.agentTasks.length
     const subConc = Math.max(1, Math.min(5, concurrency))
     const concHint = subConc > 1 ? `（并发 ${subConc}）` : ''
-    addAgentTask(taskId, 'pipeline', [`流水线整体激活${concHint}`, force ? '强制覆盖所有' : '跳过已完成'])
+    addAgentTask(taskId, 'pipeline', [
+      `流水线启动${concHint}`,
+      '项目摘要',
+      '文件预摘要 P0→P1→P2',
+      '组件分析 L0→L5',
+      '整体架构分析',
+    ])
     t.agentTasks[idx].status = 'running'
     try {
       const result = await ipc.analysis.startPipeline({

@@ -1776,7 +1776,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
 
         edge_kind = 'calls' if et == 'CALL' else 'imports'
 
@@ -1838,15 +1838,17 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     for r in rows:
                         symbol_file_map[r[0]] = r[1] or ''
 
+        __root = project_root.replace('\\', '/') if project_root else ''
         def _rel(p: str) -> str:
             """将可能的绝对路径转为项目相对路径（匹配 node_list 格式）"""
             if not p:
                 return p
             if p.startswith('file:'):
                 p = p[5:]
-            if project_root and p.lower().startswith(project_root.lower()):
-                p = p[len(project_root):]
-            return p.lstrip('/').replace('\\', '/')
+            p = p.replace('\\', '/')
+            if __root and p.lower().startswith(__root.lower()):
+                p = p[len(__root):]
+            return p.lstrip('/')
 
         # 4. Resolve edge source/target to community keys
         def resolve_key(raw_id, edge_kind, sym_map, file_comm):
@@ -2209,7 +2211,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "SELECT root_path FROM projects WHERE id = ?", (pid,)
             ).fetchone()
             result = root_row["root_path"] if root_row else ""
-            return str(result or "")
+            return str(result or "").replace('\\', '/')
         except Exception as e:
             logger.warning("[_get_project_root] FAILED pid=%r error=%s", pid, e)
             return ""

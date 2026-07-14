@@ -224,19 +224,24 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
                             val = row.get(col, "")
                             if val.startswith("file:") and original_root:
                                 val = val[5:]
-                                if val.lower().startswith(original_root.lower()):
-                                    val = val[len(original_root):]
-                                row[col] = val.lstrip("/")
+                            val = val.replace('\\', '/')
+                            if original_root:
+                                _oroot = original_root.replace('\\', '/')
+                                if val.lower().startswith(_oroot.lower()):
+                                    val = val[len(_oroot):]
+                            row[col] = val.lstrip("/")
                     # graph_doc.node_list/edge_list 同样归一化，否则运行时 _rel 产生绝对路径 key，
                     # 与 graph_edge 归一化后的相对路径不匹配，跨社区边全部丢失
                     if table == "graph_doc":
-                        _orig_lower = original_root.lower()
+                        _orig_norm = original_root.replace('\\', '/') if original_root else ''
+                        _orig_lower = _orig_norm.lower()
                         def _norm_path(pv):
                             if not pv or not pv.startswith("file:") or not original_root:
                                 return pv
                             pv = pv[5:]
+                            pv = pv.replace('\\', '/')
                             if pv.lower().startswith(_orig_lower):
-                                pv = pv[len(original_root):]
+                                pv = pv[len(_orig_norm):]
                             return pv.lstrip("/")
                         for jcol in ("node_list", "edge_list"):
                             raw = row.get(jcol, "")

@@ -65,6 +65,14 @@ class AgentTaskState:
                  "last_error": s.last_error}
                 for s in self.progress.steps
             ]
+        item_logs = []
+        if self.progress and self.progress.item_logs:
+            item_logs = [
+                {"id": l.id, "type": l.type, "name": l.name,
+                 "status": l.status, "startTime": l.startTime,
+                 "endTime": l.endTime, "error": l.error}
+                for l in self.progress.item_logs
+            ]
         d = {
             "agent_id": self.agent_id,
             "task_id": self.task_id,
@@ -77,6 +85,10 @@ class AgentTaskState:
             "elapsed_sec": round(self.progress.elapsed_sec if self.progress else 0, 1),
             "message": self.progress.message if self.progress else "",
             "steps": steps,
+            "item_logs": item_logs,
+            "weighted_progress": self.progress.weighted_progress if self.progress else 0.0,
+            "weighted_total": self.progress.weighted_total if self.progress else 0,
+            "weighted_done": self.progress.weighted_done if self.progress else 0,
             "error": self.error,
             "created_at": self.created_at,
             "finished_at": self.finished_at,

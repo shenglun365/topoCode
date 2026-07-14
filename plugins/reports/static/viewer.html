@@ -1880,6 +1880,11 @@ const GraphView = {
       GraphView._initToolbar();
       GraphView._initContextMenu();
 
+      // 阻止浏览器默认右键菜单（完整覆盖节点+背景区域）
+      document.getElementById('cyContainer').addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+      });
+
       // Error dismiss handlers
       var errDismiss = document.getElementById('graphErrorDismiss');
       var errClose = document.getElementById('graphErrorClose');

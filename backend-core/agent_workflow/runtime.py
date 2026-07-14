@@ -15,6 +15,7 @@ AgentRuntime — 规划→执行→观察 循环。
 """
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -52,8 +53,31 @@ class StepProgress:
     status: str = "pending"   # pending | running | done | failed
     result: Optional[ToolResult] = None
     file_count: int = 0        # 该步骤包含的文件数（预摘要批量时 >1）
+    item_names: list[str] = field(default_factory=list)  # 步骤内各条目名称（文件路径/组件名）
     retries_used: int = 0      # 实际重试次数
     last_error: str = ""       # 最后一次错误信息（失败时）
+
+
+WEIGHT_MAP = {
+    'file': 30,
+    'component': 120,
+    'project_overview': 180,
+    'project_summary': 60,
+    'phase': 0,
+}
+
+
+@dataclass
+class ItemLog:
+    """单条任务项日志（文件/组件/项目级别的生命周期事件）"""
+
+    id: str
+    type: str           # 'file' | 'component' | 'project' | 'phase'
+    name: str
+    status: str         # 'running' | 'success' | 'failed' | 'retry'
+    startTime: str      # ISO 时间戳
+    endTime: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass
@@ -71,6 +95,10 @@ class AgentProgress:
     message: str = ""
     failed_count: int = 0      # 失败的 step 数
     retry_count: int = 0       # 累计重试次数
+    item_logs: list[ItemLog] = field(default_factory=list)
+    weighted_progress: float = 0.0
+    weighted_total: int = 0
+    weighted_done: int = 0
 
 
 ProgressCallback = Callable[[AgentProgress], None]
@@ -119,6 +147,10 @@ class AgentRuntime:
         self._status = AgentStatus.IDLE
         self._task_id = ""
         self._steps: list[StepProgress] = []
+        self._item_logs: list[ItemLog] = []
+        self._weighted_total: int = 0
+        self._weighted_done: int = 0
+        self._weighted_progress: float = 0.0
         self._tool_call_history: list[tuple] = []
         self._loop_warning_count: int = 0
         self._content_warning_count: int = 0
@@ -189,11 +221,22 @@ class AgentRuntime:
 
         self._steps = []
         file_total = 0
+        self._item_logs = []
+        self._weighted_total = 0
+        self._weighted_done = 0
+        self._weighted_progress = 0.0
         for i, s in enumerate(steps):
             fc = len(s.args.get("path", [])) if s.args else 0
+            items: list[str] = []
+            if fc > 0 and s.args:
+                items = list(s.args.get("path", []))
+            elif s.args and "components" in s.args:
+                comps = s.args["components"]
+                if isinstance(comps, list):
+                    items = [c.get("name", c.get("id", f"item-{j}")) for j, c in enumerate(comps) if isinstance(c, dict)]
             self._steps.append(StepProgress(
                 step_index=i, step_total=len(steps), description=s.description,
-                file_count=fc,
+                file_count=fc, item_names=items,
             ))
             file_total += fc
 
@@ -224,6 +267,26 @@ class AgentRuntime:
             tool.cancel_event = self._cancel_event
 
             self._steps[i].status = "running"
+            # Emit start logs for each item in this step
+            item_type = 'phase'
+            if self._steps[i].item_names:
+                if step.tool.startswith('summarize_'):
+                    item_type = 'file'
+                elif step.tool.startswith('analyze_'):
+                    item_type = 'component'
+                elif step.tool == 'generate_overview':
+                    item_type = 'project_overview'
+                elif step.tool.startswith('pipeline_ensure_summary'):
+                    item_type = 'project_summary'
+                for log_name in self._steps[i].item_names:
+                    self._report_item(item_type, log_name, 'running', batch=True)
+            else:
+                # No per-item names → use step description as a single log entry
+                if step.tool.startswith('pipeline_ensure_summary'):
+                    item_type = 'project_summary'
+                elif step.tool == 'generate_overview':
+                    item_type = 'project_overview'
+                self._report_item(item_type, step.description, 'running', batch=True)
             self._report(
                 status=AgentStatus.RUNNING,
                 step_current=i + 1,
@@ -293,6 +356,15 @@ class AgentRuntime:
                 failed_count += 1
 
             file_current += self._steps[i].file_count
+
+            # Emit end logs for each item
+            end_status = 'success' if self._steps[i].status == 'done' else 'failed'
+            end_error = self._steps[i].last_error if end_status == 'failed' else None
+            if self._steps[i].item_names:
+                for log_name in self._steps[i].item_names:
+                    self._report_item(item_type, log_name, end_status, error=end_error, batch=True)
+            else:
+                self._report_item(item_type, step.description, end_status, error=end_error, batch=True)
 
             self._report(
                 status=AgentStatus.RUNNING,
@@ -397,14 +469,18 @@ class AgentRuntime:
         tools_schema = self._tools.to_openai_tools(workflow.get_tool_filter(context))
 
         # 初始化步骤列表（用于 frontend 展示）
-        self._steps = [
-            StepProgress(
-                step_index=i,
-                step_total=len(components),
-                description=f"Analyzing component: {comp.get('name', comp.get('id', f'comp-{i}'))[:40]}",
-            )
-            for i, comp in enumerate(components)
-        ]
+        self._steps = []
+        self._item_logs = []
+        self._weighted_total = 0
+        self._weighted_done = 0
+        self._weighted_progress = 0.0
+        for i, comp in enumerate(components):
+            cname = comp.get('name', comp.get('id', f'comp-{i}'))[:40]
+            self._steps.append(StepProgress(
+                step_index=i, step_total=len(components),
+                description=f"Analyzing component: {cname}",
+                item_names=[cname],
+            ))
 
         from .tool_calling import agentic_chat, create_strategy
         strategy = create_strategy(multi_db=self._multi_db)
@@ -424,6 +500,7 @@ class AgentRuntime:
             self._reset_detection_state()
 
             self._steps[c_idx].status = "running"
+            self._report_item('component', comp_name, 'running', batch=True)
             self._report(
                 status=AgentStatus.RUNNING,
                 step_current=c_idx + 1,
@@ -678,6 +755,8 @@ class AgentRuntime:
             total_turns += comp_turns
 
             self._steps[c_idx].status = "done" if comp_success else "failed"
+            end_status = 'success' if comp_success else 'failed'
+            self._report_item('component', comp_name, end_status, batch=True)
 
         self._sandbox.budget.finish()
         self._sandbox.budget.consume_tokens(total_tokens)
@@ -987,11 +1066,61 @@ class AgentRuntime:
                 message=kwargs.get("message", ""),
                 failed_count=kwargs.get("failed_count", 0),
                 retry_count=kwargs.get("retry_count", 0),
+                item_logs=self._item_logs,
+                weighted_progress=self._weighted_progress,
+                weighted_total=self._weighted_total,
+                weighted_done=self._weighted_done,
             )
             try:
                 self._on_progress(progress)
             except Exception as e:
                 logger.warning(f"[AgentRuntime] on_progress callback error: {e}")
+
+    def _report_item(self, type_: str, name: str, status: str,
+                     start_time: Optional[str] = None,
+                     end_time: Optional[str] = None,
+                     error: Optional[str] = None,
+                     batch: bool = False):
+        """报告单项生命周期事件。batch=True 时不立即触发 _report()。"""
+        now_iso = datetime.datetime.now().isoformat()
+        if not start_time:
+            start_time = now_iso
+
+        existing = None
+        if status in ('success', 'failed', 'retry'):
+            for log in reversed(self._item_logs):
+                if log.type == type_ and log.name == name and log.status == 'running':
+                    existing = log
+                    break
+
+        if existing:
+            existing.status = status
+            existing.endTime = now_iso if not end_time else end_time
+            if error:
+                existing.error = error
+        else:
+            log_id = f"{type_}-{hash(name)}-{int(time.time() * 1000)}"
+            self._item_logs.append(ItemLog(
+                id=log_id, type=type_, name=name, status=status,
+                startTime=start_time, endTime=end_time,
+                error=error,
+            ))
+
+        self._calc_weighted()
+        if not batch:
+            self._report()
+
+    def _calc_weighted(self):
+        total = 0
+        done = 0
+        for log in self._item_logs:
+            w = WEIGHT_MAP.get(log.type, 0)
+            total += w
+            if log.status in ('success', 'failed'):
+                done += w
+        self._weighted_total = total
+        self._weighted_done = done
+        self._weighted_progress = round(done / total * 100, 1) if total > 0 else 0.0
 
     @staticmethod
     def _needs_rate_limit(tool_name: str) -> bool:

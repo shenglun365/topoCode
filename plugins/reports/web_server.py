@@ -267,7 +267,7 @@ async def get_community_files(task_id: str = Query(None), taskId: str = Query(No
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
         _rel = cd._make_rel(project_root)
 
         rows = pdb.fetchall(
@@ -862,7 +862,7 @@ async def get_community_graph(task_id: str = Query(None), taskId: str = Query(No
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
 
         if gn == "component":
             return cd.get_community_graph_component(
@@ -899,13 +899,15 @@ async def get_file_graph(task_id: str = Query(None), taskId: str = Query(None),
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
 
+        _proot = project_root.replace('\\', '/') if project_root else ''
         def _rel(p):
             if not p: return p
             if p.startswith('file:'): p = p[5:]
-            if project_root and p.lower().startswith(project_root.lower()): p = p[len(project_root):]
-            return p.lstrip('/').replace('\\', '/')
+            p = p.replace('\\', '/')
+            if _proot and p.lower().startswith(_proot.lower()): p = p[len(_proot):]
+            return p.lstrip('/')
 
         # 构建 file_path → comm_id 映射（用于 scope 过滤）
         file_comm = {}
@@ -1166,7 +1168,7 @@ async def get_heatmap(task_id: str = Query(None), taskId: str = Query(None),
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
 
         if cid:
             # 有 drill → 构建该社区的子社区间跨社区矩阵
@@ -1196,7 +1198,7 @@ async def get_external_graph(task_id: str = Query(None), taskId: str = Query(Non
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
         return cd.get_external_graph(pdb, tid, et, depth, cid, project_root)
     except HTTPException:
         raise
@@ -1218,7 +1220,7 @@ async def get_external_stats(task_id: str = Query(None), taskId: str = Query(Non
         proj_row = multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
-        project_root = (proj_row["root_path"] + "/") if proj_row and proj_row["root_path"] else ""
+        project_root = (proj_row["root_path"].replace('\\', '/') + "/") if proj_row and proj_row["root_path"] else ""
         return cd.get_external_stats(pdb, tid, project_root)
     except HTTPException:
         raise

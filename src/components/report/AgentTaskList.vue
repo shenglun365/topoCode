@@ -82,6 +82,8 @@ function transformHistory(h: any) {
     message: h.message || '',
     steps,
     createdAt: h.created_at || '',
+    taskLogs: [],
+    weightedProgress: 0,
   }
   // console.log('[transformHistory] agent=%s action=%s status=%s steps=%d', h.agent_id, h.action, h.status, steps.length)
   return task
@@ -124,9 +126,10 @@ async function refresh() {
           const idx = t.agentTasks.length
           t.agentTasks.push({
             id: h.agent_id, action: 'presummary_files', status: h.status || 'running',
-            progress: 0, step: 0, total: 0, message: h.message || '',
+            progress: 0, message: h.message || '',
             steps: [],
             createdAt: h.created_at || '',
+            taskLogs: [], weightedProgress: 0,
           })
           communityStore.ensureAgentPolling(taskId.value)
           // console.log('[refresh] injected history agent into store: %s', h.agent_id)
@@ -182,10 +185,37 @@ watch(taskId, (newId, oldId) => {
   }
 })
 
-function sumFileCount(steps: any[], statuses: string[]): number {
-  return steps
-    .filter(s => statuses.includes(s.status))
-    .reduce((sum, s) => sum + (s.file_count || 1), 0)
+function getLastLogs(task: any): any[] {
+  const logs = task.taskLogs || []
+  return logs.slice(-3)
+}
+
+function logIcon(status: string): string {
+  const map: Record<string, string> = {
+    running: '▶', success: '✓', failed: '✗', retry: '↻',
+  }
+  return map[status] || '·'
+}
+
+function logStatusText(status: string): string {
+  const map: Record<string, string> = {
+    running: '', success: '', failed: '', retry: '',
+  }
+  return map[status] || ''
+}
+
+function formatTime(iso: string): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    return d.toTimeString().slice(0, 8)
+  } catch { return '' }
+}
+
+function currentStepDesc(task: any): string {
+  if (!task.steps) return ''
+  const running = task.steps.find((s: any) => s.status === 'running')
+  return running?.description || task.steps[task.steps.length - 1]?.description || ''
 }
 
 const statusLabel = (status: string) => {
@@ -284,30 +314,32 @@ const actionLabel = (action: string) => {
         </button>
       </div>
       <div
-        v-show="task.status === 'running'"
+        v-show="task.status === 'running' || task.status === 'queued'"
         class="atl-progress-bar"
       >
         <div
           class="atl-progress-fill"
-          :style="{ width: task.progress + '%' }"
+          :style="{ width: (task.weightedProgress || task.progress) + '%' }"
         />
       </div>
-      <div
-        v-show="task.steps && task.steps.length > 0"
-        class="atl-steps"
-      >
-        <div class="atl-step-compact">
-          <span>{{ t('report.agent.status.completed') }} </span>
-          <span class="atl-compact-count">{{ sumFileCount(task.steps, ['done']) }}</span>
-          <span>/{{ sumFileCount(task.steps, ['done','failed','pending','running']) }}</span>
-          <span class="atl-compact-detail">{{ t('report.agent.stepSummary', { done: sumFileCount(task.steps, ['done']), failed: sumFileCount(task.steps, ['failed']), remaining: sumFileCount(task.steps, ['pending','running']) }) }}</span>
+      <div class="atl-task-logs">
+        <div
+          v-for="log in getLastLogs(task)"
+          :key="log.id"
+          class="atl-log-entry"
+          :class="'atl-log-' + log.status"
+        >
+          <span class="atl-log-icon">{{ logIcon(log.status) }}</span>
+          <span class="atl-log-time">{{ formatTime(log.startTime) }}</span>
+          <span class="atl-log-name">{{ log.name }}</span>
+          <span class="atl-log-status">{{ logStatusText(log.status) }}</span>
         </div>
         <div
-          v-show="task.steps.find(s => s.status === 'running')"
-          class="atl-step-current"
+          v-if="(!task.taskLogs || task.taskLogs.length === 0) && task.steps && task.steps.length > 0"
+          class="atl-log-fallback"
         >
-          <span>{{ t('report.agent.current') }}</span>
-          <span>{{ task.steps.find(s => s.status === 'running')?.description }}</span>
+          <span class="atl-log-icon">▶</span>
+          <span class="atl-log-name">{{ currentStepDesc(task) }}</span>
         </div>
       </div>
     </div>
@@ -327,7 +359,7 @@ const actionLabel = (action: string) => {
 
 <style scoped>
 .atl-container { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; contain: content; }
-.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; contain: layout style; will-change: transform; }
+.atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; min-height: 4.5rem; contain: layout style; will-change: transform; }
 .atl-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
 .atl-project { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); }
 .atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: 3px; }
@@ -406,44 +438,36 @@ const actionLabel = (action: string) => {
 }
 .atl-resume-btn:hover { background: var(--success, #22c55e); color: #fff; }
 .atl-progress { margin-left: auto; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); }
-.atl-progress-bar { height: 3px; background: var(--bg-secondary); border-radius: 2px; margin: 0.25rem 0; }
-.atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: 2px; transition: width 0.3s; }
-.atl-steps { display: flex; flex-direction: column; gap: 0.15rem; margin-top: 0.25rem; }
-.atl-step-compact {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  padding: 0.15rem 0;
-}
-.atl-compact-count {
-  font-weight: 600;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-.atl-compact-detail {
-  font-size: 0.6rem;
-  color: var(--text-muted);
-  margin-left: 0.25rem;
-}
-.atl-step-current {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.25rem;
-  font-size: 0.65rem;
-  color: var(--accent);
-  margin-top: 0.15rem;
-  padding: 0.1rem 0.35rem;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-radius: 3px;
+.atl-progress-bar { height: 3px; background: var(--bg-secondary); border-radius: 2px; margin: 0.25rem 0; min-height: 3px; }
+.atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: 2px; transition: width 0.3s ease; }
+.atl-task-logs {
+  display: flex; flex-direction: column; gap: 0.1rem;
+  margin-top: 0.25rem; min-height: 1.2rem;
   overflow: hidden;
 }
-.atl-step-current span:last-child {
-  word-break: break-all;
-  overflow-wrap: break-word;
-  min-width: 0;
+.atl-log-entry {
+  display: flex; align-items: center; gap: 0.25rem;
+  font-size: 0.65rem; line-height: 1.3;
+  padding: 0.05rem 0;
+  white-space: nowrap; overflow: hidden;
 }
+.atl-log-icon { flex-shrink: 0; font-size: 0.6rem; width: 0.8rem; text-align: center; }
+.atl-log-running .atl-log-icon { color: var(--accent, #7c3aed); }
+.atl-log-success .atl-log-icon { color: var(--success, #22c55e); }
+.atl-log-failed .atl-log-icon { color: var(--danger, #ef4444); }
+.atl-log-retry .atl-log-icon { color: var(--warning, #f59e0b); }
+.atl-log-time { flex-shrink: 0; font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+.atl-log-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  word-break: break-all; color: var(--text-primary);
+}
+.atl-log-running .atl-log-name { color: var(--accent, #7c3aed); }
+.atl-log-success .atl-log-name { color: var(--success, #22c55e); }
+.atl-log-failed .atl-log-name { color: var(--danger, #ef4444); }
+.atl-log-retry .atl-log-name { color: var(--warning, #f59e0b); }
+.atl-log-status { flex-shrink: 0; font-size: 0.6rem; }
+.atl-log-fallback { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; color: var(--text-muted); padding: 0.05rem 0; white-space: nowrap; overflow: hidden; }
+.atl-log-fallback .atl-log-name { color: var(--text-muted); }
 .atl-more { text-align: center; padding: 0.25rem; }
 .atl-more-btn { font-size: 0.65rem; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 3px; padding: 0.1rem 0.6rem; cursor: pointer; }
 .atl-more-btn:hover { background: var(--accent); color: #fff; }

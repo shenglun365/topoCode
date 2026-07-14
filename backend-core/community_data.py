@@ -28,14 +28,16 @@ logger = logging.getLogger(__name__)
 
 def _make_rel(project_root: str):
     """返回路径规范化函数: file:/abs/path → rel/path"""
+    __root = project_root.replace('\\', '/') if project_root else ''
     def _rel(p):
         if not p:
             return p
         if p.startswith('file:'):
             p = p[5:]
-        if project_root and p.lower().startswith(project_root.lower()):
-            p = p[len(project_root):]
-        return p.lstrip('/').replace('\\', '/')
+        p = p.replace('\\', '/')
+        if __root and p.lower().startswith(__root.lower()):
+            p = p[len(__root):]
+        return p.lstrip('/')
     return _rel
 
 

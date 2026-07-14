@@ -342,9 +342,20 @@ async function testCurrentForm() {
   dialogTestResult.value = null
 
   try {
-    // v2: 先暂存配置到 DB，然后通过后端 API 测试连接
-    // 如果是编辑已有模型，直接用其 ID；否则先保存再测试
+    // 先确保 DB 中的配置与表单当前值一致，再用它测试连接
     if (editingId.value) {
+      await modelConfigStore.updateModel({
+        id: editingId.value,
+        name: form.value.name || form.value.model,
+        provider: form.value.provider,
+        model: form.value.model,
+        url: form.value.url,
+        temperature: form.value.temperature,
+        maxTokens: form.value.maxTokens,
+        frequencyPenalty: form.value.frequencyPenalty,
+        presencePenalty: form.value.presencePenalty,
+        apiKey: form.value.apiKey || undefined,
+      })
       const result = await window.api!.settings.testModel(editingId.value)
       dialogTestResult.value = result.status === 'connected' ? 'success' : 'error'
     } else {

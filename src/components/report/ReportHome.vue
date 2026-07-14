@@ -395,7 +395,9 @@ watch(() => props.taskId, () => {
 })
 // agent 完成时刷新概览文档和仪表盘（不依赖初始 7s 轮询窗口）
 watch(agentCompletedSignal, () => {
+  // 首次尝试 + 指数退避重试（后端写入概览文档可能略有延迟）
   loadOverviewDoc(true)
+  startOverviewPoll()
   if (props.taskId) {
     reportStore.invalidateDashboard(props.taskId)
     reportStore.loadDashboard(props.taskId).then((dash) => {
