@@ -618,7 +618,7 @@ createApp({
           pre.parentElement.replaceChild(w,pre)
           try{
             if(sel.includes('mermaid')){
-              if(!_mermaid){const{default:md}=await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');_mermaid=md}
+              if(!_mermaid){const{default:md}=await import('/static/mermaid.min.mjs');_mermaid=md}
               _mermaid.initialize({startOnLoad:false,theme:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default',themeVariables:{fontSize:fontSize.value+'px'}})
               const uid='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6)
               const{svg}=await _mermaid.render(uid,code);w.className='';w.dataset.mermaidSource=code;w.innerHTML=svg
