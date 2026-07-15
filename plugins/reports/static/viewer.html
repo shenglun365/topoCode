@@ -2242,7 +2242,7 @@ const GraphView = {
 
     var _menuTimer = null;
 
-    g_cy.on('tap', 'node', function(evt) {
+    g_cy.on('cxttap', 'node', function(evt) {
       evt.stopPropagation();
       var node = evt.target;
       var nodeId = node.id();
