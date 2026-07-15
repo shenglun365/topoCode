@@ -2242,7 +2242,7 @@ const GraphView = {
 
     var _menuTimer = null;
 
-    g_cy.on('cxttap', 'node', function(evt) {
+    g_cy.on('tap', 'node', function(evt) {
       evt.stopPropagation();
       var node = evt.target;
       var nodeId = node.id();
@@ -2264,8 +2264,9 @@ const GraphView = {
       menu._ctxNodeId = nodeId;
       menu._ctxIsExt = !!isExternal;
 
+      var cyRect = g_cy.container().getBoundingClientRect();
       var pos = node.renderedPosition();
-      var mx = pos.x, my = pos.y;
+      var mx = cyRect.left + pos.x, my = cyRect.top + pos.y;
       var mw = menu.offsetWidth || 130;
       var mh = menu.offsetHeight || 60;
       if (mx + mw > window.innerWidth) mx = window.innerWidth - mw - 4;
