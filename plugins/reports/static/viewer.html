@@ -2278,6 +2278,7 @@ const GraphView = {
       menu.style.top = Math.max(0, my) + 'px';
       console.log('[ctx] setting menu display=block, left=' + menu.style.left + ' top=' + menu.style.top + ' cyRect=' + JSON.stringify({left:cyRect.left, top:cyRect.top}));
       menu.style.display = 'block';
+      console.log('[ctx] after set, computed display=' + getComputedStyle(menu).display + ' inline display=' + menu.style.display);
 
       if (_menuTimer) clearTimeout(_menuTimer);
       _menuTimer = setTimeout(function() { console.log('[ctx] menu timeout hide'); menu.style.display = 'none'; _menuTimer = null; }, 15000);
@@ -2285,7 +2286,8 @@ const GraphView = {
 
     // Background tap -> hide
     g_cy.on('tap', function(evt) {
-      if (evt.target === g_cy) console.log('[ctx] background tap, hiding menu');
+      if (evt.target !== g_cy) return;
+      console.log('[ctx] background tap, hiding menu');
       if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
       menu.style.display = 'none';
     });
