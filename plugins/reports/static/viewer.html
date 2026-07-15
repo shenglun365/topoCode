@@ -2243,10 +2243,13 @@ const GraphView = {
     var _menuTimer = null;
 
     g_cy.on('tap', 'node', function(evt) {
+      console.log('[ctx] tap node fired, target=', evt.target.id(), 'menu exists=', !!menu, 'g_cy exists=', !!g_cy);
       evt.stopPropagation();
       var node = evt.target;
       var nodeId = node.id();
       var isExternal = node.data('isExternal');
+
+      console.log('[ctx] nodeId=', nodeId, 'isExternal=', isExternal, 'drillItem=', !!menu.querySelector('[data-action="drilldown"]'));
 
       var drillItem = menu.querySelector('[data-action="drilldown"]');
       var docItem = menu.querySelector('[data-action="doc"]');
@@ -2273,14 +2276,16 @@ const GraphView = {
       if (my + mh > window.innerHeight) my = window.innerHeight - mh - 4;
       menu.style.left = Math.max(0, mx) + 'px';
       menu.style.top = Math.max(0, my) + 'px';
+      console.log('[ctx] setting menu display=block, left=' + menu.style.left + ' top=' + menu.style.top + ' cyRect=' + JSON.stringify({left:cyRect.left, top:cyRect.top}));
       menu.style.display = 'block';
 
       if (_menuTimer) clearTimeout(_menuTimer);
-      _menuTimer = setTimeout(function() { menu.style.display = 'none'; _menuTimer = null; }, 15000);
+      _menuTimer = setTimeout(function() { console.log('[ctx] menu timeout hide'); menu.style.display = 'none'; _menuTimer = null; }, 15000);
     });
 
     // Background tap -> hide
-    g_cy.on('tap', function() {
+    g_cy.on('tap', function(evt) {
+      if (evt.target === g_cy) console.log('[ctx] background tap, hiding menu');
       if (_menuTimer) { clearTimeout(_menuTimer); _menuTimer = null; }
       menu.style.display = 'none';
     });
