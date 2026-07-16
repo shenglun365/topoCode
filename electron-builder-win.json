@@ -27,7 +27,10 @@
     }
   ],
   "win": {
-    "icon": null
+    "icon": null,
+    "sign": null,
+    "certificateSubjectName": null,
+    "certificateSha1": null
   },
   "linux": {
     "target": ["AppImage", "deb"]
