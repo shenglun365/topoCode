@@ -893,31 +893,22 @@ export const useCommunityStore = defineStore('community', () => {
             message: msg,
           })
         }
-        // Sync item_logs
+        // Sync item_logs (仅批量级日志，无需逐文件转发)
         const agent = t.agentTasks[taskIdx]
         if (progress.item_logs && progress.item_logs.length > 0) {
-          console.log('[CS] poll item_logs', { taskIdx, agentTaskId, itemLogsCount: progress.item_logs.length, existingLogs: agent.taskLogs.length })
           const existingMap = new Map(agent.taskLogs.map(l => [l.id, l]))
           for (const log of progress.item_logs) {
             const existing = existingMap.get(log.id)
             if (existing) {
               if (existing.status !== log.status || existing.endTime !== log.endTime) {
-                console.log('[CS] taskLogs update', { id: log.id, type: log.type, name: log.name, fromStatus: existing.status, toStatus: log.status })
                 existing.status = log.status
                 existing.endTime = log.endTime
                 if (log.error) existing.error = log.error
               }
             } else {
-              console.log('[CS] taskLogs push', { id: log.id, type: log.type, name: log.name, status: log.status })
               agent.taskLogs.push({ ...log })
               existingMap.set(log.id, log)
             }
-          }
-          // Trim to last 100 logs to avoid unbounded growth
-          if (agent.taskLogs.length > 100) {
-            const before = agent.taskLogs.length
-            agent.taskLogs = agent.taskLogs.slice(-100)
-            console.log('[CS] taskLogs slice', { before, after: agent.taskLogs.length })
           }
         }
         if (progress.steps) {
@@ -1018,6 +1009,9 @@ export const useCommunityStore = defineStore('community', () => {
           agent.totalComps = stats.totalComps
           agent.weightedProgress = stats.weightedProgress
           agent.progress = Math.round(stats.weightedProgress)
+          if (stats.currentFile) agent.currentFile = stats.currentFile
+          if (stats.currentComponent) agent.currentComponent = stats.currentComponent
+          if (stats.phase) agent.phase = stats.phase
         }
       },
     })

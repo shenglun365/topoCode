@@ -212,15 +212,13 @@ function completedPhases(task: any): any[] {
 }
 
 function rollingFileLogs(task: any): any[] {
+  // 预摘要/组件分析不再上报逐文件日志，仅展示汇总计数
   const logs = task.taskLogs || []
   const fileLogs = logs.filter((l: any) => l.type === 'file' || l.type === 'component')
+  if (fileLogs.length === 0) return []
   const running = fileLogs.filter((l: any) => l.status === 'running').reverse()
   const done = fileLogs.filter((l: any) => l.status === 'success' || l.status === 'failed').reverse()
-  // Last 5 completed + up to 5 running
   const result = [...done.slice(0, 5), ...running.slice(0, 5)].slice(0, 10)
-  if (task.id && task.action === 'pipeline') {
-    console.log('[AT] rollingFileLogs', { taskId: task.id, totalLogs: logs.length, fileLogs: fileLogs.length, done: done.length, running: running.length, result: result.length, resultNames: result.map((r: any) => r.name).join(', ') })
-  }
   return result
 }
 
@@ -378,6 +376,13 @@ const actionLabel = (action: string) => {
           class="atl-log-breakdown"
         >
           {{ t('report.agent.components', '组件') }}: {{ task.doneComps || 0 }}/{{ task.totalComps }}
+        </div>
+        <div
+          v-if="task.currentFile"
+          class="atl-log-breakdown atl-log-current"
+        >
+          <span class="atl-log-icon">▶</span>
+          {{ task.currentFile }}
         </div>
         <div
           v-for="log in completedPhases(task)"
