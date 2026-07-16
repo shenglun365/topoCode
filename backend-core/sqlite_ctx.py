@@ -1306,52 +1306,42 @@ class MultiDBManager:
 
         # 迁移: 更新 model_configs 的 provider CHECK 约束（旧版只允许 4 个值）
         try:
-            raw_conn = sqlite3.connect(self.main_db.db_path)
-            raw_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            try:
-                row = raw_conn.execute(
-                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='model_configs'"
-                ).fetchone()
-                if row and 'ollama' in row[0] and 'openai' in row[0] and 'custom)' in row[0]:
-                    raw_conn.executescript("""
-                        CREATE TABLE model_configs_new (
-                            id TEXT PRIMARY KEY,
-                            name TEXT NOT NULL,
-                            provider TEXT NOT NULL CHECK(provider IN ('ollama', 'lm-studio', 'custom-local', 'deepseek', 'minimax-cn', 'minimax-global', 'openrouter', 'custom-cloud')),
-                            model TEXT NOT NULL,
-                            url TEXT NOT NULL,
-                            api_key TEXT DEFAULT '',
-                            type TEXT DEFAULT 'local' CHECK(type IN ('local', 'cloud')),
-                            status TEXT DEFAULT 'offline' CHECK(status IN ('offline', 'online', 'error')),
-                            is_default INTEGER DEFAULT 0,
-                            temperature REAL DEFAULT 0.7,
-                            max_tokens INTEGER DEFAULT 16384,
-                            frequency_penalty REAL DEFAULT 0.0,
-                            presence_penalty REAL DEFAULT 0.0,
-                            timeout INTEGER DEFAULT 30000,
-                            extra_config TEXT,
-                            context_window INTEGER DEFAULT 8192,
-                            max_requests_per_day INTEGER DEFAULT 0,
-                            max_tokens_per_day INTEGER DEFAULT 0,
-                            created_at TEXT DEFAULT (datetime('now')),
-                            updated_at TEXT DEFAULT (datetime('now'))
-                        );
-                        INSERT OR IGNORE INTO model_configs_new SELECT * FROM model_configs;
-                        DROP TABLE model_configs;
-                        ALTER TABLE model_configs_new RENAME TO model_configs;
-                    """)
-                    raw_conn.commit()
-                    logger.info("[migrate] Updated model_configs CHECK constraint")
-                else:
-                    logger.info(f"[migrate] model_configs constraint already up-to-date (or table missing)")
-            except Exception as e:
-                logger.error(f"[migrate] Failed to update model_configs constraint: {e}")
-                raw_conn.rollback()
-                raise
-            finally:
-                raw_conn.close()
+            row = self.main_db.fetchone(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='model_configs'"
+            )
+            if row and 'openai' in row.get('sql', ''):
+                logger.info("[migrate] Old provider CHECK constraint detected, migrating...")
+                self.main_db.conn.executescript("""
+                    CREATE TABLE model_configs_new (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        provider TEXT NOT NULL CHECK(provider IN ('ollama', 'lm-studio', 'custom-local', 'deepseek', 'minimax-cn', 'minimax-global', 'openrouter', 'custom-cloud')),
+                        model TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        api_key TEXT DEFAULT '',
+                        type TEXT DEFAULT 'local' CHECK(type IN ('local', 'cloud')),
+                        status TEXT DEFAULT 'offline' CHECK(status IN ('offline', 'online', 'error')),
+                        is_default INTEGER DEFAULT 0,
+                        temperature REAL DEFAULT 0.7,
+                        max_tokens INTEGER DEFAULT 16384,
+                        frequency_penalty REAL DEFAULT 0.0,
+                        presence_penalty REAL DEFAULT 0.0,
+                        timeout INTEGER DEFAULT 30000,
+                        extra_config TEXT,
+                        context_window INTEGER DEFAULT 8192,
+                        max_requests_per_day INTEGER DEFAULT 0,
+                        max_tokens_per_day INTEGER DEFAULT 0,
+                        created_at TEXT DEFAULT (datetime('now')),
+                        updated_at TEXT DEFAULT (datetime('now'))
+                    );
+                    INSERT OR IGNORE INTO model_configs_new SELECT * FROM model_configs;
+                    DROP TABLE model_configs;
+                    ALTER TABLE model_configs_new RENAME TO model_configs;
+                """)
+                self.main_db.conn.commit()
+                logger.info("[migrate] model_configs CHECK constraint updated")
         except Exception as e:
-            logger.warning(f"[migrate] Skipping model_configs migration: {e}")
+            logger.error(f"[migrate] model_configs migration failed: {e}")
 
         # 性能索引: 任务列表 ORDER BY created_at
         try:
