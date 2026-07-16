@@ -1304,13 +1304,13 @@ class MultiDBManager:
             CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
         """)
 
-        # 迁移: 更新 model_configs 的 provider CHECK 约束（旧版只允许 4 个值）
+        # 迁移: 更新 model_configs 的 provider/status CHECK 约束
         try:
             row = self.main_db.fetchone(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='model_configs'"
             )
-            if row and 'openai' in row.get('sql', ''):
-                logger.info("[migrate] Old provider CHECK constraint detected, migrating...")
+            if row and ('openai' in row.get('sql', '') or 'online' in row.get('sql', '')):
+                logger.info("[migrate] Old model_configs CHECK constraint detected, migrating...")
                 self.main_db.conn.executescript("""
                     CREATE TABLE model_configs_new (
                         id TEXT PRIMARY KEY,
@@ -1320,7 +1320,7 @@ class MultiDBManager:
                         url TEXT NOT NULL,
                         api_key TEXT DEFAULT '',
                         type TEXT DEFAULT 'local' CHECK(type IN ('local', 'cloud')),
-        status TEXT DEFAULT 'offline' CHECK(status IN ('offline', 'connected', 'error')),
+                        status TEXT DEFAULT 'offline' CHECK(status IN ('offline', 'connected', 'error')),
                         is_default INTEGER DEFAULT 0,
                         temperature REAL DEFAULT 0.7,
                         max_tokens INTEGER DEFAULT 16384,
