@@ -317,7 +317,7 @@ export interface Dimensions {
 export interface ModelConfigItem {
   id: string
   name: string
-  provider: 'ollama' | 'openai' | 'lm-studio' | 'custom'
+  provider: 'ollama' | 'lm-studio' | 'custom-local' | 'deepseek' | 'minimax-cn' | 'minimax-global' | 'openrouter' | 'custom-cloud'
   model: string
   url: string
   type: 'local' | 'cloud'

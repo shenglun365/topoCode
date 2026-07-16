@@ -678,7 +678,7 @@ export const mockModelConfig = {
 export interface ModelConfigItem {
   id: string
   name: string
-  provider: 'ollama' | 'openai' | 'lm-studio' | 'custom'
+  provider: 'ollama' | 'lm-studio' | 'custom-local' | 'deepseek' | 'minimax-cn' | 'minimax-global' | 'openrouter' | 'custom-cloud'
   model: string
   url: string
   type: 'local' | 'cloud'
@@ -725,10 +725,10 @@ export const mockModelConfigs: ModelConfigItem[] = [
   },
   {
     id: 'model-2',
-    name: 'OpenAI - gpt-4o',
-    provider: 'openai',
-    model: 'gpt-4o',
-    url: 'https://api.openai.com',
+    name: 'DeepSeek - deepseek-chat',
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    url: 'https://api.deepseek.com',
     type: 'cloud',
     status: 'connected',
     isDefault: false,

@@ -340,7 +340,7 @@ MAIN_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS model_configs (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        provider TEXT NOT NULL CHECK(provider IN ('ollama', 'openai', 'lm-studio', 'custom')),
+        provider TEXT NOT NULL CHECK(provider IN ('ollama', 'lm-studio', 'custom-local', 'deepseek', 'minimax-cn', 'minimax-global', 'openrouter', 'custom-cloud')),
         model TEXT NOT NULL,
         url TEXT NOT NULL,
         api_key TEXT DEFAULT '',
@@ -1302,6 +1302,43 @@ class MultiDBManager:
             );
             CREATE INDEX IF NOT EXISTS idx_project_group_map_group ON project_group_map(group_id);
         """)
+
+        # 迁移: 更新 model_configs 的 provider CHECK 约束（旧版只允许 4 个值）
+        try:
+            row = self.main_db.fetchone(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='model_configs'"
+            )
+            if row and 'ollama' in row['sql'] and 'openai' in row['sql'] and 'custom)' in row['sql']:
+                self.main_db.executescript("""
+                    CREATE TABLE model_configs_new (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        provider TEXT NOT NULL CHECK(provider IN ('ollama', 'lm-studio', 'custom-local', 'deepseek', 'minimax-cn', 'minimax-global', 'openrouter', 'custom-cloud')),
+                        model TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        api_key TEXT DEFAULT '',
+                        type TEXT DEFAULT 'local' CHECK(type IN ('local', 'cloud')),
+                        status TEXT DEFAULT 'offline' CHECK(status IN ('offline', 'online', 'error')),
+                        is_default INTEGER DEFAULT 0,
+                        temperature REAL DEFAULT 0.7,
+                        max_tokens INTEGER DEFAULT 16384,
+                        frequency_penalty REAL DEFAULT 0.0,
+                        presence_penalty REAL DEFAULT 0.0,
+                        timeout INTEGER DEFAULT 30000,
+                        extra_config TEXT,
+                        context_window INTEGER DEFAULT 8192,
+                        max_requests_per_day INTEGER DEFAULT 0,
+                        max_tokens_per_day INTEGER DEFAULT 0,
+                        created_at TEXT DEFAULT (datetime('now')),
+                        updated_at TEXT DEFAULT (datetime('now'))
+                    );
+                    INSERT OR IGNORE INTO model_configs_new SELECT * FROM model_configs;
+                    DROP TABLE model_configs;
+                    ALTER TABLE model_configs_new RENAME TO model_configs;
+                """)
+                logger.info("[migrate] Updated model_configs CHECK constraint")
+        except Exception:
+            pass
 
         # 性能索引: 任务列表 ORDER BY created_at
         try:
