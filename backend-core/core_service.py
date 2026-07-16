@@ -1200,7 +1200,10 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             if row.get("api_key"):
                 del row["api_key"]
             if row.get("extra_config"):
-                row["extraConfig"] = json.loads(row["extra_config"])
+                try:
+                    row["extraConfig"] = json.loads(row["extra_config"])
+                except (json.JSONDecodeError, TypeError):
+                    row["extraConfig"] = {}
         return rows
 
     @server.register("settings.addModel")
