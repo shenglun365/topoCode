@@ -1,8 +1,9 @@
 /** 单窗口管理器 - 单后端共享 + 保活机制 */
 
-import { BrowserWindow, app, ipcMain, session } from 'electron'
+import { BrowserWindow, app, ipcMain, session, dialog } from 'electron'
 import { join } from 'path'
 import { pythonBridge, BackendStatus } from './python-bridge'
+import { zmqRouter } from './zmq-router'
 
 // 后端保活超时（秒）
 const BACKEND_KEEPALIVE_TIMEOUT = 60
@@ -87,6 +88,31 @@ export class WindowManager {
 
     this.mainWindow = win
     console.log(`[WindowManager] Main window created`)
+
+    win.on('close', async (e) => {
+      if (this.isQuitting) return
+      e.preventDefault()
+      try {
+        const result: any = await zmqRouter.call('analysis.listRunningTasks', {})
+        const runningTasks = Array.isArray(result) ? result : (result?.tasks || [])
+        if (runningTasks.length > 0) {
+          const { response } = await dialog.showMessageBox(win, {
+            type: 'warning',
+            title: '确认关闭',
+            message: `有 ${runningTasks.length} 个 LLM 解析任务正在执行中`,
+            detail: '关闭窗口会导致正在执行的任务中断，已生成的中间结果可能丢失。\n建议先手工取消所有任务，再关闭窗口。\n\n是否仍要关闭？',
+            buttons: ['取消', '确认关闭'],
+            defaultId: 0,
+            cancelId: 0,
+          })
+          if (response === 0) return
+        }
+      } catch {
+        // 查询失败时仍允许关闭
+      }
+      this.isQuitting = true
+      win.destroy()
+    })
 
     win.on('closed', () => {
       this.mainWindow = null
