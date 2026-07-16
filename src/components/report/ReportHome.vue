@@ -393,9 +393,8 @@ watch(() => props.taskId, () => {
   reportStore.invalidateDashboard(props.taskId)
   loadData()
 })
-// agent 完成时刷新概览文档和仪表盘（不依赖初始 7s 轮询窗口）
-watch(agentCompletedSignal, () => {
-  // 首次尝试 + 指数退避重试（后端写入概览文档可能略有延迟）
+// agent 完成时刷新概览文档、项目摘要和仪表盘（不依赖初始 7s 轮询窗口）
+watch(agentCompletedSignal, async () => {
   loadOverviewDoc(true)
   startOverviewPoll()
   if (props.taskId) {
@@ -407,6 +406,15 @@ watch(agentCompletedSignal, () => {
       }
     })
     reportStore.checkReportExists(props.taskId)
+  }
+  // 刷新项目摘要（流水线可能在 AST 阶段无模型时未执行摘要）
+  const pid = projectId.value
+  if (pid) {
+    const projSummary = await reportStore.getProjectSummary(pid).catch(() => null)
+    if (projSummary?.summary) {
+      projectSummaryText.value = projSummary.summary
+      projectSummaryDate.value = projSummary.generated_at || ''
+    }
   }
 })
 </script>
