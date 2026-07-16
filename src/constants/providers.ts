@@ -3,21 +3,23 @@
 export const PROVIDER_DEFAULT_URLS: Record<string, string> = {
   ollama: 'http://localhost:11434',
   'lm-studio': 'http://localhost:1234',
-  openai: 'https://api.openai.com/v1',
+  'custom-local': '',
   deepseek: 'https://api.deepseek.com',
   'minimax-cn': 'https://api.minimax.chat/v1',
   'minimax-global': 'https://api.minimax.com/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  'custom-cloud': '',
 }
 
 export const PROVIDER_NAMES: Record<string, string> = {
   ollama: 'Ollama',
   'lm-studio': 'LM Studio',
-  openai: 'OpenAI',
+  'custom-local': 'Custom Local',
   deepseek: 'DeepSeek',
   'minimax-cn': 'MiniMax (CN)',
   'minimax-global': 'MiniMax (Global)',
   openrouter: 'OpenRouter',
+  'custom-cloud': 'Custom Cloud',
 }
 
 export const CDN_URLS = {

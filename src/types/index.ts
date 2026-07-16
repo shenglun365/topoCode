@@ -160,7 +160,7 @@ export interface AgentTask {
 export interface ModelConfig {
   id: string;
   name: string;
-  type: 'ollama' | 'openai' | 'custom';
+  provider: 'ollama' | 'lm-studio' | 'custom-local' | 'deepseek' | 'minimax-cn' | 'minimax-global' | 'openrouter' | 'custom-cloud';
   url: string;
   model: string;
   temperature?: number;
@@ -168,7 +168,7 @@ export interface ModelConfig {
   frequencyPenalty?: number;
   presencePenalty?: number;
   isDefault?: boolean;
-  status: 'online' | 'offline' | 'error';
+  status: 'offline' | 'connected' | 'error';
   latency?: number;
 }
 
