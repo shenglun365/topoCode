@@ -12,13 +12,12 @@
  *   node build/bundle-module.mjs --registry               # build + emit registry.json
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, createReadStream, createWriteStream } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, createReadStream, createWriteStream, rmSync } from 'fs'
 import { join, dirname, basename, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { createGzip } from 'zlib'
 import { createHash } from 'crypto'
 import { create, extract } from 'tar'
-import { execSync } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const rootDir = join(__dirname, '..')
@@ -58,7 +57,7 @@ function copyDir(src, dst, skipDirs = new Set()) {
 
 function cleanDir(dir) {
   if (existsSync(dir)) {
-    execSync(`rm -rf "${dir}"`, { stdio: 'inherit' })
+    rmSync(dir, { recursive: true, force: true })
   }
 }
 
