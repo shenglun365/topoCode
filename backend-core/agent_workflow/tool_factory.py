@@ -168,6 +168,14 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                                     wf_result = future.result(timeout=1.0)
                                     break
                                 except _TimeoutError:
+                                    # 仅转发 running 状态，让前端可以看到当前正在处理的文件
+                                    if hasattr(self, '_forward_log'):
+                                        for log in runtime._item_logs:
+                                            if log.type == 'file' and log.status == 'running':
+                                                self._forward_log(
+                                                    log.type, log.name, log.status,
+                                                    log.startTime, log.endTime, log.error,
+                                                )
                                     continue
                         else:
                             wf_result = future.result(timeout=7200)
@@ -308,6 +316,14 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                                     wf_result = future.result(timeout=1.0)
                                     break
                                 except _TimeoutError:
+                                    # 仅转发 running 状态，让前端可以看到当前正在分析的组件
+                                    if hasattr(self, '_forward_log'):
+                                        for log in runtime._item_logs:
+                                            if log.status == 'running':
+                                                self._forward_log(
+                                                    log.type, log.name, log.status,
+                                                    log.startTime, log.endTime, log.error,
+                                                )
                                     continue
                         else:
                             if _timeout_sec > 0:
