@@ -351,7 +351,7 @@ MAIN_DB_TABLES_SQL = """
         max_tokens INTEGER DEFAULT 16384,
         frequency_penalty REAL DEFAULT 0.0,
         presence_penalty REAL DEFAULT 0.0,
-        timeout INTEGER DEFAULT 30000,
+        timeout INTEGER DEFAULT 30,
         extra_config TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
@@ -1326,7 +1326,7 @@ class MultiDBManager:
                         max_tokens INTEGER DEFAULT 16384,
                         frequency_penalty REAL DEFAULT 0.0,
                         presence_penalty REAL DEFAULT 0.0,
-                        timeout INTEGER DEFAULT 30000,
+                        timeout INTEGER DEFAULT 30,
                         extra_config TEXT,
                         context_window INTEGER DEFAULT 8192,
                         max_requests_per_day INTEGER DEFAULT 0,
@@ -1334,7 +1334,19 @@ class MultiDBManager:
                         created_at TEXT DEFAULT (datetime('now')),
                         updated_at TEXT DEFAULT (datetime('now'))
                     );
-                    INSERT OR IGNORE INTO model_configs_new SELECT * FROM model_configs;
+                    INSERT OR IGNORE INTO model_configs_new
+                        (id, name, provider, model, url, api_key, type, status,
+                         is_default, temperature, max_tokens, frequency_penalty,
+                         presence_penalty, timeout, extra_config,
+                         created_at, updated_at,
+                         context_window, max_requests_per_day, max_tokens_per_day)
+                    SELECT
+                        id, name, provider, model, url, api_key, type, status,
+                        is_default, temperature, max_tokens, frequency_penalty,
+                        presence_penalty, timeout, extra_config,
+                        created_at, updated_at,
+                        context_window, max_requests_per_day, max_tokens_per_day
+                    FROM model_configs;
                     DROP TABLE model_configs;
                     ALTER TABLE model_configs_new RENAME TO model_configs;
                 """)
@@ -1342,6 +1354,43 @@ class MultiDBManager:
                 logger.info("[migrate] model_configs CHECK constraint updated")
         except Exception as e:
             logger.error(f"[migrate] model_configs migration failed: {e}")
+
+        # 修复迁移可能造成的数据损坏（旧版本迁移曾使用 SELECT * 导致列错位）
+        try:
+            self.main_db.execute("""
+                UPDATE model_configs SET timeout = 30 WHERE typeof(timeout) = 'text'
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET context_window = 8192 WHERE typeof(context_window) = 'text'
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET max_requests_per_day = 0 WHERE typeof(max_requests_per_day) = 'text'
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET max_tokens_per_day = 0 WHERE typeof(max_tokens_per_day) = 'text'
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET created_at = datetime('now') WHERE typeof(created_at) != 'text' OR created_at IS NULL
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET updated_at = datetime('now') WHERE typeof(updated_at) != 'text' OR updated_at IS NULL
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET frequency_penalty = 0.0 WHERE frequency_penalty >= 30000
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET presence_penalty = 0.0 WHERE typeof(presence_penalty) = 'text'
+            """)
+            self.main_db.execute("""
+                UPDATE model_configs SET extra_config = NULL WHERE typeof(extra_config) = 'text' AND extra_config LIKE '20%T%'
+            """)
+            # 将旧版毫秒超时值（30000ms）转换为秒（30s）
+            self.main_db.execute("""
+                UPDATE model_configs SET timeout = 30 WHERE typeof(timeout) = 'integer' AND timeout >= 30000
+            """)
+            self.main_db.conn.commit()
+        except Exception as e:
+            logger.warning(f"[migrate] model_configs data repair skipped: {e}")
 
         # 性能索引: 任务列表 ORDER BY created_at
         try:

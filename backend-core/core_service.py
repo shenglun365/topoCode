@@ -1243,6 +1243,9 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "max_tokens": kwargs.get("maxTokens", 16384),
             "frequency_penalty": kwargs.get("frequencyPenalty", 0.0),
             "presence_penalty": kwargs.get("presencePenalty", 0.0),
+            "timeout": kwargs.get("timeout", 30),
+            "extra_config": kwargs.get("extraConfig") or None,
+            "context_window": kwargs.get("contextWindow", 8192),
             "created_at": now,
             "updated_at": now,
         }
@@ -1254,7 +1257,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.updateModel")
     def update_model(id: str, **kwargs):
-        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "apiKey", "maxRequestsPerDay", "maxTokensPerDay", "frequencyPenalty", "presencePenalty"}
+        allowed = {"name", "temperature", "maxTokens", "url", "isDefault", "provider", "model", "apiKey", "maxRequestsPerDay", "maxTokensPerDay", "frequencyPenalty", "presencePenalty", "timeout", "contextWindow", "extraConfig"}
         data = {}
         for k, v in kwargs.items():
             if k == "isDefault":
@@ -1274,6 +1277,12 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             elif k == "apiKey":
                 if v:
                     data["api_key"] = v
+            elif k == "timeout":
+                data["timeout"] = int(v) if v else 30
+            elif k == "contextWindow":
+                data["context_window"] = int(v) if v else 8192
+            elif k == "extraConfig":
+                data["extra_config"] = v
             elif k == "url":
                 clean_url = v.rstrip('/')
                 if clean_url.endswith('/v1'):

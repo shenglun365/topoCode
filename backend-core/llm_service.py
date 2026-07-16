@@ -815,8 +815,8 @@ class LLMService:
         )
         if not limits:
             return
-        max_req = limits.get('max_requests_per_day', 0) or 0
-        max_tok = limits.get('max_tokens_per_day', 0) or 0
+        max_req = int(limits.get('max_requests_per_day', 0) or 0)
+        max_tok = int(limits.get('max_tokens_per_day', 0) or 0)
         if max_req == 0 and max_tok == 0:
             return
         today = datetime.now().strftime('%Y-%m-%d')
