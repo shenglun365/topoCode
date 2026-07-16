@@ -10,7 +10,6 @@ import os
 
 import re
 import shutil
-import sqlite3
 import uuid
 import zipfile
 from collections import Counter
@@ -1204,48 +1203,9 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 row["extraConfig"] = json.loads(row["extra_config"])
         return rows
 
-    def _fix_provider_constraint():
-        """修复 model_configs 的 provider CHECK 约束（旧版）"""
-        try:
-            raw = sqlite3.connect(main_db.db_path)
-            raw.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            row = raw.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='model_configs'"
-            ).fetchone()
-            if row and 'openai' in row[0]:
-                logger.info("[addModel] Old provider CHECK constraint detected, migrating...")
-                raw.executescript("""
-                    CREATE TABLE model_configs_new (
-                        id TEXT PRIMARY KEY, name TEXT NOT NULL,
-                        provider TEXT NOT NULL CHECK(provider IN ('ollama','lm-studio','custom-local','deepseek','minimax-cn','minimax-global','openrouter','custom-cloud')),
-                        model TEXT NOT NULL, url TEXT NOT NULL, api_key TEXT DEFAULT '',
-                        type TEXT DEFAULT 'local' CHECK(type IN ('local','cloud')),
-                        status TEXT DEFAULT 'offline' CHECK(status IN ('offline','online','error')),
-                        is_default INTEGER DEFAULT 0,
-                        temperature REAL DEFAULT 0.7, max_tokens INTEGER DEFAULT 16384,
-                        frequency_penalty REAL DEFAULT 0.0, presence_penalty REAL DEFAULT 0.0,
-                        timeout INTEGER DEFAULT 30000, extra_config TEXT,
-                        context_window INTEGER DEFAULT 8192,
-                        max_requests_per_day INTEGER DEFAULT 0, max_tokens_per_day INTEGER DEFAULT 0,
-                        created_at TEXT DEFAULT (datetime('now')),
-                        updated_at TEXT DEFAULT (datetime('now'))
-                    );
-                    INSERT OR IGNORE INTO model_configs_new SELECT * FROM model_configs;
-                    DROP TABLE model_configs;
-                    ALTER TABLE model_configs_new RENAME TO model_configs;
-                """)
-                raw.commit()
-                logger.info("[addModel] Provider CHECK constraint migrated")
-            raw.close()
-        except Exception as e:
-            logger.info(f"[addModel] fix_provider_constraint skipped: {e}")
-
     @server.register("settings.addModel")
     def add_model(name: str, provider: str, model: str, url: str, type: str = "local", **kwargs):
         now = datetime.now().isoformat()
-
-        # 预先修复旧约束（如果表还是旧的）
-        _fix_provider_constraint()
 
         # 去重: 同名 + 同 provider 的模型自动更新
         existing = main_db.fetchone(
