@@ -1,4 +1,4 @@
-# TopoOne Backend Core — 必须的最小依赖集
+# TopoOne Backend Core - minimal required deps
 pyzmq==27.1.0
 requests==2.34.2
 pydantic==2.13.4
