@@ -110,9 +110,6 @@ class OpenAICompatProvider(BaseLLMProvider):
                         usage_data = data['usage']
 
                     reasoning = delta.get('reasoning_content', '')
-                    chunk = delta.get('content', '')
-                    if reasoning or chunk or delta.get('tool_calls'):
-                        logger.info(f"[LLM_DEBUG] delta reasoning={reasoning!r} content={chunk!r} tool_calls={bool(delta.get('tool_calls'))}")
                     if reasoning:
                         chunk_queue.put({"type": "reasoning", "text": reasoning})
                     if chunk:

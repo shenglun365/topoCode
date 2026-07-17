@@ -570,8 +570,10 @@ async function handleSend() {
     await chat({
       messages: sendMessages,
       onChunk(chunk: string) {
-        console.log(`[LLM_DEBUG] AIAssistantPanel.onChunk text_len=${chunk.length} text_preview=${chunk.slice(0, 100)}`)
-        assistantMsg.content += chunk
+        // 过滤模型推理内容（... 等标签）
+        const cleaned = chunk.replace(/<think>[\s\S]*?<\/think>\s*/g, '')
+        if (!cleaned) return
+        assistantMsg.content += cleaned
         scrollToBottom()
       },
       locale,

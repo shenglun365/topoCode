@@ -291,13 +291,6 @@ app.whenReady().then(async () => {
   // LLM 流式 chunk 事件需要广播到所有窗口
   zmqRouter.on('event', (event: { topic: string; eventType: string; data: any }) => {
     if (event.topic === 'llm') {
-      const d = event.data
-      const textPreview = typeof d?.text === 'string' ? d.text.slice(0, 100) : (typeof d?.text === 'undefined' ? '' : JSON.stringify(d.text).slice(0, 100))
-      if (event.eventType === 'chunk') {
-        console.log(`[Main] ZMQ_LLM eventType=chunk requestId=${d?.requestId} idx=${d?.index} text_len=${typeof d?.text === 'string' ? d.text.length : 0} text_preview=${textPreview} keys=${Object.keys(d || {}).join(',')}`)
-      } else {
-        console.log(`[Main] ZMQ_LLM eventType=${event.eventType} requestId=${d?.requestId} keys=${Object.keys(d || {}).join(',')}`)
-      }
       const payload = {
         requestId: event.data?.requestId,
         eventType: event.eventType,  // chunk / tool_call / tool_result / done / error

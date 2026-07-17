@@ -375,7 +375,6 @@ class LLMService:
                             })
                         full_content = item.get('content', '')
                         _token_data = thread_token_data  # capture token info from stream thread
-                        logger.info(f"[LLM_DEBUG] queue done requestId={request_id} full_content_len={len(full_content or '')}")
                         break
 
                     if isinstance(item, dict) and item.get('type') == 'error':
@@ -383,10 +382,6 @@ class LLMService:
 
                     if isinstance(item, dict) and item.get('type') == 'tool_calls':
                         tool_calls_merged = json.loads(item.get('data', '[]'))
-                        logger.info(f"[LLM_DEBUG] queue tool_calls requestId={request_id} count={len(tool_calls_merged)}")
-
-                    if isinstance(item, dict) and item.get('type') == 'reasoning':
-                        logger.info(f"[LLM_DEBUG] queue reasoning requestId={request_id} text_len={len(item.get('text',''))} text_preview={item.get('text','')[:80]!r}")
 
                     # 文本 chunk
                     if isinstance(item, str):
@@ -395,7 +390,6 @@ class LLMService:
 
                     now = time.monotonic()
                     if batch_text and (now - last_pub >= 0.1 or len(batch_text) >= 200):
-                        logger.info(f"[LLM_DEBUG] publish requestId={request_id} idx={batch_idx} text_len={len(batch_text)} text_preview={batch_text[:100]!r}")
                         self._publish('llm', 'chunk', {
                             'requestId': request_id,
                             'index': batch_idx,
