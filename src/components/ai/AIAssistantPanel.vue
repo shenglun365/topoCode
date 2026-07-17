@@ -707,8 +707,15 @@ onMounted(() => {
         >
           <div
             class="ai-message-bubble"
-            v-html="formatMessageContent(msg)"
-          />
+            :class="{ 'ai-message-streaming': msg.isStreaming && !msg.content }"
+          >
+            <template v-if="msg.isStreaming && !msg.content">
+              <span class="ai-loading-dot" />
+              <span class="ai-loading-dot" />
+              <span class="ai-loading-dot" />
+            </template>
+            <span v-html="formatMessageContent(msg)" />
+          </div>
         </div>
       </div>
 
@@ -906,6 +913,31 @@ onMounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-bottom-left-radius: 2px;
+}
+
+.ai-message-streaming {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px !important;
+  min-height: 20px;
+}
+
+.ai-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: ai-loading-bounce 1.4s ease-in-out infinite both;
+}
+
+.ai-loading-dot:nth-child(1) { animation-delay: -0.32s; }
+.ai-loading-dot:nth-child(2) { animation-delay: -0.16s; }
+.ai-loading-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes ai-loading-bounce {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.2); }
 }
 
 .ai-messages-more {
