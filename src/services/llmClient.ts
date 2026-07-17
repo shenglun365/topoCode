@@ -70,6 +70,7 @@ export function chat(options: ChatOptions): Promise<string> {
       unsub = bridge.llm.subscribe(result.requestId, {
         onChunk(data: { index: number; text: string }) {
           if (aborted) return
+          console.log(`[LLM_DEBUG] llmClient.onChunk idx=${data.index} text_len=${data.text.length} text_preview=${data.text.slice(0, 100)} keys=${Object.keys(data).join(',')}`)
           options.onChunk?.(data.text)
         },
         onDone(data: { content: string; structured?: Record<string, any> }) {

@@ -570,6 +570,7 @@ async function handleSend() {
     await chat({
       messages: sendMessages,
       onChunk(chunk: string) {
+        console.log(`[LLM_DEBUG] AIAssistantPanel.onChunk text_len=${chunk.length} text_preview=${chunk.slice(0, 100)}`)
         assistantMsg.content += chunk
         scrollToBottom()
       },
