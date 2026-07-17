@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { ipc } from '@/services/ipc'
 import { isLLMConfigured } from '@/services/llmClient'
 import { controlDispatcher } from '@/services/control-dispatcher'
+import { playSuccessSound, playFailureSound } from '@/services/sound'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
 import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@/types/ipc'
@@ -951,6 +952,11 @@ export const useCommunityStore = defineStore('community', () => {
         if (isCompleted) {
           controlDispatcher.unregister(controlKey)
           agentCompletedSignal.value++
+          if (progress.status === 'completed' || progress.status === 'partial') {
+            playSuccessSound()
+          } else if (progress.status === 'failed') {
+            playFailureSound()
+          }
           if (progress.status !== 'failed' && progress.status !== 'cancelled' && taskId) {
             const pid = useProjectStore().selectedProjectId
             if (pid) {
