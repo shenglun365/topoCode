@@ -184,7 +184,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .diag-fullscreen-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:40px}
 .diag-fullscreen-overlay .diag-fs-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:1}
 .diag-fullscreen-overlay .diag-fs-close:hover{background:rgba(255,255,255,.3)}
-.diag-fullscreen-overlay .diag-fs-content{max-width:95%;max-height:90vh;overflow:auto}
+.diag-fullscreen-overlay .diag-fs-content{max-width:95%;max-height:90vh;overflow:auto;transform-origin:center center;transition:transform .1s}
 .diag-fullscreen-overlay .diag-fs-content svg{max-width:none!important}
 .reasoning-toggle{color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px}
 .reasoning-toggle:hover{color:var(--accent)}
@@ -808,9 +808,17 @@ createApp({
           // ── fullscreen ──
           fullscreenBtn.onclick=function(){
             const ov=document.createElement('div');ov.className='diag-fullscreen-overlay'
-            ov.innerHTML='<button class="diag-fs-close">×</button><div class="diag-fs-content">'+svgWrap.innerHTML+'</div>'
-            document.body.appendChild(ov)
-            ov.querySelector('.diag-fs-close').onclick=function(){ov.remove()}
+            const fc=document.createElement('div');fc.className='diag-fs-content'
+            fc.innerHTML=svgWrap.innerHTML
+            const closeBtn=document.createElement('button');closeBtn.className='diag-fs-close';closeBtn.textContent='×'
+            ov.appendChild(closeBtn);ov.appendChild(fc);document.body.appendChild(ov)
+            var fsScale=1
+            ov.addEventListener('wheel',function(e){
+              e.preventDefault()
+              fsScale=Math.max(0.25,Math.min(5,fsScale+(e.deltaY>0?-0.2:0.2)))
+              fc.style.transform='scale('+fsScale+')'
+            },{passive:false})
+            closeBtn.onclick=function(){ov.remove()}
             ov.onclick=function(e){if(e.target===ov)ov.remove()}
           }
 
