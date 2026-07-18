@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="/static/store.js?v=20260706"></script>
-<script src="/static/i18n.js?v=20260711"></script>
+<script src="/static/i18n.js?v=20260718"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
   @font-face { font-family:'Inter'; font-style:normal; font-weight:100 900; font-display:swap; src:url(/static/fonts/inter/inter-cyrillic-ext.woff2) format('woff2'); unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+2DE0-2DFF,U+A640-A69F,U+FE2E-FE2F; }
@@ -338,7 +338,6 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
             <div class="message-actions" v-if="m.id">
               <button class="msg-act-btn" @click="copyMessageContent(m)" :title="__('chat.copyMsg')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
               <button class="msg-act-btn" @click="quoteMessage(m)" title="引用此消息"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
-              <button class="msg-act-btn msg-continue" @click="continueAssistant(m)" :title="__('chat.continue')">⟳ {{__('chat.continue')}}</button>
               <div class="del-wrap">
                 <button class="del-msg" @click.stop="showDeleteMenu(m.id)">{{__('common.delete')}}</button>
                 <div v-if="activeDeleteMsg===m.id" class="del-menu" @click.stop>
@@ -346,6 +345,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
                   <button class="dm-item dm-batch" @click="enterBatchMode">{{__('chat.batchDelete')}}</button>
                 </div>
               </div>
+              <button class="msg-act-btn msg-continue" @click="continueAssistant(m)" :title="__('chat.continue')">⟳ {{__('chat.continue')}}</button>
             </div>
           </div>
         </div>

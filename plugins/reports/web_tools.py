@@ -190,14 +190,32 @@ WEB_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "web_read_file",
-            "description": "读取项目中的源码文件内容（自动截断过长文件）",
+            "description": "获取文件中关键符号的结构概览（含符号名、类型、行号范围、函数签名）。不返回完整代码。如需获取具体代码行，请使用 web_read_file_lines。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "projectId": {"type": "string", "description": "项目 ID"},
                     "path": {"type": "string", "description": "文件相对路径"},
+                    "taskId": {"type": "string", "description": "分析任务 ID（可选，指定后可获取更精确的符号信息）"},
                 },
                 "required": ["projectId", "path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_read_file_lines",
+            "description": "按行号范围读取源码文件的具体代码行，返回带行号的内容。应在 web_read_file 获取符号概览后，针对感兴趣的行号范围调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "projectId": {"type": "string", "description": "项目 ID"},
+                    "path": {"type": "string", "description": "文件相对路径"},
+                    "startLine": {"type": "integer", "description": "起始行号（含），从 1 开始"},
+                    "endLine": {"type": "integer", "description": "结束行号（含）"},
+                },
+                "required": ["projectId", "path", "startLine", "endLine"],
             },
         },
     },
@@ -553,6 +571,7 @@ class WebToolExecutor:
             "web_get_community_graph": self._get_community_graph,
             "web_get_community_files": self._get_community_files,
             "web_read_file": self._read_file,
+            "web_read_file_lines": self._read_file_lines,
             "web_get_file_summary": self._get_file_summary,
             "web_search_symbols": self._search_symbols,
             "web_get_symbol_detail": self._get_symbol_detail,
@@ -782,6 +801,7 @@ class WebToolExecutor:
     def _read_file(self, args: dict) -> dict:
         pid = args.get("projectId", "")
         path = args.get("path", "")
+        task_id = args.get("taskId", "")
         proj = self.multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
@@ -793,12 +813,117 @@ class WebToolExecutor:
             return {"error": "Path outside project root"}
         if not os.path.isfile(full):
             return {"error": f"File not found: {path}"}
-        with open(full, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read(MAX_RESULT_LENGTH + 2000)
-        truncated = len(content) > MAX_RESULT_LENGTH
-        if truncated:
-            content = content[:MAX_RESULT_LENGTH] + "\n...(truncated)"
-        return {"path": path, "content": content, "size": len(content), "truncated": truncated}
+
+        # 获取文件基本信息
+        total_lines = 0
+        try:
+            with open(full, "rb") as f:
+                total_lines = sum(1 for _ in f)
+        except Exception:
+            pass
+        file_size = os.path.getsize(full)
+
+        # 查询 graph_node 中的符号信息
+        pdb = self.multi_db.get_project_db(pid)
+        symbols = []
+        if task_id:
+            rows = pdb.fetchall(
+                "SELECT name, kind, signature, docstring, start_line, end_line "
+                "FROM graph_node WHERE file_path=? AND task_id=? ORDER BY start_line",
+                (path, task_id),
+            )
+            symbols = rows
+        else:
+            # 如果没有指定 taskId，按项目下的任务顺序查找
+            tasks = self.multi_db.main_db.fetchall(
+                "SELECT id FROM analysis_tasks WHERE project_id=? ORDER BY created_at DESC",
+                (pid,),
+            )
+            for t in tasks:
+                rows = pdb.fetchall(
+                    "SELECT name, kind, signature, docstring, start_line, end_line "
+                    "FROM graph_node WHERE file_path=? AND task_id=? ORDER BY start_line",
+                    (path, t["id"]),
+                )
+                if rows:
+                    symbols = rows
+                    task_id = t["id"]
+                    break
+
+        if symbols:
+            lines = []
+            for s in symbols:
+                name = s["name"]
+                kind = s["kind"]
+                sl = s["start_line"]
+                el = s["end_line"]
+                sig = (s["signature"] or "")[:120]
+                entry = f"  [{kind}] {name}  L{sl}-L{el}"
+                if sig:
+                    entry += f"  {sig}"
+                lines.append(entry)
+            overview = "\n".join(lines)
+            result = (
+                f"文件: {path} ({file_size} bytes, {total_lines} 行)\n"
+                f"符号数量: {len(symbols)}\n"
+                f"符号概览:\n{overview}\n\n"
+                f"提示: 如需查看具体代码行，请使用 web_read_file_lines 按行号范围读取。"
+            )
+            return {"path": path, "summary": True, "content": result, "size": file_size, "lines": total_lines, "symbol_count": len(symbols)}
+        else:
+            # 无符号信息时，回退读取前 100 行作为概览
+            preview_lines = []
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as f:
+                    for i, line in enumerate(f):
+                        if i >= 100:
+                            break
+                        preview_lines.append(f"{i+1}: {line}")
+            except Exception:
+                pass
+            preview = "".join(preview_lines)
+            note = "(无解析符号，以下为文件前 100 行预览)"
+            if not preview:
+                preview = "(文件为空或无法读取)"
+            result = f"文件: {path} ({file_size} bytes, {total_lines} 行)\n{note}\n{preview}"
+            return {"path": path, "summary": True, "content": result, "size": file_size, "lines": total_lines, "symbol_count": 0}
+
+    def _read_file_lines(self, args: dict) -> dict:
+        pid = args.get("projectId", "")
+        path = args.get("path", "")
+        start_line = int(args.get("startLine", 1))
+        end_line = int(args.get("endLine", 10))
+        proj = self.multi_db.main_db.fetchone(
+            "SELECT root_path FROM projects WHERE id = ?", (pid,)
+        )
+        if not proj:
+            return {"error": f"Project {pid} not found"}
+        root = proj["root_path"]
+        full = os.path.normpath(os.path.join(root, path))
+        if os.path.commonpath([full, os.path.normpath(root)]) != os.path.normpath(root):
+            return {"error": "Path outside project root"}
+        if not os.path.isfile(full):
+            return {"error": f"File not found: {path}"}
+        if start_line < 1:
+            start_line = 1
+        if end_line < start_line:
+            end_line = start_line
+        lines = []
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                for i, line in enumerate(f):
+                    lineno = i + 1
+                    if lineno > end_line:
+                        break
+                    if lineno >= start_line:
+                        lines.append({"lineNo": lineno, "content": line.rstrip("\n\r")})
+        except Exception as e:
+            return {"error": f"Failed to read file: {e}"}
+        content = "\n".join(f"{l['lineNo']}: {l['content']}" for l in lines)
+        return {
+            "path": path, "startLine": start_line, "endLine": end_line,
+            "content": content, "lines_returned": len(lines),
+        }
 
     def _get_file_summary(self, args: dict) -> dict:
         task_id = args.get("taskId", "")

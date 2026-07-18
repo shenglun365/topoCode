@@ -68,7 +68,12 @@ BUILTIN_SKILLS: dict[str, Skill] = {
         description="读取源码文件和文件摘要",
         icon="📄",
         tools=["web_read_file", "web_get_file_summary", "web_get_community_files"],
-        context_prompt="用户可以读取项目源码文件和文件摘要。",
+        context_prompt=(
+            "用户可以读取项目源码文件和文件摘要。"
+            "查询文件内容时，优先使用 web_get_file_summary 获取预摘要（速度最快）；"
+            "摘要信息不足时，使用 web_read_file 查看文件结构概览（符号名+行号）；"
+            "如需阅读具体代码片段，使用 web_read_file_lines 按行号范围读取。"
+        ),
         default=True,
     ),
     "symbol_analyzer": Skill(
