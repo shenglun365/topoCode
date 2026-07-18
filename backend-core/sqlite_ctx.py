@@ -351,7 +351,7 @@ MAIN_DB_TABLES_SQL = """
         max_tokens INTEGER DEFAULT 16384,
         frequency_penalty REAL DEFAULT 0.0,
         presence_penalty REAL DEFAULT 0.0,
-        timeout INTEGER DEFAULT 30,
+        timeout INTEGER DEFAULT 300,
         extra_config TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
@@ -1326,7 +1326,7 @@ class MultiDBManager:
                         max_tokens INTEGER DEFAULT 16384,
                         frequency_penalty REAL DEFAULT 0.0,
                         presence_penalty REAL DEFAULT 0.0,
-                        timeout INTEGER DEFAULT 30,
+                        timeout INTEGER DEFAULT 300,
                         extra_config TEXT,
                         context_window INTEGER DEFAULT 8192,
                         max_requests_per_day INTEGER DEFAULT 0,
@@ -1358,7 +1358,7 @@ class MultiDBManager:
         # 修复迁移可能造成的数据损坏（旧版本迁移曾使用 SELECT * 导致列错位）
         try:
             self.main_db.execute("""
-                UPDATE model_configs SET timeout = 30 WHERE typeof(timeout) = 'text'
+                UPDATE model_configs SET timeout = 300 WHERE typeof(timeout) = 'text'
             """)
             self.main_db.execute("""
                 UPDATE model_configs SET context_window = 8192 WHERE typeof(context_window) = 'text'
@@ -1384,9 +1384,13 @@ class MultiDBManager:
             self.main_db.execute("""
                 UPDATE model_configs SET extra_config = NULL WHERE typeof(extra_config) = 'text' AND extra_config LIKE '20%T%'
             """)
-            # 将旧版毫秒超时值（30000ms）转换为秒（30s）
+            # 将旧版毫秒超时值（30000ms）转换为秒（300s）
             self.main_db.execute("""
-                UPDATE model_configs SET timeout = 30 WHERE typeof(timeout) = 'integer' AND timeout >= 30000
+                UPDATE model_configs SET timeout = 300 WHERE typeof(timeout) = 'integer' AND timeout >= 30000
+            """)
+            # 修复已有 timeout=30 记录（上一版迁移和数据修复的遗留值）
+            self.main_db.execute("""
+                UPDATE model_configs SET timeout = 300 WHERE timeout = 30
             """)
             self.main_db.conn.commit()
         except Exception as e:

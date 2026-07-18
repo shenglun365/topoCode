@@ -389,7 +389,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                 sub_tools.register(_GenerateOverviewTool(multi_db, project_db, task_id))
                 workflow = OverviewWorkflow()
                 context = {"task_id": task_id, "project_summary": project_summary or "", "language": language}
-                sandbox = _AS(project_root, max_tokens=8192, timeout_seconds=600)
+                sandbox = _AS(project_root, max_tokens=32768, timeout_seconds=600)
 
                 runtime = AgentRuntime(sub_tools, sandbox, multi_db=multi_db)
 
