@@ -791,7 +791,7 @@ createApp({
           tabCode.onclick=function(){tabCode.classList.add('diag-tab-active');tabChart.classList.remove('diag-tab-active');diagView.style.display='none';diagCode.style.display=''}
 
           // ── zoom ──
-          (function(){
+          ;(function(){
             var zs=1
             zoomOut.onclick=function(){zs=Math.max(0.25,zs-0.25);svgWrap.style.transform='scale('+zs+')';zoomPct.textContent=Math.round(zs*100)+'%'}
             zoomIn.onclick=function(){zs=Math.min(3,zs+0.25);svgWrap.style.transform='scale('+zs+')';zoomPct.textContent=Math.round(zs*100)+'%'}
