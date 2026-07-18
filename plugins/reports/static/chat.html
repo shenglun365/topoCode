@@ -734,42 +734,42 @@ createApp({
         const blocks=el.querySelectorAll(sel);if(!blocks.length)continue
         const isMermaid=sel.includes('mermaid')
         for(const b of blocks){
-          var pre=b.parentElement;if(!pre||pre.tagName!=='PRE')continue
-          var code=b.textContent.trim();if(!code)continue
-          var msg=messages.value.find(function(m){return m.id===msgId})
+          const pre=b.parentElement;if(!pre||pre.tagName!=='PRE')continue
+          const code=b.textContent.trim();if(!code)continue
+          const msg=messages.value.find(function(m){return m.id===msgId})
           if(!msg)continue
           msg._diagIdx=(msg._diagIdx||0)+1
 
           // ── 构建容器 ──
-          var container=document.createElement('div');container.className='diagram-container'
+          const container=document.createElement('div');container.className='diagram-container'
           container.dataset.msgId=msgId;container.dataset.diagramIndex=msg._diagIdx
           pre.parentElement.insertBefore(container,pre)
 
           // toolbar
-          var toolbar=document.createElement('div');toolbar.className='diag-toolbar'
-          var tabsDiv=document.createElement('div');tabsDiv.className='diag-tabs'
-          var tabChart=makeBtn('button','diag-tab diag-tab-active','图表');tabChart.dataset.tab='chart'
-          var tabCode=makeBtn('button','diag-tab','代码');tabCode.dataset.tab='code'
+          const toolbar=document.createElement('div');toolbar.className='diag-toolbar'
+          const tabsDiv=document.createElement('div');tabsDiv.className='diag-tabs'
+          const tabChart=makeBtn('button','diag-tab diag-tab-active','图表');tabChart.dataset.tab='chart'
+          const tabCode=makeBtn('button','diag-tab','代码');tabCode.dataset.tab='code'
           tabsDiv.appendChild(tabChart);tabsDiv.appendChild(tabCode)
-          var actionsDiv=document.createElement('div');actionsDiv.className='diag-actions'
-          var zoomOut=makeBtn('button','diag-zoom-out','−','缩小')
-          var zoomPct=makeBtn('span','diag-zoom-pct','100%')
-          var zoomIn=makeBtn('button','diag-zoom-in','+','放大')
-          var downloadBtn=makeBtn('button','diag-download','⬇','下载')
-          var fullscreenBtn=makeBtn('button','diag-fullscreen','⛶','全屏')
+          const actionsDiv=document.createElement('div');actionsDiv.className='diag-actions'
+          const zoomOut=makeBtn('button','diag-zoom-out','−','缩小')
+          const zoomPct=makeBtn('span','diag-zoom-pct','100%')
+          const zoomIn=makeBtn('button','diag-zoom-in','+','放大')
+          const downloadBtn=makeBtn('button','diag-download','⬇','下载')
+          const fullscreenBtn=makeBtn('button','diag-fullscreen','⛶','全屏')
           actionsDiv.appendChild(zoomOut);actionsDiv.appendChild(zoomPct)
           actionsDiv.appendChild(zoomIn);actionsDiv.appendChild(downloadBtn);actionsDiv.appendChild(fullscreenBtn)
           toolbar.appendChild(tabsDiv);toolbar.appendChild(actionsDiv);container.appendChild(toolbar)
 
           // 图表视图
-          var diagView=document.createElement('div');diagView.className='diag-view'
-          var svgWrap=document.createElement('div');svgWrap.className='diag-svg-wrap';svgWrap.style.transform='scale(1)'
+          const diagView=document.createElement('div');diagView.className='diag-view'
+          const svgWrap=document.createElement('div');svgWrap.className='diag-svg-wrap';svgWrap.style.transform='scale(1)'
           diagView.appendChild(svgWrap);container.appendChild(diagView)
 
           // 代码视图
-          var diagCode=document.createElement('div');diagCode.className='diag-code';diagCode.style.display='none'
-          var ta=document.createElement('textarea');ta.className='diag-textarea';ta.spellcheck=false;ta.value=code
-          var renderBtn=makeBtn('button','diag-render-btn','重新渲染')
+          const diagCode=document.createElement('div');diagCode.className='diag-code';diagCode.style.display='none'
+          const ta=document.createElement('textarea');ta.className='diag-textarea';ta.spellcheck=false;ta.value=code
+          const renderBtn=makeBtn('button','diag-render-btn','重新渲染')
           diagCode.appendChild(ta);diagCode.appendChild(renderBtn);container.appendChild(diagCode)
           diagCode.insertBefore(pre,ta)
 
@@ -781,7 +781,7 @@ createApp({
               const uid='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6)
               const{svg}=await _mermaid.render(uid,code);svgWrap.innerHTML=svg
             }else{
-              var r=await fetch('/api/plantuml?code='+encodeURIComponent(code))
+              const r=await fetch('/api/plantuml?code='+encodeURIComponent(code))
               if(!r.ok)throw new Error('HTTP '+r.status);svgWrap.innerHTML=await r.text()
             }
           }catch(e){svgWrap.innerHTML='<div class="diagram-error">渲染失败: '+e.message+'</div>'}
@@ -799,15 +799,15 @@ createApp({
 
           // ── download ──
           downloadBtn.onclick=function(){
-            var se=svgWrap.querySelector('svg');if(!se)return
-            var xml=new XMLSerializer().serializeToString(se.cloneNode(true))
-            var blob=new Blob(['<?xml version="1.0"?>'+xml],{type:'image/svg+xml'})
-            var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='diagram.svg';a.click();URL.revokeObjectURL(url)
+            const se=svgWrap.querySelector('svg');if(!se)return
+            const xml=new XMLSerializer().serializeToString(se.cloneNode(true))
+            const blob=new Blob(['<?xml version="1.0"?>'+xml],{type:'image/svg+xml'})
+            const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='diagram.svg';a.click();URL.revokeObjectURL(url)
           }
 
           // ── fullscreen ──
           fullscreenBtn.onclick=function(){
-            var ov=document.createElement('div');ov.className='diag-fullscreen-overlay'
+            const ov=document.createElement('div');ov.className='diag-fullscreen-overlay'
             ov.innerHTML='<button class="diag-fs-close">×</button><div class="diag-fs-content">'+svgWrap.innerHTML+'</div>'
             document.body.appendChild(ov)
             ov.querySelector('.diag-fs-close').onclick=function(){ov.remove()}
@@ -816,20 +816,20 @@ createApp({
 
           // ── re-render + persist ──
           renderBtn.onclick=async function(){
-            var nc=ta.value.trim();if(!nc)return
+            const nc=ta.value.trim();if(!nc)return
             try{
               if(isMermaid){
                 if(!_mermaid){_mermaid=window.mermaid}
                 const uid='m-'+Date.now();const{svg}=await _mermaid.render(uid,nc);svgWrap.innerHTML=svg
               }else{
-                var r2=await fetch('/api/plantuml?code='+encodeURIComponent(nc))
+                const r2=await fetch('/api/plantuml?code='+encodeURIComponent(nc))
                 if(!r2.ok)throw new Error('HTTP '+r2.status);svgWrap.innerHTML=await r2.text()
               }
               tabChart.click()
-              var mi=container.dataset.msgId;var di=parseInt(container.dataset.diagramIndex)
-              var mo=messages.value.find(function(m){return m.id===mi})
+              const mi=container.dataset.msgId;const di=parseInt(container.dataset.diagramIndex)
+              const mo=messages.value.find(function(m){return m.id===mi})
               if(mo){
-                var nc2=replaceDiagramBlock(mo.content,di-1,nc)
+                const nc2=replaceDiagramBlock(mo.content,di-1,nc)
                 mo.content=nc2
                 try{await fetch('/api/chat/sessions/'+currentId.value+'/messages/'+mi,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:nc2})})}catch(e){}
               }
