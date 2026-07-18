@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Any, Optional
 
+from community_data import _infer_edge_type
 from ..tools import AgentTool, ToolResult
 from ..skill_registry import register_skill
 
@@ -84,7 +85,12 @@ class GetCommunitySubgraphTool(AgentTool):
                     task_id = resolved["task_id"]
                     logger.info(f"[GetCommunitySubgraphTool] auto-resolved task_id={task_id} from comm_id={comm_id}")
 
-            # Try with provided values first, then fallback
+            # Infer edge_type from commId if not provided
+            if not edge_type and comm_id:
+                inferred = _infer_edge_type(comm_id)
+                if inferred:
+                    edge_type = inferred
+
             candidates = []
             if edge_type and comm_lv:
                 candidates.append((edge_type, comm_lv))

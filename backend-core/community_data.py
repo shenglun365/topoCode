@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 # 辅助
 # ═══════════════════════════════════════════════════════
 
+def _infer_edge_type(comm_id: str) -> str:
+    """从社区ID推断边类型: comm-xxx-call-... → CALL, comm-xxx-incl-... → INCLUDE"""
+    if not comm_id:
+        return ''
+    parts = comm_id.split('-')
+    if len(parts) >= 3:
+        return 'CALL' if parts[2] == 'call' else 'INCLUDE' if parts[2] == 'incl' else ''
+    return ''
+
+
 def _make_rel(project_root: str):
     """返回路径规范化函数: file:/abs/path → rel/path"""
     __root = project_root.replace('\\', '/') if project_root else ''
@@ -827,11 +837,7 @@ def get_community_graph_component(db, task_id: str, edge_type: str,
         if not rows:
             rows = read_graph_doc_rows(db, task_id, edge_type, '', comm_id)
         if not rows:
-            # fallback: commId 嵌入的边类型 (comm-xxx-call-... → CALL, comm-xxx-incl-... → INCLUDE)
-            parts = comm_id.split('-')
-            inferred = None
-            if len(parts) >= 3:
-                inferred = 'CALL' if parts[2] == 'call' else 'INCLUDE' if parts[2] == 'incl' else None
+            inferred = _infer_edge_type(comm_id)
             if inferred and inferred != edge_type:
                 rows = read_graph_doc_children(db, task_id, inferred, comm_id) or \
                        read_graph_doc_rows(db, task_id, inferred, '', comm_id) or []

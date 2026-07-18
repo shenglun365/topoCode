@@ -659,6 +659,9 @@ class WebToolExecutor:
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
         et = (args.get("edgeType") or "CALL").upper()
+        inferred = cd._infer_edge_type(comm_id)
+        if inferred:
+            et = inferred
         pid, pdb = self._resolve_task(task_id)
         row = pdb.fetchone(
             "SELECT name, summary, comm_lv FROM community_llm_results "
@@ -681,14 +684,6 @@ class WebToolExecutor:
             "message": "该社区尚无 LLM 分析结果",
         }
 
-    @staticmethod
-    def _infer_edge_type(comm_id: str) -> str:
-        """从社区ID推断边类型: comm-xxx-call-... → CALL, comm-xxx-incl-... → INCLUDE"""
-        parts = comm_id.split('-')
-        if len(parts) >= 3:
-            return 'CALL' if parts[2] == 'call' else 'INCLUDE' if parts[2] == 'incl' else ''
-        return ''
-
     def _get_community_graph(self, args: dict) -> dict:
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
@@ -701,24 +696,22 @@ class WebToolExecutor:
         )
         project_root = (proj["root_path"].replace('\\', '/') + "/") if proj and proj["root_path"] else ""
 
-        # 从社区ID推断边类型做 fallback（get_community_graph_component 内置此逻辑，
-        # get_community_graph_file 没有，需在此层补上）
-        inferred = self._infer_edge_type(comm_id)
-        if inferred and inferred != et:
+        inferred = cd._infer_edge_type(comm_id)
+        if inferred:
             et = inferred
 
         if gran == "component":
             result = cd.get_community_graph_component(
-                pdb, task_id, et, comm_id, comm_id, project_root, depth=depth
+                pdb, task_id, et, '', comm_id, project_root, depth=depth
             )
         else:
             result = cd.get_community_graph_file(
-                pdb, task_id, et, comm_id, comm_id, project_root
+                pdb, task_id, et, '', comm_id, project_root
             )
         # 若 file 粒度无结果，回退到 component 粒度
         if gran != "component" and _is_empty_result(result):
             result = cd.get_community_graph_component(
-                pdb, task_id, et, comm_id, comm_id, project_root, depth=depth
+                pdb, task_id, et, '', comm_id, project_root, depth=depth
             )
         return result
 
@@ -742,6 +735,9 @@ class WebToolExecutor:
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
         et = (args.get("edgeType") or "CALL").upper()
+        inferred = cd._infer_edge_type(comm_id)
+        if inferred:
+            et = inferred
         pid, pdb = self._resolve_task(task_id)
         proj = self.multi_db.main_db.fetchone(
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
@@ -1306,6 +1302,9 @@ def _resolve_community_doc_ref(ref: dict, multi_db: MultiDBManager) -> str:
     task_id = ref.get("taskId", "")
     comm_id = ref.get("commId", "")
     et = ref.get("edgeType", "CALL")
+    inferred = cd._infer_edge_type(comm_id)
+    if inferred:
+        et = inferred
     label = ref.get("label", comm_id)
     try:
         task = multi_db.main_db.fetchone(
@@ -1335,6 +1334,9 @@ def _resolve_community_graph_ref(ref: dict, multi_db: MultiDBManager) -> str:
     task_id = ref.get("taskId", "")
     comm_id = ref.get("commId", "")
     et = ref.get("edgeType", "CALL")
+    inferred = cd._infer_edge_type(comm_id)
+    if inferred:
+        et = inferred
     label = ref.get("label", comm_id)
     try:
         task = multi_db.main_db.fetchone(

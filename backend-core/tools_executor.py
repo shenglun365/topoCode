@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+from community_data import _infer_edge_type
 from sqlite_ctx import MultiDBManager
 
 logger = logging.getLogger(__name__)
@@ -323,6 +324,9 @@ class ToolExecutor:
         comm_id = args.get('commId', '')
         comm_lv = args.get('commLv', 'L2')
         edge_type = args.get('edgeType', 'CALL')
+        inferred = _infer_edge_type(comm_id)
+        if inferred:
+            edge_type = inferred
         depth = min(max(int(args.get('depth', 2)), 1), 4)
 
         if not task_id or not comm_id:
