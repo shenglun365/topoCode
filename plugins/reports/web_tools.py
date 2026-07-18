@@ -681,6 +681,14 @@ class WebToolExecutor:
             "message": "该社区尚无 LLM 分析结果",
         }
 
+    @staticmethod
+    def _infer_edge_type(comm_id: str) -> str:
+        """从社区ID推断边类型: comm-xxx-call-... → CALL, comm-xxx-incl-... → INCLUDE"""
+        parts = comm_id.split('-')
+        if len(parts) >= 3:
+            return 'CALL' if parts[2] == 'call' else 'INCLUDE' if parts[2] == 'incl' else ''
+        return ''
+
     def _get_community_graph(self, args: dict) -> dict:
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
@@ -692,6 +700,13 @@ class WebToolExecutor:
             "SELECT root_path FROM projects WHERE id = ?", (pid,)
         )
         project_root = (proj["root_path"].replace('\\', '/') + "/") if proj and proj["root_path"] else ""
+
+        # 从社区ID推断边类型做 fallback（get_community_graph_component 内置此逻辑，
+        # get_community_graph_file 没有，需在此层补上）
+        inferred = self._infer_edge_type(comm_id)
+        if inferred and inferred != et:
+            et = inferred
+
         if gran == "component":
             result = cd.get_community_graph_component(
                 pdb, task_id, et, comm_id, comm_id, project_root, depth=depth
@@ -700,9 +715,30 @@ class WebToolExecutor:
             result = cd.get_community_graph_file(
                 pdb, task_id, et, comm_id, comm_id, project_root
             )
+        # 若 file 粒度无结果，回退到 component 粒度
+        if gran != "component" and _is_empty_result(result):
+            result = cd.get_community_graph_component(
+                pdb, task_id, et, comm_id, comm_id, project_root, depth=depth
+            )
         return result
 
+    @staticmethod
+    def _bad_id(v) -> bool:
+        s = str(v).strip()
+        return not s or s == 'None'
+
+    @staticmethod
+    def _normalize_path(p: str) -> str:
+        p = p.replace("\\", "/")
+        if p.startswith("file:"):
+            p = p[5:]
+        return p
+
     def _get_community_files(self, args: dict) -> dict:
+        """列出社区包含的源码文件。
+        INCLUDE 社区: node_list 为文件路径字符串列表。
+        CALL 社区: node_list 为符号节点 [id 或 {id, ...}]，id 可能为文件路径或符号 hash。
+        """
         task_id = args.get("taskId", "")
         comm_id = args.get("commId", "")
         et = (args.get("edgeType") or "CALL").upper()
@@ -728,15 +764,22 @@ class WebToolExecutor:
             if not isinstance(nodes, list):
                 nodes = [nodes]
             for n in nodes:
-                nid = str(n) if isinstance(n, str) else str(n.get("id", ""))
-                if project_root and nid.lower().startswith(project_root.lower()):
-                    nid = nid[len(project_root):]
-                nid = nid.lstrip("/")
-                if nid and nid not in seen:
-                    seen.add(nid)
+                if et == "CALL":
+                    nid = str(n) if isinstance(n, str) else str(n.get("id", ""))
+                else:
+                    nid = str(n) if isinstance(n, str) else str(n.get("path", n.get("id", "")))
+                if self._bad_id(nid):
+                    continue
+                fp = self._normalize_path(nid)
+                fp = fp.split(':')[0] if ':' in fp else fp
+                if project_root and fp.lower().startswith(project_root.lower()):
+                    fp = fp[len(project_root):]
+                fp = fp.lstrip("/")
+                if fp and fp not in seen:
+                    seen.add(fp)
                     files.append({
-                        "path": nid,
-                        "name": nid.replace('\\', '/').split("/")[-1] if "/" in nid.replace('\\', '/') else nid,
+                        "path": fp,
+                        "name": fp.split("/")[-1],
                     })
         return {"files": files, "total": len(files)}
 
@@ -750,7 +793,7 @@ class WebToolExecutor:
             return {"error": f"Project {pid} not found"}
         root = proj["root_path"]
         full = os.path.normpath(os.path.join(root, path))
-        if not full.startswith(os.path.normpath(root)):
+        if os.path.commonpath([full, os.path.normpath(root)]) != os.path.normpath(root):
             return {"error": "Path outside project root"}
         if not os.path.isfile(full):
             return {"error": f"File not found: {path}"}
@@ -1331,7 +1374,7 @@ def _resolve_source_file_ref(ref: dict, multi_db: MultiDBManager) -> str:
         if not proj:
             return f"用户引用了文件「{label}」"
         full = os.path.normpath(os.path.join(proj["root_path"], path))
-        if not full.startswith(os.path.normpath(proj["root_path"])):
+        if os.path.commonpath([full, os.path.normpath(proj["root_path"])]) != os.path.normpath(proj["root_path"]):
             return f"用户引用了文件「{label}」"
         if not os.path.isfile(full):
             return f"用户引用了文件「{label}」(文件不在磁盘)"

@@ -167,18 +167,24 @@ class ToolExecutor:
         """执行工具并返回结果"""
         handler = self._handlers.get(tool_name)
         if not handler:
+            logger.warning(f"[CHAT_TRACE] EXECUTE_UNKNOWN tool={tool_name}")
             return {"error": f"Unknown tool: {tool_name}"}
 
+        logger.info(f"[CHAT_TRACE] EXECUTE name={tool_name} args_keys={list(args.keys())}")
         try:
             result = handler(args)
             # 截断过长结果
             result_str = json.dumps(result, ensure_ascii=False, default=str)
-            if len(result_str) > self.MAX_RESULT_LENGTH:
+            truncated = len(result_str) > self.MAX_RESULT_LENGTH
+            logger.info(f"[CHAT_TRACE] EXECUTE_RESULT name={tool_name} "
+                        f"result_size={len(result_str)} truncated={truncated}")
+            if truncated:
                 result_str = result_str[:self.MAX_RESULT_LENGTH] + "\n...(truncated)"
                 result = {"content": result_str, "truncated": True}
             return result
         except Exception as e:
             logger.error(f"[ToolExecutor] {tool_name} failed: {e}")
+            logger.error(f"[CHAT_TRACE] EXECUTE_ERROR name={tool_name} error={e}")
             return {"error": str(e)}
 
     # ==================== 工具实现 ====================

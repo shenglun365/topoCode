@@ -12,6 +12,7 @@ API format: POST /v1/chat/completions
 
 import json as _json
 import logging
+import time
 
 import requests
 
@@ -82,10 +83,16 @@ class OpenAICompatProvider(BaseLLMProvider):
         usage_data = {}
 
         try:
+            logger.info(f"[CHAT_TRACE] PROVIDER_CALL provider={self.PROVIDER_NAME} "
+                        f"model={payload['model']} url={base_url} "
+                        f"payload_len={len(_json.dumps(payload))} "
+                        f"timeout={timeout}")
             resp = requests.post(
                 f'{base_url}/v1/chat/completions',
                 json=payload, headers=headers, stream=True, timeout=timeout
             )
+            logger.info(f"[CHAT_TRACE] PROVIDER_RESPONSE provider={self.PROVIDER_NAME} "
+                        f"status={resp.status_code}")
             if resp.status_code != 200:
                 chunk_queue.put({'type': 'error', 'message': f'{self.PROVIDER_NAME} API error {resp.status_code}: {resp.text[:200]}'})
                 chunk_queue.put({'type': 'done', 'content': ''})
@@ -140,10 +147,13 @@ class OpenAICompatProvider(BaseLLMProvider):
                     'total_tokens': usage_data.get('total_tokens'),
                 }
         except Exception as e:
+            logger.error(f"[CHAT_TRACE] PROVIDER_ERROR provider={self.PROVIDER_NAME} error={e}")
             chunk_queue.put({'type': 'error', 'message': str(e)})
             chunk_queue.put({'type': 'done', 'content': ''})
             return token_info
 
+        logger.info(f"[CHAT_TRACE] PROVIDER_DONE provider={self.PROVIDER_NAME} "
+                    f"content_len={len(full_content)}")
         chunk_queue.put({'type': 'done', 'content': full_content})
         return token_info
 

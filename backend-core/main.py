@@ -43,6 +43,17 @@ from plugin_manager import PluginManager
 setup_logging()
 logger = logging.getLogger(__name__)
 
+# 压制非 AI Chat 模块的 INFO 日志（诊断模式下可启用）
+if os.environ.get("TOPOCODE_CHAT_DEBUG", "") == "1":
+    for _name in ['zmq_server', 'messaging', 'sqlite_ctx', 'task_manager',
+                   'db_service', 'ingest', 'data_layer', 'store',
+                   'plugin_manager', 'export_service', 'verify_service',
+                   'community_data', 'state_store', 'analysis_context']:
+        logging.getLogger(_name).setLevel(logging.WARNING)
+    logging.getLogger('tools_executor').setLevel(logging.INFO)
+    logging.getLogger('llm_service').setLevel(logging.INFO)
+    logger.info("[CHAT_DEBUG] Non-essential loggers suppressed, chat tracing enabled")
+
 
 # ═══════════════════════════════════════════════════════════════
 # 单进程模式

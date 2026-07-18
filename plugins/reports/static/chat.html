@@ -95,13 +95,17 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .messages::-webkit-scrollbar-track{background:transparent}
 .messages::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
 .message{display:flex;gap:14px;max-width:820px;margin:0 auto;width:100%;animation:fadeUp .3s ease;margin-bottom:24px}
+.message.user{flex-direction:row-reverse}
 .message-avatar{width:32px;height:32px;border-radius:var(--radius-full);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:var(--ui-font-size);font-weight:500;color:#fff}
 .message-avatar.user{background:var(--text-secondary)}
 .message-avatar.ai{background:var(--accent)}
-.message-content{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
+.message-content{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;max-width:75%}
+.message.user .msg-content{align-items:flex-end}
 .message-content .sender{font-weight:500;color:var(--text-secondary)}
 .message-content .bubble{padding:12px 16px;border-radius:var(--radius-lg);border-top-left-radius:4px;font-size:var(--content-font-size,15px);line-height:1.65;word-break:break-word;background:var(--bubble-ai);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
 .message.user .bubble{background:var(--bubble-user);border-color:transparent;border-top-left-radius:var(--radius-lg);border-top-right-radius:4px}
+.message.assistant .msg-content{margin-left:4px}
+.message.user .msg-content{margin-right:4px}
 .message .bubble>:first-child{margin-top:0}
 .message .bubble>:last-child{margin-bottom:0}
 .message .bubble p{margin:6px 0}
@@ -221,6 +225,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 </style>
+<script src="/static/mermaid.min.js"></script>
 </head>
 <body>
 <div id="app" class="app">
@@ -298,9 +303,9 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <template v-for="(m, i) in messages" :key="m.id || i">
         <div class="message" :class="m.role">
           <div class="cbox-wrap"><input type="checkbox" :checked="selectedIds.has(m.id)" @change="toggleSelect(m.id)"></div>
-          <div class="message-avatar" :class="m.role">{{ m.role==='user'?__('chat.you'):__('chat.ai') }}</div>
+          <div v-if="m.role!=='user'" class="message-avatar" :class="m.role">{{ __('chat.ai') }}</div>
           <div class="msg-content">
-            <div class="sender">{{ m.role==='user'?__('chat.you'):'TopoCode' }}</div>
+            <div v-if="m.role!=='user'" class="sender">TopoCode</div>
             <div v-if="m.role==='assistant'&&m.reasoning" class="reasoning-toggle" @click="m.showReasoning=!m.showReasoning">
               <span class="arrow" :class="{open:m.showReasoning}">▶</span>
               <span v-if="m.showReasoning">收起思考过程</span>
@@ -320,7 +325,14 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
                 <pre v-if="tc.result">{{ typeof tc.result==='string' ? tc.result : JSON.stringify(tc.result, null, 2) }}</pre>
               </div>
             </div>
-            <div class="bubble" v-html="renderMd(m.content)" :ref="el=>onBubbleUpdate(el,i)"></div>
+            <div v-if="m.qualityLow" class="bubble bubble-low">
+              <div style="color:var(--warning);font-weight:600;margin-bottom:6px">⚠️ 本次分析未能生成有效回答</div>
+              <div style="font-size:12px;opacity:.7">可展开上方「思考过程」或「工具调用」查看详细信息</div>
+            </div>
+            <div v-else-if="m.role==='assistant'&&!m.content&&!m._streamDone" class="bubble">
+              <div class="loading-dots"><span></span><span></span><span></span></div>
+            </div>
+            <div v-else class="bubble" v-html="renderMd(m.content)" :ref="el=>onBubbleUpdate(el,i)"></div>
             <div class="message-actions" v-if="m.id">
               <button class="msg-act-btn" @click="copyMessageContent(m)" :title="__('chat.copyMsg')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
               <button class="msg-act-btn" @click="quoteMessage(m)" title="引用此消息"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
@@ -335,10 +347,6 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
           </div>
         </div>
       </template>
-      <div class="message" v-if="streaming">
-        <div class="message-avatar ai">AI</div>
-        <div class="message-content"><div class="sender">TopoCode</div><div class="bubble"><div class="loading-dots"><span></span><span></span><span></span></div></div></div>
-      </div>
     </div>
 
     <div class="empty-state" v-if="!messages.length&&!currentId&&!streaming">
@@ -359,7 +367,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <div class="input-wrapper">
         <div class="input-row">
           <div class="autocomplete-wrap">
-            <textarea v-model="input" @keydown.enter.exact="send" @keydown="onInputKeydown" @input="onInputChange" :placeholder="__('chat.placeholder')" rows="2" :disabled="streaming" id="chatTextarea"></textarea>
+            <textarea v-model="input" @keydown.enter.exact="send" @keydown="onInputKeydown" @input="onInputChange" :placeholder="__('chat.placeholder')" rows="3" :disabled="streaming" id="chatTextarea"></textarea>
             <div class="autocomplete-panel" id="acPanel"></div>
           </div>
           <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && (!input.trim()||!currentId)" @click="streaming ? stopStream() : send()">
@@ -618,7 +626,7 @@ createApp({
           pre.parentElement.replaceChild(w,pre)
           try{
             if(sel.includes('mermaid')){
-              if(!_mermaid){const{default:md}=await import('/static/mermaid.min.mjs');_mermaid=md}
+              if(!_mermaid){_mermaid=window.mermaid}
               _mermaid.initialize({startOnLoad:false,theme:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default',themeVariables:{fontSize:fontSize.value+'px'}})
               const uid='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6)
               const{svg}=await _mermaid.render(uid,code);w.className='';w.dataset.mermaidSource=code;w.innerHTML=svg
@@ -833,8 +841,15 @@ createApp({
               if(data.type==='tool_call'){if(!messages.value[mid].toolCalls)messages.value[mid].toolCalls=[];messages.value[mid].toolCalls.push({name:data.name,arguments:data.arguments,result:null})}
               if(data.type==='tool_result'){const tc=messages.value[mid].toolCalls?.find(t=>t.name===data.name);if(tc)tc.result=data.result}
               if(data.type==='done'){
-                console.log('[chat] SSE done, total events:', sseCount, 'final content length:', (data.content||'').length)
-                if(data.content)messages.value[mid].content=data.content
+                console.log('[chat] SSE done, total events:', sseCount, 'final content length:', (data.content||'').length, 'quality:', data.quality)
+                messages.value[mid]._streamDone=true
+                if(data.quality==='low'){
+                  messages.value[mid].qualityLow=true
+                  messages.value[mid].content=''
+                  messages.value[mid].reasoning=data.reasoning||messages.value[mid].reasoning
+                }else{
+                  messages.value[mid].content=data.content||''
+                }
                 messages.value[mid]._drawn=false
                 nextTick(()=>{const bs=msgArea.value?.querySelectorAll('.message.assistant .bubble');if(bs)renderDiagrams(bs[bs.length-1])})
               }

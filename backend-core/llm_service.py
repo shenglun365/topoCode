@@ -263,6 +263,8 @@ class LLMService:
         self._active_streams[request_id] = task
 
         logger.info(f"[LLMService] Streaming started: requestId={request_id}, session={session_id}, mode={mode}")
+        logger.info(f"[CHAT_TRACE] streaming_start requestId={request_id} session={session_id} "
+                    f"model={model_id} mode={mode}")
         return {'requestId': request_id, 'status': 'streaming'}
 
     async def abort_chat(self, request_id: str) -> Dict[str, Any]:
@@ -338,6 +340,13 @@ class LLMService:
                         model, messages, chunk_queue, tools, mode, max_tokens=max_tokens
                     )
 
+                _call_msgs_chars = sum(len(m.get('content', '') or '') for m in messages)
+                _call_sys = sum(1 for m in messages if m.get('role') == 'system')
+                logger.info(f"[CHAT_TRACE] LLM_CALL_START requestId={request_id} "
+                            f"tool_round={tool_round}/{max_tool_rounds} msgs={len(messages)} "
+                            f"sys={_call_sys} total_chars={_call_msgs_chars} "
+                            f"model={model_name} provider={provider} max_tokens={max_tokens}")
+
                 thread = threading.Thread(target=_http_stream, daemon=True)
                 thread.start()
 
@@ -402,6 +411,10 @@ class LLMService:
                 thread.join(timeout=5)
 
                 # ===== Tools Calling 检测 =====
+                if tool_calls_merged:
+                    logger.info(f"[CHAT_TRACE] TOOL_CALLS_RECEIVED requestId={request_id} "
+                                f"count={len(tool_calls_merged)} "
+                                f"names={[tc.get('function',{}).get('name','?') for tc in tool_calls_merged]}")
                 if tool_round < max_tool_rounds and tool_calls_merged:
                     tool_calls = self._parse_tool_calls_merged(tool_calls_merged)
                     if tool_calls:
@@ -416,7 +429,15 @@ class LLMService:
                                 'toolName': tool_name,
                                 'args': tool_args,
                             })
+                            _args_preview = json.dumps(tool_args, ensure_ascii=False)[:200]
+                            logger.info(f"[CHAT_TRACE] TOOL_EXECUTE name={tool_name} "
+                                        f"args_preview={_args_preview}")
+                            _te_start = time.monotonic()
                             result = executor.execute(tool_name, tool_args)
+                            _te_latency = int((time.monotonic() - _te_start) * 1000)
+                            _result_str = json.dumps(result, ensure_ascii=False, default=str)
+                            logger.info(f"[CHAT_TRACE] TOOL_RESULT name={tool_name} "
+                                        f"result_size={len(_result_str)} latency={_te_latency}ms")
                             self._publish('llm', 'tool_result', {
                                 'requestId': request_id,
                                 'toolName': tool_name,
@@ -438,6 +459,8 @@ class LLMService:
                                 'content': json.dumps(result, ensure_ascii=False, default=str),
                             })
                         tool_round += 1
+                        logger.info(f"[CHAT_TRACE] tool_round_{tool_round} continuing "
+                                    f"requestId={request_id}")
                         full_content = ""  # reset for next round
                         chunk_queue = queue.Queue()
                         continue  # 继续下一轮
@@ -493,6 +516,11 @@ class LLMService:
                             },
                         })
             else:
+                _latency_ms = int((time.monotonic() - _start_time) * 1000)
+                logger.info(f"[CHAT_TRACE] LLM_DONE requestId={request_id} "
+                            f"content_size={len(full_content or '')} "
+                            f"token_data={_token_data} latency={_latency_ms}ms "
+                            f"status={_status} tool_rounds={tool_round}")
                 self._publish('llm', 'done', {
                     'requestId': request_id,
                     'content': full_content or '',
@@ -534,6 +562,7 @@ class LLMService:
             _error_msg = str(e)
             _latency_ms = int((time.monotonic() - _start_time) * 1000)
             logger.error(f"[LLMService] Stream error: requestId={request_id}, error={e}")
+            logger.error(f"[CHAT_TRACE] STREAM_ERROR requestId={request_id} error={_error_msg}")
             self._publish('llm', 'error', {
                 'requestId': request_id,
                 'message': str(e),
@@ -1038,6 +1067,12 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not messages:
             raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
 
+        _total_chars = sum(len(m.get('content', '') or '') for m in messages)
+        _sys_count = sum(1 for m in messages if m.get('role') == 'system')
+        logger.info(f"[CHAT_TRACE] llm.chat ENTER mode={mode} session={session_id} "
+                    f"msgs={len(messages)} sys={_sys_count} total_chars={_total_chars} "
+                    f"max_tokens={max_tokens} template={template_id} tools={tools}")
+
         # 自由对话（无 template_id）注入默认语言指令
         if not template_id:
             lang_instr = pm.get_language_instruction(locale)
@@ -1046,14 +1081,18 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
                 for m in messages
             )
             if not has_lang_instr:
-                logger.info(f"[llm.chat] injecting language instruction: {lang_instr}")
+                logger.info(f"[llm.chat] injecting language instruction: {lang_instr[:80]}")
                 messages.insert(0, {"role": "system", "content": lang_instr})
+                _sys_after = sum(1 for m in messages if m.get('role') == 'system')
+                logger.info(f"[CHAT_TRACE] lang_instr injected now sys={_sys_after} total_msgs={len(messages)}")
 
         # v2: inject user custom instructions
         from instruction_manager import InstructionManager
         im = InstructionManager()
         scope = "report" if template_id else "chat"
         messages = im.inject(messages, scope=scope)
+        _sys_after2 = sum(1 for m in messages if m.get('role') == 'system')
+        logger.info(f"[CHAT_TRACE] instruction_injected now sys={_sys_after2} total_msgs={len(messages)}")
 
         extra_meta = {}
         if template_id:

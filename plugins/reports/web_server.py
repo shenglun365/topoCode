@@ -52,6 +52,8 @@ app.add_middleware(
 )
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+import mimetypes
+mimetypes.add_type("application/javascript", ".mjs")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -2089,6 +2091,7 @@ async def send_chat_message(session_id: str, request: Request):
                 if api_key:
                     headers['Authorization'] = f'Bearer {api_key}'
                 timeout = md.get('timeout', 300)
+                _log(f"[CHAT_TRACE] _llm_round payload: model={payload['model']} max_tokens={payload.get('max_tokens')} tools={bool(tools)} force_choice={force_tool_choice}")
                 _log(f"[LLM-round] POST {base_url}/v1/chat/completions  timeout={timeout}s")
                 resp = _req.post(
                     f'{base_url}/v1/chat/completions',
@@ -2106,6 +2109,9 @@ async def send_chat_message(session_id: str, request: Request):
                 line_count = 0
                 reasoning_only_count = 0
                 MAX_REASONING_LINES = 3000
+                _chunk_total = 0
+                _reasoning_total = 0
+                _usage_data = {}
                 try:
                     for line_bytes in resp.iter_lines():
                         if not line_bytes:
@@ -2115,11 +2121,13 @@ async def send_chat_message(session_id: str, request: Request):
                             continue
                         data_str = line[6:].strip()
                         if data_str == '[DONE]':
-                            _log(f"[LLM-round] [DONE] after {line_count} lines")
+                            _log(f"[LLM-round] [DONE] after {line_count} lines usage={_usage_data}")
                             break
                         line_count += 1
                         try:
                             data = json.loads(data_str)
+                            if data.get('usage'):
+                                _usage_data = data['usage']
                             delta = data.get('choices', [{}])[0].get('delta', {})
                             chunk = delta.get('content', '')
                             reasoning = delta.get('reasoning_content', '')
@@ -2135,8 +2143,10 @@ async def send_chat_message(session_id: str, request: Request):
                             else:
                                 reasoning_only_count = 0
                             if reasoning:
+                                _reasoning_total += len(reasoning)
                                 chunk_q.put({"type": "reasoning", "text": reasoning})
                             if chunk:
+                                _chunk_total += len(chunk)
                                 chunk_q.put(chunk)
                             tc = delta.get('tool_calls')
                             if tc:
@@ -2146,6 +2156,9 @@ async def send_chat_message(session_id: str, request: Request):
                             _log(f"[LLM-round] parse error at line {line_count}: {e} | data={data_str[:100]}")
                             pass
                     _log(f"[LLM-round] complete ({line_count} data lines)")
+                    _log(f"[CHAT_TRACE] _llm_round stats: lines={line_count} "
+                         f"chunk_total={_chunk_total} reasoning_total={_reasoning_total} "
+                         f"usage={_usage_data}")
                 except Exception as e:
                     _log(f"[LLM-round] exception: {e}")
                     with _active_streams_lock:
@@ -2178,6 +2191,8 @@ async def send_chat_message(session_id: str, request: Request):
 
             async def _producer():
                 ctx_msgs = list(context_messages)
+                _acc_reasoning = ""  # 跨轮累积 reasoning，供 fallback 使用
+                _acc_tool_calls = 0  # 跨轮累积 tool 调用次数，供质量判定使用
                 for round_idx in range(TOOL_ROUND_LIMIT):
                     force_choice = round_idx == 0 and bool(tool_defs)
                     chunk_q = _queue.Queue()
@@ -2238,6 +2253,8 @@ async def send_chat_message(session_id: str, request: Request):
                                 await queue.put({"type": "chunk", "text": item})
 
                     t.join(timeout=5)
+                    # 跨轮累积 reasoning（最终无 content 时 fallback 使用）
+                    _acc_reasoning += full_reasoning
                     parsed = []
                     for v in tc_by_idx.values():
                         try:
@@ -2245,29 +2262,50 @@ async def send_chat_message(session_id: str, request: Request):
                         except Exception:
                             args = {}
                         parsed.append({"id": v.get("id", ""), "name": v.get("function", {}).get("name", ""), "arguments": args})
+                    _acc_tool_calls += len(parsed)
                     _log(f"[producer] round {round_idx} parsed: {len(parsed)} tool calls, full_content_len={len(full_content)}")
 
                     if not parsed:
                         _log(f"[producer] round {round_idx} no tool calls → finalize")
-                        # Qwen3.6 等模型把全部输出放 reasoning_content，此时 content 为空
-                        if not full_content.strip() and full_reasoning.strip():
-                            _log(f"[producer] content empty, using reasoning as content fallback ({len(full_reasoning)} chars)")
-                            full_content = full_reasoning
-                            full_reasoning = ""
-                        if full_content.strip():
+                        final_content = full_content.strip()
+                        _reasoning_len = len(full_reasoning.strip())
+                        _acc_reasoning_str = _acc_reasoning.strip()
+                        # 质量判定：跑了多轮工具但模型未产出实质内容
+                        quality = "ok"
+                        if not final_content and _acc_reasoning_str:
+                            # 没写 content，但有推理内容 → 够完整则当作 content
+                            if len(_acc_reasoning_str) >= 500:
+                                final_content = _acc_reasoning_str
+                            elif _acc_tool_calls >= 2:
+                                quality = "low"
+                        elif not final_content and not _acc_reasoning_str and _acc_tool_calls >= 2:
+                            quality = "low"
+                        if quality == "low":
+                            _log(f"[CHAT_TRACE] QUALITY_LOW: calls={_acc_tool_calls} "
+                                 f"content_len={len(final_content)} acc_reasoning_len={len(_acc_reasoning_str)}")
+                        _log(f"[CHAT_TRACE] FINALIZE round={round_idx} content_len={len(final_content)} "
+                             f"reasoning_len={_reasoning_len} acc_reasoning_len={len(_acc_reasoning_str)} "
+                             f"acc_calls={_acc_tool_calls} quality={quality} "
+                             f"msgs_in_ctx={len(ctx_msgs)} tool_defs={bool(tool_defs)}")
+                        if final_content:
                             _meta = {}
-                            if full_reasoning.strip():
+                            if _reasoning_len:
                                 _meta["reasoning"] = full_reasoning.strip()
                             _sdb().execute(
                                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                                 "VALUES (?, ?, 'assistant', ?, ?, ?)",
-                                (_make_message_id(), session_id, full_content.strip(), json.dumps(_meta), now),
+                                (_make_message_id(), session_id, final_content, json.dumps(_meta), now),
                             )
-                        if round_idx == 0 and tool_defs and full_content.strip():
-                            _log(f"[producer] emit suppressed first-round chunks: {len(full_content)} chars")
-                            await queue.put({"type": "chunk", "text": full_content.strip()})
-                        await queue.put({"type": "done", "content": full_content.strip()})
-                        _log(f"[producer] done: content_len={len(full_content.strip())}")
+                        if round_idx == 0 and tool_defs and final_content:
+                            _log(f"[producer] emit suppressed first-round chunks: {len(final_content)} chars")
+                            await queue.put({"type": "chunk", "text": final_content})
+                        await queue.put({
+                            "type": "done",
+                            "content": final_content if quality == "ok" else "",
+                            "quality": quality,
+                            "reasoning": _acc_reasoning_str if quality == "low" else "",
+                        })
+                        _log(f"[producer] done: content_len={len(final_content)} quality={quality}")
                         return
 
                     _log(f"[producer] executing {len(parsed)} tool(s): {[p.get('name','') for p in parsed]}")
@@ -2330,12 +2368,15 @@ async def send_chat_message(session_id: str, request: Request):
                     else:
                         _log(f"[event_stream] -> SSE event #{event_count}: type={event.get('type')} keys={list(event.keys())}")
                     if event["type"] == "done":
+                        content_len = len(event.get("content", "") or "")
                         yield f"event: done\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                         _log(f"[event_stream] done, total {event_count} events")
+                        _log(f"[CHAT_TRACE] event_stream_done: events={event_count} content_len={content_len} session={session_id}")
                         break
                     elif event["type"] == "error":
                         yield f"event: error\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                         _log(f"[event_stream] error, abort")
+                        _log(f"[CHAT_TRACE] event_stream_error: session={session_id} msg={event.get('message','')}")
                         break
                     elif event["type"] == "chunk":
                         yield f"event: chunk\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
