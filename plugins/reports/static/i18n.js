@@ -165,6 +165,11 @@
         compress:'压缩',
         save:'保存',
         continue:'继续处理',
+        rename:'命名',
+        renameTitle:'给会话命名',
+        renamePlaceholder:'输入会话名称…',
+        renameSubmit:'提交',
+        renameAi:'AI 生成',
       },
       // web_server.py index 页面
       index: {
@@ -331,6 +336,11 @@
         compress:'Compress',
         save:'Save',
         continue:'Continue',
+        rename:'Rename',
+        renameTitle:'Name this session',
+        renamePlaceholder:'Enter session name…',
+        renameSubmit:'Submit',
+        renameAi:'AI Generate',
       },
       index: {
         title: 'TopoCode Documents',

@@ -851,7 +851,8 @@ class WebToolExecutor:
                     break
 
         if symbols:
-            lines = []
+            # 构建符合列表
+            overview_lines = []
             for s in symbols:
                 name = s["name"]
                 kind = s["kind"]
@@ -861,13 +862,70 @@ class WebToolExecutor:
                 entry = f"  [{kind}] {name}  L{sl}-L{el}"
                 if sig:
                     entry += f"  {sig}"
-                lines.append(entry)
-            overview = "\n".join(lines)
+                overview_lines.append(entry)
+            overview = "\n".join(overview_lines)
+
+            # 提取符号行号范围，去重合并重叠/相邻区间
+            raw_ranges = []
+            for s in symbols:
+                sl, el = s["start_line"], s["end_line"]
+                if sl and el and el >= sl:
+                    raw_ranges.append((sl, el))
+            raw_ranges.sort()
+            merged = []
+            for sl, el in raw_ranges:
+                if merged and sl <= merged[-1][1] + 2:
+                    merged[-1] = (merged[-1][0], max(merged[-1][1], el))
+                else:
+                    merged.append((sl, el))
+
+            # 读文件到列表
+            file_lines = []
+            try:
+                with open(full, "r", encoding="utf-8", errors="replace") as f:
+                    file_lines = f.readlines()
+            except Exception:
+                pass
+
+            # 拼接代码片段
+            MAX_CODE_LINES = 150
+            MAX_SYMBOLS_WITH_CODE = 20
+            MAX_LINES_PER_RANGE = 30
+            code_output = []
+            code_total = 0
+            prev_end = 0
+            ranges_shown = 0
+            for sl, el in merged:
+                if ranges_shown >= MAX_SYMBOLS_WITH_CODE or code_total >= MAX_CODE_LINES:
+                    break
+                # 省略标记
+                if prev_end and sl > prev_end + 1:
+                    code_output.append(f"// ... 省略 L{prev_end+1}-L{sl-1}")
+                elif prev_end and sl == prev_end + 1:
+                    code_output.append(f"// ... 省略 L{prev_end+1}")
+                # 每区间限行数
+                limit = min(el, sl + MAX_LINES_PER_RANGE - 1)
+                for lineno in range(sl, limit + 1):
+                    if code_total >= MAX_CODE_LINES:
+                        break
+                    if lineno - 1 < len(file_lines):
+                        code_output.append(f"L{lineno}: {file_lines[lineno-1].rstrip()}")
+                    code_total += 1
+                if limit < el:
+                    code_output.append(f"// ... 符号超出 {MAX_LINES_PER_RANGE} 行显示上限，剩余 L{limit+1}-L{el} 行省略")
+                prev_end = el
+                ranges_shown += 1
+            remaining = len(merged) - ranges_shown
+            if remaining > 0:
+                code_output.append(f"// ... 剩余 {remaining} 个符号的代码已省略，如需查看请使用 web_read_file_lines")
+
+            code_block = "\n".join(code_output) if code_output else "(无代码内容)"
             result = (
                 f"文件: {path} ({file_size} bytes, {total_lines} 行)\n"
                 f"符号数量: {len(symbols)}\n"
                 f"符号概览:\n{overview}\n\n"
-                f"提示: 如需查看具体代码行，请使用 web_read_file_lines 按行号范围读取。"
+                f"代码片段:\n{code_block}\n\n"
+                f"提示: 如需阅读其他行，请使用 web_read_file_lines 按行号读取。"
             )
             return {"path": path, "summary": True, "content": result, "size": file_size, "lines": total_lines, "symbol_count": len(symbols)}
         else:

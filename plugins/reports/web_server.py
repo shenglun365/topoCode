@@ -1644,6 +1644,36 @@ async def update_chat_session(session_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/chat/sessions/{session_id}/auto-title")
+async def auto_title_session(session_id: str):
+    """手动触发 AI 生成会话标题，返回生成的标题"""
+    _require_chat_ready()
+    try:
+        row = _sdb().fetchone(
+            "SELECT title FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        if not row:
+            raise HTTPException(404, "Session not found")
+        msgs = _sdb().fetchall(
+            "SELECT role, content FROM llm_messages WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY created_at",
+            (session_id,),
+        )
+        if len(msgs) < 2:
+            return {"title": row["title"] or "新对话", "generated": False}
+        context = "\n".join([f"{'用户' if m['role'] == 'user' else '助手'}: {m['content'][:500]}" for m in msgs[-4:]])
+        prompt = f"为以下对话生成一个5-8个字的标题。直接输出标题，不要输出其他任何内容。\n\n{context}"
+        _do_auto_title(session_id, prompt)
+        updated = _sdb().fetchone(
+            "SELECT title FROM llm_sessions WHERE id = ?", (session_id,)
+        )
+        new_title = updated["title"] if updated else (row["title"] or "新对话")
+        return {"title": new_title, "generated": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
     _require_chat_ready()
@@ -2387,8 +2417,7 @@ async def send_chat_message(session_id: str, request: Request):
                     elif event["type"] == "tool_result":
                         yield f"event: tool_result\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
-                # 流结束后检查是否需要自动生成标题
-                _check_auto_title(session_id)
+                pass
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
