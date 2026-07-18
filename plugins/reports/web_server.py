@@ -2489,7 +2489,7 @@ def _do_auto_title(session_id: str, context: str):
         payload = {
             "model": md.get("model", ""),
             "messages": [
-                {"role": "system", "content": "为对话生成一个简短标题，直接输出标题，不要多于15个字。"},
+                {"role": "system", "content": "为对话生成一个简短标题（不要多于15个字）。列出3个候选，直接选一个输出。"},
                 {"role": "user", "content": f"对话内容：{context}"},
             ],
             "stream": False,
