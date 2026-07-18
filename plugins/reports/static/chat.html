@@ -812,14 +812,28 @@ createApp({
             fc.innerHTML=svgWrap.innerHTML
             const closeBtn=document.createElement('button');closeBtn.className='diag-fs-close';closeBtn.textContent='×'
             ov.appendChild(closeBtn);ov.appendChild(fc);document.body.appendChild(ov)
-            var fsScale=1
+            var fsScale=1,fsDx=0,fsDy=0,fsDragging=false,fsStartX=0,fsStartY=0,fsSx=0,fsSy=0
+            function fsUpdate(){fc.style.transform='translate('+fsDx+'px,'+fsDy+'px) scale('+fsScale+')'}
             ov.addEventListener('wheel',function(e){
               e.preventDefault()
+              var old=fsScale
               fsScale=Math.max(0.25,Math.min(5,fsScale+(e.deltaY>0?-0.2:0.2)))
-              fc.style.transform='scale('+fsScale+')'
+              // 以鼠标位置为中心缩放
+              var rect=fc.getBoundingClientRect()
+              var mx=e.clientX-rect.left,my=e.clientY-rect.top
+              fsDx=mx-(mx-fsDx)*(fsScale/old);fsDy=my-(my-fsDy)*(fsScale/old)
+              fsUpdate()
             },{passive:false})
+            fc.onmousedown=function(e){
+              fsDragging=true;fsStartX=e.clientX;fsStartY=e.clientY;fsSx=fsDx;fsSy=fsDy;fc.style.cursor='grabbing'
+            }
+            window.addEventListener('mousemove',function(e){
+              if(!fsDragging)return;fsDx=fsSx+(e.clientX-fsStartX);fsDy=fsSy+(e.clientY-fsStartY);fsUpdate()
+            })
+            window.addEventListener('mouseup',function(){
+              if(!fsDragging)return;fsDragging=false;fc.style.cursor=''
+            })
             closeBtn.onclick=function(){ov.remove()}
-            ov.onclick=function(e){if(e.target===ov)ov.remove()}
           }
 
           // ── re-render + persist ──
