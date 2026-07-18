@@ -90,6 +90,8 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .topbar-left .chat-title{font-size:var(--ui-font-size);font-weight:500;color:var(--text)}
 .topbar-right select{font-size:var(--ui-font-size);padding:5px 10px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg);color:var(--text);outline:none;cursor:pointer}
 .topbar-right select:focus{border-color:var(--accent)}
+.msg-continue{margin-left:auto;color:var(--accent)!important}
+.msg-continue:hover{background:var(--accent-light)!important}
 .messages{flex:1;overflow-y:auto;padding:24px 32px 16px;display:flex;flex-direction:column;scroll-behavior:smooth}
 .messages::-webkit-scrollbar{width:4px}
 .messages::-webkit-scrollbar-track{background:transparent}
@@ -336,6 +338,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
             <div class="message-actions" v-if="m.id">
               <button class="msg-act-btn" @click="copyMessageContent(m)" :title="__('chat.copyMsg')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
               <button class="msg-act-btn" @click="quoteMessage(m)" title="引用此消息"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
+              <button class="msg-act-btn msg-continue" @click="continueAssistant(m)" :title="__('chat.continue')">⟳ {{__('chat.continue')}}</button>
               <div class="del-wrap">
                 <button class="del-msg" @click.stop="showDeleteMenu(m.id)">{{__('common.delete')}}</button>
                 <div v-if="activeDeleteMsg===m.id" class="del-menu" @click.stop>
@@ -798,6 +801,12 @@ createApp({
         _currentAbort=null
       }
     }
+    async function continueAssistant(m){
+      if(streaming.value)return
+      if(!currentId.value){await createSession();if(!currentId.value)return}
+      input.value='请继续完成分析，上次回答不完整，请基于已有信息继续深入分析。如果还需要更多信息，可以继续调用工具。'
+      await send()
+    }
     async function send(ev){
       console.log('[exec-flow] chat send: \u5165\u53e3',{textLen:input.value.trim().length,streaming:streaming.value,cid:!!currentId.value,model:currentModel.value||'null',refsCount:pendingRefs.value.length})
       if(ev&&ev.shiftKey){console.log('[exec-flow] chat send: shift\u952e\u8df3\u8fc7');return}
@@ -955,7 +964,7 @@ createApp({
       renderMd,onBubbleUpdate,createSession,switchSession,deleteSession,onModelChange,send,
       loadNotes,switchNotesTab,viewNote,deleteNote,execPendingDraft,
       deleteMode,selectedIds,allSelected,toggleSelect,selectAll,exitDeleteMode,deleteMessage,deleteSelected,
-      contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip}
+      continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip}
   }
 }).mount('#app')
 </script>

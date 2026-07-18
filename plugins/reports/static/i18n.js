@@ -164,6 +164,7 @@
         tool:'工具',
         compress:'压缩',
         save:'保存',
+        continue:'继续处理',
       },
       // web_server.py index 页面
       index: {
@@ -329,6 +330,7 @@
         tool:'Tool',
         compress:'Compress',
         save:'Save',
+        continue:'Continue',
       },
       index: {
         title: 'TopoCode Documents',
