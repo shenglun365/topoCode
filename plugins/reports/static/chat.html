@@ -782,13 +782,15 @@ createApp({
             container.querySelector('.diag-code').style.display=isChart?'none':''
           })
           // zoom
-          var scale=1;var zoomPct=container.querySelector('.diag-zoom-pct')
-          container.querySelector('.diag-zoom-out').onclick=function(){
-            scale=Math.max(0.25,scale-0.25);svgWrap.style.transform='scale('+scale+')';zoomPct.textContent=Math.round(scale*100)+'%'
-          }
-          container.querySelector('.diag-zoom-in').onclick=function(){
-            scale=Math.min(3,scale+0.25);svgWrap.style.transform='scale('+scale+')';zoomPct.textContent=Math.round(scale*100)+'%'
-          }
+          (function(){
+            var zs=1;var zp=container.querySelector('.diag-zoom-pct')
+            container.querySelector('.diag-zoom-out').onclick=function(){
+              zs=Math.max(0.25,zs-0.25);svgWrap.style.transform='scale('+zs+')';zp.textContent=Math.round(zs*100)+'%'
+            }
+            container.querySelector('.diag-zoom-in').onclick=function(){
+              zs=Math.min(3,zs+0.25);svgWrap.style.transform='scale('+zs+')';zp.textContent=Math.round(zs*100)+'%'
+            }
+          })()
           // download
           container.querySelector('.diag-download').onclick=function(){
             var svgEl=svgWrap.querySelector('svg');if(!svgEl)return
@@ -813,7 +815,6 @@ createApp({
             try{
               if(isMermaid){
                 if(!_mermaid){_mermaid=window.mermaid}
-                _mermaid.initialize({startOnLoad:false,theme:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default',themeVariables:{fontSize:fontSize.value+'px'}})
                 const uid='m-'+Date.now();const{svg}=await _mermaid.render(uid,newCode);svgWrap.innerHTML=svg
               }else{
                 const r=await fetch('/api/plantuml?code='+encodeURIComponent(newCode))
