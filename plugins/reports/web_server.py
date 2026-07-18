@@ -2284,6 +2284,9 @@ async def send_chat_message(session_id: str, request: Request):
                             quality = "low"
 
                         # ── 自校验：工具调用 <5 轮 且 内容 <100 字 → 追加提示让模型重试 ──
+                        _log(f"[producer] self-verify check: enabled={enable_self_verify} "
+                             f"done={_self_verify_done} calls={_acc_tool_calls} "
+                             f"content_len={len(final_content)}")
                         if (enable_self_verify and not _self_verify_done
                                 and _acc_tool_calls < 5 and len(final_content) < 100):
                             _self_verify_done = True
