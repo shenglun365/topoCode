@@ -1243,7 +1243,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "max_tokens": kwargs.get("maxTokens", 16384),
             "frequency_penalty": kwargs.get("frequencyPenalty", 0.0),
             "presence_penalty": kwargs.get("presencePenalty", 0.0),
-            "timeout": kwargs.get("timeout", 30),
+            "timeout": kwargs.get("timeout", 300),
             "extra_config": kwargs.get("extraConfig") or None,
             "context_window": kwargs.get("contextWindow", 8192),
             "created_at": now,
@@ -1278,7 +1278,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
                 if v:
                     data["api_key"] = v
             elif k == "timeout":
-                data["timeout"] = int(v) if v else 30
+                data["timeout"] = int(v) if v else 300
             elif k == "contextWindow":
                 data["context_window"] = int(v) if v else 8192
             elif k == "extraConfig":
