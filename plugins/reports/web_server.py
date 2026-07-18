@@ -1661,8 +1661,7 @@ async def auto_title_session(session_id: str):
         if len(msgs) < 2:
             return {"title": row["title"] or "新对话", "generated": False}
         context = "\n".join([f"{'用户' if m['role'] == 'user' else '助手'}: {m['content'][:500]}" for m in msgs[-4:]])
-        prompt = f"为以下对话生成一个5-8个字的标题。直接输出标题，不要输出其他任何内容。\n\n{context}"
-        _do_auto_title(session_id, prompt)
+        _do_auto_title(session_id, context)
         updated = _sdb().fetchone(
             "SELECT title FROM llm_sessions WHERE id = ?", (session_id,)
         )
@@ -2451,13 +2450,12 @@ def _check_auto_title(session_id: str):
             return
         logger.info(f"[auto-title] _check: calling _do_auto_title with {len(msgs)} messages")
         context = "\n".join([f"{'用户' if m['role'] == 'user' else '助手'}: {m['content'][:500]}" for m in msgs[-4:]])
-        prompt = f"为以下对话生成一个5-8个字的标题。直接输出标题，不要输出其他任何内容。\n\n{context}"
-        _do_auto_title(session_id, prompt)
+        _do_auto_title(session_id, context)
     except Exception as e:
         logger.warning(f"[auto-title] _check_auto_title error: {e}")
 
 
-def _do_auto_title(session_id: str, prompt: str):
+def _do_auto_title(session_id: str, context: str):
     """在后台线程中调用 LLM 生成标题"""
     try:
         model_id = ""
@@ -2476,7 +2474,7 @@ def _do_auto_title(session_id: str, prompt: str):
         if not model_id:
             logger.warning(f"[auto-title] _do: no default model found for session {session_id[:16]}")
             return
-        logger.info(f"[auto-title] _do: using model_id={model_id[:16]}, prompt_len={len(prompt)}")
+        logger.info(f"[auto-title] _do: using model_id={model_id[:16]}, context_len={len(context)}")
         model_cfg = multi_db.main_db.fetchone(
             "SELECT * FROM model_configs WHERE id = ?", (model_id,)
         )
@@ -2488,12 +2486,11 @@ def _do_auto_title(session_id: str, prompt: str):
         if base_url.endswith("/v1"):
             base_url = base_url[:-3]
         import requests as _req
-        ctx = prompt.split(chr(10)*2, 1)[1] if chr(10)*2 in prompt else prompt
         payload = {
             "model": md.get("model", ""),
             "messages": [
-                {"role": "system", "content": "你是一个简洁的标题生成助手。根据对话内容，用不超过16个字概括主题作为标题。只输出标题本身，严禁输出思考过程、分析或任何其他文字。"},
-                {"role": "user", "content": f"对话内容：{ctx}"},
+                {"role": "system", "content": "为对话生成一个简短标题，直接输出标题，不要多于15个字。"},
+                {"role": "user", "content": f"对话内容：{context}"},
             ],
             "stream": False,
             "max_tokens": md.get('max_tokens', 16384),
