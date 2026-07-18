@@ -160,6 +160,32 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .message .bubble a{color:var(--accent);text-decoration:none}
 .message .bubble a:hover{text-decoration:underline}
 .message .bubble svg.mermaid{max-width:100%;margin:4px 0}
+/* diagram container */
+.diagram-container{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;margin:8px 0}
+.diag-toolbar{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:var(--bg-hover);border-bottom:1px solid var(--border);gap:4px}
+.diag-tabs{display:flex;gap:2px}
+.diag-tab{background:none;border:none;padding:3px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:12px;color:var(--text-muted);transition:all .15s}
+.diag-tab:hover{color:var(--text-secondary);background:var(--bg-tertiary)}
+.diag-tab-active{background:var(--accent);color:#fff}
+.diag-tab-active:hover{background:var(--accent-hover);color:#fff}
+.diag-actions{display:flex;align-items:center;gap:2px}
+.diag-actions button{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1}
+.diag-actions button:hover{background:var(--bg-tertiary);color:var(--text-primary)}
+.diag-zoom-pct{font-size:11px;color:var(--text-muted);min-width:30px;text-align:center}
+.diag-view{padding:12px;overflow:auto;background:var(--bg)}
+.diag-svg-wrap{transform-origin:top left;transition:transform .15s}
+.diag-svg-wrap svg{max-width:none!important}
+.diag-code{padding:0}
+.diag-textarea{width:100%;min-height:120px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#1e1e1e);color:var(--code-text,#d4d4d4);resize:vertical;outline:none;box-sizing:border-box;tab-size:2}
+.diag-render-btn{display:block;width:100%;padding:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;font-size:13px}
+.diag-render-btn:hover{background:var(--accent-hover)}
+.diagram-error{padding:16px;color:var(--error,#ef4444);font-size:13px;text-align:center}
+/* fullscreen overlay */
+.diag-fullscreen-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:40px}
+.diag-fullscreen-overlay .diag-fs-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:1}
+.diag-fullscreen-overlay .diag-fs-close:hover{background:rgba(255,255,255,.3)}
+.diag-fullscreen-overlay .diag-fs-content{max-width:95%;max-height:90vh;overflow:auto}
+.diag-fullscreen-overlay .diag-fs-content svg{max-width:none!important}
 .reasoning-toggle{color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px}
 .reasoning-toggle:hover{color:var(--accent)}
 .reasoning-toggle .arrow{font-size:var(--ui-font-size);transition:transform .2s}
@@ -683,27 +709,134 @@ createApp({
 
     function renderMd(t){return t?marked.parse(t):''}
     function onBubbleUpdate(el,idx){
-      if(!el||streaming.value)return;const m=messages.value[idx];if(!m||m._drawn)return;m._drawn=true;renderDiagrams(el)
+      if(!el||streaming.value)return;const m=messages.value[idx];if(!m||m._drawn)return;m._drawn=true;renderDiagrams(el,m.id)
     }
-    async function renderDiagrams(el){
+    function replaceDiagramBlock(content, index, newCode){
+      var parts = content.split(/(```(?:mermaid|plantuml)[\s\S]*?```)/)
+      var matchIdx = 0
+      for(var i=0;i<parts.length;i++){
+        if(/^```(?:mermaid|plantuml)/.test(parts[i])){
+          if(matchIdx === index){
+            parts[i] = parts[i].replace(/(```(?:mermaid|plantuml))[\s\S]*?(```)/, '$1\n'+newCode+'\n$2')
+            break
+          }
+          matchIdx++
+        }
+      }
+      return parts.join('')
+    }
+    async function renderDiagrams(el, msgId){
+      if(!msgId)return
       for(const sel of['code.language-mermaid','code.language-plantuml']){
         const blocks=el.querySelectorAll(sel);if(!blocks.length)continue
+        const isMermaid = sel.includes('mermaid')
         for(const b of blocks){
           const pre=b.parentElement;if(!pre||pre.tagName!=='PRE')continue
           const code=b.textContent.trim();if(!code)continue
-          const w=document.createElement('div');w.className='diagram-placeholder';w.textContent='渲染中…'
-          pre.parentElement.replaceChild(w,pre)
+          const msg = messages.value.find(function(m){return m.id===msgId})
+          if(!msg) continue
+          msg._diagIdx = (msg._diagIdx || 0) + 1
+          var diagIdx = msg._diagIdx
+          const container=document.createElement('div');container.className='diagram-container'
+          container.dataset.msgId=msgId;container.dataset.diagramIndex=diagIdx
+          container.innerHTML='<div class="diag-toolbar">'+
+            '<div class="diag-tabs">'+
+              '<button class="diag-tab diag-tab-active" data-tab="chart">图表</button>'+
+              '<button class="diag-tab" data-tab="code">代码</button>'+
+            '</div>'+
+            '<div class="diag-actions">'+
+              '<button class="diag-zoom-out" title="缩小">−</button>'+
+              '<span class="diag-zoom-pct">100%</span>'+
+              '<button class="diag-zoom-in" title="放大">+</button>'+
+              '<button class="diag-download" title="下载">⬇</button>'+
+              '<button class="diag-fullscreen" title="全屏">⛶</button>'+
+            '</div>'+
+          '</div>'+
+          '<div class="diag-view"><div class="diag-svg-wrap" style="transform:scale(1)"></div></div>'+
+          '<div class="diag-code" style="display:none">'+
+            '<textarea class="diag-textarea" spellcheck="false">'+code.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</textarea>'+
+            '<button class="diag-render-btn">重新渲染</button>'+
+          '</div>'
+          pre.parentElement.insertBefore(container, pre)
+          container.querySelector('.diag-code').appendChild(pre)
+          var svgWrap=container.querySelector('.diag-svg-wrap')
           try{
-            if(sel.includes('mermaid')){
+            if(isMermaid){
               if(!_mermaid){_mermaid=window.mermaid}
               _mermaid.initialize({startOnLoad:false,theme:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default',themeVariables:{fontSize:fontSize.value+'px'}})
               const uid='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6)
-              const{svg}=await _mermaid.render(uid,code);w.className='';w.dataset.mermaidSource=code;w.innerHTML=svg
+              const{svg}=await _mermaid.render(uid,code);svgWrap.innerHTML=svg
             }else{
               const r=await fetch('/api/plantuml?code='+encodeURIComponent(code))
-              if(!r.ok)throw new Error('HTTP '+r.status);w.innerHTML=await r.text();w.className=''
+              if(!r.ok)throw new Error('HTTP '+r.status);svgWrap.innerHTML=await r.text()
             }
-          }catch(e){w.className='diagram-error';w.textContent='渲染失败: '+e.message}
+          }catch(e){svgWrap.innerHTML='<div class="diagram-error">渲染失败: '+e.message+'</div>'}
+
+          // tab 切换
+          container.querySelector('.diag-toolbar').addEventListener('click', function(e){
+            var tab=e.target.closest('.diag-tab');if(!tab)return
+            container.querySelectorAll('.diag-tab').forEach(function(t){t.classList.remove('diag-tab-active')})
+            tab.classList.add('diag-tab-active')
+            var isChart=tab.dataset.tab==='chart'
+            container.querySelector('.diag-view').style.display=isChart?'':'none'
+            container.querySelector('.diag-code').style.display=isChart?'none':''
+          })
+          // zoom
+          var scale=1;var zoomPct=container.querySelector('.diag-zoom-pct')
+          container.querySelector('.diag-zoom-out').onclick=function(){
+            scale=Math.max(0.25,scale-0.25);svgWrap.style.transform='scale('+scale+')';zoomPct.textContent=Math.round(scale*100)+'%'
+          }
+          container.querySelector('.diag-zoom-in').onclick=function(){
+            scale=Math.min(3,scale+0.25);svgWrap.style.transform='scale('+scale+')';zoomPct.textContent=Math.round(scale*100)+'%'
+          }
+          // download
+          container.querySelector('.diag-download').onclick=function(){
+            var svgEl=svgWrap.querySelector('svg');if(!svgEl)return
+            var clone=svgEl.cloneNode(true);var xml=new XMLSerializer().serializeToString(clone)
+            var blob=new Blob(['<?xml version="1.0"?>'+xml],{type:'image/svg+xml'})
+            var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='diagram.svg'
+            a.click();URL.revokeObjectURL(url)
+          }
+          // fullscreen
+          container.querySelector('.diag-fullscreen').onclick=function(){
+            var svgHtml=svgWrap.innerHTML
+            var overlay=document.createElement('div');overlay.className='diag-fullscreen-overlay'
+            overlay.innerHTML='<button class="diag-fs-close">×</button><div class="diag-fs-content">'+svgHtml+'</div>'
+            document.body.appendChild(overlay)
+            overlay.querySelector('.diag-fs-close').onclick=function(){overlay.remove()}
+            overlay.onclick=function(e){if(e.target===overlay)overlay.remove()}
+          }
+          // re-render + persist
+          container.querySelector('.diag-render-btn').onclick=async function(){
+            var newCode=container.querySelector('.diag-textarea').value.trim()
+            if(!newCode)return
+            try{
+              if(isMermaid){
+                if(!_mermaid){_mermaid=window.mermaid}
+                _mermaid.initialize({startOnLoad:false,theme:window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'default',themeVariables:{fontSize:fontSize.value+'px'}})
+                const uid='m-'+Date.now();const{svg}=await _mermaid.render(uid,newCode);svgWrap.innerHTML=svg
+              }else{
+                const r=await fetch('/api/plantuml?code='+encodeURIComponent(newCode))
+                if(!r.ok)throw new Error('HTTP '+r.status);svgWrap.innerHTML=await r.text()
+              }
+              // 切回图表 tab
+              var chartTab=container.querySelector('.diag-tab[data-tab="chart"]')
+              if(chartTab)chartTab.click()
+              // 局部替换 + 持久化
+              var mi=container.dataset.msgId;var di=parseInt(container.dataset.diagramIndex)
+              var mObj=messages.value.find(function(m){return m.id===mi})
+              if(mObj){
+                var nc=replaceDiagramBlock(mObj.content,di-1,newCode)
+                mObj.content=nc
+                try{
+                  await fetch('/api/chat/sessions/'+currentId.value+'/messages/'+mi,{
+                    method:'PUT',headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({content:nc})
+                  })
+                }catch(e){console.warn('[diagram] save failed:',e)}
+              }
+            }catch(e){showToast('渲染失败: '+e.message)}
+          }
         }
       }
     }

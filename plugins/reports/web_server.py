@@ -1644,6 +1644,22 @@ async def update_chat_session(session_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 
+@app.put("/api/chat/sessions/{session_id}/messages/{message_id}")
+async def update_chat_message(session_id: str, message_id: str, request: Request):
+    """更新单条消息内容（用于图表代码编辑后的持久化）"""
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        content = body.get("content", "")
+        _sdb().execute(
+            "UPDATE llm_messages SET content = ? WHERE id = ? AND session_id = ?",
+            (content, message_id, session_id),
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.post("/api/chat/sessions/{session_id}/auto-title")
 async def auto_title_session(session_id: str):
     """手动触发 AI 生成会话标题，返回生成的标题"""
