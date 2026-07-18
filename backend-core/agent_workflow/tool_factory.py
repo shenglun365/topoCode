@@ -208,7 +208,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
         def to_openai_schema(self, filter_names=None):
             return None
 
-        async def execute(self, task_id: str, levels: list[str], force: bool = False, language: str = "") -> ToolResult:
+        async def execute(self, task_id: str, levels: list[str], force: bool = False, language: str = "", enable_self_verify: bool = True) -> ToolResult:
             try:
                 from .sandbox import PathSandbox, AgentSandbox as _AS
                 from .runtime import AgentRuntime
@@ -291,6 +291,7 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         "_save_fn": _save_fn,
                         "subagent_concurrency": RunComponentAnalysisTool._sub_conc,
                         "language": language,
+                        "enable_self_verify": enable_self_verify,
                     }
                     sandbox = _AS(project_root, max_tokens=32768, timeout_seconds=900)
 

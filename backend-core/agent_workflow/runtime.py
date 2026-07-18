@@ -162,6 +162,7 @@ class AgentRuntime:
         self._tool_call_history: list[tuple] = []
         self._loop_warning_count: int = 0
         self._content_warning_count: int = 0
+        self._verification_count: int = 0
 
     def _detect_tool_call_loop(self, tool_calls: list, max_repeat: int = 3) -> bool:
         """检测连续 N 轮相同的工具调用组合"""
@@ -175,11 +176,45 @@ class AgentRuntime:
             return all(s == sig for s in self._tool_call_history)
         return False
 
+    def _count_tool_turns(self, messages: list[dict]) -> int:
+        """统计对话中已执行的工具调用轮次"""
+        return sum(
+            1 for msg in messages
+            if msg.get("role") == "assistant" and msg.get("tool_calls")
+        )
+
+    def _should_verify_completion(self, messages: list[dict], content: str) -> bool:
+        """判断模型是否可能过早停止——工具调用 <5 轮 且 内容 <100 字时触发校验"""
+        tool_turns = self._count_tool_turns(messages)
+        content_len = len(content.strip())
+        if tool_turns >= 5 or content_len >= 100:
+            return False
+        return True
+
+    def _build_verification_prompt(self, messages: list[dict]) -> str:
+        """构建校验提示，引导模型确认是否真正完成任务"""
+        tool_turns = self._count_tool_turns(messages)
+        if tool_turns < 2:
+            return (
+                "You have only made {} tool call(s), which seems insufficient. "
+                "Please make sure you have:\n"
+                "1. Explored component structure (get_community_subgraph)\n"
+                "2. Searched for key symbols (search_symbols)\n"
+                "3. Read important files (summarize_file)\n\n"
+                "Call more tools if needed, or output the final JSON if done."
+            ).format(tool_turns)
+        return (
+            "Your output is very short (under 100 chars). Please double-check "
+            "if you have fully analyzed this component. Call more tools if "
+            "needed, or output the final JSON if complete."
+        )
+
     def _reset_detection_state(self):
         """重置检测状态（每组件循环开始时调用）"""
         self._tool_call_history.clear()
         self._loop_warning_count = 0
         self._content_warning_count = 0
+        self._verification_count = 0
 
     def cancel(self):
         """取消当前执行。设置标志后，运行时在下一个安全点退出。"""
@@ -533,6 +568,7 @@ class AgentRuntime:
         project_summary = context.get("project_summary", "")
         effective_max_turns = context.get("max_turns", workflow.max_turns)
         analysis_mode = context.get("analysis_mode", "quick")
+        enable_self_verify = context.get("enable_self_verify", True)
         tools_schema = self._tools.to_openai_tools(workflow.get_tool_filter(context))
 
         # 初始化步骤列表（用于 frontend 展示）
@@ -680,6 +716,20 @@ class AgentRuntime:
 
                     if not response.tool_calls:
                         if response.content:
+                            if (enable_self_verify and self._verification_count < 1
+                                    and turn < effective_max_turns - 2):
+                                if self._should_verify_completion(messages, response.content):
+                                    self._verification_count += 1
+                                    messages.append({
+                                        "role": "user",
+                                        "content": self._build_verification_prompt(messages)
+                                    })
+                                    logger.info(
+                                        f"[AgentRuntime] comp={comp_id} self-verify #1, "
+                                        f"tool_turns={self._count_tool_turns(messages)}, "
+                                        f"content_len={len(response.content)}"
+                                    )
+                                    continue
                             final_response = response.content
                             break
                         # 模型返回空内容 + 无工具调用 → 引导输出 JSON（最多引导 1 次）

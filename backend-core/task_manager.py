@@ -2437,7 +2437,8 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
     @server.register("analysis.startPipeline")
     def start_pipeline(task_id=None, taskId=None, force=False, language=None,
                        concurrency=None, subagent_concurrency=None,
-                       component_timeout=None, componentTimeout=None):
+                       component_timeout=None, componentTimeout=None,
+                       enable_self_verify=None):
         """启动流水线整体激活 (PipelineWorkflow 入口)"""
         tid = task_id or taskId
         if not tid:
@@ -2470,6 +2471,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "concurrency": conc,
                 "subagent_concurrency": sub_conc,
                 "component_timeout": comp_timeout,
+                "enable_self_verify": enable_self_verify if enable_self_verify is not None else True,
             }
             result = mgr.dispatch("pipeline", tid, context,
                                   project_id=pid, project_root=project_root,
@@ -2525,6 +2527,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "_estimated_total_weight": _est_weight,
             "_total_files": _total_files,
             "_total_comps": _total_comps,
+            "enable_self_verify": enable_self_verify if enable_self_verify is not None else True,
         }
 
         def _on_pipeline_complete(state_dict):
@@ -2964,7 +2967,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                            summary_model_id=None, summaryModelId=None,
                            subagent_concurrency=None, subagentConcurrency=None,
                            analysis_mode=None, analysisMode=None,
-                           force=False):
+                           force=False, enable_self_verify=None):
         """按需组件分析入口 — 用户选中组件后启动批量 LLM 分析"""
         tid = task_id or taskId
         if not tid:
@@ -3213,6 +3216,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             }
             context["_save_fn"] = _save_fn
             context["max_turns"] = turns
+            context["enable_self_verify"] = enable_self_verify if enable_self_verify is not None else True
             if agentic_mode:
                 context["subagent_concurrency"] = sub_conc
                 if summary_model:

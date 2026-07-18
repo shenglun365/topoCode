@@ -76,6 +76,20 @@ export const useSettingsStore = defineStore('settings', () => {
     locale.value = newLocale; i18n.global.locale.value = newLocale; localStorage.setItem('locale', newLocale)
   }
 
+  // ── 自校验开关 ──
+  const selfVerifyEnabled = ref(true)
+  try {
+    const saved = localStorage.getItem('selfVerifyEnabled')
+    if (saved !== null) {
+      selfVerifyEnabled.value = saved === 'true'
+    }
+  } catch (e) { console.warn('Failed to load selfVerifyEnabled', e) }
+
+  function toggleSelfVerify() {
+    selfVerifyEnabled.value = !selfVerifyEnabled.value
+    localStorage.setItem('selfVerifyEnabled', String(selfVerifyEnabled.value))
+  }
+
   function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent') {
     activeTab.value = tab
   }
@@ -179,6 +193,7 @@ export const useSettingsStore = defineStore('settings', () => {
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
     importConfig, importConfigLoading,
     resourceProjectsDir, resourceDirHistory,
+    selfVerifyEnabled, toggleSelfVerify,
     setProjectPageSize, initLocale, setLocale, setActiveTab,
     restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,

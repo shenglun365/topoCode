@@ -521,10 +521,10 @@ export interface IPCAPI {
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
-    startPipeline: (params: { taskId: string; force?: boolean; language?: string; concurrency?: number; subagent_concurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    startPipeline: (params: { taskId: string; force?: boolean; language?: string; concurrency?: number; subagent_concurrency?: number; enable_self_verify?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
     getAgentConfig: () => Promise<{ routes: Array<{ action: string; workflow: string; description: string }>; skills: Array<{ name: string; description: string; steps: number }>; tools: Array<{ name: string; description: string; category: string; llm_visible: boolean }> }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean; enable_self_verify?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
