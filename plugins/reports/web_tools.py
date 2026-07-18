@@ -865,9 +865,11 @@ class WebToolExecutor:
                 overview_lines.append(entry)
             overview = "\n".join(overview_lines)
 
-            # 提取符号行号范围，去重合并重叠/相邻区间
+            # 提取符号行号范围，去重合并重叠/相邻区间（跳过覆盖全文件的 file 级别符号）
             raw_ranges = []
             for s in symbols:
+                if s["kind"] == "file":
+                    continue
                 sl, el = s["start_line"], s["end_line"]
                 if sl and el and el >= sl:
                     raw_ranges.append((sl, el))
@@ -888,9 +890,9 @@ class WebToolExecutor:
                 pass
 
             # 拼接代码片段
-            MAX_CODE_LINES = 150
-            MAX_SYMBOLS_WITH_CODE = 20
-            MAX_LINES_PER_RANGE = 30
+            MAX_CODE_LINES = 600
+            MAX_SYMBOLS_WITH_CODE = 40
+            MAX_LINES_PER_RANGE = 60
             code_output = []
             code_total = 0
             prev_end = 0

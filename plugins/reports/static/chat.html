@@ -913,8 +913,8 @@ createApp({
               if(data.type==='chunk'&&data.text)messages.value[mid].content+=data.text
               if(data.type==='reasoning'&&data.text)messages.value[mid].reasoning+=data.text
               if(data.type==='error')messages.value[mid].content='错误: '+(data.message||'')
-              if(data.type==='tool_call'){if(!messages.value[mid].toolCalls)messages.value[mid].toolCalls=[];messages.value[mid].toolCalls.push({name:data.name,arguments:data.arguments,result:null})}
-              if(data.type==='tool_result'){const tc=messages.value[mid].toolCalls?.find(t=>t.name===data.name);if(tc)tc.result=data.result}
+              if(data.type==='tool_call'){if(!messages.value[mid].toolCalls)messages.value[mid].toolCalls=[];messages.value[mid].toolCalls.push({id:data.id||'tc_'+Date.now(),name:data.name,arguments:data.arguments,result:null})}
+              if(data.type==='tool_result'){const tc=messages.value[mid].toolCalls?.find(t=>t.id===data.id);if(tc)tc.result=data.result}
               if(data.type==='done'){
                 console.log('[chat] SSE done, total events:', sseCount, 'final content length:', (data.content||'').length, 'quality:', data.quality)
                 messages.value[mid]._streamDone=true

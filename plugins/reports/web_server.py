@@ -2344,14 +2344,14 @@ async def send_chat_message(session_id: str, request: Request):
                         t_args = tc_item.get("arguments", {})
                         tc_id = tc_item.get("id", "")
                         _log(f"[producer] tool_call: {t_name} id={tc_id} args={json.dumps(t_args)[:200]}")
-                        await queue.put({"type": "tool_call", "name": t_name, "arguments": t_args})
+                        await queue.put({"type": "tool_call", "id": tc_id, "name": t_name, "arguments": t_args})
                         try:
                             result = executor.execute(t_name, t_args)
                             _log(f"[producer] tool_result: {t_name} ok")
                         except Exception as e:
                             result = {"error": str(e)}
                             _log(f"[producer] tool_result: {t_name} error: {e}")
-                        await queue.put({"type": "tool_result", "name": t_name, "result": result})
+                        await queue.put({"type": "tool_result", "id": tc_id, "name": t_name, "result": result})
 
                         result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
                         _sdb().execute(
