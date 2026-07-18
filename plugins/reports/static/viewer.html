@@ -7,6 +7,9 @@
 <script src="/static/marked.min.js"></script>
 <script src="/static/mermaid.min.js"></script>
 <script src="/static/cytoscape.min.js"></script>
+<script src="/static/layout-base.js"></script>
+<script src="/static/cose-base.js"></script>
+<script src="/static/cose-bilkent.min.js"></script>
 <script src="/static/store.js?v=20260706"></script>
 <script src="/static/i18n.js?v=20260711"></script>
 <style>
@@ -1786,7 +1789,7 @@ const GraphView = {
         GraphView._layoutDone = false;
       GraphView._layoutTimer = null;
 
-      var ly = g_cy.layout({ name: 'cose', animate: false, nodeRepulsion: 25000, idealEdgeLength: 200, numIter: Math.max(numIter, 1000), fit: false, nodeOverlap: 40, spacingFactor: 1.5, padding: 20 });
+      var ly = g_cy.layout({ name: 'cose-bilkent', animate: false, nodeRepulsion: 80000, idealEdgeLength: 200, gravity: 0, numIter: Math.max(numIter, 1000), fit: false, quality: 'proof' });
       ly.one('layoutstop', function() {
         GraphView._layoutDone = true;
         if (GraphView._layoutTimer) { clearTimeout(GraphView._layoutTimer); GraphView._layoutTimer = null; }
@@ -2112,7 +2115,7 @@ const GraphView = {
       _manualShown.clear();
       g_cy.nodes().show();
       API.graphLayoutDelete(S.taskId, S.cid || '', S.et, S.gran || 'component', S.depth || 1).catch(function() {});
-      var ly = g_cy.layout({ name: 'cose', animate: false, nodeRepulsion: 25000, idealEdgeLength: 200, numIter: 4000, fit: false, nodeOverlap: 40, spacingFactor: 1.5, padding: 20 });
+      var ly = g_cy.layout({ name: 'cose-bilkent', animate: false, nodeRepulsion: 80000, idealEdgeLength: 200, gravity: 0, numIter: 4000, fit: false, quality: 'proof' });
       ly.run();
       g_cy.resize();
       var conn = g_cy.nodes().filter(function(n) { return n.degree(false) > 0; });
