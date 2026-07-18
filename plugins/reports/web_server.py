@@ -1927,6 +1927,7 @@ async def send_chat_message(session_id: str, request: Request):
         model_id = body.get("modelId") or body.get("model_id", "")
         streaming = body.get("stream", True)
         context_limit = body.get("contextLimit", 0)  # 0 = use model default
+        enable_self_verify = body.get("enable_self_verify", False)
 
         # ── Phase 0: 指令检测 ──
         if content.startswith("/compress"):
@@ -2193,6 +2194,7 @@ async def send_chat_message(session_id: str, request: Request):
                 ctx_msgs = list(context_messages)
                 _acc_reasoning = ""  # 跨轮累积 reasoning，供 fallback 使用
                 _acc_tool_calls = 0  # 跨轮累积 tool 调用次数，供质量判定使用
+                _self_verify_done = False  # 自校验是否已执行
                 for round_idx in range(TOOL_ROUND_LIMIT):
                     force_choice = round_idx == 0 and bool(tool_defs)
                     chunk_q = _queue.Queue()
@@ -2280,6 +2282,24 @@ async def send_chat_message(session_id: str, request: Request):
                                 quality = "low"
                         elif not final_content and not _acc_reasoning_str and _acc_tool_calls >= 2:
                             quality = "low"
+
+                        # ── 自校验：工具调用 <5 轮 且 内容 <100 字 → 追加提示让模型重试 ──
+                        if (enable_self_verify and not _self_verify_done
+                                and _acc_tool_calls < 5 and len(final_content) < 100):
+                            _self_verify_done = True
+                            _log(f"[producer] self-verify #1: "
+                                 f"calls={_acc_tool_calls} content_len={len(final_content)}")
+                            ctx_msgs.append({
+                                "role": "user",
+                                "content": (
+                                    "Your previous response contained only reasoning "
+                                    "but no actual content. Please provide a complete "
+                                    "answer based on the information you have gathered. "
+                                    "If you need more information, call tools again."
+                                )
+                            })
+                            continue
+
                         if quality == "low":
                             _log(f"[CHAT_TRACE] QUALITY_LOW: calls={_acc_tool_calls} "
                                  f"content_len={len(final_content)} acc_reasoning_len={len(_acc_reasoning_str)}")
