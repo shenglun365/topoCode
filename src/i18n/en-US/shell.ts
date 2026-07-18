@@ -22,7 +22,6 @@ export default { shell: {
     toggleLeftPanel: 'Toggle Left Panel',
     toggleRightPanel: 'Toggle Right Panel',
     toggleTheme: 'Toggle Theme',
-    selfVerify: 'Verify early stop',
     fullscreen: 'Fullscreen',
     zoomIn: 'Zoom In',
     zoomOut: 'Zoom Out',

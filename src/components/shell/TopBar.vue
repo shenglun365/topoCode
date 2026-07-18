@@ -19,7 +19,6 @@ import { useThemeStore } from '@/stores/theme'
 import { useProjectStore } from '@/stores/project'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { useStatusStore } from '@/stores/status'
-import { useSettingsStore } from '@/stores/settings-store'
 import { useNavigationStore } from '@/stores/navigation'
 import StarLogo from './StarLogo.vue'
 
@@ -36,7 +35,6 @@ const themeStore = useThemeStore()
 const projectStore = useProjectStore()
 const onboardingStore = useOnboardingStore()
 const statusStore = useStatusStore()
-const settingsStore = useSettingsStore()
 const navigation = useNavigationStore()
 
 // ── 配置 ──
@@ -312,17 +310,6 @@ onMounted(() => {
             v-else
             class="w-4 h-4"
           />
-        </div>
-        <div
-          class="icon-btn self-verify-btn"
-          :class="{ active: settingsStore.selfVerifyEnabled }"
-          :title="t('shell.topBar.selfVerify')"
-          @click="settingsStore.toggleSelfVerify()"
-        >
-          <span
-            class="verify-dot"
-            :class="{ on: settingsStore.selfVerifyEnabled }"
-          >✓</span>
         </div>
         <div
           class="icon-btn"
@@ -711,22 +698,6 @@ onMounted(() => {
 .tab-bar-actions .icon-btn.active {
   color: var(--accent);
   background: var(--bg-tertiary);
-}
-
-.self-verify-btn {
-  width: auto !important;
-  padding: 0 6px;
-  gap: 2px;
-}
-.verify-dot {
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.4;
-  transition: all 0.15s;
-}
-.verify-dot.on {
-  color: var(--accent);
-  opacity: 1;
 }
 
 

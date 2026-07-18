@@ -22,7 +22,6 @@ export default { shell: {
     toggleLeftPanel: '切换左面板',
     toggleRightPanel: '切换右面板',
     toggleTheme: '切换主题',
-    selfVerify: '校验早停',
     fullscreen: '全屏',
     zoomIn: '放大',
     zoomOut: '缩小',

@@ -43,9 +43,7 @@ class PipelineWorkflow(AgentWorkflow):
             AgentStep(
                 tool="pipeline_run_component_analysis",
                 description="[流水线] 组件分析 L0→L5",
-                args={"task_id": task_id, "levels": ["L0", "L1", "L2", "L3", "L4", "L5"],
-                       "force": force, "language": language,
-                       "enable_self_verify": context.get("enable_self_verify", True)},
+                args={"task_id": task_id, "levels": ["L0", "L1", "L2", "L3", "L4", "L5"], "force": force, "language": language},
             ),
             AgentStep(
                 tool="pipeline_run_overview",

@@ -6,7 +6,6 @@ import { controlDispatcher } from '@/services/control-dispatcher'
 import { playSuccessSound, playFailureSound } from '@/services/sound'
 import { useAnalysisStore } from '@/stores/analysis'
 import { useProjectStore } from '@/stores/project'
-import { useSettingsStore } from '@/stores/settings-store'
 import type { ExternalStatsResult, CrossCommunityEdge, CrossCommunityEdgesResult } from '@/types/ipc'
 import type { ComponentRef } from '@/stores/component-selection-store'
 
@@ -1215,13 +1214,11 @@ export const useCommunityStore = defineStore('community', () => {
     ])
     t.agentTasks[idx].status = 'running'
     try {
-      const settingsStore = useSettingsStore()
       const result = await ipc.analysis.startPipeline({
         taskId, force: force || undefined, language: language || undefined,
         concurrency: subConc > 1 ? subConc : undefined,
         subagent_concurrency: subConc > 1 ? subConc : undefined,
         component_timeout: componentTimeout,
-        enable_self_verify: settingsStore.selfVerifyEnabled,
       })
       if (result.success && result.agentTaskId) {
         t.agentTasks[idx].id = result.agentTaskId
