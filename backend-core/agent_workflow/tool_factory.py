@@ -421,14 +421,18 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         wf_result = future.result(timeout=3600)
 
                 overview = (wf_result.data or {}).get("overview", "")
+                _log.info("[Overview] pipeline save_check overview_len=%d wf_result.success=%s",
+                          len(overview), wf_result.success)
                 if overview:
                     try:
                         from report_tree_service import save_overall_doc
-                        save_overall_doc(multi_db, task_id, "Architecture Overview", overview)
+                        result = save_overall_doc(multi_db, task_id, "Architecture Overview", overview)
+                        _log.info("[Overview] save_overall_doc done doc_id=%s len=%d",
+                                  result.get("id", "?"), len(overview))
                     except Exception as e2:
                         _log.warning(f"[Pipeline] save overview failed: {e2}")
-
-                _log.info(f"[Pipeline] overview done wf_result.success={wf_result.success}")
+                else:
+                    _log.warning("[Overview] skip save: overview empty")
                 return ToolResult.ok({
                     "overview_done": bool(overview), "summary": "Overall architecture analysis generated" if overview else "Overall architecture analysis: no content",
                 })

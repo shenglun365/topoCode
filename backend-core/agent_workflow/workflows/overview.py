@@ -153,10 +153,15 @@ class _GenerateOverviewTool(AgentTool):
             })
             messages = result['messages']
             logger.info("[Overview] calling LLM with prompt=%d chars", len(context_text))
-            resp = await llm_fn(messages=messages, temperature=0.3, max_tokens=None)
+            resp = await llm_fn(messages=messages, temperature=0.3, max_tokens=32768)
             overview = resp if isinstance(resp, str) else str(resp or "")
             logger.info("[Overview] LLM response=%d chars", len(overview))
+            if overview:
+                logger.info("[Overview] content preview: %s...", overview[:200].replace('\n', ' '))
+            else:
+                logger.warning("[Overview] LLM returned empty content")
 
+            logger.info("[Overview] ToolResult.ok data_len=%d", len(overview))
             return ToolResult.ok(data=overview, tokens_used=len(context_text) // 4 + 1000)
         except Exception as e:
             logger.warning(f"[Overview] failed: {e}")
@@ -182,6 +187,8 @@ class OverviewWorkflow(AgentWorkflow):
 
     def finalize(self, results: dict[str, Any]) -> WorkflowResult:
         overview = results.get("generate_overview", "")
+        logger.info("[Overview] finalize results keys=%s overview_len=%d is_empty=%s",
+                    list(results.keys()), len(overview), not bool(overview))
         return WorkflowResult(
             success=True,
             data={"overview": overview},

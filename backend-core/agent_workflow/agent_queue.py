@@ -332,6 +332,7 @@ class AgentTaskManager:
                     else:
                         s.status = TaskState.FAILED
                         s.error = "runtime produced no result"
+                    s.result = result
                     s.finished_at = time.time()
 
         except BaseException as e:
