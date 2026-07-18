@@ -725,41 +725,55 @@ createApp({
       }
       return parts.join('')
     }
+    function makeBtn(tag, cls, html, title){
+      var el=document.createElement(tag);if(cls)el.className=cls;if(html)el.innerHTML=html;if(title)el.title=title;return el
+    }
     async function renderDiagrams(el, msgId){
       if(!msgId)return
       for(const sel of['code.language-mermaid','code.language-plantuml']){
         const blocks=el.querySelectorAll(sel);if(!blocks.length)continue
-        const isMermaid = sel.includes('mermaid')
+        const isMermaid=sel.includes('mermaid')
         for(const b of blocks){
-          const pre=b.parentElement;if(!pre||pre.tagName!=='PRE')continue
-          const code=b.textContent.trim();if(!code)continue
-          const msg = messages.value.find(function(m){return m.id===msgId})
-          if(!msg) continue
-          msg._diagIdx = (msg._diagIdx || 0) + 1
-          var diagIdx = msg._diagIdx
-          const container=document.createElement('div');container.className='diagram-container'
-          container.dataset.msgId=msgId;container.dataset.diagramIndex=diagIdx
-          container.innerHTML='<div class="diag-toolbar">'+
-            '<div class="diag-tabs">'+
-              '<button class="diag-tab diag-tab-active" data-tab="chart">图表</button>'+
-              '<button class="diag-tab" data-tab="code">代码</button>'+
-            '</div>'+
-            '<div class="diag-actions">'+
-              '<button class="diag-zoom-out" title="缩小">−</button>'+
-              '<span class="diag-zoom-pct">100%</span>'+
-              '<button class="diag-zoom-in" title="放大">+</button>'+
-              '<button class="diag-download" title="下载">⬇</button>'+
-              '<button class="diag-fullscreen" title="全屏">⛶</button>'+
-            '</div>'+
-          '</div>'+
-          '<div class="diag-view"><div class="diag-svg-wrap" style="transform:scale(1)"></div></div>'+
-          '<div class="diag-code" style="display:none">'+
-            '<textarea class="diag-textarea" spellcheck="false">'+code.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</textarea>'+
-            '<button class="diag-render-btn">重新渲染</button>'+
-          '</div>'
-          pre.parentElement.insertBefore(container, pre)
-          container.querySelector('.diag-code').appendChild(pre)
-          var svgWrap=container.querySelector('.diag-svg-wrap')
+          var pre=b.parentElement;if(!pre||pre.tagName!=='PRE')continue
+          var code=b.textContent.trim();if(!code)continue
+          var msg=messages.value.find(function(m){return m.id===msgId})
+          if(!msg)continue
+          msg._diagIdx=(msg._diagIdx||0)+1
+
+          // ── 构建容器 ──
+          var container=document.createElement('div');container.className='diagram-container'
+          container.dataset.msgId=msgId;container.dataset.diagramIndex=msg._diagIdx
+          pre.parentElement.insertBefore(container,pre)
+
+          // toolbar
+          var toolbar=document.createElement('div');toolbar.className='diag-toolbar'
+          var tabsDiv=document.createElement('div');tabsDiv.className='diag-tabs'
+          var tabChart=makeBtn('button','diag-tab diag-tab-active','图表');tabChart.dataset.tab='chart'
+          var tabCode=makeBtn('button','diag-tab','代码');tabCode.dataset.tab='code'
+          tabsDiv.appendChild(tabChart);tabsDiv.appendChild(tabCode)
+          var actionsDiv=document.createElement('div');actionsDiv.className='diag-actions'
+          var zoomOut=makeBtn('button','diag-zoom-out','−','缩小')
+          var zoomPct=makeBtn('span','diag-zoom-pct','100%')
+          var zoomIn=makeBtn('button','diag-zoom-in','+','放大')
+          var downloadBtn=makeBtn('button','diag-download','⬇','下载')
+          var fullscreenBtn=makeBtn('button','diag-fullscreen','⛶','全屏')
+          actionsDiv.appendChild(zoomOut);actionsDiv.appendChild(zoomPct)
+          actionsDiv.appendChild(zoomIn);actionsDiv.appendChild(downloadBtn);actionsDiv.appendChild(fullscreenBtn)
+          toolbar.appendChild(tabsDiv);toolbar.appendChild(actionsDiv);container.appendChild(toolbar)
+
+          // 图表视图
+          var diagView=document.createElement('div');diagView.className='diag-view'
+          var svgWrap=document.createElement('div');svgWrap.className='diag-svg-wrap';svgWrap.style.transform='scale(1)'
+          diagView.appendChild(svgWrap);container.appendChild(diagView)
+
+          // 代码视图
+          var diagCode=document.createElement('div');diagCode.className='diag-code';diagCode.style.display='none'
+          var ta=document.createElement('textarea');ta.className='diag-textarea';ta.spellcheck=false;ta.value=code
+          var renderBtn=makeBtn('button','diag-render-btn','重新渲染')
+          diagCode.appendChild(ta);diagCode.appendChild(renderBtn);container.appendChild(diagCode)
+          diagCode.insertBefore(pre,ta)
+
+          // ── 渲染 SVG ──
           try{
             if(isMermaid){
               if(!_mermaid){_mermaid=window.mermaid}
@@ -767,74 +781,57 @@ createApp({
               const uid='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,6)
               const{svg}=await _mermaid.render(uid,code);svgWrap.innerHTML=svg
             }else{
-              const r=await fetch('/api/plantuml?code='+encodeURIComponent(code))
+              var r=await fetch('/api/plantuml?code='+encodeURIComponent(code))
               if(!r.ok)throw new Error('HTTP '+r.status);svgWrap.innerHTML=await r.text()
             }
           }catch(e){svgWrap.innerHTML='<div class="diagram-error">渲染失败: '+e.message+'</div>'}
 
-          // tab 切换
-          container.querySelector('.diag-toolbar').addEventListener('click', function(e){
-            var tab=e.target.closest('.diag-tab');if(!tab)return
-            container.querySelectorAll('.diag-tab').forEach(function(t){t.classList.remove('diag-tab-active')})
-            tab.classList.add('diag-tab-active')
-            var isChart=tab.dataset.tab==='chart'
-            container.querySelector('.diag-view').style.display=isChart?'':'none'
-            container.querySelector('.diag-code').style.display=isChart?'none':''
-          })
-          // zoom
+          // ── tab 切换 ──
+          tabChart.onclick=function(){tabChart.classList.add('diag-tab-active');tabCode.classList.remove('diag-tab-active');diagView.style.display='';diagCode.style.display='none'}
+          tabCode.onclick=function(){tabCode.classList.add('diag-tab-active');tabChart.classList.remove('diag-tab-active');diagView.style.display='none';diagCode.style.display=''}
+
+          // ── zoom ──
           (function(){
-            var zs=1;var zp=container.querySelector('.diag-zoom-pct')
-            container.querySelector('.diag-zoom-out').onclick=function(){
-              zs=Math.max(0.25,zs-0.25);svgWrap.style.transform='scale('+zs+')';zp.textContent=Math.round(zs*100)+'%'
-            }
-            container.querySelector('.diag-zoom-in').onclick=function(){
-              zs=Math.min(3,zs+0.25);svgWrap.style.transform='scale('+zs+')';zp.textContent=Math.round(zs*100)+'%'
-            }
+            var zs=1
+            zoomOut.onclick=function(){zs=Math.max(0.25,zs-0.25);svgWrap.style.transform='scale('+zs+')';zoomPct.textContent=Math.round(zs*100)+'%'}
+            zoomIn.onclick=function(){zs=Math.min(3,zs+0.25);svgWrap.style.transform='scale('+zs+')';zoomPct.textContent=Math.round(zs*100)+'%'}
           })()
-          // download
-          container.querySelector('.diag-download').onclick=function(){
-            var svgEl=svgWrap.querySelector('svg');if(!svgEl)return
-            var clone=svgEl.cloneNode(true);var xml=new XMLSerializer().serializeToString(clone)
+
+          // ── download ──
+          downloadBtn.onclick=function(){
+            var se=svgWrap.querySelector('svg');if(!se)return
+            var xml=new XMLSerializer().serializeToString(se.cloneNode(true))
             var blob=new Blob(['<?xml version="1.0"?>'+xml],{type:'image/svg+xml'})
-            var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='diagram.svg'
-            a.click();URL.revokeObjectURL(url)
+            var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='diagram.svg';a.click();URL.revokeObjectURL(url)
           }
-          // fullscreen
-          container.querySelector('.diag-fullscreen').onclick=function(){
-            var svgHtml=svgWrap.innerHTML
-            var overlay=document.createElement('div');overlay.className='diag-fullscreen-overlay'
-            overlay.innerHTML='<button class="diag-fs-close">×</button><div class="diag-fs-content">'+svgHtml+'</div>'
-            document.body.appendChild(overlay)
-            overlay.querySelector('.diag-fs-close').onclick=function(){overlay.remove()}
-            overlay.onclick=function(e){if(e.target===overlay)overlay.remove()}
+
+          // ── fullscreen ──
+          fullscreenBtn.onclick=function(){
+            var ov=document.createElement('div');ov.className='diag-fullscreen-overlay'
+            ov.innerHTML='<button class="diag-fs-close">×</button><div class="diag-fs-content">'+svgWrap.innerHTML+'</div>'
+            document.body.appendChild(ov)
+            ov.querySelector('.diag-fs-close').onclick=function(){ov.remove()}
+            ov.onclick=function(e){if(e.target===ov)ov.remove()}
           }
-          // re-render + persist
-          container.querySelector('.diag-render-btn').onclick=async function(){
-            var newCode=container.querySelector('.diag-textarea').value.trim()
-            if(!newCode)return
+
+          // ── re-render + persist ──
+          renderBtn.onclick=async function(){
+            var nc=ta.value.trim();if(!nc)return
             try{
               if(isMermaid){
                 if(!_mermaid){_mermaid=window.mermaid}
-                const uid='m-'+Date.now();const{svg}=await _mermaid.render(uid,newCode);svgWrap.innerHTML=svg
+                const uid='m-'+Date.now();const{svg}=await _mermaid.render(uid,nc);svgWrap.innerHTML=svg
               }else{
-                const r=await fetch('/api/plantuml?code='+encodeURIComponent(newCode))
-                if(!r.ok)throw new Error('HTTP '+r.status);svgWrap.innerHTML=await r.text()
+                var r2=await fetch('/api/plantuml?code='+encodeURIComponent(nc))
+                if(!r2.ok)throw new Error('HTTP '+r2.status);svgWrap.innerHTML=await r2.text()
               }
-              // 切回图表 tab
-              var chartTab=container.querySelector('.diag-tab[data-tab="chart"]')
-              if(chartTab)chartTab.click()
-              // 局部替换 + 持久化
+              tabChart.click()
               var mi=container.dataset.msgId;var di=parseInt(container.dataset.diagramIndex)
-              var mObj=messages.value.find(function(m){return m.id===mi})
-              if(mObj){
-                var nc=replaceDiagramBlock(mObj.content,di-1,newCode)
-                mObj.content=nc
-                try{
-                  await fetch('/api/chat/sessions/'+currentId.value+'/messages/'+mi,{
-                    method:'PUT',headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({content:nc})
-                  })
-                }catch(e){console.warn('[diagram] save failed:',e)}
+              var mo=messages.value.find(function(m){return m.id===mi})
+              if(mo){
+                var nc2=replaceDiagramBlock(mo.content,di-1,nc)
+                mo.content=nc2
+                try{await fetch('/api/chat/sessions/'+currentId.value+'/messages/'+mi,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:nc2})})}catch(e){}
               }
             }catch(e){showToast('渲染失败: '+e.message)}
           }
