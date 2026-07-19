@@ -91,16 +91,15 @@ BUILTIN_SKILLS: dict[str, Skill] = {
     "knowledge_keeper": Skill(
         name="knowledge_keeper",
         title="知识归档",
-        description="管理和检索对话中产生的分析结论",
+        description="管理对话中产生的分析结论（搜索由 web_search_knowledge 统一提供）",
         icon="💾",
         tools=[
-            "web_search_archives",
             "web_save_archive",
             "web_list_archives",
             "web_delete_archive",
             "web_update_archive",
         ],
-        context_prompt="用户可以检索、管理和保存历史归档知识。",
+        context_prompt="用户可以保存和管理历史归档知识。知识搜索请使用 web_search_knowledge。",
         default=False,
     ),
     "conversation_analyst": Skill(
@@ -123,18 +122,21 @@ BUILTIN_SKILLS: dict[str, Skill] = {
         ),
         default=True,
     ),
-    "document_manager": Skill(
-        name="document_manager",
-        title="文档管理",
-        description="搜索和保存文档",
+    "knowledge_manager": Skill(
+        name="knowledge_manager",
+        title="知识库",
+        description="统一搜索用户存档文档、对话归档、架构分析报告等知识内容",
         icon="📄",
         tools=[
-            "web_search_docs",
-            "web_save_doc",
+            "web_search_knowledge",
         ],
         context_prompt=(
-            "你可以在知识库中搜索已保存的文档（web_search_docs），"
-            "也可以将重要的分析结论保存为持久化文档（web_save_doc）。"
+            "你可以使用 web_search_knowledge 统一搜索知识库，结果按类型区分：\n"
+            "- user_doc：用户手动保存的笔记/文章\n"
+            "- archive：对话中归档的结论片段\n"
+            "- community_analysis：LLM 对架构组件的分析报告（需指定项目ID）\n"
+            "- report：项目整体架构概览文档（需指定项目ID）\n"
+            "注意：知识库文档是用户手动保存或系统自动生成的内容，与实时查询的项目数据分析结果不同。"
         ),
         default=True,
     ),

@@ -533,30 +533,17 @@ WEB_TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "web_search_docs",
-            "description": "搜索已保存的文档（全文检索标题和内容）。返回文档列表含标题、摘要、更新时间。",
+            "name": "web_search_knowledge",
+            "description": "统一搜索知识库。用户存档文档、对话归档、架构分析报告等。返回结果带 source_type 区分类型：user_doc（用户存档）、archive（对话归档）、community_analysis（社区分析报告）、report（架构概览）。写入由用户手动操作，本工具只读。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "search": {"type": "string", "description": "搜索关键词"},
-                    "limit": {"type": "integer", "description": "返回条数（默认10，最大50）"},
+                    "types": {"type": "array", "items": {"type": "string", "enum": ["user_doc", "archive", "community_analysis", "report"]}, "description": "可选，按类型过滤结果"},
+                    "project_id": {"type": "string", "description": "可选，指定项目ID后可搜索该项目的社区分析和架构报告"},
+                    "limit": {"type": "integer", "description": "返回条数（默认10，最大30）"},
                 },
                 "required": ["search"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "web_save_doc",
-            "description": "将分析结论保存为持久化文档。适合保存重要的分析结果、架构决策等。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "文档标题"},
-                    "content": {"type": "string", "description": "文档正文（Markdown 格式）"},
-                },
-                "required": ["title", "content"],
             },
         },
     },
@@ -620,8 +607,7 @@ class WebToolExecutor:
             "web_list_archives": self._list_archives,
             "web_delete_archive": self._delete_archive,
             "web_update_archive": self._update_archive,
-            "web_search_docs": self._search_docs,
-            "web_save_doc": self._save_doc,
+            "web_search_knowledge": self._search_knowledge,
         }
 
     def execute(self, tool_name: str, args: dict) -> dict:
@@ -1454,32 +1440,83 @@ class WebToolExecutor:
         )
         return {"ok": True}
 
-    def _search_docs(self, args: dict) -> dict:
+    def _search_knowledge(self, args: dict) -> dict:
         q = args.get("search", "")
-        limit = min(int(args.get("limit", 10)), 50)
+        type_filter = args.get("types", []) or []
+        pid = args.get("project_id", "") or ""
+        limit = min(int(args.get("limit", 10)), 30)
+        results = []
         if not q:
-            return {"docs": [], "total": 0}
-        rows = self.multi_db.knowledge_db.fetchall(
-            "SELECT id, title, description, updated_at FROM knowledge_docs "
-            "WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT ?",
-            (f"%{q}%", f"%{q}%", limit)
-        )
-        return {"docs": [dict(r) for r in rows], "total": len(rows)}
+            return {"results": [], "total": 0}
 
-    def _save_doc(self, args: dict) -> dict:
-        title = args.get("title", "").strip()
-        content = args.get("content", "").strip()
-        if not title or not content:
-            return {"error": "title and content are required", "skip": True}
-        import uuid as _uid
-        did = f"doc_{_uid.uuid4().hex[:12]}"
-        now = __import__("datetime").datetime.now().isoformat()
-        self.multi_db.knowledge_db.execute(
-            "INSERT INTO knowledge_docs (id, title, content, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'draft', ?, ?)",
-            (did, title, content, now, now)
-        )
-        return {"id": did, "title": title, "ok": True}
+        # L1: 用户存档文档 (knowledge_docs)
+        if not type_filter or "user_doc" in type_filter:
+            try:
+                rows = self.multi_db.knowledge_db.fetchall(
+                    "SELECT id, title, description AS snippet, updated_at, project_id FROM knowledge_docs "
+                    "WHERE (id LIKE ? OR title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT ?",
+                    (f"%{q}%", f"%{q}%", f"%{q}%", limit)
+                )
+                for r in rows:
+                    results.append({"source_type": "user_doc", "source_label": "用户存档文档",
+                        "id": r["id"], "title": r["title"] or "", "snippet": (r["snippet"] or "")[:200],
+                        "project_id": r["project_id"] or "", "updated_at": r["updated_at"] or ""})
+            except Exception:
+                pass
+
+        # L1: 对话归档 (chat_archives)
+        if not type_filter or "archive" in type_filter:
+            try:
+                rows = self.multi_db.main_db.fetchall(
+                    "SELECT id, title, content, category, created_at, project_id FROM chat_archives "
+                    "WHERE (id LIKE ? OR title LIKE ? OR content LIKE ?) ORDER BY created_at DESC LIMIT ?",
+                    (f"%{q}%", f"%{q}%", f"%{q}%", limit)
+                )
+                for r in rows:
+                    results.append({"source_type": "archive", "source_label": "对话归档",
+                        "id": r["id"], "title": r["title"] or r["category"] or "", "snippet": (r["content"] or "")[:200],
+                        "project_id": r["project_id"] or "", "updated_at": r["created_at"] or ""})
+            except Exception:
+                pass
+
+        # L2: 社区分析 / 架构报告（需 project_id）
+        if pid and (not type_filter or "community_analysis" in type_filter or "report" in type_filter):
+            try:
+                project_db = self.multi_db.get_project_db(pid)
+            except Exception:
+                project_db = None
+            if project_db:
+                # 社区分析
+                if not type_filter or "community_analysis" in type_filter:
+                    try:
+                        rows = project_db.fetchall(
+                            "SELECT comm_id AS id, name AS title, summary AS snippet, created_at, task_id FROM community_llm_results "
+                            "WHERE (comm_id LIKE ? OR name LIKE ? OR summary LIKE ?) ORDER BY updated_at DESC LIMIT ?",
+                            (f"%{q}%", f"%{q}%", f"%{q}%", limit)
+                        )
+                        for r in rows:
+                            results.append({"source_type": "community_analysis", "source_label": "社区分析报告",
+                                "id": r["id"], "title": r["title"] or "", "snippet": (r["snippet"] or "")[:200],
+                                "project_id": pid, "updated_at": r["created_at"] or ""})
+                    except Exception:
+                        pass
+                # 架构报告
+                if not type_filter or "report" in type_filter:
+                    try:
+                        rows = project_db.fetchall(
+                            "SELECT id, title, content AS snippet, created_at, comm_id FROM report_subdocs "
+                            "WHERE (id LIKE ? OR title LIKE ? OR content LIKE ?) ORDER BY created_at DESC LIMIT ?",
+                            (f"%{q}%", f"%{q}%", f"%{q}%", limit)
+                        )
+                        for r in rows:
+                            results.append({"source_type": "report", "source_label": "架构分析报告",
+                                "id": r["id"], "title": r["title"] or "", "snippet": (r["snippet"] or "")[:200],
+                                "project_id": pid, "updated_at": r["created_at"] or ""})
+                    except Exception:
+                        pass
+
+        results.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+        return {"results": results[:limit], "total": len(results)}
 
 
 # ==================== 引用解析 ====================
