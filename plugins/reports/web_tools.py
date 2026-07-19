@@ -530,6 +530,36 @@ WEB_TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search_docs",
+            "description": "搜索已保存的文档（全文检索标题和内容）。返回文档列表含标题、摘要、更新时间。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "search": {"type": "string", "description": "搜索关键词"},
+                    "limit": {"type": "integer", "description": "返回条数（默认10，最大50）"},
+                },
+                "required": ["search"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_save_doc",
+            "description": "将分析结论保存为持久化文档。适合保存重要的分析结果、架构决策等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "文档标题"},
+                    "content": {"type": "string", "description": "文档正文（Markdown 格式）"},
+                },
+                "required": ["title", "content"],
+            },
+        },
+    },
 ]
 
 WEB_TOOL_MAP = {t["function"]["name"]: t for t in WEB_TOOL_DEFINITIONS}
@@ -590,6 +620,8 @@ class WebToolExecutor:
             "web_list_archives": self._list_archives,
             "web_delete_archive": self._delete_archive,
             "web_update_archive": self._update_archive,
+            "web_search_docs": self._search_docs,
+            "web_save_doc": self._save_doc,
         }
 
     def execute(self, tool_name: str, args: dict) -> dict:
@@ -1421,6 +1453,33 @@ class WebToolExecutor:
             f"UPDATE chat_archives SET {', '.join(updates)} WHERE id = ?", params
         )
         return {"ok": True}
+
+    def _search_docs(self, args: dict) -> dict:
+        q = args.get("search", "")
+        limit = min(int(args.get("limit", 10)), 50)
+        if not q:
+            return {"docs": [], "total": 0}
+        rows = self.multi_db.knowledge_db.fetchall(
+            "SELECT id, title, description, updated_at FROM knowledge_docs "
+            "WHERE title LIKE ? OR content LIKE ? ORDER BY updated_at DESC LIMIT ?",
+            (f"%{q}%", f"%{q}%", limit)
+        )
+        return {"docs": [dict(r) for r in rows], "total": len(rows)}
+
+    def _save_doc(self, args: dict) -> dict:
+        title = args.get("title", "").strip()
+        content = args.get("content", "").strip()
+        if not title or not content:
+            return {"error": "title and content are required", "skip": True}
+        import uuid as _uid
+        did = f"doc_{_uid.uuid4().hex[:12]}"
+        now = __import__("datetime").datetime.now().isoformat()
+        self.multi_db.knowledge_db.execute(
+            "INSERT INTO knowledge_docs (id, title, content, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'draft', ?, ?)",
+            (did, title, content, now, now)
+        )
+        return {"id": did, "title": title, "ok": True}
 
 
 # ==================== 引用解析 ====================

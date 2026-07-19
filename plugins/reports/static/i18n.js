@@ -119,7 +119,7 @@
       },
       // chat 专有
       chat: {
-        sessions: '会话', notes: '便签',
+        sessions: '会话', notes: '便签', documents: '文档',
         newSession: '+ 新建会话',
         copySessionId: '复制会话ID',
         noConversation: '暂无对话',
@@ -170,6 +170,11 @@
         renamePlaceholder:'输入会话名称…',
         renameSubmit:'提交',
         renameAi:'AI 生成',
+        docs:'文档', docList:'文档列表', docEdit:'编辑文档',
+        docNew:'新建文档', docDelete:'删除文档',
+        docSaveAs:'存为文档', docDeleteConfirm:'确定删除此文档？',
+        docEditor:'MD 编辑器', docPreview:'预览',
+        docNoTitle:'无标题文档', docNoDocs:'暂无文档',
       },
       // web_server.py index 页面
       index: {
@@ -290,7 +295,7 @@
         refMaterial:'Reference Materials ({{count}} items)',
       },
       chat: {
-        sessions: 'Sessions', notes: 'Notes',
+        sessions: 'Sessions', notes: 'Notes', documents: 'Documents',
         newSession: '+ New Session',
         copySessionId: 'Copy Session ID',
         noConversation: 'No conversation',
@@ -341,6 +346,11 @@
         renamePlaceholder:'Enter session name…',
         renameSubmit:'Submit',
         renameAi:'AI Generate',
+        docs:'Documents', docList:'Document List', docEdit:'Edit Document',
+        docNew:'New Document', docDelete:'Delete Document',
+        docSaveAs:'Save as Document', docDeleteConfirm:'Delete this document?',
+        docEditor:'MD Editor', docPreview:'Preview',
+        docNoTitle:'Untitled', docNoDocs:'No documents yet',
       },
       index: {
         title: 'TopoCode Documents',

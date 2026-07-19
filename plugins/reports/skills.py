@@ -123,6 +123,21 @@ BUILTIN_SKILLS: dict[str, Skill] = {
         ),
         default=True,
     ),
+    "document_manager": Skill(
+        name="document_manager",
+        title="文档管理",
+        description="搜索和保存文档",
+        icon="📄",
+        tools=[
+            "web_search_docs",
+            "web_save_doc",
+        ],
+        context_prompt=(
+            "你可以在知识库中搜索已保存的文档（web_search_docs），"
+            "也可以将重要的分析结论保存为持久化文档（web_save_doc）。"
+        ),
+        default=True,
+    ),
 }
 
 

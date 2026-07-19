@@ -82,6 +82,18 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .note-item:hover .send-btn{opacity:1}
 .note-item .send-btn:hover{background:var(--accent-hover)}
 .note-empty{padding:24px;text-align:center;font-size:var(--ui-font-size);color:var(--text-muted)}
+.sidebar-search{width:100%;padding:6px 10px;font-size:var(--ui-font-size);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);color:var(--text);outline:none;box-sizing:border-box}
+.sidebar-search:focus{border-color:var(--accent)}
+.doc-annotation{display:flex;gap:8px;margin:12px 0;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-md);position:relative}
+.doc-annotation .doc-anno-marker{width:3px;flex-shrink:0;background:var(--accent);border-radius:2px;opacity:.6}
+.doc-annotation .doc-anno-body{flex:1;font-size:13px;color:var(--text-secondary);line-height:1.6}
+.doc-annotation .doc-anno-body p{margin:4px 0}
+.doc-render h1,.doc-render h2,.doc-render h3{margin:16px 0 8px}
+.doc-render p{margin:8px 0;line-height:1.7}
+.doc-render code{padding:1px 4px;background:var(--bg-hover);border-radius:3px;font-size:.9em}
+.doc-render pre{background:var(--bg-code,#1e1e1e);padding:12px;border-radius:var(--radius-md);overflow:auto}
+.doc-render pre code{background:none;padding:0}
+.doc-render ul,.doc-render ol{padding-left:20px;margin:8px 0}
 
 .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg);position:relative;font-size:var(--content-font-size,15px)}
 /* 会话命名弹窗 */
@@ -284,6 +296,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
     <div class="sidebar-tabs">
       <div class="sidebar-tab" :class="{active:tab==='chat'}" @click="tab='chat'">{{__('chat.sessions')}}</div>
       <div class="sidebar-tab" :class="{active:tab==='notes'}" @click="switchNotesTab">{{__('chat.notes')}}</div>
+      <div class="sidebar-tab" :class="{active:tab==='docs'}" @click="switchDocTab">{{__('chat.documents')}}</div>
     </div>
     <div class="sidebar-content" v-if="tab==='chat'">
       <button class="btn-new" @click="createSession">{{__('chat.newSession')}}</button>
@@ -295,7 +308,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       </div>
       <div v-if="!sessions.length" class="note-empty">{{__('chat.noConversation')}}</div>
     </div>
-    <div class="sidebar-content" v-else>
+    <div class="sidebar-content" v-else-if="tab==='notes'">
       <div v-for="n in notes" :key="n.id" class="note-item" style="cursor:pointer" @click="viewNote(n)">
         <span class="status-dot" :class="n.status"></span>
         <span class="title">{{ n.title || __('chat.noTitle') }}</span>
@@ -311,6 +324,17 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
           <button class="send-btn" style="opacity:1" @click.stop="execPendingDraft(d)">{{__('chat.execute')}}</button>
         </div>
       </div>
+    </div>
+    <div class="sidebar-content" v-else>
+      <div style="padding:8px 10px">
+        <input v-model="docSearch" class="sidebar-search" :placeholder="__('common.search')" @input="loadDocs">
+      </div>
+      <div v-for="d in docs" :key="d.id" class="note-item" style="cursor:pointer" @click="viewDoc(d)">
+        <span class="title">{{ d.title || __('chat.docNoTitle') }}</span>
+        <span class="ref-count">{{ (d.updated_at||'').slice(0,10) }}</span>
+        <button class="del-btn" @click.stop="deleteDoc(d.id)">×</button>
+      </div>
+      <div v-if="!docs.length" class="note-empty">{{__('chat.docNoDocs')}}</div>
     </div>
   </aside>
 
@@ -399,6 +423,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
                 </div>
               </div>
               <button class="msg-act-btn msg-continue" @click="continueAssistant(m)" :title="__('chat.continue')">⟳ {{__('chat.continue')}}</button>
+              <button class="msg-act-btn" v-if="m.role==='assistant'&&m.content" @click="saveMsgAsDoc(m)" :title="__('chat.docSaveAs')" style="font-size:11px">📄</button>
             </div>
           </div>
         </div>
@@ -458,6 +483,32 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
   </div>
 </div>
 
+<!-- document editor modal -->
+<div class="modal-overlay" v-if="showDocEditor" @click.self="showDocEditor=false">
+  <div class="modal" style="width:720px;max-width:95vw">
+    <div class="modal-header">
+      <input v-model="docEditTitle" class="doc-edit-title" :placeholder="__('chat.docNoTitle')" style="flex:1;font-size:15px;font-weight:600;border:none;outline:none;background:transparent;color:var(--text)">
+      <button class="modal-close" @click="showDocEditor=false">×</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;padding:12px 16px">
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" :class="{'btn-primary':!docPreview}" @click="docPreview=false">{{__('chat.docEditor')}}</button>
+        <button class="btn btn-sm" :class="{'btn-primary':docPreview}" @click="docPreview=true">{{__('chat.docPreview')}}</button>
+      </div>
+      <textarea v-if="!docPreview" v-model="docEditContent" class="doc-textarea"
+        style="width:100%;min-height:400px;font-family:var(--font-mono,monospace);font-size:13px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);resize:vertical;background:var(--bg-code,#1e1e1e);color:var(--code-text,#d4d4d4);outline:none;tab-size:2;line-height:1.5;box-sizing:border-box"
+        spellcheck="false"></textarea>
+      <div v-else class="doc-render" style="min-height:400px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);overflow:auto;line-height:1.7;font-size:var(--content-font-size,15px)" v-html="renderDocMd(docEditContent)"></div>
+    </div>
+    <div class="modal-footer">
+      <span style="font-size:11px;color:var(--text-muted)">使用 <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">&lt;!-- annotation:id --&gt;批注文字&lt;!-- /annotation --&gt;</code> 添加批注</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost" @click="showDocEditor=false">{{__('common.cancel')}}</button>
+      <button class="btn btn-primary" @click="saveDoc">{{__('common.save')}}</button>
+    </div>
+  </div>
+</div>
+
 <script>
 marked.setOptions({gfm:true,breaks:true,langPrefix:'language-',
   highlight:function(c,l){if(l&&hljs.getLanguage(l)){try{return hljs.highlight(c,{language:l}).value}catch(e){}}return c}})
@@ -470,8 +521,8 @@ createApp({
     const sessions=ref([]);const messages=ref([]);const models=ref([]);const notes=ref([])
     const currentId=ref('');const currentModel=ref('');const input=ref('')
     const streaming=ref(false);const msgArea=ref(null);const tab=ref('chat')
-    const viewNoteData=ref(null)
-    const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
+    const viewNoteData=ref(null);const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
+    const docs=ref([]);const docSearch=ref('');const currentDoc=ref(null);const showDocEditor=ref(false);const docEditContent=ref('');const docEditTitle=ref('');const docPreview=ref(false)
     const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
     watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
     const fontSize=ref(localStorage.getItem('topoone-font-size')||'18')
@@ -1013,6 +1064,45 @@ createApp({
     async function deleteNote(id){
       try{await fetch('/api/notes/'+id,{method:'DELETE'});loadNotes()}catch(e){}
     }
+    // documents
+    function switchDocTab(){tab.value='docs';loadDocs()}
+    async function loadDocs(){
+      try{
+        var q=docSearch.value.trim()
+        var url='/api/documents?page_size=100'
+        if(q)url+='&search='+encodeURIComponent(q)
+        var r=await fetch(url);var d=await r.json()
+        docs.value=d.documents||[]
+      }catch(e){}
+    }
+    function viewDoc(d){
+      fetch('/api/documents/'+d.id).then(function(r){return r.json()}).then(function(data){
+        currentDoc.value=data
+        docEditTitle.value=data.title||''
+        docEditContent.value=data.content||''
+        docPreview.value=false
+        showDocEditor.value=true
+      }).catch(function(e){})
+    }
+    async function saveDoc(){
+      if(!currentDoc.value)return
+      try{
+        await fetch('/api/documents/'+currentDoc.value.id,{method:'PUT',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({title:docEditTitle.value,content:docEditContent.value})})
+        showDocEditor.value=false;currentDoc.value=null;loadDocs()
+      }catch(e){}
+    }
+    async function deleteDoc(id){
+      if(!confirm(__('chat.docDeleteConfirm')))return
+      try{await fetch('/api/documents/'+id,{method:'DELETE'});loadDocs()}catch(e){}
+    }
+    function toggleDocPreview(){docPreview.value=!docPreview.value}
+    function splitAnnotations(t){
+      // 将 <!-- annotation:id -->...<!-- /annotation --> 替换为可渲染的 HTML 标记
+      return t.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
+        function(m,id,text){return '<div class="doc-annotation"><span class="doc-anno-marker"></span><div class="doc-anno-body">'+marked.parse(text.trim())+'</div></div>'})
+    }
+    function renderDocMd(t){return t?splitAnnotations(marked.parse(t)):''}
     function stopStream(){
       if(_currentAbort){
         _currentAbort.abort()
@@ -1025,6 +1115,16 @@ createApp({
       if(!currentId.value){await createSession();if(!currentId.value)return}
       input.value='请继续完成分析，上次回答不完整，请基于已有信息继续深入分析。如果还需要更多信息，可以继续调用工具。'
       await send()
+    }
+    async function saveMsgAsDoc(m){
+      var title=prompt(__('chat.docSaveAs'), m.content.slice(0,40)+'...')
+      if(!title)return
+      try{
+        var r=await fetch('/api/documents',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({title:title,content:m.content})})
+        var d=await r.json()
+        if(d.ok)alert(__('common.operationSuccess'))
+      }catch(e){alert(__('common.operationFailed'))}
     }
     async function send(ev){
       console.log('[exec-flow] chat send: \u5165\u53e3',{textLen:input.value.trim().length,streaming:streaming.value,cid:!!currentId.value,model:currentModel.value||'null',refsCount:pendingRefs.value.length})
@@ -1184,7 +1284,9 @@ createApp({
       loadNotes,switchNotesTab,viewNote,deleteNote,execPendingDraft,
       deleteMode,selectedIds,allSelected,toggleSelect,selectAll,exitDeleteMode,deleteMessage,deleteSelected,
       renameDialog,renameText,renameGenerating,renameInput,openRenameDialog,submitRename,aiGenerateRename,
-      continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip}
+      continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip,
+      docs,docSearch,currentDoc,showDocEditor,docEditTitle,docEditContent,docPreview,
+      switchDocTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc}
   }
 }).mount('#app')
 </script>

@@ -3258,6 +3258,106 @@ async def execute_draft(request: Request):
         raise HTTPException(500, str(e))
 
 
+# ==================== 文档管理 ====================
+
+@app.post("/api/documents")
+async def create_doc(request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        title = body.get("title", "无标题文档")
+        content = body.get("content", "")
+        project_id = body.get("projectId") or body.get("project_id", "")
+        tags = body.get("tags", "")
+        did = f"doc_{uuid.uuid4().hex[:12]}"
+        now = __import__("datetime").datetime.now().isoformat()
+        multi_db.knowledge_db.execute(
+            "INSERT INTO knowledge_docs (id, title, content, project_id, tags, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)",
+            (did, title, content, project_id, tags, now, now)
+        )
+        return {"id": did, "ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/documents")
+async def list_docs(search: str = "", status: str = "", project_id: str = "", page: int = 1, page_size: int = 50):
+    _require_chat_ready()
+    try:
+        where = "WHERE 1=1"
+        params = []
+        if search:
+            where += " AND (title LIKE ? OR content LIKE ?)"
+            params.extend([f"%{search}%", f"%{search}%"])
+        if status:
+            where += " AND status = ?"
+            params.append(status)
+        if project_id:
+            where += " AND project_id = ?"
+            params.append(project_id)
+        total = multi_db.knowledge_db.fetchone(
+            f"SELECT COUNT(*) AS c FROM knowledge_docs {where}", tuple(params)
+        )["c"]
+        rows = multi_db.knowledge_db.fetchall(
+            f"SELECT id, title, type, status, project_id, tags, created_at, updated_at "
+            f"FROM knowledge_docs {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            tuple(params) + (page_size, (page - 1) * page_size)
+        )
+        return {"documents": rows, "total": total}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/documents/{doc_id}")
+async def get_doc(doc_id: str):
+    _require_chat_ready()
+    try:
+        row = multi_db.knowledge_db.fetchone("SELECT * FROM knowledge_docs WHERE id = ?", (doc_id,))
+        if not row:
+            raise HTTPException(404, "Document not found")
+        return dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.put("/api/documents/{doc_id}")
+async def update_doc(doc_id: str, request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        allowed = {"title", "content", "tags", "status"}
+        sets = []
+        vals = []
+        for k in allowed:
+            if k in body:
+                sets.append(f"{k} = ?")
+                vals.append(body[k])
+        if not sets:
+            return {"ok": True}
+        vals.append(__import__("datetime").datetime.now().isoformat())
+        sets.append("updated_at = ?")
+        multi_db.knowledge_db.execute(
+            f"UPDATE knowledge_docs SET {', '.join(sets)} WHERE id = ?",
+            tuple(vals) + (doc_id,)
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/documents/{doc_id}")
+async def delete_doc(doc_id: str):
+    _require_chat_ready()
+    try:
+        multi_db.knowledge_db.execute("DELETE FROM knowledge_docs WHERE id = ?", (doc_id,))
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # ==================== 上下文摘要 ====================
 @app.get("/api/chat/context/project/{project_id}")
 async def get_project_context(project_id: str):
@@ -3459,6 +3559,16 @@ def _ensure_chat_tables():
             project_id TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    # 文档分类预留表
+    multi_db.main_db.execute("""
+        CREATE TABLE IF NOT EXISTS doc_categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            parent_id TEXT REFERENCES doc_categories(id),
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
         )
     """)
 
