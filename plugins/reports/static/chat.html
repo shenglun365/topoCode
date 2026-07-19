@@ -98,9 +98,10 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .topbar-back{background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--ui-font-size);padding:4px 8px;border-radius:var(--radius-md)}
 .topbar-back:hover{background:var(--bg-hover)}
 .doc-topbar-btn{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px 6px;border-radius:var(--radius-md);line-height:1;display:inline-flex;align-items:center}
-.doc-title-clickable{cursor:pointer;padding:2px 6px;border-radius:var(--radius-md);border:1px solid transparent;position:relative}
+.doc-title-clickable{cursor:pointer;padding:2px 20px 2px 6px;border-radius:var(--radius-md);border:1px solid transparent;position:relative}
 .doc-title-clickable:hover{border-color:var(--border);background:var(--bg-hover)}
-.doc-title-clickable:hover::after{content:'✎';position:absolute;right:-18px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-muted)}
+.doc-title-clickable .edit-icon{display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-muted);pointer-events:none}
+.doc-title-clickable:hover .edit-icon{display:inline}
 .topbar-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle;line-height:1.6}
 .badge-chat{background:var(--accent-light);color:var(--accent)}
 .badge-doc{background:#dbeafe;color:#2563eb}
@@ -365,7 +366,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
         <span v-if="!viewingDoc"><span class="topbar-badge badge-chat">{{__('chat.sessions')}}</span><span class="chat-title">{{ currentTitle }}</span></span>
         <template v-else>
           <span class="topbar-badge badge-doc">{{__('chat.documents')}}</span>
-          <span class="chat-title doc-title-clickable" @click="openDocEditor" :title="__('chat.docEdit')">{{ viewingDoc.title || __('chat.docNoTitle') }}</span>
+          <span class="chat-title doc-title-clickable" @click="openDocEditor" :title="__('chat.docEdit')">{{ viewingDoc.title || __('chat.docNoTitle') }}<svg class="edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
           <button class="doc-topbar-btn" :class="{active:annoMode}" @click="toggleAnnoMode" :title="__('chat.docAnnotate')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
           <button class="doc-topbar-btn" :class="{active:!showAnnotations}" @click="showAnnotations=!showAnnotations" :title="__('chat.docToggleAnno')" v-if="viewingDoc&&hasAnnotations(viewingDoc.content)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
         </template>
@@ -1355,14 +1356,51 @@ createApp({
       })()
     }
 
+    // 持久化状态恢复与保持
+    function saveState(){
+      try{
+        localStorage.setItem('chat_view_state',JSON.stringify({
+          tab:tab.value,
+          sessionId:currentId.value,
+          docId:viewingDoc.value?viewingDoc.value.id:null
+        }))
+      }catch(e){}
+    }
+    watch(tab,saveState)
+    watch(currentId,saveState)
+    watch(viewingDoc,saveState)
+
     onMounted(()=>{
       applyFontSize(fontSize.value)
+      // 恢复已保存的状态
+      try{
+        var saved=JSON.parse(localStorage.getItem('chat_view_state'))
+        if(saved){
+          if(saved.docId){
+            // 恢复文档浏览
+            fetch('/api/documents/'+saved.docId).then(function(r){return r.json()}).then(function(data){
+              viewingDoc.value=data;annoMode.value=false;tab.value='docs'
+              loadDocs()
+            }).catch(function(){})
+          }else if(saved.sessionId){
+            currentId.value=saved.sessionId;tab.value=saved.tab||'chat'
+            loadMessages()
+          }else{
+            tab.value=saved.tab||'chat'
+          }
+        }
+      }catch(e){}
       const p=new URLSearchParams(location.search);const sid=p.get('sessionId')
+      // URL 参数优先
+      if(sid&&sid!==currentId.value){
+        console.log('[exec-flow] chat onMounted: URL\u6709sessionId=' + sid.slice(0,12))
+        viewingDoc.value=null;currentId.value=sid;loadMessages();_checkPendingExecute()
+      }
       // 按 taskId 隔离便签
       NotesStore.init(p.get('taskId')||'')
       NotesStore.subscribe(function(){ loadPendingDrafts() })
       loadModels()
-      if(sid){console.log('[exec-flow] chat onMounted: URL\u6709sessionId=' + sid.slice(0,12));currentId.value=sid;loadMessages();_checkPendingExecute()}else{loadSessions().then(function(){_checkPendingExecute()})}
+      if(!currentId.value&&!viewingDoc.value){loadSessions().then(function(){_checkPendingExecute()})}
       // storage \u4e8b\u4ef6\u76d1\u542c\uff1aviewer \u5199\u5165 localStorage \u540e\u89e6\u53d1
       window.addEventListener('storage', function(e) {
         if (!e.key) return;
