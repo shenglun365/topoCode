@@ -304,7 +304,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       </div>
     </div>
     <div class="sidebar-tabs">
-      <div class="sidebar-tab" :class="{active:tab==='chat'}" @click="tab='chat'">{{__('chat.sessions')}}</div>
+      <div class="sidebar-tab" :class="{active:tab==='chat'}" @click="switchChatTab">{{__('chat.sessions')}}</div>
       <div class="sidebar-tab" :class="{active:tab==='notes'}" @click="switchNotesTab">{{__('chat.notes')}}</div>
       <div class="sidebar-tab" :class="{active:tab==='docs'}" @click="switchDocTab">{{__('chat.documents')}}</div>
     </div>
@@ -1098,7 +1098,8 @@ createApp({
     }
 
     // notes
-    function switchNotesTab(){tab.value='notes';loadNotes();loadPendingDrafts()}
+    function switchChatTab(){tab.value='chat';viewingDoc.value=null;annoMode.value=false}
+    function switchNotesTab(){tab.value='notes';viewingDoc.value=null;annoMode.value=false;loadNotes();loadPendingDrafts()}
     function viewNote(n){
       viewNoteData.value={id:n.id,title:n.title,content:n.content,refs:n.refs||[]}
     }
@@ -1370,7 +1371,7 @@ createApp({
       renameDialog,renameText,renameGenerating,renameInput,openRenameDialog,submitRename,aiGenerateRename,
       continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip,
       docs,docSearch,currentDoc,showDocEditor,docEditTitle,docEditContent,docPreview,
-      switchDocTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc,
+      switchDocTab,switchChatTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc,
       viewingDoc,annoMode,showAnnoDialog,annoText,docBodyRef,showAnnotations,
       closeDocView,openDocEditor,toggleAnnoMode,onDocBodyClick,confirmAnno,hasAnnotations}
   }
