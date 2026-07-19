@@ -43,10 +43,10 @@ class OpenAICompatProvider(BaseLLMProvider):
         extra_raw = model_config.get('extra_config')
         if extra_raw and isinstance(extra_raw, str):
             try:
-                extra = json.loads(extra_raw)
+                extra = _json.loads(extra_raw)
                 if isinstance(extra, dict):
                     payload.update(extra)
-            except (json.JSONDecodeError, TypeError):
+            except (_json.JSONDecodeError, TypeError):
                 pass
         payload['model'] = model_config['model']
         payload['messages'] = messages
@@ -180,10 +180,10 @@ class OpenAICompatProvider(BaseLLMProvider):
         extra_raw = model_config.get('extra_config')
         if extra_raw and isinstance(extra_raw, str):
             try:
-                extra = json.loads(extra_raw)
+                extra = _json.loads(extra_raw)
                 if isinstance(extra, dict):
                     payload.update(extra)
-            except (json.JSONDecodeError, TypeError):
+            except (_json.JSONDecodeError, TypeError):
                 pass
         payload['model'] = model_config['model']
         payload['messages'] = messages
