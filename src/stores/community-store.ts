@@ -1108,8 +1108,8 @@ export const useCommunityStore = defineStore('community', () => {
   async function getPreSummaryStatus(taskId: string) {
     return await ipc.analysis.getPreSummaryStatus({ taskId })
   }
-  async function listPreSummaryFiles(taskId: string, batch = 'P0', page = 1, pageSize = 20) {
-    return await ipc.analysis.listPreSummaryFiles({ taskId, batch, page, page_size: pageSize })
+  async function listPreSummaryFiles(taskId: string, batch = 'P0', page = 1, pageSize = 20, search = '') {
+    return await ipc.analysis.listPreSummaryFiles({ taskId, batch, page, page_size: pageSize, search })
   }
   async function startPreSummary(taskId: string, batch = 'P0', limit = 0, subagentConcurrency = 1) {
     const t = ensureTask(taskId)

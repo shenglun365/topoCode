@@ -331,6 +331,7 @@ export interface ModelConfigItem {
   apiKey?: string
   maxRequestsPerDay?: number
   maxTokensPerDay?: number
+  extraConfig?: Record<string, unknown>
 }
 
 /** 模型每日用量统计 */
@@ -515,7 +516,7 @@ export interface IPCAPI {
     clearAgentTaskHistory: (params: { taskId: string }) => Promise<{ success: boolean }>
     // 预摘要
     getPreSummaryStatus: (params: { taskId: string }) => Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string; failed_count: number }>
-    listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string; has_summary?: boolean }> }>
+    listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number; search?: string }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string; has_summary?: boolean }> }>
     startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
     startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number }>
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
@@ -586,8 +587,8 @@ export interface IPCAPI {
   // 设置配置
   settings: {
     getModels: () => Promise<ModelConfigItem[]>
-    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; apiKey?: string; isDefault?: boolean }) => Promise<ModelConfigItem>
-    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; isDefault?: boolean; apiKey?: string; maxRequestsPerDay?: number; maxTokensPerDay?: number }) => Promise<ModelConfigItem>
+    addModel: (params: { name: string; provider: string; model: string; url: string; type: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; apiKey?: string; isDefault?: boolean; extraConfig?: Record<string, unknown> }) => Promise<ModelConfigItem>
+    updateModel: (params: { id: string; name?: string; provider?: string; model?: string; url?: string; temperature?: number; maxTokens?: number; frequencyPenalty?: number; presencePenalty?: number; isDefault?: boolean; apiKey?: string; maxRequestsPerDay?: number; maxTokensPerDay?: number; extraConfig?: Record<string, unknown> }) => Promise<ModelConfigItem>
     removeModel: (id: string) => Promise<void>
     testModel: (id: string) => Promise<{ status: string; latency: number; model: string }>
     getAgents: () => Promise<AgentConfigItem[]>

@@ -1400,6 +1400,19 @@ async def list_models():
         return {"models": [], "webChatDefaultModelId": None}
 
 
+@app.put("/api/models/{model_id}")
+async def update_model_config(model_id: str, body: dict):
+    if not multi_db:
+        raise HTTPException(503, "Backend not ready")
+    extra = body.get("extraConfig") or body.get("extra_config")
+    if extra is not None:
+        multi_db.main_db.execute(
+            "UPDATE model_configs SET extra_config = ? WHERE id = ?",
+            (json.dumps(extra) if isinstance(extra, dict) else str(extra), model_id)
+        )
+    return {"ok": True}
+
+
 @app.get("/api/skills")
 async def list_skills():
     registry = get_skill_registry()
@@ -1932,7 +1945,7 @@ class SessionCompressor:
         try:
             import aiohttp
             model_id = _resolve_default_model_id()
-            configs = _sdb().fetchall("SELECT model_id, api_base, api_key, model_name FROM model_configs")
+            configs = _sdb().fetchall("SELECT model_id, api_base, api_key, model_name, extra_config FROM model_configs")
             cfg = next((c for c in configs if c["model_id"] == model_id), None)
             if not cfg:
                 cfg = configs[0] if configs else None
@@ -1947,6 +1960,14 @@ class SessionCompressor:
                 "stream": False,
                 "max_tokens": 1000,
             }
+            extra_raw = cfg.get("extra_config")
+            if extra_raw and isinstance(extra_raw, str):
+                try:
+                    extra = json.loads(extra_raw)
+                    if isinstance(extra, dict):
+                        payload.update(extra)
+                except (json.JSONDecodeError, TypeError):
+                    pass
             headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(f"{base_url}/v1/chat/completions",
@@ -2115,11 +2136,18 @@ async def send_chat_message(session_id: str, request: Request):
                 base_url = md.get('url', '').rstrip('/')
                 if base_url.endswith('/v1'):
                     base_url = base_url[:-3]
-                payload = {
-                    'model': md.get('model', ''),
-                    'messages': messages,
-                    'stream': True,
-                }
+                payload = {}
+                extra_raw = md.get('extra_config')
+                if extra_raw and isinstance(extra_raw, str):
+                    try:
+                        extra = json.loads(extra_raw)
+                        if isinstance(extra, dict):
+                            payload.update(extra)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                payload['model'] = md.get('model', '')
+                payload['messages'] = messages
+                payload['stream'] = True
                 if tools:
                     payload['tools'] = tools
                     if force_tool_choice:
@@ -2502,16 +2530,23 @@ def _do_auto_title(session_id: str, context: str):
         if base_url.endswith("/v1"):
             base_url = base_url[:-3]
         import requests as _req
-        payload = {
-            "model": md.get("model", ""),
-            "messages": [
-                {"role": "system", "content": "为对话生成一个简短标题。列出3个候选，直接选一个输出。"},
-                {"role": "user", "content": f"对话内容：{context}"},
-            ],
-            "stream": False,
-            "max_tokens": md.get('max_tokens', 16384),
-            "temperature": 0.1,
-        }
+        payload = {}
+        extra_raw = md.get('extra_config')
+        if extra_raw and isinstance(extra_raw, str):
+            try:
+                extra = json.loads(extra_raw)
+                if isinstance(extra, dict):
+                    payload.update(extra)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        payload["model"] = md.get("model", "")
+        payload["messages"] = [
+            {"role": "system", "content": "为对话生成一个简短标题。列出3个候选，直接选一个输出。"},
+            {"role": "user", "content": f"对话内容：{context}"},
+        ]
+        payload["stream"] = False
+        payload["max_tokens"] = md.get('max_tokens', 16384)
+        payload["temperature"] = 0.1
         if md.get('frequency_penalty') is not None:
             payload['frequency_penalty'] = md['frequency_penalty']
         if md.get('presence_penalty') is not None:

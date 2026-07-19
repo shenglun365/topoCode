@@ -1244,7 +1244,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "frequency_penalty": kwargs.get("frequencyPenalty", 0.0),
             "presence_penalty": kwargs.get("presencePenalty", 0.0),
             "timeout": kwargs.get("timeout", 300),
-            "extra_config": kwargs.get("extraConfig") or None,
+            "extra_config": json.dumps(kwargs["extraConfig"]) if kwargs.get("extraConfig") else None,
             "context_window": kwargs.get("contextWindow", 8192),
             "created_at": now,
             "updated_at": now,
@@ -1253,7 +1253,13 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             data["api_key"] = kwargs["apiKey"]
 
         main_db.insert("model_configs", data)
-        return main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (model_id,))
+        row = main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (model_id,))
+        if row and row.get("extra_config"):
+            try:
+                row["extraConfig"] = json.loads(row["extra_config"])
+            except (json.JSONDecodeError, TypeError):
+                row["extraConfig"] = {}
+        return row
 
     @server.register("settings.updateModel")
     def update_model(id: str, **kwargs):
@@ -1282,7 +1288,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             elif k == "contextWindow":
                 data["context_window"] = int(v) if v else 8192
             elif k == "extraConfig":
-                data["extra_config"] = v
+                data["extra_config"] = json.dumps(v) if isinstance(v, dict) else str(v)
             elif k == "url":
                 clean_url = v.rstrip('/')
                 if clean_url.endswith('/v1'):
@@ -1293,7 +1299,13 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         data["updated_at"] = datetime.now().isoformat()
 
         main_db.update("model_configs", data, "id = ?", (id,))
-        return main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (id,))
+        row = main_db.fetchone("SELECT * FROM model_configs WHERE id = ?", (id,))
+        if row and row.get("extra_config"):
+            try:
+                row["extraConfig"] = json.loads(row["extra_config"])
+            except (json.JSONDecodeError, TypeError):
+                row["extraConfig"] = {}
+        return row
 
     @server.register("settings.removeModel")
     def remove_model(id: str):

@@ -39,11 +39,18 @@ class OpenAICompatProvider(BaseLLMProvider):
         base_url = model_config['url'].rstrip('/')
         if base_url.endswith('/v1'):
             base_url = base_url[:-3]
-        payload = {
-            'model': model_config['model'],
-            'messages': messages,
-            'stream': True,
-        }
+        payload = {}
+        extra_raw = model_config.get('extra_config')
+        if extra_raw and isinstance(extra_raw, str):
+            try:
+                extra = json.loads(extra_raw)
+                if isinstance(extra, dict):
+                    payload.update(extra)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        payload['model'] = model_config['model']
+        payload['messages'] = messages
+        payload['stream'] = True
         if model_config.get('temperature') is not None:
             payload['temperature'] = model_config['temperature']
         payload['max_tokens'] = max_tokens if max_tokens is not None else model_config.get('max_tokens', 16384)
@@ -169,14 +176,22 @@ class OpenAICompatProvider(BaseLLMProvider):
         base_url = model_config['url'].rstrip('/')
         if base_url.endswith('/v1'):
             base_url = base_url[:-3]
-        payload = {
-            'model': model_config['model'],
-            'messages': messages,
-            'stream': False,
-        }
+        payload = {}
+        extra_raw = model_config.get('extra_config')
+        if extra_raw and isinstance(extra_raw, str):
+            try:
+                extra = json.loads(extra_raw)
+                if isinstance(extra, dict):
+                    payload.update(extra)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        payload['model'] = model_config['model']
+        payload['messages'] = messages
+        payload['stream'] = False
         if model_config.get('temperature') is not None:
             payload['temperature'] = model_config['temperature']
         payload['max_tokens'] = max_tokens if max_tokens is not None else model_config.get('max_tokens', 16384)
+
         headers = {'Content-Type': 'application/json'}
         if model_config.get('api_key'):
             headers['Authorization'] = f"Bearer {model_config['api_key']}"

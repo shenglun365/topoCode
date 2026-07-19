@@ -14,6 +14,7 @@ import {
   AdjustmentsHorizontalIcon,
   ChevronDownIcon,
   ChevronUpIcon,
+  Cog6ToothIcon,
 } from '@heroicons/vue/24/outline'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useAgentUsageStore } from '@/stores/agent-usage-store'
@@ -63,6 +64,11 @@ const form = ref({
 const showUsageLimitDialog = ref(false)
 const editLimitModelId = ref('')
 const usageLimitForm = ref({ maxRequestsPerDay: 0, maxTokensPerDay: 0 })
+
+const showExtraConfigDialog = ref(false)
+const editExtraConfigModelId = ref('')
+const extraConfigText = ref('')
+const extraConfigError = ref('')
 
 const showStatsPanel = ref(false)
 const usageDateRange = ref({ start: '', end: '' })
@@ -331,6 +337,35 @@ async function setDefaultModel(id: string) {
   await modelConfigStore.updateModel({ id, isDefault: true })
 }
 
+function openExtraConfigDialog(config: ModelConfigItem) {
+  editExtraConfigModelId.value = config.id
+  extraConfigText.value = config.extraConfig
+    ? JSON.stringify(config.extraConfig, null, 2)
+    : '{\n  \n}'
+  extraConfigError.value = ''
+  showExtraConfigDialog.value = true
+}
+
+async function saveExtraConfig() {
+  const raw = extraConfigText.value.trim()
+  if (!raw) {
+    await modelConfigStore.updateModel({ id: editExtraConfigModelId.value, extraConfig: undefined })
+    showExtraConfigDialog.value = false
+    return
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      extraConfigError.value = '必须输入一个 JSON 对象 (key: value)'
+      return
+    }
+    await modelConfigStore.updateModel({ id: editExtraConfigModelId.value, extraConfig: parsed as Record<string, unknown> })
+    showExtraConfigDialog.value = false
+  } catch {
+    extraConfigError.value = 'JSON 格式错误，请检查'
+  }
+}
+
 // ==================== 弹窗内测试 ====================
 async function testCurrentForm() {
   if (!form.value.url || !form.value.model) {
@@ -593,6 +628,13 @@ onMounted(() => {
                 <AdjustmentsHorizontalIcon class="w-3 h-3" />
                 <span>{{ t('settings.usageLimit') }}</span>
               </button>
+              <button
+                class="btn btn-ghost btn-sm"
+                @click="openExtraConfigDialog(config)"
+              >
+                <Cog6ToothIcon class="w-3 h-3" />
+                <span>{{ t('settings.extraConfig') }}</span>
+              </button>
               <span style="flex:1;" />
               <button
                 class="btn btn-ghost btn-sm"
@@ -681,6 +723,55 @@ onMounted(() => {
   </Teleport>
 
 
+
+  <!-- ==================== 扩展参数对话框 ==================== -->
+  <Teleport to="body">
+    <div
+      v-if="showExtraConfigDialog"
+      class="modal-overlay"
+      @click.self="showExtraConfigDialog = false"
+    >
+      <div
+        class="modal"
+        style="width:520px;"
+      >
+        <div class="modal-header">
+          <h3>{{ t('settings.extraConfig') }}</h3>
+        </div>
+        <div class="modal-body">
+          <div class="form-field">
+            <label class="field-label">{{ t('settings.extraConfigDesc') }}</label>
+            <textarea
+              v-model="extraConfigText"
+              class="field-textarea"
+              rows="12"
+              spellcheck="false"
+            />
+          </div>
+          <p
+            v-if="extraConfigError"
+            style="color:var(--error);font-size:12px;margin-top:8px;"
+          >
+            {{ extraConfigError }}
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button
+            class="btn btn-ghost"
+            @click="showExtraConfigDialog = false"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            class="btn btn-primary"
+            @click="saveExtraConfig"
+          >
+            {{ t('common.save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 
   <!-- 添加/编辑对话框 -->
   <div
@@ -1125,6 +1216,26 @@ onMounted(() => {
   transition: all 0.2s ease;
   appearance: none;
   -webkit-appearance: none;
+}
+
+.field-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, 'SF Mono', 'Cascadia Code', monospace);
+  color: var(--text-primary);
+  background: var(--bg-code, #1e1e1e);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+  tab-size: 2;
+  line-height: 1.5;
+}
+
+.field-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
 
 .field-input::placeholder {

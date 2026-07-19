@@ -50,7 +50,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null
 async function loadFiles() {
   loading.value = true
   try {
-    const resp = await communityStore.listPreSummaryFiles(props.taskId, activeBatch.value, currentPage.value, pageSize)
+    const resp = await communityStore.listPreSummaryFiles(props.taskId, activeBatch.value, currentPage.value, pageSize, searchQuery.value)
     if (resp) {
       files.value = resp.files || []
       totalFiles.value = resp.total || 0

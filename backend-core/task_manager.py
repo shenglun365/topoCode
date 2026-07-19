@@ -2570,18 +2570,19 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         return {"success": True}
 
     def get_l0_comps(project_db, tid):
-        """获取 L0 社区列表，INCLUDE 为空时回退到 CALL。"""
+        """获取 L0 社区列表，合并 CALL 和 INCLUDE 两个边类型。"""
+        comps = []
         for et in ("INCLUDE", "CALL"):
             cascades = get_cascade_levels_impl(project_db, tid, et)
-            l0_items = []
             for l in cascades.get("levels", []):
                 if l.get("lv") == "L0":
-                    l0_items = l.get("items", [])
+                    for it in l.get("items", []):
+                        comps.append({
+                            "id": it.get("id", ""),
+                            "metadata": {"qualityScore": it.get("qualityScore", 0)},
+                        })
                     break
-            if l0_items:
-                return [{"id": it.get("id", ""), "metadata": {"qualityScore": it.get("qualityScore", 0)}}
-                        for it in l0_items]
-        return []
+        return comps
 
     @server.register("analysis.getPreSummaryStatus")
     def get_pre_summary_status(task_id=None, taskId=None):
@@ -2596,7 +2597,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        # 缓存 rank_data（L0 组件和排名在分析完成后不变）
         rank_data = multi_db.cache_store.get_file_ranks(tid)
         if rank_data is None:
             comps = get_l0_comps(project_db, tid)
@@ -2628,7 +2628,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     @server.register("analysis.listPreSummaryFiles")
     def list_pre_summary_files(task_id=None, taskId=None, batch="P0",
-                                page=1, page_size=20):
+                                page=1, page_size=20, search=""):
         tid = task_id or taskId
         if not tid:
             raise ValueError("task_id is required")
@@ -2640,18 +2640,30 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         project_db = multi_db.get_project_db(pid)
         project_root = _get_project_root(pid)
 
-        rank_data = multi_db.cache_store.get_file_ranks(tid)
-        if rank_data is None:
-            comps = get_l0_comps(project_db, tid)
-            rank_data = _compute_file_ranks(tid, project_db, comps, project_root)
-            multi_db.cache_store.set_file_ranks(tid, rank_data)
-        batch_files = [f for f in rank_data["files"] if f["batch"] == batch]
+        def _load_and_filter(cached_ok=True):
+            rd = multi_db.cache_store.get_file_ranks(tid) if cached_ok else None
+            if rd is None:
+                comps = get_l0_comps(project_db, tid)
+                rd = _compute_file_ranks(tid, project_db, comps, project_root)
+                if cached_ok:
+                    multi_db.cache_store.set_file_ranks(tid, rd)
+            bfs = [f for f in rd["files"] if f["batch"] == batch]
+            if search:
+                q = search.lower()
+                bfs = [f for f in bfs if q in f["file_path"].lower()]
+            return bfs, rd
+
+        batch_files, rank_data = _load_and_filter(cached_ok=True)
+
+        # 搜索无结果时重算（可能是缓存数据与当前 L0 社区不同步）
+        if search and not batch_files:
+            batch_files, rank_data = _load_and_filter(cached_ok=False)
+
         total = len(batch_files)
         start = (page - 1) * page_size
         end = start + page_size
         page_items = batch_files[start:end]
 
-        # 缓存状态标记（file_path 已为相对路径，直接查询）
         cached_set: set[str] = set()
         if page_items:
             try:
