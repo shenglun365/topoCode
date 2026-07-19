@@ -1063,10 +1063,12 @@ createApp({
     function showConfirm(title,msg,onOk){confirmDialog.value={show:true,title:title,message:msg,onOk:onOk}}
     async function deleteSession(id){
       if(streaming.value)return
-      showConfirm(__('common.confirm'),__('chat.deleteSessionConfirm'),async function(){
+      var s=sessions.value.find(function(x){return x.id===id})
+      var label=(s?s.title||s.id:id)
+      showConfirm(__('common.confirm'),__('chat.deleteSessionConfirm')+'\n「'+label+'」('+id+')',async function(){
         try{
           await fetch('/api/chat/sessions/'+id,{method:'DELETE'})
-          sessions.value=sessions.value.filter(s=>s.id!==id)
+          sessions.value=sessions.value.filter(function(x){return x.id!==id})
           if(currentId.value===id){currentId.value='';messages.value=[]}
         }catch(e){}
       })
@@ -1218,7 +1220,9 @@ createApp({
       }catch(e){}
     }
     async function deleteDoc(id){
-      showConfirm(__('common.confirm'),__('chat.docDeleteConfirm'),async function(){
+      var d=docs.value.find(function(x){return x.id===id})
+      var label=(d?d.title||d.id:id)
+      showConfirm(__('common.confirm'),__('chat.docDeleteConfirm')+'\n「'+label+'」('+id+')',async function(){
         try{
           await fetch('/api/documents/'+id,{method:'DELETE'})
           if(viewingDoc.value&&viewingDoc.value.id===id){viewingDoc.value=null;annoMode.value=false}
