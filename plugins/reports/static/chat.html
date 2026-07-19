@@ -508,7 +508,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
             <textarea v-model="input" @keydown.enter.exact="send" @keydown="onInputKeydown" @input="onInputChange" :placeholder="__('chat.placeholder')" rows="3" :disabled="streaming" id="chatTextarea"></textarea>
             <div class="autocomplete-panel" id="acPanel"></div>
           </div>
-          <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && (!input.trim()||!currentId)" @click="streaming ? stopStream() : send()">
+          <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && !input.trim()" @click="streaming ? stopStream() : send()">
             <svg class="send-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             <svg class="stop-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>

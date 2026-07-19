@@ -129,6 +129,7 @@ BUILTIN_SKILLS: dict[str, Skill] = {
         icon="📄",
         tools=[
             "web_search_knowledge",
+            "web_get_document",
         ],
         context_prompt=(
             "你可以使用 web_search_knowledge 统一搜索知识库，结果按类型区分：\n"

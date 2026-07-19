@@ -547,6 +547,20 @@ WEB_TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_get_document",
+            "description": "获取知识库中文档的完整内容。返回文档 ID、标题、完整正文（Markdown 格式）、更新时间。用于阅读已搜索到的文档。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {"type": "string", "description": "文档 ID"},
+                },
+                "required": ["doc_id"],
+            },
+        },
+    },
 ]
 
 WEB_TOOL_MAP = {t["function"]["name"]: t for t in WEB_TOOL_DEFINITIONS}
@@ -608,6 +622,7 @@ class WebToolExecutor:
             "web_delete_archive": self._delete_archive,
             "web_update_archive": self._update_archive,
             "web_search_knowledge": self._search_knowledge,
+            "web_get_document": self._get_document,
         }
 
     def execute(self, tool_name: str, args: dict) -> dict:
@@ -1517,6 +1532,21 @@ class WebToolExecutor:
 
         results.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
         return {"results": results[:limit], "total": len(results)}
+
+    def _get_document(self, args: dict) -> dict:
+        doc_id = args.get("doc_id", "")
+        if not doc_id:
+            return {"error": "doc_id is required", "_skip": True}
+        try:
+            row = self.multi_db.knowledge_db.fetchone(
+                "SELECT id, title, content, project_id, tags, created_at, updated_at FROM knowledge_docs WHERE id = ?",
+                (doc_id,)
+            )
+            if not row:
+                return {"error": f"Document {doc_id} not found", "_skip": True}
+            return {"doc": dict(row)}
+        except Exception as e:
+            return {"error": str(e), "_skip": True}
 
 
 # ==================== 引用解析 ====================
