@@ -179,6 +179,7 @@
         docAnnotate:'批注', docAnnoHint:'点击文档中要插入批注的位置', docAddAnno:'添加批注',
         docAnnoPos:'插入位置:', docAnnoPlaceholder:'输入批注内容…',
         docToggleAnno:'显示/隐藏批注',
+        deleteSessionConfirm:'确定要删除此会话吗？',
       },
       // web_server.py index 页面
       index: {
@@ -359,6 +360,7 @@
         docAnnotate:'Annotate', docAnnoHint:'Click on the document to insert annotation', docAddAnno:'Add Annotation',
         docAnnoPos:'Position:', docAnnoPlaceholder:'Enter annotation text…',
         docToggleAnno:'Show/Hide annotations',
+        deleteSessionConfirm:'Delete this session?',
       },
       index: {
         title: 'TopoCode Documents',

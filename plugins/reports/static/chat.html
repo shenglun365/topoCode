@@ -1049,13 +1049,11 @@ createApp({
     async function switchSession(id){if(streaming.value)return;currentId.value=id;await loadMessages()}
     async function deleteSession(id){
       if(streaming.value)return
+      if(!confirm(__('chat.deleteSessionConfirm')))return
       try{
         await fetch('/api/chat/sessions/'+id,{method:'DELETE'})
         sessions.value=sessions.value.filter(s=>s.id!==id)
-        if(currentId.value===id){
-          if(sessions.value.length){currentId.value=sessions.value[0].id;loadMessages()}
-          else{currentId.value='';messages.value=[]}
-        }
+        if(currentId.value===id){currentId.value='';messages.value=[]}
       }catch(e){}
     }
     function onModelChange(){
@@ -1206,7 +1204,11 @@ createApp({
     }
     async function deleteDoc(id){
       if(!confirm(__('chat.docDeleteConfirm')))return
-      try{await fetch('/api/documents/'+id,{method:'DELETE'});loadDocs()}catch(e){}
+      try{
+        await fetch('/api/documents/'+id,{method:'DELETE'})
+        if(viewingDoc.value&&viewingDoc.value.id===id){viewingDoc.value=null;annoMode.value=false}
+        loadDocs()
+      }catch(e){}
     }
     function toggleDocPreview(){docPreview.value=!docPreview.value}
     function hasAnnotations(t){return t&&/<!--\s*annotation:/i.test(t)}
