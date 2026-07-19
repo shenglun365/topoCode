@@ -102,6 +102,12 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .doc-title-clickable:hover{border-color:var(--border);background:var(--bg-hover)}
 .doc-title-clickable .edit-icon{display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-muted);pointer-events:none}
 .doc-title-clickable:hover .edit-icon{display:inline}
+.toggle-switch{position:relative;display:inline-flex;width:36px;height:20px;cursor:pointer}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-switch .toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:10px;transition:background .2s}
+.toggle-switch .toggle-slider::before{content:'';position:absolute;left:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s}
+.toggle-switch input:checked+.toggle-slider{background:var(--accent)}
+.toggle-switch input:checked+.toggle-slider::before{transform:translateX(16px)}
 .topbar-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle;line-height:1.6}
 .badge-chat{background:var(--accent-light);color:var(--accent)}
 .badge-doc{background:#dbeafe;color:#2563eb}
@@ -351,7 +357,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
         <input v-model="docSearch" class="sidebar-search" :placeholder="__('common.search')" @input="loadDocs">
       </div>
       <div v-for="d in docs" :key="d.id" class="note-item" :class="{active:viewingDoc&&viewingDoc.id===d.id}" style="cursor:pointer" @click="viewDoc(d)">
-        <span class="title">{{ d.title || __('chat.docNoTitle') }}</span>
+        <span class="title">{{ d.title || d.id }}</span>
         <span class="ref-count">{{ (d.updated_at||'').slice(0,10) }}</span>
         <button class="copy-id-btn" @click.stop="copyId(d.id)" :title="__('chat.copyDocId')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
         <button class="del-btn" @click.stop="deleteDoc(d.id)">×</button>
@@ -366,7 +372,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
         <span v-if="!viewingDoc"><span class="topbar-badge badge-chat">{{__('chat.sessions')}}</span><span class="chat-title">{{ currentTitle }}</span></span>
         <template v-else>
           <span class="topbar-badge badge-doc">{{__('chat.documents')}}</span>
-          <span class="chat-title doc-title-clickable" @click="openDocEditor" :title="__('chat.docEdit')">{{ viewingDoc.title || __('chat.docNoTitle') }}<svg class="edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+          <span class="chat-title doc-title-clickable" @click="openDocEditor" :title="__('chat.docEdit')">{{ viewingDoc.title || viewingDoc.id }}<svg class="edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
           <button class="doc-topbar-btn" :class="{active:annoMode}" @click="toggleAnnoMode" :title="__('chat.docAnnotate')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
           <button class="doc-topbar-btn" :class="{active:!showAnnotations}" @click="showAnnotations=!showAnnotations" :title="__('chat.docToggleAnno')" v-if="viewingDoc&&hasAnnotations(viewingDoc.content)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
         </template>
@@ -537,13 +543,19 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
   <div class="modal-overlay" v-if="showDocEditor" @click.self="showDocEditor=false">
     <div class="modal" style="width:720px;max-width:95vw">
       <div class="modal-header">
-        <input v-model="docEditTitle" class="doc-edit-title" :placeholder="__('chat.docNoTitle')" style="flex:1;font-size:15px;font-weight:600;border:none;outline:none;background:transparent;color:var(--text)">
+        <div style="flex:1;display:flex;align-items:center;gap:6px">
+          <input v-model="docEditTitle" class="doc-edit-title" :placeholder="__('chat.docNoTitle')" style="flex:1;font-size:15px;font-weight:600;border:none;outline:none;background:transparent;color:var(--text);min-width:0">
+          <svg class="edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;flex-shrink:0"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </div>
         <button class="modal-close" @click="showDocEditor=false">×</button>
       </div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;padding:12px 16px">
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" :class="{'btn-primary':!docPreview}" @click="docPreview=false">{{__('chat.docEditor')}}</button>
-          <button class="btn btn-sm" :class="{'btn-primary':docPreview}" @click="docPreview=true">{{__('chat.docPreview')}}</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="toggle-switch" :title="docPreview?__('chat.docEditor'):__('chat.docPreview')">
+            <input type="checkbox" v-model="docPreview">
+            <span class="toggle-slider"></span>
+          </label>
+          <span style="font-size:12px;color:var(--text-muted)">{{ docPreview ? __('chat.docPreview') : __('chat.docEditor') }}</span>
         </div>
         <textarea v-if="!docPreview" v-model="docEditContent" class="doc-textarea"
           style="width:100%;min-height:400px;font-family:var(--font-mono,monospace);font-size:13px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);resize:vertical;background:var(--bg-code,#1e1e1e);color:var(--code-text,#d4d4d4);outline:none;tab-size:2;line-height:1.5;box-sizing:border-box"
