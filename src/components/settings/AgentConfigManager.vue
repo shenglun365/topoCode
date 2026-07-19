@@ -16,6 +16,8 @@ const CHAT_TOOLS_ZH = [
   { name: 'search_symbols', description: '按名称搜索项目中的符号（函数/类/方法/变量），返回匹配列表', parameters: { query: '搜索关键词', limit: '最多返回条数' } },
   { name: 'get_call_chain', description: '获取两个符号之间的调用链路（含中间节点），支持限制最大深度', parameters: { fromSymbolId: '起始符号 ID', toSymbolId: '目标符号 ID', taskId: '分析任务 ID', maxDepth: '最大深度' } },
   { name: 'get_ast_node', description: '获取指定 AST 节点的详细代码内容（含所在文件和行号范围）', parameters: { nodeId: 'AST 节点 ID', fileId: '文件 ID' } },
+  { name: 'web_search_knowledge', description: '统一搜索知识库（用户存档文档、对话归档、架构分析报告），返回带类型的结果', parameters: { search: '搜索关键词', types: '可选过滤类型', project_id: '项目ID（可选）' } },
+  { name: 'web_get_document', description: '获取知识库中文档的完整 Markdown 内容，用于阅读已搜索到的文档', parameters: { doc_id: '文档 ID' } },
 ]
 
 const CHAT_TOOLS_EN = [
@@ -26,6 +28,8 @@ const CHAT_TOOLS_EN = [
   { name: 'search_symbols', description: 'Search project symbols by name (functions/classes/methods/variables), returns matching list', parameters: { query: 'Search keyword', limit: 'Max results' } },
   { name: 'get_call_chain', description: 'Get call chain between two symbols (including intermediate nodes), supports max depth', parameters: { fromSymbolId: 'Start symbol ID', toSymbolId: 'Target symbol ID', taskId: 'Analysis task ID', maxDepth: 'Max depth' } },
   { name: 'get_ast_node', description: 'Get AST node source code (with file path and line range)', parameters: { nodeId: 'AST node ID', fileId: 'File ID' } },
+  { name: 'web_search_knowledge', description: 'Unified knowledge base search (user docs, archives, analysis reports), returns typed results', parameters: { search: 'Search keyword', types: 'Optional type filter', project_id: 'Project ID (optional)' } },
+  { name: 'web_get_document', description: 'Get full Markdown content of a knowledge document by ID', parameters: { doc_id: 'Document ID' } },
 ]
 
 const MOCK_AGENT_CONFIG = {
