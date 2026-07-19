@@ -1121,7 +1121,7 @@ createApp({
     }
 
     // notes
-    function switchChatTab(){tab.value='chat';viewingDoc.value=null;annoMode.value=false;loadSessions()}
+    function switchChatTab(){tab.value='chat';viewingDoc.value=null;annoMode.value=false}
     function switchNotesTab(){tab.value='notes';viewingDoc.value=null;annoMode.value=false;loadNotes();loadPendingDrafts()}
     function viewNote(n){
       viewNoteData.value={id:n.id,title:n.title,content:n.content,refs:n.refs||[]}
@@ -1385,37 +1385,36 @@ createApp({
     onMounted(()=>{
       applyFontSize(fontSize.value)
       // 恢复已保存的状态
-      var needsLoadSessions = true
-      try{
-        var saved=JSON.parse(localStorage.getItem('chat_view_state'))
-        if(saved){
-          if(saved.docId){
-            // 恢复文档浏览
-            fetch('/api/documents/'+saved.docId).then(function(r){return r.json()}).then(function(data){
-              viewingDoc.value=data;annoMode.value=false;tab.value='docs'
-              loadDocs()
-            }).catch(function(){})
-            needsLoadSessions = false
-          }else if(saved.sessionId){
-            currentId.value=saved.sessionId;tab.value=saved.tab||'chat'
-            loadMessages()
-            needsLoadSessions = false
-          }else{
-            tab.value=saved.tab||'chat'
+      function _restore(){
+        try{
+          var saved=JSON.parse(localStorage.getItem('chat_view_state'))
+          if(saved){
+            if(saved.docId){
+              fetch('/api/documents/'+saved.docId).then(function(r){return r.json()}).then(function(data){
+                viewingDoc.value=data;annoMode.value=false;tab.value='docs'
+              }).catch(function(){})
+            }else if(saved.sessionId){
+              currentId.value=saved.sessionId;tab.value=saved.tab||'chat'
+              loadMessages()
+            }else{
+              tab.value=saved.tab||'chat'
+            }
           }
-        }
-      }catch(e){}
+        }catch(e){}
+      }
+      _restore()
       const p=new URLSearchParams(location.search);const sid=p.get('sessionId')
-      // URL 参数优先
       if(sid&&sid!==currentId.value){
         console.log('[exec-flow] chat onMounted: URL\u6709sessionId=' + sid.slice(0,12))
         viewingDoc.value=null;currentId.value=sid;loadMessages();_checkPendingExecute()
       }
-      // 按 taskId 隔离便签
       NotesStore.init(p.get('taskId')||'')
       NotesStore.subscribe(function(){ loadPendingDrafts() })
       loadModels()
-      if(needsLoadSessions||(!currentId.value&&!viewingDoc.value)){loadSessions().then(function(){_checkPendingExecute()})}
+      // 无论恢复何种状态，始终加载侧栏列表（会话/便签/文档按需切换 tab 时加载）
+      loadSessions().then(function(){_checkPendingExecute()})
+      loadNotes()
+      loadDocs()
       // storage \u4e8b\u4ef6\u76d1\u542c\uff1aviewer \u5199\u5165 localStorage \u540e\u89e6\u53d1
       window.addEventListener('storage', function(e) {
         if (!e.key) return;
