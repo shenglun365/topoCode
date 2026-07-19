@@ -517,6 +517,18 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
     </div>
   </main>
 
+  <!-- confirm dialog -->
+  <div class="modal-overlay" v-if="confirmDialog.show" @click.self="confirmDialog.show=false">
+    <div class="modal" style="width:400px">
+      <div class="modal-header"><h3>{{ confirmDialog.title }}</h3></div>
+      <div class="modal-body"><p style="font-size:13px;color:var(--text);margin:0">{{ confirmDialog.message }}</p></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" @click="confirmDialog.show=false">{{__('common.cancel')}}</button>
+        <button class="btn btn-primary" style="background:#ef4444;border-color:#ef4444" @click="confirmDialog.onOk&&confirmDialog.onOk();confirmDialog.show=false">{{__('common.delete')}}</button>
+      </div>
+    </div>
+  </div>
+
   <!-- note detail modal -->
   <div class="modal-overlay" v-if="viewNoteData" @click.self="viewNoteData=null">
     <div class="modal">
@@ -587,6 +599,7 @@ createApp({
     const viewNoteData=ref(null);const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
     const docs=ref([]);const docSearch=ref('');const currentDoc=ref(null);const showDocEditor=ref(false);const docEditContent=ref('');const docEditTitle=ref('');const docPreview=ref(false)
     const viewingDoc=ref(null);const annoMode=ref(false);const showAnnoDialog=ref(false);const annoText=ref('');const annoPosition=ref(null);const docBodyRef=ref(null);const showAnnotations=ref(true)
+    const confirmDialog=ref({show:false,title:'',message:'',onOk:null})
     const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
     watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
     const fontSize=ref(localStorage.getItem('topoone-font-size')||'18')
@@ -1047,14 +1060,16 @@ createApp({
       }catch(e){console.error('[exec-flow] chat createSession error:',e)}
     }
     async function switchSession(id){if(streaming.value)return;currentId.value=id;await loadMessages()}
+    function showConfirm(title,msg,onOk){confirmDialog.value={show:true,title:title,message:msg,onOk:onOk}}
     async function deleteSession(id){
       if(streaming.value)return
-      if(!confirm(__('chat.deleteSessionConfirm')))return
-      try{
-        await fetch('/api/chat/sessions/'+id,{method:'DELETE'})
-        sessions.value=sessions.value.filter(s=>s.id!==id)
-        if(currentId.value===id){currentId.value='';messages.value=[]}
-      }catch(e){}
+      showConfirm(__('common.confirm'),__('chat.deleteSessionConfirm'),async function(){
+        try{
+          await fetch('/api/chat/sessions/'+id,{method:'DELETE'})
+          sessions.value=sessions.value.filter(s=>s.id!==id)
+          if(currentId.value===id){currentId.value='';messages.value=[]}
+        }catch(e){}
+      })
     }
     function onModelChange(){
       if(!currentId.value||!currentModel.value)return
@@ -1203,12 +1218,13 @@ createApp({
       }catch(e){}
     }
     async function deleteDoc(id){
-      if(!confirm(__('chat.docDeleteConfirm')))return
-      try{
-        await fetch('/api/documents/'+id,{method:'DELETE'})
-        if(viewingDoc.value&&viewingDoc.value.id===id){viewingDoc.value=null;annoMode.value=false}
-        loadDocs()
-      }catch(e){}
+      showConfirm(__('common.confirm'),__('chat.docDeleteConfirm'),async function(){
+        try{
+          await fetch('/api/documents/'+id,{method:'DELETE'})
+          if(viewingDoc.value&&viewingDoc.value.id===id){viewingDoc.value=null;annoMode.value=false}
+          loadDocs()
+        }catch(e){}
+      })
     }
     function toggleDocPreview(){docPreview.value=!docPreview.value}
     function hasAnnotations(t){return t&&/<!--\s*annotation:/i.test(t)}
@@ -1441,7 +1457,7 @@ createApp({
       continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip,
       docs,docSearch,currentDoc,showDocEditor,docEditTitle,docEditContent,docPreview,
       switchDocTab,switchChatTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc,
-      viewingDoc,annoMode,showAnnoDialog,annoText,docBodyRef,showAnnotations,
+      viewingDoc,annoMode,showAnnoDialog,annoText,docBodyRef,showAnnotations,confirmDialog,showConfirm,
       closeDocView,openDocEditor,toggleAnnoMode,onDocBodyClick,confirmAnno,hasAnnotations}
   }
 }).mount('#app')
