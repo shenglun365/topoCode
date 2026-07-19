@@ -175,6 +175,8 @@
         docSaveAs:'存为文档', docDeleteConfirm:'确定删除此文档？',
         docEditor:'MD 编辑器', docPreview:'预览',
         docNoTitle:'无标题文档', docNoDocs:'暂无文档',
+        docAnnotate:'批注', docAnnoHint:'点击文档中要插入批注的位置', docAddAnno:'添加批注',
+        docAnnoPos:'插入位置:', docAnnoPlaceholder:'输入批注内容…',
       },
       // web_server.py index 页面
       index: {
@@ -351,6 +353,8 @@
         docSaveAs:'Save as Document', docDeleteConfirm:'Delete this document?',
         docEditor:'MD Editor', docPreview:'Preview',
         docNoTitle:'Untitled', docNoDocs:'No documents yet',
+        docAnnotate:'Annotate', docAnnoHint:'Click on the document to insert annotation', docAddAnno:'Add Annotation',
+        docAnnoPos:'Position:', docAnnoPlaceholder:'Enter annotation text…',
       },
       index: {
         title: 'TopoCode Documents',
