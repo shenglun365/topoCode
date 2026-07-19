@@ -481,30 +481,30 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       </div>
     </div>
   </div>
-</div>
 
-<!-- document editor modal -->
-<div class="modal-overlay" v-if="showDocEditor" @click.self="showDocEditor=false">
-  <div class="modal" style="width:720px;max-width:95vw">
-    <div class="modal-header">
-      <input v-model="docEditTitle" class="doc-edit-title" :placeholder="__('chat.docNoTitle')" style="flex:1;font-size:15px;font-weight:600;border:none;outline:none;background:transparent;color:var(--text)">
-      <button class="modal-close" @click="showDocEditor=false">×</button>
-    </div>
-    <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;padding:12px 16px">
-      <div style="display:flex;gap:6px">
-        <button class="btn btn-sm" :class="{'btn-primary':!docPreview}" @click="docPreview=false">{{__('chat.docEditor')}}</button>
-        <button class="btn btn-sm" :class="{'btn-primary':docPreview}" @click="docPreview=true">{{__('chat.docPreview')}}</button>
+  <!-- document editor modal -->
+  <div class="modal-overlay" v-if="showDocEditor" @click.self="showDocEditor=false">
+    <div class="modal" style="width:720px;max-width:95vw">
+      <div class="modal-header">
+        <input v-model="docEditTitle" class="doc-edit-title" :placeholder="__('chat.docNoTitle')" style="flex:1;font-size:15px;font-weight:600;border:none;outline:none;background:transparent;color:var(--text)">
+        <button class="modal-close" @click="showDocEditor=false">×</button>
       </div>
-      <textarea v-if="!docPreview" v-model="docEditContent" class="doc-textarea"
-        style="width:100%;min-height:400px;font-family:var(--font-mono,monospace);font-size:13px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);resize:vertical;background:var(--bg-code,#1e1e1e);color:var(--code-text,#d4d4d4);outline:none;tab-size:2;line-height:1.5;box-sizing:border-box"
-        spellcheck="false"></textarea>
-      <div v-else class="doc-render" style="min-height:400px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);overflow:auto;line-height:1.7;font-size:var(--content-font-size,15px)" v-html="renderDocMd(docEditContent)"></div>
-    </div>
-    <div class="modal-footer">
-      <span style="font-size:11px;color:var(--text-muted)">使用 <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">&lt;!-- annotation:id --&gt;批注文字&lt;!-- /annotation --&gt;</code> 添加批注</span>
-      <span style="flex:1"></span>
-      <button class="btn btn-ghost" @click="showDocEditor=false">{{__('common.cancel')}}</button>
-      <button class="btn btn-primary" @click="saveDoc">{{__('common.save')}}</button>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:8px;padding:12px 16px">
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" :class="{'btn-primary':!docPreview}" @click="docPreview=false">{{__('chat.docEditor')}}</button>
+          <button class="btn btn-sm" :class="{'btn-primary':docPreview}" @click="docPreview=true">{{__('chat.docPreview')}}</button>
+        </div>
+        <textarea v-if="!docPreview" v-model="docEditContent" class="doc-textarea"
+          style="width:100%;min-height:400px;font-family:var(--font-mono,monospace);font-size:13px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);resize:vertical;background:var(--bg-code,#1e1e1e);color:var(--code-text,#d4d4d4);outline:none;tab-size:2;line-height:1.5;box-sizing:border-box"
+          spellcheck="false"></textarea>
+        <div v-else class="doc-render" style="min-height:400px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);overflow:auto;line-height:1.7;font-size:var(--content-font-size,15px)" v-html="renderDocMd(docEditContent)"></div>
+      </div>
+      <div class="modal-footer">
+        <span style="font-size:11px;color:var(--text-muted)">使用 <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">&lt;!-- annotation:id --&gt;批注文字&lt;!-- /annotation --&gt;</code> 添加批注</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" @click="showDocEditor=false">{{__('common.cancel')}}</button>
+        <button class="btn btn-primary" @click="saveDoc">{{__('common.save')}}</button>
+      </div>
     </div>
   </div>
 </div>
