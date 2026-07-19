@@ -1121,7 +1121,7 @@ createApp({
     }
 
     // notes
-    function switchChatTab(){tab.value='chat';viewingDoc.value=null;annoMode.value=false}
+    function switchChatTab(){tab.value='chat';viewingDoc.value=null;annoMode.value=false;loadSessions()}
     function switchNotesTab(){tab.value='notes';viewingDoc.value=null;annoMode.value=false;loadNotes();loadPendingDrafts()}
     function viewNote(n){
       viewNoteData.value={id:n.id,title:n.title,content:n.content,refs:n.refs||[]}
@@ -1385,6 +1385,7 @@ createApp({
     onMounted(()=>{
       applyFontSize(fontSize.value)
       // 恢复已保存的状态
+      var needsLoadSessions = true
       try{
         var saved=JSON.parse(localStorage.getItem('chat_view_state'))
         if(saved){
@@ -1394,9 +1395,11 @@ createApp({
               viewingDoc.value=data;annoMode.value=false;tab.value='docs'
               loadDocs()
             }).catch(function(){})
+            needsLoadSessions = false
           }else if(saved.sessionId){
             currentId.value=saved.sessionId;tab.value=saved.tab||'chat'
             loadMessages()
+            needsLoadSessions = false
           }else{
             tab.value=saved.tab||'chat'
           }
@@ -1412,7 +1415,7 @@ createApp({
       NotesStore.init(p.get('taskId')||'')
       NotesStore.subscribe(function(){ loadPendingDrafts() })
       loadModels()
-      if(!currentId.value&&!viewingDoc.value){loadSessions().then(function(){_checkPendingExecute()})}
+      if(needsLoadSessions||(!currentId.value&&!viewingDoc.value)){loadSessions().then(function(){_checkPendingExecute()})}
       // storage \u4e8b\u4ef6\u76d1\u542c\uff1aviewer \u5199\u5165 localStorage \u540e\u89e6\u53d1
       window.addEventListener('storage', function(e) {
         if (!e.key) return;
