@@ -534,6 +534,31 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
     </div>
   </div>
 
+  <!-- prompt dialog -->
+  <div class="modal-overlay" v-if="promptDialog.show" @click.self="promptDialog.show=false">
+    <div class="modal" style="width:460px">
+      <div class="modal-header"><h3>{{ promptDialog.title }}</h3><button class="modal-close" @click="promptDialog.show=false">×</button></div>
+      <div class="modal-body">
+        <input v-model="promptDialog.value" class="field-input" @keydown.enter.exact="promptDialog.onOk&&promptDialog.onOk(promptDialog.value);promptDialog.show=false" style="width:100%">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" @click="promptDialog.show=false">{{__('common.cancel')}}</button>
+        <button class="btn btn-primary" @click="promptDialog.onOk&&promptDialog.onOk(promptDialog.value);promptDialog.show=false">{{__('common.confirm')}}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- alert dialog -->
+  <div class="modal-overlay" v-if="alertDialog.show" @click.self="alertDialog.show=false">
+    <div class="modal" style="width:400px">
+      <div class="modal-header"><h3>{{__('common.info')}}</h3><button class="modal-close" @click="alertDialog.show=false">×</button></div>
+      <div class="modal-body"><p style="font-size:13px;color:var(--text);margin:0">{{ alertDialog.message }}</p></div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" @click="alertDialog.show=false">{{__('common.confirm')}}</button>
+      </div>
+    </div>
+  </div>
+
   <!-- note detail modal -->
   <div class="modal-overlay" v-if="viewNoteData" @click.self="viewNoteData=null">
     <div class="modal">
@@ -605,6 +630,8 @@ createApp({
     const docs=ref([]);const docSearch=ref('');const currentDoc=ref(null);const showDocEditor=ref(false);const docEditContent=ref('');const docEditTitle=ref('');const docPreview=ref(false)
     const viewingDoc=ref(null);const docBodyRef=ref(null);const showAnnotations=ref(true);const editAnnoData=ref(null)
     const confirmDialog=ref({show:false,title:'',message:'',onOk:null})
+    const promptDialog=ref({show:false,title:'',value:'',onOk:null})
+    const alertDialog=ref({show:false,message:''})
     const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
     watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
     const fontSize=ref(localStorage.getItem('topoone-font-size')||'18')
@@ -1066,6 +1093,8 @@ createApp({
     }
     async function switchSession(id){if(streaming.value)return;currentId.value=id;await loadMessages()}
     function showConfirm(title,msg,onOk){confirmDialog.value={show:true,title:title,message:msg,onOk:onOk}}
+    function showPrompt(title,defaultVal,onOk){promptDialog.value={show:true,title:title,value:defaultVal||'',onOk:onOk}}
+    function showAlert(msg){alertDialog.value={show:true,message:msg}}
     async function deleteSession(id){
       if(streaming.value)return
       var s=sessions.value.find(function(x){return x.id===id})
@@ -1174,16 +1203,22 @@ createApp({
       docPreview.value=false
       showDocEditor.value=true
     }
-    // 批注交互：点击批注块编辑 / 点击 + 号新建
+    // 批注交互：点击批注块编辑 / 点击空槽位新建
     function onDocAnnoClick(ev){
       if(!viewingDoc.value||!showAnnotations.value)return
       var el=ev.target
       var annoEl=el.closest('.doc-annotation')
       if(!annoEl)return
-      var id=annoEl.dataset?.annoId||''
-      var bodyEl=annoEl.querySelector('.doc-anno-body')
-      var text=bodyEl?bodyEl.textContent.trim():''
-      editAnnoData.value={id:id,text:text,position:'',isNew:false}
+      var isSlot=annoEl.dataset?.annoSlot!==undefined
+      if(isSlot){
+        // 空槽位：点击直接新建批注，用 slot 标记替换为正式 annotation
+        editAnnoData.value={id:'',text:'',position:'',isNew:true,isSlot:true}
+      }else{
+        var id=annoEl.dataset?.annoId||''
+        var bodyEl=annoEl.querySelector('.doc-anno-body')
+        var text=bodyEl?bodyEl.textContent.trim():''
+        editAnnoData.value={id:id,text:text,position:'',isNew:false}
+      }
     }
     function addNewAnnotation(){
       if(!viewingDoc.value)return
@@ -1196,7 +1231,12 @@ createApp({
       if(data.isNew){
         var id='ann_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)
         var tag='\n<!-- annotation:'+id+' -->\n'+(data.text||'')+'\n<!-- /annotation -->\n'
-        viewingDoc.value.content=md+tag
+        if(data.isSlot){
+          // 替换第一个 ann:slot 占位
+          viewingDoc.value.content=md.replace('<!-- ann:slot -->',tag)
+        }else{
+          viewingDoc.value.content=md+tag
+        }
       }else{
         // 更新已有批注
         var pat=new RegExp('(<!--\\s*annotation:'+data.id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*-->)[\\s\\S]*?(<!--\\s*/annotation\\s*-->)')
@@ -1244,9 +1284,14 @@ createApp({
     function toggleDocPreview(){docPreview.value=!docPreview.value}
     function hasAnnotations(t){return t&&/<!--\s*annotation:/i.test(t)}
     function splitAnnotations(t,show){
-      if(!show)return t.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g,'')
-      return t.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
+      if(!show)return t.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g,'').replace(/<!--\s*ann:slot\s*-->/g,'')
+      // 渲染已有批注
+      var r=t.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
         function(m,id,text){return '<div class="doc-annotation" data-anno-id="'+id+'"><span class="doc-anno-marker"></span><div class="doc-anno-body">'+marked.parse(text.trim())+'</div></div>'})
+      // 渲染空批注槽位（ann:slot → 空白可点击条）
+      r=r.replace(/<!--\s*ann:slot\s*-->/g,
+        function(){return '<div class="doc-annotation doc-annotation-slot" data-anno-slot><span class="doc-anno-marker" style="opacity:.3"></span><div class="doc-anno-body" style="color:var(--text-muted);font-style:italic;font-size:12px">+ '+__('chat.docAddAnno')+'</div></div>'})
+      return r
     }
     // 基于分块的文档渲染 — 每块包裹 <div data-md-block="N"> 精确定位批注插入点
     var _mdBlocks=[]       // 每块的原始 MD 文本
@@ -1269,9 +1314,13 @@ createApp({
         if(/^<!-- ANNO_KEEP -->/.test(b)){
           var annoRaw=b.replace(/<!-- ANNO_KEEP -->([\s\S]*)<!-- \/ANNO_KEEP -->/,'$1')
           htmls.push(annoRaw)
-          // 在 raw 中跳过这段
           var skipIdx=raw.indexOf(annoRaw,cursor)
           if(skipIdx>=0)cursor=skipIdx+annoRaw.length
+          continue
+        }
+        // 跳过 ann:slot 占位（它们由 splitAnnotations 单独渲染）
+        if(/^<!--\s*ann:slot\s*-->/.test(b)){
+          htmls.push(b)
           continue
         }
         // 在 raw 中找到 b 的精确位置
@@ -1299,16 +1348,16 @@ createApp({
       await send()
     }
     async function saveMsgAsDoc(m){
-      var title=prompt(__('chat.docSaveAs'), m.content.slice(0,40)+'...')
-      if(!title)return
-      // 首次保存时预置批注占位符（为每段末尾添加 ann:slot 标记）
-      var content=m.content.replace(/\n\n/g,'\n\n<!-- ann:slot -->\n\n')+'\n\n<!-- ann:slot -->'
-      try{
-        var r=await fetch('/api/documents',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({title:title,content:content})})
-        var d=await r.json()
-        if(d.ok)alert(__('common.operationSuccess'))
-      }catch(e){alert(__('common.operationFailed'))}
+      showPrompt(__('chat.docSaveAs'), m.content.slice(0,40)+'...',async function(title){
+        if(!title)return
+        var content=m.content.replace(/\n\n/g,'\n\n<!-- ann:slot -->\n\n')+'\n\n<!-- ann:slot -->'
+        try{
+          var r=await fetch('/api/documents',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({title:title,content:content})})
+          var d=await r.json()
+          if(d.ok)showAlert(__('common.operationSuccess'))
+        }catch(e){showAlert(__('common.operationFailed'))}
+      })
     }
     async function send(ev){
       console.log('[exec-flow] chat send: \u5165\u53e3',{textLen:input.value.trim().length,streaming:streaming.value,cid:!!currentId.value,model:currentModel.value||'null',refsCount:pendingRefs.value.length})
@@ -1510,7 +1559,7 @@ createApp({
       continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip,
       docs,docSearch,currentDoc,showDocEditor,docEditTitle,docEditContent,docPreview,
       switchDocTab,switchChatTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc,
-      viewingDoc,docBodyRef,showAnnotations,confirmDialog,showConfirm,editAnnoData,
+      viewingDoc,docBodyRef,showAnnotations,confirmDialog,showConfirm,editAnnoData,promptDialog,alertDialog,showPrompt,showAlert,
       closeDocView,openDocEditor,hasAnnotations,
       onDocAnnoClick,addNewAnnotation,saveAnnotation,deleteAnnotation}
   }
