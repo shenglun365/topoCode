@@ -1174,19 +1174,16 @@ createApp({
     function onDocBodyClick(ev){
       if(!annoMode.value||!viewingDoc.value)return
       var el=ev.target
-      var p=el.closest('p,li,h1,h2,h3,h4,pre,blockquote')
-      if(!p)return
-      // 检查是否点击了不可插入的位置
-      if(p.tagName==='PRE'||el.closest('pre,code,.diagram-container,.mermaid,table,.doc-annotation')){
+      var blockEl=el.closest('[data-md-block]')
+      if(!blockEl)return
+      if(el.closest('pre,code,.diagram-container,.mermaid,table,.doc-annotation')){
         alert('批注只能插入到正文段落、列表项和标题下方。\n\n不可插入的位置：\n• 代码段（```代码块```）\n• 图表（Mermaid / PlantUML）\n• 表格\n• 已有批注内部\n\n请点击正文段落、列表项或标题后再试。')
         return
       }
-      var text=p.textContent.trim().slice(0,60)+(p.textContent.trim().length>60?'...':'')
-      // 在 MD 中找到点击段落匹配的位置，用于插入批注
-      var md=viewingDoc.value.content||''
-      var anchor=p.textContent.trim().slice(0,40).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')
-      var idx=md.search(anchor)
-      annoPosition.value={paragraph:text,matchStart:idx,matchLen:anchor.length}
+      var idx=parseInt(blockEl.dataset.mdBlock)
+      if(isNaN(idx)||idx<0||idx>=_mdBlocks.length)return
+      var blockText=_mdBlocks[idx]
+      annoPosition.value={blockIdx:idx,blockText:blockText.slice(0,80)+(blockText.length>80?'...':'')}
       annoText.value=''
       showAnnoDialog.value=true
     }
@@ -1196,10 +1193,16 @@ createApp({
       var tag='\n<!-- annotation:'+id+' -->\n'+annoText.value+'\n<!-- /annotation -->\n'
       var md=viewingDoc.value.content||''
       var pos=annoPosition.value
-      if(pos&&pos.matchStart>=0){
-        // 在匹配段落之后插入
-        var insertAt=pos.matchStart+pos.matchLen
-        viewingDoc.value.content=md.slice(0,insertAt)+tag+md.slice(insertAt)
+      if(pos&&pos.blockIdx!=null){
+        // 按分块定位：在原始 MD 中找到第 N 个块的位置，插入在其后
+        var blocks=md.split(/\n{2,}/).map(function(b){return b.trim()}).filter(function(b){return b})
+        var insertAt=0
+        for(var i=0;i<=pos.blockIdx&&i<blocks.length;i++){
+          var foundIdx=md.indexOf(blocks[i],insertAt)
+          if(foundIdx<0){insertAt=md.length;break}
+          insertAt=foundIdx+blocks[i].length
+        }
+        viewingDoc.value.content=md.slice(0,insertAt)+'\n'+tag+md.slice(insertAt)
       }else{
         viewingDoc.value.content=md+'\n'+tag
       }
@@ -1237,7 +1240,30 @@ createApp({
       return t.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
         function(m,id,text){return '<div class="doc-annotation"><span class="doc-anno-marker"></span><div class="doc-anno-body">'+marked.parse(text.trim())+'</div></div>'})
     }
-    function renderDocMd(t){return t?splitAnnotations(marked.parse(t),showAnnotations.value):''}
+    // 基于分块的文档渲染 — 每块包裹 <div data-md-block="N"> 精确定位批注插入点
+    var _mdBlocks=[]
+    function renderDocMd(t){
+      _mdBlocks=[]
+      if(!t)return''
+      // 拆分 MD 为顶层块（按双换行分割，但保留代码块/列表等）
+      var raw=t
+      // 先替换已有批注为占位符，避免批注内容被拆分
+      raw=raw.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g,function(m){return '\n<!-- ANNO_KEEP -->\n'+m+'\n<!-- /ANNO_KEEP -->\n'})
+      var blocks=raw.split(/\n{2,}/)
+      var htmls=[]
+      for(var i=0;i<blocks.length;i++){
+        var b=blocks[i].trim()
+        if(!b)continue
+        // 跳过纯批注占位
+        if(/^<!-- ANNO_KEEP -->/.test(b)){htmls.push(b.replace(/<!-- ANNO_KEEP -->([\s\S]*)<!-- \/ANNO_KEEP -->/,'$1'));continue}
+        _mdBlocks.push(b)
+        var rendered=marked.parse(b)
+        // 恢复批注占位
+        rendered=rendered.replace(/<!-- ANNO_KEEP -->([\s\S]*?)<!-- \/ANNO_KEEP -->/g,function(m,c){return c})
+        htmls.push('<div data-md-block="'+( _mdBlocks.length-1)+'">'+rendered+'</div>')
+      }
+      return splitAnnotations(htmls.join('\n'),showAnnotations.value)
+    }
     function stopStream(){
       if(_currentAbort){
         _currentAbort.abort()
