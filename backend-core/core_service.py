@@ -709,6 +709,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         import import_service
         if not projectId:
             raise ValueError("projectId is required")
+        logger.info(f"[Import] system.importProjectArchive called: projectId={projectId!r}, importMode={importMode!r}, archivePath={archivePath!r}")
         import_id = import_service.start_import(
             multi_db, archivePath,
             lambda ch, ev, data: server.publish(ch, ev, data),

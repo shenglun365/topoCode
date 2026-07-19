@@ -1418,10 +1418,12 @@ class MultiDBManager:
     def _project_db_path(self, project_id: str, project_root: str = None) -> str:
         """获取项目数据库路径。仅使用新架构 .topocode/data/project.db。"""
         root = project_root or self._get_project_root(project_id)
+        logger.info(f"[Import] _project_db_path({project_id!r}): root={root!r}, project_root_param={project_root!r}")
         if root and root.strip():
             topo_dir = os.path.join(root, ".topocode", "data")
             os.makedirs(topo_dir, exist_ok=True)
             return os.path.join(topo_dir, "project.db")
+        logger.warning(f"[Import] _project_db_path({project_id!r}) FAILED: root is empty (project_root_param={project_root!r})")
         raise ValueError(
             f"Project {project_id} has no root_path — cannot resolve .topocode/data/project.db. "
             "Project must be re-imported or root_path must be set."
@@ -1433,8 +1435,11 @@ class MultiDBManager:
             row = self.main_db.execute(
                 "SELECT root_path FROM projects WHERE id = ?", (project_id,)
             ).fetchone()
-            return row["root_path"] if row else ""
+            val = row["root_path"] if row else ""
+            logger.info(f"[Import] _get_project_root({project_id!r}) -> {val!r}")
+            return val
         except Exception:
+            logger.warning(f"[Import] _get_project_root({project_id!r}) raised exception", exc_info=True)
             return ""
 
     def init_project_db(self, project_id: str, project_root: str = None):
@@ -1740,8 +1745,10 @@ class MultiDBManager:
                 "SELECT root_path FROM projects WHERE id = ?", (project_id,)
             ).fetchone()
             project_root = row["root_path"] if row else None
+            logger.info(f"[Import] get_project_db({project_id!r}): root_path from DB = {project_root!r}")
         except Exception:
             project_root = None
+            logger.warning(f"[Import] get_project_db({project_id!r}): exception reading root_path", exc_info=True)
 
         db_path = self._project_db_path(project_id, project_root)
 

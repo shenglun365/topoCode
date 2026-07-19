@@ -100,7 +100,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
 
         project_id = existing_project["id"]
         base_name = existing_project["name"]
-        logger.info(f"[Import] {import_mode} mode: writing to project {project_id} ({base_name})")
+        logger.info(f"[Import] target project: id={project_id!r}, name={base_name!r}, root_path={existing_project.get('root_path')!r}, mode={import_mode!r}")
         _update_status(import_id, IMPORT_STATUS_RUNNING, 5,
                        f"{'Overwriting' if is_restore else 'Writing to'} existing project {base_name}")
 
@@ -110,6 +110,7 @@ def _import_worker(import_id: str, multi_db, archive_path: str, publish_fn,
             "community_hierarchy", "community_llm_results", "report_subdocs",
             "file_summaries", "file_hashes",
         ]
+        logger.info(f"[Import] calling multi_db.get_project_db(project_id={project_id!r})")
         project_db = multi_db.get_project_db(project_id)
         multi_db._migrate_project_db(project_db)
         _clear_project_analysis_data(project_db, clear_tables)
@@ -437,6 +438,8 @@ def start_import(multi_db, archive_path: str, publish_fn,
         raise FileNotFoundError(f"Archive not found: {archive_path}")
     if import_mode not in (IMPORT_MODE_SHARE, IMPORT_MODE_RESTORE):
         raise ValueError(f"Invalid import_mode: {import_mode}")
+
+    logger.info(f"[Import] start_import: target={target_project_id!r}, mode={import_mode!r}, archive={archive_path!r}")
 
     import_id = f"import-{uuid.uuid4().hex[:12]}"
     with _import_lock:
