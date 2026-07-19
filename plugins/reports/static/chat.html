@@ -91,9 +91,8 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .doc-annotation .doc-anno-body p{margin:4px 0}
 .doc-view{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .doc-view-body{flex:1;overflow-y:auto;padding:24px 32px;max-width:820px;margin:0 auto;width:100%}
-.doc-view-body.anno-active{cursor:crosshair}
-.doc-view-body.anno-active p,.doc-view-body.anno-active li,.doc-view-body.anno-active h1,.doc-view-body.anno-active h2,.doc-view-body.anno-active h3,.doc-view-body.anno-active h4,.doc-view-body.anno-active blockquote{outline:1px dashed transparent;transition:outline .15s}
-.doc-view-body.anno-active p:hover,.doc-view-body.anno-active li:hover,.doc-view-body.anno-active h1:hover,.doc-view-body.anno-active h2:hover,.doc-view-body.anno-active h3:hover,.doc-view-body.anno-active h4:hover,.doc-view-body.anno-active blockquote:hover{outline-color:var(--accent);cursor:crosshair}
+.doc-annotation{cursor:pointer;transition:border-color .15s}
+.doc-annotation:hover{border-color:var(--accent)}
 .doc-view-body .doc-render{min-height:200px}
 .topbar-back{background:none;border:none;color:var(--accent);cursor:pointer;font-size:var(--ui-font-size);padding:4px 8px;border-radius:var(--radius-md)}
 .topbar-back:hover{background:var(--bg-hover)}
@@ -373,8 +372,8 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
         <template v-else>
           <span class="topbar-badge badge-doc">{{__('chat.documents')}}</span>
           <span class="chat-title doc-title-clickable" @click="openDocEditor" :title="__('chat.docEdit')">{{ viewingDoc.title || viewingDoc.id }}<svg class="edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-          <button class="doc-topbar-btn" :class="{active:annoMode}" @click="toggleAnnoMode" :title="__('chat.docAnnotate')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
-          <button class="doc-topbar-btn" :class="{active:!showAnnotations}" @click="showAnnotations=!showAnnotations" :title="__('chat.docToggleAnno')" v-if="viewingDoc&&hasAnnotations(viewingDoc.content)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
+          <button class="doc-topbar-btn" :class="{active:!showAnnotations}" @click="showAnnotations=!showAnnotations;if(!showAnnotations)editAnnoData=null" :title="__('chat.docToggleAnno')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
+          <button class="doc-topbar-btn" @click="addNewAnnotation" :title="__('chat.docAddAnno')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         </template>
       </div>
       <div class="topbar-right">
@@ -414,23 +413,29 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
     </div>
     <!-- 文档浏览 -->
     <div v-if="viewingDoc" class="doc-view">
-      <div v-if="annoMode" style="padding:6px 16px;font-size:11px;color:var(--text-muted);border-bottom:1px solid var(--border);flex-shrink:0;text-align:center">{{__('chat.docAnnoHint')}}</div>
-      <div class="doc-view-body" ref="docBodyRef" @click="onDocBodyClick" :class="{'anno-active':annoMode}">
+      <div class="doc-view-body" ref="docBodyRef" @click="onDocAnnoClick">
         <div v-if="viewingDoc" class="doc-render" v-html="renderDocMd(viewingDoc.content||'')"></div>
       </div>
     </div>
 
-    <!-- 批注对话框 -->
-    <div v-if="showAnnoDialog" class="modal-overlay" @click.self="showAnnoDialog=false">
-      <div class="modal" style="width:480px">
-        <div class="modal-header"><h3>{{__('chat.docAddAnno')}}</h3><button class="modal-close" @click="showAnnoDialog=false">×</button></div>
+    <!-- 批注编辑对话框 -->
+    <div v-if="editAnnoData" class="modal-overlay" @click.self="editAnnoData=null">
+      <div class="modal" style="width:520px">
+        <div class="modal-header">
+          <h3>{{ editAnnoData.isNew ? __('chat.docAddAnno') : __('chat.docEdit') }}</h3>
+          <span style="flex:1"></span>
+          <span v-if="editAnnoData.id" style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">{{ editAnnoData.id }}</span>
+          <button class="modal-close" @click="editAnnoData=null">×</button>
+        </div>
         <div class="modal-body">
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{__('chat.docAnnoPos')}} {{ annoPosition?.paragraph || '' }}</div>
-          <textarea v-model="annoText" class="doc-textarea" style="width:100%;min-height:120px;font-size:13px;padding:10px;border:1px solid var(--border);border-radius:var(--radius-md);resize:vertical;outline:none;box-sizing:border-box;font-family:inherit" :placeholder="__('chat.docAnnoPlaceholder')"></textarea>
+          <div v-if="editAnnoData.position" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">{{__('chat.docAnnoPos')}} {{ editAnnoData.position }}</div>
+          <textarea v-model="editAnnoData.text" class="doc-textarea" style="width:100%;min-height:120px;font-size:13px;padding:10px;border:1px solid var(--border);border-radius:var(--radius-md);resize:vertical;outline:none;box-sizing:border-box;font-family:inherit" :placeholder="__('chat.docAnnoPlaceholder')"></textarea>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showAnnoDialog=false">{{__('common.cancel')}}</button>
-          <button class="btn btn-primary" @click="confirmAnno">{{__('common.confirm')}}</button>
+          <button v-if="!editAnnoData.isNew" class="btn btn-ghost" style="color:#ef4444" @click="deleteAnnotation(editAnnoData)">{{__('common.delete')}}</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost" @click="editAnnoData=null">{{__('common.cancel')}}</button>
+          <button class="btn btn-primary" @click="saveAnnotation">{{__('common.save')}}</button>
         </div>
       </div>
     </div>
@@ -598,7 +603,7 @@ createApp({
     const streaming=ref(false);const msgArea=ref(null);const tab=ref('chat')
     const viewNoteData=ref(null);const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
     const docs=ref([]);const docSearch=ref('');const currentDoc=ref(null);const showDocEditor=ref(false);const docEditContent=ref('');const docEditTitle=ref('');const docPreview=ref(false)
-    const viewingDoc=ref(null);const annoMode=ref(false);const showAnnoDialog=ref(false);const annoText=ref('');const annoPosition=ref(null);const docBodyRef=ref(null);const showAnnotations=ref(true)
+    const viewingDoc=ref(null);const docBodyRef=ref(null);const showAnnotations=ref(true);const editAnnoData=ref(null)
     const confirmDialog=ref({show:false,title:'',message:'',onOk:null})
     const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
     watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
@@ -1136,8 +1141,8 @@ createApp({
     }
 
     // notes
-    function switchChatTab(){tab.value='chat';viewingDoc.value=null;annoMode.value=false}
-    function switchNotesTab(){tab.value='notes';viewingDoc.value=null;annoMode.value=false;loadNotes();loadPendingDrafts()}
+    function switchChatTab(){tab.value='chat';viewingDoc.value=null}
+    function switchNotesTab(){tab.value='notes';viewingDoc.value=null;loadNotes();loadPendingDrafts()}
     function viewNote(n){
       viewNoteData.value={id:n.id,title:n.title,content:n.content,refs:n.refs||[]}
     }
@@ -1158,10 +1163,9 @@ createApp({
     function viewDoc(d){
       fetch('/api/documents/'+d.id).then(function(r){return r.json()}).then(function(data){
         viewingDoc.value=data
-        annoMode.value=false
       }).catch(function(e){})
     }
-    function closeDocView(){viewingDoc.value=null;annoMode.value=false}
+    function closeDocView(){viewingDoc.value=null;editAnnoData.value=null}
     function openDocEditor(){
       if(!viewingDoc.value)return
       currentDoc.value=viewingDoc.value
@@ -1170,43 +1174,47 @@ createApp({
       docPreview.value=false
       showDocEditor.value=true
     }
-    function toggleAnnoMode(){annoMode.value=!annoMode.value}
-    function onDocBodyClick(ev){
-      if(!annoMode.value||!viewingDoc.value)return
+    // 批注交互：点击批注块编辑 / 点击 + 号新建
+    function onDocAnnoClick(ev){
+      if(!viewingDoc.value||!showAnnotations.value)return
       var el=ev.target
-      var blockEl=el.closest('[data-md-block]')
-      if(!blockEl)return
-      if(el.closest('pre,code,.diagram-container,.mermaid,table,.doc-annotation')){
-        alert('批注只能插入到正文段落、列表项和标题下方。\n\n不可插入的位置：\n• 代码段（```代码块```）\n• 图表（Mermaid / PlantUML）\n• 表格\n• 已有批注内部\n\n请点击正文段落、列表项或标题后再试。')
-        return
-      }
-      var idx=parseInt(blockEl.dataset.mdBlock)
-      if(isNaN(idx)||idx<0||idx>=_mdBlocks.length)return
-      var blockText=_mdBlocks[idx]
-      annoPosition.value={blockIdx:idx,blockText:blockText.slice(0,80)+(blockText.length>80?'...':'')}
-      annoText.value=''
-      showAnnoDialog.value=true
+      var annoEl=el.closest('.doc-annotation')
+      if(!annoEl)return
+      var id=annoEl.dataset?.annoId||''
+      var bodyEl=annoEl.querySelector('.doc-anno-body')
+      var text=bodyEl?bodyEl.textContent.trim():''
+      editAnnoData.value={id:id,text:text,position:'',isNew:false}
     }
-    function confirmAnno(){
-      if(!annoText.value.trim()||!viewingDoc.value)return
-      var id='ann_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)
-      var tag='\n<!-- annotation:'+id+' -->\n'+annoText.value+'\n<!-- /annotation -->\n'
+    function addNewAnnotation(){
+      if(!viewingDoc.value)return
+      editAnnoData.value={id:'',text:'',position:'',isNew:true}
+    }
+    function saveAnnotation(){
+      var data=editAnnoData.value
+      if(!data||!viewingDoc.value)return
       var md=viewingDoc.value.content||''
-      var pos=annoPosition.value
-      if(pos&&pos.blockIdx!=null){
-        // 按分块定位：在原始 MD 中找到第 N 个块的位置，插入在其后
-        var blocks=md.split(/\n{2,}/).map(function(b){return b.trim()}).filter(function(b){return b})
-        var insertAt=0
-        for(var i=0;i<=pos.blockIdx&&i<blocks.length;i++){
-          var foundIdx=md.indexOf(blocks[i],insertAt)
-          if(foundIdx<0){insertAt=md.length;break}
-          insertAt=foundIdx+blocks[i].length
-        }
-        viewingDoc.value.content=md.slice(0,insertAt)+'\n'+tag+md.slice(insertAt)
+      if(data.isNew){
+        var id='ann_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)
+        var tag='\n<!-- annotation:'+id+' -->\n'+(data.text||'')+'\n<!-- /annotation -->\n'
+        viewingDoc.value.content=md+tag
       }else{
-        viewingDoc.value.content=md+'\n'+tag
+        // 更新已有批注
+        var pat=new RegExp('(<!--\\s*annotation:'+data.id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*-->)[\\s\\S]*?(<!--\\s*/annotation\\s*-->)')
+        var m=md.match(pat)
+        if(m){
+          viewingDoc.value.content=md.slice(0,m.index+m[1].length)+'\n'+(data.text||'')+'\n'+md.slice(m.index+m[1].length+1+m[0].length-m[1].length-m[2].length)
+        }
       }
-      annoText.value='';showAnnoDialog.value=false;annoMode.value=false
+      editAnnoData.value=null
+      fetch('/api/documents/'+viewingDoc.value.id,{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({content:viewingDoc.value.content})}).catch(function(e){})
+    }
+    function deleteAnnotation(data){
+      if(!data||!data.id||!viewingDoc.value)return
+      var md=viewingDoc.value.content||''
+      var pat=new RegExp('\\n?<!--\\s*annotation:'+data.id.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->\\n?')
+      viewingDoc.value.content=md.replace(pat,'')
+      editAnnoData.value=null
       fetch('/api/documents/'+viewingDoc.value.id,{method:'PUT',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({content:viewingDoc.value.content})}).catch(function(e){})
     }
@@ -1228,7 +1236,7 @@ createApp({
       showConfirm(__('common.confirm'),__('chat.docDeleteConfirm')+'\n「'+label+'」('+id+')',async function(){
         try{
           await fetch('/api/documents/'+id,{method:'DELETE'})
-          if(viewingDoc.value&&viewingDoc.value.id===id){viewingDoc.value=null;annoMode.value=false}
+          if(viewingDoc.value&&viewingDoc.value.id===id){viewingDoc.value=null}
           loadDocs()
         }catch(e){}
       })
@@ -1238,28 +1246,41 @@ createApp({
     function splitAnnotations(t,show){
       if(!show)return t.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g,'')
       return t.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
-        function(m,id,text){return '<div class="doc-annotation"><span class="doc-anno-marker"></span><div class="doc-anno-body">'+marked.parse(text.trim())+'</div></div>'})
+        function(m,id,text){return '<div class="doc-annotation" data-anno-id="'+id+'"><span class="doc-anno-marker"></span><div class="doc-anno-body">'+marked.parse(text.trim())+'</div></div>'})
     }
     // 基于分块的文档渲染 — 每块包裹 <div data-md-block="N"> 精确定位批注插入点
-    var _mdBlocks=[]
+    var _mdBlocks=[]       // 每块的原始 MD 文本
+    var _mdBlockOffsets=[] // 每块在原始 MD 中的起始位置
     function renderDocMd(t){
-      _mdBlocks=[]
+      _mdBlocks=[];_mdBlockOffsets=[]
       if(!t)return''
-      // 拆分 MD 为顶层块（按双换行分割，但保留代码块/列表等）
       var raw=t
-      // 先替换已有批注为占位符，避免批注内容被拆分
-      raw=raw.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g,function(m){return '\n<!-- ANNO_KEEP -->\n'+m+'\n<!-- /ANNO_KEEP -->\n'})
-      var blocks=raw.split(/\n{2,}/)
+      // 在原始 MD 中逐块定位（先扫描已有批注做偏移调整，但 block 索引基于原始文本）
+      var annoPat=/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/
+      // 用标记替换已有批注后再拆分
+      var prepared=raw.replace(annoPat,function(m){return '\n<!-- ANNO_KEEP -->\n'+m+'\n<!-- /ANNO_KEEP -->\n'})
+      var parts=prepared.split(/\n{2,}/)
       var htmls=[]
-      for(var i=0;i<blocks.length;i++){
-        var b=blocks[i].trim()
+      var cursor=0 // 在原始 raw 中的扫描游标
+      for(var i=0;i<parts.length;i++){
+        var b=parts[i].trim()
         if(!b)continue
-        // 跳过纯批注占位
-        if(/^<!-- ANNO_KEEP -->/.test(b)){htmls.push(b.replace(/<!-- ANNO_KEEP -->([\s\S]*)<!-- \/ANNO_KEEP -->/,'$1'));continue}
+        // 跳过纯批注占位（它们在 raw 中对应的文本我们需要定位）
+        if(/^<!-- ANNO_KEEP -->/.test(b)){
+          var annoRaw=b.replace(/<!-- ANNO_KEEP -->([\s\S]*)<!-- \/ANNO_KEEP -->/,'$1')
+          htmls.push(annoRaw)
+          // 在 raw 中跳过这段
+          var skipIdx=raw.indexOf(annoRaw,cursor)
+          if(skipIdx>=0)cursor=skipIdx+annoRaw.length
+          continue
+        }
+        // 在 raw 中找到 b 的精确位置
+        var pos=raw.indexOf(b,cursor)
+        if(pos<0){pos=raw.indexOf(b);if(pos<0)pos=cursor}
         _mdBlocks.push(b)
+        _mdBlockOffsets.push(pos)
+        cursor=pos+b.length
         var rendered=marked.parse(b)
-        // 恢复批注占位
-        rendered=rendered.replace(/<!-- ANNO_KEEP -->([\s\S]*?)<!-- \/ANNO_KEEP -->/g,function(m,c){return c})
         htmls.push('<div data-md-block="'+( _mdBlocks.length-1)+'">'+rendered+'</div>')
       }
       return splitAnnotations(htmls.join('\n'),showAnnotations.value)
@@ -1280,9 +1301,11 @@ createApp({
     async function saveMsgAsDoc(m){
       var title=prompt(__('chat.docSaveAs'), m.content.slice(0,40)+'...')
       if(!title)return
+      // 首次保存时预置批注占位符（为每段末尾添加 ann:slot 标记）
+      var content=m.content.replace(/\n\n/g,'\n\n<!-- ann:slot -->\n\n')+'\n\n<!-- ann:slot -->'
       try{
         var r=await fetch('/api/documents',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({title:title,content:m.content})})
+          body:JSON.stringify({title:title,content:content})})
         var d=await r.json()
         if(d.ok)alert(__('common.operationSuccess'))
       }catch(e){alert(__('common.operationFailed'))}
@@ -1439,7 +1462,7 @@ createApp({
           if(saved){
             if(saved.docId){
               fetch('/api/documents/'+saved.docId).then(function(r){return r.json()}).then(function(data){
-                viewingDoc.value=data;annoMode.value=false;tab.value='docs'
+                viewingDoc.value=data;tab.value='docs'
               }).catch(function(){})
             }else if(saved.sessionId){
               currentId.value=saved.sessionId;tab.value=saved.tab||'chat'
@@ -1487,8 +1510,9 @@ createApp({
       continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip,
       docs,docSearch,currentDoc,showDocEditor,docEditTitle,docEditContent,docPreview,
       switchDocTab,switchChatTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc,
-      viewingDoc,annoMode,showAnnoDialog,annoText,docBodyRef,showAnnotations,confirmDialog,showConfirm,
-      closeDocView,openDocEditor,toggleAnnoMode,onDocBodyClick,confirmAnno,hasAnnotations}
+      viewingDoc,docBodyRef,showAnnotations,confirmDialog,showConfirm,editAnnoData,
+      closeDocView,openDocEditor,hasAnnotations,
+      onDocAnnoClick,addNewAnnotation,saveAnnotation,deleteAnnotation}
   }
 }).mount('#app')
 </script>

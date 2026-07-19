@@ -176,9 +176,8 @@
         docEditor:'MD 编辑器', docPreview:'预览',
         docNoTitle:'无标题文档', docNoDocs:'暂无文档',
         copyDocId:'复制文档ID',
-        docAnnotate:'批注', docAnnoHint:'点击文档中要插入批注的位置', docAddAnno:'添加批注',
-        docAnnoPos:'插入位置:', docAnnoPlaceholder:'输入批注内容…',
-        docToggleAnno:'显示/隐藏批注',
+        docAddAnno:'添加批注', docAnnoPlaceholder:'输入批注内容…',
+        docToggleAnno:'显示/隐藏批注', docAnnoDelete:'删除批注',
         deleteSessionConfirm:'确定要删除此会话吗？',
       },
       // web_server.py index 页面
@@ -357,9 +356,8 @@
         docEditor:'MD Editor', docPreview:'Preview',
         docNoTitle:'Untitled', docNoDocs:'No documents yet',
         copyDocId:'Copy Document ID',
-        docAnnotate:'Annotate', docAnnoHint:'Click on the document to insert annotation', docAddAnno:'Add Annotation',
-        docAnnoPos:'Position:', docAnnoPlaceholder:'Enter annotation text…',
-        docToggleAnno:'Show/Hide annotations',
+        docAddAnno:'Add Annotation', docAnnoPlaceholder:'Enter annotation text…',
+        docToggleAnno:'Show/Hide annotations', docAnnoDelete:'Delete Annotation',
         deleteSessionConfirm:'Delete this session?',
       },
       index: {
