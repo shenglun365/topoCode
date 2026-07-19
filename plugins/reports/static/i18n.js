@@ -177,6 +177,7 @@
         docNoTitle:'无标题文档', docNoDocs:'暂无文档',
         docAnnotate:'批注', docAnnoHint:'点击文档中要插入批注的位置', docAddAnno:'添加批注',
         docAnnoPos:'插入位置:', docAnnoPlaceholder:'输入批注内容…',
+        docToggleAnno:'显示/隐藏批注',
       },
       // web_server.py index 页面
       index: {
@@ -355,6 +356,7 @@
         docNoTitle:'Untitled', docNoDocs:'No documents yet',
         docAnnotate:'Annotate', docAnnoHint:'Click on the document to insert annotation', docAddAnno:'Add Annotation',
         docAnnoPos:'Position:', docAnnoPlaceholder:'Enter annotation text…',
+        docToggleAnno:'Show/Hide annotations',
       },
       index: {
         title: 'TopoCode Documents',

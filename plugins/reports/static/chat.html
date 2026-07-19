@@ -356,6 +356,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
           <span class="chat-title">{{ viewingDoc.title || __('chat.docNoTitle') }}</span>
           <button class="doc-topbar-btn" @click="openDocEditor" :title="__('chat.docEdit')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
           <button class="doc-topbar-btn" :class="{active:annoMode}" @click="toggleAnnoMode" :title="__('chat.docAnnotate')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+          <button class="doc-topbar-btn" :class="{active:!showAnnotations}" @click="showAnnotations=!showAnnotations" :title="__('chat.docToggleAnno')" v-if="viewingDoc&&hasAnnotations(viewingDoc.content)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
         </template>
       </div>
       <div class="topbar-right">
@@ -561,7 +562,7 @@ createApp({
     const streaming=ref(false);const msgArea=ref(null);const tab=ref('chat')
     const viewNoteData=ref(null);const pendingDrafts=ref([]);const pendingRefs=ref([]);const deleteMode=ref(false);const selectedIds=ref(new Set())
     const docs=ref([]);const docSearch=ref('');const currentDoc=ref(null);const showDocEditor=ref(false);const docEditContent=ref('');const docEditTitle=ref('');const docPreview=ref(false)
-    const viewingDoc=ref(null);const annoMode=ref(false);const showAnnoDialog=ref(false);const annoText=ref('');const annoPosition=ref(null);const docBodyRef=ref(null)
+    const viewingDoc=ref(null);const annoMode=ref(false);const showAnnoDialog=ref(false);const annoText=ref('');const annoPosition=ref(null);const docBodyRef=ref(null);const showAnnotations=ref(true)
     const contextLimit=ref(parseInt(localStorage.getItem('topo_context_limit')||'32000'))
     watch(contextLimit,function(val){try{localStorage.setItem('topo_context_limit',String(val))}catch(e){}})
     const fontSize=ref(localStorage.getItem('topoone-font-size')||'18')
@@ -1178,12 +1179,13 @@ createApp({
       try{await fetch('/api/documents/'+id,{method:'DELETE'});loadDocs()}catch(e){}
     }
     function toggleDocPreview(){docPreview.value=!docPreview.value}
-    function splitAnnotations(t){
-      // 将 <!-- annotation:id -->...<!-- /annotation --> 替换为可渲染的 HTML 标记
+    function hasAnnotations(t){return t&&/<!--\s*annotation:/i.test(t)}
+    function splitAnnotations(t,show){
+      if(!show)return t.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g,'')
       return t.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
         function(m,id,text){return '<div class="doc-annotation"><span class="doc-anno-marker"></span><div class="doc-anno-body">'+marked.parse(text.trim())+'</div></div>'})
     }
-    function renderDocMd(t){return t?splitAnnotations(marked.parse(t)):''}
+    function renderDocMd(t){return t?splitAnnotations(marked.parse(t),showAnnotations.value):''}
     function stopStream(){
       if(_currentAbort){
         _currentAbort.abort()
@@ -1368,8 +1370,8 @@ createApp({
       continueAssistant,contextLimit,fontSize,onFontSizeChange,onInputKeydown,onInputChange,copyId,activeDeleteMsg,showDeleteMenu,confirmSingleDelete,enterBatchMode,copyMessageContent,quoteMessage,stopStream,notePreview,noteTooltip,
       docs,docSearch,currentDoc,showDocEditor,docEditTitle,docEditContent,docPreview,
       switchDocTab,loadDocs,viewDoc,saveDoc,deleteDoc,toggleDocPreview,renderDocMd,saveMsgAsDoc,
-      viewingDoc,annoMode,showAnnoDialog,annoText,docBodyRef,
-      closeDocView,openDocEditor,toggleAnnoMode,onDocBodyClick,confirmAnno}
+      viewingDoc,annoMode,showAnnoDialog,annoText,docBodyRef,showAnnotations,
+      closeDocView,openDocEditor,toggleAnnoMode,onDocBodyClick,confirmAnno,hasAnnotations}
   }
 }).mount('#app')
 </script>
