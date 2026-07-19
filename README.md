@@ -29,6 +29,23 @@ TopoCode 不是一句提示词生成架构图的效率工具，而是帮助你�
 - **Web 文档服务** — 本地 HTTP 服务（默认 3456 端口），浏览器中浏览架构文档和使用 AI 对话
 - **多语言支持** — 中文 / English 界面与 AI 分析输出
 
+> **补充说明 — 代码生成项目**：TopoCode 直接解析磁盘上的源码文件，不依赖完整编译环境。如果项目包含代码生成步骤（如 protobuf、graphql-codegen、`go generate` 等），生成的源码不在原始代码中，直接导入不会包含这些生成文件。**如需更全面的分析**，可在导入前手动执行代码生成命令，使生成的源码纳入分析范围。请按需分析，不必强求覆盖所有生成代码。
+>
+> 常见代码生成命令示例：
+>
+> | 语言 | 典型代码生成场景 | 导入前可执行 |
+> |---|---|---|
+> | C / C++ | autoconf 生成 config.h / yacc / bison / flex / Qt MOC / protobuf | `./configure` / `bison -d parser.y` / `moc header.h` / `protoc --cpp_out=.` |
+> | Go | stringer / mockgen / protobuf | `go generate ./...` / `protoc --go_out=.` |
+> | TypeScript | graphql-codegen / protobuf-ts / openapi-generator | `npx graphql-codegen` / `protoc --ts_out=.` |
+> | Dart | freezed / json_serializable / drift / protobuf | `dart run build_runner build` / `protoc --dart_out=.` |
+> | Java | protobuf / Dagger / MapStruct 等注解处理器 | `protoc --java_out=.` |
+> | Kotlin | protobuf / KSP | `protoc --kotlin_out=.` |
+> | Swift | protobuf / Sourcery | `protoc --swift_out=.` / `sourcery --sources ...` |
+> | C# | protobuf / T4 模板 | `protoc --csharp_out=.` |
+> | Python | protobuf / Cython | `protoc --python_out=.` |
+> | 其他语言 | protobuf / thrift / gRPC 等代码生成器 | 对应语言代码生成命令 |
+
 ---
 
 ## 技术栈

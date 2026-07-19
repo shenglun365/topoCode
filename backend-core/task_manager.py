@@ -2368,7 +2368,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         if not task:
             return {"taskId": tid, "found": False}
         pid = task["project_id"]
-        project_db = multi_db.get_project_db(pid)
+        try:
+            project_db = multi_db.get_project_db(pid)
+        except Exception:
+            logger.warning(f"[get_progress_stats] project {pid} not accessible (task {tid}), returning empty")
+            return {"taskId": tid, "found": True, "done_files": 0, "total_files": 0,
+                    "done_comps": 0, "total_comps": 0, "cached_count": 0,
+                    "batch_files": {}, "failed_count": 0}
         if not project_db:
             return {"taskId": tid, "found": False}
 

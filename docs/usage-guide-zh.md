@@ -60,6 +60,23 @@
 3. 在弹出的对话框中选择项目的**本地源码目录**
 4. 系统自动扫描目录结构并开始导入
 
+> **💡 关于代码生成项目**：TopoCode 直接解析磁盘上的源码文件，不会自动执行构建或代码生成流程。部分项目包含代码生成步骤（如 protobuf、graphql-codegen、`go generate` 等），生成的源码不在原始代码目录中，直接导入不会包含这些文件。**如需更完整的分析**，可在导入前手动执行代码生成命令。请**按需选择**，不必强求覆盖全部生成代码。
+>
+> 常见代码生成命令示例：
+>
+> | 语言 | 典型代码生成场景 | 导入前可执行 |
+> |---|---|---|
+> | C / C++ | autoconf 生成 config.h / yacc / bison / flex / Qt MOC / protobuf | `./configure` / `bison -d parser.y` / `moc header.h` / `protoc --cpp_out=.` |
+> | Go | stringer / mockgen / protobuf | `go generate ./...` / `protoc --go_out=.` |
+> | TypeScript | graphql-codegen / protobuf-ts / openapi-generator | `npx graphql-codegen` / `protoc --ts_out=.` |
+> | Dart | freezed / json_serializable / drift / protobuf | `dart run build_runner build` / `protoc --dart_out=.` |
+> | Java | protobuf / Dagger / MapStruct 等注解处理器 | `protoc --java_out=.` |
+> | Kotlin | protobuf / KSP | `protoc --kotlin_out=.` |
+> | Swift | protobuf / Sourcery | `protoc --swift_out=.` / `sourcery --sources ...` |
+> | C# | protobuf / T4 模板 | `protoc --csharp_out=.` |
+> | Python | protobuf / Cython | `protoc --python_out=.` |
+> | 其他语言 | protobuf / thrift / gRPC 等代码生成器 | 对应语言代码生成命令 |
+
 ### 导入过程
 
 - 扫描文件类型、统计代码行数

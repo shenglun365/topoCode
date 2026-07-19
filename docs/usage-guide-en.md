@@ -60,6 +60,23 @@ Open `http://localhost:3456` in a browser to confirm the Web document service is
 3. Select the **local source directory** of your project
 4. The system will scan the directory structure and begin importing
 
+> **💡 About code generation**: TopoCode parses source files from disk and does not automatically run build or codegen steps. If your project includes code generation (e.g., protobuf, graphql-codegen, `go generate`, etc.), those generated sources aren't present in the original code and won't be analyzed by default. **For a more complete analysis**, you may run the codegen commands before importing. Choose based on your needs — there's no need to cover every generated file.
+>
+> Common code generation command examples:
+>
+> | Language | Typical Codegen Scenario | May Run Before Import |
+> |---|---|---|
+> | C / C++ | autoconf config.h / yacc / bison / flex / Qt MOC / protobuf | `./configure` / `bison -d parser.y` / `moc header.h` / `protoc --cpp_out=.` |
+> | Go | stringer / mockgen / protobuf | `go generate ./...` / `protoc --go_out=.` |
+> | TypeScript | graphql-codegen / protobuf-ts / openapi-generator | `npx graphql-codegen` / `protoc --ts_out=.` |
+> | Dart | freezed / json_serializable / drift / protobuf | `dart run build_runner build` / `protoc --dart_out=.` |
+> | Java | protobuf / Dagger / MapStruct annotation processors | `protoc --java_out=.` |
+> | Kotlin | protobuf / KSP | `protoc --kotlin_out=.` |
+> | Swift | protobuf / Sourcery | `protoc --swift_out=.` / `sourcery --sources ...` |
+> | C# | protobuf / T4 templates | `protoc --csharp_out=.` |
+> | Python | protobuf / Cython | `protoc --python_out=.` |
+> | Other | protobuf / thrift / gRPC codegen for any language | Corresponding codegen command |
+
 ### Import Process
 
 - Scan file types and count lines of code

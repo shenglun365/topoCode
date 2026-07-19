@@ -29,6 +29,23 @@ TopoCode is not a one-shot efficiency tool that generates architecture diagrams 
 - **Web Document Service & AI Chat** — Local HTTP server (default port 3456) for browsing architecture documents and using the AI assistant in a browser
 - **Internationalization** — Chinese / English interface and AI analysis output
 
+> **Note — projects with code generation**: TopoCode parses source files directly from disk and does not require a full build environment. If your project has code generation steps (e.g., protobuf, graphql-codegen, `go generate`, etc.), the generated sources are not part of the original code and won't be included in analysis by default. **For a more comprehensive analysis**, you may run the code generation commands before importing. Analyze based on your needs — covering every generated file is not necessary.
+>
+> Common code generation command examples:
+>
+> | Language | Typical Codegen Scenario | May Run Before Import |
+> |---|---|---|
+> | C / C++ | autoconf config.h / yacc / bison / flex / Qt MOC / protobuf | `./configure` / `bison -d parser.y` / `moc header.h` / `protoc --cpp_out=.` |
+> | Go | stringer / mockgen / protobuf | `go generate ./...` / `protoc --go_out=.` |
+> | TypeScript | graphql-codegen / protobuf-ts / openapi-generator | `npx graphql-codegen` / `protoc --ts_out=.` |
+> | Dart | freezed / json_serializable / drift / protobuf | `dart run build_runner build` / `protoc --dart_out=.` |
+> | Java | protobuf / Dagger / MapStruct annotation processors | `protoc --java_out=.` |
+> | Kotlin | protobuf / KSP | `protoc --kotlin_out=.` |
+> | Swift | protobuf / Sourcery | `protoc --swift_out=.` / `sourcery --sources ...` |
+> | C# | protobuf / T4 templates | `protoc --csharp_out=.` |
+> | Python | protobuf / Cython | `protoc --python_out=.` |
+> | Other | protobuf / thrift / gRPC codegen for any language | Corresponding codegen command |
+
 ---
 
 ## Tech Stack

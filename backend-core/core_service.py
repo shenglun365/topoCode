@@ -404,6 +404,12 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     def remove_project(id: str):
         if not id or id == "undefined":
             raise ValueError(f"Invalid project id: {id}")
+        # 删除与分析任务相关的运行记录
+        tasks = main_db.fetchall("SELECT id FROM analysis_tasks WHERE project_id=?", (id,))
+        for t in tasks:
+            main_db.delete("analysis_task_runs", "task_id=?", (t["id"],))
+        # 删除分析任务
+        main_db.delete("analysis_tasks", "project_id=?", (id,))
         # 删除项目库
         multi_db.delete_project_db(id)
         # 删除主库记录
