@@ -444,18 +444,19 @@ class LLMService:
                                 'result': result,
                             })
                             # 构造 tool message 追加到 messages
+                            _tc_id = f"call_{_make_id()}"
                             messages.append({
                                 'role': 'assistant',
                                 'content': None,
                                 'tool_calls': [{
-                                    'id': f"call_{_make_id()}",
+                                    'id': _tc_id,
                                     'type': 'function',
                                     'function': {'name': tool_name, 'arguments': json.dumps(tool_args, ensure_ascii=False)},
                                 }]
                             })
                             messages.append({
                                 'role': 'tool',
-                                'tool_call_id': f"call_{_make_id()}",
+                                'tool_call_id': _tc_id,
                                 'content': json.dumps(result, ensure_ascii=False, default=str),
                             })
                         tool_round += 1
