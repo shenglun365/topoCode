@@ -626,6 +626,23 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.send('log:error', source, message, data)
     },
   },
+
+  // ==================== 崩溃报告 ====================
+  crash: {
+    list: () => ipcRenderer.invoke('crash:list'),
+    dismiss: (id: string) => ipcRenderer.invoke('crash:dismiss', id),
+    report: (id: string) => ipcRenderer.invoke('crash:report', id),
+    onNew: (callback: (data: any) => void) => {
+      const listener = (_: any, data: any) => callback(data)
+      ipcRenderer.on('crash:new', listener)
+      return () => ipcRenderer.removeListener('crash:new', listener)
+    },
+    onPending: (callback: (data: any) => void) => {
+      const listener = (_: any, data: any) => callback(data)
+      ipcRenderer.on('crash:pending', listener)
+      return () => ipcRenderer.removeListener('crash:pending', listener)
+    },
+  },
 })
 
 // Window API 类型由 src/types/ipc.ts 中的 IPCAPI 统一声明

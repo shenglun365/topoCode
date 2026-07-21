@@ -5,12 +5,14 @@ import { useStatusStore } from '@/stores/status'
 import { useSettingsStore } from '@/stores/settings-store'
 import { useModelConfigStore } from '@/stores/model-config-store'
 import { useComponentId } from '@/composables/useComponentId'
+import { useCrashReportStore } from '@/stores/crashReport'
 
 const { showId, componentId } = useComponentId('SH-006')
 const { t } = useI18n()
 const status = useStatusStore()
 const settings = useSettingsStore()
 const modelConfigStore = useModelConfigStore()
+const crashStore = useCrashReportStore()
 const testing = ref(false)
 
 const defaultModel = computed(() => modelConfigStore.models.find(m => m.isDefault) || modelConfigStore.models[0] || null)
@@ -35,6 +37,15 @@ async function testModelStatus() {
 
 <template>
   <footer class="status-bar">
+    <div
+      v-if="crashStore.hasCrash"
+      class="status-item crash-indicator"
+      :title="crashStore.latestCrash?.summary"
+      @click="crashStore.openCrash(crashStore.latestCrash!)"
+    >
+      <span class="status-dot status-error blink" />
+      <span>后端异常</span>
+    </div>
     <span
       v-if="showId"
       class="cmp-id"
@@ -161,6 +172,15 @@ async function testModelStatus() {
 .status-dot.status-restarting {
   background: var(--warning);
   animation: status-blink 0.8s ease-in-out infinite;
+}
+.status-dot.blink {
+  animation: status-blink 0.8s ease-in-out infinite;
+}
+.crash-indicator {
+  cursor: pointer;
+}
+.crash-indicator:hover {
+  color: var(--error);
 }
 @keyframes status-blink {
   0%, 100% { opacity: 1; }

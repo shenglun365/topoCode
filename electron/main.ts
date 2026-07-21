@@ -4,7 +4,7 @@ import { app, ipcMain, dialog, shell, BrowserWindow, net } from 'electron'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { windowManager } from './window-manager'
-import { pythonBridge, HTTP_PORT } from './python-bridge'
+import { pythonBridge, HTTP_PORT, listPendingCrashes, dismissCrash, type CrashReport } from './python-bridge'
 import { zmqRouter } from './zmq-router'
 import { initUpdater, checkForUpdates, downloadUpdate, quitAndInstall } from './updater'
 
@@ -279,11 +279,50 @@ function setupIPC() {
     quitAndInstall()
     return true
   })
+
+  // ---- 崩溃报告 ----
+  ipcMain.handle('crash:list', () => {
+    return listPendingCrashes()
+  })
+
+  ipcMain.handle('crash:dismiss', (_, id: string) => {
+    dismissCrash(id)
+    return true
+  })
+
+  ipcMain.handle('crash:report', async (_, id: string) => {
+    const crashes = listPendingCrashes()
+    const crash = crashes.find(c => c.id === id)
+    if (!crash) return false
+
+    const subject = encodeURIComponent(`TopoCode Crash Report - ${crash.summary}`)
+    const body = encodeURIComponent(
+      `Application: TopoCode\n` +
+      `Version: ${app.getVersion()}\n` +
+      `Time: ${crash.timestamp}\n` +
+      `Error: ${crash.summary}\n` +
+      `Exit Code: ${crash.exitCode}\n` +
+      `Signal: ${crash.signal}\n\n` +
+      `日志目录: ${join(app.getPath('userData'), 'logs')}\n\n` +
+      `请附上日志目录中的文件以便排查问题。`
+    )
+    await shell.openExternal(`mailto:topocode@163.com?subject=${subject}&body=${body}`)
+
+    // 上报后删除 crash 文件
+    dismissCrash(id)
+    return true
+  })
 }
 
 // ==================== 应用生命周期 ====================
 
 app.whenReady().then(async () => {
+  // 扫描待处理的崩溃报告，通知渲染进程
+  const pendingCrashes = listPendingCrashes()
+  if (pendingCrashes.length > 0) {
+    console.log(`[Main] Found ${pendingCrashes.length} pending crash report(s)`)
+  }
+
   // 初始化 ZMQ Router
   await zmqRouter.connect()
 
@@ -308,6 +347,16 @@ app.whenReady().then(async () => {
 
   // 创建第一个窗口
   windowManager.createWindow()
+
+  // 通知渲染进程待处理的崩溃报告
+  if (pendingCrashes.length > 0) {
+    windowManager.broadcast('crash:pending', pendingCrashes)
+  }
+
+  // 监听运行时崩溃事件，转发到渲染进程
+  pythonBridge.onCrash((report: CrashReport) => {
+    windowManager.broadcast('crash:new', report)
+  })
 
   // 初始化 auto-updater
   const win = windowManager.getMainWindow()

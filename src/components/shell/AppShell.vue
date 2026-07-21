@@ -16,6 +16,7 @@ import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@/composables/useComponentId'
 import { useConfirm } from '@/composables/useConfirm'
 import { useAnalysisStore } from '@/stores/analysis'
+import { useCrashReportStore } from '@/stores/crashReport'
 
 const { t } = useI18n()
 
@@ -26,6 +27,7 @@ const navigation = useNavigationStore()
 const funcGroup = useFuncGroupStore()
 const statusStore = useStatusStore()
 const panelStore = usePanelStore()
+const crashReportStore = useCrashReportStore()
 
 // 路由 path 到功能组 ID 的映射
 const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
@@ -97,6 +99,9 @@ onMounted(async () => {
       }
         } catch (_) {}
 
+  // 初始化崩溃报告存储
+  crashReportStore.init()
+
   // 订阅后端推送事件
   try {
     useAnalysisStore().subscribeToEvents()
@@ -141,6 +146,7 @@ watch(
 
 onUnmounted(() => {
   controlDispatcher.unregister('backend-status')
+  crashReportStore.cleanup()
 });
 </script>
 
@@ -261,6 +267,41 @@ onUnmounted(() => {
 
     <!-- 底部状态栏 -->
     <StatusBar v-show="!panelStore.isFullscreen && !isAuthPage" />
+
+    <!-- 崩溃报告弹窗 -->
+    <div
+      v-if="crashReportStore.showDialog && crashReportStore.selectedCrash"
+      class="confirm-overlay"
+      @click.self="crashReportStore.closeDialog"
+    >
+      <div class="confirm-box crash-dialog">
+        <h3 class="crash-dialog-title">后端异常崩溃</h3>
+        <div class="crash-dialog-body">
+          <p>后端服务异常退出，错误信息：</p>
+          <pre class="crash-detail">{{ crashReportStore.selectedCrash.summary }}</pre>
+          <p class="crash-time">
+            时间：{{ crashReportStore.selectedCrash.timestamp }}
+          </p>
+          <p class="crash-hint">
+            点击"上报"将打开邮件客户端，请附上日志文件以便排查。
+          </p>
+        </div>
+        <div class="confirm-actions">
+          <button
+            class="confirm-btn confirm-btn-primary"
+            @click="crashReportStore.report(crashReportStore.selectedCrash!)"
+          >
+            上报给开发者
+          </button>
+          <button
+            class="confirm-btn"
+            @click="crashReportStore.dismiss(crashReportStore.selectedCrash!)"
+          >
+            忽略
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 新手引导 -->
     <OnboardingTour />
@@ -552,5 +593,39 @@ onUnmounted(() => {
 
 .confirm-btn-primary:hover {
   background: #6d28d9;
+}
+
+/* 崩溃报告弹窗 */
+.crash-dialog {
+  max-width: 480px;
+}
+.crash-dialog-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  color: var(--error);
+}
+.crash-dialog-body p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.crash-detail {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0 0 8px;
+}
+.crash-time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.crash-hint {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 </style>

@@ -3,7 +3,7 @@
 import { spawn, ChildProcess } from 'child_process'
 import { app } from 'electron'
 import { join, delimiter } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, unlinkSync } from 'fs'
 
 export const HTTP_PORT = 3456
 
@@ -16,10 +16,67 @@ export interface BackendStatus {
   error?: string
 }
 
+export interface CrashReport {
+  id: string
+  timestamp: string
+  exitCode: number | null
+  signal: string | null
+  summary: string
+}
+
+let _crashIdCounter = 0
+function _crashId(): string {
+  return `${Date.now()}-${++_crashIdCounter}`
+}
+
+function getCrashDir(): string {
+  const dir = join(app.getPath('userData'), 'crashes')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function saveCrashReport(report: CrashReport): void {
+  try {
+    const crashDir = getCrashDir()
+    const filePath = join(crashDir, `${report.id}.json`)
+    writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf-8')
+  } catch (e) {
+    console.error('[CrashReport] Failed to save:', e)
+  }
+}
+
+export function listPendingCrashes(): CrashReport[] {
+  try {
+    const crashDir = getCrashDir()
+    const files = readdirSync(crashDir).filter(f => f.endsWith('.json'))
+    return files.map(f => {
+      try {
+        const content = require('fs').readFileSync(join(crashDir, f), 'utf-8')
+        return JSON.parse(content) as CrashReport
+      } catch {
+        return null
+      }
+    }).filter(Boolean) as CrashReport[]
+  } catch {
+    return []
+  }
+}
+
+export function dismissCrash(id: string): void {
+  try {
+    const crashDir = getCrashDir()
+    const filePath = join(crashDir, `${id}.json`)
+    if (existsSync(filePath)) unlinkSync(filePath)
+  } catch (e) {
+    console.error('[CrashReport] Failed to dismiss:', e)
+  }
+}
+
 export class PythonBridge {
   private process: ChildProcess | null = null
   private _state: BridgeState = 'stopped'
   private listeners: Array<(status: BackendStatus) => void> = []
+  private crashListeners: Array<(report: CrashReport) => void> = []
   public memoryLimit: number = 4096
   public httpHost: string = '127.0.0.1'
   public httpPort: number = 3456
@@ -155,6 +212,18 @@ export class PythonBridge {
 
       this.process.on('exit', (code, signal) => {
         console.error(`[PythonBridge] Process exited code=${code} signal=${signal}`)
+        const abnormal = code !== 0 || signal !== null
+        if (this.state !== 'stopping' && abnormal) {
+          const report: CrashReport = {
+            id: _crashId(),
+            timestamp: new Date().toISOString(),
+            exitCode: code,
+            signal: signal,
+            summary: `Process exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`,
+          }
+          saveCrashReport(report)
+          this.emitCrash(report)
+        }
         if (this.state !== 'stopping') {
           this.process = null
           this.setState(code !== 0 ? 'error' : 'stopped')
@@ -287,6 +356,19 @@ export class PythonBridge {
   offStatusChange(callback: (status: BackendStatus) => void): void {
     const idx = this.listeners.indexOf(callback)
     if (idx >= 0) this.listeners.splice(idx, 1)
+  }
+
+  onCrash(callback: (report: CrashReport) => void): void {
+    this.crashListeners.push(callback)
+  }
+
+  offCrash(callback: (report: CrashReport) => void): void {
+    const idx = this.crashListeners.indexOf(callback)
+    if (idx >= 0) this.crashListeners.splice(idx, 1)
+  }
+
+  private emitCrash(report: CrashReport): void {
+    this.crashListeners.forEach(cb => cb(report))
   }
 
   private notify(): void {

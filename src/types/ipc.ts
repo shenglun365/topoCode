@@ -1,3 +1,12 @@
+/** 崩溃报告 */
+export interface CrashReport {
+  id: string
+  timestamp: string
+  exitCode: number | null
+  signal: string | null
+  summary: string
+}
+
 /** IPC 类型定义 - ZeroMQ 消息队列通讯协议 */
 
 // ==================== ZeroMQ 消息格式 ====================
