@@ -1,13 +1,16 @@
 """
-ingest/consumer.py — 异步消费 ingest 目录中的 JSON 文件
+ingest/consumer.py — 后台线程消费 ingest 目录中的 JSON 文件
 
-扫描 <project_root>/.topocode/ingest/ 中的 *.json 文件，
-按 _type 分发写入对应 project DB。
-写入成功后删除文件。
+架构：
+  解除了 async 事件循环的阻塞 — 在独立线程中轮询，避免阻塞 IPC 请求处理。
+
+  项目列表缓存（60s TTL），避免每轮全表扫描主库。
 """
 import json
 import logging
 import os
+import threading
+import time
 import uuid
 from typing import Callable, Optional
 
@@ -62,39 +65,89 @@ def consume_one(ingest_dir: str, fname: str) -> bool:
         return False
 
 
-async def ingest_consumer_loop(multi_db, interval: float = 2.0):
+class IngestConsumer:
     """
-    异步循环：扫描所有项目的 ingest 目录，消费待入库文件。
-    在 main.py 中通过 asyncio.create_task() 启动。
+    后台线程 ingest 消费者。
 
-    Args:
-        multi_db: MultiDBManager 实例
-        interval: 轮询间隔（秒）
+    - 在独立线程中轮询，不阻塞 async 事件循环
+    - 项目列表缓存（60s TTL），避免每轮查主库
     """
-    while True:
+
+    def __init__(self, multi_db, interval: float = 2.0):
+        self._multi_db = multi_db
+        self._interval = interval
+
+        # 项目列表缓存
+        self._project_cache: dict[str, str] = {}   # pid → root_path
+        self._cache_updated: float = 0
+        self._cache_ttl: float = 60.0
+
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+
+    def _refresh_project_cache(self):
+        """刷新项目列表缓存（TTL 控制）"""
+        now = time.time()
+        if now - self._cache_updated < self._cache_ttl:
+            return
         try:
-            projects = multi_db.main_db.fetchall("SELECT id, root_path FROM projects")
-            for p in projects:
-                pid = p["id"]
-                root = p["root_path"] or ""
-                if not root:
-                    continue
-                ingest_dir = os.path.join(root, ".topocode", "ingest")
-                if not os.path.isdir(ingest_dir):
-                    continue
-                try:
-                    files = sorted(
-                        f for f in os.listdir(ingest_dir)
-                        if f.endswith(".json") and not f.endswith(".tmp")
-                    )
-                except OSError:
-                    continue
-                for fname in files:
-                    if not consume_one(ingest_dir, fname):
-                        break
+            rows = self._multi_db.main_db.fetchall(
+                "SELECT id, root_path FROM projects "
+                "WHERE root_path IS NOT NULL AND root_path != ''"
+            )
+            self._project_cache = {r["id"]: r["root_path"] for r in rows}
+            self._cache_updated = now
+            logger.debug(f"[IngestConsumer] refreshed project cache: {len(self._project_cache)} projects")
         except Exception as e:
-            logger.error(f"[ingest] consumer loop error: {e}")
-        await _async_sleep(interval)
+            logger.warning(f"[IngestConsumer] refresh project cache failed: {e}")
+
+    def _run(self):
+        """后台线程主循环"""
+        logger.info("[IngestConsumer] background thread started")
+        while self._running:
+            try:
+                self._refresh_project_cache()
+                for pid, root in self._project_cache.items():
+                    if not root:
+                        continue
+                    ingest_dir = os.path.join(root, ".topocode", "ingest")
+                    if not os.path.isdir(ingest_dir):
+                        continue
+                    try:
+                        files = sorted(
+                            f for f in os.listdir(ingest_dir)
+                            if f.endswith(".json") and not f.endswith(".tmp")
+                        )
+                    except OSError:
+                        continue
+                    for fname in files:
+                        if not consume_one(ingest_dir, fname):
+                            break
+            except Exception as e:
+                logger.error(f"[IngestConsumer] loop error: {e}")
+            time.sleep(self._interval)
+        logger.info("[IngestConsumer] background thread stopped")
+
+    def start(self):
+        """启动后台消费线程"""
+        if self._thread and self._thread.is_alive():
+            logger.warning("[IngestConsumer] already running")
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="ingest-consumer",
+        )
+        self._thread.start()
+        logger.info("[IngestConsumer] started")
+
+    def stop(self):
+        """停止消费线程"""
+        self._running = False
+
+    def join(self, timeout: float = 5.0):
+        """等待线程结束"""
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
 
 
 def setup_handlers(multi_db):

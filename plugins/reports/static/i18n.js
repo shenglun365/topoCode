@@ -165,6 +165,7 @@
         compress:'压缩',
         save:'保存',
         continue:'继续处理',
+        continueTitle:'如果模型没有完成指令，可以点击提示模型继续处理。',
         rename:'命名',
         renameTitle:'给会话命名',
         renamePlaceholder:'输入会话名称…',

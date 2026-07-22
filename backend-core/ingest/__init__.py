@@ -1,5 +1,5 @@
 from .writer import write_ingest
-from .consumer import register_handler, consume_one, ingest_consumer_loop, setup_handlers
+from .consumer import register_handler, consume_one, IngestConsumer, setup_handlers
 
 __all__ = ["write_ingest", "register_handler", "consume_one",
-           "ingest_consumer_loop", "setup_handlers"]
+           "IngestConsumer", "setup_handlers"]

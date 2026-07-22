@@ -3131,7 +3131,22 @@ function showSelBar(sel) {
   _selBar.style.left = left + 'px';
   _selBar.style.top = top + 'px';
   _selBar.querySelector('[data-action="copy"]').onclick = function() {
-    navigator.clipboard.writeText(text).then(function(){showToast(__('common.copySuccess'));removeSelBar()}).catch(function(){showToast(__('common.copyFailed'));removeSelBar()});
+    try {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function(){showToast(__('common.copySuccess'));removeSelBar()}).catch(function(){showToast(__('common.copyFailed'));removeSelBar()});
+        return;
+      }
+    } catch(e) {}
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(__('common.copySuccess'));
+    removeSelBar();
   };
   _selBar.querySelector('[data-action="note"]').onclick = function() {
     var ref = getCurrentContextRef();

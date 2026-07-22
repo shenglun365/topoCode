@@ -542,20 +542,6 @@ MAIN_DB_TABLES_SQL = """
         updated_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- ============================================
-    -- cloud_api_config — 云端 API 配置（预留）
-    -- ============================================
-    CREATE TABLE IF NOT EXISTS cloud_api_config (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        api_key TEXT,
-        endpoint TEXT DEFAULT 'https://cloud.topocode.dev',
-        enabled INTEGER DEFAULT 0,
-        privacy_upload_metrics INTEGER DEFAULT 0,
-        privacy_upload_patterns INTEGER DEFAULT 0,
-        privacy_allow_benchmark_contrib INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-    );
 
     -- ============================================
     -- agent_instructions — 用户自定义 Agent 指令（预留）

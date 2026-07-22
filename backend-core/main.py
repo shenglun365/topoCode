@@ -144,15 +144,13 @@ class BackendApp:
 
     def _start_optional_services(self):
         web_task = None
-        ingest_task = None
+        self._ingest_consumer = None
 
-        # 启动 ingest 消费循环
+        # 启动 ingest 消费后台线程
         try:
-            from ingest import ingest_consumer_loop
-            ingest_task = asyncio.create_task(
-                ingest_consumer_loop(self.multi_db, interval=2.0)
-            )
-            logger.info("[Ingest] consumer loop started")
+            from ingest import IngestConsumer
+            self._ingest_consumer = IngestConsumer(self.multi_db, interval=2.0)
+            self._ingest_consumer.start()
         except Exception as e:
             logger.warning(f"[Ingest] failed to start consumer: {e}")
 
@@ -169,29 +167,31 @@ class BackendApp:
                 logger.info(f"Web server task created for http://{self.http_host}:{self.http_port}")
             except Exception as e:
                 logger.warning(f"Failed to start web server: {e}")
-        return web_task, ingest_task
+        return web_task
 
     async def run(self):
         logger.info(f"Starting TopoOne Backend (data_dir: {self.data_dir})")
         self.register_all()
         self._setup_signals()
-        web_task, ingest_task = self._start_optional_services()
+        web_task = self._start_optional_services()
         try:
             await self.server.run_forever()
         finally:
-            for task in (web_task, ingest_task):
-                if task:
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+            if web_task:
+                web_task.cancel()
+                try:
+                    await web_task
+                except asyncio.CancelledError:
+                    pass
             self.multi_db.close_all()
             logger.info("Backend shutdown complete")
 
     def shutdown(self):
         logger.info("Shutting down...")
         self.server.stop()
+        if self._ingest_consumer:
+            self._ingest_consumer.stop()
+            self._ingest_consumer.join(timeout=2.0)
         self.multi_db.close_all()
 
 
@@ -232,6 +232,9 @@ async def _run_distributed(data_dir: str, http_port: int | None, http_host: str 
         logger.info("[Distributed] shutting down...")
         sv.stop()
         app.server.stop()
+        if app._ingest_consumer:
+            app._ingest_consumer.stop()
+            app._ingest_consumer.join(timeout=2.0)
         await sv.shutdown_all(timeout=5.0)
         app.multi_db.close_all()
         logger.info("[Distributed] shutdown complete")
