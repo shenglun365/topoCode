@@ -89,6 +89,7 @@ EXTRACTORS: dict[str, LanguageExtractor] = {
     "jsx":        JAVASCRIPT,
     "typescript": TYPESCRIPT,
     "tsx":        TYPESCRIPT,
+    "vue":        TYPESCRIPT,
     "java":       JAVA,
     "c":          C,
     "c_header":   C,
@@ -118,7 +119,7 @@ def _build_family_map():
     groups = [
         ("c",       ["c", "c_header", "cpp", "cpp_header", "objc"]),
         ("jvm",     ["java", "kotlin", "scala"]),
-        ("js",      ["javascript", "jsx", "typescript", "tsx"]),
+        ("js",      ["javascript", "jsx", "typescript", "tsx", "vue"]),
     ]
     for family, langs in groups:
         for lang in langs:

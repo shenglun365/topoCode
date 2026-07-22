@@ -17,6 +17,7 @@ const SUPPORTED_LANGUAGES = new Set([
   'python',
   'javascript', 'jsx',
   'typescript', 'tsx',
+  'vue',
   'java',
   'c', 'c_header',
   'cpp', 'cpp_header',

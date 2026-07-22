@@ -151,6 +151,10 @@ def get_parser(lang_name: str) -> Optional[Parser]:
     if lang_name in _PARSER_CACHE:
         return _PARSER_CACHE[lang_name]
 
+    # 语言别名: vue → typescript（.vue 文件的 script 块用 TS 解析）
+    if lang_name == "vue":
+        lang_name = "typescript"
+
     lang = LANGUAGES.get(lang_name)
     if lang is None:
         logger.debug(f"Language '{lang_name}' not available in tree-sitter")

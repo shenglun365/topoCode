@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from tree_sitter import Node as SyntaxNode, Parser
 
@@ -61,6 +62,7 @@ _EXT_MAP = {
     ".scala": "scala", ".sc": "scala",
     ".lua": "lua", ".luau": "luau",
     ".m": "objc", ".mm": "objc",
+    ".vue": "vue",
 }
 
 
@@ -101,6 +103,27 @@ def _prev_docstring(node: SyntaxNode, source: bytes) -> Optional[str]:
     return None
 
 
+# ── Vue SFC 预处理 ──────────────────────────────────────────
+_VUE_SCRIPT_RE = re.compile(
+    r'<script\b[^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+def _extract_vue_script(source: bytes) -> Optional[Tuple[bytes, int]]:
+    """从 .vue 文件提取 <script> 块内容。
+
+    Returns:
+        (script_bytes, line_offset) — script 块文本及其在原始文件中的行偏移
+    """
+    text = source.decode("utf-8", errors="replace")
+    m = _VUE_SCRIPT_RE.search(text)
+    if not m:
+        return None
+    script_text = m.group(1)
+    line_offset = text[:m.start(1)].count("\n")
+    return (script_text.encode("utf-8"), line_offset)
+
+
 # ══════════════════════════════════════════════════════════
 # TreeSitterWalker
 # ══════════════════════════════════════════════════════════
@@ -138,6 +161,18 @@ class TreeSitterWalker:
 
         # 解码源文本（供钩子函数使用）
         self.source_str = self.source.decode("utf-8", errors="replace")
+
+        # Vue SFC 预处理：提取 <script> 块用 TypeScript 解析
+        if self.language == "vue":
+            result = _extract_vue_script(self.source)
+            if result:
+                self.source, self._vue_line_offset = result
+                self.source_str = self.source.decode("utf-8", errors="replace")
+                self.language = "typescript"
+                logger.info(f"Vue SFC extracted script block from {self.file_path} (offset={self._vue_line_offset})")
+            else:
+                logger.warning(f"No script block found in Vue file: {self.file_path}")
+                return self._build_result()
 
         # 创建 file 节点
         file_node = Node(
@@ -329,9 +364,9 @@ class TreeSitterWalker:
             qualified_name=qualified_name,
             file_path=self.file_path,
             language=self.language,
-            start_line=ast_node.start_point[0] + 1,
+            start_line=ast_node.start_point[0] + 1 + getattr(self, '_vue_line_offset', 0),
             start_col=ast_node.start_point[1],
-            end_line=ast_node.end_point[0] + 1,
+            end_line=ast_node.end_point[0] + 1 + getattr(self, '_vue_line_offset', 0),
             end_col=ast_node.end_point[1],
             **{k: v for k, v in extra.items() if hasattr(Node, k)},
         )

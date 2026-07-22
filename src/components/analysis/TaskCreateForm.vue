@@ -46,7 +46,7 @@ const scope = ref('')
 const patternType = ref<'all' | 'glob' | 'regex'>('all')
 const pattern = ref('')
 const excludeDirs = ref('')
-const reportTypes = ref<string[]>([])
+const reportTypes = ref<string[]>(['dependency', 'callChain'])
 const loading = ref(false)
 
 // Multi-select state (from FileStatsPanel)
