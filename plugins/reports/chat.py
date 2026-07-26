@@ -918,6 +918,8 @@ async def get_chat_messages(session_id: str, limit: int = Query(50), offset: int
         )
         return {"messages": [{"id": m["id"], "role": m["role"], "content": m["content"],
                                "refs": json.loads(m["metadata"]).get("refs", []) if m["metadata"] else [],
+                               "reasoning": json.loads(m["metadata"]).get("reasoning", "") if m["metadata"] else "",
+                               "toolCalls": json.loads(m["metadata"]).get("tool_calls", []) if m["metadata"] else [],
                                "createdAt": m["created_at"]} for m in rows], "total": len(rows)}
     except Exception as e:
         raise HTTPException(500, str(e))

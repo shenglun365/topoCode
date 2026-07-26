@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as api from '@web/services/api'
 import { renderMarkdown, renderDiagrams } from '@web/services/render'
 import { useToast } from '@web/composables/useToast'
@@ -210,9 +210,12 @@ async function loadMessages() {
   if (!currentId.value) return
   try {
     const data = await api.getMessages(currentId.value)
-    messages.value = data.messages.filter(m => m.role !== 'system')
+    messages.value = data.messages.filter(m => m.role !== 'system' && m.role !== 'tool')
+    data.messages.forEach((m: any, i: number) => {
+      if (m.role === 'assistant') console.log(`[loadMessages] #${i} role=${m.role} contentLen=${(m.content||'').length} reasoningLen=${(m.reasoning||'').length} toolCalls=${(m.toolCalls||[]).length} contentStart=${(m.content||'').slice(0,80)}`)
+    })
     loadPendingDrafts()
-    nextTick(() => { if (msgArea.value) renderDiagrams(msgArea.value) })
+    nextTick(() => { console.log(`[renderDiagrams call] msgArea=${!!msgArea.value}`); if (msgArea.value) renderDiagrams(msgArea.value) })
   } catch (_) {}
 }
 
@@ -226,6 +229,7 @@ async function send() {
   streaming.value = true
   scrollToBottom()
 
+  const asstMsg: ChatMessage = { id: `tmp-${Date.now()}-asst`, role: 'assistant', content: '', createdAt: new Date().toISOString(), isStreaming: true }
   asstMsg.toolCalls = []
   asstMsg.reasoning = ''
   const msg: ChatMessage = asstMsg
@@ -263,6 +267,8 @@ async function send() {
               msg.isStreaming = false
               if (data.quality === 'low') msg.qualityLow = true
               if (data.content) msg.content = data.content
+              if (data.reasoning) msg.reasoning = (msg.reasoning || '') + data.reasoning
+              console.log(`[sse done] contentLen=${(msg.content||'').length} reasoningLen=${(msg.reasoning||'').length} toolCalls=${(msg.toolCalls||[]).length}`)
               scrollToBottom()
             }
             else if (data.type === 'error') { msg.isStreaming = false; msg.role = 'error'; msg.content = data.message || '请求失败'; scrollToBottom() }
@@ -285,7 +291,7 @@ async function send() {
     asstMsg.isStreaming = false; asstMsg.role = 'error'; asstMsg.content = e.message || '请求失败'
   } finally {
     streaming.value = false; scrollToBottom()
-    nextTick(() => { if (msgArea.value) renderDiagrams(msgArea.value) })
+    nextTick(() => { console.log(`[renderDiagrams call] msgArea=${!!msgArea.value}`); if (msgArea.value) renderDiagrams(msgArea.value) })
   }
 }
 
@@ -544,8 +550,8 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <button class="btn-new" @click="createSession">新对话</button>
         <div v-for="s in sessions" :key="s.id" class="session-item" :class="{ active: s.id === currentId }" @click="switchSession(s.id)">
           <span class="title">{{ s.title }}</span>
-          <button class="del-btn" @click.stop="deleteSession(s.id)">×</button>
-          <button class="rename-btn" @click.stop="openRename(s)">✏️</button>
+          <button class="del-btn" @click.stop="deleteSession(s.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button class="rename-btn" @click.stop="openRename(s)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
         </div>
         <div v-if="!sessions.length" class="note-empty">暂无对话</div>
       </div>
@@ -555,9 +561,8 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
           <span class="status-dot" :class="n.status"></span>
           <span class="title">{{ n.title || '无标题' }}</span>
         </div>
-        <div v-if="!notes.length" class="note-empty">暂无便签</div>
+        <div v-if="!notes.length && !pendingDrafts.length" class="note-empty">暂无便签</div>
         <div v-if="pendingDrafts.length" class="pending-section">
-          <div class="pending-title">待处理草稿</div>
           <div v-for="d in pendingDrafts" :key="d.id" class="pending-item">
             <span class="title">{{ d.userText?.slice(0, 20) || `#${d.seq}` }}</span>
             <button class="send-btn" @click="execPendingDraft(d)">执行</button>
@@ -569,7 +574,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <div v-for="a in archives" :key="a.id" class="note-item">
           <span class="title">{{ a.title || a.id.slice(0,16) }}</span>
           <span class="ref-count">{{ a.category }}</span>
-          <button class="del-btn" @click.stop="deleteArchive(a.id)">×</button>
+          <button class="del-btn" @click.stop="deleteArchive(a.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <div v-if="!archives.length" class="note-empty">暂无归档</div>
       </div>
@@ -578,7 +583,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <input v-model="docSearch" class="sidebar-search" placeholder="搜索文档..." @input="loadDocs" />
         <div v-for="d in documents" :key="d.id" class="note-item" :class="{ active: viewingDoc?.id === d.id }" @click="viewDoc(d)">
           <span class="title">{{ d.title || d.id }}</span>
-          <button class="del-btn" @click.stop="deleteDoc(d.id)">×</button>
+          <button class="del-btn" @click.stop="deleteDoc(d.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <div v-if="!documents.length" class="note-empty">暂无文档</div>
       </div>
@@ -660,32 +665,32 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
             <div class="msg-content">
               <div v-if="m.role === 'assistant'" class="sender">TopoCode</div>
               <div v-if="m.role === 'assistant' && !m.content && m.isStreaming" class="loading-dots"><span></span><span></span><span></span></div>
-              <div v-if="m.qualityLow" class="quality-low-banner">⚠️ 本次分析未能生成有效回答</div>
+              <div v-if="m.qualityLow" class="quality-low-banner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 本次分析未能生成有效回答</div>
               <div v-if="m.reasoning" class="reasoning-toggle" @click="m.showReasoning = !m.showReasoning">
-                <span class="arrow" :class="{ open: m.showReasoning }">▶</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: m.showReasoning }"><polyline points="9 18 15 12 9 6"/></svg>
                 <span>{{ m.showReasoning ? '收起思考过程' : '查看思考过程' }}<span v-if="m.reasoning.length > 10" class="reasoning-tokens">({{ Math.round(m.reasoning.length / 2) }} tokens)</span></span>
               </div>
-              <div v-if="m.reasoning && m.showReasoning" class="reasoning-content">{{ m.reasoning }}</div>
+              <div v-if="m.reasoning && m.showReasoning" class="reasoning-content" v-html="renderMarkdown(m.reasoning)"></div>
               <div v-if="m.toolCalls?.length" class="tool-toggle" @click="m.showToolCalls = !m.showToolCalls">
-                <span class="arrow" :class="{ open: m.showToolCalls }">▶</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: m.showToolCalls }"><polyline points="9 18 15 12 9 6"/></svg>
                 <span>调用 {{ m.toolCalls.length }} 个工具</span>
               </div>
               <div v-if="m.toolCalls?.length && m.showToolCalls" class="tool-detail">
                 <div v-for="tc in m.toolCalls" :key="tc.id" class="tool-call-item">
-                  <div class="tool-call-name">🔧 {{ tc.name }}</div>
+                  <div class="tool-call-name"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> {{ tc.name }}</div>
                   <div class="tool-label">参数</div>
                   <pre>{{ JSON.stringify(tc.arguments, null, 2) }}</pre>
                   <div v-if="tc.result" class="tool-label">执行结果</div>
                   <pre v-if="tc.result">{{ tc.result }}</pre>
                 </div>
               </div>
-              <div v-else class="bubble" v-html="renderMarkdown(m.content)"></div>
+              <div v-if="m.content" class="bubble" v-html="renderMarkdown(m.content)"></div>
               <div v-if="m.id && !deleteMode" class="message-actions">
-                <button class="msg-act-btn" @click="copyMessage(m)" title="复制">📋</button>
-                <button class="msg-act-btn" @click="quoteMessage(m)" title="引用">💬</button>
-                <button class="msg-act-btn" @click="continueAssistant(m)" title="继续">⟳</button>
-                <button class="msg-act-btn" @click="saveMsgAsDoc(m)" title="保存为文档">📄</button>
-                <button class="msg-act-btn del-msg" @click="deleteSingle(m.id)" title="删除">🗑️</button>
+                <button class="msg-act-btn" @click="copyMessage(m)" title="复制"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+                <button class="msg-act-btn" @click="quoteMessage(m)" title="引用"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+                <button class="msg-act-btn" @click="continueAssistant(m)" title="继续"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+                <button class="msg-act-btn" @click="saveMsgAsDoc(m)" title="保存为文档"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></button>
+                <button class="msg-act-btn del-msg" @click="deleteSingle(m.id)" title="删除"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
               </div>
             </div>
           </div>
@@ -743,7 +748,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .sidebar-tab:hover{background:var(--bg-hover)}
 .sidebar-tab.active{background:var(--accent);color:#fff}
 .sidebar-content{flex:1;overflow-y:auto;padding:0 8px 8px}
-.sidebar-content,.doc-view-body::-webkit-scrollbar{width:4px}
+.sidebar-content::-webkit-scrollbar,.doc-view-body::-webkit-scrollbar{width:4px}
 .sidebar-content::-webkit-scrollbar-track,.doc-view-body::-webkit-scrollbar-track{background:transparent}
 .sidebar-content::-webkit-scrollbar-thumb,.doc-view-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
 .sidebar-search{width:100%;padding:6px 10px;font-size:var(--ui-font-size);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg);color:var(--text);outline:none;box-sizing:border-box}
@@ -786,11 +791,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .doc-render pre code{background:none;padding:0}
 .doc-render ul,.doc-render ol{padding-left:20px;margin:8px 0}
 .messages{flex:1;overflow-y:auto;padding:24px 32px 16px;display:flex;flex-direction:column}
-.message{display:flex;gap:14px;max-width:820px;margin:0 auto;width:100%;margin-bottom:24px;position:relative;animation:fadeUp .3s ease}
+.message{display:flex;gap:14px;max-width:min(85%,960px);margin:0 auto;width:100%;margin-bottom:24px;position:relative;animation:fadeUp .3s ease}
 @keyframes fadeUp{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
 .message-avatar{width:32px;height:32px;border-radius:var(--radius-full);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:var(--ui-font-size);font-weight:500;color:#fff}
 .message-avatar.ai{background:var(--accent)}
-.msg-content{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;max-width:75%}
+.msg-content{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
 .sender{font-weight:500;color:var(--text-secondary);font-size:var(--ui-font-size)}
 .bubble{padding:16px 20px;border-radius:var(--radius-lg);font-size:var(--content-font-size,15px);line-height:1.65;word-break:break-word;background:var(--bubble-ai);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
 .bubble h1{font-size:1.13em;font-weight:600;margin:16px 0 8px}.bubble h2{font-size:1.07em;font-weight:600;margin:14px 0 6px}.bubble h3{font-size:1em;font-weight:600;margin:12px 0 4px}
@@ -819,7 +824,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .quality-low-banner{padding:10px 14px;color:var(--warning,#f59e0b);font-weight:600;font-size:var(--ui-font-size);margin-bottom:4px}
 .reasoning-toggle,.tool-toggle{color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px;font-size:var(--ui-font-size)}
 .reasoning-toggle:hover,.tool-toggle:hover{color:var(--accent)}
-.reasoning-toggle .arrow,.tool-toggle .arrow{font-size:var(--ui-font-size);transition:transform .2s}
+.reasoning-toggle .arrow,.tool-toggle .arrow{display:inline-flex;transition:transform .2s}
 .reasoning-toggle .arrow.open,.tool-toggle .arrow.open{transform:rotate(90deg)}
 .reasoning-tokens{font-size:var(--ui-font-size);opacity:0.7;margin-left:2px}
 .reasoning-content{color:var(--text-secondary);padding:10px 14px;background:var(--bg-hover);border-radius:8px;margin:4px 0 10px;white-space:pre-wrap;line-height:1.5;max-height:300px;overflow-y:auto;border-left:3px solid var(--accent);font-size:var(--ui-font-size)}

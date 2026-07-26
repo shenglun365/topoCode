@@ -1,472 +1,91 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, watch, nextTick } from 'vue'
-import * as api from '@web/services/api'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { renderDocMarkdown, renderDiagrams } from '@web/services/render'
+import { useFloatDrag } from '@web/composables/useFloatDrag'
+import { useDocState } from '@web/composables/useDocState'
+import { useNotes } from '@web/composables/useNotes'
+import { useHeatmap } from '@web/composables/useHeatmap'
 import { useToast } from '@web/composables/useToast'
-import type { CommunityDoc, CommunityChild, GraphNode, GraphEdge } from '@web/types'
-import cytoscape from 'cytoscape'
-import coseBilkent from 'cytoscape-cose-bilkent'
-cytoscape.use(coseBilkent)
-
-const { toast } = useToast()
+import { useGraphState } from '@web/composables/useGraphState'
+import GraphContextMenu from '@web/components/graph/GraphContextMenu.vue'
 
 const taskId = ref(new URLSearchParams(location.search).get('taskId') || '')
-const docId = ref(new URLSearchParams(location.search).get('docId') || '')
-const originalDocId = docId.value
 const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
 const urlEt = new URLSearchParams(location.search).get('edgeType') || 'INCLUDE'
 
-// ── Doc (left panel) state ──
-const docCommId = ref(urlCid)
-const docEdgeType = ref(urlEt)
-const docBreadcrumb = ref<{ label: string; cid: string; et: string }[]>([])
-function pushDocBc(item: { label: string; cid: string; et: string }) {
-  const last = docBreadcrumb.value[docBreadcrumb.value.length - 1]
-  if (last?.cid === item.cid) return
-  docBreadcrumb.value.push(item)
-}
-const loading = ref(true)
+const {
+  floatBounds, updateFloatBoundaries, clampFloatPosition,
+  _fitPanel, _restoreWithBounds, clampToBounds,
+  makeElementDraggable, makeFloatDraggable, mountAutoClose,
+  onWindowResize: onWindowResize_,
+} = useFloatDrag()
+const {
+  notesModalVisible, notesList, notesFilterStatus, notesSortOrder,
+  notesProjectFilter, notesProjectOptions, notesUserText,
+  notesSelectedSessions, notesSessions, notesExecStep, notesAutoDelete,
+  notesDotVisible, filteredNotes,
+  openNotesModal, deleteRefFromNote, deleteNoteById, deleteSelectedRefs,
+  manualDrafts, executeNotes, _addRefToDraft,
+  _notesLoad, initNotesChannel,
+} = useNotes(taskId)
+const {
+  heatmapData, heatmapSize, heatmapLoading,
+  loadHeatmap, heatmapBg, setHeatmapSize,
+} = useHeatmap()
 
-// ── Graph (right panel) state ──
-const graphCommId = ref(urlCid)
-const graphEdgeType = ref(urlEt)
-const graphBreadcrumb = ref<{ cid: string; et: string; label?: string }[]>([])
-function pushGraphBc(item: { cid: string; et: string; label?: string }) {
-  const last = graphBreadcrumb.value[graphBreadcrumb.value.length - 1]
-  if (last?.cid === item.cid) return
-  graphBreadcrumb.value.push(item)
-}
+const {
+  docId, originalDocId,
+  docCommId, docEdgeType, docBreadcrumb, doc, loading, children,
+  docContentRef,
+  tocVisible, tocCallChildren, tocIncludeChildren, tocLoading,
+  files, filePage, fileSearch, filePreview, fileSummary, pageMode, filteredFiles: filteredFiles_,
+  pushDocBc, loadDoc, loadChildren, navigateTo, navBack,
+  loadFiles, filterFiles, openFilePreview,
+  toggleToc, loadTocData, tocNavigate,
+} = useDocState(taskId)
 
-const doc = ref<{ title: string; content: string } | null>(null)
-const graphNodes = ref<GraphNode[]>([])
-const graphEdges = ref<GraphEdge[]>([])
-const children = ref<CommunityChild[]>([])
+const {
+  graphCommId, graphEdgeType, graphBreadcrumb, graphNodes, graphEdges,
+  graphLoading, cyContainer, externalGraphData,
+  followMode, showEdges, gran, graphTab, isHeatmap, toolbarCollapsed, toolbarTitle,
+  rightCommTree, rightDepth, layoutTimeout, etOptions,
+  filterVisible, filterQuery, filterToggleState, filterNodeList, filteredNodeList,
+  contextMenuVisible, contextMenuPos, contextNodeId, contextNodeIsExternal, contextNodeHasChildren,
+  pushGraphBc, loadGraph, renderGraph,
+  setEdgeType, loadRightCommTree, navigateComm,
+  toggleFollowMode, toggleEdges, toggleGran, heatmapDrill, resetLayout,
+  toggleFilter, applyFilter, cycleFilter, filterToggleLabel, filterToggleTitle,
+  _nodeFilterColor, isNodeHidden, toggleNodeFilter, applyCenterMode,
+  getCy, getManualHidden, getManualShown, getCenterNodes,
+  ctxCopyText: ctxCopy,
+  initContextMenuAutoClose,
+} = useGraphState(taskId)
+
+const { toast } = useToast()
+
 const fontSize = ref(parseInt(localStorage.getItem('topoone-font-size') || '18'))
 const leftVisible = ref(true)
 const rightVisible = ref(true)
-const cyContainer = ref<HTMLDivElement>()
-const graphLoading = ref(false)
-const docContentRef = ref<HTMLDivElement>()
 const tocFloatRef = ref<HTMLDivElement>()
 const fileCommFloatRef = ref<HTMLDivElement>()
 
-// TOC state (left panel float)
-const tocVisible = ref(false)
-const tocCallChildren = ref<CommunityChild[]>([])
-const tocIncludeChildren = ref<CommunityChild[]>([])
-const tocLoading = ref(false)
-
-// Right panel state
-const rightCommTree = ref<CommunityChild[]>([])
-const rightDepth = ref(1)
-const layoutTimeout = ref(60)
 const commFloatVisible = ref(false)
-const etOptions = ['INCLUDE', 'CALL', 'EXTERNAL_INCLUDE', 'EXTERNAL_CALL'] as const
-
-// File list state
-const files = ref<any[]>([])
-const filePage = ref(1)
-const fileSearch = ref('')
-const filePreview = ref<any>(null)
-const fileSummary = ref<any>(null)
-const pageMode = ref<'doc' | 'file-summary'>('doc')
-
-// External graph state
-const externalGraphData = ref<any>(null)
 
 // Annotation state
 const showAnnotations = ref(true)
 const editAnnoData = ref<{ id?: string; text: string; isNew?: boolean } | null>(null)
 
-// Graph state
-const followMode = ref(true)
-const showEdges = ref(true)
-const gran = ref('component')
-const graphTab = ref<'graph' | 'heatmap'>('graph')
-const toolbarCollapsed = ref(false)
-const toolbarTitle = ref('图谱操作')
-const isHeatmap = computed(() => graphTab.value === 'heatmap')
-
-// Heatmap state
-const heatmapData = ref<any>(null)
-const heatmapSize = ref(10)
-const heatmapLoading = ref(false)
-
 // Layout
 const leftFlex = ref('1 1 55%')
 const rightFlex = ref('1 1 45%')
-const floatBounds = reactive<Record<string, { minX: number; maxX: number; minY: number; maxY: number }>>({})
 const resizerRef = ref<HTMLDivElement>()
 
-// Context menu
-const contextMenuVisible = ref(false)
-const contextMenuPos = ref({ x: 0, y: 0 })
-const contextNodeId = ref('')
-const contextNodeIsExternal = ref(false)
-const contextNodeHasChildren = ref(true)
-let ctxMenuTimer: any = null
-
-// Filter
-const filterVisible = ref(false)
-const filterQuery = ref('')
-const filterToggleState = ref('hideOrphan') // hideOrphan | hideAll | showAll
-
-let cy: any = null
-let manualHidden = new Set<string>()
-let manualShown = new Set<string>()
-let centerNodes: string[] = []
-
-// Exact legacy color algorithms
-function _stableHue(id: string): number {
-  let h = 0; for (let i = 0; i < id.length; i++) { h = ((h << 5) - h) + id.charCodeAt(i); h |= 0 }
-  h = Math.abs(h)
-  return ((h * 2654435761) ^ (h >>> 16)) % 360
-}
-function _hueSatLight(depth: number, hue: number): string {
-  const t = [[80, 55], [70, 65], [55, 78], [40, 88], [30, 94]]
-  const v = t[Math.min(depth, 4)]
-  return `hsl(${hue}, ${v[0]}%, ${v[1]}%)`
-}
-function _parentCommId(cid: string): string | null {
-  const p = (cid || '').split('-')
-  for (let i = 0; i < p.length; i++) {
-    if (/^L\d+$/.test(p[i])) {
-      const lv = parseInt(p[i].substring(1))
-      if (lv === 0) return null
-      const r = p.slice(0, i); r.push('L' + (lv - 1)); const s = p.slice(i + 1); s.pop()
-      if (lv === 1) s.shift(); else if (lv === 2) r.push('L0')
-      return r.concat(s).join('-')
-    }
-  }
-  return null
-}
-// Apply legacy two-pass coloring: node → highest ancestor → stable hue → depth-graded HSL
-function applyNodeColors(cy: any, isExternal: boolean) {
-  if (isExternal) {
-    cy.nodes().forEach((n: any) => n.style('background-color', '#f59e0b'))
-    return
-  }
-  const colorRoot: Record<string, string> = {}
-  cy.nodes().forEach((n: any) => {
-    let key = n.id(), pid = _parentCommId(n.id())
-    while (pid !== null) { key = pid; pid = _parentCommId(pid) }
-    colorRoot[n.id()] = key
-  })
-  const rootHue: Record<string, number> = {}
-  for (const rk of Object.values(colorRoot)) rootHue[rk] = _stableHue(rk)
-  cy.nodes().forEach((n: any) => {
-    const nid = n.id(), rid = colorRoot[nid]
-    if (!rid) { n.style('background-color', '#999'); return }
-    let cd = 0
-    for (let cur = nid; cur !== rid;) { const p = _parentCommId(cur); if (p === null) break; cur = p; cd++ }
-    n.style('background-color', _hueSatLight(cd, rootHue[rid]))
-  })
-}
-
-async function loadDoc() {
-  if (!taskId.value) return; loading.value = true
-  try {
-    if (docCommId.value) {
-      const d = await api.getCommunityDoc(taskId.value, docCommId.value, docEdgeType.value)
-      console.log('[DocViewer] community doc loaded:', d?.title, 'content length:', d?.content?.length)
-      doc.value = { title: d.title, content: d.content }
-      if (docBreadcrumb.value.length) {
-        const last = docBreadcrumb.value[docBreadcrumb.value.length - 1]
-        last.label = d.title
-      }
-    } else if (docId.value) {
-      const d: any = await api.get('/api/docs/' + docId.value)
-      doc.value = { title: d.title || '文档', content: d.content || '' }
-    } else {
-      doc.value = { title: taskId.value, content: '选择左侧子组件查看详细文档' }
-      docBreadcrumb.value = []
-    }
-    await loadChildren()
-  } catch (e: any) {
-    console.error('[DocViewer] loadDoc error:', e?.message || e)
-  } finally {
-    loading.value = false
-    nextTick(() => { if (docContentRef.value) renderDiagrams(docContentRef.value); checkHash() })
-  }
-}
-
-async function loadChildren() {
-  try {
-    const kids = await api.getCommunityChildren(taskId.value, docCommId.value || undefined, docEdgeType.value)
-    children.value = kids
-  } catch (_) { children.value = [] }
-}
-
-async function loadGraph() {
-  graphLoading.value = true
-  try {
-    const et = graphEdgeType.value
-    if (et === 'EXTERNAL_INCLUDE' || et === 'EXTERNAL_CALL') {
-      const data = await api.get('/api/external-graph', { task_id: taskId.value, edge_type: et, depth: String(rightDepth.value), comm_id: graphCommId.value || '' })
-      externalGraphData.value = data
-      graphNodes.value = data.nodes || []; graphEdges.value = data.edges || []
-    } else {
-      const graph = await api.getCommunityGraph(taskId.value, et, graphCommId.value || undefined, gran.value, rightDepth.value)
-      graphNodes.value = graph.nodes; graphEdges.value = graph.edges
-    }
-    nextTick(() => {
-      renderGraph()
-      if (filterVisible.value && cy) {
-        filterNodeList.value = cy.nodes().map((n: any) => ({ id: n.id(), label: n.data('label') || n.id() }))
-      }
-    })
-  } catch (e) { console.error(e) } finally { graphLoading.value = false }
-}
-
-// Legacy layout builder
-function _buildLayout(cy: any, nodeCount: number) {
-  let numIter = 4000
-  if (nodeCount > 500) numIter = 300
-  else if (nodeCount > 100) numIter = 1000
-  return {
-    name: 'cose-bilkent', animate: false,
-    nodeRepulsion: 80000, idealEdgeLength: 200, gravity: 0,
-    numIter: Math.max(numIter, 1000),
-    fit: false, quality: 'proof',
-  }
-}
-function _afterLayout(cy: any) {
-  cy.one('layoutstop', () => {
-    cy.zoom(1.0)
-    const conn = cy.nodes().filter((n: any) => n.degree(false) > 0)
-    if (!conn.empty()) cy.center(conn); else cy.center()
-  })
-}
-
-function renderGraph() {
-  if (!cyContainer.value || !graphNodes.value.length) return
-  if (cy) { cy.destroy(); cy = null }
-  const container = cyContainer.value
-  const isExternal = graphEdgeType.value === 'EXTERNAL_INCLUDE' || graphEdgeType.value === 'EXTERNAL_CALL'
-
-  const elements: any[] = []
-  for (const n of graphNodes.value) {
-    elements.push({ data: { id: n.id, label: n.label } })
-  }
-  for (const e of graphEdges.value) {
-    elements.push({ data: { id: e.id, source: e.source, target: e.target } })
-  }
-
-  try {
-    cy = cytoscape({
-      container, elements,
-      style: [
-        { selector: 'node', style: { 'background-color': '#4d6bfe', label: 'data(label)', 'font-size': '11px', 'text-valign': 'center', 'text-halign': 'center', width: 30, height: 30 } },
-        { selector: 'edge', style: { width: 1.5, 'line-color': '#6b6b76', 'target-arrow-color': '#6b6b76', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
-        { selector: 'node.hidden', style: { display: 'none' } },
-        { selector: 'node.center-highlight', style: { 'border-color': '#f59e0b', 'border-width': 3 } },
-      ],
-      layout: _buildLayout(cy, graphNodes.value.length),
-    })
-    // Apply exact legacy coloring
-    applyNodeColors(cy, isExternal)
-    toolbarTitle.value = `图操作（${graphNodes.value.length} 节点 / ${graphEdges.value.length} 边）`
-    // Initialize follow/lock mode handlers
-    _dragPrevPos = null
-    cy.off('grab drag free', 'node')
-    if (followMode.value) {
-      cy.on('drag', 'node', (evt: any) => {
-        const node = evt.target; const pos = node.position()
-        if (!_dragPrevPos) { _dragPrevPos = { x: pos.x, y: pos.y }; return }
-        const dx = pos.x - _dragPrevPos.x; const dy = pos.y - _dragPrevPos.y
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
-        _dragPrevPos = { x: pos.x, y: pos.y }
-        const neighbors = node.closedNeighborhood().nodes().filter((n: any) => !n.same(node))
-        neighbors.forEach((n: any) => { const np = n.position(); n.position({ x: np.x + dx * 0.7, y: np.y + dy * 0.7 }) })
-      })
-      cy.on('free', 'node', () => { _dragPrevPos = null })
-    } else {
-      cy.on('grab', 'node', (evt: any) => {
-        const grabbed = evt.target
-        cy.nodes().forEach((n: any) => { if (!n.same(grabbed)) n.lock() })
-      })
-      cy.on('free', 'node', () => { if (cy) cy.nodes().unlock() })
-    }
-  } catch (e) { console.warn('[renderGraph] failed:', e); return }
-  // Post-layout: legacy zoom reset + center on connected nodes
-  _afterLayout(cy)
-
-  // Load saved layout
-  api.get('/api/graph-layout', { taskId: taskId.value, commId: graphCommId.value || '', edgeType: graphEdgeType.value, gran: gran.value, depth: String(rightDepth.value) }).then((saved: any) => {
-    if (saved?.nodes && Object.keys(saved.nodes).length) {
-      for (const [id, pos] of Object.entries(saved.nodes) as [string, any][]) {
-        const n = cy.getElementById(id); if (n.length) n.position({ x: pos.x, y: pos.y })
-      }
-      cy.layout({ name: 'preset', fit: true }).run()
-    }
-  }).catch(() => {})
-
-  cy.on('dragfree', () => {
-    const nodes: Record<string, any> = {}
-    cy.nodes().forEach((n: any) => { const p = n.position(); nodes[n.id()] = { x: p.x, y: p.y } })
-    api.post('/api/graph-layout', { taskId: taskId.value, commId: graphCommId.value || '', edgeType: graphEdgeType.value, gran: gran.value, depth: rightDepth.value, nodes } as any).catch(() => {})
-  })
-  cy.on('dblclick', 'node', (evt: any) => {
-    const nid = evt.target.id()
-    if (nid === graphCommId.value) return
-    const label = graphNodes.value.find(n => n.id === nid)?.label || nid.slice(0, 16)
-    pushGraphBc({ cid: nid, et: graphEdgeType.value, label })
-    graphCommId.value = nid
-    if (evt.target.data('hasChildren') === false) gran.value = 'file'
-    loadGraph()
-    loadRightCommTree()
-  })
-  cy.on('dblclick', (evt: any) => { if (evt.target === cy) cy.fit(undefined, 50) })
-  cy.on('tap', 'node', (evt: any) => {
-    const node = evt.target
-    const nid = node.id()
-    const isExt = !!node.data('isExternal')
-    const hasChildren = node.data('hasChildren') !== false
-    contextNodeId.value = nid
-    contextNodeIsExternal.value = isExt
-    contextNodeHasChildren.value = hasChildren
-    const cyRect = cy.container().getBoundingClientRect()
-    const pos = node.renderedPosition()
-    let mx = cyRect.left + pos.x, my = cyRect.top + pos.y
-    const mw = 150, mh = 180
-    if (mx + mw > window.innerWidth) mx = window.innerWidth - mw - 4
-    if (my + mh > window.innerHeight) my = window.innerHeight - mh - 4
-    contextMenuPos.value = { x: Math.max(0, mx), y: Math.max(0, my) }
-    contextMenuVisible.value = true
-    evt.stopPropagation()
-    if (ctxMenuTimer) { clearTimeout(ctxMenuTimer); ctxMenuTimer = null }
-    ctxMenuTimer = setTimeout(() => { contextMenuVisible.value = false; ctxMenuTimer = null }, 15000)
-  })
-  cy.on('tap', (evt: any) => {
-    if (evt.target === cy) { contextMenuVisible.value = false; if (ctxMenuTimer) { clearTimeout(ctxMenuTimer); ctxMenuTimer = null } }
-  })
-  cy.on('dragfree', () => { contextMenuVisible.value = false; if (ctxMenuTimer) { clearTimeout(ctxMenuTimer); ctxMenuTimer = null } })
-  applyFilter(); applyCenterMode()
-}
-
-// ── Navigation ──
-function navigateTo(cid: string, et?: string) {
-  docId.value = ''
-  docCommId.value = cid; if (et) docEdgeType.value = et
-  pushDocBc({ label: cid.slice(0, 16), cid: cid, et: et || docEdgeType.value })
-  loadDoc()
-}
-
-function navBack(idx: number) {
-  if (idx < 0 || !docBreadcrumb.value[idx]) {
-    docId.value = originalDocId; docCommId.value = ''; docEdgeType.value = 'INCLUDE'; docBreadcrumb.value = []; loadDoc(); return
-  }
-  const target = docBreadcrumb.value[idx]
-  if (target?.cid) { docCommId.value = target.cid; docEdgeType.value = target.et || 'INCLUDE'; docBreadcrumb.value = docBreadcrumb.value.slice(0, idx + 1); loadDoc() }
-}
-
-// ── Right Panel (graph) ──
-function setEdgeType(et: string) {
-  graphEdgeType.value = et
-  if (et.startsWith('EXTERNAL_')) gran.value = 'component'
-  if (gran.value === 'file' && (et === 'EXTERNAL_INCLUDE' || et === 'EXTERNAL_CALL')) {
-    graphEdgeType.value = et === 'EXTERNAL_INCLUDE' ? 'INCLUDE' : 'CALL'
-  }
-  loadGraph()
-  loadRightCommTree()
-}
-
-async function loadRightCommTree() {
-  try {
-    const kids = await api.getCommunityChildren(taskId.value, graphCommId.value || undefined, graphEdgeType.value)
-    rightCommTree.value = kids
-  } catch (_) { rightCommTree.value = [] }
-}
-
-function navigateComm(cid: string, name?: string) {
-  graphCommId.value = cid
-  pushGraphBc({ cid, et: graphEdgeType.value, label: name || cid.slice(0, 16) })
-  loadGraph()
-  loadRightCommTree()
-}
-
-// ── TOC (left panel float, navigates doc) ──
-async function toggleToc() {
-  tocVisible.value = !tocVisible.value
-  if (tocVisible.value) await loadTocData()
-}
-async function loadTocData() {
-  tocLoading.value = true
-  tocCallChildren.value = []
-  tocIncludeChildren.value = []
-  try {
-    const isRoot = !docCommId.value
-    if (isRoot) {
-      const [callKids, includeKids] = await Promise.all([
-        api.getCommunityChildren(taskId.value, undefined, 'CALL'),
-        api.getCommunityChildren(taskId.value, undefined, 'INCLUDE'),
-      ])
-      tocCallChildren.value = callKids || []
-      tocIncludeChildren.value = includeKids || []
-    } else {
-      const kids = await api.getCommunityChildren(taskId.value, docCommId.value, docEdgeType.value)
-      if (docEdgeType.value === 'CALL') tocCallChildren.value = kids || []
-      else tocIncludeChildren.value = kids || []
-    }
-  } catch (_) {
-    tocCallChildren.value = []
-    tocIncludeChildren.value = []
-  } finally { tocLoading.value = false }
-}
-function tocNavigate(c: CommunityChild) {
-  tocVisible.value = false
-  docId.value = ''
-  docCommId.value = c.commId
-  docEdgeType.value = c.edgeType || docEdgeType.value
-  pushDocBc({ label: c.name || c.commId, cid: c.commId, et: c.edgeType || docEdgeType.value })
-  loadDoc()
-}
-
-// ── File list ──
-const filteredFiles = ref<any[]>([])
-async function loadFiles() {
-  if (!docCommId.value) return
-  try {
-    const data = await api.get('/api/community-files', { task_id: taskId.value, community_id: docCommId.value, edge_type: docEdgeType.value })
-    files.value = data.files || []
-    filteredFiles.value = data.files || []
-  } catch (_) { files.value = []; filteredFiles.value = [] }
-}
-
-function filterFiles() {
-  const q = fileSearch.value.toLowerCase()
-  filteredFiles.value = files.value.filter((f: any) => f.path.toLowerCase().includes(q))
-}
-
-function openFilePreview(fp: string) {
-  filePreview.value = fp; pageMode.value = 'file-summary'
-  if (taskId.value) {
-    api.get('/api/file-summary', { task_id: taskId.value, file_path: fp }).then(d => { fileSummary.value = d }).catch(() => { fileSummary.value = null })
-  }
-}
-
-// ── Context menu actions ──
-function ctxCopy() {
-  const n = graphNodes.value.find(x => x.id === contextNodeId.value)
-  if (!n) return
-  const info = { projectId: '', projectName: '', taskId: taskId.value, nodeId: n.id, nodeName: n.label }
-  const text = JSON.stringify(info, null, 2)
-  try { navigator.clipboard.writeText(text) } catch (_) {
-    const ta = document.createElement('textarea')
-    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta)
-    ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
-  }
-  toast('已复制')
-  contextMenuVisible.value = false
-}
 function ctxDrilldown() {
   const nid = contextNodeId.value
   if (gran.value === 'file' || nid === graphCommId.value) { contextMenuVisible.value = false; return }
+  const cy = getCy()
   const node = cy?.getElementById(nid)
-  if (node && node.data('hasChildren') === false) {
-    gran.value = 'file'
-    rightDepth.value = 1
-  }
+  if (node && node.data('hasChildren') === false) { gran.value = 'file'; rightDepth.value = 1 }
   graphCommId.value = nid
   const drillLabel = graphNodes.value.find(n => n.id === nid)?.label || nid.slice(0, 16)
   pushGraphBc({ cid: nid, et: graphEdgeType.value, label: drillLabel })
@@ -476,10 +95,24 @@ function ctxDrilldown() {
 }
 function ctxCenter() {
   const nid = contextNodeId.value
-  const idx = centerNodes.indexOf(nid)
-  if (idx >= 0) centerNodes.splice(idx, 1); else centerNodes.push(nid)
-  applyCenterMode(); contextMenuVisible.value = false
+  const cn = getCenterNodes()
+  const idx = cn.indexOf(nid)
+  if (idx >= 0) cn.splice(idx, 1); else cn.push(nid)
+  applyCenterMode()
+  contextMenuVisible.value = false
 }
+
+console.log('[DocViewer] using useDocState + useGraphState')
+
+function toggleTab() {
+  if (graphTab.value === 'graph') {
+    graphTab.value = 'heatmap'
+    loadHeatmap(taskId.value, graphEdgeType.value, graphCommId.value)
+  } else {
+    graphTab.value = 'graph'
+  }
+}
+
 function ctxOpenDoc() {
   docId.value = ''
   docCommId.value = contextNodeId.value
@@ -488,196 +121,16 @@ function ctxOpenDoc() {
   loadDoc()
   contextMenuVisible.value = false
 }
-// Replaced by the draft-aware version below
 
-// ── Filter ──
-function toggleFilter() {
-  filterVisible.value = !filterVisible.value
-  if (filterVisible.value && cy) {
-    // Refresh filter list from current cy nodes
-    const cyNodes = cy.nodes().map((n: any) => ({ id: n.id(), label: n.data('label') || n.id() }))
-    filterNodeList.value = cyNodes
-  }
-}
-const filterNodeList = ref<{ id: string; label: string }[]>([])
-const filteredNodeList = computed(() => {
-  if (!filterQuery.value) return filterNodeList.value
-  const q = filterQuery.value.toLowerCase()
-  return filterNodeList.value.filter(n => n.label.toLowerCase().includes(q))
-})
-function applyFilter() {
-  if (!cy) return; const q = filterQuery.value.toLowerCase().trim()
-  cy.nodes().forEach((n: any) => {
-    if (manualHidden.has(n.id())) { n.hide(); return }
-    if (manualShown.has(n.id())) { n.show(); return }
-    if (q && !n.data('label').toLowerCase().includes(q)) { n.hide(); return }
-    n.show()
+function ctxSaveNote() {
+  const n = graphNodes.value.find(x => x.id === contextNodeId.value)
+  if (!n) return
+  _addRefToDraft({
+    projectId: '', projectName: '', taskId: taskId.value,
+    componentId: n.id, label: n.label, text: n.label,
   })
-}
-function cycleFilter() {
-  if (!cy) return
-  const total = cy.nodes()
-  const candidates = centerNodes.length > 0 ? total.filter((n: any) => !n.hidden()) : total
-  if (filterToggleState.value === 'hideOrphan') {
-    const isolated = candidates.filter((n: any) => n.degree(false) === 0)
-    if (isolated.length > 0) {
-      isolated.hide(); isolated.forEach((n: any) => manualHidden.add(n.id()))
-    }
-    filterToggleState.value = 'hideAll'
-  } else if (filterToggleState.value === 'hideAll') {
-    const hasNonIsoHidden = candidates.some((n: any) => n.hidden() && n.degree(false) > 0)
-    if (!hasNonIsoHidden) {
-      candidates.hide(); candidates.forEach((n: any) => manualHidden.add(n.id()))
-    }
-    filterToggleState.value = 'showAll'
-  } else {
-    total.show(); manualHidden.clear(); manualShown.clear()
-    filterToggleState.value = 'hideOrphan'
-  }
-  if (centerNodes.length > 0) applyCenterMode()
-  applyFilter()
-}
-function filterToggleLabel(): string {
-  return { hideOrphan: '隐藏孤立', hideAll: '隐藏全部', showAll: '显示全部' }[filterToggleState.value] || '隐藏孤立'
-}
-function filterToggleTitle(): string {
-  return { hideOrphan: '隐藏孤立节点（无连线）', hideAll: '隐藏所有节点', showAll: '显示所有节点' }[filterToggleState.value] || '隐藏孤立节点（无连线）'
-}
-function _nodeFilterColor(id: string): string {
-  if (!cy) return '#999'
-  const n = cy.getElementById(id)
-  if (n.length) return n.style('background-color') || '#999'
-  return '#999'
-}
-function isNodeHidden(id: string): boolean {
-  if (manualHidden.has(id)) return true
-  if (cy) { const n = cy.getElementById(id); if (n.length && n.hasClass('hidden')) return true }
-  return false
-}
-function toggleNodeFilter(id: string) {
-  if (manualHidden.has(id)) { manualHidden.delete(id); manualShown.add(id) }
-  else { manualHidden.add(id); manualShown.delete(id) }
-  applyFilter()
-}
-function applyCenterMode() {
-  if (!cy) return; cy.nodes().removeClass('center-highlight')
-  if (!centerNodes.length) { cy.nodes().show(); manualHidden.forEach((id: string) => { const n = cy.getElementById(id); if (n.length) n.hide() }); return }
-  const vs = new Set(centerNodes)
-  centerNodes.forEach((cid: string) => { const cn = cy.getElementById(cid); if (cn.length) cn.neighbourhood().forEach((n: any) => vs.add(n.id())) })
-  cy.nodes().forEach((n: any) => {
-    const id = n.id()
-    if (manualHidden.has(id)) { n.hide(); return } if (manualShown.has(id)) { n.show(); return }
-    vs.has(id) ? n.show() : n.hide()
-  })
-  centerNodes.forEach((cid: string) => { const cn = cy.getElementById(cid); if (cn.length) cn.addClass('center-highlight') })
-}
-function resetLayout() {
-  if (!cy) return
-  centerNodes = []
-  manualHidden.clear()
-  manualShown.clear()
-  filterQuery.value = ''
-  filterToggleState.value = 'hideOrphan'
-  cy.nodes().removeClass('hidden center-highlight').show()
-  cy.edges().show()
-  api.del('/api/graph-layout', { taskId: taskId.value, commId: graphCommId.value || '', edgeType: graphEdgeType.value, gran: gran.value, depth: rightDepth.value } as any).catch(() => {})
-  cy.layout(_buildLayout(cy, cy.nodes().length)).run()
-  _afterLayout(cy)
-}
-function toggleEdges() {
-  showEdges.value = !showEdges.value
-  if (cy) {
-    if (showEdges.value) cy.edges().show()
-    else cy.edges().hide()
-  }
-}
-function toggleGran() { gran.value = gran.value === 'component' ? 'file' : 'component'; loadGraph() }
-
-// ── Heatmap ──
-async function loadHeatmap() {
-  heatmapLoading.value = true
-  try {
-    const isExternal = graphEdgeType.value === 'EXTERNAL_INCLUDE' || graphEdgeType.value === 'EXTERNAL_CALL'
-    if (isExternal) {
-      const data = await api.getExternalStats(taskId.value)
-      heatmapData.value = data ? { matrix: data.stats || [], rows: data.labels || [], cols: data.communities || [], maxCount: data.maxCount || 0 } : null
-    } else {
-      const data = await api.getHeatmap(taskId.value, graphEdgeType.value, heatmapSize.value, graphCommId.value || undefined)
-      heatmapData.value = data ? sortHeatmap(data) : null
-    }
-  } catch (_) { heatmapData.value = null } finally { heatmapLoading.value = false }
-}
-
-function sortHeatmap(data: any): any {
-  if (!data || !data.matrix || !data.matrix.length) return data
-  const n = data.matrix.length
-  const rowSums = data.matrix.map((row: number[]) => row.reduce((a: number, b: number) => a + b, 0))
-  const colSums = data.matrix[0] ? data.matrix[0].map((_: number, ci: number) => data.matrix.reduce((a: number, r: number[]) => a + r[ci], 0)) : []
-  const rowIdx = Array.from({ length: n }, (_, i) => i).sort((a, b) => rowSums[b] - rowSums[a])
-  const colIdx = colSums.length ? Array.from({ length: colSums.length }, (_, i) => i).sort((a, b) => colSums[b] - colSums[a]) : []
-  return {
-    rows: rowIdx.map((i: number) => data.rows[i]),
-    cols: colIdx.length ? colIdx.map((i: number) => data.cols[i]) : data.cols,
-    matrix: rowIdx.map((i: number) => colIdx.length ? colIdx.map((j: number) => data.matrix[i][j]) : data.matrix[i]),
-    maxCount: data.maxCount,
-    commIds: data.commIds ? rowIdx.map((i: number) => data.commIds[i]) : undefined,
-  }
-}
-
-function toggleTab() {
-  if (graphTab.value === 'graph') {
-    graphTab.value = 'heatmap'
-    loadHeatmap()
-  } else {
-    graphTab.value = 'graph'
-  }
-}
-let _dragPrevPos: { x: number; y: number } | null = null
-
-function toggleFollowMode() {
-  followMode.value = !followMode.value
-  if (cy) {
-    cy.off('grab drag free', 'node')
-    _dragPrevPos = null
-    if (followMode.value) {
-      // Follow mode: dragged node's direct neighbors move with 0.7 factor
-      cy.on('drag', 'node', (evt: any) => {
-        const node = evt.target
-        const pos = node.position()
-        if (!_dragPrevPos) { _dragPrevPos = { x: pos.x, y: pos.y }; return }
-        const dx = pos.x - _dragPrevPos.x
-        const dy = pos.y - _dragPrevPos.y
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
-        _dragPrevPos = { x: pos.x, y: pos.y }
-        const neighbors = node.closedNeighborhood().nodes().filter((n: any) => !n.same(node))
-        neighbors.forEach((n: any) => {
-          const np = n.position()
-          n.position({ x: np.x + dx * 0.7, y: np.y + dy * 0.7 })
-        })
-      })
-      cy.on('free', 'node', () => { _dragPrevPos = null })
-    } else {
-      // Locked mode: grab locks all other nodes, free unlocks
-      cy.on('grab', 'node', (evt: any) => {
-        const grabbed = evt.target
-        cy.nodes().forEach((n: any) => { if (!n.same(grabbed)) n.lock() })
-      })
-      cy.on('free', 'node', () => { if (cy) cy.nodes().unlock() })
-    }
-  }
-}
-function heatmapBg(val: number, max: number): string {
-  if (val === 0 || !max) return 'transparent'
-  const i = Math.min(val / max, 1)
-  return `rgb(255,${Math.round(245 - 200 * i)},${Math.round(245 - 200 * i)})`
-}
-function heatmapDrill(cid: string) {
-  graphCommId.value = cid
-  const hmLabel = graphNodes.value.find(n => n.id === cid)?.label || cid.slice(0, 16)
-  pushGraphBc({ cid, et: graphEdgeType.value, label: hmLabel })
-  loadGraph()
-  loadRightCommTree()
-  graphTab.value = 'heatmap'
+  toast('已存入便签')
+  contextMenuVisible.value = false
 }
 
 // ── Selection toolbar (exact legacy logic) ──
@@ -755,204 +208,7 @@ function showSelBar(sel: Selection) {
   })
 }
 
-// ── Float bounds: viewport-relative (for position:fixed floats) ──
-// ── + panel-relative (for position:absolute toolbar/filter) ──
-function updateFloatBoundaries() {
-  const leftPanel = document.querySelector('.left-panel') as HTMLElement
-  const rightPanel = document.querySelector('.right-panel') as HTMLElement
-  if (leftPanel && !leftPanel.style.display.startsWith('none') && leftPanel.offsetHeight > 0) {
-    const lr = leftPanel.getBoundingClientRect()
-    floatBounds.tocFloat = { minX: lr.left, maxX: lr.right - 30, minY: lr.top, maxY: lr.bottom - 30 }
-  } else {
-    floatBounds.tocFloat = { minX: 0, maxX: 0, minY: 0, maxY: 0 }
-  }
-  if (rightPanel && !rightPanel.style.display.startsWith('none') && rightPanel.offsetHeight > 0) {
-    const rr = rightPanel.getBoundingClientRect()
-    floatBounds.fileCommFloat = { minX: rr.left, maxX: rr.right - 30, minY: rr.top + 44, maxY: rr.bottom - 30 }
-    // Panel-relative bounds for position:absolute toolbar/filter
-    const pw = rightPanel.offsetWidth, ph = rightPanel.offsetHeight
-    floatBounds.graphToolbar = { minX: 0, maxX: pw - 30, minY: 8, maxY: ph - 30 }
-    floatBounds.graphFilter = { minX: 0, maxX: pw - 30, minY: 0, maxY: ph - 30 }
-  }
-}
-function clampFloatPosition(el: HTMLElement, key: string) {
-  const b = floatBounds[key]
-  if (!b || b.minX === 0 && b.maxX === 0) return
-  // Use computed style for elements that haven't been dragged yet (no inline style)
-  const isInline = el.style.left !== ''
-  const curLeft = isInline ? parseInt(el.style.left) : el.offsetLeft
-  const curTop = isInline ? parseInt(el.style.top) : el.offsetTop
-  let changed = false
-  if (curLeft !== undefined && !isNaN(curLeft)) {
-    if (curLeft < b.minX) { el.style.left = b.minX + 'px'; changed = true }
-    if (curLeft > b.maxX) { el.style.left = b.maxX + 'px'; changed = true }
-  }
-  if (curTop !== undefined && !isNaN(curTop)) {
-    if (curTop < b.minY) { el.style.top = b.minY + 'px'; changed = true }
-    if (curTop > b.maxY) { el.style.top = b.maxY + 'px'; changed = true }
-  }
-}
 
-// ── Window resize ──
-function onWindowResize() {
-  updateFloatBoundaries()
-  if (tocFloatRef.value) clampFloatPosition(tocFloatRef.value, 'tocFloat')
-  if (fileCommFloatRef.value) clampFloatPosition(fileCommFloatRef.value, 'fileCommFloat')
-}
-
-// ── Fit panel position to avoid overflow (exact legacy logic) ──
-// Uses data-flipped flag to prevent oscillation between static/absolute
-function _fitPanel(floatEl: HTMLElement) {
-  const panel = floatEl.querySelector('.toc-panel') as HTMLElement
-  if (!panel) return
-  const parent = floatEl.parentElement
-  if (!parent) return
-  const pr = parent.getBoundingClientRect()
-  const fr = floatEl.getBoundingClientRect()
-  const pw = panel.offsetWidth, ph = panel.offsetHeight
-  if (!pw && !ph) return
-  const frRel = fr.left - pr.left
-  // Both floats now use left-aligned layout (panel extends right from button)
-  const overflowRight = pw > 0 && frRel + pw > pr.width
-  const overflowBottom = ph > 0 && fr.top - pr.top + ph > pr.height
-  console.log(`[_fitPanel] id=${floatEl.id} pr={l:${pr.left},r:${pr.right},w:${pr.width}} fr={l:${fr.left},t:${fr.top}} rel=${frRel} pw=${pw} ph=${ph} oR=${overflowRight} oB=${overflowBottom}`)
-  if (overflowRight || overflowBottom) {
-    floatEl.classList.add('flip-overflow')
-    if (overflowBottom) floatEl.classList.add('flip-up')
-    else floatEl.classList.remove('flip-up')
-    if (overflowRight) floatEl.classList.add('flip-left')
-    else floatEl.classList.remove('flip-left')
-  } else {
-    floatEl.classList.remove('flip-overflow', 'flip-up', 'flip-left')
-  }
-}
-
-// ── Get element position relative to its positioned parent ──
-function _floatPos(el: HTMLElement): { left: number; top: number } {
-  const r = el.getBoundingClientRect()
-  const p = el.offsetParent
-  if (p) { const pr = p.getBoundingClientRect(); return { left: r.left - pr.left, top: r.top - pr.top } }
-  return { left: r.left, top: r.top }
-}
-
-// ── Clamp position to float bounds (viewport-relative coords) ──
-function _restoreWithBounds(el: HTMLElement, left: number, top: number, boundsKey?: string) {
-  const b = boundsKey ? floatBounds[boundsKey] : undefined
-  el.style.right = ''
-  if (b && b.minX !== 0 && b.maxX !== 0) {
-    el.style.left = Math.max(b.minX, Math.min(b.maxX, left)) + 'px'
-    el.style.top = Math.max(b.minY, Math.min(b.maxY, top)) + 'px'
-  } else {
-    el.style.left = left + 'px'
-    el.style.top = top + 'px'
-  }
-  _fitPanel(el)
-}
-// ── Same for panel-relative (toolbar/filter which stay position:absolute) ──
-function clampToBounds(el: HTMLElement, left: number, top: number, boundsKey?: string) {
-  const b = boundsKey ? floatBounds[boundsKey] : undefined
-  if (b && b.minX !== 0 && b.maxX !== 0) {
-    el.style.left = Math.max(b.minX, Math.min(b.maxX, left)) + 'px'
-    el.style.top = Math.max(b.minY, Math.min(b.maxY, top)) + 'px'
-  } else {
-    el.style.left = left + 'px'
-    el.style.top = top + 'px'
-  }
-}
-
-// ── Generic drag for any floating element (handles transform offset) ──
-function makeElementDraggable(el: HTMLElement, handle: HTMLElement, storageKey: string, boundsKey?: string) {
-  let dragging = false, moved = false, startX = 0, startY = 0, origLeft = 0, origTop = 0, origTransform = ''
-  try {
-    const saved = localStorage.getItem(storageKey)
-    if (saved) { const p = JSON.parse(saved); el.style.right = ''; clampToBounds(el, p.x, p.y, boundsKey); el.style.transform = 'none' }
-  } catch (_) {}
-  handle.addEventListener('mousedown', (e) => {
-    moved = false; startX = e.clientX; startY = e.clientY
-    origTransform = el.style.transform || getComputedStyle(el).transform
-    if (origTransform && origTransform !== 'none') {
-      el.style.transform = 'none'
-      void el.offsetHeight
-    }
-    const pos = _floatPos(el)
-    origLeft = pos.left; origTop = pos.top
-    dragging = true
-    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
-    e.stopPropagation()
-  })
-  function onMove(e: MouseEvent) {
-    if (!dragging) return
-    const dx = e.clientX - startX, dy = e.clientY - startY
-    if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) moved = true
-    if (moved) {
-      el.style.right = ''
-      let left = origLeft + dx
-      let top = origTop + dy
-      const b = boundsKey ? floatBounds[boundsKey] : undefined
-      if (b && b.minX !== 0 && b.maxX !== 0) {
-        left = Math.max(b.minX, Math.min(b.maxX, left))
-        top = Math.max(b.minY, Math.min(b.maxY, top))
-      }
-      el.style.left = left + 'px'
-      el.style.top = top + 'px'
-    }
-  }
-  function onUp() {
-    if (!dragging) return
-    dragging = false
-    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp)
-    if (moved) {
-      try { localStorage.setItem(storageKey, JSON.stringify({ x: parseInt(el.style.left) || 0, y: parseInt(el.style.top) || 0 })) } catch (_) {}
-    }
-  }
-}
-
-// ── Floating panel drag (toggle button doubles as drag handle) ──
- function makeFloatDraggable(el: HTMLElement, storageKey: string) {
-  let dragging = false, ox = 0, oy = 0, fitPending = false
-  const boundsKey = el.id
-  try {
-    const saved = localStorage.getItem(storageKey)
-    if (saved) { const p = JSON.parse(saved); el.style.right = ''; _restoreWithBounds(el, p.x, p.y, boundsKey); console.log('[drag] RESTORE id=' + boundsKey + ' to ' + p.x + ',' + p.y) }
-  } catch (_) {}
-  el.addEventListener('mousedown', (e) => {
-    if ((e.target as HTMLElement).closest('.toc-panel')) return
-    e.preventDefault()
-    el.classList.add('dragging')
-    const rect = el.getBoundingClientRect()
-    ox = e.clientX - rect.left; oy = e.clientY - rect.top
-    const b = floatBounds[boundsKey]
-    console.log(`[drag] START id=${boundsKey} clientXY=${e.clientX},${e.clientY} offset=${ox},${oy} bounds=${JSON.stringify(b)}`)
-    if (!b || (b.minX === 0 && b.maxX === 0)) { el.style.left = rect.left + 'px'; el.style.top = rect.top + 'px' }
-    document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
-  })
-  function onMove(ev: MouseEvent) {
-    const b = floatBounds[boundsKey]
-    if (!b || (b.minX === 0 && b.maxX === 0)) return
-    el.style.right = ''
-    const left = Math.max(b.minX, Math.min(b.maxX, ev.clientX - ox))
-    const top = Math.max(b.minY, Math.min(b.maxY, ev.clientY - oy))
-    el.style.left = left + 'px'; el.style.top = top + 'px'
-    if (!fitPending) {
-      fitPending = true
-      requestAnimationFrame(() => { fitPending = false; _fitPanel(el) })
-    }
-  }
-  function onUp() {
-    el.classList.remove('dragging')
-    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp)
-    _fitPanel(el)
-    const saved = { x: parseInt(el.style.left) || 0, y: parseInt(el.style.top) || 0 }
-    console.log(`[drag] SAVE id=${boundsKey} pos=${JSON.stringify(saved)}`)
-    try { localStorage.setItem(storageKey, JSON.stringify(saved)) } catch (_) {}
-  }
-}
-// ── Auto-close floating panels ──
-function mountAutoClose(el: HTMLElement, closeFn: () => void) {
-  let timer: any = null
-  el.addEventListener('mouseleave', () => { timer = setTimeout(closeFn, 1500) })
-  el.addEventListener('mouseenter', () => { if (timer) { clearTimeout(timer); timer = null } })
-}
 
 // ── i18n helper ──
 function _(key: string): string {
@@ -1104,201 +360,6 @@ function deleteAnnotation() {
   editAnnoData.value = null; toast('批注已删除')
 }
 
-// ── Notes system (legacy-aligned) ──
-const notesModalVisible = ref(false)
-const notesList = ref<any[]>([])
-const notesFilterStatus = ref('draft') // draft | pending | sent | all
-const notesSortOrder = ref('seq') // seq | time
-const notesProjectFilter = ref('')
-const notesProjectOptions = ref<string[]>([])
-const notesUserText = ref('')
-const notesSelectedSessions = ref<any[]>([])
-const notesSessions = ref<any[]>([])
-const notesExecStep = ref<'none' | 'confirm' | 'sessions'>('none')
-const notesAutoDelete = ref(true)
-const notesDotVisible = ref(false)
-let notesBc: BroadcastChannel | null = null
-let notesPollTimer: any = null
-
-const notesKey = computed(() => `topo_notes_${taskId.value}`)
-
-const filteredNotes = computed(() => {
-  let list = notesList.value
-  if (notesFilterStatus.value !== 'all') list = list.filter((n: any) => n.status === notesFilterStatus.value)
-  if (notesProjectFilter.value) list = list.filter((n: any) => n.refs?.some((r: any) => r.projectId === notesProjectFilter.value))
-  if (notesSortOrder.value === 'time') list = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-  else list = [...list].sort((a, b) => (a.seq || 0) - (b.seq || 0))
-  return list
-})
-
-function _notesMakeRefId(): string { return 'ref_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6) }
-function _notesKey(): string { return notesKey.value }
-
-function _notesSave() {
-  try {
-    localStorage.setItem(_notesKey(), JSON.stringify(notesList.value))
-    updateNotesDot()
-    try { notesBc?.postMessage({ type: 'notes' }) } catch (_) {}
-  } catch (_) {}
-}
-
-function _notesLoad() {
-  try {
-    const raw = localStorage.getItem(_notesKey())
-    notesList.value = raw ? JSON.parse(raw) : []
-    // Rebuild project filter options
-    const projs = new Set<string>()
-    for (const n of notesList.value)
-      for (const r of (n.refs || []))
-        if (r.projectId) projs.add(r.projectId)
-    notesProjectOptions.value = Array.from(projs).sort()
-    updateNotesDot()
-    loadNotesSessions()
-  } catch (_) { notesList.value = [] }
-}
-
-function updateNotesDot() {
-  notesDotVisible.value = notesList.value.some((n: any) => n.status === 'draft' || n.status === 'pending')
-}
-
-function loadNotesSessions() {
-  if (taskId.value) {
-    api.listSessions().then(d => { notesSessions.value = d.sessions || [] }).catch(() => {})
-  }
-}
-
-function openNotesModal() {
-  notesModalVisible.value = !notesModalVisible.value
-  if (notesModalVisible.value) {
-    _notesLoad()
-    notesExecStep.value = 'none'
-    notesUserText.value = ''
-  }
-}
-
-function deleteRefFromNote(noteId: string, refId: string) {
-  const n = notesList.value.find((x: any) => x.id === noteId)
-  if (!n) return
-  n.refs = (n.refs || []).filter((r: any) => r._id !== refId)
-  if (!n.refs.length) {
-    notesList.value = notesList.value.filter((x: any) => x.id !== noteId)
-  }
-  _notesSave()
-}
-
-function deleteNoteById(id: string) {
-  notesList.value = notesList.value.filter((x: any) => x.id !== id)
-  _notesSave()
-}
-
-function deleteSelectedRefs() {
-  const checked = document.querySelectorAll<HTMLInputElement>('.note-ref-cbox:checked')
-  const ids = new Map<string, string[]>()
-  checked.forEach(cb => { const [nid, rid] = cb.value.split('|'); if (!ids.has(nid)) ids.set(nid, []); ids.get(nid)!.push(rid) })
-  for (const [nid, rids] of ids) {
-    const n = notesList.value.find((x: any) => x.id === nid)
-    if (!n) continue
-    n.refs = (n.refs || []).filter((r: any) => !rids.includes(r._id))
-    if (!n.refs.length) notesList.value = notesList.value.filter((x: any) => x.id !== nid)
-  }
-  _notesSave()
-}
-
-function _getOrCreateDraft(): any {
-  let draft = notesList.value.find((n: any) => n.status === 'draft')
-  if (!draft) {
-    const maxSeq = Math.max(0, ...notesList.value.map((n: any) => n.seq || 0))
-    draft = { id: 'draft_' + Date.now().toString(36), seq: maxSeq + 1, status: 'draft', createdAt: new Date().toISOString(), refs: [], userText: '' }
-    notesList.value.unshift(draft)
-  }
-  return draft
-}
-
-function _addRefToDraft(ref: any) {
-  const draft = _getOrCreateDraft()
-  draft.refs.push({ ...ref, _id: _notesMakeRefId(), seq: draft.refs.length + 1 })
-  _notesSave()
-  if (notesModalVisible.value) _notesLoad()
-}
-
-function manualDrafts() {
-  // Mark all draft/pending refs as pending (or already pending stay pending)
-  const pending = notesList.value.filter((n: any) => n.status === 'draft')
-  pending.forEach((n: any) => { n.status = 'pending'; n.userText = notesUserText.value || n.userText || '' })
-  _notesSave()
-  notesModalVisible.value = false
-  toast('已标记为待处理')
-}
-
-async function executeNotes() {
-  const checked = document.querySelectorAll<HTMLInputElement>('.note-ref-cbox:checked')
-  if (!checked.length && !notesUserText.value.trim()) { toast('请选择便签或输入内容'); return }
-  
-  if (notesExecStep.value === 'none') {
-    // Step 1: show session picker
-    notesExecStep.value = 'sessions'
-    await loadNotesSessions()
-    return
-  }
-  
-  if (notesExecStep.value === 'sessions') {
-    // Step 2: execute with selected session
-    const selSession = document.querySelector<HTMLSelectElement>('#noteSessionSelect')
-    const sessionId = selSession?.value
-    if (!sessionId) { toast('请选择会话'); return }
-    const refs: any[] = []
-    const checked2 = document.querySelectorAll<HTMLInputElement>('.note-ref-cbox:checked')
-    checked2.forEach(cb => {
-      const [nid, rid] = cb.value.split('|')
-      const n = notesList.value.find((x: any) => x.id === nid)
-      if (!n) return
-      const r = (n.refs || []).find((x: any) => x._id === rid)
-      if (r) refs.push(r)
-    })
-    const execData = { taskId: taskId.value, sessionId, refs, userText: notesUserText.value || '' }
-    try {
-      localStorage.setItem('topo_exec_pending_' + taskId.value, JSON.stringify(execData))
-      window.open(`/chat?taskId=${taskId.value}&sessionId=${sessionId}`, '_blank')
-      if (notesAutoDelete.value) {
-        checked2.forEach(cb => {
-          const [nid, rid] = cb.value.split('|')
-          const n = notesList.value.find((x: any) => x.id === nid)
-          if (!n) return
-          n.refs = (n.refs || []).filter((r: any) => r._id !== rid)
-          if (!n.refs.length) notesList.value = notesList.value.filter((x: any) => x.id !== nid)
-        })
-        _notesSave()
-      }
-    } catch (_) { toast('执行失败') }
-    notesModalVisible.value = false
-    notesExecStep.value = 'none'
-  }
-}
-
-// Listen for cross-tab notes changes
-function initNotesChannel() {
-  try {
-    notesBc = new BroadcastChannel('topo_notes_' + taskId.value)
-    notesBc.onmessage = () => { if (notesModalVisible.value) _notesLoad() }
-  } catch (_) {}
-  notesPollTimer = setInterval(() => {
-    if (!notesModalVisible.value) {
-      _notesLoad()
-    }
-  }, 30000)
-}
-
-// Replace simple ctxSaveNote with draft-aware version
-function ctxSaveNote() {
-  const n = graphNodes.value.find(x => x.id === contextNodeId.value)
-  if (!n) return
-  _addRefToDraft({
-    projectId: '', projectName: '', taskId: taskId.value,
-    componentId: n.id, label: n.label, text: n.label,
-  })
-  toast('已存入便签')
-  contextMenuVisible.value = false
-}
 
 function toggleLeft() {
   leftVisible.value = !leftVisible.value
@@ -1335,22 +396,14 @@ watch(filterVisible, (v) => {
 
 onMounted(() => {
   applyFontSize(fontSize.value)
-  loadDoc()
+  loadDoc(() => { if (docContentRef.value) renderDiagrams(docContentRef.value); checkHash() })
   loadGraph()
   loadFiles()
   initSelectionToolbar()
   _notesLoad()
   initNotesChannel()
-  window.addEventListener('resize', onWindowResize)
-  document.addEventListener('mousedown', (e) => {
-    if (!contextMenuVisible.value) return
-    const target = e.target as HTMLElement
-    const cyContainer = document.querySelector('.cy-canvas')
-    if (cyContainer && cyContainer.contains(target)) return
-    if (target.closest('.ctx-menu')) return
-    contextMenuVisible.value = false
-    if (ctxMenuTimer) { clearTimeout(ctxMenuTimer); ctxMenuTimer = null }
-  })
+  window.addEventListener('resize', () => onWindowResize_(tocFloatRef, fileCommFloatRef))
+  initContextMenuAutoClose()
   // Initialize float positions (near center divider) + boundaries
   nextTick(() => {
     updateFloatBoundaries()
@@ -1438,7 +491,6 @@ onMounted(() => {
       </select>
       <button class="toggle-btn notes-btn" :class="{ active: false }" @click="openNotesModal" title="便签">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span v-if="notesDotVisible" class="notes-dot"></span>
       </button>
       <button class="toggle-btn" :class="{ active: leftVisible }" @click="toggleLeft" title="文档面板">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -1486,7 +538,7 @@ onMounted(() => {
           <div v-if="files.length" class="file-list-section">
             <h3>文件列表 ({{ files.length }})</h3>
             <input v-model="fileSearch" class="file-search" placeholder="搜索文件..." @input="filterFiles" />
-            <div v-for="f in filteredFiles.slice(0, 20)" :key="f.path" class="file-item" @click="openFilePreview(f.path)">
+            <div v-for="f in filteredFiles_.slice(0, 20)" :key="f.path" class="file-item" @click="openFilePreview(f.path)">
               <span class="file-name">{{ f.name }}</span>
               <span class="file-path">{{ f.path }}</span>
             </div>
@@ -1526,7 +578,7 @@ onMounted(() => {
       <div v-show="rightVisible" class="right-panel" :style="{ flex: rightFlex }">
         <!-- Right Breadcrumb -->
         <div class="breadcrumb">
-          <span class="bc-link" @click="graphBreadcrumb = []; graphCommId = ''; graphEdgeType = 'INCLUDE'; loadGraph(); loadRightCommTree()">根 ({{ graphEdgeType }})</span>
+          <span class="bc-link" @click="graphBreadcrumb = []; graphCommId = ''; loadGraph(); loadRightCommTree()">根</span>
           <template v-for="(cs, i) in graphBreadcrumb" :key="i">
             <span class="bc-sep"> › </span>
             <span class="bc-link" @click="graphBreadcrumb = graphBreadcrumb.slice(0, i + 1); graphCommId = cs.cid; graphEdgeType = cs.et; loadGraph(); loadRightCommTree()">{{ cs.label || cs.cid.slice(0, 16) }} <span class="bc-et">({{ cs.et }})</span></span>
@@ -1609,7 +661,7 @@ onMounted(() => {
         <!-- Heatmap -->
         <div v-show="graphTab === 'heatmap'" class="heatmap-container">
           <div class="heatmap-controls">
-            <label>规模: <select v-model.number="heatmapSize" @change="loadHeatmap">
+            <label>规模: <select v-model.number="heatmapSize" @change="loadHeatmap(taskId.value, graphEdgeType.value, graphCommId.value)">
               <option :value="5">5x5</option><option :value="10">10x10</option><option :value="15">15x15</option>
               <option :value="20">20x20</option><option :value="30">30x30</option><option :value="50">50x50</option>
             </select></label>
@@ -1627,32 +679,20 @@ onMounted(() => {
           <div v-else class="cy-placeholder" style="position:static">暂无热力图数据</div>
         </div>
 
-        <!-- Context Menu -->
-        <div v-if="contextMenuVisible" class="ctx-menu" :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }">
-          <div class="ctx-item" @click.stop="ctxCopy">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            <span>复制节点信息</span>
-          </div>
-          <div class="ctx-divider"></div>
-          <div v-if="!contextNodeIsExternal && contextNodeId !== graphCommId && contextNodeHasChildren" class="ctx-item" @click.stop="ctxDrilldown">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
-            <span>下钻 (查看下级)</span>
-          </div>
-          <div class="ctx-item" @click.stop="ctxOpenDoc">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-            <span>打开文档</span>
-          </div>
-          <div class="ctx-divider"></div>
-          <div class="ctx-item" @click.stop="ctxCenter">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg>
-            <span>{{ centerNodes.includes(contextNodeId) ? '取消居中' : '中心视图' }}</span>
-          </div>
-          <div class="ctx-divider"></div>
-          <div class="ctx-item" @click.stop="ctxSaveNote">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-            <span>存入便签</span>
-          </div>
-        </div>
+        <GraphContextMenu
+          :visible="contextMenuVisible"
+          :pos="contextMenuPos"
+          :node-id="contextNodeId"
+          :graph-comm-id="graphCommId"
+          :is-external="contextNodeIsExternal"
+          :has-children="contextNodeHasChildren"
+          :center-nodes="getCenterNodes()"
+          @copy="ctxCopy(contextNodeId); contextMenuVisible = false"
+          @drilldown="ctxDrilldown"
+          @center="ctxCenter"
+          @open-doc="ctxOpenDoc"
+          @save-note="ctxSaveNote"
+        />
 
         <!-- Notes Modal (legacy-aligned) -->
         <div v-if="notesModalVisible" class="note-overlay" @click.self="notesModalVisible = false">
@@ -1683,7 +723,7 @@ onMounted(() => {
                       <span v-if="r.projectName" class="ref-id">{{ r.projectName }}</span>
                       <span v-if="r.taskId" class="ref-id">{{ r.taskId.slice(0,8) }}</span>
                       <span v-if="r.componentId" class="ref-id">{{ r.componentId.slice(0,12) }}</span>
-                      <button class="copy-id-btn" title="复制引用ID" @click.stop="navigator.clipboard.writeText(r.componentId || r._id).then(()=>toast('已复制')).catch(()=>{})">📋</button>
+                      <button class="copy-id-btn" title="复制引用ID" @click.stop="navigator.clipboard.writeText(r.componentId || r._id).then(()=>toast('已复制')).catch(()=>{})">复制</button>
                     </span>
                     <span class="draft-actions">
                       <button class="del" @click.stop="deleteRefFromNote(n.id, r._id)">删除</button>
@@ -1886,7 +926,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .ctx-item:hover{background:var(--bg-hover)}
 .ctx-divider{height:1px;background:var(--border);margin:3px 6px}
 .notes-btn{position:relative}
-.notes-dot{position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:50%;background:#ef4444;border:2px solid var(--bg);animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
 .note-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn .15s ease}
 .note-modal{width:780px;max-height:85vh;background:var(--bg);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25)}
