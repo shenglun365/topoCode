@@ -61,8 +61,8 @@ interface CommunityTaskRuntime {
   /** 文件级图数据缓存 (commId→{nodes,edges}) */
   fileGraphs: Record<string, { nodes: Array<{ id: string; label: string; filePath: string }>; edges: Array<{ source: string; target: string; direction?: string }> }>
   /** Agent 任务队列 */
-  agentTasks: Array<{
-    id: string; action: string; status: 'queued'|'running'|'completed'|'partial'|'failed'|'cancelled'
+    agentTasks: Array<{
+    id: string; action: string;     status: 'queued'|'running'|'completed'|'partial'|'failed'|'cancelled'|'stopping'
     steps: Array<{ description: string; status: 'pending'|'running'|'done'|'failed'; file_count?: number }>
     progress: number; message: string; createdAt: string
     taskLogs: Array<{ id: string; type: string; name: string; status: string; startTime: string; endTime: string | null; error: string | null }>
@@ -71,6 +71,9 @@ interface CommunityTaskRuntime {
     totalComps: number
     doneFiles: number
     doneComps: number
+    currentFile?: string
+    currentComponent?: string
+    phase?: string
   }>
 }
 

@@ -516,7 +516,7 @@ export interface IPCAPI {
     getExternalStats: (taskId: string) => Promise<ExternalStatsResult>
     getCrossCommunityEdges: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<CrossCommunityEdgesResult>
     getCommunityNodeLists: (params: { taskId: string; edgeType: string; commLv: string }) => Promise<Record<string, string[]>>
-    startOverview: (params: { taskId: string; force?: boolean }) => Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; skipped?: boolean; error?: string }>
+    startOverview: (params: { taskId: string; force?: boolean; language?: string }) => Promise<{ taskId: string; success: boolean; agentTaskId?: string | null; skipped?: boolean; error?: string }>
     getAgentProgress: (params: { agentTaskId: string }) => Promise<{ found: boolean; status?: string; step_current?: number; step_total?: number; file_current?: number; file_total?: number; tokens_used?: number; elapsed_sec?: number; message?: string; steps?: Array<{ description: string; status: string; file_count?: number }>; item_logs?: Array<{ id: string; type: string; name: string; status: string; startTime: string; endTime: string | null; error: string | null }>; weighted_progress?: number; weighted_total?: number; weighted_done?: number; total_files?: number; total_comps?: number; done_files?: number; done_comps?: number; error?: string }>
     getProgressStats: (params: { taskId: string }) => Promise<{ taskId: string; found: boolean; totalFiles: number; doneFiles: number; totalComps: number; doneComps: number; weightedProgress: number }>
     cancelAgentTask: (params: { agentTaskId: string }) => Promise<{ cancelled: boolean }>
@@ -526,15 +526,15 @@ export interface IPCAPI {
     // 预摘要
     getPreSummaryStatus: (params: { taskId: string }) => Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string; failed_count: number }>
     listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number; search?: string }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string; has_summary?: boolean }> }>
-    startPreSummary: (params: { taskId: string; batch?: string; limit?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string }>
-    startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number }>
+    startPreSummary: (params: { taskId: string; batch?: string; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string; allCached?: boolean }>
+    startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number; agentTaskId?: string; fileCount?: number }>
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
-    startPipeline: (params: { taskId: string; force?: boolean; language?: string; concurrency?: number; subagent_concurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
+    startPipeline: (params: { taskId: string; force?: boolean; language?: string; concurrency?: number; subagent_concurrency?: number; component_timeout?: number }) => Promise<{ success: boolean; agentTaskId?: string; error?: string }>
     getAgentConfig: () => Promise<{ routes: Array<{ action: string; workflow: string; description: string }>; skills: Array<{ name: string; description: string; steps: number }>; tools: Array<{ name: string; description: string; category: string; llm_visible: boolean }> }>
     // 组件分析
-    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; analysisMode?: string; force?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
+    analyzeComponents: (params: { taskId: string; components: Array<{ id: string; type: string; name: string; metadata?: Record<string, any> }>; language?: string; concurrency?: number; agentic?: boolean; maxTurns?: number; summaryModelId?: string; subagentConcurrency?: number; analysisMode?: string; force?: boolean }) => Promise<{ success: boolean; agentTaskId?: string; error?: string; skipped?: number }>
     // 社区 LLM 结果持久化
     saveCommunityResult: (params: {
       taskId: string; edgeType: string; commLv: string; commId: string;
@@ -675,6 +675,7 @@ export interface IPCAPI {
       sessionId: string; modelId: string; mode?: 'chat' | 'tools' | 'structured'
       messages?: Array<{ role: string; content: string }>; templateId?: string
       variables?: Record<string, any>; tools?: string[]; outputSchema?: Record<string, any>
+      locale?: string
     }) => Promise<{ requestId: string; status: string }>
     abortChat: (params: { requestId: string }) => Promise<{ success: boolean }>
     subscribe: (requestId: string, callbacks: {

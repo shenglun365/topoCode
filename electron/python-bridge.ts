@@ -196,12 +196,12 @@ export class PythonBridge {
       }
       if (process.platform === 'win32') spawnOptions.shell = true
 
-      this.process = spawn(python, [
-        this.pythonScript, this.dbPath,
-        '--http-port', String(httpPort),
-        '--http-host', String(httpHost),
-        '--memory-limit', String(this.memoryLimit),
-      ], spawnOptions)
+      const isNewBackend = process.env.TOPO_BACKEND === 'new'
+
+      this.process = spawn(python, isNewBackend
+        ? ['-m', 'topoone', '--http-port', String(httpPort), '--http-host', String(httpHost)]
+        : [this.pythonScript, '--http-port', String(httpPort), '--http-host', String(httpHost), '--memory-limit', String(this.memoryLimit)],
+      spawnOptions)
 
       this.process.stdout?.on('data', (data) => {
         console.log('[Python]', data.toString())

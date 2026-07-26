@@ -2,7 +2,7 @@
 
 import { app, ipcMain, dialog, shell, BrowserWindow, net } from 'electron'
 import { join } from 'path'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync, rmSync } from 'fs'
 import { windowManager } from './window-manager'
 import { pythonBridge, HTTP_PORT, listPendingCrashes, dismissCrash, type CrashReport } from './python-bridge'
 import { zmqRouter } from './zmq-router'
@@ -16,6 +16,9 @@ if (process.platform === 'linux' && isDev) {
   app.disableHardwareAcceleration()
   app.commandLine.appendSwitch('no-sandbox')
 }
+
+// 限制 Chromium 磁盘缓存 256MB
+app.commandLine.appendSwitch('disk-cache-size', '268435456')
 
 // ==================== 日志系统 ====================
 
@@ -258,8 +261,13 @@ function setupIPC() {
     if (!noisy.includes(method)) console.log(`[Main] ipc:call -> ${method}`, logParams)
     try {
       const result = await zmqRouter.call(method, params)
-      if (!noisy.includes(method)) console.log(`[Main] ipc:call <- ${method} (success)`)
-      return JSON.parse(JSON.stringify(result))
+      const resultStr = JSON.stringify(result)
+      if (!noisy.includes(method)) {
+        const size = resultStr.length
+        const preview = size > 200 ? resultStr.slice(0, 200) + "..." : resultStr
+        console.log(`[Main] ipc:call <- ${method} (${size}B)`, preview)
+      }
+      return JSON.parse(resultStr)
     } catch (error: any) {
       console.error(`[Main] ipc:call error (${method}):`, error.message)
       throw new Error(`IPC call failed: ${error.message}`)
@@ -317,6 +325,37 @@ function setupIPC() {
 // ==================== 应用生命周期 ====================
 
 app.whenReady().then(async () => {
+  // 清理 7 天前的日志
+  try {
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000
+    if (existsSync(LOG_DIR)) {
+      for (const file of readdirSync(LOG_DIR)) {
+        const fp = join(LOG_DIR, file)
+        if (Date.now() - statSync(fp).mtimeMs > SEVEN_DAYS) {
+          rmSync(fp)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[Main] Log cleanup failed:', e)
+  }
+
+  // 清理 30 天前的崩溃报告
+  try {
+    const crashDir = join(app.getPath('userData'), 'crashes')
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000
+    if (existsSync(crashDir)) {
+      for (const file of readdirSync(crashDir)) {
+        const fp = join(crashDir, file)
+        if (Date.now() - statSync(fp).mtimeMs > THIRTY_DAYS) {
+          rmSync(fp)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[Main] Crash cleanup failed:', e)
+  }
+
   // 扫描待处理的崩溃报告，通知渲染进程
   const pendingCrashes = listPendingCrashes()
   if (pendingCrashes.length > 0) {

@@ -19,6 +19,8 @@ import sys
 import threading
 from datetime import datetime
 
+import uvicorn
+
 # Windows: zmq.asyncio needs SelectorEventLoop (ProactorEventLoop is incompatible)
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -143,8 +145,8 @@ class BackendApp:
         setup_handlers(self.multi_db)
 
     def _start_optional_services(self):
-        web_task = None
         self._ingest_consumer = None
+        self._web_proc = None
 
         # 启动 ingest 消费后台线程
         try:
@@ -154,40 +156,70 @@ class BackendApp:
         except Exception as e:
             logger.warning(f"[Ingest] failed to start consumer: {e}")
 
+        # 启动 Data API（HTTP 写代理），供子进程 Web 端使用
+        try:
+            from data_api import app as data_app, set_globals as set_data_globals
+            data_port = int(os.environ.get('DATA_API_PORT', '3459'))
+            set_data_globals(self.multi_db, self.server)
+            self._data_api_thread = threading.Thread(
+                target=lambda: uvicorn.run(data_app, host='127.0.0.1', port=data_port, log_level='info'),
+                daemon=True
+            )
+            self._data_api_thread.start()
+            logger.info(f"Data API started on http://127.0.0.1:{data_port}")
+        except Exception as e:
+            self._data_api_thread = None
+            logger.warning(f"Failed to start data API: {e}")
+
+        # 启动 Web 端（子进程）
         if self.http_port:
             self.multi_db.http_port = self.http_port
             self.multi_db.http_host = self.http_host
             try:
-                from web_server import start_http_server
-                cache_path = os.path.join(self.data_dir, "plantuml_cache.db")
-                web_task = asyncio.create_task(
-                    start_http_server(self.multi_db, port=self.http_port, host=self.http_host,
-                                      cache_path=cache_path, zmq_server_instance=self.server)
+                # Use subprocess to run web端 as a child process
+                reports_dir = os.path.join(os.path.dirname(__file__), "..", "plugins", "reports")
+                reports_dir = os.path.abspath(reports_dir)
+                web_entry = os.path.join(reports_dir, "__main__.py")
+                data_port = int(os.environ.get('DATA_API_PORT', '3459'))
+                self._web_proc = subprocess.Popen(
+                    [sys.executable, web_entry,
+                     "--port", str(self.http_port),
+                     "--host", str(self.http_host),
+                     "--data-dir", self.data_dir,
+                     "--data-api-port", str(data_port)],
+                    stdout=None, stderr=None,
                 )
-                logger.info(f"Web server task created for http://{self.http_host}:{self.http_port}")
+                logger.info(f"Web server subprocess started (PID {self._web_proc.pid}) on http://{self.http_host}:{self.http_port}")
             except Exception as e:
-                logger.warning(f"Failed to start web server: {e}")
-        return web_task
+                logger.warning(f"Failed to start web server subprocess: {e}")
 
     async def run(self):
         logger.info(f"Starting TopoOne Backend (data_dir: {self.data_dir})")
         self.register_all()
         self._setup_signals()
-        web_task = self._start_optional_services()
+        self._start_optional_services()
         try:
             await self.server.run_forever()
         finally:
-            if web_task:
-                web_task.cancel()
-                try:
-                    await web_task
-                except asyncio.CancelledError:
-                    pass
+            self._shutdown_web_process()
             self.multi_db.close_all()
             logger.info("Backend shutdown complete")
 
+    def _shutdown_web_process(self):
+        if self._web_proc and self._web_proc.poll() is None:
+            logger.info(f"Terminating web server subprocess (PID {self._web_proc.pid})...")
+            self._web_proc.terminate()
+            try:
+                self._web_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning("Web server subprocess did not exit in 5s, killing...")
+                self._web_proc.kill()
+                self._web_proc.wait(timeout=2)
+            logger.info("Web server subprocess terminated")
+
     def shutdown(self):
         logger.info("Shutting down...")
+        self._shutdown_web_process()
         self.server.stop()
         if self._ingest_consumer:
             self._ingest_consumer.stop()

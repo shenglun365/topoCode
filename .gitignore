@@ -55,3 +55,14 @@ plugins/community/.deps/
 
 # Landing page / marketing site (not served by app)
 website/
+
+# Vite web build artifacts (auto-generated, ~100+ hashed files)
+plugins/reports/static/web/
+plugins/reports/static/web-root.html
+plugins/reports/static/viewer.html
+plugins/reports/static/chat.html
+plugins/reports/static/code.html
+plugins/reports/static/api/
+plugins/reports/static/chat/
+plugins/reports/static/viewer/
+plugins/reports/static/web-root/
