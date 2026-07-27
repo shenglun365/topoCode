@@ -615,4 +615,52 @@ python main.py --http-port 3456
 
 ---
 
+## 11. 配置文件与环境变量
+
+项目使用 `.env` / `.env.local` 文件统一管理配置，前端（Vite）和后端（Python）共享同一套环境变量。
+
+### 11.1 配置文件说明
+
+| 文件 | 用途 | 是否提交 Git |
+|------|------|:----------:|
+| `.env` | 公共默认值（所有环境通用） | ✅ |
+| `.env.local` | 本地覆盖（个人开发环境专用） | ❌ |
+
+> `.env.local` 优先级高于 `.env`，同名变量以 `.env.local` 为准。
+
+### 11.2 可用配置项
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `VITE_API_BASE` | API 基础地址（nginx 转发后端） | `https://topocode.cn` |
+| `VITE_DISABLE_MOCK` | 禁用 Mock 数据 | `true` |
+
+### 11.3 PlantUML 部署建议
+
+**建议自行部署本地 PlantUML 服务**，以确保数据安全（图表代码不经过第三方服务器）、响应速度和稳定性。
+
+前端统一通过后端代理（`POST /api/plantuml`）转发，后端负责编码并请求 PlantUML 服务器，不受 URL 长度限制。
+
+Docker 部署：
+
+```bash
+# 国内推荐使用阿里云镜像
+docker run -d --name plantuml -p 8300:8080 registry.cn-hangzhou.aliyuncs.com/dockerhub-mirror/plantuml/plantuml-server:jetty
+
+# 或官方镜像
+docker run -d --name plantuml -p 8300:8080 plantuml/plantuml-server:jetty
+```
+
+设置后端环境变量：
+
+```bash
+PLANTUML_SERVER=http://localhost:8300
+```
+
+默认值为 `http://www.plantuml.com/plantuml`，内网环境必须改为自建地址。修改后重启 Python 后端服务。
+
+表中不再需要 `VITE_PLANTUML_URL`（前端不再直连）。
+
+---
+
 > 本文档由 TopoCode 团队维护，更新于 2026-07

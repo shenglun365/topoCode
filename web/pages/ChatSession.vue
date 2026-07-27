@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as api from '@web/services/api'
-import { renderMarkdown, renderDiagrams } from '@web/services/render'
+import { renderMarkdown, renderDocMarkdown } from '@web/services/render'
+import { diagramStateStore } from '@web/services/diagramStateStore'
+import { parseDocContent } from '@web/services/parseContent'
+import ChatInput from '@web/components/ChatInput.vue'
+import ChatToolbar from '@web/components/ChatToolbar.vue'
+import ChatSidebar from '@web/components/ChatSidebar.vue'
+import ChatMessage from '@web/components/ChatMessage.vue'
+import MermaidViewer from '@web/components/MermaidViewer.vue'
+import PlantUmlViewer from '@web/components/PlantUmlViewer.vue'
+import RenameDialog from '@web/components/RenameDialog.vue'
+import SaveAsDocDialog from '@web/components/SaveAsDocDialog.vue'
+import NoteDetailDialog from '@web/components/NoteDetailDialog.vue'
 import { useToast } from '@web/composables/useToast'
 import { useDialog } from '@web/composables/useDialog'
 import AppDialog from '@web/components/shared/AppDialog.vue'
-import type { ChatSession, ChatMessage, ModelConfig, Note } from '@web/types'
+import type { ChatSession, ChatMessage as ChatMsg, ModelConfig, Note } from '@web/types'
 
 const { toast } = useToast()
 const { dialog, confirm, prompt, alert, close: closeDialog } = useDialog()
@@ -48,22 +59,6 @@ const renameGenerating = ref(false)
 // Note detail
 const viewNoteData = ref<Note | null>(null)
 
-// Autocomplete
-const autoCompleteItems = ref<any[]>([])
-const autoCompleteVisible = ref(false)
-const autoCompleteIdx = ref(-1)
-const AC_COMMANDS = [
-  { trigger: '/compress', hint: '压缩当前会话' },
-  { trigger: '/help', hint: '显示帮助' },
-]
-const AC_REF_TYPES = [
-  { trigger: '@community:', hint: '社区ID' },
-  { trigger: '@project:', hint: '项目ID' },
-  { trigger: '@file:', hint: '文件路径' },
-  { trigger: '@symbol:', hint: '符号名称' },
-  { trigger: '@session:', hint: '会话ID' },
-]
-
 // Batch delete
 const deleteMode = ref(false)
 const selectedIds = ref(new Set<string>())
@@ -77,6 +72,8 @@ const currentTitle = computed(() => {
   const s = sessions.value.find(x => x.id === currentId.value)
   return s ? s.title : 'TopoCode AI'
 })
+
+const docBlocks = computed(() => parseDocContent(viewingDoc.value?.content || '', viewingDoc.value?.id))
 
 // BroadcastChannel for cross-tab notes sync
 const bc = new BroadcastChannel('topo_notes' + (taskId.value ? '_' + taskId.value : ''))
@@ -159,6 +156,7 @@ async function createSession() {
 
 async function switchSession(id: string) {
   if (streaming.value) return
+  viewingDoc.value = null
   currentId.value = id
   await loadMessages()
   scrollToBottom()
@@ -171,6 +169,7 @@ async function deleteSession(id: string) {
     await api.deleteSession(id)
     sessions.value = sessions.value.filter(s => s.id !== id)
     if (currentId.value === id) {
+      messages.value.forEach(m => { if (m.id) diagramStateStore.removeAll(m.id) })
       currentId.value = sessions.value[0]?.id || ''
       if (currentId.value) await loadMessages(); else messages.value = []
     }
@@ -198,15 +197,26 @@ async function aiRename() {
   if (!s) return
   renameGenerating.value = true
   try {
-    const resp = await fetch(`/api/chat/sessions/${s.id}/auto-title`, { method: 'POST' })
+    const resp = await fetch(`/api/chat/sessions/${s.id}/auto-title`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelId: currentModel.value }) })
     const data = await resp.json()
-    if (data.title) { renameText.value = data.title; s.title = data.title; renameDialog.value = null }
+    if (data.generated && data.title) {
+      renameText.value = data.title
+      s.title = data.title
+      renameDialog.value = null
+      await loadSessions()
+    } else {
+      toast(data.title ? '标题未变化，请检查模型配置' : 'AI 生成失败')
+    }
   } catch (_) { toast('AI 生成失败') }
   finally { renameGenerating.value = false }
 }
 
 // ── Messages ──
+let _loadMsgCount = 0
 async function loadMessages() {
+  _loadMsgCount++
+  const caller = new Error().stack?.split('\n')[2]?.trim() || '?'
+  console.log(`[loadMessages] #${_loadMsgCount} caller=${caller} currentId=${currentId.value}`)
   if (!currentId.value) return
   try {
     const data = await api.getMessages(currentId.value)
@@ -215,8 +225,34 @@ async function loadMessages() {
       if (m.role === 'assistant') console.log(`[loadMessages] #${i} role=${m.role} contentLen=${(m.content||'').length} reasoningLen=${(m.reasoning||'').length} toolCalls=${(m.toolCalls||[]).length} contentStart=${(m.content||'').slice(0,80)}`)
     })
     loadPendingDrafts()
-    nextTick(() => { console.log(`[renderDiagrams call] msgArea=${!!msgArea.value}`); if (msgArea.value) renderDiagrams(msgArea.value) })
   } catch (_) {}
+}
+
+// 代码编辑：子组件触发的 "重新渲染" → 更新 msg.content
+async function onCodeChange(msgId: string, newCode: string) {
+  const msg = messages.value.find(m => m.id === msgId)
+  if (!msg) return
+  // 找到消息中第几个图块发生改变
+  const parts = msg.content.split(/(```(?:mermaid|plantuml)[\s\S]*?```)/)
+  for (let i = 0; i < parts.length; i++) {
+    if (/^```(?:mermaid|plantuml)/.test(parts[i])) {
+      const match = parts[i].match(/^```(?:mermaid|plantuml)\n?/)
+      if (match) {
+        const fences = match[0]
+        parts[i] = fences + newCode + '\n```'
+        break
+      }
+    }
+  }
+  msg.content = parts.join('')
+  try {
+    await api.put(`/api/chat/sessions/${currentId.value}/messages/${msgId}`, { content: msg.content } as any)
+  } catch (_) {}
+}
+
+async function onSend(text: string) {
+  input.value = text
+  await send()
 }
 
 async function send() {
@@ -232,11 +268,11 @@ async function send() {
   const asstMsg: ChatMessage = { id: `tmp-${Date.now()}-asst`, role: 'assistant', content: '', createdAt: new Date().toISOString(), isStreaming: true }
   asstMsg.toolCalls = []
   asstMsg.reasoning = ''
-  const msg: ChatMessage = asstMsg
+  messages.value.push(asstMsg)
+  const msg = messages.value[messages.value.length - 1]
   const tcById: Record<string, any> = {}
   let contentChunks = 0
 
-  messages.value.push(msg)
   scrollToBottom()
 
   try {
@@ -252,7 +288,9 @@ async function send() {
 
     const decoder = new TextDecoder()
     let buffer = ''
+    let chatFinished = false
     while (true) {
+      if (chatFinished) break
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -270,8 +308,11 @@ async function send() {
               if (data.reasoning) msg.reasoning = (msg.reasoning || '') + data.reasoning
               console.log(`[sse done] contentLen=${(msg.content||'').length} reasoningLen=${(msg.reasoning||'').length} toolCalls=${(msg.toolCalls||[]).length}`)
               scrollToBottom()
+              streaming.value = false
+              chatFinished = true
+              break
             }
-            else if (data.type === 'error') { msg.isStreaming = false; msg.role = 'error'; msg.content = data.message || '请求失败'; scrollToBottom() }
+            else if (data.type === 'error') { msg.isStreaming = false; msg.role = 'error'; msg.content = data.message || '请求失败'; scrollToBottom(); streaming.value = false; chatFinished = true; break }
             else if (data.type === 'reasoning' && data.text) {
               msg.reasoning = (msg.reasoning || '') + data.text
             }
@@ -291,7 +332,6 @@ async function send() {
     asstMsg.isStreaming = false; asstMsg.role = 'error'; asstMsg.content = e.message || '请求失败'
   } finally {
     streaming.value = false; scrollToBottom()
-    nextTick(() => { console.log(`[renderDiagrams call] msgArea=${!!msgArea.value}`); if (msgArea.value) renderDiagrams(msgArea.value) })
   }
 }
 
@@ -317,18 +357,36 @@ function selectAll() {
 
 async function deleteSingle(id: string) {
   if (!currentId.value) return
-  try { await api.deleteMessages(currentId.value, id); await loadMessages() } catch (_) { toast('删除失败') }
+  try { await api.deleteMessages(currentId.value, id); diagramStateStore.removeAll(id); await loadMessages() } catch (_) { toast('删除失败') }
 }
 
 async function deleteSelected() {
   if (!currentId.value || !selectedIds.value.size) return
   const ids = Array.from(selectedIds.value).join(',')
-  try { await api.deleteMessages(currentId.value, ids); selectedIds.value = new Set(); await loadMessages() } catch (_) { toast('删除失败') }
+  try { await api.deleteMessages(currentId.value, ids); selectedIds.value.forEach(id => diagramStateStore.removeAll(id)); selectedIds.value = new Set(); await loadMessages() } catch (_) { toast('删除失败') }
 }
 
 function copyMessage(m: ChatMessage) {
   const prefix = m.role === 'user' ? '用户: ' : 'AI: '
-  navigator.clipboard.writeText(prefix + m.content.slice(0, 4000)).then(() => toast('已复制')).catch(() => {})
+  copyToClipboard(prefix + m.content.slice(0, 4000))
+}
+
+function copyToClipboard(text: string) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => toast('已复制')).catch(() => fallbackCopy(text))
+  } else {
+    fallbackCopy(text)
+  }
+}
+
+function fallbackCopy(text: string) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'; ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy'); toast('已复制') } catch (_) {}
+  document.body.removeChild(ta)
 }
 
 function quoteMessage(m: ChatMessage) {
@@ -343,12 +401,40 @@ async function continueAssistant(m: ChatMessage) {
   await send()
 }
 
-async function saveMsgAsDoc(m: ChatMessage) {
-  const title = await prompt('请输入文档标题:', m.content.slice(0, 30) + '...')
-  if (!title) return
+// ── Save message as document ──
+const saveAsDocMsg = ref<ChatMessage | null>(null)
+
+function saveMsgAsDoc(m: ChatMessage) {
+  saveAsDocMsg.value = m
+}
+
+async function handleSaveAsDoc(opts: { mode: 'single' | 'session'; target: 'new' | 'existing'; title: string; docId?: string }) {
+  const msg = saveAsDocMsg.value
+  if (!msg) return
+  saveAsDocMsg.value = null
+
+  let content = ''
+  if (opts.mode === 'single') {
+    content = msg.content
+  } else {
+    // 完整对话：拼接所有非 system/tool 消息的 content，略过 reasoning/toolCalls
+    content = messages.value
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => `**${m.role === 'user' ? '用户' : 'AI'}**:\n${m.content}`)
+      .join('\n\n---\n\n')
+  }
+  content = content.replace(/\n\n/g, '\n\n<!-- ann:slot -->\n\n') + '\n\n<!-- ann:slot -->'
+
   try {
-    await api.post('/api/documents', { title, content: m.content })
+    if (opts.target === 'new') {
+      await api.post('/api/documents', { title: opts.title, content })
+    } else if (opts.docId) {
+      const existing = await api.get(`/api/documents/${opts.docId}`)
+      const appended = (existing.content || '') + '\n\n---\n\n' + content
+      await api.put(`/api/documents/${opts.docId}`, { content: appended })
+    }
     toast('已保存为文档')
+    await loadDocs()
   } catch (_) { toast('保存失败') }
 }
 
@@ -373,7 +459,6 @@ async function execPendingDraft(d: any) {
   }
   pendingRefs.value = d.refs || []
   input.value = d.userText || '分析这些内容'
-  // Remove from pending
   try {
     const raw = localStorage.getItem(`topo_notes_${taskId.value}`)
     if (raw) {
@@ -424,6 +509,7 @@ async function deleteDoc(id: string) {
     await api.del(`/api/documents/${id}`)
     documents.value = documents.value.filter((d: any) => d.id !== id)
     if (viewingDoc.value?.id === id) viewingDoc.value = null
+    diagramStateStore.removeAll(id)
     toast('已删除')
   } catch (_) { toast('删除失败') }
 }
@@ -445,76 +531,141 @@ function onStorage(e: StorageEvent) {
   if (e.key?.startsWith('topo_notes')) { loadPendingDrafts(); if (tab.value === 'notes') loadNotes() }
 }
 
+function copyId(id: string) {
+  copyToClipboard(id)
+}
+
+// ── Annotations ──
+const showAnnotations = ref(true)
+const editAnnoData = ref<{ id: string; text: string; isNew: boolean; isSlot?: boolean } | null>(null)
+
+function getAnnotationBlocks(html: string): string {
+  if (!html) return html
+  if (!showAnnotations.value) return html.replace(/<!--\s*annotation:[^\s]+\s*-->[\s\S]*?<!--\s*\/annotation\s*-->/g, '').replace(/<!--\s*ann:slot\s*-->/g, '')
+  let r = html.replace(/<!--\s*annotation:([^\s]+)\s*-->([\s\S]*?)<!--\s*\/annotation\s*-->/g,
+    (_, id, text) => `<div class="doc-annotation" data-anno-id="${id}"><div class="doc-anno-marker"></div><div class="doc-anno-body">${renderMarkdown(text.trim())}</div></div>`)
+  r = r.replace(/<!--\s*ann:slot\s*-->/g,
+    () => '<div class="doc-annotation doc-annotation-slot" data-anno-slot><div class="doc-anno-marker" style="opacity:.3"></div><div class="doc-anno-body" style="color:var(--text-muted);font-style:italic;font-size:12px">+ 添加批注</div></div>')
+  return r
+}
+function onDocAnnoClick(e: MouseEvent) {
+  const anno = (e.target as HTMLElement).closest('.doc-annotation') as HTMLElement
+  if (!anno) return
+  const isSlot = anno.dataset?.annoSlot !== undefined
+  if (isSlot) {
+    editAnnoData.value = { id: '', text: '', isNew: true, isSlot: true }
+  } else {
+    editAnnoData.value = { id: anno.dataset.annoId || '', text: anno.querySelector('.doc-anno-body')?.textContent?.trim() || '', isNew: false }
+  }
+}
+function addNewAnnotation() { editAnnoData.value = { id: '', text: '', isNew: true } }
+function saveAnnotation() {
+  if (!editAnnoData.value || !viewingDoc.value) { editAnnoData.value = null; return }
+  const { id, text, isNew, isSlot } = editAnnoData.value
+  if (!text?.trim()) { editAnnoData.value = null; return }
+  const tag = `\n<!-- annotation:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)} -->\n${text.trim()}\n<!-- /annotation -->\n`
+  if (isNew && isSlot) {
+    viewingDoc.value.content = viewingDoc.value.content.replace('<!-- ann:slot -->', tag)
+  } else if (isNew) {
+    viewingDoc.value.content += `\n\n<!-- annotation:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)} -->${text.trim()}<!-- /annotation -->`
+  } else {
+    viewingDoc.value.content = viewingDoc.value.content.replace(new RegExp(`<!--\\s*annotation:${id}\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->`, 'g'), `<!-- annotation:${id} -->${text.trim()}<!-- /annotation -->`)
+  }
+  editAnnoData.value = null; toast('批注已保存')
+}
+function deleteAnnotation() {
+  if (!editAnnoData.value?.id || !viewingDoc.value) return
+  viewingDoc.value.content = viewingDoc.value.content.replace(new RegExp(`<!--\\s*annotation:${editAnnoData.value.id}\\s*-->[\\s\\S]*?<!--\\s*/annotation\\s*-->\\n?`, 'g'), '')
+  editAnnoData.value = null; toast('批注已删除')
+}
+
 // ── Tabs ──
 function switchTab(t: 'chat' | 'notes' | 'docs' | 'archives') {
   tab.value = t as any
+  if (t === 'chat' || t === 'notes') viewingDoc.value = null
   if (t === 'notes') loadNotes()
   if (t === 'docs') loadDocs()
   if (t === 'archives') loadArchives()
 }
 
-const tabKeys = ['chat', 'notes', 'docs'] as const
+// ── State persistence ──
+function saveState() {
+  try {
+    localStorage.setItem('chat_view_state', JSON.stringify({
+      tab: tab.value,
+      sessionId: currentId.value,
+      docId: viewingDoc.value ? viewingDoc.value.id : null,
+    }))
+  } catch (_) {}
+}
+watch(tab, saveState)
+watch(currentId, saveState)
+watch(viewingDoc, saveState)
 
-// ── Autocomplete ──
-function onInputChange() {
-  const val = input.value
-  const cursorPos = (document.querySelector('.input-row textarea') as HTMLTextAreaElement)?.selectionStart || val.length
-  const before = val.slice(0, cursorPos)
-  const slashMatch = before.match(/\/(\w*)$/)
-  const atMatch = before.match(/@(\w*:?\w*)$/)
-
-  if (slashMatch) {
-    const prefix = '/' + slashMatch[1]
-    autoCompleteItems.value = AC_COMMANDS.filter(c => c.trigger.startsWith(prefix) || prefix.startsWith(c.trigger)).slice(0, 8)
-    autoCompleteVisible.value = autoCompleteItems.value.length > 0
-    autoCompleteIdx.value = 0
-  } else if (atMatch) {
-    const atPrefix = atMatch[1]
-    if (atPrefix.includes(':')) {
-      const [type, q] = atPrefix.split(':')
-      const matched = AC_REF_TYPES.find(r => r.trigger.slice(1, -1) === type)
-      if (matched && q.length >= 1) {
-        autoCompleteVisible.value = false // Real impl would fetch
+async function restoreState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('chat_view_state') || '')
+    if (!saved) { console.log('[restoreState] no saved state'); return }
+    console.log(`[restoreState] saved.sessionId=${saved.sessionId} saved.tab=${saved.tab} saved.docId=${saved.docId} currentId=${currentId.value}`)
+    if (saved.docId) {
+      api.get(`/api/documents/${saved.docId}`).then((data) => {
+        viewingDoc.value = data
+        tab.value = 'docs'
+      }).catch(() => {})
+    } else if (saved.sessionId) {
+      if (saved.sessionId !== currentId.value) {
+        console.log(`[restoreState] switching to saved session ${saved.sessionId} (was ${currentId.value})`)
+        currentId.value = saved.sessionId
+        tab.value = saved.tab || 'chat'
+        await loadMessages()
+      } else {
+        console.log(`[restoreState] already on session ${saved.sessionId}, skip loadMessages`)
+        tab.value = saved.tab || 'chat'
       }
     } else {
-      autoCompleteItems.value = AC_REF_TYPES.filter(r => r.trigger.slice(1, -1).startsWith(atPrefix)).slice(0, 8)
-      autoCompleteVisible.value = autoCompleteItems.value.length > 0
-      autoCompleteIdx.value = 0
+      console.log(`[restoreState] restore tab only: ${saved.tab}`)
     }
-  } else {
-    autoCompleteVisible.value = false
-  }
+  } catch (_) {}
 }
 
-function onInputKeydown(e: KeyboardEvent) {
-  if (!autoCompleteVisible.value) return
-  const items = autoCompleteItems.value
-  if (e.key === 'ArrowDown') { e.preventDefault(); autoCompleteIdx.value = Math.min(autoCompleteIdx.value + 1, items.length - 1) }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); autoCompleteIdx.value = Math.max(autoCompleteIdx.value - 1, 0) }
-  else if (e.key === 'Enter' || e.key === 'Tab') {
-    if (autoCompleteIdx.value >= 0 && items[autoCompleteIdx.value]) {
-      e.preventDefault()
-      const item = items[autoCompleteIdx.value]
-      const ta = document.querySelector('.input-row textarea') as HTMLTextAreaElement
-      if (ta) {
-        const val = ta.value
-        const pos = ta.selectionStart
-        const before = val.slice(0, pos)
-        const match = before.match(/(\/\w*)$|(@\w*:?\w*)$/)
-        if (match) {
-          const start = pos - match[1].length
-          ta.value = val.slice(0, start) + item.trigger + val.slice(pos)
-          ta.selectionStart = ta.selectionEnd = start + item.trigger.length
-          ta.focus()
-        }
-      }
-      autoCompleteVisible.value = false
-    }
-  } else if (e.key === 'Escape') { autoCompleteVisible.value = false }
+// ── Diagram view state ──
+async function saveDiagState() {
+  const id = currentId.value
+  if (!id) return
+  let saved = 0
+  for (const msg of messages.value) {
+    if (!msg.id) continue
+    const states = diagramStateStore.loadAll(msg.id)
+    if (!Object.keys(states).length) continue
+    msg.content = diagramStateStore.embedInContent(msg.content, msg.id)
+    try {
+      await api.put(`/api/chat/sessions/${currentId.value}/messages/${msg.id}`, { content: msg.content } as any)
+      saved++
+    } catch (_) { console.log(`[saveDiagState] PUT failed msgId=${msg.id}`) }
+    diagramStateStore.removeAll(msg.id)
+  }
+  document.dispatchEvent(new CustomEvent('diagram-state-changed'))
+  toast('图状态已保存')
+}
+
+/** 保存当前查看文档的图状态 */
+async function saveViewingDocDiagState() {
+  const doc = viewingDoc.value
+  if (!doc) return
+  const states = diagramStateStore.loadAll(doc.id)
+  if (!Object.keys(states).length) return
+  doc.content = diagramStateStore.embedInContent(doc.content, doc.id)
+  try {
+    await api.put(`/api/documents/${doc.id}`, { content: doc.content } as any)
+    diagramStateStore.removeAll(doc.id)
+    document.dispatchEvent(new CustomEvent('diagram-state-changed'))
+    toast('文档图状态已保存')
+  } catch (_) { toast('保存失败') }
 }
 
 onMounted(async () => {
   applyFontSize(fontSize.value)
+
   try {
     const data = await api.listModels()
     models.value = data.models
@@ -522,6 +673,7 @@ onMounted(async () => {
     else if (data.models.length > 0) currentModel.value = data.models[0].id
   } catch (_) {}
   await loadSessions()
+  await restoreState()
   checkStorage()
   window.addEventListener('storage', onStorage)
 })
@@ -533,91 +685,56 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
   <div class="app">
     <AppDialog :dialog="dialog" @ok="(v) => dialog.onOk?.(v)" @cancel="dialog.onCancel?.()" />
 
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><line x1="11" y1="7" x2="6" y2="17"/><line x1="13" y1="7" x2="18" y2="17"/><line x1="7" y1="19" x2="17" y2="19"/></svg>
-          <span>TopoCode</span>
-        </div>
-      </div>
-      <div class="sidebar-tabs">
-        <div v-for="tk in tabKeys" :key="tk" class="sidebar-tab" :class="{ active: tab === tk }" @click="switchTab(tk)">
-          {{ { chat: '对话', notes: '便签', docs: '文档', archives: '归档' }[tk] }}
-        </div>
-      </div>
-
-      <div v-if="tab === 'chat'" class="sidebar-content">
-        <button class="btn-new" @click="createSession">新对话</button>
-        <div v-for="s in sessions" :key="s.id" class="session-item" :class="{ active: s.id === currentId }" @click="switchSession(s.id)">
-          <span class="title">{{ s.title }}</span>
-          <button class="del-btn" @click.stop="deleteSession(s.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-          <button class="rename-btn" @click.stop="openRename(s)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-        </div>
-        <div v-if="!sessions.length" class="note-empty">暂无对话</div>
-      </div>
-
-      <div v-else-if="tab === 'notes'" class="sidebar-content">
-        <div v-for="n in notes" :key="n.id" class="note-item" @click="viewNote(n)">
-          <span class="status-dot" :class="n.status"></span>
-          <span class="title">{{ n.title || '无标题' }}</span>
-        </div>
-        <div v-if="!notes.length && !pendingDrafts.length" class="note-empty">暂无便签</div>
-        <div v-if="pendingDrafts.length" class="pending-section">
-          <div v-for="d in pendingDrafts" :key="d.id" class="pending-item">
-            <span class="title">{{ d.userText?.slice(0, 20) || `#${d.seq}` }}</span>
-            <button class="send-btn" @click="execPendingDraft(d)">执行</button>
-          </div>
-        </div>
-      </div>
-
-      <div v-else-if="tab === 'archives'" class="sidebar-content">
-        <div v-for="a in archives" :key="a.id" class="note-item">
-          <span class="title">{{ a.title || a.id.slice(0,16) }}</span>
-          <span class="ref-count">{{ a.category }}</span>
-          <button class="del-btn" @click.stop="deleteArchive(a.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-        </div>
-        <div v-if="!archives.length" class="note-empty">暂无归档</div>
-      </div>
-
-      <div v-else class="sidebar-content">
-        <input v-model="docSearch" class="sidebar-search" placeholder="搜索文档..." @input="loadDocs" />
-        <div v-for="d in documents" :key="d.id" class="note-item" :class="{ active: viewingDoc?.id === d.id }" @click="viewDoc(d)">
-          <span class="title">{{ d.title || d.id }}</span>
-          <button class="del-btn" @click.stop="deleteDoc(d.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-        </div>
-        <div v-if="!documents.length" class="note-empty">暂无文档</div>
-      </div>
-    </aside>
+    <ChatSidebar
+      :tab="tab"
+      :sessions="sessions"
+      :currentId="currentId"
+      :notes="notes"
+      :pendingDrafts="pendingDrafts"
+      :archives="archives"
+      :documents="documents"
+      :docSearch="docSearch"
+      :viewingDoc="viewingDoc"
+      @update:tab="switchTab"
+      @create-session="createSession"
+      @switch-session="switchSession"
+      @delete-session="deleteSession"
+      @open-rename="openRename"
+      @view-note="viewNote"
+      @delete-note="deleteNote"
+      @exec-pending-draft="execPendingDraft"
+      @delete-archive="deleteArchive"
+      @load-docs="loadDocs"
+      @view-doc="viewDoc"
+      @delete-doc="deleteDoc"
+      @copy-id="copyId"
+      @update:docSearch="docSearch = $event"
+    />
 
     <main class="main">
-      <!-- Rename Dialog -->
-      <div v-if="renameDialog" class="dialog-overlay" @click.self="renameDialog = null">
-        <div class="dialog-box" style="width:360px">
-          <h3>重命名会话</h3>
-          <input v-model="renameText" class="dialog-input" placeholder="输入新标题" @keydown.enter="submitRename" ref="renameInput" />
-          <div class="dialog-actions">
-            <button class="dialog-btn" @click="renameDialog = null">取消</button>
-            <button class="dialog-btn" :disabled="renameGenerating" @click="aiRename">{{ renameGenerating ? '生成中...' : 'AI 生成' }}</button>
-            <button class="dialog-btn primary" @click="submitRename">确认</button>
-          </div>
-        </div>
-      </div>
+      <RenameDialog
+        :visible="!!renameDialog"
+        :title="renameText"
+        :generating="renameGenerating"
+        @update:title="renameText = $event"
+        @close="renameDialog = null"
+        @submit="submitRename"
+        @ai-rename="aiRename"
+      />
 
-      <!-- Note Detail Dialog -->
-      <div v-if="viewNoteData" class="dialog-overlay" @click.self="viewNoteData = null">
-        <div class="dialog-box" style="width:500px">
-          <h3>{{ viewNoteData.title || '便签详情' }}</h3>
-          <div class="note-detail-content">{{ viewNoteData.content || '无内容' }}</div>
-          <div v-if="viewNoteData.refs?.length" class="note-detail-refs">
-            <div class="ref-section-title">引用 ({{ viewNoteData.refs.length }})</div>
-            <div v-for="(r, i) in viewNoteData.refs" :key="i" class="ref-item">{{ r.label || r.text?.slice(0, 50) || `引用 ${i+1}` }}</div>
-          </div>
-          <div class="dialog-actions">
-            <button class="dialog-btn" style="color:#ef4444" @click="deleteNote(viewNoteData.id)">删除</button>
-            <button class="dialog-btn" @click="viewNoteData = null">关闭</button>
-          </div>
-        </div>
-      </div>
+      <NoteDetailDialog
+        :note="viewNoteData"
+        @close="viewNoteData = null"
+        @delete="deleteNote"
+      />
+
+      <SaveAsDocDialog
+        :visible="!!saveAsDocMsg"
+        :msg-content="saveAsDocMsg?.content || ''"
+        :session-messages="messages"
+        @close="saveAsDocMsg = null"
+        @save="handleSaveAsDoc"
+      />
 
       <!-- Doc Editor Dialog -->
       <div v-if="showDocEditor" class="dialog-overlay" @click.self="showDocEditor = false">
@@ -630,7 +747,8 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
             <span style="font-size:12px;color:var(--text-muted)">{{ docPreview ? '预览' : '编辑' }}</span>
           </div>
           <textarea v-if="!docPreview" v-model="docEditContent" style="width:100%;min-height:400px;font-family:var(--font-mono);font-size:13px;padding:12px;border:1px solid var(--border);border-radius:8px;resize:vertical;background:var(--bg-code);color:var(--code-text,#d4d4d4);outline:none" spellcheck="false"></textarea>
-          <div v-else class="doc-render" style="min-height:400px;padding:12px;border:1px solid var(--border);border-radius:8px;overflow:auto;font-size:var(--content-font-size)" v-html="renderMarkdown(docEditContent)"></div>
+          <div v-else class="doc-render" style="min-height:400px;padding:12px;border:1px solid var(--border);border-radius:8px;overflow:auto;font-size:var(--content-font-size)" v-html="renderDocMarkdown(docEditContent)"></div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">使用 &lt;!-- annotation:id --&gt;批注文字&lt;!-- /annotation --&gt; 添加批注</div>
           <div class="dialog-actions" style="margin-top:8px">
             <button class="dialog-btn" @click="showDocEditor = false">取消</button>
             <button class="dialog-btn primary" @click="saveDoc">保存</button>
@@ -638,63 +756,78 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         </div>
       </div>
 
-      <header class="topbar">
-        <div class="topbar-left"><span class="chat-title">{{ currentTitle }}</span></div>
-        <div class="topbar-right">
-          <select v-model="currentModel"><option value="">选择模型</option><option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}<template v-if="m.isDefault"> ★</template></option></select>
-          <select v-model.number="contextLimit"><option :value="16000">16K</option><option :value="32000">32K</option><option :value="64000">64K</option><option :value="128000">128K</option></select>
-          <select v-model.number="fontSize"><option :value="13">13px</option><option :value="15">15px</option><option :value="18">18px</option><option :value="22">22px</option><option :value="26">26px</option></select>
-          <button class="header-action-btn" @click="toggleDeleteMode">{{ deleteMode ? '取消' : '删除' }}</button>
-          <button class="header-action-btn" @click="clearChat">清空</button>
-        </div>
-      </header>
+      <ChatToolbar
+        :currentTitle="currentTitle"
+        :currentModel="currentModel"
+        :models="models"
+        :contextLimit="contextLimit"
+        :fontSize="fontSize"
+        :viewingDoc="!!viewingDoc"
+        :viewingDocTitle="viewingDoc?.title || ''"
+        :showAnnotations="showAnnotations"
+        @update:currentModel="currentModel = $event"
+        @update:contextLimit="contextLimit = $event"
+        @update:fontSize="fontSize = $event"
+        @edit-doc="openDocEditor"
+        @toggle-annotations="showAnnotations = !showAnnotations"
+        @add-annotation="addNewAnnotation"
+      />
 
       <!-- Document view -->
       <div v-if="viewingDoc" class="doc-view">
-        <div class="doc-view-body">
-          <div class="doc-render" v-html="renderMarkdown(viewingDoc.content || '')"></div>
+        <div class="doc-view-body" @click="onDocAnnoClick">
+          <template v-for="(b, i) in docBlocks" :key="i">
+            <span v-if="b.type === 'text'" class="doc-render" v-html="getAnnotationBlocks(b.html || '')"></span>
+            <MermaidViewer
+              v-else-if="b.type === 'mermaid'"
+              :code="b.code!"
+              :diag-id="b.diagId!"
+              :msg-id="viewingDoc?.id"
+              :initial-state="b.initialState"
+              @save-state="saveViewingDocDiagState"
+            />
+            <PlantUmlViewer
+              v-else-if="b.type === 'plantuml'"
+              :code="b.code!"
+              :diag-id="b.diagId!"
+              :msg-id="viewingDoc?.id"
+              :initial-state="b.initialState"
+              @save-state="saveViewingDocDiagState"
+            />
+          </template>
+        </div>
+      </div>
+
+      <!-- Annotation Editor Dialog -->
+      <div v-if="editAnnoData" class="dialog-overlay" @click.self="editAnnoData = null">
+        <div class="dialog-box" style="width:500px">
+          <h3>{{ editAnnoData.isNew ? '添加批注' : '编辑批注' }}</h3>
+          <textarea v-model="editAnnoData.text" class="dialog-input" style="min-height:100px;resize:vertical" placeholder="批注内容..."></textarea>
+          <div class="dialog-actions">
+            <button v-if="!editAnnoData.isNew" class="dialog-btn" style="color:#ef4444" @click="deleteAnnotation">删除</button>
+            <button class="dialog-btn" @click="editAnnoData = null">取消</button>
+            <button class="dialog-btn primary" @click="saveAnnotation">保存</button>
+          </div>
         </div>
       </div>
 
       <!-- Messages -->
-      <div v-else class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
-        <template v-for="(m, i) in messages" :key="m.id || i">
-          <div class="message" :class="m.role" @click.stop>
-            <div v-if="deleteMode && m.id" class="cbox-wrap"><input type="checkbox" :checked="selectedIds.has(m.id)" @change="toggleSelect(m.id)" /></div>
-            <div v-if="m.role !== 'user'" class="message-avatar ai">AI</div>
-            <div class="msg-content">
-              <div v-if="m.role === 'assistant'" class="sender">TopoCode</div>
-              <div v-if="m.role === 'assistant' && !m.content && m.isStreaming" class="loading-dots"><span></span><span></span><span></span></div>
-              <div v-if="m.qualityLow" class="quality-low-banner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 本次分析未能生成有效回答</div>
-              <div v-if="m.reasoning" class="reasoning-toggle" @click="m.showReasoning = !m.showReasoning">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: m.showReasoning }"><polyline points="9 18 15 12 9 6"/></svg>
-                <span>{{ m.showReasoning ? '收起思考过程' : '查看思考过程' }}<span v-if="m.reasoning.length > 10" class="reasoning-tokens">({{ Math.round(m.reasoning.length / 2) }} tokens)</span></span>
-              </div>
-              <div v-if="m.reasoning && m.showReasoning" class="reasoning-content" v-html="renderMarkdown(m.reasoning)"></div>
-              <div v-if="m.toolCalls?.length" class="tool-toggle" @click="m.showToolCalls = !m.showToolCalls">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: m.showToolCalls }"><polyline points="9 18 15 12 9 6"/></svg>
-                <span>调用 {{ m.toolCalls.length }} 个工具</span>
-              </div>
-              <div v-if="m.toolCalls?.length && m.showToolCalls" class="tool-detail">
-                <div v-for="tc in m.toolCalls" :key="tc.id" class="tool-call-item">
-                  <div class="tool-call-name"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> {{ tc.name }}</div>
-                  <div class="tool-label">参数</div>
-                  <pre>{{ JSON.stringify(tc.arguments, null, 2) }}</pre>
-                  <div v-if="tc.result" class="tool-label">执行结果</div>
-                  <pre v-if="tc.result">{{ tc.result }}</pre>
-                </div>
-              </div>
-              <div v-if="m.content" class="bubble" v-html="renderMarkdown(m.content)"></div>
-              <div v-if="m.id && !deleteMode" class="message-actions">
-                <button class="msg-act-btn" @click="copyMessage(m)" title="复制"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-                <button class="msg-act-btn" @click="quoteMessage(m)" title="引用"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
-                <button class="msg-act-btn" @click="continueAssistant(m)" title="继续"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
-                <button class="msg-act-btn" @click="saveMsgAsDoc(m)" title="保存为文档"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></button>
-                <button class="msg-act-btn del-msg" @click="deleteSingle(m.id)" title="删除"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
-              </div>
-            </div>
-          </div>
-        </template>
+      <div v-if="!viewingDoc" class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
+        <ChatMessage
+          v-for="(m, i) in messages"
+          :key="m.id || i"
+          :message="m"
+          :deleteMode="deleteMode"
+          :isSelected="selectedIds.has(m.id || '')"
+          @toggle-select="toggleSelect"
+          @copy-message="copyMessage"
+          @quote-message="quoteMessage"
+          @continue-assistant="continueAssistant"
+          @save-msg-as-doc="saveMsgAsDoc"
+          @delete-single="deleteSingle"
+          @code-change="onCodeChange"
+          @save-state="saveDiagState"
+        />
       </div>
 
       <div v-if="!currentId && !viewingDoc" class="empty-state">
@@ -708,25 +841,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <button class="tb-btn" @click="toggleDeleteMode">取消</button>
       </div>
 
-      <div class="input-area" v-if="!viewingDoc">
-        <div class="input-wrapper">
-          <div class="input-row" style="position:relative">
-            <div class="autocomplete-wrap">
-              <textarea v-model="input" @keydown.enter.exact="send" @keydown="onInputKeydown" @input="onInputChange" :placeholder="streaming ? 'AI 正在回复...' : '输入消息...'" rows="3" :disabled="streaming" />
-              <div v-if="autoCompleteVisible" class="autocomplete-panel open">
-                <div v-for="(item, idx) in autoCompleteItems" :key="idx" class="ac-item" :class="{ active: idx === autoCompleteIdx }" @mousedown.prevent="">
-                  <span class="ac-trigger">{{ item.trigger }}</span>
-                  <span class="ac-hint">{{ item.hint }}</span>
-                </div>
-              </div>
-            </div>
-            <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && !input.trim()" @click="streaming ? abortStream() : send()">
-              <svg v-if="!streaming" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <ChatInput v-if="!viewingDoc" :streaming="streaming" v-model="input" @send="onSend" @abort-stream="abortStream" />
     </main>
   </div>
 </template>
@@ -759,10 +874,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .session-item:hover,.note-item:hover{background:var(--bg-hover)}
 .session-item.active{background:var(--accent-light);color:var(--text);font-weight:500}
 .session-item .title,.note-item .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.del-btn,.rename-btn{opacity:0;background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:var(--ui-font-size);line-height:1;color:var(--text-muted)}
+.del-btn,.rename-btn,.copy-id-btn{opacity:0;background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:var(--ui-font-size);line-height:1;color:var(--text-muted)}
+.copy-id-btn{padding:2px 4px;vertical-align:middle}
 .rename-btn{font-size:12px;padding:2px 4px}
-.session-item:hover .del-btn,.session-item:hover .rename-btn,.note-item:hover .del-btn{opacity:1}
-.del-btn:hover{background:var(--bg-hover);color:#ef4444}.rename-btn:hover{opacity:1;background:var(--bg-hover)}
+.session-item:hover .del-btn,.session-item:hover .rename-btn,.session-item:hover .copy-id-btn,.note-item:hover .del-btn,.note-item:hover .copy-id-btn{opacity:1}
+.del-btn:hover{background:var(--bg-hover);color:#ef4444}.rename-btn:hover,.copy-id-btn:hover{opacity:1;background:var(--bg-hover)}
 .note-item .status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .note-item .status-dot.draft{background:#f59e0b}
 .note-item .status-dot.sent{background:#10b981}
@@ -777,6 +893,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
 .topbar-left{display:flex;align-items:center;gap:12px}
 .chat-title{font-size:var(--ui-font-size);font-weight:500;color:var(--text)}
+.topbar-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;margin-right:6px;vertical-align:middle;line-height:1.6}
 .topbar-right{display:flex;gap:8px;align-items:center}
 .topbar-right select,.header-action-btn{font-size:var(--ui-font-size);padding:5px 10px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;outline:none}
 .header-action-btn{padding:4px 10px}
@@ -790,6 +907,19 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .doc-render pre{background:var(--bg-code);padding:12px;border-radius:8px;overflow:auto}
 .doc-render pre code{background:none;padding:0}
 .doc-render ul,.doc-render ol{padding-left:20px;margin:8px 0}
+.badge-doc{background:#dbeafe;color:#2563eb;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500;font-size:12px}
+.doc-title-clickable{cursor:pointer;padding:2px 20px 2px 6px;border-radius:var(--radius-md);border:1px solid transparent;position:relative;font-size:15px;color:var(--text);font-weight:600}
+.doc-title-clickable:hover{border-color:var(--border);background:var(--bg-hover)}
+.doc-title-clickable .edit-icon{display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-muted);pointer-events:none}
+.doc-title-clickable:hover .edit-icon{display:inline}
+.doc-topbar-btn{background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center}
+.doc-topbar-btn:hover{background:var(--bg-hover);color:var(--text)}
+.doc-topbar-btn.active{background:var(--accent-light);color:var(--accent);border-color:var(--accent)}
+.doc-annotation{display:flex;gap:8px;margin:12px 0;padding:10px 12px;background:var(--bg-hover);border-radius:var(--radius-md);cursor:pointer}
+.doc-annotation:hover{outline:1px solid var(--accent)}
+.doc-anno-marker{width:3px;flex-shrink:0;background:var(--accent);border-radius:2px;opacity:.6}
+.doc-anno-body{flex:1;font-size:13px;color:var(--text-secondary);line-height:1.6}
+.doc-anno-body p{margin:4px 0}
 .messages{flex:1;overflow-y:auto;padding:24px 32px 16px;display:flex;flex-direction:column}
 .message{display:flex;gap:14px;max-width:min(85%,960px);margin:0 auto;width:100%;margin-bottom:24px;position:relative;animation:fadeUp .3s ease}
 @keyframes fadeUp{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}

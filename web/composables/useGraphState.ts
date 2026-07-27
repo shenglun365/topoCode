@@ -347,11 +347,27 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
   }
 
   // ── Context menu ──
-  function ctxCopyText(contextNodeIdVal: string): string | null {
-    const n = graphNodes.value.find(x => x.id === contextNodeIdVal)
-    if (!n) return null
-    const info = { projectId: '', projectName: '', taskId: taskId.value, nodeId: n.id, nodeName: n.label }
-    return JSON.stringify(info, null, 2)
+  function ctxCopyText(contextNodeIdVal: string, extra?: { projectId?: string; projectName?: string }) {
+    const n = graphNodes.value.find(x => x.id === contextNodeIdVal) as any
+    if (!n) return
+    const info = { projectId: extra?.projectId || '', projectName: extra?.projectName || '', taskId: taskId.value, nodeId: n.id, nodeName: n.label }
+    for (const key of Object.keys(n)) {
+      if (key === 'id' || key === 'label') continue
+      info[key] = n[key]
+    }
+    const text = JSON.stringify(info, null, 2)
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text))
+    } else {
+      fallbackCopy(text)
+    }
+    function fallbackCopy(s: string) {
+      const ta = document.createElement('textarea')
+      ta.value = s; ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select()
+      try { document.execCommand('copy') } catch (_) {}
+      document.body.removeChild(ta)
+    }
   }
 
   // Auto-close context menu on outside click

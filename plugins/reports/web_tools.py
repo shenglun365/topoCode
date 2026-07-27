@@ -658,7 +658,7 @@ class WebToolExecutor:
 
     def _list_projects(self, args: dict) -> dict:
         rows = self.multi_db.main_db.fetchall(
-            "SELECT id, name, root_path, created_at FROM projects ORDER BY updated_at DESC"
+            "SELECT id, name, root_path, created_at FROM projects ORDER BY created_at DESC"
         )
         return {
             "projects": [
@@ -1246,7 +1246,7 @@ class WebToolExecutor:
         w = (" WHERE " + " AND ".join(where)) if where else ""
         rows = self.multi_db.sessions_db.fetchall(
             f"SELECT id, title, project_id, status, metadata, created_at, updated_at "
-            f"FROM llm_sessions{w} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            f"FROM llm_sessions{w} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
         )
         return {"sessions": [
@@ -1290,7 +1290,7 @@ class WebToolExecutor:
         if project_id:
             where += " AND project_id = ?"; params.append(project_id)
         sessions = self.multi_db.sessions_db.fetchall(
-            f"SELECT id, title FROM llm_sessions WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            f"SELECT id, title FROM llm_sessions WHERE {where} ORDER BY created_at DESC LIMIT ?",
             (*params, session_limit),
         )
         results = []
@@ -1469,7 +1469,7 @@ class WebToolExecutor:
             try:
                 rows = self.multi_db.knowledge_db.fetchall(
                     "SELECT id, title, description AS snippet, updated_at, project_id FROM knowledge_docs "
-                    "WHERE (id LIKE ? OR title LIKE ? OR content LIKE ?) ORDER BY updated_at DESC LIMIT ?",
+                    "WHERE (id LIKE ? OR title LIKE ? OR content LIKE ?) ORDER BY created_at DESC LIMIT ?",
                     (f"%{q}%", f"%{q}%", f"%{q}%", limit)
                 )
                 for r in rows:
@@ -1506,7 +1506,7 @@ class WebToolExecutor:
                     try:
                         rows = project_db.fetchall(
                             "SELECT comm_id AS id, name AS title, summary AS snippet, created_at, task_id FROM community_llm_results "
-                            "WHERE (comm_id LIKE ? OR name LIKE ? OR summary LIKE ?) ORDER BY updated_at DESC LIMIT ?",
+                            "WHERE (comm_id LIKE ? OR name LIKE ? OR summary LIKE ?) ORDER BY created_at DESC LIMIT ?",
                             (f"%{q}%", f"%{q}%", f"%{q}%", limit)
                         )
                         for r in rows:

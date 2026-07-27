@@ -33,6 +33,7 @@ function pageRewritePlugin() {
 export default defineConfig({
   plugins: [vue(), vueJsx(), pageRewritePlugin()],
   root: WEB_DIR,
+  envDir: ROOT,
   resolve: {
     alias: {
       '@web': WEB_DIR,

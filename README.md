@@ -276,6 +276,39 @@ npm run dist:all     # 全平台
 
 可通过 **设置 → 通用设置** 修改 HTTP 端口与绑定地址。
 
+### PlantUML 渲染服务
+
+Web 文档和 AI 对话中的 PlantUML 图表需要一个渲染服务。**建议自行部署本地 PlantUML 服务**，以确保数据安全、响应速度和稳定性。
+
+前端统一通过后端代理 `/api/plantuml`（POST）转发，后端负责编码并请求 PlantUML 服务器，不受 URL 长度限制。
+
+推荐使用 Docker 部署（国内用户可使用镜像加速）：
+
+```bash
+# 阿里云镜像
+docker run -d --name plantuml -p 8300:8080 registry.cn-hangzhou.aliyuncs.com/dockerhub-mirror/plantuml/plantuml-server:jetty
+
+# 官方镜像
+docker run -d --name plantuml -p 8300:8080 plantuml/plantuml-server:jetty
+```
+
+部署后设置后端环境变量（如 `docker-compose.yml` 或 systemd）：
+
+```bash
+PLANTUML_SERVER=http://localhost:8300
+```
+
+默认值为 `http://www.plantuml.com/plantuml`，内网环境必须改为自建地址。
+
+修改后重启 Python 后端服务生效。
+
+### 完整配置项
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `VITE_API_BASE` | API 基础地址 | `https://topocode.cn` |
+| `VITE_DISABLE_MOCK` | 禁用 Mock 数据 | `true` |
+
 ---
 
 ## 开发

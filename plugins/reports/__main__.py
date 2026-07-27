@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    # Load .env from project root if present
+    env_path = os.path.join(_project_dir, '.env')
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, val = line.split('=', 1)
+                os.environ.setdefault(key.strip(), val.strip())
+
     parser = argparse.ArgumentParser(description="TopoCode Web Server")
     parser.add_argument("--port", type=int, default=3456, help="HTTP port")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="HTTP host")

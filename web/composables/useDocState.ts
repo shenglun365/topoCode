@@ -13,7 +13,7 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
   const docCommId = ref(urlCid)
   const docEdgeType = ref(urlEt)
   const docBreadcrumb = ref<{ label: string; cid: string; et: string }[]>([])
-  const doc = ref<{ title: string; content: string } | null>(null)
+  const doc = ref<{ title: string; content: string; projectId?: string; projectName?: string } | null>(null)
   const loading = ref(true)
   const children = ref<CommunityChild[]>([])
   const docContentRef = ref<HTMLDivElement>()
@@ -45,14 +45,14 @@ export function useDocState(taskId: ReturnType<typeof ref<string>>) {
       if (docCommId.value) {
         const d = await api.getCommunityDoc(taskId.value, docCommId.value, docEdgeType.value)
         console.log('[useDocState] community doc loaded:', d?.title, 'content length:', d?.content?.length)
-        doc.value = { title: d.title, content: d.content }
+        doc.value = { title: d.title, content: d.content, projectId: d.projectId, projectName: d.projectName }
         if (docBreadcrumb.value.length) {
           const last = docBreadcrumb.value[docBreadcrumb.value.length - 1]
           last.label = d.title
         }
       } else if (docId.value) {
         const d: any = await api.get('/api/docs/' + docId.value)
-        doc.value = { title: d.title || '文档', content: d.content || '' }
+        doc.value = { title: d.title || '文档', content: d.content || '', projectId: d.projectId, projectName: d.projectName }
       } else {
         doc.value = { title: taskId.value, content: '选择左侧子组件查看详细文档' }
         docBreadcrumb.value = []

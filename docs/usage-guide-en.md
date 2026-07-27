@@ -615,4 +615,52 @@ Please attach log files and a description of the issue. We will respond as soon 
 
 ---
 
+## 11. Configuration & Environment Variables
+
+The project uses `.env` / `.env.local` files for unified configuration management — both the frontend (Vite) and backend (Python) share the same environment variables.
+
+### 11.1 Config File Reference
+
+| File | Purpose | Committed to Git |
+|------|---------|:----------------:|
+| `.env` | Public defaults (all environments) | ✅ |
+| `.env.local` | Local overrides (personal dev env) | ❌ |
+
+> `.env.local` takes precedence over `.env` when both define the same variable.
+
+### 11.2 Available Config Options
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_API_BASE` | API base URL (nginx proxy to backend) | `https://topocode.cn` |
+| `VITE_DISABLE_MOCK` | Disable mock data | `true` |
+
+### 11.3 PlantUML Deployment
+
+**It is recommended to deploy a local PlantUML service** to ensure data security (diagram code stays on your machine), response speed, and stability.
+
+The frontend sends diagram source via the backend proxy (`POST /api/plantuml`) — the backend encodes and forwards to the PlantUML server, avoiding URL length limits.
+
+Docker deployment:
+
+```bash
+# Use Alibaba Cloud mirror (recommended for China)
+docker run -d --name plantuml -p 8300:8080 registry.cn-hangzhou.aliyuncs.com/dockerhub-mirror/plantuml/plantuml-server:jetty
+
+# Or official image
+docker run -d --name plantuml -p 8300:8080 plantuml/plantuml-server:jetty
+```
+
+Set the backend environment variable:
+
+```bash
+PLANTUML_SERVER=http://localhost:8300
+```
+
+Default is `http://www.plantuml.com/plantuml` — must be changed for internal networks. Restart the Python backend after changing.
+
+The frontend no longer needs `VITE_PLANTUML_URL` (the env variable has been removed).
+
+---
+
 > Maintained by the TopoCode Team. Updated 2026-07

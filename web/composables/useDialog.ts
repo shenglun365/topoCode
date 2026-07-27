@@ -15,13 +15,13 @@ const dialog = ref<DialogState>({ show: false, type: 'confirm', title: '', messa
 export function useDialog() {
   function confirm(msg: string, title = '确认'): Promise<boolean> {
     return new Promise(resolve => {
-      dialog.value = { show: true, type: 'confirm', title, message: msg, value: '', onOk: () => resolve(true), onCancel: () => resolve(false) }
+      dialog.value = { show: true, type: 'confirm', title, message: msg, value: '', onOk: () => { dialog.value.show = false; resolve(true) }, onCancel: () => { dialog.value.show = false; resolve(false) } }
     })
   }
 
   function prompt(msg: string, defaultValue = '', title = '输入'): Promise<string | null> {
     return new Promise(resolve => {
-      dialog.value = { show: true, type: 'prompt', title, message: msg, value: defaultValue, onOk: (v) => resolve(v || null), onCancel: () => resolve(null) }
+      dialog.value = { show: true, type: 'prompt', title, message: msg, value: defaultValue, onOk: (v) => { dialog.value.show = false; resolve(v || null) }, onCancel: () => { dialog.value.show = false; resolve(null) } }
     })
   }
 

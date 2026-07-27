@@ -21,7 +21,7 @@
     "build:plugins": "node build/bundle-plugin.mjs",
     "build:module": "node build/bundle-module.mjs",
     "build:module-registry": "node build/bundle-module.mjs --registry",
-    "build:web": "vite build --config vite.web.config.ts",
+    "build:web": "rm -rf plugins/reports/static/web/* && vite build --config vite.web.config.ts",
     "build:worker": "node build/bundle-worker.mjs",
     "build:electron": "tsc -p tsconfig.electron.json && echo '{\"type\":\"commonjs\"}' > dist-electron/package.json",
     "build:vite": "vite build",

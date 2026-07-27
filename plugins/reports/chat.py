@@ -10,7 +10,7 @@ import threading
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 import common
 import common
@@ -146,14 +146,21 @@ def _fallback_title(session_id: str, llm_hint: str) -> str:
     return ""
 
 
-def _do_auto_title(session_id: str, context: str):
+def _do_auto_title(session_id: str, context: str, model_id_override: str = ""):
     try:
-        model_id = ""
-        default_row = common.multi_db.main_db.fetchone(
-            "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
-        )
-        if default_row and default_row["value"]:
-            model_id = default_row["value"]
+        model_id = model_id_override
+        if not model_id:
+            # 优先使用该会话自带的模型
+            session_row = _sdb().fetchone("SELECT metadata FROM llm_sessions WHERE id = ?", (session_id,))
+            if session_row and session_row["metadata"]:
+                meta = json.loads(session_row["metadata"])
+                model_id = meta.get("model_id", "")
+        if not model_id:
+            default_row = common.multi_db.main_db.fetchone(
+                "SELECT value FROM app_config WHERE key='web_chat_default_model_id'"
+            )
+            if default_row and default_row["value"]:
+                model_id = default_row["value"]
         if not model_id:
             default_model = common.multi_db.main_db.fetchone(
                 "SELECT id FROM model_configs WHERE is_default = 1 AND status = 'connected' LIMIT 1"
@@ -199,6 +206,7 @@ def _do_auto_title(session_id: str, context: str):
             _headers["Authorization"] = f"Bearer {api_key}"
         resp = _req.post(f"{base_url}/v1/chat/completions", json=payload, headers=_headers, timeout=30)
         if resp.status_code != 200:
+            logger.warning(f"[auto-title] _do: LLM returned status {resp.status_code} for session {session_id[:16]}: {resp.text[:200]}")
             return
         data = resp.json()
         choices = data.get("choices", [])
@@ -386,7 +394,7 @@ async def list_chat_sessions(project_id: str = Query(None), status: str = Query(
             wheres.append("status = ?")
             params.append(status)
         sql = "SELECT id, project_id, title, status, metadata, created_at, updated_at " \
-              f"FROM llm_sessions WHERE {' AND '.join(wheres)} ORDER BY updated_at DESC"
+              f"FROM llm_sessions WHERE {' AND '.join(wheres)} ORDER BY created_at DESC"
         rows = _sdb().fetchall(sql, tuple(params))
         result = []
         for r in rows:
@@ -475,9 +483,11 @@ async def delete_chat_session(session_id: str):
 
 
 @router.post("/api/chat/sessions/{session_id}/auto-title")
-async def auto_title_session(session_id: str):
+async def auto_title_session(session_id: str, request: Request):
     _require_chat_ready()
     try:
+        body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+        model_id_override = body.get("modelId", "") or body.get("model_id", "")
         row = _sdb().fetchone("SELECT title FROM llm_sessions WHERE id = ?", (session_id,))
         if not row:
             raise HTTPException(404, "Session not found")
@@ -488,10 +498,14 @@ async def auto_title_session(session_id: str):
         if len(msgs) < 2:
             return {"title": row["title"] or "新对话", "generated": False}
         context = "\n".join([f"{'用户' if m['role'] == 'user' else '助手'}: {m['content'][:500]}" for m in msgs[-4:]])
-        _do_auto_title(session_id, context)
+        old_title = row["title"] or ""
+        _do_auto_title(session_id, context, model_id_override)
         updated = _sdb().fetchone("SELECT title FROM llm_sessions WHERE id = ?", (session_id,))
-        new_title = updated["title"] if updated else (row["title"] or "新对话")
-        return {"title": new_title, "generated": True}
+        new_title = updated["title"] if updated else old_title
+        generated = new_title != old_title
+        if generated:
+            return {"title": new_title, "generated": True}
+        return JSONResponse(content={"title": new_title, "generated": False}, status_code=200)
     except HTTPException:
         raise
     except Exception as e:
@@ -898,7 +912,7 @@ async def send_chat_message(session_id: str, request: Request):
                     elif event["type"] == "tool_result":
                         yield f"event: tool_result\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
-                pass
+                _check_auto_title(session_id)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
     except HTTPException:
@@ -1154,7 +1168,7 @@ async def list_notes(status: str = Query(None), project_id: str = Query(None)):
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         rows = common.multi_db.main_db.fetchall(
             f"SELECT id, title, content, refs, status, session_id, project_id, created_at, updated_at "
-            f"FROM chat_notes {where} ORDER BY updated_at DESC", tuple(params)
+            f"FROM chat_notes {where} ORDER BY created_at DESC", tuple(params)
         )
         return {"notes": [{"id": r["id"], "title": r["title"], "content": r["content"],
                             "refs": json.loads(r["refs"]) if r["refs"] else [],
@@ -1446,7 +1460,7 @@ async def list_docs(search: str = "", status: str = "", project_id: str = "",
         )["c"]
         rows = common.multi_db.knowledge_db.fetchall(
             f"SELECT id, title, type, status, project_id, tags, created_at, updated_at "
-            f"FROM knowledge_docs {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            f"FROM knowledge_docs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             tuple(params) + (page_size, (page - 1) * page_size)
         )
         return {"documents": rows, "total": total}

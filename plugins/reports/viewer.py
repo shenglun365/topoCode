@@ -570,6 +570,34 @@ async def render_plantuml(code: str = Query(...)):
     except Exception as e:
         raise HTTPException(500, f"PlantUML render failed: {e}")
 
+@router.post("/api/plantuml")
+async def render_plantuml_post(request: Request):
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        body = await request.body()
+        code = body.decode("utf-8", errors="replace")
+        if not code or not code.strip():
+            raise HTTPException(400, "Empty PlantUML code")
+        if not common.multi_db:
+            raise HTTPException(503, "Backend not ready")
+        code_hash = hashlib.md5(code.encode("utf-8")).hexdigest()
+        cached = common._get_cached_plantuml(code_hash)
+        if cached:
+            return Response(content=cached, media_type="image/svg+xml")
+        from plantuml_service import render_plantuml as render_pu
+        from plantuml_service import PLANTUML_SERVER as _pu_srv
+        logger.info(f"POST /api/plantuml: PLANTUML_SERVER={_pu_srv} code_len={len(code)}")
+        svg_bytes = render_pu(code, format="svg", use_remote=True)
+        svg_text = svg_bytes.decode("utf-8", errors="replace")
+        common._set_cached_plantuml(code_hash, code, svg_text)
+        return Response(content=svg_text, media_type="image/svg+xml")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("POST /api/plantuml failed")
+        raise HTTPException(500, f"PlantUML render failed: {e}")
+
 
 @router.get("/api/plantuml/clear-cache")
 async def clear_plantuml_cache():

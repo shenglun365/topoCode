@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { renderDocMarkdown, renderDiagrams } from '@web/services/render'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { diagramStateStore } from '@web/services/diagramStateStore'
+import { parseDocContent } from '@web/services/parseContent'
+import MermaidViewer from '@web/components/MermaidViewer.vue'
+import PlantUmlViewer from '@web/components/PlantUmlViewer.vue'
 import { useFloatDrag } from '@web/composables/useFloatDrag'
 import { useDocState } from '@web/composables/useDocState'
 import { useNotes } from '@web/composables/useNotes'
@@ -58,6 +61,7 @@ const {
   _nodeFilterColor, isNodeHidden, toggleNodeFilter, applyCenterMode,
   getCy, getManualHidden, getManualShown, getCenterNodes,
   ctxCopyText: ctxCopy,
+  // ... rest of useGraphState destructuring
   initContextMenuAutoClose,
 } = useGraphState(taskId)
 
@@ -126,11 +130,16 @@ function ctxSaveNote() {
   const n = graphNodes.value.find(x => x.id === contextNodeId.value)
   if (!n) return
   _addRefToDraft({
-    projectId: '', projectName: '', taskId: taskId.value,
+    projectId: doc.value?.projectId || '', projectName: doc.value?.projectName || '', taskId: taskId.value,
     componentId: n.id, label: n.label, text: n.label,
   })
   toast('已存入便签')
   contextMenuVisible.value = false
+}
+
+function handleCtxCopy(nodeId: string) {
+  console.log('[handleCtxCopy] doc=', doc.value?.projectId, doc.value?.projectName)
+  ctxCopy(nodeId, { projectId: doc.value?.projectId || '', projectName: doc.value?.projectName || '' })
 }
 
 // ── Selection toolbar (exact legacy logic) ──
@@ -379,7 +388,7 @@ function applyFontSize(val: number) {
 }
 
 watch(fontSize, applyFontSize)
-watch(docContentRef, () => { if (docContentRef.value) { renderDiagrams(docContentRef.value); attachHeadingButtons() } })
+watch(docContentRef, () => { if (docContentRef.value) { attachHeadingButtons() } })
 watch(commFloatVisible, (v) => { if (v) loadRightCommTree() })
 watch(filterVisible, (v) => {
   if (v) {
@@ -394,9 +403,38 @@ watch(filterVisible, (v) => {
   }
 })
 
+// ── Diagram view state ──
+const docBlocks = computed(() => parseDocContent(doc.value?.content || '', docId.value || originalDocId.value))
+const hasUnsavedDiag = ref(false)
+function checkDiagState() {
+  const id = docId.value || originalDocId.value
+  if (!id) { hasUnsavedDiag.value = false; return }
+  hasUnsavedDiag.value = diagramStateStore.hasUnsaved(id)
+}
+watch(doc, () => setTimeout(checkDiagState, 200), { deep: true })
+watch(docContentRef, () => setTimeout(checkDiagState, 500))
+onMounted(() => document.addEventListener('diagram-state-changed', checkDiagState))
+onUnmounted(() => document.removeEventListener('diagram-state-changed', checkDiagState))
+
+async function saveDiagramStates() {
+  const id = docId.value || originalDocId.value
+  if (!id) return
+  if (!doc.value) return
+  doc.value.content = diagramStateStore.embedInContent(doc.value.content, id)
+  try {
+    const r = await fetch(`/api/documents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: doc.value.content }) })
+    if (!r.ok) throw new Error()
+    diagramStateStore.removeAll(id)
+    hasUnsavedDiag.value = false
+    document.dispatchEvent(new CustomEvent('diagram-state-changed'))
+    const { toast } = await import('@web/composables/useToast')
+    toast('图状态已保存')
+  } catch (_) {}
+}
+
 onMounted(() => {
   applyFontSize(fontSize.value)
-  loadDoc(() => { if (docContentRef.value) renderDiagrams(docContentRef.value); checkHash() })
+  loadDoc(() => { checkHash() })
   loadGraph()
   loadFiles()
   initSelectionToolbar()
@@ -489,6 +527,9 @@ onMounted(() => {
         <option :value="18">18px</option><option :value="22">22px</option>
         <option :value="26">26px</option><option :value="32">32px</option>
       </select>
+      <button class="diag-save-btn" :class="{ 'has-unsaved': hasUnsavedDiag }" :disabled="!hasUnsavedDiag" @click="saveDiagramStates" title="保存图状态到服务器">
+        <span v-if="hasUnsavedDiag" class="save-red-dot"></span>保存图状态
+      </button>
       <button class="toggle-btn notes-btn" :class="{ active: false }" @click="openNotesModal" title="便签">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </button>
@@ -531,7 +572,27 @@ onMounted(() => {
 
         <div v-else class="doc-scroll">
           <div v-if="loading" class="loading">加载中...</div>
-          <div v-else-if="doc" ref="docContentRef" class="content" v-html="getAnnotationBlocks(renderDocMarkdown(doc.content))" @click="onDocAnnoClick"></div>
+          <div v-else-if="doc" ref="docContentRef" class="content" @click="onDocAnnoClick">
+            <template v-for="(b, i) in docBlocks" :key="i">
+              <span v-if="b.type === 'text'" class="doc-render" v-html="getAnnotationBlocks(b.html || '')"></span>
+              <MermaidViewer
+                v-else-if="b.type === 'mermaid'"
+                :code="b.code!"
+                :diag-id="b.diagId!"
+                :msg-id="docId.value || originalDocId.value"
+                :initial-state="b.initialState"
+                @save-state="saveDiagramStates"
+              />
+              <PlantUmlViewer
+                v-else-if="b.type === 'plantuml'"
+                :code="b.code!"
+                :diag-id="b.diagId!"
+                :msg-id="docId.value || originalDocId.value"
+                :initial-state="b.initialState"
+                @save-state="saveDiagramStates"
+              />
+            </template>
+          </div>
           <div v-else class="content"><p>请通过 URL 参数传入 taskId</p></div>
 
           <!-- File list section (inside scroll, below content) -->
@@ -687,7 +748,7 @@ onMounted(() => {
           :is-external="contextNodeIsExternal"
           :has-children="contextNodeHasChildren"
           :center-nodes="getCenterNodes()"
-          @copy="ctxCopy(contextNodeId); contextMenuVisible = false"
+          @copy="handleCtxCopy(contextNodeId); contextMenuVisible = false"
           @drilldown="ctxDrilldown"
           @center="ctxCenter"
           @open-doc="ctxOpenDoc"
@@ -723,7 +784,7 @@ onMounted(() => {
                       <span v-if="r.projectName" class="ref-id">{{ r.projectName }}</span>
                       <span v-if="r.taskId" class="ref-id">{{ r.taskId.slice(0,8) }}</span>
                       <span v-if="r.componentId" class="ref-id">{{ r.componentId.slice(0,12) }}</span>
-                      <button class="copy-id-btn" title="复制引用ID" @click.stop="navigator.clipboard.writeText(r.componentId || r._id).then(()=>toast('已复制')).catch(()=>{})">复制</button>
+                      <button class="copy-id-btn" title="复制引用ID" @click.stop="navigator.clipboard?.writeText(r.componentId || r._id).then(()=>toast('已复制'))?.catch(()=>{})">复制</button>
                     </span>
                     <span class="draft-actions">
                       <button class="del" @click.stop="deleteRefFromNote(n.id, r._id)">删除</button>

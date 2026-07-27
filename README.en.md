@@ -285,6 +285,39 @@ When the application is running, **both the AI assistant interface and document 
 
 The HTTP port and bind address can be changed in **Settings → General Settings**.
 
+### PlantUML Rendering Service
+
+PlantUML diagrams in Web documents and AI chat require a rendering service. **It is recommended to deploy a local PlantUML service** to ensure data security, response speed, and stability.
+
+The frontend sends diagram source to the backend proxy (`POST /api/plantuml`) which encodes and forwards to the PlantUML server — no URL length limits.
+
+Deploy with Docker (use a mirror registry in China for faster downloads):
+
+```bash
+# Docker Hub with Alibaba Cloud mirror (recommended for China)
+docker run -d --name plantuml -p 8300:8080 registry.cn-hangzhou.aliyuncs.com/dockerhub-mirror/plantuml/plantuml-server:jetty
+
+# Official image
+docker run -d --name plantuml -p 8300:8080 plantuml/plantuml-server:jetty
+```
+
+Set the backend environment variable (in `docker-compose.yml` or systemd):
+
+```bash
+PLANTUML_SERVER=http://localhost:8300
+```
+
+Default is `http://www.plantuml.com/plantuml` — must be changed for internal networks.
+
+Restart the Python backend after changing.
+
+### All Config Options
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_API_BASE` | API base URL (nginx proxy to backend) | `https://topocode.cn` |
+| `VITE_DISABLE_MOCK` | Disable mock data | `true` |
+
 ---
 
 ## Development
