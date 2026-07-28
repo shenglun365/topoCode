@@ -40,155 +40,39 @@ def find_plantuml_jar() -> Optional[str]:
 
 
 def _sanitize_plantuml(code: str) -> str:
-    """修正 LLM 生成的常见 PlantUML 语法错误"""
+    """仅做字符规范化，保留原始代码语义。语法重建由 diagram parsers 处理。"""
     code = code.strip()
+    code = code.replace('\r\n', '\n')
+    code = re.sub(r'，', ',', code)
+    code = re.sub(r'（', '(', code)
+    code = re.sub(r'）', ')', code)
+    code = re.sub(r'：', ':', code)
+    code = re.sub(r'[\u201c\u201d]', '"', code)
+    code = re.sub(r'[\u2018\u2019]', "'", code)
+    code = re.sub(r'\u3000', ' ', code)
+    code = re.sub(r'→', '-->', code)
+    code = re.sub(r'←', '<--', code)
+    code = code.replace('\t', '  ')
+    code = re.sub(r'[ \t]+$', '', code, flags=re.MULTILINE)
 
-    # 1) 分离 @startuml 和标题: @startuml Title → @startuml\ntitle Title
-    #    但 @startuml 后紧跟 PlantUML 关键字时不分离
-    _PU_KEYWORDS = r'(?:component|package|rectangle|folder|frame|cloud|database|storage|actor|usecase|class|interface|enum|abstract|state|note|box|skin|left|right|title|hide|show|skinparam|!define|!include)'
-    code = re.sub(
-        r'^@startuml[ \t]+(?!' + _PU_KEYWORDS + r'\b)(\S.+)',
-        r'@startuml\ntitle \1', code, flags=re.MULTILINE
-    )
+    if not re.search(r'^\s*@start\w+\b', code, re.MULTILINE):
+        code = '@startuml\n' + code
+    if not re.search(r'@end\w+\b\s*$', code):
+        if re.search(r'^\s*@start\w+', code, re.MULTILINE):
+            end = re.sub(r'^@start', '@end', re.search(r'^\s*(@start\w+)', code, re.MULTILINE).group(1))
+            code = code.rstrip() + '\n' + end
+        else:
+            code = code + '\n@enduml'
 
-    # 2) [node] --> [node] → component 语法 (LLM 常输出 Mermaid 风格)
-    def _convert_mermaid_to_puml(code: str) -> str:
-        lines = code.split('\n')
-        out: list[str] = []
-        alias_map: dict[str, str] = {}
-        counter = 0
-        for line in lines:
-            m2 = re.match(r'^\s*\[([^\]]+)\]\s*-->\s*\[([^\]]+)\]\s*$', line)
-            if m2:
-                for n in (m2.group(1), m2.group(2)):
-                    if n not in alias_map:
-                        counter += 1; alias_map[n] = f'a{counter}'
-                        out.append(f'  component "{n}" as {alias_map[n]}')
-                out.append(f'  {alias_map[m2.group(1)]} --> {alias_map[m2.group(2)]}')
-                continue
-            # file X --> file Y 同一处理
-            m2 = re.match(r'^\s*file\s+(\S+)\s*-->\s*file\s+(\S+)\s*$', line)
-            if m2:
-                for n in (m2.group(1), m2.group(2)):
-                    if n not in alias_map:
-                        counter += 1; alias_map[n] = f'a{counter}'
-                        out.append(f'  component "{n}" as {alias_map[n]}')
-                out.append(f'  {alias_map[m2.group(1)]} --> {alias_map[m2.group(2)]}')
-                continue
-            out.append(line)
-        return '\n'.join(out)
-    code = _convert_mermaid_to_puml(code)
-
-    # 3) package 'name' → package "name" (单引号在 PlantUML 中是注释!)
     code = re.sub(
         r"(\b(?:package|rectangle|component|node|folder|frame|cloud|database|storage)\s+)'([^']*)'",
         r'\1"\2"', code
     )
-
-    # 3) @enduml 修正
-    code = re.sub(r'^@enduml?$', '@enduml', code, flags=re.MULTILINE)
-
-    # 4) module → package + 一行多定义拆分 (循环直到稳定)
-    for _ in range(5):
-        prev = code
-        # module "Name" { text } → package "Name" { ... }
-        code = re.sub(
-            r'^(\s*)module\s+"([^"]*)"\s*\{\s*([^}]*)\s*\}\s*$',
-            lambda m: _module_to_package(m.group(1), m.group(2), m.group(3)),
-            code, flags=re.MULTILINE
-        )
-        # 一行多个定义 → 拆行
-        code = re.sub(
-            r'(?<=\S)[ \t]+(?=(?:component|package|rectangle|folder|module)\s+)',
-            '\n', code
-        )
-        if code == prev:
-            break
-
-    # 5) 容器花括号展开: package "Name" { text, text } → 多行子元素
-    #   匹配 <keyword> "Name" { text, text } (无 as alias)
-    code = re.sub(
-        r'^(\s*)(package|rectangle|folder|cloud)\s+"([^"]*)"\s*\{\s*([^}]+)\s*\}\s*$',
-        lambda m: _expand_container(m.group(1), m.group(2), m.group(3), m.group(4)),
-        code, flags=re.MULTILINE
-    )
-
-    # 6) 单行花括号展开: component "X" as x { text, text } → note
-    #    保留内含 PlantUML 关键字的情况
-    line_pat = re.compile(
-        r'^(\s*)(\w+)\s+"([^"]*)"\s+as\s+(\w+)\s*\{\s*([^}]*)\s*\}\s*$',
-        re.MULTILINE
-    )
-    def _expand_line(m: re.Match) -> str:
-        indent, kw, name, alias, content = m.groups()
-        content = content.strip()
-        if not content:
-            return f'{indent}{kw} "{name}" as {alias}'
-        # 含 PlantUML 关键字 → 保留原样 (缩进子元素)
-        if re.search(r'\b(?:component|package|rectangle|folder|note|class|interface)\b', content):
-            inner_indent = indent + '  '
-            inner = '\n'.join(f'{inner_indent}{x.strip()}' for x in content.split(',') if x.strip())
-            return f'{indent}{kw} "{name}" as {alias} {{\n{inner}\n{indent}}}'
-        items = [x.strip() for x in content.split(',') if x.strip()]
-        lines_out = [f'{indent}{kw} "{name}" as {alias}']
-        for item in items:
-            lines_out.append(f'{indent}note right of {alias}')
-            lines_out.append(f'{indent}  {item}')
-            lines_out.append(f'{indent}end note')
-        return '\n'.join(lines_out)
-    code = line_pat.sub(_expand_line, code)
-
-    # 7) 未定义别名存根: 收集所有引用的 alias 和已定义的 alias, 补充缺失
-    defined_aliases = set(re.findall(r'\bas\s+(\w+)', code))
-    referenced = set(re.findall(r'(\w+)\s*--[>-]', code))
-    referenced.update(re.findall(r'(\w+)\s*\.\.[>-]', code))
-    referenced.update(re.findall(r'--[>-]\s*(\w+)', code))
-    referenced.update(re.findall(r'\.\.[>-]\s*(\w+)', code))
-    missing = referenced - defined_aliases - {'@enduml'}
-    if missing:
-        stub = '\n' + '\n'.join(
-            f'component "{a}" as {a} #LightGray;line:gray'
-            for a in sorted(missing)
-        )
-        # 放在 @enduml 之前插入
-        if '@enduml' in code:
-            code = code.replace('@enduml', stub + '\n@enduml')
-        else:
-            code += stub
-
-    # 8) 清理多余空行
     code = re.sub(r'\n{3,}', '\n\n', code)
     return code
 
 
-def _expand_container(indent: str, kw: str, name: str, content: str) -> str:
-    """展开 package/folder/rectangle { text, text } 为多行子元素"""
-    import re
-    content = content.strip()
-    # 含 PlantUML 关键字 → 保留原样, 只缩进
-    if re.search(r'\b(?:component|package|rectangle|folder|note|class|interface|enum)\b', content):
-        inner = '\n'.join(f'{indent}  {x.strip()}' for x in content.split(',') if x.strip())
-        return f'{indent}{kw} "{name}" {{\n{inner}\n{indent}}}'
-    items = [x.strip() for x in content.split(',') if x.strip()]
-    if not items:
-        return f'{indent}{kw} "{name}"'
-    lines = [f'{indent}{kw} "{name}" {{']
-    for item in items:
-        safe_alias = re.sub(r'[^a-zA-Z0-9_]', '_', item)
-        lines.append(f'{indent}  component "{item}" as {safe_alias}')
-    lines.append(f'{indent}}}')
-    return '\n'.join(lines)
 
-
-def _module_to_package(indent: str, name: str, content: str) -> str:
-    import re
-    items = [x.strip() for x in content.split(',') if x.strip()]
-    lines = [f'{indent}package "{name}" {{']
-    for item in items:
-        safe = re.sub(r'[^a-zA-Z0-9]', '_', item)
-        lines.append(f'{indent}  component "{item}" as {safe}')
-    lines.append(f'{indent}}}')
-    return '\n'.join(lines)
 
 
 def encode_plantuml(code: str) -> str:
@@ -275,15 +159,17 @@ def _extract_error_from_svg(svg: str) -> str:
 
 
 def _render_remote(encoded: str, format: str) -> bytes:
-    """使用远程 PlantUML 服务器渲染"""
-    url = f"{PLANTUML_SERVER}/{format}/{encoded}"
-    logger.info(f"Rendering PlantUML via remote server: {url[:80]}...")
+    """使用远程 PlantUML 服务器渲染 (GET /svg/<encoded>)"""
+    url = f"{PLANTUML_SERVER}/svg/{encoded}"
+    logger.info(f"GET /svg/... len={len(encoded)}")
 
     try:
         response = requests.get(url, timeout=30)
     except requests.RequestException as e:
         logger.error(f"Remote PlantUML request failed: {e}")
         raise RuntimeError(f"PlantUML render failed: {e}")
+    ct = response.headers.get('content-type', '')
+    logger.info(f"Response {response.status_code}, Content-Type: {ct}, body_len={len(response.content)}")
     if response.status_code != 200:
         body = response.text or ''
         detail = _extract_error_from_svg(body) or body[:300]

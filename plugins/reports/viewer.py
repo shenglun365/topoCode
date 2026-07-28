@@ -605,7 +605,48 @@ async def clear_plantuml_cache():
     return {"status": "ok"}
 
 
-# ── Graph Layout Persistence ──
+# ── Diagram Rebuild API (Parser + Template) ──
+
+@router.post("/api/plantuml/rebuild")
+async def rebuild_plantuml(request: Request):
+    try:
+        body = await request.json()
+        code: str = body.get("code", "")
+        diag_type: str = body.get("type", "auto")
+        if not code or not code.strip():
+            raise HTTPException(400, "Empty code")
+        from diagram import rebuild_plantuml as _rebuild
+        try:
+            result = _rebuild(code, diag_type if diag_type != "auto" else None)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("POST /api/plantuml/rebuild failed")
+        raise HTTPException(500, f"Rebuild failed: {e}")
+
+
+@router.post("/api/mermaid/rebuild")
+async def rebuild_mermaid(request: Request):
+    try:
+        body = await request.json()
+        code: str = body.get("code", "")
+        diag_type: str = body.get("type", "auto")
+        if not code or not code.strip():
+            raise HTTPException(400, "Empty code")
+        from diagram import rebuild_mermaid as _rebuild
+        try:
+            result = _rebuild(code, diag_type if diag_type != "auto" else None)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("POST /api/mermaid/rebuild failed")
+        raise HTTPException(500, f"Rebuild failed: {e}")
 
 def _ensure_graph_layout_table(pdb):
     pdb.execute(

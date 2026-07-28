@@ -7,6 +7,7 @@ import PlantUmlViewer from '@web/components/PlantUmlViewer.vue'
 import { useFloatDrag } from '@web/composables/useFloatDrag'
 import { useDocState } from '@web/composables/useDocState'
 import { useNotes } from '@web/composables/useNotes'
+import { codeFullscreen } from '@web/services/render'
 import { useHeatmap } from '@web/composables/useHeatmap'
 import { useToast } from '@web/composables/useToast'
 import { useGraphState } from '@web/composables/useGraphState'
@@ -350,6 +351,13 @@ function getAnnotationBlocks(html: string): string {
     (_, id, text) => `<div class="doc-annotation" data-anno-id="${id}"><div class="doc-anno-marker"></div><div class="doc-anno-body"><p>${text.trim()}</p></div></div>`)
 }
 function onDocAnnoClick(e: MouseEvent) {
+  const fsBtn = (e.target as HTMLElement).closest('.code-fs-btn') as HTMLElement
+  if (fsBtn) {
+    const wrap = fsBtn.closest('.code-block-wrap')
+    const codeEl = wrap?.querySelector('code')
+    const text = codeEl?.textContent || ''
+    if (text) { codeFullscreen(text); return }
+  }
   const anno = (e.target as HTMLElement).closest('.doc-annotation') as HTMLElement
   if (!anno) return
   editAnnoData.value = { id: anno.dataset.annoId || '', text: anno.querySelector('.doc-anno-body')?.textContent?.trim() || '', isNew: false }

@@ -537,6 +537,21 @@ async def update_chat_message(session_id: str, message_id: str, request: Request
         raise HTTPException(500, str(e))
 
 
+@router.post("/api/chat/sessions/{session_id}/messages/batch")
+async def batch_update_messages(session_id: str, request: Request):
+    _require_chat_ready()
+    try:
+        body = await request.json()
+        messages = body.get("messages", [])
+        db = _sdb()
+        for m in messages:
+            db.execute("UPDATE llm_messages SET content = ? WHERE id = ? AND session_id = ?",
+                       (m["content"], m["id"], session_id))
+        return {"saved": len(messages)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @router.post("/api/chat/sessions/{session_id}/messages")
 async def send_chat_message(session_id: str, request: Request):
     """Send message + SSE streaming reply (core endpoint)"""

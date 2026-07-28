@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as api from '@web/services/api'
-import { renderMarkdown, renderDocMarkdown } from '@web/services/render'
+import { renderMarkdown, renderDocMarkdown, codeFullscreen } from '@web/services/render'
 import { diagramStateStore } from '@web/services/diagramStateStore'
 import { parseDocContent } from '@web/services/parseContent'
 import ChatInput from '@web/components/ChatInput.vue'
@@ -43,6 +43,7 @@ const taskId = ref(new URLSearchParams(location.search).get('taskId') || '')
 const sessionId = ref(new URLSearchParams(location.search).get('sessionId') || '')
 const fontSize = ref(parseInt(localStorage.getItem('topoone-font-size') || '18'))
 const contextLimit = ref(parseInt(localStorage.getItem('topo_context_limit') || '32000'))
+const MODEL_LS_KEY = 'topoone_last_model'
 
 // Archives
 const archives = ref<any[]>([])
@@ -64,7 +65,7 @@ const deleteMode = ref(false)
 const selectedIds = ref(new Set<string>())
 
 const allSelected = computed(() => {
-  const ids = messages.value.filter(m => m.id).map(m => m.id)
+  const ids = displayMessages.value.filter(m => m.id).map(m => m.id)
   return selectedIds.value.size === ids.length && ids.length > 0
 })
 
@@ -74,6 +75,42 @@ const currentTitle = computed(() => {
 })
 
 const docBlocks = computed(() => parseDocContent(viewingDoc.value?.content || '', viewingDoc.value?.id))
+
+// 合并连续的工具调用助手消息（用于展示）
+const displayMessages = computed(() => {
+  const enriched: ChatMessage[] = []
+  // Phase 1: 从 tool 消息回填结果到同组 assistant 的 toolCalls
+  for (const m of messages.value) {
+    if (m.role === 'tool' && m.content) {
+      for (let i = enriched.length - 1; i >= 0; i--) {
+        const prev = enriched[i]
+        if (prev.role === 'assistant' && prev.toolCalls?.length) {
+          const tc = prev.toolCalls.find(t => !t.result)
+          if (tc) { tc.result = m.content.slice(0, 500); break }
+        }
+      }
+      continue
+    }
+    enriched.push({ ...m })
+  }
+  // Phase 2: 合并连续的工具调用组
+  const merged: ChatMessage[] = []
+  for (const m of enriched) {
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      const prev = merged[merged.length - 1]
+      if (prev?.role === 'assistant' && prev.toolCalls?.length) {
+        prev.toolCalls!.push(...m.toolCalls)
+        if (m.content) prev.content = (prev.content || '') + (prev.content ? '\n\n' : '') + m.content
+        if (m.reasoning) prev.reasoning = (prev.reasoning || '') + '\n\n' + m.reasoning
+        if (m.id) prev._mergedIds!.push(m.id)
+        continue
+      }
+    }
+    const entry = { ...m, _mergedIds: m.role === 'assistant' && m.id ? [m.id] : undefined }
+    merged.push(entry)
+  }
+  return merged
+})
 
 // BroadcastChannel for cross-tab notes sync
 const bc = new BroadcastChannel('topo_notes' + (taskId.value ? '_' + taskId.value : ''))
@@ -128,6 +165,7 @@ function applyFontSize(val: number) {
 }
 watch(fontSize, applyFontSize)
 watch(contextLimit, (val) => { try { localStorage.setItem('topo_context_limit', String(val)) } catch (_) {} })
+watch(currentModel, (val) => { if (val) try { localStorage.setItem(MODEL_LS_KEY, val) } catch (_) {} })
 
 // ── Sessions ──
 async function loadSessions() {
@@ -220,7 +258,7 @@ async function loadMessages() {
   if (!currentId.value) return
   try {
     const data = await api.getMessages(currentId.value)
-    messages.value = data.messages.filter(m => m.role !== 'system' && m.role !== 'tool')
+    messages.value = data.messages.filter(m => m.role !== 'system')
     data.messages.forEach((m: any, i: number) => {
       if (m.role === 'assistant') console.log(`[loadMessages] #${i} role=${m.role} contentLen=${(m.content||'').length} reasoningLen=${(m.reasoning||'').length} toolCalls=${(m.toolCalls||[]).length} contentStart=${(m.content||'').slice(0,80)}`)
     })
@@ -229,19 +267,24 @@ async function loadMessages() {
 }
 
 // 代码编辑：子组件触发的 "重新渲染" → 更新 msg.content
-async function onCodeChange(msgId: string, newCode: string) {
+async function onCodeChange(msgId: string, diagId: string, newCode: string) {
   const msg = messages.value.find(m => m.id === msgId)
   if (!msg) return
-  // 找到消息中第几个图块发生改变
+  // 从 diagId 末尾提取图块索引: "diag_msg_{msgId}_{index}"
+  const idxMatch = diagId.match(/_(\d+)$/)
+  const targetIndex = idxMatch ? parseInt(idxMatch[1]) : 0
   const parts = msg.content.split(/(```(?:mermaid|plantuml)[\s\S]*?```)/)
+  let diagIndex = 0
   for (let i = 0; i < parts.length; i++) {
     if (/^```(?:mermaid|plantuml)/.test(parts[i])) {
-      const match = parts[i].match(/^```(?:mermaid|plantuml)\n?/)
-      if (match) {
-        const fences = match[0]
-        parts[i] = fences + newCode + '\n```'
+      if (diagIndex === targetIndex) {
+        const match = parts[i].match(/^```(?:mermaid|plantuml)\n?/)
+        if (match) {
+          parts[i] = match[0] + newCode + '\n```'
+        }
         break
       }
+      diagIndex++
     }
   }
   msg.content = parts.join('')
@@ -257,7 +300,8 @@ async function onSend(text: string) {
 
 async function send() {
   const text = input.value.trim()
-  if (!text || streaming.value || !currentId.value) return
+  if (!text || streaming.value) return
+  if (!currentId.value) { await createSession(); if (!currentId.value) return }
 
   const userMsg: ChatMessage = { id: `tmp-${Date.now()}`, role: 'user', content: text, createdAt: new Date().toISOString() }
   messages.value.push(userMsg)
@@ -352,18 +396,25 @@ function toggleDeleteMode() { deleteMode.value = !deleteMode.value; if (!deleteM
 
 function selectAll() {
   if (allSelected.value) selectedIds.value = new Set()
-  else selectedIds.value = new Set(messages.value.map(m => m.id).filter(Boolean))
+  else selectedIds.value = new Set(displayMessages.value.map(m => m.id).filter(Boolean))
 }
 
 async function deleteSingle(id: string) {
   if (!currentId.value) return
-  try { await api.deleteMessages(currentId.value, id); diagramStateStore.removeAll(id); await loadMessages() } catch (_) { toast('删除失败') }
+  const dm = displayMessages.value.find(m => m._mergedIds?.includes(id))
+  const ids = dm?._mergedIds ? dm._mergedIds.join(',') : id
+  try { await api.deleteMessages(currentId.value, ids); (dm?._mergedIds || [id]).forEach(mid => diagramStateStore.removeAll(mid)); await loadMessages() } catch (_) { toast('删除失败') }
 }
 
 async function deleteSelected() {
   if (!currentId.value || !selectedIds.value.size) return
-  const ids = Array.from(selectedIds.value).join(',')
-  try { await api.deleteMessages(currentId.value, ids); selectedIds.value.forEach(id => diagramStateStore.removeAll(id)); selectedIds.value = new Set(); await loadMessages() } catch (_) { toast('删除失败') }
+  const allIds = new Set(selectedIds.value)
+  displayMessages.value.forEach(dm => {
+    if (dm._mergedIds && dm._mergedIds.some(mid => selectedIds.value.has(mid)))
+      dm._mergedIds.forEach(id => allIds.add(id))
+  })
+  const ids = Array.from(allIds).join(',')
+  try { await api.deleteMessages(currentId.value, ids); allIds.forEach(id => diagramStateStore.removeAll(id)); selectedIds.value = new Set(); await loadMessages() } catch (_) { toast('删除失败') }
 }
 
 function copyMessage(m: ChatMessage) {
@@ -549,6 +600,13 @@ function getAnnotationBlocks(html: string): string {
   return r
 }
 function onDocAnnoClick(e: MouseEvent) {
+  const fsBtn = (e.target as HTMLElement).closest('.code-fs-btn') as HTMLElement
+  if (fsBtn) {
+    const wrap = fsBtn.closest('.code-block-wrap')
+    const codeEl = wrap?.querySelector('code')
+    const text = codeEl?.textContent || ''
+    if (text) { codeFullscreen(text); return }
+  }
   const anno = (e.target as HTMLElement).closest('.doc-annotation') as HTMLElement
   if (!anno) return
   const isSlot = anno.dataset?.annoSlot !== undefined
@@ -632,20 +690,21 @@ async function restoreState() {
 async function saveDiagState() {
   const id = currentId.value
   if (!id) return
-  let saved = 0
+  const toSave: { id: string; content: string }[] = []
   for (const msg of messages.value) {
     if (!msg.id) continue
     const states = diagramStateStore.loadAll(msg.id)
     if (!Object.keys(states).length) continue
     msg.content = diagramStateStore.embedInContent(msg.content, msg.id)
-    try {
-      await api.put(`/api/chat/sessions/${currentId.value}/messages/${msg.id}`, { content: msg.content } as any)
-      saved++
-    } catch (_) { console.log(`[saveDiagState] PUT failed msgId=${msg.id}`) }
-    diagramStateStore.removeAll(msg.id)
+    toSave.push({ id: msg.id, content: msg.content })
   }
-  document.dispatchEvent(new CustomEvent('diagram-state-changed'))
-  toast('图状态已保存')
+  if (!toSave.length) return
+  try {
+    await api.post(`/api/chat/sessions/${id}/messages/batch`, { messages: toSave })
+    for (const { id: mid } of toSave) diagramStateStore.removeAll(mid)
+    document.dispatchEvent(new CustomEvent('diagram-state-changed'))
+    toast('图状态已保存')
+  } catch (_) { toast('保存失败') }
 }
 
 /** 保存当前查看文档的图状态 */
@@ -669,8 +728,14 @@ onMounted(async () => {
   try {
     const data = await api.listModels()
     models.value = data.models
-    if (data.webChatDefaultModelId) currentModel.value = data.webChatDefaultModelId
-    else if (data.models.length > 0) currentModel.value = data.models[0].id
+    const lastModel = localStorage.getItem(MODEL_LS_KEY)
+    if (lastModel && data.models.some((m: any) => m.id === lastModel)) {
+      currentModel.value = lastModel
+    } else if (data.webChatDefaultModelId) {
+      currentModel.value = data.webChatDefaultModelId
+    } else if (data.models.length > 0) {
+      currentModel.value = data.models[0].id
+    }
   } catch (_) {}
   await loadSessions()
   await restoreState()
@@ -814,7 +879,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       <!-- Messages -->
       <div v-if="!viewingDoc" class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
         <ChatMessage
-          v-for="(m, i) in messages"
+          v-for="(m, i) in displayMessages"
           :key="m.id || i"
           :message="m"
           :deleteMode="deleteMode"
@@ -1014,4 +1079,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .toggle-switch input:checked+.toggle-slider{background:var(--accent)}
 .toggle-switch input:checked+.toggle-slider::before{transform:translateX(16px)}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.code-block-wrap{position:relative}
+.code-block-wrap .code-fs-btn{position:absolute;top:4px;right:4px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.4);border:none;border-radius:4px;color:#fff;cursor:pointer;opacity:0;transition:opacity .15s;z-index:1}
+.code-block-wrap:hover .code-fs-btn{opacity:1}
+.code-block-wrap .code-fs-btn:hover{background:rgba(0,0,0,.6)}
+.code-fs-content{max-width:92%;max-height:88vh;overflow:auto;transform-origin:0 0;background:#1e1e1e;border-radius:8px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.4)}
+.code-fs-content pre{margin:0;white-space:pre;font-family:var(--font-mono,monospace);font-size:14px;line-height:1.6;color:#d4d4d4}
+.code-fs-content code{background:transparent!important;padding:0!important;font-family:inherit;color:inherit}
 </style>

@@ -45,6 +45,7 @@ export interface ChatMessage {
   showReasoning?: boolean
   showToolCalls?: boolean
   qualityLow?: boolean
+  _mergedIds?: string[]
 }
 
 export interface ModelConfig {

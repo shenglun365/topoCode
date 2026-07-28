@@ -24,7 +24,81 @@ marked.setOptions({
 export function renderMarkdown(text: string): string {
   if (!text) return ''
   const result = marked.parse(text) as string
-  return result
+  return result.replace(
+    /<pre><code(?: class="[^"]*")?>([\s\S]*?)<\/code><\/pre>/g,
+    (_, codeContent) => {
+      return `<div class="code-block-wrap"><button class="code-fs-btn" title="全屏查看"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button><pre><code>${codeContent}</code></pre></div>`
+    }
+  )
+}
+
+export function codeFullscreen(codeText: string) {
+  const ov = document.createElement('div')
+  ov.className = 'diag-fullscreen-overlay'
+  const fc = document.createElement('div')
+  fc.className = 'code-fs-content'
+  const pre = document.createElement('pre')
+  const codeEl = document.createElement('code')
+  codeEl.textContent = codeText
+  pre.appendChild(codeEl)
+  fc.appendChild(pre)
+  const closeBtn = document.createElement('button')
+  closeBtn.className = 'diag-fs-close'
+  closeBtn.textContent = '\u00D7'
+  ov.appendChild(closeBtn)
+  ov.appendChild(fc)
+  document.body.appendChild(ov)
+
+  let scale = 1, dx = 0, dy = 0, dragging = false, startX = 0, startY = 0, sx = 0, sy = 0
+  function update() { fc.style.transform = `translate(${dx}px,${dy}px) scale(${scale})` }
+
+  ov.addEventListener('wheel', (e) => {
+    e.preventDefault()
+    const old = scale
+    scale = Math.max(0.25, Math.min(5, scale + (e.deltaY > 0 ? -0.2 : 0.2)))
+    const rect = fc.getBoundingClientRect()
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top
+    dx = dx + mx * (1 - scale / old)
+    dy = dy + my * (1 - scale / old)
+    update()
+  }, { passive: false })
+
+  fc.onmousedown = (e) => {
+    if ((e.target as HTMLElement).closest('button')) return
+    dragging = true; startX = e.clientX; startY = e.clientY; sx = dx; sy = dy; fc.style.cursor = 'grabbing'
+  }
+  const mm = (e: MouseEvent) => { if (!dragging) return; dx = sx + (e.clientX - startX); dy = sy + (e.clientY - startY); update() }
+  const mu = () => { dragging = false; fc.style.cursor = '' }
+  window.addEventListener('mousemove', mm); window.addEventListener('mouseup', mu)
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { cleanup(); ov.remove() } }
+  window.addEventListener('keydown', onKey)
+  closeBtn.onclick = () => { cleanup(); ov.remove() }
+  function cleanup() { window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', mu); window.removeEventListener('keydown', onKey) }
+}
+
+export function fitScale(
+  elW: number, elH: number,
+  cw: number, ch: number,
+  minScale = 0.2
+): number | null {
+  if (elW <= cw && elH <= ch) return null
+  const s = Math.min(cw / elW, ch / elH) * 0.95
+  if (s < minScale || s >= 1) return null
+  return s
+}
+
+export function autoFitCodeBlock(wrap: HTMLElement) {
+  const pre = wrap.querySelector('pre')
+  if (!pre) return
+  pre.style.transform = ''
+  pre.style.transformOrigin = '0 0'
+  wrap.style.overflow = ''
+  void pre.offsetWidth
+  const s = fitScale(pre.scrollWidth, pre.scrollHeight, wrap.clientWidth, 99999)
+  if (s !== null) {
+    pre.style.transform = `scale(${s})`
+    wrap.style.overflow = 'hidden'
+  }
 }
 
 export function renderDocMarkdown(text: string): string {
@@ -104,21 +178,7 @@ export function normalizeDiagram(
     s = s.replace(/subgraph\s+\S+(?!\n)/g, (m) => m + '\n')
 
   } else if (lang === 'plantuml') {
-    if (!/^\s*@startuml\b/m.test(s)) {
-      s = '@startuml\n' + s
-      errors.push('[error] 补全缺失的 @startuml')
-    }
-    if (!/@enduml\b\s*$/.test(s)) {
-      s = s + '\n@enduml'
-      errors.push('[error] 补全缺失的 @enduml')
-    }
-    const parts = s.split(/^@startuml\b.*$/m)
-    if (parts.length > 2) {
-      s = parts[0] + '@startuml' + parts.slice(1).join('')
-      const ep = s.split(/^@enduml\b.*$/m)
-      if (ep.length > 2) s = ep[0] + '@enduml'
-      errors.push('[warning] 移除重复的 @startuml/@enduml')
-    }
+    // plantuml 相关修复已在后端统一处理
   }
 
   return { code: s, errors }

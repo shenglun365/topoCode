@@ -8,10 +8,15 @@ export interface DiagramViewState {
 const DIAG_STATE_PREFIX = 'topoone_diag_state:'
 
 class DiagramStateStore {
+  /** composite key: `${contentId}::${diagId}` */
   private dirty = new Set<string>()
 
   private key(contentId: string): string {
     return DIAG_STATE_PREFIX + contentId
+  }
+
+  private dirtyKey(contentId: string, diagId: string): string {
+    return contentId + '::' + diagId
   }
 
   /** 读某个 contentId（消息 ID）下所有图的状态 */
@@ -33,40 +38,66 @@ class DiagramStateStore {
     const all = this.loadAll(contentId)
     all[diagId] = state
     try { localStorage.setItem(this.key(contentId), JSON.stringify(all)) } catch {}
-    this.dirty.add(contentId)
+    this.dirty.add(this.dirtyKey(contentId, diagId))
   }
 
-  /** 清除某个 contentId 的 LS 状态 */
+  /** 清除某个 contentId 下所有图的 LS 状态 */
   removeAll(contentId: string): void {
     try { localStorage.removeItem(this.key(contentId)) } catch {}
-    this.dirty.delete(contentId)
+    for (const k of [...this.dirty]) {
+      if (k.startsWith(contentId + '::')) this.dirty.delete(k)
+    }
   }
 
-  /** 是否有未保存状态 */
+  /** contentId 下是否有任何图未保存 */
   isDirty(contentId: string): boolean {
-    return this.dirty.has(contentId)
+    for (const k of this.dirty) {
+      if (k.startsWith(contentId + '::')) return true
+    }
+    return false
   }
   hasUnsaved(contentId: string): boolean {
     return this.isDirty(contentId)
   }
 
+  /** 单个图是否未保存 */
+  isDiagDirty(diagId: string, contentId: string): boolean {
+    return this.dirty.has(this.dirtyKey(contentId, diagId))
+  }
+
   /** 是否有任何消息有未保存状态 */
   hasAnyUnsaved(messages: { id?: string }[]): boolean {
-    return messages.some(m => m.id && this.dirty.has(m.id))
+    return messages.some(m => m.id && this.isDirty(m.id!))
   }
 
   /** 清除脏标记 */
-  clearDirty(contentId?: string): void {
-    if (contentId) this.dirty.delete(contentId)
-    else this.dirty.clear()
+  clearDirty(contentId?: string, diagId?: string): void {
+    if (contentId && diagId) this.dirty.delete(this.dirtyKey(contentId, diagId))
+    else if (contentId) {
+      for (const k of [...this.dirty]) {
+        if (k.startsWith(contentId + '::')) this.dirty.delete(k)
+      }
+    } else this.dirty.clear()
   }
 
   /** 将状态嵌入到消息内容中（<!-- diagram:... --> 头部） */
   embedInContent(content: string, contentId: string): string {
     const states = this.loadAll(contentId)
     if (!Object.keys(states).length) return content
+
+    // 保留非脏图的已有头部
+    const kept: string[] = []
+    const headerRe = /<!--\s*diagram:(\S+)\s*(\{[^}]*\})\s*-->/g
+    let m: RegExpExecArray | null
+    while ((m = headerRe.exec(content)) !== null) {
+      if (!(m[1] in states)) kept.push(m[0])
+    }
+
+    // 移除全部旧头部
     let s = content.replace(/<!--\s*diagram:\S+\s*\{[^}]*\}\s*-->\n?/g, '')
-    const lines: string[] = []
+
+    // 写回：保留的非脏头部 + 当前脏图的新头部
+    const lines: string[] = [...kept]
     for (const [diagId, state] of Object.entries(states)) {
       lines.push(`<!-- diagram:${diagId} ${JSON.stringify(state)} -->`)
     }

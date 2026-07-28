@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { renderMarkdown } from '@web/services/render'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { renderMarkdown, codeFullscreen, autoFitCodeBlock } from '@web/services/render'
 import { parseMessageContent } from '@web/services/parseContent'
 import type { ChatMessage } from '@web/types'
 import MermaidViewer from '@web/components/MermaidViewer.vue'
@@ -19,16 +19,37 @@ const emit = defineEmits<{
   continueAssistant: [m: ChatMessage]
   saveMsgAsDoc: [m: ChatMessage]
   deleteSingle: [id: string]
-  codeChange: [msgId: string, newCode: string]
+  codeChange: [msgId: string, diagId: string, newCode: string]
   'state-change': []
   'save-state': []
 }>()
 
 const blocks = computed(() => parseMessageContent(props.message.content || '', props.message.id))
 
-function onCodeChange(newCode: string) {
-  if (props.message.id) emit('codeChange', props.message.id, newCode)
+function onCodeChange(diagId: string, newCode: string) {
+  if (props.message.id) emit('codeChange', props.message.id, diagId, newCode)
 }
+
+function onBubbleClick(e: MouseEvent) {
+  const btn = (e.target as HTMLElement).closest('.code-fs-btn')
+  if (!btn) return
+  const wrap = btn.closest('.code-block-wrap')
+  if (!wrap) return
+  const codeEl = wrap.querySelector('code')
+  if (!codeEl) return
+  const text = codeEl.textContent || ''
+  if (text) codeFullscreen(text)
+}
+
+const bubbleRef = ref<HTMLElement>()
+
+function fitCodeBlocks() {
+  if (!bubbleRef.value) return
+  bubbleRef.value.querySelectorAll<HTMLElement>('.code-block-wrap').forEach(autoFitCodeBlock)
+}
+
+onMounted(() => nextTick(fitCodeBlocks))
+watch(() => props.message.content, () => nextTick(fitCodeBlocks))
 </script>
 
 <template>
@@ -61,7 +82,7 @@ function onCodeChange(newCode: string) {
           <pre v-if="tc.result">{{ tc.result }}</pre>
         </div>
       </div>
-      <div v-if="message.content" class="bubble">
+      <div v-if="message.content" class="bubble" ref="bubbleRef" @click="onBubbleClick">
         <template v-for="(b, i) in blocks" :key="i">
           <span v-if="b.type === 'text'" v-html="b.html"></span>
           <MermaidViewer
@@ -96,3 +117,13 @@ function onCodeChange(newCode: string) {
     </div>
   </div>
 </template>
+
+<style>
+.code-block-wrap{position:relative}
+.code-block-wrap .code-fs-btn{position:absolute;top:4px;right:4px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.4);border:none;border-radius:4px;color:#fff;cursor:pointer;opacity:0;transition:opacity .15s;z-index:1}
+.code-block-wrap:hover .code-fs-btn{opacity:1}
+.code-block-wrap .code-fs-btn:hover{background:rgba(0,0,0,.6)}
+.code-fs-content{max-width:92%;max-height:88vh;overflow:auto;transform-origin:0 0;background:#1e1e1e;border-radius:8px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.4)}
+.code-fs-content pre{margin:0;white-space:pre;font-family:var(--font-mono,monospace);font-size:14px;line-height:1.6;color:#d4d4d4}
+.code-fs-content code{background:transparent!important;padding:0!important;font-family:inherit;color:inherit}
+</style>

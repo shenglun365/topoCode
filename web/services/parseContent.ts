@@ -20,7 +20,6 @@ function parseBlocks(text: string, id: string | undefined, prefix: string): Pars
   if (!text) return []
   const blocks: ParsedBlock[] = []
   const headerStates = diagramStateStore.extractFromContent(text)
-  const headerEntries = Object.entries(headerStates)
   let remaining = text.replace(/<!--\s*diagram:\S+\s*\{[^}]*\}\s*-->\n?/g, '')
 
   const codeBlockRe = /```(mermaid|plantuml)\n([\s\S]*?)```/g
@@ -36,8 +35,7 @@ function parseBlocks(text: string, id: string | undefined, prefix: string): Pars
     const code = m[2].trim()
     if (code) {
       const diagId = diagIdFor(id, prefix, diagIndex)
-      const headerEntry = headerEntries[diagIndex]
-      const initialState = headerEntry ? headerEntry[1] : diagramStateStore.load(diagId, id || '')
+      const initialState = headerStates[diagId] || diagramStateStore.load(diagId, id || '')
       blocks.push({ type: m[1] as 'mermaid' | 'plantuml', code, diagId, initialState: initialState || undefined })
       diagIndex++
     }
