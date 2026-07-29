@@ -42,10 +42,11 @@ if (savedState) {
   zs = savedState.zs
   dx = savedState.dx
   dy = savedState.dy
-  // containerHeight intentionally NOT restored — height should reflow to parent
+  console.log(`[PlantUmlViewer] restoreState diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy}`)
 }
 
 function notifyStateChange() {
+  console.log(`[PlantUmlViewer] save diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)}`)
   diagramStateStore.save(props.diagId, contentId.value, { zs, dx, dy })
   unsaved.value = true
   emit('state-change')
@@ -69,14 +70,29 @@ function scheduleNotify() {
 
 function applyScale() {
   if (svgWrap.value) {
-    svgWrap.value.style.transform = `translate(${dx}px,${dy}px) scale(${zs})`
-    svgWrap.value.style.transformOrigin = '0 0'
+    const svg = svgWrap.value.querySelector('svg')
+    if (svg) {
+      const nw = parseFloat(svg.getAttribute('width') || '0')
+      const nh = parseFloat(svg.getAttribute('height') || '0')
+      if (nw > 0 && nh > 0) {
+        const sw = Math.round(nw * zs)
+        const sh = Math.round(nh * zs)
+        svg.style.width = sw + 'px'
+        svg.style.height = sh + 'px'
+      }
+      svg.style.marginLeft = dx + 'px'
+      svg.style.marginTop = dy + 'px'
+    }
+    svgWrap.value.style.transform = ''
+    svgWrap.value.style.transformOrigin = ''
   }
 }
 
 function reFit() {
   if (userZoomed || hasSavedState || !diagView.value || !svgWrap.value) return
-  const s = fitScale(svgWrap.value.scrollWidth, svgWrap.value.scrollHeight, diagView.value.clientWidth, diagView.value.clientHeight)
+  const sw = svgWrap.value.scrollWidth, sh = svgWrap.value.scrollHeight
+  const cw = diagView.value.clientWidth, ch = diagView.value.clientHeight
+  const s = fitScale(sw, sh, cw, ch)
   if (s !== null) { zs = s; dx = 0; dy = 0; zoomPct.value = Math.round(s * 100) + '%'; applyScale(); scheduleNotify() }
 }
 
@@ -96,6 +112,22 @@ async function renderPlantUml() {
       applyScale()
     }
     loading.value = false
+    await nextTick()
+    if (svgWrap.value && diagView.value) {
+      const sw = svgWrap.value.scrollWidth
+      const sh = svgWrap.value.scrollHeight
+      const cw = diagView.value.clientWidth
+      const ch = diagView.value.clientHeight
+      if (!hasSavedState && (sw > cw || sh > ch)) {
+        const s = fitScale(sw, sh, cw, ch)
+        if (s !== null && s < zs) {
+          zs = s; dx = 0; dy = 0
+          zoomPct.value = Math.round(s * 100) + '%'
+          applyScale()
+        }
+      }
+      console.log(`[PlantUmlViewer] afterRender diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy} container=${cw}x${ch}`)
+    }
   } catch (e: any) {
     error.value = e.message || '渲染失败'
     loading.value = false
@@ -321,14 +353,13 @@ function zoomOut() {
     </div>
 
     <div v-show="activeTab === 'code'" class="diag-code">
-      <pre><code class="language-plantuml">{{ code }}</code></pre>
-      <textarea class="diag-textarea" ref="textarea" :value="code" spellcheck="false"></textarea>
       <div class="diag-code-actions">
         <button class="diag-render-btn" @click="onReRender">重新渲染</button>
         <button class="diag-rebuild-btn" @click="onRebuild" :disabled="rebuilding">
           {{ rebuilding ? '重建中…' : '重建' }}
         </button>
       </div>
+      <textarea class="diag-textarea" ref="textarea" :value="code" spellcheck="false"></textarea>
     </div>
 
     <DiagramRebuildDialog
@@ -347,9 +378,8 @@ function zoomOut() {
 <style>
 .diagram-container{display:flex;flex-direction:column}
 .diag-view{flex:1;min-height:0}
-.diag-code{padding:0;flex:1;display:flex;flex-direction:column;min-height:0}
-.diag-code pre{flex:1;overflow:auto;margin:0;padding:12px}
-.diag-textarea{width:100%;flex:1;min-height:60px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:none;outline:none;box-sizing:border-box;tab-size:2}
+.diag-code{padding:0;display:flex;flex-direction:column;max-height:55vh;overflow-y:auto}
+.diag-textarea{width:100%;min-height:150px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:vertical;outline:none;box-sizing:border-box;tab-size:2}
 .diag-code-actions{display:flex}
 .diag-code-actions .diag-render-btn{flex:1}
 .diag-rebuild-btn{flex:1;padding:8px 14px;background:none;border:none;border-left:1px solid var(--border,#e4e4e7);cursor:pointer;font-size:13px;color:var(--text-muted,#888)}

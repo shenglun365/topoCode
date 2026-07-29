@@ -41,7 +41,7 @@ if (savedState) {
   zs = savedState.zs
   dx = savedState.dx
   dy = savedState.dy
-  // containerHeight intentionally NOT restored — height should reflow to parent
+  console.log(`[MermaidViewer] restoreState diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy}`)
 }
 
 // ── 角劲渲染：仅当容器进入视口后才开始渲染 ——
@@ -71,8 +71,19 @@ function scheduleNotify() {
 
 function applyScale() {
   if (svgWrap.value) {
-    svgWrap.value.style.transform = `translate(${dx}px,${dy}px) scale(${zs})`
-    svgWrap.value.style.transformOrigin = '0 0'
+    const svg = svgWrap.value.querySelector('svg')
+    if (svg) {
+      const nw = parseFloat(svg.getAttribute('width') || '0')
+      const nh = parseFloat(svg.getAttribute('height') || '0')
+      if (nw > 0 && nh > 0) {
+        svg.style.width = Math.round(nw * zs) + 'px'
+        svg.style.height = Math.round(nh * zs) + 'px'
+      }
+      svg.style.marginLeft = dx + 'px'
+      svg.style.marginTop = dy + 'px'
+    }
+    svgWrap.value.style.transform = ''
+    svgWrap.value.style.transformOrigin = ''
   }
 }
 
@@ -100,6 +111,22 @@ async function renderMermaid() {
       applyScale()
     }
     loading.value = false
+    await nextTick()
+    if (svgWrap.value && diagView.value) {
+      const sw = svgWrap.value.scrollWidth
+      const sh = svgWrap.value.scrollHeight
+      const cw = diagView.value.clientWidth
+      const ch = diagView.value.clientHeight
+      if (!hasSavedState && (sw > cw || sh > ch)) {
+        const s = fitScale(sw, sh, cw, ch)
+        if (s !== null && s < zs) {
+          zs = s; dx = 0; dy = 0
+          zoomPct.value = Math.round(s * 100) + '%'
+          applyScale()
+        }
+      }
+      console.log(`[MermaidViewer] afterRender diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy} container=${cw}x${ch}`)
+    }
   } catch (e: any) {
     error.value = e.message || '渲染失败'
     loading.value = false
@@ -322,14 +349,13 @@ function zoomOut() {
     </div>
 
     <div v-show="activeTab === 'code'" class="diag-code">
-      <pre><code class="language-mermaid">{{ code }}</code></pre>
-      <textarea class="diag-textarea" ref="textarea" :value="code" spellcheck="false"></textarea>
       <div class="diag-code-actions">
         <button class="diag-render-btn" @click="onReRender">重新渲染</button>
         <button class="diag-rebuild-btn" @click="onRebuild" :disabled="rebuilding">
           {{ rebuilding ? '重建中…' : '重建' }}
         </button>
       </div>
+      <textarea class="diag-textarea" ref="textarea" :value="code" spellcheck="false"></textarea>
     </div>
 
     <DiagramRebuildDialog
@@ -362,13 +388,11 @@ function zoomOut() {
 .diag-save-btn.has-unsaved:hover{background:var(--accent-light)!important}
 .save-red-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444}
 .diag-zoom-pct{font-size:11px;color:var(--text-muted,#888);min-width:30px;text-align:center}
-.diag-view{padding:12px;overflow:auto;background:var(--bg,#fff);position:relative;flex:1;min-height:0}
+.diag-view{flex:1;min-height:0}
 .diag-svg-wrap{transform-origin:0 0;cursor:grab}
 .diag-svg-wrap:active{cursor:grabbing}
-.diag-svg-wrap svg{max-width:100%!important;width:100%!important;height:auto!important}
-.diag-code{padding:0;flex:1;display:flex;flex-direction:column;min-height:0}
-.diag-code pre{flex:1;overflow:auto;margin:0;padding:12px}
-.diag-textarea{width:100%;flex:1;min-height:60px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:none;outline:none;box-sizing:border-box;tab-size:2}
+.diag-code{padding:0;display:flex;flex-direction:column;max-height:55vh;overflow-y:auto}
+.diag-textarea{width:100%;min-height:150px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:vertical;outline:none;box-sizing:border-box;tab-size:2}
 .diag-render-btn{display:block;width:100%;padding:8px;background:var(--accent,#4d6bfe);color:#fff;border:none;cursor:pointer;font-size:13px}
 .diag-render-btn:hover{background:var(--accent-hover,#3a56d4)}
 .diag-code-actions{display:flex}

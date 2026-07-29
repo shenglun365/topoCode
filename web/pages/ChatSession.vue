@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as api from '@web/services/api'
 import { renderMarkdown, renderDocMarkdown, codeFullscreen } from '@web/services/render'
 import { diagramStateStore } from '@web/services/diagramStateStore'
@@ -12,11 +12,10 @@ import MermaidViewer from '@web/components/MermaidViewer.vue'
 import PlantUmlViewer from '@web/components/PlantUmlViewer.vue'
 import RenameDialog from '@web/components/RenameDialog.vue'
 import SaveAsDocDialog from '@web/components/SaveAsDocDialog.vue'
-import NoteDetailDialog from '@web/components/NoteDetailDialog.vue'
 import { useToast } from '@web/composables/useToast'
 import { useDialog } from '@web/composables/useDialog'
 import AppDialog from '@web/components/shared/AppDialog.vue'
-import type { ChatSession, ChatMessage as ChatMsg, ModelConfig, Note } from '@web/types'
+import type { ChatSession, ChatMessage as ChatMsg, ModelConfig } from '@web/types'
 
 const { toast } = useToast()
 const { dialog, confirm, prompt, alert, close: closeDialog } = useDialog()
@@ -24,13 +23,12 @@ const { dialog, confirm, prompt, alert, close: closeDialog } = useDialog()
 const sessions = ref<ChatSession[]>([])
 const messages = ref<ChatMessage[]>([])
 const models = ref<ModelConfig[]>([])
-const notes = ref<Note[]>([])
 const currentId = ref('')
 const currentModel = ref('')
 const input = ref('')
 const streaming = ref(false)
 const msgArea = ref<HTMLElement>()
-const tab = ref<'chat' | 'notes' | 'docs' | 'archives'>('chat')
+const tab = ref<'chat' | 'docs' | 'archives'>('chat')
 const documents = ref<any[]>([])
 const docSearch = ref('')
 const viewingDoc = ref<any>(null)
@@ -57,12 +55,25 @@ const renameDialog = ref<ChatSession | null>(null)
 const renameText = ref('')
 const renameGenerating = ref(false)
 
-// Note detail
-const viewNoteData = ref<Note | null>(null)
+// Note execute flow
+const executingNote = ref<any>(null)
+const execSessionSelectorVisible = ref(false)
+const execSelectedSessionId = ref('')
+const notesDialogVisible = ref(false)
 
 // Batch delete
 const deleteMode = ref(false)
 const selectedIds = ref(new Set<string>())
+
+// Pagination for history messages
+const messagesOffset = ref(0)
+const hasMore = ref(false)
+const debug = ref(new URLSearchParams(location.search).has('debug'))
+const isLoadingMore = ref(false)
+
+// Reasoning / ToolCalls toggle state (persistent across computed re-evaluations)
+const msgShowReasoning: Record<string, boolean> = reactive({})
+const msgShowToolCalls: Record<string, boolean> = reactive({})
 
 const allSelected = computed(() => {
   const ids = displayMessages.value.filter(m => m.id).map(m => m.id)
@@ -96,17 +107,19 @@ const displayMessages = computed(() => {
   // Phase 2: 合并连续的工具调用组
   const merged: ChatMessage[] = []
   for (const m of enriched) {
-    if (m.role === 'assistant' && m.toolCalls?.length) {
+    if (m.role === 'assistant') {
       const prev = merged[merged.length - 1]
-      if (prev?.role === 'assistant' && prev.toolCalls?.length) {
-        prev.toolCalls!.push(...m.toolCalls)
+      if (prev?.role === 'assistant' && ((m as any).hasToolCalls || (prev as any).hasToolCalls || prev.toolCalls?.length || m.toolCalls?.length)) {
+        if (m.toolCalls?.length) prev.toolCalls = [...(prev.toolCalls || []), ...m.toolCalls]
         if (m.content) prev.content = (prev.content || '') + (prev.content ? '\n\n' : '') + m.content
         if (m.reasoning) prev.reasoning = (prev.reasoning || '') + '\n\n' + m.reasoning
         if (m.id) prev._mergedIds!.push(m.id)
+        prev._fromToolRounds = true
         continue
       }
     }
     const entry = { ...m, _mergedIds: m.role === 'assistant' && m.id ? [m.id] : undefined }
+    if (m.role === 'assistant' && ((m as any).hasToolCalls || m.toolCalls?.length)) entry._fromToolRounds = true
     merged.push(entry)
   }
   return merged
@@ -114,7 +127,7 @@ const displayMessages = computed(() => {
 
 // BroadcastChannel for cross-tab notes sync
 const bc = new BroadcastChannel('topo_notes' + (taskId.value ? '_' + taskId.value : ''))
-bc.onmessage = () => { if (tab.value === 'notes') loadNotes() }
+bc.onmessage = () => {}
 
 // localStorage capacity warning
 function checkStorage() {
@@ -142,19 +155,45 @@ function checkStorage() {
 }
 
 // Pending drafts pending execution
+const chatDraftsKey = computed(() => `topo_chat_drafts_${taskId.value}`)
 const loadPendingDrafts = () => {
   try {
-    const raw = localStorage.getItem(`topo_notes_${taskId.value}`)
-    if (raw) {
-      const all = JSON.parse(raw)
-      pendingDrafts.value = all.filter((d: any) => d.status === 'pending')
-    }
-  } catch (_) { pendingDrafts.value = [] }
+    const raw = localStorage.getItem(chatDraftsKey.value)
+    pendingDrafts.value = raw ? JSON.parse(raw) : []
+    console.log(`[notes] loadPendingDrafts READ key=${chatDraftsKey.value} pending=${pendingDrafts.value.length} ids=[${pendingDrafts.value.map((d:any)=>d.id).join(',')}]`)
+  } catch (_) { pendingDrafts.value = []; console.log(`[notes] loadPendingDrafts READ ERROR key=${chatDraftsKey.value}`) }
 }
 
 // ── Scroll ──
+function buildRefsPrompt(refs: any[], userText: string): string {
+  const refBlocks = (refs || []).map((r: any, i: number) => {
+    const source = [r.projectName, r.componentId].filter(Boolean).join(' / ')
+    const label = r.label || r.text?.slice(0, 60) || `引用 ${i+1}`
+    const text = r.text || ''
+    return `【引用 ${i+1}】${label}${source ? '\n来源：' + source : ''}${text ? '\n' + text : ''}`
+  }).join('\n\n')
+  if (!refBlocks) return userText || ''
+  return userText
+    ? `${userText}\n\n参考材料：\n${refBlocks}`
+    : `请分析以下材料：\n${refBlocks}`
+}
 function scrollToBottom() {
   nextTick(() => { if (msgArea.value) msgArea.value.scrollTop = msgArea.value.scrollHeight })
+}
+
+async function loadMoreMessages() {
+  if (isLoadingMore.value || !hasMore.value) return
+  isLoadingMore.value = true
+  try {
+    const prevHeight = msgArea.value?.scrollHeight || 0
+    const data = await api.getMessages(currentId.value, 50, messagesOffset.value, debug.value)
+    hasMore.value = messagesOffset.value + data.messages.length < data.total
+    messages.value.unshift(...data.messages)
+    messagesOffset.value += data.messages.length
+    await nextTick()
+    if (msgArea.value) msgArea.value.scrollTop += msgArea.value.scrollHeight - prevHeight
+  } catch (_) {}
+  finally { isLoadingMore.value = false }
 }
 
 // ── Font ──
@@ -172,14 +211,20 @@ async function loadSessions() {
   try {
     const data = await api.listSessions()
     sessions.value = data.sessions
+    if (sessionId.value && !data.sessions.some(s => s.id === sessionId.value)) {
+      sessionId.value = ''
+    }
     if (sessionId.value) {
       currentId.value = sessionId.value
       await loadMessages()
     } else if (data.sessions.length > 0) {
       currentId.value = data.sessions[0].id
       await loadMessages()
+    } else {
+      currentId.value = ''
+      messages.value = []
     }
-  } catch (_) {}
+  } catch (_) { sessions.value = []; currentId.value = ''; messages.value = [] }
 }
 
 async function createSession() {
@@ -196,6 +241,8 @@ async function switchSession(id: string) {
   if (streaming.value) return
   viewingDoc.value = null
   currentId.value = id
+  messagesOffset.value = 0
+  hasMore.value = false
   await loadMessages()
   scrollToBottom()
 }
@@ -250,18 +297,13 @@ async function aiRename() {
 }
 
 // ── Messages ──
-let _loadMsgCount = 0
 async function loadMessages() {
-  _loadMsgCount++
-  const caller = new Error().stack?.split('\n')[2]?.trim() || '?'
-  console.log(`[loadMessages] #${_loadMsgCount} caller=${caller} currentId=${currentId.value}`)
   if (!currentId.value) return
   try {
-    const data = await api.getMessages(currentId.value)
-    messages.value = data.messages.filter(m => m.role !== 'system')
-    data.messages.forEach((m: any, i: number) => {
-      if (m.role === 'assistant') console.log(`[loadMessages] #${i} role=${m.role} contentLen=${(m.content||'').length} reasoningLen=${(m.reasoning||'').length} toolCalls=${(m.toolCalls||[]).length} contentStart=${(m.content||'').slice(0,80)}`)
-    })
+    const data = await api.getMessages(currentId.value, 50, messagesOffset.value, debug.value)
+    hasMore.value = messagesOffset.value + data.messages.length < data.total
+    messages.value = data.messages
+    messagesOffset.value = data.messages.length
     loadPendingDrafts()
   } catch (_) {}
 }
@@ -302,6 +344,9 @@ async function send() {
   const text = input.value.trim()
   if (!text || streaming.value) return
   if (!currentId.value) { await createSession(); if (!currentId.value) return }
+  // Reset pagination on new message
+  messagesOffset.value = 0
+  hasMore.value = false
 
   const userMsg: ChatMessage = { id: `tmp-${Date.now()}`, role: 'user', content: text, createdAt: new Date().toISOString() }
   messages.value.push(userMsg)
@@ -326,7 +371,7 @@ async function send() {
     const resp = await fetch(`/api/chat/sessions/${currentId.value}/messages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
-    if (!resp.ok) throw new Error(`API ${resp.status}`)
+    if (!resp.ok) { const errBody = await resp.text().catch(() => ''); throw new Error(errBody || `API ${resp.status}`) }
     const reader = resp.body?.getReader()
     if (!reader) throw new Error('No reader')
 
@@ -390,6 +435,13 @@ function toggleSelect(id: string) {
   const s = selectedIds.value
   if (s.has(id)) s.delete(id); else s.add(id)
   selectedIds.value = new Set(s)
+}
+
+function toggleReasoning(msgId?: string) {
+  if (msgId) msgShowReasoning[msgId] = !msgShowReasoning[msgId]
+}
+function toggleToolCalls(msgId?: string) {
+  if (msgId) msgShowToolCalls[msgId] = !msgShowToolCalls[msgId]
 }
 
 function toggleDeleteMode() { deleteMode.value = !deleteMode.value; if (!deleteMode.value) selectedIds.value = new Set() }
@@ -489,37 +541,81 @@ async function handleSaveAsDoc(opts: { mode: 'single' | 'session'; target: 'new'
   } catch (_) { toast('保存失败') }
 }
 
-// ── Notes ──
-async function loadNotes() {
-  try { const data = await api.listNotes(); notes.value = data.notes } catch (_) {}
-}
-
-function viewNote(n: Note) { viewNoteData.value = n }
-
 async function deleteNote(id: string) {
+  const pending = pendingDrafts.value.find(d => d.id === id)
+  if (pending) {
+    console.log(`[notes] deleteNote DELETE pending id=${id} from ${chatDraftsKey.value}`)
+    try {
+      const raw = localStorage.getItem(chatDraftsKey.value)
+      if (raw) {
+        const all = JSON.parse(raw)
+        const idx = all.findIndex((x: any) => x.id === id)
+        if (idx >= 0) { all.splice(idx, 1); localStorage.setItem(chatDraftsKey.value, JSON.stringify(all)); console.log(`[notes] deleteNote spliced index=${idx}`) }
+        else { console.log(`[notes] deleteNote id=${id} not found in ${chatDraftsKey.value}`) }
+      }
+    } catch (_) { console.log(`[notes] deleteNote ERROR reading ${chatDraftsKey.value}`) }
+    loadPendingDrafts()
+    return
+  }
+  console.log(`[notes] deleteNote DELETE api id=${id}`)
   try { await api.deleteNote(id); notes.value = notes.value.filter(n => n.id !== id); viewNoteData.value = null } catch (_) { toast('删除失败') }
 }
 
-async function execPendingDraft(d: any) {
-  if (!d.refs || !d.refs.length) { toast('草稿无引用'); return }
-  if (!currentId.value) {
-    const s = await api.createSession(`便签分析 #${d.seq || ''}`, currentModel.value || undefined)
+async function executeNote(note: any) {
+  const content = note.content || note.userText || ''
+  if (!note.refs?.length && !content) { toast('便签无引用内容'); return }
+  executingNote.value = note
+  execSelectedSessionId.value = currentId.value || ''
+  execSessionSelectorVisible.value = true
+  console.log(`[execDialog] open noteId=${note.id} status=${note.status} refs=${note.refs?.length} currentId=${currentId.value} sessions=${sessions.value.length}`)
+}
+
+async function execConfirmSession() {
+  execSessionSelectorVisible.value = false
+  const note = executingNote.value
+  if (!note) return
+  executingNote.value = null
+
+  const targetId = execSelectedSessionId.value
+  console.log(`[execDialog] confirm targetId=${targetId} noteId=${note.id} currentId=${currentId.value}`)
+  if (!targetId) return
+
+  if (targetId === '__new__') {
+    const s = await api.createSession('便签执行', currentModel.value || undefined)
     sessions.value.unshift(s)
-    currentId.value = s.id
-    messages.value = []
+    console.log(`[execDialog] created new session id=${s.id}`)
+    await execAfterSwitch(s.id, note)
+  } else {
+    await execAfterSwitch(targetId, note)
   }
-  pendingRefs.value = d.refs || []
-  input.value = d.userText || '分析这些内容'
-  try {
-    const raw = localStorage.getItem(`topo_notes_${taskId.value}`)
-    if (raw) {
-      const all = JSON.parse(raw)
-      const idx = all.findIndex((x: any) => x.id === d.id)
-      if (idx >= 0) { all.splice(idx, 1); localStorage.setItem(`topo_notes_${taskId.value}`, JSON.stringify(all)) }
-    }
-  } catch (_) {}
-  loadPendingDrafts()
-  await send()
+}
+
+async function execAfterSwitch(sessionId: string, note: any) {
+  console.log(`[notes] execAfterSwitch sessionId=${sessionId} noteId=${note.id} status=${note.status} refs=${note.refs?.length}`)
+  if (sessionId !== currentId.value) {
+    console.log(`[notes] execAfterSwitch switching session from ${currentId.value} to ${sessionId}`)
+    currentId.value = sessionId
+    messages.value = []
+    messagesOffset.value = 0
+    hasMore.value = false
+  }
+  input.value = buildRefsPrompt(note.refs || [], note.content || note.userText || '')
+  pendingRefs.value = []
+  if (note.status === 'pending') {
+    try {
+      const raw = localStorage.getItem(chatDraftsKey.value)
+      if (raw) {
+        const all = JSON.parse(raw)
+        const idx = all.findIndex((x: any) => x.id === note.id)
+        if (idx >= 0) { all.splice(idx, 1); localStorage.setItem(chatDraftsKey.value, JSON.stringify(all)); console.log(`[notes] execAfterSwitch deleted pending note idx=${idx} from ${chatDraftsKey.value}`) }
+        else { console.log(`[notes] execAfterSwitch note id=${note.id} not found in ${chatDraftsKey.value}`) }
+      }
+    } catch (_) { console.log(`[notes] execAfterSwitch ERROR reading ${chatDraftsKey.value}`) }
+    loadPendingDrafts()
+  } else {
+    deleteNote(note.id)
+  }
+  nextTick(() => { send() })
 }
 
 // ── Documents ──
@@ -579,7 +675,10 @@ async function deleteArchive(id: string) {
 
 // ── Storage event listener (cross-tab note sync) ──
 function onStorage(e: StorageEvent) {
-  if (e.key?.startsWith('topo_notes')) { loadPendingDrafts(); if (tab.value === 'notes') loadNotes() }
+  if (e.key === chatDraftsKey.value) {
+    console.log(`[notes] onStorage key=${e.key} old=${e.oldValue?.length || 0}b new=${e.newValue?.length || 0}b`)
+    loadPendingDrafts()
+  }
 }
 
 function copyId(id: string) {
@@ -638,10 +737,9 @@ function deleteAnnotation() {
 }
 
 // ── Tabs ──
-function switchTab(t: 'chat' | 'notes' | 'docs' | 'archives') {
+function switchTab(t: 'chat' | 'docs' | 'archives') {
   tab.value = t as any
-  if (t === 'chat' || t === 'notes') viewingDoc.value = null
-  if (t === 'notes') loadNotes()
+  if (t === 'chat') viewingDoc.value = null
   if (t === 'docs') loadDocs()
   if (t === 'archives') loadArchives()
 }
@@ -671,6 +769,10 @@ async function restoreState() {
         tab.value = 'docs'
       }).catch(() => {})
     } else if (saved.sessionId) {
+      if (!sessions.value.some(s => s.id === saved.sessionId)) {
+        tab.value = saved.tab || 'chat'
+        return
+      }
       if (saved.sessionId !== currentId.value) {
         console.log(`[restoreState] switching to saved session ${saved.sessionId} (was ${currentId.value})`)
         currentId.value = saved.sessionId
@@ -738,7 +840,27 @@ onMounted(async () => {
     }
   } catch (_) {}
   await loadSessions()
+
+  // Check for pending exec data from viewer's "执行" flow
+  const pendingExecKey = `topo_exec_pending_${taskId.value}`
+  try {
+    const raw = localStorage.getItem(pendingExecKey)
+    if (raw) {
+      const pending = JSON.parse(raw)
+      localStorage.removeItem(pendingExecKey)
+      if (pending.refs?.length || pending.userText) {
+        input.value = buildRefsPrompt(pending.refs || [], pending.userText || '')
+        pendingRefs.value = []
+        if (currentId.value) {
+          await nextTick()
+          await send()
+        }
+      }
+    }
+  } catch (_) {}
+
   await restoreState()
+  loadPendingDrafts()
   checkStorage()
   window.addEventListener('storage', onStorage)
 })
@@ -754,8 +876,6 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       :tab="tab"
       :sessions="sessions"
       :currentId="currentId"
-      :notes="notes"
-      :pendingDrafts="pendingDrafts"
       :archives="archives"
       :documents="documents"
       :docSearch="docSearch"
@@ -765,9 +885,6 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
       @switch-session="switchSession"
       @delete-session="deleteSession"
       @open-rename="openRename"
-      @view-note="viewNote"
-      @delete-note="deleteNote"
-      @exec-pending-draft="execPendingDraft"
       @delete-archive="deleteArchive"
       @load-docs="loadDocs"
       @view-doc="viewDoc"
@@ -787,12 +904,6 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         @ai-rename="aiRename"
       />
 
-      <NoteDetailDialog
-        :note="viewNoteData"
-        @close="viewNoteData = null"
-        @delete="deleteNote"
-      />
-
       <SaveAsDocDialog
         :visible="!!saveAsDocMsg"
         :msg-content="saveAsDocMsg?.content || ''"
@@ -800,6 +911,36 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         @close="saveAsDocMsg = null"
         @save="handleSaveAsDoc"
       />
+
+      <!-- 执行便签 - 选择会话 -->
+      <div v-if="execSessionSelectorVisible" class="dialog-overlay" @click.self="execSessionSelectorVisible = false; executingNote = null">
+        <div class="dialog-box" style="width:420px">
+          <h3>选择会话执行便签</h3>
+          <div class="exec-session-list">
+            <div class="exec-session-item"
+              :class="{ active: execSelectedSessionId === currentId }"
+              @click="console.log('[execDialog] select currentSession'); execSelectedSessionId = currentId">
+              <span class="exec-session-name">当前会话</span>
+              <span class="exec-session-title">{{ currentTitle }}</span>
+            </div>
+            <div class="exec-session-item"
+              :class="{ active: execSelectedSessionId === '__new__' }"
+              @click="console.log('[execDialog] select newSession'); execSelectedSessionId = '__new__'">
+              <span class="exec-session-name">＋ 新建空白会话</span>
+            </div>
+            <div v-for="s in sessions" :key="s.id"
+              class="exec-session-item"
+              :class="{ active: execSelectedSessionId === s.id }"
+              @click="console.log('[execDialog] select session', s.id); execSelectedSessionId = s.id">
+              <span class="exec-session-name">{{ s.title || s.id.slice(0,16) }}</span>
+            </div>
+          </div>
+          <div class="dialog-actions">
+            <button class="dialog-btn" @click="execSessionSelectorVisible = false; executingNote = null">取消</button>
+            <button class="dialog-btn primary" @click="execConfirmSession">确认</button>
+          </div>
+        </div>
+      </div>
 
       <!-- Doc Editor Dialog -->
       <div v-if="showDocEditor" class="dialog-overlay" @click.self="showDocEditor = false">
@@ -821,6 +962,36 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         </div>
       </div>
 
+      <!-- 待处理便签弹窗 -->
+      <div v-if="notesDialogVisible" class="dialog-overlay" @click.self="notesDialogVisible = false">
+        <div class="dialog-box" style="width:480px;max-height:70vh;display:flex;flex-direction:column">
+          <h3>待处理便签 ({{ pendingDrafts.length }})</h3>
+          <div class="notes-dialog-list" style="flex:1;overflow-y:auto;margin:8px 0">
+            <div v-for="d in pendingDrafts" :key="d.id" class="notes-dialog-card">
+              <div class="notes-dialog-card-header">
+                <span class="title" :title="d.userText">{{ d.userText?.slice(0,30) || `#${d.seq}` }}</span>
+                <span class="ref-badge">{{ d.refs?.length || 0 }} 项引用</span>
+              </div>
+              <div class="notes-dialog-card-body">
+                <div v-for="(r, i) in d.refs?.slice(0,5)" :key="i" class="notes-dialog-ref">
+                  <div class="ref-source">{{ [r.projectName, r.componentId].filter(Boolean).join(' / ') }}</div>
+                  <div class="ref-text">{{ (r.text || r.label || '').slice(0, 100) }}</div>
+                </div>
+                <div v-if="d.refs?.length > 5" class="ref-more">还有 {{ d.refs.length - 5 }} 项...</div>
+              </div>
+              <div class="notes-dialog-card-actions">
+                <button class="exec-btn" @click="executeNote(d); notesDialogVisible = false">执行</button>
+                <button class="del-btn" @click="deleteNote(d.id)">删除</button>
+              </div>
+            </div>
+          </div>
+          <div v-if="!pendingDrafts.length" class="notes-dialog-empty" style="padding:24px;text-align:center;color:var(--text-muted)">暂无待处理便签</div>
+          <div class="dialog-actions">
+            <button class="dialog-btn" @click="notesDialogVisible = false">关闭</button>
+          </div>
+        </div>
+      </div>
+
       <ChatToolbar
         :currentTitle="currentTitle"
         :currentModel="currentModel"
@@ -830,12 +1001,14 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         :viewingDoc="!!viewingDoc"
         :viewingDocTitle="viewingDoc?.title || ''"
         :showAnnotations="showAnnotations"
+        :notesDotVisible="pendingDrafts.length > 0"
         @update:currentModel="currentModel = $event"
         @update:contextLimit="contextLimit = $event"
         @update:fontSize="fontSize = $event"
         @edit-doc="openDocEditor"
         @toggle-annotations="showAnnotations = !showAnnotations"
         @add-annotation="addNewAnnotation"
+        @open-notes-dialog="notesDialogVisible = true"
       />
 
       <!-- Document view -->
@@ -878,12 +1051,19 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
 
       <!-- Messages -->
       <div v-if="!viewingDoc" class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
+        <div v-if="hasMore" class="load-more-bar" @click="loadMoreMessages">
+          <span v-if="isLoadingMore">加载中…</span>
+          <span v-else>↑ 点击加载更早消息</span>
+        </div>
         <ChatMessage
           v-for="(m, i) in displayMessages"
           :key="m.id || i"
           :message="m"
           :deleteMode="deleteMode"
+          :debug="debug"
           :isSelected="selectedIds.has(m.id || '')"
+          :showReasoning="m.id ? (msgShowReasoning[m.id] ?? false) : false"
+          :showToolCalls="m.id ? (msgShowToolCalls[m.id] ?? false) : false"
           @toggle-select="toggleSelect"
           @copy-message="copyMessage"
           @quote-message="quoteMessage"
@@ -892,6 +1072,8 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
           @delete-single="deleteSingle"
           @code-change="onCodeChange"
           @save-state="saveDiagState"
+          @toggle-reasoning="toggleReasoning(m.id)"
+          @toggle-tool-calls="toggleToolCalls(m.id)"
         />
       </div>
 
@@ -940,20 +1122,17 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .session-item.active{background:var(--accent-light);color:var(--text);font-weight:500}
 .session-item .title,.note-item .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .del-btn,.rename-btn,.copy-id-btn{opacity:0;background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:var(--ui-font-size);line-height:1;color:var(--text-muted)}
+.exec-btn{background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:var(--ui-font-size);line-height:1;color:var(--accent,#4d6bfe);white-space:nowrap}
 .copy-id-btn{padding:2px 4px;vertical-align:middle}
 .rename-btn{font-size:12px;padding:2px 4px}
 .session-item:hover .del-btn,.session-item:hover .rename-btn,.session-item:hover .copy-id-btn,.note-item:hover .del-btn,.note-item:hover .copy-id-btn{opacity:1}
-.del-btn:hover{background:var(--bg-hover);color:#ef4444}.rename-btn:hover,.copy-id-btn:hover{opacity:1;background:var(--bg-hover)}
+.del-btn:hover{background:var(--bg-hover);color:#ef4444}
+.rename-btn:hover,.copy-id-btn:hover{opacity:1;background:var(--bg-hover)}
+.exec-btn:hover{background:var(--accent-light,#edf2ff)}
 .note-item .status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .note-item .status-dot.draft{background:#f59e0b}
 .note-item .status-dot.sent{background:#10b981}
 .note-empty{padding:24px;text-align:center;color:var(--text-muted);font-size:var(--ui-font-size)}
-.pending-section{border-top:1px solid var(--border);margin:8px 10px 0;padding-top:8px}
-.pending-title{font-size:var(--ui-font-size);font-weight:500;color:var(--text-muted);margin-bottom:6px}
-.pending-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:var(--radius-md);border-left:3px solid #f59e0b;margin-bottom:4px}
-.pending-item .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:var(--ui-font-size)}
-.send-btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-full);padding:2px 10px;font-size:var(--ui-font-size);font-weight:500;cursor:pointer;white-space:nowrap}
-.send-btn:hover{background:var(--accent-hover)}
 .main{flex:1;display:flex;flex-direction:column;min-width:0}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg)}
 .topbar-left{display:flex;align-items:center;gap:12px}
@@ -1019,6 +1198,9 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .quality-low-banner{padding:10px 14px;color:var(--warning,#f59e0b);font-weight:600;font-size:var(--ui-font-size);margin-bottom:4px}
 .reasoning-toggle,.tool-toggle{color:var(--text-muted);cursor:pointer;display:inline-flex;align-items:center;gap:4px;user-select:none;padding:2px 0;margin-bottom:4px;font-size:var(--ui-font-size)}
 .reasoning-toggle:hover,.tool-toggle:hover{color:var(--accent)}
+.load-more-bar{text-align:center;padding:8px;cursor:pointer;color:var(--accent,#4d6bfe);font-size:12px;border-bottom:1px solid var(--border,#e4e4e7);transition:background .15s;flex-shrink:0}
+.load-more-bar:hover{background:var(--bg-hover,#f0f0f2)}
+.load-more-bar:active{opacity:.7}
 .reasoning-toggle .arrow,.tool-toggle .arrow{display:inline-flex;transition:transform .2s}
 .reasoning-toggle .arrow.open,.tool-toggle .arrow.open{transform:rotate(90deg)}
 .reasoning-tokens{font-size:var(--ui-font-size);opacity:0.7;margin-left:2px}
@@ -1068,10 +1250,6 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .dialog-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 .dialog-btn.primary:hover{background:var(--accent-hover)}
 .dialog-btn:disabled{opacity:0.5;cursor:not-allowed}
-.note-detail-content{padding:8px 0;font-size:var(--ui-font-size);color:var(--text);line-height:1.6;white-space:pre-wrap;max-height:200px;overflow-y:auto}
-.note-detail-refs{margin-top:12px;border-top:1px solid var(--border);padding-top:8px}
-.ref-section-title{font-size:var(--ui-font-size);font-weight:500;color:var(--text-muted);margin-bottom:6px}
-.ref-item{padding:4px 8px;background:var(--bg-hover);border-radius:4px;margin-bottom:4px;font-size:var(--ui-font-size);color:var(--text)}
 .toggle-switch{position:relative;display:inline-flex;width:36px;height:20px;cursor:pointer}
 .toggle-switch input{opacity:0;width:0;height:0}
 .toggle-slider{position:absolute;inset:0;background:var(--border);border-radius:10px;transition:background .2s}
@@ -1086,4 +1264,25 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .code-fs-content{max-width:92%;max-height:88vh;overflow:auto;transform-origin:0 0;background:#1e1e1e;border-radius:8px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.4)}
 .code-fs-content pre{margin:0;white-space:pre;font-family:var(--font-mono,monospace);font-size:14px;line-height:1.6;color:#d4d4d4}
 .code-fs-content code{background:transparent!important;padding:0!important;font-family:inherit;color:inherit}
+.exec-session-list{max-height:320px;overflow-y:auto}
+.exec-session-item{display:flex;flex-direction:column;padding:10px 14px;cursor:pointer;border-radius:6px;margin-bottom:2px;border:1px solid transparent}
+.exec-session-item:hover{background:var(--bg-hover)}
+.exec-session-item.active{border-color:var(--accent,#4d6bfe);background:var(--accent-light,#edf2ff)}
+.exec-session-name{font-size:var(--ui-font-size);color:var(--text);font-weight:500}
+.exec-session-title{font-size:11px;color:var(--text-muted,#888);margin-top:1px}
+.notes-dialog-list{display:flex;flex-direction:column;gap:8px}
+.notes-dialog-card{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.notes-dialog-card-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-hover,#f4f4f5);border-bottom:1px solid var(--border)}
+.notes-dialog-card-header .title{font-size:var(--ui-font-size);font-weight:500;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notes-dialog-card-header .ref-badge{font-size:11px;color:var(--text-muted,#888);flex-shrink:0;margin-left:8px}
+.notes-dialog-card-body{padding:8px 12px}
+.notes-dialog-ref{margin-bottom:6px;padding:6px 8px;background:var(--bg-hover,#f4f4f5);border-radius:4px}
+.notes-dialog-ref .ref-source{font-size:11px;color:var(--text-muted,#888);margin-bottom:2px}
+.notes-dialog-ref .ref-text{font-size:var(--ui-font-size);color:var(--text);line-height:1.4}
+.notes-dialog-ref .ref-more{font-size:11px;color:var(--text-muted);text-align:center;padding:2px 0}
+.notes-dialog-card-actions{display:flex;gap:6px;padding:6px 12px;border-top:1px solid var(--border);justify-content:flex-end}
+.notes-dialog-card-actions .exec-btn{padding:4px 12px;background:var(--accent,#4d6bfe);color:#fff;border:none;border-radius:var(--radius-full);font-size:var(--ui-font-size);cursor:pointer;font-weight:500}
+.notes-dialog-card-actions .exec-btn:hover{background:var(--accent-hover,#3a56d4)}
+.notes-dialog-card-actions .del-btn{opacity:1;padding:4px 10px;background:transparent;color:#ef4444;border:1px solid #ef4444;border-radius:var(--radius-full);font-size:var(--ui-font-size);cursor:pointer}
+.notes-dialog-card-actions .del-btn:hover{background:#fef2f2}
 </style>

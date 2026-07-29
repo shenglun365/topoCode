@@ -6,6 +6,8 @@ from ._meta import ParserMeta
 from . import sequence, component
 from . import class_diagram
 from . import mermaid_flowchart, mermaid_sequence
+from . import mermaid_class, mermaid_state, mermaid_er, mermaid_gantt
+from . import mermaid_pie, mermaid_journey, mermaid_timeline
 
 from . import (
     state, activity, usecase, deployment,
@@ -106,7 +108,7 @@ def _classify(code: str, type_scores: list) -> Optional[str]:
         if s > best_score:
             best_score = s
             best_type = t
-    return best_type if best_score >= 2 else None
+    return best_type if best_score >= 3 else None
 
 def classify_plantuml(code: str) -> Optional[str]:
     return PARSER_REGISTRY.classify(code)
@@ -114,7 +116,7 @@ def classify_plantuml(code: str) -> Optional[str]:
 def classify_mermaid(code: str) -> Optional[str]:
     return _classify(code, [
         ("flowchart", [
-            (r'\bgraph\s+(TB|TD|LR|RL|BT)\b', 3),
+            (r'\bgraph\s+(TB|TD|LR|RL|BT)\b', 10),
             (r'--[>-]', 1),
             (r'[\[\(\{][^\]\)\}]*[\]\)\}]', 1),
         ]),
@@ -123,6 +125,35 @@ def classify_mermaid(code: str) -> Optional[str]:
             (r'\bparticipant\b', 2),
             (r'\bactor\b', 2),
             (r'\w+\s*-+[->]\s*\w+\s*:', 2),
+        ]),
+        ("class", [
+            (r'\bclassDiagram\b', 3),
+            (r'\bclass\s+\w', 2),
+            (r'\bnamespace\b', 1),
+        ]),
+        ("state", [
+            (r'\bstateDiagram-v2\b', 10),
+            (r'\[\*\]', 3),
+        ]),
+        ("er", [
+            (r'\berDiagram\b', 3),
+            (r'(\|\||\|o|\}\||\}o)(--|\.\.)(\|\||o\||\|\{|o\{)', 2),
+        ]),
+        ("gantt", [
+            (r'\bgantt\b', 3),
+            (r'\bsection\b', 1),
+            (r'(\d{4}-\d{2}-\d{2}|\d+d)', 1),
+        ]),
+        ("pie", [
+            (r'\bpie\b', 3),
+            (r'\".+\"\s*:\s*\d+', 2),
+        ]),
+        ("journey", [
+            (r'\bjourney\b', 10),
+            (r'\d+\s*:\s*\w+', 1),
+        ]),
+        ("timeline", [
+            (r'\btimeline\b', 10),
         ]),
     ])
 
@@ -158,3 +189,10 @@ _register_all()
 
 register("flowchart", mermaid_flowchart, MERMAID_REGISTRY)
 register("mermaid_sequence", mermaid_sequence, MERMAID_REGISTRY)
+register("class", mermaid_class, MERMAID_REGISTRY)
+register("state", mermaid_state, MERMAID_REGISTRY)
+register("er", mermaid_er, MERMAID_REGISTRY)
+register("gantt", mermaid_gantt, MERMAID_REGISTRY)
+register("pie", mermaid_pie, MERMAID_REGISTRY)
+register("journey", mermaid_journey, MERMAID_REGISTRY)
+register("timeline", mermaid_timeline, MERMAID_REGISTRY)

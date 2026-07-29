@@ -29,11 +29,8 @@ async def view_doc(task_id: str = Query(None), doc_id: str = Query(None),
                    taskId: str = Query(None), docId: str = Query(None)):
     tid = task_id or taskId or ''
     did = doc_id or docId or ''
-    legacy_path = os.path.join(STATIC_DIR, "legacy-viewer.html")
     viewer_path = os.path.join(STATIC_DIR, "viewer.html")
     logger.info(f"=== Document viewer URL: http://127.0.0.1:{common.http_port}/doc?docId={did}&taskId={tid} ===")
-    if os.path.isfile(legacy_path):
-        return FileResponse(legacy_path)
     if os.path.isfile(viewer_path):
         return FileResponse(viewer_path)
     return HTMLResponse("viewer.html not found", status_code=404)

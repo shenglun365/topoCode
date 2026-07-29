@@ -85,3 +85,10 @@ LARGE_GRAPH_NODE_THRESHOLD = 5000
 # ==================== 日志配置 ====================
 LOG_DIR = os.environ.get("TOPOCODE_LOG_DIR", os.path.join(DB_DIR, "logs"))
 LOG_LEVEL = os.environ.get("TOPOCODE_LOG_LEVEL", "INFO")
+
+# ==================== Web Chat 配置 ====================
+# 每次消息最多可进行的工具调用轮次
+TOOL_ROUND_LIMIT = int(os.environ.get("TOOL_ROUND_LIMIT", "100"))
+
+# 单会话 user+assistant 消息上限（超出后无法继续对话）
+SESSION_MAX_MESSAGES = int(os.environ.get("SESSION_MAX_MESSAGES", "200"))

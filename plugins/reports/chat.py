@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 import common
 import common
+import config
 
 router = APIRouter()
 
@@ -30,10 +31,7 @@ _active_streams_lock = threading.Lock()
 
 @router.get("/chat", response_class=HTMLResponse)
 async def view_chat():
-    legacy_path = os.path.join(STATIC_DIR, "legacy-chat.html")
     chat_path = os.path.join(STATIC_DIR, "chat.html")
-    if os.path.isfile(legacy_path):
-        return FileResponse(legacy_path)
     if os.path.isfile(chat_path):
         return FileResponse(chat_path)
     return HTMLResponse("chat.html not found.")
@@ -579,6 +577,13 @@ async def send_chat_message(session_id: str, request: Request):
         if not session:
             raise HTTPException(404, "Session not found")
 
+        # ── Session message limit check ──
+        total = _sdb().fetchone(
+            "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id=? AND role IN ('user','assistant')",
+            (session_id,))["c"]
+        if total >= config.SESSION_MAX_MESSAGES:
+            raise HTTPException(400, f"会话已超过消息上限（{config.SESSION_MAX_MESSAGES}），无法继续对话")
+
         meta = json.loads(session["metadata"]) if session["metadata"] else {}
         if not model_id:
             model_id = meta.get("model_id", "")
@@ -775,7 +780,7 @@ async def send_chat_message(session_id: str, request: Request):
             queue = asyncio.Queue()
             loop = asyncio.get_event_loop()
             executor._current_session_id = session_id
-            TOOL_ROUND_LIMIT = 50
+            TOOL_ROUND_LIMIT = config.TOOL_ROUND_LIMIT
 
             async def _producer():
                 ctx_msgs = list(context_messages)
@@ -832,7 +837,8 @@ async def send_chat_message(session_id: str, request: Request):
                             if not force_choice:
                                 await queue.put({"type": "chunk", "text": item})
 
-                    t.join(timeout=5)
+                    t.join(timeout=1)
+
                     _acc_reasoning += full_reasoning
                     parsed = []
                     for v in tc_by_idx.values():
@@ -859,10 +865,11 @@ async def send_chat_message(session_id: str, request: Request):
                             _meta = {}
                             if _reasoning_len:
                                 _meta["reasoning"] = full_reasoning.strip()
+                            _ts = __import__("datetime").datetime.now().isoformat()
                             _sdb().execute(
                                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                                 "VALUES (?, ?, 'assistant', ?, ?, ?)",
-                                (_make_message_id(), session_id, final_content, json.dumps(_meta), now),
+                                (_make_message_id(), session_id, final_content, json.dumps(_meta), _ts),
                             )
                         if round_idx == 0 and tool_defs and final_content:
                             await queue.put({"type": "chunk", "text": final_content})
@@ -883,10 +890,11 @@ async def send_chat_message(session_id: str, request: Request):
                             result = {"error": str(e)}
                         await queue.put({"type": "tool_result", "id": tc_id, "name": t_name, "result": result})
                         result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+                        _ts = __import__("datetime").datetime.now().isoformat()
                         _sdb().execute(
                             "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                             "VALUES (?, ?, 'tool', ?, ?, ?)",
-                            (_make_message_id(), session_id, result_str, json.dumps({"tool_call_id": tc_id}), now),
+                            (_make_message_id(), session_id, result_str, json.dumps({"tool_call_id": tc_id}), _ts),
                         )
                         tool_msgs.append({"role": "tool", "content": result_str, "tool_call_id": tc_id})
 
@@ -899,10 +907,11 @@ async def send_chat_message(session_id: str, request: Request):
                     tc_meta_dict = {"tool_calls": [{"name": p.get("name", ""), "arguments": p.get("arguments", {})} for p in parsed]}
                     if full_reasoning.strip():
                         tc_meta_dict["reasoning"] = full_reasoning.strip()
+                    _ts = __import__("datetime").datetime.now().isoformat()
                     _sdb().execute(
                         "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                         "VALUES (?, ?, 'assistant', ?, ?, ?)",
-                        (asst_id, session_id, full_content.strip() or "", json.dumps(tc_meta_dict), now),
+                        (asst_id, session_id, full_content.strip() or "", json.dumps(tc_meta_dict), _ts),
                     )
 
                 await queue.put({"type": "error", "message": "工具调用次数过多，请简化问题"})
@@ -927,7 +936,7 @@ async def send_chat_message(session_id: str, request: Request):
                     elif event["type"] == "tool_result":
                         yield f"event: tool_result\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
-                _check_auto_title(session_id)
+                asyncio.create_task(asyncio.to_thread(_check_auto_title, session_id))
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
     except HTTPException:
@@ -937,19 +946,30 @@ async def send_chat_message(session_id: str, request: Request):
 
 
 @router.get("/api/chat/sessions/{session_id}/messages")
-async def get_chat_messages(session_id: str, limit: int = Query(50), offset: int = Query(0)):
+async def get_chat_messages(session_id: str, limit: int = Query(50), offset: int = Query(0), debug: bool = Query(False)):
     _require_chat_ready()
     try:
+        total = _sdb().fetchone(
+            "SELECT COUNT(*) AS c FROM llm_messages WHERE session_id=? AND role IN ('user','assistant')",
+            (session_id,))["c"]
         rows = _sdb().fetchall(
             "SELECT id, role, content, metadata, created_at FROM llm_messages "
-            "WHERE session_id = ? ORDER BY created_at LIMIT ? OFFSET ?",
+            "WHERE session_id=? AND role IN ('user','assistant') ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (session_id, limit, offset),
         )
-        return {"messages": [{"id": m["id"], "role": m["role"], "content": m["content"],
-                               "refs": json.loads(m["metadata"]).get("refs", []) if m["metadata"] else [],
-                               "reasoning": json.loads(m["metadata"]).get("reasoning", "") if m["metadata"] else "",
-                               "toolCalls": json.loads(m["metadata"]).get("tool_calls", []) if m["metadata"] else [],
-                               "createdAt": m["created_at"]} for m in rows], "total": len(rows)}
+        rows.reverse()
+        msgs = []
+        for m in rows:
+            meta = json.loads(m["metadata"]) if m["metadata"] else {}
+            msg = {"id": m["id"], "role": m["role"], "content": m["content"],
+                   "refs": meta.get("refs", []),
+                   "reasoning": meta.get("reasoning", ""),
+                   "hasToolCalls": bool(meta.get("tool_calls")),
+                   "createdAt": m["created_at"]}
+            if debug:
+                msg["toolCalls"] = meta.get("tool_calls", [])
+            msgs.append(msg)
+        return {"messages": msgs, "total": total}
     except Exception as e:
         raise HTTPException(500, str(e))
 

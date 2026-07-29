@@ -81,8 +81,8 @@ export function updateSession(id: string, data: Partial<ChatSession>): Promise<{
 
 // ── Messages ──
 
-export function getMessages(sessionId: string, limit = 50, offset = 0): Promise<{ messages: ChatMessage[]; total: number }> {
-  return get(`/api/chat/sessions/${sessionId}/messages`, { limit: String(limit), offset: String(offset) })
+export function getMessages(sessionId: string, limit = 50, offset = 0, debug = false): Promise<{ messages: ChatMessage[]; total: number }> {
+  return get(`/api/chat/sessions/${sessionId}/messages`, { limit: String(limit), offset: String(offset), debug: String(debug) })
 }
 
 export function deleteMessages(sessionId: string, messageId: string): Promise<{ ok: boolean }> {

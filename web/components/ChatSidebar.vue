@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import type { ChatSession, Note } from '@web/types'
+import type { ChatSession } from '@web/types'
 
 defineProps<{
-  tab: 'chat' | 'notes' | 'docs' | 'archives'
+  tab: 'chat' | 'docs' | 'archives'
   sessions: ChatSession[]
   currentId: string
-  notes: Note[]
-  pendingDrafts: any[]
   archives: any[]
   documents: any[]
   docSearch: string
@@ -14,15 +12,12 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'update:tab': [v: 'chat' | 'notes' | 'docs' | 'archives']
+  'update:tab': [v: 'chat' | 'docs' | 'archives']
   'update:docSearch': [v: string]
   createSession: []
   switchSession: [id: string]
   deleteSession: [id: string]
   openRename: [s: ChatSession]
-  viewNote: [n: Note]
-  deleteNote: [id: string]
-  execPendingDraft: [d: any]
   deleteArchive: [id: string]
   loadDocs: []
   viewDoc: [d: any]
@@ -30,8 +25,8 @@ const emit = defineEmits<{
   copyId: [id: string]
 }>()
 
-const tabKeys = ['chat', 'notes', 'docs'] as const
-const tabLabels: Record<string, string> = { chat: '对话', notes: '便签', docs: '文档' }
+const tabKeys = ['chat', 'docs'] as const
+const tabLabels: Record<string, string> = { chat: '对话', docs: '文档' }
 </script>
 
 <template>
@@ -57,22 +52,6 @@ const tabLabels: Record<string, string> = { chat: '对话', notes: '便签', doc
         <button class="rename-btn" @click.stop="emit('openRename', s)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
       </div>
       <div v-if="!sessions.length" class="note-empty">暂无对话</div>
-    </div>
-
-    <div v-else-if="tab === 'notes'" class="sidebar-content">
-      <div v-for="n in notes" :key="n.id" class="note-item" @click="emit('viewNote', n)">
-        <span class="status-dot" :class="n.status"></span>
-        <span class="title" :title="n.title">{{ n.title || '无标题' }}</span>
-        <span class="ref-count">{{ n.refs?.length || 0 }} 项</span>
-        <button class="del-btn" @click.stop="emit('deleteNote', n.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-      </div>
-      <div v-if="!notes.length && !pendingDrafts.length" class="note-empty">暂无便签</div>
-      <div v-if="pendingDrafts.length" class="pending-section">
-        <div v-for="d in pendingDrafts" :key="d.id" class="pending-item">
-          <span class="title" :title="d.userText">{{ d.userText?.slice(0, 20) || `#${d.seq}` }}</span>
-          <button class="send-btn" @click="emit('execPendingDraft', d)">执行</button>
-        </div>
-      </div>
     </div>
 
     <div v-else-if="tab === 'archives'" class="sidebar-content">

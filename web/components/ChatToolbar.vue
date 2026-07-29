@@ -8,6 +8,7 @@ defineProps<{
   viewingDoc: boolean
   viewingDocTitle: string
   showAnnotations: boolean
+  notesDotVisible: boolean
 }>()
 
 const emit = defineEmits<{
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   editDoc: []
   toggleAnnotations: []
   addAnnotation: []
+  openNotesDialog: []
 }>()
 </script>
 
@@ -34,6 +36,10 @@ const emit = defineEmits<{
       <span v-else class="chat-title">{{ currentTitle }}</span>
     </div>
     <div class="topbar-right">
+      <button class="notes-topbar-btn" :class="{ 'has-dot': notesDotVisible }" @click="emit('openNotesDialog')" title="待处理便签">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <span v-if="notesDotVisible" class="notes-dot"></span>
+      </button>
       <select :value="currentModel" @change="emit('update:currentModel', ($event.target as HTMLSelectElement).value)">
         <option value="">选择模型</option>
         <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}<template v-if="m.isDefault"> ★</template></option>
@@ -56,3 +62,11 @@ const emit = defineEmits<{
     </div>
   </header>
 </template>
+
+<style scoped>
+.notes-topbar-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:var(--text-muted,#888);border-radius:6px;cursor:pointer;flex-shrink:0}
+.notes-topbar-btn:hover{background:var(--bg-hover,#f4f4f5);color:var(--text)}
+.notes-topbar-btn.has-dot{color:var(--text)}
+.notes-dot{position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:#ef4444;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+</style>

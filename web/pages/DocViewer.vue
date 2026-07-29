@@ -540,6 +540,7 @@ onMounted(() => {
       </button>
       <button class="toggle-btn notes-btn" :class="{ active: false }" @click="openNotesModal" title="便签">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <span v-if="notesDotVisible" class="notes-dot"></span>
       </button>
       <button class="toggle-btn" :class="{ active: leftVisible }" @click="toggleLeft" title="文档面板">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
@@ -775,6 +776,12 @@ onMounted(() => {
                 <option value="">全部项目</option>
                 <option v-for="p in notesProjectOptions" :key="p" :value="p">{{ p }}</option>
               </select>
+              <select v-model="notesFilterStatus">
+                <option value="all">全部状态</option>
+                <option value="draft">草稿</option>
+                <option value="pending">待处理</option>
+                <option value="done">已完成</option>
+              </select>
               <select v-model="notesSortOrder">
                 <option value="seq">按序号</option>
                 <option value="time">按时间</option>
@@ -810,11 +817,12 @@ onMounted(() => {
             </div>
             <div v-if="notesExecStep === 'sessions'" class="note-modal-sessions">
               <select id="noteSessionSelect" class="session-select" size="5">
+                <option value="__new__">＋ 新建会话</option>
                 <option v-for="s in notesSessions" :key="s.id" :value="s.id">{{ s.title || s.id.slice(0,12) }}</option>
               </select>
             </div>
             <div class="note-modal-footer">
-              <label class="checkbox-label"><input type="checkbox" v-model="notesAutoDelete" checked> 发送后自动删除</label>
+              <label class="checkbox-label"><input type="checkbox" v-model="notesAutoDelete" checked> 自动删除已处理引用</label>
               <button class="btn btn-secondary" @click="deleteSelectedRefs">删除选中</button>
               <button class="btn btn-secondary" @click="manualDrafts">手动处理</button>
               <button class="btn btn-primary" @click="executeNotes">{{ notesExecStep === 'sessions' ? '确认发送' : '执行' }}</button>
@@ -995,6 +1003,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .ctx-item:hover{background:var(--bg-hover)}
 .ctx-divider{height:1px;background:var(--border);margin:3px 6px}
 .notes-btn{position:relative}
+.notes-dot{position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:50%;background:#ef4444;border:2px solid var(--bg);animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
 .note-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn .15s ease}
 .note-modal{width:780px;max-height:85vh;background:var(--bg);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.25)}

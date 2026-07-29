@@ -10,6 +10,9 @@ const props = defineProps<{
   message: ChatMessage
   deleteMode: boolean
   isSelected: boolean
+  showReasoning?: boolean
+  showToolCalls?: boolean
+  debug?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +25,8 @@ const emit = defineEmits<{
   codeChange: [msgId: string, diagId: string, newCode: string]
   'state-change': []
   'save-state': []
+  toggleReasoning: []
+  toggleToolCalls: []
 }>()
 
 const blocks = computed(() => parseMessageContent(props.message.content || '', props.message.id))
@@ -48,6 +53,12 @@ function fitCodeBlocks() {
   bubbleRef.value.querySelectorAll<HTMLElement>('.code-block-wrap').forEach(autoFitCodeBlock)
 }
 
+const showReasoningToggle = computed(() => {
+  if (!props.message.reasoning) return false
+  if ((props.message as any)._fromToolRounds && !props.debug) return false
+  return true
+})
+
 onMounted(() => nextTick(fitCodeBlocks))
 watch(() => props.message.content, () => nextTick(fitCodeBlocks))
 </script>
@@ -64,24 +75,26 @@ watch(() => props.message.content, () => nextTick(fitCodeBlocks))
       <div v-if="message.qualityLow" class="quality-low-banner">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> 本次分析未能生成有效回答
       </div>
-      <div v-if="message.reasoning" class="reasoning-toggle" @click="message.showReasoning = !message.showReasoning">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: message.showReasoning }"><polyline points="9 18 15 12 9 6"/></svg>
-        <span>{{ message.showReasoning ? '收起思考过程' : '查看思考过程' }}<span v-if="message.reasoning.length > 10" class="reasoning-tokens">({{ Math.round(message.reasoning.length / 2) }} tokens)</span></span>
+      <div v-if="showReasoningToggle" class="reasoning-toggle" @click="emit('toggleReasoning')">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: showReasoning }"><polyline points="9 18 15 12 9 6"/></svg>
+        <span>{{ showReasoning ? '收起思考过程' : '查看思考过程' }}<span v-if="message.reasoning.length > 10" class="reasoning-tokens">({{ Math.round(message.reasoning.length / 2) }} tokens)</span></span>
       </div>
-      <div v-if="message.reasoning && message.showReasoning" class="reasoning-content" v-html="renderMarkdown(message.reasoning)"></div>
-      <div v-if="message.toolCalls?.length" class="tool-toggle" @click="message.showToolCalls = !message.showToolCalls">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: message.showToolCalls }"><polyline points="9 18 15 12 9 6"/></svg>
-        <span>调用 {{ message.toolCalls.length }} 个工具</span>
-      </div>
-      <div v-if="message.toolCalls?.length && message.showToolCalls" class="tool-detail">
-        <div v-for="tc in message.toolCalls" :key="tc.id" class="tool-call-item">
-          <div class="tool-call-name"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> {{ tc.name }}</div>
-          <div class="tool-label">参数</div>
-          <pre>{{ JSON.stringify(tc.arguments, null, 2) }}</pre>
-          <div v-if="tc.result" class="tool-label">执行结果</div>
-          <pre v-if="tc.result">{{ tc.result }}</pre>
+      <div v-if="message.reasoning && showReasoning" class="reasoning-content" v-html="renderMarkdown(message.reasoning)"></div>
+      <template v-if="debug">
+        <div v-if="message.toolCalls?.length" class="tool-toggle" @click="emit('toggleToolCalls')">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" class="arrow" :class="{ open: showToolCalls }"><polyline points="9 18 15 12 9 6"/></svg>
+          <span>调用 {{ message.toolCalls.length }} 次工具</span>
         </div>
-      </div>
+        <div v-if="message.toolCalls?.length && showToolCalls" class="tool-detail">
+          <div v-for="tc in message.toolCalls" :key="tc.id" class="tool-call-item">
+            <div class="tool-call-name"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> {{ tc.name }}</div>
+            <div class="tool-label">参数</div>
+            <pre>{{ JSON.stringify(tc.arguments, null, 2) }}</pre>
+            <div v-if="tc.result" class="tool-label">执行结果</div>
+            <pre v-if="tc.result">{{ tc.result }}</pre>
+          </div>
+        </div>
+      </template>
       <div v-if="message.content" class="bubble" ref="bubbleRef" @click="onBubbleClick">
         <template v-for="(b, i) in blocks" :key="i">
           <span v-if="b.type === 'text'" v-html="b.html"></span>
