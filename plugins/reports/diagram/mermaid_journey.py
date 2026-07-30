@@ -1,6 +1,21 @@
 import re
 from dataclasses import dataclass, field
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_journey",
+    patterns=[
+        (r'\bjourney\b', 20),
+        (r'\d+\s*:\s*\w+', 1),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class JourneyTask:
     name: str
@@ -76,5 +91,5 @@ def render(data: JourneyData) -> str:
             else:
                 lines.append(f'    {task.name}: {task.score}')
     for line in data.raw_lines:
-        lines.append(f'    {line}')
+        lines.append(f'{line}')
     return '\n'.join(lines)

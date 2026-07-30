@@ -1,5 +1,6 @@
 """PlantUML 渲染服务 - 通过 HTTP 调用 PlantUML Server"""
 
+import html
 import logging
 import os
 import re
@@ -41,6 +42,7 @@ def find_plantuml_jar() -> Optional[str]:
 
 def _sanitize_plantuml(code: str) -> str:
     """仅做字符规范化，保留原始代码语义。语法重建由 diagram parsers 处理。"""
+    code = html.unescape(code)
     code = code.strip()
     code = code.replace('\r\n', '\n')
     code = re.sub(r'，', ',', code)

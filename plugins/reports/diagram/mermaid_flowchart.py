@@ -2,6 +2,22 @@ import re
 from dataclasses import dataclass, field
 
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_flowchart",
+    patterns=[
+        (r'\bgraph\s+(TB|TD|LR|RL|BT)\b', 20),
+        (r'--[>-]', 1),
+        (r'[\[\(\{][^\]\)\}]*[\]\)\}]', 1),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class FlowNode:
     id: str

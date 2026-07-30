@@ -1,3 +1,4 @@
+import html
 from typing import Optional, Any
 import re
 
@@ -8,6 +9,14 @@ from . import class_diagram
 from . import mermaid_flowchart, mermaid_sequence
 from . import mermaid_class, mermaid_state, mermaid_er, mermaid_gantt
 from . import mermaid_pie, mermaid_journey, mermaid_timeline
+from . import mermaid_gitgraph, mermaid_mindmap, mermaid_block
+from . import mermaid_requirement, mermaid_architecture, mermaid_c4
+from . import mermaid_swimlane, mermaid_kanban, mermaid_xychart
+from . import mermaid_sankey, mermaid_quadrant, mermaid_packet
+from . import mermaid_venn, mermaid_zenuml, mermaid_ishikawa
+from . import mermaid_treemap, mermaid_treeview, mermaid_radar
+from . import mermaid_wardley, mermaid_cynefin, mermaid_eventmodeling
+from . import mermaid_info
 
 from . import (
     state, activity, usecase, deployment,
@@ -20,6 +29,7 @@ from . import (
     pass_flow, pass_board, pass_bpm, pass_salt, pass_dot, pass_ditaa,
     pass_chronology, pass_jcckit,
 )
+
 
 class ParserRegistry:
     def __init__(self):
@@ -36,11 +46,15 @@ class ParserRegistry:
     def __contains__(self, name: str) -> bool:
         return name in self._entries
 
-    def classify(self, code: str) -> Optional[str]:
+    def classify(self, code: str, prefix: str = "", exclude_prefix: str = "") -> Optional[str]:
         best_type = None
         best_score = 0
         best_hits = -1
         for name, module in self._entries.items():
+            if prefix and not name.startswith(prefix):
+                continue
+            if exclude_prefix and name.startswith(exclude_prefix):
+                continue
             meta = module.meta
             if not meta.patterns:
                 continue
@@ -64,15 +78,20 @@ class ParserRegistry:
             return None
         return best_type
 
-    def rebuild(self, code: str, diag_type: Optional[str] = None) -> dict:
+    def rebuild(self, code: str, diag_type: Optional[str] = None,
+                prefix: str = "", exclude_prefix: str = "") -> dict:
         if diag_type is None or diag_type == "auto":
-            diag_type = self.classify(code)
+            diag_type = self.classify(code, prefix=prefix, exclude_prefix=exclude_prefix)
         if diag_type is None or diag_type not in self._entries:
-            raise ValueError(f"Unable to identify PlantUML diagram type")
+            raise ValueError(f"Unable to identify diagram type")
         parser = self._entries[diag_type]
+        code = html.unescape(code)
         code = re.sub(r'<br\s*/?>', lambda _: chr(92) + 'n', code, flags=re.IGNORECASE)
         if parser.meta.supports_skinparam or parser.meta.supports_preproc or parser.meta.supports_layout:
-            from .preproc import extract_shared, reapply_shared
+            if parser.meta.preproc_engine == "mermaid":
+                from .mermaid_preproc import extract_shared, reapply_shared
+            else:
+                from .preproc import extract_shared, reapply_shared
             ctx, cleaned = extract_shared(code)
             data = parser.parse(cleaned)
             rebuilt = parser.render(data)
@@ -93,82 +112,25 @@ class ParserRegistry:
 
 
 PARSER_REGISTRY = ParserRegistry()
-MERMAID_REGISTRY: dict[str, object] = {}
 
-def register(name: str, parser_cls: object, registry=None):
-    if registry is None:
-        registry = PARSER_REGISTRY
-    registry[name] = parser_cls
-
-def _classify(code: str, type_scores: list) -> Optional[str]:
-    best_type = None
-    best_score = 0
-    for t, patterns in type_scores:
-        s = sum(score * len(re.findall(pat, code, re.MULTILINE)) for pat, score in patterns)
-        if s > best_score:
-            best_score = s
-            best_type = t
-    return best_type if best_score >= 3 else None
 
 def classify_plantuml(code: str) -> Optional[str]:
-    return PARSER_REGISTRY.classify(code)
+    return PARSER_REGISTRY.classify(code, exclude_prefix="mermaid_")
+
 
 def classify_mermaid(code: str) -> Optional[str]:
-    return _classify(code, [
-        ("flowchart", [
-            (r'\bgraph\s+(TB|TD|LR|RL|BT)\b', 10),
-            (r'--[>-]', 1),
-            (r'[\[\(\{][^\]\)\}]*[\]\)\}]', 1),
-        ]),
-        ("mermaid_sequence", [
-            (r'\bsequenceDiagram\b', 3),
-            (r'\bparticipant\b', 2),
-            (r'\bactor\b', 2),
-            (r'\w+\s*-+[->]\s*\w+\s*:', 2),
-        ]),
-        ("class", [
-            (r'\bclassDiagram\b', 3),
-            (r'\bclass\s+\w', 2),
-            (r'\bnamespace\b', 1),
-        ]),
-        ("state", [
-            (r'\bstateDiagram-v2\b', 10),
-            (r'\[\*\]', 3),
-        ]),
-        ("er", [
-            (r'\berDiagram\b', 3),
-            (r'(\|\||\|o|\}\||\}o)(--|\.\.)(\|\||o\||\|\{|o\{)', 2),
-        ]),
-        ("gantt", [
-            (r'\bgantt\b', 3),
-            (r'\bsection\b', 1),
-            (r'(\d{4}-\d{2}-\d{2}|\d+d)', 1),
-        ]),
-        ("pie", [
-            (r'\bpie\b', 3),
-            (r'\".+\"\s*:\s*\d+', 2),
-        ]),
-        ("journey", [
-            (r'\bjourney\b', 10),
-            (r'\d+\s*:\s*\w+', 1),
-        ]),
-        ("timeline", [
-            (r'\btimeline\b', 10),
-        ]),
-    ])
+    return PARSER_REGISTRY.classify(code, prefix="mermaid_")
+
 
 def rebuild_plantuml(code: str, diag_type: Optional[str] = None) -> dict:
-    return PARSER_REGISTRY.rebuild(code, diag_type)
+    return PARSER_REGISTRY.rebuild(code, diag_type, exclude_prefix="mermaid_")
+
 
 def rebuild_mermaid(code: str, diag_type: Optional[str] = None) -> dict:
-    if not diag_type or diag_type == "auto":
-        diag_type = classify_mermaid(code)
-    if not diag_type or diag_type not in MERMAID_REGISTRY:
-        raise ValueError(f"Unable to identify Mermaid diagram type")
-    parser = MERMAID_REGISTRY[diag_type]
-    data = parser.parse(code)
-    rebuilt = parser.render(data)
-    return {"code": rebuilt, "type": diag_type}
+    if diag_type and not diag_type.startswith("mermaid_") and diag_type != "auto":
+        diag_type = f"mermaid_{diag_type}"
+    return PARSER_REGISTRY.rebuild(code, diag_type, prefix="mermaid_")
+
 
 def _register_all():
     for mod in [
@@ -185,14 +147,23 @@ def _register_all():
     ]:
         PARSER_REGISTRY.register(mod)
 
-_register_all()
 
-register("flowchart", mermaid_flowchart, MERMAID_REGISTRY)
-register("mermaid_sequence", mermaid_sequence, MERMAID_REGISTRY)
-register("class", mermaid_class, MERMAID_REGISTRY)
-register("state", mermaid_state, MERMAID_REGISTRY)
-register("er", mermaid_er, MERMAID_REGISTRY)
-register("gantt", mermaid_gantt, MERMAID_REGISTRY)
-register("pie", mermaid_pie, MERMAID_REGISTRY)
-register("journey", mermaid_journey, MERMAID_REGISTRY)
-register("timeline", mermaid_timeline, MERMAID_REGISTRY)
+def _register_all_mermaid():
+    for mod in [
+        mermaid_flowchart, mermaid_sequence,
+        mermaid_class, mermaid_state, mermaid_er, mermaid_gantt,
+        mermaid_pie, mermaid_journey, mermaid_timeline,
+        mermaid_gitgraph, mermaid_mindmap, mermaid_block,
+        mermaid_requirement, mermaid_architecture, mermaid_c4,
+        mermaid_swimlane, mermaid_kanban, mermaid_xychart,
+        mermaid_sankey, mermaid_quadrant, mermaid_packet,
+        mermaid_venn, mermaid_zenuml, mermaid_ishikawa,
+        mermaid_treemap, mermaid_treeview, mermaid_radar,
+        mermaid_wardley, mermaid_cynefin, mermaid_eventmodeling,
+        mermaid_info,
+    ]:
+        PARSER_REGISTRY.register(mod)
+
+
+_register_all()
+_register_all_mermaid()

@@ -42,7 +42,7 @@ async function renderPreview() {
       const resp = await fetch('/api/plantuml', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: code,
+        body: code.replace(/<!--[\s\S]*?-->/g, ''),
       })
       if (!resp.ok) {
         const text = await resp.text()
@@ -52,7 +52,7 @@ async function renderPreview() {
     } else {
       const { ensureMermaid, normalizeDiagram } = await import('@web/services/render')
       const mermaidApi = await ensureMermaid()
-      const n = normalizeDiagram(code, 'mermaid')
+      const n = normalizeDiagram(code.replace(/<!--[\s\S]*?-->/g, ''), 'mermaid')
       const uid = 'rebuild-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
       const result = await mermaidApi.render(uid, n.code)
       previewSvg.value = result.svg

@@ -1,6 +1,22 @@
 import re
 from dataclasses import dataclass, field
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_class",
+    patterns=[
+        (r'\bclassDiagram\b', 20),
+        (r'\bclass\s+\w', 2),
+        (r'\bnamespace\b', 1),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class ClassMember:
     visibility: str = ""

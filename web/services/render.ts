@@ -118,6 +118,12 @@ export function normalizeDiagram(
   const errors: string[] = []
   let s = code
 
+  // 解码 HTML 实体 (&lt; → <, &#xxxx; → Unicode)
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = s
+  s = textarea.value
+  textarea.remove()
+
   const before = s
   s = s.replace(/\r\n/g, '\n')
   if (s !== before) errors.push('[error] 将 CRLF 统一为 LF')
@@ -188,8 +194,7 @@ export function normalizeDiagram(
 let mermaidApi: any = null
 
 export async function ensureMermaid() {
-  if (mermaidApi) { console.log('[render] ensureMermaid: cached'); return mermaidApi }
-  console.log('[render] ensureMermaid: importing...')
+  if (mermaidApi) return mermaidApi
   const mod = await import('mermaid')
   mermaidApi = mod.default
   mermaidApi.initialize({ startOnLoad: false, securityLevel: 'antiscript', theme: 'default' })
@@ -201,22 +206,16 @@ const renderQueue: (() => Promise<void>)[] = []
 let rendering = false
 
 async function processQueue() {
-  if (rendering) { console.log('[render] processQueue: already running'); return }
+  if (rendering) return
   rendering = true
-  console.log(`[render] processQueue: start, tasks=\${renderQueue.length}`)
   while (renderQueue.length) {
     const task = renderQueue.shift()
-    if (task) {
-      console.log(`[render] processQueue: run task, \${renderQueue.length} left`)
-      await task()
-    }
+    if (task) await task()
   }
   rendering = false
-  console.log('[render] processQueue: all done')
 }
 
 export function enqueueRender(fn: () => Promise<void>) {
   renderQueue.push(fn)
-  console.log(`[render] enqueue total=\${renderQueue.length}`)
   processQueue()
 }

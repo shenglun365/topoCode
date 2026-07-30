@@ -26,10 +26,11 @@ async function post<T>(path: string, body?: any): Promise<T> {
 }
 
 async function put<T>(path: string, body: any): Promise<T> {
+  const json = JSON.stringify(body)
   const resp = await fetch(path, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: json,
   })
   if (!resp.ok) throw new Error(`API ${resp.status}`)
   return resp.json()

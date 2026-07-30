@@ -13,3 +13,4 @@ class ParserMeta:
     supports_skinparam: bool = True
     supports_preproc: bool = True
     supports_layout: bool = True
+    preproc_engine: str = "plantuml"  # "plantuml" | "mermaid"

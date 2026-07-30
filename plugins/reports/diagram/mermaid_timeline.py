@@ -1,6 +1,20 @@
 import re
 from dataclasses import dataclass, field
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_timeline",
+    patterns=[
+        (r'\btimeline\b', 20),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class TimelineEvent:
     date: str
@@ -65,5 +79,5 @@ def render(data: TimelineData) -> str:
         for ev in sec.events:
             lines.append(f'    {ev.date} : {ev.text}')
     for line in data.raw_lines:
-        lines.append(f'    {line}')
+        lines.append(f'{line}')
     return '\n'.join(lines)

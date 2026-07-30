@@ -4,6 +4,8 @@ import { normalizeDiagram, ensureMermaid, enqueueRender, fitScale } from '@web/s
 import { diagramStateStore } from '@web/services/diagramStateStore'
 import DiagramRebuildDialog from '@web/components/DiagramRebuildDialog.vue'
 
+function stripHtml(s: string) { return s.replace(/<!--[\s\S]*?-->/g, '') }
+
 const props = defineProps<{
   code: string
   diagId: string
@@ -41,7 +43,6 @@ if (savedState) {
   zs = savedState.zs
   dx = savedState.dx
   dy = savedState.dy
-  console.log(`[MermaidViewer] restoreState diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy}`)
 }
 
 // ── 角劲渲染：仅当容器进入视口后才开始渲染 ——
@@ -73,11 +74,17 @@ function applyScale() {
   if (svgWrap.value) {
     const svg = svgWrap.value.querySelector('svg')
     if (svg) {
-      const nw = parseFloat(svg.getAttribute('width') || '0')
-      const nh = parseFloat(svg.getAttribute('height') || '0')
-      if (nw > 0 && nh > 0) {
-        svg.style.width = Math.round(nw * zs) + 'px'
-        svg.style.height = Math.round(nh * zs) + 'px'
+      const vb = svg.getAttribute('viewBox')
+      if (vb) {
+        const parts = vb.trim().split(/\s+/).map(Number)
+        if (parts.length >= 4) {
+          const nw = parts[2]
+          const nh = parts[3]
+          if (nw > 0 && nh > 0) {
+            svg.style.width = Math.round(nw * zs) + 'px'
+            svg.style.height = Math.round(nh * zs) + 'px'
+          }
+        }
       }
       svg.style.marginLeft = dx + 'px'
       svg.style.marginTop = dy + 'px'
@@ -93,15 +100,13 @@ function reFit() {
   if (s !== null) { zs = s; dx = 0; dy = 0; zoomPct.value = Math.round(s * 100) + '%'; applyScale(); scheduleNotify() }
 }
 
-async function renderMermaid() {
-  console.log('[MermaidViewer] renderMermaid: start')
+async function renderMermaid(codeOverride?: string) {
   loading.value = true
   error.value = ''
   try {
-    await ensureMermaid()
-    const n = normalizeDiagram(props.code, 'mermaid')
+    const mermaidApi = await ensureMermaid()
+    const n = normalizeDiagram(stripHtml(codeOverride ?? props.code), 'mermaid')
     const clean = n.code
-    if (n.errors.length) console.log('[diagram] normalize:', n.errors)
     const valid = await mermaidApi.parse(clean, { suppressErrors: true })
     if (!valid) throw new Error('图解法错误')
     const uid = 'm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
@@ -125,7 +130,6 @@ async function renderMermaid() {
           applyScale()
         }
       }
-      console.log(`[MermaidViewer] afterRender diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy} container=${cw}x${ch}`)
     }
   } catch (e: any) {
     error.value = e.message || '渲染失败'
@@ -140,7 +144,7 @@ onMounted(() => {
     ro.observe(diagView.value)
   }
 })
-watch(() => props.code, () => { userZoomed = false; activeTab.value = 'chart'; enqueueRender(renderMermaid) })
+watch(() => props.code, () => { userZoomed = false; activeTab.value = 'chart'; renderMermaid() })
 
 function onWheel(e: WheelEvent) {
   if (!(e.ctrlKey || e.metaKey) || !diagView.value) return
@@ -253,7 +257,7 @@ async function onRebuild() {
     const resp = await fetch('/api/mermaid/rebuild', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: props.code }),
+      body: JSON.stringify({ code: stripHtml(props.code) }),
     })
     if (!resp.ok) {
       const text = await resp.text()
@@ -269,10 +273,13 @@ async function onRebuild() {
   }
 }
 
-function onRebuildConfirm(finalCode: string) {
+async function onRebuildConfirm(finalCode: string) {
   rebuildDialogVisible.value = false
   if (textarea.value) textarea.value.value = finalCode
+  activeTab.value = 'chart'
+  await nextTick()
   emit('code-change', props.diagId, finalCode)
+  renderMermaid(finalCode)
 }
 
 let rsDragging = false, rsStartY = 0, rsStartH = 0

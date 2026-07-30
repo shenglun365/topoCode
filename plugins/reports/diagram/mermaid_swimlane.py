@@ -7,28 +7,25 @@ from ._meta import ParserMeta
 
 
 meta = ParserMeta(
-    name="mermaid_pie",
+    name="mermaid_swimlane",
     patterns=[
-        (r'\bpie\b', 20),
-        (r'\".+\"\s*:\s*\d+', 2),
+        (r'\bswimlane-beta\b', 20),
     ],
     min_score=4,
     supports_preproc=False,
     preproc_engine="mermaid",
 )
 @dataclass
-class PieData:
-    title: str = ""
-    items: list[tuple[str, str]] = field(default_factory=list)
+class SwimlaneData:
+    direction: str = "LR"
     raw_lines: list[str] = field(default_factory=list)
 
-HEADER_PAT = re.compile(r'^\s*pie\s+(?:title\s+(.+?))?\s*$', re.IGNORECASE)
+HEADER_PAT = re.compile(r'^\s*swimlane-beta(?:\s+(LR|TB))?\s*$', re.IGNORECASE)
 COMMENT_PAT = re.compile(r'^\s*%%')
 REMOVE_PAT = re.compile(r"^\s*(@startuml\b|@enduml\b)")
-ITEM_PAT = re.compile(r'^\s*"([^"]*)"\s*:\s*(\d+(?:\.\d+)?)\s*$')
 
-def parse(raw: str) -> PieData:
-    data = PieData()
+def parse(raw: str) -> SwimlaneData:
+    data = SwimlaneData()
     for line in raw.split('\n'):
         s = line.strip()
         if not s:
@@ -39,22 +36,13 @@ def parse(raw: str) -> PieData:
         m = HEADER_PAT.match(s)
         if m:
             if m.group(1):
-                data.title = m.group(1).strip().strip('"')
-            continue
-        m = ITEM_PAT.match(s)
-        if m:
-            data.items.append((m.group(1), m.group(2)))
+                data.direction = m.group(1).upper()
             continue
         data.raw_lines.append(s)
     return data
 
-def render(data: PieData) -> str:
-    if data.title:
-        lines = [f'pie title {data.title}']
-    else:
-        lines = ['pie']
-    for label, value in data.items:
-        lines.append(f'    "{label}" : {value}')
+def render(data: SwimlaneData) -> str:
+    lines = [f'swimlane-beta {data.direction}']
     for line in data.raw_lines:
         lines.append(f'{line}')
     return '\n'.join(lines)

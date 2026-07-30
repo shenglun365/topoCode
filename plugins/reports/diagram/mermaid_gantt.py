@@ -1,6 +1,22 @@
 import re
 from dataclasses import dataclass, field
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_gantt",
+    patterns=[
+        (r'\bgantt\b', 20),
+        (r'\bsection\b', 1),
+        (r'(\d{4}-\d{2}-\d{2}|\d+d)', 1),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class GanttTask:
     name: str
@@ -133,6 +149,6 @@ def render(data: GanttData) -> str:
             lines.append(parts[0])
 
     for line in data.raw_lines:
-        lines.append(f'    {line}')
+        lines.append(f'{line}')
 
     return '\n'.join(lines)

@@ -1,6 +1,21 @@
 import re
 from dataclasses import dataclass, field
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_state",
+    patterns=[
+        (r'\bstateDiagram-v2\b', 20),
+        (r'\[\*\]', 3),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class StateNode:
     name: str
@@ -139,6 +154,6 @@ def render(data: StateDiagramData) -> str:
             lines.append(f'    {t.from_name} {t.arrow} {t.to_name}')
 
     for line in data.raw_lines:
-        lines.append(f'    {line}')
+        lines.append(f'{line}')
 
     return '\n'.join(lines)

@@ -7,28 +7,26 @@ from ._meta import ParserMeta
 
 
 meta = ParserMeta(
-    name="mermaid_pie",
+    name="mermaid_cynefin",
     patterns=[
-        (r'\bpie\b', 20),
-        (r'\".+\"\s*:\s*\d+', 2),
+        (r'\bcynefin-beta\b', 20),
     ],
     min_score=4,
     supports_preproc=False,
     preproc_engine="mermaid",
 )
 @dataclass
-class PieData:
+class CynefinData:
     title: str = ""
-    items: list[tuple[str, str]] = field(default_factory=list)
     raw_lines: list[str] = field(default_factory=list)
 
-HEADER_PAT = re.compile(r'^\s*pie\s+(?:title\s+(.+?))?\s*$', re.IGNORECASE)
+HEADER_PAT = re.compile(r'^\s*cynefin-beta\s*$', re.IGNORECASE)
+TITLE_PAT = re.compile(r'^\s*title\s+(.+?)\s*$', re.IGNORECASE)
 COMMENT_PAT = re.compile(r'^\s*%%')
 REMOVE_PAT = re.compile(r"^\s*(@startuml\b|@enduml\b)")
-ITEM_PAT = re.compile(r'^\s*"([^"]*)"\s*:\s*(\d+(?:\.\d+)?)\s*$')
 
-def parse(raw: str) -> PieData:
-    data = PieData()
+def parse(raw: str) -> CynefinData:
+    data = CynefinData()
     for line in raw.split('\n'):
         s = line.strip()
         if not s:
@@ -36,25 +34,19 @@ def parse(raw: str) -> PieData:
         if COMMENT_PAT.match(s) or REMOVE_PAT.match(s):
             data.raw_lines.append(s)
             continue
-        m = HEADER_PAT.match(s)
-        if m:
-            if m.group(1):
-                data.title = m.group(1).strip().strip('"')
+        if HEADER_PAT.match(s):
             continue
-        m = ITEM_PAT.match(s)
+        m = TITLE_PAT.match(s)
         if m:
-            data.items.append((m.group(1), m.group(2)))
+            data.title = m.group(1).strip().strip('"')
             continue
         data.raw_lines.append(s)
     return data
 
-def render(data: PieData) -> str:
+def render(data: CynefinData) -> str:
+    lines = ['cynefin-beta']
     if data.title:
-        lines = [f'pie title {data.title}']
-    else:
-        lines = ['pie']
-    for label, value in data.items:
-        lines.append(f'    "{label}" : {value}')
+        lines.append(f'    title {data.title}')
     for line in data.raw_lines:
         lines.append(f'{line}')
     return '\n'.join(lines)

@@ -4,6 +4,8 @@ import { fitScale } from '@web/services/render'
 import { diagramStateStore } from '@web/services/diagramStateStore'
 import DiagramRebuildDialog from '@web/components/DiagramRebuildDialog.vue'
 
+function stripHtml(s: string) { return s.replace(/<!--[\s\S]*?-->/g, '') }
+
 const props = defineProps<{
   code: string
   diagId: string
@@ -42,11 +44,9 @@ if (savedState) {
   zs = savedState.zs
   dx = savedState.dx
   dy = savedState.dy
-  console.log(`[PlantUmlViewer] restoreState diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy}`)
 }
 
 function notifyStateChange() {
-  console.log(`[PlantUmlViewer] save diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)}`)
   diagramStateStore.save(props.diagId, contentId.value, { zs, dx, dy })
   unsaved.value = true
   emit('state-change')
@@ -72,13 +72,16 @@ function applyScale() {
   if (svgWrap.value) {
     const svg = svgWrap.value.querySelector('svg')
     if (svg) {
-      const nw = parseFloat(svg.getAttribute('width') || '0')
-      const nh = parseFloat(svg.getAttribute('height') || '0')
-      if (nw > 0 && nh > 0) {
-        const sw = Math.round(nw * zs)
-        const sh = Math.round(nh * zs)
-        svg.style.width = sw + 'px'
-        svg.style.height = sh + 'px'
+      const vb = svg.getAttribute('viewBox')
+      if (vb) {
+        const parts = vb.trim().split(/\s+/).map(Number)
+        if (parts.length >= 4) {
+          const nw = parts[2], nh = parts[3]
+          if (nw > 0 && nh > 0) {
+            svg.style.width = Math.round(nw * zs) + 'px'
+            svg.style.height = Math.round(nh * zs) + 'px'
+          }
+        }
       }
       svg.style.marginLeft = dx + 'px'
       svg.style.marginTop = dy + 'px'
@@ -96,14 +99,14 @@ function reFit() {
   if (s !== null) { zs = s; dx = 0; dy = 0; zoomPct.value = Math.round(s * 100) + '%'; applyScale(); scheduleNotify() }
 }
 
-async function renderPlantUml() {
+async function renderPlantUml(codeOverride?: string) {
   loading.value = true
   error.value = ''
   try {
     const resp = await fetch('/api/plantuml', {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
-      body: props.code,
+      body: stripHtml(codeOverride ?? props.code),
     })
     if (!resp.ok) throw new Error('PlantUML server returned ' + resp.status)
     const svg = await resp.text()
@@ -126,7 +129,6 @@ async function renderPlantUml() {
           applyScale()
         }
       }
-      console.log(`[PlantUmlViewer] afterRender diagId=${props.diagId} zs=${zs.toFixed(3)} dx=${dx} dy=${dy} container=${cw}x${ch}`)
     }
   } catch (e: any) {
     error.value = e.message || '渲染失败'
@@ -257,7 +259,7 @@ async function onRebuild() {
     const resp = await fetch('/api/plantuml/rebuild', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: props.code, type: 'auto' }),
+      body: JSON.stringify({ code: stripHtml(props.code), type: 'auto' }),
     })
     if (!resp.ok) {
       const text = await resp.text()
@@ -273,10 +275,13 @@ async function onRebuild() {
   }
 }
 
-function onRebuildConfirm(finalCode: string) {
+async function onRebuildConfirm(finalCode: string) {
   rebuildDialogVisible.value = false
   if (textarea.value) textarea.value.value = finalCode
+  activeTab.value = 'chart'
+  await nextTick()
   emit('code-change', props.diagId, finalCode)
+  renderPlantUml(finalCode)
 }
 
 let rsDragging = false, rsStartY = 0, rsStartH = 0

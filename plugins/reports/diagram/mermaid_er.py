@@ -1,6 +1,21 @@
 import re
 from dataclasses import dataclass, field
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_er",
+    patterns=[
+        (r'\berDiagram\b', 20),
+        (r'(\|\||\|o|\}\||\}o)(--|\.\.)(\|\||o\||\|\{|o\{)', 2),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class ERAttribute:
     type: str = ""
@@ -139,6 +154,6 @@ def render(data: ERDiagramData) -> str:
             lines.append(f'    {r.from_entity} {r.from_card}--{r.to_card} {r.to_entity}')
 
     for line in data.raw_lines:
-        lines.append(f'    {line}')
+        lines.append(f'{line}')
 
     return '\n'.join(lines)

@@ -3,6 +3,23 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+
+from ._meta import ParserMeta
+
+
+
+meta = ParserMeta(
+    name="mermaid_sequence",
+    patterns=[
+        (r'\bsequenceDiagram\b', 20),
+        (r'\bparticipant\b', 2),
+        (r'\bactor\b', 2),
+        (r'\w+\s*-+[->]\s*\w+\s*:', 2),
+    ],
+    min_score=4,
+    supports_preproc=False,
+    preproc_engine="mermaid",
+)
 @dataclass
 class MSeqParticipant:
     name: str

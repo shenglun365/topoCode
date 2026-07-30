@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as api from '@web/services/api'
 import { renderMarkdown, renderDocMarkdown, codeFullscreen } from '@web/services/render'
-import { diagramStateStore } from '@web/services/diagramStateStore'
+import { diagramStateStore, type DiagramViewState } from '@web/services/diagramStateStore'
 import { parseDocContent } from '@web/services/parseContent'
 import ChatInput from '@web/components/ChatInput.vue'
 import ChatToolbar from '@web/components/ChatToolbar.vue'
@@ -310,28 +310,54 @@ async function loadMessages() {
 
 // 代码编辑：子组件触发的 "重新渲染" → 更新 msg.content
 async function onCodeChange(msgId: string, diagId: string, newCode: string) {
-  const msg = messages.value.find(m => m.id === msgId)
-  if (!msg) return
-  // 从 diagId 末尾提取图块索引: "diag_msg_{msgId}_{index}"
+  const dm = displayMessages.value.find(m => m.id === msgId)
+  if (!dm?.content) return
+
   const idxMatch = diagId.match(/_(\d+)$/)
   const targetIndex = idxMatch ? parseInt(idxMatch[1]) : 0
-  const parts = msg.content.split(/(```(?:mermaid|plantuml)[\s\S]*?```)/)
+
+  const mergedIds = (dm as any)._mergedIds
+  let ownerMid = msgId
+  let localIdx = targetIndex
+
+  if (mergedIds?.length > 1) {
+    let fenceOffset = 0
+    for (const mid of mergedIds) {
+      const orig = messages.value.find(m => m.id === mid)
+      const origFences = (orig?.content || '').match(/```(?:mermaid|plantuml)[\s\S]*?```/g) || []
+      if (targetIndex < fenceOffset + origFences.length) {
+        ownerMid = mid
+        localIdx = targetIndex - fenceOffset
+        break
+      }
+      fenceOffset += origFences.length
+    }
+  }
+
+  const owner = messages.value.find(m => m.id === ownerMid)
+  if (!owner) return
+  const ownerParts = (owner.content || '').split(/(```(?:mermaid|plantuml)[\s\S]*?```)/)
   let diagIndex = 0
-  for (let i = 0; i < parts.length; i++) {
-    if (/^```(?:mermaid|plantuml)/.test(parts[i])) {
-      if (diagIndex === targetIndex) {
-        const match = parts[i].match(/^```(?:mermaid|plantuml)\n?/)
-        if (match) {
-          parts[i] = match[0] + newCode + '\n```'
+  let replaced = false
+  for (let i = 0; i < ownerParts.length; i++) {
+    if (/^```(?:mermaid|plantuml)/.test(ownerParts[i])) {
+      if (diagIndex === localIdx) {
+        const m = ownerParts[i].match(/^```(?:mermaid|plantuml)\n?/)
+        if (m) {
+          ownerParts[i] = m[0] + newCode + '\n```'
+          replaced = true
         }
         break
       }
       diagIndex++
     }
   }
-  msg.content = parts.join('')
+  if (!replaced) return
+
+  const newContent = ownerParts.join('')
+  owner.content = newContent
   try {
-    await api.put(`/api/chat/sessions/${currentId.value}/messages/${msgId}`, { content: msg.content } as any)
+    await api.put(`/api/chat/sessions/${currentId.value}/messages/${ownerMid}`, { content: newContent } as any)
   } catch (_) {}
 }
 
@@ -526,18 +552,35 @@ async function handleSaveAsDoc(opts: { mode: 'single' | 'session'; target: 'new'
       .map(m => `**${m.role === 'user' ? '用户' : 'AI'}**:\n${m.content}`)
       .join('\n\n---\n\n')
   }
-  content = content.replace(/\n\n/g, '\n\n<!-- ann:slot -->\n\n') + '\n\n<!-- ann:slot -->'
+  // 保护代码围栏：替换 fence 内容为占位符，避免 ann:slot 注入到代码块中
+  const fences: string[] = []
+  const protectedContent = content.replace(
+    /```(\w*)\n([\s\S]*?)```/g,
+    (match) => { fences.push(match); return `<!-- CODE_FENCE_${fences.length - 1} -->` }
+  )
+  content = protectedContent.replace(/\n\n/g, '\n\n<!-- ann:slot -->\n\n') + '\n\n<!-- ann:slot -->'
+  content = content.replace(/<!-- CODE_FENCE_(\d+) -->/g, (_, i) => fences[parseInt(i)])
 
   try {
+    let docId = ''
     if (opts.target === 'new') {
-      await api.post('/api/documents', { title: opts.title, content })
+      const created = await api.post('/api/documents', { title: opts.title, content })
+      docId = created.id || created.docId || ''
     } else if (opts.docId) {
+      docId = opts.docId
       const existing = await api.get(`/api/documents/${opts.docId}`)
       const appended = (existing.content || '') + '\n\n---\n\n' + content
       await api.put(`/api/documents/${opts.docId}`, { content: appended })
     }
     toast('已保存为文档')
     await loadDocs()
+    if (docId) {
+      try {
+        const data = await api.get(`/api/documents/${docId}`)
+        viewingDoc.value = data
+        tab.value = 'docs'
+      } catch (_) {}
+    }
   } catch (_) { toast('保存失败') }
 }
 
@@ -627,7 +670,7 @@ async function loadDocs() {
 }
 
 async function viewDoc(d: any) {
-  try { const data = await api.get(`/api/documents/${d.id}`); viewingDoc.value = data } catch (_) { toast('加载失败') }
+  try { const data = await api.get(`/api/documents/${d.id}`); viewingDoc.value = data; tab.value = 'docs'; syncUrl() } catch (_) { toast('加载失败') }
 }
 
 function openDocEditor() {
@@ -745,7 +788,17 @@ function switchTab(t: 'chat' | 'docs' | 'archives') {
 }
 
 // ── State persistence ──
+function syncUrl() {
+  const params = new URLSearchParams()
+  if (tab.value === 'chat' && currentId.value) params.set('sessionId', currentId.value)
+  if (tab.value === 'docs' && viewingDoc.value?.id) params.set('docId', viewingDoc.value.id)
+  if (tab.value) params.set('tab', tab.value)
+  const qs = params.toString()
+  const url = qs ? `${location.pathname}?${qs}` : location.pathname
+  history.replaceState(null, '', url)
+}
 function saveState() {
+  syncUrl()
   try {
     localStorage.setItem('chat_view_state', JSON.stringify({
       tab: tab.value,
@@ -759,6 +812,32 @@ watch(currentId, saveState)
 watch(viewingDoc, saveState)
 
 async function restoreState() {
+  // URL params take priority over localStorage
+  const params = new URLSearchParams(location.search)
+  const urlTab = params.get('tab')
+  const urlSessionId = params.get('sessionId')
+  const urlDocId = params.get('docId')
+
+  if (urlSessionId || urlDocId) {
+    if (urlDocId) {
+      try {
+        const data = await api.get(`/api/documents/${urlDocId}`)
+        viewingDoc.value = data
+        tab.value = urlTab || 'docs'
+        return
+      } catch (_) {}
+    }
+    if (urlSessionId && sessions.value.some(s => s.id === urlSessionId)) {
+      if (urlSessionId !== currentId.value) {
+        currentId.value = urlSessionId
+        tab.value = urlTab || 'chat'
+        await loadMessages()
+        return
+      }
+    }
+    if (urlTab) { tab.value = urlTab; return }
+  }
+
   try {
     const saved = JSON.parse(localStorage.getItem('chat_view_state') || '')
     if (!saved) { console.log('[restoreState] no saved state'); return }
@@ -792,21 +871,125 @@ async function restoreState() {
 async function saveDiagState() {
   const id = currentId.value
   if (!id) return
+
+  // Collect: for each message, which states to embed and where to PUT
   const toSave: { id: string; content: string }[] = []
+  const perMessage: Map<string, Record<string, DiagramViewState>> = new Map()
+
   for (const msg of messages.value) {
     if (!msg.id) continue
-    const states = diagramStateStore.loadAll(msg.id)
-    if (!Object.keys(states).length) continue
-    msg.content = diagramStateStore.embedInContent(msg.content, msg.id)
-    toSave.push({ id: msg.id, content: msg.content })
+    const allStates = diagramStateStore.loadAll(msg.id)
+    if (!Object.keys(allStates).length) continue
+
+    const fenceCount = (msg.content || '').match(/```(?:mermaid|plantuml)[\s\S]*?```/g)?.length || 0
+
+    if (fenceCount > 0) {
+      // Normal: message has its own diagram fences – filter to own diag indices
+      const ownStates: Record<string, DiagramViewState> = {}
+      for (const [diagId, state] of Object.entries(allStates)) {
+        const idxMatch = diagId.match(/_(\d+)$/)
+        const idx = idxMatch ? parseInt(idxMatch[1]) : -1
+        if (idx >= 0 && idx < fenceCount) ownStates[diagId] = state
+      }
+      if (Object.keys(ownStates).length) {
+        let existing = perMessage.get(msg.id)
+        if (!existing) { existing = {}; perMessage.set(msg.id, existing) }
+        Object.assign(existing, ownStates)
+      }
+    } else {
+      // Message has states but no own fences → merged scenario.
+      // Distribute its states to the real owner messages via displayMessages merge info.
+      const dm = displayMessages.value.find(m => m.id === msg.id)
+      const mergedIds = (dm as any)?._mergedIds
+      if (mergedIds?.length > 1) {
+        let fenceOffset = 0
+        for (const mid of mergedIds) {
+          const orig = messages.value.find(m => m.id === mid)
+          const origFenceCount = (orig?.content || '').match(/```(?:mermaid|plantuml)[\s\S]*?```/g)?.length || 0
+          if (origFenceCount > 0) {
+            const chunk: Record<string, DiagramViewState> = {}
+            for (const [diagId, state] of Object.entries(allStates)) {
+              const idxMatch = diagId.match(/_(\d+)$/)
+              const idx = idxMatch ? parseInt(idxMatch[1]) : -1
+              if (idx >= fenceOffset && idx < fenceOffset + origFenceCount) {
+                chunk[diagId] = state
+              }
+            }
+            if (Object.keys(chunk).length) {
+              let existing = perMessage.get(mid)
+              if (!existing) { existing = {}; perMessage.set(mid, existing) }
+              Object.assign(existing, chunk)
+            }
+          }
+          fenceOffset += origFenceCount
+        }
+      }
+    }
   }
-  if (!toSave.length) return
+
+  // Embed states into each message's content
+  for (const [mid, states] of perMessage) {
+    if (!Object.keys(states).length) continue
+    const msg = messages.value.find(m => m.id === mid)
+    if (!msg) continue
+    const lsKey = 'topoone_diag_state:' + mid
+    const origJson = localStorage.getItem(lsKey)
+    try {
+      localStorage.setItem(lsKey, JSON.stringify(states))
+      msg.content = diagramStateStore.embedInContent(msg.content, mid)
+    } finally {
+      if (origJson !== null) localStorage.setItem(lsKey, origJson)
+      else localStorage.removeItem(lsKey)
+    }
+    toSave.push({ id: mid, content: msg.content })
+  }
+
+  if (!toSave.length) {
+    // Nothing to embed, but still clear dirty flags so the save button resets
+    for (const msg of messages.value) {
+      if (!msg.id) continue
+      diagramStateStore.clearDirty(msg.id)
+    }
+    document.dispatchEvent(new CustomEvent('diagram-state-changed'))
+    return
+  }
+
   try {
     await api.post(`/api/chat/sessions/${id}/messages/batch`, { messages: toSave })
+    // Clear dirty flags for ALL messages (including display-merged contentIds)
+    for (const msg of messages.value) {
+      if (!msg.id) continue
+      diagramStateStore.clearDirty(msg.id)
+    }
     for (const { id: mid } of toSave) diagramStateStore.removeAll(mid)
     document.dispatchEvent(new CustomEvent('diagram-state-changed'))
     toast('图状态已保存')
   } catch (_) { toast('保存失败') }
+}
+
+/** 文档视图中的图重建确认 — 直接更新 viewingDoc.content 并保存 */
+async function onDocCodeChange(diagId: string, newCode: string) {
+  console.error('★★★★★ [onDocCodeChange] CALLED ★★★★★', { diagId, codeLen: newCode?.length })
+  if (!viewingDoc.value) return
+  const idxMatch = diagId.match(/_(\d+)$/)
+  const targetIndex = idxMatch ? parseInt(idxMatch[1]) : 0
+  const parts = viewingDoc.value.content.split(/(```(?:mermaid|plantuml)[\s\S]*?```)/)
+  let diagIndex = 0
+  for (let i = 0; i < parts.length; i++) {
+    if (/^```(?:mermaid|plantuml)/.test(parts[i])) {
+      if (diagIndex === targetIndex) {
+        const match = parts[i].match(/^```(?:mermaid|plantuml)\n?/)
+        if (match) parts[i] = match[0] + newCode + '\n```'
+        break
+      }
+      diagIndex++
+    }
+  }
+  viewingDoc.value.content = parts.join('')
+  try {
+    await api.put(`/api/documents/${viewingDoc.value.id}`, { content: viewingDoc.value.content })
+    console.error('[onDocCodeChange] PUT success')
+  } catch (e) { console.error('[onDocCodeChange] PUT failed:', e) }
 }
 
 /** 保存当前查看文档的图状态 */
@@ -1022,6 +1205,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
               :diag-id="b.diagId!"
               :msg-id="viewingDoc?.id"
               :initial-state="b.initialState"
+              @code-change="onDocCodeChange"
               @save-state="saveViewingDocDiagState"
             />
             <PlantUmlViewer
@@ -1030,6 +1214,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
               :diag-id="b.diagId!"
               :msg-id="viewingDoc?.id"
               :initial-state="b.initialState"
+              @code-change="onDocCodeChange"
               @save-state="saveViewingDocDiagState"
             />
           </template>
