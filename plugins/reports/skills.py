@@ -18,6 +18,7 @@ if _plugins_dir not in _sys.path:
     _sys.path.insert(0, _plugins_dir)
 
 from reports.web_tools import get_web_tool_definitions
+from reports.diagram_tools._ir_docs import diagram_editor_prompt
 
 
 @dataclass
@@ -139,6 +140,15 @@ BUILTIN_SKILLS: dict[str, Skill] = {
             "- report：项目整体架构概览文档（需指定项目ID）\n"
             "注意：知识库文档是用户手动保存或系统自动生成的内容，与实时查询的项目数据分析结果不同。"
         ),
+        default=True,
+    ),
+    "diagram_editor": Skill(
+        name="diagram_editor",
+        title="图编辑助手",
+        description="通过结构化中间表示(IR)创建 Mermaid/PlantUML 图。LLM 只描述结构，工具生成精确代码。",
+        icon="📐",
+        tools=["web_diagram_build", "web_diagram_validate"],
+        context_prompt=diagram_editor_prompt(),
         default=True,
     ),
 }

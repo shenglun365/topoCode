@@ -4,12 +4,14 @@ import { ref } from 'vue'
 const props = defineProps<{
   streaming: boolean
   modelValue: string
+  diagramEnabled?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [v: string]
   send: [text: string]
   abortStream: []
+  toggleDiagram: [enabled: boolean]
 }>()
 
 const textareaRef = ref<HTMLElement>()
@@ -126,11 +128,26 @@ function onEnter(e: KeyboardEvent) {
             </div>
           </div>
         </div>
-        <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && !modelValue.trim()" @click="streaming ? emit('abortStream') : send()">
-          <svg v-if="!streaming" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-        </button>
+        <div class="btn-group">
+          <button
+            class="btn-diagram-toggle"
+            :class="{ active: diagramEnabled }"
+            @click="emit('toggleDiagram', !diagramEnabled)"
+            :title="(diagramEnabled ? '关闭' : '开启') + ' AI 绘图增强'"
+          >📐</button>
+          <button class="btn-send" :class="{ 'stop-btn': streaming }" :disabled="!streaming && !modelValue.trim()" @click="streaming ? emit('abortStream') : send()">
+            <svg v-if="!streaming" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.btn-group{display:flex;align-items:center;gap:2px}
+.btn-diagram-toggle{background:none;border:1px solid var(--border,#e4e4e7);border-radius:8px;padding:6px 8px;cursor:pointer;font-size:16px;line-height:1;opacity:0.5;transition:all .15s;margin-right:2px}
+.btn-diagram-toggle:hover{opacity:0.8;border-color:var(--accent,#4d6bfe)}
+.btn-diagram-toggle.active{opacity:1;border-color:var(--accent,#4d6bfe);background:var(--accent-light,rgba(77,107,254,0.08))}
+</style>

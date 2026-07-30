@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick, provide } from 'vue'
 import * as api from '@web/services/api'
 import { renderMarkdown, renderDocMarkdown, codeFullscreen } from '@web/services/render'
 import { diagramStateStore, type DiagramViewState } from '@web/services/diagramStateStore'
@@ -36,12 +36,17 @@ const showDocEditor = ref(false)
 const docEditTitle = ref('')
 const docEditContent = ref('')
 const docPreview = ref(false)
+const initialized = ref(false)
 
 const taskId = ref(new URLSearchParams(location.search).get('taskId') || '')
 const sessionId = ref(new URLSearchParams(location.search).get('sessionId') || '')
 const fontSize = ref(parseInt(localStorage.getItem('topoone-font-size') || '18'))
 const contextLimit = ref(parseInt(localStorage.getItem('topo_context_limit') || '32000'))
 const MODEL_LS_KEY = 'topoone_last_model'
+const DIAGRAM_LS_KEY = 'topo_diagram_skill'
+const diagramEnabled = ref(localStorage.getItem(DIAGRAM_LS_KEY) === '1')
+provide('currentModel', currentModel)
+provide('contextLimit', contextLimit)
 
 // Archives
 const archives = ref<any[]>([])
@@ -102,7 +107,15 @@ const displayMessages = computed(() => {
       }
       continue
     }
-    enriched.push({ ...m })
+    const copy = { ...m }
+    if (m.role === 'assistant') {
+      const tcs = (m as any).toolCalls || m.metadata?.tool_calls || []
+      copy._toolGenerated = tcs.some((tc: any) => {
+        const name = tc.function?.name || tc.name || ''
+        return name === 'web_diagram_build'
+      })
+    }
+    enriched.push(copy)
   }
   // Phase 2: 合并连续的工具调用组
   const merged: ChatMessage[] = []
@@ -358,7 +371,7 @@ async function onCodeChange(msgId: string, diagId: string, newCode: string) {
   owner.content = newContent
   try {
     await api.put(`/api/chat/sessions/${currentId.value}/messages/${ownerMid}`, { content: newContent } as any)
-  } catch (_) {}
+  } catch (e) { console.error('[diagram-save] PUT failed', e) }
 }
 
 async function onSend(text: string) {
@@ -448,6 +461,22 @@ async function send() {
   } finally {
     streaming.value = false; scrollToBottom()
   }
+}
+
+async function onToggleDiagram(enabled: boolean) {
+  diagramEnabled.value = enabled
+  try { localStorage.setItem(DIAGRAM_LS_KEY, enabled ? '1' : '0') } catch (_) {}
+  if (!currentId.value) return
+  try {
+    const resp = await fetch(`/api/chat/sessions/${currentId.value}`)
+    const session = await resp.json()
+    const meta = (session as any).metadata || {}
+    const current: string[] = meta.active_skills || []
+    const next = enabled
+      ? [...new Set([...current, 'diagram_editor'])]
+      : current.filter((s: string) => s !== 'diagram_editor')
+    await api.put(`/api/chat/sessions/${currentId.value}`, { skills: next } as any)
+  } catch (_) {}
 }
 
 function abortStream() {
@@ -782,26 +811,44 @@ function deleteAnnotation() {
 // ── Tabs ──
 function switchTab(t: 'chat' | 'docs' | 'archives') {
   tab.value = t as any
-  if (t === 'chat') viewingDoc.value = null
-  if (t === 'docs') loadDocs()
-  if (t === 'archives') loadArchives()
+  if (t === 'chat') {
+    viewingDoc.value = null
+    if (currentId.value && messages.value.length === 0) loadMessages()
+  }
+  if (t === 'docs') {
+    viewingDoc.value = null
+    messages.value = []
+    loadDocs()
+  }
+  if (t === 'archives') {
+    messages.value = []
+    loadArchives()
+  }
 }
 
 // ── State persistence ──
 function syncUrl() {
+  if (!initialized.value) return
   const params = new URLSearchParams()
-  if (tab.value === 'chat' && currentId.value) params.set('sessionId', currentId.value)
-  if (tab.value === 'docs' && viewingDoc.value?.id) params.set('docId', viewingDoc.value.id)
-  if (tab.value) params.set('tab', tab.value)
+  if (tab.value === 'docs' && viewingDoc.value?.id) {
+    params.set('docId', viewingDoc.value.id)
+    params.set('tab', 'docs')
+  } else if (currentId.value) {
+    params.set('sessionId', currentId.value)
+    params.set('tab', 'chat')
+  } else if (tab.value) {
+    params.set('tab', tab.value)
+  }
   const qs = params.toString()
   const url = qs ? `${location.pathname}?${qs}` : location.pathname
   history.replaceState(null, '', url)
 }
 function saveState() {
   syncUrl()
+  const saveTab = (tab.value === 'docs' && !viewingDoc.value) ? 'chat' : tab.value
   try {
     localStorage.setItem('chat_view_state', JSON.stringify({
-      tab: tab.value,
+      tab: saveTab,
       sessionId: currentId.value,
       docId: viewingDoc.value ? viewingDoc.value.id : null,
     }))
@@ -824,6 +871,7 @@ async function restoreState() {
         const data = await api.get(`/api/documents/${urlDocId}`)
         viewingDoc.value = data
         tab.value = urlTab || 'docs'
+        loadDocs()
         return
       } catch (_) {}
     }
@@ -846,6 +894,7 @@ async function restoreState() {
       api.get(`/api/documents/${saved.docId}`).then((data) => {
         viewingDoc.value = data
         tab.value = 'docs'
+        loadDocs()
       }).catch(() => {})
     } else if (saved.sessionId) {
       if (!sessions.value.some(s => s.id === saved.sessionId)) {
@@ -1043,6 +1092,8 @@ onMounted(async () => {
   } catch (_) {}
 
   await restoreState()
+  initialized.value = true
+  saveState()
   loadPendingDrafts()
   checkStorage()
   window.addEventListener('storage', onStorage)
@@ -1234,8 +1285,13 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         </div>
       </div>
 
+      <!-- Docs empty state -->
+      <div v-if="tab === 'docs' && !viewingDoc" class="docs-empty-state">
+        <p>请从左侧选择一个文档</p>
+      </div>
+
       <!-- Messages -->
-      <div v-if="!viewingDoc" class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
+      <div v-if="tab === 'chat' && !viewingDoc" class="messages" ref="msgArea" :class="{ 'delete-mode': deleteMode }">
         <div v-if="hasMore" class="load-more-bar" @click="loadMoreMessages">
           <span v-if="isLoadingMore">加载中…</span>
           <span v-else>↑ 点击加载更早消息</span>
@@ -1248,6 +1304,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
           :debug="debug"
           :isSelected="selectedIds.has(m.id || '')"
           :showReasoning="m.id ? (msgShowReasoning[m.id] ?? false) : false"
+          :toolGenerated="(m as any)._toolGenerated === true"
           :showToolCalls="m.id ? (msgShowToolCalls[m.id] ?? false) : false"
           @toggle-select="toggleSelect"
           @copy-message="copyMessage"
@@ -1262,7 +1319,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         />
       </div>
 
-      <div v-if="!currentId && !viewingDoc" class="empty-state">
+      <div v-if="tab === 'chat' && !currentId" class="empty-state">
         <p>选择或创建一个对话开始</p><button class="start-btn" @click="createSession">新对话</button>
       </div>
 
@@ -1273,7 +1330,7 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <button class="tb-btn" @click="toggleDeleteMode">取消</button>
       </div>
 
-      <ChatInput v-if="!viewingDoc" :streaming="streaming" v-model="input" @send="onSend" @abort-stream="abortStream" />
+      <ChatInput v-if="tab === 'chat'" :streaming="streaming" v-model="input" :diagram-enabled="diagramEnabled" @send="onSend" @abort-stream="abortStream" @toggle-diagram="onToggleDiagram" />
     </main>
   </div>
 </template>
@@ -1304,7 +1361,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .btn-new:hover{background:var(--accent);color:#fff}
 .session-item,.note-item{display:flex;align-items:center;padding:8px 10px;border-radius:var(--radius-md);font-size:var(--ui-font-size);color:var(--text-secondary);cursor:pointer;gap:6px;margin-bottom:1px}
 .session-item:hover,.note-item:hover{background:var(--bg-hover)}
-.session-item.active{background:var(--accent-light);color:var(--text);font-weight:500}
+.session-item.active,.note-item.active{background:var(--accent-light);color:var(--text);font-weight:500}
 .session-item .title,.note-item .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .del-btn,.rename-btn,.copy-id-btn{opacity:0;background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:var(--ui-font-size);line-height:1;color:var(--text-muted)}
 .exec-btn{background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:var(--ui-font-size);line-height:1;color:var(--accent,#4d6bfe);white-space:nowrap}
@@ -1420,7 +1477,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .btn-send:hover{background:var(--accent-hover)}
 .btn-send:disabled{opacity:0.4;cursor:not-allowed}
 .btn-send.stop-btn{background:#ef4444}.btn-send.stop-btn:hover{background:#dc2626}
-.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)}
+.empty-state,.docs-empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)}
 .start-btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-full);padding:8px 20px;font-size:0.93em;font-weight:500;cursor:pointer;margin-top:4px}
 .start-btn:hover{background:var(--accent-hover)}
 .dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;animation:fadeIn .15s ease}

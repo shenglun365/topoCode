@@ -11,6 +11,7 @@ const props = defineProps<{
   diagId: string
   msgId?: string
   initialState?: DiagramViewState | null
+  toolGenerated?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -332,6 +333,7 @@ function zoomOut() {
       <div class="diag-tabs">
         <button class="diag-tab" :class="{ 'diag-tab-active': activeTab === 'chart' }" @click="activeTab = 'chart'">图表</button>
         <button class="diag-tab" :class="{ 'diag-tab-active': activeTab === 'code' }" @click="activeTab = 'code'">代码</button>
+        <span v-if="toolGenerated" class="diag-tool-badge" title="由 web_diagram_build 工具生成">🛠 工具生成</span>
       </div>
       <div class="diag-actions">
         <template v-if="activeTab === 'chart'">
@@ -386,6 +388,8 @@ function zoomOut() {
 .diag-tab:hover{color:var(--text-secondary,#666);background:var(--bg-tertiary,#e8e8e8)}
 .diag-tab-active{background:var(--accent,#4d6bfe);color:#fff}
 .diag-tab-active:hover{background:var(--accent-hover,#3a56d4);color:#fff}
+.diag-tool-badge{font-size:11px;padding:1px 6px;border-radius:4px;background:#e8f5e9;color:#2e7d32;margin-left:6px;white-space:nowrap}
+
 .diag-actions{display:flex;align-items:center;gap:2px}
 .diag-actions button{background:none;border:none;color:var(--text-muted,#888);cursor:pointer;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1}
 .diag-actions button:hover{background:var(--bg-tertiary,#e8e8e8);color:var(--text-primary,#1a1a1a)}

@@ -13,6 +13,9 @@ _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 _backend_dir = os.path.join(_project_root, "backend-core")
 if _backend_dir not in _sys.path:
     _sys.path.insert(0, _backend_dir)
+_reports_dir = os.path.dirname(os.path.abspath(__file__))
+if _reports_dir not in _sys.path:
+    _sys.path.insert(0, _reports_dir)
 
 import community_data as cd
 from sqlite_ctx import MultiDBManager
@@ -561,6 +564,39 @@ WEB_TOOL_DEFINITIONS = [
             },
         },
     },
+    # ── 图编辑工具（diagram_tools） ──
+    {
+        "type": "function",
+        "function": {
+            "name": "web_diagram_build",
+            "description": "从 IR 生成语法正确的 Mermaid/PlantUML 图代码。这是唯一能产生图代码的工具。支持的 diagram_type 和 IR 字段定义详见系统消息中的建图能力章节。禁止直接输出代码。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ir": {
+                        "type": "object",
+                        "description": "完整 IR，包含 lang/diagram_type/nodes/edges/subgraphs/init_config。nodes 必须有 id 和 text。",
+                    },
+                },
+                "required": ["ir"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_diagram_validate",
+            "description": "校验 web_diagram_build 生成的代码语法。每次 build 后必须调用。返回 {valid, errors, warnings}。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "要校验的图代码"},
+                    "lang": {"type": "string", "enum": ["mermaid", "plantuml"]},
+                },
+                "required": ["code", "lang"],
+            },
+        },
+    },
 ]
 
 WEB_TOOL_MAP = {t["function"]["name"]: t for t in WEB_TOOL_DEFINITIONS}
@@ -623,6 +659,8 @@ class WebToolExecutor:
             "web_update_archive": self._update_archive,
             "web_search_knowledge": self._search_knowledge,
             "web_get_document": self._get_document,
+            "web_diagram_build": self._diagram_build,
+            "web_diagram_validate": self._diagram_validate,
         }
 
     def execute(self, tool_name: str, args: dict) -> dict:
@@ -1547,6 +1585,52 @@ class WebToolExecutor:
             return {"doc": dict(row)}
         except Exception as e:
             return {"error": str(e), "_skip": True}
+
+    # ── Diagram Tools ──
+
+    def _diagram_build(self, args: dict) -> dict:
+        ir = args.get("ir")
+        if not ir:
+            return {"error": "ir is required", "_skip": True}
+        try:
+            from diagram_tools import build_from_ir, validate_ir
+            dt = ir.get("diagram_type", "")
+            valid_schema, schema_errors = validate_ir(ir, dt) if dt else (True, [])
+            if not valid_schema:
+                return {"error": f"IR schema validation failed: {schema_errors[:3]}", "_skip": True}
+            result = build_from_ir(ir)
+            if "error" in result:
+                return {"error": result["error"], "_skip": True}
+            from diagram_tools._validator import validate_diagram_syntax
+            validation = validate_diagram_syntax(result["code"], ir.get("lang", "mermaid"))
+            modified_nodes = sum(1 for n in (ir.get("nodes") or []) if n.get("_is_modified"))
+            modified_edges = sum(1 for e in (ir.get("edges") or []) if e.get("_is_modified"))
+            resp: dict = {
+                "code": result["code"],
+                "type": result["type"],
+                "validation": validation,
+                "_tool_generated": True,
+                "edit_summary": {
+                    "modified_nodes": modified_nodes,
+                    "modified_edges": modified_edges,
+                },
+            }
+            if not validation["valid"]:
+                resp["warning"] = "生成的代码存在语法问题，建议检查"
+            return resp
+        except Exception as e:
+            return {"error": f"Build failed: {e}", "_skip": True}
+
+    def _diagram_validate(self, args: dict) -> dict:
+        code = args.get("code", "")
+        lang = args.get("lang", "mermaid")
+        if not code:
+            return {"error": "code is required", "_skip": True}
+        try:
+            from diagram_tools._validator import validate_diagram_syntax
+            return validate_diagram_syntax(code, lang)
+        except Exception as e:
+            return {"error": f"Validation failed: {e}", "_skip": True}
 
 
 # ==================== 引用解析 ====================

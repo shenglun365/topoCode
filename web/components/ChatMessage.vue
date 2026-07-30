@@ -13,6 +13,7 @@ const props = defineProps<{
   showReasoning?: boolean
   showToolCalls?: boolean
   debug?: boolean
+  toolGenerated?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -104,6 +105,7 @@ watch(() => props.message.content, () => nextTick(fitCodeBlocks))
             :diag-id="b.diagId!"
             :msg-id="message.id"
             :initial-state="b.initialState"
+            :tool-generated="props.toolGenerated"
             @code-change="onCodeChange"
             @state-change="emit('state-change')"
             @save-state="emit('save-state')"
@@ -114,6 +116,7 @@ watch(() => props.message.content, () => nextTick(fitCodeBlocks))
             :diag-id="b.diagId!"
             :msg-id="message.id"
             :initial-state="b.initialState"
+            :tool-generated="props.toolGenerated"
             @code-change="onCodeChange"
             @state-change="emit('state-change')"
             @save-state="emit('save-state')"
