@@ -57,7 +57,7 @@ export interface ModelConfig {
   badge: string
 }
 
-export interface Note {
+export interface Draft {
   id: string
   title: string
   content: string
@@ -72,6 +72,11 @@ export interface Note {
 export interface GraphNode {
   id: string
   label: string
+  commLv?: string
+  isExternal?: boolean
+  hasChildren?: boolean
+  parentId?: string
+  commId?: string
 }
 
 export interface GraphEdge {

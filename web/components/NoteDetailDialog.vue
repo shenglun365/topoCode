@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { Note } from '@web/types'
+import type { Draft } from '@web/types'
 
 defineProps<{
-  note: Note | null
+  note: Draft | null
 }>()
 
 const emit = defineEmits<{
   close: []
   delete: [id: string]
-  execute: [n: Note]
+  execute: [n: Draft]
 }>()
 </script>
 

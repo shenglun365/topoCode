@@ -110,6 +110,28 @@ def read_graph_doc_children(db, task_id: str, edge_type: str,
     )
 
 
+def read_community_hierarchy_maps(db, task_id: str, edge_type: str):
+    """全量读取社区层级映射 (一次查询, 内存建索引).
+
+    返回 (parent_of, children_of):
+      parent_of[cid]  → 父社区 id ('', 顶级社区无父)
+      children_of[pid] → [子社区 id, ...]  (pid 是否有子 = pid 是否在 children_of)
+    """
+    rows = db.fetchall(
+        "SELECT comm_id, parent_comm_id FROM graph_doc "
+        "WHERE task_id=? AND edge_type=?",
+        (task_id, edge_type)
+    )
+    parent_of, children_of = {}, {}
+    for r in rows:
+        cid = r["comm_id"]
+        pid = r["parent_comm_id"] or ''
+        parent_of[cid] = pid
+        if pid:
+            children_of.setdefault(pid, []).append(cid)
+    return parent_of, children_of
+
+
 _RECURSION_DEPTH = 0
 _MAX_RECURSE = 5
 
@@ -884,20 +906,11 @@ def get_community_graph_component(db, task_id: str, edge_type: str,
             "error": True,
             "message": f"\u8282\u70b9\u6570\u8d85\u8fc7{MAX_NODES}\uff0c\u8bf7\u7f29\u5c0f\u67e5\u8be2\u8303\u56f4\uff08\u9009\u62e9\u66f4\u5177\u4f53\u7684\u793e\u533a\uff09\u6216\u964d\u4f4e\u751f\u6210\u6df1\u5ea6\uff08depth\uff09"
         }
-    # add hasChildren: 批次查询(一次 SQL 替代 N 次)
-    cids = [n["id"] for n in comm_nodes]
-    has_set = set()
-    if cids:
-        placeholders = ",".join(["?"] * len(cids))
-        rows = db.fetchall(
-            f"SELECT parent_comm_id FROM graph_doc "
-            f"WHERE task_id=? AND edge_type=? AND parent_comm_id IN ({placeholders}) "
-            f"GROUP BY parent_comm_id",
-            (task_id, edge_type, *cids)
-        )
-        has_set = {r["parent_comm_id"] for r in rows}
+    # hasChildren + parentId: 全量层级映射 (一次查询, 语义同 read_community_hierarchy_maps)
+    parent_of, children_of = read_community_hierarchy_maps(db, task_id, edge_type)
     for n in comm_nodes:
-        n["hasChildren"] = n["id"] in has_set
+        n["hasChildren"] = n["id"] in children_of
+        n["parentId"] = parent_of.get(n["id"], '')
     # commIds — 仅含最终图中出现的社区
     comm_ids_meta = []
     for n in comm_nodes:
@@ -1049,13 +1062,8 @@ def get_external_graph(db, task_id: str, edge_type: str,
             if key:
                 file_cids.setdefault(key, set()).add(cid)
 
-    # 树索引: children_of[pid] = [cid...], parent_of[cid] = pid
-    children_of, parent_of = {}, {}
-    for r in rows:
-        pid = r.get("parent_comm_id") or ''
-        if pid:
-            children_of.setdefault(pid, []).append(r["comm_id"])
-            parent_of[r["comm_id"]] = pid
+    # 树索引: 统一走 read_community_hierarchy_maps
+    parent_of, children_of = read_community_hierarchy_maps(db, task_id, base_et)
 
     # 社区名称
     name_rows = db.fetchall(
@@ -1111,8 +1119,9 @@ def get_external_graph(db, task_id: str, edge_type: str,
             _add_node(cid, comm_names.get(cid, cid), False, _cid_level_backend(cid))
             edges.append({"id": f"{ext_id}->{cid}", "source": ext_id, "target": cid})
 
-    # hasChildren
+    # hasChildren + parentId
     for nid in list(nodes.keys()):
+        nodes[nid]["parentId"] = parent_of.get(nid, '')
         if not nodes[nid].get("isExternal"):
             nodes[nid]["hasChildren"] = nid in children_of
 

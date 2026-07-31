@@ -2,31 +2,31 @@
 import type { ChatSession } from '@web/types'
 
 defineProps<{
-  tab: 'chat' | 'docs' | 'archives'
+  tab: 'chat' | 'notes' | 'archives'
   sessions: ChatSession[]
   currentId: string
   archives: any[]
-  documents: any[]
-  docSearch: string
-  viewingDoc: any
+  notes: any[]
+  noteSearch: string
+  viewingNote: any
 }>()
 
 const emit = defineEmits<{
-  'update:tab': [v: 'chat' | 'docs' | 'archives']
-  'update:docSearch': [v: string]
+  'update:tab': [v: 'chat' | 'notes' | 'archives']
+  'update:noteSearch': [v: string]
   createSession: []
   switchSession: [id: string]
   deleteSession: [id: string]
   openRename: [s: ChatSession]
   deleteArchive: [id: string]
-  loadDocs: []
-  viewDoc: [d: any]
-  deleteDoc: [id: string]
+  loadNotes: []
+  viewNote: [d: any]
+  deleteNote: [id: string]
   copyId: [id: string]
 }>()
 
-const tabKeys = ['chat', 'docs'] as const
-const tabLabels: Record<string, string> = { chat: '对话', docs: '文档' }
+const tabKeys = ['chat', 'notes'] as const
+const tabLabels: Record<string, string> = { chat: '对话', notes: '笔记' }
 </script>
 
 <template>
@@ -34,7 +34,7 @@ const tabLabels: Record<string, string> = { chat: '对话', docs: '文档' }
     <div class="sidebar-header">
       <div class="logo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><line x1="11" y1="7" x2="6" y2="17"/><line x1="13" y1="7" x2="18" y2="17"/><line x1="7" y1="19" x2="17" y2="19"/></svg>
-        <span>TopoCode</span>
+        <span>TopoCode Chat</span>
       </div>
     </div>
     <div class="sidebar-tabs">
@@ -64,14 +64,14 @@ const tabLabels: Record<string, string> = { chat: '对话', docs: '文档' }
     </div>
 
     <div v-else class="sidebar-content">
-      <input :value="docSearch" @input="emit('update:docSearch', ($event.target as HTMLInputElement).value); emit('loadDocs')" class="sidebar-search" placeholder="搜索文档..." />
-      <div v-for="d in documents" :key="d.id" class="note-item" :class="{ active: viewingDoc?.id === d.id }" @click="emit('viewDoc', d)">
+      <input :value="noteSearch" @input="emit('update:noteSearch', ($event.target as HTMLInputElement).value); emit('loadNotes')" class="sidebar-search" placeholder="搜索笔记..." />
+      <div v-for="d in notes" :key="d.id" class="note-item" :class="{ active: viewingNote?.id === d.id }" @click="emit('viewNote', d)">
         <span class="title" :title="d.title">{{ d.title || d.id }}</span>
         <span class="ref-count">{{ d.updated_at?.slice(0,10) || '' }}</span>
-        <button class="copy-id-btn" @click.stop="emit('copyId', d.id)" title="复制文档 ID"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
-        <button class="del-btn" @click.stop="emit('deleteDoc', d.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button class="copy-id-btn" @click.stop="emit('copyId', d.id)" title="复制笔记 ID"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+        <button class="del-btn" @click.stop="emit('deleteNote', d.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
-      <div v-if="!documents.length" class="note-empty">暂无文档</div>
+      <div v-if="!notes.length" class="note-empty">暂无笔记</div>
     </div>
   </aside>
 </template>

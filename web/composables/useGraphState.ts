@@ -94,7 +94,13 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
     const container = cyContainer.value
 
     const elements: any[] = []
-    for (const n of graphNodes.value) elements.push({ data: { id: n.id, label: n.label } })
+    for (const n of graphNodes.value) elements.push({
+      data: {
+        id: n.id, label: n.label,
+        commLv: n.commLv, isExternal: !!n.isExternal, hasChildren: !!n.hasChildren,
+        parentId: n.parentId || '', commId: n.commId || '',
+      },
+    })
     for (const e of graphEdges.value) elements.push({ data: { id: e.id, source: e.source, target: e.target } })
 
     try {
@@ -104,11 +110,12 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
           { selector: 'node', style: { 'background-color': '#4d6bfe', label: 'data(label)', 'font-size': '11px', 'text-valign': 'center', 'text-halign': 'center', width: 30, height: 30 } },
           { selector: 'edge', style: { width: 1.5, 'line-color': '#6b6b76', 'target-arrow-color': '#6b6b76', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
           { selector: 'node.hidden', style: { display: 'none' } },
+          { selector: 'node.ext-node', style: { 'border-color': '#ffffff', 'border-width': 2, 'border-style': 'dashed' } },
           { selector: 'node.center-highlight', style: { 'border-color': '#f59e0b', 'border-width': 3 } },
         ],
         layout: _buildLayout(_cy, graphNodes.value.length),
       })
-      applyNodeColors(_cy)
+      applyNodeColors(_cy, { visitedCommId: graphCommId.value, gran: gran.value })
       toolbarTitle.value = `图操作（${graphNodes.value.length} 节点 / ${graphEdges.value.length} 边）`
       setupFollowMode()
     } catch (e) { console.warn('[renderGraph] failed:', e); return }
@@ -169,7 +176,7 @@ export function useGraphState(taskId: ReturnType<typeof ref<string>>) {
       const label = graphNodes.value.find(n => n.id === nid)?.label || nid.slice(0, 16)
       pushGraphBc({ cid: nid, et: graphEdgeType.value, label })
       graphCommId.value = nid
-      if (evt.target.data('hasChildren') === false) gran.value = 'file'
+      if (evt.target.data('hasChildren') === false && !evt.target.data('isExternal')) gran.value = 'file'
       loadGraph()
       loadRightCommTree()
     })

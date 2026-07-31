@@ -58,8 +58,8 @@ def _make_message_id():
     return f"msg_{uuid.uuid4().hex[:12]}"
 
 
-def _make_note_id():
-    return f"note_{uuid.uuid4().hex[:12]}"
+def _make_draft_id():
+    return f"draft_{uuid.uuid4().hex[:12]}"
 
 
 def _create_chat_session(title: str, project_id: str = "") -> str:
@@ -1165,21 +1165,21 @@ async def delete_archive(archive_id: str):
         raise HTTPException(500, str(e))
 
 
-# ── Notes ──
+# ── Drafts ──
 
-@router.post("/api/notes")
-async def create_note(request: Request):
+@router.post("/api/drafts")
+async def create_draft(request: Request):
     _require_chat_ready()
     try:
         body = await request.json()
-        nid = _make_note_id()
+        nid = _make_draft_id()
         title = body.get("title", "")
         content = body.get("content", "")
         refs = json.dumps(body.get("refs", []), ensure_ascii=False)
         project_id = body.get("projectId") or body.get("project_id", "")
         now = __import__("datetime").datetime.now().isoformat()
         common.multi_db.main_db.execute(
-            "INSERT INTO chat_notes (id, title, content, refs, status, project_id, created_at, updated_at) "
+            "INSERT INTO chat_drafts (id, title, content, refs, status, project_id, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)",
             (nid, title, content, refs, project_id or None, now, now),
         )
@@ -1188,8 +1188,8 @@ async def create_note(request: Request):
         raise HTTPException(500, str(e))
 
 
-@router.get("/api/notes")
-async def list_notes(status: str = Query(None), project_id: str = Query(None)):
+@router.get("/api/drafts")
+async def list_drafts(status: str = Query(None), project_id: str = Query(None)):
     _require_chat_ready()
     try:
         wheres = []
@@ -1203,9 +1203,9 @@ async def list_notes(status: str = Query(None), project_id: str = Query(None)):
         where = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         rows = common.multi_db.main_db.fetchall(
             f"SELECT id, title, content, refs, status, session_id, project_id, created_at, updated_at "
-            f"FROM chat_notes {where} ORDER BY created_at DESC", tuple(params)
+            f"FROM chat_drafts {where} ORDER BY created_at DESC", tuple(params)
         )
-        return {"notes": [{"id": r["id"], "title": r["title"], "content": r["content"],
+        return {"drafts": [{"id": r["id"], "title": r["title"], "content": r["content"],
                             "refs": json.loads(r["refs"]) if r["refs"] else [],
                             "status": r["status"], "sessionId": r["session_id"], "projectId": r["project_id"],
                             "createdAt": r["created_at"], "updatedAt": r["updated_at"]} for r in rows], "total": len(rows)}
@@ -1213,16 +1213,16 @@ async def list_notes(status: str = Query(None), project_id: str = Query(None)):
         raise HTTPException(500, str(e))
 
 
-@router.get("/api/notes/{note_id}")
-async def get_note(note_id: str):
+@router.get("/api/drafts/{draft_id}")
+async def get_draft(draft_id: str):
     _require_chat_ready()
     try:
         row = common.multi_db.main_db.fetchone(
-            "SELECT id, title, content, refs, status, session_id, project_id, created_at, updated_at FROM chat_notes WHERE id = ?",
-            (note_id,),
+            "SELECT id, title, content, refs, status, session_id, project_id, created_at, updated_at FROM chat_drafts WHERE id = ?",
+            (draft_id,),
         )
         if not row:
-            raise HTTPException(404, "Note not found")
+            raise HTTPException(404, "Draft not found")
         return {"id": row["id"], "title": row["title"], "content": row["content"],
                 "refs": json.loads(row["refs"]) if row["refs"] else [],
                 "status": row["status"], "sessionId": row["session_id"], "projectId": row["project_id"],
@@ -1233,14 +1233,14 @@ async def get_note(note_id: str):
         raise HTTPException(500, str(e))
 
 
-@router.put("/api/notes/{note_id}")
-async def update_note(note_id: str, request: Request):
+@router.put("/api/drafts/{draft_id}")
+async def update_draft(draft_id: str, request: Request):
     _require_chat_ready()
     try:
         body = await request.json()
-        row = common.multi_db.main_db.fetchone("SELECT id, refs FROM chat_notes WHERE id = ?", (note_id,))
+        row = common.multi_db.main_db.fetchone("SELECT id, refs FROM chat_drafts WHERE id = ?", (draft_id,))
         if not row:
-            raise HTTPException(404, "Note not found")
+            raise HTTPException(404, "Draft not found")
         existing_refs = json.loads(row["refs"]) if row["refs"] else []
         updates = []
         if "title" in body:
@@ -1261,8 +1261,8 @@ async def update_note(note_id: str, request: Request):
         now = __import__("datetime").datetime.now().isoformat()
         updates.append(("updated_at", now))
         set_clause = ", ".join(f"{k} = ?" for k, _ in updates)
-        vals = [v for _, v in updates] + [note_id]
-        common.multi_db.main_db.execute(f"UPDATE chat_notes SET {set_clause} WHERE id = ?", tuple(vals))
+        vals = [v for _, v in updates] + [draft_id]
+        common.multi_db.main_db.execute(f"UPDATE chat_drafts SET {set_clause} WHERE id = ?", tuple(vals))
         return {"ok": True}
     except HTTPException:
         raise
@@ -1270,27 +1270,27 @@ async def update_note(note_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 
-@router.delete("/api/notes/{note_id}")
-async def delete_note(note_id: str):
+@router.delete("/api/drafts/{draft_id}")
+async def delete_draft(draft_id: str):
     _require_chat_ready()
     try:
-        common.multi_db.main_db.execute("DELETE FROM chat_notes WHERE id = ?", (note_id,))
+        common.multi_db.main_db.execute("DELETE FROM chat_drafts WHERE id = ?", (draft_id,))
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-@router.post("/api/notes/{note_id}/send")
-async def send_note(note_id: str, request: Request):
+@router.post("/api/drafts/{draft_id}/send")
+async def send_draft(draft_id: str, request: Request):
     _require_chat_ready()
     try:
         body = await request.json()
         session_id = body.get("sessionId") or body.get("session_id", "")
-        row = common.multi_db.main_db.fetchone("SELECT id, title, content, refs, status, project_id FROM chat_notes WHERE id = ?", (note_id,))
+        row = common.multi_db.main_db.fetchone("SELECT id, title, content, refs, status, project_id FROM chat_drafts WHERE id = ?", (draft_id,))
         if not row:
-            raise HTTPException(404, "Note not found")
+            raise HTTPException(404, "Draft not found")
         if row["status"] == "sent":
-            raise HTTPException(400, "Note already sent")
+            raise HTTPException(400, "Draft already sent")
 
         refs = json.loads(row["refs"]) if row["refs"] else []
         title = row["title"] or "便签消息"
@@ -1307,7 +1307,7 @@ async def send_note(note_id: str, request: Request):
             sid = _make_session_id()
             now = __import__("datetime").datetime.now().isoformat()
             metadata = json.dumps({"module": "web_chat", "model_id": "",
-                                    "active_skills": default_skills, "refs": refs, "note_id": note_id}, ensure_ascii=False)
+                                    "active_skills": default_skills, "refs": refs, "draft_id": draft_id}, ensure_ascii=False)
             _sdb().execute(
                 "INSERT INTO llm_sessions (id, module_type, project_id, title, metadata, created_at, updated_at) "
                 "VALUES (?, 'ai_assistant', ?, ?, ?, ?, ?)",
@@ -1319,10 +1319,10 @@ async def send_note(note_id: str, request: Request):
             if not existing:
                 raise HTTPException(404, "Session not found")
             meta = json.loads(existing["metadata"]) if existing["metadata"] else {}
-            sent_notes = meta.get("sent_note_ids", [])
-            if note_id in sent_notes:
-                raise HTTPException(400, "Note already sent to this session")
-            meta.setdefault("sent_note_ids", []).append(note_id)
+            sent_drafts = meta.get("sent_draft_ids", [])
+            if draft_id in sent_drafts:
+                raise HTTPException(400, "Draft already sent to this session")
+            meta.setdefault("sent_draft_ids", []).append(draft_id)
             now = __import__("datetime").datetime.now().isoformat()
             _sdb().execute("UPDATE llm_sessions SET metadata = ?, updated_at = ? WHERE id = ?",
                            (json.dumps(meta, ensure_ascii=False), now, session_id))
@@ -1335,19 +1335,19 @@ async def send_note(note_id: str, request: Request):
             _sdb().execute(
                 "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
                 "VALUES (?, ?, 'system', ?, ?, ?)",
-                (sys_msg_id, session_id, ref_context, json.dumps({"refs": refs, "note_id": note_id}, ensure_ascii=False), now),
+                (sys_msg_id, session_id, ref_context, json.dumps({"refs": refs, "draft_id": draft_id}, ensure_ascii=False), now),
             )
 
         user_text = note_content or f"分析这些内容：{title}"
         _sdb().execute(
             "INSERT INTO llm_messages (id, session_id, role, content, metadata, created_at) "
             "VALUES (?, ?, 'user', ?, ?, ?)",
-            (user_msg_id, session_id, user_text, json.dumps({"refs": refs, "note_id": note_id}, ensure_ascii=False), now),
+            (user_msg_id, session_id, user_text, json.dumps({"refs": refs, "draft_id": draft_id}, ensure_ascii=False), now),
         )
 
         common.multi_db.main_db.execute(
-            "UPDATE chat_notes SET status = 'sent', session_id = ?, message_id = ?, updated_at = ? WHERE id = ?",
-            (session_id, user_msg_id, now, note_id),
+            "UPDATE chat_drafts SET status = 'sent', session_id = ?, message_id = ?, updated_at = ? WHERE id = ?",
+            (session_id, user_msg_id, now, draft_id),
         )
 
         return {"sessionId": session_id, "messageId": user_msg_id, "ok": True}
@@ -1357,18 +1357,18 @@ async def send_note(note_id: str, request: Request):
         raise HTTPException(500, str(e))
 
 
-@router.post("/api/notes/batch-send")
-async def batch_send_notes(request: Request):
+@router.post("/api/drafts/batch-send")
+async def batch_send_drafts(request: Request):
     _require_chat_ready()
     try:
         body = await request.json()
-        note_ids = body.get("noteIds", [])
-        if not note_ids:
-            raise HTTPException(422, "noteIds is required")
+        draft_ids = body.get("draftIds", [])
+        if not draft_ids:
+            raise HTTPException(422, "draftIds is required")
         first = None
-        for nid in note_ids:
+        for nid in draft_ids:
             try:
-                result = await send_note(nid, request)
+                result = await send_draft(nid, request)
                 if not first:
                     first = result
             except HTTPException as e:
@@ -1382,7 +1382,7 @@ async def batch_send_notes(request: Request):
         raise HTTPException(500, str(e))
 
 
-@router.post("/api/notes/execute-draft")
+@router.post("/api/drafts/execute-draft")
 async def execute_draft(request: Request):
     _require_chat_ready()
     try:
@@ -1451,18 +1451,18 @@ async def execute_draft(request: Request):
         raise HTTPException(500, str(e))
 
 
-# ── Documents ──
+# ── Notes ──
 
-@router.post("/api/documents")
-async def create_doc(request: Request):
+@router.post("/api/notes")
+async def create_note(request: Request):
     _require_chat_ready()
     try:
         body = await request.json()
-        title = body.get("title", "无标题文档")
+        title = body.get("title", "无标题笔记")
         content = body.get("content", "")
         project_id = body.get("projectId") or body.get("project_id", "")
         tags = body.get("tags", "")
-        did = f"doc_{uuid.uuid4().hex[:12]}"
+        did = f"note_{uuid.uuid4().hex[:12]}"
         now = __import__("datetime").datetime.now().isoformat()
         common.multi_db.knowledge_db.execute(
             "INSERT INTO knowledge_docs (id, title, content, project_id, tags, status, created_at, updated_at) "
@@ -1474,8 +1474,8 @@ async def create_doc(request: Request):
         raise HTTPException(500, str(e))
 
 
-@router.get("/api/documents")
-async def list_docs(search: str = "", status: str = "", project_id: str = "",
+@router.get("/api/notes")
+async def list_notes(search: str = "", status: str = "", project_id: str = "",
                      page: int = 1, page_size: int = 50):
     _require_chat_ready()
     try:
@@ -1498,18 +1498,18 @@ async def list_docs(search: str = "", status: str = "", project_id: str = "",
             f"FROM knowledge_docs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             tuple(params) + (page_size, (page - 1) * page_size)
         )
-        return {"documents": rows, "total": total}
+        return {"notes": rows, "total": total}
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-@router.get("/api/documents/{doc_id}")
-async def get_doc(doc_id: str):
+@router.get("/api/notes/{note_id}")
+async def get_note(note_id: str):
     _require_chat_ready()
     try:
-        row = common.multi_db.knowledge_db.fetchone("SELECT * FROM knowledge_docs WHERE id = ?", (doc_id,))
+        row = common.multi_db.knowledge_db.fetchone("SELECT * FROM knowledge_docs WHERE id = ?", (note_id,))
         if not row:
-            raise HTTPException(404, "Document not found")
+            raise HTTPException(404, "Note not found")
         return dict(row)
     except HTTPException:
         raise
@@ -1517,8 +1517,8 @@ async def get_doc(doc_id: str):
         raise HTTPException(500, str(e))
 
 
-@router.put("/api/documents/{doc_id}")
-async def update_doc(doc_id: str, request: Request):
+@router.put("/api/notes/{note_id}")
+async def update_note(note_id: str, request: Request):
     _require_chat_ready()
     try:
         body = await request.json()
@@ -1533,17 +1533,17 @@ async def update_doc(doc_id: str, request: Request):
             return {"ok": True}
         vals.append(__import__("datetime").datetime.now().isoformat())
         sets.append("updated_at = ?")
-        common.multi_db.knowledge_db.execute(f"UPDATE knowledge_docs SET {', '.join(sets)} WHERE id = ?", tuple(vals) + (doc_id,))
+        common.multi_db.knowledge_db.execute(f"UPDATE knowledge_docs SET {', '.join(sets)} WHERE id = ?", tuple(vals) + (note_id,))
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-@router.delete("/api/documents/{doc_id}")
-async def delete_doc(doc_id: str):
+@router.delete("/api/notes/{note_id}")
+async def delete_note(note_id: str):
     _require_chat_ready()
     try:
-        common.multi_db.knowledge_db.execute("DELETE FROM knowledge_docs WHERE id = ?", (doc_id,))
+        common.multi_db.knowledge_db.execute("DELETE FROM knowledge_docs WHERE id = ?", (note_id,))
         return {"ok": True}
     except Exception as e:
         raise HTTPException(500, str(e))

@@ -277,8 +277,21 @@ def _ensure_chat_tables():
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
+    # 迁移: chat_notes → chat_drafts (便签表改名, 保留数据)
+    try:
+        _old = multi_db.main_db.fetchone(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_notes'"
+        )
+        _new = multi_db.main_db.fetchone(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chat_drafts'"
+        )
+        if _old and not _new:
+            multi_db.main_db.execute("ALTER TABLE chat_notes RENAME TO chat_drafts")
+            logger.info("[chat] migrated chat_notes → chat_drafts")
+    except Exception as e:
+        logger.warning(f"[chat] chat_notes→chat_drafts migration skipped: {e}")
     multi_db.main_db.execute("""
-        CREATE TABLE IF NOT EXISTS chat_notes (
+        CREATE TABLE IF NOT EXISTS chat_drafts (
             id TEXT PRIMARY KEY,
             title TEXT DEFAULT '',
             content TEXT DEFAULT '',

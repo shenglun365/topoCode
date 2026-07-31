@@ -1,16 +1,36 @@
 export function useGraphLayout() {
   console.log('[useGraphLayout] init')
 
+  // 外部专用色带 [EXT_HUE_START, EXT_HUE_END)：内部色相稳定避开该区间
+  const EXT_HUE_START = 190
+  const EXT_HUE_END = 235
+
   function _stableHue(id: string): number {
     let h = 0; for (let i = 0; i < id.length; i++) { h = ((h << 5) - h) + id.charCodeAt(i); h |= 0 }
     h = Math.abs(h)
     return ((h * 2654435761) ^ (h >>> 16)) % 360
   }
 
+  function _externalHue(id: string): number {
+    return EXT_HUE_START + (_stableHue(id) % (EXT_HUE_END - EXT_HUE_START))
+  }
+
+  function _internalHue(id: string): number {
+    const span = 360 - (EXT_HUE_END - EXT_HUE_START)
+    let h = _stableHue(id) % span
+    if (h >= EXT_HUE_START) h += (EXT_HUE_END - EXT_HUE_START)
+    return h
+  }
+
   function _hueSatLight(depth: number, hue: number): string {
     const t = [[80, 55], [70, 65], [55, 78], [40, 88], [30, 94]]
     const v = t[Math.min(depth, 4)]
     return `hsl(${hue}, ${v[0]}%, ${v[1]}%)`
+  }
+
+  function _levelNum(id: string): number | null {
+    const m = /L(\d+)/.exec(id || '')
+    return m ? parseInt(m[1]) : null
   }
 
   function _parentCommId(cid: string): string | null {
@@ -27,21 +47,42 @@ export function useGraphLayout() {
     return null
   }
 
-  function applyNodeColors(cy: any, _isExternal?: boolean) {
-    const colorRoot: Record<string, string> = {}
+  function applyNodeColors(cy: any, opts?: { visitedCommId?: string; gran?: string }) {
+    const visitedCommId = (opts?.visitedCommId || '').trim()
+    const gran = opts?.gran || 'component'
+    const visitedLv = visitedCommId ? _levelNum(visitedCommId) : null
+    // 色系根层级: 根视图 → L0 全部为色系根; 访问 Lk 社区 → 其第一级子节点 (Lk+1) 为色系根
+    const rootLevel = visitedCommId && visitedLv !== null ? visitedLv + 1 : 0
+
+    const nodeById: Record<string, any> = {}
+    cy.nodes().forEach((m: any) => { nodeById[m.id()] = m })
+
     cy.nodes().forEach((n: any) => {
-      let key = n.id(), pid = _parentCommId(n.id())
-      while (pid !== null) { key = pid; pid = _parentCommId(pid) }
-      colorRoot[n.id()] = key
-    })
-    const rootHue: Record<string, number> = {}
-    for (const rk of Object.values(colorRoot)) rootHue[rk] = _stableHue(rk)
-    cy.nodes().forEach((n: any) => {
-      const nid = n.id(), rid = colorRoot[nid]
-      if (!rid) { n.style('background-color', '#999'); return }
-      let cd = 0
-      for (let cur = nid; cur !== rid;) { const p = _parentCommId(cur); if (p === null) break; cur = p; cd++ }
-      n.style('background-color', _hueSatLight(cd, rootHue[rid]))
+      const nid = n.id()
+      // 外部节点: 固定色带 + 白色虚线描边（二次区分）
+      if (n.data('isExternal')) {
+        n.addClass('ext-node')
+        n.style('background-color', _hueSatLight(0, _externalHue(nid)))
+        return
+      }
+      const lv = _levelNum(n.data('commLv') || '')
+      // 文件级 / 无层级节点: 色系根 = 所属社区
+      if (gran === 'file' || lv === null) {
+        const commId = n.data('commId') || n.data('parentId') || nid
+        n.style('background-color', _hueSatLight(0, _internalHue(commId)))
+        return
+      }
+      // 内部节点: 回溯到色系根 (优先 parentId, 兜底字符串), 深度控制明暗
+      const depth = Math.max(0, lv - rootLevel)
+      let rootId = nid
+      let cur = nid
+      for (let i = 0; i < depth; i++) {
+        const p = nodeById[cur]?.data('parentId') || _parentCommId(cur)
+        if (!p) break
+        cur = p
+        rootId = cur
+      }
+      n.style('background-color', _hueSatLight(depth, _internalHue(rootId)))
     })
   }
 

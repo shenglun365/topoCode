@@ -430,7 +430,7 @@ async function saveDiagramStates() {
   if (!doc.value) return
   doc.value.content = diagramStateStore.embedInContent(doc.value.content, id)
   try {
-    const r = await fetch(`/api/documents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: doc.value.content }) })
+    const r = await fetch(`/api/notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: doc.value.content }) })
     if (!r.ok) throw new Error()
     diagramStateStore.removeAll(id)
     hasUnsavedDiag.value = false

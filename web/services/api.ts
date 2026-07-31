@@ -1,4 +1,4 @@
-import type { Project, Task, ChatSession, ChatMessage, ModelConfig, Note, GraphNode, GraphEdge, CommunityDoc, CommunityChild } from '@web/types'
+import type { Project, Task, ChatSession, ChatMessage, ModelConfig, Draft, GraphNode, GraphEdge, CommunityDoc, CommunityChild } from '@web/types'
 
 const API_BASE = ''
 
@@ -96,21 +96,21 @@ export function listModels(): Promise<{ models: ModelConfig[]; webChatDefaultMod
   return get('/api/models')
 }
 
-// ── Notes ──
+// ── Drafts (sticky notes) ──
 
-export function listNotes(status?: string, projectId?: string): Promise<{ notes: Note[]; total: number }> {
+export function listDrafts(status?: string, projectId?: string): Promise<{ drafts: Draft[]; total: number }> {
   const params: Record<string, string> = {}
   if (status) params.status = status
   if (projectId) params.project_id = projectId
-  return get('/api/notes', params)
+  return get('/api/drafts', params)
 }
 
-export function createNote(data: Partial<Note>): Promise<{ id: string; title: string; ok: boolean }> {
-  return post('/api/notes', data)
+export function createDraft(data: Partial<Draft>): Promise<{ id: string; title: string; ok: boolean }> {
+  return post('/api/drafts', data)
 }
 
-export function deleteNote(id: string): Promise<{ ok: boolean }> {
-  return del(`/api/notes/${id}`)
+export function deleteDraft(id: string): Promise<{ ok: boolean }> {
+  return del(`/api/drafts/${id}`)
 }
 
 // ── Community / Graph ──
@@ -158,8 +158,8 @@ export function deleteArchive(id: string): Promise<{ ok: boolean }> {
   return del(`/api/chat/archives/${id}`)
 }
 
-export function updateDoc(docId: string, data: any): Promise<any> {
-  return put(`/api/documents/${docId}`, data)
+export function updateNote(noteId: string, data: any): Promise<any> {
+  return put(`/api/notes/${noteId}`, data)
 }
 
 export { get, post, put, del }
