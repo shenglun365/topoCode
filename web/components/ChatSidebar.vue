@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ChatSession } from '@web/types'
+import StarLogoMark from '@web/components/StarLogoMark.vue'
 
 defineProps<{
   tab: 'chat' | 'notes' | 'archives'
@@ -33,7 +34,7 @@ const tabLabels: Record<string, string> = { chat: '对话', notes: '笔记' }
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><line x1="11" y1="7" x2="6" y2="17"/><line x1="13" y1="7" x2="18" y2="17"/><line x1="7" y1="19" x2="17" y2="19"/></svg>
+        <StarLogoMark :size="18" />
         <span>TopoCode Chat</span>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import * as api from '@web/services/api'
 import { t } from '@web/services/i18n'
 import type { Project, Task } from '@web/types'
+import StarLogoMark from '@web/components/StarLogoMark.vue'
 
 const projects = ref<Project[]>([])
 const tasksByProject = ref<Record<string, Task[]>>({})
@@ -90,7 +91,10 @@ onMounted(async () => {
 
 <template>
   <div class="container">
-    <h1>TopoCode 文档</h1>
+    <div class="page-header">
+      <StarLogoMark :size="40" />
+      <h1>TopoCode 文档</h1>
+    </div>
     <div class="toolbar">
       <form @submit.prevent="page = 1" style="display:flex;gap:8px;flex:1;align-items:center">
         <input v-model="search" type="text" placeholder="搜索项目/任务..." />
@@ -161,7 +165,8 @@ onMounted(async () => {
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--font);background:var(--bg-secondary);color:var(--text);font-size:14px;line-height:1.6;padding:24px;-webkit-font-smoothing:antialiased}
 .container{max-width:760px;margin:0 auto}
-h1{font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text)}
+.page-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+h1{font-size:18px;font-weight:600;color:var(--text)}
 .toolbar{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
 .toolbar input{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;flex:1;min-width:160px;outline:none;background:var(--bg);color:var(--text)}
 .toolbar input:focus{border-color:var(--accent)}

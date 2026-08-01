@@ -12,6 +12,7 @@ import { useHeatmap } from '@web/composables/useHeatmap'
 import { useToast } from '@web/composables/useToast'
 import { useGraphState } from '@web/composables/useGraphState'
 import GraphContextMenu from '@web/components/graph/GraphContextMenu.vue'
+import StarLogoMark from '@web/components/StarLogoMark.vue'
 
 const taskId = ref(new URLSearchParams(location.search).get('taskId') || '')
 const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
@@ -529,6 +530,7 @@ onMounted(() => {
 <template>
   <div class="viewer">
     <div class="header">
+      <StarLogoMark :size="26" />
       <span class="title">TopoCode Doc Viewer</span>
       <select v-model.number="fontSize">
         <option :value="13">13px</option><option :value="15">15px</option>

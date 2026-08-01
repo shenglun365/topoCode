@@ -98,11 +98,32 @@ export function useGraphLayout() {
     }
   }
 
+  function _repositionIsolatedNodes(cy: any) {
+    const isolated = cy.nodes().filter((n: any) => n.degree(false) === 0)
+    if (isolated.empty()) return
+    const ext = cy.extent()
+    const pad = 30, nodeW = 34, nodeH = 34
+    const colStep = nodeW + 8, rowH = nodeH + 8
+    const xMin = ext.x1 + pad, xMax = ext.x2 - pad
+    const yMin = ext.y1 + pad, yMax = ext.y2 - pad
+    const cols = Math.max(1, Math.floor((xMax - xMin) / colStep))
+    cy.batch(() => {
+      isolated.sort((a: any, b: any) => (a.id() < b.id() ? -1 : 1))
+        .forEach((n: any, i: number) => {
+          const row = Math.floor(i / cols), col = i % cols
+          const x = Math.min(xMax - nodeW / 2, xMin + nodeW / 2 + col * colStep)
+          const y = Math.max(yMin, yMax - rowH / 2 - row * rowH)
+          n.position({ x, y })
+        })
+    })
+  }
+
   function _afterLayout(cy: any) {
     cy.one('layoutstop', () => {
       cy.zoom(1.0)
       const conn = cy.nodes().filter((n: any) => n.degree(false) > 0)
       if (!conn.empty()) cy.center(conn); else cy.center()
+      _repositionIsolatedNodes(cy)
     })
   }
 
