@@ -6,6 +6,8 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
+    "./web/architect.html",
+    "./web/architect-src/**/*.{vue,ts}",
   ],
   theme: {
     extend: {

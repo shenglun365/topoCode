@@ -6,13 +6,15 @@ import { resolve } from 'path'
 const ROOT = resolve(__dirname)
 const STATIC_DIR = resolve(ROOT, 'plugins/reports/static')
 const WEB_DIR = resolve(ROOT, 'web')
+const ARCHITECT_SRC = resolve(WEB_DIR, 'architect-src')
 
-// Plugin: rewrite /doc → /viewer.html, /chat → /chat.html
+// Plugin: rewrite /doc → /viewer.html, /chat → /chat.html, /architect → /architect.html
 function pageRewritePlugin() {
   const REWRITES: Record<string, string> = {
     '/doc': '/viewer.html',
     '/chat': '/chat.html',
     '/code': '/code.html',
+    '/architect': '/architect.html',
   }
   return {
     name: 'page-rewrite',
@@ -37,6 +39,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@web': WEB_DIR,
+      '@': ARCHITECT_SRC,
     },
   },
   server: {
@@ -55,7 +58,7 @@ export default defineConfig({
   cacheDir: resolve(__dirname, 'node_modules/.vite-web'),
   optimizeDeps: {
     include: ['cytoscape', 'cytoscape-cose-bilkent', 'marked', 'marked-highlight', 'highlight.js', 'mermaid'],
-    exclude: ['@/services/ipc', '@/services/*', '@/stores/*', '@/composables/*', '@/utils/*'],
+    exclude: ['@/services/ipc', '@/services/*', '@/stores/*', '@/composables/*', '@/utils/*', 'architect-src/*'],
   },
   build: {
     outDir: STATIC_DIR,
@@ -65,11 +68,15 @@ export default defineConfig({
         'web-root': resolve(WEB_DIR, 'web-root.html'),
         viewer: resolve(WEB_DIR, 'viewer.html'),
         chat: resolve(WEB_DIR, 'chat.html'),
+        architect: resolve(WEB_DIR, 'architect.html'),
       },
       output: {
         entryFileNames: 'web/[name]/assets/[name].[hash].js',
         chunkFileNames: 'web/[name]/assets/chunk-[hash].js',
         assetFileNames: 'web/[name]/assets/[name].[hash][extname]',
+        manualChunks(id: string) {
+          if (id.includes('architect-src')) return 'architect/vendor'
+        },
       },
     },
   },

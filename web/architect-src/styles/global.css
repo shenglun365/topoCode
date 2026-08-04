@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-ctp-base text-ctp-text font-sans;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ctp-surface1 rounded-full;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ctp-surface2;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-ctp-mantle border border-ctp-surface0 rounded-lg;
+  }
+  .panel-header {
+    @apply flex items-center justify-between px-4 py-2.5 border-b border-ctp-surface0 text-sm font-medium text-ctp-subtext1;
+  }
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer select-none disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-ctp-blue text-ctp-crust hover:bg-ctp-sapphire;
+  }
+  .btn-ghost {
+    @apply btn text-ctp-subtext1 hover:bg-ctp-surface0 hover:text-ctp-text;
+  }
+  .btn-green {
+    @apply btn bg-ctp-green text-ctp-crust hover:brightness-110;
+  }
+  .btn-mauve {
+    @apply btn bg-ctp-mauve text-ctp-crust hover:brightness-110;
+  }
+  .btn-teal {
+    @apply btn bg-ctp-teal text-ctp-crust hover:brightness-110;
+  }
+  .btn-red {
+    @apply btn bg-ctp-red text-ctp-crust hover:brightness-110;
+  }
+  .btn-blue {
+    @apply btn bg-ctp-blue text-ctp-crust hover:brightness-110;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+  .btn-xs {
+    @apply px-2 py-0.5 text-[11px];
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .input {
+    @apply w-full rounded-md bg-ctp-crust border border-ctp-surface1 px-3 py-1.5 text-sm text-ctp-text placeholder-ctp-overlay0 focus:border-ctp-blue focus:ring-1 focus:ring-ctp-blue outline-none;
+  }
+  .md-body {
+    @apply prose prose-sm prose-invert max-w-none;
+    --tw-prose-body: #cdd6f4;
+    --tw-prose-headings: #cdd6f4;
+    --tw-prose-links: #89b4fa;
+    --tw-prose-bold: #bac2de;
+    --tw-prose-quotes: #a6adc8;
+    --tw-prose-code: #f5c2e7;
+    --tw-prose-pre-bg: #181825;
+    --tw-prose-bullets: #6c7086;
+    --tw-prose-hr: #313244;
+    --tw-prose-th-borders: #313244;
+    --tw-prose-td-borders: #313244;
+  }
+  .md-body pre {
+    @apply bg-ctp-crust border border-ctp-surface0;
+  }
+  .md-body code:not(pre code) {
+    @apply bg-ctp-surface0 px-1 py-0.5 rounded text-[0.85em];
+  }
+}
+
+@keyframes topo-flow {
+  0% { offset-distance: 0%; }
+  100% { offset-distance: 100%; }
+}
+@keyframes topo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up {
+  animation: fade-up 0.25s ease-out both;
+}
