@@ -1,6 +1,8 @@
 import type { ArchitectureModel, Blueprint } from '@/types'
 import type { KbAnalysisTurn } from './kb-analysis-agent'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
+import { apiPost } from './api-client'
+import { backendUp } from './backend'
 import { mockResult } from './mock/delay'
 import { useArchMcpStore } from '@/stores/mcp-store'
 
@@ -58,6 +60,26 @@ let bpSeq = 0
 
 export const blueprintAgent = {
   async init(req: BlueprintInitRequest): Promise<BlueprintInitResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ turns: KbAnalysisTurn[]; blueprint: { id: string } }>('/blueprint/init', req)
+        if (res.turns?.length && res.blueprint?.id) {
+          const blueprint: Blueprint = {
+            id: res.blueprint.id,
+            title: `${req.productForm === 'ui-ue' ? '界面' : '服务'}架构蓝图`,
+            description: `依据 ${req.reqIds.length} 条需求初始草拟`,
+            model: buildDraftModel(),
+            source: 'agent-draft',
+            status: 'draft',
+            createdAt: Date.now(),
+          }
+          this.record('topocode.blueprint.init', `蓝图初始化：${req.productForm} · ${req.reqIds.length} 条需求`)
+          return { turns: res.turns, blueprint }
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
     await mockResult(null, 500)
     bpSeq += 1
     const turns: KbAnalysisTurn[] = [
@@ -81,6 +103,26 @@ export const blueprintAgent = {
   },
 
   async refine(req: BlueprintRefineRequest): Promise<BlueprintRefineResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ blueprint: { id: string }; questions?: KbAnalysisTurn[] }>('/blueprint/refine', req)
+        if (res.blueprint?.id) {
+          const blueprint: Blueprint = {
+            id: req.blueprintId,
+            title: '架构蓝图',
+            description: `已${req.action}节点 ${req.nodeId}`,
+            model: buildDraftModel(),
+            source: 'agent+user',
+            status: 'draft',
+            createdAt: Date.now(),
+          }
+          this.record('topocode.blueprint.refine', `细化：${req.action} · 节点 ${req.nodeId}`)
+          return { blueprint, questions: res.questions as KbAnalysisTurn[] | undefined }
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
     await mockResult(null, 400)
     const model = buildDraftModel()
     const blueprint: Blueprint = {
@@ -97,6 +139,20 @@ export const blueprintAgent = {
   },
 
   async freeze(blueprintId: string): Promise<BlueprintFreezeResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ blueprint: { id: string }; taskTreeHint: BlueprintFreezeResult['taskTreeHint'] }>('/blueprint/demo-freeze', { blueprintId })
+        if (res.blueprint?.id && res.taskTreeHint) {
+          this.record('topocode.blueprint.freeze', `出 demo：蓝图 ${blueprintId}`)
+          return {
+            blueprint: { id: blueprintId, title: '', description: '', model: emptyModel(), source: 'agent+user', status: 'draft', createdAt: Date.now() },
+            taskTreeHint: res.taskTreeHint,
+          }
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
     await mockResult(null, 350)
     this.record('topocode.blueprint.freeze', `出 demo：蓝图 ${blueprintId}`)
     return {
@@ -106,6 +162,17 @@ export const blueprintAgent = {
   },
 
   async confirm(blueprintId: string): Promise<{ status: string }> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ status: string }>('/blueprint/confirm', { blueprintId })
+        if (res.status) {
+          this.record('topocode.blueprint.confirm', `蓝图确认：${blueprintId}`)
+          return { status: res.status }
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
     await mockResult(null, 300)
     this.record('topocode.blueprint.confirm', `蓝图确认：${blueprintId}`)
     return { status: 'confirmed' }

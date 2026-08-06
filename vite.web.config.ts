@@ -47,7 +47,8 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true },
+      '/api/architect': { target: 'http://127.0.0.1:3470', changeOrigin: true, ws: true },
+      '/api': { target: 'http://127.0.0.1:3456', changeOrigin: true, ws: true },
       '/web': { target: 'http://127.0.0.1:3456', changeOrigin: true },
       '/static': { target: 'http://127.0.0.1:3456', changeOrigin: true },
     },
@@ -68,15 +69,11 @@ export default defineConfig({
         'web-root': resolve(WEB_DIR, 'web-root.html'),
         viewer: resolve(WEB_DIR, 'viewer.html'),
         chat: resolve(WEB_DIR, 'chat.html'),
-        architect: resolve(WEB_DIR, 'architect.html'),
       },
       output: {
         entryFileNames: 'web/[name]/assets/[name].[hash].js',
         chunkFileNames: 'web/[name]/assets/chunk-[hash].js',
         assetFileNames: 'web/[name]/assets/[name].[hash][extname]',
-        manualChunks(id: string) {
-          if (id.includes('architect-src')) return 'architect/vendor'
-        },
       },
     },
   },

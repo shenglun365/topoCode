@@ -39,6 +39,11 @@ function adaptProject(p: any): Project {
     createdAt: p.created_at ?? p.createdAt ?? '',
     groups: p.groups || [],
     doneTaskCount: p.done_task_count ?? p.doneTaskCount ?? 0,
+    importMode: p.import_mode ?? p.importMode ?? '',
+    remoteUrl: p.remote_url ?? p.remoteUrl ?? '',
+    localRepoPath: p.local_repo_path ?? p.localRepoPath ?? '',
+    sourceCacheDir: p.source_cache_dir ?? p.sourceCacheDir ?? '',
+    currentVersionId: p.current_version_id ?? p.currentVersionId ?? '',
   }
 }
 
@@ -93,8 +98,8 @@ function createRealIPC() {
         const list = await api.project.list()
         return adaptProjectList(list)
       },
-      import: async (path: string) => {
-        const result = await api.project.import(path)
+      import: async (path: string, opts?: { mode?: string; branch?: string; head?: string; repoUrl?: string; localRepoPath?: string }) => {
+        const result = await api.project.import(path, opts)
         return adaptProject(result)
       },
       get: async (id: string) => {
@@ -142,8 +147,33 @@ function createRealIPC() {
       getGitInfo: async (params: { projectId: string }) => {
         return await api.project.getGitInfo(params)
       },
+      saveBaseline: async (params: { projectId: string; remoteUrl?: string; localRepoPath?: string; branch?: string; head?: string }) => {
+        return await api.project.saveBaseline(params)
+      },
       checkImportStatus: async (params: { projectId: string }) => {
         return await api.project.checkImportStatus(params)
+      },
+    },
+
+    // ==================== KB 版本基线 ====================
+    version: {
+      list: async (projectId: string) => {
+        return await api.call('version.list', { projectId })
+      },
+      get: async (projectId: string, versionId: string) => {
+        return await api.call('version.get', { projectId, versionId })
+      },
+      preview: async (projectId: string, opts?: { branch?: string; head?: string }) => {
+        return await api.call('version.preview', { projectId, ...(opts || {}) })
+      },
+      sync: async (projectId: string, opts?: { branch?: string; head?: string; label?: string; stages?: Record<string, boolean>; force?: boolean; requestId?: string }) => {
+        return await api.call('version.sync', { projectId, ...(opts || {}) })
+      },
+      diff: async (projectId: string, fromId: string, toId: string) => {
+        return await api.call('version.diff', { projectId, fromId, toId })
+      },
+      materialize: async (projectId: string, versionId: string) => {
+        return await api.call('version.materialize', { projectId, versionId })
       },
     },
 
@@ -472,6 +502,18 @@ function createRealIPC() {
       },
       getDimensions: async () => {
         return await api.knowledge.getDimensions()
+      },
+      pullRequest: async (params: { projectId: string; repoUrl?: string; localRepoPath?: string; branch?: string; head?: string; note?: string }) => {
+        return await api.call('knowledge.pullRequest', params)
+      },
+      pendingUpdates: async (projectId?: string) => {
+        return await api.call('knowledge.pendingUpdates', { projectId })
+      },
+      updateConfirm: async (requestId: string, opts?: { method?: string }) => {
+        return await api.call('knowledge.updateConfirm', { requestId, ...(opts || {}) })
+      },
+      updateCancel: async (requestId: string) => {
+        return await api.call('knowledge.updateCancel', { requestId })
       },
     },
 

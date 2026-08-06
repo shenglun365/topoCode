@@ -77,7 +77,8 @@ contextBridge.exposeInMainWorld('api', {
   // ==================== 项目管理 ====================
   project: {
     list: () => ipcRenderer.invoke('ipc:call', { method: 'project.list', params: {} }),
-    import: (path: string) => ipcRenderer.invoke('ipc:call', { method: 'project.import', params: { path } }),
+    import: (path: string, opts?: { mode?: string; branch?: string; head?: string; repoUrl?: string; localRepoPath?: string }) =>
+      ipcRenderer.invoke('ipc:call', { method: 'project.import', params: { path, ...(opts || {}) } }),
     get: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.get', params: { id } }),
     remove: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.remove', params: { id } }),
     sync: (id: string) => ipcRenderer.invoke('ipc:call', { method: 'project.sync', params: { id } }),

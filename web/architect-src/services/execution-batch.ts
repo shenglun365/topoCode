@@ -1,6 +1,8 @@
 import type { DesignPlan, ExecutionTask, Requirement, TaskNode } from '@/types'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchTaskStore } from '@/stores/task-store'
+import { apiPost } from './api-client'
+import { backendUp } from './backend'
 import { BASELINE_COMMIT } from './mock/order-system'
 
 /**
@@ -73,11 +75,37 @@ export function buildTaskTree(plan: DesignPlan, reqs: Requirement[], opts?: { in
 }
 
 /** 落盘批次：方案确认 + 任务树注册 + 创建执行任务，需求标记执行中并绑定 execId。 */
-export async function commitBatch(reqs: Requirement[], adapter: string, plan?: DesignPlan, opts?: { model?: string }): Promise<{ plan: DesignPlan; exec: ExecutionTask }> {
+export async function commitBatch(reqs: Requirement[], adapter: string, plan?: DesignPlan, opts?: { model?: string; testIds?: string[] }): Promise<{ plan: DesignPlan; exec: ExecutionTask }> {
   const requirement = useArchRequirementStore()
   const task = useArchTaskStore()
   const p = plan ?? buildBatchPlan(reqs)
   if (!p.taskPlanId) p.taskPlanId = `tp-${Date.now().toString().slice(-4)}`
+
+  // 后端优先：POST /exec 原子 commitBatch(方案+任务树+执行任务+需求绑定 单事务)。
+  if (await backendUp()) {
+    try {
+      const res = await apiPost<{ plan: DesignPlan; exec: ExecutionTask }>('/exec', {
+        reqIds: reqs.map((r) => r.id),
+        adapter,
+        model: opts?.model,
+        plan: p,
+        testIds: opts?.testIds,
+      })
+      const planOut = res.plan
+      const execOut = res.exec
+      task.planToTaskTree[planOut.taskPlanId ?? planOut.id] = buildTaskTree(planOut, reqs)
+      requirement.addPlan(planOut)
+      if (planOut.status === 'confirmed') {
+        requirement.confirmPlan(planOut.id)
+      }
+      if (!task.findExecution(execOut.id)) task.executionTasks.unshift(execOut)
+      reqs.forEach((r) => { r.execId = execOut.id })
+      return { plan: planOut, exec: execOut }
+    } catch {
+      // 后端调用失败 → 本地 mock 落盘(与既有行为一致)
+    }
+  }
+
   task.planToTaskTree[p.taskPlanId] = buildTaskTree(p, reqs)
   requirement.addPlan(p)
   requirement.confirmPlan(p.id)

@@ -395,6 +395,150 @@ export interface DesignPlan {
 export type ExecutionStatus = 'created' | 'running' | 'accepting' | 'done' | 'failed' | 'blocked' | 'stopped'
 export type Connectivity = 'unknown' | 'ok' | 'fail'
 
+/** 概览页「启动命令」栏目：后端 /launch 返回的启动信息。 */
+export interface LaunchInfo {
+  execRoot: string
+  kbRoot: string
+  mode: string
+  productForm?: string
+  scaffold?: Record<string, unknown> | null
+}
+
+/** 概览页「agent设置」栏目：coding agent 适配器。 */
+export interface AgentAdapterInfo {
+  id: string
+  name: string
+  desc?: string
+  models?: string[]
+  keepContext?: boolean
+  note?: string
+}
+
+/** 概览页「agent设置」栏目：KB 关联项(来自 /project/kb/list 的关联项目)。 */
+export interface KbLinkItem extends KbProject {
+  bound?: boolean
+}
+
+/** 概览页「agent设置」栏目：coding agent 适配器 + 联通性。 */
+export interface OverviewAdapter extends AgentAdapterInfo {
+  conn: Connectivity
+}
+
+/** 三方 coding agent 连接配置(架构师不存三方密码，仅存连接参数)。 */
+export interface AgentConfig {
+  id: string
+  adapter: string
+  name: string
+  mode: 'server' | 'cli'
+  host: string
+  port: number
+  username: string
+  /** 探测地址(如 http://127.0.0.1:4096)，缺省由 host/port 推导。 */
+  url?: string
+  /** 选用的模型 id 列表(来自 agent 自身已配置 auth 的模型)。 */
+  models: string[]
+  defaultModel?: string
+  lastStatus?: 'unknown' | 'ok' | 'fail'
+  lastDetail?: string
+  lastCheckAt?: number
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** 连通性测试结果。 */
+export interface AgentProbeResult {
+  status: 'ok' | 'fail'
+  detail: string
+  version?: string
+  models?: { id: string; name: string }[]
+  connected?: string[]
+}
+
+/** 知识库连接配置。 */
+export interface KbConfig {
+  dataApiUrl: string
+  mcpUrl: string
+  lastStatus?: 'unknown' | 'ok' | 'fail'
+  lastDetail?: string
+  lastCheckAt?: number
+  updatedAt?: number
+  test?: { status: 'ok' | 'fail'; detail: string }
+}
+
+/** 概览页「使用文档」栏目：引导任务。 */
+export interface OverviewMission {
+  id: string
+  title: string
+  desc: string
+}
+
+/** 概览页聚合接口 GET /overview 的返回数据。 */
+export interface OverviewData {
+  launch: LaunchInfo
+  recent: ProjectInfo[]
+  adapters: OverviewAdapter[]
+  /** 已保存的三方 agent 连接配置。 */
+  agentConfigs: AgentConfig[]
+  kb: {
+    count: number
+    linked: boolean
+    projects: KbProject[]
+  }
+  kbConfig: KbConfig
+  missions: OverviewMission[]
+}
+
+/** 宿主目录浏览条目。 */
+export interface DirEntry {
+  name: string
+  isDir: boolean
+  size: number
+  mtime: number
+  readable?: boolean
+  writable?: boolean
+}
+
+/** GET /dir/list 返回数据。 */
+export interface DirList {
+  path: string
+  parent: string | null
+  readable: boolean
+  writable: boolean
+  /** 宿主机标识(远程 Web-UI 访问时用于确认目录所在机器)。 */
+  host?: {
+    name: string
+    ip: string
+  }
+  entries: DirEntry[]
+}
+
+/** POST /dir/analyze 返回数据：选定目录的自动识别结果。 */
+export interface DirAnalysis {
+  root: string
+  name: string
+  readable: boolean
+  writable: boolean
+  isGitRoot: boolean
+  gitToplevel: string | null
+  gitBranch: string | null
+  isEmpty: boolean
+  hasCode: boolean
+  /** 重复打开已建立的 architect 项目(同一 root_path)。 */
+  duplicate: {
+    id: string
+    name: string
+    rootPath: string
+    mode?: string
+  } | null
+  /** 可安全关联的有效 KB 项目(同一仓库源校验通过)。 */
+  kbCandidates: {
+    id: string
+    name: string
+    rootPath: string
+    reason: string
+  }[]
+}
+
 /** 任务会话统计(依赖三方 agent 接口；可降级为字节量统计)。 */
 export interface TaskSessionStats {
   requests: number
@@ -414,6 +558,49 @@ export interface AppendedReq {
   analysis?: RequirementAnalysis
   design?: { approach: string; changes: ChangeItem[] }
   status: AppendedReqStatus
+  updatedAt: number
+}
+
+export type TestLevel = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5'
+
+/** 单测执行通道：三方 agent 或 topocode 命令行。 */
+export type TestChannel = 'agent' | 'cli'
+
+export type UnitTestStatus = 'idle' | 'running' | 'passed' | 'failed' | 'error' | 'skipped'
+
+export type UnitTestSource = 'requirement' | 'manual' | 'scan'
+
+/** 单元测试用例(脚本已编写，左栏列表展示；经「添加」关连脚本入库)。 */
+export interface UnitTest {
+  id: string
+  name: string
+  /** 覆盖的功能模块(知识库组件层级 L0~L5)。 */
+  levels: TestLevel[]
+  /** 测试脚本路径。 */
+  scriptPath: string
+  /** 来源：需求流程 / 外部手写 / 自动扫描(预留)。 */
+  source: UnitTestSource
+  status: UnitTestStatus
+  /** 最近一次执行结果。 */
+  lastResult?: { passed: number; failed: number; error?: string; note: string; at: number }
+  createdAt: number
+  updatedAt: number
+}
+
+export type UnitTestSessionStatus = 'created' | 'running' | 'done' | 'failed' | 'stopped'
+
+/** 单元测试会话：单独保留，可再进入或新建；工作区左右栏执行反馈。 */
+export interface UnitTestSession {
+  id: string
+  title: string
+  channel: TestChannel
+  adapter: string
+  /** 本会话涉及的单测 id。 */
+  testIds: string[]
+  status: UnitTestSessionStatus
+  messages: AgentMessage[]
+  stats?: TaskSessionStats
+  createdAt: number
   updatedAt: number
 }
 
@@ -438,6 +625,8 @@ export interface ExecutionTask {
   treeRevision?: number
   /** 会话统计。 */
   stats?: TaskSessionStats
+  /** 关联的需要执行的单元测试(仅在任务侧冗余；不随任务自动执行)。 */
+  testIds?: string[]
   amendments: AppendedReq[]
 }
 
@@ -481,7 +670,6 @@ export interface Snapshot {
 }
 
 export type WorkflowStageKey = 'pool' | 'design' | 'execute' | 'accept'
-
 export type StepStatus = 'locked' | 'pending' | 'active' | 'done'
 
 export interface WorkflowStageRoute {
@@ -498,6 +686,8 @@ export interface WorkflowStageCtx {
   activeTaskCount: number
   acceptingCount: number
   doneTaskCount: number
+  unitTestSessionCount: number    // 单元测试会话数
+  passedTestCount: number         // 已通过的单测数
 }
 
 /** 单个流水线阶段的声明式定义，未来微调只改这里/配置数据对象。 */
@@ -617,6 +807,28 @@ export type ProjectMode = 'greenfield' | 'existing'
 
 export type ProductForm = 'ui-ue' | 'io' | 'hybrid'
 
+/** KB 项目(来自 KB project.list，首页路线1 选择源)。 */
+export interface KbProject {
+  id: string
+  name: string
+  rootPath: string
+  importMode: 'static' | 'git-local' | 'git-remote'
+  remoteUrl?: string
+  localRepoPath?: string
+  sourceCacheDir?: string
+  sourceDir?: string
+  currentVersionId?: string
+  status?: string
+  language?: string
+  fileCount?: number
+  doneTaskCount?: number
+  updatedAt?: string
+  /** import_mode ∈ {git-local, git-remote} ⇒ 已 git 关联，关联安全。 */
+  gitLinked: boolean
+  /** current_version_id 非空 ⇒ KB 已有知识基线。 */
+  hasBaseline: boolean
+}
+
 export interface ProjectScaffold {
   language: string
   framework?: string
@@ -640,6 +852,13 @@ export interface ProjectInfo {
   mode: ProjectMode
   scaffold?: ProjectScaffold
   productForm?: ProductForm
+  /** 已关联 KB 时非空：KB 项目 id / KB 源码目录 / 关联校验时间。 */
+  kbProjectId?: string
+  kbSourceDir?: string
+  linkVerifiedAt?: number
+  /** 置顶 / 收藏(近期项目排序：置顶 → 收藏 → 最近更新)。 */
+  pinned?: boolean
+  favorite?: boolean
 }
 
 export interface RepoBaseline {

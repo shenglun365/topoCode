@@ -1,6 +1,11 @@
 /** API client for architect backend. */
 
-const API_BASE = '/api/architect'
+// 独立服务后：可用 VITE_ARCH_API_BASE 指向 3470；缺省同源 /api/architect(vite 代理)。
+const API_BASE: string = (import.meta.env.VITE_ARCH_API_BASE as string | undefined) || '/api/architect'
+
+export function apiBaseUrl(): string {
+  return API_BASE
+}
 
 export async function apiGet<T>(path: string): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`)

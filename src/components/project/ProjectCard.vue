@@ -25,6 +25,7 @@ import ProjectContextMenu from './ProjectContextMenu.vue'
 import { useProjectStore } from '@/stores/project'
 import ConfirmDialog from '@/components/shared/ConfirmDialog.vue'
 import ClearCacheDialog from './ClearCacheDialog.vue'
+import VersionUpdateDialog from './VersionUpdateDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
 
 const { showId, componentId } = useComponentId('PR-002')
@@ -88,6 +89,11 @@ const showClearCacheDialog = ref(false)
 // 修改信息弹窗
 const showEditDialog = ref(false)
 const editNameInput = ref('')
+const editRemoteUrl = ref('')
+const editLocalRepoPath = ref('')
+const editBranch = ref('')
+const editHead = ref('')
+const showVersionUpdateDialog = ref(false)
 const allGroups = ref<GroupNode[]>([])
 const selectedGroupIds = ref<string[]>([])
 
@@ -185,10 +191,22 @@ async function togglePinned() {
   }
 }
 
-// 修改信息（名称 + 分组）
+// 修改信息（名称 + 分组 + 版本基线）
 async function startEditInfo() {
   hideMenu()
   editNameInput.value = props.project.name
+  editRemoteUrl.value = props.project.remoteUrl || ''
+  editLocalRepoPath.value = props.project.localRepoPath || ''
+  // 从最新版本基线读取分支/head
+  try {
+    const versions = await ipc.version.list(props.project.id)
+    const latest = versions?.[0]
+    editBranch.value = latest?.branch || ''
+    editHead.value = latest?.head || ''
+  } catch {
+    editBranch.value = ''
+    editHead.value = ''
+  }
   allGroups.value = await ipc.group.list()
   // 初始化当前项目已选的分组
   selectedGroupIds.value = props.project.groups ? [...props.project.groups] : []
@@ -242,6 +260,26 @@ async function confirmEditInfo() {
   // 更新名称
   if (newName !== props.project.name) {
     await projectStore.updateProjectMeta(props.project.id, { name: newName })
+  }
+
+  // 保存版本基线（远端/本地仓库、分支、head）
+  const hasBaselineChange =
+    editRemoteUrl.value !== (props.project.remoteUrl || '') ||
+    editLocalRepoPath.value !== (props.project.localRepoPath || '') ||
+    !!editBranch.value || !!editHead.value
+  if (hasBaselineChange) {
+    try {
+      await ipc.project.saveBaseline({
+        projectId: props.project.id,
+        remoteUrl: editRemoteUrl.value,
+        localRepoPath: editLocalRepoPath.value,
+        branch: editBranch.value,
+        head: editHead.value,
+      })
+      await projectStore.loadProjects()
+    } catch (e) {
+      console.error('[ProjectCard] saveBaseline failed:', e)
+    }
   }
 
   // 更新分组（对比当前项目分组）
@@ -375,6 +413,15 @@ async function handleCheckChanges() {
 async function handleResyncFromDialog() {
   changesDialogVisible.value = false
   await projectStore.syncProject(props.project.id)
+}
+
+async function startVersionUpdate() {
+  hideMenu()
+  showVersionUpdateDialog.value = true
+}
+
+async function onVersionUpdated() {
+  await projectStore.loadProjects()
 }
 
 </script>
@@ -558,6 +605,15 @@ async function handleResyncFromDialog() {
           <MagnifyingGlassIcon class="w-4 h-4" />
           <span>{{ t('project.checkChanges') }}</span>
         </div>
+        <!-- KB 基线更新 -->
+        <div
+          v-if="!isResourceProject"
+          class="context-menu-item"
+          @click="startVersionUpdate"
+        >
+          <ArrowPathIcon class="w-4 h-4" />
+          <span>{{ t('version.title', 'KB 基线更新') }}</span>
+        </div>
         <!-- 资源项目操作 -->
         <template v-if="isResourceProject">
           <div class="context-menu-divider" />
@@ -641,6 +697,45 @@ async function handleResyncFromDialog() {
               @keydown.enter="confirmEditInfo"
             >
           </div>
+
+          <!-- 版本基线：远端/本地仓库、分支、head -->
+          <div class="edit-info-section">
+            <div class="edit-info-field">
+              <label class="edit-info-label">{{ t('project.remoteUrl', '远端仓库地址') }}</label>
+              <input
+                v-model="editRemoteUrl"
+                class="edit-info-input"
+                :placeholder="t('project.remoteUrlPlaceholder', 'https://github.com/user/repo.git（可选）')"
+              >
+            </div>
+            <div class="edit-info-field">
+              <label class="edit-info-label">{{ t('project.localRepoPath', '本地仓库地址') }}</label>
+              <input
+                v-model="editLocalRepoPath"
+                class="edit-info-input"
+                :placeholder="t('project.localRepoPathPlaceholder', '/path/to/repo（可选）')"
+              >
+            </div>
+            <div class="edit-info-row">
+              <div class="edit-info-field grow">
+                <label class="edit-info-label">{{ t('project.branch', '代码分支') }}</label>
+                <input
+                  v-model="editBranch"
+                  class="edit-info-input"
+                  :placeholder="t('project.branchPlaceholder', '如 main（可选）')"
+                >
+              </div>
+              <div class="edit-info-field grow">
+                <label class="edit-info-label">{{ t('project.head', '代码版本 head') }}</label>
+                <input
+                  v-model="editHead"
+                  class="edit-info-input"
+                  :placeholder="t('project.headPlaceholder', 'commit hash（可选）')"
+                >
+              </div>
+            </div>
+          </div>
+
           <div class="edit-info-field">
             <label class="edit-info-label">{{ t('project.editGroups') }}</label>
             <div
@@ -685,6 +780,14 @@ async function handleResyncFromDialog() {
       variant="warning"
       :confirm-label="t('project.confirmUpdate')"
       @confirm="confirmPathChange"
+    />
+
+    <!-- KB 基线更新弹窗 -->
+    <VersionUpdateDialog
+      v-if="showVersionUpdateDialog"
+      :project-id="project.id"
+      @close="showVersionUpdateDialog = false"
+      @updated="onVersionUpdated"
     />
   </div>
 
@@ -876,6 +979,23 @@ async function handleResyncFromDialog() {
 
 .edit-info-dialog {
   width: 100%;
+}
+
+.edit-info-section {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.edit-info-row {
+  display: flex;
+  gap: 10px;
+}
+
+.edit-info-row .grow {
+  flex: 1;
+  min-width: 0;
 }
 
 .edit-info-field {

@@ -6,7 +6,7 @@ import {
   ClipboardDocumentListIcon, QueueListIcon,
   ServerStackIcon,
   GlobeAltIcon, ShieldCheckIcon, ShieldExclamationIcon, MapIcon, Cog6ToothIcon,
-  ChevronDownIcon, ChevronRightIcon,
+  ChevronDownIcon, ChevronRightIcon, BeakerIcon,
 } from '@heroicons/vue/24/outline'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useArchTaskStore } from '@/stores/task-store'
@@ -14,6 +14,7 @@ import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchMcpStore } from '@/stores/mcp-store'
 import { useArchMergeBaselineStore } from '@/stores/merge-baseline-store'
+import { useArchUnitTestStore } from '@/stores/unit-test-store'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,9 +25,11 @@ const agent = useArchAgentStore()
 const spec = useArchSpecStore()
 const mcp = useArchMcpStore()
 const mergeBaseline = useArchMergeBaselineStore()
+const unitTest = useArchUnitTestStore()
 mcp.load()
 spec.load()
 mergeBaseline.load()
+unitTest.load()
 
 const collapsed = ref<Record<string, boolean>>({})
 
@@ -89,6 +92,16 @@ function isActive(path: string) {
           <QueueListIcon class="w-4 h-4 text-ctp-green" />
           <span class="flex-1 text-left">{{ t('nav.tree.tasks') }}</span>
           <span class="chip bg-ctp-surface0 text-ctp-subtext0">{{ task.doneCount }}/{{ task.totalCount }}</span>
+        </button>
+
+        <button
+          class="tree-item"
+          :class="{ '!text-ctp-blue': isActive('/workbench/unit-test') }"
+          @click="nav('/workbench/unit-test')"
+        >
+          <BeakerIcon class="w-4 h-4 text-ctp-lavender" />
+          <span class="flex-1 text-left">{{ t('nav.tree.unitTest') }}</span>
+          <span class="chip bg-ctp-surface0 text-ctp-subtext0">{{ unitTest.tests.length }}</span>
         </button>
       </template>
 

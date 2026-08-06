@@ -7,8 +7,8 @@ import {
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
-import { useArchGitSyncStore } from '@/stores/git-sync-store'
 import { commitBatch } from '@/services/execution-batch'
+import { apiGet } from '@/services/api-client'
 import type { ExecutionTask } from '@/types'
 import PoolSelectDialog from '@/components/coding/PoolSelectDialog.vue'
 
@@ -22,7 +22,6 @@ const { t } = useI18n()
 const agent = useArchAgentStore()
 const taskStore = useArchTaskStore()
 const requirement = useArchRequirementStore()
-const git = useArchGitSyncStore()
 
 const selectedAdapter = ref(agent.adapters[0]?.id ?? 'opencode')
 const selectedModel = ref(agent.adapters[0]?.models?.[0] ?? '')
@@ -59,8 +58,12 @@ const busy = computed(() => agent.running)
 async function testConnectivity() {
   testing.value = true
   connectivity.value = 'unknown'
-  await git.head()
-  connectivity.value = Math.random() > 0.15 ? 'ok' : 'fail'
+  try {
+    const res = await apiGet<{ status: string }>(`/agent/adapters/${selectedAdapter.value}/connectivity`)
+    connectivity.value = res.status === 'ok' ? 'ok' : 'fail'
+  } catch {
+    connectivity.value = 'fail'
+  }
   testing.value = false
 }
 

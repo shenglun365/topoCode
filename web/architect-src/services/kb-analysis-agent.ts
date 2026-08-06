@@ -3,6 +3,9 @@ import type {
 } from '@/types'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useArchMcpStore } from '@/stores/mcp-store'
+import { apiPost } from './api-client'
+import { backendUp } from './backend'
+import { currentProjectParams } from './project-service'
 import { CODE_MAPPINGS } from './mock/order-system'
 import { mockResult } from './mock/delay'
 
@@ -437,4 +440,66 @@ class MockKnowledgeBaseAgent implements RequirementAnalysisAgent {
   }
 }
 
-export const analysisAgent: RequirementAnalysisAgent = new MockKnowledgeBaseAgent()
+/**
+ * 后端优先的 kb 分析 agent：后端不可达时回退本地 mock(MockKnowledgeBaseAgent)。
+ * 后端契约见 docs/architect/api-knowledge-greenfield.md §1：
+ *   POST /requirements/analyze/clarify  → { turns, questions }
+ *   POST /requirements/analyze/collect  → { formDraft? | questions? | report }
+ */
+class BackendFirstKnowledgeBaseAgent implements RequirementAnalysisAgent {
+  private mock = new MockKnowledgeBaseAgent()
+
+  async clarify(req: KbAnalysisRequest): Promise<ClarifyResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ turns: KbAnalysisTurn[]; questions: QuestionItem[] }>('/requirements/analyze/clarify', { req, ...currentProjectParams() })
+        if (res.turns?.length && res.questions?.length) return { turns: res.turns, questions: res.questions }
+      } catch {
+        // fall through to mock
+      }
+    }
+    return this.mock.clarify(req)
+  }
+
+  async collect(ctx: { turns: KbAnalysisTurn[]; base: KbAnalysisRequest; answers: Record<string, string>; note?: string }): Promise<CollectResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ formDraft?: FormDraft; questions?: QuestionItem[]; report?: RequirementAnalysis }>(
+          '/requirements/analyze/collect',
+          { base: ctx.base, answers: ctx.answers, note: ctx.note, ...currentProjectParams() },
+        )
+        if (res.formDraft) {
+          return this.assemble(ctx, res.formDraft)
+        }
+        if (res.questions?.length) {
+          return {
+            turns: [...ctx.turns, { role: 'assistant', content: '请补充需求描述后再继续。', questions: res.questions }],
+            questions: res.questions,
+          }
+        }
+        if (res.report) {
+          const draft = toFormDraft(ctx.base, normalizeReport(res.report) as CompleteAnalysis, ctx.answers)
+          return this.assemble(ctx, draft)
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
+    return this.mock.collect(ctx)
+  }
+
+  private assemble(ctx: { turns: KbAnalysisTurn[]; base: KbAnalysisRequest; answers: Record<string, string>; note?: string }, draft: FormDraft): CollectResult {
+    const turns = [...ctx.turns]
+    const answered = Object.entries(ctx.answers).filter(([, v]) => v && v.trim())
+    if (answered.length) turns.push({ role: 'user', content: answered.map(([k, v]) => `• ${k}: ${v}`).join('\n') })
+    if (ctx.note?.trim()) turns.push({ role: 'user', content: ctx.note.trim() })
+    turns.push({
+      role: 'assistant',
+      content: `已生成结果表单草案(覆盖 ${draft.assetScope.length} 项数据资产，含四维评估)。请审阅右栏预览，确认后整份替换当前表单。`,
+      formDraft: draft,
+    })
+    return { turns, formDraft: draft }
+  }
+}
+
+export const analysisAgent: RequirementAnalysisAgent = new BackendFirstKnowledgeBaseAgent()

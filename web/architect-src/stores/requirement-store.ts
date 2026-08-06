@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 import type { DesignPlan, Requirement, RequirementAnalysis } from '@/types'
 import { CODE_MAPPINGS, PLANS, REQUIREMENTS } from '@/services/mock/order-system'
+import { apiGet, apiPost } from '@/services/api-client'
+import { backendReady, backendUp } from '@/services/backend'
+import { requirementService } from '@/services/requirement-service'
 
 /** 归属推导：未显式记录时按旧 tier 兼容。 */
 function locationOf(r: Requirement): 'proposal' | 'pool' {
@@ -64,6 +67,23 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     async load() {
       if (this.loaded) return
       this.loading = true
+      // 后端优先：需求 + 方案列表；不可达回退 mock。
+      if (await backendUp()) {
+        try {
+          const [items, plans] = await Promise.all([
+            requirementService.list(),
+            apiGet<DesignPlan[]>('/plans'),
+          ])
+          this.items = items ?? []
+          this.plans = plans ?? []
+          this.items.forEach((r) => { if (r.analysis) enrichAnalysis(r.analysis) })
+          this.loaded = true
+          this.loading = false
+          return
+        } catch {
+          // fall through to mock
+        }
+      }
       this.items = structuredClone(REQUIREMENTS)
       this.plans = structuredClone(PLANS)
       this.items.forEach((r) => { if (r.analysis) enrichAnalysis(r.analysis) })
@@ -208,6 +228,7 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       this.items.forEach((r) => {
         if (p.reqIds.includes(r.id)) { r.planId = id; r.status = 'planned' }
       })
+      if (backendReady()) apiPost<unknown>(`/plans/${id}/confirm`).catch(() => {})
     },
     /** 方案被重新规划/取消时，需求回到 analyzed，可被别的方案再选。 */
     releasePlan(id: string) {
@@ -217,6 +238,7 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
       this.items.forEach((r) => {
         if (p.reqIds.includes(r.id) && r.planId === id) { r.planId = undefined; r.status = 'analyzed' }
       })
+      if (backendReady()) apiPost<unknown>(`/plans/${id}/release`).catch(() => {})
     },
     /**
      * 代码级回退(回流特殊情况)：执行中需求/设计出现重大问题，该批次覆盖的

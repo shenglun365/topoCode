@@ -18,6 +18,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import ProjectCard from '@/components/project/ProjectCard.vue'
 import GroupFilter from '@/components/project/GroupFilter.vue'
 import GroupManager from '@/components/project/GroupManager.vue'
+import ImportSourceDialog from '@/components/project/ImportSourceDialog.vue'
 import { useComponentId } from '@/composables/useComponentId'
 const { showId, componentId } = useComponentId('PG-001')
 const { t } = useI18n()
@@ -29,6 +30,9 @@ const settingsStore = useSettingsStore()
 
 // 筛选模式: all | favorites
 const filterMode = ref<'all' | 'favorites'>('all')
+
+// 导入源码对话框
+const showImportDialog = ref(false)
 
 // 分组筛选
 const selectedGroupIds = ref<string[]>([])
@@ -152,40 +156,36 @@ const PARSER_LANGUAGES = new Set([
 
 async function handleImportProject() {
   if (projectStore.importing) return
-  if (window.api && window.api.dialog) {
-    const path = await window.api.dialog.openDirectory()
-    if (path) {
-      const project = await projectStore.importProject(path)
-      if (project) {
-        await projectStore.loadProjects()
-        try {
-          const fileStats = await analysisStore.scanFileStats(project.id)
-          const exts = Object.entries(fileStats.extensions || {})
-            .filter(([k]) => k !== '' && PARSER_LANGUAGES.has(k))
-          exts.sort((a, b) => b[1] - a[1])
-          const topExt = exts.length > 0 ? exts[0] : null
-          if (topExt && topExt[1] > 10000) {
-            fileCountExceedInfo.value = { projectName: project.name, language: topExt[0], count: topExt[1] }
-            showFileCountExceedDialog.value = true
-          } else {
-            const topLang = topExt ? [topExt[0]] : []
-            await analysisStore.createTask({
-              projectId: project.id,
-              type: 'full',
-              name: project.name,
-              scopes: [],
-              extensions: topLang,
-              excludeDirs: [],
-              reportTypes: ['dependency', 'callChain'],
-            })
-          }
-        } catch (e) {
-          console.error('[HomePage] auto-create task failed:', e)
-        }
-      } else {
-        showDuplicateDialog.value = true
-      }
+  showImportDialog.value = true
+}
+
+async function onProjectImported(projectId: string) {
+  await projectStore.loadProjects()
+  const imported = projectStore.projects.find(p => p.id === projectId)
+  if (!imported) return
+  try {
+    const fileStats = await analysisStore.scanFileStats(projectId)
+    const exts = Object.entries(fileStats.extensions || {})
+      .filter(([k]) => k !== '' && PARSER_LANGUAGES.has(k))
+    exts.sort((a, b) => b[1] - a[1])
+    const topExt = exts.length > 0 ? exts[0] : null
+    if (topExt && topExt[1] > 10000) {
+      fileCountExceedInfo.value = { projectName: imported.name, language: topExt[0], count: topExt[1] }
+      showFileCountExceedDialog.value = true
+    } else {
+      const topLang = topExt ? [topExt[0]] : []
+      await analysisStore.createTask({
+        projectId,
+        type: 'full',
+        name: imported.name,
+        scopes: [],
+        extensions: topLang,
+        excludeDirs: [],
+        reportTypes: ['dependency', 'callChain'],
+      })
     }
+  } catch (e) {
+    console.error('[HomePage] auto-create task failed:', e)
   }
 }
 
@@ -474,6 +474,13 @@ onMounted(async () => {
       </div>
     </div>
   </Teleport>
+
+  <!-- 导入源码对话框（static / git-local / git-remote） -->
+  <ImportSourceDialog
+    v-if="showImportDialog"
+    @close="showImportDialog = false"
+    @imported="onProjectImported"
+  />
 </template>
 
 <style scoped>

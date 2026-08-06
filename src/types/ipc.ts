@@ -64,6 +64,19 @@ export interface Project {
   lastSync: string | null
   createdAt: string
   fileTree?: FileTreeNode[]
+  /** KB 导入模式：static / git-local / git-remote */
+  importMode?: string
+  /** git 远端仓库地址 */
+  remoteUrl?: string
+  /** git 本地仓库地址 */
+  localRepoPath?: string
+  /** git 导入的源码缓存目录 */
+  sourceCacheDir?: string
+  /** 当前 KB 版本基线 id */
+  currentVersionId?: string
+  /** 当前基线分支/head（派生自 version） */
+  currentBranch?: string
+  currentHead?: string
 }
 
 /** 文件树节点 */
@@ -458,7 +471,7 @@ export interface IPCAPI {
   // 项目管理
   project: {
     list: () => Promise<Project[]>
-    import: (path: string) => Promise<Project>
+    import: (path: string, opts?: { mode?: string; branch?: string; head?: string; repoUrl?: string; localRepoPath?: string }) => Promise<Project>
     get: (id: string) => Promise<Project>
     remove: (id: string) => Promise<void>
     sync: (id: string) => Promise<Project>
@@ -473,7 +486,18 @@ export interface IPCAPI {
     detectGitInfo: (params: { projectId: string }) => Promise<GitInfo>
     saveGitInfo: (params: { projectId: string; remoteUrl?: string; currentBranch?: string; currentCommit?: string; latestTag?: string; tags?: string; branches?: string; recentCommits?: string }) => Promise<{ status: string }>
     getGitInfo: (params: { projectId: string }) => Promise<GitInfo>
+    saveBaseline: (params: { projectId: string; remoteUrl?: string; localRepoPath?: string; branch?: string; head?: string }) => Promise<{ ok: boolean; projectId: string; remoteUrl: string; localRepoPath: string; version?: ProjectVersion | null }>
     checkImportStatus: (params: { projectId: string }) => Promise<{ hasSnapshot: boolean; needsSavePrompt: boolean }>
+  }
+
+  // KB 版本基线管理（P0：对外契约，architect 经 data_api /zmq/{method} 消费）
+  version: {
+    list: (projectId: string) => Promise<ProjectVersion[]>
+    get: (projectId: string, versionId: string) => Promise<ProjectVersion>
+    preview: (projectId: string, opts?: { branch?: string; head?: string }) => Promise<VersionPreview>
+    sync: (projectId: string, opts?: { branch?: string; head?: string; label?: string; stages?: Record<string, boolean>; force?: boolean; requestId?: string }) => Promise<VersionSyncResult>
+    diff: (projectId: string, fromId: string, toId: string) => Promise<VersionDiff>
+    materialize: (projectId: string, versionId: string) => Promise<Array<Record<string, any>>>
   }
 
   // 分组管理
@@ -591,6 +615,11 @@ export interface IPCAPI {
     deleteDoc: (id: string) => Promise<void>
     getGraph: (params?: { projectId?: string }) => Promise<KnowledgeGraph>
     getDimensions: () => Promise<Dimensions>
+    // KB 基线更新请求（architect 待更新标记 → KB 确认）
+    pullRequest: (params: { projectId: string; repoUrl?: string; localRepoPath?: string; branch?: string; head?: string; note?: string }) => Promise<{ requestId: string; projectId: string; status: string }>
+    pendingUpdates: (projectId?: string) => Promise<UpdateRequest[]>
+    updateConfirm: (requestId: string, opts?: { method?: string }) => Promise<VersionPreview & { projectId?: string; requestId?: string; branch?: string; head?: string }>
+    updateCancel: (requestId: string) => Promise<{ cancelled: boolean }>
   }
 
   // 设置配置
@@ -901,4 +930,89 @@ export interface SavedPositionKey {
   count: number
 }
 
-export {}
+// ==================== KB 版本基线类型（P0 契约） ====================
+
+export interface ProjectVersion {
+  id: string
+  projectId?: string
+  parentVersionId?: string
+  label?: string
+  branch?: string
+  head?: string
+  changeType?: 'minor' | 'major'
+  fileCount?: number
+  addedCount?: number
+  modifiedCount?: number
+  deletedCount?: number
+  isBaseline?: number
+  createdAt?: string
+  files?: Array<{ changeType: 'A' | 'M' | 'D'; filePath: string }>
+}
+
+export interface VersionPreview {
+  delta?: {
+    added: string[]
+    modified: string[]
+    deleted: string[]
+    addedCount: number
+    modifiedCount: number
+    deletedCount: number
+    total: number
+  }
+  branchSwitched?: boolean
+  changeType?: 'minor' | 'major'
+  risk?: 'low' | 'medium' | 'high'
+  impact?: Record<string, any>
+  stages?: Record<string, { suggested: boolean; implemented: boolean }>
+  latest?: { versionId: string | null; branch: string; head: string }
+}
+
+export interface VersionDiff {
+  fromVersion: string
+  toVersion: string
+  added: string[]
+  modified: string[]
+  deleted: string[]
+  addedCount: number
+  modifiedCount: number
+  deletedCount: number
+}
+
+export interface VersionSyncResult {
+  changed: boolean
+  projectId: string
+  version?: ProjectVersion
+  delta?: { added: string[]; modified: string[]; deleted: string[] }
+  archivedRows?: number
+  stagePlan?: VersionPreview
+  stagesRequested?: Record<string, boolean>
+  incrementalResults?: Record<string, {
+    status: string
+    implemented?: boolean
+    archivedRows?: number
+    writtenNodes?: number
+    removedFiles?: number
+    keptEdges?: number
+    newEdges?: number
+    totalEdges?: number
+  }>
+  requestId?: string
+}
+
+export interface UpdateRequest {
+  id: string
+  projectId: string
+  source?: string
+  repoUrl?: string
+  localRepoPath?: string
+  branch?: string
+  head?: string
+  status: 'pending' | 'confirmed' | 'done' | 'cancelled'
+  method?: string
+  resultVersionId?: string
+  note?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export {} 

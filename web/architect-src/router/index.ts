@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, stepper: true, title: '任务执行' },
       },
       {
+        path: 'unit-test',
+        name: 'UnitTest',
+        component: () => import('@/pages/UnitTestPage.vue'),
+        meta: { workbench: true, stepper: true, title: '单元测试' },
+      },
+      {
         path: 'coding',
         redirect: '/workbench/execute',
       },

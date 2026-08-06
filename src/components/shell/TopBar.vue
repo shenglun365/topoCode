@@ -21,6 +21,7 @@ import { useOnboardingStore } from '@/stores/onboarding'
 import { useStatusStore } from '@/stores/status'
 import { useNavigationStore } from '@/stores/navigation'
 import StarLogo from './StarLogo.vue'
+import ImportSourceDialog from '@/components/project/ImportSourceDialog.vue'
 
 import { useComponentId } from '@/composables/useComponentId'
 import { version as APP_VERSION } from '../../../package.json'
@@ -113,6 +114,7 @@ const versionInfo = ref<{ latest_version: string; has_update: boolean; download_
 const showVersionDialog = ref(false)
 const showExitConfirm = ref(false)
 const showDuplicateDialog = ref(false)
+const showImportDialog = ref(false)
 type MenuItem = { label?: string; shortcut?: string; action?: string; divider?: boolean }
 const menus = computed<Record<string, MenuItem[]>>(() => ({
   file: [
@@ -192,15 +194,7 @@ function hasUpdate(): boolean {
 
 async function handleFileImport() {
   closeMenu()
-  if (window.api && window.api.dialog) {
-    const paths = await window.api.dialog.openDirectory()
-    if (paths) {
-      const result = await projectStore.importProject(paths)
-      if (!result) {
-        showDuplicateDialog.value = true
-      }
-    }
-  }
+  showImportDialog.value = true
 }
 
 async function handleExit() {
@@ -559,6 +553,13 @@ onMounted(() => {
         </div>
       </div>
     </Teleport>
+
+    <!-- 导入源码对话框 -->
+    <ImportSourceDialog
+      v-if="showImportDialog"
+      @close="showImportDialog = false"
+      @imported="showImportDialog = false"
+    />
   </div>
 </template>
 

@@ -48,7 +48,7 @@ export const useArchAgentStore = defineStore('arch-agent', {
     async send(sessionId: string, content: string) {
       const s = this.sessions.find((x) => x.id === sessionId)
       if (!s) return
-      await agentService.sendMessage(sessionId, content)
+      await agentService.sendMessage(s, content)
     },
     async runTask(sessionId: string) {
       const s = this.sessions.find((x) => x.id === sessionId)

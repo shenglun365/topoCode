@@ -1,22 +1,20 @@
-import type { AgentMessage, AgentSession, AgentStatus, ExecutionTask, TaskNode } from '@/types'
-import { INITIAL_SESSIONS } from './mock/order-system'
-import { runMockAgentSession } from './mock/agent-engine'
-import { mockResult } from './mock/delay'
+import type { AgentAdapterInfo, AgentConfig, AgentMessage, AgentProbeResult, AgentSession, AgentStatus, Connectivity, ExecutionTask, TaskNode } from '@/types'
+import { apiGet, apiPost, apiPatch, apiDelete } from './api-client'
+import { ArchWs } from './ws-client'
+import { MockAgentAdapter } from './mock/agent-service'
 
 /**
- * 三方 Coding Agent 适配接口。
+ * 三方 Coding Agent 适配接口 → 后端优先。
  *
- * 后端需提供「会话保持」能力 —— opencode / codex 等主流 CLI agent 均支持
- * 多轮会话(multi-turn)且沿用同一会话上下文，本工具以 subagent 模式对接：
- *   1. 每个执行任务(ExecutionTask)创建一个独立会话，会话绑定到方案的任务方案树
- *   2. 会话携带「上下文包」(方案 + 需求 + 编码规约 + 相关文件)
- *   3. 多轮对话持续引用同一上下文，直至测试验收通过
- *
- * 原型阶段全部为 mock 实现，真实接入时替换为对后端 HTTP/WebSocket 的调用。
+ * 后端契约见 docs/architect/api-execution.md §5：
+ *   - 会话创建/对话/执行均走 WS `/ws/coding-agent`(会话保持, 多轮沿用上下文)
+ *   - 连通性经 `GET /agent/adapters/{id}/connectivity`
+ * 后端不可达时回退本地 mock(MockAgentAdapter)。
  */
+
 export interface AgentAdapter {
   createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession>
-  sendMessage(sessionId: string, content: string, opts?: { keepContext?: boolean }): Promise<AgentMessage>
+  sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean }): Promise<AgentMessage>
   runTask(session: AgentSession, task: TaskNode, opts?: RunHooks): Promise<void>
   getStatus(sessionId: string): Promise<AgentStatus>
   terminate(sessionId: string): Promise<void>
@@ -31,72 +29,190 @@ export interface RunHooks {
   isCancelled?: () => boolean
 }
 
-const sessions = new Map<string, AgentSession>(Object.entries(INITIAL_SESSIONS))
-/** 已请求停止的会话 id(前端 mock 停止接口)。 */
-const cancelled = new Set<string>()
+let useMock = false
+let probed = false
+const mockAdapter = new MockAgentAdapter()
 
-let seq = 0
-
-class MockAgentAdapter implements AgentAdapter {
-  async createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession> {
-    await mockResult(null, 300)
-    const session: AgentSession = {
-      id: `sess-${++seq}`,
-      taskId: opts.exec.id,
-      adapter: opts.exec.adapter,
-      status: 'idle',
-      keepContext: opts.keepContext ?? true,
-      messages: [
-        {
-          id: `m-init-${seq}`,
-          role: 'user',
-          time: Date.now(),
-          content: `创建会话 · 执行方案「${opts.planTitle}」(任务 ${opts.exec.id}, 第 ${opts.exec.runCount} 次)`,
-        },
-      ],
-      artifacts: [],
-      stats: { requests: 0, tokensIn: 0, tokensOut: 0, bytesIn: 0, bytesOut: 0 },
-    }
-    sessions.set(session.id, session)
-    cancelled.delete(session.id)
-    return structuredClone(session)
-  }
-
-  async sendMessage(sessionId: string, content: string): Promise<AgentMessage> {
-    await mockResult(null, 400)
-    const s = sessions.get(sessionId)
-    const msg: AgentMessage = {
-      id: `m-${++seq}`, role: 'user', time: Date.now(), content,
-    }
-    s?.messages.push(msg)
-    return msg
-  }
-
-  async runTask(session: AgentSession, task: TaskNode, opts?: RunHooks): Promise<void> {
-    // 会话保持: 直接复用传入的会话对象(与 store 同一引用), 保证 UI 实时可见
-    sessions.set(session.id, session)
-    cancelled.delete(session.id)
-    await runMockAgentSession(session, task, {
-      ...opts,
-      isCancelled: opts?.isCancelled ?? (() => cancelled.has(session.id)),
-      onStatus: (st) => { opts?.onStatus?.(st) },
-    })
-  }
-
-  async getStatus(sessionId: string): Promise<AgentStatus> {
-    return sessions.get(sessionId)?.status ?? 'idle'
-  }
-
-  /** 停止执行(前端 mock；后端需适配各 agent 的终止接口)。 */
-  async terminate(sessionId: string): Promise<void> {
-    cancelled.add(sessionId)
-    const s = sessions.get(sessionId)
-    if (s && s.status !== 'done' && s.status !== 'failed') s.status = 'stopped'
+async function ensureBackend(): Promise<void> {
+  if (probed) return
+  probed = true
+  try {
+    await apiGet<unknown>('/agent/adapters')
+    useMock = false
+  } catch {
+    useMock = true
   }
 }
 
-export const agentService: AgentAdapter = new MockAgentAdapter()
+function pushLocal(session: AgentSession, msg: AgentMessage): void {
+  session.messages.push(msg)
+}
 
-export function getSession(sessionId: string): AgentSession | undefined {
-  return sessions.get(sessionId)
+class HttpAgentAdapter implements AgentAdapter {
+  async createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession> {
+    const ws = new ArchWs('ws/coding-agent')
+    await ws.ready()
+    ws.send('session.create', {
+      exec: opts.exec,
+      planTitle: opts.planTitle,
+      keepContext: opts.keepContext ?? true,
+    })
+    const res = await ws.once<any>('session_created')
+    ws.close()
+    return res.session as AgentSession
+  }
+
+  async sendMessage(session: AgentSession, content: string): Promise<AgentMessage> {
+    const userMsg: AgentMessage = { id: `m-${Date.now()}`, role: 'user', time: Date.now(), content }
+    pushLocal(session, userMsg)
+    const ws = new ArchWs('ws/coding-agent')
+    await ws.ready()
+    const replyP = ws.once<any>('message', 15000)
+    ws.send('session.message', { sessionId: session.id, content })
+    try {
+      const reply = await replyP
+      const m: AgentMessage = { id: reply.id, role: reply.role, time: reply.time, content: reply.content }
+      session.messages.push(m)
+    } catch {
+      // 后端无回复时仅保留本地用户消息
+    }
+    ws.close()
+    return userMsg
+  }
+
+  async runTask(session: AgentSession, task: TaskNode, opts?: RunHooks): Promise<void> {
+    const ws = new ArchWs('ws/coding-agent')
+    await ws.ready()
+
+    const offStatus = ws.on('status', (ev) => {
+      session.status = ev.status
+      opts?.onStatus?.(ev.status)
+    })
+    const offMsg = ws.on('message', (ev) => {
+      const m: AgentMessage = { id: ev.id, role: ev.role, time: ev.time, content: ev.content }
+      session.messages.push(m)
+      opts?.onMessage?.(m)
+    })
+    const offTool = ws.on('tool_call', (ev) => {
+      const m: AgentMessage = { id: ev.id, role: 'tool', time: ev.time, tool: ev.tool, content: '' }
+      session.messages.push(m)
+      opts?.onMessage?.(m)
+    })
+    const offTree = ws.on('tree.change', (ev) => opts?.onTreeChange?.(ev.reason))
+
+    const terminal = new Promise<AgentStatus>((resolve) => {
+      ;['done', 'failed', 'stopped'].forEach((t) => {
+        ws.on(t, (ev) => {
+          session.status = ev.status
+          if (ev.stats) session.stats = ev.stats
+          if (ev.artifacts) session.artifacts = ev.artifacts
+          if (ev.testResult) session.testResult = ev.testResult
+          resolve(ev.status)
+        })
+      })
+    })
+
+    ws.send('task.run', { sessionId: session.id, task })
+    try {
+      await terminal
+    } finally {
+      offStatus()
+      offMsg()
+      offTool()
+      offTree()
+      ws.close()
+    }
+  }
+
+  async getStatus(sessionId: string): Promise<AgentStatus> {
+    try {
+      const session = await apiGet<AgentSession>(`/agent/sessions/${sessionId}`)
+      return session?.status ?? 'idle'
+    } catch {
+      return 'idle'
+    }
+  }
+
+  async terminate(sessionId: string): Promise<void> {
+    const ws = new ArchWs('ws/coding-agent')
+    await ws.ready()
+    ws.send('session.stop', { sessionId })
+    ws.close()
+  }
+}
+
+const httpAdapter = new HttpAgentAdapter()
+
+class SwitchAgentAdapter implements AgentAdapter {
+  private impl(): AgentAdapter {
+    return useMock ? (mockAdapter as unknown as AgentAdapter) : httpAdapter
+  }
+
+  async createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession> {
+    await ensureBackend()
+    return this.impl().createSession(opts)
+  }
+
+  async sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean }): Promise<AgentMessage> {
+    await ensureBackend()
+    return this.impl().sendMessage(session, content, opts)
+  }
+
+  async runTask(session: AgentSession, task: TaskNode, opts?: RunHooks): Promise<void> {
+    await ensureBackend()
+    return this.impl().runTask(session, task, opts)
+  }
+
+  async getStatus(sessionId: string): Promise<AgentStatus> {
+    await ensureBackend()
+    return this.impl().getStatus(sessionId)
+  }
+
+  async terminate(sessionId: string): Promise<void> {
+    await ensureBackend()
+    return this.impl().terminate(sessionId)
+  }
+}
+
+export const agentService: AgentAdapter = new SwitchAgentAdapter()
+
+/** 列出 coding agent 适配器(真实来源: 后端 installer targets 注册表)。 */
+export async function listAgentAdapters(): Promise<AgentAdapterInfo[]> {
+  return apiGet<AgentAdapterInfo[]>('/agent/adapters')
+}
+
+/** 探测某个适配器的联通性(真实 detect())。 */
+export async function checkAdapterConnectivity(id: string): Promise<Connectivity> {
+  const res = await apiGet<{ status?: string }>(`/agent/adapters/${id}/connectivity`)
+  return res?.status === 'ok' ? 'ok' : 'fail'
+}
+
+/** 列出已保存的三方 agent 连接配置。 */
+export async function listAgentConfigs(): Promise<AgentConfig[]> {
+  return apiGet<AgentConfig[]>('/agent/configs')
+}
+
+/** 新建连接配置。 */
+export async function createAgentConfig(opts: Partial<AgentConfig>): Promise<AgentConfig> {
+  return apiPost<AgentConfig>('/agent/configs', opts)
+}
+
+/** 更新连接配置。 */
+export async function updateAgentConfig(id: string, opts: Partial<AgentConfig>): Promise<AgentConfig> {
+  return apiPatch<AgentConfig>(`/agent/configs/${id}`, opts)
+}
+
+/** 删除连接配置。 */
+export async function deleteAgentConfig(id: string): Promise<{ deleted: string }> {
+  return apiDelete<{ deleted: string }>(`/agent/configs/${id}`)
+}
+
+/** 已保存配置的真实连通性测试。 */
+export async function testAgentConfig(id: string): Promise<AgentConfig> {
+  return apiPost<AgentConfig>(`/agent/configs/${id}/test`)
+}
+
+/** 未保存前的连通性预测试(弹窗内「测试连通性」用)。 */
+export async function previewAgentConfig(opts: Partial<AgentConfig>): Promise<AgentProbeResult> {
+  return apiPost<AgentProbeResult>('/agent/configs/preview', opts)
 }

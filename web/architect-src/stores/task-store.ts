@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 import type { AppendedReq, ExecutionTask, Requirement, TaskNode, TaskStatus } from '@/types'
 import { EXECUTION_TASKS, PLAN_TASK_TREES } from '@/services/mock/order-system'
+import { apiGet, apiPost, apiPatch } from '@/services/api-client'
+import { backendReady, backendUp } from '@/services/backend'
+import { taskService } from '@/services/task-service'
 import { useArchRequirementStore } from './requirement-store'
 
 export const useArchTaskStore = defineStore('arch-task', {
@@ -46,6 +49,31 @@ export const useArchTaskStore = defineStore('arch-task', {
     async load() {
       if (this.loaded) return
       this.loading = true
+      // 后端优先：加载执行任务 + 各方案任务树；不可达回退 mock。
+      if (await backendUp()) {
+        try {
+          const execs = await apiGet<ExecutionTask[]>('/exec')
+          this.executionTasks = execs ?? []
+          const trees: Record<string, TaskNode> = {}
+          for (const e of this.executionTasks) {
+            try {
+              const root = await taskService.tree(e.planId)
+              const key = root?.id ?? e.planId
+              trees[key] = root
+              const req = useArchRequirementStore()
+              req.updatePlan(e.planId, { taskPlanId: key, updatedAt: e.updatedAt })
+            } catch {
+              // 单树失败不阻塞整体加载
+            }
+          }
+          this.planToTaskTree = trees
+          this.loaded = true
+          this.loading = false
+          return
+        } catch {
+          // fall through to mock
+        }
+      }
       this.planToTaskTree = { ...PLAN_TASK_TREES }
       this.executionTasks = structuredClone(EXECUTION_TASKS)
       this.loaded = true
@@ -95,10 +123,12 @@ export const useArchTaskStore = defineStore('arch-task', {
         t.updatedAt = Date.now()
         if (status === 'done' || status === 'failed' || status === 'stopped' || status === 'blocked') t.endedAt = Date.now()
       }
+      if (backendReady()) apiPatch<unknown>(`/exec/${id}`, { status }).catch(() => {})
     },
     setStats(id: string, stats: NonNullable<ExecutionTask['stats']>) {
       const t = this.findExecution(id)
       if (t) t.stats = { ...stats }
+      if (backendReady()) apiPatch<unknown>(`/exec/${id}`, { stats }).catch(() => {})
     },
     /** 停止执行(配合会话停止)。 */
     stopTask(id: string) {
@@ -108,6 +138,7 @@ export const useArchTaskStore = defineStore('arch-task', {
         t.endedAt = Date.now()
         t.updatedAt = Date.now()
       }
+      if (backendReady()) apiPost<unknown>(`/exec/${id}/stop`).catch(() => {})
     },
     /** 保存当前任务树为历史快照，替换为新树(任务树随执行过程整体废弃重建)。 */
     replaceTaskTree(planId: string, tree: TaskNode) {
@@ -147,10 +178,17 @@ export const useArchTaskStore = defineStore('arch-task', {
       if (!t) return
       t.status = 'done'
       useArchRequirementStore().markPlanReqsDone(t.planId)
+      if (backendReady()) apiPost<unknown>(`/exec/${id}/accept`).catch(() => {})
     },
     addAmendment(execId: string, req: AppendedReq) {
       const t = this.findExecution(execId)
       if (t) t.amendments.unshift(req)
+      if (backendReady()) {
+        apiPost<unknown>(`/exec/${execId}/amendments`, {
+          title: req.title, desc: req.desc, scope: req.scope,
+          analysis: req.analysis, design: req.design,
+        }).catch(() => {})
+      }
     },
     updateAmendment(execId: string, reqId: string, patch: Partial<AppendedReq>) {
       const t = this.findExecution(execId)

@@ -1,6 +1,8 @@
 import type { ArchComponent, KbQueryCompResult, KbQueryResult, KbQuerySection, KbQuerySkill, KbQuerySpec } from '@/types'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useArchMcpStore } from '@/stores/mcp-store'
+import { apiPost } from './api-client'
+import { backendUp } from './backend'
 import { currentBaselineInfo } from './baseline-service'
 
 /**
@@ -105,6 +107,17 @@ function buildSummary(spec: KbQuerySpec, compResults: KbQueryCompResult[], skill
 export const kbQueryAgent = {
   /** 执行一次知识库复合查询。 */
   async query(spec: KbQuerySpec, opts: KbAgentOptions = {}): Promise<KbQueryResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<KbQueryResult>('/kb/query', spec)
+        if (res.id && res.compResults) {
+          this.record('topocode.kb.query', `复合查询: ${spec.kind === 'depends' ? '依赖' : '被调用'} · ${res.compResults.length} 组件 · skill ${res.skills.length}`)
+          return { ...res, cached: opts.cached ?? res.cached ?? false }
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
     const targets = resolveComponents(spec.compIds)
     const skills = selectSkills(spec)
     const compResults = targets.map((t) => buildCompResult(t, spec))

@@ -103,7 +103,7 @@ export const useProjectStore = defineStore('project', () => {
     })
   }
 
-  async function importProject(path: string) {
+  async function importProject(path: string, opts?: { mode?: string; branch?: string; head?: string; repoUrl?: string; localRepoPath?: string }) {
     // 检查重复导入
     const existing = projects.value.find(
       p => p.path === path || p.rootPath === path
@@ -153,7 +153,7 @@ export const useProjectStore = defineStore('project', () => {
     importStatus.value = 'scan'
     try {
       // ipc.project.import() 已通过 adaptProject 完成 snake→camel 转换
-      const project = await ipc.project.import(path)
+      const project = await ipc.project.import(path, opts)
       if (!project) return null
       projects.value.push(project)
       return project

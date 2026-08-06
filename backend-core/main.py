@@ -38,6 +38,7 @@ from core_service import (
     register_render_methods,
     register_report_methods,
     register_module_methods,
+    register_version_methods,
 )
 from llm_service import register_llm_methods
 from plugin_manager import PluginManager
@@ -83,6 +84,9 @@ class BackendApp:
         pub_port = int(os.environ.get('ZMQ_PUB_PORT', '5680'))
         self.server = ZMQServer(self.multi_db, dealer_port=dealer_port, pub_port=pub_port)
         self.plugin_manager = PluginManager()
+        self._web_proc = None
+        self._arch_proc = None
+        self._mcp_proc = None
 
     def _setup_signals(self):
         try:
@@ -112,6 +116,7 @@ class BackendApp:
         register_llm_methods(self.server, self.multi_db)
         register_report_methods(self.server, self.multi_db)
         register_module_methods(self.server)
+        register_version_methods(self.server, self.multi_db)
         logger.info(f"Registered {len(self.server.methods)} core methods")
 
         plugins_found = self.plugin_manager.discover()
@@ -193,6 +198,39 @@ class BackendApp:
             except Exception as e:
                 logger.warning(f"Failed to start web server subprocess: {e}")
 
+        # 启动 Architect 独立服务（子进程，3470）
+        arch_port = int(os.environ.get('ARCH_PORT', '3470'))
+        try:
+            arch_dir = os.path.join(os.path.dirname(__file__), "..", "plugins", "architect")
+            arch_dir = os.path.abspath(arch_dir)
+            arch_entry = os.path.join(arch_dir, "__main__.py")
+            self._arch_proc = subprocess.Popen(
+                [sys.executable, arch_entry,
+                 "--port", str(arch_port),
+                 "--host", "127.0.0.1",
+                 "--data-dir", self.data_dir],
+                stdout=None, stderr=None,
+            )
+            logger.info(f"Architect server subprocess started (PID {self._arch_proc.pid}) on http://127.0.0.1:{arch_port}")
+        except Exception as e:
+            self._arch_proc = None
+            logger.warning(f"Failed to start architect subprocess: {e}")
+
+        # 启动 MCP Server（子进程，3460）— 提供外部 agent/工具访问 KB 的通道
+        try:
+            mcp_port = int(os.environ.get('MCP_SERVER_PORT', '3460'))
+            mcp_dir = os.path.join(os.path.dirname(__file__), "..", "plugins", "mcp_server")
+            mcp_dir = os.path.abspath(mcp_dir)
+            mcp_entry = os.path.join(mcp_dir, "server.py")
+            self._mcp_proc = subprocess.Popen(
+                [sys.executable, mcp_entry],
+                stdout=None, stderr=None,
+            )
+            logger.info(f"MCP server subprocess started (PID {self._mcp_proc.pid}) on http://127.0.0.1:{mcp_port}")
+        except Exception as e:
+            self._mcp_proc = None
+            logger.warning(f"Failed to start MCP server subprocess: {e}")
+
     async def run(self):
         logger.info(f"Starting TopoOne Backend (data_dir: {self.data_dir})")
         self.register_all()
@@ -202,8 +240,32 @@ class BackendApp:
             await self.server.run_forever()
         finally:
             self._shutdown_web_process()
+            self._shutdown_arch_process()
+            self._shutdown_mcp_process()
             self.multi_db.close_all()
             logger.info("Backend shutdown complete")
+
+    def _shutdown_arch_process(self):
+        if self._arch_proc and self._arch_proc.poll() is None:
+            logger.info(f"Terminating architect subprocess (PID {self._arch_proc.pid})...")
+            self._arch_proc.terminate()
+            try:
+                self._arch_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning("Architect subprocess did not exit in 5s, killing...")
+                self._arch_proc.kill()
+                self._arch_proc.wait(timeout=2)
+
+    def _shutdown_mcp_process(self):
+        if self._mcp_proc and self._mcp_proc.poll() is None:
+            logger.info(f"Terminating MCP server subprocess (PID {self._mcp_proc.pid})...")
+            self._mcp_proc.terminate()
+            try:
+                self._mcp_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning("MCP server subprocess did not exit in 5s, killing...")
+                self._mcp_proc.kill()
+                self._mcp_proc.wait(timeout=2)
 
     def _shutdown_web_process(self):
         if self._web_proc and self._web_proc.poll() is None:
@@ -220,6 +282,8 @@ class BackendApp:
     def shutdown(self):
         logger.info("Shutting down...")
         self._shutdown_web_process()
+        self._shutdown_arch_process()
+        self._shutdown_mcp_process()
         self.server.stop()
         if self._ingest_consumer:
             self._ingest_consumer.stop()
@@ -247,6 +311,16 @@ async def _run_distributed(data_dir: str, http_port: int | None, http_host: str 
                  restart_limit=3)
     sv.register("agent_worker",
                  [sys.executable, "-m", "agent_worker", "--data-dir", data_dir],
+                 restart_limit=3)
+    arch_dir = os.path.join(os.path.dirname(__file__), "..", "plugins", "architect")
+    sv.register("architect",
+                 [sys.executable, os.path.join(os.path.abspath(arch_dir), "__main__.py"),
+                  "--port", str(int(os.environ.get('ARCH_PORT', '3470'))),
+                  "--host", "127.0.0.1", "--data-dir", data_dir],
+                 restart_limit=3)
+    mcp_dir = os.path.join(os.path.dirname(__file__), "..", "plugins", "mcp_server")
+    sv.register("mcp_server",
+                 [sys.executable, os.path.join(os.path.abspath(mcp_dir), "server.py")],
                  restart_limit=3)
 
     await sv.start_all()

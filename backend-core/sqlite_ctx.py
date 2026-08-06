@@ -244,6 +244,11 @@ MAIN_DB_TABLES_SQL = """
         pinned INTEGER DEFAULT 0,
         sort_order INTEGER DEFAULT 0,
         last_sync TEXT,
+        import_mode TEXT DEFAULT 'static' CHECK(import_mode IN ('static', 'git-local', 'git-remote')),
+        remote_url TEXT DEFAULT '',
+        local_repo_path TEXT DEFAULT '',
+        source_cache_dir TEXT DEFAULT '',
+        current_version_id TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -583,6 +588,66 @@ MAIN_DB_TABLES_SQL = """
         project_id TEXT NOT NULL,
         task_id TEXT NOT NULL
     );
+
+    -- ============================================
+    -- project_versions — KB 版本基线注册表（只向前，不向后）
+    -- 每个 KB 更新产生一个新的基线版本；对比仅在基线之间进行。
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS project_versions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        parent_version_id TEXT,
+        label TEXT DEFAULT '',
+        branch TEXT DEFAULT '',
+        head TEXT DEFAULT '',
+        change_type TEXT DEFAULT 'minor' CHECK(change_type IN ('minor', 'major')),
+        file_count INTEGER DEFAULT 0,
+        added_count INTEGER DEFAULT 0,
+        modified_count INTEGER DEFAULT 0,
+        deleted_count INTEGER DEFAULT 0,
+        is_baseline INTEGER DEFAULT 0,
+        metadata TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_versions_project ON project_versions(project_id, created_at DESC);
+
+    -- ============================================
+    -- project_version_files — 版本间文件级 delta (A/M/D)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS project_version_files (
+        id TEXT PRIMARY KEY,
+        version_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        change_type TEXT NOT NULL CHECK(change_type IN ('A', 'M', 'D')),
+        file_path TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (version_id) REFERENCES project_versions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pvf_version ON project_version_files(version_id);
+    CREATE INDEX IF NOT EXISTS idx_pvf_project ON project_version_files(project_id, change_type);
+
+    -- ============================================
+    -- project_update_requests — architect 发起的"待更新"标记
+    -- (repo_url + branch + head)，由 KB 界面确认后执行
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS project_update_requests (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        source TEXT DEFAULT 'architect' CHECK(source IN ('architect', 'kb')),
+        repo_url TEXT DEFAULT '',
+        local_repo_path TEXT DEFAULT '',
+        branch TEXT DEFAULT '',
+        head TEXT DEFAULT '',
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'confirmed', 'done', 'cancelled')),
+        method TEXT DEFAULT '',
+        result_version_id TEXT,
+        note TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_pur_project ON project_update_requests(project_id, status);
 """
 
 KNOWLEDGE_DB_TABLES_SQL = """
@@ -673,11 +738,13 @@ PROJECT_DB_TABLES_SQL = """
         hashcode TEXT,
         parent_path TEXT,
         mtime REAL,
+        version_from TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_source_files_parent ON source_files(parent_path);
     CREATE INDEX IF NOT EXISTS idx_source_files_lang ON source_files(language);
+    CREATE INDEX IF NOT EXISTS idx_source_files_version_from ON source_files(version_from);
 
     -- AST 数据表 (仅保留最新)
     CREATE TABLE IF NOT EXISTS ast_data (
@@ -1052,7 +1119,342 @@ PROJECT_DB_TABLES_SQL = """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_pos_snap_unique
         ON graph_node_positions(task_id, edge_type, drill_key, snapshot_id, layout_type, node_id)
         WHERE snapshot_id IS NOT NULL;
+
+    -- ============================================
+    -- source_files_history — 过期源码文件行 (δ 归档)
+    -- 活表 = 最新版本；被覆盖/删除的行移入此处，带 version_from/version_to 区间
+    -- 重建版本 V: 活表(version_from<=V) UNION 历史(version_from<=V AND version_to>V)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS source_files_history (
+        id TEXT PRIMARY KEY,
+        file_path TEXT NOT NULL,
+        file_name TEXT,
+        language TEXT,
+        size INTEGER DEFAULT 0,
+        content_hash TEXT,
+        hashcode TEXT,
+        parent_path TEXT,
+        mtime REAL,
+        version_from TEXT,
+        version_to TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_source_files_hist_range ON source_files_history(file_path, version_from, version_to);
+    CREATE INDEX IF NOT EXISTS idx_source_files_hist_vfrom ON source_files_history(version_from);
+    CREATE INDEX IF NOT EXISTS idx_source_files_hist_vto ON source_files_history(version_to);
+
+    -- ============================================
+    -- community_overrides — 手动组件划分/修改（预留）
+    -- 优先级高于自动聚类；增量更新不覆盖用户手动划分。
+    -- action: 'rename' | 'merge' | 'split' | 'reassign' | 'freeze'
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS community_overrides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        task_id TEXT DEFAULT '',
+        edge_type TEXT DEFAULT '',
+        comm_lv TEXT DEFAULT '',
+        comm_id TEXT DEFAULT '',
+        action TEXT NOT NULL,
+        payload TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_community_overrides_project ON community_overrides(project_id, comm_id);
 """
+
+ARCHITECT_DB_TABLES_SQL = """
+    -- Architect workbench state (独立 db: ~/.topocode/architect.db, label 'architect')
+    -- 契约见 docs/architect/conventions.md §7
+
+    CREATE TABLE IF NOT EXISTS arch_projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        desc TEXT DEFAULT '',
+        root_path TEXT,                 -- execRoot
+        kb_root TEXT,                   -- kbRoot
+        branch TEXT DEFAULT 'main',
+        baseline_id TEXT,
+        baseline_commit TEXT,
+        created_at INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        config TEXT,                    -- JSON
+        mode TEXT DEFAULT 'existing',   -- existing | greenfield
+        scaffold TEXT,                  -- JSON
+        product_form TEXT,
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_requirements (
+        id TEXT PRIMARY KEY,
+        kind TEXT DEFAULT 'user-story',
+        tier TEXT DEFAULT 'raw',            -- raw | analyzed
+        status TEXT DEFAULT 'raw',
+        location TEXT DEFAULT 'proposal',   -- proposal | pool
+        title TEXT NOT NULL DEFAULT '',
+        desc TEXT DEFAULT '',
+        priority TEXT DEFAULT 'P2',
+        acceptance TEXT,                    -- JSON: string[]
+        analysis TEXT,                      -- JSON: RequirementAnalysis
+        trace_to TEXT,                      -- JSON: string[]
+        routed_by TEXT,                     -- direct | (analysis)
+        suggestion TEXT,                    -- JSON
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_plans (
+        id TEXT PRIMARY KEY,
+        req_ids TEXT,                       -- JSON: string[]
+        title TEXT DEFAULT '',
+        approach TEXT DEFAULT '',
+        changes TEXT,                       -- JSON: ChangeItem[]
+        impact TEXT,                        -- JSON
+        status TEXT DEFAULT 'draft',
+        task_plan_id TEXT,
+        base_commit TEXT,
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_task_trees (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT,
+        root TEXT,                          -- JSON: TaskNode
+        revision INTEGER DEFAULT 0,
+        history TEXT,                       -- JSON: TaskNode[] (缩略快照, 上限20)
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_execution_tasks (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT,
+        adapter TEXT DEFAULT 'opencode',
+        model TEXT,
+        req_ids TEXT,                       -- JSON: string[]
+        connectivity TEXT DEFAULT 'unknown',
+        status TEXT DEFAULT 'created',
+        session_ids TEXT,                   -- JSON: string[]
+        base_commit TEXT,
+        run_count INTEGER DEFAULT 0,
+        tree_revision INTEGER DEFAULT 0,
+        test_ids TEXT,                      -- JSON: string[] (任务侧冗余关联)
+        amendments TEXT,                    -- JSON: AppendedReq[]
+        stats TEXT,                         -- JSON: TaskSessionStats
+        error TEXT,
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0,
+        ended_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_agent_sessions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT,
+        adapter TEXT DEFAULT 'opencode',
+        status TEXT DEFAULT 'idle',
+        keep_context INTEGER DEFAULT 1,
+        artifacts TEXT,                     -- JSON: string[]
+        test_result TEXT,                   -- JSON
+        stats TEXT,                         -- JSON: TaskSessionStats
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_agent_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        time INTEGER DEFAULT 0,
+        content TEXT DEFAULT '',
+        tool TEXT                            -- JSON: AgentToolCall
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_agent_msgs_session ON arch_agent_messages(session_id);
+
+    CREATE TABLE IF NOT EXISTS arch_unit_tests (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        levels TEXT,                        -- JSON: TestLevel[]
+        script_path TEXT DEFAULT '',
+        source TEXT DEFAULT 'manual',       -- requirement | manual | scan
+        status TEXT DEFAULT 'idle',
+        last_result TEXT,                   -- JSON
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_unit_test_sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT DEFAULT '',
+        channel TEXT DEFAULT 'cli',         -- agent | cli
+        adapter TEXT DEFAULT 'opencode',
+        test_ids TEXT,                      -- JSON: string[]
+        status TEXT DEFAULT 'created',
+        stats TEXT,                         -- JSON: TaskSessionStats
+        default_channel TEXT DEFAULT 'cli', -- 默认执行通道
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_unit_test_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        time INTEGER DEFAULT 0,
+        content TEXT DEFAULT '',
+        tool TEXT                            -- JSON: AgentToolCall
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_ut_msgs_session ON arch_unit_test_messages(session_id);
+
+    CREATE TABLE IF NOT EXISTS arch_mcp_calls (
+        id TEXT PRIMARY KEY,
+        tool TEXT DEFAULT '',
+        input TEXT,                         -- JSON
+        output TEXT,                        -- JSON
+        status TEXT DEFAULT '',
+        time INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_interactions (
+        id TEXT PRIMARY KEY,
+        prompt TEXT DEFAULT '',
+        status TEXT DEFAULT '',
+        answer TEXT DEFAULT '',
+        time INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_specs (
+        version TEXT PRIMARY KEY,
+        overrides TEXT,                     -- JSON
+        explicit_rules TEXT,                -- JSON
+        derived_rules TEXT,                 -- JSON
+        changelog TEXT,                     -- JSON
+        updated_at INTEGER DEFAULT 0
+    );
+"""
+
+
+# ── Architect 库独立初始化(供 architect 独立进程直接使用) ──────────
+# 与 MultiDBManager._architect_migrations 同源，避免两处维护。
+
+_REQ_MIGRATION_COLS = [
+    ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
+    ("parent_id", "TEXT"), ("related_to", "TEXT"), ("merged_into", "TEXT"),
+    ("preferred_asset_ids", "TEXT"),
+]
+
+_ARCH_PROJECT_MIGRATION_COLS = [
+    ("kb_project_id", "TEXT DEFAULT ''"),
+    ("git_linked", "INTEGER DEFAULT 0"),
+    ("kb_source_dir", "TEXT DEFAULT ''"),
+    ("link_verified_at", "INTEGER DEFAULT 0"),
+    ("pinned", "INTEGER DEFAULT 0"),
+    ("favorite", "INTEGER DEFAULT 0"),
+]
+
+
+def architect_db_migrations(db) -> None:
+    """architect 库增量迁移(旧库补列/补表)。幂等: 已存在跳过。"""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_blueprints (
+            id TEXT PRIMARY KEY,
+            req_ids TEXT, title TEXT, description TEXT,
+            model TEXT, source TEXT, status TEXT, stack TEXT,
+            created_at INTEGER, updated_at INTEGER
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_kb_snapshots (
+            id TEXT PRIMARY KEY,
+            exec_root TEXT, git_commit TEXT, baseline_version TEXT,
+            model TEXT, mappings TEXT, metrics TEXT, created_at INTEGER
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_tags (
+            id TEXT PRIMARY KEY,
+            group_key TEXT DEFAULT '', label TEXT DEFAULT '',
+            color TEXT DEFAULT '', scope TEXT DEFAULT '',
+            offline INTEGER DEFAULT 0, created_at INTEGER DEFAULT 0,
+            updated_at INTEGER DEFAULT 0
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_collab_config (
+            key TEXT PRIMARY KEY,
+            value TEXT DEFAULT ''
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_staging_scans (
+            id TEXT PRIMARY KEY,
+            scope TEXT DEFAULT '', grade TEXT DEFAULT '',
+            files TEXT, edges_changed INTEGER DEFAULT 0,
+            re_explained TEXT, boundary_changed TEXT, compliance TEXT,
+            created_at INTEGER DEFAULT 0
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_snapshot_records (
+            id TEXT PRIMARY KEY,
+            name TEXT DEFAULT '', version TEXT DEFAULT '',
+            task_id TEXT DEFAULT '', git_branch TEXT DEFAULT '',
+            git_commit TEXT DEFAULT '', model TEXT, created_at INTEGER DEFAULT 0
+        )
+    """)
+    try:
+        snap_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_snapshot_records)")}
+    except Exception:
+        snap_cols = set()
+    if "root_path" not in snap_cols:
+        try:
+            db.execute("ALTER TABLE arch_snapshot_records ADD COLUMN root_path TEXT DEFAULT ''")
+        except Exception:
+            pass
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_agent_configs (
+            id TEXT PRIMARY KEY,
+            adapter TEXT DEFAULT '',          -- opencode / codex / claude / ...
+            name TEXT DEFAULT '',
+            mode TEXT DEFAULT 'server',       -- server | cli
+            host TEXT DEFAULT '',
+            port INTEGER DEFAULT 0,
+            username TEXT DEFAULT '',
+            url TEXT DEFAULT '',              -- 探测地址(如 http://127.0.0.1:4096)
+            models TEXT,                      -- JSON: 选用的模型 id 列表
+            default_model TEXT DEFAULT '',
+            last_status TEXT DEFAULT 'unknown', -- unknown | ok | fail
+            last_detail TEXT DEFAULT '',
+            last_check_at INTEGER DEFAULT 0,
+            created_at INTEGER DEFAULT 0,
+            updated_at INTEGER DEFAULT 0
+        )
+    """)
+    try:
+        existing = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_requirements)")}
+    except Exception:
+        existing = set()
+    for name, typ in _REQ_MIGRATION_COLS:
+        if name not in existing:
+            try:
+                db.execute(f"ALTER TABLE arch_requirements ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
+    try:
+        proj_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_projects)")}
+    except Exception:
+        proj_cols = set()
+    for name, typ in _ARCH_PROJECT_MIGRATION_COLS:
+        if name not in proj_cols:
+            try:
+                db.execute(f"ALTER TABLE arch_projects ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
+
+
+def init_architect_db(db) -> None:
+    """初始化 architect 工作台库(架构表 + 迁移)。db 为打开 architect.db 的 SQLiteContext。"""
+    db.executescript(ARCHITECT_DB_TABLES_SQL)
+    architect_db_migrations(db)
+    db.conn.commit()
 
 
 def _init_default_skills(db: SQLiteContext):
@@ -1168,6 +1570,16 @@ class MultiDBManager:
         if not self._is_remote:
             self._init_sessions_tables()
 
+        # 初始化 architect 工作台库
+        architect_db_path = os.path.join(self.data_dir, "architect.db")
+        self._write_queue.register_db("architect", architect_db_path)
+        self.architect_db = SQLiteContext(architect_db_path, label="architect",
+                                          write_queue=self._write_queue)
+        if not self._is_remote:
+            self._init_architect_tables()
+        else:
+            self._init_architect_tables_remote()
+
         # 项目库 LRU 缓存 (max=10)
         self._project_db_cache: OrderedDict[str, SQLiteContext] = OrderedDict()
         self._project_db_max = 100
@@ -1259,6 +1671,11 @@ class MultiDBManager:
                 ("sort_order", "INTEGER DEFAULT 0"),
                 ("summary", "TEXT DEFAULT ''"),
                 ("summary_generated_at", "TEXT"),
+                ("import_mode", "TEXT DEFAULT 'static'"),
+                ("remote_url", "TEXT DEFAULT ''"),
+                ("local_repo_path", "TEXT DEFAULT ''"),
+                ("source_cache_dir", "TEXT DEFAULT ''"),
+                ("current_version_id", "TEXT DEFAULT ''"),
             ],
         }
         for table, columns in columns_to_add.items():
@@ -1400,6 +1817,32 @@ class MultiDBManager:
         """初始化会话库表"""
         self.sessions_db.executescript(SESSIONS_DB_TABLES_SQL)
         self.sessions_db.conn.commit()
+
+    def _init_architect_tables(self):
+        """初始化 architect 工作台库表"""
+        init_architect_db(self.architect_db)
+
+    def _init_architect_tables_remote(self):
+        """远程初始化 architect 表结构（通过 RemoteWriteQueue 发送到 DB Service）"""
+        self._write_queue.execute_sync("architect", ARCHITECT_DB_TABLES_SQL, (), timeout=60)
+        for name, typ in self._REQ_MIGRATION_COLS:
+            try:
+                self._write_queue.execute_sync(
+                    "architect", f"ALTER TABLE arch_requirements ADD COLUMN {name} {typ}", (), timeout=30,
+                )
+            except Exception:
+                pass
+
+    # ALTER TABLE 迁移列(独立方法供 local/remote 复用)
+    _REQ_MIGRATION_COLS = [
+        ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
+        ("parent_id", "TEXT"), ("related_to", "TEXT"), ("merged_into", "TEXT"),
+        ("preferred_asset_ids", "TEXT"),
+    ]
+
+    def _architect_migrations(self, db):
+        """architect 库增量迁移(旧库补列/补表)。幂等: 已存在跳过。"""
+        return architect_db_migrations(db)
 
     def _project_db_path(self, project_id: str, project_root: str = None) -> str:
         """获取项目数据库路径。仅使用新架构 .topocode/data/project.db。"""
@@ -1652,6 +2095,56 @@ class MultiDBManager:
         except Exception:
             pass
 
+        # ── KB 版本化: source_files.version_from + 历史表 + 手动组件划分（兼容旧库）──
+        try:
+            cursor = project_db.execute("PRAGMA table_info(source_files)")
+            sf_cols = {row[1] for row in cursor.fetchall()}
+            if 'version_from' not in sf_cols:
+                project_db.execute("ALTER TABLE source_files ADD COLUMN version_from TEXT")
+        except Exception:
+            pass
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS source_files_history (
+                    id TEXT PRIMARY KEY,
+                    file_path TEXT NOT NULL,
+                    file_name TEXT,
+                    language TEXT,
+                    size INTEGER DEFAULT 0,
+                    content_hash TEXT,
+                    hashcode TEXT,
+                    parent_path TEXT,
+                    mtime REAL,
+                    version_from TEXT,
+                    version_to TEXT,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_source_files_hist_range ON source_files_history(file_path, version_from, version_to)")
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_source_files_hist_vfrom ON source_files_history(version_from)")
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_source_files_hist_vto ON source_files_history(version_to)")
+        except Exception:
+            pass
+        try:
+            project_db.execute("""
+                CREATE TABLE IF NOT EXISTS community_overrides (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL,
+                    task_id TEXT DEFAULT '',
+                    edge_type TEXT DEFAULT '',
+                    comm_lv TEXT DEFAULT '',
+                    comm_id TEXT DEFAULT '',
+                    action TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    updated_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            project_db.execute("CREATE INDEX IF NOT EXISTS idx_community_overrides_project ON community_overrides(project_id, comm_id)")
+        except Exception:
+            pass
+
         project_db.conn.commit()
 
         # ===== 去重 + 防重复索引（graph_doc + community_hierarchy）=====
@@ -1682,6 +2175,36 @@ class MultiDBManager:
             except Exception:
                 pass
         project_db.conn.commit()
+
+    def source_cache_dir_for(self, project_id: str) -> str:
+        """KB 项目源码缓存目录: {data_dir}/source-cache/{project_id}/"""
+        return os.path.join(self.data_dir, "source-cache", project_id)
+
+    def ensure_history_table(self, project_db: SQLiteContext, table: str,
+                             suffix: str = "_history"):
+        """确保某活表的历史表存在（δ 归档用）。
+
+        历史表 = 活表同构(CTAS, 无约束) + version_from + version_to。
+        CTAS 不保留 PK/UNIQUE，允许同一 id 在不同版本区间重复出现。
+        """
+        hist_table = f"{table}{suffix}"
+        try:
+            project_db.execute(
+                f"CREATE TABLE IF NOT EXISTS {hist_table} AS SELECT * FROM {table} WHERE 1=0"
+            )
+            cursor = project_db.execute(f"PRAGMA table_info({hist_table})")
+            cols = {row[1] for row in cursor.fetchall()}
+            if 'version_from' not in cols:
+                project_db.execute(f'ALTER TABLE {hist_table} ADD COLUMN version_from TEXT')
+            if 'version_to' not in cols:
+                project_db.execute(f'ALTER TABLE {hist_table} ADD COLUMN version_to TEXT')
+            project_db.execute(f"CREATE INDEX IF NOT EXISTS idx_{hist_table}_vfrom ON {hist_table}(version_from)")
+            project_db.execute(f"CREATE INDEX IF NOT EXISTS idx_{hist_table}_vto ON {hist_table}(version_to)")
+            project_db.conn.commit()
+            return hist_table
+        except Exception as e:
+            logger.warning(f"[ensure_history_table] failed for {table}: {e}")
+            return hist_table
 
     def _evict_idle_project_dbs(self):
         """关闭超过空闲超时的项目库连接"""

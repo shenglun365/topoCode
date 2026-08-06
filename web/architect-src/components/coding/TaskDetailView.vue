@@ -4,13 +4,14 @@ import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, PlayIcon, RocketLaunchIcon, PlusIcon, CubeIcon,
   ArrowPathRoundedSquareIcon, ShieldCheckIcon, ArrowUturnLeftIcon, ExclamationTriangleIcon,
-  CheckCircleIcon, XCircleIcon, CheckIcon, ChatBubbleOvalLeftEllipsisIcon, ArrowLeftIcon, MapIcon,
+  CheckCircleIcon, XCircleIcon, CheckIcon, ChatBubbleOvalLeftEllipsisIcon, ArrowLeftIcon, MapIcon, SparklesIcon,
 } from '@heroicons/vue/24/outline'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchStagingStore } from '@/stores/staging-store'
 import { useArchGitSyncStore } from '@/stores/git-sync-store'
+import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import { useSplitPane } from '@/composables/useSplitPane'
 import TaskTree from '@/components/coding/TaskTree.vue'
 import AgentSessionPanel from '@/components/coding/AgentSessionPanel.vue'
@@ -27,7 +28,9 @@ const task = useArchTaskStore()
 const agent = useArchAgentStore()
 const staging = useArchStagingStore()
 const git = useArchGitSyncStore()
+const unitTest = useArchUnitTestStore()
 staging.load()
+unitTest.load()
 
 // ---- 左右分割 ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane({ max: 70, min: 32 })
@@ -46,6 +49,7 @@ const baselineBusy = ref(false)
 const baselineWarn = ref(false)
 const pickerOpen = ref(false)
 const expandedReqs = ref<string[]>([])
+const testPickerOpen = ref(false)
 
 const execStatusColor: Record<string, string> = {
   created: 'bg-ctp-surface0 text-ctp-subtext0',
@@ -108,6 +112,22 @@ function reflow() {
 }
 function passAcceptance() {
   if (exec.value) task.passAcceptance(exec.value.id)
+}
+
+// ---- 验收清单关联单元测试(agent 辅助 + 人工增减) ----
+const linkedTestIds = computed(() => exec.value?.testIds ?? [])
+function suggestTests() {
+  if (!exec.value) return
+  const ids = unitTest.suggestForTask(exec.value.id)
+  if (exec.value) exec.value.testIds = ids
+}
+function toggleLinkedTest(id: string) {
+  if (!exec.value) return
+  const cur = [...(exec.value.testIds ?? [])]
+  const i = cur.indexOf(id)
+  if (i >= 0) cur.splice(i, 1)
+  else cur.push(id)
+  exec.value.testIds = cur
 }
 
 // ---- 追加需求(添加需求池项并入当前执行) ----
@@ -422,6 +442,50 @@ function toggleExpanded(id: string) {
                   <span class="truncate">{{ c.name }}</span>
                 </div>
               </div>
+              <!-- 关联单元测试(agent 辅助判定 + 人工增减；不随任务自动执行) -->
+              <div class="mt-2 border-t border-ctp-yellow/20 pt-2">
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <span class="text-[11px] font-medium text-ctp-yellow">{{ t('execute.linkedTests') }}</span>
+                  <span class="text-[10px] text-ctp-overlay1">{{ linkedTestIds.length }}</span>
+                  <button
+                    class="btn btn-xs btn-ghost ml-auto"
+                    @click="suggestTests"
+                  >
+                    <SparklesIcon class="w-3 h-3" />{{ t('execute.agentSuggest') }}
+                  </button>
+                </div>
+                <div
+                  v-if="linkedTestIds.length"
+                  class="space-y-1"
+                >
+                  <div
+                    v-for="id in linkedTestIds"
+                    :key="id"
+                    class="flex items-center gap-1.5 text-[11px]"
+                  >
+                    <button
+                      class="text-ctp-overlay1 hover:text-ctp-red shrink-0"
+                      :title="t('common.close')"
+                      @click="toggleLinkedTest(id)"
+                    >
+                      <XMarkIcon class="w-3 h-3" />
+                    </button>
+                    <span class="truncate">{{ unitTest.byId(id)?.name ?? id }}</span>
+                  </div>
+                </div>
+                <div
+                  v-else
+                  class="text-[10px] text-ctp-overlay1"
+                >
+                  {{ t('execute.linkedTestsEmpty') }}
+                </div>
+                <button
+                  class="btn btn-xs btn-ghost mt-1"
+                  @click="testPickerOpen = true"
+                >
+                  <PlusIcon class="w-3 h-3" />{{ t('execute.addLinkedTest') }}
+                </button>
+              </div>
               <button
                 class="btn btn-xs btn-green mt-2 w-full"
                 @click="passAcceptance"
@@ -480,5 +544,50 @@ function toggleExpanded(id: string) {
       @update:open="(v) => (pickerOpen = v)"
       @confirm="addFromPicker"
     />
+
+    <!-- 关联单元测试选择弹窗 -->
+    <div
+      v-if="testPickerOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-ctp-crust/70"
+      @click.self="testPickerOpen = false"
+    >
+      <div class="w-[480px] max-w-[92vw] rounded-xl border border-ctp-surface1 bg-ctp-mantle shadow-xl p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold text-ctp-text">{{ t('execute.pickLinkedTest') }}</span>
+          <button
+            class="text-ctp-overlay1 hover:text-ctp-red"
+            @click="testPickerOpen = false"
+          >
+            <XMarkIcon class="w-4 h-4" />
+          </button>
+        </div>
+        <div class="max-h-72 overflow-auto space-y-0.5">
+          <div
+            v-for="test in unitTest.tests"
+            :key="test.id"
+            class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-ctp-surface0/50"
+          >
+            <input
+              type="checkbox"
+              class="accent-ctp-blue"
+              :checked="linkedTestIds.includes(test.id)"
+              @change="toggleLinkedTest(test.id)"
+            >
+            <span class="text-xs text-ctp-text truncate">{{ test.name }}</span>
+            <span class="ml-auto font-mono text-[10px] text-ctp-overlay1 shrink-0">{{ test.levels.join(' · ') }}</span>
+          </div>
+          <p
+            v-if="!unitTest.tests.length"
+            class="text-[11px] text-ctp-overlay1 text-center py-6"
+          >{{ t('unitTest.listEmpty') }}</p>
+        </div>
+        <div class="flex justify-end">
+          <button
+            class="btn btn-sm btn-blue"
+            @click="testPickerOpen = false"
+          >{{ t('common.confirm') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

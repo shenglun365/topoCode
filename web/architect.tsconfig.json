@@ -17,10 +17,10 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["architect-src/*"]
     },
     "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["architect-src/**/*.ts", "architect-src/**/*.d.ts", "architect-src/**/*.vue", "entry-architect.ts"],
+  "references": [{ "path": "./architect.tsconfig.node.json" }]
 }

@@ -3,6 +3,7 @@ import type { StepStatus, WorkflowStageCtx, WorkflowStageKey, WorkflowStep } fro
 import { WORKFLOW_STAGES } from '@/config/workflow'
 import { useArchRequirementStore } from './requirement-store'
 import { useArchTaskStore } from './task-store'
+import { useArchUnitTestStore } from './unit-test-store'
 
 export const useArchWorkflowStore = defineStore('arch-workflow', {
   state: () => ({
@@ -20,6 +21,7 @@ export const useArchWorkflowStore = defineStore('arch-workflow', {
     ctx(): WorkflowStageCtx {
       const req = useArchRequirementStore()
       const task = useArchTaskStore()
+      const ut = useArchUnitTestStore()
       return {
         proposalCount: req.proposals.length,
         poolCount: req.poolItems.length,
@@ -28,6 +30,8 @@ export const useArchWorkflowStore = defineStore('arch-workflow', {
         activeTaskCount: task.activeTasks.length,
         acceptingCount: task.executionTasks.filter((t) => t.status === 'accepting').length,
         doneTaskCount: task.executionTasks.filter((t) => t.status === 'done').length,
+        unitTestSessionCount: ut.sessions.length,
+        passedTestCount: ut.tests.filter((t) => t.status === 'passed').length,
       }
     },
     /** 读接口：渲染用阶段列表(含 status 推导)。 */

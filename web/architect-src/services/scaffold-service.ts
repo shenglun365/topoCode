@@ -1,4 +1,6 @@
 import type { ScaffoldFile, ScaffoldResult } from '@/types'
+import { apiPost } from './api-client'
+import { backendUp } from './backend'
 import { mockResult } from './mock/delay'
 
 /**
@@ -51,6 +53,33 @@ let scaffoldTokenSeq = 0
 
 export const scaffoldService = {
   async generate(req: ScaffoldGenerateRequest): Promise<ScaffoldResult> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{
+          token: string
+          files: Array<{ path: string; content: string; action?: string; summary?: string }>
+          validation: { ok: boolean }
+        }>('/scaffold/generate', {
+          blueprintId: req.blueprintId,
+          module: req.layers.includes(2) ? 'core' : '',
+          execRoot: req.execRoot,
+        })
+        if (res.token) {
+          const files: ScaffoldFile[] = (res.files ?? []).map((f) => ({
+            path: f.path,
+            action: (f.action === 'modify' || f.action === 'skip' ? f.action : 'create') as ScaffoldFile['action'],
+            summary: f.summary ?? f.path,
+          }))
+          return {
+            token: res.token,
+            files,
+            validation: { build: res.validation?.ok ?? true, vet: true, test: true },
+          }
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
     await mockResult(null, 600)
     scaffoldTokenSeq += 1
     const template = FILE_TEMPLATES[req.stack.language]
@@ -70,6 +99,16 @@ export const scaffoldService = {
   },
 
   async confirm(_token: string, _execRoot: string, _commitMessage?: string): Promise<{ commit: string; filesWritten: number; buildPass: boolean }> {
+    if (await backendUp()) {
+      try {
+        const res = await apiPost<{ commit: string; filesWritten: number; buildPass: boolean }>('/scaffold/confirm', {
+          token: _token, execRoot: _execRoot, commitMessage: _commitMessage,
+        })
+        if (res.commit) return res
+      } catch {
+        // fall through to mock
+      }
+    }
     await mockResult(null, 400)
     return { commit: `scaffold-${Date.now().toString(16).slice(0, 12)}`, filesWritten: 12, buildPass: true }
   },

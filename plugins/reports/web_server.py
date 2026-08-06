@@ -11,7 +11,7 @@ import signal
 import sys
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -20,7 +20,6 @@ from web_root import router as web_root_router
 from viewer import router as viewer_router
 from chat import router as chat_router
 from vue_routes import vue_router
-from architect_routes import router as architect_router
 from web_tools import WebToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -50,24 +49,28 @@ app.include_router(viewer_router)
 app.include_router(chat_router)
 app.include_router(vue_router)
 
-# Architect API — merged into same process, no proxy hop
-app.include_router(architect_router)
-
-# Mount Vue web static files at /web
+# Architect is now a standalone service (plugins/architect, port 3470).
+# Mount Vue web static files at /web (viewer/chat/code web-root apps only).
 _web_static = os.path.join(STATIC_DIR, "web")
 if os.path.isdir(_web_static):
     app.mount("/web", StaticFiles(directory=_web_static), name="web_vue")
 
-# Mount Architect SPA (production only; dev uses Vite)
-# HTML is at STATIC_DIR/architect.html; JS/CSS assets under /web/ (already mounted)
-_architect_html = os.path.join(STATIC_DIR, "architect.html")
-if os.path.isfile(_architect_html):
-    from fastapi.responses import FileResponse
+# Old /architect entry → redirect to the standalone architect service.
+from fastapi.responses import RedirectResponse
 
-    @app.get("/architect", include_in_schema=False)
-    @app.get("/architect/", include_in_schema=False)
-    async def serve_architect():
-        return FileResponse(_architect_html)
+
+def _architect_url(request) -> str:
+    configured = os.environ.get("ARCHITECT_URL")
+    if configured:
+        return configured
+    host = request.headers.get("host", "127.0.0.1").rsplit(":", 1)[0]
+    return f"http://{host}:3470/architect"
+
+
+@app.get("/architect", include_in_schema=False)
+@app.get("/architect/", include_in_schema=False)
+async def redirect_architect(request: Request):
+    return RedirectResponse(_architect_url(request))
 
 
 def create_app(multi_db_instance, zmq_server_instance=None) -> FastAPI:
@@ -75,6 +78,8 @@ def create_app(multi_db_instance, zmq_server_instance=None) -> FastAPI:
     common.set_globals(multi_db_instance, zmq_server_instance)
     common.web_tool_executor = WebToolExecutor(multi_db_instance)
     common._ensure_chat_tables()
+    # NOTE: architect workbench db is owned by the standalone architect service
+    # (plugins/architect), no longer initialized here.
     return app
 
 

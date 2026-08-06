@@ -332,16 +332,66 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         return rows
 
     @server.register("project.import")
-    async def import_project(path: str):
-        """导入项目 — 单次遍历 + 事务批量写入 + 异步释放 event loop"""
+    async def import_project(path: str, mode: str = "static", branch: str = "",
+                             head: str = "", repo_url: str = "",
+                             local_repo_path: str = ""):
+        """导入项目 — 支持 static / git-local / git-remote 三种模式。
+
+        - static:      就地目录（建议独立静态目录，非工程/git 仓库目录）
+        - git-local:   path 为本地 git 仓库路径，克隆到源码缓存目录
+        - git-remote:  repo_url 为远端仓库地址，克隆到源码缓存目录
+        导入完成后注册初始 KB 版本基线（version.sync 的前置）。
+        """
         import asyncio
         import time
 
-        logger.info(f"[import] ===== import started: {path} =====")
+        logger.info(f"[import] ===== import started: {path} mode={mode} =====")
         t0 = time.time()
 
-        if not os.path.isdir(path):
-            raise FileNotFoundError(f"Directory not found: {path}")
+        import git_service
+        from version_sync_service import register_version
+
+        mode = (mode or "static")
+        if mode not in ("static", "git-local", "git-remote"):
+            raise ValueError(f"Invalid import mode: {mode}")
+
+        project_id = f"proj-{uuid.uuid4().hex[:8]}"
+        source_cache_dir = multi_db.source_cache_dir_for(project_id)
+        effective_root = path
+        resolved_head = head
+        resolved_remote = repo_url
+        resolved_local = local_repo_path
+
+        # ── git 模式：克隆到源码缓存目录 ──
+        if mode in ("git-local", "git-remote"):
+            if mode == "git-local":
+                if not local_repo_path and not path:
+                    raise ValueError("local_repo_path is required for git-local")
+                source = local_repo_path or path
+                resolved_local = source
+                resolved_remote = git_service.remote_url(source)
+            else:
+                if not repo_url:
+                    raise ValueError("repo_url is required for git-remote")
+                source = repo_url
+                resolved_local = ""
+
+            cache_root = os.path.join(source_cache_dir, "worktree")
+            logger.info(f"[import] cloning {mode} source into {cache_root} ...")
+            resolved_head = git_service.clone(source, cache_root,
+                                              branch=branch or None,
+                                              head=head or None)
+            if not resolved_remote:
+                resolved_remote = git_service.remote_url(cache_root)
+            if not branch:
+                try:
+                    branch = git_service.current_branch(cache_root)
+                except Exception:
+                    branch = ""
+            effective_root = cache_root
+
+        if not os.path.isdir(effective_root):
+            raise FileNotFoundError(f"Directory not found: {effective_root}")
 
         # 加载系统导入配置
         import_config = _load_import_config(main_db)
@@ -351,20 +401,20 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         extra_ignore_files = import_config.get("extra_ignore_files", [])
         ignore_filenames = IGNORE_FILE_PRIORITY + extra_ignore_files
         logger.info(f"[import] loading ignore files: {ignore_filenames}")
-        gitignore = MultiIgnoreParser().load_files(path, ignore_filenames)
+        gitignore = MultiIgnoreParser().load_files(effective_root, ignore_filenames)
         logger.info(f"[import] ignore files loaded, elapsed {time.time() - t0:.2f}s")
 
-        # 创建项目库
-        project_id = f"proj-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
         logger.info(f"[import] creating project db: {project_id}")
-        project_db = multi_db.init_project_db(project_id, project_root=os.path.abspath(path))
+        project_db = multi_db.init_project_db(project_id, project_root=os.path.abspath(effective_root))
         logger.info(f"[import] project db created, elapsed {time.time() - t0:.2f}s")
 
         # 单次遍历：同时完成语言检测和文件扫描
         logger.info(f"[import] starting file scan...")
         scan_t0 = time.time()
-        file_count, language = await _scan_and_import(project_db, path, gitignore, server, project_id, extra_patterns=effective_patterns)
+        file_count, language = await _scan_and_import(
+            project_db, effective_root, gitignore, server, project_id,
+            extra_patterns=effective_patterns)
         scan_elapsed = time.time() - scan_t0
         logger.info(f"[import] scan complete: {file_count} files, language={language}, elapsed {scan_elapsed:.2f}s")
 
@@ -372,21 +422,47 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         logger.info(f"[import] writing to main projects table...")
         main_db.insert("projects", {
             "id": project_id,
-            "name": os.path.basename(path),
-            "root_path": path,
+            "name": os.path.basename(effective_root) if mode != "static" else os.path.basename(path),
+            "root_path": effective_root,
             "language": language,
             "file_count": file_count,
             "status": "synced",
             "needs_resync": 0,
             "has_file_changes": 0,
             "is_sample": 0,
+            "import_mode": mode,
+            "remote_url": resolved_remote or "",
+            "local_repo_path": resolved_local or "",
+            "source_cache_dir": source_cache_dir if mode in ("git-local", "git-remote") else "",
             "last_sync": now,
         })
 
-        _ensure_topocode_in_gitignore(path)
+        _ensure_topocode_in_gitignore(effective_root)
+
+        # ── 注册初始 KB 版本基线（全部文件 = added）──
+        try:
+            file_rows = project_db.fetchall("SELECT file_path FROM source_files")
+            all_paths = [r["file_path"] for r in file_rows]
+            version = register_version(
+                multi_db, project_id,
+                branch=branch or "",
+                head=resolved_head or "",
+                label="initial-import",
+                change_type="minor",
+                delta={"added": all_paths, "modified": [], "deleted": []},
+                is_baseline=True,
+            )
+            project_db.executemany(
+                "UPDATE source_files SET version_from = ? WHERE version_from IS NULL",
+                [(version["id"],)],
+            )
+            project_db.conn.commit()
+            logger.info(f"[import] initial baseline version registered: {version['id']}")
+        except Exception as e:
+            logger.warning(f"[import] initial version registration failed: {e}")
 
         server.publish("project", "import.progress", {
-            "path": path,
+            "path": effective_root,
             "progress": 100,
             "fileCount": file_count,
             "phase": "done",
@@ -881,6 +957,58 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         if not pid: raise ValueError("project_id is required")
         return _tm_check_import_status(multi_db, pid)
 
+    @server.register("project.saveBaseline")
+    def save_baseline(project_id: str = None, projectId: str = None,
+                      remote_url: str = "", local_repo_path: str = "",
+                      branch: str = "", head: str = ""):
+        """保存项目版本基线信息（远端/本地仓库、分支、head）。
+
+        这是源码知识库的版本基线：static 项目可手工填写，git 项目由导入/更新自动维护。
+        更新 projects 字段 + project_git_info，并按 (branch, head) 注册版本基线。
+        """
+        import version_sync_service as vss
+        pid = project_id or projectId
+        if not pid:
+            raise ValueError("project_id is required")
+
+        project = main_db.fetchone("SELECT * FROM projects WHERE id = ?", (pid,))
+        if not project:
+            raise ValueError(f"Project not found: {pid}")
+
+        updates = {}
+        if remote_url is not None and remote_url != project.get("remote_url", ""):
+            updates["remote_url"] = remote_url or ""
+        if local_repo_path is not None and local_repo_path != project.get("local_repo_path", ""):
+            updates["local_repo_path"] = local_repo_path or ""
+        if updates:
+            updates["updated_at"] = datetime.now().isoformat()
+            main_db.update("projects", updates, "id = ?", (pid,))
+
+        # 同步 project_git_info（手动编辑标记）
+        try:
+            _tm_save_git_info(multi_db, pid, remote_url=remote_url or None,
+                              current_branch=branch or None,
+                              current_commit=head or None)
+        except Exception as e:
+            logger.warning(f"[saveBaseline] git_info save failed: {e}")
+
+        # 注册/刷新版本基线（force 使无内容变化时也记录 branch/head 标签）
+        try:
+            result = vss.sync(multi_db, pid, branch=branch, head=head,
+                              label="baseline", force=bool(branch or head))
+            return {
+                "ok": True,
+                "projectId": pid,
+                "remoteUrl": remote_url or project.get("remote_url", ""),
+                "localRepoPath": local_repo_path or project.get("local_repo_path", ""),
+                "version": result.get("version") if result.get("changed") else None,
+            }
+        except Exception as e:
+            logger.warning(f"[saveBaseline] version sync failed: {e}")
+            return {"ok": True, "projectId": pid,
+                    "remoteUrl": remote_url or "", "localRepoPath": local_repo_path or "",
+                    "version": None}
+
     # ==================== 图节点位置 ====================
 
     @server.register("graph.savePositions")
@@ -1051,6 +1179,80 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             (project_id,)
         )
         return [dict(r) for r in rows]
+
+    return server
+
+
+# ==================== KB 版本基线方法 ====================
+
+def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
+    """注册 KB 版本基线 + 增量更新 + 更新请求方法。
+
+    对外契约（architect 经 data_api /zmq/{method} 代理调用）：
+      version.list / version.get / version.preview / version.sync /
+      version.diff / version.materialize /
+      knowledge.pullRequest / knowledge.pendingUpdates /
+      knowledge.updateConfirm / knowledge.updateCancel
+    """
+    import version_sync_service as vss
+
+    @server.register("version.list")
+    def version_list(project_id: str = None, projectId: str = None):
+        return vss.list_versions(multi_db, project_id or projectId)
+
+    @server.register("version.get")
+    def version_get(project_id: str = None, version_id: str = None,
+                    projectId: str = None, versionId: str = None):
+        return vss.get_version(multi_db, project_id or projectId, version_id or versionId)
+
+    @server.register("version.preview")
+    def version_preview(project_id: str = None, branch: str = "", head: str = "",
+                        projectId: str = None):
+        return vss.preview(multi_db, project_id or projectId, branch=branch, head=head)
+
+    @server.register("version.sync")
+    def version_sync(project_id: str = None, branch: str = "", head: str = "",
+                     label: str = "", stages: dict = None, force: bool = False,
+                     request_id: str = None, task_id: str = None,
+                     projectId: str = None, requestId: str = None,
+                     taskId: str = None):
+        return vss.sync(multi_db, project_id or projectId,
+                        branch=branch, head=head, label=label, stages=stages,
+                        force=force, request_id=request_id or requestId,
+                        task_id=task_id or taskId)
+
+    @server.register("version.diff")
+    def version_diff(project_id: str = None, from_id: str = None, to_id: str = None,
+                     projectId: str = None, fromId: str = None, toId: str = None):
+        return vss.diff_versions(multi_db, project_id or projectId,
+                                 from_id or fromId, to_id or toId)
+
+    @server.register("version.materialize")
+    def version_materialize(project_id: str = None, version_id: str = None,
+                            projectId: str = None, versionId: str = None):
+        return vss.materialize(multi_db, project_id or projectId, version_id or versionId)
+
+    @server.register("knowledge.pullRequest")
+    def knowledge_pull_request(project_id: str = None, repo_url: str = "",
+                               local_repo_path: str = "", branch: str = "",
+                               head: str = "", note: str = "",
+                               projectId: str = None):
+        return vss.pull_request(multi_db, project_id or projectId,
+                                repo_url=repo_url, local_repo_path=local_repo_path,
+                                branch=branch, head=head, note=note)
+
+    @server.register("knowledge.pendingUpdates")
+    def knowledge_pending_updates(project_id: str = None, projectId: str = None):
+        return vss.pending_updates(multi_db, project_id or projectId)
+
+    @server.register("knowledge.updateConfirm")
+    def knowledge_update_confirm(request_id: str = None, method: str = "pull",
+                                 requestId: str = None):
+        return vss.confirm_update(multi_db, request_id or requestId, method=method)
+
+    @server.register("knowledge.updateCancel")
+    def knowledge_update_cancel(request_id: str = None, requestId: str = None):
+        return {"cancelled": vss.cancel_update(multi_db, request_id or requestId)}
 
     return server
 
@@ -2057,6 +2259,12 @@ async def _scan_and_import(project_db, root_path: str, gitignore: GitIgnoreParse
                     })
 
             rel_path = os.path.relpath(entry.path, root_path).replace('\\', '/')
+
+            # KB 元数据目录永不索引（.topocode 会在初始化时被创建）；.git 为仓库元数据
+            if rel_path == '.topocode' or rel_path.startswith('.topocode/') \
+                    or rel_path == '.git' or rel_path.startswith('.git/'):
+                ignored_count += 1
+                continue
 
             # 跳过被忽略的文件/目录
             if gitignore and should_ignore_file(rel_path, gitignore, entry.is_dir(), extra_patterns):

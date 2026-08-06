@@ -12,6 +12,7 @@ import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchAgentStore } from '@/stores/agent-store'
+import { useArchProjectStore } from '@/stores/project-store'
 import { useSplitPane } from '@/composables/useSplitPane'
 import type { FormDraft, Requirement, RequirementAnalysis } from '@/types'
 
@@ -20,6 +21,10 @@ const route = useRoute()
 const router = useRouter()
 const store = useArchRequirementStore()
 const agentStore = useArchAgentStore()
+const projectStore = useArchProjectStore()
+
+/** 未绑定 KB 基线项目(无项目 或 工作目录直开无 KB) → KB 能力降级。 */
+const kbDegraded = computed(() => !projectStore.hasBaseline)
 
 function emptyForm(): FormDraft {
   return {
@@ -306,6 +311,15 @@ function backToList() {
 <template>
   <div class="h-full flex flex-col min-h-0">
     <div class="shrink-0 px-5 pt-5">
+      <div
+        v-if="kbDegraded"
+        class="mb-3 flex items-start gap-2 bg-ctp-yellow/10 border border-ctp-yellow/25 rounded-md px-3 py-2"
+      >
+        <BoltIcon class="w-4 h-4 mt-0.5 shrink-0 text-ctp-yellow" />
+        <p class="text-xs text-ctp-subtext1">
+          {{ t('requirement.degradedHint') }}
+        </p>
+      </div>
       <div class="flex items-center gap-3">
         <button
           class="btn btn-sm btn-ghost"
