@@ -582,6 +582,39 @@ class StagingScansStore:
         return data
 
 
+class AgentInstancesStore:
+    TABLE = "arch_agent_instances"
+
+    @classmethod
+    def all(cls):
+        return _all(cls.TABLE, order_by="updated_at DESC")
+
+    @classmethod
+    def get(cls, instance_id: str):
+        return _get(cls.TABLE, instance_id)
+
+    @classmethod
+    def get_by_key(cls, project_id: str, adapter: str, host: str):
+        rows = _all(cls.TABLE)
+        for r in rows:
+            if r.get("projectId") == project_id and r.get("adapter") == adapter and r.get("host") == host:
+                return r
+        return None
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def update(cls, instance_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, instance_id, data)
+
+    @classmethod
+    def delete(cls, instance_id: str) -> bool:
+        return _delete(cls.TABLE, instance_id)
+
+
 class SnapshotsStore:
     TABLE = "arch_kb_snapshots"
 

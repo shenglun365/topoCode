@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   ArrowPathIcon, BookOpenIcon, DocumentTextIcon, FolderIcon,
@@ -8,22 +7,25 @@ import {
   CheckCircleIcon, PlusIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { ArrowUpOnSquareIcon, StarIcon } from '@heroicons/vue/24/solid'
+import { StopIcon } from '@heroicons/vue/24/outline'
 import HostDirPickerDialog from '@/components/project/HostDirPickerDialog.vue'
 import AgentConfigDialog from '@/components/project/AgentConfigDialog.vue'
-import type { AgentConfig, Connectivity, KbConfig, OverviewMission, ProjectInfo } from '@/types'
+import type { AgentConfig, AgentInstance, KbConfig, OverviewAdapter, OverviewMission, ProjectInfo } from '@/types'
 import { getOverview } from '@/services/overview-service'
+import { apiGet } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
-import { deleteAgentConfig, testAgentConfig } from '@/services/agent-service'
+import { deleteAgentConfig, listAgentInstances, stopAgentInstance, testAgentConfig } from '@/services/agent-service'
 import { kbService } from '@/services/kb-service'
 
-const router = useRouter()
 const { t } = useI18n()
 
 const showSetup = ref(false)
 const showAgentConfig = ref(false)
 const recent = ref<ProjectInfo[]>([])
-const adapters = ref<{ id: string; name: string; conn: Connectivity }[]>([])
+const adapters = ref<OverviewAdapter[]>([])
 const agentConfigs = ref<AgentConfig[]>([])
+const instances = ref<AgentInstance[]>([])
+const loadingInstances = ref(false)
 const kbConfig = ref<KbConfig | null>(null)
 const kbCount = ref(0)
 const kbLinked = ref(false)
@@ -55,7 +57,10 @@ const filtered = computed(() => {
   )
 })
 
-onMounted(loadOverview)
+onMounted(() => {
+  loadOverview()
+  loadDocs()
+})
 
 async function loadOverview() {
   loading.value = true
@@ -70,6 +75,27 @@ async function loadOverview() {
     missions.value = data.missions ?? []
   }
   loading.value = false
+  loadInstances()
+}
+
+async function loadInstances() {
+  loadingInstances.value = true
+  try {
+    instances.value = await listAgentInstances()
+  } catch {
+    instances.value = []
+  } finally {
+    loadingInstances.value = false
+  }
+}
+
+async function stopInstance(i: AgentInstance) {
+  try {
+    await stopAgentInstance(i.id)
+    await loadInstances()
+  } catch {
+    // 忽略
+  }
 }
 
 function reload() {
@@ -77,10 +103,20 @@ function reload() {
   loadOverview()
 }
 
-async function openProjectAt(p: ProjectInfo) {
-  if (!p.rootPath) return
-  await router.replace({ path: '/overview', query: { root: p.rootPath } })
+/** 打开新项目成功 → 刷新主页列表。 */
+function onSetupSaved() {
   reload()
+}
+
+function workbenchUrl(p: ProjectInfo): string {
+  const base = window.location.origin + window.location.pathname
+  return `${base}#/workbench?project=${encodeURIComponent(p.id)}`
+}
+
+/** 点击近期项目 → 开新浏览器 tab 进入其 workbench。 */
+function openProjectAt(p: ProjectInfo) {
+  if (!p.id) return
+  window.open(workbenchUrl(p), '_blank')
 }
 
 async function toggleFavorite(p: ProjectInfo) {
@@ -179,6 +215,20 @@ const connDocs: { icon: unknown; title: string; note: string }[] = [
   { icon: DocumentTextIcon, title: 'Conventions', note: '约定与库归属' },
   { icon: DocumentTextIcon, title: 'KB Contract', note: 'KB 接口契约' },
 ]
+const docList = ref<{ id: string; title: string }[]>([])
+
+async function loadDocs() {
+  try {
+    docList.value = (await apiGet<{ id: string; title: string }[]>('/docs/list')) ?? []
+  } catch {
+    docList.value = []
+  }
+}
+
+function openDoc(id: string) {
+  const base = window.location.origin + window.location.pathname
+  window.open(`${base}#/docs/${id}`, '_blank')
+}
 </script>
 
 <template>
@@ -202,7 +252,7 @@ const connDocs: { icon: unknown; title: string; note: string }[] = [
       </div>
     </section>
 
-    <HostDirPickerDialog v-if="showSetup" @close="showSetup = false" />
+    <HostDirPickerDialog v-if="showSetup" @close="showSetup = false" @saved="onSetupSaved" />
     <AgentConfigDialog v-if="showAgentConfig" @close="showAgentConfig = false" @saved="onAgentConfigSaved" />
 
     <!-- 左栏：近期项目；右栏：agent设置 + 使用文档 -->
@@ -237,12 +287,6 @@ const connDocs: { icon: unknown; title: string; note: string }[] = [
             :class="p.pinned ? 'border-ctp-blue' : 'border-ctp-surface0 hover:border-ctp-surface2'"
             @click="openProjectAt(p)"
           >
-            <span
-              class="w-8 h-8 rounded-md bg-ctp-surface0 flex items-center justify-center shrink-0"
-              :title="p.mode === 'greenfield' ? 'greenfield' : 'existing'"
-            >
-              <span class="text-xs font-semibold text-ctp-blue">{{ p.mode === 'greenfield' ? 'g' : 'e' }}</span>
-            </span>
             <div class="flex-1 min-w-0 pl-1">
               <div class="flex items-center gap-2 min-w-0">
                 <span class="text-sm text-ctp-text truncate">{{ p.name }}</span>
@@ -362,24 +406,66 @@ const connDocs: { icon: unknown; title: string; note: string }[] = [
                 </div>
               </div>
 
-              <!-- 已检测到但未配置的适配器 -->
+              <!-- 已检测到但未配置的适配器(当前仅 opencode, 附本机安装验证) -->
               <div v-else class="space-y-1">
                 <p class="text-[11px] text-ctp-subtext0">{{ t('agent.noConfigs') }}</p>
-                <ul class="flex flex-wrap gap-1.5">
-                  <li
-                    v-for="a in adapters"
-                    :key="a.id"
-                    class="chip bg-ctp-surface0 text-ctp-subtext1"
+                <div
+                  v-for="a in adapters"
+                  :key="a.id"
+                  class="flex items-center gap-2 border border-ctp-surface0 rounded-md px-3 py-1.5"
+                >
+                  <span
+                    class="w-2 h-2 rounded-full shrink-0"
+                    :class="a.conn === 'ok' ? 'bg-ctp-green' : a.conn === 'fail' ? 'bg-ctp-red' : 'bg-ctp-overlay0'"
+                  />
+                  <span class="text-sm text-ctp-text shrink-0">{{ a.name }}</span>
+                  <span v-if="a.env?.version" class="text-[10px] text-ctp-overlay1 shrink-0">v{{ a.env.version }}</span>
+                  <span
+                    class="text-[10px] text-ctp-overlay1 truncate"
+                    :class="a.conn === 'ok' ? 'text-ctp-green' : a.conn === 'fail' ? 'text-ctp-red' : ''"
+                    :title="a.env?.detail"
+                  >{{ a.env?.detail }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 运行实例((project, adapter, host)) -->
+            <div v-if="instances.length">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="text-xs text-ctp-overlay1">{{ t('agent.instances') }}</div>
+                <button
+                  class="btn btn-ghost !px-2 !py-1 text-xs"
+                  :title="t('agent.refresh')"
+                  @click="loadInstances"
+                >
+                  <ArrowPathIcon :class="['w-3.5 h-3.5', loadingInstances ? 'animate-spin' : '']" />
+                </button>
+              </div>
+              <div class="space-y-1.5">
+                <div
+                  v-for="i in instances"
+                  :key="i.id"
+                  class="flex items-center gap-2 border border-ctp-surface0 rounded-md px-3 py-1.5"
+                >
+                  <span
+                    class="w-2 h-2 rounded-full shrink-0"
+                    :class="i.state === 'ready' || i.state === 'busy' || i.state === 'idle' ? 'bg-ctp-green' : i.state === 'error' ? 'bg-ctp-red' : i.state === 'starting' ? 'bg-ctp-yellow' : 'bg-ctp-overlay0'"
+                  />
+                  <span class="text-[10px] font-mono text-ctp-subtext1 shrink-0">{{ i.adapter }}</span>
+                  <span class="text-[10px] font-mono text-ctp-overlay1 shrink-0">{{ i.host }}:{{ i.port || '—' }}</span>
+                  <span v-if="i.taskBranch" class="text-[10px] font-mono text-ctp-sapphire truncate">{{ i.taskBranch }}</span>
+                  <span class="flex-1" />
+                  <span class="text-[10px] shrink-0" :class="i.state === 'error' ? 'text-ctp-red' : 'text-ctp-overlay1'">
+                    {{ t(`agent.instanceState.${i.state || 'stopped'}`) }}
+                  </span>
+                  <button
+                    class="btn btn-ghost !px-1.5 !py-1 text-ctp-overlay1 hover:text-ctp-red shrink-0"
+                    :title="t('agent.stopInstance')"
+                    @click="stopInstance(i)"
                   >
-                    <span class="flex items-center gap-1.5">
-                      <span
-                        class="w-1.5 h-1.5 rounded-full"
-                        :class="a.conn === 'ok' ? 'bg-ctp-green' : 'bg-ctp-overlay0'"
-                      />
-                      {{ a.name }}
-                    </span>
-                  </li>
-                </ul>
+                    <StopIcon class="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -422,11 +508,12 @@ const connDocs: { icon: unknown; title: string; note: string }[] = [
                 <li
                   v-for="m in missions"
                   :key="m.id"
-                  class="flex items-start gap-2 text-xs text-ctp-subtext1"
+                  class="flex items-start gap-2 text-xs text-ctp-subtext1 cursor-pointer group hover:bg-ctp-surface0/50 rounded-md px-1.5 py-1 transition-colors"
+                  @click="m.docId && openDoc(m.docId)"
                 >
                   <CheckCircleIcon class="w-3.5 h-3.5 mt-0.5 shrink-0 text-ctp-peach" />
                   <div>
-                    <span class="text-ctp-text">{{ m.title }}</span>
+                    <span class="text-ctp-text group-hover:text-ctp-blue">{{ m.title }}</span>
                     <span class="text-ctp-overlay1"> — {{ m.desc }}</span>
                   </div>
                 </li>
@@ -435,7 +522,18 @@ const connDocs: { icon: unknown; title: string; note: string }[] = [
             </div>
             <div>
               <div class="text-[11px] text-ctp-overlay1 mb-1.5">{{ t('overview.docTitle') }}</div>
-              <ul class="space-y-1.5">
+              <ul v-if="docList.length" class="space-y-1.5">
+                <li
+                  v-for="d in docList"
+                  :key="d.id"
+                  class="flex items-center gap-2 cursor-pointer group hover:bg-ctp-surface0/50 rounded-md px-1.5 py-1 transition-colors"
+                  @click="openDoc(d.id)"
+                >
+                  <DocumentTextIcon class="w-4 h-4 text-ctp-peach shrink-0" />
+                  <span class="text-xs text-ctp-sapphire truncate group-hover:text-ctp-blue">{{ d.title }}</span>
+                </li>
+              </ul>
+              <ul v-else class="space-y-1.5">
                 <li
                   v-for="d in connDocs"
                   :key="d.title"

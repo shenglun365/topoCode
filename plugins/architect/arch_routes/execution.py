@@ -194,6 +194,14 @@ async def create_execution_task(request: Request):
     exec_id = store.next_id("ex")
     plan_id = plan["id"]
     tree_id = store.next_id("tree")
+    branch_mode = (body.get("branchMode") or "auto").strip().lower()
+    if branch_mode not in ("auto", "manual"):
+        branch_mode = "auto"
+    task_branch = (body.get("taskBranch") or "").strip()
+    if branch_mode == "auto" or not task_branch:
+        task_branch = f"arch/{exec_id}"
+        branch_mode = "auto"
+    instance_id = (body.get("instanceId") or "").strip()
 
     # 收集需求字段更新(exec_id/plan_id/status→planned)
     statements = [
@@ -205,13 +213,13 @@ async def create_execution_task(request: Request):
         ("INSERT INTO arch_task_trees (id, plan_id, root, revision, history, updated_at)"
          " VALUES (?, ?, ?, 1, ?, ?)",
          (tree_id, plan_id, store._dumps(root), store._dumps([]), now)),
-        ("INSERT INTO arch_execution_tasks (id, plan_id, adapter, model, req_ids, connectivity, status, session_ids, base_commit, run_count, tree_revision, test_ids, amendments, stats, created_at, updated_at)"
-         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("INSERT INTO arch_execution_tasks (id, plan_id, adapter, model, req_ids, connectivity, status, session_ids, base_commit, run_count, tree_revision, test_ids, amendments, stats, instance_id, task_branch, branch_mode, created_at, updated_at)"
+         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
          (exec_id, plan_id, body.get("adapter", "opencode"), body.get("model"),
           store._dumps(req_ids), "ok", "created", store._dumps([]), plan["baseCommit"],
           1, 0, store._dumps(body.get("testIds", [])), store._dumps([]),
           store._dumps({"requests": 0, "tokensIn": 0, "tokensOut": 0, "bytesIn": 0, "bytesOut": 0}),
-          now, now)),
+          instance_id, task_branch, branch_mode, now, now)),
     ]
     for r in reqs:
         statements.append(

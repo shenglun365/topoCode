@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import {
   ArrowPathIcon, ArrowUpIcon, CheckIcon, CheckCircleIcon, DocumentIcon,
+  DocumentTextIcon,
   ExclamationTriangleIcon, FolderIcon, PlusIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import type { DirAnalysis, DirList } from '@/types'
+import type { DirAnalysis, DirList, ProjectInfo } from '@/types'
 import { dirService } from '@/services/dir-service'
 import { useArchProjectStore } from '@/stores/project-store'
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; saved: [project: ProjectInfo] }>()
 
 const { t } = useI18n()
-const router = useRouter()
 const project = useArchProjectStore()
 
 const view = ref<'browse' | 'confirm'>('browse')
@@ -136,13 +135,14 @@ async function confirmOpen() {
   error.value = ''
   try {
     const root = analysis.value.root
-    if (kbChoice.value) {
-      await project.bindKbProject(kbChoice.value, root)
-    } else {
-      await project.bindWorkingDir(root)
-    }
+    const p = kbChoice.value
+      ? await project.bindKbProject(kbChoice.value, root)
+      : await project.bindWorkingDir(root)
+    emit('saved', p)
     emit('close')
-    router.replace({ path: '/overview', query: { root } })
+    // 跳转到当前项目工作台(新标签)。用 architect 项目 id 而非目录路径作 URL 参数。
+    const base = window.location.origin + window.location.pathname
+    window.open(`${base}#/workbench?project=${encodeURIComponent(p?.id ?? '')}`, '_blank')
   } catch (e) {
     error.value = e instanceof Error && e.message ? e.message : t('overview.openDir.bindFailed')
   } finally {
@@ -346,31 +346,38 @@ onMounted(() => load())
             <p class="text-[11px] text-ctp-overlay1 font-mono mt-1 truncate">{{ analysis.root }}</p>
           </div>
 
-          <!-- 自动识别项 -->
-          <div class="grid grid-cols-2 gap-2">
-            <div
-              class="flex items-center gap-2 border border-ctp-surface0 rounded-lg px-3 py-2"
-              :class="analysis.isGitRoot ? 'border-ctp-green/40' : ''"
-            >
-              <CheckCircleIcon v-if="analysis.isGitRoot" class="w-4 h-4 text-ctp-green shrink-0" />
-              <ExclamationTriangleIcon v-else class="w-4 h-4 text-ctp-overlay1 shrink-0" />
-              <div class="min-w-0">
-                <div class="text-xs text-ctp-text">{{ t('overview.openDir.isGitRoot') }}</div>
-                <div class="text-[10px] text-ctp-overlay1 truncate">
-                  {{ analysis.isGitRoot ? analysis.gitBranch || '—' : t('overview.openDir.notGitRoot') }}
+          <!-- 自动识别项: GIT 状态识别 / 目录内容识别 -->
+          <div class="space-y-2">
+            <div>
+              <div class="text-[11px] text-ctp-overlay1 mb-1">{{ t('overview.openDir.gitStatusTitle') }}</div>
+              <div
+                class="flex items-center gap-2 border rounded-lg px-3 py-2"
+                :class="analysis.isGitRoot ? 'border-ctp-green/40' : 'border-ctp-peach/40'"
+              >
+                <CheckCircleIcon v-if="analysis.isGitRoot" class="w-4 h-4 text-ctp-green shrink-0" />
+                <ExclamationTriangleIcon v-else class="w-4 h-4 text-ctp-peach shrink-0" />
+                <div class="min-w-0">
+                  <div class="text-xs text-ctp-text">{{ analysis.isGitRoot ? t('overview.openDir.isGitRoot') : t('overview.openDir.notGitRoot') }}</div>
+                  <div class="text-[10px] text-ctp-overlay1 truncate">
+                    {{ analysis.isGitRoot ? analysis.gitBranch || '—' : t('overview.openDir.notGitRootHint') }}
+                  </div>
                 </div>
               </div>
             </div>
-            <div
-              class="flex items-center gap-2 border border-ctp-surface0 rounded-lg px-3 py-2"
-              :class="analysis.isEmpty ? 'border-ctp-peach/40' : ''"
-            >
-              <CheckCircleIcon v-if="analysis.isEmpty" class="w-4 h-4 text-ctp-peach shrink-0" />
-              <ExclamationTriangleIcon v-else class="w-4 h-4 text-ctp-overlay1 shrink-0" />
-              <div class="min-w-0">
-                <div class="text-xs text-ctp-text">{{ t('overview.openDir.isEmpty') }}</div>
-                <div class="text-[10px] text-ctp-overlay1 truncate">
-                  {{ analysis.hasCode ? t('overview.openDir.hasCode') : t('overview.openDir.noCode') }}
+
+            <div>
+              <div class="text-[11px] text-ctp-overlay1 mb-1">{{ t('overview.openDir.contentStatusTitle') }}</div>
+              <div
+                class="flex items-center gap-2 border rounded-lg px-3 py-2"
+                :class="analysis.hasCode ? 'border-ctp-green/40' : 'border-ctp-surface0'"
+              >
+                <CheckCircleIcon v-if="analysis.hasCode" class="w-4 h-4 text-ctp-green shrink-0" />
+                <DocumentTextIcon v-else class="w-4 h-4 text-ctp-overlay1 shrink-0" />
+                <div class="min-w-0">
+                  <div class="text-xs text-ctp-text">{{ analysis.hasCode ? t('overview.openDir.hasCode') : t('overview.openDir.noCode') }}</div>
+                  <div class="text-[10px] text-ctp-overlay1 truncate">
+                    {{ t('overview.openDir.contentHint') }}
+                  </div>
                 </div>
               </div>
             </div>

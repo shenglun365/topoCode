@@ -422,6 +422,8 @@ export interface KbLinkItem extends KbProject {
 /** 概览页「agent设置」栏目：coding agent 适配器 + 联通性。 */
 export interface OverviewAdapter extends AgentAdapterInfo {
   conn: Connectivity
+  /** opencode 本机安装/适配验证(仅 opencode 携带)。 */
+  env?: AgentEnvCheck
 }
 
 /** 三方 coding agent 连接配置(架构师不存三方密码，仅存连接参数)。 */
@@ -430,6 +432,8 @@ export interface AgentConfig {
   adapter: string
   name: string
   mode: 'server' | 'cli'
+  /** 实例运行模式: managed(架构师 spawn serve) | external(直连已有/远程 serve)。 */
+  instanceMode?: 'managed' | 'external'
   host: string
   port: number
   username: string
@@ -445,6 +449,32 @@ export interface AgentConfig {
   updatedAt?: number
 }
 
+/** Agent 运行实例((project, adapter, host) 维度) — 连接配置 × 具体项目的运行时实体。 */
+export interface AgentInstance {
+  id: string
+  projectId: string
+  adapter: string
+  /** 实例所在主机(支持远程 IP)。 */
+  host: string
+  mode: 'managed' | 'external'
+  state: 'starting' | 'ready' | 'busy' | 'idle' | 'stopped' | 'error'
+  pid?: number
+  port?: number
+  /** 工程实现目录(= arch_projects.rootPath)。 */
+  workDir?: string
+  repoUrl?: string
+  baseBranch?: string
+  baseCommit?: string
+  /** 当前任务分支(arch/<task_id>)。 */
+  taskBranch?: string
+  lastCommit?: string
+  refCount?: number
+  idleUntil?: number
+  error?: string
+  createdAt?: number
+  updatedAt?: number
+}
+
 /** 连通性测试结果。 */
 export interface AgentProbeResult {
   status: 'ok' | 'fail'
@@ -452,6 +482,17 @@ export interface AgentProbeResult {
   version?: string
   models?: { id: string; name: string }[]
   connected?: string[]
+}
+
+/** 本机 opencode 安装/适配验证结果。 */
+export interface AgentEnvCheck {
+  status: 'ok' | 'partial' | 'fail'
+  installed: boolean
+  binary?: string
+  version?: string
+  config?: string[]
+  detail: string
+  checks: { binary: boolean; version: boolean; config: boolean }
 }
 
 /** 知识库连接配置。 */
@@ -470,6 +511,8 @@ export interface OverviewMission {
   id: string
   title: string
   desc: string
+  /** 关联的本地 md 文档 id(点击跳转到 /docs/<docId>)。 */
+  docId?: string
 }
 
 /** 概览页聚合接口 GET /overview 的返回数据。 */
@@ -628,6 +671,11 @@ export interface ExecutionTask {
   /** 关联的需要执行的单元测试(仅在任务侧冗余；不随任务自动执行)。 */
   testIds?: string[]
   amendments: AppendedReq[]
+  /** 绑定的 agent 运行实例(AgentInstance.id)。 */
+  instanceId?: string
+  /** 任务分支: auto=arch/<task_id>，manual=人工指定。 */
+  taskBranch?: string
+  branchMode?: 'auto' | 'manual'
 }
 
 export type AgentStatus = 'idle' | 'planning' | 'working' | 'testing' | 'done' | 'failed' | 'stopped'
@@ -881,6 +929,47 @@ export interface RepoStatus {
     files: string[]
   }
   lastRebaseline: number | null
+}
+
+/** 项目概览(工作区首页)：工作目录/远端/KB/基线 + 相对基线的代码变更与组件变更。 */
+export interface ProjectOverviewDiffFile {
+  path: string
+  status: 'A' | 'M' | 'D' | 'R'
+  additions: number
+  deletions: number
+}
+
+export interface ProjectOverviewComponent {
+  name: string
+  added: number
+  modified: number
+  deleted: number
+  files: string[]
+}
+
+export interface ProjectOverview {
+  workDir: string
+  remoteUrl: string
+  branch: string
+  defaultBranch: string
+  head: { commit: string; branch: string; ahead: number; behind: number; dirty: boolean }
+  kb: {
+    linked: boolean
+    kbProjectId?: string
+    kbSourceDir?: string
+    kbRoot?: string
+    linkVerifiedAt?: number
+  }
+  baseline: { id: string | null; commit: string; exists: boolean }
+  diff: {
+    filesChanged: number
+    added: number
+    modified: number
+    deleted: number
+    deletedHighRisk: boolean
+    files: ProjectOverviewDiffFile[]
+    byComponent: ProjectOverviewComponent[]
+  }
 }
 
 export type CollabMode = 'main-agent' | 'mcp-server' | 'spec-assist' | 'migration'

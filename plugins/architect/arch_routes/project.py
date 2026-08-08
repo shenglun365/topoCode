@@ -389,6 +389,46 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
     })
 
 
+@router.get("/project/overview")
+async def get_project_overview(root: Optional[str] = None, project: Optional[str] = None):
+    """项目概览(工作区首页)：工作目录、远端仓库、知识库关联、基线、相对基线的代码变更与组件变更。"""
+    proj = _resolve_project(root, project)
+    if not proj:
+        return ok(None)
+    from . import arch_git
+    work_dir = proj.get("rootPath") or ""
+    remote = _git_origin(work_dir)
+    st = arch_git.repo_status(work_dir)
+    diff = arch_git.diff_worktree(proj) if work_dir else {
+        "filesChanged": 0, "added": 0, "modified": 0, "deleted": 0,
+        "deletedHighRisk": False, "files": [], "byComponent": []}
+    return ok({
+        "workDir": work_dir,
+        "remoteUrl": remote or proj.get("remoteUrl") or "",
+        "branch": proj.get("branch") or st.get("branch") or "",
+        "defaultBranch": proj.get("defaultBranch") or "",
+        "head": {"commit": st.get("commit") or "", "branch": st.get("branch") or "",
+                 "ahead": st.get("ahead", 0), "behind": st.get("behind", 0),
+                 "dirty": bool(st.get("dirty"))},
+        "kb": {
+            "linked": bool(proj.get("kbProjectId")),
+            "kbProjectId": proj.get("kbProjectId"),
+            "kbSourceDir": proj.get("kbSourceDir"),
+            "kbRoot": proj.get("kbRoot"),
+            "linkVerifiedAt": proj.get("linkVerifiedAt"),
+        },
+        "baseline": {
+            "id": proj.get("baselineId"),
+            "commit": proj.get("baselineCommit") or "",
+            "exists": bool(proj.get("baselineCommit") or proj.get("baselineId")),
+        },
+        "diff": {"filesChanged": diff["filesChanged"], "added": diff["added"],
+                 "modified": diff["modified"], "deleted": diff["deleted"],
+                 "deletedHighRisk": diff["deletedHighRisk"],
+                 "files": diff["files"], "byComponent": diff["byComponent"]},
+    })
+
+
 @router.get("/project/snapshots")
 async def get_snapshots(root: Optional[str] = None, project: Optional[str] = None):
     if not _resolve_project(root, project):

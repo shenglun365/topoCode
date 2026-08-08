@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 
 const props = defineProps<{ content: string }>()
@@ -7,9 +7,11 @@ const props = defineProps<{ content: string }>()
 const md = new MarkdownIt({ html: true, linkify: true, breaks: true })
 const html = ref('')
 
-onMounted(() => {
-  html.value = md.render(props.content)
-})
+function render() {
+  html.value = md.render(props.content || '')
+}
+
+watch(() => props.content, render, { immediate: true })
 </script>
 
 <template>

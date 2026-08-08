@@ -63,13 +63,13 @@ export const useArchProjectStore = defineStore('arch-project', {
     /** 打开工作目录并关联 KB：校验通过后写 ?root=execRoot(选择持久化在 URL)。 */
     async bindKbProject(kbProjectId: string, execRoot: string, name?: string): Promise<ProjectInfo> {
       const project = await projectService.bindKbProject(kbProjectId, execRoot, name)
-      await setProjectQuery({ root: execRoot })
+      await setProjectQuery({ project: project.id, root: execRoot })
       await this.load(true)
       return project
     },
     async bindWorkingDir(execRoot: string, name?: string): Promise<ProjectInfo> {
       const project = await projectService.bindWorkingDir(execRoot, name)
-      await setProjectQuery({ root: execRoot })
+      await setProjectQuery({ project: project.id, root: execRoot })
       await this.load(true)
       return project
     },

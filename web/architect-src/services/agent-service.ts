@@ -1,7 +1,8 @@
-import type { AgentAdapterInfo, AgentConfig, AgentMessage, AgentProbeResult, AgentSession, AgentStatus, Connectivity, ExecutionTask, TaskNode } from '@/types'
+import type { AgentAdapterInfo, AgentConfig, AgentEnvCheck, AgentInstance, AgentMessage, AgentProbeResult, AgentSession, AgentStatus, Connectivity, ExecutionTask, TaskNode } from '@/types'
 import { apiGet, apiPost, apiPatch, apiDelete } from './api-client'
 import { ArchWs } from './ws-client'
 import { MockAgentAdapter } from './mock/agent-service'
+import { currentProjectParams } from './project-service'
 
 /**
  * 三方 Coding Agent 适配接口 → 后端优先。
@@ -56,6 +57,8 @@ class HttpAgentAdapter implements AgentAdapter {
       exec: opts.exec,
       planTitle: opts.planTitle,
       keepContext: opts.keepContext ?? true,
+      root: currentProjectParams().root,
+      project: currentProjectParams().project,
     })
     const res = await ws.once<any>('session_created')
     ws.close()
@@ -187,6 +190,11 @@ export async function checkAdapterConnectivity(id: string): Promise<Connectivity
   return res?.status === 'ok' ? 'ok' : 'fail'
 }
 
+/** 验证本机 opencode 安装/适配完整性(可执行 + 版本 + 配置)。 */
+export async function getOpencodeEnv(): Promise<AgentEnvCheck> {
+  return apiGet<AgentEnvCheck>('/agent/opencode/env')
+}
+
 /** 列出已保存的三方 agent 连接配置。 */
 export async function listAgentConfigs(): Promise<AgentConfig[]> {
   return apiGet<AgentConfig[]>('/agent/configs')
@@ -215,4 +223,21 @@ export async function testAgentConfig(id: string): Promise<AgentConfig> {
 /** 未保存前的连通性预测试(弹窗内「测试连通性」用)。 */
 export async function previewAgentConfig(opts: Partial<AgentConfig>): Promise<AgentProbeResult> {
   return apiPost<AgentProbeResult>('/agent/configs/preview', opts)
+}
+
+// ── 实例层(AgentInstancePool) ────────────────────────────────
+
+/** 列出全部 agent 实例((project, adapter, host) 维度)。 */
+export async function listAgentInstances(): Promise<AgentInstance[]> {
+  return apiGet<AgentInstance[]>('/agent/instances')
+}
+
+/** 停止某实例(managed terminate / external 置 stopped)。 */
+export async function stopAgentInstance(id: string): Promise<AgentInstance> {
+  return apiPost<AgentInstance>(`/agent/instances/${id}/stop`, {})
+}
+
+/** 重启实例(重新 spawn / 重新探测)。 */
+export async function restartAgentInstance(id: string): Promise<AgentInstance> {
+  return apiPost<AgentInstance>(`/agent/instances/${id}/restart`, {})
 }

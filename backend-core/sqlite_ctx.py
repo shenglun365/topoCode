@@ -1183,7 +1183,15 @@ ARCHITECT_DB_TABLES_SQL = """
         mode TEXT DEFAULT 'existing',   -- existing | greenfield
         scaffold TEXT,                  -- JSON
         product_form TEXT,
-        updated_at INTEGER DEFAULT 0
+        updated_at INTEGER DEFAULT 0,
+        kb_project_id TEXT DEFAULT '',
+        git_linked INTEGER DEFAULT 0,
+        kb_source_dir TEXT DEFAULT '',
+        link_verified_at INTEGER DEFAULT 0,
+        pinned INTEGER DEFAULT 0,
+        favorite INTEGER DEFAULT 0,
+        remote_url TEXT DEFAULT '',
+        default_branch TEXT DEFAULT 'main'
     );
 
     CREATE TABLE IF NOT EXISTS arch_requirements (
@@ -1243,7 +1251,10 @@ ARCHITECT_DB_TABLES_SQL = """
         error TEXT,
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0,
-        ended_at INTEGER
+        ended_at INTEGER,
+        instance_id TEXT DEFAULT '',
+        task_branch TEXT DEFAULT '',
+        branch_mode TEXT DEFAULT 'auto'
     );
 
     CREATE TABLE IF NOT EXISTS arch_agent_sessions (
@@ -1256,7 +1267,9 @@ ARCHITECT_DB_TABLES_SQL = """
         test_result TEXT,                   -- JSON
         stats TEXT,                         -- JSON: TaskSessionStats
         created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
+        updated_at INTEGER DEFAULT 0,
+        instance_id TEXT DEFAULT '',
+        opencode_session_id TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS arch_agent_messages (
@@ -1348,6 +1361,23 @@ _ARCH_PROJECT_MIGRATION_COLS = [
     ("link_verified_at", "INTEGER DEFAULT 0"),
     ("pinned", "INTEGER DEFAULT 0"),
     ("favorite", "INTEGER DEFAULT 0"),
+    ("remote_url", "TEXT DEFAULT ''"),
+    ("default_branch", "TEXT DEFAULT 'main'"),
+]
+
+_ARCH_EXEC_MIGRATION_COLS = [
+    ("instance_id", "TEXT DEFAULT ''"),
+    ("task_branch", "TEXT DEFAULT ''"),
+    ("branch_mode", "TEXT DEFAULT 'auto'"),
+]
+
+_ARCH_AGENT_CONFIG_MIGRATION_COLS = [
+    ("instance_mode", "TEXT DEFAULT 'managed'"),
+]
+
+_ARCH_AGENT_SESSION_MIGRATION_COLS = [
+    ("instance_id", "TEXT DEFAULT ''"),
+    ("opencode_session_id", "TEXT DEFAULT ''"),
 ]
 
 
@@ -1425,6 +1455,30 @@ def architect_db_migrations(db) -> None:
             last_detail TEXT DEFAULT '',
             last_check_at INTEGER DEFAULT 0,
             created_at INTEGER DEFAULT 0,
+            updated_at INTEGER DEFAULT 0,
+            instance_mode TEXT DEFAULT 'managed' -- managed | external
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_agent_instances (
+            id TEXT PRIMARY KEY,
+            project_id TEXT DEFAULT '',       -- arch_projects.id
+            adapter TEXT DEFAULT 'opencode',
+            host TEXT DEFAULT '127.0.0.1',    -- 实例所在主机(支持远程 IP)
+            mode TEXT DEFAULT 'managed',      -- managed | external
+            state TEXT DEFAULT 'idle',        -- starting | ready | busy | idle | stopped | error
+            pid INTEGER DEFAULT 0,            -- managed 子进程 pid
+            port INTEGER DEFAULT 0,           -- serve 端口
+            work_dir TEXT DEFAULT '',         -- 工程实现目录(= arch_projects.root_path)
+            repo_url TEXT DEFAULT '',         -- 外部 git 仓库(统一代码事实源)
+            base_branch TEXT DEFAULT 'main',
+            base_commit TEXT DEFAULT '',
+            task_branch TEXT DEFAULT '',      -- 当前任务分支(arch/<task_id>)
+            last_commit TEXT DEFAULT '',
+            ref_count INTEGER DEFAULT 0,      -- 活跃会话引用数
+            idle_until INTEGER DEFAULT 0,     -- 空闲超时回收时间戳(0=不回收)
+            error TEXT DEFAULT '',
+            created_at INTEGER DEFAULT 0,
             updated_at INTEGER DEFAULT 0
         )
     """)
@@ -1446,6 +1500,36 @@ def architect_db_migrations(db) -> None:
         if name not in proj_cols:
             try:
                 db.execute(f"ALTER TABLE arch_projects ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
+    try:
+        exec_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_execution_tasks)")}
+    except Exception:
+        exec_cols = set()
+    for name, typ in _ARCH_EXEC_MIGRATION_COLS:
+        if name not in exec_cols:
+            try:
+                db.execute(f"ALTER TABLE arch_execution_tasks ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
+    try:
+        cfg_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_agent_configs)")}
+    except Exception:
+        cfg_cols = set()
+    for name, typ in _ARCH_AGENT_CONFIG_MIGRATION_COLS:
+        if name not in cfg_cols:
+            try:
+                db.execute(f"ALTER TABLE arch_agent_configs ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
+    try:
+        sess_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_agent_sessions)")}
+    except Exception:
+        sess_cols = set()
+    for name, typ in _ARCH_AGENT_SESSION_MIGRATION_COLS:
+        if name not in sess_cols:
+            try:
+                db.execute(f"ALTER TABLE arch_agent_sessions ADD COLUMN {name} {typ}")
             except Exception:
                 pass
 

@@ -4,111 +4,41 @@
 - 仅保存连接参数(host/port/username/url)，**不存 password**；
 - 模型由 agent 自身配置提供(模型多选 + 默认模型来自 agent 自身已配置的 auth)；
 - 连通性测试 = 真实 HTTP 探测(如 opencode `GET /global/health` + `GET /provider`)。
-- 任务执行(经 /ws/coding-agent 实际跑 agent)后续阶段再做。
+- 实例层见 agent_server.py(AgentInstancePool)：config 是连接模板，(project,adapter,host)
+  的实例才是在具体项目上运行/执行任务的实体。
 
-当前已适配：opencode(server 模式)；其余 adapter 显示但标记待适配。
+适配器：探测/默认参数统一走 `agent_adapters` 注册表(当前仅 opencode)。
 """
 import json
 import logging
-import urllib.error
-import urllib.request
 from typing import Optional
 from fastapi import APIRouter, Request
 
 from .common import _ts, _id, ok, err
 from . import store
+from . import agent_server
+from .agent_adapters import get_agent, DEFAULT_HOST, DEFAULT_PORT, DEFAULT_USERNAME
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-DEFAULT_OPENSE_HOST = "127.0.0.1"
-DEFAULT_OPENSE_PORT = 4096
-DEFAULT_USERNAME = "opencode"
-
-# 已适配的连接模式(其余 adapter 仅展示)。
-_SUPPORTED = {"opencode"}
+DEFAULT_OPENSE_HOST = DEFAULT_HOST
+DEFAULT_OPENSE_PORT = DEFAULT_PORT
 
 
-# ── HTTP 探测工具 ──────────────────────────────────────────────
-
-def _http_json(url: str, timeout: float = 3.0, username: str = None) -> tuple:
-    """GET JSON。返回 (data, error)。成功 data 为解析后的 dict/list；失败 error 为可读原因。"""
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    if username:
-        import base64
-        token = base64.b64encode(f"{username}:".encode()).decode()
-        req.add_header("Authorization", f"Basic {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode()), None
-    except urllib.error.HTTPError as e:
-        return None, f"HTTP {e.code}"
-    except urllib.error.URLError as e:
-        reason = getattr(e, "reason", None)
-        return None, f"无法连接: {reason}"
-    except Exception as e:
-        return None, str(e)
-
-
-def _opencode_base(cfg: dict) -> str:
-    url = (cfg.get("url") or "").strip()
-    if url:
-        return url.rstrip("/")
-    host = cfg.get("host") or DEFAULT_OPENSE_HOST
-    port = int(cfg.get("port") or DEFAULT_OPENSE_PORT)
-    return f"http://{host}:{port}"
-
-
-def probe_opencode(cfg: dict) -> dict:
-    """opencode server 连通性测试：
-    1. GET /global/health → {healthy, version}；
-    2. GET /provider → connected 提供商(即已配置好 auth 的模型来源)。
-    返回 { status: ok|fail, detail, version, models, connected }。
-    """
-    base = _opencode_base(cfg)
-    username = cfg.get("username") or DEFAULT_USERNAME
-    health, err_ = _http_json(f"{base}/global/health", username=username)
-    if err_ or not health or not health.get("healthy"):
-        return {
-            "status": "fail",
-            "detail": err_ or "opencode 服务未就绪(healthy != true)",
-            "version": (health or {}).get("version") or "",
-            "models": [], "connected": [],
-        }
-    models = []
-    connected = []
-    providers, perr = _http_json(f"{base}/provider", username=username)
-    if perr is None and isinstance(providers, dict):
-        connected = providers.get("connected") or []
-        for p in providers.get("all") or []:
-            if p.get("id") not in connected:
-                continue
-            pm = p.get("models")
-            # models 可能是 dict(modelId → info) 或 list(info)
-            items = list(pm.values()) if isinstance(pm, dict) else (pm or [])
-            for m in items:
-                if not isinstance(m, dict):
-                    continue
-                models.append({"id": m.get("id"), "name": m.get("name") or m.get("id")})
-    return {
-        "status": "ok",
-        "detail": "opencode 服务连通",
-        "version": health.get("version") or "",
-        "models": models,
-        "connected": connected,
-    }
-
+# ── 连通性探测 ─────────────────────────────────────────────────
 
 def probe_adapter(cfg: dict) -> dict:
-    """按 adapter 分派探测。未适配的类型返回 fail(带提示)。"""
+    """按 adapter 分派探测(走注册表)。未注册的类型返回 fail(带提示)。"""
     adapter = (cfg.get("adapter") or "").lower()
-    if adapter == "opencode":
-        return probe_opencode(cfg)
-    return {
-        "status": "fail",
-        "detail": f"「{adapter or '未知'}」接入待适配",
-        "version": "", "models": [], "connected": [],
-    }
+    impl = get_agent(adapter)
+    if impl is None:
+        return {
+            "status": "fail",
+            "detail": f"「{adapter or '未知'}」接入待适配",
+            "version": "", "models": [], "connected": [],
+        }
+    return impl.probe(cfg)
 
 
 # ── 路由 ─────────────────────────────────────────────────────────
@@ -138,11 +68,17 @@ async def create_agent_config(request: Request):
         return err(400, "缺少 adapter")
     now = _ts()
     cfg_id = _id("agcfg")
+    inst_mode = (body.get("instanceMode") or body.get("mode") or "managed").strip().lower()
+    if inst_mode not in ("managed", "external"):
+        inst_mode = "managed"
+    if (body.get("url") or "").strip():
+        inst_mode = "external"
     cfg = {
         "id": cfg_id,
         "adapter": adapter,
         "name": (body.get("name") or adapter).strip(),
         "mode": body.get("mode") or "server",
+        "instanceMode": inst_mode,
         "host": body.get("host") or DEFAULT_OPENSE_HOST,
         "port": int(body.get("port") or DEFAULT_OPENSE_PORT),
         "username": body.get("username") or DEFAULT_USERNAME,
@@ -166,7 +102,7 @@ async def update_agent_config(cfg_id: str, request: Request):
     existing = store.AgentConfigsStore.get(cfg_id)
     if not existing:
         return err(404, "Config not found")
-    allowed = {"name", "mode", "host", "port", "username", "url", "models", "default_model", "defaultModel"}
+    allowed = {"name", "mode", "host", "port", "username", "url", "models", "default_model", "defaultModel", "instanceMode"}
     patch = {}
     for k in allowed:
         if k in body:
@@ -213,3 +149,52 @@ async def preview_agent_config(request: Request):
         "url": body.get("url") or "",
     }
     return ok(probe_adapter(cfg))
+
+
+# ── 实例层(AgentInstancePool) ─────────────────────────────────
+
+@router.get("/agent/instances")
+async def list_agent_instances():
+    """列出全部 agent 实例((project, adapter, host) 维度)。"""
+    return ok(store.AgentInstancesStore.all())
+
+
+@router.get("/agent/instances/{instance_id}")
+async def get_agent_instance(instance_id: str):
+    inst = store.AgentInstancesStore.get(instance_id)
+    if not inst:
+        return err(404, "Instance not found")
+    return ok(inst)
+
+
+@router.post("/agent/instances/{instance_id}/stop")
+async def stop_agent_instance(instance_id: str):
+    """停止实例(managed terminate / external 置 stopped)。"""
+    inst = store.AgentInstancesStore.get(instance_id)
+    if not inst:
+        return err(404, "Instance not found")
+    await agent_server.get_pool().stop(instance_id)
+    return ok(store.AgentInstancesStore.get(instance_id) or inst)
+
+
+@router.post("/agent/instances/{instance_id}/restart")
+async def restart_agent_instance(instance_id: str, request: Request):
+    """重启实例(项目 + 配置)。managed 重新 spawn, external 重新探测。"""
+    inst = store.AgentInstancesStore.get(instance_id)
+    if not inst:
+        return err(404, "Instance not found")
+    await agent_server.get_pool().stop(instance_id)
+    project = store.ProjectsStore.get(inst.get("projectId") or "")
+    if not project:
+        return err(400, "实例无绑定项目")
+    cfg = _find_config_for_adapter(inst.get("adapter") or "opencode")
+    if not cfg:
+        return err(400, "无对应 agent 连接配置")
+    return ok(await agent_server.get_pool().ensure(project, cfg))
+
+
+def _find_config_for_adapter(adapter: str) -> Optional[dict]:
+    for c in store.AgentConfigsStore.all():
+        if (c.get("adapter") or "").lower() == adapter:
+            return c
+    return None

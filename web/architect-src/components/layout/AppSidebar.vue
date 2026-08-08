@@ -55,14 +55,25 @@ function isOpen(section: string) {
 function isActive(path: string) {
   return route.path.startsWith(path)
 }
+
+/** 工作区首页(/workbench)是否激活：精确匹配不带子路径。 */
+function isOverviewActive() {
+  return route.path === '/workbench' || route.path === '/workbench/'
+}
 </script>
 
 <template>
   <aside class="w-64 shrink-0 flex flex-col bg-ctp-mantle border-r border-ctp-surface0">
-    <div class="px-4 py-2.5 text-[11px] uppercase tracking-wider text-ctp-overlay1 border-b border-ctp-surface0">
-      {{ t('nav.resource') }}
-    </div>
     <div class="flex-1 overflow-auto py-2 space-y-1 text-sm">
+      <button
+        class="tree-item"
+        :class="{ 'is-active': isOverviewActive() }"
+        @click="nav('/workbench/')"
+      >
+        <GlobeAltIcon class="w-4 h-4 text-ctp-mauve" />
+        <span class="flex-1 text-left">{{ t('nav.overview') }}</span>
+      </button>
+
       <button
         class="tree-section w-full text-left flex items-center justify-between cursor-pointer"
         @click="toggle('req')"
@@ -77,7 +88,7 @@ function isActive(path: string) {
       <template v-if="isOpen('req')">
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/requirements') }"
+          :class="{ 'is-active': isActive('/workbench/requirements') }"
           @click="nav('/workbench/requirements')"
         >
           <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-sky" />
@@ -86,7 +97,7 @@ function isActive(path: string) {
 
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/execute') }"
+          :class="{ 'is-active': isActive('/workbench/execute') }"
           @click="nav('/workbench/execute')"
         >
           <QueueListIcon class="w-4 h-4 text-ctp-green" />
@@ -96,7 +107,7 @@ function isActive(path: string) {
 
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/unit-test') }"
+          :class="{ 'is-active': isActive('/workbench/unit-test') }"
           @click="nav('/workbench/unit-test')"
         >
           <BeakerIcon class="w-4 h-4 text-ctp-lavender" />
@@ -119,7 +130,7 @@ function isActive(path: string) {
       <template v-if="isOpen('assets')">
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/assets') && (!route.query.tab || route.query.tab === 'modules') && !route.query.sub }"
+          :class="{ 'is-active': isActive('/workbench/assets') && (!route.query.tab || route.query.tab === 'modules') && !route.query.sub }"
           @click="nav('/workbench/assets', { tab: 'modules' })"
         >
           <ServerStackIcon class="w-4 h-4 text-ctp-blue" />
@@ -129,7 +140,7 @@ function isActive(path: string) {
 
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/assets') && route.query.tab === 'spec' }"
+          :class="{ 'is-active': isActive('/workbench/assets') && route.query.tab === 'spec' }"
           @click="nav('/workbench/assets', { tab: 'spec' })"
         >
           <ShieldCheckIcon class="w-4 h-4 text-ctp-peach" />
@@ -139,7 +150,7 @@ function isActive(path: string) {
 
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/archmap') && route.query.view === 'impact' }"
+          :class="{ 'is-active': isActive('/workbench/archmap') && route.query.view === 'impact' }"
           @click="nav('/workbench/archmap', { view: 'impact' })"
         >
           <MapIcon class="w-4 h-4 text-ctp-mauve" />
@@ -148,7 +159,7 @@ function isActive(path: string) {
         </button>
         <button
           class="tree-item"
-          :class="{ '!text-ctp-blue': isActive('/workbench/archmap') && route.query.view === 'merge' }"
+          :class="{ 'is-active': isActive('/workbench/archmap') && route.query.view === 'merge' }"
           @click="nav('/workbench/archmap', { view: 'merge' })"
         >
           <ShieldExclamationIcon class="w-4 h-4 text-ctp-sapphire" />
@@ -210,6 +221,12 @@ function isActive(path: string) {
 <style scoped>
 .tree-item {
   @apply w-full flex items-center gap-2 px-3 py-1.5 text-ctp-subtext0 hover:bg-ctp-surface0 hover:text-ctp-text transition-colors cursor-pointer;
+}
+.tree-item.is-active {
+  @apply bg-ctp-surface0 text-ctp-blue;
+}
+.tree-item.is-active > svg {
+  @apply text-ctp-blue;
 }
 .tree-sub-item {
   @apply w-full flex items-center gap-1.5 py-1 text-xs text-ctp-overlay1 hover:text-ctp-text transition-colors cursor-pointer;

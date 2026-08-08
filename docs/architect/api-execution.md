@@ -119,9 +119,21 @@ interface AgentAdapter {
 
 ### WS `/api/architect/ws/coding-agent`
 
-客户端 → 服务端：`session.create` / `session.message` / `task.run` / `session.stop`
+客户端 → 服务端：`session.create`(带 `root` 可选) / `session.message` / `task.run` / `session.stop`
 服务端 → 客户端：`session_created` / `message` / `tool_call` / `status` / `tree.change` /
 `done` / `failed` / `stopped`
+
+`session.create` 携带 `root`(工程实现目录)且取到**真实 adapter**(经 `AgentInstancePool`
+按 `(project, adapter, host)` 取/建实例)时按形态执行；无 `root` / 实例不可达 /
+探测失败 → 回退服务端模拟(§5.4 语义)。`task.run` 时 agent 在工程目录建 task 分支提交并 push，
+完成后 architect 从**只读分析副本**(`~/.topocode/arch/<proj>/analysis`) pull 该分支同步差异。
+
+**adapter 形态(§5.6)**：
+- **daemon(server)**：`opencode`、`qwen(code)`。常驻 `serve`，`session.create → POST /session`，
+  `task.run` 经 `iter_events` 订阅 HTTP SSE(`/event` 或 `/session/:id/events`)逐条归一化事件。
+- **cli(进程型)**：`codex`、`cline`。无常驻进程；每次 `task.run` 启动一次性子进程
+  (`codex exec --json` / `cline --json`)，经 `process_events` 流式消费 stdout JSONL→归一化事件。
+  resume 支持走引擎自身参数(如 `cline --resume`)。
 
 **`AgentSession` 结构**(与 execution.md §4.4 一致)：
 
@@ -144,6 +156,19 @@ interface AgentAdapter {
 **落地**：`arch_agent_sessions` + `arch_agent_messages`。每收/发一条消息即落库，边流边存。
 **终态**：终止事件 `type` = `done`/`failed`/`stopped`(非 `status`)，并携带 `stats/artifacts/testResult`。
 `task.run` 在服务端为后台任务，`session.stop` 可在运行中被接收并中断(✅ 阶段 2 已实现)。
+`arch_agent_sessions` 增 `instance_id` / `opencode_session_id`(真实会话映射)。
+
+### task 分支与 git 单向事实源(阶段 4+ 扩展)
+
+外部 git 仓库为**唯一代码事实源**，角色单向：
+- 编码 agent 实例：工程实现目录(`root_path`)建 `arch/<task_id>` 分支(或人工指定)提交并 push；
+- ARCHITECT：独立只读分析副本(`~/.topocode/arch/<proj>/analysis`，`arch_git.py`)按 task 分支 pull；
+- KB：既有 git_service + version_sync 拉取。
+
+`ExecutionTask` 增 `instance_id` / `task_branch` / `branch_mode`：
+- `branch_mode='auto'` → `task_branch=arch/<task_id>`(默认)；`='manual'` → 人工指定分支。
+- 任务启动前基线校验(§6 语义)不通过 → 提示先提交/清理，避免把未提交状态混进 agent 改动。
+- 验收通过后由用户触发把 task 分支合并到目标分支(人工)。
 
 **与 `coding_agent_runner`(3458) 对接(阶段性)**：
 - 主后端 `POST http://127.0.0.1:3458/tasks` 提交任务。
@@ -152,8 +177,31 @@ interface AgentAdapter {
 - 完整接管 runner 为延后项，非阶段 2 阻塞。
 
 **连通性探测**：`GET /api/architect/agent/adapters/{adapter_id}/connectivity`
-→ `{ status: 'ok'|'fail' }`，支撑 `TaskCreateView.testConnectivity`(现用 `git.head()` 模拟)。✅ 阶段 2 已实现
-(已知 adapter → ok，未知 → fail；后续对接 runner 真实探测)。
+→ `{ status: 'ok'|'fail' }`，支撑 `TaskCreateView.testConnectivity`。✅ 已实现：
+已知 adapter(经 `agent_adapters.list_adapters()` 注册的开源 engines) → ok(含 version)，
+未知 → fail。各 adapter 还可经 `GET /agent/adapters/{id}/connectivity` 做真实
+env_check/probe。
+
+### 5.6 多 adapter 支持(4 引擎已接入)
+
+注册表 `agent_adapters._ADAPTERS`(见 `api-agent-config.md` §adapter 清单)：
+
+| adapter | 形态 | 运行方式 | 模型来源 | 接入状态 |
+| --- | --- | --- | --- | --- |
+| `opencode` | daemon | `opencode serve` + SSE(`/event`) | agent 自身 provider | ✅(原有) |
+| `qwen` | daemon | `qwen serve --no-web` + ACP(`/session/:id/events` SSE) | agent 自身 model | ✅ 阶段 5 接入 |
+| `codex` | cli | `codex exec --json` 一次性子进程 | `~/.codex` 或临时 CODEX_HOME(local baseUrl) | ✅ 阶段 5 接入 |
+| `cline` | cli | `cline --json` 一次性子进程 | cline 引擎登录态(需预先登录) | ✅ 阶段 5 接入(连通性探测，运行需登录) |
+
+- **探测**：daemon 型 `probe()` 探测后端 HTTP health；cli 型 `probe()` 校验二进制存在
+  (codex/cline 实例 `health()` 同样只校验 binary)。
+- **cli 消息流**：`_run_opencode_task` 对 `mode=="cli"` 走 `process_events`
+  (起子进程→逐行 JSONL→归一化 status/message/tool_call→终态)，daemon 型走既有
+  `send_fut + iter_events`。
+- **环境**：codex 可携带 `cfg.baseUrl/apiKey/model`，`CodexSession.build_env` 动态生成
+  临时 `CODEX_HOME`(wire_api=responses) 指向本地 OpenAI 兼容服务；cline 使用引擎自身登录态。
+- **边界**：cline 可用性探测通过即视为已适配，但真实运行需该引擎自带登录(架构师不存
+  第三方密码/密钥，见 §5.4 语义)。
 
 ## 6. git 服务(阶段 4 补齐)
 

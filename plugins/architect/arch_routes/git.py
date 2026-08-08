@@ -1,88 +1,117 @@
-"""Git domain routes — 服务端模拟仓库操作(全量)。
+"""Git domain routes — 真实 git 操作(arch_git 只读分析副本语义)。
 
-契约见 docs/architect/api-execution.md。真实 git 操作在独立进程;
-此处返回确定性的模拟结果, 便于前端全链路联调。
+契约见 docs/architect/api-execution.md。architect 不修改 agent 工作副本；
+本域仅读取工程实现目录(root_path, 经 ?root= 或 ?project= 解析)与只读分析副本。
+仓库不可用/无绑定项目 → 降级返回(不中断 UI)。
 """
 import re
+from typing import Optional
 from fastapi import APIRouter, Request
 from .common import _ts, ok, err
-from . import store
+from . import store, arch_git
 
 router = APIRouter()
 
 BASELINE_COMMIT = "1a2b3c4d5e6f"
-BRANCH = "main"
-LOG_ENTRIES = [
-    {"oid": "8f4a2e1c", "subject": "feat: 订单结算接入库存预占", "author": "dev", "date": "2026-07-28 14:02"},
-    {"oid": "3c1b90a7", "subject": "fix: 支付回调幂等修正", "author": "dev", "date": "2026-07-26 09:41"},
-    {"oid": BASELINE_COMMIT, "subject": "feat: 引入订单服务骨架", "author": "dev", "date": "2026-07-20 11:12"},
-]
-
-_WORKING_TREE = {
-    "app/order.go": "package order\n// 订单核心逻辑(工作区未提交修改)\n",
-    "app/payment.go": "package payment\n// 支付回调幂等处理\n",
-    "app/inventory.go": "package inventory\n// 库存预占/扣减\n",
-}
 
 
-def _status():
-    return {
-        "branch": BRANCH, "ahead": 0, "behind": 0, "dirty": True,
-        "uncommitted": ["app/order.go"], "staged": [], "baseline": BASELINE_COMMIT,
-    }
+def _resolve_project(request: Request) -> Optional[dict]:
+    root = request.query_params.get("root") or request.query_params.get("repo")
+    project = request.query_params.get("project")
+    from .project import _resolve_project as _rp
+    return _rp(root, project)
+
+
+def _status(root: str):
+    return arch_git.status({"rootPath": root})
 
 
 @router.get("/git/status")
-async def git_status():
-    return ok(_status())
+async def git_status(request: Request):
+    proj = _resolve_project(request)
+    if not proj or not proj.get("rootPath"):
+        return ok({"branch": "main", "ahead": 0, "behind": 0, "dirty": False,
+                   "uncommitted": [], "staged": [], "baseline": BASELINE_COMMIT})
+    return ok(_status(proj.get("rootPath")))
 
 
 @router.get("/git/log")
-async def git_log(limit: int = 10):
-    return ok({"branch": BRANCH, "entries": LOG_ENTRIES[:limit], "baseline": BASELINE_COMMIT})
+async def git_log(request: Request, limit: int = 10):
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
+    entries = arch_git.commit_log(root, limit=limit)
+    return ok({"branch": arch_git.repo_status(root).get("branch") or "main",
+               "entries": entries, "baseline": BASELINE_COMMIT})
 
 
 @router.get("/git/head")
-async def git_head():
-    return ok({"oid": "8f4a2e1c", "subject": "feat: 订单结算接入库存预占", "branch": BRANCH})
+async def git_head(request: Request):
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
+    st = arch_git.repo_status(root)
+    return ok({"oid": st.get("commit")[:8] or "unknown", "subject": "",
+               "branch": st.get("branch") or "main"})
 
 
 @router.get("/git/working-tree")
-async def git_working_tree():
-    return ok({"files": [{"path": k, "staged": k in ("app/order.go",), "content": v} for k, v in _WORKING_TREE.items()]})
+async def git_working_tree(request: Request, limit: int = 200):
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
+    files = arch_git.working_tree(root, limit=limit)
+    return ok({"files": files})
 
 
 @router.post("/git/checkout")
 async def git_checkout(request: Request):
-    body = await request.json()
+    body = await request.json() or {}
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
     ref = body.get("ref") or "main"
-    return ok({"branch": ref, "oid": "8f4a2e1c", "clean": True})
+    return ok(arch_git.checkout(root, ref))
 
 
 @router.post("/git/reset")
 async def git_reset(request: Request):
-    body = await request.json()
-    mode = body.get("mode") or "hard"
-    target = body.get("target") or BASELINE_COMMIT
-    return ok({"mode": mode, "target": target, "status": _status(), "reset": True})
+    body = await request.json() or {}
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
+    target = body.get("target") or body.get("commit") or "HEAD"
+    arch_git._git(["reset", "--hard", target], cwd=root)
+    return ok({"mode": body.get("mode") or "hard", "target": target,
+               "status": _status(root), "reset": True})
 
 
 @router.post("/git/commit")
 async def git_commit(request: Request):
-    body = await request.json()
+    body = await request.json() or {}
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
     msg = body.get("message") or "chore: 更新"
-    return ok({"oid": "a7c9e2f1", "subject": msg, "branch": BRANCH, "status": _status()})
+    arch_git._git(["add", "-A"], cwd=root)
+    oid = arch_git._git(["commit", "-m", msg], cwd=root)
+    return ok({"oid": oid or "unknown", "subject": msg,
+               "branch": arch_git.repo_status(root).get("branch") or "main",
+               "status": _status(root)})
 
 
 @router.post("/git/push")
 async def git_push(request: Request):
-    return ok({"branch": BRANCH, "pushed": True, "remote": "origin"})
+    body = await request.json() or {}
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
+    branch = body.get("branch") or arch_git.repo_status(root).get("branch") or "main"
+    arch_git._git(["push", "-u", "origin", branch], cwd=root, timeout=300)
+    return ok({"branch": branch, "pushed": True, "remote": "origin"})
 
 
 @router.get("/git/diff")
 async def git_diff(request: Request):
-    body = {}
-    return ok({"files": [
-        {"path": "app/order.go", "additions": 12, "deletions": 2,
-         "diff": "--- a/app/order.go\n+++ b/app/order.go\n@@ -1,3 +1,13 @@\n package order\n+// 工作区未提交修改\n"},
-    ]})
+    proj = _resolve_project(request)
+    root = (proj or {}).get("rootPath") or ""
+    task_branch = (proj or {}).get("taskBranch") or ""
+    base = (proj or {}).get("baselineCommit") or ""
+    if task_branch:
+        diff = arch_git.diff_files(proj or {}, task_branch, base=base)
+        return ok({"files": [{"path": f["path"], "additions": 0, "deletions": 0,
+                              "diff": ""} for f in diff.get("files", [])]})
+    return ok({"files": []})

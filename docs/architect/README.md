@@ -61,6 +61,7 @@
 | 2 | coding agent 会话域 | `AgentSession` 落库、`/ws/coding-agent` 真流式、连通性探测 + 前端 WS 接线 | ✅ 已实现 |
 | 3 | 知识分析 + Greenfield | `analyze/clarify|collect`、blueprint、scaffold、extract、launch/guide | ✅ 已实现 |
 | 4 | 加固已 HTTP 域 | 原子 `commitBatch`、amendments、git 全量、plans confirm/release、tags/collab/mcp 落库 | ✅ 已实现 |
+| 5 | 多 adapter 接入 | qwen/daemon(ACP)、codex/cline(cli 一次性进程)、`AgentConfigDialog` adapter 切换、映射单测 | ✅ 已实现 |
 
 ### 1.4 各阶段验证
 

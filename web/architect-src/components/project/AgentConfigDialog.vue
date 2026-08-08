@@ -5,18 +5,20 @@ import {
   ArrowPathIcon, BoltIcon, CheckCircleIcon, ExclamationTriangleIcon,
   ServerIcon, StarIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import type { AgentAdapterInfo, AgentProbeResult } from '@/types'
-import { listAgentAdapters, previewAgentConfig, createAgentConfig } from '@/services/agent-service'
+import type { AgentAdapterInfo, AgentEnvCheck, AgentProbeResult } from '@/types'
+import { listAgentAdapters, getOpencodeEnv, previewAgentConfig, createAgentConfig } from '@/services/agent-service'
 
 const emit = defineEmits<{ close: []; saved: [] }>()
 
 const { t } = useI18n()
 
 const adapters = ref<AgentAdapterInfo[]>([])
+const env = ref<AgentEnvCheck | null>(null)
 const form = ref({
   adapter: 'opencode',
   name: '',
   mode: 'server',
+  instanceMode: 'managed' as 'managed' | 'external',
   host: '127.0.0.1',
   port: 4096,
   username: 'opencode',
@@ -30,43 +32,65 @@ const saving = ref(false)
 const probe = ref<AgentProbeResult | null>(null)
 const error = ref('')
 
+/** 当前 adapter 运行形态(server=daemon HTTP/SSE; cli=一次性进程)。 */
+const adapterMode = computed(() => {
+  const a = adapters.value.find((x) => x.id === form.value.adapter)
+  const map: Record<string, 'server' | 'cli'> = {
+    opencode: 'server', qwen: 'server', codex: 'cli', 'claude-code': 'cli', cline: 'cli',
+  }
+  return a && map[a.id] ? map[a.id] : 'server'
+})
+
 const modelOptions = computed(() => probe.value?.models ?? [])
 const connectedCount = computed(() => probe.value?.connected?.length ?? 0)
-const supported = (id: string) => id === 'opencode'
+const isCli = computed(() => adapterMode.value === 'cli')
+const isServer = computed(() => !isCli.value)
 
-async function loadAdapters() {
-  try {
-    adapters.value = await listAgentAdapters()
-  } catch {
-    adapters.value = [
-      { id: 'opencode', name: 'OpenCode' },
-      { id: 'codex', name: 'OpenAI Codex' },
-      { id: 'claude', name: 'Claude Code' },
-      { id: 'cursor', name: 'Cursor' },
-      { id: 'copilot', name: 'GitHub Copilot' },
-      { id: 'gemini', name: 'Gemini CLI' },
-      { id: 'windsurf', name: 'Windsurf' },
-    ]
+function selectAdapter(id: string) {
+  const a = adapters.value.find((x) => x.id === id)
+  if (!a) return
+  form.value.adapter = id
+  form.value.name = a.name || id
+  form.value.mode = isCli.value ? 'cli' : 'server'
+  form.value.models = []
+  form.value.default_model = ''
+  probe.value = null
+  if (id === 'qwen') {
+    form.value.host = '127.0.0.1'
+    form.value.port = 4170
+    form.value.username = ''
+    form.value.url = ''
   }
 }
 
-function selectAdapter(id: string) {
-  if (!supported(id)) return
-  form.value.adapter = id
+async function loadEnv() {
+  try {
+    env.value = await getOpencodeEnv()
+  } catch {
+    env.value = null
+  }
 }
 
 async function runProbe() {
   probing.value = true
   error.value = ''
   try {
+    // daemon 型先保证本机已完整安装; cli 型直接走探测(连通性与二进制校验)。
+    if (!isServer.value) {
+      await loadEnv()
+      if (env.value && env.value.status !== 'ok') {
+        error.value = env.value.detail
+        probe.value = null
+        return
+      }
+    }
     probe.value = await previewAgentConfig({
       adapter: form.value.adapter,
       host: form.value.host,
       port: Number(form.value.port),
       username: form.value.username,
       url: form.value.url,
-    })
-    // 探测成功后，把未选中的已连通模型补齐为候选；保留已选。
+    })    // 探测成功后，把未选中的已连通模型补齐为候选；保留已选。
     const ids = new Set((probe.value?.models ?? []).map((m) => m.id))
     form.value.models = form.value.models.filter((m) => ids.has(m))
     if (form.value.default_model && !ids.has(form.value.default_model)) {
@@ -101,10 +125,11 @@ async function save() {
   const payload = {
     adapter: form.value.adapter,
     name: form.value.name || form.value.adapter,
-    mode: form.value.mode as 'server' | 'cli',
-    host: form.value.host,
-    port: Number(form.value.port),
-    username: form.value.username,
+    mode: (isServer.value ? 'server' : 'cli') as 'server' | 'cli',
+    instanceMode: form.value.instanceMode,
+    host: isServer.value ? form.value.host : 'cli',
+    port: isServer.value ? Number(form.value.port) : 0,
+    username: isServer.value ? form.value.username : form.value.username || 'opencode',
     url: form.value.url,
     models: form.value.models,
     defaultModel: form.value.default_model,
@@ -120,8 +145,17 @@ async function save() {
   }
 }
 
+async function loadAdapters() {
+  try {
+    adapters.value = await listAgentAdapters()
+  } catch {
+    adapters.value = []
+  }
+}
+
 onMounted(() => {
   loadAdapters()
+  loadEnv()
 })
 </script>
 
@@ -138,11 +172,16 @@ onMounted(() => {
             {{ t('agent.dialog.title') }}
           </h2>
         </div>
-        <button class="text-ctp-overlay1 hover:text-ctp-text" @click="emit('close')">
+        <button
+          class="text-ctp-overlay1 hover:text-ctp-text"
+          @click="emit('close')"
+        >
           <XMarkIcon class="w-5 h-5" />
         </button>
       </div>
-      <p class="text-xs text-ctp-subtext0 mb-3">{{ t('agent.dialog.desc') }}</p>
+      <p class="text-xs text-ctp-subtext0 mb-3">
+        {{ t('agent.dialog.desc') }}
+      </p>
 
       <div
         v-if="error"
@@ -153,35 +192,91 @@ onMounted(() => {
       </div>
 
       <div class="flex-1 overflow-y-auto space-y-4">
-        <!-- 适配器选择 -->
+        <!-- 适配器选择 + 本机安装验证 -->
         <div>
           <label class="text-xs text-ctp-overlay1 mb-1.5 block">{{ t('agent.dialog.adapter') }}</label>
-          <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          <div class="flex flex-wrap gap-1.5 mb-2">
             <button
               v-for="a in adapters"
               :key="a.id"
-              class="chip text-left"
-              :class="[
-                supported(a.id)
-                  ? form.adapter === a.id ? 'ring-1 ring-ctp-mauve/50 bg-ctp-mauve/10 text-ctp-mauve' : 'bg-ctp-surface0 text-ctp-subtext1'
-                  : 'bg-ctp-surface0 text-ctp-overlay0 cursor-not-allowed',
-              ]"
-              :disabled="!supported(a.id)"
+              class="chip text-xs"
+              :class="form.adapter === a.id
+                ? 'ring-1 ring-ctp-mauve/50 bg-ctp-mauve/10 text-ctp-mauve'
+                : 'bg-ctp-surface0 text-ctp-subtext1'"
               @click="selectAdapter(a.id)"
             >
-              <span class="flex items-center gap-1">
-                {{ a.name }}
-                <span
-                  v-if="!supported(a.id)"
-                  class="text-[10px] text-ctp-overlay1"
-                >{{ t('agent.dialog.pending') }}</span>
-              </span>
+              {{ a.name }}
             </button>
+          </div>
+          <div class="flex items-center gap-2 border border-ctp-surface0 rounded-md px-3 py-2">
+            <span class="chip bg-ctp-mauve/10 text-ctp-mauve shrink-0">{{ form.adapter }}</span>
+            <template v-if="isServer">
+              <span
+                v-if="env"
+                class="flex items-center gap-1.5 text-xs min-w-0"
+              >
+                <CheckCircleIcon
+                  v-if="env.status === 'ok'"
+                  class="w-4 h-4 text-ctp-green shrink-0"
+                />
+                <ExclamationTriangleIcon
+                  v-else
+                  class="w-4 h-4 text-ctp-red shrink-0"
+                />
+                <span
+                  class="truncate"
+                  :class="env.status === 'ok' ? 'text-ctp-green' : 'text-ctp-red'"
+                  :title="env.detail"
+                >{{ env.detail }}</span>
+              </span>
+              <span
+                v-else
+                class="text-xs text-ctp-overlay1"
+              >{{ t('agent.dialog.checking') }}</span>
+              <span
+                v-if="env?.version"
+                class="text-[10px] text-ctp-overlay1 shrink-0"
+              >v{{ env.version }}</span>
+            </template>
+            <span
+              v-else
+              class="text-xs text-ctp-subtext0"
+            >
+              {{ t('agent.dialog.cliModeHint', { adapter: form.adapter }) }}
+            </span>
           </div>
         </div>
 
-        <!-- server 参数 -->
-        <div>
+        <!-- 运行模式(仅 daemon 型) -->
+        <div v-if="isServer">
+          <label class="text-xs text-ctp-overlay1 mb-1.5 block">{{ t('agent.dialog.instanceMode') }}</label>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button
+              class="chip text-xs"
+              :class="form.instanceMode === 'managed'
+                ? 'ring-1 ring-ctp-mauve/50 bg-ctp-mauve/10 text-ctp-mauve'
+                : 'bg-ctp-surface0 text-ctp-subtext1'"
+              @click="form.instanceMode = 'managed'"
+            >
+              {{ t('agent.dialog.modeManaged') }}
+            </button>
+            <button
+              class="chip text-xs"
+              :class="form.instanceMode === 'external'
+                ? 'ring-1 ring-ctp-mauve/50 bg-ctp-mauve/10 text-ctp-mauve'
+                : 'bg-ctp-surface0 text-ctp-subtext1'"
+              @click="form.instanceMode = 'external'"
+            >
+              {{ t('agent.dialog.modeExternal') }}
+            </button>
+          </div>
+          <p class="text-[10px] text-ctp-overlay1 mt-1">
+            {{ t('agent.dialog.modeHint') }}
+          </p>
+        </div>
+
+        <!-- server 参数(daemon 型 + 外部模式) -->
+        <div v-if="form.instanceMode === 'external' && isServer">
           <label class="text-xs text-ctp-overlay1 mb-1.5 block">{{ t('agent.dialog.server') }}</label>
           <div class="grid grid-cols-6 gap-2">
             <div class="col-span-3">
@@ -189,7 +284,7 @@ onMounted(() => {
                 v-model="form.host"
                 class="input font-mono text-xs"
                 :placeholder="t('agent.dialog.host')"
-              />
+              >
             </div>
             <div class="col-span-1">
               <input
@@ -197,33 +292,51 @@ onMounted(() => {
                 type="number"
                 class="input font-mono text-xs"
                 :placeholder="t('agent.dialog.port')"
-              />
+              >
             </div>
             <div class="col-span-2">
               <input
                 v-model="form.username"
                 class="input font-mono text-xs"
                 :placeholder="t('agent.dialog.username')"
-              />
+              >
             </div>
           </div>
           <input
             v-model="form.url"
             class="input font-mono text-xs mt-2"
             :placeholder="t('agent.dialog.urlPlaceholder')"
-          />
-          <p class="text-[10px] text-ctp-overlay1 mt-1">{{ t('agent.dialog.urlHint') }}</p>
+          >
+          <p class="text-[10px] text-ctp-overlay1 mt-1">
+            {{ t('agent.dialog.urlHint') }}
+          </p>
         </div>
 
-        <!-- 测试连通性 -->
-        <div class="flex items-center gap-2">
-          <button class="btn btn-blue text-xs" :disabled="probing" @click="runProbe">
+        <!-- 测试连通性(external / cli 均可测) -->
+        <div
+          v-if="!isServer || form.instanceMode === 'external'"
+          class="flex items-center gap-2"
+        >
+          <button
+            class="btn btn-blue text-xs"
+            :disabled="probing"
+            @click="runProbe"
+          >
             <ArrowPathIcon :class="['w-3.5 h-3.5', probing ? 'animate-spin' : '']" />
             {{ probing ? t('common.loading') : t('agent.dialog.test') }}
           </button>
-          <span v-if="probe" class="flex items-center gap-1.5 text-xs">
-            <CheckCircleIcon v-if="probe.status === 'ok'" class="w-4 h-4 text-ctp-green" />
-            <ExclamationTriangleIcon v-else class="w-4 h-4 text-ctp-red" />
+          <span
+            v-if="probe"
+            class="flex items-center gap-1.5 text-xs"
+          >
+            <CheckCircleIcon
+              v-if="probe.status === 'ok'"
+              class="w-4 h-4 text-ctp-green"
+            />
+            <ExclamationTriangleIcon
+              v-else
+              class="w-4 h-4 text-ctp-red"
+            />
             <span :class="probe.status === 'ok' ? 'text-ctp-green' : 'text-ctp-red'">
               {{ probe.detail }}{{ probe.version ? ` · v${probe.version}` : '' }}
             </span>
@@ -248,7 +361,7 @@ onMounted(() => {
                 :checked="form.models.includes(m.id)"
                 class="accent-ctp-mauve shrink-0"
                 @change="toggleModel(m.id)"
-              />
+              >
               <span class="flex-1 min-w-0 text-xs text-ctp-text truncate">{{ m.name }}</span>
               <button
                 v-if="form.models.includes(m.id)"
@@ -263,7 +376,10 @@ onMounted(() => {
             </label>
           </div>
         </div>
-        <p v-else-if="probe && probe.status === 'ok'" class="text-xs text-ctp-subtext0">
+        <p
+          v-else-if="probe && probe.status === 'ok'"
+          class="text-xs text-ctp-subtext0"
+        >
           {{ t('agent.dialog.noModels') }}
         </p>
       </div>
@@ -271,10 +387,17 @@ onMounted(() => {
       <div class="flex items-center justify-between mt-4">
         <span class="text-[10px] text-ctp-overlay1">{{ t('agent.dialog.noPassword') }}</span>
         <div class="flex items-center gap-2">
-          <button class="btn btn-ghost text-xs" @click="emit('close')">
+          <button
+            class="btn btn-ghost text-xs"
+            @click="emit('close')"
+          >
             {{ t('common.cancel') }}
           </button>
-          <button class="btn btn-green text-xs" :disabled="saving" @click="save">
+          <button
+            class="btn btn-green text-xs"
+            :disabled="saving"
+            @click="save"
+          >
             <BoltIcon class="w-3.5 h-3.5" />
             {{ saving ? t('common.loading') : t('common.save') }}
           </button>

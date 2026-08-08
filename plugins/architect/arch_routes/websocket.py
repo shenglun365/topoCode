@@ -1,9 +1,13 @@
 """WebSocket routes for KB analysis agent, coding agent and unit-test execution."""
 import asyncio
 import logging
+from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .common import _ts, _id
 from . import store
+from . import agent_server
+from . import agent_adapters
+from . import arch_git
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -49,14 +53,17 @@ async def kb_analysis_ws(websocket: WebSocket):
 
 @router.websocket("/ws/coding-agent")
 async def coding_agent_ws(websocket: WebSocket):
-    """coding-agent 会话流(阶段 2 服务端模拟 + 落库)。
+    """coding-agent 会话流(阶段 2 服务端模拟 + 落库；真实 opencode 对接优先)。
 
     契约见 docs/architect/api-execution.md §5。客户端消息:
-      session.create  { exec, planTitle, keepContext? }   → session_created { session }
-      session.message { sessionId, content }              → message
-      task.run       { sessionId, task }                  → 流式 message/tool_call/status/tree.change + done|failed|stopped
-      session.stop   { sessionId }                        → status stopped
-      ping                                                → pong
+      session.create  { exec, planTitle, keepContext?, root? }   → session_created { session }
+      session.message { sessionId, content }                      → message
+      task.run       { sessionId, task }                          → 流式 message/tool_call/status/tree.change + done|failed|stopped
+      session.stop   { sessionId }                                → status stopped
+      ping                                                        → pong
+
+    session.create 携带 root(工程实现目录)时走真实 opencode(经 AgentInstancePool)；
+    无 root / 实例不可达 / 探测失败 → 回退服务端模拟(与 api-execution.md §5.4 一致)。
     """
     await websocket.accept()
     try:
@@ -71,6 +78,8 @@ async def coding_agent_ws(websocket: WebSocket):
                 exec_data = data.get("exec", {})
                 plan_title = data.get("planTitle", "")
                 keep_context = bool(data.get("keepContext", True))
+                root = (data.get("root") or data.get("execRoot") or "").strip()
+                project_id = (data.get("project") or "").strip() or None
                 session_id = store.next_id("sess")
                 now = _ts()
                 session = {
@@ -94,6 +103,16 @@ async def coding_agent_ws(websocket: WebSocket):
                 }
                 store.AgentSessionsStore.append_message({**init_msg, "sessionId": session_id})
                 session["messages"] = [init_msg]
+
+                # 真实 opencode 对接: 需要 root 或 project + 该 adapter 的连接配置。
+                inst = None
+                if root or project_id:
+                    inst = await _ensure_opencode_session(root, project_id, exec_data, session_id)
+                if inst:
+                    store.AgentSessionsStore.update(session_id, {
+                        "instanceId": inst["id"], "status": "idle", "updatedAt": _ts(),
+                    })
+                    session["instanceId"] = inst["id"]
                 await websocket.send_json({"type": "session_created", "session": session})
 
             elif msg_type == "session.message":
@@ -108,6 +127,12 @@ async def coding_agent_ws(websocket: WebSocket):
                 }
                 store.AgentSessionsStore.append_message({**user_msg, "sessionId": session_id})
                 store.AgentSessionsStore.update(session_id, {"updatedAt": _ts()})
+                if session.get("opencodeSessionId"):
+                    reply = await _opencode_message(session, content)
+                    if reply:
+                        m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": reply}
+                        store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+                        await websocket.send_json({"type": "message", **m})
                 await websocket.send_json({"type": "message", **user_msg})
 
             elif msg_type == "task.run":
@@ -122,6 +147,9 @@ async def coding_agent_ws(websocket: WebSocket):
             elif msg_type == "session.stop":
                 session_id = data.get("sessionId")
                 _CANCELLED.add(session_id)
+                session = store.AgentSessionsStore.get(session_id)
+                if session and session.get("opencodeSessionId"):
+                    await _opencode_abort(session)
                 if session_id not in _RUNNING:
                     await websocket.send_json({"type": "stopped", "sessionId": session_id, "status": "stopped"})
 
@@ -129,6 +157,99 @@ async def coding_agent_ws(websocket: WebSocket):
         logger.info("Coding agent WebSocket disconnected")
     except Exception as e:
         logger.exception(f"Coding agent WS error: {e}")
+
+
+# ── 真实 opencode 对接辅助 ─────────────────────────────────────
+
+def _config_for_adapter(adapter: str):
+    for c in store.AgentConfigsStore.all():
+        if (c.get("adapter") or "").lower() == (adapter or "opencode").lower():
+            return c
+    return None
+
+
+def _project_for_root(root: str):
+    from .project import _resolve_project
+    return _resolve_project(root, None)
+
+
+def _project_for(root: Optional[str], project_id: Optional[str]):
+    from .project import _resolve_project
+    return _resolve_project(root, project_id)
+
+
+async def _ensure_opencode_session(root: str, project_id: Optional[str], exec_data: dict, session_id: str) -> Optional[dict]:
+    """确保项目实例就绪 + 创建 agent 会话。失败返回 None(调用方回退模拟)。"""
+    try:
+        project = _project_for(root or None, project_id)
+        if not project or not project.get("id"):
+            return None
+        adapter = (exec_data.get("adapter") or "opencode").lower()
+        agent = agent_adapters.get_agent(adapter)
+        if agent is None:
+            return None
+        cfg = _config_for_adapter(adapter)
+        if not cfg:
+            return None
+        pool = agent_server.get_pool()
+        inst = await pool.ensure(project, cfg)
+        if not inst or inst.get("state") not in ("ready", "busy", "idle"):
+            return None
+        client = agent_server.agent_client_for(inst, cfg, agent.id)
+        title = f"architect/{session_id} · {exec_data.get('id', '')}"
+        oc = client.create_session(title=title)
+        oc_id = oc.get("id") or oc.get("_id")
+        if not oc_id or oc.get("_error"):
+            logger.warning(f"[coding-agent] opencode 会话创建失败: {oc.get('_error', 'no id')}")
+            return None
+        store.AgentSessionsStore.update(session_id, {"opencodeSessionId": oc_id, "updatedAt": _ts()})
+        # 任务树由 exec 提供; 建 task 分支并记录到实例。
+        task_branch = exec_data.get("taskBranch") or f"arch/{exec_data.get('id', session_id)}"
+        store.AgentInstancesStore.update(inst["id"], {
+            "taskBranch": task_branch, "updatedAt": _ts(),
+        })
+        return inst
+    except Exception as e:
+        logger.warning(f"[coding-agent] 真实 opencode 会话创建失败, 回退模拟: {e}")
+        return None
+
+
+async def _opencode_message(session: dict, content: str) -> str:
+    """向 agent 会话发消息(同步取回复文本)。失败返回空串。阻塞调用放线程。"""
+    try:
+        inst = store.AgentInstancesStore.get(session.get("instanceId") or "")
+        cfg = _config_for_adapter(session.get("adapter") or "opencode")
+        if not inst or not cfg:
+            return ""
+        adapter = agent_adapters.get_agent(session.get("adapter") or "opencode")
+        if adapter is None:
+            return ""
+        client = agent_server.agent_client_for(inst, cfg, adapter.id)
+        res = await asyncio.to_thread(client.send_message, session.get("opencodeSessionId", ""), content)
+        if res.get("_error"):
+            return ""
+        info = res.get("info") or {}
+        parts = res.get("parts") or []
+        texts = [p.get("text", "") for p in parts if p.get("type") == "text" and p.get("text")]
+        return "\n".join(texts) or (info.get("id") or "")
+    except Exception as e:
+        logger.warning(f"[coding-agent] agent 消息失败: {e}")
+        return ""
+
+
+async def _opencode_abort(session: dict) -> None:
+    try:
+        inst = store.AgentInstancesStore.get(session.get("instanceId") or "")
+        cfg = _config_for_adapter(session.get("adapter") or "opencode")
+        if not inst or not cfg:
+            return
+        adapter = agent_adapters.get_agent(session.get("adapter") or "opencode")
+        if adapter is None:
+            return
+        client = agent_server.agent_client_for(inst, cfg, adapter.id)
+        await asyncio.to_thread(client.abort, session.get("opencodeSessionId", ""))
+    except Exception:
+        pass
 
 
 _CANCELLED: set[str] = set()
@@ -159,7 +280,7 @@ def _agent_bump_stats(session: dict, bytes_: int) -> None:
 
 
 async def _run_coding_agent_task(websocket: WebSocket, session_id: str, task: dict) -> None:
-    """coding-agent 任务执行流(服务端模拟，对齐 mock agent-engine，边流边落库)。
+    """coding-agent 任务执行流(真实 opencode 优先；无 opencode 会话则服务端模拟)。
 
     isCancelled 语义: 收到 session.stop 后置 _CANCELLED；任务流内各步检查。
     """
@@ -169,6 +290,19 @@ async def _run_coding_agent_task(websocket: WebSocket, session_id: str, task: di
         _RUNNING.discard(session_id)
         return
     _CANCELLED.discard(session_id)
+
+    oc_id = session.get("opencodeSessionId") or ""
+    inst = store.AgentInstancesStore.get(session.get("instanceId") or "") if oc_id else None
+
+    # 真实执行路径: 有 opencode 会话 → 发任务上下文包, 同步取最终回复。
+    if oc_id and inst:
+        try:
+            await _run_opencode_task(websocket, session, inst, task)
+            return
+        except Exception as e:
+            logger.warning(f"[coding-agent] opencode 执行失败, 回退模拟: {e}")
+        finally:
+            _RUNNING.discard(session_id)
 
     def cancelled() -> bool:
         return session_id in _CANCELLED
@@ -241,6 +375,171 @@ async def _run_coding_agent_task(websocket: WebSocket, session_id: str, task: di
     store.AgentSessionsStore.update(session_id, {"stats": session.get("stats"), "updatedAt": _ts()})
     await websocket.send_json({"type": "message", **done_msg})
     await finish("done" if ok else "failed")
+
+
+async def _run_opencode_task(websocket: WebSocket, session: dict, inst: dict, task: dict) -> None:
+    """真实执行: 组装上下文包 → 下发 → 流式消费(fallback 同步取回复) → 更新 git 引用。
+
+    流式: adapter 支持流式时, 订阅 /event → 归一化前端 WS 事件(message/tool_call/status);
+    同时阻塞调用经 `asyncio.to_thread`, 避免卡住事件循环。不支持流式的 adapter 走同步回退。
+    """
+    session_id = session["id"]
+    oc_id = session.get("opencodeSessionId", "")
+    cfg = _config_for_adapter(session.get("adapter") or "opencode")
+    if not cfg:
+        raise RuntimeError("无 agent 连接配置")
+    adapter = agent_adapters.get_agent(session.get("adapter") or "opencode")
+    if adapter is None:
+        raise RuntimeError(f"未知 adapter: {session.get('adapter')}")
+    client = agent_server.agent_client_for(inst, cfg, adapter.id)
+
+    await websocket.send_json({"type": "status", "sessionId": session_id, "status": "planning"})
+    store.AgentSessionsStore.update(session_id, {"status": "planning", "updatedAt": _ts()})
+
+    # 任务上下文包(方案/任务/上下文文件)。
+    context = task.get("context") or []
+    ctx_text = (
+        f"任务「{task.get('title', '')}」。\n"
+        f"上下文: {' / '.join(context) if context else '无'}\n"
+        f"请按架构规约实现, 完成后提交到当前分支并保持测试通过。"
+    )
+    model = session.get("model") or ""
+
+    def _forward(ev: dict) -> None:
+        kind = ev.get("type")
+        if kind == "message":
+            m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(),
+                 "content": ev.get("content", "")}
+            store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+            asyncio.create_task(websocket.send_json({"type": "message", **m}))
+        elif kind == "tool_call":
+            m = {"id": store.next_id("m"), "role": "tool", "time": _ts(),
+                 "content": "", "tool": ev.get("tool", {})}
+            store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+            asyncio.create_task(websocket.send_json({"type": "tool_call", "id": m["id"],
+                                                     "time": m["time"], "tool": m["tool"]}))
+        elif kind == "status":
+            asyncio.create_task(websocket.send_json({"type": "status",
+                                                     "sessionId": session_id,
+                                                     "status": ev.get("status")}))
+
+    async def _finish() -> None:
+        """任务收尾: 更新状态 → 同步 git 分析副本 → 终态事件。"""
+        await websocket.send_json({"type": "status", "sessionId": session_id, "status": "done"})
+        store.AgentSessionsStore.update(session_id, {"status": "done", "updatedAt": _ts()})
+        project = _project_for_root(inst.get("workDir") or "")
+        task_branch = inst.get("taskBranch") or ""
+        if project and task_branch:
+            copy = arch_git.pull_task_branch(project, task_branch)
+            if copy.get("ok"):
+                await websocket.send_json({
+                    "type": "tree.change", "sessionId": session_id,
+                    "reason": f"agent 已提交到 {task_branch}({copy.get('commit', '')[:8]}), 分析副本已同步",
+                })
+        await websocket.send_json({
+            "type": "done", "sessionId": session_id, "status": "done",
+            "stats": session.get("stats"), "artifacts": session.get("artifacts"),
+            "testResult": session.get("testResult"),
+        })
+
+    # cli 型(进程执行): 一次性子进程流式消费; 复用 _finish 收尾。
+    if getattr(adapter, "mode", "server") == "cli":
+        workdir = inst.get("workDir") or (client.cfg or {}).get("workdir") or ""
+        context = task.get("context") or []
+        ctx_text = (
+            f"任务「{task.get('title', '')}」。\n"
+            f"上下文: {' / '.join(context) if context else '无'}\n"
+            f"请按架构规约实现, 完成后提交到当前分支并保持测试通过。"
+        )
+
+        async def _forward_cli(ev: dict) -> None:
+            kind = ev.get("type")
+            if kind == "message":
+                m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(),
+                     "content": ev.get("content", "")}
+                store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+                asyncio.create_task(websocket.send_json({"type": "message", **m}))
+            elif kind == "tool_call":
+                m = {"id": store.next_id("m"), "role": "tool", "time": _ts(),
+                     "content": "", "tool": ev.get("tool", {})}
+                store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+                asyncio.create_task(websocket.send_json({"type": "tool_call", "id": m["id"],
+                                                         "time": m["time"], "tool": m["tool"]}))
+            elif kind == "error":
+                _agent_bump_stats(session, 400)
+                await websocket.send_json({"type": "message", "sessionId": session_id,
+                                           "content": ev.get("content", "")})
+            elif kind == "status":
+                asyncio.create_task(websocket.send_json({"type": "status",
+                                                         "sessionId": session_id,
+                                                         "status": ev.get("status")}))
+
+        try:
+            async for ev in adapter.process_events(client, ctx_text, session.get("model") or "",
+                                                   resume="", workdir=workdir):
+                if session_id in _CANCELLED:
+                    break
+                await _forward_cli(ev)
+            await _run_cancel(websocket, session_id, _finish())
+        finally:
+            _RUNNING.discard(session_id)
+        return
+
+    try:
+        # 先注入上下文(no_reply: 只注入不等待 AI 回复)。
+        await asyncio.to_thread(client.send_message, oc_id, ctx_text, "", True)
+
+        if not adapter.supports_stream:
+            # 非流式回退: 同步取最终回复文本。
+            res = await asyncio.to_thread(client.send_message, oc_id, ctx_text, model)
+            if res.get("_error"):
+                raise RuntimeError(res["_error"])
+            for t in [p.get("text", "") for p in (res.get("parts") or [])
+                      if p.get("type") == "text" and p.get("text")]:
+                m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": t}
+                store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
+                await websocket.send_json({"type": "message", **m})
+            await _run_cancel(websocket, session_id, _finish())
+            return
+
+        # 流式: 后台下发任务 + 前台消费 /event 归一化事件, 直至下发完成。
+        send_fut = asyncio.create_task(asyncio.to_thread(client.send_message, oc_id, ctx_text, model))
+        iterator = adapter.iter_events(client, oc_id)
+
+        async def _drain() -> None:
+            async for ev in iterator:
+                if send_fut.done() or session_id in _CANCELLED:
+                    break
+                _forward(ev)
+
+        drain_fut = asyncio.create_task(_drain())
+        try:
+            if session_id in _CANCELLED:
+                # 已取消: 不等下发完成, abort 由 stop 处理器负责。
+                await asyncio.wait_for(asyncio.shield(drain_fut), timeout=1.0)
+            else:
+                res = await asyncio.wait_for(asyncio.shield(send_fut), timeout=None)
+                # send 完成后短暂收尾 SSE 尾部事件, 再关闭。
+                await asyncio.wait_for(asyncio.shield(drain_fut), timeout=1.0)
+                if isinstance(res, dict) and res.get("_error"):
+                    raise RuntimeError(res["_error"])
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            drain_fut.cancel()
+            await asyncio.gather(drain_fut, return_exceptions=True)
+            await iterator.aclose()
+        await _run_cancel(websocket, session_id, _finish())
+    finally:
+        _RUNNING.discard(session_id)
+
+
+async def _run_cancel(websocket: WebSocket, session_id: str, coro) -> None:
+    """在取消检查通过后执行收尾; 已取消则发 stopped。"""
+    if session_id in _CANCELLED:
+        await websocket.send_json({"type": "stopped", "sessionId": session_id, "status": "stopped"})
+        return
+    await coro
 
 
 def _push_session_message(session_id: str, role: str, content: str, tool=None):

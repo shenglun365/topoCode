@@ -66,3 +66,5 @@ plugins/reports/static/api/
 plugins/reports/static/chat/
 plugins/reports/static/viewer/
 plugins/reports/static/web-root/
+plugins/architect/static/web/architect/assets/
+

@@ -7,8 +7,10 @@ export const BASELINE_COMMIT = '1a2b3c4d5e6f'
 
 export const AGENT_ADAPTERS = [
   { id: 'opencode', name: 'opencode', keepContext: true, note: '会话保持 · 支持多轮上下文延续', models: ['default', 'fast', 'large'] },
-  { id: 'codex', name: 'codex', keepContext: true, note: '会话保持 · CLI 批量执行', models: ['default', 'max-effort'] },
+  { id: 'qwen', name: 'qwen', keepContext: true, note: 'daemon 模式 · ACP 会话/SSE 流式', models: ['qwen3.5-9b-mtp', 'default'] },
+  { id: 'codex', name: 'codex', keepContext: true, note: '进程模式 · CLI 批量执行', models: ['default', 'max-effort'] },
   { id: 'claude-code', name: 'claude-code', keepContext: true, note: '会话保持 · 长上下文', models: ['opus', 'sonnet', 'haiku'] },
+  { id: 'cline', name: 'cline', keepContext: true, note: 'headless CLI · 需引擎登录态', models: ['default'] },
 ]
 
 export const PROJECT_INFO: ProjectInfo = {

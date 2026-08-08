@@ -75,7 +75,7 @@ export function buildTaskTree(plan: DesignPlan, reqs: Requirement[], opts?: { in
 }
 
 /** 落盘批次：方案确认 + 任务树注册 + 创建执行任务，需求标记执行中并绑定 execId。 */
-export async function commitBatch(reqs: Requirement[], adapter: string, plan?: DesignPlan, opts?: { model?: string; testIds?: string[] }): Promise<{ plan: DesignPlan; exec: ExecutionTask }> {
+export async function commitBatch(reqs: Requirement[], adapter: string, plan?: DesignPlan, opts?: { model?: string; testIds?: string[]; branchMode?: 'auto' | 'manual'; taskBranch?: string }): Promise<{ plan: DesignPlan; exec: ExecutionTask }> {
   const requirement = useArchRequirementStore()
   const task = useArchTaskStore()
   const p = plan ?? buildBatchPlan(reqs)
@@ -90,6 +90,8 @@ export async function commitBatch(reqs: Requirement[], adapter: string, plan?: D
         model: opts?.model,
         plan: p,
         testIds: opts?.testIds,
+        branchMode: opts?.branchMode,
+        taskBranch: opts?.taskBranch,
       })
       const planOut = res.plan
       const execOut = res.exec

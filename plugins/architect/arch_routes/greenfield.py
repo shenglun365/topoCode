@@ -227,14 +227,14 @@ def launch_info() -> dict:
 
 _MISSIONS = {
     "existing": [
-        {"id": "mission-1", "title": "需求澄清", "desc": "从需求池挑选待执行需求并澄清边界"},
-        {"id": "mission-2", "title": "方案确认", "desc": "评估影响面并确认执行方案"},
-        {"id": "mission-3", "title": "任务执行", "desc": "驱动 coding agent 完成改动"},
+        {"id": "mission-1", "title": "需求澄清", "desc": "从需求池挑选待执行需求并澄清边界", "docId": "api-knowledge-greenfield"},
+        {"id": "mission-2", "title": "方案确认", "desc": "评估影响面并确认执行方案", "docId": "api-overview"},
+        {"id": "mission-3", "title": "任务执行", "desc": "驱动 coding agent 完成改动", "docId": "api-execution"},
     ],
     "greenfield": [
-        {"id": "mission-1", "title": "蓝图规划", "desc": "从零规划模块与领域模型"},
-        {"id": "mission-2", "title": "脚手架生成", "desc": "生成工程骨架"},
-        {"id": "mission-3", "title": "知识抽取", "desc": "抽取代码为知识库基线"},
+        {"id": "mission-1", "title": "蓝图规划", "desc": "从零规划模块与领域模型", "docId": "api-knowledge-greenfield"},
+        {"id": "mission-2", "title": "脚手架生成", "desc": "生成工程骨架", "docId": "api-knowledge-greenfield"},
+        {"id": "mission-3", "title": "知识抽取", "desc": "抽取代码为知识库基线", "docId": "api-knowledge-greenfield"},
     ],
 }
 

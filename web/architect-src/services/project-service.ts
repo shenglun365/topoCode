@@ -1,4 +1,4 @@
-import type { KbProject, ProjectInfo, RepoStatus, Snapshot } from '@/types'
+import type { KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import router from '@/router'
 
@@ -80,6 +80,10 @@ export const projectService = {
   async status(): Promise<RepoStatus | null> {
     const qs = projectQuery().toString()
     return apiGet<RepoStatus | null>(`/project/status${qs ? '?' + qs : ''}`)
+  },
+  async overview(): Promise<ProjectOverview | null> {
+    const qs = projectQuery().toString()
+    return apiGet<ProjectOverview | null>(`/project/overview${qs ? '?' + qs : ''}`)
   },
   async snapshots(): Promise<Snapshot[]> {
     const qs = projectQuery().toString()
