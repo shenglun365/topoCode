@@ -30,6 +30,7 @@ mcp.load()
 spec.load()
 mergeBaseline.load()
 unitTest.load()
+agent.load()
 
 const collapsed = ref<Record<string, boolean>>({})
 

@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import type { TestChannel, UnitTest, UnitTestSession } from '@/types'
 import { unitTestService } from '@/services/unit-test-service'
-import { AGENT_ADAPTERS } from '@/services/mock/order-system'
 import { useArchTaskStore } from './task-store'
+
+const DEFAULT_ADAPTER_ID = 'opencode'
 
 export const useArchUnitTestStore = defineStore('arch-unit-test', {
   state: () => ({
@@ -53,7 +54,7 @@ export const useArchUnitTestStore = defineStore('arch-unit-test', {
       this.activeSessionId = sessionId
     },
     async createSession(opts: { title: string; channel: TestChannel; adapter?: string }) {
-      const adapter = opts.adapter ?? AGENT_ADAPTERS[0]?.id ?? 'opencode'
+      const adapter = opts.adapter ?? DEFAULT_ADAPTER_ID
       const s = await unitTestService.createSession({
         title: opts.title,
         channel: opts.channel,

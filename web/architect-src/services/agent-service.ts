@@ -1,7 +1,6 @@
 import type { AgentAdapterInfo, AgentConfig, AgentEnvCheck, AgentInstance, AgentMessage, AgentProbeResult, AgentSession, AgentStatus, Connectivity, ExecutionTask, TaskNode } from '@/types'
 import { apiGet, apiPost, apiPatch, apiDelete } from './api-client'
 import { ArchWs } from './ws-client'
-import { MockAgentAdapter } from './mock/agent-service'
 import { currentProjectParams } from './project-service'
 
 /**
@@ -10,7 +9,7 @@ import { currentProjectParams } from './project-service'
  * 后端契约见 docs/architect/api-execution.md §5：
  *   - 会话创建/对话/执行均走 WS `/ws/coding-agent`(会话保持, 多轮沿用上下文)
  *   - 连通性经 `GET /agent/adapters/{id}/connectivity`
- * 后端不可达时回退本地 mock(MockAgentAdapter)。
+ * 后端不可达时直接抛错——不复用本地 mock。
  */
 
 export interface AgentAdapter {
@@ -28,21 +27,6 @@ export interface RunHooks {
   onTreeChange?: (reason: string) => void
   /** 是否已请求取消执行(停止)。 */
   isCancelled?: () => boolean
-}
-
-let useMock = false
-let probed = false
-const mockAdapter = new MockAgentAdapter()
-
-async function ensureBackend(): Promise<void> {
-  if (probed) return
-  probed = true
-  try {
-    await apiGet<unknown>('/agent/adapters')
-    useMock = false
-  } catch {
-    useMock = true
-  }
 }
 
 function pushLocal(session: AgentSession, msg: AgentMessage): void {
@@ -128,12 +112,8 @@ class HttpAgentAdapter implements AgentAdapter {
   }
 
   async getStatus(sessionId: string): Promise<AgentStatus> {
-    try {
-      const session = await apiGet<AgentSession>(`/agent/sessions/${sessionId}`)
-      return session?.status ?? 'idle'
-    } catch {
-      return 'idle'
-    }
+    const session = await apiGet<AgentSession>(`/agent/sessions/${sessionId}`)
+    return session?.status ?? 'idle'
   }
 
   async terminate(sessionId: string): Promise<void> {
@@ -146,38 +126,7 @@ class HttpAgentAdapter implements AgentAdapter {
 
 const httpAdapter = new HttpAgentAdapter()
 
-class SwitchAgentAdapter implements AgentAdapter {
-  private impl(): AgentAdapter {
-    return useMock ? (mockAdapter as unknown as AgentAdapter) : httpAdapter
-  }
-
-  async createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession> {
-    await ensureBackend()
-    return this.impl().createSession(opts)
-  }
-
-  async sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean }): Promise<AgentMessage> {
-    await ensureBackend()
-    return this.impl().sendMessage(session, content, opts)
-  }
-
-  async runTask(session: AgentSession, task: TaskNode, opts?: RunHooks): Promise<void> {
-    await ensureBackend()
-    return this.impl().runTask(session, task, opts)
-  }
-
-  async getStatus(sessionId: string): Promise<AgentStatus> {
-    await ensureBackend()
-    return this.impl().getStatus(sessionId)
-  }
-
-  async terminate(sessionId: string): Promise<void> {
-    await ensureBackend()
-    return this.impl().terminate(sessionId)
-  }
-}
-
-export const agentService: AgentAdapter = new SwitchAgentAdapter()
+export const agentService: AgentAdapter = httpAdapter
 
 /** 列出 coding agent 适配器(真实来源: 后端 installer targets 注册表)。 */
 export async function listAgentAdapters(): Promise<AgentAdapterInfo[]> {

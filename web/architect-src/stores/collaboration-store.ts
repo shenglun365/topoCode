@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import type { CollabMode, UserInteraction } from '@/types'
-import { USER_INTERACTIONS } from '@/services/mock/order-system'
 import { apiGet, apiPut, apiPost } from '@/services/api-client'
 import { backendUp } from '@/services/backend'
 
@@ -25,22 +24,18 @@ export const useArchCollabStore = defineStore('arch-collab', {
     },
     async load() {
       if (this.loaded) return
-      if (await backendUp()) {
-        try {
-          const [modeRes, interactions] = await Promise.all([
-            apiGet<{ mode: CollabMode }>('/collab/mode'),
-            apiGet<UserInteraction[]>('/collab/interactions'),
-          ])
-          this.mode = modeRes.mode ?? this.mode
-          this.interactions = interactions ?? []
-          this.loaded = true
-          return
-        } catch {
-          // fall through to mock
-        }
+      if (!(await backendUp())) throw new Error('后端不可达，无法加载协同交互')
+      try {
+        const [modeRes, interactions] = await Promise.all([
+          apiGet<{ mode: CollabMode }>('/collab/mode'),
+          apiGet<UserInteraction[]>('/collab/interactions'),
+        ])
+        this.mode = modeRes.mode ?? this.mode
+        this.interactions = interactions ?? []
+        this.loaded = true
+      } catch (err) {
+        throw err
       }
-      this.interactions = [...USER_INTERACTIONS]
-      this.loaded = true
     },
     async resolve(id: string, answer: string) {
       const item = this.interactions.find((i) => i.id === id)

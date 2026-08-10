@@ -1,18 +1,20 @@
 import { defineStore } from 'pinia'
-import type { AgentMessage, AgentSession, AgentStatus, ExecutionTask } from '@/types'
-import { agentService } from '@/services/agent-service'
-import { AGENT_ADAPTERS, INITIAL_SESSIONS } from '@/services/mock/order-system'
+import type { AgentAdapterInfo, AgentMessage, AgentSession, AgentStatus, ExecutionTask } from '@/types'
+import { agentService, listAgentAdapters } from '@/services/agent-service'
+import { apiGet } from '@/services/api-client'
 import { useArchTaskStore } from './task-store'
 import { useArchRequirementStore } from './requirement-store'
 
 export const useArchAgentStore = defineStore('arch-agent', {
   state: () => ({
-    sessions: [...Object.values(INITIAL_SESSIONS)] as AgentSession[],
-    adapters: AGENT_ADAPTERS,
-    activeSessionId: (Object.values(INITIAL_SESSIONS)[0]?.id ?? null) as string | null,
+    sessions: [] as AgentSession[],
+    adapters: [] as AgentAdapterInfo[],
+    activeSessionId: null as string | null,
+    loaded: false,
+    loading: false,
     running: false,
     log: [] as string[],
-    /** 已请求停止的会话(前端 mock)。 */
+    /** 已请求停止的会话。 */
     stopping: new Set<string>(),
   }),
   getters: {
@@ -26,6 +28,26 @@ export const useArchAgentStore = defineStore('arch-agent', {
     },
   },
   actions: {
+    async load() {
+      if (this.loaded || this.loading) return
+      this.loading = true
+      try {
+        const [adapters, sessions] = await Promise.all([
+          listAgentAdapters().catch(() => [] as AgentAdapterInfo[]),
+          apiGet<AgentSession[]>('/agent/sessions').catch(() => [] as AgentSession[]),
+        ])
+        this.adapters = adapters ?? []
+        // 仅并入对当前(已存在)执行任务的会话；其余保持不显示，避免残留。
+        this.sessions = (sessions ?? []).filter((s) => !!s.taskId)
+        this.activeSessionId = this.sessions[0]?.id ?? null
+        this.loaded = true
+        this.loading = false
+      } catch (err) {
+        this.loading = false
+        console.error('[arch] agent 会话加载失败', err)
+        this.loaded = true
+      }
+    },
     async openSession(executionId: string) {
       const taskStore = useArchTaskStore()
       const exec = taskStore.findExecution(executionId)

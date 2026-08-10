@@ -1,7 +1,7 @@
 """WebSocket routes for KB analysis agent, coding agent and unit-test execution."""
 import asyncio
 import logging
-from typing import Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .common import _ts, _id
 from . import store
@@ -12,43 +12,212 @@ from . import arch_git
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_MAX_TOOL_ROUNDS = 4
+
 
 @router.websocket("/ws/kb-analysis")
 async def kb_analysis_ws(websocket: WebSocket):
+    """需求分析 <=> KB agent 会话流(阶段A 自由对话流式 + 阶段D 统一会话持久化)。
+
+    客户端消息:
+      chat   { conversationId?, kind?, projectId?, reqId?, title?, messages:[{role,content}], modelId? }
+             → streaming: chunk {requestId,text} ... done {requestId,conversationId,content} | error
+      ping   → pong
+
+    LLM 通道: 主后端 `llm.chat`(流式,经 ZMQ PUB 推送 chunk,按 requestId 过滤)优先;
+    不可达/未配置 → 降级 `llm.sync`(一次性完整回复)。
+    """
     await websocket.accept()
     try:
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type", "")
-            if msg_type == "clarify":
-                await websocket.send_json({
-                    "type": "clarify",
-                    "questions": [
-                        {"key": "scope", "label": "需求影响范围", "type": "text", "hint": "描述该需求涉及的模块"},
-                        {"key": "priority", "label": "优先级", "type": "select", "options": ["P0", "P1", "P2"]},
-                    ],
-                    "turnId": _id("turn"),
-                })
-            elif msg_type == "answer":
-                await websocket.send_json({
-                    "type": "collect", "status": "analyzing", "message": "正在分析知识库…",
-                })
-                await asyncio.sleep(1)
-                await websocket.send_json({
-                    "type": "collect", "status": "done",
-                    "report": {
-                        "functionalScope": ["订单创建", "库存预扣"],
-                        "entityBoundary": ["Order", "Inventory"],
-                        "feasibility": {"ok": True, "reason": "影响范围可控", "estMin": 120},
-                        "assetScope": [
-                            {"assetId": "c-order", "assetType": "component", "role": "core", "source": "auto"},
-                        ],
-                    },
-                })
-            elif msg_type == "ping":
+
+            if msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
+
+            elif msg_type == "chat":
+                await _handle_kb_chat(websocket, data)
+
     except WebSocketDisconnect:
         logger.info("KB analysis WebSocket disconnected")
+    except Exception as e:
+        logger.exception(f"KB analysis WS error: {e}")
+
+
+async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
+    """自由对话回合：持久化历史 → 发起 llm.chat 流式 → 逐字转发。"""
+    from . import req_agent
+
+    history = data.get("messages") or []
+    if not history and data.get("content"):
+        history = [{"role": "user", "content": data.get("content", "")}]
+    model_id = data.get("modelId") or data.get("model") or ""
+    project = (data.get("project") or "").strip()
+    root = (data.get("root") or "").strip()
+    kind = data.get("kind") or "requirement"
+    title = data.get("title") or f"{kind} 对话"
+
+    # ---- 会话落库(阶段D 统一表) ----
+    now = _ts()
+    conv_id = data.get("conversationId") or ""
+    if not conv_id:
+        conv = store.ConversationsStore.create({
+            "kind": kind, "projectId": project, "reqId": data.get("reqId") or "",
+            "title": title, "status": "active", "meta": {"title": title},
+        })
+        conv_id = conv["id"]
+    else:
+        conv = store.ConversationsStore.get(conv_id)
+        if not conv:
+            await websocket.send_json({"type": "error", "message": "conversation not found"})
+            return
+    user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
+    last_user_msg_id = ""
+    for m in user_msgs[-1:]:
+        last_user_msg_id = store.next_id("m")
+        store.ConversationsStore.append_message({
+            "id": last_user_msg_id, "conversationId": conv_id,
+            "role": "user", "time": now, "content": m.get("content", ""),
+        })
+
+    # ---- 上下文: 能力文档 + 历史(带软拒绝范围) ----
+    msgs = _build_chat_messages(root, project, history)
+
+    # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
+    request_id = None
+    assistant_text = ""
+    tool_round = 0
+    loop_fell_back = False
+    while tool_round <= _MAX_TOOL_ROUNDS:
+        rid = _req_chat_stream(msgs, model_id or req_agent.get_model_preference())
+        if not rid:
+            # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
+            loop_fell_back = True
+            assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+            break
+        request_id = rid
+        await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
+                                   "requestId": rid, "userMessageId": last_user_msg_id})
+        round_text = ""
+        round_ok = True
+        async for event_type, payload in _iter_llm_events(rid):
+            if event_type == "chunk":
+                round_text += payload.get("text") or ""
+            elif event_type == "done":
+                round_text = payload.get("content") or round_text
+                break
+            elif event_type == "error":
+                round_ok = False
+                await websocket.send_json({"type": "error", "requestId": rid,
+                                           "message": payload.get("message", "")})
+                break
+        if not round_ok:
+            # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
+            loop_fell_back = True
+            assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+            break
+
+        # 本轮工具调用解析并在 architect 侧执行
+        calls = req_agent.extract_tool_calls(round_text)
+        if calls:
+            # 达到最大工具轮次时也要执行本轮工具后用 llm.sync 收尾，避免空答案
+            if tool_round >= _MAX_TOOL_ROUNDS:
+                results: List[Dict[str, str]] = []
+                for c in calls:
+                    name = c.get("tool", "")
+                    args = c.get("arguments", {})
+                    result = await asyncio.to_thread(
+                        req_agent.run_arch_tool, name, args, root, project
+                    )
+                    results.append({"name": name,
+                                    "text": req_agent.tool_result_text(name, result)})
+                if results:
+                    tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
+                    msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
+                    msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+                loop_fell_back = True
+                assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+                break
+            tool_round += 1
+            results: List[Dict[str, str]] = []
+            for c in calls:
+                name = c.get("tool", "")
+                args = c.get("arguments", {})
+                result = await asyncio.to_thread(
+                    req_agent.run_arch_tool, name, args, root, project
+                )
+                logger.info("[req_agent] kb chat tool round=%s call=%s result_keys=%s",
+                            tool_round, name, list(result.keys()) if isinstance(result, dict) else ())
+                results.append({"name": name,
+                                "text": req_agent.tool_result_text(name, result)})
+            if results:
+                tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
+                msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
+                msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
+            continue
+
+        # 无工具调用 → 本轮即最终答案
+        assistant_text = req_agent.strip_tool_blocks(round_text)
+        break
+
+    # 最终答案按小块逐字转发，保持流式观感
+    if assistant_text:
+        CHUNK_SIZE = 24
+        for i in range(0, len(assistant_text), CHUNK_SIZE):
+            await websocket.send_json({"type": "chunk", "requestId": request_id,
+                                       "delta": assistant_text[i:i + CHUNK_SIZE]})
+    elif request_id is None and not loop_fell_back:
+        # ---- 降级: llm.sync 一次性(同样支持工具调用循环，避免输出裸 [TOOL_CALL] 块) ----
+        assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+        if not assistant_text:
+            await websocket.send_json({"type": "chat_fallback", "conversationId": conv_id})
+    else:
+        await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
+    if assistant_text:
+        assistant_msg_id = store.next_id("m")
+        store.ConversationsStore.append_message({
+            "id": assistant_msg_id, "conversationId": conv_id,
+            "role": "assistant", "time": _ts(), "content": assistant_text,
+        })
+        await websocket.send_json({"type": "done", "conversationId": conv_id,
+                                   "content": assistant_text, "messageId": assistant_msg_id})
+
+
+async def _sync_with_tools(msgs, root, project, model_id, max_rounds: int = 4) -> str:
+    """llm.sync 降级通道：走统一工具调用循环(req_agent.run_tools_loop)，
+    避免「LLM 输出 [TOOL_CALL] 后无结果」。返回最终纯文本。
+    """
+    from . import req_agent
+    res = await asyncio.to_thread(
+        req_agent.run_tools_loop, msgs,
+        root=root, project=project, model_id=model_id,
+        mode="chat", max_tokens=2000, max_rounds=max_rounds,
+    )
+    return res.get("content", "") if isinstance(res, dict) else ""
+
+
+def _build_chat_messages(root, project, history, cap=20):
+    """组装 prompt: 能力文档(system) + 最近 N 条历史。"""
+    from .req_agent import chat_system_prompt
+    msgs = [{"role": "system", "content": chat_system_prompt(root, project)}]
+    for m in history[-cap:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and (m.get("content") or "").strip():
+            msgs.append({"role": m["role"], "content": m["content"]})
+    return msgs
+
+
+async def _iter_llm_events(request_id: str):
+    """architect 进程内 ZMQ SUB 订阅主后端 llm.* 流(按 requestId 过滤)。"""
+    from .zmq_stream import iter_llm_events
+    async for e in iter_llm_events(request_id):
+        yield e
+
+
+def _req_chat_stream(msgs, model_id):
+    """发起流式 llm.chat; 返回 requestId 或 None(降级)。"""
+    from .req_agent import llm_chat_start
+    return llm_chat_start(msgs, model_id=model_id, session_id="arch-req-chat", max_tokens=2000)
 
 
 @router.websocket("/ws/coding-agent")
@@ -171,6 +340,24 @@ def _config_for_adapter(adapter: str):
 def _project_for_root(root: str):
     from .project import _resolve_project
     return _resolve_project(root, None)
+
+
+def _task_prompt(task: dict, root: Optional[str] = None) -> str:
+    """任务上下文包 + 语义数据资产锚点展开(锁定「改哪里」)。"""
+    context = task.get("context") or []
+    text = (
+        f"任务「{task.get('title', '')}」。\n"
+        f"上下文: {' / '.join(context) if context else '无'}\n"
+    )
+    try:
+        from . import semantic_assets as S
+        block = S.context_block_for(root, None, context)
+        if block:
+            text += block + "\n"
+    except Exception:
+        pass
+    text += "请按架构规约实现, 完成后提交到当前分支并保持测试通过。"
+    return text
 
 
 def _project_for(root: Optional[str], project_id: Optional[str]):
@@ -396,13 +583,9 @@ async def _run_opencode_task(websocket: WebSocket, session: dict, inst: dict, ta
     await websocket.send_json({"type": "status", "sessionId": session_id, "status": "planning"})
     store.AgentSessionsStore.update(session_id, {"status": "planning", "updatedAt": _ts()})
 
-    # 任务上下文包(方案/任务/上下文文件)。
+    # 任务上下文包(方案/任务/上下文文件 + 语义数据资产锚点展开)。
     context = task.get("context") or []
-    ctx_text = (
-        f"任务「{task.get('title', '')}」。\n"
-        f"上下文: {' / '.join(context) if context else '无'}\n"
-        f"请按架构规约实现, 完成后提交到当前分支并保持测试通过。"
-    )
+    ctx_text = _task_prompt(task, inst.get("workDir"))
     model = session.get("model") or ""
 
     def _forward(ev: dict) -> None:
@@ -446,11 +629,7 @@ async def _run_opencode_task(websocket: WebSocket, session: dict, inst: dict, ta
     if getattr(adapter, "mode", "server") == "cli":
         workdir = inst.get("workDir") or (client.cfg or {}).get("workdir") or ""
         context = task.get("context") or []
-        ctx_text = (
-            f"任务「{task.get('title', '')}」。\n"
-            f"上下文: {' / '.join(context) if context else '无'}\n"
-            f"请按架构规约实现, 完成后提交到当前分支并保持测试通过。"
-        )
+        ctx_text = _task_prompt(task, workdir)
 
         async def _forward_cli(ev: dict) -> None:
             kind = ev.get("type")

@@ -68,6 +68,7 @@ coding agent 联通性、知识库关联与引导任务，避免前端多次并�
 | `GET /project/list` | `recent` |
 | `GET /agent/adapters` + `GET /agent/adapters/{id}/connectivity` | `adapters` |
 | `GET /project/kb/list` | `kb.projects` / `kb.count` |
+| `GET /project/kb/match` | 按工作目录自动匹配可关联 KB 候选(前端「增加关联」) |
 | `GET /guide/missions` | `missions` |
 
 ## 近期项目排序与维护

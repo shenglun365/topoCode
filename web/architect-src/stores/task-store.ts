@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import type { AppendedReq, ExecutionTask, Requirement, TaskNode, TaskStatus } from '@/types'
-import { EXECUTION_TASKS, PLAN_TASK_TREES } from '@/services/mock/order-system'
 import { apiGet, apiPost, apiPatch } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
 import { taskService } from '@/services/task-service'
@@ -49,35 +48,30 @@ export const useArchTaskStore = defineStore('arch-task', {
     async load() {
       if (this.loaded) return
       this.loading = true
-      // 后端优先：加载执行任务 + 各方案任务树；不可达回退 mock。
-      if (await backendUp()) {
-        try {
-          const execs = await apiGet<ExecutionTask[]>('/exec')
-          this.executionTasks = execs ?? []
-          const trees: Record<string, TaskNode> = {}
-          for (const e of this.executionTasks) {
-            try {
-              const root = await taskService.tree(e.planId)
-              const key = root?.id ?? e.planId
-              trees[key] = root
-              const req = useArchRequirementStore()
-              req.updatePlan(e.planId, { taskPlanId: key, updatedAt: e.updatedAt })
-            } catch {
-              // 单树失败不阻塞整体加载
-            }
+      // 后端优先：加载执行任务 + 各方案任务树；失败直接抛出(不再静默回退 mock)。
+      if (!(await backendUp())) throw new Error('后端不可达，无法加载执行任务')
+      try {
+        const execs = await apiGet<ExecutionTask[]>('/exec')
+        this.executionTasks = execs ?? []
+        const trees: Record<string, TaskNode> = {}
+        for (const e of this.executionTasks) {
+          try {
+            const root = await taskService.tree(e.planId)
+            const key = root?.id ?? e.planId
+            trees[key] = root
+            const req = useArchRequirementStore()
+            req.updatePlan(e.planId, { taskPlanId: key, updatedAt: e.updatedAt })
+          } catch {
+            // 单树失败不阻塞整体加载
           }
-          this.planToTaskTree = trees
-          this.loaded = true
-          this.loading = false
-          return
-        } catch {
-          // fall through to mock
         }
+        this.planToTaskTree = trees
+        this.loaded = true
+        this.loading = false
+      } catch (err) {
+        this.loading = false
+        throw err
       }
-      this.planToTaskTree = { ...PLAN_TASK_TREES }
-      this.executionTasks = structuredClone(EXECUTION_TASKS)
-      this.loaded = true
-      this.loading = false
     },
     findExecution(id: string): ExecutionTask | undefined {
       return this.executionTasks.find((t) => t.id === id)

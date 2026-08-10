@@ -12,10 +12,10 @@ const architecture = useArchArchitectureStore()
 const task = useArchTaskStore()
 
 onMounted(async () => {
-  if (!project.loaded) {
-    await project.load()
-    if (project.project) {
-      await Promise.all([requirement.load(), architecture.loadFromSnapshot(), task.load()])
+  await project.load()
+  if (project.project) {
+    for (const load of [requirement.load, architecture.loadFromSnapshot, task.load]) {
+      await load().catch((err) => console.error('[arch] 初始化加载失败', err))
     }
   }
 })

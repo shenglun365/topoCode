@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { mermaidParseErrorDetail } from '@web/services/render'
 
 const props = defineProps<{
   visible: boolean
@@ -46,7 +47,12 @@ async function renderPreview() {
       })
       if (!resp.ok) {
         const text = await resp.text()
-        throw new Error(text.slice(0, 200) || `HTTP ${resp.status}`)
+        let msg = (text && text.trim()) ? text : `HTTP ${resp.status}`
+        try {
+          const j = JSON.parse(text)
+          if (j && j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+        } catch { /* keep raw text */ }
+        throw new Error(msg)
       }
       previewSvg.value = await resp.text()
     } else {
@@ -58,7 +64,7 @@ async function renderPreview() {
       previewSvg.value = result.svg
     }
   } catch (e: any) {
-    previewError.value = e.message || '渲染失败'
+    previewError.value = mermaidParseErrorDetail(e) || '渲染失败'
   } finally {
     previewLoading.value = false
   }
@@ -250,6 +256,8 @@ function onOverlayClick(e: MouseEvent) {
 .preview-error {
   color: var(--error, #e53935);
   font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  white-space: pre-wrap;
   word-break: break-word;
 }
 .preview-svg {

@@ -7,6 +7,7 @@ In single-process mode (current): web端 calls multi_db directly.
 This API exists for multi-process mode where web端 runs as a subprocess.
 """
 
+import inspect
 import json
 import logging
 
@@ -72,6 +73,9 @@ async def call_zmq_method(method: str, body: dict):
 
     try:
         result = handler(**body)
+        # 异步 handler：与 zmq_server 的 await 语义一致，否则返回的是 coroutine 无法序列化
+        if inspect.iscoroutine(result) or inspect.isawaitable(result):
+            result = await result
         return {"result": result}
     except Exception as e:
         raise HTTPException(500, str(e))

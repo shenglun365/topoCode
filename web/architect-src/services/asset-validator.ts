@@ -13,6 +13,11 @@ export function isPlannedAsset(assetId: string): boolean {
   return assetId.startsWith('p-')
 }
 
+/** 是否为语义数据资产(sa-前缀) —— architect 自持，随最新代码结构提取。 */
+export function isSemanticAsset(assetId: string): boolean {
+  return assetId.startsWith('sa-')
+}
+
 export interface AssetRefInfo {
   assetId: string
   name: string
@@ -81,8 +86,8 @@ export function validateAssetRef(item: AssetScopeItem): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   const known = resolveAsset(item.assetId)
   if (!known) {
-    // greenfield p-前缀规划资产放行
-    if (!isPlannedAsset(item.assetId)) {
+    // greenfield p-前缀规划资产 / sa-语义数据资产 均放行
+    if (!isPlannedAsset(item.assetId) && !isSemanticAsset(item.assetId)) {
       issues.push({ field: `asset.${item.assetId}`, message: `资产 ${item.assetId} 未在知识库命中，将按手动引用保存`, level: 'warn' })
     }
   }

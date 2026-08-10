@@ -3,10 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FolderIcon, DocumentTextIcon, CubeIcon,
-  CodeBracketIcon, CheckCircleIcon, XCircleIcon,
+  CodeBracketIcon, CheckCircleIcon, XCircleIcon, MagnifyingGlassIcon,
 } from '@heroicons/vue/24/outline'
 import { projectService } from '@/services/project-service'
-import type { ProjectOverview } from '@/types'
+import type { KbMatchResult, ProjectOverview } from '@/types'
+import KbLinkDialog from '@/components/project/KbLinkDialog.vue'
+import { useArchProjectStore } from '@/stores/project-store'
 
 const { t } = useI18n()
 
@@ -28,6 +30,41 @@ async function load() {
 }
 
 onMounted(load)
+
+const showLinkDialog = ref(false)
+const linkMatch = ref<KbMatchResult | null>(null)
+const matching = ref(false)
+const unlinking = ref(false)
+
+async function openLinkDialog() {
+  matching.value = true
+  try {
+    linkMatch.value = await projectService.matchKbProjects()
+  } catch {
+    linkMatch.value = null
+  } finally {
+    matching.value = false
+    showLinkDialog.value = true
+  }
+}
+
+function closeLinkDialog() {
+  showLinkDialog.value = false
+  load()
+}
+
+async function askUnlink() {
+  if (!window.confirm(t('overviewHome.unlinkConfirm'))) return
+  unlinking.value = true
+  try {
+    await useArchProjectStore().unlinkKb()
+    await load()
+  } catch {
+    error.value = t('overviewHome.loadFailed')
+  } finally {
+    unlinking.value = false
+  }
+}
 
 const diffSummary = computed(() => [
   { label: t('overviewHome.added'), value: overview.value?.diff.added ?? 0, cls: 'text-ctp-green' },
@@ -94,9 +131,26 @@ function statusCls(s: string): string {
           <span class="text-sm font-medium text-ctp-text">{{ t('overviewHome.kbLink') }}</span>
         </div>
         <div v-if="overview.kb.linked" class="text-sm text-ctp-text">
-          <span class="inline-flex items-center gap-1.5 text-ctp-green text-xs">
-            <CheckCircleIcon class="w-4 h-4" /> {{ t('overviewHome.kbLinked') }}
-          </span>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 text-ctp-green text-xs">
+              <CheckCircleIcon class="w-4 h-4" /> {{ t('overviewHome.kbLinked') }}
+            </span>
+            <button
+              class="btn btn-blue !px-2.5 !py-1 text-xs shrink-0"
+              :disabled="matching"
+              @click="openLinkDialog"
+            >
+              <MagnifyingGlassIcon class="w-3.5 h-3.5" />
+              {{ matching ? t('app.loading') : t('overviewHome.switchLink') }}
+            </button>
+            <button
+              class="btn btn-ghost !px-2.5 !py-1 text-xs shrink-0"
+              :disabled="unlinking"
+              @click="askUnlink"
+            >
+              {{ unlinking ? t('app.loading') : t('overviewHome.unlink') }}
+            </button>
+          </div>
           <div class="mt-2 space-y-1">
             <div v-if="overview.kb.kbProjectId" class="text-xs text-ctp-subtext1">
               <span class="text-ctp-overlay1">{{ t('overviewHome.kbProject') }}:</span>
@@ -112,8 +166,22 @@ function statusCls(s: string): string {
           <span class="inline-flex items-center gap-1.5 text-ctp-red text-xs">
             <XCircleIcon class="w-4 h-4" /> {{ t('overviewHome.kbNotLinked') }}
           </span>
+          <button
+            class="btn btn-blue !px-2.5 !py-1 text-xs ml-2 shrink-0"
+            :disabled="matching"
+            @click="openLinkDialog"
+          >
+            <MagnifyingGlassIcon class="w-3.5 h-3.5" />
+            {{ matching ? t('app.loading') : t('overviewHome.findLink') }}
+          </button>
         </div>
       </section>
+
+      <KbLinkDialog
+        v-if="showLinkDialog"
+        :match-result="linkMatch"
+        @close="closeLinkDialog"
+      />
 
       <!-- ③ 基线信息 -->
       <section class="panel p-4">

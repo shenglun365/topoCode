@@ -72,6 +72,19 @@ def _resolve_project(root: Optional[str] = None, project_id: Optional[str] = Non
     return None
 
 
+def kb_degraded(root: Optional[str] = None, project_id: Optional[str] = None) -> bool:
+    """是否降级: 无项目 或 项目无 KB 基线(工作目录直开/无 KB 内容支撑)。
+
+    项目选择持久化在 URL(?root=/?project=)，由前端随请求透传 root/project。
+    全插件 KB 相关 API 共用的判定口径(requirements/arch_change/knowledge 复用)。
+    """
+    try:
+        proj = _resolve_project(root, project_id)
+    except Exception:
+        return True
+    return not (proj and proj.get("baselineId"))
+
+
 def _kb_call(method: str, **params):
     """调用 KB 方法(经 ctx 网关，拓扑无关)；结果 None/错误时回退。"""
     from .kb_gateway import call_kb
@@ -133,27 +146,67 @@ def _is_subpath(child: str, parent: str) -> bool:
         return False
 
 
-def _same_repo_source(arch_root: str, kb: dict) -> tuple:
-    """判定 architect 工作目录与 KB 源码为同一仓库源。返回 (ok, reason/error)。"""
+def _classify_kb_source(arch_root: str, kb: dict) -> str:
+    """将 architect 工作目录与 KB 匹配分类：本地仓库地址优先，远端作为辅助。
+
+    返回 ''(不匹配) / 'local'(本地 repo/源码路径重叠) / 'remote'(仅 git 远端一致)。
+    """
     arch = os.path.abspath(str(arch_root))
     kb_root = kb.get("rootPath") or ""
     kb_cache = kb.get("sourceCacheDir") or ""
     kb_remote = kb.get("remoteUrl") or ""
     kb_local = kb.get("localRepoPath") or ""
     if kb_root and _is_subpath(arch, kb_root):
-        return True, "architect 工作目录为 KB 源码目录或其子目录"
+        return "local"
     if kb_cache and _is_subpath(arch, kb_cache):
-        return True, "architect 工作目录位于 KB 源码缓存目录内"
-    a_remote = _norm_url(_git_origin(arch))
-    if a_remote:
-        if kb_remote and _norm_url(kb_remote) == a_remote:
-            return True, "git 远端一致"
-        k_remote = _norm_url(_git_origin(kb_root))
-        if k_remote and k_remote == a_remote:
-            return True, "git 远端一致"
+        return "local"
     if kb_local and os.path.abspath(kb_local) == arch:
-        return True, "与 KB 本地仓库来源路径一致"
+        return "local"
+    a_remote = _norm_url(_git_origin(arch))
+    if not a_remote:
+        return ""
+    if kb_remote and _norm_url(kb_remote) == a_remote:
+        return "remote"
+    k_remote = _norm_url(_git_origin(kb_root))
+    if k_remote and k_remote == a_remote:
+        return "remote"
+    return ""
+
+
+def _same_repo_source(arch_root: str, kb: dict) -> tuple:
+    """判定 architect 工作目录与 KB 源码为同一仓库源。返回 (ok, reason/error)。"""
+    kind = _classify_kb_source(arch_root, kb)
+    if kind == "local":
+        return True, "architect 工作目录为 KB 源码目录/缓存目录/本地仓库来源路径"
+    if kind == "remote":
+        return True, "git 远端一致"
     return False, "architect 工作目录与所选 KB 项目不是同一仓库源（路径不重叠、git 远端/本地仓库路径不匹配）"
+
+
+def _match_kb_candidates(arch_root: str, rows: Optional[list] = None) -> dict:
+    """「查找关联」候选：本地仓库地址为主参数、远端地址为辅参数，两组同时返回。
+
+    - `local`：arch 工作目录与 KB 本地仓库/源码缓存/路径重叠命中(主)；
+    - `remote`：arch 工作目录 git origin 与 KB 远端一致命中(仅两端都配了远端才成立)；
+    - 两组各自独立列出命中候选；未命中该组为空数组，由前端逐组标明「无」。
+    """
+    rows = list(rows) if rows else _list_kb_projects()
+    local = []
+    remote = []
+    for p in rows:
+        kind = _classify_kb_source(arch_root, p)
+        if kind == "local":
+            p["matchLevel"] = "local"
+            local.append(p)
+        elif kind == "remote":
+            p["matchLevel"] = "remote"
+            remote.append(p)
+    return {
+        "workDir": arch_root,
+        "remoteUrl": _git_origin(arch_root) or "",
+        "local": local,
+        "remote": remote,
+    }
 
 
 # ── 路由 ─────────────────────────────────────────────────────────
@@ -260,6 +313,20 @@ async def list_kb_projects():
     return ok(_list_kb_projects())
 
 
+@router.get("/project/kb/match")
+async def match_kb_projects(root: Optional[str] = None, project: Optional[str] = None):
+    """按当前项目工作目录为可用知识库匹配可关联的 KB 候选。
+
+    - 主参数为工作主目录(git 本地仓库/源码路径重叠) → `local` 组；
+    - 辅参数为远端仓库地址(仅当工作目录与 KB 都配置了远端时生效) → `remote` 组；
+    - 两组同时返回；未命中对应组为空数组，由前端逐组标明「无」。
+    """
+    proj = _resolve_project(root, project)
+    if not proj or not proj.get("rootPath"):
+        return err(400, "未定位到工作目录")
+    return ok(_match_kb_candidates(proj["rootPath"]))
+
+
 @router.post("/project/bind")
 async def bind_project(request: Request):
     """登记并打开一个 architect 项目(arch_projects 为唯一事实源)，可选关联 KB。
@@ -336,6 +403,7 @@ async def link_project(request: Request):
         "name": proj.get("name") or arch_root.rstrip("/").rsplit("/", 1)[-1],
         "desc": proj.get("desc", ""), "mode": proj.get("mode", "existing"),
         "rootPath": arch_root,
+        "kbProjectId": kb["id"],
         "kbRoot": kb.get("rootPath") or "", "kbSourceDir": kb.get("rootPath") or "",
         "baselineId": kb.get("currentVersionId"), "branch": "main",
         "gitLinked": True, "linkVerifiedAt": _ts(), "active": True,
@@ -369,7 +437,11 @@ async def unbind_project():
 
 @router.get("/project/status")
 async def get_project_status(root: Optional[str] = None, project: Optional[str] = None):
-    if not _resolve_project(root, project):
+    proj = _resolve_project(root, project)
+    if not proj:
+        return ok(None)
+    if not proj.get("baselineId"):
+        # 未关联知识库 → 无基线状态(返回 None)，由前端提示降级。
         return ok(None)
     return ok({
         "baseline": {
@@ -431,10 +503,12 @@ async def get_project_overview(root: Optional[str] = None, project: Optional[str
 
 @router.get("/project/snapshots")
 async def get_snapshots(root: Optional[str] = None, project: Optional[str] = None):
-    if not _resolve_project(root, project):
+    proj = _resolve_project(root, project)
+    if not proj or not proj.get("baselineId"):
+        # 未关联知识库 → 无基线快照可读，返回空列表(前端提示降级)。
         return ok([])
     now = _ts()
-    model = build_architecture_model()
+    model = build_architecture_model(root, project)
     return ok([
         {"id": "snap-v0", "name": "基线快照", "version": "v0",
          "createdAt": now - 86400000 * 3, "model": model},
@@ -458,17 +532,20 @@ async def create_snapshot(request: Request, root: Optional[str] = None, project:
         (snap_id, body.get("name", "架构快照"), body.get("version", "v1"),
          body.get("taskId", "manual"), body.get("branch", "main"),
          body.get("commit", BASELINE_COMMIT),
-         store._dumps(body.get("model") or build_architecture_model()),
+         store._dumps(body.get("model") or build_architecture_model(root, project)),
          resolved.get("rootPath") or "", now),
     )
     db.commit()
     return ok({"id": snap_id, "name": body.get("name", "架构快照"),
                "version": body.get("version", "v1"),
-               "createdAt": now, "model": body.get("model") or build_architecture_model()})
+               "createdAt": now, "model": body.get("model") or build_architecture_model(root, project)})
 
 
 @router.get("/project/baseline/meta")
-async def get_baseline_meta():
+async def get_baseline_meta(root: Optional[str] = None, project: Optional[str] = None):
+    proj = _resolve_project(root, project)
+    if not proj or not proj.get("baselineId"):
+        return err(400, "未关联知识库，无法读取基线信息。请在项目概览「查找关联」中关联知识库后重试。")
     return ok({
         "gitTag": "v1.0.0-order-service", "branch": "main",
         "gitDate": _ts() - 86400000 * 3, "analyzedAt": _ts() - 86400000 * 3,
@@ -478,13 +555,21 @@ async def get_baseline_meta():
 
 
 @router.get("/project/baseline/dirty")
-async def get_baseline_dirty():
+async def get_baseline_dirty(root: Optional[str] = None, project: Optional[str] = None):
+    proj = _resolve_project(root, project)
+    if not proj or not proj.get("baselineId"):
+        return err(400, "未关联知识库，无法读取基线状态。")
     return ok({"dirty": True})
 
 
 @router.post("/project/baseline/sync")
 async def sync_baseline(request: Request):
-    body = await request.json()
+    body = await request.json() or {}
+    root = body.get("root") or request.query_params.get("root")
+    project = body.get("project") or request.query_params.get("project")
+    proj = _resolve_project(root, project)
+    if not proj or not proj.get("baselineId"):
+        return err(400, "未关联知识库，无法同步基线。请在项目概览「查找关联」中关联知识库后重试。")
     return ok({
         "success": True, "commit": body.get("commit", BASELINE_COMMIT),
         "baselineId": "baseline_id = N+1",

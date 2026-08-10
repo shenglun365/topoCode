@@ -54,9 +54,9 @@ async function doImport() {
       path = dirPath.value
     } else if (mode.value === 'git-local') {
       path = localRepoPath.value
-      opts.localRepoPath = localRepoPath.value
+      opts.local_repo_path = localRepoPath.value
     } else {
-      opts.repoUrl = repoUrl.value
+      opts.repo_url = repoUrl.value
     }
     const project = await projectStore.importProject(path, opts)
     if (!project) {
@@ -204,6 +204,31 @@ function close() {
 </template>
 
 <style scoped>
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+}
+.dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.dialog-close {
+  font-size: 18px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  line-height: 1;
+}
+.dialog-close:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
 .import-source-card {
   width: 520px;
   max-width: 92vw;

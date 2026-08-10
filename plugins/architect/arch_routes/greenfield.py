@@ -166,47 +166,49 @@ async def kb_extract(request: Request):
 @router.post("/kb/baseline")
 async def kb_baseline(request: Request):
     """建立知识基线。已关联 KB 项目时经 `version.list`+`version.materialize` 取真实版本
-    与文件清单写入快照；KB 不可达时回退占位。"""
+    与文件清单写入快照；KB 能力不足/不可达 → 明确报错(不占位)。"""
     from .kb_gateway import call_kb
     body = await request.json()
     proj_id = body.get("kbProjectId") or body.get("projectId")
     commit = body.get("commit") or "HEAD"
-    baseline_id = store.next_id("base")
 
-    if proj_id:
-        versions = call_kb("version.list", projectId=proj_id) or []
-        current = None
-        for v in versions:
-            if v.get("id") == proj_id and (v.get("current_version_id") or v.get("current")):
-                current = v
-                break
-        if current is None and versions:
-            current = versions[0]
-        if current:
-            files = call_kb("version.materialize", projectId=proj_id, versionId=current.get("id")) or {"files": []}
-            file_list = []
-            raw = files
-            if isinstance(raw, dict):
-                file_list = raw.get("files") or raw.get("items") or []
-            file_list = [f if isinstance(f, str) else f.get("path", f) for f in file_list]
-            store.SnapshotsStore.create({
-                "id": store.next_id("snap"), "name": f"KB 基线 {commit}",
-                "version": "v1", "taskId": "manual", "gitBranch": "main",
-                "gitCommit": commit, "model": {"fileCount": len(file_list), "files": file_list},
-                "createdAt": _ts(),
-            })
-            return ok({
-                "baselineId": store.next_id("base"),
-                "commit": current.get("currId") or current.get("current_version_id") or current.get("id") or commit,
-                "mode": "existing", "tag": "v0.0.1",
-                "kbProjectId": proj_id, "files": file_list,
-            })
-    # KB 不可达/未关联 → 占位
+    if not proj_id:
+        return err(400, "缺少 kbProjectId/projectId，无法建立 KB 基线")
+    versions = call_kb("version.list", projectId=proj_id) or []
+    if not versions:
+        return err(502, "KB 能力不足：version.list 未返回任何版本，无法建立基线。")
+    current = versions[0]
+    for v in versions:
+        if v.get("id") == proj_id and (v.get("current_version_id") or v.get("current")):
+            current = v
+            break
+    if current is None:
+        current = versions[0]
+    raw = call_kb("version.materialize", projectId=proj_id, versionId=current.get("id"))
+    if raw is None:
+        return err(502, "KB 能力不足：version.materialize 不可达，无法读取基线文件清单。")
+    # version.materialize 可能返回裸 list 或 {files:[...]} dict，统一为路径列表
+    if isinstance(raw, list):
+        file_list = [f if isinstance(f, str) else (f.get("path") or f.get("file_path") or f.get("file_name") or str(f))
+                     for f in raw]
+    elif isinstance(raw, dict):
+        items = raw.get("files") or raw.get("items") or []
+        file_list = [f if isinstance(f, str) else (f.get("path") or f.get("file_path") or f.get("file_name") or str(f))
+                     for f in items]
+    else:
+        file_list = []
+    file_list = [f for f in file_list if f]
+    store.SnapshotsStore.create({
+        "id": store.next_id("snap"), "name": f"KB 基线 {commit}",
+        "version": "v1", "taskId": "manual", "gitBranch": "main",
+        "gitCommit": commit, "model": {"fileCount": len(file_list), "files": file_list},
+        "createdAt": _ts(),
+    })
     return ok({
         "baselineId": store.next_id("base"),
-        "commit": commit,
-        "mode": "existing",
-        "tag": "v0.0.1",
+        "commit": current.get("currId") or current.get("current_version_id") or current.get("id") or commit,
+        "mode": "existing", "tag": "v0.0.1",
+        "kbProjectId": proj_id, "files": file_list,
     })
 
 

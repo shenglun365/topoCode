@@ -28,6 +28,7 @@ async def add_unit_test(request: Request):
         "scriptPath": body.get("scriptPath", ""),
         "source": body.get("source", "manual"),
         "status": "idle",
+        "assetRefs": body.get("assetRefs", []),
         "createdAt": now,
         "updatedAt": now,
     }

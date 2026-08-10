@@ -1,10 +1,22 @@
 import { defineStore } from 'pinia'
 import type { ComplianceCheck, GateKey, IncrementalLogEntry, Rebaseline, StagingModel } from '@/types'
-import { BASELINE_COMMIT, COMPLIANCE_CHECKS, INCREMENTAL_LOG, STAGING_MODEL } from '@/services/mock/order-system'
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
-import { delay } from '@/services/mock/delay'
+import { currentProjectParams } from '@/services/project-service'
 import { useArchWorkflowStore } from './workflow-store'
+
+/** 项目上下文(root/project)透传(GET 走 query，POST 走 body)。 */
+function ctxQuery(): string {
+  const { root, project } = currentProjectParams()
+  const qs = new URLSearchParams()
+  if (root) qs.set('root', root)
+  if (project) qs.set('project', project)
+  return qs.toString()
+}
+
+function ctxBody(): Record<string, string | undefined> {
+  return currentProjectParams()
+}
 
 export const useArchStagingStore = defineStore('arch-staging', {
   state: () => ({
@@ -17,8 +29,8 @@ export const useArchStagingStore = defineStore('arch-staging', {
     rebaseline: {
       status: 'idle',
       baselineId: '',
-      commit: BASELINE_COMMIT,
-      manifestHash: 'sha256:9f7…c21',
+      commit: '',
+      manifestHash: '',
       handshake: { verify: '', verifyOk: false, commitResult: '', committedId: '' },
     } as Rebaseline,
   }),
@@ -37,110 +49,71 @@ export const useArchStagingStore = defineStore('arch-staging', {
     async load() {
       if (this.loaded || this.loading) return
       this.loading = true
-      if (await backendUp()) {
-        try {
-          const [model, log, compliance] = await Promise.all([
-            apiGet<StagingModel>('/arch/staging'),
-            apiGet<IncrementalLogEntry[]>('/arch/staging/log'),
-            apiGet<ComplianceCheck[]>('/arch/staging/compliance'),
-          ])
-          this.model = model
-          this.log = log ?? []
-          this.compliance = compliance ?? []
-          this.loading = false
-          return
-        } catch {
-          // fall through to mock
-        }
+      if (!(await backendUp())) throw new Error('后端不可达，无法加载基线/合规数据')
+      try {
+        const ext = ctxQuery()
+        const api = (p: string) => apiGet<unknown>(`${p}${ext ? '?' + ext : ''}`)
+        const [model, log, compliance] = await Promise.all([
+          api('/arch/staging') as Promise<StagingModel>,
+          api('/arch/staging/log') as Promise<IncrementalLogEntry[]>,
+          api('/arch/staging/compliance') as Promise<ComplianceCheck[]>,
+        ])
+        this.model = model
+        this.log = log ?? []
+        this.compliance = compliance ?? []
+        this.loading = false
+      } catch (err) {
+        this.loading = false
+        throw err
       }
-      await delay(150)
-      this.model = STAGING_MODEL
-      this.log = [...INCREMENTAL_LOG]
-      this.compliance = [...COMPLIANCE_CHECKS]
-      this.loading = false
     },
     get loaded(): boolean {
       return !!this.model
     },
     async runIncrementalScan() {
       this.loading = true
-      if (await backendUp()) {
-        try {
-          const res = await apiPost<{ log: IncrementalLogEntry; compliance?: ComplianceCheck[] }>('/arch/staging/scan')
-          this.model = { ...(this.model ?? STAGING_MODEL) }
-          this.log = [res.log, ...(this.log ?? [])]
-          this.compliance = res.compliance ?? this.compliance
-          this.scanned = true
-          this.loading = false
-          return
-        } catch {
-          // fall through to mock
-        }
+      if (!(await backendUp())) throw new Error('后端不可达，无法执行增量扫描')
+      try {
+        const res = await apiPost<{ log: IncrementalLogEntry; compliance?: ComplianceCheck[] }>('/arch/staging/scan', ctxBody())
+        if (this.model) this.model = { ...this.model }
+        this.log = [res.log, ...(this.log ?? [])]
+        this.compliance = res.compliance ?? this.compliance
+        this.scanned = true
+        this.loading = false
+      } catch (err) {
+        this.loading = false
+        throw err
       }
-      await delay(700)
-      this.model = { ...STAGING_MODEL }
-      this.log = [
-        {
-          id: `inc-${Date.now()}`,
-          time: Date.now(),
-          scope: '递归执行 batch (增量扫描)',
-          grade: 'M',
-          files: STAGING_MODEL.scope.filesChanged,
-          edgesChanged: STAGING_MODEL.layers.file.edgesChanged,
-          reExplained: ['comm-order', 'comm-mq'],
-          boundaryChanged: [],
-        },
-        ...INCREMENTAL_LOG,
-      ]
-      this.compliance = [...COMPLIANCE_CHECKS]
-      this.scanned = true
-      this.loading = false
     },
     setGate(key: GateKey, value: boolean) {
       this.gates[key] = value
       if (backendReady()) apiPost<unknown>('/arch/staging/gates', { key, value }).catch(() => {})
     },
     async verifyBaseline() {
-      await delay(500)
-      if (await backendUp()) {
-        try {
-          const res = await apiPost<{ verify: string; verifyOk: boolean }>('/arch/baseline/verify')
-          this.rebaseline.status = 'verified'
-          this.rebaseline.handshake.verifyOk = res.verifyOk
-          this.rebaseline.handshake.verify = res.verify
-          this.rebaseline.baselineId = 'baseline_id = N (基线 v0.0.1)'
-          return
-        } catch {
-          // fall through
-        }
+      if (!(await backendUp())) throw new Error('后端不可达，无法校验基线')
+      try {
+        const res = await apiPost<{ verify: string; verifyOk: boolean }>('/arch/baseline/verify', ctxBody())
+        this.rebaseline.status = 'verified'
+        this.rebaseline.handshake.verifyOk = res.verifyOk
+        this.rebaseline.handshake.verify = res.verify
+        this.rebaseline.baselineId = 'baseline_id = N (基线 v0.0.1)'
+      } catch (err) {
+        throw err
       }
-      this.rebaseline.status = 'verified'
-      this.rebaseline.handshake.verifyOk = true
-      this.rebaseline.handshake.verify = 'ok · manifest_hash 与 scope 一致'
-      this.rebaseline.baselineId = 'baseline_id = N (基线 v0.0.1)'
     },
     async commitRebaseline() {
-      await delay(600)
-      if (await backendUp()) {
-        try {
-          const res = await apiPost<{ commitResult: string; committedId: string }>('/arch/baseline/commit')
-          this.rebaseline.status = 'committed'
-          this.rebaseline.handshake.commitResult = res.commitResult
-          this.rebaseline.handshake.committedId = res.committedId
-          this.rebaseline.baselineId = 'baseline_id = N+1 (新基线 v1.0.0)'
-          const workflow = useArchWorkflowStore()
-          workflow.finishAcceptance()
-          return
-        } catch {
-          // fall through
-        }
+      if (!(await backendUp())) throw new Error('后端不可达，无法提交新基线')
+      try {
+        const res = await apiPost<{ commitResult: string; committedId: string }>('/arch/baseline/commit', ctxBody())
+        this.rebaseline.status = 'committed'
+        this.rebaseline.handshake.commitResult = res.commitResult
+        this.rebaseline.handshake.committedId = res.committedId
+        this.rebaseline.baselineId = 'baseline_id = N+1 (新基线 v1.0.0)'
+        const workflow = useArchWorkflowStore()
+        workflow.finishAcceptance()
+      } catch (err) {
+        throw err
       }
-      this.rebaseline.status = 'committed'
-      this.rebaseline.handshake.commitResult = '原子写入成功'
-      this.rebaseline.handshake.committedId = 'N+1 (v1.0.0)'
-      this.rebaseline.baselineId = 'baseline_id = N+1 (新基线 v1.0.0)'
-      const workflow = useArchWorkflowStore()
-      workflow.finishAcceptance()
     },
   },
 })

@@ -15,6 +15,7 @@ const agent = useArchAgentStore()
 const mcp = useArchMcpStore()
 const collab = useArchCollabStore()
 mcp.load()
+agent.load()
 
 const phase = computed(() => t(`workflow.steps.${workflow.currentLabelKey}`))
 

@@ -7,14 +7,20 @@ import {
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementForm from '@/components/requirements/RequirementForm.vue'
-import { analysisAgent, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
+import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
+import { analysisAgent, chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
+import { apiGet } from '@/services/api-client'
+import { backendUp, reProbeBackend } from '@/services/backend'
+import type { ArchLlmModel, ArchLlmModelsResult, ConversationDetail } from '@/types'
 import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useSplitPane } from '@/composables/useSplitPane'
-import type { FormDraft, Requirement, RequirementAnalysis } from '@/types'
+import type { FormDraft, Requirement, RequirementAnalysis, SemanticAssetKind } from '@/types'
+import { requirementService } from '@/services/requirement-service'
+import { semanticAssetService } from '@/services/semantic-asset-service'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -42,8 +48,32 @@ function emptyForm(): FormDraft {
   }
 }
 
+/** 临时提案 id：新建需求会话在保存前先生成，聊天会话以 reqId 关联；
+ *  保存提案时临时 id 转为正式(见 seed())。未保存可在下次打开时经「历史会话导入」恢复。 */
+function nextDraftReqId(): string {
+  return `RQ-${Date.now().toString().slice(-4)}-${Math.random().toString(36).slice(2, 5)}`
+}
+
 const form = reactive<FormDraft>(emptyForm())
 provide('requirement-form', form)
+
+// ---- 对话模型选择(需求分析对话复用 /llm/models，透传后端 llm.sync) ----
+const chatModelId = ref<string>('')
+const chatModels = ref<ArchLlmModel[]>([])
+
+async function loadChatModels() {
+  if (!(await backendUp())) return
+  try {
+    const data = await apiGet<ArchLlmModelsResult>('/llm/models')
+    chatModels.value = data.models ?? []
+    chatModelId.value = data.modelId ?? ''
+  } catch {
+    // 后端不可用 → 保持空(agent 会回退 mock)
+  }
+}
+function onChatModelChange(id: string) {
+  chatModelId.value = id
+}
 
 // ---- 左右栏分割(表单 | 对话) ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane()
@@ -51,6 +81,8 @@ const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const draft = ref<FormDraft | null>(null)
 const editingId = ref<string | null>(null)
+/** 当前会话的临时提案 id(未保存提案的关联键；保存/入池后转为正式)。 */
+const draftReqId = ref<string>('')
 const analyzed = ref(false)
 const committed = ref<'proposal' | 'pool' | null>(null)
 const committedReqs = ref<Requirement[]>([])
@@ -93,10 +125,11 @@ const canEnterPool = computed(() => validation.value.ok && hasAnalysis.value)
 function preferredIds(): string[] | undefined {
   return seedPreferred.value.length ? [...seedPreferred.value] : undefined
 }
-/** 提交种子：基本信息正文 basicMd 作为内容文本(agent 检索用 desc；入池/提案写入 remarks)。 */
+/** 提交种子：基本信息正文 basicMd 作为内容文本(agent 检索用 desc；入池/提案写入 remarks)。
+ *  编辑已有提案 → 复用编辑 id；新建会话 → 使用临时提案 id(保存时转为正式)。 */
 function seed() {
   return {
-    id: editingId.value ?? undefined,
+    id: editingId.value ?? (draftReqId.value || undefined),
     title: form.title.trim(),
     desc: form.basicMd,
     priority: form.priority,
@@ -111,6 +144,7 @@ function base() {
     priority: form.priority,
     kind: form.kind,
     preferredAssetIds: preferredIds(),
+    modelId: chatModelId.value || undefined,
   }
 }
 function emptyAssessment(): RequirementAnalysis['assessment'] {
@@ -138,22 +172,28 @@ function analysisFromForm(): RequirementAnalysis {
 }
 
 onMounted(async () => {
-  await store.load()
+  await reProbeBackend()
+  await store.load().catch((err) => console.error('[arch] 需求加载失败', err))
+  await loadChatModels()
   const q = route.query
   if (typeof q.id === 'string') {
-    const seed = store.byId(q.id)
-    if (seed) {
-      loadActive(seed)
-      if (!seed.analysis) await startClarify()
+    const seedItem = store.byId(q.id)
+    if (seedItem) {
+      loadActive(seedItem)
+      const auto = await importHistoryByReq(seedItem.id)
+      if (!seedItem.analysis && !auto) await startClarify()
     }
   } else if (q.pending === '1') {
     picker.value = true
+  } else {
+    draftReqId.value = nextDraftReqId()
   }
 })
 
 /** 将某个提案装入当前分析会话(清空聊天，必要时重新澄清)。 */
 function loadActive(r: Requirement) {
   editingId.value = r.id
+  draftReqId.value = ''
   seedPreferred.value = [...(r.preferredAssetIds ?? [])]
   form.title = r.title
   form.priority = r.priority
@@ -169,6 +209,7 @@ function loadActive(r: Requirement) {
   form.implementationPath = a?.implementationPath ?? ''
   form.report = a ? structuredClone(a) : undefined
   turns.value = []
+  chatConvId.value = ''
   draft.value = null
   committed.value = null
   committedReqs.value = []
@@ -197,6 +238,7 @@ async function startClarify() {
   try {
     const res = await analysisAgent.clarify(base())
     turns.value = res.turns
+    chatConvId.value = ''
     draft.value = null
   } finally {
     busy.value = false
@@ -215,7 +257,119 @@ async function collect(answers: Record<string, string>, note?: string) {
   }
 }
 function onAnswers(answers: Record<string, string>) { collect(answers) }
-function onSend(text: string) { collect({}, text) }
+
+/** 自由对话(阶段A)：经 WS 流式回复，保持会话一致性(conversationId 续聊)。 */
+const chatConvId = ref<string>('')
+
+async function onSend(text: string) {
+  if (busy.value) return
+  turns.value.push({ role: 'user', content: text })
+  const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
+  busy.value = true
+  try {
+    const msgs = turns.value.slice(0, -1).map((t) => ({ role: t.role, content: t.content }))
+    await chatStream(msgs, {
+      conversationId: chatConvId.value || undefined,
+      kind: 'requirement',
+      reqId: editingId.value ?? (draftReqId.value || undefined),
+      title: form.title.trim() || '需求分析对话',
+      modelId: chatModelId.value || undefined,
+    }, (ev) => {
+      if (ev.conversationId) chatConvId.value = ev.conversationId
+      if (ev.type === 'chat_start') {
+        if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
+      } else if (ev.type === 'chunk') {
+        turns.value[idx].content += ev.delta ?? ''
+      } else if (ev.type === 'done') {
+        turns.value[idx].content = ev.content ?? turns.value[idx].content
+        if (ev.messageId) turns.value[idx].id = ev.messageId
+      } else if (ev.type === 'chat_fallback') {
+        turns.value[idx].content = t('requirement.chat.fallback')
+      } else if (ev.type === 'error') {
+        turns.value[idx].content = ev.message || t('requirement.chat.fallback')
+      }
+    })
+  } catch (err: any) {
+    turns.value[idx].content = err?.message || t('requirement.chat.fallback')
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 语义数据资产提取：从最新代码结构(codegraph)提取并作为对话回合卡片展示。 */
+async function onExtractAssets(kinds?: SemanticAssetKind[]) {
+  if (busy.value) return
+  const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
+  busy.value = true
+  try {
+    const res = await semanticAssetService.extractAll(kinds, { modelId: chatModelId.value || undefined })
+    const assets = res.assets ?? []
+    turns.value[idx].content = assets.length
+      ? `${t('requirement.chat.semanticExtracted')}${res.count ?? assets.length}${t('requirement.chat.semanticExtractedTail')}`
+      : t('requirement.chat.semanticEmpty')
+    turns.value[idx].assets = assets
+    if (res.degraded) turns.value[idx].content += t('requirement.chat.semanticDegraded')
+  } catch (err: any) {
+    turns.value[idx].content = err?.message || t('requirement.chat.semanticFailed')
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 对话流单条消息删除：本地移除 + 后端持久化删除(有 id 的已落库消息)。 */
+async function onDeleteTurn(index: number) {
+  const turn = turns.value[index]
+  if (!turn) return
+  const msgId = turn.id
+  turns.value.splice(index, 1)
+  if (msgId && chatConvId.value) {
+    requirementService.deleteMessage(chatConvId.value, msgId).catch(() => {
+      // 删除失败不阻塞本地操作；历史导入时可能恢复。
+    })
+  }
+}
+
+// ---- 历史会话导入(临时提案恢复) ----
+const historyOpen = ref(false)
+
+/** 从会话消息恢复 turns；返回 true 表示有可导入内容。 */
+function applyConversation(conv: ConversationDetail): boolean {
+  const msgs = (conv.messages ?? []).filter((m) => m.content?.trim())
+  if (!msgs.length) return false
+  turns.value = msgs.map((m) => ({ role: m.role, content: m.content, id: m.id }))
+  chatConvId.value = conv.id
+  if (conv.reqId) {
+    draftReqId.value = conv.reqId
+    if (!editingId.value) editingId.value = conv.reqId
+  } else {
+    draftReqId.value = nextDraftReqId()
+  }
+  if (!form.title.trim() && conv.title && conv.title !== '需求分析对话' && conv.title !== 'requirement 对话') {
+    form.title = conv.title
+  }
+  return true
+}
+
+/** 导入指定历史会话。 */
+async function importHistory(conv: ConversationDetail) {
+  busy.value = true
+  try {
+    applyConversation(conv)
+    historyOpen.value = false
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 已保存提案自动导入：按正式提案 id 拉取会话历史。 */
+async function importHistoryByReq(reqId: string): Promise<boolean> {
+  try {
+    const conv = await requirementService.conversationByReq(reqId)
+    return conv ? applyConversation(conv) : false
+  } catch {
+    return false
+  }
+}
 
 /** 用户确认草案 → 整份替换右栏表单；可继续多轮迭代。 */
 function confirmDraft() {
@@ -245,6 +399,7 @@ function saveToProposal() {
   }
   editingId.value = r.id
   committedReqs.value = [r]
+  bindChatConv(r.id)
   if (batchRunning.value) {
     queueIndex.value += 1
     if (queueIndex.value < queue.value.length) {
@@ -258,6 +413,13 @@ function saveToProposal() {
   committed.value = 'proposal'
 }
 
+/** 保存/入池后把当前会话 rebind 到正式提案 id(旧会话无 reqId 时也适用)。 */
+function bindChatConv(reqId: string) {
+  const convId = chatConvId.value
+  if (!convId) return
+  requirementService.bindConversation(convId, reqId, form.title.trim() || '').catch(() => {})
+}
+
 /** 入需求池(整体写入单条池项)；批量模式入池后继续下一个提案。 */
 function enterPool() {
   const v = validation.value
@@ -265,6 +427,7 @@ function enterPool() {
   const reqs = [store.finalizeAnalysis(seed(), analysisFromForm())]
   const last = reqs[reqs.length - 1]
   editingId.value = last.id
+  bindChatConv(last.id)
   if (batchRunning.value) {
     queueIndex.value += 1
     if (queueIndex.value < queue.value.length) {
@@ -282,8 +445,10 @@ function enterPool() {
 function resetWorkspace() {
   Object.assign(form, emptyForm())
   turns.value = []
+  chatConvId.value = ''
   draft.value = null
   editingId.value = null
+  draftReqId.value = nextDraftReqId()
   analyzed.value = false
   committed.value = null
   committedReqs.value = []
@@ -340,6 +505,13 @@ function backToList() {
         >{{ t('requirement.workspace.batchProgress', { current: batchProgress }) }}</span>
         <div class="flex-1" />
 
+        <button
+          v-if="committed !== 'pool' && !batchRunning"
+          class="btn btn-sm btn-ghost"
+          @click="historyOpen = true"
+        >
+          <ClipboardDocumentListIcon class="w-3.5 h-3.5" />{{ t('requirement.workspace.importHistory') }}
+        </button>
         <button
           v-if="committed !== 'pool' && !batchRunning"
           class="btn btn-sm btn-ghost"
@@ -518,14 +690,26 @@ function backToList() {
           class="flex-1 min-h-0"
           :turns="turns"
           :busy="busy"
+          :models="chatModels"
+          :model-id="chatModelId"
           @send="onSend"
           @answers="onAnswers"
           @confirm-draft="confirmDraft"
+          @model-change="onChatModelChange"
+          @delete-turn="onDeleteTurn"
+          @extract-assets="onExtractAssets"
         />
         <p class="text-[10px] text-ctp-overlay0 leading-relaxed">
           {{ t('requirement.workspace.chatHint') }}
         </p>
       </div>
     </div>
+
+    <RequirementHistoryModal
+      :open="historyOpen"
+      :active-conv-id="chatConvId"
+      @close="historyOpen = false"
+      @import="importHistory"
+    />
   </div>
 </template>

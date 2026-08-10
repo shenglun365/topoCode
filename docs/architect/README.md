@@ -30,6 +30,10 @@
 > （KB `data_api /zmq` 3459 + MCP `/v1/tools` 3460）访问，**不再**内嵌 reports。
 > `plugins/reports` 已摘除 architect 路由/SPA，仅保留 `/architect` 302 → `{host}:3470/architect`。
 > 下文历史表格中 `plugins/reports/architect_routes/*` 路径均已迁至 `plugins/architect/arch_routes/*`。
+> **architect.db 归属本身**（table schema + 迁移）亦已由 KB 侧 `backend-core/sqlite_ctx.py`
+> 移回 `arch_routes/db_schema.py` 自持；KB 的 `MultiDBManager` 不再打开/初始化该库
+> （消除双进程双写），architect 可与 KB 完全无关地独立建库迁移。`SQLiteContext` 连接类
+> 仍与 KB 共享依赖库（不读写 KB 库文件）。
 
 ### 1.1 现状
 
@@ -121,7 +125,7 @@
 | `plugins/reports/architect_routes/tags.py`(新) | tags 域：`GET/POST /tags`、`GET/PATCH /tags/{id}`、`POST /tags/{id}/offline`(offline int→bool 对齐前端契约) |
 | `plugins/reports/architect_routes/mcp_collab.py` | collab mode 落 `arch_collab_config`(GET/PUT 持久化) |
 | `plugins/reports/architect_routes/arch_change.py` | 变更域接 store：staging scan 落 `arch_staging_scans`、`GET /arch/staging/log` 读库、spec 落 `arch_specs`(GET/POST confirm)；移除与 `git.py` 冲突的 `/git/status` |
-| `plugins/reports/architect_routes/project.py` | 新增 `POST /project/snapshots` 落 `arch_snapshot_records`；**无项目态 + URL 项目选择改造**：去掉默认项目种子与全局 `active` 语义，`GET /project/bound|status` 无 URL 参数返回 null、`/project/snapshots` 返回 []；`_resolve_project(root, project)` 按 URL 解析项目(?project=KB id / ?root=路径，工作目录 id 按 root 哈希稳定)；新增 `GET /project/kb/list`(代理 KB `project.list`，snake→camel + `gitLinked`/`hasBaseline` 标注)、`POST /project/bind`(校验 + `upsert` 登记)、`POST /project/unbind`(仅清 URL) |
+| `plugins/reports/architect_routes/project.py` | 新增 `POST /project/snapshots` 落 `arch_snapshot_records`；**无项目态 + URL 项目选择改造**：去掉默认项目种子与全局 `active` 语义，`GET /project/bound|status` 无 URL 参数返回 null、`/project/snapshots` 返回 []；`_resolve_project(root, project)` 按 URL 解析项目(?project=KB id / ?root=路径，工作目录 id 按 root 哈希稳定)；新增 `GET /project/kb/list`(代理 KB `project.list`，snake→camel + `gitLinked`/`hasBaseline` 标注)、`GET /project/kb/match`(按工作目录自动匹配可关联 KB 候选：本地仓库地址为主、远端地址为辅)、`POST /project/bind`(校验 + `upsert` 登记)、`POST /project/unbind`(仅清 URL) |
 | `plugins/reports/architect_routes/requirements.py` | `analyze_clarify/collect` 按请求透传的 root/project 判定降级：`_kb_degraded()` 依据解析项目是否有 KB 基线，existing+greenfield 均返回 `degraded: true`，无资产命中、assetScope 为空(仅手动)，文案注明「KB 能力降级」 |
 | `plugins/reports/architect_routes/store.py` | `ProjectsStore.get_by_root(root)`(按 root_path 查项目) + `upsert(project_id, data)`(存在更新/否则插入) |
 | `backend-core/sqlite_ctx.py` | `_architect_migrations` 追加 `arch_projects` 幂等补列 `kb_project_id`/`git_linked` |

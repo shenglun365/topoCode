@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import type { DesignPlan, Requirement, RequirementAnalysis } from '@/types'
-import { CODE_MAPPINGS, PLANS, REQUIREMENTS } from '@/services/mock/order-system'
+import { CODE_MAPPINGS } from '@/services/mock/order-system'
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
 import { requirementService } from '@/services/requirement-service'
@@ -67,28 +67,22 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
     async load() {
       if (this.loaded) return
       this.loading = true
-      // 后端优先：需求 + 方案列表；不可达回退 mock。
-      if (await backendUp()) {
-        try {
-          const [items, plans] = await Promise.all([
-            requirementService.list(),
-            apiGet<DesignPlan[]>('/plans'),
-          ])
-          this.items = items ?? []
-          this.plans = plans ?? []
-          this.items.forEach((r) => { if (r.analysis) enrichAnalysis(r.analysis) })
-          this.loaded = true
-          this.loading = false
-          return
-        } catch {
-          // fall through to mock
-        }
+      // 后端优先：需求 + 方案列表；失败直接抛出(不再静默回退 mock)。
+      if (!(await backendUp())) throw new Error('后端不可达，无法加载需求/方案')
+      try {
+        const [items, plans] = await Promise.all([
+          requirementService.list(),
+          apiGet<DesignPlan[]>('/plans'),
+        ])
+        this.items = items ?? []
+        this.plans = plans ?? []
+        this.items.forEach((r) => { if (r.analysis) enrichAnalysis(r.analysis) })
+        this.loaded = true
+        this.loading = false
+      } catch (err) {
+        this.loading = false
+        throw err
       }
-      this.items = structuredClone(REQUIREMENTS)
-      this.plans = structuredClone(PLANS)
-      this.items.forEach((r) => { if (r.analysis) enrichAnalysis(r.analysis) })
-      this.loaded = true
-      this.loading = false
     },
     async addRaw(input: Partial<Requirement>): Promise<Requirement> {
       const r: Requirement = {
@@ -144,7 +138,7 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
         return existing
       }
       const r: Requirement = {
-        id: `RQ-${Date.now().toString().slice(-4)}`,
+        id: seed.id ?? `RQ-${Date.now().toString().slice(-4)}`,
         kind: 'user-story',
         tier: 'analyzed',
         location: 'pool',
@@ -317,7 +311,7 @@ export const useArchRequirementStore = defineStore('arch-requirement', {
         return existing
       }
       const r: Requirement = {
-        id: `RQ-${Date.now().toString().slice(-4)}`,
+        id: seed.id ?? `RQ-${Date.now().toString().slice(-4)}`,
         kind: 'user-story',
         tier: analysis ? 'analyzed' : 'raw',
         location: 'proposal',

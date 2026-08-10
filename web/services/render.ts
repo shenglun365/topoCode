@@ -201,6 +201,11 @@ export async function ensureMermaid() {
   return mermaidApi
 }
 
+export function mermaidParseErrorDetail(e: any): string {
+  const raw = e && (e.message || e.str || e.hash || String(e))
+  return (raw && String(raw).trim()) || '图解法错误'
+}
+
 // ── 渲染队列（串行化避免并发卡顿） ──
 const renderQueue: (() => Promise<void>)[] = []
 let rendering = false

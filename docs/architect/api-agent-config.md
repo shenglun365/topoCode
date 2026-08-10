@@ -40,7 +40,7 @@ ExecutionTask         instanceId + taskBranch + branchMode(auto|manual)
 
 ## 存储
 
-`arch_agent_configs`(architect.db，`sqlite_ctx.py` 迁移)：
+`arch_agent_configs`(architect.db，schema/迁移归 `arch_routes/db_schema.py` 自持)：
 `id / adapter / name / mode / host / port / username / url / models(JSON) / default_model /
 last_status / last_detail / last_check_at / instance_mode(managed|external) / created_at / updated_at`。
 

@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import type { GranularityConfig, ProductForm, ProjectInfo, ProjectMode, ProjectScaffold, RepoStatus, Snapshot } from '@/types'
-import { projectService } from '@/services/project-service'
+import { projectService, currentProjectParams } from '@/services/project-service'
 import router from '@/router'
+
+/** 当前 URL 项目选择的标识(project/root 任一变化 → 视为切换到另一项目)。 */
+function projectKey(): string {
+  const { project, root } = currentProjectParams()
+  return `${project ?? ''}|${root ?? ''}`
+}
 
 /** 项目选择持久化在 URL 内(?root=<path> / ?project=<arch行id>)，多页签各处理不同项目。 */
 async function setProjectQuery(query: Record<string, string>): Promise<void> {
@@ -15,15 +21,12 @@ async function clearProjectQuery(): Promise<void> {
   await router.replace({ path: cur.path })
 }
 
-function currentRoot(): string | undefined {
-  const r = router.currentRoute.value.query.root
-  return typeof r === 'string' ? r : undefined
-}
-
 export const useArchProjectStore = defineStore('arch-project', {
   state: () => ({
     loaded: false,
     loading: false,
+    /** 上次 load 对应的 URL 项目键(project|root)。URL 切换项目后据此触发重载。 */
+    loadedKey: '',
     project: null as ProjectInfo | null,
     status: null as RepoStatus | null,
     snapshots: [] as Snapshot[],
@@ -39,7 +42,8 @@ export const useArchProjectStore = defineStore('arch-project', {
   },
   actions: {
     async load(force = false) {
-      if (this.loaded && !force) return
+      const key = projectKey()
+      if (this.loaded && !force && key === this.loadedKey) return
       this.loading = true
       try {
         const [project, status, snapshots] = await Promise.all([
@@ -58,6 +62,7 @@ export const useArchProjectStore = defineStore('arch-project', {
       this.baseline = this.snapshots.find((s) => s.id === 'snap-v0') ?? this.snapshots[0] ?? null
       this.current = this.snapshots.find((s) => s.id === 'snap-v1') ?? this.snapshots[1] ?? null
       this.loaded = true
+      this.loadedKey = key
       this.loading = false
     },
     /** 打开工作目录并关联 KB：校验通过后写 ?root=execRoot(选择持久化在 URL)。 */
@@ -75,12 +80,24 @@ export const useArchProjectStore = defineStore('arch-project', {
     },
     /** 项目页后补关联 KB(同源校验由后端执行)。 */
     async linkKb(kbProjectId: string): Promise<void> {
-      await projectService.linkKb(kbProjectId, this.project?.rootPath ?? currentRoot())
+      const current = router.currentRoute.value.query
+      const root =
+        this.project?.rootPath
+        ?? (typeof current.root === 'string' ? current.root : undefined)
+        ?? (import.meta.env.VITE_BOUND_ROOT || undefined)
+      const project = this.project?.id ?? (typeof current.project === 'string' ? current.project : undefined)
+      await projectService.linkKb({ kbProjectId, execRoot: root, project })
       await this.load(true)
     },
     /** 解除 KB 关联(项目保留，回到降级)。 */
     async unlinkKb(): Promise<void> {
-      await projectService.unlinkKb()
+      const current = router.currentRoute.value.query
+      const root =
+        this.project?.rootPath
+        ?? (typeof current.root === 'string' ? current.root : undefined)
+        ?? (import.meta.env.VITE_BOUND_ROOT || undefined)
+      const project = this.project?.id ?? (typeof current.project === 'string' ? current.project : undefined)
+      await projectService.unlinkKb({ root, project })
       await this.load(true)
     },
     async unbind(): Promise<boolean> {
@@ -91,6 +108,7 @@ export const useArchProjectStore = defineStore('arch-project', {
       this.snapshots = []
       this.baseline = null
       this.current = null
+      this.loadedKey = projectKey()
       return ok
     },
     async createGreenfield(opts: {

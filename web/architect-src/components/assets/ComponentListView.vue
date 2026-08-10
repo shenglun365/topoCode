@@ -4,10 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { MagnifyingGlassIcon, ArrowsRightLeftIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { kbAssetService } from '@/services/kb-assets'
+import type { CodeMapping } from '@/types'
 
 const { t } = useI18n()
 const arch = useArchArchitectureStore()
-const codeMappings = kbAssetService.codeMappings()
 
 const emit = defineEmits<{
   (e: 'select', id: string): void
@@ -21,9 +21,13 @@ const query = ref('')
 const pageSize = 8
 const page = ref(1)
 
+/** 代码映射(后端获取；失败时为空)。 */
+const codeMappings = ref<CodeMapping[]>([])
+kbAssetService.codeMappings().then((m) => { codeMappings.value = m }).catch(() => { codeMappings.value = [] })
+
 /** 同一组件包含文件(代码映射去重)。 */
 const fileCount = (compId: string): number => new Set(
-  codeMappings.filter((m) => m.targetId === compId).map((m) => m.file),
+  codeMappings.value.filter((m) => m.targetId === compId).map((m) => m.file),
 ).size
 
 /** 子组件数量。 */

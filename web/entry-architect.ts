@@ -16,6 +16,8 @@ app.use(pinia)
 app.use(router)
 app.use(i18n)
 
-useArchSettingsStore().initLocale()
+const settings = useArchSettingsStore()
+settings.initLocale()
+settings.initFontScale()
 
 app.mount('#app')

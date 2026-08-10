@@ -49,7 +49,8 @@ _JSON_COLUMNS = {
     "artifacts", "test_result", "levels", "last_result", "tool",
     "input", "output", "overrides", "explicit_rules", "derived_rules",
     "changelog", "default_channel", "scaffold",
-    "related_to", "preferred_asset_ids",
+    "related_to", "preferred_asset_ids", "meta",
+    "detail", "ast_refs", "asset_refs",
 }
 
 
@@ -455,6 +456,137 @@ class UnitTestSessionsStore:
         _insert("arch_unit_test_messages", msg)
 
 
+class ConversationsStore:
+    """统一会话(阶段D 主干)：requirement/design/execution/unit-test 共用一张表+消息表。"""
+
+    TABLE = "arch_conversations"
+    MSG_TABLE = "arch_conversation_messages"
+
+    @classmethod
+    def all(cls, kind: str = None, project_id: str = None, limit: int = 100):
+        db = _db()
+        sql = f"SELECT * FROM {cls.TABLE}"
+        conds, params = [], []
+        if kind:
+            conds.append("kind = ?")
+            params.append(kind)
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        return [_row_to_api(r) for r in db.fetchall(sql, tuple(params))]
+
+    @classmethod
+    def get(cls, conv_id: str):
+        return _get(cls.TABLE, conv_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        """创建会话；缺省补 id/时间字段。"""
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "id": data.get("id") or next_id("cv"),
+            "kind": data.get("kind", "requirement"),
+            "project_id": data.get("projectId") or "",
+            "req_id": data.get("reqId") or "",
+            "title": data.get("title") or "",
+            "status": data.get("status") or "active",
+            "meta": data.get("meta"),
+            "created_at": data.get("createdAt") or now,
+            "updated_at": data.get("updatedAt") or now,
+        }
+        _insert(cls.TABLE, payload)
+        return payload
+
+    @classmethod
+    def upsert(cls, conv_id: str, data: dict) -> dict:
+        existing = _get(cls.TABLE, conv_id)
+        if existing:
+            _update(cls.TABLE, conv_id, {**data, "updatedAt": int(__import__("time").time() * 1000)})
+            return _get(cls.TABLE, conv_id) or existing
+        return cls.create({"id": conv_id, **data})
+
+    @classmethod
+    def update(cls, conv_id: str, data: dict) -> Optional[dict]:
+        data["updatedAt"] = int(__import__("time").time() * 1000)
+        return _update(cls.TABLE, conv_id, data)
+
+    @classmethod
+    def messages(cls, conv_id: str, limit: int = 200) -> list[dict]:
+        rows = _db().fetchall(
+            f"SELECT * FROM {cls.MSG_TABLE} WHERE conversation_id = ? "
+            "ORDER BY time ASC, rowid ASC LIMIT ?",
+            (conv_id, int(limit)),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def by_req(cls, req_id: str, project_id: str = "", limit: int = 20) -> list[dict]:
+        """按关联需求/提案 id 找会话(req_id 匹配; 同需求多会话按更新时间倒序)。"""
+        db = _db()
+        conds, params = ["req_id = ?"], [req_id]
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        rows = db.fetchall(
+            f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+            "ORDER BY updated_at DESC LIMIT ?",
+            tuple(params + [int(limit)]),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def summaries(cls, kind: str = None, project_id: str = None, limit: int = 100) -> list[dict]:
+        """会话摘要(用于历史导入列表): 会话头 + 消息数 + 首条用户消息预览。"""
+        db = _db()
+        sql = (f"SELECT c.*, "
+               "(SELECT COUNT(*) FROM {msg} m WHERE m.conversation_id = c.id) AS msg_count, "
+               "(SELECT MIN(m2.time) FROM {msg} m2 WHERE m2.conversation_id = c.id "
+               " AND m2.role = 'user') AS first_user_time, "
+               "(SELECT m3.content FROM {msg} m3 WHERE m3.conversation_id = c.id "
+               " AND m3.role = 'user' ORDER BY m3.time ASC, m3.rowid ASC LIMIT 1) AS preview "
+               f"FROM {cls.TABLE} c").format(msg=cls.MSG_TABLE)
+        conds, params = [], []
+        if kind:
+            conds.append("c.kind = ?")
+            params.append(kind)
+        if project_id:
+            conds.append("c.project_id = ?")
+            params.append(project_id)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY c.updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        return [_row_to_api(r) for r in db.fetchall(sql, tuple(params))]
+
+    @classmethod
+    def append_message(cls, msg: dict) -> dict:
+        _insert(cls.MSG_TABLE, msg)
+        return msg
+
+    @classmethod
+    def delete_message(cls, conv_id: str, message_id: str) -> bool:
+        """删除会话内的单条消息(对话流单条删除)。"""
+        db = _db()
+        cur = db.execute(
+            f"DELETE FROM {cls.MSG_TABLE} WHERE conversation_id = ? AND id = ?",
+            (conv_id, message_id),
+        )
+        db.commit()
+        return cur.rowcount > 0
+
+    @classmethod
+    def delete(cls, conv_id: str) -> bool:
+        db = _db()
+        db.execute(f"DELETE FROM {cls.MSG_TABLE} WHERE conversation_id = ?", (conv_id,))
+        cur = db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (conv_id,))
+        db.commit()
+        return cur.rowcount > 0
+
+
 class McpCallsStore:
     TABLE = "arch_mcp_calls"
 
@@ -626,3 +758,88 @@ class SnapshotsStore:
     def create(cls, data: dict) -> dict:
         _insert(cls.TABLE, data)
         return data
+
+
+class SemanticAssetsStore:
+    """语义数据资产(architect 自持，随最新代码结构增量更新)。
+
+    表: arch_semantic_assets。scope_type×scope_key 唯一(同范围反复提取 → upsert)。
+    """
+
+    TABLE = "arch_semantic_assets"
+    KINDS = ("data_structure", "processing_flow", "control_logic")
+
+    @classmethod
+    def all(cls, project_id: str = "", kind: str = "", limit: int = 200):
+        db = _db()
+        conds, params = [], []
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        if kind in cls.KINDS:
+            conds.append("kind = ?")
+            params.append(kind)
+        if conds:
+            conds.append("status = 'active'")
+            sql = f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)}"
+        else:
+            sql = f"SELECT * FROM {cls.TABLE} WHERE status = 'active'"
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        return [_row_to_api(r) for r in db.fetchall(sql, tuple(params))]
+
+    @classmethod
+    def get(cls, asset_id: str):
+        return _get(cls.TABLE, asset_id)
+
+    @classmethod
+    def find_by_scope(cls, project_id: str, scope_type: str, scope_key: str):
+        db = _db()
+        rows = db.fetchall(
+            "SELECT * FROM arch_semantic_assets "
+            "WHERE project_id = ? AND scope_type = ? AND scope_key = ? AND status = 'active' "
+            "ORDER BY created_at ASC",
+            (project_id, scope_type, scope_key),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def update(cls, asset_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, asset_id, data)
+
+    @classmethod
+    def delete(cls, asset_id: str) -> bool:
+        return _delete(cls.TABLE, asset_id)
+
+    @classmethod
+    def search(cls, project_id: str, text: str = "", kind: str = "",
+               limit: int = 20) -> list[dict]:
+        """全文朴素检索：名称/描述命中。"""
+        db = _db()
+        conds = ["project_id = ?", "status = 'active'"]
+        params: list = [project_id]
+        if kind in cls.KINDS:
+            conds.append("kind = ?")
+            params.append(kind)
+        if text:
+            conds.append("(name LIKE ? OR desc LIKE ? OR id LIKE ?)")
+            like = f"%{text}%"
+            params += [like, like, like]
+        sql = f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} ORDER BY updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        return [_row_to_api(r) for r in db.fetchall(sql, tuple(params))]
+
+    @classmethod
+    def mark_scope_stale(cls, project_id: str, scope_type: str, scope_key: str) -> None:
+        db = _db()
+        db.execute(
+            "UPDATE arch_semantic_assets SET status = 'stale', updated_at = ? "
+            "WHERE project_id = ? AND scope_type = ? AND scope_key = ? AND status = 'active'",
+            (int(__import__("time").time() * 1000), project_id, scope_type, scope_key),
+        )
+        db.commit()

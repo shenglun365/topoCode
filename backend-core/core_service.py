@@ -362,6 +362,20 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         resolved_remote = repo_url
         resolved_local = local_repo_path
 
+        # 项目名：static 用所选目录名；git 模式用仓库主目录名（而非 worktree 缓存目录名）
+        def _project_name_source() -> str:
+            if mode == "git-local":
+                return os.path.basename((local_repo_path or path).rstrip("/\\"))
+            if mode == "git-remote":
+                repo = (repo_url or "").rstrip("/\\")
+                name = os.path.basename(repo)
+                if name.endswith(".git"):
+                    name = name[:-4]
+                return name
+            return os.path.basename(path.rstrip("/\\"))
+
+        project_name = _project_name_source()
+
         # ── git 模式：克隆到源码缓存目录 ──
         if mode in ("git-local", "git-remote"):
             if mode == "git-local":
@@ -422,7 +436,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
         logger.info(f"[import] writing to main projects table...")
         main_db.insert("projects", {
             "id": project_id,
-            "name": os.path.basename(effective_root) if mode != "static" else os.path.basename(path),
+            "name": project_name or os.path.basename(effective_root),
             "root_path": effective_root,
             "language": language,
             "file_count": file_count,
@@ -1253,6 +1267,30 @@ def register_version_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("knowledge.updateCancel")
     def knowledge_update_cancel(request_id: str = None, requestId: str = None):
         return {"cancelled": vss.cancel_update(multi_db, request_id or requestId)}
+
+    @server.register("architecture.model")
+    def architecture_model(project_id: str = None, task_id: str = "",
+                           level: str = "L1", edge_type: str = "INCLUDE",
+                           projectId: str = None, taskId: str = None):
+        """(KB-REQ-17) 项目真实架构模型：由分析图社区/节点/边/版本差异构建。
+
+        architect 前端的组件索引、代码映射、依赖关系均来自此处，取代静态演示模型。
+        """
+        from architecture_model_service import build_architecture_model
+        pid = project_id or projectId
+        tid = task_id or taskId
+        return build_architecture_model(multi_db, pid, task_id=tid,
+                                        level=level, edge_type=edge_type)
+
+    @server.register("architecture.catalog")
+    def architecture_catalog(project_id: str = None, task_id: str = "",
+                             projectId: str = None, taskId: str = None):
+        """(KB-REQ-17) 组件目录：合并 依赖分析(INCLUDE)/调用分析(CALL) 与 L0/L1
+        层社区，附带父组件 / 文件数 / 类型元数据，供组件选择器筛选。"""
+        from architecture_model_service import build_component_catalog
+        pid = project_id or projectId
+        tid = task_id or taskId
+        return build_component_catalog(multi_db, pid, task_id=tid)
 
     return server
 

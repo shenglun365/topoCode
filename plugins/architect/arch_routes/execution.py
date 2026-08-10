@@ -19,10 +19,14 @@ def _assemble_change_items(reqs):
     changes = []
     seen = set()
     for r in reqs:
+        sem_ids = [a.get("assetId") for a in (r.get("analysis") or {}).get("assetScope") or []
+                   if str(a.get("assetId") or "").startswith("sa-")]
         for c in (r.get("analysis") or {}).get("changes") or []:
             key = c.get("resource")
             if key and key not in seen:
                 seen.add(key)
+                if sem_ids:
+                    c["semanticAssetIds"] = list(dict.fromkeys((c.get("semanticAssetIds") or []) + sem_ids))
                 changes.append(c)
     return changes
 

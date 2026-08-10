@@ -15,6 +15,71 @@ export type ReqPoolStatus =
   | 'cancelled'
 
 export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
+  | 'data_structure' | 'processing_flow' | 'control_logic'
+
+/** 语义数据资产三类(比组件更细、比伪代码更概括，锚定 AST 节点)。 */
+export type SemanticAssetKind = 'data_structure' | 'processing_flow' | 'control_logic'
+
+export interface SemanticAssetField {
+  name: string
+  type?: string
+  semantic?: string
+}
+
+export interface SemanticAssetRelation {
+  target: string
+  type?: string
+  semantic?: string
+}
+
+export interface SemanticAssetStep {
+  order?: number
+  semantic: string
+  symbols?: string[]
+  astRefs?: AstNodeRef[]
+}
+
+export interface SemanticAssetBranch {
+  condition?: string
+  then?: string
+  else?: string
+  semantic?: string
+  symbols?: string[]
+  astRefs?: AstNodeRef[]
+}
+
+export interface SemanticAssetDetail {
+  fields?: SemanticAssetField[]
+  relations?: SemanticAssetRelation[]
+  invariants?: string[]
+  trigger?: string
+  steps?: SemanticAssetStep[]
+  branches?: SemanticAssetBranch[]
+}
+
+/** 语义数据资产(architect 自持，来源 codegraph/live)。 */
+export interface SemanticAsset {
+  id: string
+  projectId?: string
+  kind: SemanticAssetKind
+  name: string
+  desc: string
+  detail?: SemanticAssetDetail
+  astRefs: AstNodeRef[]
+  scopeType?: 'files' | 'symbols' | 'comm' | 'project'
+  scopeKey?: string
+  source?: 'codegraph' | 'live' | 'kb'
+  change?: ChangeType
+  status?: 'active' | 'stale' | 'deleted'
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** 语义资产引用(需求/设计/任务/单测贯通)。 */
+export interface SemanticAssetRef {
+  assetId: string
+  role?: 'core' | 'related'
+}
 
 export interface AssetScopeItem {
   assetId: string
@@ -53,6 +118,17 @@ export interface AssetDetail {
   dependsOn?: string[]
   level?: DataLevel
   invariants?: string[]
+  /** 组件选择器元数据：分析类型(依赖分析 INCLUDE / 调用分析 CALL)与层级。 */
+  edgeType?: 'INCLUDE' | 'CALL'
+  /** 层级(L0/L1)。 */
+  hierLevel?: string
+  parentId?: string
+  parentName?: string
+  fileCount?: number
+  nodeCount?: number
+  edgeCount?: number
+  /** 所属分析任务 id(用于拼知识库文档连接)。 */
+  taskId?: string
   /** ER 表视图：列 + 关系。 */
   columns?: ErColumn[]
   relations?: ErRelation[]
@@ -805,6 +881,37 @@ export interface StagingModel {
   layers: StagingLayerStatus
 }
 
+// ============ 系统管理：LLM 模型配置 ============
+
+export type LlmModelSource = 'imported' | 'manual'
+
+export interface ArchLlmModel {
+  source: LlmModelSource
+  id: string
+  name: string
+  provider: string
+  model: string
+  url: string
+  type?: string
+  isDefault?: boolean
+  hasApiKey?: boolean
+  updatedAt?: number
+}
+
+export interface ArchLlmModelsResult {
+  models: ArchLlmModel[]
+  imported: number
+  manual: number
+  modelId: string
+}
+
+export interface ArchLlmImportResult {
+  models: ArchLlmModel[]
+  added: number
+  updated: number
+  preserved: number
+}
+
 export interface IncrementalLogEntry {
   id: string
   time: number
@@ -875,6 +982,50 @@ export interface KbProject {
   gitLinked: boolean
   /** current_version_id 非空 ⇒ KB 已有知识基线。 */
   hasBaseline: boolean
+  /** matchLevel: /project/kb/match 注入的命中分类(local/remote)，手动条目无。 */
+  matchLevel?: 'local' | 'remote'
+}
+
+/** 「查找关联」接口返回：按工作目录匹配出的 KB 候选，本地与远程两组同时给出。 */
+export interface KbMatchResult {
+  workDir: string
+  remoteUrl: string
+  /** 本地仓库地址命中(主参数)：源码目录/缓存/本地 repo 来源重叠。 */
+  local: KbProject[]
+  /** 远端一致命中(辅参数)：工作目录 git origin 与 KB 远端相同。 */
+  remote: KbProject[]
+}
+
+// ============ 需求分析会话历史(临时提案导入) ============
+
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  time: number
+  content: string
+}
+
+/** 会话历史摘要(历史导入列表条目)。 */
+export interface ConversationSummary {
+  id: string
+  kind?: string
+  /** 关联临时提案 id(reqId)；空/未绑定 → 可导入/删除。 */
+  reqId?: string
+  title: string
+  msgCount: number
+  preview: string
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** 会话详情 + 消息列表(导入时拉取)。 */
+export interface ConversationDetail {
+  id: string
+  kind?: string
+  reqId?: string
+  title: string
+  messages: ConversationMessage[]
 }
 
 export interface ProjectScaffold {

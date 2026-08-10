@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CpuChipIcon, Cog6ToothIcon } from '@heroicons/vue/24/outline'
+import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { useArchCollabStore } from '@/stores/collaboration-store'
 import { useArchProjectStore } from '@/stores/project-store'
+import { apiGet, apiPost, apiPut, apiDelete } from '@/services/api-client'
+import { backendUp } from '@/services/backend'
+import type { ArchLlmModel, ArchLlmModelsResult, ArchLlmImportResult } from '@/types'
 
 const { t } = useI18n()
 const agent = useArchAgentStore()
@@ -14,6 +17,7 @@ const spec = useArchSpecStore()
 const collab = useArchCollabStore()
 const project = useArchProjectStore()
 spec.load()
+agent.load()
 
 const adapters = computed(() => agent.adapters)
 const sessions = computed(() => agent.sessions)
@@ -58,6 +62,95 @@ watch(
 function applyGranularity(key: keyof typeof granularity) {
   project.updateConfig({ [key]: granularity[key] })
 }
+
+// ==================== LLM 模型配置 ====================
+const llmModels = ref<ArchLlmModel[]>([])
+const llmModelId = ref('')
+const importing = ref(false)
+const importMsg = ref('')
+const importError = ref('')
+const showAddManual = ref(false)
+const manualForm = reactive({ name: '', provider: '', model: '', url: '' })
+const addingManual = ref(false)
+
+async function loadLlm() {
+  if (!(await backendUp())) return
+  try {
+    const data = await apiGet<ArchLlmModelsResult>('/llm/models')
+    llmModels.value = data.models ?? []
+    llmModelId.value = data.modelId ?? ''
+  } catch {
+    // backend not ready → show nothing
+  }
+}
+
+async function importModels() {
+  if (!(await backendUp())) return
+  importing.value = true
+  importMsg.value = ''
+  importError.value = ''
+  try {
+    const data = await apiPost<ArchLlmImportResult>('/llm/models/import')
+    llmModels.value = data.models ?? []
+    importMsg.value = t('config.llm.importDone', {
+      added: data.added,
+      updated: data.updated,
+      preserved: data.preserved,
+    })
+  } catch (e: any) {
+    importError.value = e?.message || t('config.llm.importFail')
+  } finally {
+    importing.value = false
+  }
+}
+
+async function selectActiveModel(id: string) {
+  llmModelId.value = id
+  if (await backendUp()) {
+    apiPut<{ modelId: string }>('/llm/model', { modelId: id }).catch(() => {})
+  }
+}
+
+async function addManual() {
+  if (!manualForm.name.trim() || !manualForm.model.trim()) return
+  addingManual.value = true
+  try {
+    if (await backendUp()) {
+      const row = await apiPost<ArchLlmModel>('/llm/models/manual', {
+        name: manualForm.name.trim(),
+        provider: manualForm.provider.trim() || 'custom',
+        model: manualForm.model.trim(),
+        url: manualForm.url.trim(),
+      })
+      llmModels.value = [row, ...llmModels.value]
+    } else {
+      llmModels.value.unshift({
+        source: 'manual',
+        id: `man-${Date.now()}`,
+        name: manualForm.name.trim(),
+        provider: manualForm.provider.trim() || 'custom',
+        model: manualForm.model.trim(),
+        url: manualForm.url.trim(),
+      })
+    }
+    manualForm.name = ''
+    manualForm.provider = ''
+    manualForm.model = ''
+    manualForm.url = ''
+    showAddManual.value = false
+  } finally {
+    addingManual.value = false
+  }
+}
+
+async function removeManualModel(id: string) {
+  if (await backendUp()) {
+    await apiDelete<{ id: string }>(`/llm/models/${id}`).catch(() => {})
+  }
+  llmModels.value = llmModels.value.filter((m) => m.id !== id)
+}
+
+loadLlm()
 </script>
 
 <template>
@@ -160,6 +253,125 @@ function applyGranularity(key: keyof typeof granularity) {
               <span class="chip bg-ctp-surface0 text-ctp-subtext1 font-mono">{{ project.project?.baselineId ?? '—' }}</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel overflow-hidden">
+      <div class="panel-header">
+        <span class="flex items-center gap-2">
+          <Cog6ToothIcon class="w-4 h-4 text-ctp-sapphire" />{{ t('config.llm.title') }}
+        </span>
+        <span class="flex items-center gap-2">
+          <span class="text-[11px] text-ctp-overlay1">
+            {{ llmModels.length }}
+          </span>
+          <button
+            class="btn btn-primary !py-1 !px-3 !text-xs"
+            :disabled="importing"
+            @click="importModels"
+          >
+            <ArrowDownTrayIcon class="w-3.5 h-3.5" />
+            {{ importing ? t('config.llm.importing') : t('config.llm.import') }}
+          </button>
+          <button
+            class="btn !py-1 !px-3 !text-xs"
+            @click="showAddManual = !showAddManual"
+          >
+            <PlusIcon class="w-3.5 h-3.5" />{{ t('config.llm.addManual') }}
+          </button>
+        </span>
+      </div>
+      <div class="p-3 text-xs space-y-2">
+        <div class="text-[11px] text-ctp-overlay0">{{ t('config.llm.desc') }}</div>
+        <div v-if="importMsg" class="chip bg-ctp-green/15 text-ctp-green">{{ importMsg }}</div>
+        <div v-if="importError" class="chip bg-ctp-red/15 text-ctp-red">{{ importError }}</div>
+
+        <form
+          v-if="showAddManual"
+          class="border border-ctp-surface0 rounded-lg p-2.5 space-y-2"
+          @submit.prevent="addManual"
+        >
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualName') }}</span>
+              <input v-model="manualForm.name" class="input !py-1 !text-xs">
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualProvider') }}</span>
+              <input v-model="manualForm.provider" class="input !py-1 !text-xs" placeholder="custom">
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualModel') }}</span>
+              <input v-model="manualForm.model" class="input !py-1 !text-xs">
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-ctp-overlay1">{{ t('config.llm.manualUrl') }}</span>
+              <input v-model="manualForm.url" class="input !py-1 !text-xs">
+            </label>
+          </div>
+          <button
+            type="submit"
+            class="btn btn-primary !px-3 !py-1 !text-xs"
+            :disabled="addingManual || !manualForm.name || !manualForm.model"
+          >{{ t('config.llm.addManual') }}</button>
+        </form>
+
+        <div
+          v-if="!llmModels.length"
+          class="text-[11px] text-ctp-overlay0 py-3 text-center"
+        >{{ t('config.llm.noModels') }}</div>
+
+        <div class="divide-y divide-ctp-surface0">
+          <div
+            v-for="m in llmModels"
+            :key="m.id"
+            class="flex items-center gap-3 py-2"
+          >
+            <input
+              type="radio"
+              :name="'llm-active'"
+              class="accent-ctp-sapphire"
+              :checked="llmModelId === m.id"
+              :value="m.id"
+              @change="selectActiveModel(m.id)"
+            >
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-ctp-text truncate">{{ m.name }}</span>
+                <span
+                  class="chip"
+                  :class="m.source === 'manual' ? 'bg-ctp-yellow/15 text-ctp-yellow' : 'bg-ctp-blue/15 text-ctp-blue'"
+                >{{ t(`config.llm.source.${m.source}`) }}</span>
+                <span v-if="m.isDefault" class="chip bg-ctp-green/15 text-ctp-green">default</span>
+              </div>
+              <div class="text-[11px] text-ctp-subtext0 truncate">
+                <span class="font-mono text-ctp-overlay1">{{ m.provider }}</span>
+                <span class="mx-1">·</span>
+                <span class="font-mono"> {{ m.model }}</span>
+                <span v-if="m.url" class="text-ctp-overlay0"> · {{ m.url }}</span>
+              </div>
+            </div>
+            <div class="flex-1" />
+            <button
+              v-if="m.source === 'manual'"
+              class="btn !py-0.5 !px-2 !text-[11px] text-ctp-red"
+              :title="t('config.llm.deleteManual')"
+              @click="removeManualModel(m.id)"
+            >
+              <TrashIcon class="w-3 h-3" />{{ t('config.llm.delete') }}
+            </button>
+          </div>
+        </div>
+        <div class="flex gap-4 text-[10px] text-ctp-overlay0">
+          <span class="flex items-center gap-1">
+            <span class="text-ctp-blue">{{ t('config.llm.source.imported') }}</span>
+            : {{ t('config.llm.importedNote') }}
+          </span>
+          <span class="flex items-center gap-1">
+            <span class="text-ctp-yellow">{{ t('config.llm.source.manual') }}</span>
+            : {{ t('config.llm.manualNote') }}
+          </span>
         </div>
       </div>
     </div>

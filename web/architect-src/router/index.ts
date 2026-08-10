@@ -74,7 +74,7 @@ const routes: RouteRecordRaw[] = [
         path: 'config',
         name: 'Config',
         component: () => import('@/pages/ConfigPage.vue'),
-        meta: { workbench: true, title: '配置管理' },
+        meta: { workbench: true, title: '系统管理' },
       },
       {
         path: 'mcp',

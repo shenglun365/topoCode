@@ -1041,6 +1041,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         outputSchema: Optional[Dict[str, Any]] = None,
         locale: str = "",
         max_tokens: Optional[int] = None,
+        maxTokens: Optional[int] = None,
     ):
         """统一流式对话入口"""
         from zmq_server import current_call_id
@@ -1052,6 +1053,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         model_id = model_id or modelId
         template_id = template_id or templateId
         output_schema = output_schema or outputSchema
+        max_tokens = max_tokens or maxTokens
 
         if not session_id:
             raise ValueError("sessionId is required")
@@ -1112,6 +1114,81 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
     async def abort_chat(request_id: str):
         """中止流式调用"""
         return await service.abort_chat(request_id)
+
+    # ==================== 同步 LLM 调用 (architect 等独立进程复用 ai chat) ====================
+
+    @server.register('llm.sync')
+    async def sync_llm(
+        model_id: str = None,
+        modelId: str = None,
+        mode: str = 'chat',
+        messages: Optional[List[Dict[str, str]]] = None,
+        template_id: Optional[str] = None,
+        templateId: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
+        tools: Optional[List[str]] = None,
+        output_schema: Optional[Dict[str, Any]] = None,
+        outputSchema: Optional[Dict[str, Any]] = None,
+        max_tokens: Optional[int] = None,
+        maxTokens: Optional[int] = None,
+    ):
+        """同步(非流式) LLM 调用 —— 供 architect 等独立进程经 /zmq/llm.sync 复用 ai chat 能力。
+
+        与 llm.chat 一致支持穿透模板渲染 / tools / structured；返回完整结果而非 requestId：
+          - 普通/mode=tools → {'content': str, 'mode': mode, 'usage': dict}
+          - mode=structured 且带 output_schema → {'content': str, 'mode': 'structured',
+              'output': {...}, 'usage': dict}
+        写日志/用量审计由主后端完成(调方零状态)。
+        """
+        model_id = model_id or modelId
+        template_id = template_id or templateId
+        output_schema = output_schema or outputSchema
+        max_tokens = max_tokens or maxTokens
+
+        if template_id:
+            rendered = pm.render(template_id, variables or {})
+            _msgs = rendered['messages']
+            if rendered.get('mode') and mode == 'chat':
+                mode = rendered['mode']
+            if rendered.get('tools') and not tools:
+                tools = rendered['tools']
+            if rendered.get('outputSchema') and not output_schema:
+                output_schema = rendered['outputSchema']
+        else:
+            _msgs = messages
+
+        if _msgs is None:
+            _msgs = list(messages or [])
+        if not _msgs:
+            raise ValueError("Either 'messages' or 'templateId' + 'variables' is required")
+
+        # 模型默认值: 主后端 model_configs 的 is_default(与 ai chat 的默认模型一致)
+        if not model_id:
+            configs = multi_db.main_db.fetchall(
+                "SELECT * FROM model_configs ORDER BY is_default DESC, name")
+            _defaults = [m for m in configs if m.get("is_default")]
+            model_id = _defaults[0]["id"] if _defaults else (configs[0]["id"] if configs else "")
+        if not model_id:
+            raise ValueError("No model configured")
+
+        if not output_schema:
+            content = await service.sync_chat(_msgs, model_id, max_tokens=max_tokens)
+            return {"content": content, "mode": mode}
+
+        model = _get_model_by_id(multi_db, model_id)
+        if not model:
+            raise ValueError(f"Model not found: {model_id}")
+        result = await service._sync_call_for_retry(
+            model, _msgs, 'structured', tools, output_schema, max_tokens=max_tokens)
+        content = result.get('content', '')
+        parsed = service._validate_structured_output(content, output_schema)
+        return {
+            "content": content,
+            "mode": "structured",
+            "output": parsed['data'] if parsed['success'] else None,
+            "structuredError": None if parsed['success'] else parsed['error'],
+            "usage": result.get('usage') or {},
+        }
 
     # ==================== 分析报告会话管理 (analysisSession) ====================
 

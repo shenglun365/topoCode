@@ -9,6 +9,10 @@
 - KB HTTP 500/detail 即业务错误 → 映射为 `KbError`(message 可读)。
 - 连接失败/超时 → 返回 None(调用方降级 mock)，与旧 `_kb_call` 语义一致。
 - 时间戳/字段口径转换由调用方(路由)负责。
+
+> MCP 方向说明(2026-08)：当前 architect→KB 的 MCP 出向(`query()`)为**预留接口**，
+> 尚无路由消费。当前生效的 MCP 方向是**入向**：KB 侧 `plugins/mcp_server`(3460)
+> 把外部 agent 的 `/v1/tools/*` 调用转发进 architect 的 `/mcp/calls`(经 `mcp_collab` 记录)。
 """
 import json
 import logging

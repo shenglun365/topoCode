@@ -15,6 +15,10 @@ spec.load()
 
 const tab = ref<'spec' | 'rules'>('spec')
 
+/** 编码规约(后端获取；失败显示空)。 */
+const codingRules = ref('')
+kbAssetService.codingRules().then((r) => { codingRules.value = r }).catch(() => { codingRules.value = '' })
+
 const ruleLevelColor: Record<string, string> = {
   blocker: 'bg-ctp-red/15 text-ctp-red',
   major: 'bg-ctp-peach/15 text-ctp-peach',
@@ -170,7 +174,7 @@ const ruleLevelColor: Record<string, string> = {
         </div>
       </div>
       <div class="p-4 max-h-[560px] overflow-auto">
-        <MarkdownView :content="kbAssetService.codingRules()" />
+        <MarkdownView :content="codingRules" />
       </div>
     </div>
   </div>

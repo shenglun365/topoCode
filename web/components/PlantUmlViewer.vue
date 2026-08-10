@@ -109,7 +109,15 @@ async function renderPlantUml(codeOverride?: string) {
       headers: { 'Content-Type': 'text/plain' },
       body: stripHtml(codeOverride ?? props.code),
     })
-    if (!resp.ok) throw new Error('PlantUML server returned ' + resp.status)
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      let msg = (text && text.trim()) ? text : 'PlantUML server returned ' + resp.status
+      try {
+        const j = JSON.parse(text)
+        if (j && j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+      } catch { /* keep raw text */ }
+      throw new Error(msg)
+    }
     const svg = await resp.text()
     if (svgWrap.value) {
       svgWrap.value.innerHTML = svg
@@ -385,6 +393,8 @@ function zoomOut() {
 <style>
 .diagram-container{display:flex;flex-direction:column}
 .diag-view{flex:1;min-height:0}
+.diagram-loading{padding:32px;color:var(--text-muted,#888);font-size:var(--ui-font-size,14px);text-align:center}
+.diag-error{padding:16px 24px;text-align:left;white-space:pre-wrap;word-break:break-word;color:#e06c75;font-size:14px;font-family:var(--font-mono,monospace);max-height:300px;overflow:auto;margin:8px}
 .diag-code{padding:0;display:flex;flex-direction:column;max-height:55vh;overflow-y:auto}
 .diag-textarea{width:100%;min-height:150px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:vertical;outline:none;box-sizing:border-box;tab-size:2}
 .diag-code-actions{display:flex}

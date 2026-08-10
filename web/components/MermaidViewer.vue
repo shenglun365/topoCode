@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { normalizeDiagram, ensureMermaid, enqueueRender, fitScale } from '@web/services/render'
+import { normalizeDiagram, ensureMermaid, enqueueRender, fitScale, mermaidParseErrorDetail } from '@web/services/render'
 import { diagramStateStore } from '@web/services/diagramStateStore'
 import DiagramRebuildDialog from '@web/components/DiagramRebuildDialog.vue'
 
@@ -108,8 +108,11 @@ async function renderMermaid(codeOverride?: string) {
     const mermaidApi = await ensureMermaid()
     const n = normalizeDiagram(stripHtml(codeOverride ?? props.code), 'mermaid')
     const clean = n.code
-    const valid = await mermaidApi.parse(clean, { suppressErrors: true })
-    if (!valid) throw new Error('图解法错误')
+    try {
+      await mermaidApi.parse(clean)
+    } catch (e: any) {
+      throw new Error(mermaidParseErrorDetail(e))
+    }
     const uid = 'm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
     const result = await mermaidApi.render(uid, clean)
     if (svgWrap.value) {
@@ -412,7 +415,7 @@ function zoomOut() {
 .diag-rebuild-btn:hover:not(:disabled){color:var(--accent,#4d6bfe);background:var(--bg-hover,#e8e8e8)}
 .diag-rebuild-btn:disabled{opacity:0.4;cursor:not-allowed}
 .diagram-loading{padding:32px;color:var(--text-muted,#888);font-size:var(--ui-font-size,14px);text-align:center}
-.diag-error{padding:32px;text-align:center;color:#e06c75;font-size:14px}
+.diag-error{padding:16px 24px;text-align:left;white-space:pre-wrap;word-break:break-word;color:#e06c75;font-size:14px;font-family:var(--font-mono,monospace);max-height:300px;overflow:auto;margin:8px}
 .diag-resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:transparent;z-index:1}
 .diag-resize-handle::after{content:'';display:block;height:2px;margin:2px 24px;border-radius:1px;background:var(--border,#e4e4e7);transition:background .15s}
 .diag-resize-handle:hover::after,.diag-resize-handle:active::after{background:var(--accent,#4d6bfe)}

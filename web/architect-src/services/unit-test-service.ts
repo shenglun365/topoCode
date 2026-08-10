@@ -1,12 +1,11 @@
 import type { AgentMessage, TestChannel, UnitTest, UnitTestSession } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import { ArchWs } from './ws-client'
-import { mockUnitTestService } from './mock/unit-test-service'
 
 /**
  * 单元测试适配接口。
  * 后端可用: REST(列表/添加/会话) + WS(执行/对话), 服务端模拟并落库。
- * 后端不可达: 自动回退本地 mock(镜像服务端模拟语义)。
+ * 后端失败直接抛出——不复用本地 mock。
  */
 
 export interface UnitTestRunOpts {
@@ -14,47 +13,24 @@ export interface UnitTestRunOpts {
   isCancelled?: () => boolean
 }
 
-let useMock = false
-let probed = false
-
-async function ensureBackend(): Promise<void> {
-  if (probed) return
-  probed = true
-  try {
-    await apiGet<UnitTest[]>('/unit-tests')
-    useMock = false
-  } catch {
-    useMock = true
-  }
-}
-
 export const unitTestService = {
   async listTests(): Promise<UnitTest[]> {
-    await ensureBackend()
-    return useMock ? mockUnitTestService.listTests() : apiGet<UnitTest[]>('/unit-tests')
+    return apiGet<UnitTest[]>('/unit-tests')
   },
 
   async listSessions(): Promise<UnitTestSession[]> {
-    await ensureBackend()
-    return useMock ? mockUnitTestService.listSessions() : apiGet<UnitTestSession[]>('/unit-test-sessions')
+    return apiGet<UnitTestSession[]>('/unit-test-sessions')
   },
 
   async addTest(data: Partial<UnitTest>): Promise<UnitTest> {
-    await ensureBackend()
-    if (useMock) return mockUnitTestService.addTest(data)
     return apiPost<UnitTest>('/unit-tests', data)
   },
 
   async createSession(opts: { title: string; channel: TestChannel; adapter: string; testIds?: string[] }): Promise<UnitTestSession> {
-    await ensureBackend()
-    if (useMock) return mockUnitTestService.createSession(opts)
     return apiPost<UnitTestSession>('/unit-test-sessions', opts)
   },
 
   async runTests(session: UnitTestSession, target: UnitTest[], opts?: UnitTestRunOpts): Promise<void> {
-    await ensureBackend()
-    if (useMock) return mockUnitTestService.runTests(session, target, opts)
-
     session.status = 'running'
     const ws = new ArchWs('ws/unit-test')
     await ws.ready()
@@ -92,9 +68,6 @@ export const unitTestService = {
   },
 
   async sendMessage(session: UnitTestSession, content: string): Promise<AgentMessage> {
-    await ensureBackend()
-    if (useMock) return mockUnitTestService.sendMessage(session, content)
-
     const userMsg: AgentMessage = { id: `m-${Date.now()}`, role: 'user', time: Date.now(), content }
     session.messages.push(userMsg)
     const ws = new ArchWs('ws/unit-test')

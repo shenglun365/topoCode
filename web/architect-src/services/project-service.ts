@@ -1,4 +1,4 @@
-import type { KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
+import type { KbMatchResult, KbProject, ProjectInfo, ProjectOverview, RepoStatus, Snapshot } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import router from '@/router'
 
@@ -40,6 +40,11 @@ export const projectService = {
   async listKbProjects(): Promise<KbProject[]> {
     return apiGet<KbProject[]>('/project/kb/list')
   },
+  /** 「增加关联」自动匹配：按工作主目录(本地 repo 为主)、远端地址为辅 返回 KB 候选。 */
+  async matchKbProjects(): Promise<KbMatchResult> {
+    const qs = projectQuery().toString()
+    return apiGet<KbMatchResult>(`/project/kb/match${qs ? '?' + qs : ''}`)
+  },
   /** 近期项目列表：architect 自持项目(arch_projects)按最近更新倒序。 */
   async listProjects(): Promise<ProjectInfo[]> {
     try {
@@ -66,12 +71,16 @@ export const projectService = {
     return apiPost<ProjectInfo>('/project/bind', { execRoot, name })
   },
   /** 项目页后补关联 KB(同源校验由后端执行)。 */
-  async linkKb(kbProjectId: string, execRoot?: string): Promise<ProjectInfo> {
-    return apiPost<ProjectInfo>('/project/link', { kbProjectId, execRoot })
+  async linkKb(opts: { kbProjectId: string; execRoot?: string; project?: string }): Promise<ProjectInfo> {
+    return apiPost<ProjectInfo>('/project/link', {
+      kbProjectId: opts.kbProjectId,
+      execRoot: opts.execRoot,
+      project: opts.project,
+    })
   },
   /** 解除 KB 关联(architect 项目保留)。 */
-  async unlinkKb(): Promise<ProjectInfo> {
-    return apiPost<ProjectInfo>('/project/unlink', {})
+  async unlinkKb(opts: { root?: string; project?: string }): Promise<ProjectInfo> {
+    return apiPost<ProjectInfo>('/project/unlink', opts)
   },
   /** 解除选择(URL 参数清除由 store 处理)。 */
   async unbind(): Promise<boolean> {

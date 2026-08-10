@@ -1,9 +1,7 @@
 import { defineStore } from 'pinia'
 import type { ExternalCall } from '@/types'
-import { EXTERNAL_CALLS } from '@/services/mock/order-system'
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
-import { mockResult } from '@/services/mock/delay'
 
 export const useArchMcpStore = defineStore('arch-mcp', {
   state: () => ({
@@ -20,20 +18,15 @@ export const useArchMcpStore = defineStore('arch-mcp', {
     async load() {
       if (this.loaded || this.loading) return
       this.loading = true
-      if (await backendUp()) {
-        try {
-          this.calls = (await apiGet<ExternalCall[]>('/mcp/calls')) ?? []
-          this.loaded = true
-          this.loading = false
-          return
-        } catch {
-          // fall through to mock
-        }
+      if (!(await backendUp())) throw new Error('后端不可达，无法加载 MCP 调用')
+      try {
+        this.calls = (await apiGet<ExternalCall[]>('/mcp/calls')) ?? []
+        this.loaded = true
+        this.loading = false
+      } catch (err) {
+        this.loading = false
+        throw err
       }
-      const existing = this.calls
-      this.calls = await mockResult([...EXTERNAL_CALLS, ...existing], 200)
-      this.loaded = true
-      this.loading = false
     },
     record(call: ExternalCall) {
       this.calls.unshift(call)

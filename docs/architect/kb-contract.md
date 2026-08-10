@@ -102,6 +102,30 @@ result: VersionPreview + { projectId, requestId, branch, head }
 ```
 POST /zmq/knowledge.updateCancel  params: { requestId }   result: { cancelled: bool }
 ```
+
+### architecture.model（KB-REQ-17 组件索引接管）
+```
+POST /zmq/architecture.model
+params: { projectId, taskId?, level?('L1'), edgeType?('INCLUDE') }
+result: {
+  components: [{ id, name, kind, desc, lang, change, responsibilities[], owns[], dependsOn[] }],
+  codeMappings: [{ id, targetType, targetId, targetName, file, line, level, note }],
+  entityClasses / erTables / ormMappings / executionFlows / dataFlows
+}
+```
+- 组件来自项目最新 done 分析任务的图谱社区（L1 优先，空则 L0；INCLUDE 边）。
+- `name` 取自 `community_llm_results`（LLM 社区名），回退按文件路径族取名；
+- `kind` 优先 LLM `component_type`，空/通用则按文件路径推断（routes→service 等）；
+- `change` 归因版本差异（≥2 个基线时按 added/modified 文件归属，否则 `same`）；
+- `dependsOn` 由 `graph_edge kind=imports` 跨社区引用边聚合；
+- `codeMappings` 由 `graph_node` 文件首符号行号给出（锁定「改哪里」）。
+- 无项目/无 done 任务/无社区时返回全空模型（不抛错）。
+
+### version.diff / version.materialize（architect R3/R2 消费）
+```
+POST /zmq/version.diff   params: { projectId, fromId, toId }
+POST /zmq/version.materialize  params: { projectId, versionId }
+```
 ### project.saveBaseline（手工设置版本基线）
 ```
 POST /zmq/project.saveBaseline

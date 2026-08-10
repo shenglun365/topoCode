@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
@@ -19,14 +19,22 @@ const task = useArchTaskStore()
 const isWorkbench = computed(() => !!route.meta.workbench)
 const showStepper = computed(() => !!route.meta.stepper)
 
-onMounted(async () => {
-  if (!project.loaded) {
-    await project.load()
-    if (project.project) {
-      await Promise.all([requirement.load(), architecture.loadFromSnapshot(), task.load()])
+async function syncProject() {
+  await project.load()
+  if (project.project) {
+    for (const load of [requirement.load, architecture.loadFromSnapshot, task.load]) {
+      await load().catch((err) => console.error('[arch] 数据加载失败', err))
     }
   }
-})
+}
+
+onMounted(() => syncProject())
+
+/** URL 内项目选择(?project=/ ?root=)变化 → 重新同步项目与各业务 store(多页签各处理不同项目)。 */
+watch(
+  () => [route.query.project, route.query.root] as const,
+  () => syncProject(),
+)
 </script>
 
 <template>

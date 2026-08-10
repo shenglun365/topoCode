@@ -11,13 +11,10 @@ def _kb_degraded(root=None, project_id=None) -> bool:
     """是否降级: 无项目 或 项目无 KB 基线(工作目录直开/无 KB 内容支撑)。
 
     项目选择持久化在 URL(?root=/?project=)，由前端随请求透传 root/project。
+    复用 project.kb_degraded 统一口径。
     """
-    try:
-        from .project import _resolve_project
-        proj = _resolve_project(root, project_id)
-    except Exception:
-        return True
-    return not (proj and proj.get("baselineId"))
+    from .project import kb_degraded as _d
+    return _d(root, project_id)
 
 
 @router.get("/requirements")
@@ -25,11 +22,114 @@ async def list_requirements():
     return ok(store.RequirementsStore.all())
 
 
+# ── 需求分析会话历史(阶段D 统一表，范围仅限临时提案/未绑定正式提案的会话) ──
+
+def _conv_bound(conv: dict) -> bool:
+    """会话是否已绑定正式提案(存在同 req_id 的需求)。未绑定 → 可导入/删除。"""
+    req_id = conv.get("reqId") or ""
+    if not req_id:
+        return False
+    return bool(store.RequirementsStore.get(req_id))
+
+
+@router.get("/requirements/conversations")
+async def list_conversations(project_id: str = ""):
+    """历史会话摘要列表(仅返回临时/未绑定提案的会话，供导入或删除)。"""
+    convs = store.ConversationsStore.summaries(kind="requirement", project_id=project_id or None)
+    items = []
+    for c in convs:
+        if _conv_bound(c):
+            continue
+        items.append({
+            "id": c["id"], "kind": c.get("kind"), "reqId": c.get("reqId", ""),
+            "title": c.get("title") or f"{c.get('kind') or 'requirement'} 对话",
+            "msgCount": c.get("msgCount") or 0,
+            "preview": (c.get("preview") or "").strip()[:160],
+            "createdAt": c.get("createdAt") or c.get("updatedAt"),
+            "updatedAt": c.get("updatedAt"),
+        })
+    return ok(items)
+
+
+@router.get("/requirements/conversations/by-req/{req_id}")
+async def get_conversation_by_req(req_id: str, project_id: str = ""):
+    """按正式提案 id 自动导入其历史会话(需求再编辑/继续对话)。"""
+    conv = None
+    for c in store.ConversationsStore.by_req(req_id, project_id=project_id or ""):
+        if _conv_bound(c) or c.get("reqId") == req_id:
+            conv = c
+            break
+    if not conv:
+        return ok(None)
+    return ok({
+        "id": conv["id"], "kind": conv.get("kind"), "reqId": conv.get("reqId", ""),
+        "title": conv.get("title") or (f"{(store.RequirementsStore.get(req_id) or {}).get('title') or ''}" or f"{req_id} 对话"),
+        "messages": store.ConversationsStore.messages(conv["id"]),
+    })
+
+
+@router.get("/requirements/conversations/{conv_id}")
+async def get_conversation(conv_id: str):
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "Conversation not found")
+    return ok({
+        "id": conv["id"], "kind": conv.get("kind"), "reqId": conv.get("reqId", ""),
+        "title": conv.get("title") or f"{(conv.get('kind') or 'requirement')} 对话",
+        "messages": store.ConversationsStore.messages(conv_id),
+    })
+
+
+@router.delete("/requirements/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "Conversation not found")
+    if _conv_bound(conv):
+        return err(400, "已绑定正式提案的会话不可删除")
+    store.ConversationsStore.delete(conv_id)
+    return ok({"deleted": True, "id": conv_id})
+
+
+@router.delete("/requirements/conversations/{conv_id}/messages/{message_id}")
+async def delete_conversation_message(conv_id: str, message_id: str):
+    """对话流单条消息删除(可回退当前轮工具上下文)。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "Conversation not found")
+    msg = store.ConversationsStore.messages(conv_id)
+    if not any(m.get("id") == message_id for m in msg):
+        return err(404, "Message not found")
+    if _conv_bound(conv):
+        return err(400, "已绑定正式提案的会话不可删除消息")
+    ok_deleted = store.ConversationsStore.delete_message(conv_id, message_id)
+    store.ConversationsStore.update(conv_id, {"updatedAt": _ts()})
+    return ok({"deleted": ok_deleted, "id": message_id})
+
+
+@router.patch("/requirements/conversations/{conv_id}")
+async def update_conversation(conv_id: str, request: Request):
+    """绑定会话到正式提案(临时会话保存后 rebind req_id)，或更新标题。"""
+    conv = store.ConversationsStore.get(conv_id)
+    if not conv:
+        return err(404, "Conversation not found")
+    body = await request.json()
+    update = {}
+    if body.get("reqId"):
+        update["reqId"] = body["reqId"]
+    if body.get("title"):
+        update["title"] = body["title"]
+    if not update:
+        return err(400, "No fields to update")
+    store.ConversationsStore.update(conv_id, update)
+    return ok(store.ConversationsStore.get(conv_id))
+
+
 @router.post("/requirements")
 async def create_requirement(request: Request):
     body = await request.json()
     req = {
-        "id": store.next_id("RQ"), "kind": body.get("kind", "user-story"), "tier": "raw",
+        "id": body.get("id") or store.next_id("RQ"), "kind": body.get("kind", "user-story"), "tier": "raw",
         "location": "proposal", "title": body.get("title", ""),
         "priority": body.get("priority", "P2"), "status": "raw",
         "desc": body.get("desc", ""), "acceptance": body.get("acceptance", []),
@@ -107,7 +207,11 @@ async def move_requirement_location(req_id: str, request: Request):
 
 @router.post("/requirements/analyze/clarify")
 async def analyze_clarify(request: Request):
-    """KB 澄清: 返回候选资产命中 + 澄清问题清单(同步完整, 不必走 /ws/kb-analysis)。"""
+    """KB 澄清: 基于真实 KB 资产命中 + LLM 生成澄清问题清单。
+
+    原则：无回退/降级伪造——项目未绑定 KB 或 harness 失败 → 明确报错(提示 KB 能力不足)。
+    仅 greenfield(从零)模式无 KB 可检索时走领域建模提问(生成式能力，非伪造 KB 数据)。
+    """
     body = await request.json()
     req = body.get("req") or {}
     title = req.get("title", "")
@@ -115,33 +219,33 @@ async def analyze_clarify(request: Request):
     mode = req.get("mode")
     preferred = req.get("preferredAssetIds") or []
     degraded = _kb_degraded(body.get("root"), body.get("project"))
-    # 简单命中: 按 traceTo/关键词在 kb 资产名里匹配；未绑定项目时降级为无命中
-    hits = [] if degraded else _match_assets(f"{title} {desc}", preferred)
-    options = [h["name"] for h in hits[:6]]
-    if mode == "greenfield":
-        questions = [
-            {"key": "scope", "label": "需求的功能范围包含哪些？建议的模块/服务划分？", "type": "text", "hint": "如：订单管理、支付、库存…一行一条。"},
-            {"key": "boundary", "label": "核心业务实体有哪些？", "type": "text", "hint": "如 Order、Payment、Product 等业务抽象。"},
-            {"key": "flows", "label": "核心业务流？", "type": "text", "hint": "如：下单流程、支付回调流程、超时关单…"},
-            {"key": "acceptance", "label": "可验收标准？(至少一条可测试的行为)", "type": "text", "hint": "描述可验证的输入/输出与边界行为。"},
+    model_id = body.get("modelId") or body.get("req", {}).get("modelId") or None
+
+    # 既有项目：必须已绑定 KB，否则明确报错(KB 能力不足/未关联)
+    if mode != "greenfield" and degraded:
+        return err(400, KB_NOTE)
+
+    from .req_agent import req_harness_clarify
+    from .common import KbUnavailableError
+    try:
+        agent = req_harness_clarify(req, body.get("root"), body.get("project"), model_id=model_id)
+    except KbUnavailableError as e:
+        return err(502, str(e))
+    if agent and agent.get("questions"):
+        questions = agent.get("questions")
+        hits = agent.get("hits") or []
+        content = (f"已基于知识库与需求生成澄清问题清单(命中 {len(hits)} 项候选资产)。请逐一作答，我会据此收敛结果表单。"
+                   if mode != "greenfield" else
+                   "项目从零开始，无既有知识库可检索。请描述需求的功能范围和核心业务实体，我会据此给出领域建模建议。")
+        turns = [
+            {"role": "user", "content": f"请基于{'领域建模思路' if mode == 'greenfield' else '知识库'}澄清需求「{title}」。\n{desc or '(未提供详细描述)'}"},
+            {"role": "assistant", "content": content, "questions": questions},
         ]
-        content = ("项目从零开始，没有既有知识库可以检索。请描述需求的功能范围和核心业务实体，我会据此给出领域建模建议。"
-                   if not degraded else
-                   "未绑定项目，KB 能力降级：无既有资产检索。请描述需求的功能范围和核心业务实体，我会基于领域建模给出建议资产。")
-    else:
-        questions = [
-            {"key": "scope", "label": "需求的功能范围包含哪些？", "type": "text", "hint": f"命中候选：{('、'.join(options)) or '无'}。一行一条或逗号分隔。"},
-            {"key": "boundary", "label": "涉及的核心业务实体与逻辑边界？", "type": "text", "hint": "如 Order、OutboxEvent 等业务抽象(非详细代码)。"},
-            {"key": "acceptance", "label": "可验收标准？(至少一条可测试的行为)", "type": "text", "hint": "描述可验证的输入/输出与边界行为。"},
-        ]
-        content = (f"已检索知识库(命中 {len(hits)} 项资产：{('、'.join(options)) or '—'})。先回答下面几个问题，我会据此生成结果表单草案。"
-                   if not degraded else
-                   "未绑定项目，KB 能力降级：无资产检索/无社区摘要。先回答下面几个问题，我会基于需求描述生成结果表单草案。")
-    turns = [
-        {"role": "user", "content": f"请基于{'领域建模思路' if mode == 'greenfield' else '知识库'}澄清需求「{title}」。\n{desc or '(未提供详细描述)'}"},
-        {"role": "assistant", "content": content, "questions": questions},
-    ]
-    return ok({"turns": turns, "questions": questions, "hits": hits[:6], "degraded": degraded})
+        return ok({"turns": turns, "questions": questions, "hits": hits[:6],
+                   "degraded": agent.get("degraded", False), "llm": True})
+
+    # harness 失败(LLM 不可用/结构化解析失败) → 明确报错，不再回退伪造问题
+    return err(502, "KB/LLM 能力不足：需求澄清未生成问题清单(harness 调用失败)。请确认 LLM 模型已配置且 KB 可达后重试。")
 
 
 @router.post("/requirements/analyze/collect")
@@ -158,8 +262,36 @@ async def analyze_collect(request: Request):
     acceptance = _split_list(answers.get("acceptance"))
     mode = base.get("mode")
     degraded = _kb_degraded(body.get("root"), body.get("project"))
-    degraded_note = "（未绑定项目，KB 能力降级：无既有资产检索/社区摘要，以下为基于需求描述的规划建议）" if degraded else ""
+    model_id = body.get("modelId") or base.get("modelId") or None
 
+    # 既有项目：必须已绑定 KB，否则明确报错(KB 能力不足/未关联)
+    if mode != "greenfield" and degraded:
+        return err(400, KB_NOTE)
+
+    from .req_agent import req_harness_collect
+    from .common import KbUnavailableError
+    try:
+        agent = req_harness_collect({"turns": body.get("turns") or [], "base": base,
+                                     "answers": answers, "note": body.get("note")},
+                                    body.get("root"), body.get("project"), model_id=model_id)
+    except KbUnavailableError as e:
+        return err(502, str(e))
+    if agent and agent.get("report"):
+        report = agent.get("report")
+        draft = {
+            "title": title, "kind": base.get("kind") or "user-story", "priority": base.get("priority"),
+            "tags": [], "assetScope": report.get("assetScope") or [],
+            "assessmentSummary": report.get("assessmentSummary") or "",
+            "estMin": (report.get("feasibility") or {}).get("estMin") or 0,
+            "specsMd": report.get("specsMd") or "跨组件调用仅经公开接口",
+            "implementationPath": report.get("implementationPath") or "",
+            "report": report,
+        }
+        return ok({"report": report, "formDraft": draft, "reply": _compose_collect_reply(report, title),
+                   "hits": (agent.get("hits") or [])[:6],
+                   "degraded": agent.get("degraded", False), "llm": True})
+
+    # ── greenfield：从零生成(architect 设计的生成式能力，非 KB 检索数据) ──
     if mode == "greenfield":
         primary = (scope or ["core-service"])[0]
         asset_scope = []
@@ -174,15 +306,15 @@ async def analyze_collect(request: Request):
             "assessment": {"necessity": {"grade": "high", "reason": "与核心链路直接相关"},
                            "atomicity": {"independent": True, "reason": "核心模块收敛"},
                            "acceptability": {"ok": True, "reason": "可转换为功能用例验收"}},
-            "assessmentSummary": f"需求「{title}」评估结论：可行。{degraded_note}".rstrip(),
+            "assessmentSummary": f"需求「{title}」评估结论：可行。",
             "implementationPath": f"建议以「{primary}」为主干，实现「{title}」核心逻辑。",
             "steps": [{"id": "gstep-1", "title": "领域设计", "desc": "细化建议模块的边界与职责", "estMin": 60, "context": scope or ["core-service"]},
                       {"id": "gstep-2", "title": "核心实现", "desc": f"按蓝图实现「{title}」主体", "estMin": 120, "context": scope or ["core-service"]}],
         }
         if not answered:
             questions = [{"key": "acceptance", "label": "请至少补充一条备注信息，将并入备注。", "type": "text", "hint": "描述可验证的行为或期望的功能范围。"}]
-            return ok({"turns": [{"role": "assistant", "content": "请补充需求描述后再继续。", "questions": questions}], "questions": questions, "degraded": degraded})
-        return ok({"report": report, "degraded": degraded, "formDraft": {
+            return ok({"turns": [{"role": "assistant", "content": "请补充需求描述后再继续。", "questions": questions}], "questions": questions, "degraded": False})
+        return ok({"report": report, "degraded": False, "formDraft": {
             "title": title, "kind": base.get("kind") or "user-story", "priority": base.get("priority"),
             "tags": [], "assetScope": asset_scope,
             "assessmentSummary": report["assessmentSummary"], "estMin": report["feasibility"]["estMin"],
@@ -190,22 +322,8 @@ async def analyze_collect(request: Request):
             "implementationPath": report["implementationPath"], "report": report,
         }})
 
-    hits = [] if degraded else _match_assets(f"{title} {desc} {' '.join(answered)}", base.get("preferredAssetIds") or [])
-    asset_scope = [{"assetId": h["assetId"], "assetType": "component", "role": "core" if i == 0 else "related", "source": "auto"}
-                   for i, h in enumerate(hits[:5])]
-    report = {
-        "functionalScope": scope, "entityBoundary": boundary,
-        "feasibility": {"ok": True, "reason": "已核对需求边界，可按步骤落地", "estMin": 30 + len(hits) * 60},
-        "assetScope": asset_scope,
-        "assessment": {"necessity": {"grade": "high", "reason": "直接关联核心链路"},
-                       "atomicity": {"independent": True, "reason": "边界清晰"},
-                       "acceptability": {"ok": True, "reason": "可转换为验收用例"}},
-        "assessmentSummary": f"需求「{title}」评估结论：可行。涉及 {len(hits)} 项资产。{degraded_note}".rstrip(),
-        "implementationPath": f"按「{title}」需求实现，覆盖涉及资产。",
-        "steps": [{"id": f"step-{i}", "title": f"实现 {h['name']}", "desc": f"围绕 {h['name']} 落地需求变更", "estMin": 90, "context": [h["name"]]} for i, h in enumerate(hits[:4])] or
-                 [{"id": "step-1", "title": "实现需求主体", "desc": "按需求描述实现", "estMin": 90, "context": []}],
-    }
-    return ok({"report": report, "hits": hits[:6], "degraded": degraded})
+    # 既有项目 harness 失败(LLM 不可用/结构化解析失败) → 明确报错，不再回退伪造
+    return err(502, "KB/LLM 能力不足：需求分析收敛未生成结果(harness 调用失败)。请确认 LLM 模型已配置且 KB 可达后重试。")
 
 
 def _slug(text):
@@ -220,11 +338,27 @@ def _split_list(value):
     return [v.strip() for v in str(value).split(",") if v.strip()]
 
 
-def _match_assets(text, preferred=None):
+def _compose_collect_reply(report: dict, title: str) -> str:
+    """把 LLM 收敛出的分析结论转成助手回复文本,透传给前端聊天区展示。"""
+    scope = report.get("functionalScope") or []
+    assets = report.get("assetScope") or []
+    est = (report.get("feasibility") or {}).get("estMin") or 0
+    summary = report.get("assessmentSummary") or ""
+    path = report.get("implementationPath") or ""
+    parts = [f"已完成对「{title}」的需求分析：功能范围 {len(scope)} 项，关联 {len(assets)} 项数据资产，预估耗时 {est} 分钟。"]
+    if summary:
+        parts.append(summary)
+    if path:
+        parts.append(f"实现路径：{path}")
+    parts.append("右侧已生成结果表单草案，请审阅确认后再替换表单。")
+    return "\n".join(p for p in parts if p)
+
+
+def _match_assets(text, preferred=None, root=None, project=None):
     """按文本在 kb 资产里做朴素命中(名称/标签/描述包含)。"""
     try:
         from .knowledge import _all_assets as kb_all
-        assets = kb_all()
+        assets = kb_all(root, project)
     except Exception:
         assets = []
     lowered = (text or "").lower()
@@ -232,7 +366,8 @@ def _match_assets(text, preferred=None):
     hits = [a for a in assets if pre and a.get("assetId") in pre]
     if not hits:
         hits = [a for a in assets if lowered and any(
-            kw in (a.get("name") or "").lower() or kw in (a.get("description") or "").lower()
+            kw in (a.get("name") or "").lower()
+            or kw in (a.get("description") or a.get("desc") or "").lower()
             for kw in _split_list(lowered)
         )]
     return hits

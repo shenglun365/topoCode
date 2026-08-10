@@ -1,16 +1,25 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { CommandLineIcon, LanguageIcon } from '@heroicons/vue/24/outline'
-import StarLogoMark from '@web/components/StarLogoMark.vue'
+import {
+  CommandLineIcon,
+  LanguageIcon,
+  ChevronDownIcon,
+  CheckIcon,
+  ChevronUpDownIcon,
+} from '@heroicons/vue/24/outline'
+import StarLogoMark from '@/components/common/StarLogoMark.vue'
 import { useArchProjectStore } from '@/stores/project-store'
-import { useArchSettingsStore } from '@/stores/settings-store'
+import { useArchSettingsStore, FONT_SCALES } from '@/stores/settings-store'
 import type { Locale } from '@/types'
 
 const router = useRouter()
 const { t, locale } = useI18n()
 const project = useArchProjectStore()
 const settings = useArchSettingsStore()
+
+const fontMenuOpen = ref(false)
 
 function toggleLocale() {
   const next: Locale = locale.value === 'zh-CN' ? 'en-US' : 'zh-CN'
@@ -19,6 +28,11 @@ function toggleLocale() {
 
 function goOverview() {
   router.push('/overview')
+}
+
+function setFontScale(scale: number) {
+  settings.setFontScale(scale)
+  fontMenuOpen.value = false
 }
 </script>
 
@@ -53,6 +67,43 @@ function goOverview() {
     </div>
 
     <div class="flex-1" />
+
+    <div class="relative">
+      <button
+        class="btn btn-ghost"
+        :title="t('app.fontScale')"
+        @click="fontMenuOpen = !fontMenuOpen"
+      >
+        <ChevronUpDownIcon class="w-4 h-4" />
+        <span class="text-xs">{{ Math.round(settings.fontScale * 100) }}%</span>
+        <ChevronDownIcon class="w-3 h-3" />
+      </button>
+
+      <div
+        v-if="fontMenuOpen"
+        class="fixed inset-0 z-40"
+        @click="fontMenuOpen = false"
+        @contextmenu.prevent="fontMenuOpen = false"
+      />
+      <div
+        v-if="fontMenuOpen"
+        class="absolute right-0 top-full mt-1 z-50 w-28 rounded-md border border-ctp-surface0 bg-ctp-mantle shadow-lg py-1"
+      >
+        <button
+          v-for="s in FONT_SCALES"
+          :key="s"
+          class="flex items-center justify-between w-full px-3 py-1.5 text-sm text-ctp-subtext1 hover:bg-ctp-surface0 hover:text-ctp-text"
+          :class="s === settings.fontScale ? 'text-ctp-text font-medium' : ''"
+          @click="setFontScale(s)"
+        >
+          <span>{{ Math.round(s * 100) }}%</span>
+          <CheckIcon
+            v-if="s === settings.fontScale"
+            class="w-3.5 h-3.5 text-ctp-green"
+          />
+        </button>
+      </div>
+    </div>
 
     <button
       class="btn btn-ghost"
