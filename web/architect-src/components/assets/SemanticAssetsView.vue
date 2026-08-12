@@ -15,6 +15,8 @@ const q = ref('')
 const items = ref<SemanticAsset[]>([])
 const loading = ref(false)
 const extracting = ref(false)
+const reconciling = ref(false)
+const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
@@ -47,6 +49,40 @@ function toggle(id: string) {
   expanded[id] = !expanded[id]
 }
 
+async function reconcile() {
+  reconciling.value = true
+  try {
+    await semanticAssetService.reconcile(true)
+    await load()
+  } finally {
+    reconciling.value = false
+  }
+}
+
+async function refreshOne(a: SemanticAsset) {
+  try {
+    const res = await semanticAssetService.refreshAsset(a.id)
+    if (res.asset) {
+      const i = items.value.findIndex((x) => x.id === a.id)
+      if (i >= 0) items.value[i] = { ...items.value[i], ...res.asset }
+    } else if (res.status === 'deleted') {
+      const i = items.value.findIndex((x) => x.id === a.id)
+      if (i >= 0) items.value[i] = { ...items.value[i], status: 'deleted', needsUpdate: 1 }
+    }
+  } catch (err: any) {
+    console.warn('[semantic] refresh failed:', err)
+  }
+}
+
+function usable(a: SemanticAsset): boolean {
+  return a.status !== 'stale' && a.status !== 'deleted' && !a.needsUpdate
+}
+
+onMounted(async () => {
+  await load()
+  semanticAssetService.status().then((s) => { statusCounts.value = s.counts }).catch(() => {})
+})
+
 function kindIcon(k: SemanticAsset['kind']) {
   if (k === 'processing_flow') return BoltIcon
   if (k === 'control_logic') return AdjustmentsHorizontalIcon
@@ -54,19 +90,33 @@ function kindIcon(k: SemanticAsset['kind']) {
 }
 
 async function copyAsset(a: SemanticAsset) {
-  const lines = [`${a.name} (${kinds.find((x) => x.value === a.kind)?.label ?? a.kind})`, a.desc]
+  const lines = [`${a.name} (${kinds.find((x) => x.value === a.kind)?.label ?? a.kind})`, `ID: ${a.id}`, a.desc]
   if (a.astRefs?.length) {
     lines.push('')
     lines.push(...a.astRefs.slice(0, 10).map((r) => `${r.file}:L${r.startLine}-L${r.endLine} ${r.symbol}`))
   }
+  const text = lines.join('\n')
   try {
-    await navigator.clipboard?.writeText(lines.join('\n'))
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+  } catch {
+    // fallthrough
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try {
+    document.execCommand('copy')
   } catch {
     /* ignore */
   }
+  document.body.removeChild(ta)
 }
-
-onMounted(load)
 </script>
 
 <template>
@@ -97,7 +147,29 @@ onMounted(load)
       >
         <ArrowPathIcon class="w-3.5 h-3.5" />{{ t('semanticAssets.search') }}
       </button>
+      <span
+        v-if="statusCounts.stale || statusCounts.needsUpdate"
+        class="chip bg-ctp-yellow/15 text-ctp-yellow"
+      >{{ t('semanticAssets.needsUpdate') }}: {{ statusCounts.needsUpdate ?? 0 }}</span>
+      <span
+        v-if="statusCounts.deleted"
+        class="chip bg-ctp-red/15 text-ctp-red"
+      >{{ t('semanticAssets.deleted') }}: {{ statusCounts.deleted }}</span>
       <span class="flex-1" />
+      <button
+        class="btn btn-ghost !py-1.5"
+        :disabled="reconciling"
+        @click="reconcile"
+      >
+        <ArrowPathIcon
+          v-if="!reconciling"
+          class="w-3.5 h-3.5"
+        />
+        <ArrowPathIcon
+          v-else
+          class="w-3.5 h-3.5 animate-spin"
+        />{{ reconciling ? t('semanticAssets.reconciling') : t('semanticAssets.reconcile') }}
+      </button>
       <button
         class="btn btn-primary !py-1.5"
         :disabled="extracting"
@@ -136,7 +208,15 @@ onMounted(load)
             {{ a.source ?? 'live' }}
           </span>
           <span
-            v-if="a.change === 'added'"
+            v-if="a.needsUpdate || a.status === 'stale'"
+            class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow"
+          >{{ t('semanticAssets.needsUpdate') }}</span>
+          <span
+            v-else-if="a.status === 'deleted'"
+            class="chip !text-[9px] bg-ctp-red/15 text-ctp-red"
+          >{{ t('semanticAssets.deleted') }}</span>
+          <span
+            v-else-if="a.change === 'added'"
             class="chip !text-[9px] bg-ctp-green/15 text-ctp-green"
           >{{ t('semanticAssets.added') }}</span>
           <span
@@ -147,6 +227,14 @@ onMounted(load)
           <span class="text-[10px] text-ctp-overlay0 whitespace-nowrap">
             {{ a.astRefs?.length ?? 0 }} AST
           </span>
+          <button
+            v-if="!usable(a)"
+            class="text-ctp-yellow hover:text-ctp-peach p-0.5"
+            :title="t('semanticAssets.refresh')"
+            @click="refreshOne(a)"
+          >
+            <ArrowPathIcon class="w-3.5 h-3.5" />
+          </button>
           <button
             class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
             :title="t('semanticAssets.copy')"

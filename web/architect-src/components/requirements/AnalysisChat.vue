@@ -3,6 +3,7 @@ import { nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
+import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import type { ArchLlmModel, SemanticAsset, SemanticAssetKind } from '@/types'
 
 const props = defineProps<{
@@ -10,6 +11,12 @@ const props = defineProps<{
   busy: boolean
   models?: ArchLlmModel[]
   modelId?: string
+  /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
+  title?: string
+  /** 是否显示「提取语义资产」按钮(需求分析对话隐藏；资产管理保留)。 */
+  showExtract?: boolean
+  /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
+  diagramSkill?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +26,8 @@ const emit = defineEmits<{
   'model-change': [id: string]
   'delete-turn': [index: number]
   'extract-assets': [kinds?: SemanticAssetKind[]]
+  'refresh-asset': [assetId: string]
+  'toggle-diagram-skill': [enabled: boolean]
 }>()
 
 const { t } = useI18n()
@@ -101,13 +110,25 @@ function submitAnswers() {
   Object.keys(answers).forEach((k) => delete answers[k])
 }
 
-/** 单条消息删除：确认后移除本地 turn(持久化删除由 workspace 处理)。 */
+/** 单条消息删除：DOM 弹窗确认后移除本地 turn(持久化删除由 workspace 处理)。 */
+const deletePending = ref<number | null>(null)
+
 function removeTurn(i: number) {
   if (props.busy) return
   const m = props.turns[i]
   if (!m) return
-  if (!window.confirm(t('requirement.chat.deleteTurnConfirm'))) return
+  deletePending.value = i
+}
+
+function confirmDeleteTurn() {
+  const i = deletePending.value
+  deletePending.value = null
+  if (i === null) return
   emit('delete-turn', i)
+}
+
+function cancelDeleteTurn() {
+  deletePending.value = null
 }
 
 // ---- 复制：整条消息按钮 + 选中即复制(监听 copy 事件) + 轻提示 ----
@@ -171,6 +192,13 @@ function showToast(text: string) {
   toastTimer = setTimeout(() => { toastVisible.value = false }, 2000)
 }
 
+// ---- 推理内容(thinking)折叠展示 ----
+const reasoningOpen = reactive<Record<number, boolean>>({})
+
+function toggleReasoning(i: number) {
+  reasoningOpen[i] = !reasoningOpen[i]
+}
+
 // ---- 语义数据资产卡片 ----
 const expandedAssets = reactive<Record<string, boolean>>({})
 
@@ -205,7 +233,7 @@ function assetSummary(a: SemanticAsset): string {
 }
 
 function copyAsset(a: SemanticAsset) {
-  const lines = [`${a.name} (${assetKindLabel(a.kind)})`, a.desc]
+  const lines = [`${a.name} (${assetKindLabel(a.kind)})`, `ID: ${a.id}`, a.desc]
   if (a.astRefs?.length) {
     lines.push('')
     lines.push(...a.astRefs.slice(0, 10).map((r) => `${r.file}:L${r.startLine}-L${r.endLine} ${r.symbol}`))
@@ -218,6 +246,16 @@ function onExtractAssets() {
   emit('extract-assets')
 }
 
+/** 资产是否可引用(active 且未标记需更新)。 */
+function assetUsable(a: SemanticAsset): boolean {
+  return a.status !== 'stale' && a.status !== 'deleted' && !a.needsUpdate
+}
+
+function onRefreshAsset(a: SemanticAsset) {
+  if (props.busy) return
+  emit('refresh-asset', a.id)
+}
+
 onUnmounted(() => {
   if (copiedTimer.value) clearTimeout(copiedTimer.value)
   if (toastTimer) clearTimeout(toastTimer)
@@ -228,7 +266,7 @@ onUnmounted(() => {
   <div class="relative flex flex-col h-full min-h-0 border border-ctp-surface0 rounded-lg overflow-hidden bg-ctp-crust/30">
     <div class="panel-header shrink-0">
       <span class="flex items-center gap-2">
-        <ChatBubbleLeftRightIcon class="w-4 h-4 text-ctp-blue" />{{ t('requirement.chat.title') }}
+        <ChatBubbleLeftRightIcon class="w-4 h-4 text-ctp-blue" />{{ title ?? t('requirement.chat.title') }}
       </span>
       <select
         v-if="props.models?.length"
@@ -289,6 +327,31 @@ onUnmounted(() => {
             </span>
             <span class="flex-1" />
             <button
+              v-if="m.reasoning"
+              class="text-ctp-overlay0 hover:text-ctp-sky transition-colors p-0.5 flex items-center gap-1 text-[10px]"
+              :title="t('requirement.chat.toggleReasoning')"
+              @click="toggleReasoning(i)"
+            >
+              <svg
+                class="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              ><path d="M12 3a3 3 0 0 0-3 3v12a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z" /><path d="M19 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" /><path d="M5 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" /></svg>
+              <ChevronDownIcon
+                v-if="reasoningOpen[i]"
+                class="w-3 h-3"
+              />
+              <ChevronRightIcon
+                v-else
+                class="w-3 h-3"
+              />
+              {{ t('requirement.chat.reasoning') }}
+            </button>
+            <button
               class="text-ctp-overlay0 hover:text-ctp-blue transition-colors p-0.5"
               :title="t('requirement.chat.copyTurn')"
               :disabled="busy"
@@ -312,9 +375,17 @@ onUnmounted(() => {
               <TrashIcon class="w-3 h-3" />
             </button>
           </div>
-          <p class="whitespace-pre-wrap text-ctp-subtext1">
-            {{ m.content }}
-          </p>
+
+          <div
+            v-if="m.reasoning && reasoningOpen[i]"
+            class="mb-2 rounded-md border border-ctp-sky/20 bg-ctp-sky/5 px-2.5 py-2 text-[11px] text-ctp-subtext0 whitespace-pre-wrap max-h-64 overflow-auto"
+          >
+            <div class="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-ctp-sky mb-1">
+              <BookOpenIcon class="w-3 h-3" />{{ t('requirement.chat.reasoning') }}
+            </div>
+            {{ m.reasoning }}
+          </div>
+          <ChatMessageBlocks :content="m.content" />
 
           <div
             v-if="m.assets?.length"
@@ -335,7 +406,15 @@ onUnmounted(() => {
                 </span>
                 <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
                 <span
-                  v-if="a.change === 'modified'"
+                  v-if="a.needsUpdate || a.status === 'stale'"
+                  class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+                >{{ t('requirement.chat.assetNeedsUpdate') }}</span>
+                <span
+                  v-else-if="a.status === 'deleted'"
+                  class="chip !text-[9px] bg-ctp-red/15 text-ctp-red shrink-0"
+                >{{ t('requirement.chat.assetDeleted') }}</span>
+                <span
+                  v-else-if="a.change === 'modified'"
                   class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
                 >{{ t('requirement.chat.assetModified') }}</span>
                 <span
@@ -344,6 +423,15 @@ onUnmounted(() => {
                 >{{ t('requirement.chat.assetAdded') }}</span>
                 <span class="flex-1" />
                 <span class="text-[9px] text-ctp-overlay0 whitespace-nowrap">{{ assetSummary(a) }}</span>
+                <button
+                  v-if="!assetUsable(a)"
+                  class="text-ctp-yellow hover:text-ctp-peach transition-colors p-0.5"
+                  :title="t('requirement.chat.assetRefresh')"
+                  :disabled="busy"
+                  @click="onRefreshAsset(a)"
+                >
+                  <ArrowPathIcon class="w-3 h-3" />
+                </button>
                 <button
                   class="text-ctp-overlay0 hover:text-ctp-mauve transition-colors p-0.5"
                   :title="t('requirement.chat.assetCopy')"
@@ -527,6 +615,28 @@ onUnmounted(() => {
       </div>
     </transition>
 
+    <div class="flex items-center gap-2 border-t border-ctp-surface0 px-2.5 py-1.5 shrink-0">
+      <button
+        class="btn btn-xs"
+        :class="props.diagramSkill ? 'btn-blue' : 'btn-ghost'"
+        :disabled="busy"
+        :title="t('requirement.chat.diagramSkillHint')"
+        @click="emit('toggle-diagram-skill', !props.diagramSkill)"
+      >
+        <svg
+          class="w-3.5 h-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
+        {{ t('requirement.chat.diagramSkill') }}
+      </button>
+      <span class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.diagramSkillHint') }}</span>
+    </div>
+
     <div class="flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">
       <textarea
         ref="inputRef"
@@ -538,6 +648,7 @@ onUnmounted(() => {
         @keydown="onInputKeydown"
       />
       <button
+        v-if="props.showExtract !== false"
         class="btn !py-2.5 shrink-0 whitespace-nowrap btn-ghost"
         :disabled="busy"
         :title="t('requirement.chat.extractAssets')"
@@ -552,6 +663,38 @@ onUnmounted(() => {
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}
       </button>
+    </div>
+
+    <!-- 删除消息确认弹窗(DOM) -->
+    <div
+      v-if="deletePending !== null"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-ctp-crust/60 backdrop-blur-sm p-4"
+      @click.self="cancelDeleteTurn"
+    >
+      <div class="panel w-full max-w-xs">
+        <div class="panel-header">
+          <span class="flex items-center gap-2">
+            <TrashIcon class="w-4 h-4 text-ctp-red" />{{ t('requirement.chat.deleteTurn') }}
+          </span>
+        </div>
+        <div class="p-4 text-xs text-ctp-subtext1">
+          {{ t('requirement.chat.deleteTurnConfirm') }}
+        </div>
+        <div class="flex items-center justify-end gap-2 px-4 pb-4">
+          <button
+            class="btn btn-sm btn-ghost"
+            @click="cancelDeleteTurn"
+          >
+            {{ t('requirement.chat.deleteTurnCancel') }}
+          </button>
+          <button
+            class="btn btn-sm btn-red"
+            @click="confirmDeleteTurn"
+          >
+            {{ t('requirement.chat.deleteTurnOk') }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

@@ -54,7 +54,26 @@ const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 
 const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
 function copy(value: string) {
-  navigator.clipboard?.writeText(value)
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(value).catch(() => fallbackCopy(value))
+  } else {
+    fallbackCopy(value)
+  }
+}
+
+function fallbackCopy(value: string) {
+  const ta = document.createElement('textarea')
+  ta.value = value
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  try {
+    document.execCommand('copy')
+  } catch {
+    /* ignore */
+  }
+  document.body.removeChild(ta)
 }
 
 function goto(p: number) {

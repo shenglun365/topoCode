@@ -45,6 +45,12 @@ const routes: RouteRecordRaw[] = [
         meta: { workbench: true, title: '项目资产' },
       },
       {
+        path: 'asset-mgmt',
+        name: 'AssetManagement',
+        component: () => import('@/pages/AssetManagementWorkspace.vue'),
+        meta: { workbench: true, title: '资产管理' },
+      },
+      {
         path: 'architecture',
         redirect: '/workbench/assets',
       },

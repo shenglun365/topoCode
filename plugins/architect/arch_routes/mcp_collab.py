@@ -127,6 +127,27 @@ async def set_model_preference_route(request: Request):
     return ok({"modelId": model_id})
 
 
+@router.get("/llm/max-tokens")
+async def get_max_tokens_preference_route():
+    """LLM max_tokens 偏好(空 = 主后端按 model_configs.max_tokens)。"""
+    from .req_agent import get_max_tokens_preference
+    return ok({"maxTokens": get_max_tokens_preference()})
+
+
+@router.put("/llm/max-tokens")
+async def set_max_tokens_preference_route(request: Request):
+    """设置 LLM max_tokens 偏好。Body: { maxTokens: number }；0/空清除(回退模型配置)。"""
+    from .req_agent import set_max_tokens_preference
+    body = await request.json() or {}
+    raw = body.get("maxTokens")
+    try:
+        value = int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        value = None
+    set_max_tokens_preference(value)
+    return ok({"maxTokens": value})
+
+
 # ── LLM 模型配置: KB 导入 / 手动设置 ──────────────────────────────
 # 存储于 arch_collab_config 键 `llm.models`(JSON 列表)。每条含 `source`:
 #   - imported: 从 KB 手动导入(重复导入会刷新此部分)

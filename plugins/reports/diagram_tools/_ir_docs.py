@@ -15,7 +15,7 @@ def overview_docs() -> str:
         "你可以创建以下类型图。构造 IR 后调用 web_diagram_build 生成代码。\n\n"
         "### 支持类型\n"
         "mermaid: flowchart, sequence, class, state, er, gantt, pie\n"
-        "plantuml: component, sequence\n\n"
+        "plantuml: component, sequence, activity\n\n"
         "### IR 公共字段\n"
         "```\n"
         "lang: mermaid | plantuml\n"
@@ -162,6 +162,21 @@ def constraints_docs() -> str:
     )
 
 
+def plantuml_activity_docs() -> str:
+    return (
+        "### activity — 活动图（PlantUML）\n"
+        "```\n"
+        "flow: 线性步骤数组，每步含 type:\n"
+        '  {type: "action", text: "动作"}\n'
+        '  {type: "note", text: "备注"}\n'
+        '  {type: "branch", condition: "判断条件", then: [steps], else: [steps], '
+        'then_label?: "是", else_label?: "否"}\n'
+        '  {type: "fork", branches: [[steps], [steps]]}\n'
+        "兼容简化写法 steps: [\"动作1\", \"动作2\"]。\n"
+        "```"
+    )
+
+
 def diagram_editor_prompt() -> str:
     return "\n\n".join([
         overview_docs(),
@@ -174,6 +189,7 @@ def diagram_editor_prompt() -> str:
         mermaid_pie_docs(),
         plantuml_component_docs(),
         plantuml_sequence_docs(),
+        plantuml_activity_docs(),
         flowchart_example_docs(),
         constraints_docs(),
     ])
@@ -191,6 +207,7 @@ __all__ = [
     "mermaid_pie_docs",
     "plantuml_component_docs",
     "plantuml_sequence_docs",
+    "plantuml_activity_docs",
     "flowchart_example_docs",
     "constraints_docs",
 ]

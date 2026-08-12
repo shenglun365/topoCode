@@ -7,6 +7,7 @@ import type { UnitTestSession } from '@/types'
 import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
+import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import SessionStatsPanel from '@/components/coding/SessionStatsPanel.vue'
 
 const props = defineProps<{ session: UnitTestSession }>()
@@ -148,7 +149,7 @@ function stop() {
               >{{ m.role }}</span>
               <span class="text-[9px] text-ctp-overlay1">{{ new Date(m.time).toLocaleTimeString() }}</span>
             </div>
-            <p class="whitespace-pre-wrap text-ctp-subtext1">{{ m.content }}</p>
+            <ChatMessageBlocks :content="m.content" />
           </div>
         </div>
       </div>

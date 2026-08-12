@@ -9,12 +9,13 @@ import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementForm from '@/components/requirements/RequirementForm.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import { analysisAgent, chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { apiGet } from '@/services/api-client'
-import { backendUp, reProbeBackend } from '@/services/backend'
-import type { ArchLlmModel, ArchLlmModelsResult, ConversationDetail } from '@/types'
+import { reProbeBackend } from '@/services/backend'
+import type { ConversationDetail } from '@/types'
 import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
+import { useDiagramSkill } from '@/composables/useDiagramSkill'
+import { useChatModel } from '@/composables/useChatModel'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useSplitPane } from '@/composables/useSplitPane'
@@ -57,23 +58,8 @@ function nextDraftReqId(): string {
 const form = reactive<FormDraft>(emptyForm())
 provide('requirement-form', form)
 
-// ---- 对话模型选择(需求分析对话复用 /llm/models，透传后端 llm.sync) ----
-const chatModelId = ref<string>('')
-const chatModels = ref<ArchLlmModel[]>([])
-
-async function loadChatModels() {
-  if (!(await backendUp())) return
-  try {
-    const data = await apiGet<ArchLlmModelsResult>('/llm/models')
-    chatModels.value = data.models ?? []
-    chatModelId.value = data.modelId ?? ''
-  } catch {
-    // 后端不可用 → 保持空(agent 会回退 mock)
-  }
-}
-function onChatModelChange(id: string) {
-  chatModelId.value = id
-}
+// ---- 对话模型选择(需求分析对话复用 /llm/models，透传后端 llm.sync；选择持久化到浏览器) ----
+const { chatModelId, chatModels, loadChatModels, onChatModelChange } = useChatModel()
 
 // ---- 左右栏分割(表单 | 对话) ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane()
@@ -260,6 +246,7 @@ function onAnswers(answers: Record<string, string>) { collect(answers) }
 
 /** 自由对话(阶段A)：经 WS 流式回复，保持会话一致性(conversationId 续聊)。 */
 const chatConvId = ref<string>('')
+const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
 
 async function onSend(text: string) {
   if (busy.value) return
@@ -274,12 +261,15 @@ async function onSend(text: string) {
       reqId: editingId.value ?? (draftReqId.value || undefined),
       title: form.title.trim() || '需求分析对话',
       modelId: chatModelId.value || undefined,
+      diagramSkill: diagramSkill.value,
     }, (ev) => {
       if (ev.conversationId) chatConvId.value = ev.conversationId
       if (ev.type === 'chat_start') {
         if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
       } else if (ev.type === 'chunk') {
         turns.value[idx].content += ev.delta ?? ''
+      } else if (ev.type === 'reasoning') {
+        turns.value[idx].reasoning = (turns.value[idx].reasoning ?? '') + (ev.delta ?? '')
       } else if (ev.type === 'done') {
         turns.value[idx].content = ev.content ?? turns.value[idx].content
         if (ev.messageId) turns.value[idx].id = ev.messageId
@@ -313,6 +303,32 @@ async function onExtractAssets(kinds?: SemanticAssetKind[]) {
     turns.value[idx].content = err?.message || t('requirement.chat.semanticFailed')
   } finally {
     busy.value = false
+  }
+}
+
+/** 更新单个过期语义资产：增量重提，失败软删并重新生成；结果回填当前回合卡片。 */
+async function onRefreshAsset(assetId: string) {
+  if (busy.value) return
+  try {
+    const res = await semanticAssetService.refreshAsset(assetId)
+    if (!res.asset) return
+    // 在 turns 中找到含该资产 id 的回合，原地更新资产(若重生成则追加)。
+    for (const t of turns.value) {
+      if (!t.assets?.length) continue
+      const i = t.assets.findIndex((a) => a.id === assetId)
+      if (i >= 0) {
+        if (res.refreshed) {
+          t.assets[i] = { ...t.assets[i], ...res.asset }
+        } else if (res.regenerated) {
+          t.assets[i] = { ...t.assets[i], ...res.asset }
+        } else if (res.status === 'deleted') {
+          t.assets[i] = { ...t.assets[i], status: 'deleted', needsUpdate: 1 }
+        }
+        return
+      }
+    }
+  } catch (err: any) {
+    console.warn('[semantic] refresh failed:', err)
   }
 }
 
@@ -692,12 +708,16 @@ function backToList() {
           :busy="busy"
           :models="chatModels"
           :model-id="chatModelId"
+          :show-extract="false"
+          :diagram-skill="diagramSkill"
           @send="onSend"
           @answers="onAnswers"
           @confirm-draft="confirmDraft"
           @model-change="onChatModelChange"
           @delete-turn="onDeleteTurn"
           @extract-assets="onExtractAssets"
+          @refresh-asset="onRefreshAsset"
+          @toggle-diagram-skill="toggleDiagramSkill"
         />
         <p class="text-[10px] text-ctp-overlay0 leading-relaxed">
           {{ t('requirement.workspace.chatHint') }}

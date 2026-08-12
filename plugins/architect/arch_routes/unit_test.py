@@ -33,6 +33,12 @@ async def add_unit_test(request: Request):
         "updatedAt": now,
     }
     store.UnitTestsStore.create(test)
+    # 语义资产引用登记(test→sa-*)
+    try:
+        from .semantic_assets import register_scope_refs
+        register_scope_refs(body.get("assetRefs") or [], "test", test["id"])
+    except Exception:
+        pass
     return ok(store.UnitTestsStore.get(test["id"]))
 
 

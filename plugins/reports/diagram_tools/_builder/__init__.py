@@ -7,7 +7,7 @@ from ._state import build_state
 from ._er import build_er
 from ._gantt import build_gantt
 from ._pie import build_pie
-from ._plantuml import build_pu_component, build_pu_sequence
+from ._plantuml import build_pu_component, build_pu_sequence, build_pu_activity
 
 _MERMAID_BUILDERS = {
     "flowchart": build_flowchart,
@@ -23,6 +23,7 @@ _PLANTUML_BUILDERS = {
     "component": build_pu_component,
     "sequence": build_pu_sequence,
     "class": build_pu_component,
+    "activity": build_pu_activity,
 }
 
 _TYPE_ALIASES = {
@@ -52,6 +53,9 @@ _PU_TYPE_ALIASES = {
     "component_diagram": "component",
     "seq": "sequence",
     "sequence_diagram": "sequence",
+    "activity": "activity",
+    "activity_diagram": "activity",
+    "diagram_activity": "activity",
 }
 
 

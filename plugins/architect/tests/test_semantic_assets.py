@@ -58,6 +58,39 @@ def test_store_crud_and_search(tmp_path, monkeypatch):
     assert len(store.SemanticAssetsStore.find_by_scope("proj-1", "comm", "L0-0001")) == 1
 
 
+def test_store_search_scope_filter(tmp_path, monkeypatch):
+    """search/count 按 scope_key 精确过滤；__other__ 哨兵选非 comm 范围资产。"""
+    _ctx(tmp_path, monkeypatch)
+    for i, (scope_type, scope_key) in enumerate([
+        ("comm", "L0-0001"), ("comm", "L0-0002"), ("files", "src/a.py"),
+    ]):
+        store.SemanticAssetsStore.create({
+            "id": f"sa-d-{i}", "projectId": "proj-s", "kind": "data_structure",
+            "name": f"资产{i}", "desc": f"d{i}", "detail": {},
+            "astRefs": [{"file": f"src/{i}.py", "symbol": "S", "kind": "class",
+                         "startLine": 1, "endLine": 2}],
+            "scopeType": scope_type, "scopeKey": scope_key, "source": "live",
+            "srcHash": f"h{i}", "change": "added", "status": "active",
+            "createdAt": 1, "updatedAt": 1,
+        })
+    # 单个 scope_key
+    got = store.SemanticAssetsStore.search("proj-s", scopes=["L0-0001"])
+    assert [a["id"] for a in got] == ["sa-d-0"]
+    assert store.SemanticAssetsStore.count("proj-s", scopes=["L0-0001"]) == 1
+    # 多个 scope_key
+    got = store.SemanticAssetsStore.search("proj-s", scopes=["L0-0001", "L0-0002"])
+    assert len(got) == 2
+    # 仅「其它」→ 非 comm 范围
+    got = store.SemanticAssetsStore.search("proj-s", scopes=["__other__"])
+    assert [a["id"] for a in got] == ["sa-d-2"]
+    # 组件 + 其它(OR)
+    got = store.SemanticAssetsStore.search("proj-s", scopes=["L0-0001", "__other__"])
+    assert len(got) == 2
+    assert store.SemanticAssetsStore.count("proj-s", scopes=["L0-0001", "__other__"]) == 2
+    # 空 scopes → 全部
+    assert len(store.SemanticAssetsStore.search("proj-s")) == 3
+
+
 def test_save_assets_change_detection(tmp_path, monkeypatch):
     _ctx(tmp_path, monkeypatch)
     assets = [{
@@ -142,6 +175,8 @@ def test_extract_scope_heuristic(tmp_path, monkeypatch):
     (proj / "order.py").write_text(
         "class Order:\n    \"\"\"订单核心结构\"\"\"\n    pass\n\n"
         "def checkout(order):\n    pass\n", encoding="utf-8")
+    # 使测试确定走 live 扫描(KB 兜底路径可能被本机运行中的 KB 命中)。
+    monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
     res = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
                           files=["order.py"], kinds=["data_structure", "processing_flow"],
                           use_llm=False)
@@ -152,3 +187,346 @@ def test_extract_scope_heuristic(tmp_path, monkeypatch):
     assert ds["astRefs"][0]["file"] == "order.py"
     assert ds["name"] == "Order"
     assert "订单核心结构" in ds["desc"]
+    # 锚定文件哈希签名(要求①)
+    assert ds["anchorHashes"] == {"order.py": S._file_md5(str(proj), "order.py")}
+    assert ds["needsUpdate"] == 0
+
+
+def _mk_asset(project_id, asset_id="sa-d-99", anchors=None, **kw):
+    store.SemanticAssetsStore.create({
+        "id": asset_id, "projectId": project_id, "kind": "data_structure",
+        "name": "订单聚合", "desc": "订单核心结构", "detail": {},
+        "astRefs": [{"file": f, "symbol": "Order", "kind": "class",
+                     "startLine": 1, "endLine": 10} for f in (anchors or ["order.py"])],
+        "anchorHashes": anchors or {"order.py": "oldhash"},
+        "scopeType": "comm", "scopeKey": "L0-0001", "source": "live",
+        "srcHash": "h", "change": "added", "status": "active",
+        "needsUpdate": 0, "createdAt": 1, "updatedAt": 1,
+    })
+
+
+def test_reconcile_invalidates_on_file_change(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "order.py").write_text("class Order:\n    pass\n", encoding="utf-8")
+    root = str(proj)
+    pid = S.project_id_for(root, None)
+    # 锚定哈希 = 旧内容 → 与当前 md5 不同 → 应失效
+    _mk_asset(pid, anchors={"order.py": "0000000000000000"})
+    monkeypatch.setattr(S, "changed_files", lambda r, project: {
+        "added": [], "modified": ["order.py"], "deleted": []})
+    res = S.reconcile_semantic(root, None, force=True)
+    assert res["invalidated"] == ["sa-d-99"]
+    a = store.SemanticAssetsStore.get("sa-d-99")
+    assert a["status"] == "stale" and a["needsUpdate"] == 1
+
+
+def test_reconcile_skips_when_anchor_hash_unchanged(tmp_path, monkeypatch):
+    """git 报 modified 但 anchor 哈希与当前一致(刚刷新) → 不重复失效。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "order.py").write_text("class Order:\n    pass\n", encoding="utf-8")
+    root = str(proj)
+    pid = S.project_id_for(root, None)
+    _mk_asset(pid, anchors={"order.py": S._file_md5(root, "order.py")})
+    monkeypatch.setattr(S, "changed_files", lambda r, project: {
+        "added": [], "modified": ["order.py"], "deleted": []})
+    res = S.reconcile_semantic(root, None, force=True)
+    assert res["invalidated"] == []
+    assert store.SemanticAssetsStore.get("sa-d-99")["status"] == "active"
+
+
+def test_reconcile_deleted_file(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    _mk_asset(pid, asset_id="sa-d-98", anchors={"order.py": "oldhash"})
+    monkeypatch.setattr(S, "changed_files", lambda root, project: {
+        "added": [], "modified": [], "deleted": ["order.py"]})
+    S.reconcile_semantic("/tmp/x", None, force=True)
+    assert store.SemanticAssetsStore.get("sa-d-98")["change"] == "deleted"
+
+
+def test_reconcile_new_file_reverse_probe(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    _mk_asset(pid, asset_id="sa-d-97", anchors={"dep.py": "h"})
+    monkeypatch.setattr(S, "changed_files", lambda root, project: {
+        "added": ["new_mod.py"], "modified": [], "deleted": []})
+    monkeypatch.setattr(S, "probe_impact", lambda root, project, files: {
+        "dependents": ["dep.py"], "deps": [], "affectedFiles": ["new_mod.py", "dep.py"]})
+    res = S.reconcile_semantic("/tmp/x", None, force=True)
+    assert res["newFiles"] == ["new_mod.py"]
+    assert "sa-d-97" in res["invalidated"]
+    assert store.SemanticAssetsStore.get("sa-d-97")["needsUpdate"] == 1
+
+
+def test_soft_delete_and_regenerate(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    _mk_asset(pid)
+    # refresh 成功路径(同 scope 重新生成)
+    from plugins.architect.arch_routes import semantic_assets as SM
+    store.SemanticAssetsStore.mark_deleted("sa-d-99")
+    assert store.SemanticAssetsStore.get("sa-d-99")["status"] == "deleted"
+    # 重新提取同名资产 → 恢复 active(软删后重新生成)
+    assets = [{"kind": "data_structure", "name": "订单聚合", "desc": "新描述",
+               "astRefs": [{"file": "order.py", "symbol": "Order", "kind": "class",
+                            "startLine": 1, "endLine": 10}]}]
+    ctx = {"table": {}, "source": "live", "srcHash": "h2", "root": "/tmp/x"}
+    saved = SM._save_assets(pid, "comm", "L0-0001", assets, ctx)
+    assert saved[0]["status"] == "active"
+    assert saved[0]["change"] == "modified"
+
+
+def test_batch_clear_by_comm_scope(tmp_path, monkeypatch):
+    """clear 仅作用于选定组件范围(comm scope)，其他组件不受影响。"""
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    store.SemanticAssetsStore.create({
+        "id": "sa-d-11", "projectId": pid, "kind": "data_structure",
+        "name": "A1", "desc": "", "detail": {}, "astRefs": [{"file": "a.py"}],
+        "scopeType": "comm", "scopeKey": "L0-0001", "srcHash": "h",
+        "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
+    store.SemanticAssetsStore.create({
+        "id": "sa-d-12", "projectId": pid, "kind": "data_structure",
+        "name": "B1", "desc": "", "detail": {}, "astRefs": [{"file": "b.py"}],
+        "scopeType": "comm", "scopeKey": "L0-0002", "srcHash": "h",
+        "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
+    res = S.batch_manage("/tmp/x", None, "clear", comp_ids=["L0-0001"])
+    assert res["action"] == "clear"
+    assert "sa-d-11" in res["cleared"]
+    assert store.SemanticAssetsStore.get("sa-d-11")["status"] == "deleted"
+    assert store.SemanticAssetsStore.get("sa-d-12")["status"] == "active"
+
+
+def test_batch_clear_by_file_with_include_other(tmp_path, monkeypatch):
+    """clear 按文件归属匹配；include_other 覆盖未列组件的文件资产。"""
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    store.SemanticAssetsStore.create({
+        "id": "sa-d-21", "projectId": pid, "kind": "data_structure",
+        "name": "X", "desc": "", "detail": {}, "astRefs": [{"file": "svc/x.py"}],
+        "scopeType": "files", "scopeKey": "_", "srcHash": "h",
+        "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
+    store.SemanticAssetsStore.create({
+        "id": "sa-d-22", "projectId": pid, "kind": "data_structure",
+        "name": "Y", "desc": "", "detail": {}, "astRefs": [{"file": "tmp/y.py"}],
+        "scopeType": "project", "scopeKey": "_", "srcHash": "h",
+        "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
+    monkeypatch.setattr(S, "_component_file_map", lambda root, project: {
+        "L0-0001": {"svc/x.py"}})
+    # 仅选 L0-0001 → 命中 svc/x.py，不命中 tmp/y.py
+    res = S.batch_manage("/tmp/x", None, "clear", comp_ids=["L0-0001"])
+    assert "sa-d-21" in res["cleared"]
+    assert store.SemanticAssetsStore.get("sa-d-22")["status"] == "active"
+    # 追加 include_other → tmp/y.py(未列组件的文件)也被清除
+    res2 = S.batch_manage("/tmp/x", None, "clear",
+                          comp_ids=["L0-0001"], include_other=True)
+    assert "sa-d-22" in res2["cleared"]
+    assert store.SemanticAssetsStore.get("sa-d-22")["status"] == "deleted"
+
+
+def test_batch_update_refreshes_stale(tmp_path, monkeypatch):
+    """update 仅更新选定组件范围内的 stale/needsUpdate 资产。"""
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for("/tmp/x", None)
+    store.SemanticAssetsStore.create({
+        "id": "sa-d-31", "projectId": pid, "kind": "data_structure",
+        "name": "S", "desc": "", "detail": {}, "astRefs": [{"file": "a.py"}],
+        "scopeType": "comm", "scopeKey": "L0-0001", "srcHash": "h",
+        "change": "modified", "status": "stale", "needsUpdate": 1,
+        "createdAt": 1, "updatedAt": 1})
+    calls = {"n": 0}
+    def fake_handle(asset_id, root, project, model_id=None):
+        calls["n"] += 1
+        store.SemanticAssetsStore.update(asset_id, {"status": "active", "needsUpdate": 0})
+        return {"status": "refreshed"}
+    monkeypatch.setattr(S, "handle_stale_asset", fake_handle)
+    res = S.batch_manage("/tmp/x", None, "update", comp_ids=["L0-0001"])
+    assert "sa-d-31" in res["updated"]
+    assert calls["n"] == 1
+    assert store.SemanticAssetsStore.get("sa-d-31")["status"] == "active"
+
+
+def test_batch_extract_all_components(tmp_path, monkeypatch):
+    """extract 未指定组件时解析组件目录(完整来源)并逐个按 comm 范围提取。"""
+    _ctx(tmp_path, monkeypatch)
+    import plugins.architect.arch_routes.common as common
+    monkeypatch.setattr(common, "build_component_catalog", lambda *a, **k: {
+        "components": [{"id": "L0-0001"}, {"id": "L0-0002"}]})
+    calls = []
+    def fake_extract(root, project, scope_type, scope_key, **kw):
+        calls.append((scope_type, scope_key))
+        return {"count": 2}
+    monkeypatch.setattr(S, "extract_scope", fake_extract)
+    res = S.batch_manage("/tmp/x", None, "extract", comp_ids=[])
+    assert res["components"] == 2
+    assert res["count"] == 4
+    assert calls == [("comm", "L0-0001"), ("comm", "L0-0002")]
+
+
+def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
+    """模型(INCLUDE·L1)查不到的组件 id(如 CALL/L0) → 回退组件目录解析文件。"""
+    _ctx(tmp_path, monkeypatch)
+    import plugins.architect.arch_routes.common as common
+    monkeypatch.setattr(common, "build_architecture_model", lambda *a, **k: {
+        "components": [{"id": "L1-0001", "owns": ["svc/model.py"]}]})
+    monkeypatch.setattr(common, "build_component_catalog", lambda *a, **k: {
+        "components": [{"id": "L0-0009", "owns": ["svc/call.py", "svc/util.py"]}]})
+    # 模型内组件 → 走模型
+    assert S._comm_files("/tmp/x", "L1-0001") == ["svc/model.py"]
+    # 目录独有组件(CALL/L0) → 走目录回退
+    assert S._comm_files("/tmp/x", "L0-0009") == ["svc/call.py", "svc/util.py"]
+    # 都不存在 → 空
+    assert S._comm_files("/tmp/x", "nope") == []
+
+
+def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
+    """comm 组件未命中目录/模型(文件为空)时，不得退化为全项目扫描。"""
+    _ctx(tmp_path, monkeypatch)
+    import plugins.architect.arch_routes.common as common
+    common.build_component_catalog = lambda root, project: {"components": []}
+    common.build_architecture_model = lambda *a, **k: {"components": []}
+    # 即使存在 codegraph 节点，未解析文件的 comm 范围也不应扫全项目。
+    monkeypatch.setattr(S, "_query_nodes", lambda conn, files=None, symbols=None, limit=400: [
+        {"id": "n1", "kind": "class", "name": "Other", "qualified_name": "Other",
+         "file_path": "other/thing.py", "start_line": 1, "end_line": 1,
+         "start_column": 0, "end_column": 0, "signature": "", "docstring": "",
+         "return_type": ""}])
+    res = S.extract_scope("/tmp/x", None, scope_type="comm", scope_key="MISSING-1",
+                          kinds=["data_structure"], use_llm=False)
+    assert res["count"] == 0
+    assert res["source"] == "none"
+
+
+def test_ast_cache_store(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    AstCache = store.AstCacheStore
+    AstCache.upsert("proj-1", "a.py", {"contentHash": "c1", "language": "py",
+                                       "symbols": [{"name": "A"}], "imports": ["b"],
+                                       "refs": [], "source": "kb"})
+    row = AstCache.get("proj-1", "a.py")
+    assert row["contentHash"] == "c1"
+    assert row["symbols"][0]["name"] == "A"
+    AstCache.upsert("proj-1", "a.py", {"contentHash": "c2", "language": "py",
+                                       "symbols": [], "imports": [], "refs": [],
+                                       "source": "kb"})
+    assert AstCache.get("proj-1", "a.py")["contentHash"] == "c2"
+    assert AstCache.invalidate("proj-1", ["a.py"]) == 1
+    assert AstCache.get("proj-1", "a.py") is None
+
+
+def test_probe_impact_cache_fallback(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    # 无 codegraph → cache 反向索引(imports 解析)
+    pid = S.project_id_for("/tmp/x", None)
+    store.AstCacheStore.upsert(pid, "consumer.py", {
+        "contentHash": "h", "language": "py",
+        "symbols": [{"name": "use"}], "imports": ["services/new_mod"],
+        "refs": [], "source": "kb"})
+    res = S.probe_impact("/tmp/x", None, ["services/new_mod.py"])
+    assert "consumer.py" in res["dependents"]
+    assert set(res["affectedFiles"]) == {"services/new_mod.py", "consumer.py"}
+
+
+def test_norm_cache_symbol(tmp_path, monkeypatch):
+    _ctx(tmp_path, monkeypatch)
+    n = S._norm_cache_symbol("a.py", "python", {
+        "name": "Order", "kind": "class", "qualifiedName": "Order",
+        "startLine": 3, "endLine": 12, "signature": "()", "docstring": "d"})
+    assert n["start_line"] == 3 and n["kind"] == "class"
+    assert S._norm_cache_symbol("a.py", "python", {"name": ""}) is None
+
+
+def test_normalize_kind_aliases():
+    """kind/type 中文、驼峰、带空格变体 → 规范枚举。"""
+    assert S._normalize_kind("data_structure") == "data_structure"
+    assert S._normalize_kind("数据结构") == "data_structure"
+    assert S._normalize_kind("DataStructure") == "data_structure"
+    assert S._normalize_kind("data structure") == "data_structure"
+    assert S._normalize_kind("处理流程") == "processing_flow"
+    assert S._normalize_kind("processingFlow") == "processing_flow"
+    assert S._normalize_kind("控制逻辑") == "control_logic"
+    assert S._normalize_kind("control-logic") == "control_logic"
+    assert S._normalize_kind("unknown-kind") is None
+    assert S._normalize_kind("") is None
+
+
+def test_norm_llm_asset_type_field_and_steps():
+    """LLM 用 type 字段、steps.symbol 单数 → 归一化为 kind/steps.symbols。"""
+    table = {
+        "create_order": {"id": "n1", "kind": "function", "name": "create_order",
+                         "qualified_name": "create_order", "file_path": "svc/order.py",
+                         "start_line": 3, "end_line": 5, "start_column": 0, "end_column": 0,
+                         "signature": "", "docstring": "", "return_type": ""},
+        "_consume": {"id": "n2", "kind": "function", "name": "_consume",
+                     "qualified_name": "_consume", "file_path": "svc/order.py",
+                     "start_line": 10, "end_line": 14, "start_column": 0, "end_column": 0,
+                     "signature": "", "docstring": "", "return_type": ""},
+    }
+    a = {
+        "name": "订单生命周期管理", "type": "processing_flow",
+        "desc": "订单创建到过期清理的完整流程。",
+        "steps": [{"symbol": "create_order", "action": "初始化新订单"},
+                  {"step": 2, "symbol": "_consume", "action": "资源扣减"}],
+        "source_symbols": ["create_order", "_consume", "missing_sym"],
+    }
+    norm = S._norm_llm_asset(a, table)
+    assert norm["kind"] == "processing_flow"
+    assert norm["detail"]["steps"][0] == {"order": None, "semantic": "初始化新订单",
+                                          "symbols": ["create_order"]}
+    assert norm["detail"]["steps"][1]["order"] == 2
+    # source_symbols → astRefs(可解析的真实节点；无法解析的记警告跳过)
+    files = {r["file"] for r in norm["astRefs"]}
+    assert files == {"svc/order.py"}
+    assert len(norm["astRefs"]) == 2
+
+
+def test_norm_llm_asset_relations_branches():
+    """relations {from,to,via} 与 branches {condition,then,else,result_symbol} 归一化。"""
+    a = {
+        "name": "用户认证鉴权", "type": "control_logic",
+        "desc": "登录鉴权分支逻辑。",
+        "relations": [{"from": "user", "to": "session", "via": "token"},
+                      {"target": "balance", "type": "1:1"}],
+        "branches": [{"condition": "未登录", "then": ["return 401"], "result_symbol": "err"}],
+    }
+    norm = S._norm_llm_asset(a, {})
+    assert norm["detail"]["relations"] == [
+        {"target": "session", "type": "token", "semantic": ""},
+        {"target": "balance", "type": "1:1", "semantic": ""},
+    ]
+    b = norm["detail"]["branches"][0]
+    assert b["condition"] == "未登录"
+    assert b["then"] == "return 401"
+    assert b["semantic"] == "err"
+
+
+def test_norm_llm_asset_rejects_missing_kind_name():
+    """缺 kind/name → 返回 None(丢弃)。"""
+    assert S._norm_llm_asset({"name": "x", "type": "未知"}, {}) is None
+    assert S._norm_llm_asset({"kind": "data_structure"}, {}) is None
+    assert S._norm_llm_asset("not-dict", {}) is None
+
+
+def test_llm_extract_normalizes_chinese_type(tmp_path, monkeypatch):
+    """mock llm_sync 返回中文 type 的资产 → 归一化后有效 > 0。"""
+    _ctx(tmp_path, monkeypatch)
+    import plugins.architect.arch_routes.req_agent as RA
+    monkeypatch.setattr(RA, "llm_sync", lambda *a, **k: {
+        "output": {"assets": [
+            {"name": "订单流程", "type": "处理流程", "desc": "d",
+             "steps": [{"symbol": "create_order", "action": "init"}]},
+            {"name": "用户模型", "type": "数据结构", "desc": "d",
+             "fields": [{"name": "id", "type": "int"}]},
+        ]}})
+    table = {"create_order": {"id": "n1", "kind": "function", "name": "create_order",
+                              "qualified_name": "create_order", "file_path": "svc/order.py",
+                              "start_line": 1, "end_line": 2, "start_column": 0,
+                              "end_column": 0, "signature": "", "docstring": "", "return_type": ""}}
+    out = S._llm_extract("/tmp/x", None, "ctx-text", None, table=table)
+    assert len(out) == 2
+    kinds = {a["kind"] for a in out}
+    assert kinds == {"processing_flow", "data_structure"}

@@ -192,11 +192,41 @@ IR_SCHEMA_CLASS = {
 }
 
 
+IR_SCHEMA_ACTIVITY = {
+    "type": "object",
+    "properties": {
+        "lang": {"type": "string", "enum": ["plantuml"]},
+        "diagram_type": {"type": "string", "enum": ["activity"]},
+        "title": {"type": "string"},
+        "comments": {"type": "array", "items": {"type": "string"}},
+        "flow": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["action", "note", "branch", "fork"]},
+                    "text": {"type": "string"},
+                    "condition": {"type": "string"},
+                    "then_label": {"type": "string"},
+                    "else_label": {"type": "string"},
+                    "then": {"type": "array"},
+                    "else": {"type": "array"},
+                    "branches": {"type": "array"},
+                },
+                "required": ["type"],
+            },
+        },
+        "steps": {"type": "array"},
+    },
+}
+
+
 def ir_schema_for_type(diagram_type: str) -> dict | None:
     return {
         "flowchart": IR_SCHEMA_FLOWCHART,
         "sequence": IR_SCHEMA_SEQUENCE,
         "class": IR_SCHEMA_CLASS,
+        "activity": IR_SCHEMA_ACTIVITY,
     }.get(diagram_type)
 
 

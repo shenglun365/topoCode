@@ -71,6 +71,11 @@ export interface SemanticAsset {
   source?: 'codegraph' | 'live' | 'kb'
   change?: ChangeType
   status?: 'active' | 'stale' | 'deleted'
+  /** 锚定文件哈希签名(文件更新 → 需更新后使用)。 */
+  anchorHashes?: Record<string, string>
+  /** 需更新后使用(文件已变更)。 */
+  needsUpdate?: number
+  deletedAt?: number
   createdAt?: number
   updatedAt?: number
 }

@@ -33,9 +33,12 @@ def _conv_bound(conv: dict) -> bool:
 
 
 @router.get("/requirements/conversations")
-async def list_conversations(project_id: str = ""):
-    """历史会话摘要列表(仅返回临时/未绑定提案的会话，供导入或删除)。"""
-    convs = store.ConversationsStore.summaries(kind="requirement", project_id=project_id or None)
+async def list_conversations(project_id: str = "", kind: str = "requirement"):
+    """历史会话摘要列表(仅返回临时/未绑定提案的会话，供导入或删除)。
+
+    kind: 会话归类(requirement | asset | design | ...)，按需筛选；缺省 requirement。
+    """
+    convs = store.ConversationsStore.summaries(kind=kind or "requirement", project_id=project_id or None)
     items = []
     for c in convs:
         if _conv_bound(c):
@@ -153,6 +156,13 @@ async def patch_requirement(req_id: str, request: Request):
     row = store.RequirementsStore.update(req_id, {**body, "updatedAt": _ts()})
     if not row:
         return err(404, "Requirement not found")
+    # 语义资产引用登记(req→sa-*，供删除/失效精确波及)
+    try:
+        from .semantic_assets import register_scope_refs
+        scope = (body.get("analysis") or {}).get("assetScope") or []
+        register_scope_refs(scope, "req", req_id)
+    except Exception:
+        pass
     return ok(row)
 
 

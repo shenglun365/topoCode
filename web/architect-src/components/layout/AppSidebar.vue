@@ -4,11 +4,10 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   ClipboardDocumentListIcon, QueueListIcon,
-  ServerStackIcon,
+  ScaleIcon,
   GlobeAltIcon, ShieldCheckIcon, ShieldExclamationIcon, MapIcon, Cog6ToothIcon,
   ChevronDownIcon, ChevronRightIcon, BeakerIcon,
 } from '@heroicons/vue/24/outline'
-import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
@@ -19,7 +18,6 @@ import { useArchUnitTestStore } from '@/stores/unit-test-store'
 const router = useRouter()
 const route = useRoute()
 const { t } = useI18n()
-const architecture = useArchArchitectureStore()
 const task = useArchTaskStore()
 const agent = useArchAgentStore()
 const spec = useArchSpecStore()
@@ -131,22 +129,21 @@ function isOverviewActive() {
       <template v-if="isOpen('assets')">
         <button
           class="tree-item"
-          :class="{ 'is-active': isActive('/workbench/assets') && (!route.query.tab || route.query.tab === 'modules') && !route.query.sub }"
-          @click="nav('/workbench/assets', { tab: 'modules' })"
-        >
-          <ServerStackIcon class="w-4 h-4 text-ctp-blue" />
-          <span class="flex-1 text-left">{{ t('nav.tree.components') }}</span>
-          <span class="chip bg-ctp-surface0 text-ctp-subtext0">{{ architecture.components.length }}</span>
-        </button>
-
-        <button
-          class="tree-item"
-          :class="{ 'is-active': isActive('/workbench/assets') && route.query.tab === 'spec' }"
+          :class="{ 'is-active': isActive('/workbench/assets') }"
           @click="nav('/workbench/assets', { tab: 'spec' })"
         >
           <ShieldCheckIcon class="w-4 h-4 text-ctp-peach" />
           <span class="flex-1 text-left">{{ t('nav.tree.spec') }}</span>
           <span class="chip bg-ctp-surface0 text-ctp-subtext0">{{ spec.ruleCount }}</span>
+        </button>
+
+        <button
+          class="tree-item"
+          :class="{ 'is-active': isActive('/workbench/asset-mgmt') }"
+          @click="nav('/workbench/asset-mgmt')"
+        >
+          <ScaleIcon class="w-4 h-4 text-ctp-mauve" />
+          <span class="flex-1 text-left">{{ t('nav.tree.assetMgmt') }}</span>
         </button>
 
         <button

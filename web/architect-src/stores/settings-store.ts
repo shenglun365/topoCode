@@ -11,7 +11,6 @@ export type FontScale = (typeof FONT_SCALES)[number]
 export const useArchSettingsStore = defineStore('arch-settings', {
   state: () => ({
     locale: 'zh-CN' as Locale,
-    plantumlServer: 'http://127.0.0.1:8080/plantuml',
     fontScale: 1 as FontScale,
   }),
   persist: true,

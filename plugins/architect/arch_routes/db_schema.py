@@ -219,14 +219,43 @@ ARCHITECT_DB_TABLES_SQL = """
         scope_comm_id TEXT DEFAULT '',
         source TEXT DEFAULT 'codegraph',    -- codegraph | live | kb
         src_hash TEXT DEFAULT '',           -- 输入指纹(增量 change 判定)
-        change TEXT DEFAULT 'same',         -- same | added | modified
+        change TEXT DEFAULT 'same',         -- same | added | modified | deleted
         status TEXT DEFAULT 'active',       -- active | stale | deleted
         meta TEXT,                          -- JSON: 附加(componentId/edgeType 等)
+        anchor_hashes TEXT,                 -- JSON: {relFile: md5} 锚定文件哈希签名
+        needs_update INTEGER DEFAULT 0,     -- 需更新后使用(文件已变)
+        last_checked_at INTEGER DEFAULT 0,
+        deleted_at INTEGER DEFAULT 0,       -- 软删时间戳
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_proj ON arch_semantic_assets(project_id, kind);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_scope ON arch_semantic_assets(project_id, scope_type, scope_key);
+    CREATE INDEX IF NOT EXISTS idx_arch_semantic_status ON arch_semantic_assets(project_id, status);
+
+    CREATE TABLE IF NOT EXISTS arch_ast_cache (
+        project_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,            -- 相对路径(正斜杠)
+        content_hash TEXT DEFAULT '',
+        language TEXT DEFAULT '',
+        symbols TEXT,                       -- JSON: node[] (file 内符号)
+        imports TEXT,                       -- JSON: module[] 
+        refs TEXT,                          -- JSON: [{name,kind,line}]
+        source TEXT DEFAULT 'codegraph',    -- codegraph | kb | live
+        parsed_at INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, file_path)
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_semantic_refs (
+        asset_id TEXT NOT NULL,
+        ref_type TEXT NOT NULL,             -- req | plan | task | test
+        ref_id TEXT NOT NULL,
+        role TEXT DEFAULT 'related',        -- core | related
+        created_at INTEGER DEFAULT 0,
+        PRIMARY KEY (asset_id, ref_type, ref_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_semantic_refs_asset ON arch_semantic_refs(asset_id);
+    CREATE INDEX IF NOT EXISTS idx_arch_semantic_refs_ref ON arch_semantic_refs(ref_type, ref_id);
 """
 
 
@@ -264,6 +293,13 @@ _ARCH_AGENT_SESSION_MIGRATION_COLS = [
 
 _ARCH_UNIT_TEST_MIGRATION_COLS = [
     ("asset_refs", "TEXT"),                # JSON: SemanticAssetRef[]
+]
+
+_ARCH_SEMANTIC_MIGRATION_COLS = [
+    ("anchor_hashes", "TEXT"),             # JSON: {relFile: md5}
+    ("needs_update", "INTEGER DEFAULT 0"),
+    ("last_checked_at", "INTEGER DEFAULT 0"),
+    ("deleted_at", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -418,7 +454,7 @@ def architect_db_migrations(db) -> None:
                 db.execute(f"ALTER TABLE arch_agent_sessions ADD COLUMN {name} {typ}")
             except Exception:
                 pass
-    # 语义资产表(旧库增量迁移兜底)
+    # 语义资产表(旧库增量迁移兜底) + 新增列
     db.execute("""
         CREATE TABLE IF NOT EXISTS arch_semantic_assets (
             id TEXT PRIMARY KEY,
@@ -438,6 +474,40 @@ def architect_db_migrations(db) -> None:
             meta TEXT,
             created_at INTEGER DEFAULT 0,
             updated_at INTEGER DEFAULT 0
+        )
+    """)
+    try:
+        sem_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_semantic_assets)")}
+    except Exception:
+        sem_cols = set()
+    for name, typ in _ARCH_SEMANTIC_MIGRATION_COLS:
+        if name not in sem_cols:
+            try:
+                db.execute(f"ALTER TABLE arch_semantic_assets ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_ast_cache (
+            project_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            content_hash TEXT DEFAULT '',
+            language TEXT DEFAULT '',
+            symbols TEXT,
+            imports TEXT,
+            refs TEXT,
+            source TEXT DEFAULT 'codegraph',
+            parsed_at INTEGER DEFAULT 0,
+            PRIMARY KEY (project_id, file_path)
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_semantic_refs (
+            asset_id TEXT NOT NULL,
+            ref_type TEXT NOT NULL,
+            ref_id TEXT NOT NULL,
+            role TEXT DEFAULT 'related',
+            created_at INTEGER DEFAULT 0,
+            PRIMARY KEY (asset_id, ref_type, ref_id)
         )
     """)
     try:

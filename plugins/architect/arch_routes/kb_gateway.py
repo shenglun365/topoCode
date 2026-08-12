@@ -17,6 +17,7 @@
 import json
 import logging
 import os
+import socket
 import urllib.error
 import urllib.request
 
@@ -35,8 +36,12 @@ class KbGateway:
 
     # ── RPC(API)通道 ─────────────────────────────────────────────
 
-    def call(self, kb_method: str, **params):
-        """调用 KB 方法。返回业务对象；KB 不可达返回 None；KB 业务失败抛 KbError。"""
+    def call(self, kb_method: str, timeout: float = None, **params):
+        """调用 KB 方法。返回业务对象；KB 不可达/超时返回 None；KB 业务失败抛 KbError。
+
+        timeout 为 None 时用实例默认(self.timeout)；LLM 等耗时调用方应显式传更长超时。
+        """
+        t = self.timeout if timeout is None else float(timeout)
         url = f"{self.base_url}/zmq/{kb_method}"
         req = urllib.request.Request(
             url,
@@ -45,7 +50,7 @@ class KbGateway:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=t) as resp:
                 body = json.loads(resp.read().decode())
             return body.get("result")
         except urllib.error.HTTPError as e:
@@ -56,14 +61,21 @@ class KbGateway:
                 pass
             logger.warning("[KbGateway] %s -> HTTP %s: %s", kb_method, e.code, detail)
             raise KbError(detail)
+        except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+            if isinstance(e, urllib.error.URLError) and e.reason and not isinstance(e.reason, socket.timeout):
+                logger.info("[KbGateway] %s unreachable (%s): %s", kb_method, url, e.reason)
+            else:
+                logger.warning("[KbGateway] %s timeout after %.0fs (%s)", kb_method, t, url)
+            return None
         except Exception:
             logger.info("[KbGateway] %s unreachable (%s)", kb_method, url)
             return None
 
     # ── MCP 通道 ─────────────────────────────────────────────────
 
-    def query(self, tool: str, **params):
-        """调用 MCP 工具。返回 `{ok, tool, ...}` 原样；不可达返回 None。"""
+    def query(self, tool: str, timeout: float = None, **params):
+        """调用 MCP 工具。返回 `{ok, tool, ...}` 原样；不可达/超时返回 None。"""
+        t = self.timeout if timeout is None else float(timeout)
         url = f"{self.mcp_url}/v1/tools/{tool}/call"
         req = urllib.request.Request(
             url,
@@ -72,8 +84,14 @@ class KbGateway:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=t) as resp:
                 return json.loads(resp.read().decode())
+        except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+            if isinstance(e, urllib.error.URLError) and e.reason and not isinstance(e.reason, socket.timeout):
+                logger.info("[KbGateway] mcp %s unreachable (%s): %s", tool, url, e.reason)
+            else:
+                logger.warning("[KbGateway] mcp %s timeout after %.0fs (%s)", tool, t, url)
+            return None
         except Exception:
             logger.info("[KbGateway] mcp %s unreachable (%s)", tool, url)
             return None

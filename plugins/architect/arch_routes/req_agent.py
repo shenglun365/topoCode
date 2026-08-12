@@ -16,6 +16,7 @@ LLM 复用通道：`KbGateway.call('llm.sync', ...)` → 主后端 /zmq/llm.sync
 import inspect
 import json
 import logging
+import os
 import re
 from typing import Any, Callable, Dict, List, Optional
 
@@ -371,13 +372,60 @@ def tool_semantic_mappings(asset_ids: List[str], root: Optional[str] = None,
     from . import semantic_assets as S
     out = []
     for i in (asset_ids or []):
-        out += S.mappings(i)
+        out += S.mappings(i, root, project)
     return out[:12]
+
+
+@register_architect_tool(
+    "asset.semantic.reconcile",
+    "校验语义数据资产新鲜度(git/文件哈希比对)：标记因文件变更或新增文件影响而过期的资产为「需更新后使用」。返回失效清单。",
+)
+def tool_semantic_reconcile(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+    from . import semantic_assets as S
+    return S.reconcile_semantic(root, project, force=True)
+
+
+@register_architect_tool(
+    "asset.semantic.refresh",
+    "更新单个过期(需更新)的语义数据资产：增量重提其所属范围；失败则软删并离线重新生成。返回新状态。",
+)
+def tool_semantic_refresh(asset_id: str, root: Optional[str] = None,
+                          project: Optional[str] = None) -> Dict[str, Any]:
+    from . import semantic_assets as S
+    return S.handle_stale_asset(asset_id, root, project)
+
+
+# ── 绘图增强工具（经薄代理转发 reports diagram_tools 服务，单一起源） ──
+
+@register_architect_tool(
+    "diagram.build",
+    "从结构化中间表示(IR)生成语法正确的 Mermaid/PlantUML 图代码。"
+    "LLM 只描述图的结构(节点/边/分组/方向)，由本工具生成精确代码，"
+    "避免小参数模型直接输出 mermaid/plantuml 源码时的语法错误。",
+)
+def tool_diagram_build(ir: Dict[str, Any]) -> Dict[str, Any]:
+    from . import diagram as _diagram
+    return _diagram.call_build(ir)
+
+
+@register_architect_tool(
+    "diagram.validate",
+    "校验 Mermaid/PlantUML 代码语法。返回 {valid, errors, warnings}。"
+    "生成图后建议校验一次，语法有问题时修正 IR 重新调用 diagram.build。",
+)
+def tool_diagram_validate(code: str, lang: str = "mermaid") -> Dict[str, Any]:
+    from . import diagram as _diagram
+    return _diagram.call_validate(code, lang)
 
 
 # ── LLM 通道: 复用主后端 ai chat ─────────────────────────────────────
 
 _MODEL_KEY = "llm.modelId"
+_MAX_TOKENS_KEY = "llm.maxTokens"
+
+# LLM 同步调用超时(秒)：本地大模型结构化提取/工具循环耗时可能远超 KB 默认 10s，
+# 与 model_configs.timeout 对齐(默认 300s)，可用 LLM_SYNC_TIMEOUT 覆盖。
+_LLM_CALL_TIMEOUT = float(os.environ.get("LLM_SYNC_TIMEOUT", "300"))
 
 
 def get_model_preference() -> str:
@@ -389,6 +437,26 @@ def get_model_preference() -> str:
 def set_model_preference(model_id: str) -> None:
     from . import store
     store.CollabConfigStore.set(_MODEL_KEY, model_id)
+
+
+def get_max_tokens_preference() -> Optional[int]:
+    """architect 侧 max_tokens 偏好(空 = 主后端按 model_configs.max_tokens)。"""
+    from . import store
+    raw = store.CollabConfigStore.get(_MAX_TOKENS_KEY, "")
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return val if val > 0 else None
+
+
+def set_max_tokens_preference(value: Optional[int]) -> None:
+    """设置 max_tokens 偏好；None/<=0 视为清除(回退主后端模型配置)。"""
+    from . import store
+    store.CollabConfigStore.set(
+        _MAX_TOKENS_KEY,
+        str(int(value)) if value and int(value) > 0 else "",
+    )
 
 
 def llm_sync(messages: List[Dict[str, str]],
@@ -414,10 +482,20 @@ def llm_sync(messages: List[Dict[str, str]],
             body["tools"] = tools
         if output_schema:
             body["outputSchema"] = output_schema
-        res = gateway.call("llm.sync", **body)
-        return res if isinstance(res, dict) else None
+        res = gateway.call("llm.sync", timeout=_LLM_CALL_TIMEOUT, **body)
+        if not isinstance(res, dict):
+            logger.warning("[req_agent] llm.sync 返回非 dict(%s): %r",
+                           type(res).__name__,
+                           str(res)[:200] if res is not None else None)
+            return None
+        if mode == "structured" and output_schema and res.get("output") is None:
+            logger.warning("[req_agent] llm.sync structured 输出为空: "
+                           "content_len=%d structuredError=%r",
+                           len(res.get("content") or ""),
+                           str(res.get("structuredError"))[:200])
+        return res
     except Exception as e:
-        logger.warning("[req_agent] llm.sync failed: %s", e)
+        logger.warning("[req_agent] llm.sync failed: %s", e, exc_info=True)
         return None
 
 
@@ -473,7 +551,9 @@ _CAPABILITY_DOC = (
     "- asset.semantic.search：检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点)\n"
     "- asset.semantic.extract：从最新代码结构提取语义数据资产并落库，供对话确认与需求/设计引用\n"
     "- asset.semantic.detail：读取单个语义资产的完整描述/结构化细节/AST 锚点\n"
-    "- asset.semantic.mappings：查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」\n\n"
+    "- asset.semantic.mappings：查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」\n"
+    "- asset.semantic.reconcile：校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)\n"
+    "- asset.semantic.refresh：更新过期资产(增量重提；失败软删并重新生成)\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
@@ -487,6 +567,8 @@ _CAPABILITY_DOC = (
     '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["data_structure","processing_flow","control_logic"]}\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
+    "- asset.semantic.reconcile: {}\n"
+    '- asset.semantic.refresh: {"asset_id": "sa-xxx"}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"
     "可处理范围：\n"
@@ -495,12 +577,52 @@ _CAPABILITY_DOC = (
     "3. 新项目引导(从零建立开发环境/确立目标)、未关联 KB 的已有项目建立 KB 的引导(非强制)。\n"
     "越界处理(软拒绝)：对与需求分析无关的通用闲聊/外包式实现请求，礼貌说明能力范围并引导回"
     "需求分析语境，不深入执行，但允许用户继续提问。\n"
-    "回复保持简洁、直接、可操作，可输出 Markdown。"
+    "回复保持简洁、直接、可操作，可输出 Markdown。\n\n"
+    "图表输出能力：当描述语义数据资产(数据结构/处理流程/控制逻辑)、依赖链路、"
+    "实现路径或改动影响时，可用 Mermaid 或 PlantUML 图直观表达。直接以代码围栏输出，前端会自动渲染成图：\n"
+    "  ```mermaid\n  graph LR\n    A[订单实体] --> B[订单明细]\n  ```\n"
+    "  ```plantuml\n  @startuml\n  class Order {\n    +id: Long\n    +amount: BigDecimal\n  }\n  @enduml\n  ```\n"
+    "要求：图代码语法正确、节点精简、命名与代码资产一致；围栏语言标签只能用 mermaid 或 plantuml；"
+    "图中不要包含 [TOOL_CALL] 块。"
 )
 
 
-def chat_system_prompt(root: Optional[str], project: Optional[str]) -> str:
-    """自由对话系统提示：能力文档 + 当前项目/KB 上下文 + 范围限定(软拒绝)。"""
+def _diagram_skill_doc() -> str:
+    """绘图增强(IR→代码)能力文档：从 reports 拉共享 IR schema(单一起源)。
+
+    拉取失败时降级为最小说明(不阻塞对话)。
+    """
+    base = (
+        "绘图增强(diagram.build)：当需要输出复杂/较大图表时，优先用结构化中间表示(IR)描述图，"
+        "再调用 diagram.build 生成语法正确的代码，避免小模型直接写 mermaid/plantuml 源码出错。\n"
+        "用法：输出一个工具调用块 "
+        '[TOOL_CALL]{"tool":"diagram.build","arguments":{"ir":{lang, diagram_type, nodes, edges, ...}}}[/TOOL_CALL]，'
+        "收到返回代码后，以 ```mermaid 或 ```plantuml 围栏输出；可再用 diagram.validate 校验。\n\n"
+        "IR schema：\n"
+    )
+    try:
+        from . import diagram as _diagram
+        docs = _diagram.fetch_ir_docs()
+        if docs:
+            return base + docs
+    except Exception as e:
+        logger.warning("[req_agent] fetch ir-docs failed: %s", e)
+    return base + (
+        "mermaid: flowchart{nodes[{id,text,shape}], edges[{from,to,label}], direction} / "
+        "sequence{participants[], messages[{from,to,label,arrow}]} / "
+        "class{classes[{name,stereotype,members[]}], relations[]} / "
+        "state{states[], transitions[]} / er{entities[], relations[]} / gantt / pie；"
+        "plantuml: component{nodes[], edges[]} / sequence{participants[], messages[]}。\n"
+        "lang 字段取 mermaid | plantuml。"
+    )
+
+
+def chat_system_prompt(root: Optional[str], project: Optional[str],
+                       diagram_skill: bool = False) -> str:
+    """自由对话系统提示：能力文档 + 当前项目/KB 上下文 + 范围限定(软拒绝)。
+
+    diagram_skill=True 时注入绘图增强(IR→代码)文档与工具说明(对应前端 📐 开关)。
+    """
     ctx = tool_project_ctx(root, project)
     mode = "greenfield(从零)" if not project else "existing(既有)"
     degraded = ctx.get("degraded", False)
@@ -510,10 +632,11 @@ def chat_system_prompt(root: Optional[str], project: Optional[str]) -> str:
         if bound and not degraded
         else "KB 降级(无资产检索)，仅能基于需求描述给出规划建议，建议先关联知识库。"
     )
+    extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
     return (
         "你是 TopoCode 架构需求分析 agent(自由对话)。\n"
         f"当前项目：{ctx.get('name') or '(未绑定)'}，模式：{mode}。{kb}\n\n"
-        f"{_CAPABILITY_DOC}"
+        f"{_CAPABILITY_DOC}{extra}"
     )
 
 
@@ -535,7 +658,7 @@ def llm_chat_start(messages: List[Dict[str, str]],
             "messages": messages,
             "max_tokens": max_tokens,
         }
-        res = gateway.call("llm.chat", **body)
+        res = gateway.call("llm.chat", timeout=_LLM_CALL_TIMEOUT, **body)
         if not isinstance(res, dict) or not res.get("requestId"):
             return None
         return res.get("requestId")

@@ -355,6 +355,8 @@ class LLMService:
                 batch_idx = 0
                 last_pub = time.monotonic()
                 tool_calls_merged = None  # provider 已按 index 合并好的 tool_calls
+                round_reasoning = False  # 本轮是否收到推理内容(供空正文诊断)
+                round_reasoning_chars = 0  # 本轮累计推理字符数
 
                 while True:
                     try:
@@ -384,6 +386,12 @@ class LLMService:
                             })
                         full_content = item.get('content', '')
                         _token_data = thread_token_data  # capture token info from stream thread
+                        if not full_content and round_reasoning:
+                            # 思考型模型仅产出推理未输出正文(常见于 max_tokens 在推理阶段耗尽)。
+                            # 不静默当作成功，记录告警并在 done 中标注，便于上层触发重试/降级。
+                            logger.warning(f"[CHAT_TRACE] REASONING_ONLY_EMPTY requestId={request_id} "
+                                           f"round_reasoning_chars={round_reasoning_chars} "
+                                           f"model={model_name} max_tokens={max_tokens}")
                         break
 
                     if isinstance(item, dict) and item.get('type') == 'error':
@@ -391,6 +399,18 @@ class LLMService:
 
                     if isinstance(item, dict) and item.get('type') == 'tool_calls':
                         tool_calls_merged = json.loads(item.get('data', '[]'))
+
+                    # 推理内容(reasoning_content)：单独 PUB，不混入 content
+                    if isinstance(item, dict) and item.get('type') == 'reasoning':
+                        reasoning_text = item.get('text', '') or ''
+                        if reasoning_text:
+                            round_reasoning = True
+                            round_reasoning_chars += len(reasoning_text)
+                            self._publish('llm', 'reasoning', {
+                                'requestId': request_id,
+                                'text': reasoning_text,
+                            })
+                        continue
 
                     # 文本 chunk
                     if isinstance(item, str):
@@ -525,6 +545,7 @@ class LLMService:
                 self._publish('llm', 'done', {
                     'requestId': request_id,
                     'content': full_content or '',
+                    'reasoningOnly': bool(not full_content and round_reasoning),
                 })
 
             # ===== 计算延迟 =====
@@ -678,9 +699,8 @@ class LLMService:
             raise ValueError(f"Model not found: {model_id}")
         self._check_usage_limits(model_id)
         result = await self._sync_call_for_retry(model, messages, 'chat', None, None, max_tokens=max_tokens)
-        content = result.get('content', '')
-        if not content:
-            content = result.get('reasoning_content', '') or ''
+        # 仅返回 content；reasoning_content 不当作答案兜底，避免推理文本泄漏为最终内容
+        content = result.get('content', '') or ''
         # 记录用量统计（使用 API 返回的实际 token 数据）
         try:
             if model.get('id'):

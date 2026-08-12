@@ -10,7 +10,7 @@ from ._meta import ParserMeta
 meta = ParserMeta(
     name="mermaid_flowchart",
     patterns=[
-        (r'\bgraph\s+(TB|TD|LR|RL|BT)\b', 20),
+        (r'\b(?:graph|flowchart)\s+(TB|TD|LR|RL|BT)\b', 20),
         (r'--[>-]', 1),
         (r'[\[\(\{][^\]\)\}]*[\]\)\}]', 1),
     ],
@@ -41,7 +41,7 @@ class FlowchartData:
     edges: list[FlowEdge] = field(default_factory=list)
 
 
-GRAPH_PAT = re.compile(r'^\s*graph\s+(TB|TD|LR|RL|BT)\s*$', re.IGNORECASE)
+GRAPH_PAT = re.compile(r'^\s*(?:graph|flowchart)\s+(TB|TD|LR|RL|BT)\s*$', re.IGNORECASE)
 TITLE_PAT = re.compile(r'^\s*title\s+(.+?)\s*$', re.IGNORECASE)
 REMOVE_PAT = re.compile(r"^\s*(%|%%|@startuml\b|@enduml\b)")
 

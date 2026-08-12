@@ -50,7 +50,8 @@ _JSON_COLUMNS = {
     "input", "output", "overrides", "explicit_rules", "derived_rules",
     "changelog", "default_channel", "scaffold",
     "related_to", "preferred_asset_ids", "meta",
-    "detail", "ast_refs", "asset_refs",
+    "detail", "ast_refs", "asset_refs", "anchor_hashes",
+    "symbols", "imports", "refs",
 }
 
 
@@ -793,12 +794,14 @@ class SemanticAssetsStore:
         return _get(cls.TABLE, asset_id)
 
     @classmethod
-    def find_by_scope(cls, project_id: str, scope_type: str, scope_key: str):
+    def find_by_scope(cls, project_id: str, scope_type: str, scope_key: str,
+                      include_deleted: bool = False):
         db = _db()
+        status_sql = "status = 'active'" if not include_deleted else "1=1"
         rows = db.fetchall(
-            "SELECT * FROM arch_semantic_assets "
-            "WHERE project_id = ? AND scope_type = ? AND scope_key = ? AND status = 'active' "
-            "ORDER BY created_at ASC",
+            f"SELECT * FROM arch_semantic_assets "
+            f"WHERE project_id = ? AND scope_type = ? AND scope_key = ? AND {status_sql} "
+            f"ORDER BY created_at ASC",
             (project_id, scope_type, scope_key),
         )
         return [_row_to_api(r) for r in rows]
@@ -818,8 +821,12 @@ class SemanticAssetsStore:
 
     @classmethod
     def search(cls, project_id: str, text: str = "", kind: str = "",
-               limit: int = 20) -> list[dict]:
-        """全文朴素检索：名称/描述命中。"""
+               limit: int = 20, offset: int = 0,
+               scopes: Optional[list] = None) -> list[dict]:
+        """全文朴素检索：名称/描述命中，支持分页(limit/offset)与范围过滤。
+
+        scopes: scope_key 精确匹配列表；含哨兵 "__other__" 表示非 comm 范围资产(scope_type != 'comm')。
+        """
         db = _db()
         conds = ["project_id = ?", "status = 'active'"]
         params: list = [project_id]
@@ -830,9 +837,50 @@ class SemanticAssetsStore:
             conds.append("(name LIKE ? OR desc LIKE ? OR id LIKE ?)")
             like = f"%{text}%"
             params += [like, like, like]
-        sql = f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} ORDER BY updated_at DESC LIMIT ?"
-        params.append(int(limit))
+        if scopes:
+            keys = [s for s in scopes if s != "__other__"]
+            scope_conds: list = []
+            if keys:
+                scope_conds.append(f"scope_key IN ({','.join(['?'] * len(keys))})")
+                params += list(keys)
+            if "__other__" in scopes:
+                scope_conds.append("scope_type != 'comm'")
+            if scope_conds:
+                conds.append(f"({' OR '.join(scope_conds)})")
+        sql = (f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+               f"ORDER BY updated_at DESC LIMIT ? OFFSET ?")
+        params += [int(limit), int(offset)]
         return [_row_to_api(r) for r in db.fetchall(sql, tuple(params))]
+
+    @classmethod
+    def count(cls, project_id: str, text: str = "", kind: str = "",
+              scopes: Optional[list] = None) -> int:
+        """满足检索条件的资产总数(与 search 同一条件)。"""
+        db = _db()
+        conds = ["project_id = ?", "status = 'active'"]
+        params: list = [project_id]
+        if kind in cls.KINDS:
+            conds.append("kind = ?")
+            params.append(kind)
+        if text:
+            conds.append("(name LIKE ? OR desc LIKE ? OR id LIKE ?)")
+            like = f"%{text}%"
+            params += [like, like, like]
+        if scopes:
+            keys = [s for s in scopes if s != "__other__"]
+            scope_conds: list = []
+            if keys:
+                scope_conds.append(f"scope_key IN ({','.join(['?'] * len(keys))})")
+                params += list(keys)
+            if "__other__" in scopes:
+                scope_conds.append("scope_type != 'comm'")
+            if scope_conds:
+                conds.append(f"({' OR '.join(scope_conds)})")
+        row = db.fetchone(
+            f"SELECT COUNT(*) AS n FROM {cls.TABLE} WHERE {' AND '.join(conds)}",
+            tuple(params),
+        )
+        return int((row or {}).get("n") or 0)
 
     @classmethod
     def mark_scope_stale(cls, project_id: str, scope_type: str, scope_key: str) -> None:
@@ -843,3 +891,151 @@ class SemanticAssetsStore:
             (int(__import__("time").time() * 1000), project_id, scope_type, scope_key),
         )
         db.commit()
+
+    @classmethod
+    def set_needs_update(cls, asset_id: str, needs: bool = True, *, change: str = "",
+                         reason: str = "") -> Optional[dict]:
+        """文件变化 → 标记需更新后使用(status=stale + needs_update=1)。"""
+        now = int(__import__("time").time() * 1000)
+        payload: dict = {"status": "stale", "needsUpdate": 1 if needs else 0,
+                         "updatedAt": now, "lastCheckedAt": now}
+        if change:
+            payload["change"] = change
+        if reason:
+            meta = _get(cls.TABLE, asset_id)
+            m = dict((meta or {}).get("meta") or {})
+            m["invalidateReason"] = reason
+            payload["meta"] = m
+        return cls.update(asset_id, payload)
+
+    @classmethod
+    def mark_deleted(cls, asset_id: str, *, change: str = "deleted") -> Optional[dict]:
+        """软删：保留行与 id，引用可告警。"""
+        now = int(__import__("time").time() * 1000)
+        return cls.update(asset_id, {"status": "deleted", "change": change,
+                                     "deletedAt": now, "updatedAt": now})
+
+    @classmethod
+    def list_stale(cls, project_id: str) -> list[dict]:
+        db = _db()
+        rows = db.fetchall(
+            "SELECT * FROM arch_semantic_assets WHERE project_id = ? "
+            "AND status = 'stale' ORDER BY updated_at DESC LIMIT 200",
+            (project_id,),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def all_status(cls, project_id: str, limit: int = 400) -> list[dict]:
+        """全部状态(含 stale/deleted，供 reconcile/status 统计)。"""
+        db = _db()
+        rows = db.fetchall(
+            "SELECT * FROM arch_semantic_assets WHERE project_id = ? "
+            "ORDER BY updated_at DESC LIMIT ?",
+            (project_id, int(limit)),
+        )
+        return [_row_to_api(r) for r in rows]
+
+
+class AstCacheStore:
+    """architect AST 缓存层(要求③)：按文件存符号/边，content_hash 判新鲜。
+
+    取数优先级: 缓存命中(content_hash 一致) → codegraph → KB parseFileAst → live 扫描。
+    """
+
+    TABLE = "arch_ast_cache"
+
+    @classmethod
+    def get(cls, project_id: str, file_path: str) -> Optional[dict]:
+        db = _db()
+        row = db.fetchone(
+            "SELECT * FROM arch_ast_cache WHERE project_id = ? AND file_path = ?",
+            (project_id, file_path),
+        )
+        return _row_to_api(row) if row else None
+
+    @classmethod
+    def upsert(cls, project_id: str, file_path: str, data: dict) -> dict:
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "projectId": project_id, "filePath": file_path,
+            "contentHash": data.get("contentHash") or "",
+            "language": data.get("language") or "",
+            "symbols": data.get("symbols") or [],
+            "imports": data.get("imports") or [],
+            "refs": data.get("refs") or [],
+            "source": data.get("source") or "codegraph",
+            "parsedAt": now,
+        }
+        cols, params = [], []
+        for k, v in payload.items():
+            cols.append(_to_snake(k))
+            params.append(_dumps(v))
+        db = _db()
+        db.execute(
+            f"INSERT INTO {cls.TABLE} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))}) "
+            f"ON CONFLICT(project_id, file_path) DO UPDATE SET "
+            f"content_hash=excluded.content_hash, language=excluded.language, "
+            f"symbols=excluded.symbols, imports=excluded.imports, refs=excluded.refs, "
+            f"source=excluded.source, parsed_at=excluded.parsed_at",
+            tuple(params),
+        )
+        db.commit()
+        return cls.get(project_id, file_path) or payload
+
+    @classmethod
+    def invalidate(cls, project_id: str, files: Optional[list] = None) -> int:
+        db = _db()
+        if files:
+            ph = ",".join("?" * len(files))
+            cur = db.execute(
+                f"DELETE FROM {cls.TABLE} WHERE project_id = ? AND file_path IN ({ph})",
+                (project_id, *files),
+            )
+        else:
+            cur = db.execute("DELETE FROM arch_ast_cache WHERE project_id = ?", (project_id,))
+        db.commit()
+        return cur.rowcount or 0
+
+    @classmethod
+    def for_project(cls, project_id: str, limit: int = 2000) -> list[dict]:
+        db = _db()
+        rows = db.fetchall(
+            "SELECT * FROM arch_ast_cache WHERE project_id = ? LIMIT ?",
+            (project_id, int(limit)),
+        )
+        return [_row_to_api(r) for r in rows]
+
+
+class SemanticRefsStore:
+    """语义资产引用登记(删除/失效时精确波及引用方)。"""
+
+    TABLE = "arch_semantic_refs"
+
+    @classmethod
+    def add(cls, asset_id: str, ref_type: str, ref_id: str, role: str = "related") -> None:
+        now = int(__import__("time").time() * 1000)
+        db = _db()
+        db.execute(
+            f"INSERT INTO {cls.TABLE} (asset_id, ref_type, ref_id, role, created_at) "
+            f"VALUES (?, ?, ?, ?, ?) ON CONFLICT(asset_id, ref_type, ref_id) "
+            f"DO UPDATE SET role = excluded.role",
+            (asset_id, ref_type, ref_id, role, now),
+        )
+        db.commit()
+
+    @classmethod
+    def refs_of(cls, asset_id: str) -> list[dict]:
+        db = _db()
+        rows = db.fetchall(
+            "SELECT * FROM arch_semantic_refs WHERE asset_id = ?", (asset_id,))
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def assets_referenced_in(cls, ref_type: str, ref_id: str) -> list[str]:
+        db = _db()
+        rows = db.fetchall(
+            "SELECT asset_id FROM arch_semantic_refs WHERE ref_type = ? AND ref_id = ?",
+            (ref_type, ref_id),
+        )
+        return [r["asset_id"] for r in rows]

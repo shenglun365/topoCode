@@ -10,6 +10,7 @@ import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchCollabStore } from '@/stores/collaboration-store'
+import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import SessionStatsPanel from './SessionStatsPanel.vue'
 
 const props = defineProps<{ session: AgentSession }>()
@@ -57,11 +58,6 @@ const toolColor: Record<string, string> = {
 
 function roleChip(role: AgentMessage['role']) {
   return role === 'user' ? 'bg-ctp-sky/15 text-ctp-sky' : role === 'tool' ? 'bg-ctp-surface0 text-ctp-overlay1' : 'bg-ctp-mauve/15 text-ctp-mauve'
-}
-function roleColor(role: AgentMessage['role']) {
-  if (role === 'user') return 'text-ctp-sky'
-  if (role === 'tool') return 'text-ctp-overlay1'
-  return 'text-ctp-text'
 }
 
 watch(
@@ -202,12 +198,9 @@ function answer(interactionId: string) {
               >{{ m.role }}</span>
               <span class="text-[9px] text-ctp-overlay1">{{ new Date(m.time).toLocaleTimeString() }}</span>
             </div>
-            <p
-              class="whitespace-pre-wrap text-ctp-subtext1"
-              :class="roleColor(m.role)"
-            >
-              {{ m.content }}
-            </p>
+            <ChatMessageBlocks
+              :content="m.content"
+            />
           </div>
         </div>
       </div>

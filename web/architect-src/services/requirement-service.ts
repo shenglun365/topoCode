@@ -12,11 +12,12 @@ export const requirementService = {
   async update(id: string, data: Partial<Requirement>): Promise<Requirement> {
     return apiPatch<Requirement>(`/requirements/${id}`, data)
   },
-  /** 历史会话摘要(仅临时/未绑定提案)。 */
-  async conversations(): Promise<ConversationSummary[]> {
+  /** 历史会话摘要(仅临时/未绑定提案)。kind 缺省 requirement(资产管理会话传 'asset')。 */
+  async conversations(kind = 'requirement'): Promise<ConversationSummary[]> {
     const { project } = currentProjectParams()
-    const qs = project ? `?project=${encodeURIComponent(project)}` : ''
-    return apiGet<ConversationSummary[]>(`/requirements/conversations${qs}`)
+    const qs = new URLSearchParams({ kind })
+    if (project) qs.set('project', project)
+    return apiGet<ConversationSummary[]>(`/requirements/conversations?${qs.toString()}`)
   },
   /** 按会话 id 拉取详情+消息(导入)。 */
   async conversation(id: string): Promise<ConversationDetail> {

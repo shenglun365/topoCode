@@ -204,6 +204,7 @@ RPC_IDS: dict[str, str] = {
     "analysis.startPreSummary":    "API-152",
     "analysis.startPreSummaryPipeline": "API-153",
     "analysis.analyzeComponents":  "API-154",
+    "analysis.parseFileAst":       "API-155",
 }
 
 

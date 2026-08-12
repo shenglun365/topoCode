@@ -20,6 +20,8 @@ import { ArchWs } from './ws-client'
 export interface KbAnalysisTurn {
   role: 'user' | 'assistant'
   content: string
+  /** 推理内容(thinking)：独立于正文，前端可折叠展示。 */
+  reasoning?: string
   questions?: QuestionItem[]
   formDraft?: FormDraft
   /** 语义数据资产卡片(提取/检索结果，供对话确认)。 */
@@ -56,9 +58,9 @@ export interface RequirementAnalysisAgent {
   collect(ctx: { turns: KbAnalysisTurn[]; base: KbAnalysisRequest; answers: Record<string, string>; note?: string }): Promise<CollectResult>
 }
 
-/** 自由对话流式事件(阶段A)：逐字增量 + 回合结束。 */
+/** 自由对话流式事件(阶段A)：逐字增量 + 推理内容 + 回合结束。 */
 export interface ChatStreamEvent {
-  type: 'chunk' | 'done' | 'error' | 'chat_fallback' | 'chat_start'
+  type: 'chunk' | 'reasoning' | 'done' | 'error' | 'chat_fallback' | 'chat_start'
   delta?: string
   content?: string
   message?: string
@@ -78,6 +80,8 @@ export interface ChatStreamOptions {
   reqId?: string
   title?: string
   modelId?: string
+  /** 绘图增强(IR→代码)：开启后后端注入 diagram.build/validate 工具文档。 */
+  diagramSkill?: boolean
   /** 是否有流式通道可用(后端不可达/未启用时回退一次性回复)。 */
   signal?: AbortSignal
 }
@@ -114,6 +118,10 @@ export async function chatStream(
           onEvent({ type: 'chunk', delta, conversationId: ev?.conversationId })
         }
       })
+      ws.on('reasoning', (ev: any) => {
+        const delta = ev?.delta ?? ''
+        if (delta) onEvent({ type: 'reasoning', delta, conversationId: ev?.conversationId })
+      })
       ws.on('done', (ev: any) => {
         const content = ev?.content ?? full
         full = content
@@ -139,6 +147,7 @@ export async function chatStream(
       reqId: opts.reqId,
       title: opts.title,
       modelId: opts.modelId,
+      diagramSkill: opts.diagramSkill,
     })
 
     return await doneP

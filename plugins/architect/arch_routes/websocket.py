@@ -14,6 +14,21 @@ router = APIRouter()
 
 _MAX_TOOL_ROUNDS = 4
 
+# 自由对话 LLM 调用 token 预算：思考型模型(reasoning_content)会先消耗大量 token 再输出正文，
+# 预算过小会在推理阶段耗尽(finish_reason=length、content 为空)。
+# 默认传 None 由主后端按 model_configs.max_tokens(设置中可配，如 32000)；也可经 KB 侧 `llm.maxTokens` 覆盖。
+_MIN_CHAT_MAX_TOKENS = 8192
+
+
+def _chat_max_tokens() -> Optional[int]:
+    """读 KB 侧 `llm.maxTokens` 偏好(与 llm.modelId 同源)；未配置返回 None → 主后端用模型配置。
+    覆盖值做过小保护，避免思考型模型在推理阶段耗尽 token 产出空正文。"""
+    from . import req_agent
+    pref = req_agent.get_max_tokens_preference()
+    if pref and pref > 0:
+        return max(pref, _MIN_CHAT_MAX_TOKENS)
+    return None
+
 
 @router.websocket("/ws/kb-analysis")
 async def kb_analysis_ws(websocket: WebSocket):
@@ -57,6 +72,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     root = (data.get("root") or "").strip()
     kind = data.get("kind") or "requirement"
     title = data.get("title") or f"{kind} 对话"
+    diagram_skill = bool(data.get("diagramSkill") or data.get("diagram_skill"))
 
     # ---- 会话落库(阶段D 统一表) ----
     now = _ts()
@@ -82,7 +98,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         })
 
     # ---- 上下文: 能力文档 + 历史(带软拒绝范围) ----
-    msgs = _build_chat_messages(root, project, history)
+    msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill)
 
     # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
     request_id = None
@@ -104,6 +120,12 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         async for event_type, payload in _iter_llm_events(rid):
             if event_type == "chunk":
                 round_text += payload.get("text") or ""
+            elif event_type == "reasoning":
+                # 推理内容单独转发(不混入正文)；前端可折叠展示思考过程
+                text = payload.get("text") or ""
+                if text:
+                    await websocket.send_json({"type": "reasoning", "conversationId": conv_id,
+                                               "delta": text})
             elif event_type == "done":
                 round_text = payload.get("content") or round_text
                 break
@@ -167,11 +189,18 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         for i in range(0, len(assistant_text), CHUNK_SIZE):
             await websocket.send_json({"type": "chunk", "requestId": request_id,
                                        "delta": assistant_text[i:i + CHUNK_SIZE]})
-    elif request_id is None and not loop_fell_back:
-        # ---- 降级: llm.sync 一次性(同样支持工具调用循环，避免输出裸 [TOOL_CALL] 块) ----
+    elif not loop_fell_back:
+        # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
+        # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
         assistant_text = await _sync_with_tools(msgs, root, project, model_id)
-        if not assistant_text:
-            await websocket.send_json({"type": "chat_fallback", "conversationId": conv_id})
+        if assistant_text:
+            CHUNK_SIZE = 24
+            for i in range(0, len(assistant_text), CHUNK_SIZE):
+                await websocket.send_json({"type": "chunk", "requestId": request_id,
+                                           "delta": assistant_text[i:i + CHUNK_SIZE]})
+        else:
+            await websocket.send_json({"type": "error", "requestId": request_id,
+                                       "message": "LLM 未返回内容"})
     else:
         await websocket.send_json({"type": "error", "requestId": request_id, "message": "LLM 未返回内容"})
     if assistant_text:
@@ -192,15 +221,15 @@ async def _sync_with_tools(msgs, root, project, model_id, max_rounds: int = 4) -
     res = await asyncio.to_thread(
         req_agent.run_tools_loop, msgs,
         root=root, project=project, model_id=model_id,
-        mode="chat", max_tokens=2000, max_rounds=max_rounds,
+        mode="chat", max_tokens=_chat_max_tokens(), max_rounds=max_rounds,
     )
     return res.get("content", "") if isinstance(res, dict) else ""
 
 
-def _build_chat_messages(root, project, history, cap=20):
-    """组装 prompt: 能力文档(system) + 最近 N 条历史。"""
+def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False):
+    """组装 prompt: 能力文档(system) + 最近 N 条历史。diagram_skill 开启绘图增强(IR→代码)。"""
     from .req_agent import chat_system_prompt
-    msgs = [{"role": "system", "content": chat_system_prompt(root, project)}]
+    msgs = [{"role": "system", "content": chat_system_prompt(root, project, diagram_skill=diagram_skill)}]
     for m in history[-cap:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and (m.get("content") or "").strip():
             msgs.append({"role": m["role"], "content": m["content"]})
@@ -217,7 +246,7 @@ async def _iter_llm_events(request_id: str):
 def _req_chat_stream(msgs, model_id):
     """发起流式 llm.chat; 返回 requestId 或 None(降级)。"""
     from .req_agent import llm_chat_start
-    return llm_chat_start(msgs, model_id=model_id, session_id="arch-req-chat", max_tokens=2000)
+    return llm_chat_start(msgs, model_id=model_id, session_id="arch-req-chat", max_tokens=_chat_max_tokens())
 
 
 @router.websocket("/ws/coding-agent")
