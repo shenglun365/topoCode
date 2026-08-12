@@ -8,9 +8,9 @@ import {
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementForm from '@/components/requirements/RequirementForm.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
+import DesignPanel from '@/components/design/DesignPanel.vue'
 import { analysisAgent, chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { reProbeBackend } from '@/services/backend'
-import type { ConversationDetail } from '@/types'
 import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
@@ -19,7 +19,7 @@ import { useChatModel } from '@/composables/useChatModel'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useSplitPane } from '@/composables/useSplitPane'
-import type { FormDraft, Requirement, RequirementAnalysis, SemanticAssetKind } from '@/types'
+import type { ConversationDetail, FormDraft, Requirement, RequirementAnalysis, SemanticAssetKind } from '@/types'
 import { requirementService } from '@/services/requirement-service'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 
@@ -484,6 +484,22 @@ async function executeNow() {
   router.push({ path: '/workbench/execute' })
 }
 
+// ---- 方向2/3：设计方案 + 修改前后对比 ----
+const designOpen = ref(false)
+const designTargetId = computed(() =>
+  committed.value === 'pool'
+    ? (committedReqs.value[0]?.id ?? editingId.value ?? '')
+    : (editingId.value ?? ''),
+)
+function openDesign() {
+  if (!designTargetId.value) return
+  designOpen.value = true
+}
+function onDesignExecute() {
+  designOpen.value = false
+  executeNow()
+}
+
 function backToList() {
   router.push({ path: '/workbench/requirements', query: { tab: committed.value === 'pool' ? 'pool' : 'proposal' } })
 }
@@ -552,6 +568,13 @@ function backToList() {
           @click="enterPool"
         >
           <BoltIcon class="w-3.5 h-3.5" />{{ t('requirement.workspace.enterPool') }}
+        </button>
+        <button
+          v-if="designTargetId"
+          class="btn btn-sm btn-sky"
+          @click="openDesign"
+        >
+          <SparklesIcon class="w-3.5 h-3.5" />{{ t('design.button') }}
         </button>
       </div>
 
@@ -730,6 +753,15 @@ function backToList() {
       :active-conv-id="chatConvId"
       @close="historyOpen = false"
       @import="importHistory"
+    />
+
+    <DesignPanel
+      :open="designOpen"
+      :req-id="designTargetId"
+      :analysis="hasAnalysis ? analysisFromForm() : undefined"
+      :can-execute="committed === 'pool'"
+      @close="designOpen = false"
+      @execute="onDesignExecute"
     />
   </div>
 </template>

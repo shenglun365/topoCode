@@ -5,12 +5,13 @@ import {
   BoltIcon, AdjustmentsHorizontalIcon, CubeTransparentIcon, ChevronDownIcon, ChevronRightIcon,
   ArrowPathIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, SparklesIcon,
 } from '@heroicons/vue/24/outline'
-import type { SemanticAsset, SemanticAssetKind } from '@/types'
+import type { SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 import { semanticAssetService } from '@/services/semantic-asset-service'
 
 const { t } = useI18n()
 
 const kind = ref<SemanticAssetKind | ''>('')
+const level = ref<SemanticAssetLevel | ''>('')
 const q = ref('')
 const items = ref<SemanticAsset[]>([])
 const loading = ref(false)
@@ -20,15 +21,22 @@ const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
-  { value: 'data_structure', label: t('semanticAssets.kind.data_structure') },
-  { value: 'processing_flow', label: t('semanticAssets.kind.processing_flow') },
-  { value: 'control_logic', label: t('semanticAssets.kind.control_logic') },
+  { value: 'structure', label: t('semanticAssets.kind.structure') },
+  { value: 'behavior', label: t('semanticAssets.kind.behavior') },
+  { value: 'rule', label: t('semanticAssets.kind.rule') },
+  { value: 'contract', label: t('semanticAssets.kind.contract') },
+]
+
+const levels: { value: SemanticAssetLevel; label: string }[] = [
+  { value: 'high', label: t('semanticAssets.level.high') },
+  { value: 'medium', label: t('semanticAssets.level.medium') },
+  { value: 'low', label: t('semanticAssets.level.low') },
 ]
 
 async function load() {
   loading.value = true
   try {
-    items.value = await semanticAssetService.search(q.value, kind.value || undefined)
+    items.value = await semanticAssetService.search(q.value, kind.value || undefined, undefined, level.value || undefined)
   } finally {
     loading.value = false
   }
@@ -84,8 +92,9 @@ onMounted(async () => {
 })
 
 function kindIcon(k: SemanticAsset['kind']) {
-  if (k === 'processing_flow') return BoltIcon
-  if (k === 'control_logic') return AdjustmentsHorizontalIcon
+  if (k === 'behavior') return BoltIcon
+  if (k === 'rule') return AdjustmentsHorizontalIcon
+  if (k === 'contract') return ArrowPathIcon
   return CubeTransparentIcon
 }
 
@@ -139,6 +148,18 @@ async function copyAsset(a: SemanticAsset) {
           :key="k.value"
           :value="k.value"
         >{{ k.label }}</option>
+      </select>
+      <select
+        v-model="level"
+        class="input !py-1.5 !text-xs w-auto"
+        @change="load"
+      >
+        <option value="">{{ t('semanticAssets.allLevels') }}</option>
+        <option
+          v-for="l in levels"
+          :key="l.value"
+          :value="l.value"
+        >{{ l.label }}</option>
       </select>
       <button
         class="btn btn-ghost !py-1.5"
@@ -203,6 +224,11 @@ async function copyAsset(a: SemanticAsset) {
           <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
             {{ t(`semanticAssets.kind.${a.kind}`) }}
           </span>
+          <span
+            v-if="a.level && a.level !== 'medium'"
+            class="chip !text-[9px] shrink-0"
+            :class="a.level === 'high' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-sky/15 text-ctp-sky'"
+          >{{ t(`semanticAssets.level.${a.level}`) }}</span>
           <span class="text-xs font-medium text-ctp-text truncate">{{ a.name }}</span>
           <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0">
             {{ a.source ?? 'live' }}

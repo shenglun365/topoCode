@@ -255,3 +255,129 @@ export function callsToMermaid(dataFlows: DataFlow[], components: ArchComponent[
   })
   return lines.join('\n')
 }
+
+// ============ 语义资产图谱 ============
+
+const SEMANTIC_LEVEL_ORDER = ['high', 'medium', 'low'] as const
+
+const SEMANTIC_LEVEL_LABEL: Record<string, string> = {
+  high: 'high · 概念级',
+  medium: 'medium · 逻辑级',
+  low: 'low · 实现级',
+}
+
+function _semLevel(n?: string): string {
+  return SEMANTIC_LEVEL_ORDER.includes(n as any) ? (n as string) : 'medium'
+}
+
+/** 资产 id → 稳定序号节点标识(mermaid/plantuml 符号安全)。 */
+function _semNodeId(idx: number): string {
+  return `n${idx}`
+}
+
+function _semLabel(s: string, max = 26): string {
+  const t = (s || '').replace(/[\[\]{}()]/g, ' ').trim()
+  return t.length > max ? `${t.slice(0, max)}…` : (t || '?')
+}
+
+/** 语义资产图谱 → Mermaid flowchart(按粒度 high→medium→low 分 subgraph 表达层级)。 */
+export function semanticGraphToMermaid(
+  nodes: { id: string; kind: string; level?: string; name: string; status?: string; needsUpdate?: number }[],
+  edges: { from: string; to: string; type?: string; semantic?: string }[],
+): string {
+  const lines = ['flowchart TD']
+  lines.push('  classDef structure fill:#313244,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4')
+  lines.push('  classDef behavior fill:#313244,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4')
+  lines.push('  classDef rule fill:#313244,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4')
+  lines.push('  classDef contract fill:#313244,stroke:#f9e2af,stroke-width:2px,color:#cdd6f4')
+  lines.push('  classDef stale fill:#3a2a2a,stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:#f5c2e7')
+  lines.push('  classDef needsUpdate stroke:#f9e2af')
+  const byLevel = new Map<string, { id: string; kind: string; idx: number; name: string; status?: string; needsUpdate?: number }[]>()
+  nodes.forEach((n, idx) => {
+    const lv = _semLevel(n.level)
+    if (!byLevel.has(lv)) byLevel.set(lv, [])
+    byLevel.get(lv)!.push({ ...n, idx })
+  })
+  const idToNode = new Map(nodes.map((n, i) => [n.id, i]))
+  const declared = new Set<string>()
+  for (const lv of SEMANTIC_LEVEL_ORDER) {
+    const group = byLevel.get(lv)
+    if (!group?.length) continue
+    lines.push(`  subgraph ${lv.toUpperCase()}[${SEMANTIC_LEVEL_LABEL[lv] ?? lv}]`)
+    lines.push(`  style ${lv.toUpperCase()} fill:#1e1e2e,stroke:#45475a,color:#89b4fa,font-weight:600`)
+    for (const n of group) {
+      const nodeId = _semNodeId(n.idx)
+      const status = n.status || 'active'
+      const flag = n.needsUpdate ? ' ⚠' : ''
+      const style = status === 'stale' ? ':::stale' : n.needsUpdate ? ':::needsUpdate' : ''
+      lines.push(`    ${nodeId}["${_semLabel(n.name)}${flag}"]${style}`)
+      lines.push(`    class ${nodeId} ${n.kind || 'structure'}`)
+      declared.add(nodeId)
+    }
+    lines.push('  end')
+  }
+  const seen = new Set<string>()
+  for (const e of edges) {
+    if (!e.from || !e.to) continue
+    const si = idToNode.get(e.from)
+    const ti = idToNode.get(e.to)
+    if (si === undefined || ti === undefined) continue
+    const a = _semNodeId(si)
+    const b = _semNodeId(ti)
+    if (a === b) continue
+    const key = `${a}->${b}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const label = (e.type || e.semantic || '').trim()
+    lines.push(`  ${a} -->${label ? `|${_semLabel(label, 14)}|` : ''} ${b}`)
+  }
+  // 显式加粗可见连线(深色背景下保证线/字可读，不依赖全局主题)。
+  lines.push('  linkStyle default stroke:#a6adc8,color:#cdd6f4,stroke-width:1.5px')
+  return lines.join('\n')
+}
+
+/** 语义资产图谱 → PlantUML component 图(按粒度 package 分组表达层级)。 */
+export function semanticGraphToPlantUml(
+  nodes: { id: string; kind: string; level?: string; name: string; status?: string; needsUpdate?: number }[],
+  edges: { from: string; to: string; type?: string; semantic?: string }[],
+): string {
+  const lines = ['@startuml', 'skinparam componentStyle rectangle', 'skinparam backgroundColor #181825',
+    'skinparam ArrowColor #a6adc8', 'skinparam ArrowThickness 1.5', 'skinparam LineColor #a6adc8',
+    'skinparam componentBackgroundColor #313244', 'skinparam componentBorderColor #45475a',
+    'skinparam componentFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam packageBackgroundColor #1e1e2e',
+    'skinparam packageBorderColor #585b70', 'skinparam packageFontColor #89b4fa', 'skinparam shadowing false']
+  const byLevel = new Map<string, { id: string; kind: string; idx: number; name: string; status?: string; needsUpdate?: number }[]>()
+  nodes.forEach((n, idx) => {
+    const lv = _semLevel(n.level)
+    if (!byLevel.has(lv)) byLevel.set(lv, [])
+    byLevel.get(lv)!.push({ ...n, idx })
+  })
+  const idToNode = new Map(nodes.map((n, i) => [n.id, i]))
+  for (const lv of SEMANTIC_LEVEL_ORDER) {
+    const group = byLevel.get(lv)
+    if (!group?.length) continue
+    lines.push(`package "${SEMANTIC_LEVEL_LABEL[lv] ?? lv}" as L${lv.toUpperCase()} {`)
+    for (const n of group) {
+      const nodeId = _semNodeId(n.idx)
+      lines.push(`  component "${_semLabel(n.name)}${n.needsUpdate ? ' ⚠' : ''}" as ${nodeId} <<${n.kind || 'structure'}>> #313244`)
+    }
+    lines.push('}')
+  }
+  const seen = new Set<string>()
+  for (const e of edges) {
+    if (!e.from || !e.to) continue
+    const si = idToNode.get(e.from)
+    const ti = idToNode.get(e.to)
+    if (si === undefined || ti === undefined) continue
+    const a = _semNodeId(si)
+    const b = _semNodeId(ti)
+    if (a === b) continue
+    const key = `${a}->${b}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const label = (e.type || e.semantic || '').trim()
+    lines.push(`${a} --> ${b}${label ? ` : ${_semLabel(label, 18)}` : ''}`)
+  }
+  lines.push('@enduml')
+  return lines.join('\n')
+}

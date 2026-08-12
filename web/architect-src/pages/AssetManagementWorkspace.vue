@@ -1,22 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
-  SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon,
+  SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
+import SemanticGraphView from '@/components/assets/SemanticGraphView.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { semanticAssetService } from '@/services/semantic-asset-service'
+import { semanticAssetService, type ExtractTaskMessage, type ExtractTaskStatus, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { useChatModel } from '@/composables/useChatModel'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import type { AssetDetail, ConversationDetail, SemanticAsset, SemanticAssetKind } from '@/types'
+import type { AssetDetail, ConversationDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
 
@@ -63,9 +64,10 @@ async function onDeleteTurn(index: number) {
 }
 
 // ---- 资产内容区 ----
-type AssetTab = 'semantic' | 'component'
-const tab = ref<AssetTab>('semantic')
+type AssetTab = 'overview' | 'semantic' | 'component' | 'graph'
+const tab = ref<AssetTab>('overview')
 const kind = ref<SemanticAssetKind | ''>('')
+const level = ref<SemanticAssetLevel | ''>('')
 const q = ref('')
 const items = ref<SemanticAsset[]>([])
 const comps = ref<AssetDetail[]>([])
@@ -74,11 +76,21 @@ const extracting = ref(false)
 const reconciling = ref(false)
 const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
+/** 概览统计(总量/按类别/按粒度/状态)。 */
+const overviewStats = ref<SemanticStatsResult | null>(null)
+const purging = ref(false)
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
-  { value: 'data_structure', label: t('assetMgmt.kind.data_structure') },
-  { value: 'processing_flow', label: t('assetMgmt.kind.processing_flow') },
-  { value: 'control_logic', label: t('assetMgmt.kind.control_logic') },
+  { value: 'structure', label: t('assetMgmt.kind.structure') },
+  { value: 'behavior', label: t('assetMgmt.kind.behavior') },
+  { value: 'rule', label: t('assetMgmt.kind.rule') },
+  { value: 'contract', label: t('assetMgmt.kind.contract') },
+]
+
+const levels: { value: SemanticAssetLevel; label: string }[] = [
+  { value: 'high', label: t('assetMgmt.level.high') },
+  { value: 'medium', label: t('assetMgmt.level.medium') },
+  { value: 'low', label: t('assetMgmt.level.low') },
 ]
 
 const statusText = computed(() => {
@@ -272,7 +284,7 @@ function scopeParams(): string[] | undefined {
 async function loadSemantic() {
   loading.value = true
   try {
-    const r = await semanticAssetService.searchPage(q.value, kind.value || undefined, { limit: PAGE_SIZE, offset: (page.value - 1) * PAGE_SIZE, scope: scopeParams() })
+    const r = await semanticAssetService.searchPage(q.value, kind.value || undefined, { limit: PAGE_SIZE, offset: (page.value - 1) * PAGE_SIZE, scope: scopeParams(), level: level.value || undefined })
     items.value = r.items
     total.value = r.total
   } finally {
@@ -292,6 +304,64 @@ async function loadComponents() {
   }
 }
 
+/** 概览统计：语义资产总量/类别/粒度/状态。 */
+async function loadOverview() {
+  try {
+    overviewStats.value = await semanticAssetService.stats()
+  } catch {
+    overviewStats.value = null
+  }
+}
+
+/** 清理确认弹窗状态(先 dry-run 展示影响范围，确认后再真正删除)。 */
+const purgeOpen = ref(false)
+const purgeResult = ref<SemanticPurgeResult | null>(null)
+const purgeBusy = ref(false)
+
+/** 触发清理：先 dry-run 计算影响范围(需求池引用 + 未完成任务)并弹窗确认。 */
+async function runPurge() {
+  if (purging.value || purgeBusy.value) return
+  purging.value = true
+  try {
+    const res = await semanticAssetService.purge({ staleDays: 7 })
+    purgeResult.value = res
+    purgeOpen.value = true
+  } catch (err: any) {
+    turns.value.push({ role: 'assistant', content: `✘ 影响范围计算失败：${err?.message || err}` })
+  } finally {
+    purging.value = false
+  }
+}
+
+/** 确认清理：真正物理删除 stale/deleted 行，并把受影响需求/任务标记为需重新生成方案。 */
+async function confirmPurge() {
+  if (purgeBusy.value) return
+  purgeBusy.value = true
+  try {
+    const res = await semanticAssetService.purge({ staleDays: 7, confirm: true })
+    const impact = res.impact
+    turns.value.push({
+      role: 'assistant',
+      content: [
+        `🧹 已物理删除 ${res.purged} 条 stale/deleted 语义资产。`,
+        impact.reqCount ? `受影响需求 ${impact.reqCount} 条（已标记需重新生成方案）。` : '',
+        impact.taskCount ? `受影响未完成任务 ${impact.taskCount} 个（已标记需重新生成方案）。` : '',
+      ].filter(Boolean).join(' '),
+    })
+    await Promise.all([loadOverview(), refreshStatus()])
+    purgeOpen.value = false
+  } catch (err: any) {
+    turns.value.push({ role: 'assistant', content: `✘ 清理失败：${err?.message || err}` })
+  } finally {
+    purgeBusy.value = false
+  }
+}
+
+function cancelPurge() {
+  purgeOpen.value = false
+  purgeResult.value = null
+}
+
 // ---- 组件 tab：类型(INCLUDE/CALL) + 层级(L0/L1) 筛选 ----
 const compType = ref<'all' | 'INCLUDE' | 'CALL'>('all')
 const compLevel = ref<'all' | 'L0' | 'L1'>('all')
@@ -302,6 +372,153 @@ const compDetails = reactive<Record<string, AssetDetail>>({})
 const compDetailLoading = reactive<Record<string, boolean>>({})
 const compDetailMiss = reactive<Record<string, boolean>>({})
 const compExtracting = reactive<Record<string, boolean>>({})
+
+// ---- 提取语义资产：组件复选模式(右上角按钮 → 切到组件 tab 勾选后提交) ----
+const extractMode = ref(false)
+const extractSelected = ref<string[]>([])
+/** 提取任务(服务端后台执行，刷新不中断)：当前任务 id + 轮询句柄 + 已同步消息游标。 */
+const extractTaskId = ref<string>('')
+const extractPollTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const extractMsgSeen = ref<Set<string>>(new Set())
+const extractRunning = ref(false)
+
+function enterExtractMode() {
+  tab.value = 'component'
+  extractMode.value = true
+  extractSelected.value = []
+  loadComponents()
+}
+
+function exitExtractMode() {
+  extractMode.value = false
+  extractSelected.value = []
+}
+
+function toggleExtractSelect(id: string) {
+  const i = extractSelected.value.indexOf(id)
+  if (i >= 0) extractSelected.value.splice(i, 1)
+  else extractSelected.value.push(id)
+}
+
+function selectAllExtract() {
+  extractSelected.value = comps.value.map((c) => c.assetId)
+}
+
+function invertExtract() {
+  const all = comps.value.map((c) => c.assetId)
+  const sel = new Set(extractSelected.value)
+  extractSelected.value = all.filter((id) => !sel.has(id))
+}
+
+/** 右上角「提取语义资产」：未进入复选 → 切到组件 tab 并进入复选；已进入 → 提交所选组件提取。 */
+function handleExtract() {
+  if (extractRunning.value) return
+  if (!extractMode.value) {
+    enterExtractMode()
+    return
+  }
+  if (!extractSelected.value.length) return
+  submitExtract()
+}
+
+/** 向资产管理对话同步一条提取进度消息(去重：按消息 id)。 */
+function syncExtractMsg(m: ExtractTaskMessage) {
+  if (extractMsgSeen.value.has(m.id)) return
+  extractMsgSeen.value.add(m.id)
+  turns.value.push({ role: (m.role as 'user' | 'assistant') || 'assistant', content: m.content, id: m.id })
+}
+
+/** 停止任务轮询(清理定时器)。 */
+function stopExtractPoll() {
+  if (extractPollTimer.value) {
+    clearInterval(extractPollTimer.value)
+    extractPollTimer.value = null
+  }
+  extractRunning.value = false
+}
+
+/** 复位全部组件提取按钮的进行态(任务结束后释放)。 */
+function resetCompExtracting() {
+  for (const k of Object.keys(compExtracting)) compExtracting[k] = false
+}
+
+/** 消费一次任务快照：同步新消息；任务结束 → 停止轮询并刷新。 */
+function consumeExtractTask(st: ExtractTaskStatus) {
+  if (!st.found || !st.id) {
+    stopExtractPoll()
+    resetCompExtracting()
+    return
+  }
+  for (const m of st.messages ?? []) syncExtractMsg(m)
+  if (!st.running) {
+    stopExtractPoll()
+    resetCompExtracting()
+    extractTaskId.value = ''
+    Promise.all([loadSemantic(), refreshStatus()]).then(() => {
+      if (extractMode.value) exitExtractMode()
+    })
+  }
+}
+
+/** 轮询任务直到结束(服务端后台执行，浏览器刷新不中断)。 */
+function pollExtractTask(taskId: string) {
+  stopExtractPoll()
+  extractTaskId.value = taskId
+  extractRunning.value = true
+  const tick = async () => {
+    try {
+      const st = await semanticAssetService.extractTaskStatus(taskId)
+      consumeExtractTask(st)
+    } catch (err: any) {
+      console.warn('[asset-mgmt] extract task poll failed:', err)
+    }
+  }
+  void tick()
+  extractPollTimer.value = setInterval(() => void tick(), 1200)
+}
+
+/** 提交：创建服务端后台提取任务，轮询并把进度消息同步到对话消息栏。
+ *  已有任务进行中 → 忽略重复点击，避免重复激活任务。 */
+async function submitExtract() {
+  if (extractRunning.value || extracting.value) return
+  const ids = extractSelected.value
+  if (!ids.length) return
+  extracting.value = true
+  try {
+    const names = ids
+      .map((id) => comps.value.find((c) => c.assetId === id)?.name ?? id)
+      .join('、')
+    turns.value.push({
+      role: 'assistant',
+      content: `▶ 开始提取语义资产，组件：${names}（任务在服务端执行，刷新页面不中断）。`,
+    })
+    const { taskId } = await semanticAssetService.startExtractTask(ids, {
+      kinds: kinds.map((k) => k.value),
+      modelId: chatModelId.value || undefined,
+    })
+    pollExtractTask(taskId)
+  } catch (err: any) {
+    turns.value.push({ role: 'assistant', content: `✘ 提取任务创建失败：${err?.message || err}` })
+    exitExtractMode()
+  } finally {
+    extracting.value = false
+  }
+}
+
+/** 刷新后恢复：读取最近一次提取任务，若仍在运行则恢复轮询并同步历史消息。 */
+async function restoreExtractTask() {
+  try {
+    const st = await semanticAssetService.latestExtractTask()
+    if (!st || !st.found || !st.id) return
+    extractMsgSeen.value = new Set((st.messages ?? []).map((m) => m.id))
+    for (const m of st.messages ?? []) syncExtractMsg(m)
+    if (st.running) {
+      pollExtractTask(st.id)
+    }
+  } catch (err: any) {
+    console.warn('[asset-mgmt] restore extract task failed:', err)
+  }
+}
 
 async function toggleCompDetail(c: AssetDetail) {
   const id = c.assetId
@@ -331,25 +548,32 @@ function openKB(c: AssetDetail) {
   window.open(url, '_blank')
 }
 
-/** 提取单个组件的语义资产(architect agent skills，comm 范围)。 */
+/** 提取单个组件的语义资产(comm 范围，统一走服务端后台任务)。
+ *  任务进行中(existing task running 或该组件已在提取) → 忽略重复点击，避免重复激活任务。 */
 async function extractComp(c: AssetDetail) {
-  if (compExtracting[c.assetId]) return
+  if (extractRunning.value || compExtracting[c.assetId]) return
   compExtracting[c.assetId] = true
   try {
-    await semanticAssetService.extract({ type: 'comm', key: c.assetId }, kinds.map((k) => k.value), { modelId: chatModelId.value || undefined })
-    await Promise.all([loadSemantic(), refreshStatus()])
+    turns.value.push({ role: 'assistant', content: `▶ 开始提取组件「${c.name}」的语义资产…` })
+    const { taskId } = await semanticAssetService.startExtractTask([c.assetId], {
+      kinds: kinds.map((k) => k.value),
+      modelId: chatModelId.value || undefined,
+    })
+    pollExtractTask(taskId)
   } catch (err: any) {
-    console.warn('[asset-mgmt] extract component failed:', err)
-  } finally {
     compExtracting[c.assetId] = false
+    turns.value.push({ role: 'assistant', content: `✘ 组件「${c.name}」提取任务创建失败：${err?.message || err}` })
+    console.warn('[asset-mgmt] extract component failed:', err)
   }
 }
 
 // ---- 语义资产批量管理(选定组件范围) ----
 const batchOpen = ref(false)
 const batchRunning = ref(false)
-const batchAction = ref<'extract' | 'clear' | 'update' | ''>('')
+const batchAction = ref<'clear' | ''>('')
 const batchLast = ref('')
+/** clear 前的 dry-run 影响预览(需求池/未完成任务)。 */
+const batchPreview = ref<SemanticBatchResult | null>(null)
 
 /** 当前组件范围：选中组件 id(空=全部) + 是否含「其它」。 */
 function targetScope() {
@@ -358,22 +582,38 @@ function targetScope() {
   return { compIds, includeOther }
 }
 
-async function runBatch(action: 'extract' | 'clear' | 'update') {
+async function runBatch(action: 'clear') {
   if (batchRunning.value) return
   if (action === 'clear' && batchAction.value !== 'clear') {
     batchAction.value = 'clear'
     return
   }
   const { compIds, includeOther } = targetScope()
-  if (action === 'extract' && scopeSel.value.length > 0 && compIds.length === 0) {
-    batchLast.value = t('assetMgmt.batchExtractOnlyComp')
+  // 清除 = 物理删除：确认前先 dry-run 预览对需求池/任务的影响范围。
+  if (action === 'clear' && !batchPreview.value) {
+    batchRunning.value = true
+    try {
+      const scope = scopeParams()
+      const res = await semanticAssetService.batchManage(action, compIds, {
+        includeOther, scope, dryRun: true,
+      })
+      batchPreview.value = res
+    } catch {
+      batchPreview.value = null
+      batchLast.value = t('assetMgmt.batchFailed')
+    } finally {
+      batchRunning.value = false
+    }
     return
   }
   batchRunning.value = true
   batchAction.value = ''
   try {
+    // 与 search 的 scope 语义一致：空=全部；['__other__']=仅其它；组件 id 列表=指定范围。
+    const scope = scopeParams()
     const res = await semanticAssetService.batchManage(action, compIds, {
       includeOther,
+      scope,
       kinds: kinds.map((k) => k.value),
       modelId: chatModelId.value || undefined,
     })
@@ -383,6 +623,7 @@ async function runBatch(action: 'extract' | 'clear' | 'update') {
     batchLast.value = t('assetMgmt.batchFailed')
   } finally {
     batchRunning.value = false
+    batchPreview.value = null
   }
 }
 
@@ -392,16 +633,6 @@ async function refreshStatus() {
     statusCounts.value = s.counts
   } catch {
     /* ignore */
-  }
-}
-
-async function extract() {
-  extracting.value = true
-  try {
-    await semanticAssetService.extractAll(kinds.map((k) => k.value))
-    await Promise.all([loadSemantic(), refreshStatus()])
-  } finally {
-    extracting.value = false
   }
 }
 
@@ -440,8 +671,9 @@ function toggle(id: string) {
 }
 
 function kindIcon(k: SemanticAsset['kind']) {
-  if (k === 'processing_flow') return BoltIcon
-  if (k === 'control_logic') return AdjustmentsHorizontalIcon
+  if (k === 'behavior') return BoltIcon
+  if (k === 'rule') return AdjustmentsHorizontalIcon
+  if (k === 'contract') return ServerStackIcon
   return CubeTransparentIcon
 }
 
@@ -568,7 +800,10 @@ function referenceAsset(a: SemanticAsset) {
 }
 
 function onSearch() {
-  if (tab.value === 'semantic') {
+  if (tab.value === 'graph') return
+  if (tab.value === 'overview') {
+    loadOverview()
+  } else if (tab.value === 'semantic') {
     page.value = 1
     loadSemantic()
   } else {
@@ -590,9 +825,12 @@ function gotoPage(p: number) {
 
 onMounted(async () => {
   await loadChatModels()
-  await Promise.all([loadCompCatalog(), loadSemantic(), refreshStatus()])
+  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus()])
   turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
+  await restoreExtractTask()
 })
+
+onUnmounted(() => stopExtractPoll())
 </script>
 
 <template>
@@ -604,11 +842,11 @@ onMounted(async () => {
         </h2>
         <div class="flex items-center gap-1">
           <button
-            v-for="tb in [{ id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }]"
+            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
-            @click="tab = tb.id; onSearch()"
+            @click="tab = tb.id; if (tb.id !== 'component') exitExtractMode(); onSearch()"
           >
             {{ tb.label }}
           </button>
@@ -633,10 +871,10 @@ onMounted(async () => {
         </button>
         <button
           class="btn btn-sm btn-primary"
-          :disabled="extracting"
-          @click="extract"
+          :disabled="extracting || extractRunning"
+          @click="handleExtract"
         >
-          <SparklesIcon class="w-3.5 h-3.5" />{{ extracting ? t('assetMgmt.extracting') : t('assetMgmt.extractAll') }}
+          <SparklesIcon class="w-3.5 h-3.5" />{{ extracting || extractRunning ? t('assetMgmt.extracting') : t('assetMgmt.extractSemantic') }}
         </button>
       </div>
     </div>
@@ -652,9 +890,10 @@ onMounted(async () => {
       >
         <div class="panel-header shrink-0 relative !justify-start gap-1.5">
           <span class="flex items-center gap-2">
-            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'semantic' ? t('assetMgmt.tab.semantic') : t('assetMgmt.tab.component') }}
+            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'overview' ? t('assetMgmt.tab.overview') : tab === 'semantic' ? t('assetMgmt.tab.semantic') : tab === 'graph' ? t('assetMgmt.tab.graph') : t('assetMgmt.tab.component') }}
           </span>
           <input
+            v-if="tab !== 'graph' && tab !== 'overview'"
             v-model="q"
             class="input !py-0.5 !px-2 !text-[11px] w-44 font-mono ml-3"
             :placeholder="t('assetMgmt.searchPlaceholder')"
@@ -695,6 +934,19 @@ onMounted(async () => {
               :value="k.value"
             >{{ k.label }}</option>
           </select>
+          <select
+            v-if="tab === 'semantic'"
+            v-model="level"
+            class="input !py-0.5 !px-2 !text-[11px] w-auto"
+            @change="onSearch"
+          >
+            <option value="">{{ t('assetMgmt.allLevels') }}</option>
+            <option
+              v-for="l in levels"
+              :key="l.value"
+              :value="l.value"
+            >{{ l.label }}</option>
+          </select>
           <button
             class="btn btn-xs btn-ghost"
             :disabled="loading"
@@ -702,15 +954,45 @@ onMounted(async () => {
           >
             <ArrowPathIcon class="w-3 h-3" />{{ t('assetMgmt.search') }}
           </button>
-          <template v-if="tab === 'semantic'">
-            <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ scopeSummary }}</span>
+          <template v-if="tab === 'component'">
             <button
-              class="btn btn-xs"
-              :class="filterOpen ? 'btn-blue' : 'btn-ghost'"
-              @click="filterOpen = !filterOpen; batchOpen = false"
+              v-if="!extractMode"
+              class="btn btn-xs btn-blue"
+              :disabled="!comps.length"
+              @click="enterExtractMode"
             >
-              <AdjustmentsHorizontalIcon class="w-3 h-3" />{{ t('assetMgmt.filter') }}
+              <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.enterExtractMode') }}
             </button>
+            <template v-else>
+              <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ extractSelected.length }}/{{ comps.length }}</span>
+              <button
+                class="btn btn-xs btn-ghost"
+                :disabled="extractRunning"
+                @click="selectAllExtract"
+              >{{ t('assetMgmt.selectAll') }}</button>
+              <button
+                class="btn btn-xs btn-ghost"
+                :disabled="extractRunning"
+                @click="invertExtract"
+              >{{ t('assetMgmt.invert') }}</button>
+              <button
+                class="btn btn-xs btn-ghost"
+                :disabled="extractRunning"
+                @click="exitExtractMode"
+              >{{ t('assetMgmt.exitExtractMode') }}</button>
+            </template>
+          </template>
+          <template v-if="tab === 'semantic'">
+            <div class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden" :title="t('assetMgmt.scopeGroupHint')">
+              <span class="chip !border-0 !rounded-none bg-transparent text-ctp-subtext0 font-mono text-[9px] px-2">{{ scopeSummary }}</span>
+              <button
+                class="btn btn-xs !rounded-none !border-l !border-ctp-surface1"
+                :class="filterOpen ? 'btn-blue' : 'btn-ghost'"
+                @click="filterOpen = !filterOpen; batchOpen = false"
+              >
+                <AdjustmentsHorizontalIcon class="w-3 h-3" />{{ t('assetMgmt.filter') }}
+              </button>
+            </div>
             <button
               class="btn btn-xs"
               :class="batchOpen ? 'btn-blue' : 'btn-ghost'"
@@ -720,7 +1002,7 @@ onMounted(async () => {
               <TrashIcon class="w-3 h-3" />{{ t('assetMgmt.batch') }}
             </button>
 
-            <!-- 点击浮层：批量管理(提取/清除/更新 选定组件范围) -->
+            <!-- 点击浮层：批量清除(物理删除 选定组件范围) -->
             <div
               v-if="batchOpen"
               class="absolute right-0 top-full mt-1 z-30 w-72 max-w-[90vw] rounded-lg bg-ctp-mantle border border-ctp-surface1 shadow-xl p-2.5 space-y-2"
@@ -730,20 +1012,6 @@ onMounted(async () => {
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ scopeSummary }}</span>
               </div>
               <div class="flex items-center gap-1 pt-1">
-                <button
-                  class="btn btn-xs btn-blue"
-                  :disabled="batchRunning"
-                  @click="runBatch('extract')"
-                >
-                  <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.batchExtract') }}
-                </button>
-                <button
-                  class="btn btn-xs btn-ghost"
-                  :disabled="batchRunning"
-                  @click="runBatch('update')"
-                >
-                  <ArrowPathIcon class="w-3 h-3" />{{ t('assetMgmt.batchUpdate') }}
-                </button>
                 <button
                   class="btn btn-xs"
                   :class="batchAction === 'clear' ? 'btn-red' : 'btn-ghost'"
@@ -758,6 +1026,48 @@ onMounted(async () => {
                 class="border-t border-ctp-surface0 pt-1.5 space-y-1.5"
               >
                 <p class="text-[10px] text-ctp-red">{{ t('assetMgmt.batchConfirmClear') }}</p>
+                <div
+                  v-if="batchPreview"
+                  class="space-y-1"
+                >
+                  <p class="text-[10px] text-ctp-subtext1">
+                    {{ t('assetMgmt.batchClearImpact', {
+                      candidates: batchPreview.count,
+                      reqCount: batchPreview.impact?.reqCount ?? 0,
+                      taskCount: batchPreview.impact?.taskCount ?? 0,
+                    }) }}
+                  </p>
+                  <div
+                    v-if="batchPreview.impact?.requirements?.length"
+                    class="text-[9px] text-ctp-peach"
+                  >
+                    {{ t('assetMgmt.purgeConfirm.reqTitle', { n: batchPreview.impact.reqCount }) }}
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                      <span
+                        v-for="r in batchPreview.impact.requirements"
+                        :key="r.id"
+                        class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1"
+                      >{{ r.id }} · {{ r.title }}</span>
+                    </div>
+                  </div>
+                  <div
+                    v-if="batchPreview.impact?.tasks?.length"
+                    class="text-[9px] text-ctp-blue"
+                  >
+                    {{ t('assetMgmt.purgeConfirm.taskTitle', { n: batchPreview.impact.taskCount }) }}
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                      <span
+                        v-for="t in batchPreview.impact.tasks"
+                        :key="t.id"
+                        class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1"
+                      >{{ t.id }} · {{ t.title }}</span>
+                    </div>
+                  </div>
+                  <p
+                    v-if="!batchPreview.impact?.requirements?.length && !batchPreview.impact?.tasks?.length"
+                    class="text-[9px] text-ctp-green"
+                  >{{ t('assetMgmt.purgeConfirm.noImpact') }}</p>
+                </div>
                 <div class="flex items-center gap-1">
                   <button
                     class="btn btn-xs btn-red"
@@ -766,7 +1076,7 @@ onMounted(async () => {
                   >{{ t('assetMgmt.batchConfirm') }}</button>
                   <button
                     class="btn btn-xs btn-ghost"
-                    @click="batchAction = ''"
+                    @click="batchAction = ''; batchPreview = null"
                   >{{ t('assetMgmt.batchCancel') }}</button>
                 </div>
               </div>
@@ -857,7 +1167,137 @@ onMounted(async () => {
           </template>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-auto p-2.5 space-y-1.5">
+        <!-- 语义层图谱(图形化表达 + 稳定逻辑映射) -->
+        <div
+          v-if="tab === 'graph'"
+          class="flex-1 min-h-0 overflow-hidden"
+        >
+          <SemanticGraphView :scope="scopeSel" />
+        </div>
+        <div
+          v-else
+          class="flex-1 min-h-0 overflow-auto p-2.5 space-y-1.5"
+        >
+          <!-- 资产概览：作用说明 + 分类/粒度/标签 + 现有资产数量 -->
+          <template v-if="tab === 'overview'">
+            <div class="panel overflow-hidden">
+              <div class="panel-header">
+                <span class="flex items-center gap-2">
+                  <ServerStackIcon class="w-4 h-4 text-ctp-blue" />{{ t('assetMgmt.overview.title') }}
+                </span>
+              </div>
+              <div class="p-3 space-y-2">
+                <p class="text-xs text-ctp-subtext1 leading-relaxed">
+                  {{ t('assetMgmt.overview.desc') }}
+                </p>
+              </div>
+            </div>
+
+            <div class="panel overflow-hidden">
+              <div class="panel-header">
+                <span class="flex items-center gap-2">
+                  <Squares2X2Icon class="w-4 h-4 text-ctp-peach" />{{ t('assetMgmt.overview.classificationTitle') }}
+                </span>
+              </div>
+              <div class="p-3 space-y-2">
+                <p class="text-[10px] text-ctp-subtext0 leading-relaxed">
+                  {{ t('assetMgmt.overview.classificationDesc') }}
+                </p>
+                <div class="grid grid-cols-2 gap-2">
+                  <div
+                    v-for="k in kinds"
+                    :key="k.value"
+                    class="border border-ctp-surface0 rounded-md p-2"
+                  >
+                    <div class="text-[10px] font-semibold text-ctp-text">{{ k.label }}</div>
+                    <div class="text-[9px] text-ctp-overlay0 mt-0.5">
+                      {{ t(`assetMgmt.overview.kind.${k.value}`) }}
+                    </div>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-1 pt-1">
+                  <span class="text-[10px] text-ctp-subtext1 shrink-0">{{ t('assetMgmt.overview.levelLabel') }}</span>
+                  <span
+                    v-for="l in levels"
+                    :key="l.value"
+                    class="chip"
+                    :class="l.value === 'high' ? 'bg-ctp-peach/15 text-ctp-peach' : l.value === 'low' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                  >{{ l.label }}</span>
+                </div>
+                <p class="text-[10px] text-ctp-subtext0 leading-relaxed pt-1">
+                  {{ t('assetMgmt.overview.tagHint') }}
+                </p>
+              </div>
+            </div>
+
+            <div class="panel overflow-hidden">
+              <div class="panel-header">
+                <span class="flex items-center gap-2">
+                  <CubeTransparentIcon class="w-4 h-4 text-ctp-mauve" />{{ t('assetMgmt.overview.countTitle') }}
+                </span>
+              </div>
+              <div class="p-3 space-y-2.5">
+                <div class="flex items-center gap-3">
+                  <div class="border border-ctp-blue/20 rounded-lg px-3 py-2 flex-1">
+                    <div class="text-lg font-semibold text-ctp-blue">{{ overviewStats ? overviewStats.total : '—' }}</div>
+                    <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.total') }}</div>
+                  </div>
+                  <div class="border border-ctp-surface0 rounded-lg px-3 py-2 flex-1">
+                    <div class="text-lg font-semibold text-ctp-text">{{ comps.length || compCatalog.length }}</div>
+                    <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.components') }}</div>
+                  </div>
+                  <div class="border border-ctp-green/20 rounded-lg px-3 py-2 flex-1">
+                    <div class="text-lg font-semibold text-ctp-green">{{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}</div>
+                    <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.active') }}</div>
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <div class="text-[10px] font-medium text-ctp-subtext1">{{ t('assetMgmt.overview.byKind') }}</div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="k in kinds"
+                      :key="k.value"
+                      class="chip bg-ctp-surface0 text-ctp-subtext0"
+                    >{{ k.label }} · {{ overviewStats?.byKind?.[k.value] ?? 0 }}</span>
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <div class="text-[10px] font-medium text-ctp-subtext1">{{ t('assetMgmt.overview.byLevel') }}</div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="l in levels"
+                      :key="l.value"
+                      class="chip bg-ctp-surface0 text-ctp-subtext0"
+                    >{{ l.label }} · {{ overviewStats?.byLevel?.[l.value] ?? 0 }}</span>
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <div class="text-[10px] font-medium text-ctp-subtext1">{{ t('assetMgmt.overview.statusLabel') }}</div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span class="chip bg-ctp-green/15 text-ctp-green">active · {{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}</span>
+                    <span class="chip bg-ctp-yellow/15 text-ctp-yellow">stale · {{ overviewStats?.status?.stale ?? statusCounts.stale ?? 0 }}</span>
+                    <span class="chip bg-ctp-red/15 text-ctp-red">deleted · {{ overviewStats?.status?.deleted ?? statusCounts.deleted ?? 0 }}</span>
+                    <span class="chip bg-ctp-overlay0/20 text-ctp-overlay1">needsUpdate · {{ overviewStats?.status?.needsUpdate ?? statusCounts.needsUpdate ?? 0 }}</span>
+                  </div>
+                </div>
+
+                <div class="border-t border-ctp-surface0 pt-2 flex items-center gap-2">
+                  <button
+                    class="btn btn-xs btn-ghost"
+                    :disabled="purging"
+                    @click="runPurge"
+                  >
+                    <TrashIcon class="w-3 h-3" />{{ purging ? t('assetMgmt.overview.purging') : t('assetMgmt.overview.purge') }}
+                  </button>
+                  <span class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.purgeHint') }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+
           <!-- 语义资产：按所属组件分组 -->
           <template v-if="tab === 'semantic'">
             <template
@@ -889,7 +1329,17 @@ onMounted(async () => {
                 <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
                   {{ t(`assetMgmt.kind.${a.kind}`) }}
                 </span>
+                <span
+                  v-if="a.level && a.level !== 'medium'"
+                  class="chip !text-[9px] shrink-0"
+                  :class="a.level === 'high' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-sky/15 text-ctp-sky'"
+                >{{ t(`assetMgmt.level.${a.level}`) }}</span>
                 <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
+                <span
+                  v-if="a.renamedFrom"
+                  class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                  :title="t('assetMgmt.canonicalHint')"
+                >{{ t('assetMgmt.renamed') }}: {{ a.renamedFrom }}</span>
                 <span
                   v-if="a.needsUpdate || a.status === 'stale'"
                   class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
@@ -907,7 +1357,10 @@ onMounted(async () => {
                   class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
                 >{{ t('assetMgmt.modified') }}</span>
                 <span class="flex-1" />
-                <span class="text-[9px] text-ctp-overlay0 font-mono">{{ a.id }}</span>
+                <span
+                  class="text-[9px] text-ctp-overlay0 font-mono"
+                  :title="[a.canonicalKey ? t('assetMgmt.canonicalHint') + ' · ' + a.canonicalKey : '', ...(a.nameAlias ?? []).map((x) => t('assetMgmt.renamed') + ': ' + x)].filter(Boolean).join('\n') || undefined"
+                >{{ a.id }}</span>
                 <span class="text-[9px] text-ctp-overlay0">{{ a.astRefs?.length ?? 0 }} AST</span>
                 <button
                   v-if="!usable(a)"
@@ -1004,6 +1457,13 @@ onMounted(async () => {
               class="border border-ctp-blue/20 hover:border-ctp-blue/40 rounded-lg overflow-hidden"
             >
               <div class="flex items-center gap-2 px-2 py-1.5">
+                <input
+                  v-if="extractMode"
+                  type="checkbox"
+                  class="accent-ctp-blue shrink-0"
+                  :checked="extractSelected.includes(c.assetId)"
+                  @change="toggleExtractSelect(c.assetId)"
+                >
                 <ServerStackIcon class="w-3.5 h-3.5 text-ctp-blue shrink-0" />
                 <span class="text-[11px] font-medium text-ctp-text truncate">{{ c.name }}</span>
                 <span class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue shrink-0">{{ t(`assetMgmt.componentKind.${c.kind ?? 'component'}`) }}</span>
@@ -1026,7 +1486,7 @@ onMounted(async () => {
                 </button>
                 <button
                   class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :disabled="compExtracting[c.assetId]"
+                  :disabled="compExtracting[c.assetId] || extractRunning"
                   :title="t('assetMgmt.extractComp')"
                   @click="extractComp(c)"
                 >
@@ -1173,5 +1633,87 @@ onMounted(async () => {
       @close="historyOpen = false"
       @import="importHistory"
     />
+
+    <!-- 清理语义资产确认：展示对需求池/未完成任务的影响范围 -->
+    <div
+      v-if="purgeOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    >
+      <div class="flex flex-col w-full max-w-2xl max-h-[85vh] rounded-xl bg-ctp-base border border-ctp-surface1 shadow-2xl overflow-hidden">
+        <div class="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-ctp-surface0">
+          <TrashIcon class="w-4 h-4 text-ctp-red" />
+          <h3 class="text-sm font-semibold text-ctp-text">
+            {{ t('assetMgmt.purgeConfirm.title') }}
+          </h3>
+          <span class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.purgeConfirm.hint') }}</span>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-auto p-4 space-y-3">
+          <p class="text-xs text-ctp-subtext1">
+            {{ t('assetMgmt.purgeConfirm.summary', {
+              candidates: purgeResult?.candidates ?? 0,
+              reqCount: purgeResult?.impact?.reqCount ?? 0,
+              taskCount: purgeResult?.impact?.taskCount ?? 0,
+            }) }}
+          </p>
+
+          <div
+            v-if="purgeResult?.impact?.requirements?.length"
+            class="border border-ctp-peach/25 rounded-md p-2.5 space-y-1"
+          >
+            <div class="text-[10px] font-semibold text-ctp-peach">
+              {{ t('assetMgmt.purgeConfirm.reqTitle', { n: purgeResult.impact.reqCount }) }}
+            </div>
+            <div
+              v-for="r in purgeResult.impact.requirements"
+              :key="r.id"
+              class="text-[10px] text-ctp-subtext1"
+            >
+              <span class="font-mono text-ctp-overlay1">{{ r.id }}</span>
+              · {{ r.title }}
+              <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1">{{ r.location }}</span>
+            </div>
+            <p class="text-[9px] text-ctp-peach">{{ t('assetMgmt.purgeConfirm.reqRegen') }}</p>
+          </div>
+
+          <div
+            v-if="purgeResult?.impact?.tasks?.length"
+            class="border border-ctp-blue/25 rounded-md p-2.5 space-y-1"
+          >
+            <div class="text-[10px] font-semibold text-ctp-blue">
+              {{ t('assetMgmt.purgeConfirm.taskTitle', { n: purgeResult.impact.taskCount }) }}
+            </div>
+            <div
+              v-for="t in purgeResult.impact.tasks"
+              :key="t.id"
+              class="text-[10px] text-ctp-subtext1"
+            >
+              <span class="font-mono text-ctp-overlay1">{{ t.id }}</span>
+              · {{ t.title }}
+              <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1">{{ t.status }}</span>
+            </div>
+            <p class="text-[9px] text-ctp-blue">{{ t('assetMgmt.purgeConfirm.taskRegen') }}</p>
+          </div>
+
+          <p
+            v-if="!purgeResult?.impact?.requirements?.length && !purgeResult?.impact?.tasks?.length"
+            class="text-[10px] text-ctp-green"
+          >{{ t('assetMgmt.purgeConfirm.noImpact') }}</p>
+        </div>
+
+        <div class="shrink-0 border-t border-ctp-surface0 px-4 py-2.5 flex justify-end gap-2">
+          <button
+            class="btn btn-ghost"
+            :disabled="purgeBusy"
+            @click="cancelPurge"
+          >{{ t('assetMgmt.purgeConfirm.cancel') }}</button>
+          <button
+            class="btn btn-red"
+            :disabled="purgeBusy"
+            @click="confirmPurge"
+          >{{ purgeBusy ? t('assetMgmt.purgeConfirm.deleting') : t('assetMgmt.purgeConfirm.confirm') }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

@@ -333,8 +333,9 @@ def tool_semantic_search(root: Optional[str], project: Optional[str],
 
 @register_architect_tool(
     "asset.semantic.extract",
-    "从最新代码结构提取语义数据资产(数据结构/处理流程/控制逻辑)并落库，供对话确认与需求/设计引用。"
-    "参数 scope={type: files|symbols|comm|project, key?, files?, symbols?}，kinds=[data_structure|processing_flow|control_logic]。",
+    "从最新代码结构提取语义数据资产(类别: structure/behavior/rule/contract，粒度: high/medium/low)并落库，"
+    "供对话确认与需求/设计引用。"
+    "参数 scope={type: files|symbols|comm|project, key?, files?, symbols?}，kinds=[structure|behavior|rule|contract]。",
 )
 def tool_semantic_extract(root: Optional[str], project: Optional[str],
                           scope: Dict[str, Any] = None,
@@ -563,8 +564,8 @@ _CAPABILITY_DOC = (
     "- kb.baseline: {}\n"
     '- kb.graph: {"comp_ids": ["组件ID"]}\n'
     "- project.ctx: {}\n"
-    '- asset.semantic.search: {"text": "关键词", "kind": "data_structure|processing_flow|control_logic(可选)"}\n'
-    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["data_structure","processing_flow","control_logic"]}\n'
+    '- asset.semantic.search: {"text": "关键词", "kind": "structure|behavior|rule|contract(可选)"}\n'
+    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["structure","behavior","rule","contract"]}\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"
@@ -699,7 +700,8 @@ def _skill_plan():
 _SYSTEM_PROMPT = (
     "你是 TopoCode 架构需求分析 agent。你拥有知识库 skills/tools 能力：可检索知识库资产"
     "(kb.asset.search)、查代码映射(kb.code_mappings)、读基线(kb.baseline)、遍历依赖图(kb.graph)、"
-    "检索/提取语义数据资产(asset.semantic.*，数据结构/处理流程/控制逻辑，锚定 AST 节点)。"
+    "检索/提取语义数据资产(asset.semantic.*，类别 structure/behavior/rule/contract × 粒度 high/medium/low，"
+    "锚定 AST 节点)。"
     "你的产出必须直接可被表单消费，不得包含多余解释。"
 )
 
@@ -802,6 +804,17 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
     hits = _kb_hits(root, project, text, preferred)
     manual = [{"assetId": a, "role": "core", "source": "manual"} for a in (preferred or [])]
 
+    # 完整数据资产目录(组件/ER/实体/流程/数据流/语义资产)作为候选池，覆盖文本命中未及的范围。
+    catalog_items: List[Dict[str, Any]] = []
+    catalog_text = ""
+    try:
+        from .design import data_asset_catalog, _catalog_text
+        catalog = data_asset_catalog(root, project)
+        catalog_items = catalog.get("items") or []
+        catalog_text = _catalog_text(catalog_items)
+    except Exception:
+        pass
+
     schema = {
         "type": "object",
         "required": ["functionalScope", "entityBoundary", "assetScope", "estMin",
@@ -819,11 +832,12 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
                         "assetId": {"type": "string"},
                         "assetType": {"enum": ["component", "er", "orm", "entity",
                                                 "flow", "dataflow",
-                                                "data_structure", "processing_flow",
-                                                "control_logic"]},
+                                                "structure", "behavior", "rule", "contract"]},
+                        "level": {"enum": ["high", "medium", "low"]},
                         "role": {"enum": ["core", "related"]},
                         "source": {"enum": ["auto", "manual"]},
                         "file": {"type": "string"},
+                        "businessReason": {"type": "string"},
                     },
                 },
             },
@@ -835,8 +849,9 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
     sys_prompt = _SYSTEM_PROMPT + (
         "\n\n当前阶段：需求分析收敛。请依据作答/候选资产，只输出一个 JSON 对象(不要代码块)，字段："
         '{"functionalScope":[str], "entityBoundary":[str], "assetScope":[{assetId,assetType,role,'
-        'source,file?}], "estMin":int(分钟), "implementationPath":str, "assessmentSummary":str}。'
-        "assetScope 从知识库候选与用户首选资产收敛，core 为直接改动、related 为联动。"
+        'source,file?,businessReason?}], "estMin":int(分钟), "implementationPath":str, "assessmentSummary":str}。'
+        "assetScope 从下方完整数据资产目录与用户首选资产收敛，core 为直接改动、related 为联动，"
+        "businessReason 简述业务理由。"
     )
     convo = "\n".join(
         f"{t.get('role')}: {t.get('content')}" for t in (ctx.get("turns") or [])[-8:]
@@ -848,6 +863,11 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
         f"候选资产：{'、'.join(_names(hits)) or '—'}\n用户作答：\n{answered_lines or '(无)'}\n"
         f"备注：{note or '(无)'}\n对话摘录：{convo or '(无)'}"
     )
+    if catalog_text:
+        user_prompt += (
+            f"\n\n完整数据资产目录({len(catalog_items)} 项)，assetScope 只从其中选择，不要臆造不存在的资产：\n"
+            f"{catalog_text}"
+        )
     res = run_tools_loop([
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_prompt},

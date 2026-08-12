@@ -42,10 +42,46 @@ async function ensureMermaid(): Promise<any> {
   return mermaidApi
 }
 
-export async function renderMermaid(code: string, id: string): Promise<string> {
+/** 每次渲染使用唯一临时容器 id，避免复用固定 id 时与在途渲染冲突。 */
+async function renderMermaidOnce(code: string): Promise<string> {
   const mermaid = await ensureMermaid()
-  const result = await mermaid.render(`md-${id}`, code)
+  const uid = `md-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const result = await mermaid.render(uid, code)
   return result.svg
+}
+
+/** 渲染队列：串行化 mermaid 渲染，避免并发触发同一内部实例导致首次冷加载互相干扰。 */
+const renderQueue: (() => Promise<void>)[] = []
+let rendering = false
+
+async function processQueue() {
+  if (rendering) return
+  rendering = true
+  while (renderQueue.length) {
+    const task = renderQueue.shift()
+    if (task) await task()
+  }
+  rendering = false
+}
+
+function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    renderQueue.push(() => fn().then(resolve, reject))
+    processQueue()
+  })
+}
+
+export async function renderMermaid(code: string): Promise<string> {
+  return enqueue(async () => {
+    try {
+      return await renderMermaidOnce(code)
+    } catch (e) {
+      // 首次冷启动渲染可能因 mermaid 模块/懒加载子分块尚未就绪而失败，稍候重试一次。
+      console.warn('[diagram] mermaid first render failed, retrying:', (e as Error)?.message || e)
+      await new Promise((r) => setTimeout(r, 300))
+      return await renderMermaidOnce(code)
+    }
+  })
 }
 
 /** 渲染 PlantUML 为 SVG 文本：POST 到 architect 后端 `/diagram/plantuml`，

@@ -15,10 +15,14 @@ export type ReqPoolStatus =
   | 'cancelled'
 
 export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
-  | 'data_structure' | 'processing_flow' | 'control_logic'
+  | 'structure' | 'behavior' | 'rule' | 'contract'
+  | 'data_structure' | 'processing_flow' | 'control_logic'  // 废弃别名(兼容历史数据)
 
-/** 语义数据资产三类(比组件更细、比伪代码更概括，锚定 AST 节点)。 */
-export type SemanticAssetKind = 'data_structure' | 'processing_flow' | 'control_logic'
+/** 语义数据资产类别(关切维度)。旧值 data_structure/processing_flow/control_logic 为废弃别名。 */
+export type SemanticAssetKind = 'structure' | 'behavior' | 'rule' | 'contract'
+
+/** 语义资产抽象粒度(越低越贴近代码实现)。 */
+export type SemanticAssetLevel = 'high' | 'medium' | 'low'
 
 export interface SemanticAssetField {
   name: string
@@ -55,6 +59,8 @@ export interface SemanticAssetDetail {
   trigger?: string
   steps?: SemanticAssetStep[]
   branches?: SemanticAssetBranch[]
+  /** H 级聚合：组成该业务概念的下级资产(组合链)。 */
+  aggregates?: { assetId: string; name?: string; role?: string }[]
 }
 
 /** 语义数据资产(architect 自持，来源 codegraph/live)。 */
@@ -62,6 +68,10 @@ export interface SemanticAsset {
   id: string
   projectId?: string
   kind: SemanticAssetKind
+  /** 抽象粒度 high|medium|low(默认 medium)。 */
+  level?: SemanticAssetLevel
+  /** H 级聚合资产的下级组合链父级 id。 */
+  parentId?: string
   name: string
   desc: string
   detail?: SemanticAssetDetail
@@ -73,6 +83,12 @@ export interface SemanticAsset {
   status?: 'active' | 'stale' | 'deleted'
   /** 锚定文件哈希签名(文件更新 → 需更新后使用)。 */
   anchorHashes?: Record<string, string>
+  /** 稳定规范标识(scope+锚点指纹)。锚点不变 → id 复用，req/plan/task 引用不断链。 */
+  canonicalKey?: string
+  /** 语义命名变更溯源(锚点不变仅改名)。 */
+  renamedFrom?: string
+  /** 历史语义名列表。 */
+  nameAlias?: string[]
   /** 需更新后使用(文件已变更)。 */
   needsUpdate?: number
   deletedAt?: number
@@ -91,6 +107,8 @@ export interface AssetScopeItem {
   assetType: AssetType
   role: 'core' | 'related'   // 核心修改 / 关联修改
   source: 'auto' | 'manual'
+  /** 抽象粒度(high|medium|low)：圈定表达"圈的是业务级还是代码级"。 */
+  level?: SemanticAssetLevel
   /** 关联到的具体文件(经知识库代码映射对齐)。 */
   file?: string
   /** 核心节点伪代码：标识「改哪里」的范围(业务实体抽象，非详细实现)。 */
@@ -259,9 +277,153 @@ export interface Requirement {
   routedBy?: 'analysis' | 'direct'  // 进池路径: 走分析 / 直通
   suggestion?: PathSuggestion       // 提案阶段 agent 的路径建议回合
   analysis?: RequirementAnalysis
+  /** 设计方案(方向2)：数据/接口流程/语义层增删改查 + 落地步骤。 */
+  design?: RequirementDesign
   planId?: string
   execId?: string                // 所属执行批次(执行会话)
   updatedAt: number
+}
+
+// ============ 设计方案(方向2) ============
+
+export interface DesignColumn {
+  name: string
+  type: string
+  pk?: boolean
+  fk?: string
+}
+
+export interface DesignRelation {
+  from: string
+  to: string
+  type: string
+  key: string
+}
+
+export interface DesignDataChange {
+  assetId?: string
+  assetType?: string
+  action: 'create' | 'alter' | 'drop' | 'extend'
+  name?: string
+  detail: {
+    desc?: string
+    columns?: DesignColumn[]
+    relations?: DesignRelation[]
+  }
+}
+
+export interface DesignInterfaceChange {
+  assetId?: string
+  assetType?: string
+  action?: string
+  name?: string
+  detail?: {
+    before?: string
+    after?: string
+    endpoints?: string[]
+    flows?: string[]
+  }
+  reason?: string
+}
+
+export interface DesignSemanticChange {
+  assetId?: string
+  name?: string
+  action?: 'create' | 'modify' | 'drop'
+  reason?: string
+}
+
+export interface DesignStep {
+  title: string
+  desc?: string
+  estMin?: number
+  context?: string[]
+}
+
+export interface RequirementDesign {
+  dataChanges: DesignDataChange[]
+  interfaceChanges: DesignInterfaceChange[]
+  semanticChanges: DesignSemanticChange[]
+  steps: DesignStep[]
+  landingNote: string
+  createdAt?: number
+}
+
+// ============ 范围圈定(方向1) ============
+
+export interface ScopeProposalItem {
+  assetId: string
+  assetType: string
+  role: 'core' | 'related'
+  businessReason: string
+}
+
+export interface ScopeCatalogItem {
+  assetId: string
+  name: string
+  assetType: string
+  desc?: string
+  kind?: string
+  level?: string
+}
+
+export interface ScopeDiff {
+  added: ScopeProposalItem[]
+  removed: ScopeProposalItem[]
+  promoted: ScopeProposalItem[]
+  demoted: ScopeProposalItem[]
+}
+
+export interface ScopeProposal {
+  proposal: ScopeProposalItem[]
+  coverage: string[]
+  missing: string[]
+  catalog: ScopeCatalogItem[]
+  diff: ScopeDiff
+}
+
+// ============ 修改前后对比(方向3) ============
+
+export interface DesignDiffSummary {
+  added: number
+  removed: number
+  modified: number
+  same: number
+}
+
+export interface ColumnDiff {
+  added: ErColumn[]
+  removed: ErColumn[]
+  modified: { name: string; before: ErColumn; after: ErColumn }[]
+}
+
+export interface DesignDiff {
+  summary: DesignDiffSummary
+  tables: ErTable[]
+  columnDiffs: Record<string, ColumnDiff>
+}
+
+export interface SemanticDiff {
+  summary: Record<string, number>
+  items: DesignSemanticChange[]
+}
+
+export interface CompareDeviation {
+  level: 'er' | 'semantic'
+  kind: string
+  planned: string
+  actual: string
+  note: string
+}
+
+export interface CompareResult {
+  mode: 'planned' | 'actual'
+  summary: DesignDiffSummary
+  columnDiffs?: Record<string, ColumnDiff>
+  semanticDiff: SemanticDiff
+  beforeTables: ErTable[]
+  afterTables: ErTable[]
+  deviations?: CompareDeviation[]
 }
 
 export type ComponentKind = 'gateway' | 'service' | 'infra' | 'storage' | 'integration'

@@ -209,10 +209,11 @@ ARCHITECT_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
         project_id TEXT DEFAULT '',
-        kind TEXT DEFAULT 'data_structure', -- data_structure | processing_flow | control_logic
+        kind TEXT DEFAULT 'structure',      -- structure | behavior | rule | contract
+        level TEXT DEFAULT 'medium',        -- high | medium | low(抽象粒度)
         name TEXT DEFAULT '',
         desc TEXT DEFAULT '',
-        detail TEXT,                        -- JSON: fields/steps/branches
+        detail TEXT,                        -- JSON: fields/steps/branches/aggregates
         ast_refs TEXT,                      -- JSON: AstNodeRef[]
         scope_type TEXT DEFAULT '',         -- files | symbols | comm
         scope_key TEXT DEFAULT '',
@@ -223,11 +224,15 @@ ARCHITECT_DB_TABLES_SQL = """
         status TEXT DEFAULT 'active',       -- active | stale | deleted
         meta TEXT,                          -- JSON: 附加(componentId/edgeType 等)
         anchor_hashes TEXT,                 -- JSON: {relFile: md5} 锚定文件哈希签名
+        canonical_key TEXT DEFAULT '',      -- 稳定规范标识(scope+锚点指纹)
+        renamed_from TEXT DEFAULT '',       -- 语义命名变更溯源
+        name_alias TEXT,                    -- JSON: 历史语义名列表
         needs_update INTEGER DEFAULT 0,     -- 需更新后使用(文件已变)
         last_checked_at INTEGER DEFAULT 0,
         deleted_at INTEGER DEFAULT 0,       -- 软删时间戳
         created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
+        updated_at INTEGER DEFAULT 0,
+        parent_id TEXT DEFAULT ''           -- H 级聚合资产的父级组合链
     );
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_proj ON arch_semantic_assets(project_id, kind);
     CREATE INDEX IF NOT EXISTS idx_arch_semantic_scope ON arch_semantic_assets(project_id, scope_type, scope_key);
@@ -263,6 +268,9 @@ _REQ_MIGRATION_COLS = [
     ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
     ("parent_id", "TEXT"), ("related_to", "TEXT"), ("merged_into", "TEXT"),
     ("preferred_asset_ids", "TEXT"),
+    ("design", "TEXT"),                    # JSON: 设计方案(方向2/3)
+    ("asset_invalidated", "INTEGER DEFAULT 0"),     # 引用资产被清除 → 需重新生成方案
+    ("asset_invalidated_at", "INTEGER DEFAULT 0"),
 ]
 
 _ARCH_PROJECT_MIGRATION_COLS = [
@@ -280,6 +288,7 @@ _ARCH_EXEC_MIGRATION_COLS = [
     ("instance_id", "TEXT DEFAULT ''"),
     ("task_branch", "TEXT DEFAULT ''"),
     ("branch_mode", "TEXT DEFAULT 'auto'"),
+    ("asset_invalidated", "INTEGER DEFAULT 0"),     # 引用资产被清除 → 需重新生成方案
 ]
 
 _ARCH_AGENT_CONFIG_MIGRATION_COLS = [
@@ -300,6 +309,11 @@ _ARCH_SEMANTIC_MIGRATION_COLS = [
     ("needs_update", "INTEGER DEFAULT 0"),
     ("last_checked_at", "INTEGER DEFAULT 0"),
     ("deleted_at", "INTEGER DEFAULT 0"),
+    ("canonical_key", "TEXT DEFAULT ''"),  # 稳定规范标识(scope+锚点指纹)，id 复用依据
+    ("renamed_from", "TEXT DEFAULT ''"),   # 语义命名变更溯源(锚点不变仅改名)
+    ("name_alias", "TEXT"),                # JSON: 历史语义名列表
+    ("level", "TEXT DEFAULT 'medium'"),    # 抽象粒度: high | medium | low
+    ("parent_id", "TEXT DEFAULT ''"),      # H 级聚合资产的父级(高→中→低 组合链)
 ]
 
 
@@ -472,6 +486,11 @@ def architect_db_migrations(db) -> None:
             change TEXT DEFAULT 'same',
             status TEXT DEFAULT 'active',
             meta TEXT,
+            anchor_hashes TEXT,
+            canonical_key TEXT DEFAULT '',
+            renamed_from TEXT DEFAULT '',
+            name_alias TEXT,
+            needs_update INTEGER DEFAULT 0,
             created_at INTEGER DEFAULT 0,
             updated_at INTEGER DEFAULT 0
         )
@@ -486,6 +505,22 @@ def architect_db_migrations(db) -> None:
                 db.execute(f"ALTER TABLE arch_semantic_assets ADD COLUMN {name} {typ}")
             except Exception:
                 pass
+    # 语义资产 kind 规范化迁移: 旧三类 → 新四类(默认 medium 粒度)
+    for old, new in (("data_structure", "structure"),
+                     ("processing_flow", "behavior"),
+                     ("control_logic", "rule")):
+        try:
+            db.execute(
+                "UPDATE arch_semantic_assets SET kind = ?, level = 'medium' WHERE kind = ?",
+                (new, old),
+            )
+        except Exception:
+            pass
+    try:
+        db.execute("CREATE INDEX IF NOT EXISTS idx_arch_semantic_canonical "
+                   "ON arch_semantic_assets(project_id, canonical_key)")
+    except Exception:
+        pass
     db.execute("""
         CREATE TABLE IF NOT EXISTS arch_ast_cache (
             project_id TEXT NOT NULL,
@@ -498,6 +533,23 @@ def architect_db_migrations(db) -> None:
             source TEXT DEFAULT 'codegraph',
             parsed_at INTEGER DEFAULT 0,
             PRIMARY KEY (project_id, file_path)
+        )
+    """)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS arch_extract_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT DEFAULT '',
+            root TEXT DEFAULT '',
+            status TEXT DEFAULT 'running',     -- running | done | partial | failed
+            kind TEXT DEFAULT 'semantic',      -- semantic 提取任务归类
+            comp_ids TEXT,                     -- JSON: string[] 待提取组件 id
+            total INTEGER DEFAULT 0,
+            done INTEGER DEFAULT 0,
+            progress TEXT,                     -- JSON: [{compId, status, count, error}]
+            messages TEXT,                     -- JSON: [{id, role, content, time}] 同步到对话
+            meta TEXT,                         -- JSON: 附加(模型/会话上下文)
+            created_at INTEGER DEFAULT 0,
+            updated_at INTEGER DEFAULT 0
         )
     """)
     db.execute("""

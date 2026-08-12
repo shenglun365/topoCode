@@ -45,13 +45,16 @@ def _to_camel(key: str) -> str:
 _JSON_COLUMNS = {
     "config", "acceptance", "analysis", "trace_to", "suggestion",
     "req_ids", "changes", "impact", "root", "history",
+    "design",
     "session_ids", "test_ids", "amendments", "stats",
     "artifacts", "test_result", "levels", "last_result", "tool",
     "input", "output", "overrides", "explicit_rules", "derived_rules",
     "changelog", "default_channel", "scaffold",
     "related_to", "preferred_asset_ids", "meta",
     "detail", "ast_refs", "asset_refs", "anchor_hashes",
+    "name_alias",
     "symbols", "imports", "refs",
+    "comp_ids", "progress", "messages",
 }
 
 
@@ -768,7 +771,8 @@ class SemanticAssetsStore:
     """
 
     TABLE = "arch_semantic_assets"
-    KINDS = ("data_structure", "processing_flow", "control_logic")
+    KINDS = ("structure", "behavior", "rule", "contract")
+    LEVELS = ("high", "medium", "low")
 
     @classmethod
     def all(cls, project_id: str = "", kind: str = "", limit: int = 200):
@@ -820,12 +824,36 @@ class SemanticAssetsStore:
         return _delete(cls.TABLE, asset_id)
 
     @classmethod
+    def _scope_cond(cls, scopes: Optional[list]) -> tuple:
+        """范围过滤 SQL 条件 + 参数。
+
+        scopes: 组件 id 列表 + 可选哨兵 "__other__"。
+        匹配语义与 `_component_asset_ids` 一致：资产属于某组件 =
+        scope_key 命中 或 meta.scopes(跨 INCLUDE/CALL 归属)命中；
+        "__other__" = 非组件资产(scope_type != 'comm')。
+        """
+        if not scopes:
+            return "", []
+        keys = [s for s in scopes if s != "__other__"]
+        parts: list = []
+        params: list = []
+        for k in keys:
+            parts.append(f"(scope_key = ? OR EXISTS (SELECT 1 FROM json_each({cls.TABLE}.meta, '$.scopes') je WHERE je.value = ?))")
+            params += [k, k]
+        if "__other__" in scopes:
+            parts.append("scope_type != 'comm'")
+        if not parts:
+            return "", []
+        return f"({' OR '.join(parts)})", params
+
+    @classmethod
     def search(cls, project_id: str, text: str = "", kind: str = "",
                limit: int = 20, offset: int = 0,
-               scopes: Optional[list] = None) -> list[dict]:
-        """全文朴素检索：名称/描述命中，支持分页(limit/offset)与范围过滤。
+               scopes: Optional[list] = None, level: str = "") -> list[dict]:
+        """全文朴素检索：名称/描述命中，支持分页(limit/offset)与范围/粒度过滤。
 
-        scopes: scope_key 精确匹配列表；含哨兵 "__other__" 表示非 comm 范围资产(scope_type != 'comm')。
+        scopes: 组件 id 列表；含哨兵 "__other__" 表示非 comm 范围资产(scope_type != 'comm')。
+        scope 命中含 meta.scopes 多组件归属(INCLUDE/CALL 两套口径共享代码只存一份)。
         """
         db = _db()
         conds = ["project_id = ?", "status = 'active'"]
@@ -833,20 +861,17 @@ class SemanticAssetsStore:
         if kind in cls.KINDS:
             conds.append("kind = ?")
             params.append(kind)
+        if level in cls.LEVELS:
+            conds.append("level = ?")
+            params.append(level)
         if text:
             conds.append("(name LIKE ? OR desc LIKE ? OR id LIKE ?)")
             like = f"%{text}%"
             params += [like, like, like]
-        if scopes:
-            keys = [s for s in scopes if s != "__other__"]
-            scope_conds: list = []
-            if keys:
-                scope_conds.append(f"scope_key IN ({','.join(['?'] * len(keys))})")
-                params += list(keys)
-            if "__other__" in scopes:
-                scope_conds.append("scope_type != 'comm'")
-            if scope_conds:
-                conds.append(f"({' OR '.join(scope_conds)})")
+        scope_sql, scope_params = cls._scope_cond(scopes)
+        if scope_sql:
+            conds.append(scope_sql)
+            params += scope_params
         sql = (f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
                f"ORDER BY updated_at DESC LIMIT ? OFFSET ?")
         params += [int(limit), int(offset)]
@@ -854,7 +879,7 @@ class SemanticAssetsStore:
 
     @classmethod
     def count(cls, project_id: str, text: str = "", kind: str = "",
-              scopes: Optional[list] = None) -> int:
+              scopes: Optional[list] = None, level: str = "") -> int:
         """满足检索条件的资产总数(与 search 同一条件)。"""
         db = _db()
         conds = ["project_id = ?", "status = 'active'"]
@@ -862,20 +887,17 @@ class SemanticAssetsStore:
         if kind in cls.KINDS:
             conds.append("kind = ?")
             params.append(kind)
+        if level in cls.LEVELS:
+            conds.append("level = ?")
+            params.append(level)
         if text:
             conds.append("(name LIKE ? OR desc LIKE ? OR id LIKE ?)")
             like = f"%{text}%"
             params += [like, like, like]
-        if scopes:
-            keys = [s for s in scopes if s != "__other__"]
-            scope_conds: list = []
-            if keys:
-                scope_conds.append(f"scope_key IN ({','.join(['?'] * len(keys))})")
-                params += list(keys)
-            if "__other__" in scopes:
-                scope_conds.append("scope_type != 'comm'")
-            if scope_conds:
-                conds.append(f"({' OR '.join(scope_conds)})")
+        scope_sql, scope_params = cls._scope_cond(scopes)
+        if scope_sql:
+            conds.append(scope_sql)
+            params += scope_params
         row = db.fetchone(
             f"SELECT COUNT(*) AS n FROM {cls.TABLE} WHERE {' AND '.join(conds)}",
             tuple(params),
@@ -935,6 +957,76 @@ class SemanticAssetsStore:
             (project_id, int(limit)),
         )
         return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def purge(cls, project_id: str, ids: list) -> int:
+        """物理删除指定资产行(仅清理无引用遗留数据用，谨慎调用)。"""
+        if not ids:
+            return 0
+        db = _db()
+        ph = ",".join(["?"] * len(ids))
+        cur = db.execute(
+            f"DELETE FROM arch_semantic_assets WHERE project_id = ? AND id IN ({ph})",
+            (project_id, *ids),
+        )
+        db.commit()
+        return cur.rowcount or 0
+
+
+class ExtractTaskStore:
+    """语义资产提取任务(状态保持：浏览器刷新不中断，前端可恢复读取)。
+
+    表: arch_extract_tasks。任务在服务端后台线程执行，进度/消息持久化，
+    前端轮询同步到资产管理对话消息栏。
+    """
+
+    TABLE = "arch_extract_tasks"
+    KINDS = ("semantic",)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def get(cls, task_id: str) -> Optional[dict]:
+        return _get(cls.TABLE, task_id)
+
+    @classmethod
+    def update(cls, task_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, task_id, data)
+
+    @classmethod
+    def delete(cls, task_id: str) -> bool:
+        return _delete(cls.TABLE, task_id)
+
+    @classmethod
+    def list_recent(cls, project_id: str = "", limit: int = 20) -> list[dict]:
+        db = _db()
+        conds, params = [], []
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
+        rows = db.fetchall(
+            f"SELECT * FROM {cls.TABLE} {where} ORDER BY created_at DESC LIMIT ?",
+            tuple(params + [int(limit)]),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def latest(cls, project_id: str = "", kind: str = "semantic") -> Optional[dict]:
+        db = _db()
+        conds, params = ["kind = ?"], [kind or "semantic"]
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        row = db.fetchone(
+            f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+            "ORDER BY created_at DESC LIMIT 1",
+            tuple(params),
+        )
+        return _row_to_api(row) if row else None
 
 
 class AstCacheStore:
@@ -1039,3 +1131,15 @@ class SemanticRefsStore:
             (ref_type, ref_id),
         )
         return [r["asset_id"] for r in rows]
+
+    @classmethod
+    def delete_for_assets(cls, asset_ids: list) -> int:
+        """物理删除这些资产的所有引用登记(随资产一并清除)。"""
+        if not asset_ids:
+            return 0
+        db = _db()
+        ph = ",".join(["?"] * len(asset_ids))
+        cur = db.execute(
+            f"DELETE FROM {cls.TABLE} WHERE asset_id IN ({ph})", tuple(asset_ids))
+        db.commit()
+        return cur.rowcount or 0

@@ -33,6 +33,9 @@ const playing = ref(false)
 const code = computed(() => props.diagrams[lang.value] ?? '')
 const currentCode = computed(() => (lang.value === 'toposcript' && !props.diagrams.toposcript ? topoScriptSample() : props.diagrams[lang.value] ?? ''))
 
+/** 渲染序号：只应用最后一次渲染的结果，避免覆盖中的旧渲染回写 svg/error/loading。 */
+let renderSeq = 0
+
 watch(
   () => [lang.value, props.diagrams] as const,
   async () => {
@@ -41,26 +44,29 @@ watch(
   { immediate: true },
 )
 
-let uid = 0
-const cid = `dc-${Date.now()}-${++uid}`
-
 async function render() {
+  const seq = ++renderSeq
   error.value = ''
   showSource.value = false
   if (lang.value === 'toposcript') {
     playing.value = false
+    if (seq === renderSeq) loading.value = false
     return
   }
-  if (!code.value) return
+  if (!code.value) {
+    if (seq === renderSeq) loading.value = false
+    return
+  }
   loading.value = true
   try {
-    svg.value = lang.value === 'plantuml'
+    const out = lang.value === 'plantuml'
       ? await renderPlantuml(code.value)
-      : await renderMermaid(normalizeMermaid(code.value), cid)
+      : await renderMermaid(normalizeMermaid(code.value))
+    if (seq === renderSeq) svg.value = out
   } catch (e) {
-    error.value = (e as Error).message || 'render failed'
+    if (seq === renderSeq) error.value = (e as Error).message || 'render failed'
   } finally {
-    loading.value = false
+    if (seq === renderSeq) loading.value = false
   }
 }
 
@@ -257,9 +263,13 @@ function fsEndDrag() {
         </div>
         <div
           v-if="error"
-          class="text-xs text-ctp-red mb-2 flex items-center gap-1"
+          class="text-xs text-ctp-red mb-2 flex items-center gap-1 min-w-0"
         >
-          <ExclamationTriangleIcon class="w-4 h-4" />{{ t('architecture.renderFailed') }}
+          <ExclamationTriangleIcon class="w-4 h-4 shrink-0" />
+          <span
+            class="truncate"
+            :title="error"
+          >{{ t('architecture.renderFailed') }}<template v-if="error"> — {{ error }}</template></span>
         </div>
         <div
           v-else-if="svg"
