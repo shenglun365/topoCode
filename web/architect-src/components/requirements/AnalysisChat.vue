@@ -212,14 +212,14 @@ function toggleAsset(i: number, ai: number) {
 }
 
 function assetKindIcon(kind?: SemanticAsset['kind']) {
-  if (kind === 'behavior') return BoltIcon
-  if (kind === 'rule') return AdjustmentsHorizontalIcon
+  if (kind === 'process') return BoltIcon
+  if (kind === 'decision' || kind === 'state') return AdjustmentsHorizontalIcon
   if (kind === 'contract') return CubeTransparentIcon
   return CubeTransparentIcon
 }
 
 function assetKindLabel(kind?: SemanticAsset['kind']): string {
-  return t(`requirement.chat.assetKind.${kind ?? 'structure'}`)
+  return t(`requirement.chat.assetKind.${kind ?? 'asset'}`)
 }
 
 function assetSummary(a: SemanticAsset): string {

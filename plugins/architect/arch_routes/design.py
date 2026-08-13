@@ -86,8 +86,8 @@ def data_asset_catalog(root: Optional[str], project: Optional[str],
         from . import semantic_assets as S
         for a in (S.search(root, project, "") or []):
             items.append({"assetId": a.get("id") or "", "name": a.get("name") or "",
-                          "assetType": a.get("kind") or "structure",
-                          "level": a.get("level") or "medium",
+                          "assetType": a.get("kind") or "asset",
+                          "level": a.get("level") or "interaction",
                           "desc": a.get("desc") or "", "kind": "semantic"})
     except Exception:
         pass
@@ -130,7 +130,7 @@ _SCOPE_SCHEMA = {
 def req_harness_scope(req: Dict[str, Any], root: Optional[str], project: Optional[str],
                       model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向1: 按业务需求圈定需要迭代的数据资产范围(核心/相关 + 业务理由)。"""
-    from .req_agent import llm_sync
+    from .req_agent import llm_sync, get_max_tokens_preference
     _aggregate_high_best_effort(root, project, model_id)
     catalog = data_asset_catalog(root, project)
     items = catalog["items"]
@@ -151,7 +151,7 @@ def req_harness_scope(req: Dict[str, Any], root: Optional[str], project: Optiona
     res = llm_sync([{"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt}],
                    mode="structured", output_schema=_SCOPE_SCHEMA,
-                   max_tokens=1800, model_id=model_id)
+                   max_tokens=get_max_tokens_preference(), model_id=model_id)
     if not res:
         return None
     output = res.get("output")
@@ -402,7 +402,7 @@ def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
                        root: Optional[str], project: Optional[str],
                        model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向2: 基于需求 + 已圈定范围生成设计方案(数据层/接口流程层/语义层)。"""
-    from .req_agent import llm_sync
+    from .req_agent import llm_sync, get_max_tokens_preference
     _aggregate_high_best_effort(root, project, model_id)
     catalog = data_asset_catalog(root, project)
     model = catalog["model"]
@@ -433,7 +433,7 @@ def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
     res = llm_sync([{"role": "system", "content": sys_prompt},
                     {"role": "user", "content": user_prompt}],
                    mode="structured", output_schema=_DESIGN_SCHEMA,
-                   max_tokens=3200, model_id=model_id)
+                   max_tokens=get_max_tokens_preference(), model_id=model_id)
     if not res:
         return None
     output = res.get("output")

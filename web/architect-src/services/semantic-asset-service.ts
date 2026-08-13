@@ -1,4 +1,4 @@
-import type { SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
+import type { SemanticAsset, SemanticAssetDetail, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import { currentProjectParams } from './project-service'
 
@@ -124,6 +124,8 @@ export interface SemanticGraphNode {
   scopeKey?: string
   needsUpdate?: number
   canonicalKey?: string
+  /** 精简 detail(供类图/ER/序列/状态/聚合图生成)。 */
+  detail?: SemanticAssetDetail
 }
 
 export interface SemanticGraphEdge {
@@ -232,7 +234,7 @@ export const semanticAssetService = {
     })
   },
 
-  /** 按需聚合 H 级(业务概念级)语义资产。 */
+  /** 按需聚合业务级(high)语义资产。 */
   async aggregateHigh(opts?: { modelId?: string }): Promise<SemanticExtractResult> {
     return apiPost<SemanticExtractResult>('/kb/semantic/aggregate', {
       root: currentProjectParams().root,

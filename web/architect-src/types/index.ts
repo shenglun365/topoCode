@@ -15,14 +15,14 @@ export type ReqPoolStatus =
   | 'cancelled'
 
 export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
-  | 'structure' | 'behavior' | 'rule' | 'contract'
+  | 'asset' | 'process' | 'decision' | 'contract' | 'state'
   | 'data_structure' | 'processing_flow' | 'control_logic'  // 废弃别名(兼容历史数据)
 
 /** 语义数据资产类别(关切维度)。旧值 data_structure/processing_flow/control_logic 为废弃别名。 */
-export type SemanticAssetKind = 'structure' | 'behavior' | 'rule' | 'contract'
+export type SemanticAssetKind = 'asset' | 'process' | 'decision' | 'contract' | 'state'
 
 /** 语义资产抽象粒度(越低越贴近代码实现)。 */
-export type SemanticAssetLevel = 'high' | 'medium' | 'low'
+export type SemanticAssetLevel = 'business' | 'interaction' | 'algorithm' | 'infra'
 
 export interface SemanticAssetField {
   name: string
@@ -52,6 +52,21 @@ export interface SemanticAssetBranch {
   astRefs?: AstNodeRef[]
 }
 
+export interface SemanticAssetState {
+  name: string
+  desc?: string
+  initial?: boolean
+  final?: boolean
+}
+
+export interface SemanticAssetTransition {
+  from?: string
+  to?: string
+  event?: string
+  condition?: string
+  action?: string
+}
+
 export interface SemanticAssetDetail {
   fields?: SemanticAssetField[]
   relations?: SemanticAssetRelation[]
@@ -59,6 +74,11 @@ export interface SemanticAssetDetail {
   trigger?: string
   steps?: SemanticAssetStep[]
   branches?: SemanticAssetBranch[]
+  /** state 类别：状态集合与允许迁移(事件驱动)。 */
+  states?: SemanticAssetState[]
+  transitions?: SemanticAssetTransition[]
+  /** 横向切面标签(transactional/caching/security/observability/async 等)。 */
+  tags?: string[]
   /** H 级聚合：组成该业务概念的下级资产(组合链)。 */
   aggregates?: { assetId: string; name?: string; role?: string }[]
 }
@@ -91,6 +111,10 @@ export interface SemanticAsset {
   nameAlias?: string[]
   /** 需更新后使用(文件已变更)。 */
   needsUpdate?: number
+  /** 横向切面标签(transactional/caching/security/observability/async 等)。 */
+  tags?: string[]
+  /** 附加元数据(componentId/scopes 多组件归属等)。 */
+  meta?: { componentId?: string; scopes?: string[] }
   deletedAt?: number
   createdAt?: number
   updatedAt?: number

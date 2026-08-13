@@ -21,16 +21,18 @@ const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
-  { value: 'structure', label: t('semanticAssets.kind.structure') },
-  { value: 'behavior', label: t('semanticAssets.kind.behavior') },
-  { value: 'rule', label: t('semanticAssets.kind.rule') },
+  { value: 'asset', label: t('semanticAssets.kind.asset') },
+  { value: 'process', label: t('semanticAssets.kind.process') },
+  { value: 'decision', label: t('semanticAssets.kind.decision') },
   { value: 'contract', label: t('semanticAssets.kind.contract') },
+  { value: 'state', label: t('semanticAssets.kind.state') },
 ]
 
 const levels: { value: SemanticAssetLevel; label: string }[] = [
-  { value: 'high', label: t('semanticAssets.level.high') },
-  { value: 'medium', label: t('semanticAssets.level.medium') },
-  { value: 'low', label: t('semanticAssets.level.low') },
+  { value: 'business', label: t('semanticAssets.level.business') },
+  { value: 'interaction', label: t('semanticAssets.level.interaction') },
+  { value: 'algorithm', label: t('semanticAssets.level.algorithm') },
+  { value: 'infra', label: t('semanticAssets.level.infra') },
 ]
 
 async function load() {
@@ -92,9 +94,10 @@ onMounted(async () => {
 })
 
 function kindIcon(k: SemanticAsset['kind']) {
-  if (k === 'behavior') return BoltIcon
-  if (k === 'rule') return AdjustmentsHorizontalIcon
+  if (k === 'process') return BoltIcon
+  if (k === 'decision') return AdjustmentsHorizontalIcon
   if (k === 'contract') return ArrowPathIcon
+  if (k === 'state') return AdjustmentsHorizontalIcon
   return CubeTransparentIcon
 }
 
@@ -225,9 +228,9 @@ async function copyAsset(a: SemanticAsset) {
             {{ t(`semanticAssets.kind.${a.kind}`) }}
           </span>
           <span
-            v-if="a.level && a.level !== 'medium'"
+            v-if="a.level"
             class="chip !text-[9px] shrink-0"
-            :class="a.level === 'high' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-sky/15 text-ctp-sky'"
+            :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'infra' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-sky/15 text-ctp-sky'"
           >{{ t(`semanticAssets.level.${a.level}`) }}</span>
           <span class="text-xs font-medium text-ctp-text truncate">{{ a.name }}</span>
           <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0">
@@ -336,6 +339,34 @@ async function copyAsset(a: SemanticAsset) {
                 v-if="b.else"
                 class="text-ctp-subtext0"
               > / else {{ b.else }}</span>
+            </div>
+          </div>
+          <div v-if="a.detail?.states?.length">
+            <div class="font-medium text-ctp-mauve mb-1">{{ t('semanticAssets.states') }}</div>
+            <div class="flex flex-wrap gap-1">
+              <span
+                v-for="(st, si) in a.detail.states"
+                :key="si"
+                class="chip !text-[10px] bg-ctp-surface0 text-ctp-subtext0"
+              >{{ st.name }}<template v-if="st.initial"> · <span class="text-ctp-green">{{ t('semanticAssets.stateInitial') }}</span></template><template v-if="st.final"> · <span class="text-ctp-red">{{ t('semanticAssets.stateFinal') }}</span></template></span>
+            </div>
+          </div>
+          <div v-if="a.detail?.transitions?.length">
+            <div class="font-medium text-ctp-mauve mb-1">{{ t('semanticAssets.transitions') }}</div>
+            <div
+              v-for="(tr, ti) in a.detail.transitions"
+              :key="ti"
+              class="py-0.5 font-mono text-[10px] text-ctp-overlay0"
+            >{{ tr.from ?? '?' }} → {{ tr.to ?? '?' }}<template v-if="tr.event"> on {{ tr.event }}</template><template v-if="tr.condition"> [{{ tr.condition }}]</template></div>
+          </div>
+          <div v-if="a.tags?.length || a.detail?.tags?.length">
+            <div class="font-medium text-ctp-mauve mb-1">{{ t('semanticAssets.tags') }}</div>
+            <div class="flex flex-wrap gap-1">
+              <span
+                v-for="(tg, tgi) in (a.tags ?? a.detail!.tags ?? [])"
+                :key="tgi"
+                class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue"
+              >{{ tg }}</span>
             </div>
           </div>
           <div v-if="a.detail?.invariants?.length">

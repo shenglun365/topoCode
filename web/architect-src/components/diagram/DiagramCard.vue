@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import type { Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CodeBracketIcon, ExclamationTriangleIcon, ArrowsPointingOutIcon, XMarkIcon, MagnifyingGlassPlusIcon, MagnifyingGlassMinusIcon } from '@heroicons/vue/24/outline'
-import { renderPlantuml, normalizeMermaid, renderMermaid } from '@/composables/useDiagramRenderer'
+import { renderPlantuml, normalizeMermaid, renderMermaid, DIAGRAM_EDGE_LIMITS, countDiagramEdges, isDiagramSizeError } from '@/composables/useDiagramRenderer'
 import type { DiagramLang } from '@/composables/useDiagramRenderer'
 import { topoScriptSample } from '@/composables/useTopoScript'
 import TopoScriptCanvas from './TopoScriptCanvas.vue'
@@ -29,6 +30,124 @@ const svg = ref('')
 const error = ref('')
 const showSource = ref(false)
 const playing = ref(false)
+/** 关系规模超限(不扩容)：渲染前置提示，引导缩小数据范围。 */
+const sizeLimited = ref(false)
+const sizeCount = ref(0)
+
+/** 缩放范围(全屏与非全屏统一)：0.2 ~ 50 倍。 */
+const MIN_ZOOM = 0.2
+const MAX_ZOOM = 50
+const ZOOM_STEP = 1.2
+
+/** 缩放并保持锚点不动(供全屏/内联共用)。 */
+function zoomAt(scale: Ref<number>, tx: Ref<number>, ty: Ref<number>,
+                delta: number, cx: number, cy: number) {
+  const old = scale.value
+  scale.value = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale.value * delta))
+  const k = scale.value / old
+  tx.value = cx - (cx - tx.value) * k
+  ty.value = cy - (cy - ty.value) * k
+}
+
+// ---- 内联(非全屏)滚轮缩放 + 拖拽平移 + 自适应可视区域 ----
+const inlineStageRef = ref<HTMLElement | null>(null)
+const inlineScale = ref(1)
+const inlineTx = ref(0)
+const inlineTy = ref(0)
+let inlineDragging = false
+let inlineStartX = 0
+let inlineStartY = 0
+let inlineSx = 0
+let inlineSy = 0
+let inlineObserver: ResizeObserver | null = null
+
+function inlineReset() {
+  inlineScale.value = 1
+  inlineTx.value = 0
+  inlineTy.value = 0
+}
+
+/** 非全屏：让图按可视区域的宽与高自适应缩放并居中(页面拉伸时经 ResizeObserver 实时适配)。 */
+function fitInline() {
+  const stage = inlineStageRef.value
+  const svg = stage ? stage.querySelector('.diagram-svg svg') as SVGSVGElement | null : null
+  if (!stage || !svg) return
+  let w = 0
+  let h = 0
+  const vb = svg.viewBox?.baseVal
+  if (vb && vb.width > 0 && vb.height > 0) {
+    w = vb.width
+    h = vb.height
+  } else {
+    w = parseFloat(svg.getAttribute('width') || '')
+    h = parseFloat(svg.getAttribute('height') || '')
+    if (!(w > 0 && h > 0)) {
+      const cur = Math.max(inlineScale.value, 0.001)
+      const r = svg.getBoundingClientRect()
+      w = r.width / cur
+      h = r.height / cur
+    }
+  }
+  if (!(w > 0 && h > 0)) return
+  // 固定为自然尺寸，保证 transform 的 scale 精确匹配可视区域。
+  svg.style.width = `${w}px`
+  svg.style.height = `${h}px`
+  svg.style.maxWidth = 'none'
+  const cw = stage.clientWidth
+  const ch = stage.clientHeight
+  if (cw <= 0 || ch <= 0) return
+  const s = Math.min(MAX_ZOOM, Math.min(cw / w, ch / h))
+  inlineScale.value = s
+  inlineTx.value = (cw - w * s) / 2
+  inlineTy.value = (ch - h * s) / 2
+}
+
+/** 双击复位：回到自适应可视区域。 */
+function inlineRefit() {
+  inlineReset()
+  fitInline()
+}
+
+function setupInlineObserver() {
+  const stage = inlineStageRef.value
+  if (!stage || inlineObserver) return
+  inlineObserver = new ResizeObserver(() => { fitInline() })
+  inlineObserver.observe(stage)
+}
+
+function teardownInlineObserver() {
+  if (inlineObserver) {
+    inlineObserver.disconnect()
+    inlineObserver = null
+  }
+}
+
+function inlineWheel(e: WheelEvent) {
+  if (!inlineStageRef.value) return
+  const rect = inlineStageRef.value.getBoundingClientRect()
+  zoomAt(inlineScale, inlineTx, inlineTy,
+         e.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP,
+         e.clientX - rect.left, e.clientY - rect.top)
+}
+
+function inlineStartDrag(e: MouseEvent) {
+  if (e.button !== 0) return
+  inlineDragging = true
+  inlineStartX = e.clientX
+  inlineStartY = e.clientY
+  inlineSx = inlineTx.value
+  inlineSy = inlineTy.value
+}
+
+function inlineDrag(e: MouseEvent) {
+  if (!inlineDragging) return
+  inlineTx.value = inlineSx + (e.clientX - inlineStartX)
+  inlineTy.value = inlineSy + (e.clientY - inlineStartY)
+}
+
+function inlineEndDrag() {
+  inlineDragging = false
+}
 
 const code = computed(() => props.diagrams[lang.value] ?? '')
 const currentCode = computed(() => (lang.value === 'toposcript' && !props.diagrams.toposcript ? topoScriptSample() : props.diagrams[lang.value] ?? ''))
@@ -44,10 +163,24 @@ watch(
   { immediate: true },
 )
 
+/** 内联图渲染完成 → 自适应可视区域宽高，并挂 ResizeObserver(页面拉伸时实时适配)。 */
+watch(svg, (v) => {
+  if (!v) {
+    teardownInlineObserver()
+    return
+  }
+  nextTick(() => {
+    fitInline()
+    setupInlineObserver()
+  })
+})
+
 async function render() {
   const seq = ++renderSeq
   error.value = ''
+  sizeLimited.value = false
   showSource.value = false
+  inlineReset()
   if (lang.value === 'toposcript') {
     playing.value = false
     if (seq === renderSeq) loading.value = false
@@ -57,6 +190,18 @@ async function render() {
     if (seq === renderSeq) loading.value = false
     return
   }
+  // 规模预判：关系边数超限时不发起渲染，直接给出友好的缩小范围提示(避免底层报错)。
+  const limit = DIAGRAM_EDGE_LIMITS[lang.value]
+  if (limit) {
+    const ec = countDiagramEdges(lang.value, code.value)
+    if (ec >= limit) {
+      sizeCount.value = ec
+      sizeLimited.value = true
+      svg.value = ''
+      if (seq === renderSeq) loading.value = false
+      return
+    }
+  }
   loading.value = true
   try {
     const out = lang.value === 'plantuml'
@@ -64,7 +209,17 @@ async function render() {
       : await renderMermaid(normalizeMermaid(code.value))
     if (seq === renderSeq) svg.value = out
   } catch (e) {
-    if (seq === renderSeq) error.value = (e as Error).message || 'render failed'
+    if (seq === renderSeq) {
+      const msg = (e as Error).message || 'render failed'
+      if (isDiagramSizeError(lang.value, msg)) {
+        sizeCount.value = countDiagramEdges(lang.value, code.value)
+        sizeLimited.value = true
+        error.value = ''
+        svg.value = ''
+      } else {
+        error.value = msg
+      }
+    }
   } finally {
     if (seq === renderSeq) loading.value = false
   }
@@ -77,7 +232,10 @@ watch(
   },
 )
 
-onBeforeUnmount(() => { playing.value = false })
+onBeforeUnmount(() => {
+  playing.value = false
+  teardownInlineObserver()
+})
 
 // ---- 全屏放大浏览(参考 KB chat：图主 DOM 浏览器全屏 + 滚轮缩放/拖拽平移) ----
 const fullscreenOpen = ref(false)
@@ -127,11 +285,7 @@ function fsFit() {
 }
 
 function fsZoomAt(delta: number, cx: number, cy: number) {
-  const old = fsScale.value
-  fsScale.value = Math.min(8, Math.max(0.2, fsScale.value * delta))
-  const k = fsScale.value / old
-  fsTx.value = cx - (cx - fsTx.value) * k
-  fsTy.value = cy - (cy - fsTy.value) * k
+  zoomAt(fsScale, fsTx, fsTy, delta, cx, cy)
 }
 
 function fsZoom(delta: number) {
@@ -146,7 +300,7 @@ function fsWheel(e: WheelEvent) {
   const box = fsStageRef.value
   if (!box) return
   const rect = box.getBoundingClientRect()
-  fsZoomAt(e.deltaY > 0 ? 1 / 1.2 : 1.2, e.clientX - rect.left, e.clientY - rect.top)
+  fsZoomAt(e.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP, e.clientX - rect.left, e.clientY - rect.top)
 }
 
 function fsReset() {
@@ -177,8 +331,8 @@ function fsEndDrag() {
 
 <template>
   <!-- eslint-disable vue/no-v-html -->
-  <div class="panel overflow-hidden">
-    <div class="panel-header">
+  <div class="panel overflow-hidden flex flex-col min-h-0">
+    <div class="panel-header shrink-0">
       <div class="flex items-center gap-2 min-w-0">
         <span class="truncate font-medium">{{ title }}</span>
         <span
@@ -227,7 +381,7 @@ function fsEndDrag() {
       </div>
     </div>
 
-    <div class="p-3">
+    <div class="p-3 flex-1 min-h-0 flex flex-col min-w-0">
       <div
         v-if="lang === 'toposcript'"
         class="space-y-2"
@@ -253,7 +407,7 @@ function fsEndDrag() {
 
       <div
         v-else
-        class="relative"
+        class="relative flex-1 min-h-0"
       >
         <div
           v-if="loading"
@@ -272,10 +426,37 @@ function fsEndDrag() {
           >{{ t('architecture.renderFailed') }}<template v-if="error"> — {{ error }}</template></span>
         </div>
         <div
+          v-else-if="sizeLimited"
+          class="text-xs text-ctp-yellow mb-2 flex items-start gap-1.5 min-w-0"
+        >
+          <ExclamationTriangleIcon class="w-4 h-4 shrink-0 mt-0.5" />
+          <span class="min-w-0">
+            {{ t('architecture.diagramTooLarge', { count: sizeCount }) }}<br>
+            <span class="text-ctp-subtext0">{{ t('architecture.diagramNarrowHint') }}</span>
+          </span>
+        </div>
+        <div
           v-else-if="svg"
-          class="diagram-svg"
-          v-html="svg"
-        />
+          ref="inlineStageRef"
+          class="inline-stage h-full w-full"
+          @wheel.prevent="inlineWheel"
+          @mousedown="inlineStartDrag"
+          @mousemove="inlineDrag"
+          @mouseup="inlineEndDrag"
+          @mouseleave="inlineEndDrag"
+          @dblclick="inlineRefit"
+        >
+          <div
+            class="diagram-svg"
+            :style="{ transform: `translate(${inlineTx}px, ${inlineTy}px) scale(${inlineScale})` }"
+            v-html="svg"
+          />
+          <span
+            v-if="inlineScale !== 1"
+            class="absolute right-1.5 bottom-1.5 z-10 chip bg-ctp-surface0/90 text-ctp-overlay1 font-mono text-[10px]"
+            :title="t('architecture.zoomResetHint')"
+          >{{ Math.round(inlineScale * 100) }}%</span>
+        </div>
         <div
           v-else-if="!code"
           class="text-xs text-ctp-overlay0 py-6 text-center"
@@ -305,7 +486,7 @@ function fsEndDrag() {
             <button
               class="btn btn-xs btn-ghost"
               :title="t('architecture.zoomOut')"
-              @click="fsZoom(1 / 1.2)"
+              @click="fsZoom(1 / ZOOM_STEP)"
             >
               <MagnifyingGlassMinusIcon class="w-4 h-4" />
             </button>
@@ -313,7 +494,7 @@ function fsEndDrag() {
             <button
               class="btn btn-xs btn-ghost"
               :title="t('architecture.zoomIn')"
-              @click="fsZoom(1.2)"
+              @click="fsZoom(ZOOM_STEP)"
             >
               <MagnifyingGlassPlusIcon class="w-4 h-4" />
             </button>
@@ -351,8 +532,21 @@ function fsEndDrag() {
 </template>
 
 <style scoped>
+.inline-stage {
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  min-height: 60px;
+}
+.inline-stage:active {
+  cursor: grabbing;
+}
+.diagram-svg {
+  width: fit-content;
+  transform-origin: 0 0;
+}
 .diagram-svg :deep(svg) {
-  max-width: 100%;
+  max-width: none;
   height: auto;
 }
 .fs-overlay {

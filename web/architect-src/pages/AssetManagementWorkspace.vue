@@ -81,16 +81,18 @@ const overviewStats = ref<SemanticStatsResult | null>(null)
 const purging = ref(false)
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
-  { value: 'structure', label: t('assetMgmt.kind.structure') },
-  { value: 'behavior', label: t('assetMgmt.kind.behavior') },
-  { value: 'rule', label: t('assetMgmt.kind.rule') },
+  { value: 'asset', label: t('assetMgmt.kind.asset') },
+  { value: 'process', label: t('assetMgmt.kind.process') },
+  { value: 'decision', label: t('assetMgmt.kind.decision') },
   { value: 'contract', label: t('assetMgmt.kind.contract') },
+  { value: 'state', label: t('assetMgmt.kind.state') },
 ]
 
 const levels: { value: SemanticAssetLevel; label: string }[] = [
-  { value: 'high', label: t('assetMgmt.level.high') },
-  { value: 'medium', label: t('assetMgmt.level.medium') },
-  { value: 'low', label: t('assetMgmt.level.low') },
+  { value: 'business', label: t('assetMgmt.level.business') },
+  { value: 'interaction', label: t('assetMgmt.level.interaction') },
+  { value: 'algorithm', label: t('assetMgmt.level.algorithm') },
+  { value: 'infra', label: t('assetMgmt.level.infra') },
 ]
 
 const statusText = computed(() => {
@@ -154,10 +156,17 @@ const fileToComp = computed(() => {
 })
 
 /** 语义资产归属组件 id：优先资产自带 scopeKey(真实提取范围)；未命中组件
+ *  → meta.scopes 多组件归属(INCLUDE/CALL 共享代码 / business 聚合)；
  *  → 按首个锚点文件反查；仍未命中则归「其它」。 */
 function componentOf(a: SemanticAsset): string {
   const sk = a.scopeKey
   if (sk && compById.value.has(sk)) return sk
+  const mscopes = a.meta?.scopes
+  if (mscopes?.length) {
+    for (const cid of mscopes) {
+      if (compById.value.has(cid)) return cid
+    }
+  }
   const file = a.astRefs?.[0]?.file
   return (file && fileToComp.value.get(file)) || OTHER_KEY
 }
@@ -671,9 +680,10 @@ function toggle(id: string) {
 }
 
 function kindIcon(k: SemanticAsset['kind']) {
-  if (k === 'behavior') return BoltIcon
-  if (k === 'rule') return AdjustmentsHorizontalIcon
+  if (k === 'process') return BoltIcon
+  if (k === 'decision') return AdjustmentsHorizontalIcon
   if (k === 'contract') return ServerStackIcon
+  if (k === 'state') return AdjustmentsHorizontalIcon
   return CubeTransparentIcon
 }
 
@@ -1221,7 +1231,7 @@ onUnmounted(() => stopExtractPoll())
                     v-for="l in levels"
                     :key="l.value"
                     class="chip"
-                    :class="l.value === 'high' ? 'bg-ctp-peach/15 text-ctp-peach' : l.value === 'low' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                    :class="l.value === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : l.value === 'algorithm' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
                   >{{ l.label }}</span>
                 </div>
                 <p class="text-[10px] text-ctp-subtext0 leading-relaxed pt-1">
@@ -1330,9 +1340,9 @@ onUnmounted(() => stopExtractPoll())
                   {{ t(`assetMgmt.kind.${a.kind}`) }}
                 </span>
                 <span
-                  v-if="a.level && a.level !== 'medium'"
+                  v-if="a.level"
                   class="chip !text-[9px] shrink-0"
-                  :class="a.level === 'high' ? 'bg-ctp-peach/15 text-ctp-peach' : 'bg-ctp-sky/15 text-ctp-sky'"
+                  :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'infra' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-sky/15 text-ctp-sky'"
                 >{{ t(`assetMgmt.level.${a.level}`) }}</span>
                 <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
                 <span

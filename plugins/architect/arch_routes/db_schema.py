@@ -209,8 +209,8 @@ ARCHITECT_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
         project_id TEXT DEFAULT '',
-        kind TEXT DEFAULT 'structure',      -- structure | behavior | rule | contract
-        level TEXT DEFAULT 'medium',        -- high | medium | low(抽象粒度)
+        kind TEXT DEFAULT 'asset',          -- asset | process | decision | contract | state
+        level TEXT DEFAULT 'interaction',   -- business | interaction | algorithm | infra(抽象粒度)
         name TEXT DEFAULT '',
         desc TEXT DEFAULT '',
         detail TEXT,                        -- JSON: fields/steps/branches/aggregates
@@ -312,8 +312,8 @@ _ARCH_SEMANTIC_MIGRATION_COLS = [
     ("canonical_key", "TEXT DEFAULT ''"),  # 稳定规范标识(scope+锚点指纹)，id 复用依据
     ("renamed_from", "TEXT DEFAULT ''"),   # 语义命名变更溯源(锚点不变仅改名)
     ("name_alias", "TEXT"),                # JSON: 历史语义名列表
-    ("level", "TEXT DEFAULT 'medium'"),    # 抽象粒度: high | medium | low
-    ("parent_id", "TEXT DEFAULT ''"),      # H 级聚合资产的父级(高→中→低 组合链)
+    ("level", "TEXT DEFAULT 'interaction'"),  # 抽象粒度: business | interaction | algorithm | infra
+    ("parent_id", "TEXT DEFAULT ''"),      # business 级聚合资产的父级(业务→交互→算法 组合链)
 ]
 
 
@@ -505,13 +505,13 @@ def architect_db_migrations(db) -> None:
                 db.execute(f"ALTER TABLE arch_semantic_assets ADD COLUMN {name} {typ}")
             except Exception:
                 pass
-    # 语义资产 kind 规范化迁移: 旧三类 → 新四类(默认 medium 粒度)
-    for old, new in (("data_structure", "structure"),
-                     ("processing_flow", "behavior"),
-                     ("control_logic", "rule")):
+    # 语义资产 kind 规范化迁移: 旧三类 → 新五类(默认 interaction 粒度)
+    for old, new in (("data_structure", "asset"),
+                     ("processing_flow", "process"),
+                     ("control_logic", "decision")):
         try:
             db.execute(
-                "UPDATE arch_semantic_assets SET kind = ?, level = 'medium' WHERE kind = ?",
+                "UPDATE arch_semantic_assets SET kind = ?, level = 'interaction' WHERE kind = ?",
                 (new, old),
             )
         except Exception:

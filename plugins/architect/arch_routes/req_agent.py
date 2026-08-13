@@ -335,7 +335,7 @@ def tool_semantic_search(root: Optional[str], project: Optional[str],
     "asset.semantic.extract",
     "从最新代码结构提取语义数据资产(类别: structure/behavior/rule/contract，粒度: high/medium/low)并落库，"
     "供对话确认与需求/设计引用。"
-    "参数 scope={type: files|symbols|comm|project, key?, files?, symbols?}，kinds=[structure|behavior|rule|contract]。",
+    "参数 scope={type: files|symbols|comm|project, key?, files?, symbols?}，kinds=[asset|process|decision|contract|state]。",
 )
 def tool_semantic_extract(root: Optional[str], project: Optional[str],
                           scope: Dict[str, Any] = None,
@@ -564,8 +564,8 @@ _CAPABILITY_DOC = (
     "- kb.baseline: {}\n"
     '- kb.graph: {"comp_ids": ["组件ID"]}\n'
     "- project.ctx: {}\n"
-    '- asset.semantic.search: {"text": "关键词", "kind": "structure|behavior|rule|contract(可选)"}\n'
-    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["structure","behavior","rule","contract"]}\n'
+    '- asset.semantic.search: {"text": "关键词", "kind": "asset|process|decision|contract|state(可选)"}\n'
+    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["asset","process","decision","contract","state"]}\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"
@@ -759,7 +759,7 @@ def req_harness_clarify(req: Dict[str, Any], root: Optional[str] = None,
     res = run_tools_loop([{"role": "system", "content": sys_prompt},
                           {"role": "user", "content": user_prompt}],
                          root=root, project=project,
-                         mode="chat", max_tokens=1200, model_id=model_id)
+                         mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
     if not res:
         return None
     questions = _parse_json_array(res.get("content", ""))
@@ -832,8 +832,8 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
                         "assetId": {"type": "string"},
                         "assetType": {"enum": ["component", "er", "orm", "entity",
                                                 "flow", "dataflow",
-                                                "structure", "behavior", "rule", "contract"]},
-                        "level": {"enum": ["high", "medium", "low"]},
+                                                "asset", "process", "decision", "contract", "state"]},
+                        "level": {"enum": ["business", "interaction", "algorithm", "infra"]},
                         "role": {"enum": ["core", "related"]},
                         "source": {"enum": ["auto", "manual"]},
                         "file": {"type": "string"},
@@ -872,7 +872,7 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_prompt},
     ], root=root, project=project, mode="structured", output_schema=schema,
-        max_tokens=1600, model_id=model_id)
+        max_tokens=get_max_tokens_preference(), model_id=model_id)
     if not res:
         return None
     output = res.get("output")

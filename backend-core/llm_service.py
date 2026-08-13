@@ -1198,10 +1198,30 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         model = _get_model_by_id(multi_db, model_id)
         if not model:
             raise ValueError(f"Model not found: {model_id}")
+        # structured 输出校验失败 → 回喂错误重试(max 2)，与流式 llm.chat 路径一致，
+        # 避免本地模型偶发截断/非 JSON 输出导致上层整批走启发式兜底(空 steps/branches)。
         result = await service._sync_call_for_retry(
             model, _msgs, 'structured', tools, output_schema, max_tokens=max_tokens)
         content = result.get('content', '')
         parsed = service._validate_structured_output(content, output_schema)
+        if not parsed['success']:
+            for attempt in range(2):
+                logger.warning(f"[LLMService] sync structured validation failed, retry {attempt + 1}/2: {parsed.get('error')}")
+                _msgs = list(_msgs) + [
+                    {'role': 'assistant', 'content': content or ''},
+                    {'role': 'user', 'content': (
+                        f"Your previous response was not valid JSON matching the required schema.\n"
+                        f"Error: {parsed.get('error')}\n"
+                        f"Schema: {json.dumps(output_schema, ensure_ascii=False)}\n"
+                        "Please output ONLY valid JSON. Do not wrap in markdown fences."
+                    )},
+                ]
+                result = await service._sync_call_for_retry(
+                    model, _msgs, 'structured', tools, output_schema, max_tokens=max_tokens)
+                content = result.get('content', '')
+                parsed = service._validate_structured_output(content, output_schema)
+                if parsed['success']:
+                    break
         return {
             "content": content,
             "mode": "structured",

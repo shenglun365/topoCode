@@ -153,7 +153,7 @@ class _GenerateOverviewTool(AgentTool):
             })
             messages = result['messages']
             logger.info("[Overview] calling LLM with prompt=%d chars", len(context_text))
-            resp = await llm_fn(messages=messages, temperature=0.3, max_tokens=32768)
+            resp = await llm_fn(messages=messages, temperature=0.3)
             overview = resp if isinstance(resp, str) else str(resp or "")
             logger.info("[Overview] LLM response=%d chars", len(overview))
             if overview:

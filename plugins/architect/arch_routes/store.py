@@ -771,8 +771,8 @@ class SemanticAssetsStore:
     """
 
     TABLE = "arch_semantic_assets"
-    KINDS = ("structure", "behavior", "rule", "contract")
-    LEVELS = ("high", "medium", "low")
+    KINDS = ("asset", "process", "decision", "contract", "state")
+    LEVELS = ("business", "interaction", "algorithm", "infra")
 
     @classmethod
     def all(cls, project_id: str = "", kind: str = "", limit: int = 200):
