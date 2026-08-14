@@ -564,8 +564,8 @@ _CAPABILITY_DOC = (
     "- kb.baseline: {}\n"
     '- kb.graph: {"comp_ids": ["组件ID"]}\n'
     "- project.ctx: {}\n"
-    '- asset.semantic.search: {"text": "关键词", "kind": "asset|process|decision|contract|state(可选)"}\n'
-    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["asset","process","decision","contract","state"]}\n'
+    '- asset.semantic.search: {"text": "关键词", "kind": "entity|contract|state|rule|process|decision(可选)"}\n'
+    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["entity","contract","state","rule","process","decision"]}\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"
@@ -832,8 +832,8 @@ def req_harness_collect(ctx: Dict[str, Any], root: Optional[str] = None,
                         "assetId": {"type": "string"},
                         "assetType": {"enum": ["component", "er", "orm", "entity",
                                                 "flow", "dataflow",
-                                                "asset", "process", "decision", "contract", "state"]},
-                        "level": {"enum": ["business", "interaction", "algorithm", "infra"]},
+                                                "entity", "contract", "state", "rule", "process", "decision"]},
+                        "level": {"enum": ["business", "logic", "implementation"]},
                         "role": {"enum": ["core", "related"]},
                         "source": {"enum": ["auto", "manual"]},
                         "file": {"type": "string"},

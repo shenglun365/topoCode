@@ -209,8 +209,8 @@ ARCHITECT_DB_TABLES_SQL = """
     CREATE TABLE IF NOT EXISTS arch_semantic_assets (
         id TEXT PRIMARY KEY,
         project_id TEXT DEFAULT '',
-        kind TEXT DEFAULT 'asset',          -- asset | process | decision | contract | state
-        level TEXT DEFAULT 'interaction',   -- business | interaction | algorithm | infra(抽象粒度)
+        kind TEXT DEFAULT 'entity',          -- entity | contract | state | rule | process | decision
+        level TEXT DEFAULT 'logic',   -- implementation | logic | business(抽象粒度)
         name TEXT DEFAULT '',
         desc TEXT DEFAULT '',
         detail TEXT,                        -- JSON: fields/steps/branches/aggregates
@@ -505,17 +505,29 @@ def architect_db_migrations(db) -> None:
                 db.execute(f"ALTER TABLE arch_semantic_assets ADD COLUMN {name} {typ}")
             except Exception:
                 pass
-    # 语义资产 kind 规范化迁移: 旧三类 → 新五类(默认 interaction 粒度)
-    for old, new in (("data_structure", "asset"),
+    # 语义资产 kind/level 规范化迁移: 旧五类/四粒度 → 新六类/三粒度(默认 logic 粒度)
+    for old, new in (("data_structure", "entity"),
+                     ("asset", "entity"),
                      ("processing_flow", "process"),
-                     ("control_logic", "decision")):
+                     ("control_logic", "decision"),
+                     ("rule", "decision")):
         try:
             db.execute(
-                "UPDATE arch_semantic_assets SET kind = ?, level = 'interaction' WHERE kind = ?",
+                "UPDATE arch_semantic_assets SET kind = ?, level = 'logic' WHERE kind = ?",
                 (new, old),
             )
         except Exception:
             pass
+    try:
+        db.execute(
+            "UPDATE arch_semantic_assets SET level = CASE level "
+            "WHEN 'business' THEN 'business' WHEN 'high' THEN 'business' "
+            "WHEN 'interaction' THEN 'logic' WHEN 'medium' THEN 'logic' "
+            "WHEN 'algorithm' THEN 'implementation' WHEN 'low' THEN 'implementation' "
+            "WHEN 'infra' THEN 'implementation' ELSE 'logic' END "
+            "WHERE level IS NOT NULL AND level NOT IN ('implementation','logic','business')")
+    except Exception:
+        pass
     try:
         db.execute("CREATE INDEX IF NOT EXISTS idx_arch_semantic_canonical "
                    "ON arch_semantic_assets(project_id, canonical_key)")

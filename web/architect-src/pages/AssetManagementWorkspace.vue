@@ -8,7 +8,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
-import SemanticGraphView from '@/components/assets/SemanticGraphView.vue'
+import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { semanticAssetService, type ExtractTaskMessage, type ExtractTaskStatus, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
@@ -68,6 +68,33 @@ type AssetTab = 'overview' | 'semantic' | 'component' | 'graph'
 const tab = ref<AssetTab>('overview')
 const kind = ref<SemanticAssetKind | ''>('')
 const level = ref<SemanticAssetLevel | ''>('')
+/** 语义资产 tab：组件层级(L0/L1)筛选。空 = 全部层级(按组件树展开)；L0/L1 = 以该层组件为树根。 */
+const compLevelSel = ref<'all' | 'L0' | 'L1'>('all')
+/** 语义图谱多资源 tab(从语义列表/组件列表打开，可并存)。 */
+const graphTabs = ref<GraphTabDef[]>([])
+const activeGraphTab = ref('')
+/** 打开(或激活已存在的同名资源)图谱 tab；kind 相同时复用，避免重复。 */
+function openGraphTab(kind: GraphTabDef['kind'], id: string, title: string) {
+  const key = `${kind}:${id}`
+  const existing = graphTabs.value.find((x) => x.id === key)
+  if (existing) {
+    activeGraphTab.value = existing.id
+  } else {
+    const def: GraphTabDef = { id: key, kind, title, compId: kind === 'comp' ? id : undefined, assetId: kind === 'asset' ? id : undefined }
+    graphTabs.value.push(def)
+    activeGraphTab.value = def.id
+  }
+  tab.value = 'graph'
+  onSearch()
+}
+function closeGraphTab(id: string) {
+  const i = graphTabs.value.findIndex((x) => x.id === id)
+  if (i < 0) return
+  graphTabs.value.splice(i, 1)
+  if (activeGraphTab.value === id) {
+    activeGraphTab.value = graphTabs.value[i]?.id ?? graphTabs.value[i - 1]?.id ?? ''
+  }
+}
 const q = ref('')
 const items = ref<SemanticAsset[]>([])
 const comps = ref<AssetDetail[]>([])
@@ -81,18 +108,18 @@ const overviewStats = ref<SemanticStatsResult | null>(null)
 const purging = ref(false)
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
-  { value: 'asset', label: t('assetMgmt.kind.asset') },
-  { value: 'process', label: t('assetMgmt.kind.process') },
-  { value: 'decision', label: t('assetMgmt.kind.decision') },
+  { value: 'entity', label: t('assetMgmt.kind.entity') },
   { value: 'contract', label: t('assetMgmt.kind.contract') },
   { value: 'state', label: t('assetMgmt.kind.state') },
+  { value: 'rule', label: t('assetMgmt.kind.rule') },
+  { value: 'process', label: t('assetMgmt.kind.process') },
+  { value: 'decision', label: t('assetMgmt.kind.decision') },
 ]
 
 const levels: { value: SemanticAssetLevel; label: string }[] = [
   { value: 'business', label: t('assetMgmt.level.business') },
-  { value: 'interaction', label: t('assetMgmt.level.interaction') },
-  { value: 'algorithm', label: t('assetMgmt.level.algorithm') },
-  { value: 'infra', label: t('assetMgmt.level.infra') },
+  { value: 'logic', label: t('assetMgmt.level.logic') },
+  { value: 'implementation', label: t('assetMgmt.level.implementation') },
 ]
 
 const statusText = computed(() => {
@@ -105,7 +132,7 @@ const arch = useArchArchitectureStore()
 const OTHER_KEY = '__other__'
 
 /** 统一组件节点(树/归属映射用)。 */
-interface CompNode { id: string; name: string; parentId?: string; owns: string[] }
+interface CompNode { id: string; name: string; parentId?: string; owns: string[]; hierLevel?: string }
 
 /** 组件目录(完整来源，跨 INCLUDE/CALL × L0/L1，与组件列表一致)。 */
 const compCatalog = ref<AssetDetail[]>([])
@@ -122,10 +149,10 @@ async function loadCompCatalog() {
  *  两者均空(如 KB 冷启动)时，从当前资产 scopeKey(comm-*) 兜底构建，保证筛选菜单不空。 */
 const treeComps = computed<CompNode[]>(() => {
   if (compCatalog.value.length) {
-    return compCatalog.value.map((c) => ({ id: c.assetId, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [] }))
+    return compCatalog.value.map((c) => ({ id: c.assetId, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [], hierLevel: c.hierLevel ?? undefined }))
   }
   if (arch.components.length) {
-    return arch.components.map((c) => ({ id: c.id, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [] }))
+    return arch.components.map((c) => ({ id: c.id, name: c.name, parentId: c.parentId ?? undefined, owns: c.owns ?? [], hierLevel: (c as { hierLevel?: string }).hierLevel ?? undefined }))
   }
   const byId = new Map<string, CompNode>()
   for (const a of items.value) {
@@ -244,7 +271,38 @@ const compRows = computed<CompRow[]>(() => {
   return rows
 })
 
-interface SemanticGroup { key: string; name: string; depth: number; assets: SemanticAsset[] }
+/** 组件资产 tab 树行：全部层级从根展开；选 L0/L1 时以该层组件为初始列表(可展开从属组件)。
+ *  行对象 = 组件(AssetDetail) + depth(缩进层级)。 */
+interface CompAssetRow extends AssetDetail { depth: number }
+const compAssetRows = computed<CompAssetRow[]>(() => {
+  const roots = compLevel.value === 'all'
+    ? comps.value.filter((c) => !c.parentId)
+    : comps.value.filter((c) => (c.hierLevel ?? '') === compLevel.value)
+  const rows: CompAssetRow[] = []
+  const walk = (parentId: string | undefined, depth: number) => {
+    for (const c of comps.value) {
+      if (c.parentId !== parentId) continue
+      rows.push({ ...c, depth })
+      if (compOpen[c.assetId] !== false) walk(c.assetId, depth + 1)
+    }
+  }
+  for (const r of roots) {
+    rows.push({ ...r, depth: 0 })
+    if (compOpen[r.assetId] !== false) walk(r.assetId, 1)
+  }
+  return rows
+})
+
+interface SemanticGroup { key: string; name: string; depth: number; assets: SemanticAsset[]; hierLevel?: string }
+/** 组件 id 层级映射(组件树 → L0/L1，供层级筛选)。 */
+const compHierLevel = computed<Map<string, string>>(() => {
+  const m = new Map<string, string>()
+  for (const c of treeComps.value) {
+    if (c.hierLevel) m.set(c.id, c.hierLevel)
+  }
+  return m
+})
+/** 资产 tab 组件树行：全部层级从根展开；选 L0/L1 时以该层组件为初始列表(可展开更低从属组件)。 */
 const semanticGroups = computed<SemanticGroup[]>(() => {
   const sel = new Set(scopeSel.value)
   const all = sel.size === 0
@@ -260,17 +318,28 @@ const semanticGroups = computed<SemanticGroup[]>(() => {
     }
   }
   const groups: SemanticGroup[] = []
+  // 树根：全部 → 无父节点；选层级 → 该层级组件(即便有父，也从这层开始作为初始列表)。
+  const roots = compLevelSel.value === 'all'
+    ? treeComps.value.filter((c) => !c.parentId)
+    : treeComps.value.filter((c) => (c.hierLevel ?? compHierLevel.value.get(c.id)) === compLevelSel.value)
   const walk = (parentId: string | undefined, depth: number) => {
     for (const c of treeComps.value) {
       if (c.parentId !== parentId) continue
       if (all || sel.has(c.id)) {
         const assets = byComp.get(c.id)
-        if (assets?.length) groups.push({ key: c.id, name: c.name, depth, assets })
+        const hasChild = treeComps.value.some((x) => x.parentId === c.id)
+        // 有资产或(展开态下)有下级组件时才渲染该节点
+        if (assets?.length || (hasChild && compOpen[c.id] !== false)) {
+          groups.push({ key: c.id, name: c.name, depth, assets: assets ?? [], hierLevel: c.hierLevel })
+        }
       }
-      walk(c.id, depth + 1)
+      if (compOpen[c.id] !== false) walk(c.id, depth + 1)
     }
   }
-  walk(undefined, 0)
+  for (const r of roots) {
+    groups.push({ key: r.id, name: r.name, depth: 0, assets: byComp.get(r.id) ?? [], hierLevel: r.hierLevel })
+    if (compOpen[r.id] !== false) walk(r.id, 1)
+  }
   if (other.length && (all || sel.has(OTHER_KEY))) {
     groups.push({ key: OTHER_KEY, name: t('assetMgmt.other'), depth: 0, assets: other })
   }
@@ -304,9 +373,10 @@ async function loadSemantic() {
 async function loadComponents() {
   loading.value = true
   try {
+    // compLevel(L0/L1) 仅作树起点筛选(客户端)，需拉全量组件才能展开从属层级，
+    // 故不传给后端；compType(INCLUDE/CALL) 是真实口径分区，保留后端过滤。
     comps.value = await kbAssetService.searchComponents(q.value, {
       type: compType.value === 'all' ? undefined : compType.value,
-      level: compLevel.value === 'all' ? undefined : compLevel.value,
     })
   } finally {
     loading.value = false
@@ -957,6 +1027,15 @@ onUnmounted(() => stopExtractPoll())
               :value="l.value"
             >{{ l.label }}</option>
           </select>
+          <select
+            v-if="tab === 'semantic'"
+            v-model="compLevelSel"
+            class="input !py-0.5 !px-2 !text-[11px] w-auto"
+          >
+            <option value="all">{{ t('assetMgmt.allCompLevels') }}</option>
+            <option value="L0">L0</option>
+            <option value="L1">L1</option>
+          </select>
           <button
             class="btn btn-xs btn-ghost"
             :disabled="loading"
@@ -1177,12 +1256,50 @@ onUnmounted(() => stopExtractPoll())
           </template>
         </div>
 
-        <!-- 语义层图谱(图形化表达 + 稳定逻辑映射) -->
+        <!-- 语义层图谱(多资源 tab，从语义/组件列表打开) -->
         <div
           v-if="tab === 'graph'"
-          class="flex-1 min-h-0 overflow-hidden"
+          class="flex-1 min-h-0 overflow-hidden flex flex-col"
         >
-          <SemanticGraphView :scope="scopeSel" />
+          <div
+            v-if="!graphTabs.length"
+            class="flex-1 min-h-0 flex items-center justify-center text-xs text-ctp-overlay0"
+          >
+            {{ t('assetMgmt.graph.noTab') }}
+          </div>
+          <template v-else>
+            <div class="shrink-0 flex items-stretch border-b border-ctp-surface1 px-1 pt-1 overflow-x-auto">
+              <button
+                v-for="gt in graphTabs"
+                :key="gt.id"
+                class="group relative flex items-center gap-1.5 max-w-[200px] px-3 py-1.5 text-[11px] whitespace-nowrap rounded-t-lg border border-b-0 transition-colors shrink-0"
+                :class="activeGraphTab === gt.id
+                  ? 'bg-ctp-mantle text-ctp-text border-ctp-surface1 font-semibold'
+                  : 'bg-ctp-surface0/50 text-ctp-subtext0 border-transparent hover:bg-ctp-surface0 hover:text-ctp-subtext1'"
+                :title="gt.title"
+                @click="activeGraphTab = gt.id"
+              >
+                <span class="truncate">{{ gt.title }}</span>
+                <span
+                  role="button"
+                  class="flex items-center justify-center w-4 h-4 rounded text-ctp-overlay1 hover:text-ctp-red hover:bg-ctp-red/15 cursor-pointer shrink-0"
+                  :title="t('assetMgmt.graph.closeTab')"
+                  @click.stop="closeGraphTab(gt.id)"
+                >
+                  <XMarkIcon class="w-3 h-3" />
+                </span>
+              </button>
+            </div>
+            <div class="flex-1 min-h-0">
+              <SemanticGraphView
+                v-for="gt in graphTabs"
+                v-show="activeGraphTab === gt.id"
+                :key="gt.id"
+                :tab="gt"
+                @close="closeGraphTab"
+              />
+            </div>
+          </template>
         </div>
         <div
           v-else
@@ -1231,7 +1348,7 @@ onUnmounted(() => stopExtractPoll())
                     v-for="l in levels"
                     :key="l.value"
                     class="chip"
-                    :class="l.value === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : l.value === 'algorithm' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                    :class="l.value === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : l.value === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
                   >{{ l.label }}</span>
                 </div>
                 <p class="text-[10px] text-ctp-subtext0 leading-relaxed pt-1">
@@ -1308,13 +1425,34 @@ onUnmounted(() => stopExtractPoll())
             </div>
           </template>
 
-          <!-- 语义资产：按所属组件分组 -->
+          <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
           <template v-if="tab === 'semantic'">
             <template
               v-for="g in semanticGroups"
               :key="g.key"
             >
-              <div class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5">
+              <div
+                class="flex items-center gap-1.5 px-1 pt-1.5 pb-0.5"
+                :style="{ paddingLeft: (g.depth * 12) + 'px' }"
+              >
+                <button
+                  v-if="hasChildren(g.key)"
+                  class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                  @click="toggleOpen(g.key)"
+                >
+                  <ChevronDownIcon
+                    v-if="compOpen[g.key] !== false"
+                    class="w-3 h-3"
+                  />
+                  <ChevronRightIcon
+                    v-else
+                    class="w-3 h-3"
+                  />
+                </button>
+                <span
+                  v-else
+                  class="w-3.5 shrink-0"
+                />
                 <ServerStackIcon
                   v-if="g.key !== OTHER_KEY"
                   class="w-3 h-3 text-ctp-blue shrink-0"
@@ -1323,8 +1461,20 @@ onUnmounted(() => stopExtractPoll())
                   v-else
                   class="w-3 h-3 shrink-0"
                 />
+                <span
+                  v-if="g.hierLevel"
+                  class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0 font-mono"
+                >{{ g.hierLevel }}</span>
                 <span class="text-[10px] font-semibold text-ctp-subtext1 truncate">{{ g.name }}</span>
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ g.assets.length }}</span>
+                <button
+                  v-if="g.key !== OTHER_KEY"
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                  :title="t('assetMgmt.graph.viewCompGraph')"
+                  @click="openGraphTab('comp', g.key, g.name)"
+                >
+                  <Squares2X2Icon class="w-3 h-3" />
+                </button>
               </div>
               <div
                 v-for="a in g.assets"
@@ -1342,7 +1492,7 @@ onUnmounted(() => stopExtractPoll())
                 <span
                   v-if="a.level"
                   class="chip !text-[9px] shrink-0"
-                  :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'infra' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-sky/15 text-ctp-sky'"
+                  :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
                 >{{ t(`assetMgmt.level.${a.level}`) }}</span>
                 <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
                 <span
@@ -1386,6 +1536,13 @@ onUnmounted(() => stopExtractPoll())
                   @click="referenceAsset(a)"
                 >
                   <ScaleIcon class="w-3 h-3" />
+                </button>
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                  :title="t('assetMgmt.graph.viewAssetGraph')"
+                  @click="openGraphTab('asset', a.id, a.name)"
+                >
+                  <Squares2X2Icon class="w-3 h-3" />
                 </button>
                 <button
                   class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
@@ -1459,14 +1616,36 @@ onUnmounted(() => stopExtractPoll())
             </p>
           </template>
 
-          <!-- 组件资产 -->
+          <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
           <template v-else>
             <div
-              v-for="c in comps"
+              v-for="c in compAssetRows"
               :key="c.assetId"
               class="border border-ctp-blue/20 hover:border-ctp-blue/40 rounded-lg overflow-hidden"
             >
-              <div class="flex items-center gap-2 px-2 py-1.5">
+              <div
+                class="flex items-center gap-2 px-2 py-1.5"
+                :style="{ paddingLeft: (c.depth * 14 + 8) + 'px' }"
+              >
+                <button
+                  v-if="comps.some((x) => x.parentId === c.assetId)"
+                  class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
+                  :title="t('assetMgmt.expandCollapse')"
+                  @click="toggleOpen(c.assetId)"
+                >
+                  <ChevronDownIcon
+                    v-if="compOpen[c.assetId] !== false"
+                    class="w-3 h-3"
+                  />
+                  <ChevronRightIcon
+                    v-else
+                    class="w-3 h-3"
+                  />
+                </button>
+                <span
+                  v-else
+                  class="w-3.5 shrink-0"
+                />
                 <input
                   v-if="extractMode"
                   type="checkbox"
@@ -1493,6 +1672,13 @@ onUnmounted(() => stopExtractPoll())
                   @click="openKB(c)"
                 >
                   <EyeIcon class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                  :title="t('assetMgmt.graph.viewCompGraph')"
+                  @click="openGraphTab('comp', c.assetId, c.name)"
+                >
+                  <Squares2X2Icon class="w-3.5 h-3.5" />
                 </button>
                 <button
                   class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"

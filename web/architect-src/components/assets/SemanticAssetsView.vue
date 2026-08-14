@@ -11,7 +11,8 @@ import { semanticAssetService } from '@/services/semantic-asset-service'
 const { t } = useI18n()
 
 const kind = ref<SemanticAssetKind | ''>('')
-const level = ref<SemanticAssetLevel | ''>('')
+/** 默认仅展示实现层(业务层+逻辑层暂停再生，仅保留展示)。 */
+const level = ref<SemanticAssetLevel | ''>('implementation')
 const q = ref('')
 const items = ref<SemanticAsset[]>([])
 const loading = ref(false)
@@ -21,18 +22,18 @@ const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
 
 const kinds: { value: SemanticAssetKind; label: string }[] = [
-  { value: 'asset', label: t('semanticAssets.kind.asset') },
-  { value: 'process', label: t('semanticAssets.kind.process') },
-  { value: 'decision', label: t('semanticAssets.kind.decision') },
+  { value: 'entity', label: t('semanticAssets.kind.entity') },
   { value: 'contract', label: t('semanticAssets.kind.contract') },
   { value: 'state', label: t('semanticAssets.kind.state') },
+  { value: 'rule', label: t('semanticAssets.kind.rule') },
+  { value: 'process', label: t('semanticAssets.kind.process') },
+  { value: 'decision', label: t('semanticAssets.kind.decision') },
 ]
 
 const levels: { value: SemanticAssetLevel; label: string }[] = [
   { value: 'business', label: t('semanticAssets.level.business') },
-  { value: 'interaction', label: t('semanticAssets.level.interaction') },
-  { value: 'algorithm', label: t('semanticAssets.level.algorithm') },
-  { value: 'infra', label: t('semanticAssets.level.infra') },
+  { value: 'logic', label: t('semanticAssets.level.logic') },
+  { value: 'implementation', label: t('semanticAssets.level.implementation') },
 ]
 
 async function load() {
@@ -47,7 +48,8 @@ async function load() {
 async function extract() {
   extracting.value = true
   try {
-    const res = await semanticAssetService.extractAll(kinds.map((k) => k.value))
+    // 默认仅提取实现层(业务层+逻辑层暂停再生)。
+    const res = await semanticAssetService.extractAll(kinds.map((k) => k.value), { level: 'implementation' })
     if (res.error) console.warn('[semantic] extract:', res.error)
     await load()
   } finally {
@@ -230,7 +232,7 @@ async function copyAsset(a: SemanticAsset) {
           <span
             v-if="a.level"
             class="chip !text-[9px] shrink-0"
-            :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'infra' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-sky/15 text-ctp-sky'"
+            :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
           >{{ t(`semanticAssets.level.${a.level}`) }}</span>
           <span class="text-xs font-medium text-ctp-text truncate">{{ a.name }}</span>
           <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0">

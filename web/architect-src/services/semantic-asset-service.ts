@@ -35,6 +35,9 @@ export interface SemanticExtractResult {
   degraded?: boolean
   count: number
   error?: string
+  /** 业务级(high)聚合产出数；highReason 为聚合失败原因(ok/llm/parse/empty)。 */
+  high?: number
+  highReason?: string
 }
 
 export interface SemanticReconcileResult {
@@ -301,11 +304,13 @@ export const semanticAssetService = {
   },
 
   /** 语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。 */
-  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel): Promise<SemanticGraphResult> {
+  async graph(kind?: SemanticAssetKind, scope?: string[], level?: SemanticAssetLevel, opts?: { focus?: string; hops?: number }): Promise<SemanticGraphResult> {
     const parts: string[] = []
     if (kind) parts.push(`kind=${encodeURIComponent(kind)}`)
     if (level) parts.push(`level=${encodeURIComponent(level)}`)
     if (scope?.length) parts.push(`scope=${encodeURIComponent(scope.join(','))}`)
+    if (opts?.focus) parts.push(`focus=${encodeURIComponent(opts.focus)}`)
+    if (opts?.hops) parts.push(`hops=${opts.hops}`)
     parts.push('limit=2000')
     return apiGet<SemanticGraphResult>(`/kb/semantic/graph${qsWith(parts.join('&'))}`)
   },

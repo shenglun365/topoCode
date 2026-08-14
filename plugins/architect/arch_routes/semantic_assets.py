@@ -42,50 +42,59 @@ from . import store
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-SEMANTIC_KINDS = ("asset", "process", "decision", "contract", "state")
-SEMANTIC_LEVELS = ("business", "interaction", "algorithm", "infra")
+SEMANTIC_KINDS = ("entity", "contract", "state", "rule", "process", "decision")
+SEMANTIC_LEVELS = ("implementation", "logic", "business")
+
+# 类别轴：静态·定义(是什么) / 动态·处理(发生什么)。
+SEMANTIC_CATEGORY = {
+    "entity": "static", "contract": "static", "state": "static", "rule": "static",
+    "process": "dynamic", "decision": "dynamic",
+}
+STATIC_KINDS = ("entity", "contract", "state", "rule")
+DYNAMIC_KINDS = ("process", "decision")
 
 _KIND_LABEL = {
-    "asset": "静态资产(数据实体/领域对象)",
-    "process": "行为过程(流程/时序/算法步骤)",
-    "decision": "决策规则(公式/约束/策略)",
-    "contract": "交互契约(API/事件/消息)",
-    "state": "状态机(生命周期/迁移)",
+    "entity": "实体(数据对象/领域实体)",
+    "contract": "契约(接口/消息/事件/端点)",
+    "state": "状态(生命周期定义/状态集+迁移)",
+    "rule": "规则(配置化的约束/策略定义)",
+    "process": "过程(输入→处理→输出/流程)",
+    "decision": "决策(运行时分支/策略执行)",
 }
 
 # 规范分类在各级粒度下的具体形态(供 prompt / 前端标注)。
 _LEVEL_KIND_FORM = {
-    ("business", "asset"): "business_entity 领域实体/聚合",
+    ("business", "entity"): "business_entity 聚合根/业务概念",
+    ("business", "contract"): "business_capability 对外业务能力",
+    ("business", "state"): "lifecycle 业务生命周期",
+    ("business", "rule"): "business_policy 业务政策/规章",
     ("business", "process"): "business_process 端到端业务过程",
-    ("business", "decision"): "business_rule 业务规则/策略",
-    ("business", "contract"): "business_capability 业务能力契约",
-    ("business", "state"): "lifecycle_intent 业务生命周期目标",
-    ("interaction", "asset"): "logical_data 逻辑数据结构",
-    ("interaction", "process"): "processing_flow 处理流程/交互时序",
-    ("interaction", "decision"): "control_logic 决策逻辑",
-    ("interaction", "contract"): "service_contract 服务/接口契约",
-    ("interaction", "state"): "state_flow 状态流转/生命周期",
-    ("algorithm", "asset"): "concrete_type 具体类型(class/struct/enum)",
-    ("algorithm", "process"): "call_chain 函数/调用链/算法步骤",
-    ("algorithm", "decision"): "branch_logic 分支/条件计算单元",
-    ("algorithm", "contract"): "message_contract 消息/事件/签名约定",
-    ("algorithm", "state"): "transition_logic 状态迁移条件/动作",
-    ("infra", "asset"): "config_item 配置项/环境参数",
-    ("infra", "process"): "concurrent_flow 并发/异步流程",
-    ("infra", "decision"): "policy 限流/重试/安全策略",
-    ("infra", "contract"): "transport_contract 传输/中间件契约",
-    ("infra", "state"): "resource_lifecycle 资源/连接生命周期",
+    ("business", "decision"): "business_strategy 业务策略选择",
+    ("logic", "entity"): "logical_data 领域实体/规范化关系",
+    ("logic", "contract"): "service_contract 服务/接口契约",
+    ("logic", "state"): "state_flow 状态机(迁移表)",
+    ("logic", "rule"): "configured_rule 配置化规则定义",
+    ("logic", "process"): "processing_flow 用例/流程",
+    ("logic", "decision"): "control_logic 决策表/分支",
+    ("implementation", "entity"): "concrete_type 具体类型(class/struct/enum)",
+    ("implementation", "contract"): "message_contract 签名/路由/schema",
+    ("implementation", "state"): "enum 枚举/状态字段",
+    ("implementation", "rule"): "config_item 配置结构/阈值定义",
+    ("implementation", "process"): "call_chain 函数执行序列",
+    ("implementation", "decision"): "branch_logic if/switch 分支",
 }
 
-# 统一 id 编码规则：sa-{level_code}-{kind_code}-{seq}。level/kind 各自 1 字母码，
-# 前缀由规则派生(非手维护映射)，保证新组合(infra/state)与既有组合编码一致。
-_LEVEL_CODE = {"business": "b", "interaction": "m", "algorithm": "l", "infra": "n"}
-_KIND_CODE = {"asset": "a", "process": "p", "decision": "c", "contract": "x", "state": "s"}
+# 统一 id 编码规则：sa-{cat_code}-{gran_code}-{kind_code}-{seq}。每段 1 字母码。
+_CAT_CODE = {"static": "s", "dynamic": "d"}
+_GRAN_CODE = {"implementation": "i", "logic": "l", "business": "b"}
+_KIND_CODE = {"entity": "e", "contract": "c", "state": "s", "rule": "r",
+              "process": "p", "decision": "d"}
 
 
 def _id_prefix(level: Optional[str], kind: Optional[str]) -> str:
-    """语义资产 id 统一编码前缀: sa-{level}-{kind}。未知取值回落 sa-x。"""
-    return f"sa-{_LEVEL_CODE.get(level or '', 'x')}-{_KIND_CODE.get(kind or '', 'x')}"
+    """语义资产 id 统一编码前缀: sa-{cat}-{gran}-{kind}。未知取值回落 sa-x-x-x。"""
+    cat = _CAT_CODE.get(SEMANTIC_CATEGORY.get(kind or ""), "x")
+    return f"sa-{cat}-{_GRAN_CODE.get(level or '', 'x')}-{_KIND_CODE.get(kind or '', 'x')}"
 
 # codegraph node.kind → AstNodeKind
 _AST_KIND_MAP = {
@@ -397,32 +406,163 @@ def _cross_file_edges_text(conn: sqlite3.Connection, node_ids: List[str],
 
 
 def _norm_cache_symbol(file: str, lang: str, s: dict) -> dict:
-    """KB parseFileAst 返回的 camelCase 符号 → 与 codegraph 节点同构(snake_case)。"""
+    """KB parseFileAst 返回的 camelCase 符号 → 与 codegraph 节点同构(snake_case)。
+
+    透传 return_type/decorators/visibility 等与 codegraph 对齐的字段(缺失置空)，
+    保证两条 AST 路径产出的统一符号模型一致(Rule 判定/签名信号不受路径影响)。
+
+    兼容两种输入形状：KB 原始 camelCase(`startLine`/`qualifiedName`) 与
+    本函数产出后落库的 snake_case(`start_line`/`qualified_name`)——因为
+    `_collect_via_cache` 把归一化后的节点写回 `arch_ast_cache`，读回时再归一化一次。
+    """
     name = (s.get("name") or "").strip()
     if not name:
         return None
-    return {
-        "id": f"cache:{file}::{name}::{int(s.get('startLine') or 0)}",
-        "kind": s.get("kind") or "symbol",
+    kind = s.get("kind") or "symbol"
+    # 行号/列号/限定名同时兼容 camelCase 与 snake_case 输入。
+    def _g(*keys, default=0):
+        for k in keys:
+            v = s.get(k)
+            if v is not None:
+                return v
+        return default
+    node = {
+        "id": s.get("id") or f"cache:{file}::{name}::{int(_g('startLine', 'start_line') or 0)}",
+        "kind": kind,
         "name": name,
-        "qualified_name": s.get("qualifiedName") or name,
+        "qualified_name": s.get("qualifiedName") or s.get("qualified_name") or name,
         "file_path": file,
         "language": lang,
-        "start_line": int(s.get("startLine") or 0),
-        "end_line": int(s.get("endLine") or 0),
-        "start_column": int(s.get("startCol") or 0),
-        "end_column": int(s.get("endCol") or 0),
+        "start_line": int(_g('startLine', 'start_line') or 0),
+        "end_line": int(_g('endLine', 'end_line') or 0),
+        "start_column": int(_g('startCol', 'start_column') or 0),
+        "end_column": int(_g('endCol', 'end_column') or 0),
         "signature": s.get("signature") or "",
         "docstring": s.get("docstring") or "",
-        "return_type": "",
+        "return_type": s.get("return_type") or s.get("returnType") or "",
     }
+    if s.get("decorators"):
+        node["decorators"] = s.get("decorators")
+    if s.get("visibility"):
+        node["visibility"] = s.get("visibility")
+    return node
+
+
+_REF_EDGE_KINDS = {"calls", "extends", "imports", "references", "instantiates", "implements"}
+_CONTAINER_KINDS = {"class", "interface", "struct", "enum", "component", "trait", "protocol", "namespace"}
+
+
+def _rebuild_edges_from_refs(symbols: List[dict], refs: List[dict]) -> List[dict]:
+    """KB parseFileAst 路径：从文件级 refs 重建统一边(与 codegraph `_query_edges` 同构)。
+
+    refs 为文件级数组 `{name, kind, line, col}`，无 source 符号 id，因此：
+      1) 按「符号行区间归属」：ref 行落在某符号 start_line..end_line 内 → 该符号的出边；
+      2) 目标解析：能命中符号 id/name/qualified_name → 存 id，否则存符号名(与 `_edge_lines`
+         的 name_of 解析兼容)；
+      3) contains：由「子符号行区间 ⊂ 父符号行区间」推导(类包含方法/字段)。
+    调用方应保证 symbols/refs 属于**同一文件**，避免跨文件行区间误归属。
+    返回 [{source, target, kind, line?, col?}]，供两路径统一消费。
+    """
+    out: List[dict] = []
+    if not refs:
+        return _contains_edges(out, symbols or [])
+    name_to_id: Dict[str, str] = {}
+    for n in symbols or []:
+        name_to_id.setdefault((n.get("name") or "").strip(), n.get("id") or "")
+        if n.get("qualified_name"):
+            name_to_id.setdefault((n.get("qualified_name") or "").strip(), n.get("id") or "")
+    seen: set = set()
+
+    def _emit(sid: str, tgt: str, kind: str, line: Optional[int], col: Optional[int]) -> None:
+        if not sid or not tgt or sid == tgt:
+            return
+        key = (sid, tgt, kind)
+        if key in seen:
+            return
+        seen.add(key)
+        e: Dict[str, Any] = {"source": sid, "target": tgt, "kind": kind}
+        if line is not None:
+            e["line"] = line
+        if col is not None:
+            e["col"] = col
+        out.append(e)
+
+    for n in symbols or []:
+        sid = n.get("id") or ""
+        s0 = int(n.get("start_line") or 0)
+        s1 = int(n.get("end_line") or 0)
+        if not sid or s0 <= 0:
+            continue
+        for r in refs or []:
+            if r.get("kind") not in _REF_EDGE_KINDS:
+                continue
+            rl = int(r.get("line") or 0)
+            if rl < s0 or rl > s1:
+                continue
+            nm = (r.get("name") or "").strip()
+            if not nm:
+                continue
+            tgt = name_to_id.get(nm, nm)
+            _emit(sid, tgt, r.get("kind"), rl, int(r.get("col") or 0))
+    return _contains_edges(out, symbols or [], emit=_emit)
+
+
+def _contains_edges(out: List[dict], symbols: List[dict],
+                    emit: Optional[Any] = None) -> List[dict]:
+    """contains 推导：最深的父容器包含子符号(子区间 ⊂ 父区间)。
+
+    emit 为 None 时使用独立去重并 append 到 out；否则复用调用方 `_emit`。
+    """
+    children = [
+        n for n in (symbols or [])
+        if n.get("id") and (n.get("kind") or "") not in _CONTAINER_KINDS
+        and (int(n.get("start_line") or 0) > 0)
+    ]
+    containers = [
+        n for n in (symbols or [])
+        if n.get("id") and (n.get("kind") or "") in _CONTAINER_KINDS
+        and (int(n.get("start_line") or 0) > 0)
+    ]
+    seen: set = set()
+
+    def _e(sid: str, tgt: str) -> None:
+        key = (sid, tgt, "contains")
+        if key in seen:
+            return
+        seen.add(key)
+        if emit is not None:
+            ch = next((c for c in children if c.get("id") == tgt), None)
+            emit(sid, tgt, "contains", int(ch.get("start_line") or 0) if ch else None, None)
+        else:
+            out.append({"source": sid, "target": tgt, "kind": "contains"})
+
+    for ch in children:
+        cs0 = int(ch.get("start_line") or 0)
+        cs1 = int(ch.get("end_line") or 0)
+        best = None
+        for p in containers:
+            ps0 = int(p.get("start_line") or 0)
+            ps1 = int(p.get("end_line") or 0)
+            # 区间严格真包含(子区间 ⊂ 父区间)，排除相同区间(避免容器视为含自身)。
+            if ps0 <= cs0 and ps1 >= cs1 and not (ps0 == cs0 and ps1 == cs1):
+                if best is None or (ps1 - ps0) < (int(best.get("end_line") or 0) - int(best.get("start_line") or 0)):
+                    best = p
+        if best:
+            _e(best.get("id") or "", ch.get("id") or "")
+    return out
 
 
 def _collect_via_cache(root: str, project: Optional[str],
                        files: List[str], syms: List[str]):
-    """无 codegraph 时的 AST 缓存层取数(要求③)：缓存命中 → KB 解析 → live 扫描。"""
+    """无 codegraph 时的 AST 缓存层取数(要求③)：缓存命中 → KB 解析 → live 扫描。
+
+    返回 (nodes, edges, source)。KB 路径经 `_rebuild_edges_from_refs` 从文件级 refs
+    重建统一边(与 codegraph `_query_edges` 同构)，保证下游(Rule 判定/流程/字段)效果一致。
+    """
     pid = project_id_for(root, project)
     nodes: List[dict] = []
+    # 每文件符号/refs 分组，供重建边(行区间归属必须限定单文件，防跨文件误归)。
+    per_file: Dict[str, dict] = {}
     source = "live"
     if syms:
         # 符号范围无 codegraph 无法精确定位文件 → 退化为 live 全量扫描(有文件列表时)
@@ -436,6 +576,7 @@ def _collect_via_cache(root: str, project: Optional[str],
             logger.info("[semantic] cache 文件不存在, 跳过: %s", rel)
             continue
         h = _file_md5(root, rel)
+        pf: dict = {"symbols": [], "refs": []}
         cached = store.AstCacheStore.get(pid, rel)
         if cached and cached.get("contentHash") and cached.get("contentHash") == h:
             if cached.get("source") in ("codegraph", "kb"):
@@ -444,6 +585,9 @@ def _collect_via_cache(root: str, project: Optional[str],
                 n = _norm_cache_symbol(rel, cached.get("language") or "", s)
                 if n:
                     nodes.append(n)
+                    pf["symbols"].append(n)
+            pf["refs"] = cached.get("refs") or []
+            per_file[rel] = pf
             continue
         miss.append(rel)
         # 缓存未命中/已过期 → KB 只读解析(不落 KB，写入 architect 缓存)
@@ -466,6 +610,9 @@ def _collect_via_cache(root: str, project: Optional[str],
                             src = ""
                     n["docstring"] = _peek_docstring_at_line(src, n["start_line"])
                 nodes.append(n)
+                pf["symbols"].append(n)
+            pf["refs"] = kb.get("refs") or []
+            per_file[rel] = pf
             store.AstCacheStore.upsert(pid, rel, {
                 "contentHash": h, "language": kb.get("language") or "",
                 "symbols": nodes[-len(kb["symbols"]):],
@@ -477,9 +624,12 @@ def _collect_via_cache(root: str, project: Optional[str],
             # KB 不可达/不支持 → live 扫描(仅本文件)
             for n in _scan_live(root, [rel], []):
                 nodes.append(n)
-    logger.info("[semantic] cache 兜底: 文件数=%d 缓存未命中=%s source=%s 共取节点=%d",
-                len(files or []), miss or "-", source, len(nodes))
-    return nodes, [], source
+    edges: List[dict] = []
+    for pf in per_file.values():
+        edges += _rebuild_edges_from_refs(pf["symbols"], pf["refs"])
+    logger.info("[semantic] cache 兜底: 文件数=%d 缓存未命中=%s source=%s 共取节点=%d 边=%d",
+                len(files or []), miss or "-", source, len(nodes), len(edges))
+    return nodes, edges, source
 
 
 def _kb_parse_file(root: str, rel: str) -> Optional[dict]:
@@ -729,55 +879,27 @@ def _attach_step_refs(detail: dict, table: Dict[str, dict]) -> None:
 # ── LLM 提取 ──────────────────────────────────────────────────
 
 _KIND_ALIASES = {
-    # 新 canonical
-    "asset": "asset", "process": "process", "decision": "decision",
-    "contract": "contract", "state": "state",
-    "静态资产": "asset", "行为过程": "process", "决策规则": "decision",
-    "交互契约": "contract", "状态机": "state", "状态": "state",
-    # 旧 structure → asset
-    "structure": "asset",
-    "结构": "asset",
-    "data_structure": "asset",
-    "数据结构": "asset",
-    "datastructure": "asset",
-    "data structure": "asset",
-    "data-structure": "asset",
-    "data_structure类": "asset",
-    "entity": "asset",
-    "实体": "asset",
-    "domain_entity": "asset",
-    "concrete_type": "asset",
-    # 旧 behavior → process
-    "behavior": "process",
-    "行为": "process",
-    "processing_flow": "process",
-    "处理流程": "process",
-    "processingflow": "process",
-    "process flow": "process",
-    "process-flow": "process",
-    "process": "process",
-    "processing": "process",
-    "流程": "process",
-    "flow": "process",
-    "call_chain": "process",
-    "business_process": "process",
-    # 旧 rule → decision
-    "rule": "decision",
-    "规则": "decision",
-    "control_logic": "decision",
-    "控制逻辑": "decision",
-    "controllogic": "decision",
-    "control logic": "decision",
-    "control-logic": "decision",
-    "logic": "decision",
-    "逻辑": "decision",
-    "决策": "decision",
-    "business_rule": "decision",
-    "branch_logic": "decision",
-    "policy": "decision",
-    # contract 不变
-    "contract": "contract",
-    "契约": "contract",
+    # 新 canonical(6 类)
+    "entity": "entity", "contract": "contract", "state": "state",
+    "rule": "rule", "process": "process", "decision": "decision",
+    "实体": "entity", "契约": "contract", "状态": "state",
+    "规则": "rule", "过程": "process", "决策": "decision",
+    # 静态·定义：旧 asset/structure → entity
+    "asset": "entity",
+    "静态资产": "entity",
+    "structure": "entity",
+    "结构": "entity",
+    "data_structure": "entity",
+    "数据结构": "entity",
+    "datastructure": "entity",
+    "data structure": "entity",
+    "data-structure": "entity",
+    "data_structure类": "entity",
+    "domain_entity": "entity",
+    "concrete_type": "entity",
+    "config_item": "entity",
+    "配置项": "entity",
+    # contract
     "interface": "contract",
     "接口": "contract",
     "api": "contract",
@@ -786,7 +908,7 @@ _KIND_ALIASES = {
     "business_contract": "contract",
     "business_capability": "contract",
     "transport_contract": "contract",
-    # state 新增
+    # state
     "state_machine": "state",
     "状态机": "state",
     "lifecycle": "state",
@@ -794,40 +916,66 @@ _KIND_ALIASES = {
     "state_flow": "state",
     "transition_logic": "state",
     "resource_lifecycle": "state",
-    # 各粒度形态名 → 所属 kind(infra 是粒度不是类别)
+    # rule(配置化定义) vs decision(运行时执行)
+    "business_rule": "rule",
+    "业务规则": "rule",
+    "policy": "rule",
+    "business_policy": "rule",
+    "业务政策": "rule",
+    "策略": "rule",
+    # process
+    "behavior": "process",
+    "行为": "process",
+    "行为过程": "process",
+    "processing_flow": "process",
+    "处理流程": "process",
+    "processingflow": "process",
+    "process flow": "process",
+    "process-flow": "process",
+    "processing": "process",
+    "流程": "process",
+    "flow": "process",
+    "call_chain": "process",
+    "business_process": "process",
     "concurrent_flow": "process",
-    "config_item": "asset",
-    "配置项": "asset",
+    # decision
+    "control_logic": "decision",
+    "控制逻辑": "decision",
+    "controllogic": "decision",
+    "control logic": "decision",
+    "control-logic": "decision",
+    "logic": "decision",
+    "分支": "decision",
+    "branch_logic": "decision",
+    "branch": "decision",
 }
 
 _LEVEL_ALIASES = {
-    # 新 canonical
-    "business": "business", "interaction": "interaction",
-    "algorithm": "algorithm", "infra": "infra",
-    "业务": "business", "功能": "business", "交互": "interaction",
-    "算法": "algorithm", "基础设施": "infra", "基建": "infra",
+    # 新 canonical(三档)
+    "business": "business", "logic": "logic", "implementation": "implementation",
+    "业务": "business", "功能": "business", "概念": "business",
+    "逻辑": "logic", "设计": "logic",
+    "实现": "implementation", "代码": "implementation",
     # 旧 high → business
     "high": "business",
     "高": "business",
-    "概念": "business",
     "conceptual": "business",
     "intent": "business",
     "意图": "business",
     "战略": "business",
-    # 旧 medium → interaction
-    "medium": "interaction",
-    "中": "interaction",
-    "逻辑": "interaction",
-    "logical": "interaction",
-    "design": "interaction",
-    "设计": "interaction",
-    # 旧 low → algorithm
-    "low": "algorithm",
-    "低": "algorithm",
-    "实现": "algorithm",
-    "implementation": "algorithm",
-    "code": "algorithm",
-    "代码": "algorithm",
+    # 旧 medium → logic
+    "medium": "logic",
+    "中": "logic",
+    "logical": "logic",
+    "design": "logic",
+    "interaction": "logic",
+    "交互": "logic",
+    # 旧 low → implementation
+    "low": "implementation",
+    "低": "implementation",
+    "code": "implementation",
+    "algorithm": "implementation",
+    "算法": "implementation",
 }
 
 
@@ -898,7 +1046,7 @@ def _norm_llm_asset(a: dict, table: Dict[str, dict]) -> Optional[dict]:
     name = (a.get("name") or "").strip()
     if not kind or not name:
         return None
-    level = _normalize_level(a.get("level")) or "interaction"
+    level = _normalize_level(a.get("level")) or "logic"
     detail: Dict[str, Any] = {}
     if isinstance(a.get("fields"), list):
         detail["fields"] = a["fields"]
@@ -1048,6 +1196,10 @@ def _normalize_llm_assets(output: dict, level: str, table: Dict[str, dict],
     # 从 name/desc 反查符号表补真实 AST 锚点(保证资产可定位到源码)。
     if table:
         _backfill_anchors(valid, table)
+    # 类别-锚点一致性后置校验：kind 与锚点节点类别冲突的资产丢弃(仅实现层)。
+    # entity 锚到函数、contract 锚到变量等 —— LLM 常见误标，此处确定性纠正。
+    if level == "implementation":
+        valid = [a for a in valid if _asset_anchor_kind_ok(a.get("kind") or "", a.get("astRefs") or [])]
     return valid, dropped
 
 
@@ -1213,16 +1365,17 @@ _ASSET_OUTPUT_SCHEMA = {
 _SYSTEM_PROMPT = (
     "你是代码语义化建模专家。基于给定的最新代码符号清单(文件/符号/行号/签名/docstring/关系边)，"
     "提取语义化的数据资产。\n"
-    "语义资产按「类别(关切维度) × 抽象粒度(离代码远近)」二维分类，并用 tags 标注横向切面：\n"
-    "类别 kind(值只能是 asset / process / decision / contract / state，禁止翻译成中文):\n"
-    "  - asset    : 静态资产 —— 数据实体、配置项、领域对象\n"
-    "  - process  : 行为过程 —— 时序交互、工作流、算法步骤\n"
-    "  - decision : 决策规则 —— 显式业务公式、约束断言、策略模式(无状态计算)\n"
-    "  - contract : 交互契约 —— API、事件 Topic、消息 Header\n"
-    "  - state    : 状态机 —— 实体的生命周期、允许的迁移路径、事件驱动(有状态分支归此类，"
-    "    如 if(status==PAID)；detail 用 states/transitions)\n"
-    "规则(重要): decision 与 state 的划分 —— decision 是纯计算(如 price*0.9)不依赖状态；"
-    "凡是围绕实体状态流转/状态判定的归 state。\n"
+    "语义资产按「类别轴(静态·定义 / 动态·处理) × 粒度轴(业务 / 逻辑 / 实现)」二维分类，"
+    "并用 tags 标注横向切面。\n"
+    "类别 kind(值只能是 entity / contract / state / rule / process / decision，禁止翻译成中文):\n"
+    "  - entity   : 实体(静态) —— 数据对象、领域实体：字段/类型/关系(1:N/FK)/不变式\n"
+    "  - contract : 契约(静态) —— 交换的形状：接口签名、API 端点、消息/事件 schema\n"
+    "  - state    : 状态(静态) —— 生命周期定义：状态集合 + 允许迁移(仅定义面)\n"
+    "  - rule     : 规则(静态，条件性) —— 配置化的约束/策略/阈值定义(仅当存在真实配置拆分时产出)\n"
+    "  - process  : 过程(动态) —— 输入→有序步骤→输出：trigger + inputs/steps/outputs\n"
+    "  - decision : 决策(动态) —— 运行时分支：condition→then/else(无配置化拆分的规则归此类)\n"
+    "规则(重要): 规则 vs 决策 —— 硬编码在代码里的 if/分支是 decision(动态)；"
+    "只有存在真实配置拆分(配置表/阈值存储/策略文件/env)时，配置侧才是 rule(静态)，执行侧仍是 decision/process。\n"
     "tags(横向切面，可多选，按代码特征自动打标):\n"
     "  - transactional 事务性(commit/rollback/atomic/事务装饰器)\n"
     "  - caching 缓存(redis/@lru_cache/cachetools)\n"
@@ -1231,17 +1384,14 @@ _SYSTEM_PROMPT = (
     "  - async 并发异步(async def/await/thread/semaphore/pool)\n"
     "  - middleware 中间件(middleware/hook/interceptor)\n"
     "  - resilience 限流重试(rate_limit/retry/backoff)\n"
-    "粒度 level(越低越贴近代码实现；值只能是 business / interaction / algorithm / infra):\n"
-    "  - business    : 业务级 —— 组件下的业务功能模块(如「订单创建与支付结算」「用户统一认证」)，"
-    "    聚合多个交互/算法级资产(detail 用 aggregates 列出组成资产)，回答「业务上是什么」；"
-    "    不直接耦合单个符号\n"
-    "  - interaction : 交互/功能级 —— 模块职责边界、API 网关(谁负责 Who)；锚定符号集合；"
-    "    asset→fields/relations/invariants；process→trigger/steps；decision→branches；"
-    "    contract→relations(端点/事件/消息)；state→states/transitions\n"
-    "  - algorithm   : 算法/实现级 —— 具体计算、循环、数据格式化(具体步骤 How)；"
-    "    锚定单符号/1-hop 调用链；detail 以签名/字段/分支为事实层\n"
-    "  - infra       : 基础设施级 —— 并发模型、事务边界、缓存策略、中间件选型(用什么 With What)；"
-    "    仅当符号命中上述 tags 信号(async/transactional/caching/security/middleware/resilience)时使用\n"
+    "粒度 level(越低越贴近代码实现；值只能是 business / logic / implementation):\n"
+    "  - business       : 业务级 —— 组件下的业务功能模块/共性目标(如「订单创建与支付结算」「用户统一认证」)，"
+    "    聚合多条逻辑(detail 用 aggregates 列出组成资产)，回答「业务上是什么」；"
+    "    一个叶子组件通常对应 1~2 个业务资产(允许跨一级同源组件的共性特征)\n"
+    "  - logic          : 逻辑级 —— 伪码之上的概括简化：模块职责、用例/流程、决策表(谁负责 Who)；"
+    "    锚定符号集合\n"
+    "  - implementation : 实现级 —— 代码事实层，贴近伪码：具体计算、调用序、分支条件(具体步骤 How)；"
+    "    锚定单符号或连续同类 AST\n"
     "约束(重要):\n"
     "1. 只输出 JSON 对象 {\"assets\": [...]}，不要 Markdown 代码块、不要解释。\n"
     "2. 每个资产必须真实来源于清单中的符号; steps/branches 的 symbols 必须是清单中的符号名，不得臆造。\n"
@@ -1250,11 +1400,12 @@ _SYSTEM_PROMPT = (
     "5. 建议提取 2~6 个资产；无匹配数据时返回空数组。\n"
     "6. 每个资产建议填写 source_symbols(清单中真实符号名数组)或 anchor_symbol(主要符号名)，"
     "帮助定位其真实代码位置。\n"
-    "7. 高(high)粒度资产应聚合多个逻辑单元并填写 aggregates 字段，避免与 medium 资产重复表述。\n"
+    "7. 高(business)粒度资产应聚合多个逻辑单元并填写 aggregates 字段，避免与 logic 资产重复表述。\n"
     "8. relations 用于表达资产之间的依赖/关联，强烈建议为每个资产填写(可空) 1~3 条："
     "target 填**其它资产业务名**或清单中的符号名(如「支付结算聚合」依赖「订单实体」、"
-    "「鉴权校验链」被「下单流程」调用)，type 填关系类型(calls/contains/extends/implements/1:N/读写等)，"
-    "semantic 一句话说明关系含义。relations 是图谱连边的数据来源，务必填写。"
+    "「鉴权校验链」被「下单流程」调用)，type 填关系类型(calls/uses/reads/writes/contains/"
+    "extends/references/constrains/sends/triggers/1:N 等)，semantic 一句话说明关系含义。"
+    "relations 是图谱连边的数据来源，务必填写。"
 )
 
 
@@ -1262,50 +1413,52 @@ def _llm_extract(root: Optional[str], project: Optional[str],
                  context_text: str, model_id: Optional[str],
                  table: Optional[Dict[str, dict]] = None,
                  max_assets: int = 6,
-                 level: str = "interaction") -> List[dict]:
+                 level: str = "logic") -> List[dict]:
     """LLM 结构化提取。LLM 不可用/解析失败返回空列表(调用方启发式兜底)。
 
     LLM 输出经 `_norm_llm_asset` 宽容归一化(兼容 type/kind、单复数字段、中文变体)。
-    level: 请求粒度(interaction 默认)；提示词据此要求产出对应抽象层的资产。
+    level: 请求粒度(logic 默认)；提示词据此要求产出对应抽象层的资产。
     """
     from .req_agent import llm_sync
     table = table or {}
     sys_prompt = _SYSTEM_PROMPT
-    if level == "algorithm":
+    if level == "implementation":
         sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 algorithm 算法/实现级资产(代码事实层)：名称贴近符号(如 `Order.calcTotal`)，"
+            "\n\n本批只提取 implementation 实现/代码事实层资产：名称贴近符号(如 `Order.calcTotal`)，"
             "锚定清单中的真实符号。detail 必须逐条完整填写：\n"
-            "  - asset → fields(列出该类型/结构体的字段 name/type)\n"
+            "  - entity → fields(列出该类型/结构体的字段 name/type)\n"
             "  - process → steps(按真实调用顺序，每步 symbols 填被调符号名；"
             "若步骤前存在 if/分支判定，在 condition 字段写判定条件原文)\n"
             "  - decision → branches(逐条列出分支 condition 尽量按代码原文 + then/else，condition 不得留空)\n"
             "  - contract → relations(签名/消息约定)\n"
             "  - state → states(状态集合) + transitions(迁移 from/to/event/condition)\n"
-            "不得输出 business/interaction 级归纳，不得臆造清单中不存在的符号。"
+            "  - rule → 仅当存在真实配置拆分(配置表/阈值存储/常量字典如 `_DEFAULT_*`/env)时才产出；"
+            "detail 记录 configSource/约束/阈值。硬编码分支不是 rule。\n"
+            "类别-锚点对应(重要):\n"
+            "  - entity 只能锚 class/struct/enum/interface 类型节点；禁止把函数当实体。\n"
+            "  - contract 只能锚 route 节点或 api_*/handle_* 路由处理函数；禁止把内部函数"
+            "(get_config/send_sms_code 等)当契约。\n"
+            "  - state 只能锚 enum 枚举。\n"
+            "  - 每个符号只产一个资产(选最合适类别)，禁止同一函数同时输出 process+contract+decision。\n"
+            "不得输出 business/logic 级归纳，不得臆造清单中不存在的符号。"
         )
     elif level == "business":
         sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 business 业务级资产：组件下的业务功能模块(如「订单创建与支付结算」「用户统一认证」)，"
-            "聚合多个交互/算法级资产，detail 用 aggregates 列出组成资产。不要输出 interaction/algorithm 级细节。"
+            "\n\n本批只提取 business 业务级资产：组件下的业务功能模块/共性目标(如「订单创建与支付结算」「用户统一认证」)，"
+            "聚合多个逻辑/实现级资产，detail 用 aggregates 列出组成资产。不要输出 logic/implementation 级细节。"
         )
-    elif level == "infra":
+    elif level == "logic":
         sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 infra 基础设施级资产(并发/事务/缓存/安全/中间件/限流重试)："
-            "仅抽取命中 tags 信号的符号(async/transactional/caching/security/middleware/resilience)，"
-            "名称可贴近符号或作功能命名，detail 用 fields/steps/relations 描述其机制，tags 标注对应切面。"
-            "没有命中信号的符号不要归入本批。"
-        )
-    else:
-        sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 interaction 交互/功能级资产：业务语义命名(如「支付结算聚合」)。"
+            "\n\n本批只提取 logic 逻辑级资产：伪码之上的概括简化(模块职责/用例/流程/决策表)。"
             "detail 必须按类别完整填写，不得留空：\n"
-            "  - asset → fields(名称/类型/语义) + invariants + relations\n"
-            "  - process → trigger + steps(按执行顺序，每步 semantic + symbols；"
-            "存在分支时在 condition 字段写前置判定条件) + invariants\n"
-            "  - decision → branches(condition/then/else 逐条，condition 不得留空) + invariants\n"
+            "  - entity → fields(名称/类型/语义) + relations + invariants\n"
+            "  - process → trigger + inputs/outputs(端点引用其它资产或符号) + steps(按执行顺序，"
+            "每步 semantic + symbols；存在分支时在 condition 字段写前置判定条件) + invariants\n"
+            "  - decision → branches(condition/then/else 逐条，condition 不得留空) + inputs + invariants\n"
             "  - contract → relations(端点/事件/消息，target 用符号名或其它资产业务名)\n"
             "  - state → states(状态集合，标注 initial/final) + transitions(from/to/event/condition)\n"
-            "不要输出 business/infra 级资产。"
+            "  - rule → 仅当存在真实配置拆分时才产出；否则相关逻辑归 decision/process。\n"
+            "不要输出 business/implementation 级资产。"
         )
     logger.info("[semantic] llm 提取: model=%s level=%s text_len=%d",
                 model_id or "(默认)", level, len(context_text or ""))
@@ -1391,26 +1544,101 @@ def _infra_tags(text: str) -> List[str]:
     return hit
 
 
+# 配置载体命名信号(角色判定：命中 → 倾向静态 Rule)。
+_CONFIG_CARRIER_NAMES = (
+    "config", "settings", "threshold", "policy", "rule", "quota", "limit",
+    "allowlist", "denylist", "blacklist", "whitelist", "strategy", "feature_flag",
+)
+# 配置读写 API 签名信号(如 `get_config(key, default)` / `set_threshold(key, value)`)。
+_CONFIG_ACCESS_SIG = ("key", "default", "get_", "set_", "load_", "read_")
+
+
+def _config_carrier_signal(node: dict) -> bool:
+    """强信号①：符号本身是配置载体(Config/Settings/Thresholds 类、_DEFAULT_* 常量、config 读写 API)。
+
+    变量仅按名称/取值特征判定(避免 router/_templates/app/logger 等普通实例变量误判)。
+    """
+    kind = (node.get("kind") or "").lower()
+    name = (node.get("name") or "").lower()
+    sig = (node.get("signature") or "").lower()
+    if kind == "variable":
+        # 仅名称含配置语义才判(router/FastAPI/Jinja2/logger 实例不属配置载体)。
+        if name in ("config", "settings", "thresholds"):
+            return True
+        if name.startswith(("_default_", "default_", "_limit_", "_threshold_", "_config_",
+                            "config_", "setting_", "threshold_")):
+            return True
+        if any(t in name for t in ("config", "settings", "threshold", "policy", "quota", "limit")):
+            return True
+        return False
+    if name in ("config", "settings", "thresholds") or name.endswith(("_config", "_settings", "_thresholds")):
+        return True
+    if kind in ("class", "interface", "struct") and name.endswith(("config", "settings", "thresholds", "policy")):
+        return True
+    if name.startswith(("_default_", "default_", "_limit_", "_threshold_", "_config_")):
+        return True
+    # 配置读写 API：get/set/load/read_xxx_config 或签名含 key+default。
+    if any(prefix in name for prefix in ("get_config", "set_config", "get_threshold",
+                                         "set_threshold", "load_config", "get_all_config",
+                                         "get_settings", "set_settings")):
+        return True
+    if ("config" in name or "threshold" in name or "setting" in name) \
+            and ("key" in sig or "default" in sig):
+        return True
+    return False
+
+
+def _config_consumer_signal(node: dict, edges: List[dict],
+                            name_of: Optional[Dict[str, str]] = None) -> bool:
+    """强信号②：符号 calls 配置读写符号(如 register_success calls get_config) → 是执行点，非 Rule。"""
+    out_edges = [e for e in (edges or []) if e.get("source") == node.get("id")]
+    for e in out_edges:
+        if e.get("kind") != "calls":
+            continue
+        tgt = e.get("target") or ""
+        if tgt.startswith("cache:") or "::" in tgt:
+            tgt = tgt.rsplit("::", 1)[-1]
+        t = tgt.lower()
+        if any(k in t for k in ("get_config", "set_config", "get_threshold", "set_threshold",
+                                "get_settings", "load_config", "get_all_config")):
+            return True
+    return False
+
+
+def _classify_rule_role(node: dict, edges: List[dict],
+                        name_of: Optional[Dict[str, str]] = None) -> str:
+    """符号的规则角色判定(信号优先)：
+    - 'rule'    : 配置载体(定义侧) → 静态 Rule 资产；
+    - 'dynamic' : 配置消费者(执行侧) → 归 process/decision，由 detail 用 uses 关联规则；
+    - ''        : 无信号，不参与规则判定。
+    """
+    if _config_carrier_signal(node):
+        return "rule"
+    if _config_consumer_signal(node, edges, name_of):
+        return "dynamic"
+    return ""
+
+
 def _heuristic_extract(kind: str, ctx: Dict[str, Any],
-                       level: str = "interaction") -> List[dict]:
+                       level: str = "logic") -> List[dict]:
     """无 LLM 时的确定性提取。
 
-    - level='algorithm' : 代码事实层。concrete_type/call_chain/branch_logic/message_contract
-                         一一对应 codegraph 符号节点(名称=符号名，锚定真实节点)，零臆造。
-    - level='interaction': 逻辑级降级。以符号名+签名/docstring 兜底(名称=符号名，粒度近 algorithm，
-                         供 LLM 不可用时仍能消费)。
-    - level='infra'  : 基础设施级。在常规 kind 分支之上叠加量化信号过滤(_infra_tags ≥1 命中)，
-                      命中信号写入 detail.tags；未命中信号的符号不产出。
-    - kind='state'   : 从枚举/含状态字段的类型归纳状态机(独立于粒度信号)。
+    - level='implementation' : 代码事实层。concrete_type/call_chain/branch_logic/message_contract
+                              一一对应 codegraph 符号节点(名称=符号名，锚定真实节点)，零臆造。
+    - level='logic' : 逻辑级降级。以符号名+签名/docstring 兜底(名称=符号名，粒度近 implementation，
+                     供 LLM 不可用时仍能消费)。
+    - kind='rule'   : 配置载体强信号过滤 —— 仅当命中配置读写符号(Config 类 / _DEFAULT_* 常量 /
+                      get_config(key,default) 类签名)时产出，硬编码分支归 decision。
+    - kind='state'  : 从枚举/含状态字段的类型归纳状态机(独立于粒度信号)。
     """
     nodes = ctx.get("nodes") or []
     edges = ctx.get("edges") or []
+    root = ctx.get("root") or ""
     out: List[dict] = []
-    low = level == "algorithm"
-    infra_level = level == "infra"
+    low = level == "implementation"
     node_by_id = {n.get("id"): n for n in nodes}
     name_of = {n.get("id"): (n.get("qualified_name") or n.get("name") or "") for n in nodes}
-    if kind == "asset":
+    if kind == "entity":
         for n in nodes:
             if n.get("kind") not in ("class", "interface", "enum", "struct", "component"):
                 continue
@@ -1418,19 +1646,14 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
             desc = doc or (f"数据结构「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。"
                            if not low else
                            f"具体类型「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。")
-            detail = {"fields": [], "relations": [], "invariants": []}
+            fields = _fields_from_node(n) or _member_fields_from_edges(n.get("id"), edges, node_by_id)
+            if not fields:
+                # codegraph 对 Python 等语言常缺字段级节点 → 源码回读兜底(所有粒度都填属性)。
+                fields = _fields_from_source(root, n)
+            detail = {"fields": fields, "relations": [], "invariants": []}
             if low:
-                fields = _fields_from_node(n)
-                if not fields:
-                    fields = _member_fields_from_edges(n.get("id"), edges, node_by_id)
                 detail = {"kind": "type", "signature": n.get("signature") or "",
                           "fields": fields, "invariants": []}
-            if infra_level:
-                tags = _infra_tags(f"{n['name']} {n.get('signature') or ''} {doc}")
-                if not tags:
-                    continue
-                detail["tags"] = tags
-                desc = f"基础设施「{n['name']}」(切面: {','.join(tags)})，位于 {n['file_path']}:{n['start_line']}。"
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "process":
@@ -1449,12 +1672,6 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
                           "steps": [{"order": 1, "semantic": "调用 " + c, "symbols": [c]}
                                     for c in callees],
                           "invariants": []}
-            if infra_level:
-                tags = _infra_tags(f"{n['name']} {sig} {doc}")
-                if not tags:
-                    continue
-                detail["tags"] = tags
-                desc = f"基础设施「{n['name']}」(切面: {','.join(tags)})，位于 {n['file_path']}:{n['start_line']}。"
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "decision":
@@ -1472,12 +1689,6 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
                           "branches": [{"condition": "", "then": "", "else": "",
                                         "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}],
                           "invariants": []}
-            if infra_level:
-                tags = _infra_tags(f"{n['name']} {sig} {doc}")
-                if not tags:
-                    continue
-                detail["tags"] = tags
-                desc = f"基础设施「{n['name']}」(切面: {','.join(tags)})，位于 {n['file_path']}:{n['start_line']}。"
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "contract":
@@ -1494,12 +1705,20 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
                 detail = {"kind": "message_contract",
                           "relations": [{"target": "", "type": "signature", "semantic": sig}],
                           "invariants": []}
-            if infra_level:
-                tags = _infra_tags(f"{n['name']} {sig} {doc}")
-                if not tags:
-                    continue
-                detail["tags"] = tags
-                desc = f"基础设施「{n['name']}」(切面: {','.join(tags)})，位于 {n['file_path']}:{n['start_line']}。"
+            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
+                        "detail": detail, "astRefs": [_node_to_ref(n)]})
+    elif kind == "rule":
+        # 配置载体强信号：仅产出命中配置读写信号的符号(定义侧)；配置消费者(执行侧)归 decision/process。
+        for n in nodes:
+            role = _classify_rule_role(n, edges, name_of)
+            if role != "rule":
+                continue
+            doc = (n.get("docstring") or "").strip()
+            desc = doc or f"配置/阈值「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。"
+            detail = {"configSource": "", "constraints": [], "thresholds": []}
+            if low:
+                detail = {"kind": "config_item", "configSource": n.get("file_path") or "",
+                          "constraints": [], "thresholds": []}
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "state":
@@ -1519,28 +1738,182 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
                         "name": n["name"], "desc": f"实体生命周期「{n['name']}」的状态机(枚举推导)。",
                         "detail": {"states": states, "transitions": transitions, "invariants": []},
                         "astRefs": [_node_to_ref(n)]})
-    elif kind == "infra":
-        # 兼容旧调用：kind=infra 等价于以 level='infra' 跑 process 分支(信号过滤)。
-        # 推荐用法是 level='infra' + 常规 kind(asset/process/decision/contract)。
-        for n in nodes:
-            if n.get("kind") not in ("function", "method", "route"):
+    return out[:12]
+
+
+# ── 实现层主类别分配(每符号只产一个资产，消除跨类别重复) ──────────────
+
+# 路由/api 边界的命名与装饰器信号(实现层 contract 的判定)。
+_API_NAME_PREFIXES = ("api_", "handle_", "handler_")
+_API_SIG_TOKENS = ("Request", "Depends", "Response", "Form(", "Body(")
+
+
+def _is_contract_boundary_node(node: dict, edges: List[dict],
+                               name_of: Optional[Dict[str, str]] = None,
+                               node_by_id: Optional[Dict[str, dict]] = None) -> bool:
+    """契约边界信号：route 节点；无 route 节点时的 api_* 前缀处理函数。
+
+    - route 节点 → contract(API 端点，锚点即路由)。
+    - 被 route 节点 references 引用的处理函数 → 该端点已有契约，函数本身归 process
+      (实现层契约/过程不重复：同一端点 契约(路由) + 过程(处理函数) 两个资产)。
+    - 无 route 节点(如 codegraph 未解析路由)时，api_*/handle_* 前缀函数退化为契约。
+    内部业务函数(get_config/send_sms_code 等)不标契约。
+    """
+    kind = (node.get("kind") or "").lower()
+    if kind == "route":
+        return True
+    # 被 route 节点引用的处理函数 → 路由已表达契约，函数归 process/decision。
+    node_id = node.get("id")
+    for e in edges or []:
+        if e.get("kind") == "references" and e.get("target") == node_id:
+            src = e.get("source") or ""
+            if str(src).startswith("route:") or str(src).startswith("node:route:"):
+                return False
+            if node_by_id:
+                src_node = node_by_id.get(src)
+                if src_node and (src_node.get("kind") or "").lower() == "route":
+                    return False
+    name = (node.get("name") or "").lower()
+    if name.startswith(_API_NAME_PREFIXES):
+        return True
+    sig = (node.get("signature") or "")
+    if any(t in sig for t in _API_SIG_TOKENS):
+        return True
+    return False
+
+
+def _branch_dense(node: dict) -> bool:
+    """分支密集判定(实现层 decision)：函数体内 if/elif/for/while/match 命中 ≥2。
+
+    以 signature/docstring 中的控制流词频近似(无源码读取时仍确定性)。
+    """
+    text = f"{node.get('signature') or ''} {node.get('docstring') or ''}".lower()
+    hits = sum(1 for tok in ("if ", "elif", "else", "for ", "while ", "case ", "match ",
+                             "switch", "==", "!=", " is ", " in ")
+               if tok in text)
+    return hits >= 2
+
+
+def _primary_kind_for_node(node: dict, edges: List[dict],
+                           name_of: Optional[Dict[str, str]] = None,
+                           node_by_id: Optional[Dict[str, dict]] = None) -> str:
+    """实现层每符号只产一个主类别(信号优先，避免跨类别重复)：
+
+    rule(配置载体) > contract(路由/api 边界) > entity(类型) / state(枚举)
+    > decision(分支密集) > process(普通函数)。
+    """
+    kind = (node.get("kind") or "").lower()
+    if _config_carrier_signal(node):
+        return "rule"
+    if _is_contract_boundary_node(node, edges, name_of, node_by_id):
+        return "contract"
+    if kind == "enum":
+        return "state"
+    if kind in ("class", "interface", "struct", "component"):
+        return "entity"
+    if kind in ("function", "method"):
+        if _branch_dense(node):
+            return "decision"
+        return "process"
+    return ""
+
+
+def _heuristic_extract_primary(ctx: Dict[str, Any],
+                               kinds: List[str],
+                               level: str = "implementation") -> List[dict]:
+    """实现层单趟提取：每个符号只产一个主类别资产(消除跨类别重复)。
+
+    与 `_heuristic_extract`(按 kind 全量扫)不同，本函数按 `_primary_kind_for_node`
+    为每个节点分配唯一主类别，并复用各类别 detail 构造逻辑产出资产。
+    """
+    nodes = ctx.get("nodes") or []
+    edges = ctx.get("edges") or []
+    root = ctx.get("root") or ""
+    node_by_id = {n.get("id"): n for n in nodes}
+    name_of = {n.get("id"): (n.get("qualified_name") or n.get("name") or "") for n in nodes}
+    out: List[dict] = []
+    per_kind_cap: Dict[str, int] = {}
+    for n in nodes:
+        pk = _primary_kind_for_node(n, edges, name_of, node_by_id)
+        if not pk or pk not in kinds:
+            continue
+        if per_kind_cap.get(pk, 0) >= _IMPL_KIND_CAP:
+            continue
+        per_kind_cap[pk] = per_kind_cap.get(pk, 0) + 1
+        if pk == "entity":
+            doc = (n.get("docstring") or "").strip()
+            fields = _fields_from_node(n) or _member_fields_from_edges(n.get("id"), edges, node_by_id)
+            if not fields:
+                fields = _fields_from_source(root, n)
+            out.append({"kind": "entity", "level": level, "name": n["name"],
+                        "desc": doc or f"具体类型「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。",
+                        "detail": {"kind": "type", "signature": n.get("signature") or "",
+                                   "fields": fields, "invariants": []},
+                        "astRefs": [_node_to_ref(n)]})
+        elif pk == "state":
+            members = _member_fields_from_edges(n.get("id"), edges, node_by_id)
+            if not members:
                 continue
+            states = [{"name": m.get("name") or f"s{i}", "desc": "",
+                       "initial": i == 0, "final": i == len(members) - 1}
+                      for i, m in enumerate(members)]
+            transitions = [{"from": states[i]["name"], "to": states[i + 1]["name"],
+                            "event": "", "condition": "", "action": ""}
+                           for i in range(len(states) - 1)]
+            out.append({"kind": "state", "level": level, "name": n["name"],
+                        "desc": f"实体生命周期「{n['name']}」的状态机(枚举推导)。",
+                        "detail": {"states": states, "transitions": transitions, "invariants": []},
+                        "astRefs": [_node_to_ref(n)]})
+        elif pk == "rule":
+            doc = (n.get("docstring") or "").strip()
+            out.append({"kind": "rule", "level": level, "name": n["name"],
+                        "desc": doc or f"配置/阈值「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。",
+                        "detail": {"kind": "config_item", "configSource": n.get("file_path") or "",
+                                   "constraints": [], "thresholds": []},
+                        "astRefs": [_node_to_ref(n)]})
+        elif pk == "contract":
             sig = n.get("signature") or ""
             doc = (n.get("docstring") or "").strip()
-            tags = _infra_tags(f"{n['name']} {sig} {doc}")
-            if not tags:
-                continue
-            desc = f"基础设施「{n['name']}」(切面: {','.join(tags)})，位于 {n['file_path']}:{n['start_line']}。"
-            detail = {"trigger": "", "steps": [], "invariants": [], "tags": tags}
-            if low:
-                callees = _callee_names(n.get("id"), edges, name_of)
-                detail = {"trigger": "", "kind": "concurrent_flow",
-                          "steps": [{"order": 1, "semantic": "调用 " + c, "symbols": [c]}
-                                    for c in callees],
-                          "invariants": [], "tags": tags}
-            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
-                        "detail": detail, "astRefs": [_node_to_ref(n)]})
-    return out[:12]
+            # route 节点本身无签名/文档：取被其引用的处理函数签名补全。
+            if n.get("kind") == "route":
+                for e in edges or []:
+                    if e.get("kind") != "references" or e.get("source") != n.get("id"):
+                        continue
+                    h = node_by_id.get(e.get("target"))
+                    if h and (h.get("signature") or h.get("docstring")):
+                        if not sig:
+                            sig = h.get("signature") or ""
+                        if not doc:
+                            doc = (h.get("docstring") or "").strip()
+                        break
+            out.append({"kind": "contract", "level": level, "name": n["name"],
+                        "desc": doc or f"服务契约「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。",
+                        "detail": {"kind": "message_contract",
+                                   "relations": [{"target": "", "type": "signature", "semantic": sig}],
+                                   "invariants": []},
+                        "astRefs": [_node_to_ref(n)]})
+        elif pk == "decision":
+            sig = n.get("signature") or ""
+            doc = (n.get("docstring") or "").strip()
+            out.append({"kind": "decision", "level": level, "name": n["name"],
+                        "desc": doc or f"分支逻辑「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。",
+                        "detail": {"kind": "branch_logic",
+                                   "branches": [{"condition": "", "then": "", "else": "",
+                                                 "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}],
+                                   "invariants": []},
+                        "astRefs": [_node_to_ref(n)]})
+        else:  # process
+            callees = _callee_names(n.get("id"), edges, name_of)
+            sig = n.get("signature") or ""
+            doc = (n.get("docstring") or "").strip()
+            out.append({"kind": "process", "level": level, "name": n["name"],
+                        "desc": doc or f"调用链「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。",
+                        "detail": {"trigger": "", "kind": "call_chain",
+                                   "steps": [{"order": 1, "semantic": "调用 " + c, "symbols": [c]}
+                                             for c in callees],
+                                   "invariants": []},
+                        "astRefs": [_node_to_ref(n)]})
+    return out
 
 
 def _fields_from_node(n: dict) -> List[dict]:
@@ -1556,6 +1929,67 @@ def _fields_from_node(n: dict) -> List[dict]:
                 out.append({"name": str(f["name"]), "type": f.get("type") or ""})
         return out
     return []
+
+
+def _fields_from_source(root: str, n: dict, max_fields: int = 40) -> List[dict]:
+    """源码回读扫描实体字段(类/结构体体内声明)，供 class/ER 图展示属性。
+
+    覆盖多种声明形态：
+      - `name: type`(含 dataclass `name: type = default`)
+      - `self.name = ...`(__init__ 内实例属性)
+      - `name = type(...)`(结构体/值对象字段)
+    读取失败返回空列表(不影响锚点保留)。
+    """
+    if not root or not n or not (n.get("start_line") or 0):
+        return []
+    rel = (n.get("file_path") or "").lstrip("/")
+    full = os.path.join(root, rel.replace("/", os.sep))
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().split("\n")
+    except Exception:
+        return []
+    s0 = int(n.get("start_line") or 0)
+    s1 = int(n.get("end_line") or s0)
+    if s1 < s0:
+        s1 = s0
+    # 退化范围(live 扫描 end_line==start_line)：放宽到类声明后 80 行内，防漏字段。
+    body = lines[s0 - 1:s1] if s0 >= 1 else []
+    if len(body) <= 2:
+        body = lines[s0 - 1:s0 - 1 + 80]
+    fields: List[dict] = []
+    seen: set = set()
+    # ① 类体内顶层 `name: type` / `name: type = value`(dataclass/注解字段)。
+    pat_ann = re.compile(r"^\s*([A-Za-z_]\w*)\s*:\s*([^=#]+?)\s*(?:=.*)?$")
+    for ln in body:
+        m = pat_ann.match(ln)
+        if not m:
+            continue
+        name = m.group(1).strip()
+        ftype = m.group(2).strip().rstrip(",").strip()
+        if name.startswith("_") and name.endswith("__"):
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        fields.append({"name": name, "type": ftype or ""})
+        if len(fields) >= max_fields:
+            break
+    # ② __init__ 内 `self.name = ...` 实例属性(Python 类常见无注解字段)。
+    if len(fields) < max_fields:
+        pat_self = re.compile(r"^\s*self\.([A-Za-z_]\w*)\s*=")
+        for ln in body:
+            m = pat_self.match(ln)
+            if not m:
+                continue
+            name = m.group(1)
+            if name in seen:
+                continue
+            seen.add(name)
+            fields.append({"name": name, "type": ""})
+            if len(fields) >= max_fields:
+                break
+    return fields[:max_fields]
 
 
 def _callee_names(node_id: str, edges: List[dict],
@@ -1638,6 +2072,34 @@ _EDGE_SEMANTIC = {
 }
 
 
+def _merge_high_details(payload: dict, old: dict) -> None:
+    """同批合并 business 资产时聚合 detail：把旧行的 aggregates/invariants 并入新 payload，
+    避免后写覆盖导致跨叶子聚合的子资产(id)与组件归属丢失。"""
+    old_detail = old.get("detail") or {}
+    if not isinstance(old_detail, dict):
+        old_detail = {}
+    new_detail = payload.get("detail") or {}
+    if not isinstance(new_detail, dict):
+        new_detail = {}
+    # aggregates 按 assetId 去重合并
+    merged: Dict[str, dict] = {}
+    for agg in (old_detail.get("aggregates") or []) + (new_detail.get("aggregates") or []):
+        if not isinstance(agg, dict):
+            continue
+        aid = agg.get("assetId") or ""
+        if aid and aid not in merged:
+            merged[aid] = dict(agg)
+    new_detail["aggregates"] = list(merged.values())
+    # invariants 去重合并
+    inv = list(new_detail.get("invariants") or [])
+    for v in (old_detail.get("invariants") or []):
+        if v not in inv:
+            inv.append(v)
+    if inv:
+        new_detail["invariants"] = inv
+    payload["detail"] = new_detail
+
+
 def _merge_relation(asset: dict, rel: dict) -> None:
     """合并一条 relations 到资产 detail(按 target+type 去重，防膨胀)。"""
     detail = asset.setdefault("detail", {})
@@ -1698,6 +2160,37 @@ def _derive_relations_from_edges(assets: List[dict], ctx: Dict[str, Any]) -> Non
                     "target": name_by_idx[ti], "type": kind, "semantic": semantic})
 
 
+_ASSET_EXPECTED_ANCHOR_KIND = {
+    "entity": ("class", "struct", "enum", "interface", "component"),
+    "state": ("class", "struct", "enum", "interface"),
+    "contract": ("func", "method", "route", "class"),
+    "rule": ("func", "field", "variable", "class"),
+    "process": ("func", "method", "route"),
+    "decision": ("func", "method", "route"),
+}
+
+# 实现层单趟提取：每类资产每文件上限(避免超大文件全量产出)。
+_IMPL_KIND_CAP = 80
+
+
+def _asset_anchor_kind_ok(kind: str, ast_refs: List[dict]) -> bool:
+    """资产 kind ↔ 锚点 AST 节点 kind 一致性校验(实现层)。
+
+    entity 只锚类型/枚举；contract 只锚函数/路由；rule 可锚函数/字段(配置载体)。
+    锚点 kind 与资产类别明显冲突(如 entity 锚到 function)时判不合格 → 丢弃。
+    """
+    if not ast_refs:
+        return True
+    expected = _ASSET_EXPECTED_ANCHOR_KIND.get(kind)
+    if not expected:
+        return True
+    for r in ast_refs:
+        k = (r.get("kind") or "").lower()
+        if k in expected:
+            return True
+    return False
+
+
 def _save_assets(project_id: str, scope_type: str, scope_key: str,
                  assets: List[dict], ctx: Dict[str, Any]) -> List[dict]:
     _derive_relations_from_edges(assets, ctx)
@@ -1722,6 +2215,9 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             logger.warning("[semantic] component membership map failed: %s", e)
     matched: set = set()
     saved: List[dict] = []
+    # 同批内重复 canonicalKey(如按叶子聚合时多个叶子产出同名 business)：
+    # 复用本批已创建/更新的行并合并 scopes，避免同批产生重复资产行。
+    batch_seen: Dict[str, dict] = {}
     for a in assets:
         detail = a.get("detail") or {}
         for k in ("fields", "relations", "invariants", "trigger",
@@ -1738,6 +2234,17 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             for b in detail["branches"]:
                 ast_refs += b.get("astRefs") or []
         ast_refs = list({json.dumps(r, ensure_ascii=False, sort_keys=True): r for r in ast_refs}.values())
+        # 实现层幻影拒绝：实现级资产必须锚定真实 AST 符号(0 astRefs 直接丢弃，
+        # 避免 LLM 臆造名/无法解析锚点的空资产污染图谱)。
+        if (a.get("level") or "logic") == "implementation":
+            if not ast_refs:
+                logger.warning("[semantic] 丢弃无锚点实现层资产: %s (kind=%s)", a.get("name"), a["kind"])
+                continue
+            if not _asset_anchor_kind_ok(a["kind"], ast_refs):
+                logger.warning("[semantic] 丢弃锚点类别不符的实现层资产: %s (kind=%s anchor=%s)",
+                               a.get("name"), a["kind"],
+                               [(r.get("kind"), r.get("symbol")) for r in ast_refs[:2]])
+                continue
         membership = _asset_scope_membership(ast_refs, file_to_comps)
         meta = {"componentId": scope_key if scope_type == "comm" else "",
                 "scopes": membership}
@@ -1745,12 +2252,12 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             meta["files"] = (ctx.get("files") or [])[:200]
         if scope_type == "symbols":
             meta["symbols"] = (ctx.get("symbols") or [])[:200]
-        canonical_key = _canonical_key(a["kind"], a.get("level") or "interaction", ast_refs,
+        canonical_key = _canonical_key(a["kind"], a.get("level") or "logic", ast_refs,
                                        name=a.get("name") or "",
                                        scope_type=scope_type, scope_key=scope_key)
         payload = {
             "projectId": project_id, "kind": a["kind"],
-            "level": a.get("level") or "interaction",
+            "level": a.get("level") or "logic",
             "name": a["name"], "desc": a.get("desc") or "",
             "detail": detail, "astRefs": ast_refs[:40],
             "scopeType": scope_type, "scopeKey": scope_key,
@@ -1764,7 +2271,9 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             "updatedAt": now,
             "parentId": a.get("parentId") or "",
         }
-        old = by_key.get(canonical_key)
+        old = batch_seen.get(canonical_key)
+        if old is None:
+            old = by_key.get(canonical_key)
         if old is None:
             legacy = by_name.get(a.get("name") or "")
             # 名称兜底仅承接「无 canonicalKey」的遗留行(迁移衔接)；
@@ -1775,6 +2284,10 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
             matched.add(old["id"])
             payload["id"] = old["id"]
             payload["change"] = "modified" if (ctx.get("srcHash") and ctx.get("srcHash") != old.get("srcHash")) else "same"
+            # 同批内重复(跨叶子同名 business)：合并 aggregates/invariants，避免后写覆盖
+            # 导致丢前面叶子聚合的子资产(进而丢失其组件归属)。
+            if old is batch_seen.get(canonical_key):
+                _merge_high_details(payload, old)
             # LLM 改动语义命名但锚点不变 → 复用 id，仅记录 renamed 溯源。
             old_name = old.get("name") or ""
             if old_name and old_name != (a.get("name") or ""):
@@ -1795,13 +2308,15 @@ def _save_assets(project_id: str, scope_type: str, scope_key: str,
                 payload["meta"] = old_meta
             store.SemanticAssetsStore.update(old["id"], payload)
         else:
-            lvl = a.get("level") or "interaction"
+            lvl = a.get("level") or "logic"
             payload["id"] = store.next_id(_id_prefix(lvl, a["kind"]))
             payload["change"] = "added"
             payload["status"] = "active"
             payload["createdAt"] = now
             store.SemanticAssetsStore.create(payload)
         saved.append(store.SemanticAssetsStore.get(payload["id"]) or payload)
+        # 同批内后续相同 canonicalKey(如按叶子聚合的跨叶子同名 business) → 复用本批已建行。
+        batch_seen[canonical_key] = saved[-1]
     # 仅对「本范围曾有、本次未再生成」且无其它组件归属的资产标 stale：
     # 跨组件共享代码(meta.scopes 多归属)不会被某个组件的重提误标。
     for old in by_name.values():
@@ -1824,15 +2339,15 @@ def extract_scope(root: Optional[str], project: Optional[str],
                   files: Optional[List[str]] = None,
                   symbols: Optional[List[str]] = None,
                   kinds: Optional[List[str]] = None,
-                  model_id: Optional[str] = None,
-                  use_llm: bool = True,
-                  level: str = "interaction") -> Dict[str, Any]:
+                   model_id: Optional[str] = None,
+                   use_llm: bool = True,
+                   level: str = "implementation") -> Dict[str, Any]:
     """按范围提取语义资产并落库。返回 {assets, source, degraded, count}。
 
-    level: 抽象粒度 high|medium|low。
-      - low    : LLM 归纳(代码事实层：字段/调用序/分支条件)，LLM 不可用降级增强启发式；
-      - medium : LLM 归纳(逻辑组织层)，LLM 不可用降级启发式；
-      - high   : 由 _aggregate_high 负责(按需，从已提取 M/L 资产聚合)，本入口不直接生成。
+    level: 抽象粒度 implementation|logic|business。
+      - implementation : LLM 归纳(代码事实层：字段/调用序/分支条件)，LLM 不可用降级增强启发式；
+      - logic          : LLM 归纳(逻辑组织层)，LLM 不可用降级启发式；
+      - business       : 由聚合层负责(按需，从已落库 logic/implementation 资产聚合)，本入口不直接生成。
     请求粒度权威：LLM 资产统一落为请求层级，一次提取只产出一级。
     degraded=True 表示 LLM 不可用(启发式兜底) 或 codegraph 缺失(轻量扫描)。
     """
@@ -1873,10 +2388,16 @@ def extract_scope(root: Optional[str], project: Optional[str],
     heur_counts: Dict[str, int] = {}
     if not all_assets:
         degraded = True
-        for k in kinds:
-            _before = len(all_assets)
-            all_assets += _heuristic_extract(k, ctx, level=level)
-            heur_counts[k] = len(all_assets) - _before
+        if level == "implementation":
+            # 实现层单趟主类别分配：每符号只产一个资产(消除跨类别重复)。
+            all_assets = _heuristic_extract_primary(ctx, kinds)
+            for a in all_assets:
+                heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
+        else:
+            for k in kinds:
+                _before = len(all_assets)
+                all_assets += _heuristic_extract(k, ctx, level=level)
+                heur_counts[k] = len(all_assets) - _before
     logger.info(
         "[semantic] extract_scope 结果: scope=%s(%s) llm=%d heuristic=%s "
         "degraded=%s saved=%d text_len=%d",
@@ -1892,7 +2413,7 @@ def _extract_file_set(root: str, project: Optional[str],
                       kinds: Optional[List[str]] = None,
                       model_id: Optional[str] = None,
                       use_llm: bool = True,
-                      level: str = "interaction") -> Tuple[List[dict], int, List[str]]:
+                      level: str = "implementation") -> Tuple[List[dict], int, List[str]]:
     """对去重后的文件集合逐文件单次提取(每文件独立 LLM 上下文)。
 
     INCLUDE/CALL 两套组件重叠文件只提取一次；资产身份=代码锚点，
@@ -1921,11 +2442,11 @@ def _extract_file_set_levels(root: str, project: Optional[str],
                              kinds: Optional[List[str]] = None,
                              model_id: Optional[str] = None,
                              use_llm: bool = True,
-                             levels: Tuple[str, ...] = ("algorithm", "interaction")) -> Tuple[List[dict], int, List[str]]:
-    """对文件集合逐级提取(low+medium 默认)，合并各层级资产。
+                             levels: Tuple[str, ...] = ("implementation",)) -> Tuple[List[dict], int, List[str]]:
+    """对文件集合逐级提取(默认仅 implementation)，合并各层级资产。
 
-    满足按粒度展示：一次「提取全部」同时产出 代码级(low)+逻辑级(medium)，
-    业务级(high)由 `_aggregate_high` 从 M/L 资产聚合。
+    满足按粒度展示：业务级(business)由聚合层按需从 logic 资产聚合；
+    逻辑级+业务级当前暂停再生，需要时显式传 levels。
     """
     assets: List[dict] = []
     done, failed = 0, []
@@ -1938,20 +2459,48 @@ def _extract_file_set_levels(root: str, project: Optional[str],
     return assets, done, failed
 
 
+_AGG_HINT = {
+    "llm": "LLM 服务不可达或调用失败，已重试仍失败",
+    "parse": "LLM 返回内容未能解析为结构化资产，已重试仍失败",
+    "empty": "当前无足够交互/算法级资产可聚合",
+}
+
 def _aggregate_high_best_effort(root: Optional[str], project: Optional[str],
                                 model_id: Optional[str] = None) -> Dict[str, Any]:
-    try:
-        return _aggregate_high(root, project, model_id=model_id)
-    except Exception as e:
-        logger.warning("[semantic] aggregate high best-effort failed: %s", e)
-        return {"count": 0}
+    """按需聚合 H 级业务概念资产(失败不阻塞，仅记录日志)。
+
+    对 LLM 瞬时不可达/输出解析失败做同任务内重试(retry=2，间隔 2s)，
+    避免一次瞬时失败导致 business 级资产永久缺失。返回 _aggregate_high 的原始结果
+    (含 count/reason)，供调用方把失败原因暴露给用户。
+    """
+    last: Optional[Dict[str, Any]] = None
+    for attempt in range(3):
+        try:
+            res = _aggregate_high(root, project, model_id=model_id)
+            last = res
+        except Exception as e:
+            logger.warning("[semantic] aggregate high best-effort failed: %s", e, exc_info=True)
+            last = {"assets": [], "count": 0, "degraded": True, "reason": "llm"}
+        if last and last.get("count"):
+            return last
+        reason = (last or {}).get("reason") or "unknown"
+        if attempt < 2 and reason in ("llm", "parse"):
+            logger.info("[semantic] aggregate high 第 %d 次失败(%s)，重试…", attempt + 1, reason)
+            time.sleep(2)
+            continue
+        return last or {"count": 0}
+    return last or {"count": 0}
 
 
 def _resolve_extract_levels(level: str) -> Tuple[str, ...]:
-    """请求粒度 → 需提取的层级。显式层级只产该级；缺省/all 产 algorithm+interaction+infra。"""
+    """请求粒度 → 需提取的层级。显式层级只产该级；缺省/all 仅产 implementation。
+
+    业务层+逻辑层当前暂停再生：默认只专注实现层。显式请求 logic/business
+    (如单资产重提/按需聚合)仍可单独产出，不影响已落库资产的只读展示。
+    """
     if level in SEMANTIC_LEVELS:
         return (level,)
-    return ("algorithm", "interaction", "infra")
+    return ("implementation",)
 
 
 def extract_all(root: Optional[str], project: Optional[str],
@@ -1963,8 +2512,8 @@ def extract_all(root: Optional[str], project: Optional[str],
     """批处理: 组件目录(跨 INCLUDE/CALL × L0/L1)文件并集 → 逐文件多级提取。
 
     组件是下游投影(资产身份=代码锚点)，两套组件重叠文件不重复提取。
-    无组件时按全项目提取一次。缺省 level 产出 low+medium 并聚合 high，
-    保证业务层/逻辑层/代码层三档按粒度展示都有数据。
+    无组件时按全项目提取一次。缺省 level 产出 implementation+logic 并聚合 business，
+    保证业务层/逻辑层/实现层三档按粒度展示都有数据。
     """
     root = resolve_root(root, project)
     if not root:
@@ -1983,10 +2532,10 @@ def extract_all(root: Optional[str], project: Optional[str],
     logger.info("[semantic] extract_all 组件目录: 组件=%d 文件(去重前)=%d level=%s",
                 len(comps), len(files), level)
     levels = _resolve_extract_levels(level)
-    file_levels = tuple(lv for lv in levels if lv in ("algorithm", "interaction"))
-    do_high = level in ("", "all", "business")
-    do_infra = level in ("", "all", "infra")
-    high_count = 0
+    file_levels = tuple(lv for lv in levels if lv in ("implementation", "logic"))
+    # 业务级聚合暂停再生：仅当显式请求 level="business" 才触发聚合(默认不再自动产 business)。
+    do_business = level == "business"
+    business_count = 0
     if not files:
         logger.info("[semantic] extract_all 无组件文件, 按全项目提取一次")
         assets: List[dict] = []
@@ -1994,25 +2543,20 @@ def extract_all(root: Optional[str], project: Optional[str],
             res = extract_scope(root, project, "project", kinds=kinds,
                                 model_id=model_id, use_llm=use_llm, level=lv)
             assets += res.get("assets") or []
-        if do_infra:
-            res = extract_scope(root, project, "project", kinds=kinds,
-                                model_id=model_id, use_llm=use_llm, level="infra")
-            assets += res.get("assets") or []
     else:
         assets, done, _failed = _extract_file_set_levels(root, project, files, kinds,
                                                          model_id=model_id, use_llm=use_llm,
                                                          levels=file_levels)
-        if do_infra:
-            _infra_assets, _d, _f = _extract_file_set(root, project, files, kinds,
-                                                      model_id=model_id, use_llm=use_llm,
-                                                      level="infra")
-            assets += _infra_assets
-    if do_high:
-        high_count = (_aggregate_high_best_effort(root, project, model_id) or {}).get("count") or 0
-    logger.info("[semantic] extract_all 完成: 文件=%d 资产=%d high=%d",
-                len(files), len(assets), high_count)
+    business_count = 0
+    business_reason = "ok"
+    if do_business:
+        agg = _aggregate_high_best_effort(root, project, model_id) or {}
+        business_count = agg.get("count") or 0
+        business_reason = agg.get("reason") or "ok"
+    logger.info("[semantic] extract_all 完成: 文件=%d 资产=%d business=%d business_reason=%s",
+                len(files), len(assets), business_count, business_reason)
     return {"assets": assets, "count": len(assets), "components": len(comps),
-            "high": high_count}
+            "business": business_count, "businessReason": business_reason}
 
 
 def refresh_scope(root: Optional[str], project: Optional[str],
@@ -2041,7 +2585,7 @@ def _high_asset_text(pid: str) -> str:
     for a in rows:
         if a.get("status") != "active":
             continue
-        lvl = a.get("level") or "interaction"
+        lvl = a.get("level") or "logic"
         if lvl == "business":
             continue
         detail = a.get("detail") or {}
@@ -2055,6 +2599,131 @@ def _high_asset_text(pid: str) -> str:
         lines.append(f"- {a.get('id')} | {a.get('kind')}/{lvl} | {a.get('name')}"
                      f"{(' — ' + (a.get('desc') or '')) if a.get('desc') else ''}{extra}")
     return "\n".join(lines) or "(暂无语义资产)"
+
+def _leaf_components(root: Optional[str], project: Optional[str]) -> List[dict]:
+    """KB 组件树 → 叶子组件(父组件文件已被其子组件 100% 覆盖，只需按叶子聚合)。
+
+    叶子 = 非「任何组件 parentId」的组件。返回 [{id,name,desc,owns,parentId,level,edgeType}]，
+    父先子后保序(便于前端逐层展示)。目录解析失败返回空列表。
+    """
+    from .common import build_component_catalog
+    comps = []
+    try:
+        comps = (build_component_catalog(root, project) or {}).get("components") or []
+    except Exception as e:
+        logger.warning("[semantic] leaf components 目录解析失败: %s", e, exc_info=True)
+        return []
+    child_ids = {c.get("parentId") for c in comps if c.get("parentId")}
+    leaves = [c for c in comps if c.get("id") and c.get("id") not in child_ids]
+    # 父先子后：按组件树层级稳定排序(L0 先于 L1)，同层保持目录顺序。
+    by_parent: Dict[str, List[dict]] = {}
+    for c in comps:
+        by_parent.setdefault(c.get("parentId"), []).append(c)
+    ordered: List[dict] = []
+    seen: set = set()
+    def _walk(p: Optional[str]) -> None:
+        for c in by_parent.get(p, []):
+            cid = c.get("id")
+            if cid in seen:
+                continue
+            seen.add(cid)
+            if cid in child_ids:
+                _walk(cid)          # 父组件：先递归子，父本身不参与聚合(叶子集合不含父)
+            else:
+                ordered.append(c)
+    _walk(None)
+    return ordered
+
+
+def _postorder_component_nodes(root: Optional[str], project: Optional[str]) -> List[dict]:
+    """组件树后序遍历(子先于父)，含中间节点，每节点附带 `direct` 直属文件集。
+
+    direct(N) = N.owns − ∪{子节点.owns} —— 只属于中间组件、未被任何叶子覆盖的文件
+    归该中间节点的 direct，保证这类文件产出的逻辑资产仍能进入业务聚合(不因叶子不覆盖而丢)。
+
+    返回 [{id,name,desc,owns,parentId,level,direct:[文件]}]，子先于父。
+    """
+    from .common import build_component_catalog
+    comps = []
+    try:
+        comps = (build_component_catalog(root, project) or {}).get("components") or []
+    except Exception as e:
+        logger.warning("[semantic] postorder 组件目录解析失败: %s", e, exc_info=True)
+        return []
+    by_parent: Dict[Optional[str], List[dict]] = {}
+    for c in comps:
+        if not c.get("id"):
+            continue
+        by_parent.setdefault(c.get("parentId") or None, []).append(c)
+    # 每节点直接文件 = 自身 owns − 所有直接子节点 owns(逐层下推 → 最深拥有者)。
+    child_files: Dict[str, set] = {}
+    for c in comps:
+        for f in (c.get("owns") or []):
+            if f:
+                child_files.setdefault(c.get("id"), set()).add(_norm_path(f))
+    direct: Dict[str, set] = {}
+    for c in comps:
+        cid = c.get("id")
+        own = {_norm_path(f) for f in (c.get("owns") or []) if f}
+        covered: set = set()
+        for ch in by_parent.get(cid, []):
+            covered |= child_files.get(ch.get("id"), set())
+        d = own - covered
+        if not d and not by_parent.get(cid):
+            d = own  # 孤立无子节点 → direct = 自身文件
+        direct[cid] = d
+    ordered: List[dict] = []
+    seen: set = set()
+
+    def _walk(p: Optional[str]) -> None:
+        for c in by_parent.get(p, []):
+            cid = c.get("id")
+            if cid in seen:
+                continue
+            seen.add(cid)
+            _walk(cid)  # 先递归子(后序)，再 append 自身
+            ordered.append({**c, "direct": sorted(direct.get(cid, set()))})
+
+    _walk(None)
+    for c in comps:
+        cid = c.get("id")
+        if cid and cid not in seen:
+            seen.add(cid)
+            ordered.append({**c, "direct": sorted(direct.get(cid, set()))})
+    return ordered
+
+
+def _high_asset_text_for_comp(pid: str, comp_id: str,
+                              max_lines: int = 4000) -> str:
+    """某组件(叶子)归属的 interaction/algorithm 候选资产清单(business 聚合候选素材)。
+
+    过滤 meta.scopes 含 comp_id 的 active 资产，仅保留 logic/implementation(同全局语义)。
+    """
+    rows = store.SemanticAssetsStore.all_status(pid, limit=4000)
+    lines = []
+    for a in rows:
+        if a.get("status") != "active":
+            continue
+        lvl = a.get("level") or "logic"
+        if lvl not in ("logic", "implementation"):
+            continue
+        scopes = (a.get("meta") or {}).get("scopes") or []
+        if comp_id not in scopes:
+            continue
+        detail = a.get("detail") or {}
+        extra = ""
+        if detail.get("steps"):
+            extra = f" steps={len(detail['steps'])}"
+        elif detail.get("fields"):
+            extra = f" fields={len(detail['fields'])}"
+        elif detail.get("branches"):
+            extra = f" branches={len(detail['branches'])}"
+        lines.append(f"- {a.get('id')} | {a.get('kind')}/{lvl} | {a.get('name')}"
+                     f"{(' — ' + (a.get('desc') or '')) if a.get('desc') else ''}{extra}")
+        if len(lines) >= max_lines:
+            break
+    return "\n".join(lines) or ""
+
 
 _HIGH_SCHEMA = {
     "type": "object",
@@ -2075,6 +2744,27 @@ _HIGH_SCHEMA = {
                                   "properties": {"assetId": {"type": "string"},
                                                  "role": {"type": "string"}}},
                         "description": "组成本业务概念的下级资产 id 列表(必须来自候选清单)"},
+                    "relations": {
+                        "type": "array",
+                        "items": {"type": "object",
+                                  "properties": {"target": {"type": "string"},
+                                                 "type": {"type": "string"},
+                                                 "semantic": {"type": "string"}}},
+                        "description": "该 business 资产与其它 business 资产的依赖/关联(跨业务模块)"},
+                    "inputs": {
+                        "type": "array",
+                        "items": {"type": "object",
+                                  "properties": {"target": {"type": "string"},
+                                                 "type": {"type": "string"},
+                                                 "semantic": {"type": "string"}}},
+                        "description": "该业务过程消费的资产(实体/契约等)，target 用资产 id 或业务名"},
+                    "outputs": {
+                        "type": "array",
+                        "items": {"type": "object",
+                                  "properties": {"target": {"type": "string"},
+                                                 "type": {"type": "string"},
+                                                 "semantic": {"type": "string"}}},
+                        "description": "该业务过程产出的资产(实体/契约等)，target 用资产 id 或业务名"},
                     "invariants": {"type": "array", "items": {"type": "string"}},
                 },
             },
@@ -2083,63 +2773,47 @@ _HIGH_SCHEMA = {
 }
 
 
-def _aggregate_high(root: Optional[str], project: Optional[str],
-                    model_id: Optional[str] = None,
-                    max_assets: int = 8) -> Dict[str, Any]:
-    """按需聚合 business 级(业务功能模块)资产：从已提取 interaction/algorithm 资产 + 跨组件依赖图合成。
+_AGG_BATCH = 40
+_AGG_MAX_ASSETS_PER_LEAF = 8
 
-    只消费已落库的 active 中/低资产(锚定真实代码)，LLM 仅作归纳并填写 aggregates
-    (组成资产 id)，防止业务级表述漂移。落库后为下级资产回填 parentId(组合链)。
+
+def _aggregate_one_batch(leaf: dict, batch: str, model_id: Optional[str],
+                         max_assets: int) -> List[dict]:
+    """对单个叶子的一批候选执行 LLM 聚合，返回 business 资产列表(含 aggregates 定向重试)。
+
+    失败(LLM 不可达/解析失败)返回空列表，由调用方决定隔离策略。
     """
-    root = resolve_root(root, project)
-    if not root:
-        return {"assets": [], "count": 0, "degraded": True, "reason": "root"}
     from .req_agent import llm_sync, get_max_tokens_preference
-    pid = project_id_for(root, project)
-    asset_text = _high_asset_text(pid)
-    # 候选清单截断：完整清单(数百行)会让小模型在 structured 输出时丢 aggregates。
-    # 仅保留 interaction/algorithm 级候选，控制规模以便模型稳定引用 id 并填 aggregates。
-    _cand_lines = [l for l in (asset_text or "").split("\n")
-                   if "/interaction" in l or "/algorithm" in l]
-    if not _cand_lines:
-        _cand_lines = [l for l in (asset_text or "").split("\n") if l]
-    _MAX_CAND = 80
-    if len(_cand_lines) > _MAX_CAND:
-        _cand_lines = _cand_lines[:_MAX_CAND]
-    asset_text_cut = "\n".join(_cand_lines) or "(暂无语义资产)"
-    # 跨组件依赖图上下文(业务过程常横跨组件)。
-    comp_context = ""
-    try:
-        from .common import build_architecture_model
-        model = build_architecture_model(root, project)
-        comps = model.get("components") or []
-        lines = []
-        for c in comps:
-            lines.append(f"- {c.get('id')} ({c.get('name')})"
-                         f"{(' — ' + (c.get('desc') or '')) if c.get('desc') else ''}"
-                         f"{(' owns: ' + ','.join((c.get('owns') or [])[:4])) if c.get('owns') else ''}")
-        if lines:
-            comp_context = "组件目录:\n" + "\n".join(lines)
-    except Exception as e:
-        logger.warning("[semantic] aggregate high 组件上下文失败: %s", e)
+    cname = leaf.get("name") or leaf.get("id") or ""
+    cdesc = (leaf.get("desc") or "").strip().replace("\n", " ")[:400]
+    owns = (leaf.get("owns") or [])[:6]
+    comp_block = (f"当前组件: {leaf.get('id')} ({cname})"
+                  + (f" — {cdesc}" if cdesc else "")
+                  + (f"\n组件文件: {', '.join(owns)}" if owns else ""))
     sys_prompt = (
-        "你是资深架构师。基于已提取的交互/算法级语义资产清单与组件目录，"
-        "归纳出 business 业务级的语义资产(组件下的业务功能模块)。\n"
-        "类别 kind ∈ asset(领域实体/聚合)/process(端到端业务过程)/"
-        "decision(业务规则/策略)/contract(业务能力契约)/state(业务生命周期)。\n"
+        "你是资深架构师。基于某个组件的逻辑/实现级语义资产清单，归纳该组件下的 "
+        "business 业务级语义资产(业务功能模块/共性目标)。\n"
+        "类别 kind ∈ entity(聚合根/业务概念)/process(端到端业务过程)/"
+        "decision(业务策略选择)/contract(对外业务能力)/state(业务生命周期)/"
+        "rule(业务政策，仅当存在配置化拆分时)。\n"
         "规则：\n"
-        "1. 每个 business 资产必须是多个逻辑单元的业务归纳(如「订单创建与支付结算」聚合"
-        " createOrder/支付 等资产)，不得与 interaction 资产重复表述；\n"
+        "1. 每个 business 资产必须是该组件内多个逻辑单元的业务归纳(如「订单创建与支付结算」聚合"
+        " createOrder/支付 等资产)，不得与 logic 资产重复表述；\n"
         "2. aggregates **必填**：必须引用下方候选清单中真实存在的资产 id(至少一个，"
         "推荐 3~10 个)，格式为字符串 id 数组；缺 aggregates 会导致资产无法定位到组件，"
         "这是本任务的核心要求；\n"
         "3. name 用业务命名，desc 概括业务功能与边界；\n"
-        "4. 只输出 JSON 对象 {\"assets\": [...]}，不要代码块。"
+        "4. relations **建议填写**：描述本批产出的各 business 资产之间的依赖/调用关系"
+        "(target 用**其它 business 资产名**，type 用 uses/calls/depends 等)，"
+        "让业务层资产之间也能连成图；\n"
+        "5. process/contract 类资产建议填 inputs/outputs(消费/产出的资产 id 或业务名)；\n"
+        "6. 只输出 JSON 对象 {\"assets\": [...]}，不要代码块。"
     )
     user_prompt = (
-        f"{comp_context or '(无组件)'}\n\n"
-        f"候选交互/算法级资产:\n{asset_text_cut}\n\n"
-        f"请归纳 business 级业务功能资产(每个必须填 aggregates，引用上述候选中的真实 id)。"
+        f"{comp_block}\n\n"
+        f"候选逻辑/实现级资产:\n{batch or '(暂无语义资产)'}\n\n"
+        f"请归纳 business 级业务功能资产(每个必须填 aggregates，引用上述候选中的真实 id；"
+        f"并在 relations 中表达各业务资产间的依赖关系)。"
     )
     try:
         res = llm_sync([{"role": "system", "content": sys_prompt},
@@ -2147,36 +2821,60 @@ def _aggregate_high(root: Optional[str], project: Optional[str],
                        mode="structured", output_schema=_HIGH_SCHEMA,
                        max_tokens=get_max_tokens_preference(), model_id=model_id)
     except Exception as e:
-        logger.warning("[semantic] aggregate high LLM 失败: %s", e, exc_info=True)
-        return {"assets": [], "count": 0, "degraded": True, "reason": "llm"}
+        logger.warning("[semantic] aggregate one-batch LLM 失败: %s", e, exc_info=True)
+        return []
+    if not isinstance(res, dict):
+        return []
     output = res.get("output") if isinstance(res, dict) else None
     if not isinstance(output, dict):
-        return {"assets": [], "count": 0, "degraded": True, "reason": "parse"}
-    raw = output.get("assets") or []
-    assets: List[dict] = []
-    for a in raw:
-        if not isinstance(a, dict):
-            continue
-        kind = _normalize_kind(a.get("kind"))
-        name = (a.get("name") or "").strip()
-        if not kind or not name:
-            continue
-        agg = []
-        for x in (a.get("aggregates") or []):
-            if isinstance(x, str) and x.strip():
-                agg.append({"assetId": x.strip()})
-            elif isinstance(x, dict) and x.get("assetId"):
-                agg.append({"assetId": str(x.get("assetId")),
-                            "role": (x.get("role") or "related").strip()})
-        agg = [x for x in agg if x.get("assetId")]
-        detail = {"aggregates": agg,
-                  "invariants": [str(v) for v in (a.get("invariants") or [])]}
-        assets.append({"kind": kind, "level": "business", "name": name,
-                       "desc": (a.get("desc") or "").strip(),
-                       "detail": detail, "astRefs": [],
-                       "parentId": ""})
-        if len(assets) >= max_assets:
-            break
+        return []
+
+    def _parse(raw_assets: List[Any]) -> List[dict]:
+        out: List[dict] = []
+        for a in raw_assets:
+            if not isinstance(a, dict):
+                continue
+            kind = _normalize_kind(a.get("kind"))
+            name = (a.get("name") or "").strip()
+            if not kind or not name:
+                continue
+            agg = []
+            for x in (a.get("aggregates") or []):
+                if isinstance(x, str) and x.strip():
+                    agg.append({"assetId": x.strip()})
+                elif isinstance(x, dict) and x.get("assetId"):
+                    agg.append({"assetId": str(x.get("assetId")),
+                                "role": (x.get("role") or "related").strip()})
+            agg = [x for x in agg if x.get("assetId")]
+            detail: Dict[str, Any] = {"aggregates": agg,
+                                      "invariants": [str(v) for v in (a.get("invariants") or [])]}
+
+            def _eps(key: str) -> List[dict]:
+                out = []
+                for r in (a.get(key) or []):
+                    if not isinstance(r, dict):
+                        continue
+                    tgt = (r.get("target") or r.get("to") or "").strip()
+                    if not tgt:
+                        continue
+                    out.append({"target": tgt,
+                                "type": (r.get("type") or r.get("via") or "").strip(),
+                                "semantic": (r.get("semantic") or "").strip()})
+                return out
+
+            for key in ("relations", "inputs", "outputs"):
+                eps = _eps(key)
+                if eps:
+                    detail[key] = eps
+            out.append({"kind": kind, "level": "business", "name": name,
+                        "desc": (a.get("desc") or "").strip(),
+                        "detail": detail,
+                        "astRefs": [], "parentId": ""})
+            if len(out) >= max_assets:
+                break
+        return out
+
+    assets = _parse(output.get("assets") or [])
     # aggregates 完整性定向重试：LLM(尤其小模型)常跳过 aggregates，导致 business 资产
     # 无法推导组件归属(归属=被聚合子资产的 meta.scopes 并集)。缺 aggregates 时回喂
     # 提示重试(与 _llm_extract 的 detail 重试同理)。
@@ -2197,44 +2895,105 @@ def _aggregate_high(root: Optional[str], project: Optional[str],
                max_tokens=get_max_tokens_preference(), model_id=model_id)
             out2 = res2.get("output") if isinstance(res2, dict) else None
             if isinstance(out2, dict):
-                rebuilt: List[dict] = []
-                for a in out2.get("assets") or []:
-                    if not isinstance(a, dict):
-                        continue
-                    kind2 = _normalize_kind(a.get("kind"))
-                    name2 = (a.get("name") or "").strip()
-                    if not kind2 or not name2:
-                        continue
-                    agg2 = []
-                    for x in (a.get("aggregates") or []):
-                        if isinstance(x, str) and x.strip():
-                            agg2.append({"assetId": x.strip()})
-                        elif isinstance(x, dict) and x.get("assetId"):
-                            agg2.append({"assetId": str(x.get("assetId")),
-                                         "role": (x.get("role") or "related").strip()})
-                    agg2 = [x for x in agg2 if x.get("assetId")]
-                    rebuilt.append({"kind": kind2, "level": "business", "name": name2,
-                                    "desc": (a.get("desc") or "").strip(),
-                                    "detail": {"aggregates": agg2,
-                                               "invariants": [str(v) for v in (a.get("invariants") or [])]},
-                                    "astRefs": [], "parentId": ""})
-                    if len(rebuilt) >= max_assets:
-                        break
+                rebuilt = _parse(out2.get("assets") or [])
                 # 仅当重试结果比首轮有更多带 aggregates 的资产时采用
                 if sum(1 for a in rebuilt if (a.get("detail") or {}).get("aggregates")) \
                         > sum(1 for a in assets if (a.get("detail") or {}).get("aggregates")):
                     assets = rebuilt
         except Exception as e:
-            logger.warning("[semantic] aggregate high 重试失败: %s", e)
-    if not assets:
-        return {"assets": [], "count": 0, "degraded": False, "reason": "empty"}
-    saved = _save_assets(pid, "project", "business", assets, {"root": root, "project": project,
-                                                             "table": {},
-                                                             "source": "codegraph",
-                                                             "srcHash": ""})
+            logger.warning("[semantic] aggregate one-batch 重试失败: %s", e)
+    return assets
+
+
+def _aggregate_high(root: Optional[str], project: Optional[str],
+                    model_id: Optional[str] = None,
+                    max_assets: int = 8) -> Dict[str, Any]:
+    """按需聚合 business 级(业务功能模块)资产：按 KB 组件树后序遍历逐节点聚合。
+
+    只消费已落库的 active logic/implementation 资产(锚定真实代码)，LLM 仅作归纳并填写
+    aggregates(组成资产 id)。每节点候选来自其 **direct 直属文件** 产出的逻辑资产
+    (中间节点独有的、未被叶子覆盖的文件不丢失)。每候选完整覆盖(超 _AGG_BATCH 条循环分批，
+    不截断)。落库后为下级资产回填 parentId(组合链)。单节点/单批失败隔离，不影响其它节点。
+    """
+    root = resolve_root(root, project)
+    if not root:
+        return {"assets": [], "count": 0, "degraded": True, "reason": "root"}
+    pid = project_id_for(root, project)
+    nodes = _postorder_component_nodes(root, project)
+    if not nodes:
+        return {"assets": [], "count": 0, "degraded": True, "reason": "comp"}
+    all_assets: List[dict] = []
+    node_errors: List[str] = []
+    for node in nodes:
+        cid = node.get("id") or ""
+        if not cid:
+            continue
+        cand_text = _high_asset_text_for_comp(pid, cid)
+        lines = [l for l in cand_text.split("\n") if l.strip()]
+        if not lines:
+            continue  # 该节点 direct 范围暂无 M/L 资产，无可聚合素材
+        node_assets: List[dict] = []
+        for i in range(0, len(lines), _AGG_BATCH):
+            batch = "\n".join(lines[i:i + _AGG_BATCH])
+            got = _aggregate_one_batch(node, batch, model_id, max_assets)
+            node_assets += got
+        if node_assets:
+            all_assets += node_assets
+        else:
+            node_errors.append(cid)
+            logger.info("[semantic] aggregate high 节点 %s(%s) 聚合产出 0", cid, node.get("name"))
+    if not all_assets:
+        reason = "llm" if node_errors else "empty"
+        return {"assets": [], "count": 0, "degraded": True, "reason": reason}
+    saved = _save_assets(pid, "project", "business", all_assets, {"root": root, "project": project,
+                                                                  "table": {},
+                                                                  "source": "codegraph",
+                                                                  "srcHash": ""})
     # 回填组合链: 下级资产 parentId → 上级 business 资产。
     _link_parent(pid, saved)
-    return {"assets": saved, "count": len(saved), "degraded": False, "reason": "ok"}
+    # 继承子资产 astRefs：business 资产锚定到真实符号 → 派生边可覆盖 business 层。
+    _inherit_ast_refs_from_aggregates(pid, saved)
+    # 同批合并(跨节点同名)会使 saved 含重复 id → 按 id 去重后返回。
+    dedup: Dict[str, dict] = {}
+    for a in saved:
+        if a.get("id"):
+            dedup.setdefault(a["id"], a)
+    uniq = list(dedup.values())
+    return {"assets": uniq, "count": len(uniq), "degraded": False, "reason": "ok"}
+
+
+def _inherit_ast_refs_from_aggregates(pid: str, high_assets: List[dict]) -> None:
+    """business 资产继承 aggregates 子资产的 astRefs(并集去重)。
+
+    使 `_derive_project_edges` 能按符号把 business 资产映射到 codegraph 节点，
+    从而为业务层合成稳定边(无 LLM 漂移)，同时保持 business 资产自身零符号的纯度。
+    """
+    for h in high_assets:
+        hid = h.get("id") or ""
+        if not hid:
+            continue
+        child_ids = [a.get("assetId") or "" for a in (h.get("detail") or {}).get("aggregates") or []]
+        merged: List[dict] = []
+        seen: set = set()
+        for cid in child_ids:
+            if not cid or not str(cid).startswith("sa-"):
+                continue
+            try:
+                child = store.SemanticAssetsStore.get(cid)
+            except Exception:
+                continue
+            for r in (child.get("astRefs") or []) if child else []:
+                key = json.dumps(r, ensure_ascii=False, sort_keys=True)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(r)
+        if not merged:
+            continue
+        try:
+            store.SemanticAssetsStore.update(hid, {"astRefs": merged[:40], "updatedAt": _ts()})
+        except Exception:
+            pass
 
 
 def _link_parent(pid: str, high_assets: List[dict]) -> None:
@@ -2369,7 +3128,7 @@ def batch_manage(root: Optional[str], project: Optional[str],
                  include_other: bool = False,
                  kinds: Optional[List[str]] = None,
                  model_id: Optional[str] = None,
-                 level: str = "interaction",
+                 level: str = "implementation",
                  scopes: Optional[List[str]] = None,
                  dry_run: bool = False) -> Dict[str, Any]:
     """批量管理组件范围语义资产。
@@ -2414,12 +3173,16 @@ def batch_manage(root: Optional[str], project: Optional[str],
                                                          model_id=model_id, use_llm=True,
                                                          levels=levels)
         high_count = 0
-        if (level or "") in ("", "all", "business"):
-            high_count = (_aggregate_high_best_effort(root, project, model_id) or {}).get("count") or 0
-        logger.info("[semantic] batch extract 完成: 文件=%d 资产=%d high=%d",
-                    done, len(assets), high_count)
+        high_reason = "ok"
+        # 业务层暂停再生：仅显式请求 level="business" 才聚合。
+        if (level or "") == "business":
+            agg = _aggregate_high_best_effort(root, project, model_id) or {}
+            high_count = agg.get("count") or 0
+            high_reason = agg.get("reason") or "ok"
+        logger.info("[semantic] batch extract 完成: 文件=%d 资产=%d high=%d high_reason=%s",
+                    done, len(assets), high_count, high_reason)
         return {"action": action, "count": len(assets), "components": len(comp_ids),
-                "cleared": [], "updated": [], "high": high_count}
+                "cleared": [], "updated": [], "high": high_count, "highReason": high_reason}
     if action != "clear":
         return {"action": action, "count": 0, "cleared": [], "updated": []}
     pid = project_id_for(root, project)
@@ -2669,7 +3432,7 @@ def _extract_one_comp(task_id: str, cid: str, name: str, kinds: Optional[List[st
             return result
         assets, _, failed = _extract_file_set_levels(root, project, files, kinds,
                                                      model_id=model_id, use_llm=True,
-                                                     levels=("algorithm", "interaction", "infra"))
+                                                     levels=("implementation",))
         result["count"] = len(assets)
         if failed:
             result["status"] = "failed"
@@ -2726,11 +3489,6 @@ def _run_extract_task(task_id: str, comp_ids: List[str], names: Dict[str, str],
     else:
         status = "failed"
         tail = "全部组件提取失败，请检查 LLM/KB 后重试。"
-    high_count = 0
-    if done > 0:
-        high_count = (_aggregate_high_best_effort(root, project, model_id) or {}).get("count") or 0
-        _task_append_message(task_id, "assistant",
-                             f"🏷 业务概念级(high)聚合完成，产出 {high_count} 个资产。")
     _task_append_message(task_id, "assistant", f"✅ {tail}")
     _task_update_progress(task_id, status=status)
     with _EXTRACT_LOCK:
@@ -2781,9 +3539,34 @@ def get_extract_task(task_id: str) -> Optional[dict]:
     return store.ExtractTaskStore.get(task_id)
 
 
-def extract_task_status(task_id: str) -> Dict[str, Any]:
-    """任务状态快照(供前端轮询)：status/progress/messages + 概要。"""
+def _task_thread_alive(task_id: str) -> bool:
+    """任务对应的后台线程是否仍存活(模块内进程重启后均为 False → 孤儿任务)。"""
+    with _EXTRACT_LOCK:
+        t = _EXTRACT_THREADS.get(task_id)
+        return bool(t and t.is_alive())
+
+
+def _reap_orphan_extract_task(task_id: str) -> Optional[dict]:
+    """回收孤儿任务：状态为 running 但后台线程已死(进程强杀/重启遗留)。
+    标记 failed 并追加提示消息，返回回收后的任务；非孤儿返回 None。"""
     task = store.ExtractTaskStore.get(task_id)
+    if not task:
+        return None
+    if (task.get("status") or "running") == "running" and not _task_thread_alive(task_id):
+        _task_append_message(task_id, "assistant",
+                             "⚠ 提取任务中断：服务进程已重启/关闭，后台线程被终止，无法继续。请重新发起提取。")
+        store.ExtractTaskStore.update(task_id, {"status": "failed", "updatedAt": _ts()})
+        logger.info("[semantic] reaped orphan extract task %s (process restarted)", task_id)
+        return store.ExtractTaskStore.get(task_id)
+    return None
+
+
+def extract_task_status(task_id: str) -> Dict[str, Any]:
+    """任务状态快照(供前端轮询)：status/progress/messages + 概要。
+    进程重启遗留的 running 孤儿任务在此被标记为 failed，避免前端永久卡在"提取中"。"""
+    task = _reap_orphan_extract_task(task_id)
+    if task is None:
+        task = store.ExtractTaskStore.get(task_id)
     if not task:
         return {"found": False}
     msgs = task.get("messages") or []
@@ -3068,16 +3851,15 @@ def handle_stale_asset(asset_id: str, root: Optional[str], project: Optional[str
         return {"status": "regenerated", "refreshed": False, "regenerated": True,
                 "asset": res["assets"][0] if res["assets"] else None,
                 "degraded": res.get("degraded", False)}
-    # 刷新失败(LLM/解析均不可用) → 软删 + 启发式重新生成(离线兜底)
+    # 刷新失败(LLM/解析均不可用) → 软删 + 启发式重新生成(离线兜底)。
+    # 业务层+逻辑层暂停再生：仅按实现层主类别单趟重新生成。
     store.SemanticAssetsStore.mark_deleted(asset_id)
     try:
         ctx = collect_context(root, scope_type, scope_key,
                               files=scope_files, symbols=scope_symbols,
                               project=project)
         pid = project_id_for(root, project)
-        heur = []
-        for k in SEMANTIC_KINDS:
-            heur += _heuristic_extract(k, ctx, level="interaction")
+        heur = _heuristic_extract_primary(ctx, list(SEMANTIC_KINDS))
         if heur:
             saved = _save_assets(pid, scope_type, scope_key, heur, ctx)
             return {"status": "regenerated", "refreshed": False, "regenerated": True,
@@ -3111,7 +3893,7 @@ def referencing_assets(asset_id: str) -> list[dict]:
 
 # ── 上下文展开(任务执行/需求设计注入) ─────────────────────────
 
-_SA_ID_RE = re.compile(r"\bsa-(?:d|f|c|dcf|hs|hb|hr|hx|ms|mb|mr|mx|ls|lb|lr|lx)-\d+\b")
+_SA_ID_RE = re.compile(r"\bsa-(?:s|d)-(?:i|l|b)-(?:e|c|s|r|p|d)-\d+\b")
 
 
 def context_block_for(root: Optional[str], project: Optional[str],
@@ -3137,7 +3919,7 @@ def context_block_for(root: Optional[str], project: Optional[str],
         if not a or a.get("status") != "active" or a.get("needsUpdate"):
             continue
         detail = a.get("detail") or {}
-        line = (f"- {a.get('name')}({a.get('kind')}/{a.get('level') or 'interaction'}): "
+        line = (f"- {a.get('name')}({a.get('kind')}/{a.get('level') or 'logic'}): "
                 f"{a.get('desc') or ''}")
         refs = (a.get("astRefs") or [])[:8]
         if refs:
@@ -3339,13 +4121,31 @@ def _graph_node_detail(a: dict) -> dict:
     return out
 
 
+def _n_hop_subgraph(edges: List[dict], node_ids: set, focus_id: str, hops: int) -> set:
+    """从 focus_id 出发的无向 N 跳节点集(边仅在 node_ids 内的节点间计数)。"""
+    keep = {focus_id}
+    for _ in range(max(1, hops)):
+        add: set = set()
+        for e in edges:
+            if e.get("from") in keep and e.get("to") in node_ids:
+                add.add(e["to"])
+            if e.get("to") in keep and e.get("from") in node_ids:
+                add.add(e["from"])
+        keep |= add
+    return keep
+
+
 def semantic_graph(root: Optional[str], project: Optional[str],
                    kind: str = "", scopes: Optional[List[str]] = None,
-                   level: str = "", limit: int = 2000) -> Dict[str, Any]:
+                   level: str = "", limit: int = 2000,
+                   focus: str = "", hops: int = 1) -> Dict[str, Any]:
     """语义层图谱：节点=语义资产，边=资产间 relations，锚点=AST 引用。
 
     边 = 存库基础 relations(按 id/name/nameAlias/符号解析) ∪ 程序化派生边
     (codegraph 边，_derive_project_edges)。派生边不持久化，随粒度筛选稳定合成。
+
+    focus: 单资产聚焦——仅返回该资产周围的 hops 跳子图(默认 1 跳)；
+    未传 focus 时返回范围内全部节点。
     """
     _lazy_reconcile(root, project)
     pid = project_id_for(root, project)
@@ -3360,8 +4160,8 @@ def semantic_graph(root: Optional[str], project: Optional[str],
     for a in rows:
         aid = a.get("id") or ""
         nodes.append({
-            "id": aid, "kind": a.get("kind") or "asset",
-            "level": a.get("level") or "interaction",
+            "id": aid, "kind": a.get("kind") or "entity",
+            "level": a.get("level") or "logic",
             "name": a.get("name") or "", "desc": a.get("desc") or "",
             "change": a.get("change") or "same", "status": a.get("status") or "active",
             "scopeType": a.get("scopeType") or "", "scopeKey": a.get("scopeKey") or "",
@@ -3378,6 +4178,16 @@ def semantic_graph(root: Optional[str], project: Optional[str],
                           "resolved": resolved,
                           "type": rel.get("type") or "",
                           "semantic": rel.get("semantic") or ""})
+        # 动态过程的三段端点(输入/输出) → 类型化边：inputs=uses/reads, outputs=writes/sends。
+        for ep, etype in (("inputs", "uses"), ("outputs", "writes")):
+            for rel in detail.get(ep) or []:
+                tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), idx)
+                if not tgt:
+                    continue
+                edges.append({"from": aid, "to": tgt,
+                              "resolved": resolved,
+                              "type": rel.get("type") or etype,
+                              "semantic": rel.get("semantic") or ""})
         for r in a.get("astRefs") or []:
             if r.get("file"):
                 anchors.append({"assetId": aid, "file": r.get("file"),
@@ -3394,6 +4204,14 @@ def semantic_graph(root: Optional[str], project: Optional[str],
             continue
         seen_edges.add(key)
         merged.append(e)
+    # 单资产聚焦：仅保留 focus 周围 hops 跳子图(默认 1 跳)。
+    if focus:
+        f_id = (focus or "").strip()
+        if f_id and f_id in {n["id"] for n in nodes}:
+            keep = _n_hop_subgraph(merged, {n["id"] for n in nodes}, f_id, hops)
+            nodes = [n for n in nodes if n["id"] in keep]
+            merged = [e for e in merged if e.get("from") in keep and e.get("to") in keep]
+            anchors = [a for a in anchors if a.get("assetId") in keep]
     return {"nodes": nodes, "edges": merged, "anchors": anchors,
             "count": len(nodes)}
 
@@ -3547,14 +4365,17 @@ async def api_semantic_stats(root: Optional[str] = None, project: Optional[str] 
 
 @router.get("/kb/semantic/graph")
 async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
-                    kind: str = "", scope: str = "", level: str = "", limit: int = 2000):
+                    kind: str = "", scope: str = "", level: str = "", limit: int = 2000,
+                    focus: str = "", hops: int = 1):
     """语义层图谱：节点=语义资产，边=资产 relations，锚点=AST 引用。
 
     scope: 逗号分隔的组件范围(scope_key)；kind: 资产种类过滤；level: 抽象粒度过滤。
+    focus: 单资产聚焦(仅返回其周围 hops 跳子图)；hops: 聚焦跳数，默认 1。
     """
     scopes = [s.strip() for s in (scope or "").split(",") if s.strip()] or None
     lvl = level if level in SEMANTIC_LEVELS else ""
-    return ok(semantic_graph(root, project, kind, scopes, level=lvl, limit=limit))
+    return ok(semantic_graph(root, project, kind, scopes, level=lvl, limit=limit,
+                             focus=focus, hops=hops))
 
 
 @router.get("/kb/semantic/{asset_id}")
@@ -3588,7 +4409,7 @@ async def api_handle_stale(request: Request):
 async def api_extract(request: Request):
     body = await request.json()
     st, sk, files, symbols = _scope(body)
-    lvl = body.get("level") or "interaction"
+    lvl = body.get("level") or "implementation"
     logger.info("[semantic] /kb/semantic/extract 请求: type=%s key=%s files=%d symbols=%d kinds=%s level=%s",
                 st, sk or "-", len(files or []), len(symbols or []), body.get("kinds"), lvl)
     res = extract_scope(body.get("root"), body.get("project"),

@@ -258,17 +258,13 @@ export function callsToMermaid(dataFlows: DataFlow[], components: ArchComponent[
 
 // ============ 语义资产图谱 ============
 
-const SEMANTIC_LEVEL_ORDER = ['business', 'interaction', 'algorithm', 'infra'] as const
-
+const SEMANTIC_LEVEL_ORDER = ['business', 'logic', 'implementation'] as const
 const SEMANTIC_LEVEL_LABEL: Record<string, string> = {
-  business: '业务',
-  interaction: '交互',
-  algorithm: '算法',
-  infra: '基建',
+  business: '业务', logic: '逻辑', implementation: '实现',
 }
 
 function _semLevel(n?: string): string {
-  return SEMANTIC_LEVEL_ORDER.includes(n as any) ? (n as string) : 'interaction'
+  return SEMANTIC_LEVEL_ORDER.includes(n as any) ? (n as string) : 'logic'
 }
 
 /** 资产 id → 稳定序号节点标识(mermaid/plantuml 符号安全)。 */
@@ -439,19 +435,115 @@ function _safeIdent(s: string, fallback = 'f'): string {
 /** 推荐图类型：类别 × 粒度。 */
 export function recommendedSemanticView(kind?: string, level?: string): SemanticGraphViewId {
   const lv = _semLevel(level)
-  if (kind === 'asset') return lv === 'business' ? 'mindmap' : lv === 'interaction' ? 'er' : 'class'
+  if (kind === 'entity') return lv === 'business' ? 'mindmap' : lv === 'logic' ? 'er' : 'class'
   if (kind === 'process') return lv === 'business' ? 'activity' : 'seq'
   if (kind === 'decision') return lv === 'business' ? 'mindmap' : 'state'
   if (kind === 'contract') return 'seq'
   if (kind === 'state') return 'state'
-  if (lv === 'infra') return 'flow'
+  if (kind === 'rule') return 'mindmap'
+  if (lv === 'implementation') return 'flow'
   return lv === 'business' ? 'mindmap' : 'flow'
+}
+
+/** 视图可用性判定的最小节点形状(与语义图谱节点 detail 兼容)。 */
+type ViewNodeShape = {
+  kind?: string
+  level?: string
+  detail?: {
+    fields?: { name?: string }[]
+    steps?: unknown[]
+    branches?: unknown[]
+    trigger?: unknown
+    states?: unknown[]
+    transitions?: unknown[]
+  }
+}
+
+/** 按数据区间(粒度 + 节点类别构成 + detail 内容)动态给出支持的图类型(供下拉只显示可用的)。 */
+export function supportedViewsFor(
+  level: string,
+  nodes: ViewNodeShape[],
+): SemanticGraphViewId[] {
+  const lv = level || 'all'
+  const kinds = new Set(nodes.map((n) => n.kind || 'entity'))
+  const has = (k: string) => kinds.has(k)
+  const byKind = (k: string) => nodes.filter((n) => n.kind === k)
+  const hasFields = (k: string) => byKind(k).some((n) => (n.detail?.fields ?? []).length > 0)
+  const hasFlowDetail = (k: string) => byKind(k).some((n) =>
+    (n.detail?.steps ?? []).length > 0 || (n.detail?.branches ?? []).length > 0 || !!n.detail?.trigger)
+  const hasStates = () => byKind('state').some((n) =>
+    (n.detail?.states ?? []).length > 0 && (n.detail?.transitions ?? []).length > 0)
+  const seqParticipants = nodes.filter((n) => n.kind === 'process' || n.kind === 'contract').length
+  // 业务级优先 mindmap/activity；其余按 kind 分布。
+  if (lv === 'business') {
+    const out: SemanticGraphViewId[] = ['mindmap']
+    if (has('process') && hasFlowDetail('process')) out.push('activity')
+    if ((has('contract') || has('entity') || has('rule')) && hasFields('entity')) out.push('class')
+    return [...new Set(out)]
+  }
+  const out: SemanticGraphViewId[] = []
+  if (has('state') && hasStates()) out.push('state')
+  if (has('process')) {
+    out.push('flow')
+    if (seqParticipants <= SEQ_PARTICIPANT_BUDGET) out.push('seq')
+    if (hasFlowDetail('process')) out.push('activity')
+  }
+  if ((has('entity') || has('rule')) && hasFields('entity')) out.push('class', 'er')
+  if (has('contract') && seqParticipants <= SEQ_PARTICIPANT_BUDGET) out.push('seq', 'class')
+  if (has('decision')) out.push('state')
+  out.push('flow')
+  return [...new Set(out)]
+}
+
+/** 视图预算(节点数上限，超限不提供该视图)。 */
+export const SEQ_PARTICIPANT_BUDGET = 30
+export const MINDMAP_NODE_BUDGET = 120
+export const FLOW_NODE_BUDGET = 200
+
+/** 不适用的视图及其原因(供下拉工具提示说明「为何不可选」)。 */
+export function viewUnavailableReasons(
+  level: string,
+  nodes: ViewNodeShape[],
+): Partial<Record<SemanticGraphViewId, string>> {
+  const lv = level || 'all'
+  const reasons: Partial<Record<SemanticGraphViewId, string>> = {}
+  const has = (k: string) => nodes.some((n) => n.kind === k)
+  const byKind = (k: string) => nodes.filter((n) => n.kind === k)
+  const hasFields = (k: string) => byKind(k).some((n) => (n.detail?.fields ?? []).length > 0)
+  const hasFlowDetail = (k: string) => byKind(k).some((n) =>
+    (n.detail?.steps ?? []).length > 0 || (n.detail?.branches ?? []).length > 0 || !!n.detail?.trigger)
+  const seqParticipants = nodes.filter((n) => n.kind === 'process' || n.kind === 'contract').length
+  const businessOnly = lv === 'business'
+  if ((has('entity') || has('rule') || (businessOnly && has('contract'))) && !hasFields('entity')) {
+    reasons.er = '无带属性的实体资产(ER 图需要实体字段)'
+    reasons.class = '无带属性的实体资产(类图需要实体字段)'
+  } else if (!has('entity') && !has('rule')) {
+    reasons.er = '无实体/规则资产'
+    reasons.class = '无实体/规则资产'
+  }
+  if (seqParticipants > SEQ_PARTICIPANT_BUDGET) {
+    reasons.seq = `参与者过多(${seqParticipants} > ${SEQ_PARTICIPANT_BUDGET})，时序图不清晰`
+  } else if (!has('process') && !has('contract')) {
+    reasons.seq = '无过程/契约资产'
+  }
+  if (businessOnly && has('process') && !hasFlowDetail('process')) {
+    reasons.activity = '过程资产缺少步骤/分支细节'
+  } else if (!has('process')) {
+    reasons.activity = '无过程资产'
+  }
+  if (has('state') && !byKind('state').some((n) => (n.detail?.states ?? []).length > 0)) {
+    reasons.state = '状态资产缺少状态集定义'
+  }
+  if (nodes.length > MINDMAP_NODE_BUDGET) {
+    reasons.mindmap = `节点过多(${nodes.length} > ${MINDMAP_NODE_BUDGET})`
+  }
+  return reasons
 }
 
 // ---- 类图 ----
 
 export function semanticClassDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
-  const classes = nodes.filter((n) => n.kind === 'asset' || (n.kind === 'contract' && n.level === 'algorithm'))
+  const classes = nodes.filter((n) => n.kind === 'entity' || (n.kind === 'contract' && n.level === 'implementation'))
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['classDiagram', '  direction LR']
   lines.push('  classDef asset fill:#313244,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4')
@@ -486,7 +578,7 @@ export function semanticClassDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
 }
 
 export function semanticClassDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
-  const classes = nodes.filter((n) => n.kind === 'asset' || (n.kind === 'contract' && n.level === 'algorithm'))
+  const classes = nodes.filter((n) => n.kind === 'entity' || (n.kind === 'contract' && n.level === 'implementation'))
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['@startuml', 'skinparam classBackgroundColor #313244', 'skinparam classBorderColor #45475a',
     'skinparam classFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825',
@@ -529,7 +621,7 @@ function _erRelationArrow(type: string): string {
 }
 
 export function semanticErDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
-  const entities = nodes.filter((n) => n.kind === 'asset')
+  const entities = nodes.filter((n) => n.kind === 'entity')
   // mermaid erDiagram 实体 id 需为 ASCII 标识符：用资产 id(稳定且唯一)，业务名以注释行辅助。
   const nameMap = new Map<string, string>(entities.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['erDiagram']
@@ -557,7 +649,7 @@ export function semanticErDiagramToMermaid(nodes: _Node[], edges: _Edge[]): stri
 }
 
 export function semanticErDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
-  const entities = nodes.filter((n) => n.kind === 'asset')
+  const entities = nodes.filter((n) => n.kind === 'entity')
   const nameMap = new Map<string, string>(entities.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['@startuml', 'skinparam classBackgroundColor #313244', 'skinparam classBorderColor #45475a',
     'skinparam classFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825',
@@ -769,7 +861,7 @@ export function semanticStateDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): 
 function _activityOrder(nodes: _Node[]): _Node[] {
   return [...nodes].sort((a, b) => {
     const pr = (k: string) => (k === 'process' ? 0 : k === 'decision' ? 1 : k === 'contract' ? 2 : 3)
-    const lv = (l?: string) => (l === 'interaction' ? 0 : l === 'algorithm' ? 1 : 2)
+    const lv = (l?: string) => (l === 'logic' ? 0 : l === 'implementation' ? 1 : 2)
     return pr(a.kind) - pr(b.kind) || lv(a.level) - lv(b.level) || (a.name || '').localeCompare(b.name || '')
   })
 }

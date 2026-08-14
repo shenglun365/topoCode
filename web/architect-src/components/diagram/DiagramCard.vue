@@ -15,15 +15,25 @@ const props = defineProps<{
   playKey?: number
   /** 初始语言；缺省按 diagrams 推导(toposcript > mermaid)。 */
   defaultLang?: DiagramLang
+  /** 允许切换的语言(缺省全部)。语义图谱等场景可排除 toposcript。 */
+  allowedLangs?: DiagramLang[]
+  /** 隐藏顶部标题栏(由外部工具栏接管语言切换/源码/全屏)。 */
+  headerless?: boolean
 }>()
 
 const { t } = useI18n()
-const defaultLang = computed<DiagramLang>(() => (
-  props.defaultLang
-  ?? (props.diagrams.toposcript ? 'toposcript' : 'mermaid')
-))
-
-const langs: DiagramLang[] = ['mermaid', 'plantuml', 'toposcript']
+/** 可切换语言：按 allowedLangs 过滤；缺省全部(含 toposcript)。 */
+const langs = computed<DiagramLang[]>(() => {
+  if (props.allowedLangs?.length) return props.allowedLangs
+  return ['mermaid', 'plantuml', 'toposcript']
+})
+const defaultLang = computed<DiagramLang>(() => {
+  const cands = langs.value
+  if (props.defaultLang && cands.includes(props.defaultLang)) return props.defaultLang
+  if (props.diagrams.toposcript && cands.includes('toposcript')) return 'toposcript'
+  if (cands.includes('mermaid')) return 'mermaid'
+  return cands[0] ?? 'mermaid'
+})
 const lang = ref<DiagramLang>(defaultLang.value)
 const loading = ref(false)
 const svg = ref('')
@@ -327,12 +337,24 @@ function fsDrag(e: MouseEvent) {
 function fsEndDrag() {
   fsDragging = false
 }
+
+/** 外部工具栏接管(headerless 时)：切换语言 / 源码 / 全屏。 */
+function setLang(l: DiagramLang) {
+  if (langs.value.includes(l)) lang.value = l
+}
+function toggleSource() {
+  showSource.value = !showSource.value
+}
+defineExpose({ currentLang: lang, setLang, toggleSource, openFullscreen })
 </script>
 
 <template>
   <!-- eslint-disable vue/no-v-html -->
   <div class="panel overflow-hidden flex flex-col min-h-0">
-    <div class="panel-header shrink-0">
+    <div
+      v-if="!headerless"
+      class="panel-header shrink-0"
+    >
       <div class="flex items-center gap-2 min-w-0">
         <span class="truncate font-medium">{{ title }}</span>
         <span

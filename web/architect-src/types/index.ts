@@ -15,14 +15,14 @@ export type ReqPoolStatus =
   | 'cancelled'
 
 export type AssetType = 'component' | 'er' | 'orm' | 'entity' | 'flow' | 'dataflow'
-  | 'asset' | 'process' | 'decision' | 'contract' | 'state'
+  | 'asset' | 'process' | 'decision' | 'contract' | 'state' | 'rule'
   | 'data_structure' | 'processing_flow' | 'control_logic'  // 废弃别名(兼容历史数据)
 
-/** 语义数据资产类别(关切维度)。旧值 data_structure/processing_flow/control_logic 为废弃别名。 */
-export type SemanticAssetKind = 'asset' | 'process' | 'decision' | 'contract' | 'state'
+/** 语义数据资产类别：静态·定义(entity/contract/state/rule) × 动态·处理(process/decision)。 */
+export type SemanticAssetKind = 'entity' | 'contract' | 'state' | 'rule' | 'process' | 'decision'
 
-/** 语义资产抽象粒度(越低越贴近代码实现)。 */
-export type SemanticAssetLevel = 'business' | 'interaction' | 'algorithm' | 'infra'
+/** 语义资产抽象粒度(业务→逻辑→实现，越低越贴近代码)。 */
+export type SemanticAssetLevel = 'business' | 'logic' | 'implementation'
 
 export interface SemanticAssetField {
   name: string
@@ -74,12 +74,19 @@ export interface SemanticAssetDetail {
   trigger?: string
   steps?: SemanticAssetStep[]
   branches?: SemanticAssetBranch[]
+  /** 动态过程的三段端点：输入/输出(直连其它资产 id 或符号名)。 */
+  inputs?: SemanticAssetRelation[]
+  outputs?: SemanticAssetRelation[]
   /** state 类别：状态集合与允许迁移(事件驱动)。 */
   states?: SemanticAssetState[]
   transitions?: SemanticAssetTransition[]
+  /** rule 类别：配置来源/约束/阈值(仅配置化拆分时)。 */
+  configSource?: string
+  constraints?: string[]
+  thresholds?: { key?: string; value?: string }[]
   /** 横向切面标签(transactional/caching/security/observability/async 等)。 */
   tags?: string[]
-  /** H 级聚合：组成该业务概念的下级资产(组合链)。 */
+  /** business 级聚合：组成该业务概念的下级资产(组合链)。 */
   aggregates?: { assetId: string; name?: string; role?: string }[]
 }
 

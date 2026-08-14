@@ -86,8 +86,8 @@ def data_asset_catalog(root: Optional[str], project: Optional[str],
         from . import semantic_assets as S
         for a in (S.search(root, project, "") or []):
             items.append({"assetId": a.get("id") or "", "name": a.get("name") or "",
-                          "assetType": a.get("kind") or "asset",
-                          "level": a.get("level") or "interaction",
+                          "assetType": a.get("kind") or "entity",
+                          "level": a.get("level") or "logic",
                           "desc": a.get("desc") or "", "kind": "semantic"})
     except Exception:
         pass
@@ -131,7 +131,6 @@ def req_harness_scope(req: Dict[str, Any], root: Optional[str], project: Optiona
                       model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向1: 按业务需求圈定需要迭代的数据资产范围(核心/相关 + 业务理由)。"""
     from .req_agent import llm_sync, get_max_tokens_preference
-    _aggregate_high_best_effort(root, project, model_id)
     catalog = data_asset_catalog(root, project)
     items = catalog["items"]
     title = req.get("title", "")
@@ -388,14 +387,11 @@ def diff_models(before: List[Dict[str, Any]], after: List[Dict[str, Any]]) -> Di
 
 def _aggregate_high_best_effort(root: Optional[str], project: Optional[str],
                                 model_id: Optional[str] = None) -> None:
-    """需求分析/设计前按需聚合 H 级业务概念资产(失败不阻塞，仅记录日志)。"""
-    try:
-        from .semantic_assets import _aggregate_high
-        res = _aggregate_high(root, project, model_id=model_id)
-        if res.get("count"):
-            logger.info("[design] 按需聚合 H 级资产: %d 个", res.get("count"))
-    except Exception as e:
-        logger.warning("[design] 按需聚合 H 级资产失败(忽略): %s", e)
+    """需求分析/设计前按需聚合 H 级业务概念资产(失败不阻塞，仅记录日志)。
+
+    业务层当前暂停再生：仅保留既有 business 资产只读展示，不再自动触发聚合。
+    """
+    logger.info("[design] 业务层暂停再生: 跳过自动聚合 H 级资产")
 
 
 def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
@@ -403,7 +399,6 @@ def req_harness_design(req: Dict[str, Any], analysis: Dict[str, Any],
                        model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """方向2: 基于需求 + 已圈定范围生成设计方案(数据层/接口流程层/语义层)。"""
     from .req_agent import llm_sync, get_max_tokens_preference
-    _aggregate_high_best_effort(root, project, model_id)
     catalog = data_asset_catalog(root, project)
     model = catalog["model"]
     before = [_norm_table(t) for t in (model.get("erTables") or [])]
