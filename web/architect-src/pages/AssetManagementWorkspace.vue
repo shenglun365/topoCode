@@ -5,10 +5,12 @@ import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
+  ChartBarSquareIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
+import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { semanticAssetService, type ExtractTaskMessage, type ExtractTaskStatus, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
@@ -17,7 +19,7 @@ import { useSplitPane } from '@/composables/useSplitPane'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { useChatModel } from '@/composables/useChatModel'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import type { AssetDetail, ConversationDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
+import type { AssetDetail, AssetDiagramItem, ConversationDetail, FlowViewResult, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
 
@@ -64,8 +66,51 @@ async function onDeleteTurn(index: number) {
 }
 
 // ---- 资产内容区 ----
-type AssetTab = 'overview' | 'semantic' | 'component' | 'graph'
+type AssetTab = 'overview' | 'semantic' | 'component' | 'graph' | 'flow'
 const tab = ref<AssetTab>('overview')
+
+// ---- 流程图 tab：入口(契约路由) → 业务活动图(服务端确定性建图) ----
+const flowLoading = ref(false)
+const flowView = ref<FlowViewResult | null>(null)
+const flowError = ref('')
+const flowStepsOpen = reactive<Record<string, boolean>>({})
+
+async function loadFlowView() {
+  flowLoading.value = true
+  flowError.value = ''
+  try {
+    flowView.value = await semanticAssetService.flowView()
+  } catch (e: any) {
+    flowError.value = e?.message ?? String(e)
+  } finally {
+    flowLoading.value = false
+  }
+}
+
+function flowKey(f: { entry?: { file?: string; symbol?: string; path?: string } }): string {
+  return `${f.entry?.file ?? ''}::${f.entry?.symbol ?? ''}${f.entry?.path ?? ''}`
+}
+
+// ---- 静态资产图弹窗(entity → 类图，state → 状态图) ----
+const diagramModalOpen = ref(false)
+const diagramModalLoading = ref(false)
+const diagramModalItems = ref<AssetDiagramItem[]>([])
+const diagramModalTitle = ref('')
+
+async function openAssetDiagram(a: SemanticAsset) {
+  diagramModalOpen.value = true
+  diagramModalLoading.value = true
+  diagramModalTitle.value = a.name
+  diagramModalItems.value = []
+  try {
+    const res = await semanticAssetService.assetDiagram([a.id])
+    diagramModalItems.value = res.diagrams ?? []
+  } catch {
+    diagramModalItems.value = []
+  } finally {
+    diagramModalLoading.value = false
+  }
+}
 const kind = ref<SemanticAssetKind | ''>('')
 const level = ref<SemanticAssetLevel | ''>('')
 /** 语义资产 tab：组件层级(L0/L1)筛选。空 = 全部层级(按组件树展开)；L0/L1 = 以该层组件为树根。 */
@@ -886,6 +931,8 @@ function onSearch() {
   } else if (tab.value === 'semantic') {
     page.value = 1
     loadSemantic()
+  } else if (tab.value === 'flow') {
+    loadFlowView()
   } else {
     loadComponents()
   }
@@ -922,7 +969,7 @@ onUnmounted(() => stopExtractPoll())
         </h2>
         <div class="flex items-center gap-1">
           <button
-            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
+            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'flow' as const, label: t('assetMgmt.tab.flow') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
@@ -970,10 +1017,10 @@ onUnmounted(() => stopExtractPoll())
       >
         <div class="panel-header shrink-0 relative !justify-start gap-1.5">
           <span class="flex items-center gap-2">
-            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'overview' ? t('assetMgmt.tab.overview') : tab === 'semantic' ? t('assetMgmt.tab.semantic') : tab === 'graph' ? t('assetMgmt.tab.graph') : t('assetMgmt.tab.component') }}
+            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'overview' ? t('assetMgmt.tab.overview') : tab === 'semantic' ? t('assetMgmt.tab.semantic') : tab === 'flow' ? t('assetMgmt.tab.flow') : tab === 'graph' ? t('assetMgmt.tab.graph') : t('assetMgmt.tab.component') }}
           </span>
           <input
-            v-if="tab !== 'graph' && tab !== 'overview'"
+            v-if="tab !== 'graph' && tab !== 'overview' && tab !== 'flow'"
             v-model="q"
             class="input !py-0.5 !px-2 !text-[11px] w-44 font-mono ml-3"
             :placeholder="t('assetMgmt.searchPlaceholder')"
@@ -986,9 +1033,15 @@ onUnmounted(() => stopExtractPoll())
             :title="t('assetMgmt.compType')"
             @change="onSearch"
           >
-            <option value="all">{{ t('assetMgmt.compTypeAll') }}</option>
-            <option value="INCLUDE">{{ t('assetMgmt.compTypeInclude') }}</option>
-            <option value="CALL">{{ t('assetMgmt.compTypeCall') }}</option>
+            <option value="all">
+              {{ t('assetMgmt.compTypeAll') }}
+            </option>
+            <option value="INCLUDE">
+              {{ t('assetMgmt.compTypeInclude') }}
+            </option>
+            <option value="CALL">
+              {{ t('assetMgmt.compTypeCall') }}
+            </option>
           </select>
           <select
             v-if="tab === 'component'"
@@ -997,9 +1050,15 @@ onUnmounted(() => stopExtractPoll())
             :title="t('assetMgmt.compLevel')"
             @change="onSearch"
           >
-            <option value="all">{{ t('assetMgmt.compLevelAll') }}</option>
-            <option value="L0">L0</option>
-            <option value="L1">L1</option>
+            <option value="all">
+              {{ t('assetMgmt.compLevelAll') }}
+            </option>
+            <option value="L0">
+              L0
+            </option>
+            <option value="L1">
+              L1
+            </option>
           </select>
           <select
             v-if="tab === 'semantic'"
@@ -1007,12 +1066,16 @@ onUnmounted(() => stopExtractPoll())
             class="input !py-0.5 !px-2 !text-[11px] w-auto"
             @change="onSearch"
           >
-            <option value="">{{ t('assetMgmt.allKinds') }}</option>
+            <option value="">
+              {{ t('assetMgmt.allKinds') }}
+            </option>
             <option
               v-for="k in kinds"
               :key="k.value"
               :value="k.value"
-            >{{ k.label }}</option>
+            >
+              {{ k.label }}
+            </option>
           </select>
           <select
             v-if="tab === 'semantic'"
@@ -1020,21 +1083,31 @@ onUnmounted(() => stopExtractPoll())
             class="input !py-0.5 !px-2 !text-[11px] w-auto"
             @change="onSearch"
           >
-            <option value="">{{ t('assetMgmt.allLevels') }}</option>
+            <option value="">
+              {{ t('assetMgmt.allLevels') }}
+            </option>
             <option
               v-for="l in levels"
               :key="l.value"
               :value="l.value"
-            >{{ l.label }}</option>
+            >
+              {{ l.label }}
+            </option>
           </select>
           <select
             v-if="tab === 'semantic'"
             v-model="compLevelSel"
             class="input !py-0.5 !px-2 !text-[11px] w-auto"
           >
-            <option value="all">{{ t('assetMgmt.allCompLevels') }}</option>
-            <option value="L0">L0</option>
-            <option value="L1">L1</option>
+            <option value="all">
+              {{ t('assetMgmt.allCompLevels') }}
+            </option>
+            <option value="L0">
+              L0
+            </option>
+            <option value="L1">
+              L1
+            </option>
           </select>
           <button
             class="btn btn-xs btn-ghost"
@@ -1058,21 +1131,30 @@ onUnmounted(() => stopExtractPoll())
                 class="btn btn-xs btn-ghost"
                 :disabled="extractRunning"
                 @click="selectAllExtract"
-              >{{ t('assetMgmt.selectAll') }}</button>
+              >
+                {{ t('assetMgmt.selectAll') }}
+              </button>
               <button
                 class="btn btn-xs btn-ghost"
                 :disabled="extractRunning"
                 @click="invertExtract"
-              >{{ t('assetMgmt.invert') }}</button>
+              >
+                {{ t('assetMgmt.invert') }}
+              </button>
               <button
                 class="btn btn-xs btn-ghost"
                 :disabled="extractRunning"
                 @click="exitExtractMode"
-              >{{ t('assetMgmt.exitExtractMode') }}</button>
+              >
+                {{ t('assetMgmt.exitExtractMode') }}
+              </button>
             </template>
           </template>
           <template v-if="tab === 'semantic'">
-            <div class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden" :title="t('assetMgmt.scopeGroupHint')">
+            <div
+              class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"
+              :title="t('assetMgmt.scopeGroupHint')"
+            >
               <span class="chip !border-0 !rounded-none bg-transparent text-ctp-subtext0 font-mono text-[9px] px-2">{{ scopeSummary }}</span>
               <button
                 class="btn btn-xs !rounded-none !border-l !border-ctp-surface1"
@@ -1114,7 +1196,9 @@ onUnmounted(() => stopExtractPoll())
                 v-if="batchAction === 'clear'"
                 class="border-t border-ctp-surface0 pt-1.5 space-y-1.5"
               >
-                <p class="text-[10px] text-ctp-red">{{ t('assetMgmt.batchConfirmClear') }}</p>
+                <p class="text-[10px] text-ctp-red">
+                  {{ t('assetMgmt.batchConfirmClear') }}
+                </p>
                 <div
                   v-if="batchPreview"
                   class="space-y-1"
@@ -1155,28 +1239,38 @@ onUnmounted(() => stopExtractPoll())
                   <p
                     v-if="!batchPreview.impact?.requirements?.length && !batchPreview.impact?.tasks?.length"
                     class="text-[9px] text-ctp-green"
-                  >{{ t('assetMgmt.purgeConfirm.noImpact') }}</p>
+                  >
+                    {{ t('assetMgmt.purgeConfirm.noImpact') }}
+                  </p>
                 </div>
                 <div class="flex items-center gap-1">
                   <button
                     class="btn btn-xs btn-red"
                     :disabled="batchRunning"
                     @click="runBatch('clear')"
-                  >{{ t('assetMgmt.batchConfirm') }}</button>
+                  >
+                    {{ t('assetMgmt.batchConfirm') }}
+                  </button>
                   <button
                     class="btn btn-xs btn-ghost"
                     @click="batchAction = ''; batchPreview = null"
-                  >{{ t('assetMgmt.batchCancel') }}</button>
+                  >
+                    {{ t('assetMgmt.batchCancel') }}
+                  </button>
                 </div>
               </div>
               <div
                 v-if="batchRunning"
                 class="text-[10px] text-ctp-overlay1"
-              >{{ t('assetMgmt.batchRunning') }}</div>
+              >
+                {{ t('assetMgmt.batchRunning') }}
+              </div>
               <div
                 v-if="batchLast"
                 class="text-[10px] text-ctp-subtext1"
-              >{{ batchLast }}</div>
+              >
+                {{ batchLast }}
+              </div>
             </div>
             <div
               v-if="batchOpen"
@@ -1243,7 +1337,9 @@ onUnmounted(() => stopExtractPoll())
                 <button
                   class="btn btn-xs btn-ghost"
                   @click="clearScope"
-                >{{ t('assetMgmt.clearScope') }}</button>
+                >
+                  {{ t('assetMgmt.clearScope') }}
+                </button>
               </div>
             </div>
 
@@ -1336,7 +1432,9 @@ onUnmounted(() => stopExtractPoll())
                     :key="k.value"
                     class="border border-ctp-surface0 rounded-md p-2"
                   >
-                    <div class="text-[10px] font-semibold text-ctp-text">{{ k.label }}</div>
+                    <div class="text-[10px] font-semibold text-ctp-text">
+                      {{ k.label }}
+                    </div>
                     <div class="text-[9px] text-ctp-overlay0 mt-0.5">
                       {{ t(`assetMgmt.overview.kind.${k.value}`) }}
                     </div>
@@ -1366,21 +1464,35 @@ onUnmounted(() => stopExtractPoll())
               <div class="p-3 space-y-2.5">
                 <div class="flex items-center gap-3">
                   <div class="border border-ctp-blue/20 rounded-lg px-3 py-2 flex-1">
-                    <div class="text-lg font-semibold text-ctp-blue">{{ overviewStats ? overviewStats.total : '—' }}</div>
-                    <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.total') }}</div>
+                    <div class="text-lg font-semibold text-ctp-blue">
+                      {{ overviewStats ? overviewStats.total : '—' }}
+                    </div>
+                    <div class="text-[9px] text-ctp-overlay0">
+                      {{ t('assetMgmt.overview.total') }}
+                    </div>
                   </div>
                   <div class="border border-ctp-surface0 rounded-lg px-3 py-2 flex-1">
-                    <div class="text-lg font-semibold text-ctp-text">{{ comps.length || compCatalog.length }}</div>
-                    <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.components') }}</div>
+                    <div class="text-lg font-semibold text-ctp-text">
+                      {{ comps.length || compCatalog.length }}
+                    </div>
+                    <div class="text-[9px] text-ctp-overlay0">
+                      {{ t('assetMgmt.overview.components') }}
+                    </div>
                   </div>
                   <div class="border border-ctp-green/20 rounded-lg px-3 py-2 flex-1">
-                    <div class="text-lg font-semibold text-ctp-green">{{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}</div>
-                    <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.overview.active') }}</div>
+                    <div class="text-lg font-semibold text-ctp-green">
+                      {{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}
+                    </div>
+                    <div class="text-[9px] text-ctp-overlay0">
+                      {{ t('assetMgmt.overview.active') }}
+                    </div>
                   </div>
                 </div>
 
                 <div class="space-y-1">
-                  <div class="text-[10px] font-medium text-ctp-subtext1">{{ t('assetMgmt.overview.byKind') }}</div>
+                  <div class="text-[10px] font-medium text-ctp-subtext1">
+                    {{ t('assetMgmt.overview.byKind') }}
+                  </div>
                   <div class="flex flex-wrap gap-1.5">
                     <span
                       v-for="k in kinds"
@@ -1391,7 +1503,9 @@ onUnmounted(() => stopExtractPoll())
                 </div>
 
                 <div class="space-y-1">
-                  <div class="text-[10px] font-medium text-ctp-subtext1">{{ t('assetMgmt.overview.byLevel') }}</div>
+                  <div class="text-[10px] font-medium text-ctp-subtext1">
+                    {{ t('assetMgmt.overview.byLevel') }}
+                  </div>
                   <div class="flex flex-wrap gap-1.5">
                     <span
                       v-for="l in levels"
@@ -1402,7 +1516,9 @@ onUnmounted(() => stopExtractPoll())
                 </div>
 
                 <div class="space-y-1">
-                  <div class="text-[10px] font-medium text-ctp-subtext1">{{ t('assetMgmt.overview.statusLabel') }}</div>
+                  <div class="text-[10px] font-medium text-ctp-subtext1">
+                    {{ t('assetMgmt.overview.statusLabel') }}
+                  </div>
                   <div class="flex flex-wrap gap-1.5">
                     <span class="chip bg-ctp-green/15 text-ctp-green">active · {{ overviewStats?.status?.active ?? statusCounts.active ?? 0 }}</span>
                     <span class="chip bg-ctp-yellow/15 text-ctp-yellow">stale · {{ overviewStats?.status?.stale ?? statusCounts.stale ?? 0 }}</span>
@@ -1481,131 +1597,250 @@ onUnmounted(() => stopExtractPoll())
                 :key="a.id"
                 class="border border-ctp-mauve/20 hover:border-ctp-mauve/40 rounded-lg overflow-hidden"
               >
-              <div class="flex items-center gap-1.5 px-2 py-1.5">
-                <component
-                  :is="kindIcon(a.kind)"
-                  class="w-3.5 h-3.5 text-ctp-mauve shrink-0"
-                />
-                <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
-                  {{ t(`assetMgmt.kind.${a.kind}`) }}
-                </span>
-                <span
-                  v-if="a.level"
-                  class="chip !text-[9px] shrink-0"
-                  :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
-                >{{ t(`assetMgmt.level.${a.level}`) }}</span>
-                <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
-                <span
-                  v-if="a.renamedFrom"
-                  class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0"
-                  :title="t('assetMgmt.canonicalHint')"
-                >{{ t('assetMgmt.renamed') }}: {{ a.renamedFrom }}</span>
-                <span
-                  v-if="a.needsUpdate || a.status === 'stale'"
-                  class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
-                >{{ t('assetMgmt.needsUpdate') }}</span>
-                <span
-                  v-else-if="a.status === 'deleted'"
-                  class="chip !text-[9px] bg-ctp-red/15 text-ctp-red shrink-0"
-                >{{ t('assetMgmt.deleted') }}</span>
-                <span
-                  v-else-if="a.change === 'added'"
-                  class="chip !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0"
-                >{{ t('assetMgmt.added') }}</span>
-                <span
-                  v-else-if="a.change === 'modified'"
-                  class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
-                >{{ t('assetMgmt.modified') }}</span>
-                <span class="flex-1" />
-                <span
-                  class="text-[9px] text-ctp-overlay0 font-mono"
-                  :title="[a.canonicalKey ? t('assetMgmt.canonicalHint') + ' · ' + a.canonicalKey : '', ...(a.nameAlias ?? []).map((x) => t('assetMgmt.renamed') + ': ' + x)].filter(Boolean).join('\n') || undefined"
-                >{{ a.id }}</span>
-                <span class="text-[9px] text-ctp-overlay0">{{ a.astRefs?.length ?? 0 }} AST</span>
-                <button
-                  v-if="!usable(a)"
-                  class="text-ctp-yellow hover:text-ctp-peach p-0.5"
-                  :title="t('assetMgmt.refresh')"
-                  @click="refreshOne(a)"
-                >
-                  <ArrowPathIcon class="w-3 h-3" />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :title="t('assetMgmt.reference')"
-                  @click="referenceAsset(a)"
-                >
-                  <ScaleIcon class="w-3 h-3" />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :title="t('assetMgmt.graph.viewAssetGraph')"
-                  @click="openGraphTab('asset', a.id, a.name)"
-                >
-                  <Squares2X2Icon class="w-3 h-3" />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :title="t('assetMgmt.copy')"
-                  @click="copyAsset(a)"
-                >
-                  <ClipboardDocumentIcon class="w-3 h-3" />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :title="t('assetMgmt.expand')"
-                  @click="toggle(a.id)"
-                >
-                  <ChevronDownIcon
-                    v-if="expanded[a.id]"
-                    class="w-3.5 h-3.5"
+                <div class="flex items-center gap-1.5 px-2 py-1.5">
+                  <component
+                    :is="kindIcon(a.kind)"
+                    class="w-3.5 h-3.5 text-ctp-mauve shrink-0"
                   />
-                  <ChevronRightIcon
-                    v-else
-                    class="w-3.5 h-3.5"
-                  />
-                </button>
-              </div>
-              <p class="px-2 pb-1.5 text-[10px] text-ctp-subtext0 line-clamp-2 whitespace-pre-wrap">
-                {{ a.desc }}
-              </p>
-              <div
-                v-if="expanded[a.id]"
-                class="border-t border-ctp-mauve/15 px-2 py-1.5 space-y-1 text-[10px]"
-              >
-                <div v-if="a.detail?.fields?.length">
-                  <div class="font-medium text-ctp-mauve mb-0.5">{{ t('assetMgmt.fields') }}</div>
-                  <div
-                    v-for="f in a.detail.fields"
-                    :key="f.name"
-                    class="pl-2"
-                  ><span class="font-mono text-ctp-text">{{ f.name }}</span><span class="text-ctp-overlay0">: {{ f.type ?? '—' }}</span> {{ f.semantic ? `— ${f.semantic}` : '' }}</div>
+                  <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
+                    {{ t(`assetMgmt.kind.${a.kind}`) }}
+                  </span>
+                  <span
+                    v-if="a.level"
+                    class="chip !text-[9px] shrink-0"
+                    :class="a.level === 'business' ? 'bg-ctp-peach/15 text-ctp-peach' : a.level === 'implementation' ? 'bg-ctp-sky/15 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext0'"
+                  >{{ t(`assetMgmt.level.${a.level}`) }}</span>
+                  <span class="text-[11px] font-medium text-ctp-text truncate">{{ a.name }}</span>
+                  <span
+                    v-if="a.renamedFrom"
+                    class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                    :title="t('assetMgmt.canonicalHint')"
+                  >{{ t('assetMgmt.renamed') }}: {{ a.renamedFrom }}</span>
+                  <span
+                    v-if="a.needsUpdate || a.status === 'stale'"
+                    class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+                  >{{ t('assetMgmt.needsUpdate') }}</span>
+                  <span
+                    v-else-if="a.status === 'deleted'"
+                    class="chip !text-[9px] bg-ctp-red/15 text-ctp-red shrink-0"
+                  >{{ t('assetMgmt.deleted') }}</span>
+                  <span
+                    v-else-if="a.change === 'added'"
+                    class="chip !text-[9px] bg-ctp-green/15 text-ctp-green shrink-0"
+                  >{{ t('assetMgmt.added') }}</span>
+                  <span
+                    v-else-if="a.change === 'modified'"
+                    class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+                  >{{ t('assetMgmt.modified') }}</span>
+                  <span class="flex-1" />
+                  <span
+                    class="text-[9px] text-ctp-overlay0 font-mono"
+                    :title="[a.canonicalKey ? t('assetMgmt.canonicalHint') + ' · ' + a.canonicalKey : '', ...(a.nameAlias ?? []).map((x) => t('assetMgmt.renamed') + ': ' + x)].filter(Boolean).join('\n') || undefined"
+                  >{{ a.id }}</span>
+                  <span class="text-[9px] text-ctp-overlay0">{{ a.astRefs?.length ?? 0 }} AST</span>
+                  <button
+                    v-if="!usable(a)"
+                    class="text-ctp-yellow hover:text-ctp-peach p-0.5"
+                    :title="t('assetMgmt.refresh')"
+                    @click="refreshOne(a)"
+                  >
+                    <ArrowPathIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.reference')"
+                    @click="referenceAsset(a)"
+                  >
+                    <ScaleIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.graph.viewAssetGraph')"
+                    @click="openGraphTab('asset', a.id, a.name)"
+                  >
+                    <Squares2X2Icon class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-if="a.kind === 'entity' || a.kind === 'state'"
+                    class="text-ctp-overlay0 hover:text-ctp-teal p-0.5"
+                    :title="t('assetMgmt.viewDiagram')"
+                    @click="openAssetDiagram(a)"
+                  >
+                    <ChartBarSquareIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.copy')"
+                    @click="copyAsset(a)"
+                  >
+                    <ClipboardDocumentIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.expand')"
+                    @click="toggle(a.id)"
+                  >
+                    <ChevronDownIcon
+                      v-if="expanded[a.id]"
+                      class="w-3.5 h-3.5"
+                    />
+                    <ChevronRightIcon
+                      v-else
+                      class="w-3.5 h-3.5"
+                    />
+                  </button>
                 </div>
-                <div v-if="a.detail?.steps?.length">
-                  <div class="font-medium text-ctp-mauve mb-0.5">{{ t('assetMgmt.steps') }}</div>
-                  <div
-                    v-for="(s, si) in a.detail.steps"
-                    :key="si"
-                    class="pl-2"
-                  >{{ s.order ?? si + 1 }}. {{ s.semantic }}</div>
+                <p class="px-2 pb-1.5 text-[10px] text-ctp-subtext0 line-clamp-2 whitespace-pre-wrap">
+                  {{ a.desc }}
+                </p>
+                <div
+                  v-if="expanded[a.id]"
+                  class="border-t border-ctp-mauve/15 px-2 py-1.5 space-y-1 text-[10px]"
+                >
+                  <div v-if="a.detail?.fields?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.fields') }}
+                    </div>
+                    <div
+                      v-for="f in a.detail.fields"
+                      :key="f.name"
+                      class="pl-2"
+                    >
+                      <span class="font-mono text-ctp-text">{{ f.name }}</span><span class="text-ctp-overlay0">: {{ f.type ?? '—' }}</span> {{ f.semantic ? `— ${f.semantic}` : '' }}
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.steps?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.steps') }}
+                    </div>
+                    <div
+                      v-for="(s, si) in a.detail.steps"
+                      :key="si"
+                      class="pl-2"
+                    >
+                      {{ s.order ?? si + 1 }}. {{ s.semantic }}
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.branches?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.branches') }}
+                    </div>
+                    <div
+                      v-for="(b, bi) in a.detail.branches"
+                      :key="bi"
+                      class="pl-2"
+                    >
+                      <span class="font-mono text-ctp-text">if {{ b.condition ?? '?' }}</span> → {{ b.then ?? '—' }}<span v-if="b.else"> / else {{ b.else }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.relations?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.relations') }}
+                    </div>
+                    <div
+                      v-for="(r, ri) in a.detail.relations"
+                      :key="ri"
+                      class="pl-2"
+                    >
+                      <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1">{{ r.type ?? 'ref' }}</span><span class="font-mono text-ctp-text">{{ r.target ?? '?' }}</span><span
+                        v-if="r.methods?.length"
+                        class="font-mono text-ctp-overlay0"
+                      >{{ r.methods.join('/') }}</span><span
+                        v-if="r.semantic"
+                        class="text-ctp-subtext0"
+                      > — {{ r.semantic }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.states?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.states') }}
+                    </div>
+                    <div class="pl-2 flex flex-wrap gap-1">
+                      <span
+                        v-for="(st, si) in a.detail.states"
+                        :key="si"
+                        class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0"
+                      >{{ st.name }}<template v-if="st.initial"> · {{ t('assetMgmt.stateInitial') }}</template><template v-if="st.final"> · {{ t('assetMgmt.stateFinal') }}</template></span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.transitions?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.transitions') }}
+                    </div>
+                    <div
+                      v-for="(tr, ti) in a.detail.transitions"
+                      :key="ti"
+                      class="pl-2 font-mono text-ctp-overlay0"
+                    >
+                      {{ tr.from ?? '?' }} → {{ tr.to ?? '?' }}<template v-if="tr.event">
+                        on {{ tr.event }}
+                      </template><template v-if="tr.condition">
+                        [{{ tr.condition }}]
+                      </template>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.configSource || a.detail?.constraints?.length || a.detail?.thresholds?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.constraints') }}
+                    </div>
+                    <div
+                      v-if="a.detail?.configSource"
+                      class="pl-2"
+                    >
+                      {{ t('assetMgmt.configSource') }}: <span class="font-mono text-ctp-overlay0">{{ a.detail.configSource }}</span>
+                    </div>
+                    <div
+                      v-for="(c, ci) in (a.detail?.constraints ?? [])"
+                      :key="`c${ci}`"
+                      class="pl-2 font-mono text-ctp-text"
+                    >
+                      {{ c }}
+                    </div>
+                    <div
+                      v-for="(th, thi) in (a.detail?.thresholds ?? [])"
+                      :key="`t${thi}`"
+                      class="pl-2"
+                    >
+                      <span class="font-mono text-ctp-text">{{ th.key ?? '?' }}</span><span class="text-ctp-overlay0"> = {{ th.value ?? '?' }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.detail?.invariants?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.invariants') }}
+                    </div>
+                    <div
+                      v-for="(iv, ii) in a.detail.invariants"
+                      :key="ii"
+                      class="pl-2 text-ctp-subtext0"
+                    >
+                      • {{ iv }}
+                    </div>
+                  </div>
+                  <div v-if="(a.tags?.length || a.detail?.tags?.length)">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      {{ t('assetMgmt.tags') }}
+                    </div>
+                    <div class="pl-2 flex flex-wrap gap-1">
+                      <span
+                        v-for="(tg, tgi) in (a.tags ?? a.detail!.tags ?? [])"
+                        :key="tgi"
+                        class="chip !text-[8px] bg-ctp-blue/15 text-ctp-blue"
+                      >{{ tg }}</span>
+                    </div>
+                  </div>
+                  <div v-if="a.astRefs?.length">
+                    <div class="font-medium text-ctp-mauve mb-0.5">
+                      AST
+                    </div>
+                    <div
+                      v-for="(r, ri) in a.astRefs.slice(0, 8)"
+                      :key="ri"
+                      class="pl-2 font-mono text-ctp-overlay0"
+                    >
+                      {{ r.file }}:L{{ r.startLine }}-L{{ r.endLine }} <span class="text-ctp-subtext0">{{ r.symbol }}</span>
+                    </div>
+                  </div>
                 </div>
-                <div v-if="a.detail?.branches?.length">
-                  <div class="font-medium text-ctp-mauve mb-0.5">{{ t('assetMgmt.branches') }}</div>
-                  <div
-                    v-for="(b, bi) in a.detail.branches"
-                    :key="bi"
-                    class="pl-2"
-                  ><span class="font-mono text-ctp-text">if {{ b.condition ?? '?' }}</span> → {{ b.then ?? '—' }}<span v-if="b.else"> / else {{ b.else }}</span></div>
-                </div>
-                <div v-if="a.astRefs?.length">
-                  <div class="font-medium text-ctp-mauve mb-0.5">AST</div>
-                  <div
-                    v-for="(r, ri) in a.astRefs.slice(0, 8)"
-                    :key="ri"
-                    class="pl-2 font-mono text-ctp-overlay0"
-                  >{{ r.file }}:L{{ r.startLine }}-L{{ r.endLine }} <span class="text-ctp-subtext0">{{ r.symbol }}</span></div>
-                </div>
-              </div>
               </div>
             </template>
             <p
@@ -1614,6 +1849,77 @@ onUnmounted(() => stopExtractPoll())
             >
               {{ t('assetMgmt.emptySemantic') }}
             </p>
+          </template>
+
+          <!-- 流程图：入口(契约路由) → 业务活动图(服务端确定性建图 + 资产业务名标签) -->
+          <template v-else-if="tab === 'flow'">
+            <p class="text-[10px] text-ctp-overlay0 px-1 pt-0.5">
+              {{ t('assetMgmt.flowHint') }}
+            </p>
+            <div
+              v-if="flowError"
+              class="text-xs text-ctp-red px-1"
+            >
+              {{ t('assetMgmt.flowError') }}: {{ flowError }}
+            </div>
+            <p
+              v-else-if="!flowView?.flows?.length && !flowLoading"
+              class="text-xs text-ctp-overlay0 text-center py-8"
+            >
+              {{ flowView?.note || t('assetMgmt.flowEmpty') }}
+            </p>
+            <div
+              v-else-if="flowLoading"
+              class="text-xs text-ctp-overlay1 text-center py-8"
+            >
+              {{ t('assetMgmt.flowLoading') }}
+            </div>
+            <template v-else>
+              <div
+                v-for="f in flowView!.flows"
+                :key="flowKey(f)"
+                class="border border-ctp-sky/25 hover:border-ctp-sky/45 rounded-lg overflow-hidden"
+              >
+                <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-ctp-surface0">
+                  <span class="chip !text-[9px] bg-ctp-sky/15 text-ctp-sky shrink-0 font-mono">{{ (f.entry.methods ?? []).join('/') || 'GET' }} {{ f.entry.path || f.entry.symbol }}</span>
+                  <span
+                    v-if="f.entry.name && f.entry.name !== f.entry.symbol"
+                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
+                  >{{ f.entry.name }}</span>
+                  <span
+                    v-if="f.entry.file"
+                    class="text-[9px] text-ctp-overlay0 font-mono truncate"
+                  >{{ f.entry.file }}</span>
+                  <span class="flex-1" />
+                  <button
+                    class="btn btn-ghost !py-0.5 !text-[10px] shrink-0"
+                    @click="flowStepsOpen[flowKey(f)] = !flowStepsOpen[flowKey(f)]"
+                  >
+                    {{ t('assetMgmt.flowSteps') }}
+                  </button>
+                </div>
+                <div class="h-72">
+                  <DiagramCard
+                    :title="`${(f.entry.methods ?? []).join('/') || 'GET'} ${f.entry.path || f.entry.symbol}`"
+                    :diagrams="{ mermaid: f.mermaid }"
+                    :allowed-langs="['mermaid']"
+                  />
+                </div>
+                <div
+                  v-if="flowStepsOpen[flowKey(f)]"
+                  class="border-t border-ctp-surface0 px-2.5 py-1.5 space-y-0.5 text-[10px]"
+                >
+                  <div
+                    v-for="(s, si) in f.steps"
+                    :key="si"
+                    class="flex items-center gap-1.5"
+                  >
+                    <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0">{{ si + 1 }}</span>
+                    <span class="text-ctp-subtext0">{{ s }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
           </template>
 
           <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
@@ -1715,16 +2021,22 @@ onUnmounted(() => stopExtractPoll())
                 <p
                   v-if="compDetailLoading[c.assetId]"
                   class="text-ctp-overlay0"
-                >{{ t('assetMgmt.summaryLoading') }}</p>
+                >
+                  {{ t('assetMgmt.summaryLoading') }}
+                </p>
                 <p
                   v-else-if="compDetailMiss[c.assetId]"
                   class="text-ctp-peach"
-                >{{ t('assetMgmt.summaryMiss') }}</p>
+                >
+                  {{ t('assetMgmt.summaryMiss') }}
+                </p>
                 <template v-else-if="compDetails[c.assetId]">
                   <p
                     v-if="compDetails[c.assetId].desc"
                     class="text-ctp-subtext1 leading-relaxed"
-                  >{{ compDetails[c.assetId].desc }}</p>
+                  >
+                    {{ compDetails[c.assetId].desc }}
+                  </p>
                   <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-ctp-overlay0">
                     <span v-if="compDetails[c.assetId].lang">lang: {{ compDetails[c.assetId].lang }}</span>
                     <span v-if="compDetails[c.assetId].hierLevel">hier: {{ compDetails[c.assetId].hierLevel }}</span>
@@ -1750,7 +2062,9 @@ onUnmounted(() => stopExtractPoll())
                 <p
                   v-else
                   class="text-ctp-overlay0"
-                >{{ t('assetMgmt.summaryMiss') }}</p>
+                >
+                  {{ t('assetMgmt.summaryMiss') }}
+                </p>
               </div>
             </div>
             <p
@@ -1773,12 +2087,16 @@ onUnmounted(() => stopExtractPoll())
               class="btn btn-xs"
               :disabled="page <= 1"
               @click="gotoPage(page - 1)"
-            >{{ t('assetMgmt.prevPage') }}</button>
+            >
+              {{ t('assetMgmt.prevPage') }}
+            </button>
             <button
               class="btn btn-xs"
               :disabled="page >= totalPages"
               @click="gotoPage(page + 1)"
-            >{{ t('assetMgmt.nextPage') }}</button>
+            >
+              {{ t('assetMgmt.nextPage') }}
+            </button>
           </div>
         </div>
       </div>
@@ -1869,7 +2187,9 @@ onUnmounted(() => stopExtractPoll())
               · {{ r.title }}
               <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1">{{ r.location }}</span>
             </div>
-            <p class="text-[9px] text-ctp-peach">{{ t('assetMgmt.purgeConfirm.reqRegen') }}</p>
+            <p class="text-[9px] text-ctp-peach">
+              {{ t('assetMgmt.purgeConfirm.reqRegen') }}
+            </p>
           </div>
 
           <div
@@ -1888,13 +2208,17 @@ onUnmounted(() => stopExtractPoll())
               · {{ t.title }}
               <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1">{{ t.status }}</span>
             </div>
-            <p class="text-[9px] text-ctp-blue">{{ t('assetMgmt.purgeConfirm.taskRegen') }}</p>
+            <p class="text-[9px] text-ctp-blue">
+              {{ t('assetMgmt.purgeConfirm.taskRegen') }}
+            </p>
           </div>
 
           <p
             v-if="!purgeResult?.impact?.requirements?.length && !purgeResult?.impact?.tasks?.length"
             class="text-[10px] text-ctp-green"
-          >{{ t('assetMgmt.purgeConfirm.noImpact') }}</p>
+          >
+            {{ t('assetMgmt.purgeConfirm.noImpact') }}
+          </p>
         </div>
 
         <div class="shrink-0 border-t border-ctp-surface0 px-4 py-2.5 flex justify-end gap-2">
@@ -1902,12 +2226,67 @@ onUnmounted(() => stopExtractPoll())
             class="btn btn-ghost"
             :disabled="purgeBusy"
             @click="cancelPurge"
-          >{{ t('assetMgmt.purgeConfirm.cancel') }}</button>
+          >
+            {{ t('assetMgmt.purgeConfirm.cancel') }}
+          </button>
           <button
             class="btn btn-red"
             :disabled="purgeBusy"
             @click="confirmPurge"
-          >{{ purgeBusy ? t('assetMgmt.purgeConfirm.deleting') : t('assetMgmt.purgeConfirm.confirm') }}</button>
+          >
+            {{ purgeBusy ? t('assetMgmt.purgeConfirm.deleting') : t('assetMgmt.purgeConfirm.confirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 静态资产图：entity → 类图(字段/方法)，state → 状态图(状态+迁移) -->
+    <div
+      v-if="diagramModalOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      @click.self="diagramModalOpen = false"
+    >
+      <div class="flex flex-col w-full max-w-3xl h-[80vh] rounded-xl bg-ctp-base border border-ctp-surface1 shadow-2xl overflow-hidden">
+        <div class="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-ctp-surface0">
+          <ChartBarSquareIcon class="w-4 h-4 text-ctp-teal" />
+          <h3 class="text-sm font-semibold text-ctp-text truncate">
+            {{ diagramModalTitle }}
+          </h3>
+          <span class="text-[10px] text-ctp-overlay0">{{ t('assetMgmt.diagramHint') }}</span>
+          <span class="flex-1" />
+          <button
+            class="btn btn-ghost !py-1"
+            @click="diagramModalOpen = false"
+          >
+            {{ t('assetMgmt.purgeConfirm.cancel') }}
+          </button>
+        </div>
+        <div class="flex-1 min-h-0 p-3">
+          <p
+            v-if="diagramModalLoading"
+            class="text-xs text-ctp-overlay1 text-center py-10"
+          >
+            {{ t('assetMgmt.diagramLoading') }}
+          </p>
+          <p
+            v-else-if="!diagramModalItems.length"
+            class="text-xs text-ctp-overlay0 text-center py-10"
+          >
+            {{ t('assetMgmt.diagramEmpty') }}
+          </p>
+          <template v-else>
+            <div
+              v-for="d in diagramModalItems"
+              :key="d.assetId"
+              class="h-full min-h-0"
+            >
+              <DiagramCard
+                :title="`${d.name} (${t(`assetMgmt.diagramType.${d.type}`)})`"
+                :diagrams="{ mermaid: d.mermaid }"
+                :allowed-langs="['mermaid']"
+              />
+            </div>
+          </template>
         </div>
       </div>
     </div>

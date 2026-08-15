@@ -1703,12 +1703,25 @@ def test_collect_via_cache_kb_path_rebuilds_edges(tmp_path, monkeypatch):
         {"name": "Config", "kind": "instantiates", "line": 5, "col": 8},
     ]
 
-    def _fake_kb(root, rel):
-        return {"symbols": kb_symbols, "refs": kb_refs, "language": "python"}
+    def _fake_kb(root, rel, impl=False):
+        res = {"symbols": kb_symbols, "refs": kb_refs, "language": "python"}
+        if impl:
+            res["implDetails"] = {
+                "statements": [{"type": "if", "condition": "a > 0",
+                                "startLine": 4, "endLine": 5, "enclosing": "register_success"}],
+                "routes": [], "constants": [
+                    {"name": "TTL", "value": "10", "line": 6}],
+            }
+        return res
 
     monkeypatch.setattr(S, "_kb_parse_file", _fake_kb)
-    nodes, edges, source = S._collect_via_cache(root, None, ["a.py"], [])
+    nodes, edges, source, impl_by_file = S._collect_via_cache(root, None, ["a.py"], [])
     assert source == "kb"
+    # impl details 随 KB 路径收集并回写缓存
+    assert impl_by_file["a.py"]["statements"][0]["condition"] == "a > 0"
+    row = store.AstCacheStore.get(pid, "a.py")
+    assert row["statements"][0]["condition"] == "a > 0"
+    assert row["constants"][0]["value"] == "10"
     assert {n["name"] for n in nodes} == {"Config", "get_config", "register_success"}
     assert nodes[0]["start_line"] >= 1  # 行号不丢失
     call_kinds = {e["kind"] for e in edges}
@@ -1995,3 +2008,235 @@ def test_impl_asset_phantom_and_anchor_kind_rejected(tmp_path, monkeypatch):
                                     "startLine": 10, "endLine": 15}]},
     ], ctx)
     assert saved2 == []
+
+
+# ── P0: 调用链行序恢复(边 line/col 透传) ──────────────────────
+
+def test_query_edges_includes_line_col(tmp_path, monkeypatch):
+    """codegraph 路径 _query_edges 透传 line/col(调用顺序数据源)。"""
+    _ctx(tmp_path, monkeypatch)
+    cg = sqlite3.connect(":memory:")
+    cg.row_factory = sqlite3.Row  # 与 _open_cg 一致
+    cg.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, kind TEXT, name TEXT, "
+               "qualified_name TEXT, file_path TEXT, start_line INTEGER, end_line INTEGER, "
+               "start_column INTEGER, end_column INTEGER, signature TEXT, docstring TEXT, "
+               "return_type TEXT)")
+    cg.execute("CREATE TABLE edges (source TEXT, target TEXT, kind TEXT, "
+               "line INTEGER, col INTEGER)")
+    cg.execute("INSERT INTO nodes VALUES ('fn1','function','checkout','checkout','a.py',10,20,0,0,'','','')")
+    cg.execute("INSERT INTO nodes VALUES ('fn2','function','validate','validate','b.py',1,5,0,0,'','','')")
+    cg.execute("INSERT INTO nodes VALUES ('fn3','function','save','save','c.py',1,5,0,0,'','','')")
+    cg.execute("INSERT INTO edges VALUES ('fn1','fn3','calls',18,4)")
+    cg.execute("INSERT INTO edges VALUES ('fn1','fn2','calls',12,4)")
+    cg.commit()
+    rows = S._query_edges(cg, ["fn1"])
+    assert len(rows) == 2
+    by_target = {r["target"]: r for r in rows}
+    assert by_target["fn2"]["line"] == 12 and by_target["fn2"]["col"] == 4
+    assert by_target["fn3"]["line"] == 18
+
+
+def test_callee_names_sorted_by_line(tmp_path, monkeypatch):
+    """_callee_names 按边 line 升序返回(无 line 边排末尾，保持相对序)。"""
+    _ctx(tmp_path, monkeypatch)
+    edges = [
+        {"source": "fn1", "target": "t_late", "kind": "calls", "line": 30},
+        {"source": "fn1", "target": "t_noline", "kind": "calls"},
+        {"source": "fn1", "target": "t_early", "kind": "calls", "line": 12},
+        {"source": "fn1", "target": "t_mid", "kind": "calls", "line": 20},
+        {"source": "fn2", "target": "other", "kind": "calls", "line": 1},
+        {"source": "fn1", "target": "notcall", "kind": "references", "line": 2},
+    ]
+    out = S._callee_names("fn1", edges, None)
+    assert out == ["t_early", "t_mid", "t_late", "t_noline"]
+
+
+def test_ordered_call_lines_block(tmp_path, monkeypatch):
+    """_ordered_call_lines 产出按函数分组的行序调用序列；无 line 边时为空。"""
+    _ctx(tmp_path, monkeypatch)
+    nodes = [{"id": "fn1", "kind": "function", "name": "checkout",
+              "qualified_name": "checkout", "file_path": "a.py",
+              "start_line": 10, "end_line": 25}]
+    table = S.build_symbol_table(nodes)
+    edges = [
+        {"source": "fn1", "target": "save", "kind": "calls", "line": 18},
+        {"source": "fn1", "target": "validate", "kind": "calls", "line": 12},
+        {"source": "fn1", "target": "charge", "kind": "calls", "line": 22},
+        {"source": "fn1", "target": "validate", "kind": "calls", "line": 24},  # 重复目标去重
+    ]
+    out = S._ordered_call_lines(nodes, edges, table)
+    assert out == "- checkout: L12 validate → L18 save → L22 charge"
+    # 无 line 信息 → 空(调用方回退普通边清单)
+    edges_noline = [{"source": "fn1", "target": "save", "kind": "calls"}]
+    assert S._ordered_call_lines(nodes, edges_noline, table) == ""
+
+
+def test_heuristic_process_steps_ordered_by_line(tmp_path, monkeypatch):
+    """实现层启发式 process.steps 按调用行序编号(order=1..n)。"""
+    _ctx(tmp_path, monkeypatch)
+    nodes = [
+        {"id": "fn1", "kind": "function", "name": "checkout", "qualified_name": "checkout",
+         "file_path": "a.py", "start_line": 10, "end_line": 25, "signature": "(order)",
+         "docstring": "", "return_type": ""},
+    ]
+    edges = [
+        {"source": "fn1", "target": "save", "kind": "calls", "line": 18},
+        {"source": "fn1", "target": "validate", "kind": "calls", "line": 12},
+        {"source": "fn1", "target": "charge", "kind": "calls", "line": 22},
+    ]
+    ctx = {"nodes": nodes, "edges": edges, "root": str(tmp_path)}
+    got = S._heuristic_extract_primary(ctx, ["process"])
+    assert len(got) == 1
+    steps = got[0]["detail"]["steps"]
+    assert [s["order"] for s in steps] == [1, 2, 3]
+    assert [s["symbols"][0] for s in steps] == ["validate", "save", "charge"]
+
+
+# ── implDetails(KB 实现细节)消费 ─────────────────────────────────
+
+
+def _impl_fixture():
+    return {
+        "a.py": {
+            "statements": [
+                {"type": "if", "condition": "user.age >= 18", "startLine": 8,
+                 "endLine": 10, "enclosing": "register"},
+                {"type": "loop", "condition": "item in items", "startLine": 14,
+                 "endLine": 15, "enclosing": "batch"},
+                {"type": "if", "condition": "x == 1", "startLine": 20,
+                 "endLine": 21, "enclosing": "check_age"},
+            ],
+            "routes": [
+                {"path": "/register", "methods": ["POST"], "handler": "register",
+                 "framework": "fastapi", "line": 5},
+            ],
+            "constants": [
+                {"name": "MAX_AGE", "value": "150", "line": 2},
+            ],
+        },
+    }
+
+
+def _impl_node(nid, name, kind="function", file_path="a.py", sig="()", doc=""):
+    return {"id": nid, "kind": kind, "name": name, "qualified_name": name,
+            "file_path": file_path, "start_line": 1, "end_line": 9,
+            "start_column": 0, "end_column": 0,
+            "signature": sig, "docstring": doc, "return_type": ""}
+
+
+def test_impl_block_text():
+    """impl 块: 路由清单/常量值/控制流语句清单 三段结构化文本。"""
+    block = S._impl_block(_impl_fixture())
+    assert "API 路由清单" in block
+    assert "- [POST] /register -> register (a.py:5, fastapi)" in block
+    assert "常量值清单" in block
+    assert "- MAX_AGE = 150 (a.py:2)" in block
+    assert "控制流语句清单" in block
+    assert "- register:8 [if] user.age >= 18" in block
+    assert S._impl_block({}) == ""
+
+
+def test_heuristic_primary_uses_impl_details(tmp_path, monkeypatch):
+    """实现层主路径: decision 分支取语句条件原文、contract 取路由 path/methods、
+    process 带前置条件、路由 handler 函数在无 route 节点时判契约。"""
+    _ctx(tmp_path, monkeypatch)
+    nodes = [
+        _impl_node("n1", "register"),
+        _impl_node("n2", "check_age", doc="if x else y"),
+        _impl_node("n3", "batch"),
+        _impl_node("n4", "Config", kind="class"),
+    ]
+    ctx = {"nodes": nodes, "edges": [], "root": "", "implDetails": _impl_fixture()}
+    got = S._heuristic_extract_primary(
+        ctx, ["process", "decision", "contract", "rule", "entity", "state"])
+    by_name = {a["name"]: a for a in got}
+    # register 是路由 handler(无 route 节点) → contract，relations 含真实端点
+    reg = by_name["register"]
+    assert reg["kind"] == "contract"
+    rels = reg["detail"]["relations"]
+    assert rels[0]["target"] == "/register" and rels[0]["methods"] == ["POST"]
+    assert "/register" in reg["desc"]
+    # check_age 分支密集 → decision，branches.condition 为语句清单原文
+    chk = by_name["check_age"]
+    assert chk["kind"] == "decision"
+    assert chk["detail"]["branches"][0]["condition"] == "x == 1"
+    assert chk["detail"]["branches"][0]["line"] == 20
+    # batch → process，conditions 含循环条件原文
+    b = by_name["batch"]
+    assert b["kind"] == "process"
+    assert "item in items" in b["detail"]["conditions"]
+    # Config 类 → entity(rule 信号优先: Config 是配置载体)
+    assert by_name["Config"]["kind"] == "rule"
+
+
+def test_primary_kind_route_node_suppresses_impl_handler():
+    """scope 已有 route 节点时，impl handler 判定不介入(边逻辑已覆盖)。"""
+    route = _impl_node("r1", "/x", kind="route", file_path="a.py")
+    handler = _impl_node("n1", "register")
+    edges = [{"source": "r1", "target": "n1", "kind": "references"}]
+    # 有 route 节点(调用方传 impl=None) → register 非契约边界(api_ 前缀?否) → process
+    assert S._primary_kind_for_node(handler, edges, None, {"r1": route}, None) == "process"
+    # 无 route 节点 + impl 路由元数据 → 契约
+    assert S._primary_kind_for_node(handler, edges, None, {"r1": route},
+                                    _impl_fixture()) == "contract"
+
+
+def test_fetch_impl_for_file_kb_and_cache(tmp_path, monkeypatch):
+    """impl 取数: 缓存未命中走 KB(implDetails)回写缓存; 命中不再调 KB; 旧后端降级 None。"""
+    _ctx(tmp_path, monkeypatch)
+    root = str(tmp_path / "proj")
+    os.makedirs(root)
+    with open(os.path.join(root, "b.py"), "w", encoding="utf-8") as fh:
+        fh.write("X = 1\n")
+    calls = []
+
+    def _fake_kb(root_, rel, impl=False):
+        calls.append(rel)
+        return {"symbols": [], "refs": [], "language": "python",
+                "implDetails": {"statements": [],
+                                "routes": [{"path": "/x", "methods": ["GET"],
+                                            "handler": "h", "framework": "fastapi", "line": 1}],
+                                "constants": []}}
+
+    monkeypatch.setattr(S, "_kb_parse_file", _fake_kb)
+    impl = S._fetch_impl_for_file(root, None, "b.py")
+    assert impl["routes"][0]["path"] == "/x"
+    assert calls == ["b.py"]
+    # 缓存命中 → 不再调 KB
+    assert S._fetch_impl_for_file(root, None, "b.py")["routes"][0]["path"] == "/x"
+    assert calls == ["b.py"]
+    # 旧 KB 后端(无 implDetails) → None(降级)
+    monkeypatch.setattr(S, "_kb_parse_file",
+                        lambda root_, rel, impl=False:
+                        {"symbols": [], "refs": [], "language": "python"})
+    with open(os.path.join(root, "b.py"), "a", encoding="utf-8") as fh:
+        fh.write("Y = 2\n")
+    assert S._fetch_impl_for_file(root, None, "b.py") is None
+
+
+def test_collect_context_cache_path_impl_block(tmp_path, monkeypatch):
+    """collect_context 无 codegraph 路径: ctx.text 含 impl 块, ctx.implDetails 可消费。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "p"
+    proj.mkdir()
+    (proj / "m.py").write_text(
+        "def f(a):\n    if a > 0:\n        x()\n    return 0\n", encoding="utf-8")
+
+    def _fake_kb(root_, rel, impl=False):
+        return {"symbols": [{"name": "f", "kind": "function", "qualifiedName": "f",
+                             "startLine": 1, "endLine": 4, "signature": "(a)",
+                             "docstring": "", "returnType": "int"}],
+                "refs": [], "imports": [], "language": "python",
+                "implDetails": {
+                    "statements": [{"type": "if", "condition": "a > 0",
+                                    "startLine": 2, "endLine": 3, "enclosing": "f"}],
+                    "routes": [], "constants": []}}
+
+    monkeypatch.setattr(S, "_kb_parse_file", _fake_kb)
+    ctx = S.collect_context(str(proj), "files", "m.py", files=["m.py"])
+    assert ctx["implDetails"]["m.py"]["statements"][0]["condition"] == "a > 0"
+    assert "控制流语句清单" in ctx["text"]
+    assert "- f:2 [if] a > 0" in ctx["text"]
+    # decision 资产可用 impl 分支
+    got = S._heuristic_extract("decision", ctx, level="implementation")
+    assert got and got[0]["detail"]["branches"][0]["condition"] == "a > 0"

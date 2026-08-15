@@ -1,4 +1,4 @@
-import type { SemanticAsset, SemanticAssetDetail, SemanticAssetKind, SemanticAssetLevel } from '@/types'
+import type { AssetDiagramResult, FlowViewResult, SemanticAsset, SemanticAssetDetail, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import { currentProjectParams } from './project-service'
 
@@ -313,6 +313,27 @@ export const semanticAssetService = {
     if (opts?.hops) parts.push(`hops=${opts.hops}`)
     parts.push('limit=2000')
     return apiGet<SemanticGraphResult>(`/kb/semantic/graph${qsWith(parts.join('&'))}`)
+  },
+
+  /** 生成入口流程/活动图(确定性建图 + 资产业务名标签)。
+   *  entries 缺省 = 项目内全部 contract http 入口。 */
+  async flowView(opts?: { entries?: { file?: string; symbol?: string; path?: string; methods?: string[]; name?: string; assetId?: string }[]; files?: string[]; subgraphBy?: 'file' | 'none' }): Promise<FlowViewResult> {
+    return apiPost<FlowViewResult>('/kb/semantic/flow-view', {
+      root: currentProjectParams().root,
+      project: currentProjectParams().project,
+      entries: opts?.entries,
+      files: opts?.files,
+      subgraphBy: opts?.subgraphBy,
+    })
+  },
+
+  /** 静态资产图：entity → 类图(字段/方法)，state → 状态图。assetIds 缺省 = 项目内 entity/state 资产。 */
+  async assetDiagram(assetIds?: string[]): Promise<AssetDiagramResult> {
+    return apiPost<AssetDiagramResult>('/kb/semantic/asset-diagram', {
+      root: currentProjectParams().root,
+      project: currentProjectParams().project,
+      assetIds,
+    })
   },
 
   /** 创建并后台启动组件语义资产提取任务(服务端执行，刷新不中断)。返回 {taskId}。 */

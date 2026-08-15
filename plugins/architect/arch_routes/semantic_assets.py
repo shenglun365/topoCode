@@ -38,6 +38,7 @@ from fastapi import APIRouter, Request
 
 from .common import _ts, err, ok
 from . import store
+from . import asset_tools  # noqa: F401  (模块级导入触发 asset.* 工具注册)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -251,7 +252,7 @@ def _query_edges(conn: sqlite3.Connection, node_ids: List[str], limit: int = 300
     ph = ",".join("?" * len(ids))
     try:
         rows = conn.execute(
-            f"SELECT source, target, kind FROM edges "
+            f"SELECT source, target, kind, line, col FROM edges "
             f"WHERE (source IN ({ph}) OR target IN ({ph})) "
             f"AND kind IN ('calls','contains','extends','imports','references','instantiates') "
             f"LIMIT ?",
@@ -359,6 +360,51 @@ def _edge_lines(edges: List[dict], table: Dict[str, dict]) -> str:
         if len(out) >= 180:
             break
     return "\n".join(out)
+
+
+def _ordered_call_lines(nodes: List[dict], edges: List[dict],
+                        table: Dict[str, dict], limit_funcs: int = 60,
+                        limit_calls: int = 12) -> str:
+    """按函数分组的有序调用序列(边 line 升序)，供实现层 process/decision 提取。
+
+    仅覆盖带 line 信息的 calls 边；无 line 时输出为空(调用方回退普通边清单)。
+    """
+    name_of = {n["id"]: (n.get("qualified_name") or n.get("name")) for n in table.values()}
+    calls_by_src: Dict[str, List[tuple]] = {}
+    has_line = False
+    for e in edges or []:
+        if e.get("kind") != "calls" or not e.get("target"):
+            continue
+        ln = e.get("line")
+        if isinstance(ln, int) and ln > 0:
+            has_line = True
+        calls_by_src.setdefault(e.get("source") or "", []).append(
+            (ln if isinstance(ln, int) else 0, e["target"]))
+    if not has_line:
+        return ""
+    fn_ids = [n.get("id") for n in nodes or []
+              if (n.get("kind") or "") in ("function", "method", "route")]
+    lines: List[str] = []
+    for fid in fn_ids:
+        seq = calls_by_src.get(fid)
+        if not seq:
+            continue
+        seq.sort()
+        name = name_of.get(fid, fid)
+        calls = []
+        seen_t: set = set()
+        for ln, t in seq:
+            tn = name_of.get(t, t)
+            if tn in seen_t:
+                continue
+            seen_t.add(tn)
+            calls.append(f"L{ln} {tn}" if ln else tn)
+            if len(calls) >= limit_calls:
+                break
+        lines.append(f"- {name}: " + " → ".join(calls))
+        if len(lines) >= limit_funcs:
+            break
+    return "\n".join(lines)
 
 
 def _cross_file_edges_text(conn: sqlite3.Connection, node_ids: List[str],
@@ -556,8 +602,9 @@ def _collect_via_cache(root: str, project: Optional[str],
                        files: List[str], syms: List[str]):
     """无 codegraph 时的 AST 缓存层取数(要求③)：缓存命中 → KB 解析 → live 扫描。
 
-    返回 (nodes, edges, source)。KB 路径经 `_rebuild_edges_from_refs` 从文件级 refs
-    重建统一边(与 codegraph `_query_edges` 同构)，保证下游(Rule 判定/流程/字段)效果一致。
+    返回 (nodes, edges, source, impl_by_file)。KB 路径经 `_rebuild_edges_from_refs`
+    从文件级 refs 重建统一边(与 codegraph `_query_edges` 同构)，保证下游
+    (Rule 判定/流程/字段)效果一致；impl_by_file 为实现细节(语句/路由/常量)。
     """
     pid = project_id_for(root, project)
     nodes: List[dict] = []
@@ -568,14 +615,14 @@ def _collect_via_cache(root: str, project: Optional[str],
         # 符号范围无 codegraph 无法精确定位文件 → 退化为 live 全量扫描(有文件列表时)
         if files:
             nodes = _scan_live(root, files, syms)
-        return nodes, [], source
+        return nodes, [], source, {}
     miss: List[str] = []
     for rel in (files or [])[:120]:
         full = os.path.join(root, rel.replace("/", os.sep))
         if not os.path.isfile(full):
             logger.info("[semantic] cache 文件不存在, 跳过: %s", rel)
             continue
-        h = _file_md5(root, rel)
+        h = _cache_content_hash(root, rel)
         pf: dict = {"symbols": [], "refs": []}
         cached = store.AstCacheStore.get(pid, rel)
         if cached and cached.get("contentHash") and cached.get("contentHash") == h:
@@ -587,11 +634,16 @@ def _collect_via_cache(root: str, project: Optional[str],
                     nodes.append(n)
                     pf["symbols"].append(n)
             pf["refs"] = cached.get("refs") or []
+            impl = _impl_from_row(cached)
+            if impl is None:
+                impl = _fetch_impl_for_file(root, project, rel)  # 旧行补取
+            if impl and any(impl.values()):
+                pf["impl"] = impl
             per_file[rel] = pf
             continue
         miss.append(rel)
         # 缓存未命中/已过期 → KB 只读解析(不落 KB，写入 architect 缓存)
-        kb = _kb_parse_file(root, rel)
+        kb = _kb_parse_file(root, rel, impl=True)
         if kb and kb.get("symbols"):
             source = "kb"
             src = None
@@ -612,12 +664,18 @@ def _collect_via_cache(root: str, project: Optional[str],
                 nodes.append(n)
                 pf["symbols"].append(n)
             pf["refs"] = kb.get("refs") or []
+            impl = _impl_from_kb(kb)
+            if impl and any(impl.values()):
+                pf["impl"] = impl
             per_file[rel] = pf
             store.AstCacheStore.upsert(pid, rel, {
                 "contentHash": h, "language": kb.get("language") or "",
                 "symbols": nodes[-len(kb["symbols"]):],
                 "imports": kb.get("imports") or [],
                 "refs": kb.get("refs") or [],
+                "statements": (impl or {}).get("statements") or [],
+                "routes": (impl or {}).get("routes") or [],
+                "constants": (impl or {}).get("constants") or [],
                 "source": "kb",
             })
         else:
@@ -627,23 +685,181 @@ def _collect_via_cache(root: str, project: Optional[str],
     edges: List[dict] = []
     for pf in per_file.values():
         edges += _rebuild_edges_from_refs(pf["symbols"], pf["refs"])
-    logger.info("[semantic] cache 兜底: 文件数=%d 缓存未命中=%s source=%s 共取节点=%d 边=%d",
-                len(files or []), miss or "-", source, len(nodes), len(edges))
-    return nodes, edges, source
+    impl_by_file = {rel: pf["impl"] for rel, pf in per_file.items() if pf.get("impl")}
+    logger.info("[semantic] cache 兜底: 文件数=%d 缓存未命中=%s source=%s 共取节点=%d 边=%d impl文件=%d",
+                len(files or []), miss or "-", source, len(nodes), len(edges), len(impl_by_file))
+    return nodes, edges, source, impl_by_file
 
 
-def _kb_parse_file(root: str, rel: str) -> Optional[dict]:
-    """经 KbGateway 调 KB 只读 analysis.parseFileAst(内容不落 KB)。"""
+def _kb_parse_file(root: str, rel: str, impl: bool = False) -> Optional[dict]:
+    """经 KbGateway 调 KB 只读 analysis.parseFileAst(内容不落 KB)。
+
+    impl=True 时请求 implDetails(语句条件/框架路由/常量值)；
+    旧版 KB 后端无此参数(HTTP 500) → 自动重试无参调用，降级为仅符号。
+    """
     full = os.path.join(root, rel.replace("/", os.sep))
     try:
         from .kb_gateway import call_kb
-        res = call_kb("analysis.parseFileAst", filePath=full, file_path=full)
+        res = None
+        if impl:
+            res = call_kb("analysis.parseFileAst", filePath=full, file_path=full,
+                          implDetails=True)
+            if not (isinstance(res, dict) and res.get("symbols") is not None):
+                # 旧 KB 后端不支持 implDetails → 无参重试(降级为仅符号)
+                res = call_kb("analysis.parseFileAst", filePath=full, file_path=full)
+        else:
+            res = call_kb("analysis.parseFileAst", filePath=full, file_path=full)
         if isinstance(res, dict) and res.get("symbols") is not None:
             return res
         return None
     except Exception as e:
         logger.warning("[semantic] kb parseFileAst %s failed: %s", rel, e)
         return None
+
+
+def _impl_from_kb(kb: Optional[dict]) -> Optional[dict]:
+    """KB 响应 → impl details；无 implDetails 字段(旧后端)返回 None。"""
+    if not isinstance(kb, dict) or "implDetails" not in kb:
+        return None
+    det = kb.get("implDetails") or {}
+    return {"statements": det.get("statements") or [],
+            "routes": det.get("routes") or [],
+            "constants": det.get("constants") or []}
+
+
+def _impl_from_row(row: Optional[dict]) -> Optional[dict]:
+    """缓存行 → impl details；行无 impl 数据(旧行/未填充)返回 None。"""
+    if not isinstance(row, dict):
+        return None
+    if all(row.get(k) is None for k in ("statements", "routes", "constants")):
+        return None
+    return {"statements": row.get("statements") or [],
+            "routes": row.get("routes") or [],
+            "constants": row.get("constants") or []}
+
+
+def _local_parse_impl(root: str, rel: str) -> Optional[dict]:
+    """本地解析器兜底(KB 不可用时)：与 parseFileAst 同一 TreeSitterWalker + extract_impl_details。
+
+    返回 {statements, routes, constants, language}；不支持的语言/失败返回 None。
+    """
+    full = os.path.join(root, rel.replace("/", os.sep))
+    try:
+        with open(full, "rb") as fh:
+            raw = fh.read()
+    except Exception:
+        return None
+    if len(raw) > 512 * 1024:
+        return None
+    try:
+        from parsers.core.walker import TreeSitterWalker, _detect_language
+        from parsers.core.impl_detail import extract_impl_details
+        from parsers.languages import EXTRACTORS
+        from parsers.language_loader import get_parser
+    except Exception:
+        return None
+    lang = _detect_language(full) or ""
+    if not lang or EXTRACTORS.get(lang) is None or get_parser(lang) is None:
+        return None
+    try:
+        table = TreeSitterWalker(full, raw, lang, EXTRACTORS[lang]).extract()
+    except Exception as e:
+        logger.warning("[semantic] local walk %s failed: %s", rel, e)
+        return None
+    try:
+        r = extract_impl_details(rel, raw, lang, table)
+    except Exception as e:
+        logger.warning("[semantic] local impl %s failed: %s", rel, e)
+        return None
+    impl = {"statements": r.get("statements") or [], "routes": r.get("routes") or [],
+            "constants": r.get("constants") or [], "language": lang}
+    return impl if any(impl[k] for k in ("statements", "routes", "constants")) else None
+
+
+def _fetch_impl_for_file(root: str, project: Optional[str], rel: str) -> Optional[dict]:
+    """单文件实现细节: 缓存命中 → KB parseFileAst(implDetails) → 本地解析器 → 回写 architect 缓存。"""
+    pid = project_id_for(root, project)
+    full = os.path.join(root, rel.replace("/", os.sep))
+    if not os.path.isfile(full):
+        return None
+    h = _cache_content_hash(root, rel)
+    row = store.AstCacheStore.get(pid, rel)
+    if row and row.get("contentHash") == h:
+        impl = _impl_from_row(row)
+        if impl is not None:
+            return impl
+    kb = _kb_parse_file(root, rel, impl=True)
+    if kb:
+        impl = _impl_from_kb(kb)
+        if impl is None:
+            return None  # 旧 KB 后端不支持 → 降级为空
+        store.AstCacheStore.upsert(pid, rel, {
+            "contentHash": h, "language": kb.get("language") or "",
+            "symbols": kb.get("symbols") or [],
+            "imports": kb.get("imports") or [],
+            "refs": kb.get("refs") or [],
+            "statements": impl["statements"], "routes": impl["routes"],
+            "constants": impl["constants"],
+            "source": "kb",
+        })
+        return impl
+    # KB 不可用 → 本地解析器兜底(与 parseFileAst 同一提取逻辑，source=local)
+    local = _local_parse_impl(root, rel)
+    if local is None:
+        return None
+    store.AstCacheStore.upsert(pid, rel, {
+        "contentHash": h, "language": local.get("language") or "",
+        "statements": local["statements"], "routes": local["routes"],
+        "constants": local["constants"],
+        "source": "local",
+    })
+    return {k: local[k] for k in ("statements", "routes", "constants")}
+
+
+def _collect_impl_details(root: str, project: Optional[str],
+                          files: Optional[List[str]]) -> Dict[str, dict]:
+    """逐文件收集实现细节(rel → {statements, routes, constants})，全部 best-effort。"""
+    out: Dict[str, dict] = {}
+    for rel in (files or [])[:120]:
+        try:
+            impl = _fetch_impl_for_file(root, project, rel)
+        except Exception as e:
+            logger.warning("[semantic] impl details %s failed: %s", rel, e)
+            continue
+        if impl and any(impl.values()):
+            out[rel] = impl
+    return out
+
+
+def _impl_block(impl_by_file: Dict[str, dict]) -> str:
+    """实现细节结构化块: API 路由清单 / 常量值 / 控制流语句清单(供 LLM/启发式)。"""
+    if not impl_by_file:
+        return ""
+    rl: List[str] = []
+    cl: List[str] = []
+    sl: List[str] = []
+    for rel, impl in impl_by_file.items():
+        for r in (impl.get("routes") or [])[:50]:
+            methods = "/".join(r.get("methods") or ["GET"])
+            handler = r.get("handler") or "?"
+            rl.append(f"- [{methods}] {r.get('path', '')} -> {handler} "
+                      f"({rel}:{r.get('line', 0)}, {r.get('framework', '')})")
+        for c in (impl.get("constants") or [])[:80]:
+            cl.append(f"- {c.get('name', '')} = {c.get('value', '')} ({rel}:{c.get('line', 0)})")
+        for s in (impl.get("statements") or [])[:200]:
+            enc = f"{s['enclosing']}:" if s.get("enclosing") else ""
+            sl.append((f"- {enc}{s.get('startLine', 0)} [{s.get('type', '')}] "
+                       f"{(s.get('condition') or '').strip()}").rstrip())
+    parts: List[str] = []
+    if rl:
+        parts.append("API 路由清单:\n" + "\n".join(rl))
+    if cl:
+        parts.append("常量值清单:\n" + "\n".join(cl))
+    if sl:
+        parts.append("控制流语句清单(函数:行 [类型] 条件原文):\n" + "\n".join(sl))
+    if not parts:
+        return ""
+    return "\n" + "\n".join(parts) + "\n"
 
 
 def collect_context(root: str, scope_type: str, scope_key: str,
@@ -663,6 +879,8 @@ def collect_context(root: str, scope_type: str, scope_key: str,
         return {"root": root, "files": [], "symbols": [], "nodes": [], "table": {},
                 "edges": [], "text": "", "srcHash": "", "source": "none"}
     source = "live"
+    impl_by_file: Dict[str, dict] = {}
+    callee_names: Dict[str, str] = {}
     conn = _open_cg(root)
     cross = ""
     if conn is not None:
@@ -670,18 +888,40 @@ def collect_context(root: str, scope_type: str, scope_key: str,
         nodes = _query_nodes(conn, files=files, symbols=syms)
         edges = _query_edges(conn, [n["id"] for n in nodes]) if nodes else []
         cross = _cross_file_edges_text(conn, [n["id"] for n in nodes])
+        # 范围外调用目标 → 批量补名(steps/流程展示，避免裸节点 id)
+        known = {n.get("id") for n in nodes}
+        missing = {e.get("target") for e in edges
+                   if e.get("kind") == "calls" and e.get("target")
+                   and e.get("target") not in known}
+        if missing:
+            try:
+                ph = ",".join("?" * len(missing))
+                for r in conn.execute(
+                        f"SELECT id, name FROM nodes WHERE id IN ({ph})",
+                        tuple(missing)).fetchall():
+                    callee_names[r["id"]] = r["name"] or ""
+            except Exception as e:
+                logger.warning("[semantic] callee 名称补全失败: %s", e)
         conn.close()
+        # codegraph 无实现级数据 → KB parseFileAst(implDetails) 补取(缓存 arch_ast_cache)
+        if files:
+            impl_by_file = _collect_impl_details(root, project, files)
     else:
         # 无 codegraph → AST 缓存层(KB 解析优先，live 扫描兜底)
-        nodes, edges, source = _collect_via_cache(root, project, files, syms)
-    logger.info("[semantic] collect_context source=%s nodes=%d edges=%d",
-                source, len(nodes), len(edges))
+        nodes, edges, source, impl_by_file = _collect_via_cache(root, project, files, syms)
+    logger.info("[semantic] collect_context source=%s nodes=%d edges=%d implFiles=%d",
+                source, len(nodes), len(edges), len(impl_by_file))
     table = build_symbol_table(nodes)
     cross_suffix = ("\n" + cross) if cross else ""
+    ordered = _ordered_call_lines(nodes, edges, table)
+    ordered_block = ("\n有序调用序列(按行号):\n" + ordered + "\n") if ordered else ""
+    impl_block = _impl_block(impl_by_file)
     text = (
         f"文件集合({len(files)} 个): {', '.join(files[:40]) or '(全量)'}\n"
         f"符号清单:\n{_symbol_block(nodes)}\n"
         f"关系边:\n{_edge_lines(edges, table) or '(无)'}"
+        f"{ordered_block}"
+        f"{impl_block}"
         f"{cross_suffix}"
     )
     src_hash = hashlib.md5(json.dumps(
@@ -689,7 +929,8 @@ def collect_context(root: str, scope_type: str, scope_key: str,
           "s": n["start_line"], "e": n["end_line"], "sig": n.get("signature")}
          for n in nodes], ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
     return {"root": root, "project": project, "files": files, "symbols": syms, "nodes": nodes, "table": table,
-            "edges": edges, "text": text, "srcHash": src_hash, "source": source}
+            "edges": edges, "text": text, "srcHash": src_hash, "source": source,
+            "implDetails": impl_by_file, "calleeNames": callee_names}
 
 
 def _scan_live(root: str, files: Optional[List[str]],
@@ -1436,10 +1677,14 @@ def _llm_extract(root: Optional[str], project: Optional[str],
             "detail 记录 configSource/约束/阈值。硬编码分支不是 rule。\n"
             "类别-锚点对应(重要):\n"
             "  - entity 只能锚 class/struct/enum/interface 类型节点；禁止把函数当实体。\n"
-            "  - contract 只能锚 route 节点或 api_*/handle_* 路由处理函数；禁止把内部函数"
-            "(get_config/send_sms_code 等)当契约。\n"
+            "  - contract 只能锚 route 节点或 api_*/handle_* 路由处理函数(上下文「API 路由清单」"
+            "中出现的 handler)；禁止把内部函数(get_config/send_sms_code 等)当契约。\n"
             "  - state 只能锚 enum 枚举。\n"
             "  - 每个符号只产一个资产(选最合适类别)，禁止同一函数同时输出 process+contract+decision。\n"
+            "上下文若提供「API 路由清单/常量值清单/控制流语句清单」，它们是该文件的权威实现事实："
+            "  - contract 的 relations 必须采用路由清单中的真实 path/methods(不要臆造端点)；\n"
+            "  - decision 的 branches.condition 必须采用语句清单中的条件原文(按行号对应所属函数)；\n"
+            "  - rule 的 constraints/thresholds 采用常量值清单中的真实值。\n"
             "不得输出 business/logic 级归纳，不得臆造清单中不存在的符号。"
         )
     elif level == "business":
@@ -1668,9 +1913,13 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
             detail = {"trigger": "", "steps": [], "invariants": []}
             if low:
                 callees = _callee_names(n.get("id"), edges, name_of)
+                branches = _branches_from_impl(
+                    ctx.get("implDetails"), n, types=("if", "switch", "case", "loop"))
                 detail = {"trigger": "", "kind": "call_chain",
-                          "steps": [{"order": 1, "semantic": "调用 " + c, "symbols": [c]}
-                                    for c in callees],
+                          "steps": [{"order": i, "semantic": "调用 " + c, "symbols": [c]}
+                                    for i, c in enumerate(callees, 1)],
+                          "conditions": [b["condition"] for b in branches
+                                         if b.get("condition")][:8],
                           "invariants": []}
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
@@ -1685,10 +1934,11 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
                            f"分支逻辑「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。")
             detail = {"branches": [], "invariants": []}
             if low:
-                detail = {"kind": "branch_logic",
-                          "branches": [{"condition": "", "then": "", "else": "",
-                                        "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}],
-                          "invariants": []}
+                branches = _branches_from_impl(ctx.get("implDetails"), n)
+                if not branches:
+                    branches = [{"condition": "", "then": "", "else": "",
+                                 "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}]
+                detail = {"kind": "branch_logic", "branches": branches, "invariants": []}
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "contract":
@@ -1702,9 +1952,10 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
                            f"消息/签名约定「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。")
             detail = {"relations": [], "invariants": []}
             if low:
-                detail = {"kind": "message_contract",
-                          "relations": [{"target": "", "type": "signature", "semantic": sig}],
-                          "invariants": []}
+                rels = _relations_from_routes(ctx.get("implDetails"), n)
+                if not rels:
+                    rels = [{"target": "", "type": "signature", "semantic": sig}]
+                detail = {"kind": "message_contract", "relations": rels, "invariants": []}
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "rule":
@@ -1718,7 +1969,8 @@ def _heuristic_extract(kind: str, ctx: Dict[str, Any],
             detail = {"configSource": "", "constraints": [], "thresholds": []}
             if low:
                 detail = {"kind": "config_item", "configSource": n.get("file_path") or "",
-                          "constraints": [], "thresholds": []}
+                          "constraints": _constants_from_impl(ctx.get("implDetails"), n),
+                          "thresholds": []}
             out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
                         "detail": detail, "astRefs": [_node_to_ref(n)]})
     elif kind == "state":
@@ -1790,22 +2042,106 @@ def _branch_dense(node: dict) -> bool:
     text = f"{node.get('signature') or ''} {node.get('docstring') or ''}".lower()
     hits = sum(1 for tok in ("if ", "elif", "else", "for ", "while ", "case ", "match ",
                              "switch", "==", "!=", " is ", " in ")
-               if tok in text)
+                if tok in text)
     return hits >= 2
+
+
+# ── implDetails 消费辅助(KB 语句/路由/常量 → 资产 detail) ───────────
+
+def _impl_for_file(impl_by_file: Optional[Dict[str, dict]], node: dict) -> dict:
+    return (impl_by_file or {}).get(node.get("file_path") or "") or {}
+
+
+def _branches_from_impl(impl_by_file: Optional[Dict[str, dict]], node: dict,
+                        types: tuple = ("if", "switch", "case")) -> List[dict]:
+    """implDetails 控制流语句清单 → branches(condition=代码原文，带行号)。"""
+    branches: List[dict] = []
+    impl = _impl_for_file(impl_by_file, node)
+    for s in impl.get("statements") or []:
+        if s.get("enclosing") != node.get("name"):
+            continue
+        if s.get("type") not in types:
+            continue
+        branches.append({
+            "condition": (s.get("condition") or "").strip(),
+            "then": "", "else": "",
+            "line": int(s.get("startLine") or 0),
+            "semantic": f"{s.get('type')} 分支: {node.get('name')}",
+            "symbols": [node.get("name")],
+        })
+        if len(branches) >= 12:
+            break
+    return branches
+
+
+def _relations_from_routes(impl_by_file: Optional[Dict[str, dict]], node: dict) -> List[dict]:
+    """implDetails 路由清单 → contract relations(真实 path/methods/handler)。
+
+    route 节点只匹配自己的 path(节点名含该 path)；函数节点仅当其是某路由的
+    handler 时匹配。
+    """
+    rels: List[dict] = []
+    impl = _impl_for_file(impl_by_file, node)
+    is_route = (node.get("kind") or "").lower() == "route"
+    node_text = f"{node.get('name') or ''} {node.get('qualified_name') or ''}"
+
+    def _path_hit(path: str) -> bool:
+        if not path:
+            return False
+        return re.search(re.escape(path) + r"(?![\w-])", node_text) is not None
+
+    for r in impl.get("routes") or []:
+        if is_route:
+            if not _path_hit(r.get("path") or ""):
+                continue
+        elif r.get("handler") != node.get("name"):
+            continue
+        methods = r.get("methods") or ["GET"]
+        rels.append({"target": r.get("path", ""), "type": "http",
+                     "methods": methods,
+                     "line": int(r.get("line") or 0),
+                     "semantic": f"{'/'.join(methods)} {r.get('path', '')}"})
+        if len(rels) >= 20:
+            break
+    return rels
+
+
+def _constants_from_impl(impl_by_file: Optional[Dict[str, dict]], node: dict) -> List[dict]:
+    """implDetails 常量值清单 → 配置约束项(同文件，name=value+行号)。"""
+    impl = _impl_for_file(impl_by_file, node)
+    return [{"name": c.get("name", ""), "value": c.get("value", ""),
+             "line": int(c.get("line") or 0)}
+            for c in (impl.get("constants") or [])[:50]]
+
+
+def _is_route_handler(node: dict, impl_by_file: Optional[Dict[str, dict]]) -> bool:
+    """implDetails 路由元数据: 本函数是某路由 handler → 契约边界
+    (覆盖 codegraph 无 route 节点时的判定缺口)。"""
+    if not impl_by_file:
+        return False
+    name = node.get("name") or ""
+    if not name:
+        return False
+    impl = impl_by_file.get(node.get("file_path") or "") or {}
+    return any(r.get("handler") == name for r in impl.get("routes") or [])
 
 
 def _primary_kind_for_node(node: dict, edges: List[dict],
                            name_of: Optional[Dict[str, str]] = None,
-                           node_by_id: Optional[Dict[str, dict]] = None) -> str:
+                           node_by_id: Optional[Dict[str, dict]] = None,
+                           impl_by_file: Optional[Dict[str, dict]] = None) -> str:
     """实现层每符号只产一个主类别(信号优先，避免跨类别重复)：
 
     rule(配置载体) > contract(路由/api 边界) > entity(类型) / state(枚举)
     > decision(分支密集) > process(普通函数)。
+    impl_by_file 仅在 scope 无 route 节点时传入(有 route 节点时边逻辑已覆盖 handler 归属)。
     """
     kind = (node.get("kind") or "").lower()
     if _config_carrier_signal(node):
         return "rule"
     if _is_contract_boundary_node(node, edges, name_of, node_by_id):
+        return "contract"
+    if impl_by_file is not None and _is_route_handler(node, impl_by_file):
         return "contract"
     if kind == "enum":
         return "state"
@@ -1831,10 +2167,14 @@ def _heuristic_extract_primary(ctx: Dict[str, Any],
     root = ctx.get("root") or ""
     node_by_id = {n.get("id"): n for n in nodes}
     name_of = {n.get("id"): (n.get("qualified_name") or n.get("name") or "") for n in nodes}
+    impl_by_file = ctx.get("implDetails")
+    # scope 已有 route 节点时，handler 归属由边逻辑判定，impl 路由判定不介入(防重复)。
+    has_route_node = any((n.get("kind") or "").lower() == "route" for n in nodes)
     out: List[dict] = []
     per_kind_cap: Dict[str, int] = {}
     for n in nodes:
-        pk = _primary_kind_for_node(n, edges, name_of, node_by_id)
+        pk = _primary_kind_for_node(n, edges, name_of, node_by_id,
+                                    None if has_route_node else impl_by_file)
         if not pk or pk not in kinds:
             continue
         if per_kind_cap.get(pk, 0) >= _IMPL_KIND_CAP:
@@ -1869,7 +2209,8 @@ def _heuristic_extract_primary(ctx: Dict[str, Any],
             out.append({"kind": "rule", "level": level, "name": n["name"],
                         "desc": doc or f"配置/阈值「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。",
                         "detail": {"kind": "config_item", "configSource": n.get("file_path") or "",
-                                   "constraints": [], "thresholds": []},
+                                   "constraints": _constants_from_impl(impl_by_file, n),
+                                   "thresholds": []},
                         "astRefs": [_node_to_ref(n)]})
         elif pk == "contract":
             sig = n.get("signature") or ""
@@ -1886,31 +2227,43 @@ def _heuristic_extract_primary(ctx: Dict[str, Any],
                         if not doc:
                             doc = (h.get("docstring") or "").strip()
                         break
+            rels = _relations_from_routes(impl_by_file, n)
+            if not rels:
+                rels = [{"target": "", "type": "signature", "semantic": sig}]
+            ep = next((f"{'/'.join(r.get('methods') or ['GET'])} {r.get('target', '')}"
+                       for r in rels if r.get("type") == "http"), "")
             out.append({"kind": "contract", "level": level, "name": n["name"],
-                        "desc": doc or f"服务契约「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。",
-                        "detail": {"kind": "message_contract",
-                                   "relations": [{"target": "", "type": "signature", "semantic": sig}],
+                        "desc": doc or (f"服务契约「{n['name']}」({ep})，位于 {n['file_path']}:{n['start_line']}。"
+                                        if ep else
+                                        f"服务契约「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。"),
+                        "detail": {"kind": "message_contract", "relations": rels,
                                    "invariants": []},
                         "astRefs": [_node_to_ref(n)]})
         elif pk == "decision":
             sig = n.get("signature") or ""
             doc = (n.get("docstring") or "").strip()
+            branches = _branches_from_impl(impl_by_file, n)
+            if not branches:
+                branches = [{"condition": "", "then": "", "else": "",
+                             "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}]
             out.append({"kind": "decision", "level": level, "name": n["name"],
                         "desc": doc or f"分支逻辑「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。",
-                        "detail": {"kind": "branch_logic",
-                                   "branches": [{"condition": "", "then": "", "else": "",
-                                                 "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}],
+                        "detail": {"kind": "branch_logic", "branches": branches,
                                    "invariants": []},
                         "astRefs": [_node_to_ref(n)]})
         else:  # process
             callees = _callee_names(n.get("id"), edges, name_of)
+            branches = _branches_from_impl(
+                impl_by_file, n, types=("if", "switch", "case", "loop"))
             sig = n.get("signature") or ""
             doc = (n.get("docstring") or "").strip()
             out.append({"kind": "process", "level": level, "name": n["name"],
                         "desc": doc or f"调用链「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。",
                         "detail": {"trigger": "", "kind": "call_chain",
-                                   "steps": [{"order": 1, "semantic": "调用 " + c, "symbols": [c]}
-                                             for c in callees],
+                                   "steps": [{"order": i, "semantic": "调用 " + c, "symbols": [c]}
+                                             for i, c in enumerate(callees, 1)],
+                                   "conditions": [b["condition"] for b in branches
+                                                  if b.get("condition")][:8],
                                    "invariants": []},
                         "astRefs": [_node_to_ref(n)]})
     return out
@@ -1994,13 +2347,20 @@ def _fields_from_source(root: str, n: dict, max_fields: int = 40) -> List[dict]:
 
 def _callee_names(node_id: str, edges: List[dict],
                   name_of: Optional[Dict[str, str]] = None) -> List[str]:
-    """低粒度调用链：取 1-hop 直接调用目标符号名(经 name_of 把节点 id 解析为符号名)。"""
+    """低粒度调用链：取 1-hop 直接调用目标符号名(经 name_of 把节点 id 解析为符号名)。
+
+    按边 line 排序恢复函数体内的真实调用顺序(无 line 的边保持原相对序)。
+    """
     out: List[str] = []
-    for e in edges or []:
+    for i, e in enumerate(edges or []):
         if e.get("kind") == "calls" and e.get("source") == node_id and e.get("target"):
             t = e["target"]
-            out.append(name_of.get(t, t) if name_of else t)
-    return list(dict.fromkeys(out))[:8]
+            ln = e.get("line")
+            out.append((ln if isinstance(ln, int) else 1 << 30, i,
+                        name_of.get(t, t) if name_of else t))
+    out.sort(key=lambda x: (x[0], x[1]))
+    names = [n for _, _, n in out]
+    return list(dict.fromkeys(names))[:8]
 
 
 def _member_fields_from_edges(node_id: str, edges: List[dict],
@@ -2022,6 +2382,15 @@ def _member_fields_from_edges(node_id: str, edges: List[dict],
 
 
 # ── 持久化(增量 change) ───────────────────────────────────────
+
+_AST_CACHE_VERSION = "v2"
+# implDetails 解析逻辑变更时 bump → 全部旧缓存行失效重取(防脏数据长期命中)。
+
+
+def _cache_content_hash(root: str, rel: str) -> str:
+    """ast 缓存比对哈希 = 版本盐 + 文件 md5。"""
+    return f"{_AST_CACHE_VERSION}-{_file_md5(root, rel)}"
+
 
 def _file_md5(root: str, rel: str) -> str:
     """文件内容哈希签名(对应要求①：AST 节点 ↔ 文件哈希)。"""
@@ -2375,7 +2744,19 @@ def extract_scope(root: Optional[str], project: Optional[str],
         len(ctx.get("symbols") or []), ctx.get("source"), len(ctx.get("nodes") or []), synced)
     all_assets: List[dict] = []
     llm_count = 0
-    if use_llm:
+    heur_counts: Dict[str, int] = {}
+    if level == "implementation":
+        # 新管线：规则候选(类别定死) → (文件×类型)定向 LLM → 验收 → 工具补齐 → 种子地板。
+        # LLM 不可用/关闭时管线自动退化为纯确定性种子资产(不丢类别覆盖)。
+        from . import asset_extract
+        all_assets = asset_extract.extract_directed(
+            root, project, ctx, kinds, model_id=model_id, use_llm=use_llm)
+        if not use_llm:
+            degraded = True
+        for a in all_assets:
+            heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
+        llm_count = sum(1 for a in all_assets if not a.get("meta", {}).get("degraded"))
+    elif use_llm:
         try:
             llm_assets = _llm_extract(root, project, ctx.get("text") or "", model_id,
                                       table=ctx.get("table") or {}, level=level)
@@ -2385,11 +2766,10 @@ def extract_scope(root: Optional[str], project: Optional[str],
             llm_assets = []
         if llm_assets:
             all_assets = llm_assets
-    heur_counts: Dict[str, int] = {}
     if not all_assets:
         degraded = True
         if level == "implementation":
-            # 实现层单趟主类别分配：每符号只产一个资产(消除跨类别重复)。
+            # 兜底(新管线异常时)：旧单趟主类别启发式。
             all_assets = _heuristic_extract_primary(ctx, kinds)
             for a in all_assets:
                 heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
@@ -3630,8 +4010,7 @@ def changed_files(root: str, project: Optional[str]) -> Dict[str, List[str]]:
         full = os.path.join(root, rel.replace("/", os.sep))
         if not os.path.isfile(full):
             deleted.append(rel)
-            continue
-        h = _file_md5(root, rel)
+        h = _cache_content_hash(root, rel)
         if h and row.get("contentHash") and h != row.get("contentHash"):
             modified.append(rel)
     return {"added": added, "modified": modified, "deleted": deleted}
@@ -4436,6 +4815,47 @@ async def api_extract_all(request: Request):
                       max_components=int(body.get("maxComponents") or 12),
                       level=lvl)
     return ok(res)
+
+
+@router.post("/kb/semantic/flow-view")
+async def api_flow_view(request: Request):
+    """实现层资产 → 业务活动图/流程图(确定性建图 + 资产业务名标签)。
+
+    body: {root?, project?, entries?: [{file?, symbol?, path?, methods?, name?, assetId?}],
+           files?: [...], subgraphBy?: "file"|"none"}
+    返回 {flows: [{entry, mermaid, steps, nodes}], entries}
+    """
+    body = await request.json()
+    from . import flow_views
+    res = flow_views.build_flow_view(
+        body.get("root"), body.get("project"),
+        entries=body.get("entries"), files=body.get("files"),
+        subgraph_by=body.get("subgraphBy") or "file")
+    return ok(res)
+
+
+@router.post("/kb/semantic/asset-diagram")
+async def api_asset_diagram(request: Request):
+    """静态资产 → 图：entity → classDiagram(字段/方法)，state → stateDiagram。
+
+    body: {assetIds?: [...], project?: str}  (assetIds 缺省 = 项目内 entity/state 资产)
+    返回 {diagrams: [{assetId, name, type, mermaid}]}
+    """
+    body = await request.json()
+    from . import flow_views
+    ids = body.get("assetIds") or []
+    if ids:
+        assets = [store.SemanticAssetsStore.get(i) for i in ids[:20]]
+        assets = [a for a in assets if a]
+    else:
+        pid = project_id_for(body.get("root"), body.get("project"))
+        assets = []
+        if pid:
+            for k in ("entity", "state"):
+                assets += [a for a in store.SemanticAssetsStore.all(pid, k, limit=20)
+                           if (a.get("level") or "implementation") == "implementation"
+                           and (a.get("status") or "active") == "active"]
+    return ok(flow_views.build_asset_diagrams(assets))
 
 
 @router.post("/kb/semantic/refresh")

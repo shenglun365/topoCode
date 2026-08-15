@@ -244,8 +244,11 @@ ARCHITECT_DB_TABLES_SQL = """
         content_hash TEXT DEFAULT '',
         language TEXT DEFAULT '',
         symbols TEXT,                       -- JSON: node[] (file 内符号)
-        imports TEXT,                       -- JSON: module[] 
+        imports TEXT,                       -- JSON: module[]
         refs TEXT,                          -- JSON: [{name,kind,line}]
+        statements TEXT,                    -- JSON: [{type,condition,startLine,endLine,enclosing}]
+        routes TEXT,                        -- JSON: [{path,methods,handler,framework,line}]
+        constants TEXT,                     -- JSON: [{name,value,line}]
         source TEXT DEFAULT 'codegraph',    -- codegraph | kb | live
         parsed_at INTEGER DEFAULT 0,
         PRIMARY KEY (project_id, file_path)
@@ -298,6 +301,12 @@ _ARCH_AGENT_CONFIG_MIGRATION_COLS = [
 _ARCH_AGENT_SESSION_MIGRATION_COLS = [
     ("instance_id", "TEXT DEFAULT ''"),
     ("opencode_session_id", "TEXT DEFAULT ''"),
+]
+
+_AST_CACHE_MIGRATION_COLS = [
+    ("statements", "TEXT"),                # JSON: 语句级条件 [{type,condition,startLine,endLine,enclosing}]
+    ("routes", "TEXT"),                    # JSON: 框架路由 [{path,methods,handler,framework,line}]
+    ("constants", "TEXT"),                 # JSON: 常量值 [{name,value,line}]
 ]
 
 _ARCH_UNIT_TEST_MIGRATION_COLS = [
@@ -542,11 +551,24 @@ def architect_db_migrations(db) -> None:
             symbols TEXT,
             imports TEXT,
             refs TEXT,
+            statements TEXT,
+            routes TEXT,
+            constants TEXT,
             source TEXT DEFAULT 'codegraph',
             parsed_at INTEGER DEFAULT 0,
             PRIMARY KEY (project_id, file_path)
         )
     """)
+    try:
+        cache_cols = {r["name"] for r in db.fetchall("PRAGMA table_info(arch_ast_cache)")}
+    except Exception:
+        cache_cols = set()
+    for name, typ in _AST_CACHE_MIGRATION_COLS:
+        if name not in cache_cols:
+            try:
+                db.execute(f"ALTER TABLE arch_ast_cache ADD COLUMN {name} {typ}")
+            except Exception:
+                pass
     db.execute("""
         CREATE TABLE IF NOT EXISTS arch_extract_tasks (
             id TEXT PRIMARY KEY,

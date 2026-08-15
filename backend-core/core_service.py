@@ -305,10 +305,11 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("analysis.parseFileAst")
     def parse_file_ast(file_path: str = None, filePath: str = None, language: str = "",
-                       max_bytes: int = 512 * 1024):
+                       max_bytes: int = 512 * 1024, implDetails: bool = False):
         """只读解析单文件 AST → 符号/imports/refs(**不落库**，供 architect AST 缓存层)。
 
         file_path 为磁盘绝对路径(读最新源码)；language 缺省按扩展名探测。
+        implDetails=True 时追加实现细节(语句级条件/框架路由/常量值/配置键值)。
         复用 `plugins/parsers`(TreeSitterWalker) 成熟解析器；失败返回 {error}。
         """
         fp = file_path or filePath
@@ -318,45 +319,53 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
             return {"error": f"file not found: {fp}", "filePath": fp}
         try:
             from parsers.core.walker import TreeSitterWalker, _detect_language
+            from parsers.core.impl_detail import extract_impl_details, _file_ext, _CONFIG_EXTS
             from parsers.languages import EXTRACTORS
             from parsers.language_loader import get_parser
 
             lang = (language or "").strip() or (_detect_language(fp) or "")
-            if not lang:
+            is_config = _file_ext(fp) in _CONFIG_EXTS
+            if not lang and not is_config:
                 return {"error": f"unsupported file type: {fp}", "filePath": fp}
-            extractor = EXTRACTORS.get(lang)
-            parser = get_parser(lang)
-            if extractor is None or parser is None:
+            extractor = EXTRACTORS.get(lang) if lang else None
+            parser = get_parser(lang) if lang else None
+            if lang and (extractor is None or parser is None):
                 return {"error": f"no parser for language: {lang}", "filePath": fp}
             with open(fp, "rb") as fh:
                 src_bytes = fh.read()
             if len(src_bytes) > max_bytes:
                 return {"error": "file too large", "filePath": fp, "language": lang}
-            walker = TreeSitterWalker(fp, src_bytes, lang, extractor)
-            table = walker.extract()
-            symbols = []
-            for n in table.nodes:
-                if getattr(n.kind, "value", str(n.kind)) in ("file", "import", "export"):
-                    continue
-                symbols.append({
-                    "name": n.name,
-                    "kind": getattr(n.kind, "value", str(n.kind)),
-                    "qualifiedName": n.qualified_name,
-                    "startLine": n.start_line, "endLine": n.end_line,
-                    "startCol": n.start_col, "endCol": n.end_col,
-                    "signature": n.signature,
-                    "visibility": n.visibility,
-                    "isExported": n.is_exported, "isAsync": n.is_async,
-                    "isStatic": n.is_static, "docstring": n.docstring,
-                    "typeParameters": n.type_parameters,
-                })
-            refs = [{"name": r.reference_name,
-                     "kind": getattr(r.reference_kind, "value", str(r.reference_kind)),
-                     "line": r.line, "col": r.col}
-                    for r in table.unresolved_refs]
-            return {"filePath": fp, "language": lang,
-                    "symbols": symbols, "imports": table.imports,
-                    "refs": refs, "exportCount": len(table.exports)}
+            table = None
+            symbols, refs, imports, export_count = [], [], [], 0
+            if lang:
+                walker = TreeSitterWalker(fp, src_bytes, lang, extractor)
+                table = walker.extract()
+                for n in table.nodes:
+                    if getattr(n.kind, "value", str(n.kind)) in ("file", "import", "export"):
+                        continue
+                    symbols.append({
+                        "name": n.name,
+                        "kind": getattr(n.kind, "value", str(n.kind)),
+                        "qualifiedName": n.qualified_name,
+                        "startLine": n.start_line, "endLine": n.end_line,
+                        "startCol": n.start_col, "endCol": n.end_col,
+                        "signature": n.signature,
+                        "visibility": n.visibility,
+                        "isExported": n.is_exported, "isAsync": n.is_async,
+                        "isStatic": n.is_static, "docstring": n.docstring,
+                        "typeParameters": n.type_parameters,
+                    })
+                refs = [{"name": r.reference_name,
+                         "kind": getattr(r.reference_kind, "value", str(r.reference_kind)),
+                         "line": r.line, "col": r.col}
+                        for r in table.unresolved_refs]
+                imports, export_count = table.imports, len(table.exports)
+            result = {"filePath": fp, "language": lang,
+                      "symbols": symbols, "imports": imports,
+                      "refs": refs, "exportCount": export_count}
+            if implDetails:
+                result["implDetails"] = extract_impl_details(fp, src_bytes, lang, table)
+            return result
         except Exception as e:
             logger.warning("[parseFileAst] %s failed: %s", fp, e)
             return {"error": str(e), "filePath": fp}

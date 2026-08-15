@@ -34,6 +34,9 @@ export interface SemanticAssetRelation {
   target: string
   type?: string
   semantic?: string
+  /** http 契约: 方法清单(GET/POST/...)。 */
+  methods?: string[]
+  line?: number
 }
 
 export interface SemanticAssetStep {
@@ -88,6 +91,53 @@ export interface SemanticAssetDetail {
   tags?: string[]
   /** business 级聚合：组成该业务概念的下级资产(组合链)。 */
   aggregates?: { assetId: string; name?: string; role?: string }[]
+}
+
+/** 流程图入口(路由/handler)。 */
+export interface FlowViewEntry {
+  file?: string
+  symbol?: string
+  path?: string
+  methods?: string[]
+  name?: string
+}
+
+/** 流程图节点(图渲染元数据)。 */
+export interface FlowViewNode {
+  id: string
+  label: string
+  shape?: string
+  line?: number
+  symbol?: string
+  file?: string
+}
+
+/** 单入口流程(业务活动图/流程图)。 */
+export interface FlowViewFlow {
+  entry: FlowViewEntry
+  mermaid: string
+  steps: string[]
+  nodes: FlowViewNode[]
+}
+
+/** POST /kb/semantic/flow-view 结果。 */
+export interface FlowViewResult {
+  flows: FlowViewFlow[]
+  entries?: FlowViewEntry[]
+  note?: string
+  error?: string
+}
+
+/** 静态资产图(entity → 类图，state → 状态图)。 */
+export interface AssetDiagramItem {
+  assetId: string
+  name: string
+  type: 'class' | 'state'
+  mermaid: string
+}
+
+export interface AssetDiagramResult {
+  diagrams: AssetDiagramItem[]
 }
 
 /** 语义数据资产(architect 自持，来源 codegraph/live)。 */

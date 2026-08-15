@@ -53,7 +53,7 @@ _JSON_COLUMNS = {
     "related_to", "preferred_asset_ids", "meta",
     "detail", "ast_refs", "asset_refs", "anchor_hashes",
     "name_alias",
-    "symbols", "imports", "refs",
+    "symbols", "imports", "refs", "statements", "routes", "constants",
     "comp_ids", "progress", "messages",
 }
 
@@ -1056,6 +1056,9 @@ class AstCacheStore:
             "symbols": data.get("symbols") or [],
             "imports": data.get("imports") or [],
             "refs": data.get("refs") or [],
+            "statements": data.get("statements") or [],
+            "routes": data.get("routes") or [],
+            "constants": data.get("constants") or [],
             "source": data.get("source") or "codegraph",
             "parsedAt": now,
         }
@@ -1069,6 +1072,8 @@ class AstCacheStore:
             f"ON CONFLICT(project_id, file_path) DO UPDATE SET "
             f"content_hash=excluded.content_hash, language=excluded.language, "
             f"symbols=excluded.symbols, imports=excluded.imports, refs=excluded.refs, "
+            f"statements=excluded.statements, routes=excluded.routes, "
+            f"constants=excluded.constants, "
             f"source=excluded.source, parsed_at=excluded.parsed_at",
             tuple(params),
         )
