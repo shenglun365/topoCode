@@ -514,12 +514,12 @@ def architect_db_migrations(db) -> None:
                 db.execute(f"ALTER TABLE arch_semantic_assets ADD COLUMN {name} {typ}")
             except Exception:
                 pass
-    # 语义资产 kind/level 规范化迁移: 旧五类/四粒度 → 新六类/三粒度(默认 logic 粒度)
+    # 语义资产 kind/level 规范化迁移: 旧五类/四粒度 → 新六类/三粒度(默认 logic 粒度)。
+    # 注意: rule 在新六类中是一级类别(配置化规则)，不得并入 decision。
     for old, new in (("data_structure", "entity"),
                      ("asset", "entity"),
                      ("processing_flow", "process"),
-                     ("control_logic", "decision"),
-                     ("rule", "decision")):
+                     ("control_logic", "decision")):
         try:
             db.execute(
                 "UPDATE arch_semantic_assets SET kind = ?, level = 'logic' WHERE kind = ?",

@@ -93,41 +93,6 @@ export interface SemanticAssetDetail {
   aggregates?: { assetId: string; name?: string; role?: string }[]
 }
 
-/** 流程图入口(路由/handler)。 */
-export interface FlowViewEntry {
-  file?: string
-  symbol?: string
-  path?: string
-  methods?: string[]
-  name?: string
-}
-
-/** 流程图节点(图渲染元数据)。 */
-export interface FlowViewNode {
-  id: string
-  label: string
-  shape?: string
-  line?: number
-  symbol?: string
-  file?: string
-}
-
-/** 单入口流程(业务活动图/流程图)。 */
-export interface FlowViewFlow {
-  entry: FlowViewEntry
-  mermaid: string
-  steps: string[]
-  nodes: FlowViewNode[]
-}
-
-/** POST /kb/semantic/flow-view 结果。 */
-export interface FlowViewResult {
-  flows: FlowViewFlow[]
-  entries?: FlowViewEntry[]
-  note?: string
-  error?: string
-}
-
 /** 静态资产图(entity → 类图，state → 状态图)。 */
 export interface AssetDiagramItem {
   assetId: string

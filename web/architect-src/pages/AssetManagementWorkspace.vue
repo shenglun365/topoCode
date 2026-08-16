@@ -19,7 +19,7 @@ import { useSplitPane } from '@/composables/useSplitPane'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { useChatModel } from '@/composables/useChatModel'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import type { AssetDetail, AssetDiagramItem, ConversationDetail, FlowViewResult, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
+import type { AssetDetail, AssetDiagramItem, ConversationDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
 
@@ -66,30 +66,8 @@ async function onDeleteTurn(index: number) {
 }
 
 // ---- 资产内容区 ----
-type AssetTab = 'overview' | 'semantic' | 'component' | 'graph' | 'flow'
+type AssetTab = 'overview' | 'semantic' | 'component' | 'graph'
 const tab = ref<AssetTab>('overview')
-
-// ---- 流程图 tab：入口(契约路由) → 业务活动图(服务端确定性建图) ----
-const flowLoading = ref(false)
-const flowView = ref<FlowViewResult | null>(null)
-const flowError = ref('')
-const flowStepsOpen = reactive<Record<string, boolean>>({})
-
-async function loadFlowView() {
-  flowLoading.value = true
-  flowError.value = ''
-  try {
-    flowView.value = await semanticAssetService.flowView()
-  } catch (e: any) {
-    flowError.value = e?.message ?? String(e)
-  } finally {
-    flowLoading.value = false
-  }
-}
-
-function flowKey(f: { entry?: { file?: string; symbol?: string; path?: string } }): string {
-  return `${f.entry?.file ?? ''}::${f.entry?.symbol ?? ''}${f.entry?.path ?? ''}`
-}
 
 // ---- 静态资产图弹窗(entity → 类图，state → 状态图) ----
 const diagramModalOpen = ref(false)
@@ -216,31 +194,39 @@ const compById = computed<Map<string, CompNode>>(() => {
   return m
 })
 
-/** 文件 → 组件 id(取首个归属组件的文件)。 */
-const fileToComp = computed(() => {
-  const m = new Map<string, string>()
+/** 文件 → 拥有它的组件 id 列表(同一文件可被多组件同时拥有，如 INCLUDE/CALL 两套口径)。 */
+const fileToComps = computed(() => {
+  const m = new Map<string, string[]>()
   for (const c of treeComps.value) {
     for (const f of c.owns) {
-      if (!m.has(f)) m.set(f, c.id)
+      const arr = m.get(f)
+      if (arr) {
+        if (!arr.includes(c.id)) arr.push(c.id)
+      } else {
+        m.set(f, [c.id])
+      }
     }
   }
   return m
 })
 
-/** 语义资产归属组件 id：优先资产自带 scopeKey(真实提取范围)；未命中组件
- *  → meta.scopes 多组件归属(INCLUDE/CALL 共享代码 / business 聚合)；
- *  → 按首个锚点文件反查；仍未命中则归「其它」。 */
-function componentOf(a: SemanticAsset): string {
-  const sk = a.scopeKey
-  if (sk && compById.value.has(sk)) return sk
-  const mscopes = a.meta?.scopes
-  if (mscopes?.length) {
-    for (const cid of mscopes) {
-      if (compById.value.has(cid)) return cid
-    }
+/** 语义资产归属组件 id 列表(多归属)：优先资产自带 scopeKey(若为组件) +
+ *  meta.scopes 多组件归属(INCLUDE/CALL 共享代码 / business 聚合)；
+ *  均未命中组件 → 按首个锚点文件反查全部拥有组件。
+ *  返回空 = 无组件归属(归「其它」)。共享代码资产会同时归属多个组件，
+ *  保证各组件视角(树分组/关系图)都能看到它。 */
+function componentsOf(a: SemanticAsset): string[] {
+  const out: string[] = []
+  const add = (cid: string | undefined | null) => {
+    if (cid && compById.value.has(cid) && !out.includes(cid)) out.push(cid)
   }
-  const file = a.astRefs?.[0]?.file
-  return (file && fileToComp.value.get(file)) || OTHER_KEY
+  add(a.scopeKey)
+  for (const cid of a.meta?.scopes ?? []) add(cid)
+  if (!out.length) {
+    const file = a.astRefs?.[0]?.file
+    for (const cid of fileToComps.value.get(file) ?? []) add(cid)
+  }
+  return out
 }
 
 /** 递归收集子组件 id。 */
@@ -354,10 +340,13 @@ const semanticGroups = computed<SemanticGroup[]>(() => {
   const byComp = new Map<string, SemanticAsset[]>()
   const other: SemanticAsset[] = []
   for (const a of items.value) {
-    const cid = componentOf(a)
-    if (cid === OTHER_KEY) {
+    const cids = componentsOf(a)
+    if (!cids.length) {
       other.push(a)
-    } else {
+      continue
+    }
+    // 多归属：共享代码资产同时挂到每个拥有组件下(各组件视角均可见)
+    for (const cid of cids) {
       if (!byComp.has(cid)) byComp.set(cid, [])
       byComp.get(cid)!.push(a)
     }
@@ -393,8 +382,12 @@ const semanticGroups = computed<SemanticGroup[]>(() => {
 
 const scopeSummary = computed(() => {
   if (!scopeSel.value.length) return t('assetMgmt.scopeAll')
-  const n = semanticGroups.value.reduce((s, g) => s + g.assets.length, 0)
-  return `${n}/${items.value.length}`
+  // 共享资产会挂在多个组件组下 → 按资产 id 去重计数
+  const ids = new Set<string>()
+  for (const g of semanticGroups.value) {
+    for (const a of g.assets) ids.add(a.id)
+  }
+  return `${ids.size}/${items.value.length}`
 })
 
 /** 当前筛选的 scope 请求参数(组件 id + 「其它」哨兵)；空=全部。 */
@@ -931,8 +924,6 @@ function onSearch() {
   } else if (tab.value === 'semantic') {
     page.value = 1
     loadSemantic()
-  } else if (tab.value === 'flow') {
-    loadFlowView()
   } else {
     loadComponents()
   }
@@ -969,7 +960,7 @@ onUnmounted(() => stopExtractPoll())
         </h2>
         <div class="flex items-center gap-1">
           <button
-            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'flow' as const, label: t('assetMgmt.tab.flow') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
+            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
@@ -1017,10 +1008,10 @@ onUnmounted(() => stopExtractPoll())
       >
         <div class="panel-header shrink-0 relative !justify-start gap-1.5">
           <span class="flex items-center gap-2">
-            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'overview' ? t('assetMgmt.tab.overview') : tab === 'semantic' ? t('assetMgmt.tab.semantic') : tab === 'flow' ? t('assetMgmt.tab.flow') : tab === 'graph' ? t('assetMgmt.tab.graph') : t('assetMgmt.tab.component') }}
+            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'overview' ? t('assetMgmt.tab.overview') : tab === 'semantic' ? t('assetMgmt.tab.semantic') : tab === 'graph' ? t('assetMgmt.tab.graph') : t('assetMgmt.tab.component') }}
           </span>
           <input
-            v-if="tab !== 'graph' && tab !== 'overview' && tab !== 'flow'"
+            v-if="tab !== 'graph' && tab !== 'overview'"
             v-model="q"
             class="input !py-0.5 !px-2 !text-[11px] w-44 font-mono ml-3"
             :placeholder="t('assetMgmt.searchPlaceholder')"
@@ -1851,79 +1842,8 @@ onUnmounted(() => stopExtractPoll())
             </p>
           </template>
 
-          <!-- 流程图：入口(契约路由) → 业务活动图(服务端确定性建图 + 资产业务名标签) -->
-          <template v-else-if="tab === 'flow'">
-            <p class="text-[10px] text-ctp-overlay0 px-1 pt-0.5">
-              {{ t('assetMgmt.flowHint') }}
-            </p>
-            <div
-              v-if="flowError"
-              class="text-xs text-ctp-red px-1"
-            >
-              {{ t('assetMgmt.flowError') }}: {{ flowError }}
-            </div>
-            <p
-              v-else-if="!flowView?.flows?.length && !flowLoading"
-              class="text-xs text-ctp-overlay0 text-center py-8"
-            >
-              {{ flowView?.note || t('assetMgmt.flowEmpty') }}
-            </p>
-            <div
-              v-else-if="flowLoading"
-              class="text-xs text-ctp-overlay1 text-center py-8"
-            >
-              {{ t('assetMgmt.flowLoading') }}
-            </div>
-            <template v-else>
-              <div
-                v-for="f in flowView!.flows"
-                :key="flowKey(f)"
-                class="border border-ctp-sky/25 hover:border-ctp-sky/45 rounded-lg overflow-hidden"
-              >
-                <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-ctp-surface0">
-                  <span class="chip !text-[9px] bg-ctp-sky/15 text-ctp-sky shrink-0 font-mono">{{ (f.entry.methods ?? []).join('/') || 'GET' }} {{ f.entry.path || f.entry.symbol }}</span>
-                  <span
-                    v-if="f.entry.name && f.entry.name !== f.entry.symbol"
-                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
-                  >{{ f.entry.name }}</span>
-                  <span
-                    v-if="f.entry.file"
-                    class="text-[9px] text-ctp-overlay0 font-mono truncate"
-                  >{{ f.entry.file }}</span>
-                  <span class="flex-1" />
-                  <button
-                    class="btn btn-ghost !py-0.5 !text-[10px] shrink-0"
-                    @click="flowStepsOpen[flowKey(f)] = !flowStepsOpen[flowKey(f)]"
-                  >
-                    {{ t('assetMgmt.flowSteps') }}
-                  </button>
-                </div>
-                <div class="h-72">
-                  <DiagramCard
-                    :title="`${(f.entry.methods ?? []).join('/') || 'GET'} ${f.entry.path || f.entry.symbol}`"
-                    :diagrams="{ mermaid: f.mermaid }"
-                    :allowed-langs="['mermaid']"
-                  />
-                </div>
-                <div
-                  v-if="flowStepsOpen[flowKey(f)]"
-                  class="border-t border-ctp-surface0 px-2.5 py-1.5 space-y-0.5 text-[10px]"
-                >
-                  <div
-                    v-for="(s, si) in f.steps"
-                    :key="si"
-                    class="flex items-center gap-1.5"
-                  >
-                    <span class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0">{{ si + 1 }}</span>
-                    <span class="text-ctp-subtext0">{{ s }}</span>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </template>
-
           <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
-          <template v-else>
+          <template v-if="tab === 'component'">
             <div
               v-for="c in compAssetRows"
               :key="c.assetId"

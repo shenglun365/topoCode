@@ -5,7 +5,7 @@
   - asset_templates: 种子⊕增强合并(骨架不可伪造) / 验收模板 / 增强解析
   - asset_tools: 5 个只读工具 ground truth + facts 记录
   - asset_extract: 确定性地板 / LLM 增强合并 / http 关系防伪造
-  - flow_views: path 边界匹配 / 入口流图(diamond/去重/无自环) / 静态资产图
+  - asset_diagram: 静态资产图(entity → classDiagram / state → stateDiagram)
 
 Run: cd <repo> && python -m pytest plugins/architect/tests/test_asset_pipeline.py -q
 """
@@ -21,7 +21,7 @@ from plugins.architect.arch_routes import asset_rules as R  # noqa: E402
 from plugins.architect.arch_routes import asset_templates as T  # noqa: E402
 from plugins.architect.arch_routes import asset_tools as AT  # noqa: E402
 from plugins.architect.arch_routes import asset_extract as E  # noqa: E402
-from plugins.architect.arch_routes import flow_views as F  # noqa: E402
+from plugins.architect.arch_routes import asset_diagram as F  # noqa: E402
 
 
 def _ctx(tmp_path, monkeypatch):
@@ -367,57 +367,13 @@ def test_extract_group_llm_failure_falls_to_floor(tmp_path, monkeypatch):
     assert assets[0]["detail"]["fields"] == [{"name": "amount", "type": "int"}]
 
 
-# ── flow_views ────────────────────────────────────────────────
+# ── asset_diagram ─────────────────────────────────────────────
 
 
-def test_path_in_text_boundary():
-    assert F._path_in_text("/login", "POST /login")
-    assert F._path_in_text("/login", "x POST /login end")
-    assert not F._path_in_text("/login", "POST /login-with-code")
-    assert not F._path_in_text("/login", "POST /loginX")
-    assert F._path_in_text("/login-with-code", "POST /login-with-code")
-
-
-def test_entry_flow_diamonds_dedup_no_selfloop():
-    """if→diamond(条件原文); 重复调用去重且无自环; 跨文件→parallelogram。"""
-    nodes = [
-        _node("f1", "function", "api_reg", "a.py", 1, 10),
-        _node("f2", "function", "local", "a.py", 12, 13),
-        _node("f3", "function", "ext", "b.py", 20, 21),
-    ]
-    edges = [
-        {"kind": "calls", "source": "f1", "target": "f2", "line": 3},
-        {"kind": "calls", "source": "f1", "target": "f3", "line": 5},
-        {"kind": "calls", "source": "f1", "target": "f2", "line": 7},
-    ]
-    impl_by_file = {"a.py": {"statements": [
-        {"type": "if", "condition": "not user", "startLine": 2, "endLine": 3, "enclosing": "api_reg"},
-    ], "routes": [], "constants": []}}
-    ctx = {"nodes": nodes, "edges": edges, "implDetails": impl_by_file}
-    fl = F._entry_flow({"file": "a.py", "symbol": "api_reg", "path": "/reg",
-                        "methods": ["POST"], "name": "注册"}, ctx, {}, "none")
-    assert fl is not None
-    shapes = {g["id"]: g["shape"] for g in fl["ir"]["nodes"]}
-    assert shapes["s0"] == "stadium"
-    diamonds = [g for g in fl["ir"]["nodes"] if g["shape"] == "diamond"]
-    assert diamonds and diamonds[0]["text"] == "not user"
-    ext = [g for g in fl["ir"]["nodes"] if g.get("symbol") == "ext"]
-    assert ext and ext[0]["shape"] == "parallelogram"
-    # 无自环
-    assert all(e["from"] != e["to"] for e in fl["ir"]["edges"])
-    # 去重: local 只出现一次
-    assert sum(1 for g in fl["ir"]["nodes"] if g.get("symbol") == "local") == 1
-    assert any("not user" in s for s in fl["steps"])
-
-
-def test_inline_flowchart_format():
-    ir = {"direction": "TB",
-          "nodes": [{"id": "a", "text": "入口", "shape": "stadium"},
-                    {"id": "b", "text": "判定", "shape": "diamond"}],
-          "edges": [{"from": "a", "to": "b", "label": ""}]}
-    code = F._inline_flowchart(ir)
-    assert code.startswith("flowchart TB")
-    assert "a ([入口])" in code and "b {判定}" in code and "a --> b" in code
+def test_collect_via_cache_none_root_no_crash():
+    """root=None 不再 TypeError，返回空上下文。"""
+    import plugins.architect.arch_routes.semantic_assets as SA
+    assert SA._collect_via_cache(None, None, ["a.py"], []) == ([], [], "none", {})
 
 
 def test_build_asset_diagrams_entity_and_state():

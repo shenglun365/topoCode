@@ -1116,7 +1116,7 @@ export default {
   assetMgmt: {
     title: 'Asset Management',
     back: 'Back',
-    tab: { overview: 'Overview', semantic: 'Semantic Assets', flow: 'Flow Diagrams', component: 'Components', graph: 'Semantic Graph' },
+    tab: { overview: 'Overview', semantic: 'Semantic Assets', component: 'Components', graph: 'Semantic Graph' },
     overview: {
       title: 'Asset Overview',
       desc: 'Asset management distills code — data entities, processing flows, decision rules, interface contracts and state machines — into "semantic assets" that feed requirement analysis, design and task execution with referenceable context. This overview summarizes the current asset landscape: totals, composition by category and granularity, and asset health (active / stale / deleted).',
@@ -1257,11 +1257,6 @@ export default {
     diagramLoading: 'Building diagram…',
     diagramEmpty: 'Diagram unavailable (asset lacks field/state detail)',
     diagramType: { class: 'class diagram', state: 'state diagram' },
-    flowHint: 'Flow/activity diagrams from contract route entries: conditions (verbatim) as diamonds, calls linked in line order, cross-file calls as parallelograms. Use Search (top right) to rebuild.',
-    flowEmpty: 'No contract route entries. Extract implementation-level semantic assets (with contracts) first.',
-    flowError: 'Failed to build flow diagrams',
-    flowLoading: 'Building flow diagrams…',
-    flowSteps: 'Steps',
     kind: {
       entity: 'Entity',
       contract: 'Contract',

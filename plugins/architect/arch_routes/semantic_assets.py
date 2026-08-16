@@ -606,6 +606,10 @@ def _collect_via_cache(root: str, project: Optional[str],
     从文件级 refs 重建统一边(与 codegraph `_query_edges` 同构)，保证下游
     (Rule 判定/流程/字段)效果一致；impl_by_file 为实现细节(语句/路由/常量)。
     """
+    if not root:
+        # root 不可解析(缺 root/project 参数) → 无法读文件/扫描，返回空上下文防 TypeError。
+        logger.warning("[semantic] _collect_via_cache: root 未解析, 返回空上下文")
+        return [], [], "none", {}
     pid = project_id_for(root, project)
     nodes: List[dict] = []
     # 每文件符号/refs 分组，供重建边(行区间归属必须限定单文件，防跨文件误归)。
@@ -2892,8 +2896,8 @@ def extract_all(root: Optional[str], project: Optional[str],
     """批处理: 组件目录(跨 INCLUDE/CALL × L0/L1)文件并集 → 逐文件多级提取。
 
     组件是下游投影(资产身份=代码锚点)，两套组件重叠文件不重复提取。
-    无组件时按全项目提取一次。缺省 level 产出 implementation+logic 并聚合 business，
-    保证业务层/逻辑层/实现层三档按粒度展示都有数据。
+    无组件时按全项目提取一次。缺省 level 仅产出 implementation(业务层/逻辑层
+    暂停再生；显式传 level='logic'/'business' 才单独产出/聚合)。
     """
     root = resolve_root(root, project)
     if not root:
@@ -3411,9 +3415,21 @@ def _link_parent(pid: str, high_assets: List[dict]) -> None:
 
 # ── 批量管理(选定组件范围: 提取/清除/更新) ──────────────────────
 
+# 组件文件映射短 TTL 缓存：目录极少变化，而提取任务逐文件落库(每文件一次归属装配)，
+# 无缓存时 N 文件 = N 次 KB 调用；KB 瞬时失败也不应让整批资产丢失组件归属。
+_COMP_FILE_MAP_TTL = 60.0
+_comp_file_map_cache: Dict[tuple, tuple] = {}  # (root, project) -> (ts, {cid: frozenset(files)})
+
+
 def _component_file_map(root: str, project: Optional[str]) -> Dict[str, set]:
     """组件 → 文件集合。以组件目录(跨 INCLUDE/CALL × L0/L1，即组件列表完整来源)为准，
-    与 `_comm_files` 解析口径一致(不再用 INCLUDE 单视图 codeMappings)。失败返回空。"""
+    目录为空(降级/无基线)时回退架构模型兜底(与 `_comm_files` 解析口径一致)。
+    结果按 (root, project) 短 TTL 缓存。失败返回空。"""
+    key = (root or "", project or "")
+    now = time.time()
+    hit = _comp_file_map_cache.get(key)
+    if hit and now - hit[0] < _COMP_FILE_MAP_TTL:
+        return {k: set(v) for k, v in hit[1].items()}
     comp_files: Dict[str, set] = {}
     try:
         from .common import build_component_catalog
@@ -3426,8 +3442,22 @@ def _component_file_map(root: str, project: Optional[str]) -> Dict[str, set]:
                 if f:
                     comp_files.setdefault(cid, set()).add(_norm_path(f))
     except Exception as e:
-        logger.warning("[semantic] component file map failed: %s", e)
-    return comp_files
+        logger.warning("[semantic] component file map(catalog) failed: %s", e)
+    if not comp_files:
+        try:
+            from .common import build_architecture_model
+            model = build_architecture_model(root, project)
+            for c in model.get("components") or []:
+                cid = c.get("id")
+                if not cid:
+                    continue
+                for f in (c.get("owns") or []):
+                    if f:
+                        comp_files.setdefault(cid, set()).add(_norm_path(f))
+        except Exception as e:
+            logger.warning("[semantic] component file map(model fallback) failed: %s", e)
+    _comp_file_map_cache[key] = (now, {k: frozenset(v) for k, v in comp_files.items()})
+    return {k: set(v) for k, v in comp_files.items()}
 
 
 def _file_to_components(root: str, project: Optional[str]) -> Dict[str, List[str]]:
@@ -4817,23 +4847,6 @@ async def api_extract_all(request: Request):
     return ok(res)
 
 
-@router.post("/kb/semantic/flow-view")
-async def api_flow_view(request: Request):
-    """实现层资产 → 业务活动图/流程图(确定性建图 + 资产业务名标签)。
-
-    body: {root?, project?, entries?: [{file?, symbol?, path?, methods?, name?, assetId?}],
-           files?: [...], subgraphBy?: "file"|"none"}
-    返回 {flows: [{entry, mermaid, steps, nodes}], entries}
-    """
-    body = await request.json()
-    from . import flow_views
-    res = flow_views.build_flow_view(
-        body.get("root"), body.get("project"),
-        entries=body.get("entries"), files=body.get("files"),
-        subgraph_by=body.get("subgraphBy") or "file")
-    return ok(res)
-
-
 @router.post("/kb/semantic/asset-diagram")
 async def api_asset_diagram(request: Request):
     """静态资产 → 图：entity → classDiagram(字段/方法)，state → stateDiagram。
@@ -4842,7 +4855,7 @@ async def api_asset_diagram(request: Request):
     返回 {diagrams: [{assetId, name, type, mermaid}]}
     """
     body = await request.json()
-    from . import flow_views
+    from . import asset_diagram
     ids = body.get("assetIds") or []
     if ids:
         assets = [store.SemanticAssetsStore.get(i) for i in ids[:20]]
@@ -4855,7 +4868,7 @@ async def api_asset_diagram(request: Request):
                 assets += [a for a in store.SemanticAssetsStore.all(pid, k, limit=20)
                            if (a.get("level") or "implementation") == "implementation"
                            and (a.get("status") or "active") == "active"]
-    return ok(flow_views.build_asset_diagrams(assets))
+    return ok(asset_diagram.build_asset_diagrams(assets))
 
 
 @router.post("/kb/semantic/refresh")

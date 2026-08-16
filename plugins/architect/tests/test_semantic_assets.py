@@ -122,6 +122,69 @@ def test_cross_partition_dedup_and_membership(tmp_path, monkeypatch):
     assert store.SemanticAssetsStore.count("proj-n", scopes=["A", "B"]) == 1
 
 
+def test_file_scope_extraction_multi_component_scopes(tmp_path, monkeypatch):
+    """任务路径(逐文件 files scope 落库)：资产归属到所有拥有该文件的组件。
+
+    文件级去重(跳过的组件不重复提取)不丢失归属 —— 被跳过的组件视角
+    (列表检索/关系图同条件)也能看到该资产。"""
+    _ctx(tmp_path, monkeypatch)
+    monkeypatch.setattr(S, "_file_to_components", lambda root, project: {
+        "src/shared.py": ["comp-A", "comp-B", "comp-C"]})
+    saved = S._save_assets("proj-f", "files", "src/shared.py", [
+        {"kind": "process", "level": "implementation", "name": "共享流程", "desc": "d",
+         "astRefs": [{"file": "src/shared.py", "symbol": "run", "kind": "func",
+                      "startLine": 1, "endLine": 9}]},
+    ], {"table": {}, "source": "codegraph", "srcHash": "h1", "root": "/x",
+        "project": "proj-f", "files": ["src/shared.py"]})
+    got = store.SemanticAssetsStore.get(saved[0]["id"])
+    assert (got.get("meta") or {}).get("scopes") == ["comp-A", "comp-B", "comp-C"]
+    for cid in ("comp-A", "comp-B", "comp-C"):
+        assert store.SemanticAssetsStore.count("proj-f", scopes=[cid]) == 1
+
+
+def test_component_file_map_ttl_cache(tmp_path, monkeypatch):
+    """组件文件映射短 TTL 缓存：提取任务逐文件落库不再每文件打一次 KB。"""
+    _ctx(tmp_path, monkeypatch)
+    S._comp_file_map_cache.clear()
+    calls = {"n": 0}
+
+    def _fake_catalog(root, project):
+        calls["n"] += 1
+        return {"components": [
+            {"id": "c1", "owns": ["a/x.py"]},
+            {"id": "c2", "owns": ["a/x.py", "a/y.py"]},
+        ]}
+
+    monkeypatch.setattr("plugins.architect.arch_routes.common.build_component_catalog",
+                        _fake_catalog)
+    m1 = S._component_file_map("/root-cachetest", "proj-cache")
+    m2 = S._component_file_map("/root-cachetest", "proj-cache")
+    try:
+        assert calls["n"] == 1                       # TTL 内二次命中缓存
+        assert m1 == m2
+        assert m1["c2"] == {"a/x.py", "a/y.py"}
+        assert m1["c1"] == {"a/x.py"}
+    finally:
+        S._comp_file_map_cache.clear()
+
+
+def test_component_file_map_model_fallback(tmp_path, monkeypatch):
+    """组件目录为空(降级/无基线) → 回退架构模型装配组件文件映射(与 _comm_files 口径一致)。"""
+    _ctx(tmp_path, monkeypatch)
+    S._comp_file_map_cache.clear()
+    monkeypatch.setattr("plugins.architect.arch_routes.common.build_component_catalog",
+                        lambda root, project: {"components": []})
+    monkeypatch.setattr("plugins.architect.arch_routes.common.build_architecture_model",
+                        lambda root, project: {"components": [
+                            {"id": "m1", "owns": ["b/z.py"]}
+                        ]})
+    try:
+        m = S._component_file_map("/root-fb", "proj-fb")
+        assert m == {"m1": {"b/z.py"}}
+    finally:
+        S._comp_file_map_cache.clear()
+
+
 def test_save_assets_change_detection(tmp_path, monkeypatch):
     _ctx(tmp_path, monkeypatch)
     assets = [{
@@ -2240,3 +2303,42 @@ def test_collect_context_cache_path_impl_block(tmp_path, monkeypatch):
     # decision 资产可用 impl 分支
     got = S._heuristic_extract("decision", ctx, level="implementation")
     assert got and got[0]["detail"]["branches"][0]["condition"] == "a > 0"
+
+
+def test_migration_keeps_rule_as_first_class_kind(tmp_path, monkeypatch):
+    """回归: kind/level 规范化迁移不得把 rule(新六类一级类别)并入 decision/logic。
+
+    历史 bug: 0814 迁移含 ("rule","decision")，0815 rule 升为一级类别后，
+    每次进程启动重跑迁移会把新管线提取的 rule/implementation 资产改写成
+    decision/logic(id/canonical_key 仍为 rule 前缀，造成 id 与列值矛盾)。
+    """
+    db = _ctx(tmp_path, monkeypatch)
+    from plugins.architect.arch_routes import db_schema
+    now = 1
+    store.SemanticAssetsStore.create({
+        "id": "sa-s-i-r-1", "projectId": "proj-1", "kind": "rule",
+        "level": "implementation", "name": "阈值配置", "desc": "d", "detail": {},
+        "astRefs": [{"file": "m.py", "symbol": "cfg", "kind": "func",
+                     "startLine": 1, "endLine": 2}],
+        "scopeType": "files", "scopeKey": "m.py", "source": "codegraph",
+        "srcHash": "h1", "canonicalKey": "k1",
+        "change": "added", "status": "active",
+        "createdAt": now, "updatedAt": now,
+    })
+    # 模拟第二次进程启动(幂等迁移重跑)
+    db_schema.architect_db_migrations(db)
+    got = store.SemanticAssetsStore.get("sa-s-i-r-1")
+    assert got["kind"] == "rule"
+    assert got["level"] == "implementation"
+    # 遗留类别仍被规范化(迁移其余项保持生效)
+    store.SemanticAssetsStore.create({
+        "id": "sa-s-l-e-9", "projectId": "proj-1", "kind": "data_structure",
+        "level": "medium", "name": "遗留", "desc": "", "detail": {},
+        "astRefs": [], "scopeType": "project", "scopeKey": "_",
+        "source": "live", "srcHash": "", "change": "added", "status": "active",
+        "createdAt": now, "updatedAt": now,
+    })
+    db_schema.architect_db_migrations(db)
+    legacy = store.SemanticAssetsStore.get("sa-s-l-e-9")
+    assert legacy["kind"] == "entity"
+    assert legacy["level"] == "logic"
