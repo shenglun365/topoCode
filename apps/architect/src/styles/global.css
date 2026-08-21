@@ -2,6 +2,68 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ========================================
+   Catppuccin 双主题（RGB 三元组，配合 tailwind rgb(var(--ctp-x) / <alpha-value>)）
+   :root = 暗色 Mocha（默认）；[data-theme="light"] = 亮色 Latte
+   ======================================== */
+:root {
+  --ctp-base: 30 30 46;        /* #1e1e2e */
+  --ctp-mantle: 24 24 37;      /* #181825 */
+  --ctp-crust: 17 17 27;       /* #11111b */
+  --ctp-surface0: 49 50 68;    /* #313244 */
+  --ctp-surface1: 69 71 90;    /* #45475a */
+  --ctp-surface2: 88 91 112;   /* #585b70 */
+  --ctp-overlay0: 108 112 134; /* #6c7086 */
+  --ctp-overlay1: 127 132 156; /* #7f849c */
+  --ctp-overlay2: 147 153 178; /* #9399b2 */
+  --ctp-subtext0: 166 173 200; /* #a6adc8 */
+  --ctp-subtext1: 186 194 222; /* #bac2de */
+  --ctp-text: 205 214 244;     /* #cdd6f4 */
+  --ctp-rosewater: 245 224 220;/* #f5e0dc */
+  --ctp-flamingo: 242 205 205; /* #f2cdcd */
+  --ctp-pink: 245 194 231;     /* #f5c2e7 */
+  --ctp-mauve: 203 166 247;    /* #cba6f7 */
+  --ctp-red: 243 139 168;      /* #f38ba8 */
+  --ctp-maroon: 235 160 172;   /* #eba0ac */
+  --ctp-peach: 250 179 135;    /* #fab387 */
+  --ctp-yellow: 249 226 175;   /* #f9e2af */
+  --ctp-green: 166 227 161;    /* #a6e3a1 */
+  --ctp-teal: 148 226 213;     /* #94e2d5 */
+  --ctp-sky: 137 220 235;      /* #89dceb */
+  --ctp-sapphire: 116 199 236; /* #74c7ec */
+  --ctp-blue: 137 180 250;     /* #89b4fa */
+  --ctp-lavender: 180 190 254; /* #b4befe */
+}
+
+[data-theme="light"] {
+  --ctp-base: 239 241 245;     /* #eff1f5 */
+  --ctp-mantle: 230 233 239;   /* #e6e9ef */
+  --ctp-crust: 220 224 232;    /* #dce0e8 */
+  --ctp-surface0: 204 208 218; /* #ccd0da */
+  --ctp-surface1: 188 192 204; /* #bcc0cc */
+  --ctp-surface2: 172 176 190; /* #acb0be */
+  --ctp-overlay0: 108 112 134; /* #6c7086 */
+  --ctp-overlay1: 127 132 156; /* #7f849c */
+  --ctp-overlay2: 147 153 178; /* #9399b2 */
+  --ctp-subtext0: 92 95 119;   /* #5c5f77 */
+  --ctp-subtext1: 76 79 105;   /* #4c4f69 */
+  --ctp-text: 76 79 105;       /* #4c4f69 */
+  --ctp-rosewater: 220 138 120;/* #dc8a78 */
+  --ctp-flamingo: 221 120 120; /* #dd7878 */
+  --ctp-pink: 234 118 203;     /* #ea76cb */
+  --ctp-mauve: 136 57 239;     /* #8839ef */
+  --ctp-red: 210 15 57;        /* #d20f39 */
+  --ctp-maroon: 230 69 83;     /* #e64553 */
+  --ctp-peach: 254 100 11;     /* #fe640b */
+  --ctp-yellow: 223 142 29;    /* #df8e1d */
+  --ctp-green: 64 160 43;      /* #40a02b */
+  --ctp-teal: 23 146 153;      /* #179299 */
+  --ctp-sky: 4 165 229;        /* #04a5e5 */
+  --ctp-sapphire: 32 159 181;  /* #209fb5 */
+  --ctp-blue: 30 102 245;      /* #1e66f5 */
+  --ctp-lavender: 114 135 253; /* #7287fd */
+}
+
 @layer base {
   body {
     @apply bg-ctp-base text-ctp-text font-sans;
@@ -68,17 +130,17 @@
   }
   .md-body {
     @apply prose prose-sm prose-invert max-w-none;
-    --tw-prose-body: #cdd6f4;
-    --tw-prose-headings: #cdd6f4;
-    --tw-prose-links: #89b4fa;
-    --tw-prose-bold: #bac2de;
-    --tw-prose-quotes: #a6adc8;
-    --tw-prose-code: #f5c2e7;
-    --tw-prose-pre-bg: #181825;
-    --tw-prose-bullets: #6c7086;
-    --tw-prose-hr: #313244;
-    --tw-prose-th-borders: #313244;
-    --tw-prose-td-borders: #313244;
+    --tw-prose-body: rgb(var(--ctp-text));
+    --tw-prose-headings: rgb(var(--ctp-text));
+    --tw-prose-links: rgb(var(--ctp-blue));
+    --tw-prose-bold: rgb(var(--ctp-subtext1));
+    --tw-prose-quotes: rgb(var(--ctp-subtext0));
+    --tw-prose-code: rgb(var(--ctp-pink));
+    --tw-prose-pre-bg: rgb(var(--ctp-crust));
+    --tw-prose-bullets: rgb(var(--ctp-overlay0));
+    --tw-prose-hr: rgb(var(--ctp-surface1));
+    --tw-prose-th-borders: rgb(var(--ctp-surface1));
+    --tw-prose-td-borders: rgb(var(--ctp-surface1));
   }
   .md-body pre {
     @apply bg-ctp-crust border border-ctp-surface0;

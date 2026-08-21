@@ -204,16 +204,17 @@ class AgentWorker:
                 if not project_db:
                     logger.warning(f"[AgentWorker] history save skipped: no project_db (pid={pid})")
                     return
-                from topoone.engine.store.task_store import TaskStore
-                ts = TaskStore(project_db)
-                ts.execute(
+                import datetime as _dt
+                project_db.execute(
                     "INSERT OR REPLACE INTO agent_task_history "
                     "(project_id, task_id, agent_id, action, status, steps, message, error, created_at, finished_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (pid, tid, state_dict.get("agent_id", ""), route,
                      state_dict.get("status", ""), json.dumps(state_dict.get("steps", [])),
-                     state_dict.get("message", ""), state_dict.get("error", "")),
+                     state_dict.get("message", ""), state_dict.get("error", ""),
+                     _dt.datetime.now().isoformat(), _dt.datetime.now().isoformat()),
                 )
+                project_db.commit()
             except Exception as e:
                 logger.warning(f"[AgentWorker] history save failed: {e}")
 
@@ -401,14 +402,18 @@ class AgentWorker:
         limit = params.get("limit", 10)
         project_db = self._project_db_for_task(task_id)
         if not project_db:
-            return {"history": []}
+            return {"results": [], "total": 0}
         from topoone.engine.store.task_store import TaskStore
         ts = TaskStore(project_db)
+        total = ts._db.fetchone(
+            "SELECT COUNT(*) as cnt FROM agent_task_history WHERE task_id=?",
+            (task_id,),
+        )["cnt"]
         history = ts._db.fetchall(
             "SELECT * FROM agent_task_history WHERE task_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (task_id, limit, offset),
         )
-        return {"history": history}
+        return {"results": history, "total": total}
 
     async def _action_clear_history(self, params: dict) -> dict:
         project_id = params.get("project_id", "")
@@ -416,10 +421,11 @@ class AgentWorker:
         project_db = self._multi_db.get_project_db(project_id) if project_id else None
         if not project_db:
             return {"success": False, "error": "project_db not found"}
-        from topoone.engine.store.task_store import TaskStore
-        ts = TaskStore(project_db)
-        ts.execute("DELETE FROM agent_task_history WHERE project_id=? AND task_id=?",
-                    (project_id, task_id))
+        project_db.execute(
+            "DELETE FROM agent_task_history WHERE project_id=? AND task_id=?",
+            (project_id, task_id),
+        )
+        project_db.commit()
         return {"success": True}
 
     def _action_get_config(self, params: dict) -> dict:

@@ -1,8 +1,15 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    (function () {
+      var t = 'dark'
+      try { var s = localStorage.getItem('topoone-theme-architect'); if (s === 'dark' || s === 'light') t = s } catch (e) {}
+      document.documentElement.setAttribute('data-theme', t)
+    })()
+  </script>
   <title>TopoCode · Architect 工作台</title>
   <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)" href="/web/architect/assets/star-logo-mark-v8.BdFnSipG.svg">
   <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: light)" href="/web/architect/assets/star-logo-mark-v8-light.BZL1uBVQ.svg">
@@ -11,17 +18,17 @@
       margin: 0;
       padding: 0;
       height: 100%;
-      background: #1e1e2e;
-      color: #cdd6f4;
+      background: rgb(var(--ctp-base));
+      color: rgb(var(--ctp-text));
     }
     #app { min-height: 100%; }
     .app-loading {
       display: flex; align-items: center; justify-content: center;
-      height: 100vh; font-size: 16px; color: #a6adc8;
+      height: 100vh; font-size: 16px; color: rgb(var(--ctp-subtext0));
     }
   </style>
-  <script type="module" crossorigin src="/web/architect/assets/architect.CkSTmkz4.js"></script>
-  <link rel="stylesheet" crossorigin href="/web/architect/assets/architect.DDc_TYP0.css">
+  <script type="module" crossorigin src="/web/architect/assets/architect.BaJdZTaD.js"></script>
+  <link rel="stylesheet" crossorigin href="/web/architect/assets/architect.CuvTfTdp.css">
 </head>
 <body>
   <div id="app"><div class="app-loading">加载中...</div></div>

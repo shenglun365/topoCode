@@ -89,7 +89,8 @@ const BUILTIN_LIGHT: CustomTheme = {
 }
 
 const STORAGE_KEY = 'topoone-custom-themes'
-const ACTIVE_KEY = 'topoone-active-theme'
+const ACTIVE_KEY = 'topoone-theme-workbench'
+const LEGACY_ACTIVE_KEY = 'topoone-active-theme'
 
 export const useThemeStore = defineStore('theme', () => {
   // State
@@ -109,8 +110,10 @@ export const useThemeStore = defineStore('theme', () => {
       console.error('[Theme] Failed to load custom themes:', e)
     }
 
-    // 加载当前激活的主题
+    // 加载当前激活的主题（兼容旧版键名）
     const savedActive = localStorage.getItem(ACTIVE_KEY)
+      || localStorage.getItem(LEGACY_ACTIVE_KEY)
+      || localStorage.getItem('theme')
     if (savedActive) {
       activeThemeId.value = savedActive
       // 兼容旧版本
@@ -269,6 +272,7 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.setAttribute('data-theme', theme.value)
     localStorage.setItem('theme', theme.value)
     localStorage.setItem(ACTIVE_KEY, activeThemeId.value)
+    localStorage.removeItem(LEGACY_ACTIVE_KEY)
   }
 
   function applyThemeById(themeId: string) {
@@ -282,6 +286,7 @@ export const useThemeStore = defineStore('theme', () => {
       document.documentElement.setAttribute('data-theme', themeId)
       localStorage.setItem('theme', themeId)
       localStorage.setItem(ACTIVE_KEY, themeId)
+      localStorage.removeItem(LEGACY_ACTIVE_KEY)
       return
     }
 

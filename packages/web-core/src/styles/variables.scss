@@ -38,6 +38,24 @@
   /* 字体 (含中文支持) */
   --font-sans:    'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', system-ui, -apple-system, sans-serif;
   --font-mono:    'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Noto Sans Mono CJK SC', Consolas, monospace;
+
+  /* 别名层（docs/chat/portal 沿用旧变量名的兼容映射，统一指向 Catppuccin 暗色值） */
+  --bg:            var(--bg-primary);
+  --bg-card:       var(--bg-secondary);
+  --bg-side:       var(--bg-secondary);
+  --bg-code:       var(--bg-tertiary);
+  --bg-chip:       var(--bg-tertiary);
+  --bubble-ai:     var(--bg-tertiary);
+  --bubble-user:   var(--bg-hover);
+  --text:          var(--text-primary);
+  --code-text:     var(--text-primary);
+  --accent-light:  rgba(137, 180, 250, 0.12);
+  --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.3);
+  --radius-full:   9999px;
+  --transition:    0.2s ease;
+  --content-font-size: 18px;
+  --ui-font-size:  14px;
 }
 
 /* 亮色主题 - Catppuccin Latte */
@@ -60,4 +78,18 @@
 
   --border:         #acb0be;
   --border-light:   #9ca0b0;
+
+  /* 别名层（亮色） */
+  --bg:            var(--bg-primary);
+  --bg-card:       var(--bg-secondary);
+  --bg-side:       var(--bg-secondary);
+  --bg-code:       var(--bg-tertiary);
+  --bg-chip:       var(--bg-tertiary);
+  --bubble-ai:     var(--bg-tertiary);
+  --bubble-user:   var(--bg-hover);
+  --text:          var(--text-primary);
+  --code-text:     var(--text-primary);
+  --accent-light:  rgba(30, 102, 245, 0.08);
+  --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.06);
 }

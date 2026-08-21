@@ -61,11 +61,6 @@ const allTasks = computed(() => {
   }
   for (const t of history) {
     if (!seen.has(t.agent_id || t.id)) {
-      // 跳过历史中 stale 的 running/queued 记录（无对应 live entry 说明是旧管线的残留）
-      // 但 presummary_files 管线除外：后续批次会创建新 agent 且无 live placeholder
-      if ((t.status === 'running' || t.status === 'queued') && !live.some(lt => lt.id === (t.agent_id || t.id))) {
-        if (t.action !== 'presummary_files') continue
-      }
       seen.add(t.agent_id || t.id)
       merged.push(transformHistory(t))
     }
@@ -131,23 +126,22 @@ async function refresh() {
   console.log('[AT] refresh start historyLoaded=false')
   await loadHistory(0)
   console.log('[AT] refresh done historyLoaded=true')
-  // 将 history 中新发现的 running presummary_files agent 注入 store，启动轮询
-  const t = communityStore.tasks[taskId.value]
+  // 将 history 中新发现的 running/queued agent 注入 store，启动轮询
+  // （页面刷新后 live store 为空，需从后端持久化历史恢复执行中任务）
+  const t = communityStore.ensureTask(taskId.value)
   if (t) {
     for (const h of historyTasks.value) {
-      if (h.action === 'presummary_files' && (h.status === 'running' || h.status === 'queued')) {
+      if ((h.status === 'running' || h.status === 'queued')) {
         const existing = t.agentTasks.some(at => at.id === h.agent_id)
         if (!existing) {
-          const idx = t.agentTasks.length
           t.agentTasks.push({
-            id: h.agent_id, action: 'presummary_files', status: h.status || 'running',
+            id: h.agent_id, action: h.action, status: h.status || 'running',
             progress: 0, message: h.message || '',
             steps: [],
             createdAt: h.created_at || '',
             taskLogs: [], weightedProgress: 0, totalFiles: 0, totalComps: 0, doneFiles: 0, doneComps: 0,
           })
           communityStore.ensureAgentPolling(taskId.value)
-          // console.log('[refresh] injected history agent into store: %s', h.agent_id)
         }
       }
     }

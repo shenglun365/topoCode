@@ -69,16 +69,23 @@ apps/<name>/
    - 自包含 app：内嵌等价 `readToken()`（`#token=` 首粘 → localStorage `topocode:token`）+ 所有 fetch 带 Bearer + WS 带 `?token=`（architect 模式：`api-client.ts`/`ws-client.ts`/裸 fetch 三处都要带）。
 4. 路由：hash 或 history 均可；SPA 页面路由由 gateway `vue_routes` serve HTML（或自托管），资产由挂载 serve。
 5. 构建产物路径写入 manifest `static_dir`；`npm run build` 全量包含该 app。
+6. **主题统一（明/暗切换）**：
+   - 机制：`<html data-theme="dark|light">` + 共享 Catppuccin 变量（`@topo/web-core/styles/variables.scss`，别名 `--bg`/`--accent`/`--bubble-ai` 等已映射）。
+   - 状态：`localStorage['topoone-theme-<appKey>']`，**每页独立记忆**（同域不互串）。
+   - 复用 web-core：`useTheme(appKey)` / `initTheme(appKey)`（挂载前调用防闪烁）+ `<ThemeToggle app-key>` 组件。
+   - 自包含 app（architect）：内嵌等价 composable + 入口 HTML 内联 bootstrap 脚本（读 `topoone-theme-<appKey>` 设 data-theme）。
+   - 图表渲染须跟随主题（Mermaid/PlantUML 读取当前 `data-theme`，如 architect `useDiagramRenderer`/`diagram-gen.ts` 的 `currentDiagramPalette()`）。
 
 ## 6. 新子项目工程清单（防"architect 式"缺件，逐项打勾）
 
 - [ ] `vite.config.ts`（root/base/dev 端口/outDir）
 - [ ] `tsconfig.json`（strict 策略与现有 app 一致）
-- [ ] `tailwind.config.js`（ctp 24 色 + `@tailwindcss/forms` + `@tailwindcss/typography`，content 指向本工程 src）
+- [ ] `tailwind.config.js`（ctp 色以 `rgb(var(--ctp-x) / <alpha-value>)` 变量化 + `@tailwindcss/forms` + `@tailwindcss/typography`，content 指向本工程 src；global.css 定义 `:root`(Mocha) + `[data-theme="light"]`(Latte) 的 `--ctp-*` 三元组）
 - [ ] `postcss.config.js`（tailwindcss + autoprefixer）
 - [ ] `package.json` devDeps：vite/@vitejs/plugin-vue/vue-tsc/typescript/**tailwindcss/postcss/autoprefixer/@tailwindcss/forms/@tailwindcss/typography**（+ 复用 web-core 时 `"@topo/web-core": "*"`）
 - [ ] 入口 HTML + `main.ts`
 - [ ] **token 客户端**（web-core 或内嵌；验收：无 token 401、带 token 200）
+- [ ] **主题引导**（入口 HTML 内联 bootstrap 脚本 + `initTheme` + toggle 按钮；验收：明/暗可切、每页独立记忆、刷新保持、无白闪）
 - [ ] `manifest.toml`（§2 字段齐全；前缀/端口不冲突）
 - [ ] `pyproject.toml` + 后端包 + `tests/`
 - [ ] 根 `package.json` workspaces 自动发现（`apps/*` 通配，无需改）；CI/构建自动包含（`build:apps`/`test` 遍历）

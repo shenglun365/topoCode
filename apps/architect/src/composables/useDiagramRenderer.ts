@@ -15,31 +15,66 @@ export interface DiagramBlock {
 
 let mermaidApi: any = null
 let mermaidInit = false
+let mermaidTheme = ''
+
+function currentDiagramTheme(): 'dark' | 'light' {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
+
+const MERMAID_THEMES = {
+  dark: {
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: 'dark',
+    themeVariables: {
+      background: '#181825',
+      primaryColor: '#313244',
+      primaryTextColor: '#cdd6f4',
+      primaryBorderColor: '#45475a',
+      secondaryColor: '#1e1e2e',
+      tertiaryColor: '#181825',
+      lineColor: '#7f849c',
+      fontFamily: 'var(--font-sans)',
+      fontSize: '13px',
+    },
+  },
+  light: {
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: 'base',
+    themeVariables: {
+      background: '#e6e9ef',
+      primaryColor: '#ccd0da',
+      primaryTextColor: '#4c4f69',
+      primaryBorderColor: '#acb0be',
+      secondaryColor: '#eff1f5',
+      tertiaryColor: '#e6e9ef',
+      lineColor: '#5c5f77',
+      fontFamily: 'var(--font-sans)',
+      fontSize: '13px',
+    },
+  },
+} as const
 
 async function ensureMermaid(): Promise<any> {
   if (mermaidApi) return mermaidApi
   const mod = await import('mermaid')
   mermaidApi = mod.default
   if (!mermaidInit) {
-    mermaidApi.initialize({
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'dark',
-      themeVariables: {
-        background: '#181825',
-        primaryColor: '#313244',
-        primaryTextColor: '#cdd6f4',
-        primaryBorderColor: '#45475a',
-        secondaryColor: '#1e1e2e',
-        tertiaryColor: '#181825',
-        lineColor: '#7f849c',
-        fontFamily: 'var(--font-sans)',
-        fontSize: '13px',
-      },
-    })
+    mermaidTheme = currentDiagramTheme()
+    mermaidApi.initialize(MERMAID_THEMES[mermaidTheme])
     mermaidInit = true
   }
   return mermaidApi
+}
+
+/** 主题切换后重初始化 mermaid（主题仅允许在 initialize 时指定）。 */
+function refreshMermaidTheme() {
+  if (!mermaidApi || !mermaidInit) return
+  const t = currentDiagramTheme()
+  if (t === mermaidTheme) return
+  mermaidTheme = t
+  mermaidApi.initialize(MERMAID_THEMES[t])
 }
 
 /** mermaid 语法错误时渲染出的是「错误提示 SVG」(aria-roledescription=error)，而非抛异常。
@@ -63,6 +98,7 @@ function cleanupMermaidTemp(uid?: string) {
 /** 每次渲染使用唯一临时容器 id，避免复用固定 id 时与在途渲染冲突。 */
 async function renderMermaidOnce(code: string): Promise<string> {
   const mermaid = await ensureMermaid()
+  refreshMermaidTheme()
   const uid = `md-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   try {
     const result = await mermaid.render(uid, code)

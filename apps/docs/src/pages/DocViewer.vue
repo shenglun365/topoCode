@@ -11,6 +11,7 @@ import { useNotes } from '@/composables/useNotes'
 import { codeFullscreen } from '@topo/web-core/services/render'
 import { useHeatmap } from '@/composables/useHeatmap'
 import { useToast } from '@topo/web-core/composables/useToast'
+import ThemeToggle from '@topo/web-core/components/ThemeToggle.vue'
 import { useGraphState } from '@/composables/useGraphState'
 import GraphContextMenu from '@/components/graph/GraphContextMenu.vue'
 import StarLogoMark from '@topo/web-core/components/StarLogoMark.vue'
@@ -533,6 +534,7 @@ onMounted(() => {
     <div class="header">
       <StarLogoMark :size="26" />
       <span class="title">TopoCode Doc Viewer</span>
+      <ThemeToggle app-key="docs" :size="26" />
       <select v-model.number="fontSize">
         <option :value="13">13px</option><option :value="15">15px</option>
         <option :value="18">18px</option><option :value="22">22px</option>
@@ -853,8 +855,6 @@ onMounted(() => {
 </template>
 
 <style>
-:root{--bg:#ffffff;--bg-secondary:#f7f7f8;--bg-hover:#f0f0f2;--bg-code:#f4f4f5;--text:#1a1a1a;--text-secondary:#6b6b76;--text-muted:#8e8e98;--border:#e4e4e7;--accent:#4d6bfe;--accent-hover:#3a56d4;--accent-light:rgba(77,107,254,0.08);--shadow-sm:0 1px 2px rgba(0,0,0,0.04);--radius-sm:6px;--radius-md:8px;--radius-lg:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;--font-mono:"JetBrains Mono","Fira Code",monospace;--transition:0.2s ease;--content-font-size:18px;--ui-font-size:14px}
-@media(prefers-color-scheme:dark){:root{--bg:#212121;--bg-secondary:#2d2d2d;--bg-hover:#3d3d3d;--bg-code:#2a2a2a;--text:#e8e8e8;--text-secondary:#a0a0a0;--text-muted:#6b6b6b;--border:#3d3d3d;--accent:#60a5fa;--accent-hover:#3b82f6;--accent-light:rgba(96,165,250,0.12)}}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;overflow:hidden;height:100vh;-webkit-font-smoothing:antialiased}
 .viewer{display:flex;flex-direction:column;height:100vh}

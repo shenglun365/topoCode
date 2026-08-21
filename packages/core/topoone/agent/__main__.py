@@ -32,6 +32,25 @@ def register_methods(server, multi_db):
     # 存到 server 上，供 action 方法使用
     server._agent_worker = worker
 
+    # 启动清扫：进程重启后，上次执行中的 agent 已丢失，
+    # 将 agent_task_history 中残留的 running/queued 记录标记为 failed
+    try:
+        projs = multi_db.main_db.fetchall("SELECT id FROM projects")
+        for prow in projs or []:
+            pid = prow.get("id")
+            try:
+                pdb = multi_db.get_project_db(pid)
+                pdb.execute(
+                    "UPDATE agent_task_history SET status='failed', "
+                    "error='Process restarted, agent interrupted', "
+                    "finished_at=datetime('now') WHERE status IN ('running','queued')"
+                )
+                pdb.commit()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     @server.register("agent.dispatch")
     async def agent_dispatch(route: str, task_id: str, context: dict = None,
                              project_id: str = "", project_root: str = "",

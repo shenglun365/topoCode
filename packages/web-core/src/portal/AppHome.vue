@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import StarLogoMark from '../components/StarLogoMark.vue'
+import ThemeToggle from '../components/ThemeToggle.vue'
 
 interface ModuleCard {
   key: string
@@ -72,6 +73,7 @@ const modules: ModuleCard[] = [
           <h1>TopoCode</h1>
           <p class="hero-sub">源码架构分析 · 知识库管理 · AI 驱动的智能开发工作台</p>
         </div>
+        <ThemeToggle app-key="portal" :size="32" class="hero-toggle" />
       </div>
     </header>
 
@@ -258,24 +260,13 @@ const modules: ModuleCard[] = [
   color: var(--text-muted, #8e8e98);
 }
 
-@media (prefers-color-scheme: dark) {
-  .home {
-    --bg: #212121;
-    --bg-card: #2d2d2d;
-    --bg-chip: #3d3d3d;
-    --text: #e8e8e8;
-    --text-secondary: #a0a0a0;
-    --text-muted: #6b6b6b;
-    --border: #3d3d3d;
-  }
-  .card:hover {
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-  }
-}
-
 @media (max-width: 720px) {
   .grid {
     grid-template-columns: 1fr;
   }
+}
+
+.hero-toggle {
+  margin-left: 16px;
 }
 </style>

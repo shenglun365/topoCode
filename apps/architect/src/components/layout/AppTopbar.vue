@@ -8,16 +8,20 @@ import {
   ChevronDownIcon,
   CheckIcon,
   ChevronUpDownIcon,
+  MoonIcon,
+  SunIcon,
 } from '@heroicons/vue/24/outline'
 import StarLogoMark from '@/components/common/StarLogoMark.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useArchSettingsStore, FONT_SCALES } from '@/stores/settings-store'
+import { useArchTheme } from '@/composables/useArchTheme'
 import type { Locale } from '@/types'
 
 const router = useRouter()
 const { t, locale } = useI18n()
 const project = useArchProjectStore()
 const settings = useArchSettingsStore()
+const { theme: themeMode, toggle: toggleTheme } = useArchTheme()
 
 const fontMenuOpen = ref(false)
 
@@ -104,6 +108,21 @@ function setFontScale(scale: number) {
         </button>
       </div>
     </div>
+
+    <button
+      class="btn btn-ghost"
+      :title="themeMode === 'dark' ? '切换到亮色' : '切换到暗色'"
+      @click="toggleTheme()"
+    >
+      <MoonIcon
+        v-if="themeMode === 'dark'"
+        class="w-4 h-4"
+      />
+      <SunIcon
+        v-else
+        class="w-4 h-4"
+      />
+    </button>
 
     <button
       class="btn btn-ghost"

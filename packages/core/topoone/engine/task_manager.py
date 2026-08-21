@@ -2264,6 +2264,29 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 logger.warning(f"[AgentHistory] save failed for {state_dict.get('agent_id', '?')}: {e}")
         return _cb
 
+    def _save_agent_running_history(project_db, pid, tid, agent_id, action):
+        """dispatch 后立即写入 running 历史，页面刷新后前端可恢复执行中任务的状态显示。"""
+        if not agent_id or not project_db:
+            return
+        try:
+            from topoone.engine.store.analysis_store import AnalysisStore
+            import datetime as _dt
+            s = AnalysisStore(project_db)
+            s.save_agent_task_history({
+                "project_id": pid,
+                "task_id": tid,
+                "agent_id": agent_id,
+                "action": action,
+                "status": "running",
+                "steps": "",
+                "message": "",
+                "error": "",
+                "created_at": _dt.datetime.now().isoformat(),
+                "finished_at": None,
+            })
+        except Exception as e:
+            logger.warning(f"[AgentHistory] save running failed for {agent_id}: {e}")
+
     @server.register("analysis.startOverview")
     def start_overview(task_id=None, taskId=None, force=False, language=None):
         """启动整体架构概览生成 (OverviewWorkflow 入口)"""
@@ -2324,6 +2347,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             result = mgr.dispatch("overview", tid, context,
                                   project_id=pid, project_root=project_root,
                                   project_summary=project_summary)
+            _save_agent_running_history(project_db, pid, tid, result.get("agent_id"), "overview")
             return {"taskId": tid, "success": True, "agentTaskId": result.get("agent_id"), "skipped": False}
 
         # ── 构建上下文（monolith）──
@@ -2353,6 +2377,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         agent_id = router.dispatch("overview", tid, context,
             on_complete=_on_overview_complete)
+        _save_agent_running_history(project_db, pid, tid, agent_id, "overview")
 
         return {"taskId": tid, "success": True, "agentTaskId": agent_id, "skipped": False}
 
@@ -2363,7 +2388,12 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             raise ValueError("agent_task_id is required")
         mgr = _agent_mgr()
         if _agent_proxy is not None:
-            return mgr.get_progress(aid)
+            result = mgr.get_progress(aid)
+            if not result:
+                return {"found": False}
+            if isinstance(result, dict):
+                return {**result, "found": True}
+            return {"found": True}
         result = mgr.get_progress(aid)
         if not result:
             return {"found": False}
@@ -2492,6 +2522,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             result = mgr.dispatch("pipeline", tid, context,
                                   project_id=pid, project_root=project_root,
                                   project_summary=project_summary)
+            _save_agent_running_history(project_db, pid, tid, result.get("agent_id"), "pipeline")
             return {"taskId": tid, "success": True, "agentTaskId": result.get("agent_id"), "skipped": False}
 
         from topoone.agent.agent_workflow.router import RouterHarness, RouteEntry
@@ -2550,6 +2581,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
         agent_id = router.dispatch("pipeline", tid, context,
             on_complete=_on_pipeline_complete)
+        _save_agent_running_history(project_db, pid, tid, agent_id, "pipeline")
 
         return {"taskId": tid, "success": True, "agentTaskId": agent_id, "skipped": False}
 
@@ -2744,11 +2776,13 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "project_root": _get_project_root(pid),
                 "project_summary": _get_project_summary(pid),
             }, timeout=30.0)
+            _save_agent_running_history(project_db, pid, tid, result.get("agentTaskId"), "presummary_files")
             return {"success": True, "batches": batches, "total": len(batches),
                     "agentTaskId": result.get("agentTaskId", ""), "fileCount": 0}
 
         result = _chain_start_pre_summary(tid, pid, project_db, batches, 0, limit, subagent_concurrency)
         agent_task_id = result.get("agentTaskId", "") if result else ""
+        _save_agent_running_history(project_db, pid, tid, agent_task_id, "presummary_files")
         file_count = result.get("fileCount", 0) if result else 0
         return {"success": True, "batches": batches, "total": len(batches), "agentTaskId": agent_task_id, "fileCount": file_count}
 
@@ -2815,6 +2849,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 project_id=pid, project_root=project_root,
                 project_summary=_get_project_summary(pid),
             )
+            _save_agent_running_history(project_db, pid, tid, result.get("agent_id"), "presummary_files")
             return {"success": True, "agentTaskId": result.get("agent_id"),
                     "fileCount": len(batch_files)}
 
@@ -2985,6 +3020,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             multi_db=multi_db, task_id=tid, project_summary=project_summary,
         )
         agent_id = router.dispatch("presummary_files", tid, context)
+        _save_agent_running_history(project_db, pid, tid, agent_id, "presummary_files")
         return {"success": True, "agentTaskId": agent_id, "fileCount": 1}
 
     @server.register("analysis.analyzeComponents")
@@ -3255,6 +3291,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                     project_summary=project_summary,
                     comp_edge_lv=comp_edge_lv,
                 )
+                _save_agent_running_history(project_db, pid, tid, result.get("agent_id"), "analyze_components")
                 return {"success": True, "agentTaskId": result.get("agent_id"), "skipped": skipped}
 
             for c in context["components"]:
@@ -3266,6 +3303,7 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             route_action = "analyze_components"
             agent_id = router.dispatch(route_action, tid, context,
                 on_complete=_make_agent_history_cb(pid, project_db, tid, route_action))
+            _save_agent_running_history(project_db, pid, tid, agent_id, route_action)
             return {"success": True, "agentTaskId": agent_id, "skipped": skipped}
 
         except Exception as e:

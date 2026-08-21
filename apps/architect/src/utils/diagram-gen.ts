@@ -1,5 +1,22 @@
 import type { ArchComponent, DataFlow, EntityClass, ErTable, ExecutionFlow, OrmMapping } from '@/types'
 
+/** 当前主题的图表调色板（跟随 <html data-theme>）。 */
+export function currentDiagramPalette(): Record<string, string> {
+  const light = document.documentElement.getAttribute('data-theme') === 'light'
+  if (light) {
+    return {
+      fill: '#ccd0da', border: '#acb0be', border2: '#9ca0b0',
+      text: '#4c4f69', bg: '#e6e9ef', bgDeep: '#eff1f5', line: '#5c5f77',
+      staleFill: '#f2d3d0', staleText: '#ea76cb',
+    }
+  }
+  return {
+    fill: '#313244', border: '#45475a', border2: '#585b70',
+    text: '#cdd6f4', bg: '#181825', bgDeep: '#1e1e2e', line: '#a6adc8',
+    staleFill: '#3a2a2a', staleText: '#f5c2e7',
+  }
+}
+
 // ============ ER 表视图 ============
 
 export function erToMermaid(er: ErTable): string {
@@ -147,11 +164,12 @@ export function dataflowToMermaid(df: DataFlow, components: ArchComponent[]): st
 }
 
 export function componentsToMermaid(components: ArchComponent[]): string {
+  const P = currentDiagramPalette()
   const lines = ['flowchart LR']
-  lines.push('  classDef green fill:#313244,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef red fill:#313244,stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:#cdd6f4')
-  lines.push('  classDef peach fill:#313244,stroke:#fab387,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef gray fill:#313244,stroke:#585b70,color:#cdd6f4')
+  lines.push(`  classDef green fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef red fill:${P.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.text}`)
+  lines.push(`  classDef peach fill:${P.fill},stroke:#fab387,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef gray fill:${P.fill},stroke:${P.border2},color:${P.text}`)
   for (const c of components) {
     lines.push(`  ${c.id}[${JSON.stringify(c.name)}]`)
     lines.push(`  class ${c.id} ${c.change === 'same' ? 'gray' : c.change}`)
@@ -178,22 +196,23 @@ export function dataflowToTopoScript(df: DataFlow, components: ArchComponent[]):
   return lines.join('\n')
 }
 
-const CHANGE_CLASS_DEF = {
-  added: 'fill:#313244,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4',
-  removed: 'fill:#313244,stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:#cdd6f4',
-  modified: 'fill:#313244,stroke:#fab387,stroke-width:2px,color:#cdd6f4',
-  same: 'fill:#313244,stroke:#585b70,color:#cdd6f4',
-}
+const CHANGE_CLASS_DEF = (P: Record<string, string>) => ({
+  added: `fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`,
+  removed: `fill:${P.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.text}`,
+  modified: `fill:${P.fill},stroke:#fab387,stroke-width:2px,color:${P.text}`,
+  same: `fill:${P.fill},stroke:${P.border2},color:${P.text}`,
+})
 
 /**
  * 数据结构变更图：当前快照的全部 ER 表(classDiagram)，按 change 着色，含表间关系。
  */
 export function structuresToMermaid(tables: ErTable[]): string {
+  const P = currentDiagramPalette()
   const lines = ['classDiagram']
   lines.push('  direction LR')
   const classDefs: string[] = []
   ;(['added', 'removed', 'modified', 'same'] as const).forEach((k) => {
-    classDefs.push(`  classDef ${k} ${CHANGE_CLASS_DEF[k]}`)
+    classDefs.push(`  classDef ${k} ${CHANGE_CLASS_DEF(P)[k]}`)
   })
   lines.push(...classDefs)
   const seenTable = new Set<string>()
@@ -225,11 +244,12 @@ export function structuresToMermaid(tables: ErTable[]): string {
  * 调用关系变更图：数据流 stream 图(flowchart)，组件节点按 change 着色，标注调用通道。
  */
 export function callsToMermaid(dataFlows: DataFlow[], components: ArchComponent[]): string {
+  const P = currentDiagramPalette()
   const lines = ['flowchart LR']
-  lines.push('  classDef added fill:#313244,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef removed fill:#313244,stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:#cdd6f4')
-  lines.push('  classDef modified fill:#313244,stroke:#fab387,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef same fill:#313244,stroke:#585b70,color:#cdd6f4')
+  lines.push(`  classDef added fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef removed fill:${P.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.text}`)
+  lines.push(`  classDef modified fill:${P.fill},stroke:#fab387,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef same fill:${P.fill},stroke:${P.border2},color:${P.text}`)
   const compIds = new Set<string>()
   dataFlows.forEach((f) => f.streams.forEach((s) => { compIds.add(s.from); compIds.add(s.to) }))
   const comps = components.filter((c) => compIds.has(c.id))
@@ -287,12 +307,13 @@ export function semanticGraphToMermaid(
   nodes: { id: string; kind: string; level?: string; name: string; status?: string; needsUpdate?: number }[],
   edges: { from: string; to: string; type?: string; semantic?: string }[],
 ): string {
+  const P = currentDiagramPalette()
   const lines = ['flowchart TD']
-  lines.push('  classDef asset fill:#313244,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef process fill:#313244,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef decision fill:#313244,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef contract fill:#313244,stroke:#f9e2af,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef stale fill:#3a2a2a,stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:#f5c2e7')
+  lines.push(`  classDef asset fill:${P.fill},stroke:#cba6f7,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef process fill:${P.fill},stroke:#89b4fa,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef decision fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef contract fill:${P.fill},stroke:#f9e2af,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef stale fill:${P.staleFill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.staleText}`)
   lines.push('  classDef needsUpdate stroke:#f9e2af')
   const byLevel = new Map<string, { id: string; kind: string; idx: number; name: string; status?: string; needsUpdate?: number }[]>()
   nodes.forEach((n, idx) => {
@@ -306,7 +327,7 @@ export function semanticGraphToMermaid(
     const group = byLevel.get(lv)
     if (!group?.length) continue
     lines.push(`  subgraph ${lv.toUpperCase()}[${SEMANTIC_LEVEL_LABEL[lv] ?? lv}]`)
-    lines.push(`  style ${lv.toUpperCase()} fill:#1e1e2e,stroke:#45475a,color:#89b4fa,font-weight:600`)
+    lines.push(`  style ${lv.toUpperCase()} fill:${P.bgDeep},stroke:${P.border},color:#89b4fa,font-weight:600`)
     for (const n of group) {
       const nodeId = _semNodeId(n.idx)
       const status = n.status || 'active'
@@ -334,7 +355,7 @@ export function semanticGraphToMermaid(
     lines.push(`  ${a} -->${label ? `|${_semLabel(label, 14)}|` : ''} ${b}`)
   }
   // 显式加粗可见连线(深色背景下保证线/字可读，不依赖全局主题)。
-  lines.push('  linkStyle default stroke:#a6adc8,color:#cdd6f4,stroke-width:1.5px')
+  lines.push(`  linkStyle default stroke:${P.line},color:${P.text},stroke-width:1.5px`)
   return lines.join('\n')
 }
 
@@ -343,11 +364,12 @@ export function semanticGraphToPlantUml(
   nodes: { id: string; kind: string; level?: string; name: string; status?: string; needsUpdate?: number }[],
   edges: { from: string; to: string; type?: string; semantic?: string }[],
 ): string {
-  const lines = ['@startuml', 'skinparam componentStyle rectangle', 'skinparam backgroundColor #181825',
-    'skinparam ArrowColor #a6adc8', 'skinparam ArrowThickness 1.5', 'skinparam LineColor #a6adc8',
-    'skinparam componentBackgroundColor #313244', 'skinparam componentBorderColor #45475a',
-    'skinparam componentFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam packageBackgroundColor #1e1e2e',
-    'skinparam packageBorderColor #585b70', 'skinparam packageFontColor #89b4fa', 'skinparam shadowing false']
+  const P = currentDiagramPalette()
+  const lines = ['@startuml', 'skinparam componentStyle rectangle', `skinparam backgroundColor ${P.bg}`,
+    `skinparam ArrowColor ${P.line}`, 'skinparam ArrowThickness 1.5', `skinparam LineColor ${P.line}`,
+    `skinparam componentBackgroundColor ${P.fill}`, `skinparam componentBorderColor ${P.border}`,
+    `skinparam componentFontColor ${P.text}`, `skinparam defaultFontColor ${P.text}`, `skinparam packageBackgroundColor ${P.bgDeep}`,
+    `skinparam packageBorderColor ${P.border2}`, 'skinparam packageFontColor #89b4fa', 'skinparam shadowing false']
   const byLevel = new Map<string, { id: string; kind: string; idx: number; name: string; status?: string; needsUpdate?: number }[]>()
   nodes.forEach((n, idx) => {
     const lv = _semLevel(n.level)
@@ -361,7 +383,7 @@ export function semanticGraphToPlantUml(
     lines.push(`package "${SEMANTIC_LEVEL_LABEL[lv] ?? lv}" as L${lv.toUpperCase()} {`)
     for (const n of group) {
       const nodeId = _semNodeId(n.idx)
-      lines.push(`  component "${_semNodeLabel(n, 18)}${n.needsUpdate ? ' ⚠' : ''}" as ${nodeId} <<${n.kind || 'asset'}>> #313244`)
+      lines.push(`  component "${_semNodeLabel(n, 18)}${n.needsUpdate ? ' ⚠' : ''}" as ${nodeId} <<${n.kind || 'asset'}>> ${P.fill}`)
     }
     lines.push('}')
   }
@@ -543,12 +565,13 @@ export function viewUnavailableReasons(
 // ---- 类图 ----
 
 export function semanticClassDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
+  const P = currentDiagramPalette()
   const classes = nodes.filter((n) => n.kind === 'entity' || (n.kind === 'contract' && n.level === 'implementation'))
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['classDiagram', '  direction LR']
-  lines.push('  classDef asset fill:#313244,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef contract fill:#313244,stroke:#f9e2af,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef stale fill:#3a2a2a,stroke:#f38ba8,stroke-width:2px,color:#f5c2e7')
+  lines.push(`  classDef asset fill:${P.fill},stroke:#cba6f7,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef contract fill:${P.fill},stroke:#f9e2af,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef stale fill:${P.staleFill},stroke:#f38ba8,stroke-width:2px,color:${P.staleText}`)
   for (const n of classes) {
     lines.push(`  class "${_semLabel(n.name, 40)}" as ${safe.get(n.id)}`)
     const fields = (n.detail?.fields ?? []).slice(0, 30)
@@ -578,11 +601,12 @@ export function semanticClassDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
 }
 
 export function semanticClassDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
+  const P = currentDiagramPalette()
   const classes = nodes.filter((n) => n.kind === 'entity' || (n.kind === 'contract' && n.level === 'implementation'))
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
-  const lines = ['@startuml', 'skinparam classBackgroundColor #313244', 'skinparam classBorderColor #45475a',
-    'skinparam classFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825',
-    'skinparam ArrowColor #a6adc8', 'skinparam shadowing false']
+  const lines = ['@startuml', `skinparam classBackgroundColor ${P.fill}`, `skinparam classBorderColor ${P.border}`,
+    `skinparam classFontColor ${P.text}`, `skinparam defaultFontColor ${P.text}`, `skinparam backgroundColor ${P.bg}`,
+    `skinparam ArrowColor ${P.line}`, 'skinparam shadowing false']
   for (const n of classes) {
     lines.push(`class "${_semLabel(n.name, 40)}" as ${safe.get(n.id)} {`)
     for (const f of (n.detail?.fields ?? []).slice(0, 30)) {
@@ -649,11 +673,12 @@ export function semanticErDiagramToMermaid(nodes: _Node[], edges: _Edge[]): stri
 }
 
 export function semanticErDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
+  const P = currentDiagramPalette()
   const entities = nodes.filter((n) => n.kind === 'entity')
   const nameMap = new Map<string, string>(entities.map((n) => [n.id, _safeSemId(n.id)]))
-  const lines = ['@startuml', 'skinparam classBackgroundColor #313244', 'skinparam classBorderColor #45475a',
-    'skinparam classFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825',
-    'skinparam ArrowColor #a6adc8', 'skinparam shadowing false']
+  const lines = ['@startuml', `skinparam classBackgroundColor ${P.fill}`, `skinparam classBorderColor ${P.border}`,
+    `skinparam classFontColor ${P.text}`, `skinparam defaultFontColor ${P.text}`, `skinparam backgroundColor ${P.bg}`,
+    `skinparam ArrowColor ${P.line}`, 'skinparam shadowing false']
   for (const n of entities) {
     lines.push(`entity "${_semLabel(n.name, 40)}" as ${nameMap.get(n.id)} {`)
     for (const f of (n.detail?.fields ?? []).slice(0, 30)) {
@@ -707,11 +732,12 @@ export function semanticSequenceDiagramToMermaid(nodes: _Node[], edges: _Edge[])
 }
 
 export function semanticSequenceDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
+  const P = currentDiagramPalette()
   const parts = nodes.filter((n) => n.kind === 'process' || n.kind === 'contract')
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
-  const lines = ['@startuml', 'skinparam sequenceParticipantBackgroundColor #313244',
-    'skinparam sequenceParticipantBorderColor #45475a', 'skinparam sequenceParticipantFontColor #cdd6f4',
-    'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825', 'skinparam ArrowColor #a6adc8',
+  const lines = ['@startuml', `skinparam sequenceParticipantBackgroundColor ${P.fill}`,
+    `skinparam sequenceParticipantBorderColor ${P.border}`, `skinparam sequenceParticipantFontColor ${P.text}`,
+    `skinparam defaultFontColor ${P.text}`, `skinparam backgroundColor ${P.bg}`, `skinparam ArrowColor ${P.line}`,
     'skinparam shadowing false']
   const shown = new Set<string>()
   for (const n of parts) {
@@ -801,12 +827,13 @@ export function semanticStateDiagramToMermaid(nodes: _Node[], edges: _Edge[]): s
 }
 
 export function semanticStateDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
+  const P = currentDiagramPalette()
   const rules = nodes.filter((n) => n.kind === 'decision')
   const machines = _stateMachines(nodes)
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
-  const lines = ['@startuml', 'skinparam stateBackgroundColor #313244', 'skinparam stateBorderColor #45475a',
-    'skinparam stateFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825',
-    'skinparam ArrowColor #a6adc8', 'skinparam shadowing false']
+  const lines = ['@startuml', `skinparam stateBackgroundColor ${P.fill}`, `skinparam stateBorderColor ${P.border}`,
+    `skinparam stateFontColor ${P.text}`, `skinparam defaultFontColor ${P.text}`, `skinparam backgroundColor ${P.bg}`,
+    `skinparam ArrowColor ${P.line}`, 'skinparam shadowing false']
   if (!rules.length && !machines.length) return '@startuml\n@enduml'
   for (const m of machines) {
     const st = m.detail!.states!
@@ -878,13 +905,14 @@ function _branchElseLabel(b: { else?: unknown }): string {
 }
 
 export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
+  const P = currentDiagramPalette()
   const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
   const lines = ['flowchart TD']
-  lines.push('  classDef process fill:#313244,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef decision fill:#313244,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef contract fill:#313244,stroke:#f9e2af,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef asset fill:#313244,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4')
-  lines.push('  classDef stale fill:#3a2a2a,stroke:#f38ba8,stroke-width:2px,color:#f5c2e7')
+  lines.push(`  classDef process fill:${P.fill},stroke:#89b4fa,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef decision fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef contract fill:${P.fill},stroke:#f9e2af,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef asset fill:${P.fill},stroke:#cba6f7,stroke-width:2px,color:${P.text}`)
+  lines.push(`  classDef stale fill:${P.staleFill},stroke:#f38ba8,stroke-width:2px,color:${P.staleText}`)
   if (!_hasActivityDetail(nodes)) {
     // 退化：无 steps/branches/trigger → 按 scopeKey 泳道分组展示
     const byScope = new Map<string, _Node[]>()
@@ -896,7 +924,7 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
     for (const [k, group] of byScope) {
       const sid = `sw_${_safeIdent(k)}`
       lines.push(`  subgraph ${sid}["${_semLabel(k, 30)}"]`)
-      lines.push(`  style ${sid} fill:#1e1e2e,stroke:#45475a,color:#89b4fa,font-weight:600`)
+      lines.push(`  style ${sid} fill:${P.bgDeep},stroke:${P.border},color:#89b4fa,font-weight:600`)
       for (const n of group) {
         lines.push(`    ${safe.get(n.id)}["${_semNodeLabel(n, 30)}"]`)
         lines.push(`    class ${safe.get(n.id)} ${n.kind || 'process'}`)
@@ -913,7 +941,7 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
       seen.add(key)
       lines.push(`  ${a} -->${e.type ? `|${_semLabel(e.type, 12)}|` : ''} ${b}`)
     }
-    lines.push('  linkStyle default stroke:#a6adc8,color:#cdd6f4,stroke-width:1.5px')
+    lines.push(`  linkStyle default stroke:${P.line},color:${P.text},stroke-width:1.5px`)
     return lines.join('\n')
   }
   const kindStyle = (k: string) => ({ process: 'process', decision: 'decision', contract: 'contract', asset: 'asset', state: 'state' })[k] || undefined
@@ -991,14 +1019,15 @@ export function semanticActivityDiagramToMermaid(nodes: _Node[], edges: _Edge[])
     seen.add(key)
     lines.push(`  ${a} -->|${_semLabel(e.type || '', 12)}| ${b}`)
   }
-  lines.push('  linkStyle default stroke:#a6adc8,color:#cdd6f4,stroke-width:1.5px')
+  lines.push(`  linkStyle default stroke:${P.line},color:${P.text},stroke-width:1.5px`)
   return lines.join('\n')
 }
 
 export function semanticActivityDiagramToPlantUml(nodes: _Node[], edges: _Edge[]): string {
-  const lines = ['@startuml', 'skinparam activityBackgroundColor #313244', 'skinparam activityBorderColor #45475a',
-    'skinparam activityFontColor #cdd6f4', 'skinparam defaultFontColor #cdd6f4', 'skinparam backgroundColor #181825',
-    'skinparam ArrowColor #a6adc8', 'skinparam shadowing false']
+  const P = currentDiagramPalette()
+  const lines = ['@startuml', `skinparam activityBackgroundColor ${P.fill}`, `skinparam activityBorderColor ${P.border}`,
+    `skinparam activityFontColor ${P.text}`, `skinparam defaultFontColor ${P.text}`, `skinparam backgroundColor ${P.bg}`,
+    `skinparam ArrowColor ${P.line}`, 'skinparam shadowing false']
   if (!_hasActivityDetail(nodes)) {
     // 退化：无 detail → 按 scopeKey 泳道 partition
     const byScope = new Map<string, _Node[]>()

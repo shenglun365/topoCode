@@ -486,7 +486,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("system.exportProject")
     def export_project(projectId: str, taskIds: list = None):
         """导出结构分析数据（JSONL + zip）"""
-        import topoone.engine.export_service
+        import topoone.engine.export_service as export_service
         export_id = export_service.start_export(
             multi_db, projectId, taskIds,
             lambda ch, ev, data: server.publish(ch, ev, data)
@@ -495,17 +495,17 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("system.exportStatus")
     def export_status(exportId: str):
-        import topoone.engine.export_service
+        import topoone.engine.export_service as export_service
         return export_service.get_export_status(exportId)
 
     @server.register("system.exportRemoveArchive")
     def export_remove_archive(archivePath: str):
-        import topoone.engine.export_service
+        import topoone.engine.export_service as export_service
         return {"ok": export_service.remove_archive(archivePath)}
 
     @server.register("system.exportCleanupOld")
     def export_cleanup_old(projectId: str):
-        import topoone.engine.export_service
+        import topoone.engine.export_service as export_service
         export_service.cleanup_old_archives(multi_db, projectId)
         return {"ok": True}
 
@@ -524,7 +524,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
           - archivePath = "reimport:<resourceId>"   重置资源项目（TOPORES_ID:<id>，清空数据重建成空项目）
           - archivePath = "delete_backup:<resourceId>"  删除资源项目及其备份目录
         """
-        import topoone.engine.import_service
+        import topoone.engine.import_service as import_service
         if archivePath and archivePath.startswith("reimport:"):
             resource_id = archivePath[len("reimport:"):].strip()
             if not resource_id:
@@ -594,7 +594,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
         创建 ID 为 TOPORES_ID:{resourceId} 的项目，然后导入分析数据。
         """
-        import topoone.engine.import_service
+        import topoone.engine.import_service as import_service
         project_id = f"TOPORES_ID:{resourceId}"
         now = datetime.now().isoformat()
 
@@ -634,7 +634,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("system.importStatus")
     def import_status(importId: str):
-        import topoone.engine.import_service
+        import topoone.engine.import_service as import_service
         return import_service.get_import_status(importId)
 
     @server.register("system.verifyFiles")

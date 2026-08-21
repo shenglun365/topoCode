@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ChatSession } from '@topo/web-core/types/domain'
 import StarLogoMark from '@topo/web-core/components/StarLogoMark.vue'
+import ThemeToggle from '@topo/web-core/components/ThemeToggle.vue'
 
 defineProps<{
   tab: 'chat' | 'notes' | 'archives'
@@ -37,6 +38,7 @@ const tabLabels: Record<string, string> = { chat: '对话', notes: '笔记' }
         <StarLogoMark :size="18" />
         <span>TopoCode Chat</span>
       </div>
+      <ThemeToggle app-key="chat" :size="24" />
     </div>
     <div class="sidebar-tabs">
       <div v-for="tk in tabKeys" :key="tk" class="sidebar-tab" :class="{ active: tab === tk }" @click="emit('update:tab', tk)">

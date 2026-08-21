@@ -4,6 +4,7 @@ import * as api from '@topo/web-core/services/api'
 import { t } from '@topo/web-core/i18n/web-locales'
 import type { Project, Task } from '@topo/web-core/types/domain'
 import StarLogoMark from '@topo/web-core/components/StarLogoMark.vue'
+import ThemeToggle from '@topo/web-core/components/ThemeToggle.vue'
 
 const projects = ref<Project[]>([])
 const tasksByProject = ref<Record<string, Task[]>>({})
@@ -94,6 +95,7 @@ onMounted(async () => {
     <div class="page-header">
       <StarLogoMark :size="40" />
       <h1>TopoCode 文档</h1>
+      <ThemeToggle app-key="docs" :size="32" />
     </div>
     <div class="toolbar">
       <form @submit.prevent="page = 1" style="display:flex;gap:8px;flex:1;align-items:center">
@@ -152,20 +154,11 @@ onMounted(async () => {
 </template>
 
 <style>
-:root {
-  --bg:#ffffff; --bg-secondary:#f7f7f8; --bg-hover:#f0f0f2;
-  --text:#1a1a1a; --text-secondary:#6b6b76; --text-muted:#8e8e98;
-  --border:#e4e4e7; --accent:#4d6bfe; --accent-hover:#3a56d4;
-  --radius-sm:6px; --radius-md:8px; --radius-lg:12px;
-  --font:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-}
-@media(prefers-color-scheme:dark){
-  :root{--bg:#212121;--bg-secondary:#2d2d2d;--bg-hover:#3d3d3d;--text:#e8e8e8;--text-secondary:#a0a0a0;--text-muted:#6b6b6b;--border:#3d3d3d;--accent:#60a5fa;--accent-hover:#3b82f6}
-}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--font);background:var(--bg-secondary);color:var(--text);font-size:14px;line-height:1.6;padding:24px;-webkit-font-smoothing:antialiased}
 .container{max-width:760px;margin:0 auto}
 .page-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.page-header h1{flex:1}
 h1{font-size:18px;font-weight:600;color:var(--text)}
 .toolbar{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
 .toolbar input{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;flex:1;min-width:160px;outline:none;background:var(--bg);color:var(--text)}
