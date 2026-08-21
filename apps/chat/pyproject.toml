@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topoone-app-chat"
+version = "0.1.0"
+description = "TopoCode chat backend: AI Chat SPA backend (sessions/stream/skills/drafts/notes) (kind=service, port 3483)"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "TopoCodeProj Team", email = "topocode@163.com" },
+]
+# 依赖核心包（db 层 + service_app 脚手架 + service_common + diagram_ir_docs）；
+# fastapi/uvicorn 亦由核心传递。
+dependencies = [
+  "topoone-core",
+  "fastapi==0.136.3",
+  "uvicorn==0.48.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["topoone_app_chat*"]

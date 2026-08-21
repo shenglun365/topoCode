@@ -1,0 +1,107 @@
+"""Architect standalone FastAPI app.
+
+`build_app(data_dir, kb_url, mcp_url)` 构造能独立运行的服务：
+- include `arch_routes.router` (prefix `/api/architect`)；
+- 挂载 architect SPA 静态(/architect.html + /web)；
+- CORS 放行 dev(5173/5174) 与 reports(3456) 以便联调/反代。
+
+端口/编排由 `plugins/architect/__main__.py`(subprocess) 或 back `main.py` 负责。
+"""
+import logging
+import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from topoone_app_architect.arch_routes import router as architect_router
+from topoone_app_architect.arch_routes import ctx
+
+logger = logging.getLogger(__name__)
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+def _default_cors() -> list:
+    arch_port = os.environ.get("ARCH_PORT", "3470")
+    return [
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:5174", "http://127.0.0.1:5174",
+        f"http://localhost:{arch_port}", f"http://127.0.0.1:{arch_port}",
+        "http://localhost:3456", "http://127.0.0.1:3456",
+    ]
+
+
+class ProjectContextMiddleware:
+    """ASGI 中间件: 解析 ?project=/?root= → 设置请求级项目上下文(contextvar)。
+
+    项目库路由(architect/<pid>/arch.db)依据该上下文；解析失败/无参数 →
+    无上下文(store 层回退主库默认桶)。WebSocket 不经 HTTP 查询串，
+    由 WS 处理器按首条消息显式 set_project。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        token = None
+        try:
+            from urllib.parse import parse_qs
+            qs = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
+            project = (qs.get("project") or [""])[0].strip() or None
+            root = (qs.get("root") or [""])[0].strip() or None
+            if project or root:
+                from topoone_app_architect.arch_routes.project import _resolve_project
+                try:
+                    proj = _resolve_project(root, project)
+                    if proj and proj.get("id"):
+                        token = ctx.set_project(proj["id"])
+                except Exception:
+                    pass
+        except Exception:
+            token = None
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if token:
+                ctx.reset_project(token)
+
+
+def build_app(data_dir: str = None, kb_url: str = None, mcp_url: str = None,
+              cors_origins: list = None) -> FastAPI:
+    """装配 architect FastAPI 应用。data_dir 传经 ctx.setup 注入 architect.db。"""
+    ctx.setup(data_dir=data_dir, kb_url=kb_url, mcp_url=mcp_url)
+
+    app = FastAPI(title="TopoOne Architect")
+    app.add_middleware(ProjectContextMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins if cors_origins is not None else _default_cors(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(architect_router)
+
+    @app.get("/health", include_in_schema=False)
+    async def health():
+        return {"status": "ok", "service": "architect"}
+
+    # SPA 静态产物(由 vite.architect.config.ts 构建到 static/)
+    _web = os.path.join(STATIC_DIR, "web")
+    if os.path.isdir(_web):
+        app.mount("/web", StaticFiles(directory=_web), name="arch_web")
+
+    _html = os.path.join(STATIC_DIR, "architect.html")
+    if os.path.isfile(_html):
+        from fastapi.responses import FileResponse
+
+        @app.get("/architect", include_in_schema=False)
+        @app.get("/architect/", include_in_schema=False)
+        async def serve_architect():
+            return FileResponse(_html)
+
+    return app

@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: topoone-app-workbench
+Version: 0.1.0
+Summary: TopoCode workbench backend thin layer: knowledge.* RPC (kind=core, in-process registration)
+Author-email: TopoCodeProj Team <topocode@163.com>
+License: Apache-2.0
+Requires-Python: >=3.10
+Requires-Dist: topoone-core

@@ -7,8 +7,9 @@ import esbuild from 'esbuild'
 import { resolve } from 'path'
 import { mkdirSync, writeFileSync } from 'fs'
 
-const entry = resolve('src/workers/render-worker.ts')
-const outdir = 'build'
+// M10: render-worker 随 workbench 迁入 apps/workbench/src/workers/
+const entry = resolve('apps/workbench/src/workers/render-worker.ts')
+const outdir = 'apps/workbench/src/workers'
 const outfile = resolve(outdir, 'render-worker-bundled.js')
 
 async function main() {

@@ -1,0 +1,21 @@
+# 子项目 3：AI Chat（M12 切分完成）
+# python_entry = "topoone_app_chat:main"（独立进程 :3483，apps/chat/topoone_app_chat）
+# static_dir = "apps/chat/dist"（chat SPA 产物）；static_mount = ["/chat"]（gateway 托管资产，
+#   /chat 页面由 vue_routes serve dist/chat.html）；/chat 不在 api_prefixes（避免 proxy 遮蔽静态挂载）。
+# 数据：topoone.db chat_drafts/chat_archives 主写；会话/消息经 llm 服务 session.*（sessions.db）。
+[app]
+name = "chat"
+kind = "service"
+python_entry = "topoone_app_chat:main"
+static_dir = "apps/chat/dist"
+static_mount = ["/chat"]
+api_prefixes = [
+  "/api/chat",
+  "/api/models",
+  "/api/skills",
+  "/api/template-locale",
+  "/api/drafts",
+  "/api/notes",
+]
+port = 3483
+health = "/health"

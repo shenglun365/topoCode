@@ -1,0 +1,18 @@
+# 子项目 4：Architect 工作台（M13 切分完成）
+# python_entry = "topoone_app_architect:main"（独立进程 :3470，apps/architect/topoone_app_architect）
+# 服务自托管静态：server.py 从 topoone_app_architect/static serve（/architect 页面 + /web 资产），
+#   故 static_mount=[]（gateway 不托管，仅反代 /api/architect · /architect · /web/architect）。
+# 数据：独立 architect.db（--data-dir）；kb/mcp 核心 URL 经 env（KB_BASE_URL/MCP_BASE_URL）注入。
+[app]
+name = "architect"
+kind = "service"
+python_entry = "topoone_app_architect:main"
+static_dir = "apps/architect/topoone_app_architect/static"
+static_mount = []
+api_prefixes = [
+  "/api/architect",
+  "/architect",
+  "/web/architect",
+]
+port = 3470
+health = "/health"

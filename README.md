@@ -55,7 +55,7 @@ TopoCode 不是一句提示词生成架构图的效率工具，而是帮助你�
 | **前端框架** | Vue 3 + TypeScript + Pinia + Vue Router |
 | **UI 样式** | Tailwind CSS + SCSS + Heroicons |
 | **可视化** | D3.js + Cytoscape + Mermaid + PlantUML + PixiJS |
-| **桌面端** | Electron + electron-builder |
+| **交付形态** | Web 应用（浏览器访问，本地 Web 服务 :3456） |
 | **后端语言** | Python 3.10+ |
 | **IPC 通信** | ZeroMQ (pyzmq) |
 | **代码解析** | Tree-sitter (18+ 语言) |
@@ -76,58 +76,43 @@ TopoCode 不是一句提示词生成架构图的效率工具，而是帮助你�
 
 ## 目录结构
 
+> Monorepo（npm workspaces + pip editable）：1 个核心基础框架 + 4 个独立子项目。
+
 ```
 topoOne-ui/
-├── src/                          # 前端 Vue 3 应用
-│   ├── components/               # UI 组件
-│   │   ├── ai/                   # AI 助手面板
-│   │   ├── analysis/             # 分析任务相关
-│   │   ├── knowledge/            # 知识库
-│   │   ├── project/              # 项目管理
-│   │   ├── report/               # 架构报告
-│   │   ├── settings/             # 设置页
-│   │   ├── shell/                # 应用壳 (ActivityBar, TopBar, StatusBar)
-│   │   └── visualization/        # 可视化组件
-│   ├── composables/              # 组合式函数
-│   ├── pages/                    # 路由页面
-│   ├── router/                   # 路由配置
-│   ├── services/                 # IPC 服务 (ZeroMQ 调用)
-│   ├── stores/                   # Pinia 状态管理
-│   ├── i18n/                     # 国际化 (zh-CN / en-US)
-│   └── types/                    # TypeScript 类型定义
-├── electron/                     # Electron 主进程
-│   ├── main.ts                   # 主进程入口 + IPC 处理
-│   ├── preload.ts                # contextBridge 安全桥接
-│   ├── window-manager.ts         # 多窗口管理
-│   ├── python-bridge.ts          # Python 后端进程管理
-│   ├── zmq-router.ts             # ZeroMQ 消息路由
-│   └── updater.ts                # 自动更新
-├── backend-core/                 # Python 后端
-│   ├── main.py                   # 后端入口 (单进程 / 分布式)
-│   ├── zmq_server.py             # ZeroMQ RPC 服务
-│   ├── core_service.py           # 核心业务方法注册
-│   ├── llm_service.py            # LLM 推理服务
-│   ├── task_manager.py           # 分析任务管理器
-│   ├── sqlite_ctx.py             # SQLite 多数据库管理
-│   ├── agent_workflow/           # AI Agent 工作流
-│   │   ├── workflows/            # 预定义工作流 (overview, component 等)
-│   │   ├── toolkits/             # 工具集 (文件、符号、图)
-│   │   └── runtime.py            # Agent 运行时
-│   ├── prompt_manager.py         # Prompt 模板管理
-│   ├── providers/                # LLM 提供商适配 (OpenAI, Ollama)
-│   ├── messaging/                # 内部消息总线
-│   ├── ingest/                   # 数据 ingest 管道
-│   ├── data_layer/               # 数据访问层 (cache, duckdb)
-│   └── store/                    # 持久化存储
-├── plugins/                      # 插件系统
-│   ├── parsers/                  # 代码解析器 (Tree-sitter)
-│   ├── community/                # 社区发现算法
-│   ├── reports/                  # Web 文档服务 (FastAPI)
-│   └── installer/                # AI 编码工具安装器
-├── build/                        # 构建脚本
-├── scripts/                      # 开发调试脚本
-└── tests/                        # 单元测试
+├── packages/
+│   ├── core/                     # 核心基础框架（topoone-core，editable 安装）
+│   │   └── topoone/
+│   │       ├── engine/           # 引擎（app/service/task_manager/report_service/diagram_ir_docs）
+│   │       ├── gateway/          # 网关（:3456 反代 + RPC 路由 + 鉴权 + SPA 静态）
+│   │       ├── supervisor/       # 进程治理（topo serve 拉起 9 进程）
+│   │       ├── rpc/              # ZeroMQ RPC 服务
+│   │       ├── db/               # SQLite 多数据库管理
+│   │       ├── agent/            # AI Agent 工作流
+│   │       ├── llm/              # LLM 推理服务
+│   │       ├── plugins/          # 核心插件（parsers/community/mcp/runner/llm-provider-*）
+│   │       └── manifest.py       # 子项目 manifest 驱动注册
+│   └── web-core/                 # 前端共享内核（@topo/web-core：组件/服务/门户 dist-portal）
+├── apps/                         # 4 个独立子项目（各自 vite 工程 + Python 后端包）
+│   ├── workbench/                # ① 主工作台（topoone_app_workbench + @topo/app-workbench）
+│   ├── docs/                     # ② 文档浏览（topoone_app_docs :3481 + @topo/app-docs）
+│   ├── chat/                     # ③ AI 对话（topoone_app_chat :3483 + @topo/app-chat）
+│   └── architect/                # ④ Architect 工作台（topoone_app_architect :3470 + @topo/app-architect）
+├── build/                        # 构建脚本（bundle-worker/plugin/module）
+├── scripts/                      # 开发脚本（serve.sh / setup.sh / rpc-baseline）
+└── docs/plan/split/              # 工程拆分规划（M01–M14）
 ```
+
+### 子项目说明
+
+| 子项目 | 前端 | 后端 | 端口 | 职责 |
+|---|---|---|---|---|
+| **workbench** | `@topo/app-workbench` | `topoone_app_workbench` | `/app` | 主工作台（导入/分析/可视化/知识库） |
+| **docs** | `@topo/app-docs` | `topoone_app_docs` | `:3481` | 文档浏览（viewer/web-root，render.* RPC） |
+| **chat** | `@topo/app-chat` | `topoone_app_chat` | `:3483` | AI 对话（会话/技能/草稿） |
+| **architect** | `@topo/app-architect` | `topoone_app_architect` | `:3470` | Architect 工作台（语义资产/需求/设计/Coding Agent） |
+
+> 核心框架（`packages/core`）提供网关、RPC、DB、Agent、LLM、插件与进程治理；4 个子项目经 manifest 驱动注册，独立进程运行，由 `topo serve` 统一拉起（9 进程）。
 
 ---
 
@@ -142,18 +127,7 @@ topoOne-ui/
 
 > **本地模型硬件要求**：运行 Qwen3.6-9B-Q4 量化等本地模型建议 **NVIDIA RTX 4060 Ti 16GB 或以上** 显卡。如果没有独立 GPU，本地模型将使用 CPU 推理，速度会慢得多。如果仅使用云端模型（如 DeepSeek V4 Flash），4 核 8G 配置也可满足基本使用。
 
-> **图形界面运行说明**：本软件包含 Electron 图形界面组件。在无桌面环境的虚拟机、云服务器或纯命令行系统中运行时，需手动安装虚拟显示服务以提供图形渲染支持。物理机或已安装桌面环境的系统无需额外配置。
-
-### 系统环境与虚拟显示方案对照
-
-| 系统环境 | 桌面环境 | 所需操作 | 安装命令 |
-|---|---|---|---|
-| 物理机 / 工作站 (Windows / macOS / Linux 桌面版) | 已预装 | 无需操作 | — |
-| Linux 服务器 (Ubuntu / Debian) | 无 | 安装 xvfb | `sudo apt install xvfb` |
-| Linux 服务器 (CentOS / RHEL / Fedora) | 无 | 安装 Xvfb | `sudo yum install xorg-x11-server-Xvfb` |
-| 云服务器 / 虚拟机 (无 GUI) | 无 | 安装 xvfb | 同上，根据系统选择对应命令 |
-| WSL 1/2 | 无 | 安装 VcXsrv + 配置 DISPLAY | Windows 安装 VcXsrv，WSL 中执行 `export DISPLAY=:0` |
-| Docker 容器 | 无 | 使用 xvfb-run | `xvfb-run npm run dev` |
+> **运行形态**：本软件为 Web 应用（浏览器访问），无桌面端依赖，服务器/虚拟机/容器均可直接运行，无需虚拟显示（xvfb）。
 
 ### LLM 分析效率预估
 
@@ -176,72 +150,51 @@ topoOne-ui/
 - **npm** 或 **pnpm**
 - **pip**
 
-### 1. 安装前端依赖
+### 1. 一键安装
 
 ```bash
-# 使用国内镜像安装（一行命令，不修改环境变量）
-ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/" \
-  npm install --registry=https://registry.npmmirror.com
-
-# Windows PowerShell 使用：
-# $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-# npm install --registry=https://registry.npmmirror.com
-
-# 或使用 pnpm（更快，无需全局安装）
-# npx pnpm install --registry=https://registry.npmmirror.com
+# 创建 .venv + pip install -e（核心 + 4 子项目后端）+ npm install（workspaces）
+npm run setup
 ```
 
-### 2. 创建 Python 虚拟环境并安装依赖
+> 手动分步（等价于 `npm run setup`）：
+> ```bash
+> python3 -m venv .venv && source .venv/bin/activate
+> pip install -e packages/core -e apps/workbench -e apps/docs -e apps/chat -e apps/architect
+> npm install
+> ```
 
-> `npm run dev` 会自动检测项目根目录下的虚拟环境（`.venv/` 或 `venv/`），优先使用其中的 Python 解释器。
-
-```bash
-# 创建虚拟环境并一行命令安装依赖（不污染全局 Python）
-python3 -m venv .venv && \
-  source .venv/bin/activate && \
-  cd backend-core && \
-  pip install -r requirements.txt \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    --trusted-host pypi.tuna.tsinghua.edu.cn
-
-# Windows PowerShell：
-# python3 -m venv .venv; `
-#   .venv\Scripts\Activate.ps1; `
-#   cd backend-core; `
-#   pip install -r requirements.txt `
-#     -i https://pypi.tuna.tsinghua.edu.cn/simple `
-#     --trusted-host pypi.tuna.tsinghua.edu.cn
-
-# 或使用阿里云镜像（替换上述 -i 和 --trusted-host 参数）：
-#   -i https://mirrors.aliyun.com/pypi/simple/
-#   --trusted-host mirrors.aliyun.com
-```
-
-### 3. 运行开发模式
+### 2. 运行
 
 ```bash
-# 启动前端 Vite 开发服务器 + Electron
+# 全栈开发（core 后端 + 4 前端 dev server 并发）
 npm run dev
 
-# 仅启动 Vite 前端（浏览器中开发）
-npm run dev:vite
+# 仅后端服务集（supervisor 拉起 9 进程，:3456）
+npm run serve          # 等价于 topo serve
 
-# 调试模式（更多日志输出）
-npm run dev:debug
+# 查看进程状态 / 停止
+npm run status         # 等价于 topo status
+bash scripts/serve.sh stop
 ```
 
-首次启动时会自动启动 Python 后端进程。前端访问地址: `http://localhost:5173`
+> 亦可直接用 `topo` CLI（安装后即全局可用）：`topo serve` / `topo status` / `topo doctor` / `topo init` 等。
 
-### 4. 构建生产版本
+首次启动会生成访问 token（见终端输出）。浏览器访问: `http://localhost:3456/#token=<token>`
+
+| URL | 说明 |
+|---|---|
+| `/` · `/home` | 统一门户首页 |
+| `/app` | 主工作台（workbench） |
+| `/projects` · `/viewer` · `/web-root` | 文档浏览（docs） |
+| `/chat` | AI 对话（chat） |
+| `/architect` | Architect 工作台（architect） |
+
+### 3. 构建
 
 ```bash
+# core bundle（worker/plugin/module）+ portal + 4 子项目前端
 npm run build
-
-# 打包为桌面应用
-npm run dist:linux   # Linux
-npm run dist:win     # Windows
-npm run dist:mac     # macOS
-npm run dist:all     # 全平台
 ```
 
 ---
@@ -266,15 +219,9 @@ npm run dist:all     # 全平台
 
 ---
 
-## Web 文档服务 & AI 助手
+## Web 服务 & AI 助手
 
-应用运行后，**AI 助手交互界面和文档浏览均通过本地 Web 服务提供**，默认监听 `http://localhost:3456`：
-
-- `/` — 项目文档首页
-- `/doc` — 文档查看器（支持 Mermaid / PlantUML 渲染）
-- `/chat` — AI 对话界面（无需 Electron，浏览器即可使用 AI 助手）
-
-可通过 **设置 → 通用设置** 修改 HTTP 端口与绑定地址。
+应用运行后，**所有界面均通过本地 Web 服务提供**，默认监听 `http://localhost:3456`（URL 布局见上方「运行」表格）。可通过 **设置 → 通用设置** 修改 HTTP 端口与绑定地址。
 
 ### PlantUML 渲染服务
 
@@ -302,6 +249,24 @@ PLANTUML_SERVER=http://localhost:8300
 
 修改后重启 Python 后端服务生效。
 
+### MCP Server
+
+对外部 Agent/工具提供 Model Context Protocol（HTTP）接口，独立进程监听 `:3460`，工具调用转发至 architect 服务（`:3470`）。
+
+```bash
+# 独立启动（topo serve 会随 9 进程自动拉起，通常无需手动启动）
+python -m topoone.plugins.mcp
+```
+
+外部 Agent 接入端点：
+
+| 端点 | 说明 |
+|---|---|
+| `GET http://localhost:3460/v1/tools` | 列出可用工具（arch.read / arch.write / arch.invoke / arch.status） |
+| `POST http://localhost:3460/v1/tools/{tool_name}/call` | 执行工具调用（转发至 architect） |
+
+> MCP 接入路径变更（工程拆分 M08）：由旧 `python plugins/mcp_server/server.py` 变更为 `python -m topoone.plugins.mcp`；客户端为 HTTP 模式（非 stdio），仅需将接入地址指向 `http://localhost:3460`。
+
 ### 完整配置项
 
 | 变量 | 说明 | 默认值 |
@@ -313,14 +278,23 @@ PLANTUML_SERVER=http://localhost:8300
 
 ## 开发
 
+> **模块分工与边界规约**（分子系统/子模块开发前必读）：`docs/conventions/`
+> CONV-00 总纲与分工矩阵 / CONV-01 核心框架 / CONV-02 前端共享内核 / CONV-03 子项目规约（含新子项目模板）/ CONV-04 API 契约与验证门禁
+
 ```bash
 # 代码检查
-npm run type-check    # TypeScript 类型检查
+npm run type-check    # 全 workspace TypeScript 类型检查
 npm run lint          # ESLint 代码风格检查
 
 # 测试
-npm run test          # 前端测试
-cd backend-core && python -m pytest tests/  # 后端测试
+npm run test          # 后端 pytest（core + 4 子项目）+ 前端 vitest（workbench + web-core）
+npm run test:py       # 仅后端
+npm run test:fe       # 仅前端
+
+# 单子项目（示例）
+npm run dev -w @topo/app-architect    # architect 前端 dev
+npm run build -w @topo/app-docs       # docs 前端构建
+python -m pytest apps/architect/tests # architect 后端测试
 ```
 
 ---

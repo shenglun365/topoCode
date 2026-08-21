@@ -1,5 +1,0 @@
-# TopoOne Backend Core - minimal required deps
-pyzmq==27.1.0
-requests==2.34.2
-pydantic==2.13.4
-pydantic-settings==2.14.1

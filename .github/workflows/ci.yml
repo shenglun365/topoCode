@@ -9,10 +9,6 @@ on:
 jobs:
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: .
-
     steps:
       - uses: actions/checkout@v4
 
@@ -23,33 +19,29 @@ jobs:
 
       - run: npm ci
 
-      - name: Type check
-        run: npx vue-tsc --noEmit
+      - name: Type check (all workspaces)
+        run: npm run type-check
 
       - name: Lint
-        run: npx eslint src --ext .ts,.vue
+        run: npm run lint
 
-      - name: Unit tests
-        run: npx vitest run
+      - name: Frontend unit tests (workbench + web-core)
+        run: npm run test:fe
 
-      - name: Build
-        run: npx vite build
+      - name: Build (core bundle + portal + apps)
+        run: npm run build
 
   backend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend-core
-
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: "3.10"
 
-      - run: pip install -r requirements.txt
+      - name: Install core (editable)
+        run: pip install -e packages/core
 
-      - name: Backend tests
-        run: python -m pytest tests/ -v --timeout=60
+      - name: Backend tests (core + apps)
+        run: npm run test:py

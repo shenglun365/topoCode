@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topoone-app-workbench"
+version = "0.1.0"
+description = "TopoCode workbench backend thin layer: knowledge.* RPC (kind=core, in-process registration)"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "TopoCodeProj Team", email = "topocode@163.com" },
+]
+# 仅依赖核心包（db 层 + ZMQServer 方法注册约定）
+dependencies = [
+  "topoone-core",
+]
+
+[tool.setuptools.packages.find]
+include = ["topoone_app_workbench*"]

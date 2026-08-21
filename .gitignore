@@ -39,6 +39,9 @@ dist-plugins/
 dist-modules/
 tmp-module-build/
 
+# opencode
+.opencode/
+
 # topocode project analysis cache
 .topocode/
 
@@ -50,6 +53,14 @@ tmp-module-build/
 
 # Vendored Python dependencies (~82MB)
 plugins/community/.deps/
+
+# Monorepo build artifacts (docs/plan/split)
+apps/*/dist/
+apps/architect/topoone_app_architect/static/
+apps/workbench/src/workers/*-bundled.js
+packages/web-core/dist-portal/
+.pytest_cache/
+node_modules/.vite-*/
 
 # doc
 

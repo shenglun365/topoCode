@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topoone-core"
+version = "0.3.0"
+description = "TopoCode core framework: analysis engine + llm/agent services + gateway + process governance"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "TopoCodeProj Team", email = "topocode@163.com" },
+]
+# 依赖全集（沿用 backend-core/requirements.txt，M14 收敛）
+dependencies = [
+  "pyzmq==27.1.0",
+  "tree-sitter==0.23.2",
+  "tree-sitter-c==0.23.4",
+  "tree-sitter-cpp==0.23.4",
+  "tree-sitter-python==0.23.6",
+  "tree-sitter-javascript==0.23.1",
+  "tree-sitter-typescript==0.23.2",
+  "tree-sitter-go==0.23.4",
+  "tree-sitter-java==0.23.5",
+  "tree-sitter-rust>=0.20",
+  "tree-sitter-c-sharp>=0.20",
+  "tree-sitter-swift>=0.7",
+  "tree-sitter-ruby>=0.20",
+  "tree-sitter-kotlin>=0.20",
+  "tree-sitter-php>=0.20",
+  "tree-sitter-dart-orchard>=0.3",
+  "tree-sitter-scala>=0.20",
+  "tree-sitter-lua>=0.4",
+  "tree-sitter-luau>=0.20",
+  "tree-sitter-objc>=0.20",
+  "networkx==3.4.2",
+  "python-louvain==0.16",
+  "leidenalg>=0.10",
+  "python-igraph>=0.11",
+  "numpy>=1.24,<3.0",
+  "requests==2.34.2",
+  "fastapi==0.136.3",
+  "uvicorn==0.48.0",
+  "httpx==0.28.1",
+  "websockets==16.0",
+  "python-multipart==0.0.32",
+  "pydantic==2.13.4",
+  "pydantic-settings==2.14.1",
+  "diskcache==5.6.3",
+  "duckdb>=0.10.0",
+  "psutil>=6.0",
+  "tomli>=2.0; python_version < '3.11'",
+  "textual>=3.0",
+]
+
+[project.scripts]
+topo = "topoone.supervisor.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["topoone*"]

@@ -1,0 +1,34 @@
+{
+  "name": "@topo/web-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TopoCode 前端核心基础框架：契约源 / 传输层 / HTTP 客户端 / i18n / 共享组件 / 样式 / 门户",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types/*": "./src/types/*.ts",
+    "./services/*": "./src/services/*.ts",
+    "./utils/*": "./src/utils/*.ts",
+    "./composables/*": "./src/composables/*.ts",
+    "./i18n/*": "./src/i18n/*.ts",
+    "./components/*": "./src/components/*",
+    "./styles/variables.scss": "./src/styles/variables.scss",
+    "./styles/global.scss": "./src/styles/global.scss",
+    "./portal/*": "./src/portal/*"
+  },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit",
+    "build:portal": "vite build --config vite.config.portal.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@heroicons/vue": "2.2.0",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.7",
+    "marked-highlight": "^2.2.4",
+    "vue": "3.5.13",
+    "vue-i18n": "9.14.5"
+  }
+}

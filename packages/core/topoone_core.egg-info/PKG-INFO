@@ -1,0 +1,48 @@
+Metadata-Version: 2.4
+Name: topoone-core
+Version: 0.3.0
+Summary: TopoCode core framework: analysis engine + llm/agent services + gateway + process governance
+Author-email: TopoCodeProj Team <topocode@163.com>
+License: Apache-2.0
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pyzmq==27.1.0
+Requires-Dist: tree-sitter==0.23.2
+Requires-Dist: tree-sitter-c==0.23.4
+Requires-Dist: tree-sitter-cpp==0.23.4
+Requires-Dist: tree-sitter-python==0.23.6
+Requires-Dist: tree-sitter-javascript==0.23.1
+Requires-Dist: tree-sitter-typescript==0.23.2
+Requires-Dist: tree-sitter-go==0.23.4
+Requires-Dist: tree-sitter-java==0.23.5
+Requires-Dist: tree-sitter-rust>=0.20
+Requires-Dist: tree-sitter-c-sharp>=0.20
+Requires-Dist: tree-sitter-swift>=0.7
+Requires-Dist: tree-sitter-ruby>=0.20
+Requires-Dist: tree-sitter-kotlin>=0.20
+Requires-Dist: tree-sitter-php>=0.20
+Requires-Dist: tree-sitter-dart-orchard>=0.3
+Requires-Dist: tree-sitter-scala>=0.20
+Requires-Dist: tree-sitter-lua>=0.4
+Requires-Dist: tree-sitter-luau>=0.20
+Requires-Dist: tree-sitter-objc>=0.20
+Requires-Dist: networkx==3.4.2
+Requires-Dist: python-louvain==0.16
+Requires-Dist: leidenalg>=0.10
+Requires-Dist: python-igraph>=0.11
+Requires-Dist: numpy<3.0,>=1.24
+Requires-Dist: requests==2.34.2
+Requires-Dist: fastapi==0.136.3
+Requires-Dist: uvicorn==0.48.0
+Requires-Dist: httpx==0.28.1
+Requires-Dist: websockets==16.0
+Requires-Dist: python-multipart==0.0.32
+Requires-Dist: pydantic==2.13.4
+Requires-Dist: pydantic-settings==2.14.1
+Requires-Dist: diskcache==5.6.3
+Requires-Dist: duckdb>=0.10.0
+Requires-Dist: psutil>=6.0
+Requires-Dist: tomli>=2.0; python_version < "3.11"
+Requires-Dist: textual>=3.0
+Provides-Extra: test
+Requires-Dist: pytest>=8.0; extra == "test"

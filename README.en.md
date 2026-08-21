@@ -55,7 +55,7 @@ TopoCode is not a one-shot efficiency tool that generates architecture diagrams 
 | **Frontend** | Vue 3 + TypeScript + Pinia + Vue Router |
 | **UI Styling** | Tailwind CSS + SCSS + Heroicons |
 | **Visualization** | D3.js + Cytoscape + Mermaid + PlantUML + PixiJS |
-| **Desktop** | Electron + electron-builder |
+| **Delivery** | Web app (browser via local web service :3456) |
 | **Backend** | Python 3.10+ |
 | **IPC** | ZeroMQ (pyzmq) |
 | **Code Parsing** | Tree-sitter (18+ languages) |
@@ -87,60 +87,45 @@ For a detailed walkthrough, please refer to:
 
 ---
 
-## Project Structure
+ ## Project Structure
+
+> Monorepo (npm workspaces + pip editable): 1 core framework + 4 independent sub-projects.
 
 ```
 topoOne-ui/
-├── src/                          # Vue 3 Frontend
-│   ├── components/               # UI Components
-│   │   ├── ai/                   # AI Assistant Panel
-│   │   ├── analysis/             # Analysis Tasks
-│   │   ├── knowledge/            # Knowledge Base
-│   │   ├── project/              # Project Management
-│   │   ├── report/               # Architecture Reports
-│   │   ├── settings/             # Settings Pages
-│   │   ├── shell/                # App Shell (ActivityBar, TopBar, StatusBar)
-│   │   └── visualization/        # Visualization Components
-│   ├── composables/              # Vue Composables
-│   ├── pages/                    # Route Pages
-│   ├── router/                   # Route Configuration
-│   ├── services/                 # IPC Services (ZeroMQ calls)
-│   ├── stores/                   # Pinia State Management
-│   ├── i18n/                     # Internationalization (zh-CN / en-US)
-│   └── types/                    # TypeScript Type Definitions
-├── electron/                     # Electron Main Process
-│   ├── main.ts                   # Main entry + IPC handler
-│   ├── preload.ts                # contextBridge security bridge
-│   ├── window-manager.ts         # Multi-window management
-│   ├── python-bridge.ts          # Python backend process management
-│   ├── zmq-router.ts             # ZeroMQ message routing
-│   └── updater.ts                # Auto-updater
-├── backend-core/                 # Python Backend
-│   ├── main.py                   # Backend entry (monolith / distributed)
-│   ├── zmq_server.py             # ZeroMQ RPC server
-│   ├── core_service.py           # Core business method registration
-│   ├── llm_service.py            # LLM inference service
-│   ├── task_manager.py           # Analysis task manager
-│   ├── sqlite_ctx.py             # SQLite multi-database management
-│   ├── agent_workflow/           # AI Agent Workflows
-│   │   ├── workflows/            # Predefined workflows (overview, component, etc.)
-│   │   ├── toolkits/             # Tool sets (file, symbol, graph)
-│   │   └── runtime.py            # Agent runtime
-│   ├── prompt_manager.py         # Prompt template management
-│   ├── providers/                # LLM provider adapters (OpenAI, Ollama)
-│   ├── messaging/                # Internal message bus
-│   ├── ingest/                   # Data ingest pipeline
-│   ├── data_layer/               # Data access layer (cache, duckdb)
-│   └── store/                    # Persistent storage
-├── plugins/                      # Plugin System
-│   ├── parsers/                  # Code parsers (Tree-sitter)
-│   ├── community/                # Community detection algorithms
-│   ├── reports/                  # Web document service (FastAPI)
-│   └── installer/                # AI coding tool installer
-├── build/                        # Build scripts
-├── scripts/                      # Dev/debug scripts
-└── tests/                        # Unit tests
+├── packages/
+│   ├── core/                     # Core framework (topoone-core, editable install)
+│   │   └── topoone/
+│   │       ├── engine/           # Engine (app/service/task_manager/report_service)
+│   │       ├── gateway/          # Gateway (:3456 proxy + RPC routing + auth + SPA static)
+│   │       ├── supervisor/       # Process governance (topo serve launches 9 processes)
+│   │       ├── rpc/              # ZeroMQ RPC service
+│   │       ├── db/               # SQLite multi-database management
+│   │       ├── agent/            # AI Agent workflows
+│   │       ├── llm/              # LLM inference service
+│   │       ├── plugins/          # Core plugins (parsers/community/mcp/runner/llm-provider-*)
+│   │       └── manifest.py       # Sub-project manifest-driven registration
+│   └── web-core/                 # Frontend shared kernel (@topo/web-core: components/services/portal)
+├── apps/                         # 4 independent sub-projects (each: vite app + Python backend package)
+│   ├── workbench/                # ① Main workbench (topoone_app_workbench + @topo/app-workbench)
+│   ├── docs/                     # ② Doc viewer (topoone_app_docs :3481 + @topo/app-docs)
+│   ├── chat/                     # ③ AI chat (topoone_app_chat :3483 + @topo/app-chat)
+│   └── architect/                # ④ Architect workbench (topoone_app_architect :3470 + @topo/app-architect)
+├── build/                        # Build scripts (bundle-worker/plugin/module)
+├── scripts/                      # Dev scripts (serve.sh / setup.sh / rpc-baseline)
+└── docs/plan/split/              # Engineering split plan (M01–M14)
 ```
+
+### Sub-Projects
+
+| Sub-project | Frontend | Backend | Port | Responsibility |
+|---|---|---|---|---|
+| **workbench** | `@topo/app-workbench` | `topoone_app_workbench` | `/app` | Main workbench (import/analysis/visualization/knowledge) |
+| **docs** | `@topo/app-docs` | `topoone_app_docs` | `:3481` | Doc viewer (viewer/web-root, render.* RPC) |
+| **chat** | `@topo/app-chat` | `topoone_app_chat` | `:3483` | AI chat (sessions/skills/drafts) |
+| **architect** | `@topo/app-architect` | `topoone_app_architect` | `:3470` | Architect workbench (semantic assets/requirements/design/Coding Agent) |
+
+> The core framework (`packages/core`) provides the gateway, RPC, DB, Agent, LLM, plugins and process governance; the 4 sub-projects are registered via manifests, run as independent processes, and are launched together by `topo serve` (9 processes).
 
 ---
 
@@ -153,18 +138,7 @@ topoOne-ui/
 
 > **Local model hardware requirements**: Running local models like Qwen3.6-9B-Q4 (quantized) requires **NVIDIA RTX 4060 Ti 16 GB or above**. Without a dedicated GPU, local models will fall back to CPU inference, which is significantly slower. If using only cloud models (e.g., DeepSeek V4 Flash), 4-core / 8 GB RAM is sufficient for basic usage.
 
-> **GUI runtime notice**: This application includes Electron GUI components. When running on a headless VM, cloud server, or command-line-only system without a desktop environment, you must manually install a virtual display service for graphics rendering. Physical machines or systems with an existing desktop environment require no additional setup.
-
-### Environment & Virtual Display Reference
-
-| System Environment | Desktop | Required Action | Install Command |
-|---|---|---|---|
-| Physical machine / Workstation (Windows / macOS / Linux Desktop) | Pre-installed | None | — |
-| Linux Server (Ubuntu / Debian) | None | Install xvfb | `sudo apt install xvfb` |
-| Linux Server (CentOS / RHEL / Fedora) | None | Install Xvfb | `sudo yum install xorg-x11-server-Xvfb` |
-| Cloud Server / VM (headless) | None | Install xvfb | Same as above, choose based on distro |
-| WSL 1/2 | None | Install VcXsrv + configure DISPLAY | Install VcXsrv on Windows, run `export DISPLAY=:0` in WSL |
-| Docker Container | None | Use xvfb-run | `xvfb-run npm run dev` |
+> **Runtime form**: This is a web app (browser access) with no desktop dependency. It runs directly on servers/VMs/containers without a virtual display (xvfb).
 
 ### LLM Analysis Time Estimates
 
@@ -189,68 +163,51 @@ Architecture analysis duration depends on **codebase size**, **LLM performance**
 
 ## Quick Start
 
-### 1. Install Frontend Dependencies
+### 1. One-click Setup
 
 ```bash
-# Single command, no environment variable pollution
-npm install
-
-# Use mirror registry in China (one-shot, no config changes):
-# ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/" \
-#   npm install --registry=https://registry.npmmirror.com
-
-# Or use pnpm (faster, no global install required):
-# npx pnpm install
+# Create .venv + pip install -e (core + 4 sub-project backends) + npm install (workspaces)
+npm run setup
 ```
 
-### 2. Create Python Virtual Environment & Install Dependencies
+> Manual steps (equivalent to `npm run setup`):
+> ```bash
+> python3 -m venv .venv && source .venv/bin/activate
+> pip install -e packages/core -e apps/workbench -e apps/docs -e apps/chat -e apps/architect
+> npm install
+> ```
 
-> `npm run dev` will automatically detect a virtual environment (`.venv/` or `venv/`) in the project root and prefer its Python interpreter.
-
-```bash
-# Single command — creates venv, installs deps, no global pollution
-python3 -m venv .venv && \
-  source .venv/bin/activate && \
-  cd backend-core && \
-  pip install -r requirements.txt
-
-# Windows PowerShell:
-# python3 -m venv .venv; `
-#   .venv\Scripts\Activate.ps1; `
-#   cd backend-core; `
-#   pip install -r requirements.txt
-
-# Use mirror in China (replace the pip line above):
-#   pip install -r requirements.txt \
-#     -i https://pypi.tuna.tsinghua.edu.cn/simple \
-#     --trusted-host pypi.tuna.tsinghua.edu.cn
-```
-
-### 3. Run in Development Mode
+### 2. Run
 
 ```bash
-# Start Vite dev server + Electron
+# Full-stack dev (core backend + 4 frontend dev servers in parallel)
 npm run dev
 
-# Vite dev server only (browser development)
-npm run dev:vite
+# Backend services only (supervisor launches 9 processes, :3456)
+npm run serve          # equivalent to topo serve
 
-# Debug mode (verbose logging)
-npm run dev:debug
+# Check status / stop
+npm run status         # equivalent to topo status
+bash scripts/serve.sh stop
 ```
 
-The Python backend will start automatically on first launch. Frontend URL: `http://localhost:5173`
+> You can also use the `topo` CLI directly (globally available after install): `topo serve` / `topo status` / `topo doctor` / `topo init`, etc.
 
-### 4. Build for Production
+A token is generated on first launch (see terminal output). Browser URL: `http://localhost:3456/#token=<token>`
+
+| URL | Description |
+|---|---|
+| `/` · `/home` | Unified portal home |
+| `/app` | Main workbench (workbench) |
+| `/projects` · `/viewer` · `/web-root` | Doc viewer (docs) |
+| `/chat` | AI chat (chat) |
+| `/architect` | Architect workbench (architect) |
+
+### 3. Build
 
 ```bash
+# core bundle (worker/plugin/module) + portal + 4 sub-project frontends
 npm run build
-
-# Package as desktop application
-npm run dist:linux   # Linux
-npm run dist:win     # Windows
-npm run dist:mac     # macOS
-npm run dist:all     # All platforms
 ```
 
 ---
@@ -275,15 +232,9 @@ After launching, go to **Settings → Model Config** to add an LLM model. Any pr
 
 ---
 
-## Web Document Service & AI Chat
+## Web Service & AI Chat
 
-When the application is running, **both the AI assistant interface and document browsing are served through the local web service**, which listens on `http://localhost:3456` by default:
-
-- `/` — Project document home
-- `/doc` — Document viewer (with Mermaid / PlantUML rendering)
-- `/chat` — AI chat interface (use the AI assistant directly in a browser, no Electron needed)
-
-The HTTP port and bind address can be changed in **Settings → General Settings**.
+When the application is running, **all interfaces are served through the local web service**, which listens on `http://localhost:3456` by default (URL layout see the "Run" table above). The HTTP port and bind address can be changed in **Settings → General Settings**.
 
 ### PlantUML Rendering Service
 
@@ -311,6 +262,24 @@ Default is `http://www.plantuml.com/plantuml` — must be changed for internal n
 
 Restart the Python backend after changing.
 
+### MCP Server
+
+Provides a Model Context Protocol (HTTP) interface for external agents/tools. It runs as an independent process on `:3460`, and tool calls are forwarded to the architect service (`:3470`).
+
+```bash
+# Standalone start (topo serve auto-launches it as one of the 9 processes; usually no manual start needed)
+python -m topoone.plugins.mcp
+```
+
+External agent endpoints:
+
+| Endpoint | Description |
+|---|---|
+| `GET http://localhost:3460/v1/tools` | List available tools (arch.read / arch.write / arch.invoke / arch.status) |
+| `POST http://localhost:3460/v1/tools/{tool_name}/call` | Execute a tool call (forwarded to architect) |
+
+> MCP integration path change (split M08): changed from the old `python plugins/mcp_server/server.py` to `python -m topoone.plugins.mcp`. Clients use HTTP mode (not stdio) and only need to point their integration URL to `http://localhost:3460`.
+
 ### All Config Options
 
 | Variable | Description | Default |
@@ -322,14 +291,23 @@ Restart the Python backend after changing.
 
 ## Development
 
+> **Module ownership & boundary conventions** (read before developing a subsystem/sub-module): `docs/conventions/`
+> CONV-00 Overview & ownership matrix / CONV-01 Core framework / CONV-02 Frontend shared kernel / CONV-03 Sub-project conventions (incl. new sub-project template) / CONV-04 API contracts & acceptance gates
+
 ```bash
 # Code quality
-npm run type-check    # TypeScript type checking
+npm run type-check    # TypeScript type checking (all workspaces)
 npm run lint          # ESLint code style
 
 # Tests
-npm run test                          # Frontend tests
-cd backend-core && python -m pytest   # Backend tests
+npm run test          # Backend pytest (core + 4 sub-projects) + frontend vitest (workbench + web-core)
+npm run test:py       # Backend only
+npm run test:fe       # Frontend only
+
+# Single sub-project (examples)
+npm run dev -w @topo/app-architect    # architect frontend dev
+npm run build -w @topo/app-docs       # docs frontend build
+python -m pytest apps/architect/tests # architect backend tests
 ```
 
 ---

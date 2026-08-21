@@ -1,5 +1,7 @@
 # 去 Electron 化架构方案：web-ui + tui + cli + 后台 Python 微服务
 
+> **后续**：本方案的落地已由工程拆分接管，执行总纲见 `docs/plan/split/`（M01–M14，核心基础框架 + 4 独立子项目 Monorepo）。本文件的 9 进程拓扑与 §Phase 3 的 8 项验收门已作为拆分 P0–P6 的验收基线沿用。
+
 > 版本 v1.1（草案）| 日期 2026-08-16 | 状态：讨论结论，待落地（v1.1 经全仓代码核实修订，见 §8 修订记录）
 > 关联：`docs/plan/restructure-plan.md`、`docs/plan/architect-design.md`
 > v1.1 变更要点：进程拓扑唯一化（D8）、双 origin 决策（D6）、鉴权同相位（D7）、pickDirectory 方案、TUI ZMQ 直连（D9）、验收门 5→8 项
