@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Resource, ResourceListMeta } from '@/types'
+import type { Resource, ResourceListMeta } from './types'
 import { ArrowDownTrayIcon, HandThumbUpIcon, HandThumbDownIcon } from '@heroicons/vue/24/outline'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -93,7 +93,7 @@ const isFree = computed(() => props.resource.pricing_model === 'free')
             v-if="showDownloadCount && !isPrerelease"
             class="download-count"
           >
-            <ArrowDownTrayIcon class="w-3 h-3" />
+            <ArrowDownTrayIcon class="dl-icon" />
             {{ resource.download_count }}
           </span>
           <span class="vote-counts">
@@ -119,12 +119,12 @@ const isFree = computed(() => props.resource.pricing_model === 'free')
   transition: transform 0.15s, box-shadow 0.15s;
   border-radius: var(--rc-card-radius, 8px);
   box-shadow: var(--rc-card-shadow, 0 1px 4px rgba(0,0,0,0.08));
-  max-width: var(--rc-card-max-w, 220px);
+  max-width: var(--rc-card-max-w, calc(220px * var(--ui-scale)));
 }
 .resource-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-.card-thumb { height: var(--rc-card-thumb-h, 100px); display: flex; align-items: flex-start; padding: 8px; position: relative; gap: 4px; }
-.category-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.2); color: #fff; }
-.price-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,0.3); color: #ffd700; margin-left: auto; }
+.card-thumb { height: var(--rc-card-thumb-h, calc(100px * var(--ui-scale))); display: flex; align-items: flex-start; padding: 8px; position: relative; gap: 4px; }
+.category-badge { font-size: calc(10px * var(--ui-scale)); padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.2); color: #fff; }
+.price-badge { font-size: calc(10px * var(--ui-scale)); padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,0.3); color: #ffd700; margin-left: auto; }
 .price-badge-free { color: #22c55e; }
 .badge-hot {
   position: absolute; top: 4px; right: 4px;
@@ -147,15 +147,16 @@ const isFree = computed(() => props.resource.pricing_model === 'free')
   font-size: 9px; padding: 2px 8px; border-radius: 4px;
   background: rgba(34,197,94,0.85); color: #fff; font-weight: 600;
 }
-.card-body { padding: 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-.card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }
-.card-desc { font-size: 11px; color: var(--text-muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); gap: var(--rc-card-gap, 12px); }
+.card-body { padding: calc(12px * var(--ui-scale)); display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.card-title { font-size: calc(13px * var(--ui-scale)); font-weight: 600; color: var(--text-primary); line-height: 1.3; }
+.card-desc { font-size: calc(11px * var(--ui-scale)); color: var(--text-muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); gap: var(--rc-card-gap, calc(12px * var(--ui-scale))); }
 .card-footer-left { display: flex; flex-direction: column; gap: 2px; }
-.download-count { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }
-.vote-counts { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-muted); }
-.vote-icon { width: 12px; height: 12px; }
+.download-count { display: flex; align-items: center; gap: 4px; font-size: calc(11px * var(--ui-scale)); color: var(--text-muted); }
+.vote-counts { display: flex; align-items: center; gap: 3px; font-size: calc(10px * var(--ui-scale)); color: var(--text-muted); }
+.vote-icon { width: calc(12px * var(--ui-scale)); height: calc(12px * var(--ui-scale)); }
+.dl-icon { width: calc(12px * var(--ui-scale)); height: calc(12px * var(--ui-scale)); }
 .vote-icon-down { margin-left: 2px; }
-.btn-download { font-size: 11px; padding: 3px 10px; border-radius: 4px; background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; }
+.btn-download { font-size: calc(11px * var(--ui-scale)); padding: 3px calc(10px * var(--ui-scale)); border-radius: 4px; background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap; }
 .btn-prerelease { background: #f59e0b; }
 </style>

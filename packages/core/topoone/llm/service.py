@@ -23,6 +23,43 @@ from topoone.db.manager import MultiDBManager
 logger = logging.getLogger(__name__)
 
 
+def _estimate_tokens(content: str) -> int:
+    """字符→token 估算（与用量审计一致的 chars/3.5 启发式）。"""
+    return max(1, int(len(content or "") / 3.5))
+
+
+def _trim_messages_to_budget(messages: List[Dict[str, str]], budget: Optional[int]):
+    """按输入上下文预算裁剪一次性消息（P1 context_budget）。
+
+    语义：system 指令消息全部保留；非 system 消息从最旧开始丢弃、越过预算的那条
+    截断其内容，保证最终总 token 估算 ≤ budget。适用于模板渲染后的 [system, user]
+    一次性调用（/app 上下文容量），而非 chat 历史逐条裁剪。
+    """
+    if budget is None or budget <= 0:
+        return messages
+    total = sum(_estimate_tokens(m.get("content", "") or "") for m in messages)
+    if total <= budget:
+        return messages
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    content_msgs = [m for m in messages if m.get("role") != "system"]
+    system_total = sum(_estimate_tokens(m.get("content", "") or "") for m in system_msgs)
+    content_budget = max(1, budget - system_total)
+    kept = []
+    used = 0
+    for m in reversed(content_msgs):
+        est = _estimate_tokens(m.get("content", "") or "")
+        if used + est <= content_budget:
+            kept.insert(0, m)
+            used += est
+            continue
+        max_chars = max(0, int((content_budget - used) * 3.5))
+        kept.insert(0, dict(m, content=(m.get("content") or "")[:max_chars]))
+        break
+    logger.info(f"[CHAT_TRACE] context_budget={budget} trim: {len(messages)}→{len(system_msgs) + len(kept)} msgs "
+                f"(system kept={len(system_msgs)}, dropped={len(content_msgs) - len(kept)})")
+    return system_msgs + kept
+
+
 # ==================== 模型配置读取 ====================
 
 def _get_model_by_id(multi_db: MultiDBManager, model_id: str) -> Optional[Dict[str, Any]]:
@@ -1133,6 +1170,8 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         locale: str = "",
         max_tokens: Optional[int] = None,
         maxTokens: Optional[int] = None,
+        context_budget: Optional[int] = None,
+        contextBudget: Optional[int] = None,
     ):
         """统一流式对话入口"""
         from topoone.rpc.zmq_server import current_call_id
@@ -1145,6 +1184,7 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         template_id = template_id or templateId
         output_schema = output_schema or outputSchema
         max_tokens = max_tokens or maxTokens
+        context_budget = context_budget or contextBudget
 
         if not session_id:
             raise ValueError("sessionId is required")
@@ -1187,6 +1227,10 @@ def register_llm_methods(server: ZMQServer, multi_db: MultiDBManager):
         messages = im.inject(messages, scope=scope)
         _sys_after2 = sum(1 for m in messages if m.get('role') == 'system')
         logger.info(f"[CHAT_TRACE] instruction_injected now sys={_sys_after2} total_msgs={len(messages)}")
+
+        # P1: 输入上下文预算（/app 上下文容量）——注入完成后、调模型前按预算裁剪
+        if context_budget is not None:
+            messages = _trim_messages_to_budget(messages, context_budget)
 
         extra_meta = {}
         if template_id:

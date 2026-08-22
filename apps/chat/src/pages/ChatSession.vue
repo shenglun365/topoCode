@@ -6,8 +6,9 @@ import { renderMarkdown, renderDocMarkdown, codeFullscreen } from '@topo/web-cor
 import { diagramStateStore, type DiagramViewState } from '@topo/web-core/services/diagramStateStore'
 import { parseDocContent } from '@topo/web-core/services/parseContent'
 import ChatInput from '@/components/ChatInput.vue'
-import ChatToolbar from '@/components/ChatToolbar.vue'
 import ChatSidebar from '@/components/ChatSidebar.vue'
+import { AppToolbar, ModelSettingsDropdown } from '@topo/web-core/shell'
+import type { ModelSettingsProvider } from '@topo/web-core/shell'
 import ChatMessage from '@/components/ChatMessage.vue'
 import MermaidViewer from '@topo/web-core/components/MermaidViewer.vue'
 import PlantUmlViewer from '@topo/web-core/components/PlantUmlViewer.vue'
@@ -28,6 +29,13 @@ const currentId = ref('')
 const currentModel = ref('')
 const input = ref('')
 const streaming = ref(false)
+
+const modelProvider: ModelSettingsProvider = {
+  async listModels() {
+    const data = await api.listModels()
+    return data.models.map((m) => ({ id: m.id, name: m.name }))
+  },
+}
 const msgArea = ref<HTMLElement>()
 const tab = ref<'chat' | 'notes' | 'archives'>('chat')
 const notes = ref<any[]>([])
@@ -298,7 +306,7 @@ async function aiRename() {
   if (!s) return
   renameGenerating.value = true
   try {
-    const resp = await fetch(`/api/chat/sessions/${s.id}/auto-title`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modelId: currentModel.value }) })
+    const resp = await fetch(`/api/chat/sessions/${s.id}/auto-title`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...api.authHeaders() }, body: JSON.stringify({ modelId: currentModel.value }) })
     const data = await resp.json()
     if (data.generated && data.title) {
       renameText.value = data.title
@@ -411,7 +419,7 @@ async function send() {
     if (pendingRefs.value.length) { body.refs = pendingRefs.value; pendingRefs.value = [] }
 
     const resp = await fetch(`/api/chat/sessions/${currentId.value}/messages`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...api.authHeaders() }, body: JSON.stringify(body),
     })
     if (!resp.ok) { const errBody = await resp.text().catch(() => ''); throw new Error(errBody || `API ${resp.status}`) }
     const reader = resp.body?.getReader()
@@ -471,7 +479,7 @@ async function onToggleDiagram(enabled: boolean) {
   try { localStorage.setItem(DIAGRAM_LS_KEY, enabled ? '1' : '0') } catch (_) {}
   if (!currentId.value) return
   try {
-    const resp = await fetch(`/api/chat/sessions/${currentId.value}`)
+    const resp = await fetch(`/api/chat/sessions/${currentId.value}`, { headers: api.authHeaders() })
     const session = await resp.json()
     const meta = (session as any).metadata || {}
     const current: string[] = meta.active_skills || []
@@ -483,7 +491,7 @@ async function onToggleDiagram(enabled: boolean) {
 }
 
 function abortStream() {
-  if (currentId.value) fetch(`/api/chat/sessions/${currentId.value}/stream/abort`, { method: 'POST' }).catch(() => {})
+  if (currentId.value) fetch(`/api/chat/sessions/${currentId.value}/stream/abort`, { method: 'POST', headers: api.authHeaders() }).catch(() => {})
   streaming.value = false
 }
 
@@ -1257,26 +1265,41 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         </div>
       </div>
 
-      <ChatToolbar
-        :currentTitle="currentTitle"
-        :currentModel="currentModel"
-        :models="models"
-        :contextLimit="contextLimit"
-        :fontSize="fontSize"
-        :tab="tab"
-        :viewingNote="!!viewingNote"
-        :viewingNoteTitle="viewingNote?.title || ''"
-        :showAnnotations="showAnnotations"
-        :draftsDotVisible="pendingDrafts.length > 0"
-        @update:currentModel="currentModel = $event"
-        @update:contextLimit="contextLimit = $event"
-        @update:fontSize="fontSize = $event"
-        @edit-note="openNoteEditor"
-        @edit-note-md="startNoteEdit"
-        @toggle-annotations="toggleAnnotations"
-        @add-annotation="addNewAnnotation"
-        @open-drafts-dialog="draftsDialogVisible = true"
-      />
+      <AppToolbar
+        app-key="chat"
+        :font-size="fontSize"
+        :font-targets="[]"
+        @update:font-size="fontSize = $event"
+      >
+        <template #title>
+          <template v-if="viewingNote">
+            <span class="topbar-badge badge-note">笔记</span>
+            <span class="chat-title note-title-clickable" @click="openNoteEditor" title="编辑笔记">
+              {{ viewingNote?.title || '无标题' }}<svg class="edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </span>
+          </template>
+          <span v-else class="chat-title">{{ currentTitle }}</span>
+        </template>
+        <template #tools>
+          <button class="drafts-topbar-btn" :class="{ 'has-dot': pendingDrafts.length > 0 }" @click="draftsDialogVisible = true" title="待处理便签">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span v-if="pendingDrafts.length > 0" class="drafts-dot"></span>
+          </button>
+          <ModelSettingsDropdown
+            app-key="chat"
+            :provider="modelProvider"
+            :initial-model="currentModel"
+            :initial-context="contextLimit"
+            @model="currentModel = $event"
+            @context="contextLimit = $event"
+          />
+          <template v-if="viewingNote">
+            <button class="note-topbar-btn" :class="{ active: showAnnotations }" @click="toggleAnnotations" title="切换批注显示"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 18h20"/><path d="M6 6l4 12"/><path d="M14 6l4 12"/></svg></button>
+            <button class="note-topbar-btn" @click="addNewAnnotation" title="添加批注"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+            <button class="note-topbar-btn" @click="startNoteEdit" title="全文编辑 (Markdown)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+          </template>
+        </template>
+      </AppToolbar>
 
       <!-- Note view -->
       <div v-if="tab === 'notes' && viewingNote" class="note-view">
@@ -1435,6 +1458,14 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
 .badge-note{background:#dbeafe;color:#2563eb;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500;font-size:12px}
 .note-title-clickable{cursor:pointer;padding:2px 20px 2px 6px;border-radius:var(--radius-md);border:1px solid transparent;position:relative;font-size:15px;color:var(--text);font-weight:600}
 .note-title-clickable:hover{border-color:var(--border);background:var(--bg-hover)}
+.drafts-topbar-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted,#888);border-radius:6px;cursor:pointer;flex-shrink:0}
+.drafts-topbar-btn:hover{background:var(--bg-hover,#f4f4f5);color:var(--text)}
+.drafts-topbar-btn.has-dot{color:var(--text)}
+.drafts-dot{position:absolute;top:2px;right:2px;width:7px;height:7px;border-radius:50%;background:#ef4444;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.note-topbar-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted,#888);border-radius:6px;cursor:pointer;flex-shrink:0}
+.note-topbar-btn:hover{background:var(--bg-hover,#f4f4f5);color:var(--text)}
+.note-topbar-btn.active{border-color:var(--accent);color:var(--accent)}
 .note-title-clickable .edit-icon{display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text-muted);pointer-events:none}
 .note-title-clickable:hover .edit-icon{display:inline}
 .note-topbar-btn{background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center}

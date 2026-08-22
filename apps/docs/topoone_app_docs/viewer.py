@@ -31,7 +31,8 @@ _fh.setLevel(logging.DEBUG)
 _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 _diag_log.addHandler(_fh)
 
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+# M11：viewer/web-root SPA 产物在 apps/docs/dist（vite outDir；与 gateway /docs 资产挂载同源）
+STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dist")
 
 
 # ── Static pages ──

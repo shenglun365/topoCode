@@ -3,8 +3,9 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import * as api from '@topo/web-core/services/api'
 import { t } from '@topo/web-core/i18n/web-locales'
 import type { Project, Task } from '@topo/web-core/types/domain'
-import StarLogoMark from '@topo/web-core/components/StarLogoMark.vue'
-import ThemeToggle from '@topo/web-core/components/ThemeToggle.vue'
+import { AppToolbar, readFontSize } from '@topo/web-core/shell'
+
+const fontSize = ref(readFontSize())
 
 const projects = ref<Project[]>([])
 const tasksByProject = ref<Record<string, Task[]>>({})
@@ -92,11 +93,12 @@ onMounted(async () => {
 
 <template>
   <div class="container">
-    <div class="page-header">
-      <StarLogoMark :size="40" />
-      <h1>TopoCode 文档</h1>
-      <ThemeToggle app-key="docs" :size="32" />
-    </div>
+    <AppToolbar
+      app-key="docs"
+      title="TopoCode 文档"
+      :font-size="fontSize"
+      :font-targets="['--content-font-size']"
+    />
     <div class="toolbar">
       <form @submit.prevent="page = 1" style="display:flex;gap:8px;flex:1;align-items:center">
         <input v-model="search" type="text" placeholder="搜索项目/任务..." />

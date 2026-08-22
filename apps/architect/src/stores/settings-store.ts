@@ -1,38 +1,65 @@
 import { defineStore } from 'pinia'
 import type { Locale } from '@/types'
 import { i18n } from '@/i18n'
+import {
+  readLocale,
+  writeLocale,
+  readFontSize,
+  writeFontSize,
+  setFontSize,
+} from '@topo/web-core/shell'
 
-export const FONT_SCALES = [
-  1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3,
-] as const
+const LEGACY_PERSIST_KEY = 'arch-settings'
 
-export type FontScale = (typeof FONT_SCALES)[number]
+/** 迁移旧版 `arch-settings` pinia persist（{locale, fontScale}）→ 共享键，成功后清除旧键。 */
+function migrateLegacy() {
+  try {
+    const raw = localStorage.getItem(LEGACY_PERSIST_KEY)
+    if (!raw) return
+    const legacy = JSON.parse(raw)
+    if (legacy && typeof legacy === 'object') {
+      if (legacy.locale && !localStorage.getItem('topoone-locale')) {
+        writeLocale(legacy.locale as Locale)
+      }
+      const scale = Number(legacy.fontScale)
+      if (scale > 0 && !localStorage.getItem('topoone-font-size')) {
+        writeFontSize(Math.round(scale * 16))
+      }
+    }
+    localStorage.removeItem(LEGACY_PERSIST_KEY)
+  } catch {
+    /* 忽略损坏数据 */
+  }
+}
 
+/**
+ * 全局设置（P4）：locale / 字号改由共享键记忆（`topoone-locale` · `topoone-font-size`），
+ * 移除 arch-settings 持久化（旧值读兼容迁移）。字号落点 = <html> root font-size。
+ */
 export const useArchSettingsStore = defineStore('arch-settings', {
-  state: () => ({
-    locale: 'zh-CN' as Locale,
-    fontScale: 1 as FontScale,
-  }),
-  persist: true,
+  state: () => {
+    migrateLegacy()
+    return {
+      locale: readLocale() as Locale,
+      fontSize: readFontSize(),
+    }
+  },
   actions: {
     setLocale(locale: Locale) {
       this.locale = locale
+      writeLocale(locale)
       i18n.global.locale.value = locale
       document.documentElement.lang = locale
     },
     initLocale() {
       this.setLocale(this.locale)
     },
-    setFontScale(scale: number) {
-      const clamped = Math.min(FONT_SCALES[FONT_SCALES.length - 1], Math.max(FONT_SCALES[0], scale))
-      const snapped = FONT_SCALES.includes(clamped as FontScale)
-        ? (clamped as FontScale)
-        : (FONT_SCALES.reduce((a, b) => (Math.abs(b - scale) < Math.abs(a - scale) ? b : a)) as FontScale)
-      this.fontScale = snapped
-      document.documentElement.style.fontSize = `${Math.round(snapped * 16 * 100) / 100}px`
+    setFontSize(px: number) {
+      this.fontSize = px
+      setFontSize(px, ['root'])
     },
-    initFontScale() {
-      this.setFontScale(this.fontScale)
+    initFontSize() {
+      this.setFontSize(this.fontSize)
     },
   },
 })

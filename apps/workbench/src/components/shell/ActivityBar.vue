@@ -48,8 +48,13 @@ const currentPage = computed(() => navigation.currentPage)
 
 function navigateTo(page: PageType) {
   if (page === 'settings') {
-    navigation.navigateTo('settings')
-    router.push('/settings')
+    // P7：设置中心迁入门户（/#/settings）
+    window.open('/#/settings', '_blank')
+    return
+  }
+  if (page === 'user') {
+    // 用户中心迁入门户（基础服务，/#/user），新页签打开
+    window.open('/#/user', '_blank')
     return
   }
   navigation.navigateTo(page)

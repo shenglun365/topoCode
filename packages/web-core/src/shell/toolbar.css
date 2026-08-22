@@ -1,0 +1,75 @@
+/* 共享工具栏控件样式（非 scoped，供 shell 控件复用）
+   文本控件按 --ui-scale（字号档位/16px）等比缩放宽高 */
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  padding: 0 calc(8px * var(--ui-scale));
+  border: 1px solid var(--border, #45475a);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-card, #181825);
+  color: var(--text-secondary, #a6adc8);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: calc(13px * var(--ui-scale));
+  text-decoration: none;
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+.toolbar-btn:hover {
+  border-color: var(--accent, #89b4fa);
+  color: var(--accent, #89b4fa);
+}
+.toolbar-btn.active {
+  border-color: var(--accent, #89b4fa);
+  color: var(--accent, #89b4fa);
+}
+.toolbar-select {
+  height: calc(30px * var(--ui-scale));
+  padding: 0 calc(6px * var(--ui-scale));
+  border: 1px solid var(--border, #45475a);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-card, #181825);
+  color: var(--text-secondary, #a6adc8);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: calc(13px * var(--ui-scale));
+}
+.model-name {
+  max-width: calc(120px * var(--ui-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-dropdown {
+  position: relative;
+}
+.toolbar-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1000;
+  min-width: calc(230px * var(--ui-scale));
+  padding: calc(10px * var(--ui-scale));
+  background: var(--bg-secondary, #181825);
+  border: 1px solid var(--border, #45475a);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.3));
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--ui-scale));
+}
+.popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(10px * var(--ui-scale));
+}
+.popover-row label {
+  color: var(--text-muted, #6c7086);
+  font-size: calc(13px * var(--ui-scale));
+  flex-shrink: 0;
+}
+.popover-row .toolbar-select {
+  min-width: calc(130px * var(--ui-scale));
+}

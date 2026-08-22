@@ -142,8 +142,7 @@ watch(filterMode, () => { currentPage.value = 1 })
 watch(searchQuery, () => { currentPage.value = 1 })
 
 async function handleSelectProject(id: string) {
-  await projectStore.selectProject(id)
-  router.push('/code')
+  router.push({ path: '/code', query: { project: id } })
   navigation.navigateTo('code')
   try {
     await (window.api as any).system.exportCleanupOld(id)

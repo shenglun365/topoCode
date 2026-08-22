@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
@@ -242,6 +243,126 @@ class Supervisor:
         await asyncio.sleep(backoff)
         self._spawn(label)
 
+    # ── 人工重启 / 管理端点（P1） ──────────────────────────────
+
+    async def restart(self, label: str):
+        """人工重启指定 worker：重置崩溃预算后重启，不占 restart_limit。
+
+        进程存活时发 SIGTERM，由退出路径（_read_worker_stdout finally）触发 _restart；
+        已死亡/致命则直接 _spawn。
+        """
+        wi = self._workers.get(label)
+        if wi is None:
+            raise KeyError(label)
+        wi.restart_count = 0
+        wi.stop_requested = False
+        if wi.proc and wi.is_alive:
+            wi.status = "starting"
+            logger.info(f"[Supervisor] manual restart {label} (pid={wi.proc.pid})")
+            if sys.platform == "win32":
+                wi.proc.terminate()
+            else:
+                wi.proc.send_signal(signal.SIGTERM)
+        else:
+            logger.info(f"[Supervisor] manual restart {label} (not running, spawning)")
+            self._spawn(label)
+
+    async def start_admin_server(self, host: str = "127.0.0.1", port: int = 3450,
+                                 token: Optional[str] = None):
+        """启动 localhost 管理端点（P1）：GET /apps · POST /restart/{name}。
+
+        仅绑定 127.0.0.1；鉴权复用主 token（token=全权，与网关 /api 一致）。
+        """
+        self._admin_token = token
+        self._admin_server = await asyncio.start_server(
+            self._handle_admin_conn, host, port)
+        logger.info(f"[Supervisor] admin endpoint listening on http://{host}:{port}")
+
+    async def stop_admin_server(self):
+        server = getattr(self, "_admin_server", None)
+        if server:
+            server.close()
+            try:
+                await server.wait_closed()
+            except Exception:
+                pass
+            self._admin_server = None
+
+    def _admin_authorized(self, headers: dict, raw_path: str) -> bool:
+        token = getattr(self, "_admin_token", None)
+        if not token:
+            return True
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(raw_path).query)
+        if q.get("token") and q["token"][0] == token:
+            return True
+        if headers.get("authorization") == f"Bearer {token}":
+            return True
+        return False
+
+    async def _handle_admin_conn(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        try:
+            request_line = (await asyncio.wait_for(reader.readline(), timeout=10.0)).decode().strip()
+            if not request_line:
+                return
+            parts = request_line.split()
+            if len(parts) < 2:
+                await self._write_json(writer, 400, {"error": "bad request"})
+                return
+            method, raw_path = parts[0], parts[1]
+            headers = {}
+            while True:
+                line = (await reader.readline()).decode().strip()
+                if not line:
+                    break
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    headers[k.strip().lower()] = v.strip()
+            content_length = int(headers.get("content-length", "0") or "0")
+            body = b""
+            while len(body) < content_length:
+                chunk = await reader.read(content_length - len(body))
+                if not chunk:
+                    break
+                body += chunk
+
+            if not self._admin_authorized(headers, raw_path):
+                await self._write_json(writer, 401, {"error": "unauthorized"})
+                return
+
+            path = urllib.parse.urlparse(raw_path).path
+            if method == "GET" and path == "/apps":
+                await self._write_json(writer, 200, self.get_status())
+            elif method == "POST" and path.startswith("/restart/"):
+                label = urllib.parse.unquote(path.split("/")[2])
+                if label not in self._workers:
+                    await self._write_json(writer, 404, {"error": f"unknown app: {label}"})
+                    return
+                try:
+                    await self.restart(label)
+                except KeyError:
+                    await self._write_json(writer, 404, {"error": f"unknown app: {label}"})
+                    return
+                await self._write_json(writer, 200, {"restarted": label})
+            else:
+                await self._write_json(writer, 404, {"error": "not found"})
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            logger.error(f"[Supervisor] admin handler error: {e}")
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+    async def _write_json(self, writer: asyncio.StreamWriter, status: int, payload):
+        data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        writer.write(
+            (f"HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\n"
+             f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n").encode("utf-8"))
+        writer.write(data)
+        await writer.drain()
+
     # ── 停止 ────────────────────────────────────────────────────
 
     async def stop_worker(self, label: str, timeout: float = 5.0):
@@ -270,6 +391,7 @@ class Supervisor:
     async def shutdown_all(self, timeout: float = 5.0):
         """停止所有 worker"""
         self._running = False
+        await self.stop_admin_server()
         if self._monitor_task:
             self._monitor_task.cancel()
             try:

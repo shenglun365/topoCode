@@ -11,10 +11,10 @@ import { useNotes } from '@/composables/useNotes'
 import { codeFullscreen } from '@topo/web-core/services/render'
 import { useHeatmap } from '@/composables/useHeatmap'
 import { useToast } from '@topo/web-core/composables/useToast'
-import ThemeToggle from '@topo/web-core/components/ThemeToggle.vue'
 import { useGraphState } from '@/composables/useGraphState'
 import GraphContextMenu from '@/components/graph/GraphContextMenu.vue'
 import StarLogoMark from '@topo/web-core/components/StarLogoMark.vue'
+import { AppToolbar } from '@topo/web-core/shell'
 
 const taskId = ref(new URLSearchParams(location.search).get('taskId') || '')
 const urlCid = new URLSearchParams(location.search).get('communityId') || new URLSearchParams(location.search).get('cid') || ''
@@ -531,35 +531,126 @@ onMounted(() => {
 
 <template>
   <div class="viewer">
-    <div class="header">
-      <StarLogoMark :size="26" />
-      <span class="title">TopoCode Doc Viewer</span>
-      <ThemeToggle app-key="docs" :size="26" />
-      <select v-model.number="fontSize">
-        <option :value="13">13px</option><option :value="15">15px</option>
-        <option :value="18">18px</option><option :value="22">22px</option>
-        <option :value="26">26px</option><option :value="32">32px</option>
-      </select>
-      <button class="diag-save-btn" :class="{ 'has-unsaved': hasUnsavedDiag }" :disabled="!hasUnsavedDiag" @click="saveDiagramStates" title="保存图状态到服务器">
-        <span v-if="hasUnsavedDiag" class="save-red-dot"></span>保存图状态
-      </button>
-      <button class="toggle-btn notes-btn" :class="{ active: false }" @click="openNotesModal" title="便签">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <span v-if="notesDotVisible" class="notes-dot"></span>
-      </button>
-      <button class="toggle-btn" :class="{ active: leftVisible }" @click="toggleLeft" title="文档面板">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-      </button>
-      <button class="toggle-btn" :class="{ active: rightVisible }" @click="toggleRight" title="图谱面板">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><circle cx="5" cy="19" r="2"/><line x1="12" y1="9" x2="17" y2="7"/><line x1="12" y1="15" x2="17" y2="17"/><line x1="12" y1="9" x2="7" y2="7"/><line x1="12" y1="15" x2="7" y2="17"/></svg>
-      </button>
-      <a :href="`/chat?taskId=${taskId}`" target="_blank" class="header-link">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> AI
-      </a>
-      <a href="/" class="header-link">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg> 返回
-      </a>
-    </div>
+    <AppToolbar
+      app-key="docs"
+      :title="doc?.title || 'TopoCode Doc Viewer'"
+      :font-size="fontSize"
+      :font-targets="[]"
+      @update:font-size="fontSize = $event"
+    >
+      <template #brand>
+        <StarLogoMark :size="26" />
+      </template>
+      <template #project>
+        <span
+          v-if="doc?.projectName"
+          class="project-badge"
+          :title="doc.projectName"
+        >{{ doc.projectName }}</span>
+      </template>
+      <template #tools>
+        <button
+          class="diag-save-btn toolbar-btn"
+          :class="{ 'has-unsaved': hasUnsavedDiag }"
+          :disabled="!hasUnsavedDiag"
+          @click="saveDiagramStates"
+          title="保存图状态到服务器"
+        >
+          <span
+            v-if="hasUnsavedDiag"
+            class="save-red-dot"
+          ></span>保存图状态
+        </button>
+        <button
+          class="toolbar-btn notes-btn"
+          type="button"
+          @click="openNotesModal"
+          title="便签"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          ><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+          <span
+            v-if="notesDotVisible"
+            class="notes-dot"
+          ></span>
+        </button>
+        <button
+          class="toolbar-btn"
+          :class="{ active: leftVisible }"
+          type="button"
+          @click="toggleLeft"
+          title="文档面板"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          ><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
+        </button>
+        <button
+          class="toolbar-btn"
+          :class="{ active: rightVisible }"
+          type="button"
+          @click="toggleRight"
+          title="图谱面板"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          ><circle cx="12" cy="12" r="3" /><circle cx="19" cy="5" r="2" /><circle cx="5" cy="5" r="2" /><circle cx="19" cy="19" r="2" /><circle cx="5" cy="19" r="2" /><line x1="12" y1="9" x2="17" y2="7" /><line x1="12" y1="15" x2="17" y2="17" /><line x1="12" y1="9" x2="7" y2="7" /><line x1="12" y1="15" x2="7" y2="17" /></svg>
+        </button>
+        <a
+          :href="`/chat?taskId=${taskId}`"
+          target="_blank"
+          class="toolbar-btn"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          ><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg> AI
+        </a>
+        <a
+          href="/"
+          class="toolbar-btn"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          ><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg> 返回
+        </a>
+      </template>
+    </AppToolbar>
 
     <div class="layout">
       <div v-show="leftVisible" class="left-panel" :style="{ flex: leftFlex }">
@@ -860,6 +951,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 .viewer{display:flex;flex-direction:column;height:100vh}
 .header{display:flex;align-items:center;gap:6px;padding:6px 12px;border-bottom:1px solid var(--border);height:40px;flex-shrink:0;flex-wrap:wrap}
 .header .title{font-weight:500;font-size:var(--ui-font-size);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:100px}
+.project-badge{display:inline-flex;align-items:center;max-width:220px;padding:2px 10px;border-radius:var(--radius-md);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .header select,.toggle-btn{font-size:var(--ui-font-size);border-radius:var(--radius-sm)}
 .header select{padding:2px 5px;border:1px solid var(--border);background:var(--bg);color:var(--text);outline:none}
 .toggle-btn{background:none;border:1px solid var(--border);padding:3px 5px;cursor:pointer;color:var(--text-muted);display:inline-flex;align-items:center}

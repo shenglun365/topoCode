@@ -44,18 +44,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '知识库' },
   },
   {
-    path: '/user',
-    name: 'User',
-    component: () => import('@/pages/UserPage.vue'),
-    meta: { title: '用户中心' },
-  },
-  {
-    path: '/settings',
-    name: 'Settings',
-    component: () => import('@/pages/SettingsPage.vue'),
-    meta: { title: '设置' },
-  },
-  {
     path: '/login',
     name: 'Login',
     component: () => import('@/pages/LoginPage.vue'),

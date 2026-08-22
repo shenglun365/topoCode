@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuth } from './use-auth'
 
 const { t } = useI18n()
-const auth = useAuthStore()
+const auth = useAuth()
 const refreshing = ref(false)
 
 const filterType = ref<'all' | 'recharge' | 'consume'>('all')
@@ -227,32 +227,32 @@ onMounted(() => {
     class="not-logged-in"
   >
     <p>{{ t('auth.loginHint', '登录后可查看交易记录') }}</p>
-    <router-link
-      to="/login"
+    <a
+      href="/app/#/login"
       class="btn btn-primary btn-sm"
     >
       {{ t('auth.login', '登录') }}
-    </router-link>
+    </a>
   </div>
 </template>
 
 <style scoped>
 .order-tab {
-  max-width: 900px;
+  max-width: calc(900px * var(--ui-scale));
 }
 .section-title {
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-scale));
   font-weight: 600;
   color: var(--text-primary);
 }
 .filter-bar {
   display: flex;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale));
 }
 .filter-btn {
-  padding: 4px 12px;
-  font-size: 11px;
+  padding: 4px calc(12px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-secondary);
@@ -271,36 +271,36 @@ onMounted(() => {
 }
 .loading, .empty {
   text-align: center;
-  padding: 40px;
+  padding: calc(40px * var(--ui-scale));
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
 }
 .order-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
 }
 .order-table th {
   text-align: left;
-  padding: 8px 10px;
+  padding: 8px calc(10px * var(--ui-scale));
   font-weight: 500;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 .order-table td {
-  padding: 10px;
+  padding: calc(10px * var(--ui-scale));
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
 }
 .cell-date {
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--text-muted);
 }
 .cell-desc {
-  max-width: 240px;
+  max-width: calc(240px * var(--ui-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -310,7 +310,7 @@ onMounted(() => {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale));
   font-weight: 500;
 }
 .badge-green {
@@ -326,17 +326,17 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  margin-top: 16px;
+  margin-top: calc(16px * var(--ui-scale));
 }
 .page-btn {
-  min-width: 28px;
-  height: 28px;
+  min-width: calc(28px * var(--ui-scale));
+  height: calc(28px * var(--ui-scale));
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
   cursor: pointer;
 }
 .page-btn:disabled {
@@ -351,19 +351,19 @@ onMounted(() => {
 .page-ellipsis {
   padding: 0 4px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale));
 }
 .not-logged-in {
   text-align: center;
-  padding: 40px;
+  padding: calc(40px * var(--ui-scale));
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale));
 }
-.icon-refresh { width: 16px; height: 16px; }
+.icon-refresh { width: calc(16px * var(--ui-scale)); height: calc(16px * var(--ui-scale)); }
 .icon-refresh.spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

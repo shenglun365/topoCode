@@ -14,6 +14,8 @@
     "./composables/*": "./src/composables/*.ts",
     "./i18n/*": "./src/i18n/*.ts",
     "./components/*": "./src/components/*",
+    "./shell": "./src/shell/index.ts",
+    "./shell/*": "./src/shell/*",
     "./styles/variables.scss": "./src/styles/variables.scss",
     "./styles/global.scss": "./src/styles/global.scss",
     "./portal/*": "./src/portal/*"
@@ -28,6 +30,7 @@
     "highlight.js": "^11.11.1",
     "marked": "^18.0.7",
     "marked-highlight": "^2.2.4",
+    "qrcode": "^1.5.4",
     "vue": "3.5.13",
     "vue-i18n": "9.14.5"
   }

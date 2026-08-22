@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TopBar from './TopBar.vue'
 import ActivityBar from './ActivityBar.vue'
-import LeftPanel from './LeftPanel.vue'
 import RightPanel from './RightPanel.vue'
 import StatusBar from './StatusBar.vue'
 import OnboardingTour from '@/components/onboarding/OnboardingTour.vue'
-import { useNavigationStore } from '@/stores/navigation'
 import { useFuncGroupStore, type FuncGroupId } from '@/stores/funcGroup'
 import { useStatusStore } from '@/stores/status'
 import { controlDispatcher } from '@/services/control-dispatcher'
 import { usePanelStore } from '@/stores/panel'
+import { useProjectStore } from '@/stores/project'
 import { useI18n } from 'vue-i18n'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
 import { useConfirm } from '@/composables/useConfirm'
@@ -23,11 +22,59 @@ const { t } = useI18n()
 const { showId, componentId } = useComponentId('SH-001')
 const { confirmState, confirmResolve } = useConfirm()
 const route = useRoute()
-const navigation = useNavigationStore()
 const funcGroup = useFuncGroupStore()
 const statusStore = useStatusStore()
 const panelStore = usePanelStore()
+const projectStore = useProjectStore()
 const crashReportStore = useCrashReportStore()
+
+// P5: URL 为项目唯一事实源；回退最近项目（多页签各自 URL 驱动，互不影响）
+const LAST_PROJECT_KEY = 'topoone-last-project'
+const TITLE_PAGE_NAMES: Record<string, string> = {
+  '/home': '项目',
+  '/code': '代码解析',
+  '/analysis': '代码分析',
+  '/knowledge': '知识库',
+  '/coder': '编码工作台',
+}
+
+async function syncProjectFromRoute() {
+  const qProject = typeof route.query.project === 'string' ? route.query.project : ''
+  if (route.path === '/home') {
+    projectStore.deselectProject()
+    return
+  }
+  if (route.path !== '/code' && route.path !== '/analysis') return
+  const id = qProject || localStorage.getItem(LAST_PROJECT_KEY) || ''
+  if (!id) return
+  const group = route.path === '/analysis' ? 'analysis' : 'code'
+  if (funcGroup.context[group].projectId === id) return
+  await projectStore.selectProject(id)
+  try {
+    localStorage.setItem(LAST_PROJECT_KEY, id)
+  } catch {}
+}
+
+function updateTitle() {
+  const project = projectStore.selectedProject
+  const page = TITLE_PAGE_NAMES[route.path] || ''
+  const parts = ['TopoCode']
+  if (project?.name) parts.push(project.name)
+  if (page) parts.push(page)
+  document.title = parts.join(' · ')
+}
+
+watch(
+  () => [route.query.project, route.path] as const,
+  () => syncProjectFromRoute(),
+  { immediate: true },
+)
+
+watch(
+  () => [projectStore.selectedProject, route.path] as const,
+  () => updateTitle(),
+  { immediate: true },
+)
 
 // 路由 path 到功能组 ID 的映射
 const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
@@ -36,8 +83,6 @@ const routeToFuncGroupMap: { [key: string]: FuncGroupId } = {
     '/analysis': 'analysis',
     '/knowledge': 'knowledge',
     '/coder': 'coder',
-    '/user': 'home',
-    '/settings': 'home',
 }
 
 // 当前功能组
@@ -47,92 +92,40 @@ const currentFuncGroup = computed(() => {
 
 // 是否隐藏左右侧栏
 const hideShellPage = computed(() => route.meta.hideShell === true)
-const isSettingsPage = computed(() => route.path === '/home' || route.path === '/user' || route.path === '/settings')
-const hideLeftPanel = computed(() => hideShellPage.value || ['/home', '/code', '/user', '/settings'].includes(route.path))
+const isSettingsPage = computed(() => route.path === '/home')
 const isAuthPage = computed(() => hideShellPage.value)
 
-const showStartupDialog = ref(true)
-const startupPhase = ref<'loading' | 'success' | 'error'>('loading')
-const showErrorOverlay = ref(false)
-const startingSince = ref(0)
-
-function onBackendReady() {
-  if (statusStore.backend.status !== 'error') {
-    startupPhase.value = 'success'
-    showErrorOverlay.value = false
-    setTimeout(() => { showStartupDialog.value = false }, 1500)
-  }
-}
-
-function dismissStartup() {
-  showStartupDialog.value = false
-}
-
-function dismissError() {
-  showErrorOverlay.value = false
-}
-
-async function retryBackend() {
-  try {
-    await window.api!.backend.restart()
-  } catch (e: any) {
-    console.error('[AppShell] backend restart failed:', e)
-  }
-}
-
-// 初始化后端状态监听
+// 后端状态轮询：仅更新状态供状态栏展示。
+// 后台服务状态的弹窗提示机制已移除（后续由独立的服务状态监控页面统一设计）。
 onMounted(async () => {
-  try {
-    const st: any = await window.api!.backend.getStatus()
-      if (st) {
-        statusStore.setBackendStatus(st)
-        if (st.status === 'error') {
-          startupPhase.value = 'error'
-          showErrorOverlay.value = true
-          showStartupDialog.value = false
-        } else if (st.status === 'running') {
-          onBackendReady()
-        } else if (st.status === 'starting') {
-          startupPhase.value = 'loading'
-          showStartupDialog.value = true
-          startingSince.value = Date.now()
-        }
-      }
-        } catch (_) {}
+   try {
+     const st: any = await window.api!.backend.getStatus()
+     if (st) {
+       statusStore.setBackendStatus(st)
+     }
+   } catch (_) {}
 
-  // 初始化崩溃报告存储
-  crashReportStore.init()
+   // 初始化崩溃报告存储
+   crashReportStore.init()
 
-  // 订阅后端推送事件
-  try {
-    useAnalysisStore().subscribeToEvents()
-  } catch (_) {}
+   // 订阅后端推送事件
+   try {
+     useAnalysisStore().subscribeToEvents()
+   } catch (_) {}
 
-  // 每 3 秒轮询本地 PythonBridge 状态（控制层，不经过 ZMQ，避免挂死）
-  controlDispatcher.register('backend-status', {
-    interval: 3000,
-    fetcher: () => window.api!.backend.getStatus(),
-    onData: (st: any) => {
-      if (st) {
-        const wasRunning = statusStore.backend.status === 'running'
-        statusStore.setBackendStatus(st, true)
-        if (st.status === 'error') {
-          startupPhase.value = 'error'
-          showErrorOverlay.value = true
-          showStartupDialog.value = false
-        } else if (st.status === 'running') {
-          if (!wasRunning && showStartupDialog.value) onBackendReady()
-        } else if (st.status === 'starting') {
-          if (!startingSince.value) startingSince.value = Date.now()
-          startupPhase.value = 'loading'
-        }
-      }
-    },
-    onError: () => {},
-  })
+   // 每 3 秒轮询本地 PythonBridge 状态（控制层，不经过 ZMQ，避免挂死）
+   controlDispatcher.register('backend-status', {
+     interval: 3000,
+     fetcher: () => window.api!.backend.getStatus(),
+     onData: (st: any) => {
+       if (st) {
+         statusStore.setBackendStatus(st, true)
+       }
+     },
+     onError: () => {},
+   })
 })
 
-const startingElapsed = computed(() => startingSince.value ? Date.now() - startingSince.value : 0)
 
 // 同步路由切换和功能组切换
 watch(
@@ -158,82 +151,6 @@ onUnmounted(() => {
       class="cmp-id"
     >{{ componentId }}</span>
 
-    <!-- 后端启动弹窗 -->
-    <div
-      v-if="showStartupDialog"
-      class="backend-startup-overlay"
-    >
-      <div
-        class="backend-startup-modal"
-        :class="'phase-' + startupPhase"
-      >
-        <template v-if="startupPhase === 'loading'">
-          <div class="startup-spinner" />
-          <p class="startup-title">
-            {{ t('shell.backend.starting') }}
-          </p>
-        </template>
-        <template v-else-if="startupPhase === 'success'">
-          <div class="startup-icon success">
-            ✓
-          </div>
-          <p class="startup-title">
-            {{ t('shell.backend.started') }}
-          </p>
-          <button
-            class="startup-btn"
-            @click="dismissStartup"
-          >
-            {{ t('common.close') }}
-          </button>
-        </template>
-      </div>
-    </div>
-
-    <!-- 后端异常 DOM 弹窗覆盖 -->
-    <div
-      v-if="showErrorOverlay"
-      class="backend-error-overlay"
-    >
-      <div class="backend-error-modal">
-        <div class="backend-error-icon">
-          ⚠
-        </div>
-        <h2 class="backend-error-title">
-          {{ t('shell.backend.error') }}
-        </h2>
-        <div class="backend-error-body">
-          <p class="backend-error-desc">
-            {{ t('shell.backend.errorDesc') }}
-          </p>
-          <p
-            v-if="statusStore.backend.error"
-            class="backend-error-detail"
-          >
-            {{ statusStore.backend.error }}
-          </p>
-          <p class="backend-error-hint">
-            {{ t('shell.backend.possibleCauses') }}
-            <br>{{ t('shell.backend.retryHint') }}
-          </p>
-        </div>
-        <div class="backend-error-actions">
-          <button
-            class="backend-error-btn primary"
-            @click="retryBackend"
-          >
-            {{ t('shell.backend.retry') }}
-          </button>
-          <button
-            class="backend-error-btn"
-            @click="dismissError"
-          >
-            {{ t('shell.backend.dismiss') }}
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- 顶部菜单栏 -->
     <TopBar v-show="!panelStore.isFullscreen && !isAuthPage" />
 
@@ -241,9 +158,6 @@ onUnmounted(() => {
     <div class="app-row2">
       <!-- 活动栏 -->
       <ActivityBar v-show="!panelStore.isFullscreen && !isAuthPage" />
-
-      <!-- 左侧面板 -->
-      <LeftPanel v-show="!hideLeftPanel && !panelStore.isFullscreen" />
 
       <!-- 主内容区 -->
       <main
@@ -383,161 +297,7 @@ onUnmounted(() => {
   position: relative;
 }
 
-/* ---- 后端启动弹窗 ---- */
-.backend-startup-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-}
-.backend-startup-modal {
-  max-width: 360px;
-  width: 90vw;
-  padding: 2rem;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-.backend-startup-modal.phase-success {
-  border-color: var(--success);
-}
-.startup-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-.startup-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.25rem;
-  font-weight: 700;
-}
-.startup-icon.success {
-  background: var(--success);
-  color: #fff;
-}
-.startup-title {
-  font-size: 0.9rem;
-  color: var(--text-primary);
-  margin: 0;
-}
-.startup-btn {
-  padding: 0.4rem 1.25rem;
-  font-size: 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.startup-btn:hover {
-  border-color: var(--accent);
-}
-
-/* ---- 后端异常弹窗 ---- */
-.backend-error-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-}
-.backend-error-modal {
-  max-width: 460px;
-  width: 90vw;
-  padding: 2rem;
-  background: var(--bg-primary);
-  border: 1px solid #e81123;
-  border-radius: 0.75rem;
-  box-shadow: 0 0 60px rgba(232, 17, 35, 0.25);
-  text-align: center;
-}
-.backend-error-icon {
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
-}
-.backend-error-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #e81123;
-  margin: 0 0 1rem;
-}
-.backend-error-body {
-  text-align: left;
-  margin-bottom: 1.5rem;
-}
-.backend-error-desc {
-  font-size: 0.85rem;
-  color: var(--text-primary);
-  margin: 0 0 0.75rem;
-}
-.backend-error-detail {
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  color: #e81123;
-  background: rgba(232, 17, 35, 0.08);
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.375rem;
-  margin: 0 0 0.5rem;
-  word-break: break-all;
-}
-.backend-error-hint {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin: 0;
-  line-height: 1.6;
-}
-.backend-error-actions {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: center;
-}
-.backend-error-btn {
-  padding: 0.45rem 1.25rem;
-  font-size: 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.backend-error-btn:hover {
-  border-color: var(--accent);
-}
-.backend-error-btn.primary {
-  background: #e81123;
-  color: #fff;
-  border-color: #e81123;
-}
-.backend-error-btn.primary:hover {
-  background: #c50f1f;
-}
-
+/* ---- 全局确认弹窗 ---- */
 .confirm-overlay {
   position: fixed;
   inset: 0;

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuth } from './use-auth'
 
 const { t } = useI18n()
-const auth = useAuthStore()
+const auth = useAuth()
 const refreshing = ref(false)
 
 function fmtBalance(n: number): string {
@@ -106,32 +106,32 @@ onMounted(async () => {
     class="not-logged-in"
   >
     <p>{{ t('auth.loginHint', '登录后可查看账户信息') }}</p>
-    <router-link
-      to="/login"
+    <a
+      href="/app/#/login"
       class="btn btn-primary btn-sm"
     >
       {{ t('auth.login', '登录') }}
-    </router-link>
+    </a>
   </div>
 </template>
 
 <style scoped>
 .account-tab {
-  max-width: 600px;
+  max-width: calc(600px * var(--ui-scale));
 }
 .section-title {
-  font-size: 15px;
+  font-size: calc(15px * var(--ui-scale));
   font-weight: 600;
   color: var(--text-primary);
 }
 .cards {
   display: flex;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: calc(16px * var(--ui-scale));
+  margin-bottom: calc(24px * var(--ui-scale));
 }
 .account-card {
   flex: 1;
-  padding: 20px;
+  padding: calc(20px * var(--ui-scale));
   border-radius: 8px;
   border: 1px solid var(--border);
   display: flex;
@@ -147,21 +147,21 @@ onMounted(async () => {
   border-color: #6b21a8;
 }
 .card-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: rgba(255,255,255,0.7);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 .card-value {
-  font-size: 24px;
+  font-size: calc(24px * var(--ui-scale));
   font-weight: 700;
   color: #fff;
 }
 .card-btn {
   align-self: flex-start;
   margin-top: 4px;
-  padding: 4px 14px;
-  font-size: 11px;
+  padding: 4px calc(14px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
   border: 1px solid rgba(255,255,255,0.3);
   border-radius: 4px;
   background: rgba(255,255,255,0.12);
@@ -174,11 +174,11 @@ onMounted(async () => {
 }
 .summary {
   display: flex;
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale));
 }
 .summary-item {
   flex: 1;
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale));
   background: var(--bg-secondary);
   border-radius: 6px;
   display: flex;
@@ -186,25 +186,25 @@ onMounted(async () => {
   gap: 4px;
 }
 .summary-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale));
   color: var(--text-muted);
 }
 .summary-value {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   font-weight: 600;
   color: var(--text-primary);
 }
 .not-logged-in {
   text-align: center;
-  padding: 40px;
+  padding: calc(40px * var(--ui-scale));
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale));
 }
-.icon-refresh { width: 16px; height: 16px; }
+.icon-refresh { width: calc(16px * var(--ui-scale)); height: calc(16px * var(--ui-scale)); }
 .icon-refresh.spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

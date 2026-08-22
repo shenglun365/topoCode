@@ -1421,6 +1421,9 @@ class MultiDBManager:
                 ("pattern_type", "TEXT"),
                 ("pattern", "TEXT"),
             ],
+            "agent_configs": [
+                ("scenario", "TEXT DEFAULT ''"),
+            ],
             "analysis_reports": [
                 ("logs", "TEXT"),
                 ("run_id", "TEXT"),

@@ -199,7 +199,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
         return rows
 
     @server.register("settings.addAgent")
-    def add_agent(name: str, path: str, args: str = "", type: str = "custom"):
+    def add_agent(name: str, path: str, args: str = "", type: str = "custom", scenario: str = ""):
         agent_id = f"agent-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
 
@@ -209,6 +209,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
             "type": type,
             "path": path,
             "args": args,
+            "scenario": scenario or "",
             "status": "configured",
             "created_at": now,
             "updated_at": now,
@@ -218,7 +219,7 @@ def register_settings_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("settings.updateAgent")
     def update_agent(id: str, **kwargs):
-        allowed = {"path", "args", "name", "type"}
+        allowed = {"path", "args", "name", "type", "scenario"}
         data = {k: v for k, v in kwargs.items() if k in allowed}
         data["updated_at"] = datetime.now().isoformat()
 

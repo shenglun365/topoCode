@@ -5,6 +5,7 @@ import type { ImportConfig } from '@topo/web-core/types/ipc'
 import { ipc } from '@topo/web-core/services/ipc'
 import { useStatusStore } from '@/stores/status'
 import { useAnalysisStore } from '@/stores/analysis'
+import { readLocale, writeLocale, readFontSize, setFontSize as applyFontSize } from '@topo/web-core/shell'
 import i18n from '@/i18n'
 
 const DEFAULT_RESOURCE_DIR = ''
@@ -12,8 +13,8 @@ const DEFAULT_RESOURCE_DIR = ''
 export const useSettingsStore = defineStore('settings', () => {
   const activeTab = ref<'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent'>('ai')
   const loading = ref(false)
-  const locale = ref<SupportedLocale>('zh-CN')
-  const fontSize = ref(14)
+  const locale = ref<SupportedLocale>(readLocale())
+  const fontSize = ref<number>(readFontSize())
   const autoSaveInterval = ref(60)
   const projectPageSize = ref(50)
 
@@ -67,13 +68,21 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function initLocale() {
     try {
-      const saved = localStorage.getItem('locale') as SupportedLocale
-      if (saved && (saved === 'zh-CN' || saved === 'en-US')) { locale.value = saved; i18n.global.locale.value = saved }
+      const saved = readLocale()
+      locale.value = saved
+      i18n.global.locale.value = saved
     } catch (e) { console.warn('Failed to load locale', e) }
   }
 
   function setLocale(newLocale: SupportedLocale) {
-    locale.value = newLocale; i18n.global.locale.value = newLocale; localStorage.setItem('locale', newLocale)
+    locale.value = newLocale
+    i18n.global.locale.value = newLocale
+    writeLocale(newLocale)
+  }
+
+  function setFontSize(px: number) {
+    fontSize.value = px
+    applyFontSize(px, ['root'])
   }
 
   function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent') {
@@ -179,7 +188,7 @@ export const useSettingsStore = defineStore('settings', () => {
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
     importConfig, importConfigLoading,
     resourceProjectsDir, resourceDirHistory,
-    setProjectPageSize, initLocale, setLocale, setActiveTab,
+    setProjectPageSize, initLocale, setLocale, setActiveTab, setFontSize,
     restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,
     loadImportConfig, saveImportConfig,

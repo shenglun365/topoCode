@@ -54,7 +54,10 @@
   --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.3);
   --radius-full:   9999px;
   --transition:    0.2s ease;
-  --content-font-size: 18px;
+  /* 内容字号基线：FontSizeSelect 写入 <html>；--ui-scale 为相对 16px 基线的比例，
+     供门户/共享控件按字号等比缩放宽高（字号档位 13~48px） */
+  --content-font-size: 16px;
+  --ui-scale: calc(var(--content-font-size) / 16px);
   --ui-font-size:  14px;
 }
 
@@ -92,4 +95,11 @@
   --accent-light:  rgba(30, 102, 245, 0.08);
   --shadow-sm:     0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md:     0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* 基础重置：消除浏览器默认 body 边距 + 白底（门户等未引入 global.scss 的入口） */
+html,
+body {
+  margin: 0;
+  background: var(--bg-primary);
 }

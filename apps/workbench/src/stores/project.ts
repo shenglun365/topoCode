@@ -275,23 +275,6 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  async function getFileTree(id: string, fromPath: string | null = null) {
-    console.log('[ProjectStore] getFileTree id:', id, 'fromPath:', fromPath)
-    const result = await ipc.project.getFileTree(id, fromPath)
-    console.log('[ProjectStore] getFileTree result:', JSON.stringify(result).substring(0, 200))
-    // 记录到 debug store
-    try {
-      const debugStore = useDebugStore()
-      debugStore.log('projectStore', `[getFileTree] id=${id} fromPath="${fromPath}" → ${result.length} nodes`)
-      if (result.length > 0) {
-        debugStore.log('projectStore', `  → nodes: ${result.map((n: any) => `${n.type}:${n.name}`).join(', ')}`)
-      }
-    } catch (e) {
-      // ignore
-    }
-    return result
-  }
-
   async function updatePath(id: string, newRootPath: string) {
     const result = await ipc.project.updatePath(id, newRootPath)
     if (!result?.project) return result
@@ -337,26 +320,6 @@ export const useProjectStore = defineStore('project', () => {
     if (idx >= 0) {
       projects.value.splice(idx, 1)
     }
-  }
-
-  function openFileTab(node: FileTreeNode) {
-    const pid = funcGroup.currentProjectId;
-    // 按 filePath 去重，已打开则切换焦点
-    const existing = funcGroup.currentTabs.find(t => t.filePath === node.path)
-    if (existing) {
-      funcGroup.setActiveTab('home', existing.id)
-      return
-    }
-    // 新开 tab
-    const tab: HomeTab = {
-      id: `tab-file-${node.path || node.name}`,
-      kind: 'file',
-      title: node.name,
-      projectId: pid,
-      filePath: node.path || node.name,
-      node,
-    }
-    funcGroup.openTab('home', tab)
   }
 
   async function closeTab(tabId: string): Promise<boolean> {
@@ -544,17 +507,14 @@ export const useProjectStore = defineStore('project', () => {
     removeProject,
     clearProjectCache,
     syncProject,
-    getFileTree,
     updatePath,
     checkFileChanges,
     updateProjectMeta,
     initSampleData,
     clearSampleData,
-    openFileTab,
     closeTab,
     closeAllTabs,
     setActiveTab,
-    setSelectedFile,
     openTaskListTab,
     openTaskCreateForm,
     openGroupManagerTab,

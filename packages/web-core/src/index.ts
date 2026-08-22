@@ -29,6 +29,9 @@ export {
   createAppI18n,
   detectLocale,
   localeNames,
+  saveLocale,
+  LOCALE_KEY,
+  LEGACY_LOCALE_KEY,
 } from './i18n/setup'
 export type { SupportedLocale } from './i18n/setup'
 

@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth-store'
-import { authService } from '@/services/auth-service'
+import { useAuth } from './use-auth'
+import { authService } from './auth-service'
 import QRCode from 'qrcode'
 
 const { t } = useI18n()
-const router = useRouter()
-const auth = useAuthStore()
+const auth = useAuth()
 
 const qrDataUrl = ref('')
 const showQr = ref(false)
@@ -255,7 +253,6 @@ function avatarInitials(name: string): string {
 
 function handleLogout() {
   auth.logout()
-  router.push('/')
 }
 
 function formatDate(dateStr: string): string {
@@ -628,20 +625,20 @@ function formatDate(dateStr: string): string {
           class="info-value"
         >
           ********
-          <router-link
-            to="/reset-password"
+          <a
+            href="/app/#/reset-password"
             class="btn-link"
-          >{{ t('auth.resetPassword') }}</router-link>
+          >{{ t('auth.resetPassword') }}</a>
         </span>
         <span
           v-else
           class="info-value"
         >
           <span class="text-unbound">{{ t('auth.passwordNotSet') }}</span>
-          <router-link
-            to="/reset-password?set=1"
+          <a
+            href="/app/#/reset-password?set=1"
             class="btn-link"
-          >{{ t('auth.setPassword') }}</router-link>
+          >{{ t('auth.setPassword') }}</a>
         </span>
       </div>
       <div class="info-row">
@@ -776,60 +773,60 @@ function formatDate(dateStr: string): string {
       {{ t('auth.loginHint', '登录后可查看个人资料和下载资源') }}
     </p>
     <div class="actions">
-      <router-link
-        to="/login"
+      <a
+        href="/app/#/login"
         class="btn btn-primary btn-sm"
       >
         {{ t('auth.login', '登录') }}
-      </router-link>
-      <router-link
-        to="/register"
+      </a>
+      <a
+        href="/app/#/register"
         class="btn btn-ghost btn-sm"
       >
         {{ t('auth.register', '注册') }}
-      </router-link>
+      </a>
     </div>
   </div>
 </template>
 
 <style scoped>
 .profile-tab {
-  max-width: 480px;
+  max-width: calc(480px * var(--ui-scale));
 }
 .avatar-section {
   display: flex;
   justify-content: center;
-  margin-bottom: 24px;
+  margin-bottom: calc(24px * var(--ui-scale));
 }
 .avatar-placeholder {
-  width: 72px; height: 72px; border-radius: 50%;
+  width: calc(72px * var(--ui-scale));
   background: var(--accent); color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 28px; font-weight: 600;
+  font-size: calc(28px * var(--ui-scale));
 }
 .info-list {
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: calc(12px * var(--ui-scale));
 }
 .info-row {
   display: flex; justify-content: space-between;
   padding: 8px 0; border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
-.info-label { font-size: 12px; color: var(--text-muted); }
+.info-label { font-size: calc(12px * var(--ui-scale)); color: var(--text-muted); }
 .info-value {
-  font-size: 13px; color: var(--text-primary); font-weight: 500;
+  font-size: calc(13px * var(--ui-scale));
   display: flex; align-items: center; gap: 6px;
 }
 .info-value.points { color: var(--accent); font-weight: 700; }
-.text-unbound { color: var(--text-muted); font-size: 12px; }
+.text-unbound { color: var(--text-muted); font-size: calc(12px * var(--ui-scale)); }
 .btn-link {
-  font-size: 11px; color: var(--accent); text-decoration: none;
+  font-size: calc(11px * var(--ui-scale));
   background: none; border: none; cursor: pointer; padding: 0;
   white-space: nowrap;
 }
 .btn-link:hover { text-decoration: underline; }
 .badge-bound {
-  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  font-size: calc(10px * var(--ui-scale));
   background: rgba(34,197,94,0.12); color: #22c55e; font-weight: 500;
 }
 .username-edit {
@@ -848,14 +845,14 @@ function formatDate(dateStr: string): string {
   flex: 1; min-width: 0;
 }
 .verify-hint {
-  font-size: 11px; color: var(--text-muted); margin: 6px 0 4px;
+  font-size: calc(11px * var(--ui-scale));
 }
 .verify-options {
   display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;
 }
 .verify-option {
   display: flex; align-items: center; gap: 4px;
-  font-size: 12px; padding: 4px 8px; border: 1px solid var(--border);
+  font-size: calc(12px * var(--ui-scale));
   border-radius: 4px; cursor: pointer; color: var(--text-primary);
 }
 .verify-option.active {
@@ -863,18 +860,18 @@ function formatDate(dateStr: string): string {
 }
 .verify-option input { display: none; }
 .code-btn {
-  white-space: nowrap; flex-shrink: 0; font-size: 11px;
+  white-space: nowrap; flex-shrink: 0; font-size: calc(11px * var(--ui-scale));
 }
 .code-row {
   display: flex; gap: 6px; align-items: center;
 }
 .input {
-  padding: 10px 12px;
+  padding: calc(10px * var(--ui-scale)) calc(12px * var(--ui-scale));
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale));
   outline: none;
   box-sizing: border-box;
 }
@@ -883,45 +880,45 @@ function formatDate(dateStr: string): string {
 }
 
 .referral-section {
-  margin-top: 24px;
-  padding: 16px;
+  margin-top: calc(24px * var(--ui-scale));
+  padding: calc(16px * var(--ui-scale));
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-secondary);
 }
 .section-title {
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 12px;
+  font-size: calc(14px * var(--ui-scale));
+  margin-bottom: calc(12px * var(--ui-scale));
 }
 .referral-code {
   display: flex; align-items: center; gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale));
 }
-.code-label { font-size: 12px; color: var(--text-muted); }
+.code-label { font-size: calc(12px * var(--ui-scale)); color: var(--text-muted); }
 .code-value {
-  font-size: 18px; font-weight: 700; color: var(--accent);
+  font-size: calc(18px * var(--ui-scale));
   letter-spacing: 2px; font-family: monospace;
 }
 .qr-area {
   display: flex; flex-direction: column; align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale));
 }
-.qr-img { width: 80px; height: 80px; cursor: pointer; border-radius: 4px; }
-.qr-hint { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+.qr-img { width: calc(80px * var(--ui-scale)); height: calc(80px * var(--ui-scale)); cursor: pointer; border-radius: 4px; }
+.qr-hint { font-size: calc(10px * var(--ui-scale)); color: var(--text-muted); margin-top: 4px; }
 .share-buttons {
-  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: calc(12px * var(--ui-scale));
 }
 .share-btn {
   display: flex; align-items: center; gap: 4px;
-  padding: 5px 10px; border: 1px solid var(--border);
+  padding: 5px calc(10px * var(--ui-scale));
   border-radius: 4px; background: var(--bg-primary);
-  color: var(--text-primary); font-size: 11px; cursor: pointer;
+  color: var(--text-primary); font-size: calc(11px * var(--ui-scale)); cursor: pointer;
   transition: all .15s;
 }
 .share-btn:hover { border-color: var(--accent); color: var(--accent); }
-.share-icon { width: 16px; height: 16px; display: block; }
-.actions { margin-top: 24px; display: flex; gap: 8px; }
-.login-hint { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.share-icon { width: calc(16px * var(--ui-scale)); height: calc(16px * var(--ui-scale)); display: block; }
+.actions { margin-top: calc(24px * var(--ui-scale)); display: flex; gap: 8px; }
+.login-hint { font-size: calc(13px * var(--ui-scale)); color: var(--text-muted); margin-bottom: calc(16px * var(--ui-scale)); }
 .unauthenticated .actions { justify-content: center; }
 
 .qr-overlay {
@@ -929,19 +926,19 @@ function formatDate(dateStr: string): string {
   display: flex; align-items: center; justify-content: center; z-index: 10000;
 }
 .qr-modal {
-  text-align: center; background: #fff; padding: 24px;
+  text-align: center; background: #fff; padding: calc(24px * var(--ui-scale));
   border-radius: 12px;
 }
-.qr-big { width: 200px; height: 200px; margin-bottom: 12px; }
-.qr-modal p { font-size: 13px; color: #333; margin-bottom: 12px; }
+.qr-big { width: calc(200px * var(--ui-scale)); height: calc(200px * var(--ui-scale)); margin-bottom: calc(12px * var(--ui-scale)); }
+.qr-modal p { font-size: calc(13px * var(--ui-scale)); color: #333; margin-bottom: calc(12px * var(--ui-scale)); }
 
 .toast {
   position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-  padding: 8px 20px; background: var(--accent); color: #fff;
-  border-radius: 6px; font-size: 12px; z-index: 99999;
+  padding: 8px calc(20px * var(--ui-scale));
+  border-radius: 6px; font-size: calc(12px * var(--ui-scale)); z-index: 99999;
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
-.icon-refresh { width: 16px; height: 16px; }
+.icon-refresh { width: calc(16px * var(--ui-scale)); height: calc(16px * var(--ui-scale)); }
 .icon-refresh.spinning { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

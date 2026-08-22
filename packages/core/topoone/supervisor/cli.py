@@ -400,6 +400,8 @@ def _cmd_serve(args):
     os.makedirs(data_dir, exist_ok=True)
     pidfile = _write_pidfile(data_dir)
     token = _ensure_token(data_dir)
+    # P1: supervisor localhost 管理端点（仅绑定 127.0.0.1，鉴权复用主 token）
+    admin_port = int(os.environ.get("SUPERVISOR_ADMIN_PORT", "3450"))
 
     from topoone.supervisor.supervisor import Supervisor
     sv = Supervisor()
@@ -425,7 +427,8 @@ def _cmd_serve(args):
                 env = {"AGENT_SERVICE_PORT": str(_service_port("agent")),
                        "AGENT_PUB_PORT": str(int(os.environ.get("AGENT_PUB_PORT", "5684")))}
             elif name == "gateway":
-                env = {"TOPOCODE_DB_DIR": data_dir}
+                env = {"TOPOCODE_DB_DIR": data_dir,
+                       "SUPERVISOR_ADMIN_URL": f"http://127.0.0.1:{admin_port}"}
             else:
                 env = None
             cmd = _make_cmd(name, data_dir, args.http_port, args.http_host)
@@ -439,6 +442,7 @@ def _cmd_serve(args):
 
     async def _run():
         await sv.start_all()
+        await sv.start_admin_server(port=admin_port, token=token)
         print(f"[serve] started: {', '.join(_all_service_names())} (data_dir={data_dir}, http={args.http_host}:{args.http_port})", flush=True)
         host_hint = "0.0.0.0" if args.http_host in ("0.0.0.0", "") else args.http_host
         print(f"[serve] token: {token}", flush=True)

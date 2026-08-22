@@ -660,7 +660,13 @@ async def send_chat_message(session_id: str, request: Request):
         if has_tools:
             tool_descriptions = registry.collect_tool_descriptions(active_skills)
             if tool_descriptions:
-                context_messages.append({"role": "system", "content": "可用工具列表：\n" + tool_descriptions})
+                # 严格 chat template（Qwen3 系）只允许头部唯一一条 system 消息，
+                # 工具列表必须并入该条（build() 已合并头部 system 块）
+                tool_text = "可用工具列表：\n" + tool_descriptions
+                if context_messages and context_messages[0]["role"] == "system":
+                    context_messages[0]["content"] += "\n\n" + tool_text
+                else:
+                    context_messages.insert(0, {"role": "system", "content": tool_text})
 
         # ── Multi-round tool calling ──
         from topoone_app_chat.web_tools import get_web_tool_definitions
@@ -1642,10 +1648,21 @@ class ContextAssembler:
 
     def _merge(self, db_msgs: list[dict], l1_msgs: list[dict]) -> list[dict]:
         if not l1_msgs:
-            return db_msgs
-        system_msgs = [m for m in db_msgs if m["role"] == "system"]
-        dialog_msgs = [m for m in db_msgs if m["role"] != "system"]
-        return system_msgs + l1_msgs + dialog_msgs
+            merged = list(db_msgs)
+        else:
+            system_msgs = [m for m in db_msgs if m["role"] == "system"]
+            dialog_msgs = [m for m in db_msgs if m["role"] != "system"]
+            merged = system_msgs + l1_msgs + dialog_msgs
+        # 严格 chat template（Qwen3 系）要求 system 消息为头部唯一一条，多条即报错
+        # "System message must be at the beginning" —— 合并头部连续 system 为一条
+        lead = []
+        i = 0
+        while i < len(merged) and merged[i]["role"] == "system":
+            lead.append(merged[i].get("content", ""))
+            i += 1
+        if lead:
+            merged = [{"role": "system", "content": "\n\n".join(lead)}] + merged[i:]
+        return merged
 
 
 class SessionCompressor:

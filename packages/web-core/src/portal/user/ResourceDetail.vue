@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { Resource, ResourceListMeta } from '@/types'
+import type { Resource, ResourceListMeta } from './types'
 import { XMarkIcon, HandThumbUpIcon, HandThumbDownIcon } from '@heroicons/vue/24/outline'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuth } from './use-auth'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { resourceService } from '@/services/resource-service'
+import { resourceService } from './resource-service'
 
 const props = defineProps<{ resource: Resource | null; show: boolean; meta: ResourceListMeta | null }>()
 const emit = defineEmits<{ close: []; download: [id: number] }>()
 const { t } = useI18n()
-const auth = useAuthStore()
+const auth = useAuth()
 
 const labels = computed(() => props.meta?.labels || {})
 const commentText = ref('')
@@ -107,7 +107,7 @@ const dislikeActive = computed(() => props.resource?.my_vote === -1)
             class="btn btn-ghost btn-xs"
             @click="$emit('close')"
           >
-            <XMarkIcon class="w-4 h-4" />
+            <XMarkIcon class="close-icon" />
           </button>
         </div>
         <div class="modal-body">
@@ -216,43 +216,44 @@ const dislikeActive = computed(() => props.resource?.my_vote === -1)
 
 <style scoped>
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 10000; }
-.modal { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--rc-detail-radius, 10px); max-width: var(--rc-detail-max-w, 500px); width: 90vw; overflow: hidden; }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.modal-body { padding: 18px; }
-.modal-footer { display: flex; gap: 6px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--border); }
-.detail-category { display: inline-block; font-size: 10px; padding: 2px 10px; border-radius: 10px; }
-.detail-price { display: inline-block; font-size: 10px; padding: 2px 10px; border-radius: 10px; background: var(--bg-tertiary); color: #ffd700; font-weight: 600; }
+.modal { background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--rc-detail-radius, 10px); max-width: var(--rc-detail-max-w, calc(500px * var(--ui-scale))); width: 90vw; overflow: hidden; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: calc(14px * var(--ui-scale)) calc(18px * var(--ui-scale)); border-bottom: 1px solid var(--border); }
+.modal-title { font-size: calc(14px * var(--ui-scale)); font-weight: 600; color: var(--text-primary); }
+.modal-body { padding: calc(18px * var(--ui-scale)); }
+.modal-footer { display: flex; gap: 6px; justify-content: flex-end; padding: calc(12px * var(--ui-scale)) calc(18px * var(--ui-scale)); border-top: 1px solid var(--border); }
+.detail-category { display: inline-block; font-size: calc(10px * var(--ui-scale)); padding: 2px calc(10px * var(--ui-scale)); border-radius: 10px; }
+.detail-price { display: inline-block; font-size: calc(10px * var(--ui-scale)); padding: 2px calc(10px * var(--ui-scale)); border-radius: 10px; background: var(--bg-tertiary); color: #ffd700; font-weight: 600; }
 .detail-price-free { color: #22c55e; }
-.detail-desc { font-size: 13px; color: var(--text-primary); line-height: 1.6; margin-bottom: 16px; }
-.detail-meta { display: flex; gap: 16px; font-size: 11px; color: var(--text-muted); }
+.detail-desc { font-size: calc(13px * var(--ui-scale)); color: var(--text-primary); line-height: 1.6; margin-bottom: calc(16px * var(--ui-scale)); }
+.detail-meta { display: flex; gap: calc(16px * var(--ui-scale)); font-size: calc(11px * var(--ui-scale)); color: var(--text-muted); }
 .prerelease-banner {
-  background: #f59e0b; color: #fff; font-size: 12px; font-weight: 600;
-  padding: 6px 12px; border-radius: 6px; margin-bottom: 12px; text-align: center;
+  background: #f59e0b; color: #fff; font-size: calc(12px * var(--ui-scale)); font-weight: 600;
+  padding: 6px calc(12px * var(--ui-scale));
 }
 .vote-section {
-  display: flex; gap: 12px; margin-bottom: 16px; padding-top: 12px;
+  display: flex; gap: calc(12px * var(--ui-scale)); margin-bottom: calc(16px * var(--ui-scale)); padding-top: calc(12px * var(--ui-scale));
   border-top: 1px solid var(--border);
 }
 .vote-btn {
   display: flex; align-items: center; gap: 4px;
-  padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-secondary); color: var(--text-muted); font-size: 12px;
+  padding: 4px calc(12px * var(--ui-scale));
+  background: var(--bg-secondary); color: var(--text-muted); font-size: calc(12px * var(--ui-scale));
   cursor: pointer; transition: all 0.15s;
 }
 .vote-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .vote-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .vote-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.vote-icon { width: 16px; height: 16px; }
+.vote-icon { width: calc(16px * var(--ui-scale)); height: calc(16px * var(--ui-scale)); }
+.close-icon { width: calc(16px * var(--ui-scale)); height: calc(16px * var(--ui-scale)); }
 .comment-section { margin-bottom: 8px; }
-.comment-title { font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
-.comment-hint { font-size: 11px; color: var(--success); margin-bottom: 8px; }
+.comment-title { font-size: calc(12px * var(--ui-scale)); font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.comment-hint { font-size: calc(11px * var(--ui-scale)); color: var(--success); margin-bottom: 8px; }
 .comment-input {
   width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg-primary); color: var(--text-primary); font-size: 12px;
+  background: var(--bg-primary); color: var(--text-primary); font-size: calc(12px * var(--ui-scale));
   resize: vertical; outline: none; box-sizing: border-box;
 }
 .comment-input:focus { border-color: var(--accent); }
 .comment-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
-.comment-counter { font-size: 11px; color: var(--text-muted); }
+.comment-counter { font-size: calc(11px * var(--ui-scale)); color: var(--text-muted); }
 </style>

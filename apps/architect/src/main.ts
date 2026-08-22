@@ -18,6 +18,6 @@ app.use(i18n)
 
 const settings = useArchSettingsStore()
 settings.initLocale()
-settings.initFontScale()
+settings.initFontSize()
 
 app.mount('#app')

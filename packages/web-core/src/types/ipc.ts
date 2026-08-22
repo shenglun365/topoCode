@@ -381,6 +381,7 @@ export interface AgentConfigItem {
   path: string
   type: string
   args: string
+  scenario?: string
   status: 'online' | 'offline' | 'not-detected' | 'not-configured' | 'configured' | 'error'
   version?: string
   isDefault: boolean
@@ -662,8 +663,8 @@ export interface IPCAPI {
     removeModel: (id: string) => Promise<void>
     testModel: (id: string) => Promise<{ status: string; latency: number; model: string }>
     getAgents: () => Promise<AgentConfigItem[]>
-    addAgent: (params: { name: string; path: string; args: string; type?: string }) => Promise<AgentConfigItem>
-    updateAgent: (params: { id: string; path?: string; args?: string; name?: string; type?: string }) => Promise<AgentConfigItem>
+    addAgent: (params: { name: string; path: string; args: string; type?: string; scenario?: string }) => Promise<AgentConfigItem>
+    updateAgent: (params: { id: string; path?: string; args?: string; name?: string; type?: string; scenario?: string }) => Promise<AgentConfigItem>
     removeAgent: (id: string) => Promise<void>
     detectAgent: (id: string) => Promise<{ status: string; version?: string }>
     executeAgent: (params: { id: string; task: string; args?: string; taskId?: string; env?: Record<string, string> }) => Promise<{ id: string; agentId: string; command: string; status: string }>
@@ -737,6 +738,7 @@ export interface IPCAPI {
       messages?: Array<{ role: string; content: string }>; templateId?: string
       variables?: Record<string, any>; tools?: string[]; outputSchema?: Record<string, any>
       locale?: string
+      contextBudget?: number
     }) => Promise<{ requestId: string; status: string }>
     abortChat: (params: { requestId: string }) => Promise<{ success: boolean }>
     subscribe: (requestId: string, callbacks: {

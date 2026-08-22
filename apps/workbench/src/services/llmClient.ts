@@ -1,8 +1,14 @@
 import { useModelConfigStore } from '@/stores/model-config-store'
+import { readModelPref, readContextPref } from '@topo/web-core/shell'
 
 function getDefaultModelId(): string | null {
   try {
+    const pref = readModelPref('app')
     const store = useModelConfigStore()
+    if (pref) {
+      const matched = store.models.find(m => m.id === pref)
+      if (matched) return matched.id
+    }
     const defaultModel = store.models.find(m => m.isDefault)
     if (defaultModel) return defaultModel.id
     if (store.models.length > 0) return store.models[0].id
@@ -24,6 +30,8 @@ export interface ChatOptions {
   onChunk?: (chunk: string) => void
   signal?: AbortSignal
   locale?: string
+  /** P5: 输入上下文预算（token），缺省读 `topoone-context-app`；服务端 llm.chat 渲染后裁剪。 */
+  contextBudget?: number
 }
 
 export function chat(options: ChatOptions): Promise<string> {
@@ -59,6 +67,7 @@ export function chat(options: ChatOptions): Promise<string> {
         variables: options.variables,
         mode: options.mode || 'chat',
         locale: options.locale || '',
+        contextBudget: options.contextBudget ?? readContextPref('app'),
       })
 
       if (aborted) {

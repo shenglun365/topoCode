@@ -243,15 +243,8 @@ function onDeleteTask(taskId: string) {
 }
 
 function onOpenAnalysis(task: AnalysisTask) {
-  projectStore.selectProject(task.projectId)
-  router.push('/analysis')
+  router.push({ path: '/analysis', query: { project: task.projectId, task: task.id } })
   navigation.navigateTo('analysis')
-  projectStore.openReportHomeTab({
-    taskId: task.id,
-    taskName: task.name,
-    projectId: task.projectId,
-    projectName: projectStore.selectedProject?.name,
-  })
 }
 
 async function confirmDelete() {

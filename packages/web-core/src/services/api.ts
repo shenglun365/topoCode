@@ -18,7 +18,8 @@ function readToken(): string {
   return localStorage.getItem(TOKEN_KEY) || ''
 }
 
-function authHeaders(): Record<string, string> {
+/** 鉴权头（裸 fetch 场景复用，token 逻辑唯一源，见 CONV-02 §4） */
+export function authHeaders(): Record<string, string> {
   const tok = readToken()
   return tok ? { Authorization: `Bearer ${tok}` } : {}
 }

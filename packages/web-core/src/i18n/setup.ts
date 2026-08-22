@@ -16,13 +16,25 @@ export function detectLocale(): SupportedLocale {
   return 'en-US'
 }
 
-/** 从 localStorage 读取上次选择的语言 */
+/** 统一语言存储键（P2）；读兼容旧键 `locale`（各 app 历史各自存储）。 */
+export const LOCALE_KEY = 'topoone-locale'
+export const LEGACY_LOCALE_KEY = 'locale'
+
+/** 从 localStorage 读取上次选择的语言（优先统一键，回退旧键，再回退浏览器检测） */
 function loadLocale(): SupportedLocale {
   try {
-    const saved = localStorage.getItem('locale') as SupportedLocale
+    const saved = (localStorage.getItem(LOCALE_KEY) ||
+      localStorage.getItem(LEGACY_LOCALE_KEY)) as SupportedLocale
     if (saved && localeNames[saved]) return saved
   } catch {}
   return detectLocale()
+}
+
+/** 写入统一语言键（供各 app 语言切换统一入口） */
+export function saveLocale(locale: SupportedLocale): void {
+  try {
+    localStorage.setItem(LOCALE_KEY, locale)
+  } catch {}
 }
 
 /** 创建应用 i18n 实例（各 app 传入自己的词表，实例相互独立） */

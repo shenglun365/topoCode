@@ -64,6 +64,40 @@
   --ctp-lavender: 114 135 253; /* #7287fd */
 }
 
+/* 共享工具栏/壳变量别名（P4）：映射 web-core 变量到 ctp 双主题，随 data-theme 联动 */
+:root {
+  --bg-primary: rgb(var(--ctp-base));
+  --bg-secondary: rgb(var(--ctp-mantle));
+  --bg-tertiary: rgb(var(--ctp-surface0));
+  --bg-hover: rgb(var(--ctp-surface1));
+  --bg-active: rgb(var(--ctp-surface2));
+  --text-primary: rgb(var(--ctp-text));
+  --text-secondary: rgb(var(--ctp-subtext0));
+  --text-muted: rgb(var(--ctp-overlay0));
+  --accent: rgb(var(--ctp-blue));
+  --accent-hover: rgb(var(--ctp-sapphire));
+  --success: rgb(var(--ctp-green));
+  --warning: rgb(var(--ctp-yellow));
+  --error: rgb(var(--ctp-red));
+  --border: rgb(var(--ctp-surface1));
+  --border-light: rgb(var(--ctp-surface2));
+  --bg: var(--bg-primary);
+  --bg-card: var(--bg-secondary);
+  --bg-side: var(--bg-secondary);
+  --bg-code: var(--bg-tertiary);
+  --bg-chip: var(--bg-tertiary);
+  --text: var(--text-primary);
+  --code-text: var(--text-primary);
+  --accent-light: rgba(137, 180, 250, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --font-sans: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+}
+
 @layer base {
   body {
     @apply bg-ctp-base text-ctp-text font-sans;

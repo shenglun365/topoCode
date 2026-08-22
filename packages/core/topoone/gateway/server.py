@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from topoone.gateway import gateway  # noqa: E402
 from topoone.gateway import vue_routes  # noqa: E402
 from topoone.gateway import static_sources  # noqa: E402
+from topoone.gateway import system_routes  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ app.add_middleware(
 # 网关：反向代理 / RPC 路由 / 事件桥 / 鉴权（P1）
 # 必须先于其它 router，保证 /api/architect* 与 /api/rpc 不被业务路由抢先。
 app.include_router(gateway.router)
+
+# P1: supervisor 控制面代理（/api/system/apps · /api/system/apps/{name}/restart）
+app.include_router(system_routes.router)
 
 # 全局鉴权（D7）：/api/* 与 /ws/events 校验 token（静态/健康除外）
 app.middleware("http")(gateway.auth_middleware)

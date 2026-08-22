@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import { useFuncGroupStore } from '@/stores/funcGroup'
 import { useCommunityStore } from '@/stores/community-store'
+import { useAnalysisStore } from '@/stores/analysis'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
@@ -23,6 +25,8 @@ const projectStore = useProjectStore()
 const funcGroup = useFuncGroupStore()
 const panelStore = usePanelStore()
 const communityStore = useCommunityStore()
+const analysisStore = useAnalysisStore()
+const route = useRoute()
 
 /* ===== 分析功能组上下文 ===== */
 const analysisContext = computed(() => funcGroup.context.analysis)
@@ -52,6 +56,35 @@ onMounted(() => {
   panelStore.setLeftCollapsed(false)
   panelStore.setRightCollapsed(false)
 })
+
+// P5: URL 驱动分析任务（/analysis?project=&task=）——确保项目上下文并打开对应报告 tab
+watch(
+  () => [route.query.project, route.query.task] as const,
+  async ([projectId, taskId]) => {
+    if (typeof taskId !== 'string' || !taskId) return
+    const pid = typeof projectId === 'string' ? projectId : (projectStore.selectedProjectId || '')
+    if (pid && funcGroup.context.analysis.projectId !== pid) {
+      funcGroup.selectProject('analysis', pid)
+    }
+    const project = projectStore.projects.find((p) => p.id === pid)
+    let taskName = taskId
+    try {
+      if (pid) {
+        const loaded = analysisStore.tasks.find((x: any) => x.projectId === pid)
+        if (!loaded) await analysisStore.loadTasks(pid)
+        const t = analysisStore.tasks.find((x: any) => x.id === taskId)
+        if (t) taskName = t.name || taskName
+      }
+    } catch { /* 任务名解析失败则回退 taskId */ }
+    projectStore.openReportHomeTab({
+      taskId,
+      taskName,
+      projectId: pid,
+      projectName: project?.name,
+    })
+  },
+  { immediate: true },
+)
 
 // 页面激活时重连 agent 轮询（切回本页时 polling 可能中断）
 onActivated(() => {
