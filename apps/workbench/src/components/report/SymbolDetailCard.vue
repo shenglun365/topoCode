@@ -178,17 +178,17 @@ function handleOpenSource() {
 
 <style scoped>
 .symbol-detail-card {
-  padding: 10px;
+  padding: calc(10px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-secondary);
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .type-icon {
@@ -196,16 +196,16 @@ function handleOpenSource() {
 }
 
 .type-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
+  font-size: calc(10px * var(--ui-scale, 1));
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   font-weight: 500;
 }
 
 .symbol-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -214,17 +214,17 @@ function handleOpenSource() {
 }
 
 .class-prefix {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .file-info {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
-  margin-bottom: 8px;
-  border-radius: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
+  border-radius: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -234,7 +234,7 @@ function handleOpenSource() {
 }
 
 .file-path {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--accent);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -243,36 +243,36 @@ function handleOpenSource() {
 }
 
 .line-range {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .code-section {
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .code-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: calc(4px * var(--ui-scale, 1));
 }
 
 .summarize-hint {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--warning);
 }
 
 .code-block {
-  max-height: 160px;
+  max-height: calc(160px * var(--ui-scale, 1));
   overflow: auto;
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
   background: var(--bg-primary);
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   line-height: 1.5;
   font-family: var(--font-mono);
   color: var(--text-primary);
@@ -281,7 +281,7 @@ function handleOpenSource() {
 }
 
 .ai-section {
-  margin-top: 8px;
+  margin-top: calc(8px * var(--ui-scale, 1));
 }
 
 .ai-btn {
@@ -293,15 +293,15 @@ function handleOpenSource() {
 .ai-loading {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px;
-  font-size: 11px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .spinner {
-  width: 12px;
-  height: 12px;
+  width: calc(12px * var(--ui-scale, 1));
+  height: calc(12px * var(--ui-scale, 1));
   border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -313,21 +313,21 @@ function handleOpenSource() {
 }
 
 .ai-content {
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
   background: var(--bg-primary);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   line-height: 1.6;
   color: var(--text-primary);
-  max-height: 200px;
+  max-height: calc(200px * var(--ui-scale, 1));
   overflow: auto;
 }
 
 .ai-error {
-  padding: 6px 8px;
-  font-size: 11px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--error);
   background: color-mix(in srgb, var(--error) 10%, transparent);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
 }
 </style>

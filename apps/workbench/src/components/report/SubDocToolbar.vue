@@ -65,10 +65,10 @@ const { showId, componentId } = useComponentId('ST-001')
 <style scoped>
 .subdoc-toolbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 12px; border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary); gap: 8px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary); gap: calc(8px * var(--ui-scale, 1));
 }
-.toolbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.toolbar-right { display: flex; align-items: center; gap: 4px; }
-.doc-title { font-size: 13px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-left { display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1)); min-width: 0; }
+.toolbar-right { display: flex; align-items: center; gap: calc(4px * var(--ui-scale, 1)); }
+.doc-title { font-size: calc(13px * var(--ui-scale, 1)); font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

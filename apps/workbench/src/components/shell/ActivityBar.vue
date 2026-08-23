@@ -7,12 +7,9 @@ import {
   FolderIcon,
   LightBulbIcon,
   BookOpenIcon,
-  Cog6ToothIcon,
-  UserIcon,
 } from '@heroicons/vue/24/outline'
 import { useNavigationStore } from '@/stores/navigation'
 import { usePanelStore } from '@/stores/panel'
-import { useAuthStore } from '@/stores/auth-store'
 import type { PageType } from '@/types'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
 
@@ -27,8 +24,6 @@ const iconMap = {
   code: FolderIcon,
   analysis: LightBulbIcon,
   knowledge: BookOpenIcon,
-  user: UserIcon,
-  settings: Cog6ToothIcon,
 }
 
 const activities = [
@@ -38,25 +33,9 @@ const activities = [
   // { page: 'knowledge' as PageType, key: 'nav.knowledge' },
 ]
 
-const bottomActivities = [
-  { page: 'user' as PageType, key: 'nav.userCenter' },
-  { page: 'settings' as PageType, key: 'nav.settings' },
-]
-
-const authStore = useAuthStore()
 const currentPage = computed(() => navigation.currentPage)
 
 function navigateTo(page: PageType) {
-  if (page === 'settings') {
-    // P7：设置中心迁入门户（/#/settings）
-    window.open('/#/settings', '_blank')
-    return
-  }
-  if (page === 'user') {
-    // 用户中心迁入门户（基础服务，/#/user），新页签打开
-    window.open('/#/user', '_blank')
-    return
-  }
   navigation.navigateTo(page)
   if (page === 'analysis' && panelStore.leftCollapsed) {
     panelStore.setLeftCollapsed(false)
@@ -81,26 +60,6 @@ function navigateTo(page: PageType) {
     >
       <component
         :is="iconMap[activity.page]"
-        class="w-5 h-5"
-      />
-    </div>
-
-    <div class="activity-spacer" />
-
-    <div
-      v-for="activity in bottomActivities"
-      :key="activity.page"
-      class="activity-item"
-      :class="{
-        active: currentPage === activity.page,
-        'user-authenticated': activity.page === 'user' && authStore.isAuthenticated,
-      }"
-      :title="t(activity.key)"
-      @click="navigateTo(activity.page)"
-    >
-      <component
-        :is="iconMap[activity.page]"
-        class="w-5 h-5"
       />
     </div>
   </nav>
@@ -113,25 +72,25 @@ function navigateTo(page: PageType) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: calc(4px * var(--ui-scale, 1));
+  padding-bottom: calc(4px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border-right: 1px solid var(--border);
 }
 
 .activity-item {
-  width: 36px;
-  height: 36px;
+  width: calc(36px * var(--ui-scale, 1));
+  height: calc(36px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 18px;
+  font-size: calc(18px * var(--ui-scale, 1));
   transition: all 0.15s ease;
   position: relative;
-  margin-bottom: 2px;
+  margin-bottom: calc(2px * var(--ui-scale, 1));
 }
 
 .activity-item:hover {
@@ -150,17 +109,16 @@ function navigateTo(page: PageType) {
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 3px;
-  height: 20px;
+  width: calc(3px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
   background: var(--accent);
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 calc(2px * var(--ui-scale, 1)) calc(2px * var(--ui-scale, 1)) 0;
 }
 
-.activity-item.user-authenticated {
-  color: color-mix(in srgb, var(--success) 70%, transparent);
-}
-
-.activity-spacer {
-  flex: 1;
+/* 图标固定 24×24，不随字号变化 */
+.activity-item svg {
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
+  flex-shrink: 0;
 }
 </style>

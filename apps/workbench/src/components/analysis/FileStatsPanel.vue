@@ -679,10 +679,10 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .file-stats-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   border: 1px solid var(--border);
   max-height: calc(100vh - 260px);
   overflow-y: auto;
@@ -691,7 +691,7 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .stats-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 
 .section-disabled {
@@ -700,32 +700,32 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 }
 
 .section-hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-style: italic;
-  padding: 8px 4px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1));
 }
 
 .section-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 
 .section-actions {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .divider {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .stats-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -736,10 +736,10 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
   background: none;
   border: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 3px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
 }
 
 .text-btn:hover {
@@ -750,20 +750,20 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .dir-tree {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1));
 }
 
 .empty-hint {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .glob-scope-row {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   align-items: center;
 }
 
@@ -774,32 +774,32 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .glob-scope-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .glob-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   border: 1px solid var(--accent);
-  border-radius: 12px;
-  font-size: 11px;
+  border-radius: calc(12px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--accent);
 }
 
 .glob-tag code {
   font-family: monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .stats-input {
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   color: var(--text-primary);
   outline: none;
 }
@@ -810,15 +810,15 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 
 .radio-group {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   flex-wrap: wrap;
 }
 
 .radio-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
+  gap: calc(4px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -833,10 +833,10 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
-  font-size: 12px;
+  padding: calc(16px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .stats-error {
@@ -846,29 +846,29 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .stats-results {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .stats-bars {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .show-more-row {
   display: flex;
   justify-content: center;
-  padding-top: 2px;
+  padding-top: calc(2px * var(--ui-scale, 1));
 }
 
 .stat-bar-row {
   display: grid;
   grid-template-columns: 70px 35px 1fr 24px;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  padding: 4px 6px;
-  border-radius: 4px;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  border-radius: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -898,10 +898,10 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .unsupported-badge {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  margin-left: 6px;
+  gap: calc(2px * var(--ui-scale, 1));
+  margin-left: calc(6px * var(--ui-scale, 1));
   color: var(--warning, #f59e0b);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-family: system-ui;
   font-weight: 400;
   cursor: help;
@@ -925,9 +925,9 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 }
 
 .stat-bar {
-  height: 10px;
+  height: calc(10px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
@@ -935,7 +935,7 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
   height: 100%;
   background: var(--accent);
   transition: width 0.3s;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
 }
 
 .stat-bar-row.selected .stat-bar-fill {
@@ -947,11 +947,11 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 2px;
+  padding: calc(2px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 2px;
+  border-radius: calc(2px * var(--ui-scale, 1));
 }
 
 .remove-btn:hover {
@@ -963,29 +963,29 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
 .selected-tags {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .tags-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .tag-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   border: 1px solid var(--accent);
-  border-radius: 12px;
-  font-size: 11px;
+  border-radius: calc(12px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--accent);
   font-family: monospace;
 }
@@ -1010,34 +1010,34 @@ defineExpose({ totalFiles, fileCountLevel, removeExtension, removeScopeByPath })
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding-top: 8px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding-top: calc(8px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .stats-warn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: calc(3px * var(--ui-scale, 1));
   color: #d4941e;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 500;
 }
 
 .stats-error {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: calc(3px * var(--ui-scale, 1));
   color: #ef4444;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 500;
 }
 
 .loading-spinner {
-  width: 16px;
-  height: 16px;
+  width: calc(16px * var(--ui-scale, 1));
+  height: calc(16px * var(--ui-scale, 1));
   border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;

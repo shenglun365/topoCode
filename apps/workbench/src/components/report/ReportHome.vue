@@ -803,9 +803,9 @@ watch(agentCompletedSignal, async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .load-error {
@@ -813,72 +813,72 @@ watch(agentCompletedSignal, async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   color: var(--error);
-  font-size: 12px;
-  padding: 20px;
+  font-size: calc(12px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1));
 }
 
 .report-home-scroll {
   flex: 0 1 auto;
-  padding: 16px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   min-height: 0;
 }
 .report-arch-panel {
   flex: 1;
   min-height: 0;
-  padding: 16px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
 }
 
 .home-section {
-  margin-bottom: 20px;
+  margin-bottom: calc(20px * var(--ui-scale, 1));
 }
 
 .section-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 10px;
-  padding-bottom: 6px;
+  margin-bottom: calc(10px * var(--ui-scale, 1));
+  padding-bottom: calc(6px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px 8px;
+  gap: calc(12px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
 }
 
 .summary-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
+  gap: calc(2px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
 }
 
 .card-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .card-value {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .card-path {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-family: var(--font-mono);
   word-break: break-all;
 }
@@ -891,12 +891,12 @@ watch(agentCompletedSignal, async () => {
 
 .scope-tag {
   display: inline-block;
-  padding: 1px 8px;
+  padding: 1px calc(8px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-secondary);
   line-height: 1.6;
 }
@@ -907,10 +907,10 @@ watch(agentCompletedSignal, async () => {
 }
 
 .scope-tag-count {
-  margin-left: 4px;
+  margin-left: calc(4px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
 }
 
 .scope-tag-more {
@@ -922,46 +922,46 @@ watch(agentCompletedSignal, async () => {
 }
 
 .scope-dialog {
-  max-width: 520px;
+  max-width: calc(520px * var(--ui-scale, 1));
   max-height: 70vh;
 }
 .scope-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
 }
 .scope-dialog-body {
-  padding: 12px 16px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   overflow-y: auto;
 }
 .scope-dialog-section {
-  margin-bottom: 16px;
+  margin-bottom: calc(16px * var(--ui-scale, 1));
 }
 .scope-dialog-section h4 {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 .scope-dialog-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 .scope-tag-lg {
-  font-size: 11px;
-  padding: 2px 10px;
+  font-size: calc(11px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 
 .comm-et-tabs {
-  display: flex; gap: 0; margin-bottom: 8px; border-bottom: 1px solid var(--border);
+  display: flex; gap: 0; margin-bottom: calc(8px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border);
 }
 .comm-et-tab {
-  flex: 1; padding: 4px 8px; text-align: center; font-size: 10px; font-weight: 500;
+  flex: 1; padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)); text-align: center; font-size: calc(10px * var(--ui-scale, 1)); font-weight: 500;
   color: var(--text-muted); background: transparent; border: none; cursor: pointer;
   border-bottom: 2px solid transparent; transition: all 0.15s;
 }
@@ -969,28 +969,28 @@ watch(agentCompletedSignal, async () => {
 .comm-et-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
 .comm-stats {
-  display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;
+  display: flex; gap: calc(10px * var(--ui-scale, 1)); margin-bottom: calc(8px * var(--ui-scale, 1)); flex-wrap: wrap;
 }
 .comm-stat {
-  display: flex; align-items: center; gap: 3px;
-  font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);
+  display: flex; align-items: center; gap: calc(3px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1)); color: var(--text-muted); font-family: var(--font-mono);
 }
 
 .community-items {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .community-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 10px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
@@ -1004,7 +1004,7 @@ watch(agentCompletedSignal, async () => {
 
 .chip-name {
   color: var(--text-primary);
-  max-width: 100px;
+  max-width: calc(100px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1013,50 +1013,50 @@ watch(agentCompletedSignal, async () => {
 .chip-count {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
 }
 
 .comm-empty {
-  font-size: 10px; color: var(--text-muted); padding: 4px 0;
+  font-size: calc(10px * var(--ui-scale, 1)); color: var(--text-muted); padding: calc(4px * var(--ui-scale, 1)) 0;
 }
 
 /* Community search */
-.comm-search { margin-bottom: 8px; }
+.comm-search { margin-bottom: calc(8px * var(--ui-scale, 1)); }
 .comm-search-input {
-  width: 100%; padding: 4px 8px; font-size: 11px; border: 1px solid var(--border);
-  border-radius: 4px; background: var(--bg-primary); color: var(--text-primary); outline: none;
+  width: 100%; padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); border: 1px solid var(--border);
+  border-radius: calc(4px * var(--ui-scale, 1)); background: var(--bg-primary); color: var(--text-primary); outline: none;
   box-sizing: border-box;
 }
 .comm-search-input:focus { border-color: var(--accent); }
 
 /* Quality hint */
 .quality-stat { cursor: help; position: relative; }
-.quality-hint { font-size: 9px; color: var(--text-muted); margin-left: 2px; }
+.quality-hint { font-size: calc(9px * var(--ui-scale, 1)); color: var(--text-muted); margin-left: calc(2px * var(--ui-scale, 1)); }
 
 /* Community pagination */
 .comm-pagination {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; gap: calc(8px * var(--ui-scale, 1));
+  margin-top: calc(8px * var(--ui-scale, 1)); padding-top: calc(6px * var(--ui-scale, 1)); border-top: 1px solid var(--border);
 }
-.comm-page-info { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.comm-page-info { font-size: calc(10px * var(--ui-scale, 1)); color: var(--text-muted); font-family: var(--font-mono); }
 
 .model-warning {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  margin-bottom: 8px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
   background: color-mix(in srgb, var(--warning) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--warning);
 }
 
 .actions-section .actions-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
 }
 
 /* DOM dialog */
@@ -1073,14 +1073,14 @@ watch(agentCompletedSignal, async () => {
 .dialog-content {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 24px;
-  min-width: 300px;
-  max-width: 400px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(24px * var(--ui-scale, 1));
+  min-width: calc(300px * var(--ui-scale, 1));
+  max-width: calc(400px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
 
@@ -1089,7 +1089,7 @@ watch(agentCompletedSignal, async () => {
 }
 
 .dialog-message {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   color: var(--text-primary);
   text-align: center;
   line-height: 1.5;
@@ -1097,8 +1097,8 @@ watch(agentCompletedSignal, async () => {
 
 .dialog-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  gap: calc(8px * var(--ui-scale, 1));
+  margin-top: calc(4px * var(--ui-scale, 1));
 }
 
 /* Component analysis button with progress bar */
@@ -1122,7 +1122,7 @@ watch(agentCompletedSignal, async () => {
 }
 
 .comp-analysis-pct {
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
   font-family: var(--font-mono);
   color: var(--text-muted);
   position: relative;
@@ -1155,7 +1155,7 @@ watch(agentCompletedSignal, async () => {
 }
 
 .presummary-card {
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 .presummary-loading {
   opacity: 0.6;
@@ -1165,17 +1165,17 @@ watch(agentCompletedSignal, async () => {
   cursor: default;
 }
 .presummary-pct {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
 .presummary-failed {
-  margin-left: 6px;
-  font-size: 11px;
+  margin-left: calc(6px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--color-danger, #e74c3c);
 }
 .ps-summary-stat {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 
@@ -1186,12 +1186,12 @@ watch(agentCompletedSignal, async () => {
 }
 .ps-batches-compact {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 .presummary-batch {
-  padding: 0px 6px;
-  border-radius: 4px;
-  font-size: 10px;
+  padding: 0px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   font-family: var(--font-mono);
   line-height: 1.6;
   white-space: nowrap;
@@ -1212,7 +1212,7 @@ watch(agentCompletedSignal, async () => {
   border: 1px solid var(--border);
 }
 .card-summary-hint {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-style: italic;
   margin-top: 1px;
@@ -1221,20 +1221,20 @@ watch(agentCompletedSignal, async () => {
 .summary-cards-bottom {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 8px;
-  margin-top: 12px;
+  gap: calc(12px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  margin-top: calc(12px * var(--ui-scale, 1));
 }
 .summary-card-half {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
 }
 .summary-card-scope {
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
 }
 .card-label-row {
@@ -1243,31 +1243,31 @@ watch(agentCompletedSignal, async () => {
   justify-content: space-between;
 }
 .scope-view-detail {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-style: italic;
 }
 .scope-compact {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: calc(3px * var(--ui-scale, 1));
 }
 .scope-compact-row {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  font-size: 10px;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
 }
 .scope-compact-label {
   flex-shrink: 0;
-  width: 48px;
+  width: calc(48px * var(--ui-scale, 1));
   color: var(--text-muted);
   padding-top: 1px;
 }
 .scope-compact-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  gap: calc(3px * var(--ui-scale, 1));
 }
 
 .summary-empty {
@@ -1275,27 +1275,27 @@ watch(agentCompletedSignal, async () => {
 }
 
 .card-summary-preview {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 400;
   color: var(--text-secondary);
   line-height: 1.5;
 }
 
 .card-summary-empty {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 400;
   color: var(--text-muted);
   font-style: italic;
 }
 
 /* 状态文本颜色（柔和） */
-.status-text { font-size: 12px; font-weight: 500; }
+.status-text { font-size: calc(12px * var(--ui-scale, 1)); font-weight: 500; }
 .status-green { color: #5a9e6f; }
 .status-orange { color: #c08a4b; }
 
 /* Project summary dialog */
 .summary-dialog {
-  width: 560px;
+  width: calc(560px * var(--ui-scale, 1));
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
@@ -1307,9 +1307,9 @@ watch(agentCompletedSignal, async () => {
 .summary-dialog-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-  font-size: 13px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(14px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border);
@@ -1320,12 +1320,12 @@ watch(agentCompletedSignal, async () => {
 }
 
 .summary-dialog-close {
-  width: 24px;
-  height: 24px;
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
   color: var(--text-muted);
   background: transparent;
@@ -1340,27 +1340,27 @@ watch(agentCompletedSignal, async () => {
 .summary-dialog-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
-  font-size: 13px;
+  padding: calc(16px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   line-height: 1.7;
   color: var(--text-primary);
   white-space: pre-wrap;
-  min-height: 120px;
+  min-height: calc(120px * var(--ui-scale, 1));
 }
 
 .summary-body-editing {
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
 }
 
 .summary-textarea {
   width: 100%;
-  min-height: 280px;
-  padding: 8px;
+  min-height: calc(280px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   line-height: 1.7;
   resize: vertical;
   outline: none;
@@ -1375,11 +1375,11 @@ watch(agentCompletedSignal, async () => {
 .summary-dialog-footer {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
-  font-size: 10px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   border-top: 1px solid var(--border);
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .summary-dialog-date {
@@ -1388,14 +1388,14 @@ watch(agentCompletedSignal, async () => {
 
 .summary-dialog-actions {
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   margin-left: auto;
 }
 
 /* Collapse / minimize */
 .collapse-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0;
+  width: calc(22px * var(--ui-scale, 1)); height: calc(22px * var(--ui-scale, 1)); padding: 0;
   background: transparent; border: 1px solid transparent; border-radius: 0.25rem;
   color: var(--text-muted); cursor: pointer; transition: all 0.15s;
 }

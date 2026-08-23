@@ -130,6 +130,69 @@ def _is_low_quality_content(content: str) -> bool:
     return False
 
 
+def _balanced_json_span(text: str, start: int) -> Optional[str]:
+    """从 text[start]（必须是 '{'）起扫描配平的 JSON 对象子串；失败返回 None。"""
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+    return None
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    """从 LLM 输出中提取第一个合法 JSON 对象。
+
+    兼容 ```json 代码围栏、对象前后的说明文字、以及文本中首个 '{' 之后
+    存在干扰花括号的情况（逐个候选起点尝试配平 + json.loads 验证）。
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+
+    candidates: list[str] = []
+    # 优先取代码围栏内部
+    fence = t.find("```")
+    if fence != -1:
+        fence_end = t.rfind("```")
+        if fence_end > fence + 3:
+            inner = t[fence + 3:fence_end]
+            if inner.lstrip()[:5].lower() in ("json\n", "json\r", "json "):
+                inner = inner.lstrip()[5:]
+            candidates.append(inner)
+    candidates.append(t)
+
+    for cand in candidates:
+        idx = cand.find("{")
+        while idx != -1:
+            span = _balanced_json_span(cand, idx)
+            if span:
+                try:
+                    parsed = json.loads(span)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
+            idx = cand.find("{", idx + 1)
+    return None
+
+
 class AgentRuntime:
     """Agent 运行时引擎"""
 
@@ -947,17 +1010,10 @@ class AgentRuntime:
                 logger.warning(f"[AgentRuntime] _save_component_result: save failed status error: {e}")
             return
         try:
-            text = output.strip()
-            # 剥离 markdown 代码块标记
-            if text.startswith("```"):
-                lines = text.split("\n")
-                text = "\n".join(lines[1:]) if len(lines) > 1 else text
-                if text.endswith("```"):
-                    text = text[:-3]
-                text = text.strip()
-            if text.startswith("json"):
-                text = text[4:].strip()
-            parsed = json.loads(text)
+            parsed = _extract_json_object(output)
+            if parsed is None:
+                logger.warning(f"[AgentRuntime] _save_component_result: no JSON object found, raw_text={output.strip()[:500]}")
+                return
             item = parsed
             if isinstance(item, dict) and "components" in item:
                 items = item["components"]
@@ -1184,15 +1240,25 @@ class AgentRuntime:
                      end_time: Optional[str] = None,
                      error: Optional[str] = None,
                      batch: bool = False):
-        """报告单项生命周期事件。batch=True 时不立即触发 _report()。"""
+        """报告单项生命周期事件。batch=True 时不立即触发 _report()。
+
+        同一 (type, name) 的 running 事件幂等：轮询转发等重复上报不追加新记录，
+        避免前端出现同一文件多条 running 日志。
+        """
         now_iso = datetime.datetime.now().isoformat()
         if not start_time:
             start_time = now_iso
 
         existing = None
-        if status in ('success', 'failed', 'retry'):
+        if status == 'running':
             for log in reversed(self._item_logs):
-                if log.type == type_ and log.name == name and log.status == 'running':
+                if log.type == type_ and log.name == name:
+                    if log.status in ('running', 'retry'):
+                        return  # 已有进行中的记录 → 重复上报，忽略
+                    break  # 最近一条已终结（success/failed）→ 重新运行，追加新记录
+        elif status in ('success', 'failed', 'retry'):
+            for log in reversed(self._item_logs):
+                if log.type == type_ and log.name == name and log.status in ('running', 'retry'):
                     existing = log
                     break
 

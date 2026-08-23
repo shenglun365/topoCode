@@ -231,7 +231,7 @@ onUnmounted(() => {
 
 .spotlight-highlight {
   position: absolute;
-  padding: 4px;
+  padding: calc(4px * var(--ui-scale, 1));
   z-index: 1;
 }
 
@@ -239,7 +239,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   border: 2px solid var(--accent);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
   background: transparent;
 }
@@ -256,10 +256,10 @@ onUnmounted(() => {
 
 .onboarding-dialog {
   position: absolute;
-  width: 320px;
+  width: calc(320px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--ui-scale, 1));
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
   pointer-events: auto;
   overflow: hidden;
@@ -267,7 +267,7 @@ onUnmounted(() => {
 }
 
 .dialog-progress {
-  height: 3px;
+  height: calc(3px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
 }
 
@@ -278,31 +278,31 @@ onUnmounted(() => {
 }
 
 .dialog-content {
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
 }
 
 .dialog-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .dialog-description {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   line-height: 1.5;
 }
 
 .dialog-steps {
-  padding: 8px 16px;
-  font-size: 10px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
 }
 
 .dialog-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
 }
 

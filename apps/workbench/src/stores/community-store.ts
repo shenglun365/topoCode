@@ -910,8 +910,9 @@ export const useCommunityStore = defineStore('community', () => {
                 if (log.error) existing.error = log.error
               }
             } else {
-              agent.taskLogs.push({ ...log })
-              existingMap.set(log.id, log)
+              const copy = { ...log }
+              agent.taskLogs.push(copy)
+              existingMap.set(log.id, copy)
             }
           }
         }

@@ -349,7 +349,7 @@ onMounted(async () => {
         >
           <div style="margin-bottom:16px;">
             <div style="display:flex; align-items:center; gap:8px;">
-              <h2 style="font-size:16px; font-weight:600;">
+              <h2 style="font-size:calc(16px * var(--ui-scale)); font-weight:600;">
                 {{ t('resource.center', '资源中心') }}
               </h2>
               <button
@@ -370,7 +370,7 @@ onMounted(async () => {
                 ><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /></svg>
               </button>
             </div>
-            <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            <p style="font-size:calc(12px * var(--ui-scale)); color:var(--text-muted); margin-top:4px;">
               {{ t('resource.centerDesc', '浏览和下载可导入的结构分析包') }}
             </p>
           </div>
@@ -450,7 +450,7 @@ onMounted(async () => {
                 {{ cat.label }}
                 <span
                   v-if="cat.count !== undefined"
-                  style="margin-left:3px; font-size:10px; opacity:0.7;"
+                  style="margin-left:3px; font-size:calc(10px * var(--ui-scale)); opacity:0.7;"
                 >({{ cat.count }})</span>
               </button>
             </template>
@@ -458,7 +458,7 @@ onMounted(async () => {
               v-if="!auth.isAuthenticated"
               style="display:inline-flex; gap:4px; align-items:center;"
             >
-              <span style="font-size:11px; color:var(--text-muted);">{{ resourceStore.meta?.labels?.login_hint || '登录后可下载资源' }}</span>
+              <span style="font-size:calc(11px * var(--ui-scale)); color:var(--text-muted);">{{ resourceStore.meta?.labels?.login_hint || '登录后可下载资源' }}</span>
               <a
                 href="/app/#/login"
                 class="btn btn-primary btn-xs"
@@ -481,7 +481,7 @@ onMounted(async () => {
           </div>
           <div
             v-else
-            style="display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--rc-card-max-w, 220px),1fr)); gap:var(--rc-card-gap, 12px);"
+            style="display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--rc-card-max-w, calc(220px * var(--ui-scale))),1fr)); gap:var(--rc-card-gap, calc(12px * var(--ui-scale)));"
           >
             <ResourceCard
               v-for="r in resourceStore.filteredResources"

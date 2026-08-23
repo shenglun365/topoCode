@@ -147,6 +147,9 @@ onBeforeUnmount(() => {
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
+
+    <slot name="actions" />
+
     <button
       v-if="canScrollLeft"
       class="scroll-btn scroll-left"
@@ -209,7 +212,7 @@ onBeforeUnmount(() => {
   align-items: stretch;
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
-  min-height: 36px;
+  min-height: calc(36px * var(--ui-scale, 1));
   position: relative;
 }
 
@@ -217,7 +220,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  width: calc(24px * var(--ui-scale, 1));
   flex-shrink: 0;
   background: var(--bg-secondary);
   border: none;
@@ -251,9 +254,9 @@ onBeforeUnmount(() => {
 .home-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   cursor: grab;
   border-right: 1px solid var(--border);
@@ -284,9 +287,9 @@ onBeforeUnmount(() => {
 .home-tab.drag-over-right::after {
   content: '';
   position: absolute;
-  top: 4px;
-  bottom: 4px;
-  width: 2px;
+  top: calc(4px * var(--ui-scale, 1));
+  bottom: calc(4px * var(--ui-scale, 1));
+  width: calc(2px * var(--ui-scale, 1));
   background: var(--accent);
   border-radius: 1px;
   z-index: 5;
@@ -308,19 +311,19 @@ onBeforeUnmount(() => {
 }
 
 .tab-title {
-  max-width: 120px;
+  max-width: calc(120px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tab-close-btn {
-  width: 16px;
-  height: 16px;
+  width: calc(16px * var(--ui-scale, 1));
+  height: calc(16px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   opacity: 0;
   transition: all 0.1s;
   background: transparent;

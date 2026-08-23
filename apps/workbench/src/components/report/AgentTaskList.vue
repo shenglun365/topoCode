@@ -210,9 +210,17 @@ function rollingFileLogs(task: any): any[] {
   const logs = task.taskLogs || []
   const fileLogs = logs.filter((l: any) => l.type === 'file' || l.type === 'component')
   if (fileLogs.length === 0) return []
+  // running 按 (type+name) 去重：防御重复上报/历史脏数据导致同一文件多条 running
   const running = fileLogs.filter((l: any) => l.status === 'running').reverse()
+  const seenRunning = new Set<string>()
+  const runningDedup = running.filter((l: any) => {
+    const k = `${l.type}\u0000${l.name}`
+    if (seenRunning.has(k)) return false
+    seenRunning.add(k)
+    return true
+  }).slice(0, 5)
   const done = fileLogs.filter((l: any) => l.status === 'success' || l.status === 'failed').reverse()
-  const result = [...done.slice(0, 5), ...running.slice(0, 5)].slice(0, 10)
+  const result = [...done.slice(0, 5), ...runningDedup].slice(0, 10)
   return result
 }
 
@@ -425,8 +433,8 @@ const actionLabel = (action: string) => {
 .atl-task { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 0.375rem; padding: 0.5rem; min-height: 6.5rem; contain: layout style; will-change: transform; }
 .atl-header { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
 .atl-project { font-size: 0.7rem; font-weight: 600; color: var(--text-primary); }
-.atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: 3px; }
-.atl-clear-btn { margin-left: auto; font-size: 0.6rem; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: 3px; padding: 0.05rem 0.4rem; cursor: pointer; }
+.atl-task-badge { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.1rem 0.4rem; border-radius: calc(3px * var(--ui-scale, 1)); }
+.atl-clear-btn { margin-left: auto; font-size: 0.6rem; color: var(--text-muted); background: none; border: 1px solid var(--border); border-radius: calc(3px * var(--ui-scale, 1)); padding: 0.05rem 0.4rem; cursor: pointer; }
 .atl-clear-btn:hover { color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
 .atl-empty { font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 1rem; font-style: italic; }
 .atl-loading { font-size: 0.7rem; text-align: center; padding: 1rem; }
@@ -437,7 +445,7 @@ const actionLabel = (action: string) => {
 .atl-status-label {
   font-size: 0.65rem;
   padding: 0.05rem 0.35rem;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   color: var(--text-muted);
   border: 1px solid var(--border);
@@ -475,34 +483,34 @@ const actionLabel = (action: string) => {
 @keyframes atl-toast-in { from { opacity: 0; transform: translate(-50%, -50%) translateY(-8px); } to { opacity: 1; transform: translate(-50%, -50%) translateY(0); } }
 .atl-stop-btn {
   margin-left: auto;
-  width: 18px; height: 18px;
+  width: calc(18px * var(--ui-scale, 1)); height: calc(18px * var(--ui-scale, 1));
   display: flex; align-items: center; justify-content: center;
-  border-radius: 3px; border: 1px solid var(--danger, #ef4444);
+  border-radius: calc(3px * var(--ui-scale, 1)); border: 1px solid var(--danger, #ef4444);
   background: transparent; color: var(--danger, #ef4444);
-  font-size: 10px; cursor: pointer; line-height: 1;
+  font-size: calc(10px * var(--ui-scale, 1)); cursor: pointer; line-height: 1;
 }
 .atl-stop-btn:hover { background: var(--danger, #ef4444); color: #fff; }
 .atl-pause-btn {
   margin-left: auto;
-  width: 18px; height: 18px;
+  width: calc(18px * var(--ui-scale, 1)); height: calc(18px * var(--ui-scale, 1));
   display: flex; align-items: center; justify-content: center;
-  border-radius: 3px; border: 1px solid var(--warning, #f59e0b);
+  border-radius: calc(3px * var(--ui-scale, 1)); border: 1px solid var(--warning, #f59e0b);
   background: transparent; color: var(--warning, #f59e0b);
-  font-size: 10px; cursor: pointer; line-height: 1;
+  font-size: calc(10px * var(--ui-scale, 1)); cursor: pointer; line-height: 1;
 }
 .atl-pause-btn:hover { background: var(--warning, #f59e0b); color: #fff; }
 .atl-resume-btn {
   margin-left: auto;
-  width: 18px; height: 18px;
+  width: calc(18px * var(--ui-scale, 1)); height: calc(18px * var(--ui-scale, 1));
   display: flex; align-items: center; justify-content: center;
-  border-radius: 3px; border: 1px solid var(--success, #22c55e);
+  border-radius: calc(3px * var(--ui-scale, 1)); border: 1px solid var(--success, #22c55e);
   background: transparent; color: var(--success, #22c55e);
-  font-size: 10px; cursor: pointer; line-height: 1;
+  font-size: calc(10px * var(--ui-scale, 1)); cursor: pointer; line-height: 1;
 }
 .atl-resume-btn:hover { background: var(--success, #22c55e); color: #fff; }
 .atl-progress { margin-left: auto; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); }
-.atl-progress-bar { height: 3px; background: var(--bg-secondary); border-radius: 2px; margin: 0.25rem 0; min-height: 3px; }
-.atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: 2px; transition: width 0.3s ease; }
+.atl-progress-bar { height: calc(3px * var(--ui-scale, 1)); background: var(--bg-secondary); border-radius: calc(2px * var(--ui-scale, 1)); margin: 0.25rem 0; min-height: calc(3px * var(--ui-scale, 1)); }
+.atl-progress-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: calc(2px * var(--ui-scale, 1)); transition: width 0.3s ease; }
 .atl-task-logs {
   display: flex; flex-direction: column; gap: 0.1rem;
   margin-top: 0.25rem; min-height: 1.2rem;
@@ -534,6 +542,6 @@ const actionLabel = (action: string) => {
 .atl-log-fallback { display: flex; align-items: center; gap: 0.25rem; font-size: 0.65rem; color: var(--text-muted); padding: 0.05rem 0; white-space: nowrap; overflow: hidden; }
 .atl-log-fallback .atl-log-name { color: var(--text-muted); }
 .atl-more { text-align: center; padding: 0.25rem; }
-.atl-more-btn { font-size: 0.65rem; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 3px; padding: 0.1rem 0.6rem; cursor: pointer; }
+.atl-more-btn { font-size: 0.65rem; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: calc(3px * var(--ui-scale, 1)); padding: 0.1rem 0.6rem; cursor: pointer; }
 .atl-more-btn:hover { background: var(--accent); color: #fff; }
 </style>

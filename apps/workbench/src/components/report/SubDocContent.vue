@@ -188,70 +188,70 @@ onUnmounted(() => {
 <style scoped>
 .loading-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 8px; padding: 20px; color: var(--text-muted); font-size: 12px; height: 100%;
+  gap: calc(8px * var(--ui-scale, 1)); padding: calc(20px * var(--ui-scale, 1)); color: var(--text-muted); font-size: calc(12px * var(--ui-scale, 1)); height: 100%;
 }
 .loading-spinner {
-  width: 24px; height: 24px; border: 2px solid var(--border);
+  width: calc(24px * var(--ui-scale, 1)); height: calc(24px * var(--ui-scale, 1)); border: 2px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .subdoc-preview {
-  flex: 1; overflow-y: auto; padding: 16px 20px;
+  flex: 1; overflow-y: auto; padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
 }
 
 .doc-content {
   line-height: 1.7; color: var(--text-primary); white-space: pre-wrap;
 }
 
-.doc-content :deep(h1) { font-size: 21px; font-weight: 700; margin: 20px 0 12px; }
-.doc-content :deep(h2) { font-size: 17px; font-weight: 600; margin: 18px 0 10px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
-.doc-content :deep(h3) { font-size: 14px; font-weight: 600; margin: 14px 0 8px; }
-.doc-content :deep(p) { margin: 6px 0; }
+.doc-content :deep(h1) { font-size: calc(21px * var(--ui-scale, 1)); font-weight: 700; margin: calc(20px * var(--ui-scale, 1)) 0 calc(12px * var(--ui-scale, 1)); }
+.doc-content :deep(h2) { font-size: calc(17px * var(--ui-scale, 1)); font-weight: 600; margin: calc(18px * var(--ui-scale, 1)) 0 calc(10px * var(--ui-scale, 1)); padding-bottom: calc(4px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border); }
+.doc-content :deep(h3) { font-size: calc(14px * var(--ui-scale, 1)); font-weight: 600; margin: calc(14px * var(--ui-scale, 1)) 0 calc(8px * var(--ui-scale, 1)); }
+.doc-content :deep(p) { margin: calc(6px * var(--ui-scale, 1)) 0; }
 .doc-content :deep(code) {
-  background: var(--bg-tertiary); padding: 1px 5px; border-radius: 3px;
-  font-family: var(--font-mono); font-size: 11px;
+  background: var(--bg-tertiary); padding: 1px calc(5px * var(--ui-scale, 1)); border-radius: calc(3px * var(--ui-scale, 1));
+  font-family: var(--font-mono); font-size: calc(11px * var(--ui-scale, 1));
 }
 .doc-content :deep(pre) {
-  background: var(--bg-secondary); padding: 10px 14px; border-radius: 6px;
-  overflow-x: auto; margin: 8px 0;
+  background: var(--bg-secondary); padding: calc(10px * var(--ui-scale, 1)) calc(14px * var(--ui-scale, 1)); border-radius: calc(6px * var(--ui-scale, 1));
+  overflow-x: auto; margin: calc(8px * var(--ui-scale, 1)) 0;
 }
 .doc-content :deep(pre code) { background: none; padding: 0; }
 .doc-content :deep(table) {
-  border-collapse: collapse; width: 100%; margin: 8px 0;
+  border-collapse: collapse; width: 100%; margin: calc(8px * var(--ui-scale, 1)) 0;
 }
 .doc-content :deep(th), .doc-content :deep(td) {
-  border: 1px solid var(--border); padding: 6px 10px; text-align: left; font-size: 12px;
+  border: 1px solid var(--border); padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1)); text-align: left; font-size: calc(12px * var(--ui-scale, 1));
 }
 .doc-content :deep(th) { background: var(--bg-tertiary); font-weight: 600; }
 .doc-content :deep(a) { color: var(--accent); }
 .doc-content :deep(a:hover) { text-decoration: underline; }
-.doc-content :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.doc-content :deep(hr) { border: none; border-top: 1px solid var(--border); margin: calc(12px * var(--ui-scale, 1)) 0; }
 
 .doc-content :deep(.diagram-placeholder) {
-  margin: 12px 0; padding: 24px 16px; border-radius: 8px;
+  margin: calc(12px * var(--ui-scale, 1)) 0; padding: calc(24px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); border-radius: calc(8px * var(--ui-scale, 1));
   background: var(--bg-secondary); border: 1px solid var(--border);
-  display: flex; align-items: center; justify-content: center; min-height: 200px;
+  display: flex; align-items: center; justify-content: center; min-height: calc(200px * var(--ui-scale, 1));
   overflow-x: auto;
 }
-.doc-content :deep(.diagram-loading) { color: var(--text-muted); font-size: 12px; }
+.doc-content :deep(.diagram-loading) { color: var(--text-muted); font-size: calc(12px * var(--ui-scale, 1)); }
 .doc-content :deep(.diagram-placeholder svg) { max-width: 100%; height: auto; }
 .doc-content :deep(.diagram-error) {
-  color: var(--error); font-size: 11px; margin-top: 8px; word-break: break-all;
+  color: var(--error); font-size: calc(11px * var(--ui-scale, 1)); margin-top: calc(8px * var(--ui-scale, 1)); word-break: break-all;
 }
 .doc-content :deep(.fallback-diagram-header) {
-  display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 .doc-content :deep(.fallback-diagram-lang) {
-  font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase;
+  font-size: calc(10px * var(--ui-scale, 1)); font-weight: 600; color: var(--text-muted); text-transform: uppercase;
 }
 .doc-content :deep(.fallback-diagram-copy) {
-  background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 4px;
-  padding: 2px 8px; font-size: 10px; color: var(--text-secondary); cursor: pointer;
+  background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)); font-size: calc(10px * var(--ui-scale, 1)); color: var(--text-secondary); cursor: pointer;
 }
 .doc-content :deep(.fallback-code) {
-  background: var(--bg-tertiary); padding: 8px 12px; border-radius: 4px;
-  overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto;
+  background: var(--bg-tertiary); padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1)); border-radius: calc(4px * var(--ui-scale, 1));
+  overflow-x: auto; font-size: calc(11px * var(--ui-scale, 1)); max-height: calc(300px * var(--ui-scale, 1)); overflow-y: auto;
 }
 .doc-content :deep(.community-link) {
   color: var(--accent); cursor: pointer;

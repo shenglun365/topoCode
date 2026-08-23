@@ -27,6 +27,7 @@ app.use(i18n)
 // Initialize locale in settings store
 const settingsStore = useSettingsStore()
 settingsStore.initLocale()
+settingsStore.initFontSize()
 
 // Mount
 app.mount('#app')

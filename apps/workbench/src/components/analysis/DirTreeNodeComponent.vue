@@ -177,11 +177,11 @@ function updateIndeterminate() {
 .dir-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 4px;
-  border-radius: 3px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 
@@ -190,8 +190,8 @@ function updateIndeterminate() {
 }
 
 .tree-arrow {
-  width: 16px;
-  height: 16px;
+  width: calc(16px * var(--ui-scale, 1));
+  height: calc(16px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -206,7 +206,7 @@ function updateIndeterminate() {
 }
 
 .tree-arrow-empty {
-  width: 16px;
+  width: calc(16px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 
@@ -224,11 +224,11 @@ function updateIndeterminate() {
 }
 
 .dir-file-count {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: var(--bg-tertiary);
-  padding: 0 4px;
-  border-radius: 3px;
+  padding: 0 calc(4px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 </style>

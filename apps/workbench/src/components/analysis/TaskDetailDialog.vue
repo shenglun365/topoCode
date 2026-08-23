@@ -290,7 +290,7 @@ function formatRunStatusColor(status: string): string {
                   ({{ task.current || 0 }}/{{ task.total || 0 }})
                   <span
                     v-if="task.eta"
-                    style="margin-left:6px; opacity:0.7; font-size:10px;"
+                    style="margin-left:calc(6px * var(--ui-scale, 1)); opacity:0.7; font-size:calc(10px * var(--ui-scale, 1));"
                   >
                     {{ t('analysis.etaRemaining', { eta: task.eta }) }}
                   </span>
@@ -526,13 +526,13 @@ function formatRunStatusColor(status: string): string {
 }
 
 .task-detail-dialog {
-  width: 600px;
+  width: calc(600px * var(--ui-scale, 1));
   max-height: 80vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
@@ -540,40 +540,40 @@ function formatRunStatusColor(status: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .dialog-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: calc(8px * var(--ui-scale, 1));
+  height: calc(8px * var(--ui-scale, 1));
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .status-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  border-radius: calc(10px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 500;
 }
 
 .dialog-close-btn {
-  width: 24px;
-  height: 24px;
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -588,20 +588,20 @@ function formatRunStatusColor(status: string): string {
 .dialog-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: calc(20px * var(--ui-scale, 1));
 }
 
 .detail-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .section-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -612,7 +612,7 @@ function formatRunStatusColor(status: string): string {
 .info-grid {
   display: grid;
   grid-template-columns: 120px 1fr;
-  gap: 8px 16px;
+  gap: calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
 }
 
 .info-row {
@@ -620,30 +620,30 @@ function formatRunStatusColor(status: string): string {
 }
 
 .info-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .info-value {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   flex-wrap: wrap;
 }
 
 .scopes-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .scope-tag {
-  padding: 1px 6px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 3px;
-  font-size: 11px;
+  border-radius: calc(3px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   font-family: monospace;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -653,32 +653,32 @@ function formatRunStatusColor(status: string): string {
 .distribution-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .distribution-total {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .distribution-loading {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--accent);
 }
 
 .distribution-bars {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .distribution-row {
   display: grid;
   grid-template-columns: 70px 1fr 40px;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   align-items: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .distribution-ext {
@@ -689,18 +689,18 @@ function formatRunStatusColor(status: string): string {
 }
 
 .distribution-bar-bg {
-  height: 14px;
+  height: calc(14px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
 .distribution-bar-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   transition: width 0.3s;
-  min-width: 2px;
+  min-width: calc(2px * var(--ui-scale, 1));
 }
 
 .distribution-count {
@@ -709,10 +709,10 @@ function formatRunStatusColor(status: string): string {
 }
 
 .progress-bar-inline {
-  width: 80px;
-  height: 8px;
+  width: calc(80px * var(--ui-scale, 1));
+  height: calc(8px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
@@ -720,15 +720,15 @@ function formatRunStatusColor(status: string): string {
   height: 100%;
   background: var(--accent);
   transition: width 0.3s;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
 }
 
 .error-message {
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--error)11;
   border: 1px solid var(--error)33;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--error);
   font-family: monospace;
 }
@@ -737,12 +737,12 @@ function formatRunStatusColor(status: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: calc(20px * var(--ui-scale, 1));
 }
 
 .loading-spinner {
-  width: 24px;
-  height: 24px;
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
   border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -757,27 +757,27 @@ function formatRunStatusColor(status: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 20px;
-  font-size: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .logs-container {
-  max-height: 200px;
+  max-height: calc(200px * var(--ui-scale, 1));
   overflow-y: auto;
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1));
   font-family: monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .log-entry {
   display: flex;
-  gap: 8px;
-  padding: 2px 0;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) 0;
   line-height: 1.5;
 }
 
@@ -793,7 +793,7 @@ function formatRunStatusColor(status: string): string {
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
-  padding: 12px 16px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
 }
 
@@ -806,10 +806,10 @@ function formatRunStatusColor(status: string): string {
 .run-select {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   color: var(--text-primary);
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: calc(11px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
   outline: none;
   cursor: pointer;
 }
@@ -820,18 +820,18 @@ function formatRunStatusColor(status: string): string {
 
 .runs-table {
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
 .runs-table-header {
   display: grid;
   grid-template-columns: 40px 100px 1fr 1fr 80px;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -841,9 +841,9 @@ function formatRunStatusColor(status: string): string {
 .runs-table-row {
   display: grid;
   grid-template-columns: 40px 100px 1fr 1fr 80px;
-  gap: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -865,7 +865,7 @@ function formatRunStatusColor(status: string): string {
 .runs-col {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -381,11 +381,11 @@ onMounted(() => load())
 
 <style scoped>
 .server-dir-card {
-  width: 640px;
+  width: calc(640px * var(--ui-scale, 1));
   max-width: 94vw;
   background: var(--bg-secondary, #1e1e2e);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   max-height: 85vh;
@@ -394,21 +394,21 @@ onMounted(() => load())
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
 }
 .dialog-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 .dialog-close {
-  font-size: 18px;
+  font-size: calc(18px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  border-radius: calc(6px * var(--ui-scale, 1));
   line-height: 1;
 }
 .dialog-close:hover {
@@ -416,40 +416,40 @@ onMounted(() => load())
   background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 .server-dir-body {
-  padding: 16px 20px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
 }
 .import-error {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: #ef4444;
   background: color-mix(in srgb, #ef4444 10%, transparent);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 .path-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 .path-input {
   flex: 1;
   min-width: 0;
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 .dir-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 11px;
+  gap: calc(10px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 .perm-chip, .host-chip {
-  border-radius: 6px;
-  padding: 2px 8px;
-  font-size: 11px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 .perm-ok {
   background: color-mix(in srgb, #22c55e 15%, transparent);
@@ -468,13 +468,13 @@ onMounted(() => load())
   color: var(--accent);
 }
 .dir-loading {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
-  padding: 12px 0;
+  padding: calc(12px * var(--ui-scale, 1)) 0;
 }
 .dir-list {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--ui-scale, 1));
   max-height: 44vh;
   overflow-y: auto;
   list-style: none;
@@ -484,10 +484,10 @@ onMounted(() => load())
 .dir-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(7px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
 }
@@ -504,7 +504,7 @@ onMounted(() => load())
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: calc(18px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 .dir-name {
@@ -515,30 +515,30 @@ onMounted(() => load())
   white-space: nowrap;
 }
 .dir-ro {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: #ef4444;
   flex-shrink: 0;
 }
 .dir-empty {
-  padding: 14px;
-  font-size: 12px;
+  padding: calc(14px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   text-align: center;
 }
 .new-dir-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 .dir-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-top: 4px;
+  gap: calc(10px * var(--ui-scale, 1));
+  margin-top: calc(4px * var(--ui-scale, 1));
 }
 .dir-selection {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -546,18 +546,18 @@ onMounted(() => load())
 }
 .analyze-block {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
 }
 .analyze-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 .analyze-root {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: calc(2px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -565,12 +565,12 @@ onMounted(() => load())
 .analyze-grid {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 .analyze-item {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 12px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
 }
 .analyze-ok {
   border-color: color-mix(in srgb, #22c55e 40%, transparent);
@@ -579,13 +579,13 @@ onMounted(() => load())
   border-color: color-mix(in srgb, #f59e0b 40%, transparent);
 }
 .analyze-item-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 .analyze-item-sub {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: calc(2px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -593,10 +593,10 @@ onMounted(() => load())
 .analyze-warn-block, .analyze-ok-block {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 .analyze-warn-block {
   border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent);

@@ -67,7 +67,7 @@ function getStatusIcon(status: string) {
         <span class="task-card-title">{{ task.name }}</span>
         <span
           :class="`badge ${taskStatusBadge[task.status]}`"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >
           {{ taskStatusNames[task.status] }}
         </span>
@@ -114,7 +114,7 @@ function getStatusIcon(status: string) {
           v-for="tag in task.tags"
           :key="tag"
           class="badge badge-blue"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >
           {{ tag }}
         </span>
@@ -131,17 +131,17 @@ function getStatusIcon(status: string) {
             :style="{ width: `${task.progress || 0}%` }"
           />
         </div>
-        <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+        <div style="font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-muted); margin-top:calc(4px * var(--ui-scale, 1));">
           {{ task.current || 0 }}/{{ task.total || 0 }} {{ t('common.file') }}
           <span
             v-show="task.progress != null"
-            style="margin-left:6px;"
+            style="margin-left:calc(6px * var(--ui-scale, 1));"
           >
             {{ typeof task.progress === 'number' ? task.progress.toFixed(2) : task.progress }}%
           </span>
           <span
             v-if="task.eta"
-            style="margin-left:4px; opacity:0.7;"
+            style="margin-left:calc(4px * var(--ui-scale, 1)); opacity:0.7;"
           >
             {{ task.eta }}
           </span>
@@ -152,7 +152,7 @@ function getStatusIcon(status: string) {
       <div
         v-if="task.status === 'error'"
         class="text-error"
-        style="font-size:10px; margin-top:4px;"
+        style="font-size:calc(10px * var(--ui-scale, 1)); margin-top:calc(4px * var(--ui-scale, 1));"
       >
         ⚠ {{ task.error }}
       </div>
@@ -160,7 +160,7 @@ function getStatusIcon(status: string) {
       <!-- 完成信息 -->
       <div
         v-if="task.status === 'done'"
-        style="font-size:10px; color:var(--text-muted); margin-top:4px;"
+        style="font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-muted); margin-top:calc(4px * var(--ui-scale, 1));"
       >
         {{ t('common.completed') }} {{ new Date(task.updatedAt).toLocaleString(localeStr as unknown as string) }}
       </div>
@@ -168,7 +168,7 @@ function getStatusIcon(status: string) {
       <!-- 依赖信息 -->
       <div
         v-if="task.status === 'pending'"
-        style="font-size:10px; color:var(--text-muted); margin-top:4px;"
+        style="font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-muted); margin-top:calc(4px * var(--ui-scale, 1));"
       >
         {{ t('common.pending') }}
       </div>
@@ -180,11 +180,11 @@ function getStatusIcon(status: string) {
       class="task-card-detail"
     >
       <div class="divider" />
-      <div style="padding-top:8px; font-size:10px; color:var(--text-secondary);">
-        <div style="margin-bottom:4px;">
-          {{ t('common.type') }}: <code style="font-size:10px;">{{ task.type }}</code>
+      <div style="padding-top:calc(8px * var(--ui-scale, 1)); font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-secondary);">
+        <div style="margin-bottom:calc(4px * var(--ui-scale, 1));">
+          {{ t('common.type') }}: <code style="font-size:calc(10px * var(--ui-scale, 1));">{{ task.type }}</code>
         </div>
-        <div style="margin-bottom:8px;">
+        <div style="margin-bottom:calc(8px * var(--ui-scale, 1));">
           {{ t('common.create') }}: {{ new Date(task.createdAt).toLocaleString(localeStr as unknown as string) }}
         </div>
 
@@ -236,24 +236,24 @@ function getStatusIcon(status: string) {
 
 <style scoped>
 .task-card {
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale, 1));
 }
 
 .task-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .task-card-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
 }
 
 .task-action-btn {
-  width: 24px;
-  height: 24px;
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
 }
 
 .task-action-btn.active {
@@ -262,7 +262,7 @@ function getStatusIcon(status: string) {
 
 .task-card-meta {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   flex-wrap: wrap;
 }
 

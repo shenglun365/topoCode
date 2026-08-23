@@ -825,40 +825,40 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 24px 16px;
+  gap: calc(10px * var(--ui-scale, 1));
+  padding: calc(24px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .ai-empty-title {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .ai-empty-desc {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   line-height: 1.5;
 }
 
 .ai-config-link {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
-  margin-top: 4px;
+  margin-top: calc(4px * var(--ui-scale, 1));
 }
 
 .ai-context-bar {
-  padding: 6px 12px;
-  font-size: 11px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 .ai-context-label {
@@ -871,10 +871,10 @@ onMounted(() => {
 .ai-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
 }
 
 .ai-message {
@@ -896,9 +896,9 @@ onMounted(() => {
 
 .ai-message-bubble {
   max-width: 90%;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  border-radius: calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   line-height: 1.6;
   word-break: break-word;
 }
@@ -918,14 +918,14 @@ onMounted(() => {
 .ai-message-streaming {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 12px 16px !important;
-  min-height: 20px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)) !important;
+  min-height: calc(20px * var(--ui-scale, 1));
 }
 
 .ai-loading-dot {
-  width: 6px;
-  height: 6px;
+  width: calc(6px * var(--ui-scale, 1));
+  height: calc(6px * var(--ui-scale, 1));
   border-radius: 50%;
   background: var(--text-muted);
   animation: ai-loading-bounce 1.4s ease-in-out infinite both;
@@ -942,8 +942,8 @@ onMounted(() => {
 
 .ai-messages-more {
   text-align: center;
-  padding: 6px;
-  font-size: 11px;
+  padding: calc(6px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--accent);
   cursor: pointer;
 }
@@ -954,7 +954,7 @@ onMounted(() => {
 .ai-message-system .ai-message-bubble {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .ai-message-error .ai-message-bubble {
@@ -969,17 +969,17 @@ onMounted(() => {
   bottom: 100%;
   left: 0;
   right: 0;
-  margin: 0 12px;
+  margin: 0 calc(12px * var(--ui-scale, 1));
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
   overflow: hidden;
   z-index: 10;
 }
 .ai-suggest-item {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   cursor: pointer;
   color: var(--text-primary);
   transition: background 0.1s;
@@ -997,8 +997,8 @@ onMounted(() => {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
 }
@@ -1006,12 +1006,12 @@ onMounted(() => {
 .ai-textarea {
   width: 100%;
   resize: none;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-family: inherit;
   outline: none;
   transition: border-color 0.15s;
@@ -1029,22 +1029,22 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 .ai-actions-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   margin-right: auto;
 }
 
 .ai-action-btn {
-  width: 28px;
-  height: 28px;
+  width: calc(28px * var(--ui-scale, 1));
+  height: calc(28px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
   color: var(--text-muted);
   background: transparent;
@@ -1062,12 +1062,12 @@ onMounted(() => {
 }
 
 .ai-send-btn {
-  width: 28px;
-  height: 28px;
+  width: calc(28px * var(--ui-scale, 1));
+  height: calc(28px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
   background: var(--accent);
   color: white;
@@ -1083,17 +1083,17 @@ onMounted(() => {
 .ai-mode-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  gap: calc(3px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  border-radius: calc(10px * var(--ui-scale, 1));
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   transition: all 0.15s;
   white-space: nowrap;
-  height: 22px;
+  height: calc(22px * var(--ui-scale, 1));
 }
 .ai-mode-btn:hover {
   border-color: var(--accent);
@@ -1141,7 +1141,7 @@ onMounted(() => {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 0.85em;
   background: var(--bg-tertiary);
-  padding: 0.1em 0.3em; border-radius: 3px;
+  padding: 0.1em 0.3em; border-radius: calc(3px * var(--ui-scale, 1));
 }
 .ai-message-assistant .ai-message-bubble :deep(code.cmd-click) {
   cursor: pointer;
@@ -1154,7 +1154,7 @@ onMounted(() => {
 }
 .ai-message-assistant .ai-message-bubble :deep(pre) {
   background: var(--bg-tertiary); border: 1px solid var(--border);
-  border-radius: 4px; padding: 0.5em 0.7em; overflow-x: auto;
+  border-radius: calc(4px * var(--ui-scale, 1)); padding: 0.5em 0.7em; overflow-x: auto;
   margin: 0.4em 0; line-height: 1.4;
 }
 .ai-message-assistant .ai-message-bubble :deep(pre code) {
@@ -1178,7 +1178,7 @@ onMounted(() => {
 .ai-message-assistant .ai-message-bubble :deep(blockquote) {
   border-left: 3px solid var(--accent); margin: 0.4em 0; padding: 0.2em 0.6em;
   color: var(--text-muted); background: color-mix(in srgb, var(--accent) 5%, transparent);
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 calc(4px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1)) 0;
 }
 
 .ai-message-assistant .ai-message-bubble :deep(a) {
@@ -1199,7 +1199,7 @@ onMounted(() => {
 
 /* ---- 组件选择引用区 ---- */
 .ai-selection-refs {
-  margin: 0 12px 4px;
+  margin: 0 calc(12px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1));
   padding: 0.35rem 0.5rem;
   background: var(--bg-secondary);
   border: 1px dashed var(--accent);
@@ -1242,7 +1242,7 @@ onMounted(() => {
 }
 .ai-selection-chip-name {
   color: var(--text-primary);
-  max-width: 100px;
+  max-width: calc(100px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { AppToolbar } from '../../shell'
+import { AppToolbar, readFontSize } from '../../shell'
 import ModelsPanel from './ModelsPanel.vue'
 import GeneralPanel from './GeneralPanel.vue'
 import ThemesPanel from './ThemesPanel.vue'
@@ -8,6 +8,8 @@ import AgentsPanel from './AgentsPanel.vue'
 import AboutPanel from './AboutPanel.vue'
 
 type SectionKey = 'models' | 'general' | 'theme' | 'agents' | 'about'
+
+const fontSize = ref(readFontSize())
 
 const sections: Array<{ key: SectionKey; label: string }> = [
   { key: 'models', label: '模型设置' },
@@ -30,6 +32,8 @@ function goHome() {
       app-key="portal"
       title="设置"
       :font-targets="['--content-font-size']"
+      :font-size="fontSize"
+      @update:font-size="fontSize = $event"
     >
       <template #tools>
         <a href="#/" class="toolbar-btn">← 返回首页</a>

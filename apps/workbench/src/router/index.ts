@@ -1,6 +1,8 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
+import { useNavigationStore } from '@/stores/navigation'
+import type { PageType } from '@/types'
 
 const routes: RouteRecordRaw[] = [
   // dev 模式：5173/ 显示统一首页（四模块入口）；生产构建（/app 主工作台）仍 redirect 到 /home
@@ -80,6 +82,20 @@ router.beforeEach((to, _from, next) => {
     document.title = `TopoCode · ${title}`
   }
   next()
+})
+
+const routePageMap: Record<string, PageType> = {
+  '/home': 'home',
+  '/code': 'code',
+  '/analysis': 'analysis',
+  '/knowledge': 'knowledge',
+}
+
+// 从路由同步左侧导航选中态与面包屑（刷新 / 直达 URL 时保证高亮正确）
+router.afterEach((to) => {
+  const page = routePageMap[to.path]
+  if (!page) return
+  useNavigationStore().navigateTo(page)
 })
 
 export default router

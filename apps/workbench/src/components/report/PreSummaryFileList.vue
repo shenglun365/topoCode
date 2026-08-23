@@ -265,20 +265,20 @@ watch(() => props.taskId, loadFiles)
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 16px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
 .ps-context-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 10px;
-  padding: 6px 10px;
+  gap: calc(4px * var(--ui-scale, 1));
+  margin-bottom: calc(10px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 .ps-context-project {
@@ -287,7 +287,7 @@ watch(() => props.taskId, loadFiles)
 }
 .ps-context-sep {
   color: var(--text-muted);
-  margin: 0 2px;
+  margin: 0 calc(2px * var(--ui-scale, 1));
 }
 .ps-context-task {
   color: var(--text-secondary);
@@ -295,28 +295,28 @@ watch(() => props.taskId, loadFiles)
 .ps-context-id {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
 }
 
 .ps-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 
 .ps-batch-tabs {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .ps-batch-tab {
-  padding: 3px 12px;
-  font-size: 11px;
+  padding: calc(3px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 500;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-muted);
   cursor: pointer;
@@ -339,11 +339,11 @@ watch(() => props.taskId, loadFiles)
 }
 
 .ps-search-input {
-  width: 220px;
-  padding: 4px 8px;
-  font-size: 11px;
+  width: calc(220px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-primary);
   color: var(--text-primary);
   outline: none;
@@ -356,10 +356,10 @@ watch(() => props.taskId, loadFiles)
 .ps-stats-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 
@@ -371,13 +371,13 @@ watch(() => props.taskId, loadFiles)
   flex: 1;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
 }
 
 .ps-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .ps-table th {
@@ -387,13 +387,13 @@ watch(() => props.taskId, loadFiles)
   color: var(--text-muted);
   font-weight: 500;
   text-align: left;
-  padding: 6px 8px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 
 .ps-table td {
-  padding: 5px 8px;
+  padding: calc(5px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
 }
@@ -408,28 +408,28 @@ watch(() => props.taskId, loadFiles)
 }
 
 .ps-col-path {
-  min-width: 200px;
+  min-width: calc(200px * var(--ui-scale, 1));
 }
 
 .ps-col-num {
-  width: 50px;
+  width: calc(50px * var(--ui-scale, 1));
   text-align: right;
 }
 
 .ps-col-status {
-  width: 70px;
+  width: calc(70px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .ps-col-action {
-  width: 56px;
+  width: calc(56px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .ps-cell-path {
   font-family: var(--font-mono);
-  font-size: 10px;
-  max-width: 400px;
+  font-size: calc(10px * var(--ui-scale, 1));
+  max-width: calc(400px * var(--ui-scale, 1));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -445,15 +445,15 @@ watch(() => props.taskId, loadFiles)
 .ps-cell-num {
   text-align: right;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-secondary);
 }
 
 .ps-cached-badge {
   display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 9px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
+  font-size: calc(9px * var(--ui-scale, 1));
   background: color-mix(in srgb, var(--success) 15%, transparent);
   color: var(--success);
   border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
@@ -461,19 +461,19 @@ watch(() => props.taskId, loadFiles)
 
 .ps-uncached-badge {
   display: inline-block;
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 9px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
+  font-size: calc(9px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
 
 .ps-delete-btn {
-  padding: 1px 6px;
-  font-size: 9px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  font-size: calc(9px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -490,7 +490,7 @@ watch(() => props.taskId, loadFiles)
   align-items: center;
   justify-content: center;
   height: 100%;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
@@ -502,19 +502,19 @@ watch(() => props.taskId, loadFiles)
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 0;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) 0;
   flex-shrink: 0;
 }
 
 .ps-page-btn {
-  padding: 2px 10px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   transition: all 0.15s;
 }
 
@@ -528,7 +528,7 @@ watch(() => props.taskId, loadFiles)
 }
 
 .ps-page-info {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: var(--font-mono);
 }

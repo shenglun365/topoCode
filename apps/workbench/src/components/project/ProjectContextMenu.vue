@@ -108,24 +108,24 @@ const emit = defineEmits<{
 .context-menu {
   position: fixed;
   z-index: 9999;
-  width: 190px;
+  width: calc(190px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-  padding: 6px;
-  font-size: 12px;
+  padding: calc(6px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 .context-menu-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(7px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1)); border-radius: calc(6px * var(--ui-scale, 1)); cursor: pointer;
   color: var(--text-primary); transition: background 0.12s;
 }
 .context-menu-item:hover { background: var(--bg-hover); }
 .context-menu-item-warning { color: var(--warning); }
 .context-menu-item-danger { color: var(--error); }
-.context-menu-divider { height: 1px; background: var(--border); margin: 4px 6px; }
-.menu-icon-text { width: 16px; text-align: center; font-size: 14px; }
+.context-menu-divider { height: 1px; background: var(--border); margin: calc(4px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1)); }
+.menu-icon-text { width: calc(16px * var(--ui-scale, 1)); text-align: center; font-size: calc(14px * var(--ui-scale, 1)); }
 .context-menu-backdrop {
   position: fixed; inset: 0; z-index: 9998;
 }

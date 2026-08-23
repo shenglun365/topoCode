@@ -9,6 +9,30 @@ from typing import Callable, Optional
 from .tools import ToolRegistry
 
 
+def _forward_item_log_transitions(tool, runtime, types) -> None:
+    """把子 runtime 的 item 日志状态变化转发到外层 runtime（经 tool._forward_log）。
+
+    每个 (type, name) 仅在状态变化时转发一次，避免旧实现每个轮询 tick
+    重复转发全部 running 项，导致同一文件在消息栏出现多条重复日志。
+    """
+    forward = getattr(tool, '_forward_log', None)
+    if not forward:
+        return
+    states = getattr(tool, '_fwd_log_states', None)
+    if not isinstance(states, dict):
+        states = {}
+        tool._fwd_log_states = states
+    for log in runtime._item_logs:
+        if log.type not in types:
+            continue
+        key = (log.type, log.name)
+        if states.get(key) == log.status:
+            continue
+        states[key] = log.status
+        if log.status in ('running', 'success', 'failed', 'retry'):
+            forward(log.type, log.name, log.status, log.startTime, log.endTime, log.error)
+
+
 def build_component_analyst_tools(
     llm_chat_fn: Callable,
     render_prompt: Callable = None,
@@ -168,14 +192,8 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                                     wf_result = future.result(timeout=1.0)
                                     break
                                 except _TimeoutError:
-                                    # 仅转发 running 状态，让前端可以看到当前正在处理的文件
-                                    if hasattr(self, '_forward_log'):
-                                        for log in runtime._item_logs:
-                                            if log.type == 'file' and log.status == 'running':
-                                                self._forward_log(
-                                                    log.type, log.name, log.status,
-                                                    log.startTime, log.endTime, log.error,
-                                                )
+                                    # 转发文件状态变化（running/success/failed），让前端看到当前文件且不产生重复
+                                    _forward_item_log_transitions(self, runtime, ('file', 'component'))
                                     continue
                         else:
                             wf_result = future.result(timeout=7200)
@@ -317,14 +335,8 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                                     wf_result = future.result(timeout=1.0)
                                     break
                                 except _TimeoutError:
-                                    # 仅转发 running 状态，让前端可以看到当前正在分析的组件
-                                    if hasattr(self, '_forward_log'):
-                                        for log in runtime._item_logs:
-                                            if log.status == 'running':
-                                                self._forward_log(
-                                                    log.type, log.name, log.status,
-                                                    log.startTime, log.endTime, log.error,
-                                                )
+                                    # 转发组件状态变化（running/success/failed），让前端看到当前组件且不产生重复
+                                    _forward_item_log_transitions(self, runtime, ('file', 'component'))
                                     continue
                         else:
                             if _timeout_sec > 0:

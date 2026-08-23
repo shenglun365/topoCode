@@ -361,7 +361,7 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
 }
@@ -369,68 +369,68 @@ watch(
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .doc-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .toolbar-right {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .subdoc-preview {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
 }
 
 .doc-meta {
   display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
+  gap: calc(16px * var(--ui-scale, 1));
+  margin-bottom: calc(16px * var(--ui-scale, 1));
+  padding-bottom: calc(12px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .doc-content {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   line-height: 1.8;
   color: var(--text-primary);
 }
 
 .doc-content :deep(h1) {
-  font-size: 20px;
+  font-size: calc(20px * var(--ui-scale, 1));
   font-weight: 700;
-  margin: 16px 0 8px;
-  padding-bottom: 8px;
+  margin: calc(16px * var(--ui-scale, 1)) 0 calc(8px * var(--ui-scale, 1));
+  padding-bottom: calc(8px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .doc-content :deep(h2) {
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-scale, 1));
   font-weight: 600;
-  margin: 14px 0 6px;
+  margin: calc(14px * var(--ui-scale, 1)) 0 calc(6px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(h3) {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
-  margin: 12px 0 4px;
+  margin: calc(12px * var(--ui-scale, 1)) 0 calc(4px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(code) {
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: 1px calc(4px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(strong) {
@@ -440,10 +440,10 @@ watch(
 
 /* 内联图占位容器 */
 .doc-content :deep(.diagram-placeholder) {
-  min-height: 60px;
-  margin: 12px 0;
+  min-height: calc(60px * var(--ui-scale, 1));
+  margin: calc(12px * var(--ui-scale, 1)) 0;
   background: var(--bg-tertiary);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -451,25 +451,25 @@ watch(
 
 .doc-content :deep(.diagram-placeholder .diagram-loading) {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(.diagram-placeholder .diagram-error) {
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-family: var(--font-mono);
-  padding: 8px 12px;
-  border-radius: 0 0 6px 6px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  border-radius: 0 0 calc(6px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
   background: rgba(var(--danger-rgb, 239, 68, 68), 0.08);
   border-top: 1px solid rgba(var(--danger-rgb, 239, 68, 68), 0.2);
 }
 
 .doc-content :deep(.diagram-placeholder .fallback-code) {
   margin: 0;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-primary);
   overflow-x: auto;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   line-height: 1.5;
   color: var(--text-primary);
 }
@@ -477,7 +477,7 @@ watch(
 .doc-content :deep(.diagram-placeholder .fallback-diagram) {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
@@ -485,10 +485,10 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(.fallback-diagram-lang) {
@@ -497,13 +497,13 @@ watch(
 }
 
 .doc-content :deep(.fallback-diagram-copy) {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   cursor: pointer;
   color: var(--accent);
   background: none;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 8px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(.fallback-diagram-copy:hover) {
@@ -520,16 +520,16 @@ watch(
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 12px;
-  gap: 8px;
+  padding: calc(12px * var(--ui-scale, 1));
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .edit-title {
-  padding: 6px 10px;
-  font-size: 14px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 500;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-primary);
   outline: none;
@@ -538,18 +538,18 @@ watch(
 /* 编辑模式 */
 .edit-actions {
   display: flex;
-  gap: 6px;
-  padding: 4px 0;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) 0;
 }
 .edit-textarea {
   flex: 1;
   width: 100%;
-  padding: 10px;
-  font-size: 12px;
+  padding: calc(10px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   font-family: var(--font-mono);
   line-height: 1.5;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-primary);
   outline: none;
@@ -561,14 +561,14 @@ watch(
 .doc-content :deep(table) {
   border-collapse: collapse;
   width: 100%;
-  margin: 8px 0;
-  font-size: 12px;
+  margin: calc(8px * var(--ui-scale, 1)) 0;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .doc-content :deep(th),
 .doc-content :deep(td) {
   border: 1px solid var(--border);
-  padding: 6px 10px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   text-align: left;
 }
 
@@ -583,12 +583,12 @@ watch(
 }
 
 .save-error-banner {
-  margin: 8px 12px;
-  padding: 8px 12px;
+  margin: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: color-mix(in srgb, var(--error) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   color: var(--error);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 </style>

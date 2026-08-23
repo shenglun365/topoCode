@@ -227,21 +227,21 @@ function close() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
 }
 .dialog-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 .dialog-close {
-  font-size: 18px;
+  font-size: calc(18px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  border-radius: calc(6px * var(--ui-scale, 1));
   line-height: 1;
 }
 .dialog-close:hover {
@@ -249,31 +249,31 @@ function close() {
   background: color-mix(in srgb, var(--text-primary) 10%, transparent);
 }
 .import-source-card {
-  width: 520px;
+  width: calc(520px * var(--ui-scale, 1));
   max-width: 92vw;
   background: var(--bg-secondary, #1e1e2e);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   max-height: 85vh;
 }
 .import-source-body {
-  padding: 16px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--ui-scale, 1));
 }
 .mode-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 .mode-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 10px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   cursor: pointer;
   background: var(--bg-tertiary, transparent);
   text-align: left;
@@ -286,47 +286,47 @@ function close() {
 }
 .mode-card-label {
   display: block;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 .mode-card-hint {
   display: block;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: calc(2px * var(--ui-scale, 1));
 }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field-row { display: flex; align-items: center; gap: 8px; }
-.field-row.two-col { display: flex; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: calc(6px * var(--ui-scale, 1)); }
+.field-row { display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1)); }
+.field-row.two-col { display: flex; gap: calc(10px * var(--ui-scale, 1)); }
 .grow { flex: 1; }
-.field-label { font-size: 12px; color: var(--text-secondary); }
+.field-label { font-size: calc(12px * var(--ui-scale, 1)); color: var(--text-secondary); }
 .hint-warn {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: #d97706;
   background: color-mix(in srgb, #d97706 10%, transparent);
   border: 1px solid color-mix(in srgb, #d97706 35%, transparent);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   line-height: 1.5;
 }
 .hint-info {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   line-height: 1.5;
 }
 .import-error {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: #ef4444;
   background: color-mix(in srgb, #ef4444 10%, transparent);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 .dialog-footer {
-  padding: 12px 20px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: calc(10px * var(--ui-scale, 1));
 }
 </style>

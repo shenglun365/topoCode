@@ -14,7 +14,7 @@ const { theme, toggle } = useTheme(props.appKey)
     class="theme-toggle"
     type="button"
     :title="theme === 'dark' ? '切换到亮色' : '切换到暗色'"
-    :style="{ width: size + 'px', height: size + 'px' }"
+    :style="{ width: 'calc(' + size + 'px * var(--ui-scale, 1))', height: 'calc(' + size + 'px * var(--ui-scale, 1))' }"
     @click="toggle"
   >
     <svg
@@ -63,5 +63,10 @@ const { theme, toggle } = useTheme(props.appKey)
 .theme-toggle:hover {
   border-color: var(--accent, #4d6bfe);
   color: var(--accent, #4d6bfe);
+}
+.theme-toggle svg {
+  width: calc(16px * var(--ui-scale, 1));
+  height: calc(16px * var(--ui-scale, 1));
+  flex-shrink: 0;
 }
 </style>

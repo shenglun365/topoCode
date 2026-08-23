@@ -70,9 +70,9 @@ function onLocale(l: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  height: 48px;
-  padding: 0 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  height: calc(48px * var(--ui-scale, 1));
+  padding: 0 calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary, #181825);
   border-bottom: 1px solid var(--border, #45475a);
   flex-shrink: 0;
@@ -80,14 +80,13 @@ function onLocale(l: string) {
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   min-width: 0;
-  overflow: hidden;
 }
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 .toolbar-title {

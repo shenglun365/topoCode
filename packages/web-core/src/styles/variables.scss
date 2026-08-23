@@ -23,12 +23,12 @@
   --border:         #45475a;  /* surface1 */
   --border-light:   #585b70;  /* surface2 */
 
-  /* 尺寸 */
-  --activity-bar-width: 48px;
-  --tab-bar-height:    36px;
-  --status-bar-height: 24px;
-  --panel-left-width:  240px;
-  --panel-right-width: 280px;
+  /* 尺寸（随 --ui-scale 等比缩放） */
+  --activity-bar-width: calc(48px * var(--ui-scale, 1));
+  --tab-bar-height:    calc(36px * var(--ui-scale, 1));
+  --status-bar-height: calc(24px * var(--ui-scale, 1));
+  --panel-left-width:  calc(240px * var(--ui-scale, 1));
+  --panel-right-width: calc(280px * var(--ui-scale, 1));
 
   /* 圆角 */
   --radius-sm: 4px;
@@ -55,7 +55,7 @@
   --radius-full:   9999px;
   --transition:    0.2s ease;
   /* 内容字号基线：FontSizeSelect 写入 <html>；--ui-scale 为相对 16px 基线的比例，
-     供门户/共享控件按字号等比缩放宽高（字号档位 13~48px） */
+     供门户/共享控件按字号等比缩放宽高（字号档位 13~32px） */
   --content-font-size: 16px;
   --ui-scale: calc(var(--content-font-size) / 16px);
   --ui-font-size:  14px;

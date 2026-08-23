@@ -201,7 +201,17 @@ export const useProjectStore = defineStore('project', () => {
     return null
   }
 
+  /** 最近选中项目：刷新后无 ?project= 查询时由 AppShell 回退恢复 */
+  const LAST_PROJECT_KEY = 'topoone-last-project'
+
   async function selectProject(id: string) {
+    // 刷新直达 /analysis 等页面时项目列表可能尚未加载，selectedProject 依赖它查找，
+    // 不加载则 TopBar 项目徽章永远为空
+    if (projects.value.length === 0 && !loading.value) {
+      await loadProjects().catch(() => {})
+    }
+    // 统一在此记录最近项目（覆盖所有选择入口，避免回退键过期）
+    try { localStorage.setItem(LAST_PROJECT_KEY, id) } catch { /* ignore */ }
     // 委托给 funcGroup store（首页+代码解析+分析功能组）
     funcGroup.selectProject('home', id)
     funcGroup.selectProject('code', id)

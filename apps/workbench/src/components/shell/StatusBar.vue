@@ -120,18 +120,18 @@ async function testModelStatus() {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  gap: 16px;
+  padding: 0 calc(12px * var(--ui-scale, 1));
+  gap: calc(16px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .status-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   cursor: default;
 }
 
@@ -154,8 +154,8 @@ async function testModelStatus() {
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: calc(6px * var(--ui-scale, 1));
+  height: calc(6px * var(--ui-scale, 1));
   border-radius: 50%;
 }
 .status-dot.status-running {

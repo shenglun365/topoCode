@@ -85,6 +85,11 @@ export const useSettingsStore = defineStore('settings', () => {
     applyFontSize(px, ['root'])
   }
 
+  /** 启动时应用已保存字号（root + --ui-scale 同步） */
+  function initFontSize() {
+    applyFontSize(fontSize.value, ['root'])
+  }
+
   function setActiveTab(tab: 'ai' | 'general' | 'theme' | 'templates' | 'about' | 'import' | 'agent') {
     activeTab.value = tab
   }
@@ -188,7 +193,7 @@ export const useSettingsStore = defineStore('settings', () => {
     zmqDealerPort, zmqPubPort, dealerPortStatus, pubPortStatus,
     importConfig, importConfigLoading,
     resourceProjectsDir, resourceDirHistory,
-    setProjectPageSize, initLocale, setLocale, setActiveTab, setFontSize,
+    setProjectPageSize, initLocale, initFontSize, setLocale, setActiveTab, setFontSize,
     restartBackend, restartState, restartErrorMsg, hasRunningTasks,
     setPythonMemoryLimit, loadPythonMemoryLimit, testPort,
     loadImportConfig, saveImportConfig,

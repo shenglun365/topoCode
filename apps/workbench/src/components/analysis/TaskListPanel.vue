@@ -568,18 +568,18 @@ function getConfigSummary(task: AnalysisTask): string {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
 }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale, 1));
 }
 
 .panel-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -588,19 +588,19 @@ function getConfigSummary(task: AnalysisTask): string {
 .task-stats {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: calc(12px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 12px;
-  font-size: 12px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   color: var(--text-secondary);
 }
 
@@ -610,14 +610,14 @@ function getConfigSummary(task: AnalysisTask): string {
 }
 
 .stat-dot {
-  width: 6px;
-  height: 6px;
+  width: calc(6px * var(--ui-scale, 1));
+  height: calc(6px * var(--ui-scale, 1));
   border-radius: 50%;
 }
 
 .stat-divider {
   width: 1px;
-  height: 16px;
+  height: calc(16px * var(--ui-scale, 1));
   background: var(--border);
 }
 
@@ -626,7 +626,7 @@ function getConfigSummary(task: AnalysisTask): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
@@ -635,17 +635,17 @@ function getConfigSummary(task: AnalysisTask): string {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .task-card {
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .task-card:hover {
@@ -661,60 +661,60 @@ function getConfigSummary(task: AnalysisTask): string {
 .task-name-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: calc(8px * var(--ui-scale, 1));
+  height: calc(8px * var(--ui-scale, 1));
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .task-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .task-type-badge {
-  padding: 1px 6px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 3px;
-  font-size: 10px;
+  border-radius: calc(3px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: monospace;
 }
 
 .task-name-btn {
-  padding: 2px 4px;
-  margin-left: 2px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1));
+  margin-left: calc(2px * var(--ui-scale, 1));
   color: var(--text-muted);
-  gap: 2px;
+  gap: calc(2px * var(--ui-scale, 1));
 }
 .task-name-btn:hover {
   color: var(--accent);
 }
 .task-name-btn-text {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
 }
 
 .task-progress-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .task-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 500;
 }
 
 .task-progress-bar {
-  width: 60px;
-  height: 6px;
+  width: calc(60px * var(--ui-scale, 1));
+  height: calc(6px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   overflow: hidden;
 }
 
@@ -722,18 +722,18 @@ function getConfigSummary(task: AnalysisTask): string {
   height: 100%;
   background: var(--accent);
   transition: width 0.3s;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
 }
 
 .task-progress-text {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
-  min-width: 32px;
+  min-width: calc(32px * var(--ui-scale, 1));
   text-align: right;
 }
 
 .task-progress-eta {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   opacity: 0.7;
   font-family: var(--font-mono);
@@ -741,7 +741,7 @@ function getConfigSummary(task: AnalysisTask): string {
 }
 
 .task-card-body {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: monospace;
 }
@@ -749,27 +749,27 @@ function getConfigSummary(task: AnalysisTask): string {
 .task-error {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--error)11;
   border: 1px solid var(--error)33;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--error);
 }
 
 .task-card-actions {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   flex-wrap: wrap;
   align-items: center;
 }
 .actions-spacer { flex: 1; }
 
 .btn-xs {
-  padding: 3px 8px;
-  font-size: 11px;
-  gap: 4px;
+  padding: calc(3px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .btn-warning {
@@ -800,27 +800,27 @@ function getConfigSummary(task: AnalysisTask): string {
 }
 
 .confirm-dialog {
-  width: 360px;
-  padding: 20px;
+  width: calc(360px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale, 1));
 }
 
 .confirm-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .confirm-body {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   color: var(--text-secondary);
   line-height: 1.5;
 }
@@ -828,26 +828,26 @@ function getConfigSummary(task: AnalysisTask): string {
 .confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 /* Stats bar */
 .task-stats-bar {
   display: flex;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: calc(12px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 12px;
-  font-size: 12px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-secondary);
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .stat-running {
@@ -870,15 +870,15 @@ function getConfigSummary(task: AnalysisTask): string {
 .task-modified-badge {
   background: var(--warning);
   color: var(--bg-primary);
-  padding: 1px 6px;
-  border-radius: 8px;
-  font-size: 10px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(8px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 600;
 }
 
 .task-run-count {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-left: 4px;
+  margin-left: calc(4px * var(--ui-scale, 1));
 }
 </style>

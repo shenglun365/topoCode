@@ -298,10 +298,15 @@ async def upload_archive(file: UploadFile = File(...)):
     if not name:
         name = "archive.zip"
     dest = os.path.join(uploads_dir, f"{int(_time.time() * 1000)}_{name}")
-    try:
+
+    def _copy():
+        # 同步磁盘 IO 必须放线程池：大文件上传若直接在事件循环线程拷贝会阻塞整个网关
+        import shutil
         with open(dest, "wb") as out:
-            import shutil
             shutil.copyfileobj(file.file, out)
+
+    try:
+        await asyncio.to_thread(_copy)
     finally:
         try:
             file.file.close()

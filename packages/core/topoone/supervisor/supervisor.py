@@ -29,6 +29,8 @@ _HEARTBEAT_TIMEOUT = 15.0   # 秒，超过此时间未收到心跳判定为可�
 _DEAD_TIMEOUT = 30.0        # 秒，超过此时间判定为死亡
 _READY_TIMEOUT = 30.0       # 秒，启动后等待 ready 的最长时间
 _PROBE_INTERVAL = 1.0       # 秒，HTTP 健康探针间隔
+_PROBE_FAIL_LIMIT = 5       # 连续探针失败次数（5×5s=25s）判定为挂死 → kill 重启
+_KEEP_LOGS = 3              # 每个 worker 保留的历史日志文件数（按 pid 分文件）
 
 
 @dataclass
@@ -44,6 +46,9 @@ class WorkerInfo:
     stop_requested: bool = False
     health_url: Optional[str] = None   # 若设置，就绪判定改用 HTTP 探针（plain 服务）
     env: Optional[dict] = None         # 追加的子进程环境变量
+    probe_fails: int = 0               # 连续健康探针失败计数（挂死检测）
+    log_file: Optional[object] = None  # 子进程 stdout 重定向的日志文件句柄
+    tail_task: Optional[asyncio.Task] = None  # 日志 tail 协程（每次 spawn 重建）
 
     @property
     def is_alive(self) -> bool:
@@ -66,11 +71,16 @@ def _http_ok(url: str, timeout: float = 2.0) -> bool:
 class Supervisor:
     """子进程监督者"""
 
-    def __init__(self):
+    def __init__(self, log_dir: Optional[str] = None):
         self._workers: dict[str, WorkerInfo] = {}
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._monitor_task: Optional[asyncio.Task] = None
+        # 子进程 stdout 落盘目录（关键解耦：普通文件写入永不阻塞子进程，
+        # 而 64KB 的管道一旦排空不及时就会把子进程主线程卡死在 write()）
+        self._log_dir = log_dir
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
     # ── 注册 ────────────────────────────────────────────────────
 
@@ -107,21 +117,59 @@ class Supervisor:
                     await asyncio.wait_for(self._wait_health(wi), timeout=_READY_TIMEOUT)
                 else:
                     await asyncio.wait_for(wi.ready_event.wait(), timeout=_READY_TIMEOUT)
-                logger.info(f"[Supervisor] {label} is ready")
             except asyncio.TimeoutError:
                 logger.warning(f"[Supervisor] {label} not ready within {_READY_TIMEOUT}s")
+                continue
+            if wi.is_alive and wi.status == "ready":
+                logger.info(f"[Supervisor] {label} is ready")
+            else:
+                logger.warning(f"[Supervisor] {label} not ready (process exited early?)")
 
         # 启动监控协程
         self._monitor_task = self._loop.create_task(self._monitor_loop())
 
     async def _wait_health(self, wi: WorkerInfo):
-        """轮询 HTTP 健康端点直到就绪"""
+        """轮询 HTTP 健康端点直到就绪（进程已退出则立即返回，由监控循环重启）"""
         while self._running:
-            if _http_ok(wi.health_url):
+            if not wi.is_alive:
+                return
+            # _http_ok 是同步阻塞调用（urllib），必须放到线程池，避免阻塞事件循环
+            ok = await self._loop.run_in_executor(None, _http_ok, wi.health_url)
+            if ok:
                 wi.status = "ready"
                 wi.ready_event.set()
                 return
             await asyncio.sleep(_PROBE_INTERVAL)
+
+    def _close_log(self, wi: WorkerInfo):
+        """关闭 worker 的日志文件句柄（若存在）"""
+        try:
+            if wi.log_file:
+                wi.log_file.close()
+        except Exception:
+            pass
+        wi.log_file = None
+
+    def _open_worker_log(self, label: str, pid: int) -> object:
+        """为 worker 打开按 pid 分文件的 stdout 日志，并裁剪历史文件。
+
+        注意必须是可读可写模式（"a+"）：子进程写 + supervisor tail 读共用此句柄。
+        """
+        path = os.path.join(self._log_dir, f"{label}-{pid}.log")
+        # ab+：二进制可读可写、写端追加；无缓冲。子进程继承 fd 直接写盘，
+        # supervisor 侧从当前读位置增量 read（普通文件 read 无数据时立即返回）。
+        f = open(path, "ab+", buffering=0)
+        if self._log_dir:
+            try:
+                old = sorted(
+                    (os.path.join(self._log_dir, n) for n in os.listdir(self._log_dir)
+                     if n.startswith(f"{label}-") and n.endswith(".log") and n != os.path.basename(path)),
+                    key=os.path.getmtime, reverse=True)
+                for stale in old[_KEEP_LOGS - 1:]:
+                    os.remove(stale)
+            except Exception:
+                pass
+        return f
 
     def _spawn(self, label: str):
         """启动一个 worker 进程"""
@@ -131,6 +179,12 @@ class Supervisor:
         wi.status = "starting"
         wi.restart_count += 1
         wi.ready_event.clear()
+        wi.probe_fails = 0
+        # 关闭上一轮实例的日志句柄与 tail 协程，避免泄漏/重复 tail
+        self._close_log(wi)
+        if wi.tail_task and not wi.tail_task.done():
+            wi.tail_task.cancel()
+        wi.tail_task = None
         try:
             env = dict(os.environ)
             # JSON 信号 worker（db_service/agent_worker 等）默认按 distributed 模式启动；
@@ -139,56 +193,75 @@ class Supervisor:
                 env.setdefault("TOPO_MODE", "distributed")
             if wi.env:
                 env.update(wi.env)
+            # stdout 必须落盘（普通文件写入永不阻塞子进程）；无 log_dir 时丢弃
+            log_file = self._open_worker_log(label, time.time_ns() // 10**6) if self._log_dir \
+                else open(os.devnull, "ab")
             proc = subprocess.Popen(
                 wi.args,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdout=log_file, stderr=subprocess.STDOUT,
                 env=env,
             )
             wi.proc = proc
             wi.last_heartbeat = time.time()
+            if self._log_dir:
+                wi.log_file = log_file
+            else:
+                log_file.close()
             logger.info(f"[Supervisor] spawned {label} (pid={proc.pid}, attempt={wi.restart_count})")
-            # 启动读取 stdout 的协程
-            self._loop.create_task(self._read_worker_stdout(label))
+            # 启动日志 tail 协程（普通文件读取立即返回，替代旧的阻塞 readline）
+            if self._log_dir:
+                wi.tail_task = self._loop.create_task(self._tail_worker_logs(label))
         except Exception as e:
             logger.error(f"[Supervisor] failed to spawn {label}: {e}")
+            self._close_log(wi)
             wi.status = "fatal"
 
-    async def _read_worker_stdout(self, label: str):
-        """异步读取 worker 的 stdout，解析 JSON 信令"""
+    async def _tail_worker_logs(self, label: str):
+        """tail worker 的 stdout 日志文件，解析 JSON 信令。
+
+        普通文件的 read(n) 在无数据时立即返回 b''（不像管道 readline 会永久
+        占住线程），因此不会耗尽线程池，也不会因排空延迟反压子进程。
+        进程死亡检测/重启统一由 _monitor_loop 负责（单一触发点，无竞态）。
+        """
         wi = self._workers[label]
-        if not wi.proc or not wi.proc.stdout:
+        f = wi.log_file
+        if f is None:
             return
+        buf = ""
         try:
-            async for line in self._aiter_lines(wi.proc.stdout):
-                line = line.strip()
-                if not line:
-                    continue
+            while True:
                 try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.info(f"[{label}] {line}")
-                    continue
-                self._handle_msg(label, msg)
-        except Exception:
+                    chunk = await self._loop.run_in_executor(None, f.read, 1 << 16)
+                except (OSError, ValueError) as e:
+                    logger.warning(f"[Supervisor] {label} log tail stopped: {e}")
+                    break
+                if chunk:
+                    buf += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        self._ingest_line(label, line.strip())
+                    continue  # 有数据 → 立即续读，快速排空日志突发
+                # 无数据：顺带非阻塞收割僵尸（poll 返回退出码即完成 reap）
+                if wi.proc is not None:
+                    wi.proc.poll()
+                await asyncio.sleep(0.4)
+        except asyncio.CancelledError:
             pass
         finally:
-            # worker 进程已退出
-            if wi.is_alive:
-                wi.proc.wait()
-            wi.status = "dead" if not wi.stop_requested else "stopped"
-            logger.info(f"[Supervisor] {label} exited (status={wi.status}, pid={wi.proc.pid if wi.proc else '?'})")
-            # 如果不是主动停止，尝试重启
-            if not wi.stop_requested and self._running:
-                await self._restart(label)
+            # 仅关闭本协程启动时持有的句柄（新一轮 spawn 可能已换新文件）
+            if wi.log_file is f:
+                self._close_log(wi)
 
-    async def _aiter_lines(self, stream):
-        """异步行迭代器"""
-        loop = asyncio.get_event_loop()
-        while True:
-            line = await loop.run_in_executor(None, stream.readline)
-            if not line:
-                break
-            yield line.decode("utf-8", errors="replace").rstrip("\n\r")
+    def _ingest_line(self, label: str, line: str):
+        """处理 worker 日志行：JSON 信令 → 状态机；其余 → 透传日志。"""
+        if not line:
+            return
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            logger.info(f"[{label}] {line}")
+            return
+        self._handle_msg(label, msg)
 
     def _handle_msg(self, label: str, msg: dict):
         """处理 worker 发来的信令消息"""
@@ -208,21 +281,47 @@ class Supervisor:
     # ── 监控 ────────────────────────────────────────────────────
 
     async def _monitor_loop(self):
-        """定期检查 worker 心跳/健康"""
+        """定期检查 worker：死亡重启 + 挂死检测 + 心跳兜底。
+
+        本循环是重启的唯一触发点：
+        - 进程已退出（崩溃/被杀）→ 退避重启
+        - 进程存活但 /health 连续失败 ≥ _PROBE_FAIL_LIMIT（事件循环挂死，
+          即"进程活着但服务不了请求"）→ kill 后由死亡检测路径重启
+        - 无 health_url 的 JSON 信令 worker → 心跳超时 kill
+        """
         while self._running:
             await asyncio.sleep(5.0)
             now = time.time()
             for label, wi in list(self._workers.items()):
-                if wi.status == "stopped":
-                    continue
-                if wi.stop_requested:
+                if wi.status in ("stopped", "fatal") or wi.stop_requested:
                     continue
                 if not wi.is_alive:
+                    # 死亡（崩溃或被 kill）：标记并重启
+                    wi.status = "dead"
+                    logger.info(f"[Supervisor] {label} exited (pid={wi.proc.pid if wi.proc else '?'})")
+                    # 退避可能长达 30s —— 用独立 task，避免阻塞本轮其余 worker 的检查
+                    self._loop.create_task(self._restart(label))
                     continue
                 if wi.health_url:
-                    # plain 服务：无心跳信号，靠进程存活 + HTTP 探针
-                    if not _http_ok(wi.health_url, timeout=2.0):
-                        logger.warning(f"[Supervisor] {label} health probe failed")
+                    # plain 服务：进程存活 + HTTP 探针（探针在线程池执行，不阻塞循环）
+                    ok = await self._loop.run_in_executor(None, _http_ok, wi.health_url, 2.0)
+                    if ok:
+                        if wi.probe_fails:
+                            logger.info(f"[Supervisor] {label} health probe recovered")
+                        wi.probe_fails = 0
+                        if wi.status in ("starting", "dead"):
+                            wi.status = "ready"
+                            logger.info(f"[Supervisor] {label} is ready")
+                    else:
+                        wi.probe_fails += 1
+                        if wi.probe_fails == 1:
+                            logger.warning(f"[Supervisor] {label} health probe failed")
+                        elif wi.probe_fails >= _PROBE_FAIL_LIMIT:
+                            logger.error(
+                                f"[Supervisor] {label} 疑似挂死（连续 {wi.probe_fails} 次探针失败），"
+                                f"kill pid={wi.proc.pid} 触发重启")
+                            wi.probe_fails = 0
+                            wi.proc.kill()
                     continue
                 elapsed = now - wi.last_heartbeat
                 if elapsed > _DEAD_TIMEOUT:
@@ -232,15 +331,17 @@ class Supervisor:
                     logger.warning(f"[Supervisor] {label} heartbeat overdue ({elapsed:.0f}s)")
 
     async def _restart(self, label: str):
-        """重启 worker（指数退避）"""
+        """重启 worker（指数退避）。退避期间若 supervisor 已停止则放弃。"""
         wi = self._workers[label]
         if wi.restart_count > wi.restart_limit:
             wi.status = "fatal"
-            logger.error(f"[Supervisor] {label} restart limit reached ({wi.restart_limit}), marking FATAL")
+            logger.error(f"[Supervisor] restart limit reached ({wi.restart_limit}), marking FATAL")
             return
         backoff = wi.backoff()
         logger.info(f"[Supervisor] restarting {label} in {backoff:.0f}s (attempt {wi.restart_count}/{wi.restart_limit})")
         await asyncio.sleep(backoff)
+        if not self._running:
+            return
         self._spawn(label)
 
     # ── 人工重启 / 管理端点（P1） ──────────────────────────────
@@ -248,7 +349,7 @@ class Supervisor:
     async def restart(self, label: str):
         """人工重启指定 worker：重置崩溃预算后重启，不占 restart_limit。
 
-        进程存活时发 SIGTERM，由退出路径（_read_worker_stdout finally）触发 _restart；
+        进程存活时发 SIGTERM，进程退出后由监控循环的死亡检测触发 _restart；
         已死亡/致命则直接 _spawn。
         """
         wi = self._workers.get(label)
@@ -368,7 +469,12 @@ class Supervisor:
     async def stop_worker(self, label: str, timeout: float = 5.0):
         """优雅停止指定 worker"""
         wi = self._workers.get(label)
-        if not wi or not wi.is_alive:
+        if not wi:
+            return
+        if wi.tail_task and not wi.tail_task.done():
+            wi.tail_task.cancel()
+        if not wi.is_alive:
+            self._close_log(wi)
             return
         wi.stop_requested = True
         logger.info(f"[Supervisor] stopping {label} (pid={wi.proc.pid})")
@@ -385,6 +491,7 @@ class Supervisor:
             logger.warning(f"[Supervisor] {label} did not stop in {timeout}s, killing")
             wi.proc.kill()
             await self._loop.run_in_executor(None, wi.proc.wait)
+        self._close_log(wi)
         wi.status = "stopped"
         logger.info(f"[Supervisor] {label} stopped")
 
@@ -409,6 +516,7 @@ class Supervisor:
                 "pid": wi.proc.pid if wi.proc else None,
                 "restart_count": wi.restart_count,
                 "last_heartbeat": wi.last_heartbeat,
+                "probe_fails": wi.probe_fails,
                 "alive": wi.is_alive,
             }
             for label, wi in self._workers.items()

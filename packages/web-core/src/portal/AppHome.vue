@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StarLogoMark from '../components/StarLogoMark.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
@@ -9,6 +9,46 @@ const { t } = useI18n()
 
 const FONT_TARGETS: ('--content-font-size')[] = ['--content-font-size']
 const fontSize = ref(readFontSize())
+
+const settingsOpen = ref(false)
+const settingsWrap = ref<HTMLElement | null>(null)
+let settingsCloseTimer: number | null = null
+
+function cancelSettingsClose() {
+  if (settingsCloseTimer !== null) {
+    window.clearTimeout(settingsCloseTimer)
+    settingsCloseTimer = null
+  }
+}
+function scheduleSettingsClose() {
+  cancelSettingsClose()
+  settingsCloseTimer = window.setTimeout(() => {
+    settingsOpen.value = false
+    settingsCloseTimer = null
+  }, 500)
+}
+
+function onDocClick(e: MouseEvent) {
+  if (settingsWrap.value && !settingsWrap.value.contains(e.target as Node)) {
+    cancelSettingsClose()
+    settingsOpen.value = false
+  }
+}
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    cancelSettingsClose()
+    settingsOpen.value = false
+  }
+}
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onKeydown)
+})
+onBeforeUnmount(() => {
+  cancelSettingsClose()
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onKeydown)
+})
 
 function onFontSize(v: number) {
   fontSize.value = v
@@ -80,42 +120,60 @@ function modChips(key: string): string[] {
         </div>
       </div>
       <div class="hero-controls">
-        <ThemeToggle app-key="portal" :size="30" />
-        <FontSizeSelect :model-value="fontSize" :targets="FONT_TARGETS" @update:model-value="onFontSize" />
-        <LocaleToggle />
-        <HelpButton />
-        <a
-          href="#/settings"
-          class="toolbar-btn"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          ><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-          {{ t('home.settings') }}
-        </a>
         <a
           href="#/user"
-          class="toolbar-btn"
+          class="icon-btn"
+          :title="t('home.userCenter')"
+          :aria-label="t('home.userCenter')"
         >
           <svg
-            width="16"
-            height="16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="2"
+            stroke-width="1.5"
             stroke-linecap="round"
             stroke-linejoin="round"
-          ><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-          {{ t('home.userCenter') }}
+          ><path d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
         </a>
+        <div
+          ref="settingsWrap"
+          class="settings-pop"
+          @mouseenter="cancelSettingsClose"
+          @mouseleave="scheduleSettingsClose"
+        >
+          <button
+            type="button"
+            class="icon-btn"
+            :class="{ open: settingsOpen }"
+            :title="t('home.settings')"
+            :aria-label="t('home.settings')"
+            :aria-expanded="settingsOpen"
+            @click.stop="settingsOpen = !settingsOpen"
+            @mouseenter="settingsOpen = true"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" /><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+          </button>
+          <div v-if="settingsOpen" class="settings-panel">
+            <div class="controls-row">
+              <ThemeToggle app-key="portal" :size="30" />
+              <FontSizeSelect :model-value="fontSize" :targets="FONT_TARGETS" @update:model-value="onFontSize" />
+              <LocaleToggle />
+              <HelpButton />
+            </div>
+            <a
+              href="#/settings"
+              class="all-settings"
+              @click.stop="settingsOpen = false"
+            >{{ t('home.allSettings') }} →</a>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -190,7 +248,7 @@ function modChips(key: string): string[] {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   flex-wrap: wrap;
   gap: calc(24px * var(--ui-scale));
   padding: calc(40px * var(--ui-scale)) calc(24px * var(--ui-scale));
@@ -203,8 +261,88 @@ function modChips(key: string): string[] {
   display: flex;
   align-items: center;
   gap: calc(8px * var(--ui-scale));
-  flex-wrap: wrap;
-  justify-content: flex-end;
+}
+
+.icon-btn {
+  width: calc(30px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border, #e4e4e7);
+  background: var(--bg-card, #ffffff);
+  color: var(--text-secondary, #6b6b76);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+.icon-btn:hover,
+.icon-btn.open {
+  border-color: var(--accent, #4d6bfe);
+  color: var(--accent, #4d6bfe);
+}
+.icon-btn svg {
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+  flex-shrink: 0;
+}
+
+.settings-pop {
+  position: relative;
+}
+
+.settings-panel {
+  position: absolute;
+  top: calc(100% + 10px * var(--ui-scale));
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--ui-scale));
+  padding: calc(12px * var(--ui-scale));
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border, #e4e4e7);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  animation: settings-pop-in 0.14s ease;
+}
+.settings-panel::before {
+  content: '';
+  position: absolute;
+  top: calc(-10px * var(--ui-scale));
+  left: 0;
+  right: 0;
+  height: calc(10px * var(--ui-scale));
+}
+.settings-panel .controls-row {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+}
+.all-settings {
+  align-self: flex-start;
+  padding-top: calc(8px * var(--ui-scale));
+  border-top: 1px solid var(--border, #e4e4e7);
+  margin-top: calc(2px * var(--ui-scale));
+  width: 100%;
+  box-sizing: border-box;
+  font-size: calc(13px * var(--ui-scale));
+  color: var(--text-secondary, #6b6b76);
+  text-decoration: none;
+}
+.all-settings:hover {
+  color: var(--accent, #4d6bfe);
+}
+@keyframes settings-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .hero-inner {
@@ -266,6 +404,10 @@ function modChips(key: string): string[] {
   align-items: center;
   justify-content: center;
 }
+.card-icon svg {
+  width: calc(26px * var(--ui-scale));
+  height: calc(26px * var(--ui-scale));
+}
 
 .card-body {
   flex: 1;
@@ -303,6 +445,10 @@ function modChips(key: string): string[] {
   margin-top: 16px;
   opacity: 0.5;
   transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.card-arrow svg {
+  width: calc(18px * var(--ui-scale));
+  height: calc(18px * var(--ui-scale));
 }
 
 .card:hover .card-arrow {

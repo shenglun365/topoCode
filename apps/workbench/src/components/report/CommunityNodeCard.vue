@@ -127,17 +127,17 @@ async function handleAIExplain() {
 
 <style scoped>
 .community-card {
-  padding: 10px;
+  padding: calc(10px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-secondary);
 }
 
 .card-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .type-icon {
@@ -145,7 +145,7 @@ async function handleAIExplain() {
 }
 
 .comm-id {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -153,8 +153,8 @@ async function handleAIExplain() {
 
 .comm-stats {
   display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: calc(12px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .stat-item {
@@ -164,29 +164,29 @@ async function handleAIExplain() {
 }
 
 .stat-value {
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--accent);
 }
 
 .stat-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .comm-desc {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
-  padding: 4px 0;
+  padding: calc(4px * var(--ui-scale, 1)) 0;
   border-top: 1px solid var(--border);
-  margin-top: 4px;
+  margin-top: calc(4px * var(--ui-scale, 1));
 }
 
-.ai-section { margin-top: 8px; }
+.ai-section { margin-top: calc(8px * var(--ui-scale, 1)); }
 .ai-btn { width: 100%; justify-content: center; color: var(--accent); }
-.ai-loading { display: flex; align-items: center; gap: 6px; padding: 8px; font-size: 11px; color: var(--text-muted); }
-.spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+.ai-loading { display: flex; align-items: center; gap: calc(6px * var(--ui-scale, 1)); padding: calc(8px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); }
+.spinner { width: calc(12px * var(--ui-scale, 1)); height: calc(12px * var(--ui-scale, 1)); border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.ai-content { padding: 8px; background: var(--bg-primary); border-radius: 4px; font-size: 12px; line-height: 1.6; color: var(--text-primary); max-height: 200px; overflow: auto; }
-.ai-error { padding: 6px 8px; font-size: 11px; color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); border-radius: 4px; }
+.ai-content { padding: calc(8px * var(--ui-scale, 1)); background: var(--bg-primary); border-radius: calc(4px * var(--ui-scale, 1)); font-size: calc(12px * var(--ui-scale, 1)); line-height: 1.6; color: var(--text-primary); max-height: calc(200px * var(--ui-scale, 1)); overflow: auto; }
+.ai-error { padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); border-radius: calc(4px * var(--ui-scale, 1)); }
 </style>

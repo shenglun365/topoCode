@@ -12,6 +12,8 @@ export default { analysis: {
   taskSettings: 'Task Settings',
   parseSettings: 'Parse Settings',
   taskList: 'Task List',
+  taskSelect: 'Parse Tasks',
+  taskSelectEmpty: 'No parse tasks',
   taskInfo: 'Task Info',
   taskName: 'Task Name',
   taskNamePlaceholder: 'Enter task name',

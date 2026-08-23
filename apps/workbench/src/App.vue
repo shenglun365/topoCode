@@ -81,18 +81,18 @@ onMounted(async () => {
 .import-block-card {
   background: var(--bg-secondary, #1e1e2e);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px 40px;
+  border-radius: calc(12px * var(--ui-scale, 1));
+  padding: calc(32px * var(--ui-scale, 1)) calc(40px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  min-width: 280px;
+  gap: calc(10px * var(--ui-scale, 1));
+  min-width: calc(280px * var(--ui-scale, 1));
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 .import-block-spinner {
-  width: 32px;
-  height: 32px;
+  width: calc(32px * var(--ui-scale, 1));
+  height: calc(32px * var(--ui-scale, 1));
   border: 3px solid var(--border);
   border-top-color: var(--accent, #7c3aed);
   border-radius: 50%;
@@ -102,29 +102,29 @@ onMounted(async () => {
   to { transform: rotate(360deg); }
 }
 .import-block-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 .import-block-phase {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 .import-block-bar {
   width: 100%;
-  height: 6px;
+  height: calc(6px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   overflow: hidden;
 }
 .import-block-fill {
   height: 100%;
   background: var(--accent, #7c3aed);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   transition: width 0.3s;
 }
 .import-block-pct {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: var(--font-mono);
 }

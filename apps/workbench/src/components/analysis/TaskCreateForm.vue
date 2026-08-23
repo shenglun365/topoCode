@@ -560,7 +560,7 @@ function viewLogs() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
 }
@@ -568,17 +568,17 @@ function viewLogs() {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .form-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -589,10 +589,10 @@ function viewLogs() {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px;
+  padding: calc(4px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
 }
 
 .icon-btn:hover {
@@ -603,10 +603,10 @@ function viewLogs() {
 .form-layout {
   display: grid;
   grid-template-columns: 280px 1fr;
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale, 1));
   flex: 1;
   overflow: hidden;
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
 }
 
 .form-sidebar {
@@ -617,29 +617,29 @@ function viewLogs() {
 .form-main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale, 1));
   overflow-y: auto;
-  padding-right: 8px;
+  padding-right: calc(8px * var(--ui-scale, 1));
 }
 
 .form-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 
 .form-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .form-input {
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   color: var(--text-primary);
   outline: none;
   font-family: inherit;
@@ -650,30 +650,30 @@ function viewLogs() {
 }
 
 .form-value {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   color: var(--text-primary);
-  padding: 8px 0;
+  padding: calc(8px * var(--ui-scale, 1)) 0;
 }
 
 .form-id {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-family: monospace;
-  margin-left: 8px;
+  margin-left: calc(8px * var(--ui-scale, 1));
 }
 
 .form-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 0;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) 0;
 }
 
 .form-tag {
-  padding: 2px 8px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-tertiary);
-  border-radius: 12px;
-  font-size: 11px;
+  border-radius: calc(12px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
   font-family: monospace;
 }
@@ -681,8 +681,8 @@ function viewLogs() {
 .form-tag.removable {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding-right: 4px;
+  gap: calc(3px * var(--ui-scale, 1));
+  padding-right: calc(4px * var(--ui-scale, 1));
 }
 
 .tag-remove {
@@ -692,12 +692,12 @@ function viewLogs() {
   cursor: pointer;
   color: var(--text-default);
   padding: 0;
-  width: 20px;
-  height: 20px;
+  width: calc(20px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   opacity: .6;
   transition: opacity 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
 }
@@ -708,13 +708,13 @@ function viewLogs() {
   color: #ef4444;
 }
 .tag-remove .x-mark {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   line-height: 1;
   font-weight: 700;
 }
 
 .empty-tag {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   font-style: italic;
 }
@@ -722,41 +722,41 @@ function viewLogs() {
 .checkbox-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .checkbox-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   color: var(--text-primary);
   cursor: pointer;
 }
 
 .checkbox-item input[type="checkbox"] {
   accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
+  width: calc(16px * var(--ui-scale, 1));
+  height: calc(16px * var(--ui-scale, 1));
 }
 
 /* Metadata section */
 .form-metadata {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-top: 8px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  margin-top: calc(8px * var(--ui-scale, 1));
 }
 
 .metadata-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-secondary);
 }
 
@@ -768,13 +768,13 @@ function viewLogs() {
   background: var(--warning);
   color: var(--bg-primary);
   border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 12px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  border-radius: calc(4px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 
 .btn-warning:hover {

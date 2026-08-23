@@ -201,13 +201,13 @@ function openCommunityDoc(item: CommunityItem) {
 <style scoped>
 .ca-section { margin-bottom: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
 .section-header {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 13px; font-weight: 600; color: var(--text-primary);
-  margin-bottom: 10px; padding-bottom: 6px;
+  display: flex; align-items: center; gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1)); font-weight: 600; color: var(--text-primary);
+  margin-bottom: calc(10px * var(--ui-scale, 1)); padding-bottom: calc(6px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
-.arch-stats { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.arch-stats { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; white-space: nowrap; display: flex; align-items: center; gap: calc(6px * var(--ui-scale, 1)); }
 .arch-stats-divider { color: var(--border); }
 .arch-stats-coverage { color: var(--text-muted); }
 .arch-stats-coverage strong { color: var(--text-primary); }
@@ -217,7 +217,7 @@ function openCommunityDoc(item: CommunityItem) {
 .arch-actions { display: flex; align-items: center; gap: 0.5rem; }
 .arch-search { display: flex; }
 .arch-search-input {
-  width: 160px; padding: 0.2rem 0.5rem; font-size: 0.75rem;
+  width: calc(160px * var(--ui-scale, 1)); padding: 0.2rem 0.5rem; font-size: 0.75rem;
   background: var(--bg-secondary); border: 1px solid var(--border);
   border-radius: 0.375rem; color: var(--text-primary);
 }
@@ -228,7 +228,7 @@ function openCommunityDoc(item: CommunityItem) {
   display: flex; align-items: center; gap: 0.35rem;
   padding: 0.4rem 0.9rem; font-size: 0.8rem; color: var(--text-muted);
   border: none; background: none; cursor: pointer;
-  border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s;
+  border-bottom: 2px solid transparent; margin-bottom: -calc(2px * var(--ui-scale, 1)); transition: all 0.15s;
 }
 .arch-tab:hover { color: var(--text-primary); }
 .arch-tab.active { color: var(--accent, #7c3aed); border-bottom-color: var(--accent, #7c3aed); }

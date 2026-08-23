@@ -230,85 +230,85 @@ function statusLabel(s: string): string {
 
 <style scoped>
 .version-dialog {
-  width: 560px;
+  width: calc(560px * var(--ui-scale, 1));
   max-width: 94vw;
   background: var(--bg-secondary, #1e1e2e);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   max-height: 86vh;
 }
 .version-body {
-  padding: 16px 20px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
 }
 .version-error {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: #ef4444;
   background: color-mix(in srgb, #ef4444 10%, transparent);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
 .version-done {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: #10b981;
   background: color-mix(in srgb, #10b981 10%, transparent);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
 }
-.version-empty { text-align: center; color: var(--text-muted); font-size: 12px; padding: 20px 0; }
-.req-list { display: flex; flex-direction: column; gap: 8px; }
+.version-empty { text-align: center; color: var(--text-muted); font-size: calc(12px * var(--ui-scale, 1)); padding: calc(20px * var(--ui-scale, 1)) 0; }
+.req-list { display: flex; flex-direction: column; gap: calc(8px * var(--ui-scale, 1)); }
 .req-item {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--ui-scale, 1));
 }
-.req-line { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.req-line { display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1)); font-size: calc(12px * var(--ui-scale, 1)); }
 .req-branch { font-weight: 600; color: var(--text-primary); }
 .req-head { font-family: var(--font-mono); color: var(--text-muted); }
-.req-status { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
+.req-status { font-size: calc(11px * var(--ui-scale, 1)); padding: 1px calc(6px * var(--ui-scale, 1)); border-radius: calc(4px * var(--ui-scale, 1)); }
 .req-status.pending { background: #d97706; color: #fff; }
 .req-status.confirmed { background: #2563eb; color: #fff; }
 .req-status.done { background: #10b981; color: #fff; }
 .req-status.cancelled { background: var(--border); color: var(--text-muted); }
-.req-repo { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-.req-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.confirm-method, .preview { display: flex; flex-direction: column; gap: 12px; }
-.confirm-method-title, .stage-title, .preview-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.method-option, .stage-option { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
-.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.preview-head { display: flex; align-items: center; gap: 8px; }
-.badge-major { font-size: 11px; background: #d97706; color: #fff; padding: 1px 6px; border-radius: 4px; }
-.badge-risk { font-size: 11px; padding: 1px 6px; border-radius: 4px; }
+.req-repo { font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); margin-top: calc(2px * var(--ui-scale, 1)); }
+.req-actions { display: flex; gap: calc(6px * var(--ui-scale, 1)); flex-shrink: 0; }
+.confirm-method, .preview { display: flex; flex-direction: column; gap: calc(12px * var(--ui-scale, 1)); }
+.confirm-method-title, .stage-title, .preview-title { font-size: calc(13px * var(--ui-scale, 1)); font-weight: 600; color: var(--text-primary); }
+.method-option, .stage-option { display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1)); font-size: calc(13px * var(--ui-scale, 1)); color: var(--text-secondary); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: calc(8px * var(--ui-scale, 1)); }
+.preview-head { display: flex; align-items: center; gap: calc(8px * var(--ui-scale, 1)); }
+.badge-major { font-size: calc(11px * var(--ui-scale, 1)); background: #d97706; color: #fff; padding: 1px calc(6px * var(--ui-scale, 1)); border-radius: calc(4px * var(--ui-scale, 1)); }
+.badge-risk { font-size: calc(11px * var(--ui-scale, 1)); padding: 1px calc(6px * var(--ui-scale, 1)); border-radius: calc(4px * var(--ui-scale, 1)); }
 .badge-risk.high { background: #ef4444; color: #fff; }
 .badge-risk.medium { background: #d97706; color: #fff; }
 .badge-risk.low { background: #10b981; color: #fff; }
-.delta-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.delta-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(8px * var(--ui-scale, 1)); }
 .delta-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   align-items: center;
 }
-.delta-card b { font-size: 18px; }
-.delta-card span { font-size: 11px; color: var(--text-muted); }
+.delta-card b { font-size: calc(18px * var(--ui-scale, 1)); }
+.delta-card span { font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); }
 .delta-card.add b { color: #10b981; }
 .delta-card.mod b { color: #d97706; }
 .delta-card.del b { color: #ef4444; }
-.impact-line { font-size: 12px; color: var(--text-secondary); }
-.stage-list { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
-.stage-note { font-size: 11px; color: var(--text-muted); }
+.impact-line { font-size: calc(12px * var(--ui-scale, 1)); color: var(--text-secondary); }
+.stage-list { display: flex; flex-direction: column; gap: calc(6px * var(--ui-scale, 1)); border-top: 1px solid var(--border); padding-top: calc(10px * var(--ui-scale, 1)); }
+.stage-note { font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); }
 </style>

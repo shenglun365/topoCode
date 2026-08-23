@@ -53,84 +53,84 @@ function getStatusText(status: string): string {
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
-    <div style="display:flex; align-items:center; gap:10px;">
+    <div style="display:flex; align-items:center; gap:calc(10px * var(--ui-scale, 1));">
       <!-- 图标 -->
-      <div style="display:flex; flex-direction:column; align-items:center; min-width:36px;">
+      <div style="display:flex; flex-direction:column; align-items:center; min-width:calc(36px * var(--ui-scale, 1));">
         <DocumentTextIcon class="w-5 h-5 text-accent" />
-        <span style="font-size:9px; color:var(--text-muted);">{{ t('knowledge.documents') }}</span>
+        <span style="font-size:calc(9px * var(--ui-scale, 1)); color:var(--text-muted);">{{ t('knowledge.documents') }}</span>
       </div>
 
       <!-- 内容 -->
       <div style="flex:1; min-width:0;">
-        <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
-          <span style="font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <div style="display:flex; align-items:center; gap:calc(6px * var(--ui-scale, 1)); margin-bottom:calc(2px * var(--ui-scale, 1));">
+          <span style="font-size:calc(13px * var(--ui-scale, 1)); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
             {{ doc.title }}
           </span>
           <span
             class="badge badge-blue"
-            style="font-size:8px;"
+            style="font-size:calc(8px * var(--ui-scale, 1));"
           >{{ t('knowledge.documents') }}</span>
           <span
             :class="`badge ${getStatusBadge(doc.status)}`"
-            style="font-size:8px;"
+            style="font-size:calc(8px * var(--ui-scale, 1));"
           >
             {{ getStatusText(doc.status) }}
           </span>
           <span
             v-if="doc.favorite"
             class="badge badge-yellow"
-            style="font-size:8px;"
+            style="font-size:calc(8px * var(--ui-scale, 1));"
           >⭐</span>
           <span
             v-if="doc.pinned"
             class="badge badge-gray"
-            style="font-size:8px;"
+            style="font-size:calc(8px * var(--ui-scale, 1));"
           >📌</span>
         </div>
-        <div style="font-size:10px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <div style="font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ doc.description }}
         </div>
       </div>
 
       <!-- 四维标签 -->
-      <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+      <div style="display:flex; gap:calc(4px * var(--ui-scale, 1)); align-items:center; flex-shrink:0;">
         <span
           v-if="doc.tags?.lifecycle?.length"
           :class="`badge ${dimensionColors.lifecycle}`"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >
           {{ doc.tags?.lifecycle?.[0] }}
         </span>
         <span
           v-if="doc.tags?.techStack?.length"
           :class="`badge ${dimensionColors.techStack}`"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >
           {{ doc.tags?.techStack?.[0] }}
         </span>
         <span
           v-if="doc.tags?.abstraction?.length"
           :class="`badge ${dimensionColors.abstraction}`"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >
           {{ doc.tags?.abstraction?.[0] }}
         </span>
         <span
           v-if="doc.tags?.purpose?.length"
           :class="`badge ${dimensionColors.purpose}`"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >
           {{ doc.tags?.purpose?.[0] }}
         </span>
       </div>
 
       <!-- 时间 -->
-      <div style="font-size:10px; color:var(--text-muted); flex-shrink:0; min-width:60px; text-align:right;">
+      <div style="font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-muted); flex-shrink:0; min-width:calc(60px * var(--ui-scale, 1)); text-align:right;">
         {{ formatTime(doc.updatedAt) }}
       </div>
 
       <!-- 操作按钮 -->
-      <div style="display:flex; gap:2px; flex-shrink:0;">
+      <div style="display:flex; gap:calc(2px * var(--ui-scale, 1)); flex-shrink:0;">
         <button
           class="btn btn-ghost btn-sm"
           :title="doc.favorite ? t('common.unfavorite') : t('common.favorite')"
@@ -165,6 +165,6 @@ function getStatusText(status: string): string {
 
 <style scoped>
 .kb-doc-card {
-  padding: 10px 12px;
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
 }
 </style>

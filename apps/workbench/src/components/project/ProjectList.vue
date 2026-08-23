@@ -335,13 +335,13 @@ function cancelCreateTask() {
 
 .project-list-search {
   position: relative;
-  padding: 6px 8px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .search-icon {
   position: absolute;
-  left: 12px;
+  left: calc(12px * var(--ui-scale, 1));
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted);
@@ -350,12 +350,12 @@ function cancelCreateTask() {
 
 .search-input {
   width: 100%;
-  padding: 4px 8px 4px 24px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-input);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   outline: none;
 }
 
@@ -366,7 +366,7 @@ function cancelCreateTask() {
 .project-items {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: calc(4px * var(--ui-scale, 1)) 0;
 }
 
 .project-item {
@@ -376,10 +376,10 @@ function cancelCreateTask() {
 .project-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 
@@ -391,8 +391,8 @@ function cancelCreateTask() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: calc(14px * var(--ui-scale, 1));
+  height: calc(14px * var(--ui-scale, 1));
   color: var(--text-muted);
   transition: transform 0.15s ease;
 }
@@ -414,37 +414,37 @@ function cancelCreateTask() {
 }
 
 .project-count {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: var(--bg-secondary);
-  padding: 1px 5px;
-  border-radius: 8px;
+  padding: 1px calc(5px * var(--ui-scale, 1));
+  border-radius: calc(8px * var(--ui-scale, 1));
 }
 
 .project-reports {
-  padding-left: 16px;
+  padding-left: calc(16px * var(--ui-scale, 1));
 }
 
 .report-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
 }
 
 .report-empty {
-  padding: 4px 8px 4px 28px;
-  font-size: 11px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1)) calc(28px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .report-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px 3px 28px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(3px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)) calc(3px * var(--ui-scale, 1)) calc(28px * var(--ui-scale, 1));
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
 }
 
@@ -470,15 +470,15 @@ function cancelCreateTask() {
 }
 
 .report-time {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .no-match {
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale, 1));
   text-align: center;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
@@ -486,8 +486,8 @@ function cancelCreateTask() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 24px 16px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(24px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   text-align: center;
 }
 
@@ -496,33 +496,33 @@ function cancelCreateTask() {
 }
 
 .empty-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .empty-desc {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 /* 确认对话框 */
 .confirm-dialog {
-  width: 360px;
-  padding: 20px;
+  width: calc(360px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale, 1));
 }
 
 .confirm-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: calc(8px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-primary);
 }
@@ -530,6 +530,6 @@ function cancelCreateTask() {
 .confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 </style>

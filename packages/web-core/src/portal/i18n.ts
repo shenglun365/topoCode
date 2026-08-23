@@ -15,6 +15,7 @@ const zhCN = {
     sub: '源码架构分析 · 知识库管理 · AI 驱动的智能开发工作台',
     settings: '设置',
     userCenter: '用户中心',
+    allSettings: '全部设置',
     footer: 'TopoCode · 统一 Web 工作台',
     modules: {
       kb: {
@@ -190,6 +191,7 @@ const enUS = {
     sub: 'Source code architecture analysis · Knowledge base management · AI-driven intelligent dev workbench',
     settings: 'Settings',
     userCenter: 'User Center',
+    allSettings: 'All Settings',
     footer: 'TopoCode · Unified Web Workbench',
     modules: {
       kb: {

@@ -9,7 +9,7 @@ const ZH: Record<string, string> = {
   font: '字号',
   language: '语言',
   model: '模型',
-  context: '上下文',
+  context: '最大生成',
   loading: '加载中…',
   rightPanel: '右面板',
 }
@@ -19,7 +19,7 @@ const EN: Record<string, string> = {
   font: 'Font',
   language: 'Language',
   model: 'Model',
-  context: 'Context',
+  context: 'Max Tokens',
   loading: 'Loading…',
   rightPanel: 'Right Panel',
 }

@@ -243,27 +243,27 @@ function goToProject() {
 
 <style scoped>
 .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; }
-.dialog-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 10px; min-width: 420px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
-.dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.dialog-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.dialog-close { font-size: 18px; color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0 4px; }
+.dialog-card { background: var(--bg-primary); border: 1px solid var(--border); border-radius: calc(10px * var(--ui-scale, 1)); min-width: calc(420px * var(--ui-scale, 1)); max-width: calc(480px * var(--ui-scale, 1)); box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); border-bottom: 1px solid var(--border); }
+.dialog-title { font-size: calc(13px * var(--ui-scale, 1)); font-weight: 600; color: var(--text-primary); }
+.dialog-close { font-size: calc(18px * var(--ui-scale, 1)); color: var(--text-muted); background: none; border: none; cursor: pointer; padding: 0 calc(4px * var(--ui-scale, 1)); }
 .dialog-close:hover { color: var(--text-primary); }
-.upload-area { padding: 32px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.upload-area { padding: calc(32px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); display: flex; flex-direction: column; align-items: center; gap: calc(12px * var(--ui-scale, 1)); }
 .upload-icon { color: var(--text-muted); }
-.icon-lg { width: 40px; height: 40px; }
-.upload-hint { font-size: 12px; color: var(--text-muted); text-align: center; }
+.icon-lg { width: calc(40px * var(--ui-scale, 1)); height: calc(40px * var(--ui-scale, 1)); }
+.upload-hint { font-size: calc(12px * var(--ui-scale, 1)); color: var(--text-muted); text-align: center; }
 .hidden-file-input { display: none; }
 
-.mode-selector { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 0 8px; }
-.mode-option { display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 6px; border-radius: 4px; font-size: 11px; }
+.mode-selector { display: flex; flex-direction: column; gap: calc(6px * var(--ui-scale, 1)); width: 100%; padding: 0 calc(8px * var(--ui-scale, 1)); }
+.mode-option { display: flex; align-items: center; gap: calc(6px * var(--ui-scale, 1)); cursor: pointer; padding: calc(4px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1)); border-radius: calc(4px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); }
 .mode-option:hover { background: var(--bg-tertiary); }
-.mode-radio { accent-color: var(--accent); width: 14px; height: 14px; }
+.mode-radio { accent-color: var(--accent); width: calc(14px * var(--ui-scale, 1)); height: calc(14px * var(--ui-scale, 1)); }
 .mode-label { color: var(--text-primary); }
-.error-msg { padding: 6px 16px; font-size: 11px; color: var(--error); text-align: center; }
-.progress-section { padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
-.progress-bar-track { height: 6px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
-.progress-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
-.progress-info { font-size: 11px; color: var(--text-muted); text-align: center; }
+.error-msg { padding: calc(6px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); color: var(--error); text-align: center; }
+.progress-section { padding: calc(20px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); display: flex; flex-direction: column; gap: calc(12px * var(--ui-scale, 1)); }
+.progress-bar-track { height: calc(6px * var(--ui-scale, 1)); background: var(--bg-tertiary); border-radius: calc(3px * var(--ui-scale, 1)); overflow: hidden; }
+.progress-bar-fill { height: 100%; background: var(--accent); border-radius: calc(3px * var(--ui-scale, 1)); transition: width 0.3s; }
+.progress-info { font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); text-align: center; }
 .done-text { color: var(--success); font-weight: 500; }
-.dialog-footer { display: flex; gap: 6px; padding: 10px 16px; border-top: 1px solid var(--border); }
+.dialog-footer { display: flex; gap: calc(6px * var(--ui-scale, 1)); padding: calc(10px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); border-top: 1px solid var(--border); }
 </style>

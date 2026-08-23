@@ -4,7 +4,7 @@ import type { SupportedLocale } from '../i18n/setup'
 /**
  * 跨子模块统一偏好（P2）。
  *
- * 字号 / 语言全局共享一个值；模型 / 上下文按子模块（appKey）各自记忆。
+ * 字号 / 语言全局共享一个值；模型 / 最大生成（max_tokens）按子模块（appKey）各自记忆。
  * 旧键读兼容：语言旧键 `locale`（各 app 历史各自存储）；模型/上下文旧键
  * （chat `topoone_last_model` · `topo_context_limit`）由对应 app 自行回退。
  */
@@ -16,10 +16,10 @@ export const MODEL_PREFIX = 'topoone-model-'
 export const CONTEXT_PREFIX = 'topoone-context-'
 
 /** 统一字号档位（定稿 F1 超集） */
-export const FONT_SIZES = [13, 15, 18, 22, 26, 32, 40, 48] as const
+export const FONT_SIZES = [13, 15, 18, 22, 26, 32] as const
 export const DEFAULT_FONT_SIZE = 16
 
-/** 上下文容量选项（输入上下文预算，单位 token） */
+/** 最大生成选项（max_tokens，单位 token） */
 export const CONTEXT_OPTIONS = [16000, 32000, 64000, 128000] as const
 export const DEFAULT_CONTEXT = 32000
 
@@ -47,6 +47,9 @@ export function setFontSize(px: number, targets: FontSizeTarget[] = []): void {
   for (const t of targets) {
     if (t === 'root') {
       root.style.fontSize = `${px}px`
+      // root 落点的 app（workbench 等）同步 --ui-scale，使 calc(px * --ui-scale)
+      // 的共享工具栏控件随字号等比缩放（覆盖 variables.scss 的派生值）
+      root.style.setProperty('--ui-scale', String(px / 16))
     } else {
       root.style.setProperty(t, `${px}px`)
     }
@@ -88,7 +91,7 @@ export function writeModelPref(appKey: string, modelId: string): void {
   } catch {}
 }
 
-/** 子模块上下文容量偏好 */
+/** 子模块最大生成（max_tokens）偏好（旧键名沿用 topoone-context-） */
 export function contextPrefKey(appKey: string): string {
   return `${CONTEXT_PREFIX}${appKey}`
 }

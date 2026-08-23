@@ -12,6 +12,8 @@ export default { analysis: {
   taskSettings: '任务设置',
   parseSettings: '解析设置',
   taskList: '任务列表',
+  taskSelect: '解析任务',
+  taskSelectEmpty: '暂无解析任务',
   taskInfo: '任务信息',
   taskName: '任务名称',
   taskNamePlaceholder: '输入任务名称',

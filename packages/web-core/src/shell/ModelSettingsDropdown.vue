@@ -12,7 +12,7 @@ import type { ModelSettingsProvider, ModelInfo } from './model-provider'
 import { tShell } from './i18n'
 
 /**
- * 统一模型设置下拉（P2）：点击显示列表，设置模型 + 上下文容量。
+ * 统一模型设置下拉（P2）：点击显示列表，设置模型 + 最大生成（max_tokens）。
  * 偏好持久化到 localStorage（`topoone-model-{app}` / `topoone-context-{app}`），
  * 后端写操作经 `provider` 注入（各子模块实现各自数据源）。
  */

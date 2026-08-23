@@ -295,19 +295,19 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 4px 8px;
-  gap: 4px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .panel-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .header-actions {
   display: flex;
-  gap: 2px;
+  gap: calc(2px * var(--ui-scale, 1));
 }
 
 .delete-btn {
@@ -321,7 +321,7 @@ defineExpose({
 .code-index-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
 }
 
 .empty-state {
@@ -330,15 +330,15 @@ defineExpose({
   justify-content: center;
   height: 100%;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .index-message {
   display: flex;
-  gap: 6px;
-  padding: 6px;
-  margin-bottom: 4px;
-  border-radius: 4px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1));
+  margin-bottom: calc(4px * var(--ui-scale, 1));
+  border-radius: calc(4px * var(--ui-scale, 1));
   transition: background 0.15s;
 }
 
@@ -360,7 +360,7 @@ defineExpose({
 }
 
 .msg-checkbox {
-  margin-top: 4px;
+  margin-top: calc(4px * var(--ui-scale, 1));
   accent-color: var(--accent);
   flex-shrink: 0;
 }
@@ -371,8 +371,8 @@ defineExpose({
 }
 
 .msg-time {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: calc(4px * var(--ui-scale, 1));
 }
 </style>

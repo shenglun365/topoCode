@@ -256,30 +256,30 @@ function toggleView() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
-  min-height: 40px;
+  min-height: calc(40px * var(--ui-scale, 1));
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .toolbar-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .toolbar-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .toolbar-status.error {
@@ -293,22 +293,22 @@ function toggleView() {
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .progress-bar {
-  width: 80px;
-  height: 4px;
+  width: calc(80px * var(--ui-scale, 1));
+  height: calc(4px * var(--ui-scale, 1));
   background: var(--bg-hover);
-  border-radius: 2px;
+  border-radius: calc(2px * var(--ui-scale, 1));
   overflow: hidden;
-  margin-right: 8px;
+  margin-right: calc(8px * var(--ui-scale, 1));
 }
 
 .progress-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: calc(2px * var(--ui-scale, 1));
   transition: width 0.2s;
 }
 
@@ -327,9 +327,9 @@ function toggleView() {
 
 .mermaid-editor {
   flex: 1;
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   line-height: 1.6;
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -340,7 +340,7 @@ function toggleView() {
 }
 
 .editor-actions {
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
@@ -353,21 +353,21 @@ function toggleView() {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: calc(24px * var(--ui-scale, 1));
 }
 
 .render-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
 }
 
 .loading-spinner {
-  width: 32px;
-  height: 32px;
+  width: calc(32px * var(--ui-scale, 1));
+  height: calc(32px * var(--ui-scale, 1));
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -382,27 +382,27 @@ function toggleView() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 24px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(24px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .render-error .icon {
-  width: 40px;
-  height: 40px;
+  width: calc(40px * var(--ui-scale, 1));
+  height: calc(40px * var(--ui-scale, 1));
   color: var(--danger);
 }
 
 .render-error .title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .render-error .desc {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
-  max-width: 400px;
+  max-width: calc(400px * var(--ui-scale, 1));
 }
 
 .render-result {
@@ -432,22 +432,22 @@ function toggleView() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .empty-state .icon {
-  width: 48px;
-  height: 48px;
+  width: calc(48px * var(--ui-scale, 1));
+  height: calc(48px * var(--ui-scale, 1));
   opacity: 0.5;
 }
 
 .empty-state .title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
 }
 
 .empty-state .desc {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 </style>

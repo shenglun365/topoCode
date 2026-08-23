@@ -209,14 +209,14 @@ const panelStyle = computed(() => {
       position: 'fixed' as const,
       top: '0',
       right: '0',
-      bottom: '44px',
-      width: `${panelStore.rightWidth}px`,
+      bottom: 'calc(44px * var(--ui-scale, 1))',
+      width: `calc(${panelStore.rightWidth}px * var(--ui-scale, 1))`,
       zIndex: 250,
       borderRadius: '0',
     }
   }
   return {
-    width: panelStore.rightCollapsed ? '0' : `${panelStore.rightWidth}px`,
+    width: panelStore.rightCollapsed ? '0' : `calc(${panelStore.rightWidth}px * var(--ui-scale, 1))`,
   }
 })
 
@@ -389,21 +389,21 @@ function toggleFloat() {
 /* 全屏停靠拖拽把手 */
 .dock-resize-handle {
   position: absolute;
-  left: -3px;
+  left: -calc(3px * var(--ui-scale, 1));
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: calc(6px * var(--ui-scale, 1));
   cursor: col-resize;
   z-index: 1;
 }
 .dock-resize-handle::after {
   content: '';
   position: absolute;
-  left: 2px;
+  left: calc(2px * var(--ui-scale, 1));
   top: 50%;
   transform: translateY(-50%);
-  width: 2px;
-  height: 32px;
+  width: calc(2px * var(--ui-scale, 1));
+  height: calc(32px * var(--ui-scale, 1));
   background: var(--border);
   border-radius: 1px;
   transition: background 0.15s;
@@ -420,13 +420,13 @@ function toggleFloat() {
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
   transition: none;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
 }
 
 .panel-right.floating .panel-body {
   overflow: auto;
-  padding-right: 8px;
-  padding-bottom: 6px;
+  padding-right: calc(8px * var(--ui-scale, 1));
+  padding-bottom: calc(6px * var(--ui-scale, 1));
 }
 
 .panel-right.floating .panel-header.float-drag {
@@ -438,43 +438,43 @@ function toggleFloat() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  font-size: 11px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border);
-  min-height: 32px;
+  min-height: calc(32px * var(--ui-scale, 1));
 }
 
 .panel-header-actions {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .panel-header-actions .icon-btn {
-  width: 20px;
-  height: 20px;
+  width: calc(20px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 
 .panel-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   min-width: 0;
   overflow: hidden;
 }
 
 .session-hint {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 400;
   text-transform: none;
   letter-spacing: 0;
@@ -501,9 +501,9 @@ function toggleFloat() {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 6px 8px;
-  font-size: 10px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-muted);
   background: transparent;
@@ -526,7 +526,7 @@ function toggleFloat() {
 .panel-body {
   flex: 1;
   overflow: auto;
-  padding: 4px 0;
+  padding: calc(4px * var(--ui-scale, 1)) 0;
 }
 
 /* 缩放手柄 */
@@ -539,52 +539,52 @@ function toggleFloat() {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .resize-left {
-  left: 0; top: 0; bottom: 0; width: 10px;
+  left: 0; top: 0; bottom: 0; width: calc(10px * var(--ui-scale, 1));
   cursor: ew-resize;
 }
 .resize-right {
-  right: 0; top: 0; bottom: 0; width: 10px;
+  right: 0; top: 0; bottom: 0; width: calc(10px * var(--ui-scale, 1));
   cursor: ew-resize;
 }
 .resize-bottom {
-  left: 0; right: 0; bottom: 0; height: 8px;
+  left: 0; right: 0; bottom: 0; height: calc(8px * var(--ui-scale, 1));
   cursor: ns-resize;
 }
 .resize-bl {
-  left: 0; bottom: 0; width: 16px; height: 16px;
+  left: 0; bottom: 0; width: calc(16px * var(--ui-scale, 1)); height: calc(16px * var(--ui-scale, 1));
   cursor: nesw-resize;
 }
 .resize-br {
-  right: 0; bottom: 0; width: 16px; height: 16px;
+  right: 0; bottom: 0; width: calc(16px * var(--ui-scale, 1)); height: calc(16px * var(--ui-scale, 1));
   cursor: nwse-resize;
 }
 
 .symbols-panel {
-  padding: 12px;
+  padding: calc(12px * var(--ui-scale, 1));
 }
 
 .symbols-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 20px 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .symbols-empty .icon {
-  font-size: 24px;
+  font-size: calc(24px * var(--ui-scale, 1));
   opacity: 0.5;
 }
 
 .symbols-empty .title {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .symbols-empty .desc {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   line-height: 1.5;
 }

@@ -337,9 +337,9 @@ defineExpose({ loadGroups })
 .group-filter-btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -360,17 +360,17 @@ defineExpose({ loadGroups })
 }
 
 .group-filter-count {
-  min-width: 14px;
-  height: 14px;
+  min-width: calc(14px * var(--ui-scale, 1));
+  height: calc(14px * var(--ui-scale, 1));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--accent);
   background: var(--bg-tertiary);
-  border-radius: 7px;
-  padding: 0 4px;
+  border-radius: calc(7px * var(--ui-scale, 1));
+  padding: 0 calc(4px * var(--ui-scale, 1));
 }
 
 .filter-chevron {
@@ -385,29 +385,29 @@ defineExpose({ loadGroups })
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  width: 260px;
+  width: calc(260px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   z-index: 1000;
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
 }
 
 .group-filter-search {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .group-filter-settings {
-  padding: 2px 8px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   white-space: nowrap;
   flex-shrink: 0;
   transition: all 0.15s;
@@ -421,8 +421,8 @@ defineExpose({ loadGroups })
 
 .group-filter-search input {
   flex: 1;
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -436,17 +436,17 @@ defineExpose({ loadGroups })
 }
 
 .group-filter-tree {
-  max-height: 240px;
+  max-height: calc(240px * var(--ui-scale, 1));
   overflow-y: auto;
-  margin: 8px 0;
+  margin: calc(8px * var(--ui-scale, 1)) 0;
 }
 
 .group-tree-item {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px 6px;
-  font-size: 11px;
+  gap: calc(2px * var(--ui-scale, 1));
+  padding: calc(3px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -464,8 +464,8 @@ defineExpose({ loadGroups })
 }
 
 .tree-expand {
-  width: 12px;
-  height: 12px;
+  width: calc(12px * var(--ui-scale, 1));
+  height: calc(12px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -473,7 +473,7 @@ defineExpose({ loadGroups })
 }
 
 .tree-expand-placeholder {
-  width: 12px;
+  width: calc(12px * var(--ui-scale, 1));
 }
 
 .expand-open {
@@ -481,15 +481,15 @@ defineExpose({ loadGroups })
 }
 
 .tree-checkbox {
-  width: 14px;
-  height: 14px;
+  width: calc(14px * var(--ui-scale, 1));
+  height: calc(14px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 700;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: calc(2px * var(--ui-scale, 1));
   flex-shrink: 0;
 }
 
@@ -510,29 +510,29 @@ defineExpose({ loadGroups })
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding-top: 6px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding-top: calc(6px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
 }
 
 .group-filter-footer-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .group-filter-footer-right {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .group-filter-action {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-secondary);
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1));
   border-radius: var(--radius-sm);
 }
 
@@ -542,8 +542,8 @@ defineExpose({ loadGroups })
 }
 
 .group-filter-cancel {
-  padding: 2px 8px;
-  font-size: 10px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-secondary);
   background: none;
   border: 1px solid var(--border);
@@ -556,8 +556,8 @@ defineExpose({ loadGroups })
 }
 
 .group-filter-ok {
-  padding: 2px 8px;
-  font-size: 10px;
+  padding: calc(2px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: #fff;
   background: var(--accent);
   border: none;
@@ -571,7 +571,7 @@ defineExpose({ loadGroups })
 
 .group-filter-selected {
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 </style>

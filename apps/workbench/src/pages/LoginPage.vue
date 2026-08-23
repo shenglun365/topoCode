@@ -187,35 +187,35 @@ async function handleLogin() {
   background: var(--bg-primary);
 }
 .auth-card {
-  width: 400px;
-  padding: 40px 32px;
+  width: calc(400px * var(--ui-scale, 1));
+  padding: calc(40px * var(--ui-scale, 1)) calc(32px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--ui-scale, 1));
   text-align: center;
 }
 .auth-logo {
-  font-size: 32px;
+  font-size: calc(32px * var(--ui-scale, 1));
   color: var(--accent);
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 .auth-title {
-  font-size: 18px;
+  font-size: calc(18px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 24px;
+  margin-bottom: calc(24px * var(--ui-scale, 1));
 }
 .field {
-  margin-bottom: 10px;
+  margin-bottom: calc(10px * var(--ui-scale, 1));
 }
 .input {
   width: 100%;
-  padding: 10px 12px;
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   outline: none;
   box-sizing: border-box;
 }
@@ -227,27 +227,27 @@ async function handleLogin() {
 }
 .code-row {
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   align-items: center;
 }
 .code-btn {
   white-space: nowrap;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 .error {
   color: var(--error);
-  font-size: 12px;
-  margin-bottom: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
+  margin-bottom: calc(12px * var(--ui-scale, 1));
 }
 .btn-full {
   width: 100%;
-  padding: 10px;
-  font-size: 14px;
+  padding: calc(10px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
 }
 .toggle-mode {
-  margin-top: 10px;
-  font-size: 12px;
+  margin-top: calc(10px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--accent);
   cursor: pointer;
   opacity: 0.8;
@@ -257,8 +257,8 @@ async function handleLogin() {
   text-decoration: underline;
 }
 .auth-links {
-  margin-top: 14px;
-  font-size: 12px;
+  margin-top: calc(14px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 .auth-links a {
   color: var(--accent);
@@ -266,14 +266,14 @@ async function handleLogin() {
 }
 .auth-links .sep {
   color: var(--border);
-  margin: 0 6px;
+  margin: 0 calc(6px * var(--ui-scale, 1));
 }
 .auth-links .link-muted {
   color: var(--text-muted);
 }
 .auth-back {
-  margin-top: 12px;
-  font-size: 12px;
+  margin-top: calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 .auth-back a {
   color: var(--text-muted);

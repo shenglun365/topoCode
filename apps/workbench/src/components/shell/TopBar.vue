@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MoonIcon, SunIcon } from '@heroicons/vue/24/outline'
@@ -37,7 +37,10 @@ const modelProvider: ModelSettingsProvider = {
   },
 }
 
-const title = computed(() => navigation.currentBreadcrumb?.label || 'TopoCode')
+const title = computed(() => navigation.currentBreadcrumb?.label || '项目列表')
+
+/** 模型/右面板工具仅在 代码解析、架构分析 页显示（首页隐藏） */
+const showTools = computed(() => ['/code', '/analysis'].includes(route.path))
 
 const showProjectBadge = computed(() =>
   ['/code', '/analysis'].includes(route.path) && !!projectStore.selectedProject)
@@ -53,6 +56,15 @@ function onLocale(l: string) {
 function onToggleRight(v: boolean) {
   panelStore.setRightCollapsed(!v)
 }
+
+/** 首页不渲染模型下拉时也要保证模型列表已加载（llmClient/isLLMConfigured 依赖） */
+onMounted(() => {
+  if (modelConfigStore.models.length === 0) {
+    modelConfigStore.loadModels().catch((e) => {
+      console.warn('[TopBar] loadModels failed:', e)
+    })
+  }
+})
 </script>
 
 <template>
@@ -67,7 +79,7 @@ function onToggleRight(v: boolean) {
     <template #brand>
       <div class="menu-bar-logo">
         <StarLogoMark :size="18" />
-        <span class="logo-text">TopoCode</span>
+        <span class="logo-text">TopoCode 知识库管理</span>
       </div>
     </template>
     <template #project>
@@ -81,10 +93,12 @@ function onToggleRight(v: boolean) {
     </template>
     <template #tools>
       <ModelSettingsDropdown
+        v-if="showTools"
         app-key="app"
         :provider="modelProvider"
       />
       <PanelToggleButton
+        v-if="showTools"
         :model-value="!panelStore.rightCollapsed"
         @update:model-value="onToggleRight"
       />
@@ -113,12 +127,12 @@ function onToggleRight(v: boolean) {
 .menu-bar-logo {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
   flex-shrink: 0;
-  padding: 0 4px;
+  padding: 0 calc(4px * var(--ui-scale, 1));
 }
 .logo-text {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: 0.5px;
@@ -126,12 +140,12 @@ function onToggleRight(v: boolean) {
 .project-badge {
   display: inline-flex;
   align-items: center;
-  max-width: 240px;
-  padding: 2px 10px;
+  max-width: calc(240px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   border-radius: var(--radius-md);
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

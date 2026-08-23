@@ -404,7 +404,8 @@ def _cmd_serve(args):
     admin_port = int(os.environ.get("SUPERVISOR_ADMIN_PORT", "3450"))
 
     from topoone.supervisor.supervisor import Supervisor
-    sv = Supervisor()
+    # log_dir 必须传入：子进程 stdout 落盘（普通文件写入永不阻塞子进程）
+    sv = Supervisor(log_dir=os.path.join(data_dir, "logs"))
 
     manifest = _manifest_apps()
     for name in _all_service_names():

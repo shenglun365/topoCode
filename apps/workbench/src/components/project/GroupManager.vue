@@ -455,20 +455,20 @@ defineExpose({ loadGroups })
 }
 
 .dialog-error {
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--error-bg, rgba(239, 68, 68, .1));
   color: var(--error);
   border: 1px solid var(--error);
-  border-radius: 6px;
-  font-size: 12px;
-  margin-bottom: 4px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
+  margin-bottom: calc(4px * var(--ui-scale, 1));
 }
 
 .group-manager-toolbar {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: 8px 16px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -476,9 +476,9 @@ defineExpose({ loadGroups })
 .btn-primary-sm {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  font-size: 11px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 500;
   color: #fff;
   background: var(--accent);
@@ -493,8 +493,8 @@ defineExpose({ loadGroups })
 }
 
 .btn-secondary-sm {
-  padding: 4px 10px;
-  font-size: 11px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -510,7 +510,7 @@ defineExpose({ loadGroups })
 .group-manager-tree {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 16px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
 }
 
 .group-manager-empty {
@@ -518,25 +518,25 @@ defineExpose({ loadGroups })
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px 24px;
+  padding: calc(48px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1));
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .group-manager-hint {
-  font-size: 10px;
-  margin-top: 8px;
+  font-size: calc(10px * var(--ui-scale, 1));
+  margin-top: calc(8px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .group-tree-node {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  margin: 2px 0;
-  font-size: 12px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  margin: calc(2px * var(--ui-scale, 1)) 0;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-secondary);
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -565,14 +565,14 @@ defineExpose({ loadGroups })
 }
 
 .group-count {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .group-actions {
   display: flex;
-  gap: 2px;
+  gap: calc(2px * var(--ui-scale, 1));
   opacity: 0;
   transition: opacity 0.15s;
 }
@@ -582,8 +582,8 @@ defineExpose({ loadGroups })
 }
 
 .group-action-btn {
-  width: 20px;
-  height: 20px;
+  width: calc(20px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -619,34 +619,34 @@ defineExpose({ loadGroups })
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 16px;
-  min-width: 320px;
-  max-width: 400px;
+  padding: calc(16px * var(--ui-scale, 1));
+  min-width: calc(320px * var(--ui-scale, 1));
+  max-width: calc(400px * var(--ui-scale, 1));
 }
 
 .dialog-content h3 {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 12px 0;
+  margin: 0 0 calc(12px * var(--ui-scale, 1)) 0;
 }
 
 .dialog-field {
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale, 1));
 }
 
 .dialog-field label {
   display: block;
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
-  margin-bottom: 4px;
+  margin-bottom: calc(4px * var(--ui-scale, 1));
 }
 
 .dialog-field input,
 .dialog-field select {
   width: 100%;
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
   background: var(--bg-primary);
   border: 1px solid var(--border);
@@ -663,15 +663,15 @@ defineExpose({ loadGroups })
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
+  gap: calc(8px * var(--ui-scale, 1));
+  margin-top: calc(16px * var(--ui-scale, 1));
 }
 
 .dialog-warning {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   color: #f59e0b;
   text-align: center;
 }
@@ -681,7 +681,7 @@ defineExpose({ loadGroups })
 }
 
 .dialog-warning p {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-secondary);
   margin: 0;
 }

@@ -49,10 +49,8 @@ async function syncProjectFromRoute() {
   if (!id) return
   const group = route.path === '/analysis' ? 'analysis' : 'code'
   if (funcGroup.context[group].projectId === id) return
+  // 最近项目键由 projectStore.selectProject 统一维护
   await projectStore.selectProject(id)
-  try {
-    localStorage.setItem(LAST_PROJECT_KEY, id)
-  } catch {}
 }
 
 function updateTitle() {
@@ -311,31 +309,31 @@ onUnmounted(() => {
 .confirm-box {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 20px 24px;
-  min-width: 300px;
-  max-width: 420px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1));
+  min-width: calc(300px * var(--ui-scale, 1));
+  max-width: calc(420px * var(--ui-scale, 1));
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .confirm-box p {
-  margin: 0 0 16px;
-  font-size: 14px;
+  margin: 0 0 calc(16px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
   color: var(--text-primary);
   line-height: 1.5;
 }
 
 .confirm-actions {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   justify-content: flex-end;
 }
 
 .confirm-btn {
-  padding: 6px 16px;
-  font-size: 13px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
@@ -358,35 +356,35 @@ onUnmounted(() => {
 
 /* 崩溃报告弹窗 */
 .crash-dialog {
-  max-width: 480px;
+  max-width: calc(480px * var(--ui-scale, 1));
 }
 .crash-dialog-title {
-  margin: 0 0 12px;
-  font-size: 16px;
+  margin: 0 0 calc(12px * var(--ui-scale, 1));
+  font-size: calc(16px * var(--ui-scale, 1));
   color: var(--error);
 }
 .crash-dialog-body p {
-  margin: 0 0 8px;
-  font-size: 13px;
+  margin: 0 0 calc(8px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
 }
 .crash-detail {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-all;
-  margin: 0 0 8px;
+  margin: 0 0 calc(8px * var(--ui-scale, 1));
 }
 .crash-time {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 .crash-hint {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
 }
 </style>

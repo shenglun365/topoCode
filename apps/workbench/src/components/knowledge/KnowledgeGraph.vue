@@ -149,20 +149,20 @@ const viewModes = [
 
 .view-switcher {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: calc(12px * var(--ui-scale, 1));
+  left: calc(12px * var(--ui-scale, 1));
   z-index: 5;
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
   align-items: center;
 }
 
 .view-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -185,26 +185,26 @@ const viewModes = [
 .view-info {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: calc(4px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-left: 8px;
-  padding: 4px 8px;
+  margin-left: calc(8px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
 }
 
 .graph-legend {
   position: absolute;
-  bottom: 12px;
-  left: 12px;
+  bottom: calc(12px * var(--ui-scale, 1));
+  left: calc(12px * var(--ui-scale, 1));
   z-index: 5;
   display: flex;
-  gap: 12px;
-  font-size: 10px;
+  gap: calc(12px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: var(--bg-secondary);
-  padding: 6px 10px;
+  padding: calc(6px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }

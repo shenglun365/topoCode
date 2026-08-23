@@ -139,20 +139,20 @@ async function handleAIExplain() {
 
 <style scoped>
 .edge-detail-card {
-  padding: 10px;
+  padding: calc(10px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-secondary);
 }
 
 .card-header {
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .edge-type-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
+  font-size: calc(10px * var(--ui-scale, 1));
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  border-radius: calc(3px * var(--ui-scale, 1));
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
   font-weight: 500;
@@ -161,20 +161,20 @@ async function handleAIExplain() {
 .edge-flow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 
 .flow-node {
   flex: 1;
-  padding: 4px 8px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-primary);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   text-align: center;
 }
 
 .node-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
@@ -190,9 +190,9 @@ async function handleAIExplain() {
 
 .edge-meta {
   display: flex;
-  gap: 6px;
-  font-size: 11px;
-  padding: 2px 0;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) 0;
 }
 
 .meta-label {
@@ -207,11 +207,11 @@ async function handleAIExplain() {
   white-space: nowrap;
 }
 
-.ai-section { margin-top: 8px; }
+.ai-section { margin-top: calc(8px * var(--ui-scale, 1)); }
 .ai-btn { width: 100%; justify-content: center; color: var(--accent); }
-.ai-loading { display: flex; align-items: center; gap: 6px; padding: 8px; font-size: 11px; color: var(--text-muted); }
-.spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+.ai-loading { display: flex; align-items: center; gap: calc(6px * var(--ui-scale, 1)); padding: calc(8px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); color: var(--text-muted); }
+.spinner { width: calc(12px * var(--ui-scale, 1)); height: calc(12px * var(--ui-scale, 1)); border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.ai-content { padding: 8px; background: var(--bg-primary); border-radius: 4px; font-size: 12px; line-height: 1.6; color: var(--text-primary); max-height: 200px; overflow: auto; }
-.ai-error { padding: 6px 8px; font-size: 11px; color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); border-radius: 4px; }
+.ai-content { padding: calc(8px * var(--ui-scale, 1)); background: var(--bg-primary); border-radius: calc(4px * var(--ui-scale, 1)); font-size: calc(12px * var(--ui-scale, 1)); line-height: 1.6; color: var(--text-primary); max-height: calc(200px * var(--ui-scale, 1)); overflow: auto; }
+.ai-error { padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1)); font-size: calc(11px * var(--ui-scale, 1)); color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); border-radius: calc(4px * var(--ui-scale, 1)); }
 </style>

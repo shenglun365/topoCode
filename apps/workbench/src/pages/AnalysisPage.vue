@@ -7,6 +7,7 @@ import { useFuncGroupStore } from '@/stores/funcGroup'
 import { useCommunityStore } from '@/stores/community-store'
 import { useAnalysisStore } from '@/stores/analysis'
 import HomeTabBar from '@/components/project/HomeTabBar.vue'
+import TaskSelect from '@/components/project/TaskSelect.vue'
 import SubDocViewer from '@/components/report/SubDocViewer.vue'
 import ReportHome from '@/components/report/ReportHome.vue'
 import ChatView from '@/components/report/ChatView.vue'
@@ -52,6 +53,76 @@ const isReportHomeTab = computed(() => activeTab.value?.kind === 'reportHome')
 const isSubDocTab = computed(() => activeTab.value?.kind === 'subdoc')
 const isPreSummaryTab = computed(() => activeTab.value?.kind === 'preSummaryFiles')
 
+/* ===== 解析任务下拉（与 reportHome tab 状态联动） ===== */
+const currentAnalysisProjectId = computed(
+  () => analysisContext.value.projectId || projectStore.selectedProjectId || '',
+)
+
+let loadedTaskProjectId = ''
+watch(
+  currentAnalysisProjectId,
+  async (pid) => {
+    if (!pid || pid === loadedTaskProjectId) return
+    loadedTaskProjectId = pid
+    try {
+      await analysisStore.loadTasks(pid)
+    } catch { /* 任务列表加载失败时下拉显示为空 */ }
+  },
+  { immediate: true },
+)
+
+const projectTasks = computed(() => {
+  const pid = currentAnalysisProjectId.value
+  return analysisStore.tasks
+    .filter((t) => t.projectId === pid)
+    .sort((a, b) => ((b.createdAt || '') > (a.createdAt || '') ? 1 : -1))
+    .map((t) => ({ id: t.id, name: t.name }))
+})
+
+/** 已打开 reportHome tab 的任务 ID 列表（tab 增删自动联动） */
+const openTaskIds = computed(() =>
+  analysisContext.value.tabs
+    .filter((t) => t.kind === 'reportHome' && t.taskId)
+    .map((t) => t.taskId as string),
+)
+
+/** 当前激活 reportHome tab 对应的任务 ID（非 reportHome tab 时为 null） */
+const activeReportTaskId = computed(() => {
+  const a = activeTab.value
+  return a && a.kind === 'reportHome' ? (a.taskId ?? null) : null
+})
+
+async function refreshTasks() {
+  const pid = currentAnalysisProjectId.value
+  if (!pid) return
+  try {
+    await analysisStore.loadTasks(pid)
+  } catch { /* ignore */ }
+}
+
+/** 点选任务：未打开 → 开 tab；已打开未激活 → 切换；已激活 → 关闭 */
+function onTaskSelect(taskId: string) {
+  const taskTab = analysisContext.value.tabs.find(
+    (t) => t.kind === 'reportHome' && t.taskId === taskId,
+  )
+  if (!taskTab) {
+    const pid = currentAnalysisProjectId.value
+    const task = analysisStore.tasks.find((x) => x.id === taskId)
+    projectStore.openReportHomeTab({
+      taskId,
+      taskName: task?.name || taskId,
+      projectId: pid || undefined,
+      projectName: projectStore.selectedProject?.name,
+    })
+    return
+  }
+  if (analysisContext.value.activeTabId === taskTab.id) {
+    onTabClose(taskTab.id)
+    return
+  }
+  funcGroup.setActiveTab('analysis', taskTab.id)
+}
+
 onMounted(() => {
   panelStore.setLeftCollapsed(false)
   panelStore.setRightCollapsed(false)
@@ -65,6 +136,8 @@ watch(
     const pid = typeof projectId === 'string' ? projectId : (projectStore.selectedProjectId || '')
     if (pid && funcGroup.context.analysis.projectId !== pid) {
       funcGroup.selectProject('analysis', pid)
+      // 该路径绕过 projectStore.selectProject，同步最近项目键
+      try { localStorage.setItem('topoone-last-project', pid) } catch { /* ignore */ }
     }
     const project = projectStore.projects.find((p) => p.id === pid)
     let taskName = taskId
@@ -202,7 +275,17 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
       :active-tab-id="analysisContext.activeTabId ?? null"
       @update:active-tab-id="onTabUpdate"
       @close="onTabClose"
-    />
+    >
+      <template #actions>
+        <TaskSelect
+          :tasks="projectTasks"
+          :open-task-ids="openTaskIds"
+          :active-task-id="activeReportTaskId"
+          @select="onTaskSelect"
+          @toggle="(o: boolean) => { if (o) refreshTasks() }"
+        />
+      </template>
+    </HomeTabBar>
 
     <!-- ===== 报告首页（分析报告生成） / 子文档 / 空白状态 ===== -->
     <template v-if="isReportHomeTab && activeTab">
@@ -266,8 +349,8 @@ async function openCommunityDetail(payload: { taskId: string; communityId: strin
   position: fixed;
   bottom: 1rem;
   right: 1rem;
-  width: 420px;
-  height: 520px;
+  width: calc(420px * var(--ui-scale, 1));
+  height: calc(520px * var(--ui-scale, 1));
   z-index: 100;
   border-radius: 0.75rem;
   box-shadow: 0 4px 24px rgba(0,0,0,0.4);

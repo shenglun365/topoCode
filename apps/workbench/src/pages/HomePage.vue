@@ -206,7 +206,7 @@ onMounted(async () => {
       class="group-manager-panel"
     >
       <div class="group-manager-header">
-        <h3 style="font-size:14px; font-weight:600; margin:0;">
+        <h3 style="font-size:calc(14px * var(--ui-scale, 1)); font-weight:600; margin:0;">
           {{ t('group.manager') }}
         </h3>
         <button
@@ -224,25 +224,12 @@ onMounted(async () => {
 
     <!-- 项目列表 -->
     <template v-else>
-      <!-- 页面标题 -->
-      <div style="margin-bottom:24px;">
-        <h1 style="font-size:20px; font-weight:600; margin-bottom:4px;">
-          TopoCode
-        </h1>
-        <p
-          class="text-muted"
-          style="font-size:12px;"
-        >
-          {{ t('project.subtitle') }}
-        </p>
-      </div>
-
       <!-- 筛选按钮 + 搜索 -->
       <div
         v-if="projectStore.projects.length > 0"
-        style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;"
+        style="display:flex; justify-content:space-between; align-items:center; margin-bottom:calc(8px * var(--ui-scale, 1)); gap:calc(8px * var(--ui-scale, 1)); flex-wrap:wrap;"
       >
-        <div style="display:flex; gap:4px; align-items:center;">
+        <div style="display:flex; gap:calc(4px * var(--ui-scale, 1)); align-items:center;">
           <button
             :class="['btn', 'btn-sm', filterMode === 'all' ? 'btn-primary' : 'btn-ghost']"
             @click="filterMode = 'all'"
@@ -251,7 +238,7 @@ onMounted(async () => {
             <span>{{ t('project.allProjects') }}</span>
             <span
               class="badge badge-gray"
-              style="font-size:9px; margin-left:2px;"
+              style="font-size:calc(9px * var(--ui-scale, 1)); margin-left:calc(2px * var(--ui-scale, 1));"
             >{{ projectStore.projects.length }}</span>
           </button>
           <button
@@ -262,7 +249,7 @@ onMounted(async () => {
             <span>{{ t('project.myFavorites') }}</span>
             <span
               class="badge badge-yellow"
-              style="font-size:9px; margin-left:2px;"
+              style="font-size:calc(9px * var(--ui-scale, 1)); margin-left:calc(2px * var(--ui-scale, 1));"
             >{{ projectStore.projects.filter(p => p.favorite).length }}</span>
           </button>
           <!-- 分组筛选 -->
@@ -271,15 +258,15 @@ onMounted(async () => {
             @change="selectedGroupIds = $event"
           />
         </div>
-        <div style="display:flex; gap:4px; align-items:center;">
+        <div style="display:flex; gap:calc(4px * var(--ui-scale, 1)); align-items:center;">
           <!-- 每页数量选择 -->
           <span
             class="text-muted"
-            style="font-size:10px; white-space:nowrap;"
+            style="font-size:calc(10px * var(--ui-scale, 1)); white-space:nowrap;"
           >{{ t('project.pageSize') }}</span>
           <select
             :value="pageSize"
-            style="padding:2px 4px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); outline:none;"
+            style="padding:calc(2px * var(--ui-scale, 1)) calc(4px * var(--ui-scale, 1)); font-size:calc(10px * var(--ui-scale, 1)); border:1px solid var(--border); border-radius:calc(3px * var(--ui-scale, 1)); background:var(--bg-primary); color:var(--text-primary); outline:none;"
             @change="settingsStore.setProjectPageSize(Number(($event.target as HTMLSelectElement).value))"
           >
             <option value="20">
@@ -298,14 +285,14 @@ onMounted(async () => {
             <input
               v-model="searchQuery"
               :placeholder="t('project.searchProjects')"
-              style="padding:3px 6px 3px 24px; font-size:10px; border:1px solid var(--border); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); width:160px; outline:none;"
+              style="padding:calc(3px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1)) calc(3px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1)); font-size:calc(10px * var(--ui-scale, 1)); border:1px solid var(--border); border-radius:calc(3px * var(--ui-scale, 1)); background:var(--bg-primary); color:var(--text-primary); width:calc(160px * var(--ui-scale, 1)); outline:none;"
             >
           </div>
         </div>
       </div>
 
       <!-- 项目卡片网格（始终显示，导入卡片自动排在末尾） -->
-      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
+      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:calc(12px * var(--ui-scale, 1)); margin-bottom:calc(12px * var(--ui-scale, 1));">
         <ProjectCard
           v-for="project in pagedProjects"
           :key="project.id"
@@ -315,13 +302,13 @@ onMounted(async () => {
         <!-- 无匹配结果 -->
         <div
           v-if="pagedProjects.length === 0 && !searchQuery"
-          style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
+          style="grid-column: 1/-1; text-align:center; padding:calc(24px * var(--ui-scale, 1)); color:var(--text-muted); font-size:calc(12px * var(--ui-scale, 1));"
         >
           {{ t('project.noFavorites') }}
         </div>
         <div
           v-else-if="pagedProjects.length === 0 && searchQuery"
-          style="grid-column: 1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;"
+          style="grid-column: 1/-1; text-align:center; padding:calc(24px * var(--ui-scale, 1)); color:var(--text-muted); font-size:calc(12px * var(--ui-scale, 1));"
         >
           {{ t('project.noMatch') }}
         </div>
@@ -349,7 +336,7 @@ onMounted(async () => {
               <span class="import-card-percent">{{ projectStore.importProgress }}%</span>
               <div
                 class="progress-bar"
-                style="width:80%; margin-top:8px;"
+                style="width:80%; margin-top:calc(8px * var(--ui-scale, 1));"
               >
                 <div
                   class="progress-bar-fill bg-accent"
@@ -375,7 +362,7 @@ onMounted(async () => {
       >
         <span
           class="text-muted"
-          style="font-size:11px;"
+          style="font-size:calc(11px * var(--ui-scale, 1));"
         >
           {{ t('project.showing') }} {{ pageRange.start }}-{{ pageRange.end }} / {{ pageRange.total }}
         </span>
@@ -387,7 +374,7 @@ onMounted(async () => {
           >
             {{ t('project.prevPage') }}
           </button>
-          <span style="font-size:11px; padding:0 8px;">
+          <span style="font-size:calc(11px * var(--ui-scale, 1)); padding:0 calc(8px * var(--ui-scale, 1));">
             {{ currentPage }} / {{ totalPages }}
           </span>
           <button
@@ -406,18 +393,18 @@ onMounted(async () => {
         class="quick-start-empty"
       >
         <RocketLaunchIcon class="w-12 h-12 text-accent" />
-        <h2 style="font-size:16px; font-weight:600; margin-bottom:8px;">
+        <h2 style="font-size:calc(16px * var(--ui-scale, 1)); font-weight:600; margin-bottom:calc(8px * var(--ui-scale, 1));">
           {{ t('project.quickStart') }}
         </h2>
         <p
           class="text-muted"
-          style="font-size:12px; margin-bottom:16px;"
+          style="font-size:calc(12px * var(--ui-scale, 1)); margin-bottom:calc(16px * var(--ui-scale, 1));"
         >
           {{ t('project.quickStartDesc') }}
         </p>
         <p
           class="text-muted"
-          style="font-size:11px;"
+          style="font-size:calc(11px * var(--ui-scale, 1));"
         >
           {{ t('project.menuImportHint') }}
         </p>
@@ -489,7 +476,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 32px;
+  padding: calc(32px * var(--ui-scale, 1));
   overflow: auto;
 }
 
@@ -503,7 +490,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -517,7 +504,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 40px 20px;
+  padding: calc(40px * var(--ui-scale, 1)) calc(20px * var(--ui-scale, 1));
   text-align: center;
 }
 
@@ -525,23 +512,23 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
+  padding: calc(8px * var(--ui-scale, 1)) 0;
   border-top: 1px solid var(--border);
 }
 
 .pagination-buttons {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .import-card {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 140px;
+  min-height: calc(140px * var(--ui-scale, 1));
   border: 2px dashed var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s;
   user-select: none;
@@ -562,14 +549,14 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .import-card-body .import-card-hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   opacity: 0.7;
-  margin-top: 2px;
+  margin-top: calc(2px * var(--ui-scale, 1));
 }
 
 .import-card-icon {
@@ -582,7 +569,7 @@ onMounted(async () => {
 }
 
 .import-card-label {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-muted);
 }
@@ -592,7 +579,7 @@ onMounted(async () => {
 }
 
 .import-card-percent {
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-scale, 1));
   font-weight: 700;
   color: var(--accent);
 }
@@ -601,17 +588,17 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 
 .import-card-hint {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .import-card-spinner {
-  width: 24px;
-  height: 24px;
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
   border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -635,26 +622,26 @@ onMounted(async () => {
   z-index: 10000;
 }
 .confirm-dialog {
-  width: 420px;
+  width: calc(420px * var(--ui-scale, 1));
   max-width: 90vw;
-  padding: 24px;
+  padding: calc(24px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--ui-scale, 1));
 }
 .confirm-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 15px;
+  gap: calc(10px * var(--ui-scale, 1));
+  font-size: calc(15px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 .confirm-body {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   color: var(--text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -662,6 +649,6 @@ onMounted(async () => {
 .confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: calc(10px * var(--ui-scale, 1));
 }
 </style>

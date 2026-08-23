@@ -311,7 +311,7 @@ function handleExternalTagClick(name: string, count: number) {
 .arch-tag.has-name { background: var(--bg-accent-subtle, #2d1f5e); border-color: var(--accent, #7c3aed); }
 .arch-tag.selecting { cursor: copy; }
 .arch-tag.selected { border-color: #22c55e; background: color-mix(in srgb, #22c55e 10%, var(--bg-secondary)); outline: 1px solid #22c55e; }
-.tag-name { font-weight: 500; color: var(--text-primary); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-name { font-weight: 500; color: var(--text-primary); max-width: calc(140px * var(--ui-scale, 1)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-count { font-size: 0.65rem; color: var(--text-muted); background: var(--bg-tertiary); border-radius: 0.25rem; padding: 0.05rem 0.3rem; }
 .arch-empty { font-size: 0.75rem; color: var(--text-muted); padding: 0.5rem; font-style: italic; }
 

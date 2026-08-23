@@ -124,7 +124,7 @@ function onClearCacheDone() {
       </div>
       <button
         class="btn btn-primary btn-sm"
-        style="margin-top:16px;"
+        style="margin-top:calc(16px * var(--ui-scale, 1));"
         @click="goHome"
       >
         {{ t('code.goHome') }}
@@ -135,13 +135,13 @@ function onClearCacheDone() {
     <template v-else>
       <!-- 项目标题栏 -->
       <div
-        style="display:flex; align-items:center; padding:8px 16px; border-bottom:1px solid var(--border); gap:12px;"
+        style="display:flex; align-items:center; padding:calc(8px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1)); border-bottom:1px solid var(--border); gap:calc(12px * var(--ui-scale, 1));"
       >
         <FolderIcon class="w-4 h-4 text-accent" />
-        <span style="font-size:13px; font-weight:600;">{{ projectStore.selectedProject?.name }}</span>
+        <span style="font-size:calc(13px * var(--ui-scale, 1)); font-weight:600;">{{ projectStore.selectedProject?.name }}</span>
         <span
           class="badge badge-green"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >{{ t('project.synced') }}</span>
         <div style="flex:1;" />
         <button
@@ -287,7 +287,7 @@ function onClearCacheDone() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: calc(12px * var(--ui-scale, 1));
 }
 
 .menu-overlay {
@@ -301,23 +301,23 @@ function onClearCacheDone() {
   z-index: 10000;
   background: var(--bg-secondary, #1e1e2e);
   border: 1px solid var(--border, #313244);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  min-width: 160px;
-  padding: 4px;
+  min-width: calc(160px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1));
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   width: 100%;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border: none;
   background: transparent;
   color: var(--text-primary, #cdd6f4);
-  font-size: 13px;
-  border-radius: 6px;
+  font-size: calc(13px * var(--ui-scale, 1));
+  border-radius: calc(6px * var(--ui-scale, 1));
   cursor: pointer;
   text-align: left;
 }

@@ -30,7 +30,7 @@ export interface ChatOptions {
   onChunk?: (chunk: string) => void
   signal?: AbortSignal
   locale?: string
-  /** P5: 输入上下文预算（token），缺省读 `topoone-context-app`；服务端 llm.chat 渲染后裁剪。 */
+  /** 最大生成（max_tokens，token），缺省读 `topoone-context-app`；经 llm.chat `context_budget` 透传服务端。 */
   contextBudget?: number
 }
 

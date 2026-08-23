@@ -171,8 +171,8 @@ onMounted(loadSummary)
 .psd-dialog {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  width: 600px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  width: calc(600px * var(--ui-scale, 1));
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
@@ -184,13 +184,13 @@ onMounted(loadSummary)
 .psd-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .psd-title {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -200,8 +200,8 @@ onMounted(loadSummary)
 }
 
 .psd-close-btn {
-  width: 24px;
-  height: 24px;
+  width: calc(24px * var(--ui-scale, 1));
+  height: calc(24px * var(--ui-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -209,7 +209,7 @@ onMounted(loadSummary)
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
 }
 
 .psd-close-btn:hover {
@@ -220,25 +220,25 @@ onMounted(loadSummary)
 .psd-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: calc(16px * var(--ui-scale, 1));
 }
 
 .psd-meta {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--ui-scale, 1));
 }
 
 .psd-meta-row {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .psd-meta-label {
   flex-shrink: 0;
-  width: 70px;
-  font-size: 10px;
+  width: calc(70px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -246,28 +246,28 @@ onMounted(loadSummary)
 }
 
 .psd-meta-value {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 
 .psd-path {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   word-break: break-all;
 }
 
 .psd-divider {
   height: 1px;
   background: var(--border);
-  margin: 12px 0;
+  margin: calc(12px * var(--ui-scale, 1)) 0;
 }
 
 .psd-content {
-  min-height: 80px;
+  min-height: calc(80px * var(--ui-scale, 1));
 }
 
 .psd-summary-text {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   line-height: 1.7;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -281,24 +281,24 @@ onMounted(loadSummary)
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 80px;
-  font-size: 12px;
+  height: calc(80px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
 .psd-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(10px * var(--ui-scale, 1)) calc(16px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
 }
 
 .psd-btn {
-  padding: 5px 14px;
-  font-size: 11px;
+  padding: calc(5px * var(--ui-scale, 1)) calc(14px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
@@ -327,21 +327,21 @@ onMounted(loadSummary)
 .psd-confirm-box {
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 20px 24px;
-  min-width: 280px;
+  border-radius: calc(10px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1));
+  min-width: calc(280px * var(--ui-scale, 1));
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .psd-confirm-box p {
-  margin: 0 0 16px;
-  font-size: 14px;
+  margin: 0 0 calc(16px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 
 .psd-confirm-actions {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
   justify-content: flex-end;
 }
 </style>

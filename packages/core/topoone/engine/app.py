@@ -331,7 +331,7 @@ async def _run_distributed(data_dir: str, http_port: int | None, http_host: str 
     logger.info(f"data_dir={data_dir}")
 
     from topoone.supervisor.supervisor import Supervisor
-    sv = Supervisor()
+    sv = Supervisor(log_dir=os.path.join(data_dir, "logs"))
 
     # 注册受管进程（M03: db_service 迁至 topoone.engine.db_service；M05: agent_worker 并入 topoone.agent）
     sv.register("db_service",

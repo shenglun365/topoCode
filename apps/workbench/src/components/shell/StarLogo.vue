@@ -514,6 +514,6 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--ui-scale, 1));
 }
 </style>

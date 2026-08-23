@@ -145,7 +145,7 @@ function handleSave(docId: string, content: string) {
     <!-- 默认模式 -->
     <template v-else>
       <!-- 顶部 Tab 切换 -->
-      <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 16px;">
+      <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-secondary); padding:0 calc(16px * var(--ui-scale, 1));">
         <div
           class="kb-tab"
           :class="{ active: knowledgeStore.activeTab === 'graph' }"
@@ -179,7 +179,7 @@ function handleSave(docId: string, content: string) {
           <span>{{ t('knowledge.animation') }}</span>
         </div>
         <div style="flex:1;" />
-        <div style="display:flex; gap:4px; align-items:center;">
+        <div style="display:flex; gap:calc(4px * var(--ui-scale, 1)); align-items:center;">
           <button class="btn btn-ghost btn-sm">
             <ArrowDownTrayIcon class="w-4 h-4" />
             <span>{{ t('common.import') }}</span>
@@ -202,28 +202,28 @@ function handleSave(docId: string, content: string) {
         <!-- Tab 3: 知识点列表 -->
         <div
           v-else-if="knowledgeStore.activeTab === 'documents'"
-          style="width:100%; height:100%; overflow:auto; padding:16px;"
+          style="width:100%; height:100%; overflow:auto; padding:calc(16px * var(--ui-scale, 1));"
         >
           <!-- 搜索 + 排序 -->
-          <div style="margin-bottom:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <div style="display:flex; gap:8px; align-items:center;">
+          <div style="margin-bottom:calc(12px * var(--ui-scale, 1));">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:calc(8px * var(--ui-scale, 1));">
+              <div style="display:flex; gap:calc(8px * var(--ui-scale, 1)); align-items:center;">
                 <input
                   type="text"
                   class="input input-sm"
                   :placeholder="t('knowledge.searchPlaceholder')"
-                  style="width:220px;"
+                  style="width:calc(220px * var(--ui-scale, 1));"
                   :value="knowledgeStore.filter.search"
                   @input="knowledgeStore.setSearch(($event.target as HTMLInputElement).value)"
                 >
-                <span style="font-size:11px; color:var(--text-muted);">
+                <span style="font-size:calc(11px * var(--ui-scale, 1)); color:var(--text-muted);">
                   {{ t('knowledge.totalItems', { count: knowledgeStore.filteredDocs.length }) }}
                 </span>
               </div>
-              <div style="display:flex; gap:6px; align-items:center;">
+              <div style="display:flex; gap:calc(6px * var(--ui-scale, 1)); align-items:center;">
                 <select
                   class="select select-sm"
-                  style="width:120px;"
+                  style="width:calc(120px * var(--ui-scale, 1));"
                   :value="knowledgeStore.filter.sortBy"
                   @change="knowledgeStore.setSortBy(($event.target as HTMLSelectElement).value as 'updated-desc')"
                 >
@@ -255,7 +255,7 @@ function handleSave(docId: string, content: string) {
             </div>
 
             <!-- 四维折叠筛选 -->
-            <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+            <div style="display:flex; gap:calc(8px * var(--ui-scale, 1)); align-items:flex-start; flex-wrap:wrap;">
               <!-- 维度1 -->
               <div class="kb-dim-filter-group">
                 <div
@@ -388,7 +388,7 @@ function handleSave(docId: string, content: string) {
               <button
                 v-if="knowledgeStore.filter.search || Object.values(knowledgeStore.filter.dimensions).some(d => d.length > 0)"
                 class="btn btn-ghost btn-sm"
-                style="align-self:flex-start; margin-top:2px;"
+                style="align-self:flex-start; margin-top:calc(2px * var(--ui-scale, 1));"
                 @click="knowledgeStore.clearFilters()"
               >
                 <XMarkIcon class="w-3 h-3" />
@@ -398,7 +398,7 @@ function handleSave(docId: string, content: string) {
           </div>
 
           <!-- 文档卡片列表 -->
-          <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; flex-direction:column; gap:calc(8px * var(--ui-scale, 1));">
             <KnowledgeDocCard
               v-for="doc in knowledgeStore.filteredDocs"
               :key="doc.id"
@@ -426,7 +426,7 @@ function handleSave(docId: string, content: string) {
           <!-- 分页 -->
           <div
             v-if="knowledgeStore.filteredDocs.length > 0"
-            style="display:flex; justify-content:center; align-items:center; gap:8px; margin-top:16px; padding:12px; font-size:11px; color:var(--text-muted);"
+            style="display:flex; justify-content:center; align-items:center; gap:calc(8px * var(--ui-scale, 1)); margin-top:calc(16px * var(--ui-scale, 1)); padding:calc(12px * var(--ui-scale, 1)); font-size:calc(11px * var(--ui-scale, 1)); color:var(--text-muted);"
           >
             <span>{{ t('knowledge.totalItems', { count: knowledgeStore.filteredDocs.length }) }}</span>
             <div class="divider-vertical" />
@@ -458,14 +458,14 @@ function handleSave(docId: string, content: string) {
         >
           <!-- 左侧: 编辑器 -->
           <div style="flex:1; display:flex; flex-direction:column; border-right:1px solid var(--border);">
-            <div style="display:flex; align-items:center; gap:6px; padding:8px 12px; background:var(--bg-tertiary); border-bottom:1px solid var(--border);">
+            <div style="display:flex; align-items:center; gap:calc(6px * var(--ui-scale, 1)); padding:calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1)); background:var(--bg-tertiary); border-bottom:1px solid var(--border);">
               <PlayCircleIcon class="w-4 h-4" />
-              <span style="font-size:12px; font-weight:600; color:var(--text-primary);">{{ t('knowledge.animation') }}</span>
-              <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">TopoScript</span>
+              <span style="font-size:calc(12px * var(--ui-scale, 1)); font-weight:600; color:var(--text-primary);">{{ t('knowledge.animation') }}</span>
+              <span style="font-size:calc(11px * var(--ui-scale, 1)); color:var(--text-muted); margin-left:calc(8px * var(--ui-scale, 1));">TopoScript</span>
             </div>
             <textarea
               v-model="animSource"
-              style="flex:1; padding:12px; font-size:12px; font-family:'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; line-height:1.6; resize:none; border:none; outline:none; background:var(--bg-primary); color:var(--text-secondary);"
+              style="flex:1; padding:calc(12px * var(--ui-scale, 1)); font-size:calc(12px * var(--ui-scale, 1)); font-family:'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace; line-height:1.6; resize:none; border:none; outline:none; background:var(--bg-primary); color:var(--text-secondary);"
               spellcheck="false"
             />
           </div>
@@ -496,9 +496,9 @@ function handleSave(docId: string, content: string) {
 .kb-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  font-size: 12px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -518,15 +518,15 @@ function handleSave(docId: string, content: string) {
 .kb-dim-filter-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .kb-dim-filter-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -541,8 +541,8 @@ function handleSave(docId: string, content: string) {
 .kb-dim-filter-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
 }
@@ -550,9 +550,9 @@ function handleSave(docId: string, content: string) {
 .kb-dim-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  font-size: 10px;
+  gap: calc(4px * var(--ui-scale, 1));
+  padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   cursor: pointer;
   border-radius: var(--radius-sm);

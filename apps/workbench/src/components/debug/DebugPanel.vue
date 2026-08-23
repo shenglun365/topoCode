@@ -140,47 +140,47 @@ function copyLogs() {
 
 <style scoped>
 .debug-panel {
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
   font-family: 'Courier New', monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-secondary);
   overflow: auto;
 }
 
 .debug-section {
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale, 1));
 }
 
 .debug-section-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
-  font-size: 10px;
+  gap: calc(4px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-muted);
-  margin-bottom: 6px;
-  padding-bottom: 4px;
+  margin-bottom: calc(6px * var(--ui-scale, 1));
+  padding-bottom: calc(4px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .debug-actions {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .debug-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  padding: calc(2px * var(--ui-scale, 1));
   border: none;
   background: transparent;
   cursor: pointer;
   color: var(--text-muted);
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
 }
 
 .debug-action-btn:hover {
@@ -195,8 +195,8 @@ function copyLogs() {
 .debug-row {
   display: flex;
   justify-content: space-between;
-  padding: 2px 0;
-  gap: 8px;
+  padding: calc(2px * var(--ui-scale, 1)) 0;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .debug-label {
@@ -211,39 +211,39 @@ function copyLogs() {
 }
 
 .debug-empty {
-  padding: 8px;
+  padding: calc(8px * var(--ui-scale, 1));
   text-align: center;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
 }
 
 .debug-log-list {
-  max-height: 300px;
+  max-height: calc(300px * var(--ui-scale, 1));
   overflow-y: auto;
 }
 
 .debug-log-entry {
   display: flex;
   flex-direction: column;
-  padding: 3px 0;
+  padding: calc(3px * var(--ui-scale, 1)) 0;
   border-bottom: 1px solid var(--border);
   gap: 1px;
 }
 
 .debug-log-time {
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
 }
 
 .debug-log-source {
   color: var(--accent);
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
   font-weight: 600;
 }
 
 .debug-log-message {
   color: var(--text-primary);
-  font-size: 9px;
+  font-size: calc(9px * var(--ui-scale, 1));
   white-space: pre-wrap;
   word-break: break-all;
 }

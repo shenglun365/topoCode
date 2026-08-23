@@ -418,14 +418,15 @@ async function onVersionUpdated() {
     @click="emit('select', project)"
     @contextmenu="showMenu"
   >
+    <!-- 置顶（左上）/收藏（右上）：小图标，减轻对标题/操作按钮的遮挡 -->
     <ArrowUpOnSquareIcon
       v-if="project.pinned"
-      class="card-pin-left w-4 h-4 text-accent"
+      class="card-pin-left w-3 h-3 text-accent"
       :title="t('project.pinnedBadge')"
     />
     <StarIcon
       v-if="project.favorite"
-      class="card-fav-right w-3.5 h-3.5 text-yellow-400"
+      class="card-fav-right w-3 h-3 text-yellow-400"
       :title="t('project.favorited')"
     />
     <span
@@ -435,7 +436,7 @@ async function onVersionUpdated() {
     <!-- 头部: 名称 + 语言 + 菜单按钮 -->
     <div
       class="flex justify-between items-center"
-      style="margin-bottom:8px;"
+      style="margin-bottom:calc(8px * var(--ui-scale, 1));"
     >
       <div
         class="flex items-center gap-2"
@@ -446,20 +447,20 @@ async function onVersionUpdated() {
           class="w-4 h-4 shrink-0"
           :class="isResourceProject ? 'text-green-500' : 'text-accent'"
         />
-        <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <span style="font-weight:600; font-size:calc(13px * var(--ui-scale, 1)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
           {{ project.name }}
         </span>
         <!-- 分组 badge -->
         <span
           v-if="project.group"
           class="badge badge-purple"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >{{ project.group }}</span>
         <!-- 示例 badge -->
         <span
           v-if="isSample"
           class="badge badge-blue"
-          style="font-size:8px;"
+          style="font-size:calc(8px * var(--ui-scale, 1));"
         >{{ t('common.new') }}</span>
         <!-- 状态提示 -->
         <ExclamationTriangleIcon
@@ -490,14 +491,14 @@ async function onVersionUpdated() {
     <!-- 路径 -->
     <div
       class="text-muted font-mono"
-      style="font-size:11px; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+      style="font-size:calc(11px * var(--ui-scale, 1)); margin-bottom:calc(4px * var(--ui-scale, 1)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
     >
       {{ project.rootPath || project.path }}
     </div>
 
     <div
       class="flex justify-between"
-      style="font-size:11px; color:var(--text-muted);"
+      style="font-size:calc(11px * var(--ui-scale, 1)); color:var(--text-muted);"
     >
       <span>{{ project.fileCount }} {{ t('file.files') }}</span>
       <span
@@ -510,7 +511,7 @@ async function onVersionUpdated() {
     <!-- 进度条 -->
     <div
       class="progress-bar"
-      style="margin-top:8px;"
+      style="margin-top:calc(8px * var(--ui-scale, 1));"
     >
       <div
         class="progress-bar-fill"
@@ -521,7 +522,7 @@ async function onVersionUpdated() {
 
     <div
       class="flex justify-between items-center"
-      style="font-size:10px; color:var(--text-muted); margin-top:4px;"
+      style="font-size:calc(10px * var(--ui-scale, 1)); color:var(--text-muted); margin-top:calc(4px * var(--ui-scale, 1));"
     >
       <span>
         {{ project.status === 'synced' ? t('project.analysisComplete') : t('project.analysisInProgress') }}
@@ -529,11 +530,11 @@ async function onVersionUpdated() {
       <span
         v-if="project.hasFileChanges"
         class="badge"
-        style="background:#f59e0b;color:#fff;font-size:7px;"
+        style="background:#f59e0b;color:#fff;font-size:calc(7px * var(--ui-scale, 1));"
       >{{ t('project.filesChanged', '变更') }}</span>
       <span
         :class="`badge ${getStatusBadge(project.status)}`"
-        style="font-size:8px;"
+        style="font-size:calc(8px * var(--ui-scale, 1));"
       >
         {{ getStatusText(project.status) }}
       </span>
@@ -923,9 +924,9 @@ async function onVersionUpdated() {
 
 <style scoped>
 .project-card {
-  padding: 14px;
+  padding: calc(14px * var(--ui-scale, 1));
   position: relative;
-  min-height: 140px;
+  min-height: calc(140px * var(--ui-scale, 1));
 }
 
 .project-card.card-pinned {
@@ -947,15 +948,15 @@ async function onVersionUpdated() {
 
 .rename-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-family: inherit;
   outline: none;
-  margin-top: 8px;
+  margin-top: calc(8px * var(--ui-scale, 1));
 }
 
 .rename-input:focus {
@@ -967,15 +968,15 @@ async function onVersionUpdated() {
 }
 
 .edit-info-section {
-  margin-bottom: 12px;
-  padding: 10px 12px;
+  margin-bottom: calc(12px * var(--ui-scale, 1));
+  padding: calc(10px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
 }
 
 .edit-info-row {
   display: flex;
-  gap: 10px;
+  gap: calc(10px * var(--ui-scale, 1));
 }
 
 .edit-info-row .grow {
@@ -984,7 +985,7 @@ async function onVersionUpdated() {
 }
 
 .edit-info-field {
-  margin-bottom: 12px;
+  margin-bottom: calc(12px * var(--ui-scale, 1));
 }
 
 .edit-info-field:last-child {
@@ -993,20 +994,20 @@ async function onVersionUpdated() {
 
 .edit-info-label {
   display: block;
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: calc(6px * var(--ui-scale, 1));
 }
 
 .edit-info-input {
   width: 100%;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-family: inherit;
   outline: none;
 }
@@ -1018,17 +1019,17 @@ async function onVersionUpdated() {
 .edit-info-no-groups {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 0;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) 0;
 }
 
 .edit-info-set-groups-btn {
-  padding: 4px 10px;
-  font-size: 11px;
+  padding: calc(4px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   background: var(--accent);
   color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1038,22 +1039,22 @@ async function onVersionUpdated() {
 }
 
 .edit-info-group-list {
-  max-height: 160px;
+  max-height: calc(160px * var(--ui-scale, 1));
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px;
+  border-radius: calc(6px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1));
 }
 
 .edit-info-group-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
+  gap: calc(6px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
 }
 
 .edit-info-group-item:hover {
@@ -1071,21 +1072,21 @@ async function onVersionUpdated() {
   z-index: 9999;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px;
-  min-width: 180px;
+  border-radius: calc(8px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1));
+  min-width: calc(180px * var(--ui-scale, 1));
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
 .context-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-primary);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--ui-scale, 1));
   transition: background 0.1s;
 }
 
@@ -1117,7 +1118,7 @@ async function onVersionUpdated() {
 .context-menu-divider {
   height: 1px;
   background: var(--border);
-  margin: 4px 0;
+  margin: calc(4px * var(--ui-scale, 1)) 0;
 }
 
 .context-menu-backdrop {
@@ -1126,26 +1127,28 @@ async function onVersionUpdated() {
   z-index: 9998;
 }
 
+/* 置顶/收藏：恢复原始绝对定位（左上/右上），图标缩小至 12px、位置上移，
+   基本落在标题行/操作按钮之上，减轻遮挡 */
 .card-pin-left {
   position: absolute;
-  top: 4px;
-  left: 14px;
+  top: calc(2px * var(--ui-scale, 1));
+  left: calc(12px * var(--ui-scale, 1));
   z-index: 1;
 }
 .card-fav-right {
   position: absolute;
-  top: 5px;
-  right: 4px;
+  top: calc(2px * var(--ui-scale, 1));
+  right: calc(6px * var(--ui-scale, 1));
   z-index: 1;
 }
 
 .badge-pinned {
   display: inline-block;
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px calc(6px * var(--ui-scale, 1));
+  font-size: calc(10px * var(--ui-scale, 1));
   font-weight: 700;
   line-height: 1.4;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--ui-scale, 1));
   background: var(--accent);
   color: #fff;
 }
@@ -1154,25 +1157,25 @@ async function onVersionUpdated() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  font-size: 11px;
+  width: calc(16px * var(--ui-scale, 1));
+  height: calc(16px * var(--ui-scale, 1));
+  font-size: calc(11px * var(--ui-scale, 1));
   font-weight: 700;
 }
 
 
 .cache-processing-card {
   background: var(--bg-primary);
-  border-radius: 12px;
-  padding: 32px 40px;
+  border-radius: calc(12px * var(--ui-scale, 1));
+  padding: calc(32px * var(--ui-scale, 1)) calc(40px * var(--ui-scale, 1));
   text-align: center;
-  min-width: 280px;
+  min-width: calc(280px * var(--ui-scale, 1));
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
 }
 .cache-processing-spinner {
-  width: 32px;
-  height: 32px;
-  margin: 0 auto 16px;
+  width: calc(32px * var(--ui-scale, 1));
+  height: calc(32px * var(--ui-scale, 1));
+  margin: 0 auto calc(16px * var(--ui-scale, 1));
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -1180,29 +1183,29 @@ async function onVersionUpdated() {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .cache-processing-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: calc(8px * var(--ui-scale, 1));
 }
 .cache-processing-message {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
-  margin-bottom: 16px;
+  margin-bottom: calc(16px * var(--ui-scale, 1));
 }
 
 .projectcard-toast {
   position: fixed;
-  bottom: 32px;
+  bottom: calc(32px * var(--ui-scale, 1));
   left: 50%;
   transform: translateX(-50%);
-  padding: 10px 24px;
+  padding: calc(10px * var(--ui-scale, 1)) calc(24px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--ui-scale, 1));
   box-shadow: 0 4px 16px rgba(0,0,0,.3);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   z-index: 2000;
   animation: projectcard-toast-in .2s ease;
 }
@@ -1213,11 +1216,11 @@ async function onVersionUpdated() {
 
 /* 文件变更检查弹窗 */
 .changes-dialog {
-  width: 540px;
+  width: calc(540px * var(--ui-scale, 1));
   max-height: 70vh;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--ui-scale, 1));
   display: flex;
   flex-direction: column;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
@@ -1226,11 +1229,11 @@ async function onVersionUpdated() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px 10px;
+  padding: calc(14px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 .changes-dialog-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -1247,14 +1250,14 @@ async function onVersionUpdated() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 48px 18px;
+  gap: calc(14px * var(--ui-scale, 1));
+  padding: calc(48px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1));
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
 }
 .changes-dialog-loading .spinner {
-  width: 32px;
-  height: 32px;
+  width: calc(32px * var(--ui-scale, 1));
+  height: calc(32px * var(--ui-scale, 1));
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -1263,27 +1266,27 @@ async function onVersionUpdated() {
 .changes-dialog-ok {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 24px 18px 10px;
-  font-size: 14px;
+  gap: calc(10px * var(--ui-scale, 1));
+  padding: calc(24px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1)) calc(10px * var(--ui-scale, 1));
+  font-size: calc(14px * var(--ui-scale, 1));
   color: var(--text-primary);
 }
 .changes-dialog-error {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 20px 18px;
+  gap: calc(10px * var(--ui-scale, 1));
+  padding: calc(20px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1));
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
 }
 .changes-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
-  padding: 0 18px;
+  padding: 0 calc(18px * var(--ui-scale, 1));
 }
 .changes-tab {
-  padding: 8px 14px;
-  font-size: 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(14px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   background: none;
   border: none;
@@ -1297,16 +1300,16 @@ async function onVersionUpdated() {
   border-bottom-color: var(--accent);
 }
 .changes-file-list {
-  max-height: 320px;
+  max-height: calc(320px * var(--ui-scale, 1));
   overflow-y: auto;
-  padding: 8px 0;
+  padding: calc(8px * var(--ui-scale, 1)) 0;
 }
 .changes-file-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 18px;
-  font-size: 12px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(4px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-secondary);
 }
 .changes-file-row:hover { background: var(--bg-hover); }
@@ -1316,29 +1319,29 @@ async function onVersionUpdated() {
   white-space: nowrap;
 }
 .changes-file-empty {
-  padding: 16px 18px;
-  font-size: 12px;
+  padding: calc(16px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1));
+  font-size: calc(12px * var(--ui-scale, 1));
   color: var(--text-muted);
   text-align: center;
 }
 .changes-dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 18px 14px;
+  gap: calc(8px * var(--ui-scale, 1));
+  padding: calc(12px * var(--ui-scale, 1)) calc(18px * var(--ui-scale, 1)) calc(14px * var(--ui-scale, 1));
   border-top: 1px solid var(--border);
 }
 .btn-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: calc(28px * var(--ui-scale, 1));
+  height: calc(28px * var(--ui-scale, 1));
   border: none;
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
 }
 .btn-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>

@@ -69,52 +69,52 @@ function truncatePath(p: string): string {
 
 <style scoped>
 .home-section {
-  margin-bottom: 20px;
+  margin-bottom: calc(20px * var(--ui-scale, 1));
 }
 
 .section-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: calc(6px * var(--ui-scale, 1));
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 10px;
-  padding-bottom: 6px;
+  margin-bottom: calc(10px * var(--ui-scale, 1));
+  padding-bottom: calc(6px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px 8px;
+  gap: calc(12px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
 }
 
 .summary-card {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
+  gap: calc(2px * var(--ui-scale, 1));
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: calc(6px * var(--ui-scale, 1));
 }
 
 .card-label {
-  font-size: 10px;
+  font-size: calc(10px * var(--ui-scale, 1));
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .card-value {
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-scale, 1));
   font-weight: 500;
   color: var(--text-primary);
 }
 
 .card-path {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   font-family: var(--font-mono);
   word-break: break-all;
 }
@@ -122,7 +122,7 @@ function truncatePath(p: string): string {
 .header-spacer { flex: 1; }
 .collapse-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0;
+  width: calc(22px * var(--ui-scale, 1)); height: calc(22px * var(--ui-scale, 1)); padding: 0;
   background: transparent; border: 1px solid transparent; border-radius: 0.25rem;
   color: var(--text-muted); cursor: pointer; transition: all 0.15s; flex-shrink: 0;
 }

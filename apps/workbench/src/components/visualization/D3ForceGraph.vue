@@ -360,26 +360,26 @@ function exportSvg() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: calc(8px * var(--ui-scale, 1)) calc(12px * var(--ui-scale, 1));
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
-  min-height: 40px;
+  min-height: calc(40px * var(--ui-scale, 1));
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--ui-scale, 1));
 }
 
 .toolbar-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .toolbar-status {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
   color: var(--text-muted);
 }
 
@@ -390,11 +390,11 @@ function exportSvg() {
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--ui-scale, 1));
 }
 
 .progress-bar {
-  height: 2px;
+  height: calc(2px * var(--ui-scale, 1));
   background: var(--bg-hover);
   overflow: hidden;
 }
@@ -433,7 +433,7 @@ function exportSvg() {
 }
 
 .d3-node:hover .node-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--ui-scale, 1));
 }
 
 /* 状态 */
@@ -449,13 +449,13 @@ function exportSvg() {
 }
 
 .loading-spinner {
-  width: 32px;
-  height: 32px;
+  width: calc(32px * var(--ui-scale, 1));
+  height: calc(32px * var(--ui-scale, 1));
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  margin: 0 auto 12px;
+  margin: 0 auto calc(12px * var(--ui-scale, 1));
 }
 
 @keyframes spin {
@@ -464,15 +464,15 @@ function exportSvg() {
 
 .render-error .title,
 .empty-state .title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale, 1));
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 4px;
+  margin-bottom: calc(4px * var(--ui-scale, 1));
 }
 
 .render-error .desc,
 .empty-state .desc {
-  font-size: 12px;
-  max-width: 300px;
+  font-size: calc(12px * var(--ui-scale, 1));
+  max-width: calc(300px * var(--ui-scale, 1));
 }
 </style>
