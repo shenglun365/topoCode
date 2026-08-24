@@ -68,7 +68,8 @@ class OpenAICompatProvider(BaseLLMProvider):
             headers['Authorization'] = f'Bearer {api_key}'
 
         token_info = {}
-        timeout = model_config.get('timeout', 300)
+        from .base import llm_request_timeout
+        timeout = llm_request_timeout(model_config)
 
         _log_payload = {
             'provider': self.PROVIDER_NAME,
@@ -200,10 +201,11 @@ class OpenAICompatProvider(BaseLLMProvider):
             payload['tools'] = tools
             payload['tool_choice'] = 'auto'
 
+        from .base import llm_request_timeout
         resp = requests.post(
             f"{base_url}/v1/chat/completions",
             json=payload, headers=headers,
-            timeout=model_config.get('timeout', 300),
+            timeout=llm_request_timeout(model_config),
         )
         data = resp.json()
         choice = data.get('choices', [{}])[0]

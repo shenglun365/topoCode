@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 _HEARTBEAT_TIMEOUT = 15.0   # 秒，超过此时间未收到心跳判定为可疑
 _DEAD_TIMEOUT = 30.0        # 秒，超过此时间判定为死亡
 _READY_TIMEOUT = 30.0       # 秒，启动后等待 ready 的最长时间
-_PROBE_INTERVAL = 1.0       # 秒，HTTP 健康探针间隔
-_PROBE_FAIL_LIMIT = 5       # 连续探针失败次数（5×5s=25s）判定为挂死 → kill 重启
+_PROBE_INTERVAL = 1.0       # 秒，启动阶段 _wait_health 的 HTTP 探针间隔
+_MONITOR_INTERVAL = 5.0     # 秒，监控循环周期（ready 后每次探针的轮询间隔）
+_DEFAULT_PROBE_TIMEOUT = 2.0    # 秒，单次探针 HTTP 超时（默认值，可 per-worker 覆盖）
+_DEFAULT_PROBE_FAIL_LIMIT = 5   # 连续探针失败次数（默认 5×(5s+2s)≈25-35s）判定挂死 → kill
 _KEEP_LOGS = 3              # 每个 worker 保留的历史日志文件数（按 pid 分文件）
 
 
@@ -47,6 +49,8 @@ class WorkerInfo:
     health_url: Optional[str] = None   # 若设置，就绪判定改用 HTTP 探针（plain 服务）
     env: Optional[dict] = None         # 追加的子进程环境变量
     probe_fails: int = 0               # 连续健康探针失败计数（挂死检测）
+    probe_timeout: float = _DEFAULT_PROBE_TIMEOUT       # 单次探针 HTTP 超时（秒）
+    probe_fail_limit: int = _DEFAULT_PROBE_FAIL_LIMIT   # 连续失败多少次判挂死
     log_file: Optional[object] = None  # 子进程 stdout 重定向的日志文件句柄
     tail_task: Optional[asyncio.Task] = None  # 日志 tail 协程（每次 spawn 重建）
 
@@ -85,7 +89,9 @@ class Supervisor:
     # ── 注册 ────────────────────────────────────────────────────
 
     def register(self, label: str, args: list[str], restart_limit: int = 3,
-                 health_url: Optional[str] = None, env: Optional[dict] = None):
+                 health_url: Optional[str] = None, env: Optional[dict] = None,
+                 probe_timeout: float = _DEFAULT_PROBE_TIMEOUT,
+                 probe_fail_limit: int = _DEFAULT_PROBE_FAIL_LIMIT):
         """注册一个受管理的子进程
 
         - 默认（health_url=None）：就绪/存活依赖 worker 在 stdout 发 JSON 信号
@@ -93,12 +99,18 @@ class Supervisor:
         - health_url 设置后（plain 服务，如 uvicorn/FastAPI）：就绪判定改为 HTTP
           健康探针，监控改为进程存活 + 周期探针，不再依赖 JSON 信号。
         - env：追加到子进程环境的变量（覆盖 os.environ）。
+        - probe_timeout / probe_fail_limit：挂死判定的 per-worker 策略。
+          长推理/长工具等待的服务（llm/agent）应放宽，避免误杀合法长请求；
+          挂死判定窗口 ≈ probe_fail_limit × (_MONITOR_INTERVAL + probe_timeout)。
         """
         self._workers[label] = WorkerInfo(
             label=label, args=args, restart_limit=restart_limit,
             health_url=health_url, env=env,
+            probe_timeout=probe_timeout, probe_fail_limit=probe_fail_limit,
         )
-        logger.info(f"[Supervisor] registered: {label}" + (f" (health={health_url})" if health_url else ""))
+        logger.info(f"[Supervisor] registered: {label}"
+                    + (f" (health={health_url}, probe={probe_timeout}s×{probe_fail_limit})"
+                       if health_url else ""))
 
     # ── 启动 ────────────────────────────────────────────────────
 
@@ -290,8 +302,9 @@ class Supervisor:
         - 无 health_url 的 JSON 信令 worker → 心跳超时 kill
         """
         while self._running:
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(_MONITOR_INTERVAL)
             now = time.time()
+            probes = []
             for label, wi in list(self._workers.items()):
                 if wi.status in ("stopped", "fatal") or wi.stop_requested:
                     continue
@@ -303,25 +316,8 @@ class Supervisor:
                     self._loop.create_task(self._restart(label))
                     continue
                 if wi.health_url:
-                    # plain 服务：进程存活 + HTTP 探针（探针在线程池执行，不阻塞循环）
-                    ok = await self._loop.run_in_executor(None, _http_ok, wi.health_url, 2.0)
-                    if ok:
-                        if wi.probe_fails:
-                            logger.info(f"[Supervisor] {label} health probe recovered")
-                        wi.probe_fails = 0
-                        if wi.status in ("starting", "dead"):
-                            wi.status = "ready"
-                            logger.info(f"[Supervisor] {label} is ready")
-                    else:
-                        wi.probe_fails += 1
-                        if wi.probe_fails == 1:
-                            logger.warning(f"[Supervisor] {label} health probe failed")
-                        elif wi.probe_fails >= _PROBE_FAIL_LIMIT:
-                            logger.error(
-                                f"[Supervisor] {label} 疑似挂死（连续 {wi.probe_fails} 次探针失败），"
-                                f"kill pid={wi.proc.pid} 触发重启")
-                            wi.probe_fails = 0
-                            wi.proc.kill()
+                    # plain 服务：进程存活 + HTTP 探针（收集后并发执行）
+                    probes.append(self._probe_worker(label, wi))
                     continue
                 elapsed = now - wi.last_heartbeat
                 if elapsed > _DEAD_TIMEOUT:
@@ -329,6 +325,30 @@ class Supervisor:
                     wi.proc.kill()
                 elif elapsed > _HEARTBEAT_TIMEOUT:
                     logger.warning(f"[Supervisor] {label} heartbeat overdue ({elapsed:.0f}s)")
+            # 并发探针：单轮延迟 = max(各探针) 而非 sum（慢探针不拖累其他 worker 的检查节奏）
+            if probes:
+                await asyncio.gather(*probes, return_exceptions=True)
+
+    async def _probe_worker(self, label: str, wi: WorkerInfo):
+        """单次健康探针（线程池执行 HTTP，不阻塞事件循环）+ 失败计数/挂死判定。"""
+        ok = await self._loop.run_in_executor(None, _http_ok, wi.health_url, wi.probe_timeout)
+        if ok:
+            if wi.probe_fails:
+                logger.info(f"[Supervisor] {label} health probe recovered")
+            wi.probe_fails = 0
+            if wi.status in ("starting", "dead"):
+                wi.status = "ready"
+                logger.info(f"[Supervisor] {label} is ready")
+        else:
+            wi.probe_fails += 1
+            if wi.probe_fails == 1:
+                logger.warning(f"[Supervisor] {label} health probe failed")
+            elif wi.probe_fails >= wi.probe_fail_limit:
+                logger.error(
+                    f"[Supervisor] {label} 疑似挂死（连续 {wi.probe_fails} 次探针失败），"
+                    f"kill pid={wi.proc.pid} 触发重启")
+                wi.probe_fails = 0
+                wi.proc.kill()
 
     async def _restart(self, label: str):
         """重启 worker（指数退避）。退避期间若 supervisor 已停止则放弃。"""

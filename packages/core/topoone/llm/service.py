@@ -517,7 +517,9 @@ class LLMService:
                         batch_text = ""
                         last_pub = now
 
-                thread.join(timeout=5)
+                # 不能直接 thread.join（阻塞事件循环 ≥5s/轮，多并发累计可触发
+                # supervisor 挂死误杀）— 放线程池等待
+                await loop.run_in_executor(None, thread.join, 5)
 
                 # ===== Tools Calling 检测 =====
                 if tool_calls_merged:
@@ -542,7 +544,10 @@ class LLMService:
                             logger.info(f"[CHAT_TRACE] TOOL_EXECUTE name={tool_name} "
                                         f"args_preview={_args_preview}")
                             _te_start = time.monotonic()
-                            result = executor.execute(tool_name, tool_args)
+                            # 工具执行放线程池：同步 execute 在事件循环上跑会阻塞
+                            # /health（慢工具 → 探针失败 → supervisor 误杀）
+                            result = await loop.run_in_executor(
+                                None, executor.execute, tool_name, tool_args)
                             _te_latency = int((time.monotonic() - _te_start) * 1000)
                             _result_str = json.dumps(result, ensure_ascii=False, default=str)
                             logger.info(f"[CHAT_TRACE] TOOL_RESULT name={tool_name} "

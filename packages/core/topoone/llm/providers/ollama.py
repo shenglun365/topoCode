@@ -45,7 +45,8 @@ class OllamaProvider(BaseLLMProvider):
             payload['tools'] = tools
 
         token_info = {}
-        timeout = model_config.get('timeout', 300)
+        from .base import llm_request_timeout
+        timeout = llm_request_timeout(model_config)
 
         _log_payload = {
             'provider': 'ollama',
@@ -119,10 +120,11 @@ class OllamaProvider(BaseLLMProvider):
             payload['options']['num_predict'] = mt
         if mode == 'tools' and tools:
             payload['tools'] = tools
+        from .base import llm_request_timeout
         resp = requests.post(
             f"{model_config['url'].rstrip('/')}/api/chat",
             json=payload,
-            timeout=model_config.get('timeout', 300),
+            timeout=llm_request_timeout(model_config),
         )
         data = resp.json()
         msg = data.get('message', {})

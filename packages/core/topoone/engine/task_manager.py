@@ -183,6 +183,40 @@ def _compute_file_ranks(task_id: str, project_db, components: list,
     }
 
 
+_batched_files_cache: dict = {}
+
+
+def _count_batched_source_files(task_id: str, project_db, project_root: str = "") -> int:
+    """预摘要覆盖的源码文件数（P0+P1+P2 批次并集）。
+
+    进度分母用它而非图内全部文件：不属于任何 L0 社区的文件不在
+    预摘要分析范围内，若计入分母，文件进度永远到不了 100%。
+    60s 缓存（流水线期间图静态），避免 3s 轮询端点重复查询。
+    """
+    import time as _t
+    now = _t.monotonic()
+    hit = _batched_files_cache.get(task_id)
+    if hit and now - hit[1] < 60:
+        return hit[0]
+    count = 0
+    try:
+        comps = []
+        for et in ("INCLUDE", "CALL"):
+            rows = project_db.execute(
+                "SELECT comm_id, quality_score FROM community_hierarchy "
+                "WHERE task_id=? AND edge_type=? AND comm_lv='L0' ORDER BY node_count DESC",
+                (task_id, et)
+            ).fetchall()
+            for row in rows:
+                comps.append({"id": row[0], "metadata": {"qualityScore": row[1] or 0}})
+        ranks = _compute_file_ranks(task_id, project_db, comps, project_root)
+        count = sum(1 for f in ranks.get("files", []) if f.get("batch") in ("P0", "P1", "P2"))
+    except Exception:
+        count = 0
+    _batched_files_cache[task_id] = (count, now)
+    return count
+
+
 def register_analysis_methods(server, multi_db: MultiDBManager):
     """将所有 analysis.* 方法注册到 RPC 服务器"""
 
@@ -2426,10 +2460,15 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         total_comps = 0
 
         try:
-            row = project_db.execute(
-                "SELECT COUNT(DISTINCT file_path) FROM graph_node WHERE task_id=? AND kind='file'", (tid,)
-            ).fetchone()
-            if row: total_files = row[0]
+            # 分母 = 预摘要范围内的源码文件（P0/P1/P2 批次并集）；
+            # 图内全部文件含范围外文件，会导致文件进度永远 <100%
+            pr = _get_project_root(pid)
+            total_files = _count_batched_source_files(tid, project_db, pr)
+            if not total_files:
+                row = project_db.execute(
+                    "SELECT COUNT(DISTINCT file_path) FROM graph_node WHERE task_id=? AND kind='file'", (tid,)
+                ).fetchone()
+                if row: total_files = row[0]
         except Exception:
             pass
         try:
@@ -2454,8 +2493,30 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         except Exception:
             pass
 
-        total_weight = max(60, 60 + total_files * 30 + total_comps * 120 + 180)
-        done_weight = done_files * 30 + done_comps * 120
+        # 项目摘要/架构概览各占 90 权重（与 total_weight 的 +180 对应），
+        # 全部完成后加权进度才能到达 100%
+        summary_weight = 0
+        try:
+            srow = multi_db.main_db.execute(
+                "SELECT summary FROM projects WHERE id=?", (pid,)
+            ).fetchone()
+            if srow and srow[0]:
+                summary_weight = 90
+        except Exception:
+            pass
+        overview_weight = 0
+        try:
+            orow = project_db.execute(
+                "SELECT 1 FROM report_subdocs WHERE task_id=? AND comm_id='overall' LIMIT 1", (tid,)
+            ).fetchone()
+            if orow:
+                overview_weight = 90
+        except Exception:
+            pass
+        total_weight = total_files * 30 + total_comps * 120 + 180
+        if total_weight <= 0:
+            total_weight = 60  # 空范围兜底，防除零
+        done_weight = done_files * 30 + done_comps * 120 + summary_weight + overview_weight
         if total_weight > 0:
             weighted_progress = round(min(done_weight, total_weight) / total_weight * 100, 1)
         else:
@@ -2546,12 +2607,18 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         _total_files = 0
         _total_comps = 0
         try:
-            row = project_db.execute(
-                "SELECT COUNT(DISTINCT file_path) as cnt FROM graph_node WHERE task_id=? AND kind='file'", (tid,)
-            ).fetchone()
-            if row: _total_files = row["cnt"]
+            # 与 getProgressStats 同口径：预摘要范围内的源码文件
+            _total_files = _count_batched_source_files(tid, project_db, project_root)
         except Exception:
             pass
+        if not _total_files:
+            try:
+                row = project_db.execute(
+                    "SELECT COUNT(DISTINCT file_path) as cnt FROM graph_node WHERE task_id=? AND kind='file'", (tid,)
+                ).fetchone()
+                if row: _total_files = row["cnt"]
+            except Exception:
+                pass
         try:
             row = project_db.execute(
                 "SELECT COUNT(DISTINCT comm_id) as cnt FROM community_hierarchy WHERE task_id=?",
@@ -2560,7 +2627,9 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             if row: _total_comps = row["cnt"]
         except Exception:
             pass
-        _est_weight = max(60, 60 + _total_files * 30 + _total_comps * 120 + 180)
+        _est_weight = _total_files * 30 + _total_comps * 120 + 180
+        if _est_weight <= 0:
+            _est_weight = 60
         logger.info(f"[Pipeline] total files={_total_files} comps={_total_comps} est_weight={_est_weight}")
 
         context = {

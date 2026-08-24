@@ -887,7 +887,8 @@ export const useCommunityStore = defineStore('community', () => {
           ? '正在启动…' : (progress.message || '')
         const newStatus = isCompleted
           ? (progress.status === 'failed' ? 'failed' :
-             progress.status === 'cancelled' ? 'cancelled' : 'completed')
+             progress.status === 'cancelled' ? 'cancelled' :
+             progress.status === 'partial' ? 'partial' : 'completed')
           : (progress.status || 'running')
         if (newStatus !== _lastStatus || msg !== _lastMsg) {
           _lastStatus = newStatus

@@ -52,12 +52,25 @@ class PipelineWorkflow(AgentWorkflow):
             ),
         ]
 
+    _STEP_TOOLS = (
+        "pipeline_ensure_summary",
+        "pipeline_run_presummary",
+        "pipeline_run_component_analysis",
+        "pipeline_run_overview",
+    )
+
     def finalize(self, results: dict[str, Any]) -> WorkflowResult:
-        completed = sum(1 for r in results.values() if r)
-        total = 4
+        # 严格判定：任一执行单元失败（results 只含成功步骤）→ 整体不算成功。
+        # 旧实现 completed>0 会让「组件分析失败但其余 3 步完成」被标记为
+        # 成功/已完成，而实际可能还差几百个组件未分析。
+        missing = [t for t in self._STEP_TOOLS if not results.get(t)]
+        completed = len(self._STEP_TOOLS) - len(missing)
+        total = len(self._STEP_TOOLS)
+        error = ("步骤未完成: " + ", ".join(missing)) if missing else None
         return WorkflowResult(
-            success=completed > 0,
+            success=completed == total,
             steps_completed=completed,
             steps_total=total,
-            data={"completed": completed, "total": total},
+            error=error,
+            data={"completed": completed, "total": total, "failed_steps": missing},
         )

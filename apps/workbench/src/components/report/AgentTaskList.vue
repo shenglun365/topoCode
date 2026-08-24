@@ -21,6 +21,15 @@ function onCancelTask(taskIdVal: string, agentId: string) {
 const historyTasks = ref<any[]>([])
 const historyLoaded = ref(false)
 const pageSize = ref(10)
+// 已完成/部分完成任务的真实加权进度（DB 统计），避免历史卡片把 partial 硬编码成 0%
+const statsPct = ref<Record<string, number>>({})
+async function loadStats(taskIdVal: string) {
+  if (!taskIdVal || statsPct.value[taskIdVal] !== undefined) return
+  try {
+    const s = await communityStore.getProgressStats(taskIdVal)
+    if (s?.found) statsPct.value[taskIdVal] = Math.round(s.weightedProgress ?? 0)
+  } catch { /* ignore */ }
+}
 
 function _historySame(a: any[], b: any[]): boolean {
   if (a.length !== b.length) return false
@@ -82,7 +91,9 @@ function transformHistory(h: any) {
     id: h.agent_id,
     action: h.action,
     status: h.status,
-    progress: h.status === 'completed' ? 100 : h.status === 'failed' ? 0 : 0,
+    progress: h.status === 'completed' ? 100
+      : h.status === 'partial' ? (statsPct.value[h.task_id] ?? 0)
+      : 0,
     message: h.message || '',
     steps,
     createdAt: h.created_at || '',
@@ -112,6 +123,10 @@ async function loadHistory(cursor: number) {
   }
   historyLoaded.value = true
   console.log('[AT] loadHistory done', { cursor, resultsCount: results.length, historyTasksLen: historyTasks.value.length })
+  // 无运行中任务时拉一次 DB 统计，供历史卡片显示真实进度
+  if (cursor === 0 && !historyTasks.value.some(h => h.status === 'running' || h.status === 'queued')) {
+    loadStats(taskId.value)
+  }
 }
 
 async function loadMore() {

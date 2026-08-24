@@ -323,6 +323,11 @@ class AgentTaskManager:
                     if getattr(runtime, '_cancelled', False):
                         s.status = TaskState.CANCELLED
                         s.error = "cancelled"
+                    elif result and not result.success and result.steps_completed > 0:
+                        # 部分步骤完成 + 部分失败 → PARTIAL（而非笼统 FAILED），
+                        # 前端可展示"部分完成"并提示哪些步骤失败
+                        s.status = TaskState.PARTIAL
+                        s.error = result.error or "partial failure"
                     elif result and not result.success:
                         s.status = TaskState.FAILED
                         s.error = result.error or "unknown error"

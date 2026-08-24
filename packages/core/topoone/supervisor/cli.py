@@ -311,6 +311,17 @@ def _health_url(name: str) -> str:
     return f"http://127.0.0.1:{_service_port(name)}/health"
 
 
+# 挂死探针策略 (probe_timeout, probe_fail_limit)：
+# 判定窗口 ≈ probe_fail_limit × (监控周期5s + probe_timeout)。
+# llm/agent 存在合法长等待（长上下文推理 10-15min+、长 tools calling），
+# 事件循环压力期 /health 可能变慢 → 放宽窗口防误杀；真挂死最迟几分钟自愈。
+# 其余服务无合法长阻塞场景，维持严格 ~25-35s 快速自愈。
+_PROBE_POLICY = {
+    "llm": (10.0, 15),    # ≈ 15 × (5+10) = 225s
+    "agent": (5.0, 15),   # ≈ 15 × (5+5) = 150s
+}
+
+
 def _make_cmd(name: str, data_dir: str, http_port: int, http_host: str) -> list[str]:
     """构造固定核心/生态进程启动命令（doc/chat/architect 改由 _make_manifest_cmd）"""
     meta = _FIXED_SERVICES[name]
@@ -433,12 +444,15 @@ def _cmd_serve(args):
             else:
                 env = None
             cmd = _make_cmd(name, data_dir, args.http_port, args.http_host)
+        probe_timeout, probe_fail_limit = _PROBE_POLICY.get(name, (2.0, 5))
         sv.register(
             name,
             cmd,
             restart_limit=5,
             health_url=_health_url(name),
             env=env,
+            probe_timeout=probe_timeout,
+            probe_fail_limit=probe_fail_limit,
         )
 
     async def _run():

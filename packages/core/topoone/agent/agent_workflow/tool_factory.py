@@ -33,6 +33,39 @@ def _forward_item_log_transitions(tool, runtime, types) -> None:
             forward(log.type, log.name, log.status, log.startTime, log.endTime, log.error)
 
 
+def _forward_final_item_states(tool, runtime, types, wf_result) -> None:
+    """子工作流结束后的收尾转发。
+
+    轮询窗口问题：转发只发生在 1s 轮询 tick；future 完成的那次 tick 直接
+    break，最后一个子项的终态转换（如 success）可能永远没被转发 → 前端
+    条目卡在 running 转圈。这里在 future 完成后无条件补发一次。
+
+    另外，若工作流失败（非用户取消），把仍停留在 running/retry 的子项
+    收尾为 failed，避免历史日志里出现永久 ▶ 的条目。
+    """
+    _forward_item_log_transitions(tool, runtime, types)
+    if wf_result is None or getattr(wf_result, 'success', False):
+        return
+    err = (getattr(wf_result, 'error', None) or '')
+    if err == 'cancelled':
+        return
+    forward = getattr(tool, '_forward_log', None)
+    if not forward:
+        return
+    states = getattr(tool, '_fwd_log_states', None)
+    if not isinstance(states, dict):
+        states = {}
+        tool._fwd_log_states = states
+    for log in runtime._item_logs:
+        if log.type not in types or log.status not in ('running', 'retry'):
+            continue
+        key = (log.type, log.name)
+        if states.get(key) == 'failed':
+            continue
+        states[key] = 'failed'
+        forward(log.type, log.name, 'failed', log.startTime, '', err or 'workflow failed')
+
+
 def build_component_analyst_tools(
     llm_chat_fn: Callable,
     render_prompt: Callable = None,
@@ -198,6 +231,8 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                         else:
                             wf_result = future.result(timeout=7200)
 
+                    # 收尾转发：补发最后一次轮询窗口内丢失的子项终态
+                    _forward_final_item_states(self, runtime, ('file', 'component'), wf_result)
                     completed_files += wf_result.steps_completed
                     total_files += wf_result.steps_total
                     sub_results.append(f"{batch}: {wf_result.steps_completed}/{wf_result.steps_total}")
@@ -344,11 +379,13 @@ def build_pipeline_tools(multi_db, project_db, project_root, task_id, pid,
                             else:
                                 wf_result = future.result()
 
+                    # 收尾转发：补发最后一次轮询窗口内丢失的子项终态
+                    _forward_final_item_states(self, runtime, ('file', 'component'), wf_result)
                     completed_levels += 1
                     total_components += len(components)
                     sub_results.append(f"{level}: {len(components)} components")
                     _log.info(f"[Pipeline] component {level}: {len(components)} components done")
-                    _log.info(f"[Pipeline] component level={level} done wf_success={wf_result.success} completed={getattr(wf_result,'steps_completed',0)} total={getattr(wf_result,'steps_total',0)} error={getattr(wf_result,'error','')[:200]}")
+                    _log.info(f"[Pipeline] component level={level} done wf_success={wf_result.success} completed={getattr(wf_result,'steps_completed',0)} total={getattr(wf_result,'steps_total',0)} error={(getattr(wf_result,'error') or '')[:200]}")
 
                     if ce and ce.is_set():
                         _log.info(f"[Pipeline] component analysis cancelled at {level}")
