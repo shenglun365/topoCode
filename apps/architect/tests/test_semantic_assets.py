@@ -888,7 +888,12 @@ def test_derive_relations_from_ast_edges(tmp_path, monkeypatch):
 
 
 def test_extract_scope_low_level_uses_llm_with_heuristic_fallback(tmp_path, monkeypatch):
-    """level=low 走 LLM(代码事实层)并统一为 low 层级；LLM 不可用回退增强启发式。"""
+    """level=low 走 LLM(代码事实层)并统一为 low 层级；LLM 不可用回退增强启发式。
+
+    双轨：本测试钉住旧 LLM 通道（TOPOCODE_CTX_ASSET=0，llm 不可用→兜底语义）；
+    tAgent 上下文编译路径见 test_tagent_extract.py。
+    """
+    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
     _ctx(tmp_path, monkeypatch)
     proj = tmp_path / "proj"
     proj.mkdir()

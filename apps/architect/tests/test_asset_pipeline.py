@@ -322,7 +322,12 @@ def test_extract_directed_floor(tmp_path, monkeypatch):
 
 
 def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
-    """LLM 增强: 业务命名+语义注释合并进种子骨架; http 关系不可由 LLM 伪造。"""
+    """LLM 增强: 业务命名+语义注释合并进种子骨架; http 关系不可由 LLM 伪造。
+
+    双轨：本测试钉住旧 run_tools_loop 路径（TOPOCODE_CTX_ASSET=0）；
+    tAgent 上下文编译路径见 test_tagent_extract.py。
+    """
+    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("f1", "function", "api_pay", "m.py", 1, 3, sig="(request: Request)")]
     ctx = _mk_ctx(tmp_path, nodes, impl={
@@ -355,7 +360,11 @@ def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
 
 
 def test_extract_group_llm_failure_falls_to_floor(tmp_path, monkeypatch):
-    """LLM 无结构化输出 → 种子地板(不丢资产, 不空 detail)。"""
+    """LLM 无结构化输出 → 种子地板(不丢资产, 不空 detail)。
+
+    双轨：本测试钉住旧 run_tools_loop 路径（TOPOCODE_CTX_ASSET=0）。
+    """
+    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("c1", "class", "Order", "m.py", 1, 2)]
     ctx = _mk_ctx(tmp_path, nodes)

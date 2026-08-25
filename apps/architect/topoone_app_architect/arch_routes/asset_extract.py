@@ -88,7 +88,19 @@ def _tool_protocol_text() -> str:
     )
 
 
-def _directed_prompt(file_: str, kind: str, cands: List[dict]) -> str:
+def _sys_base() -> str:
+    """系统提示基座（两路共用）；tAgent 路不附 _tool_protocol_text——
+    TextFallback 策略自行把工具清单与 [TOOL_CALL: name] 协议注入 system 末尾。"""
+    return (
+        "你是代码语义资产补齐器。候选表已由规则分类(类别定死不可更改)，"
+        "种子数据由确定性分析预填(字段/调用链/分支条件/路由/常量值均为 ground truth)。"
+        "你只负责语义层：业务命名、描述、不变式、跨资产关系、逐项语义注释。"
+        "不得臆造种子与工具返回中不存在的数据。"
+    )
+
+
+def _task_spec(file_: str, kind: str) -> str:
+    """任务规格（context Base 层钉驻）：定向 prompt 头，不含候选表。"""
     tpl = KIND_TEMPLATES[kind]
     return (
         f"文件: {file_}\n候选类别(规则定死，不可更改): {kind}\n"
@@ -98,9 +110,12 @@ def _directed_prompt(file_: str, kind: str, cands: List[dict]) -> str:
         "(field_semantics/step_semantics/branch_semantics/constraint_semantics/"
         "transition_semantics，键必须与种子完全一致)。\n"
         "严禁: 臆造种子与工具返回中不存在的符号/字段/条件/path/常量值；更改类别。\n"
-        "只输出 JSON 对象 {\"assets\": [...]}，不要 Markdown 代码块。\n\n"
-        "候选表:\n" + _candidate_lines(cands, kind)
+        "只输出 JSON 对象 {\"assets\": [...]}，不要 Markdown 代码块。"
     )
+
+
+def _directed_prompt(file_: str, kind: str, cands: List[dict]) -> str:
+    return _task_spec(file_, kind) + "\n\n候选表:\n" + _candidate_lines(cands, kind)
 
 
 def _floor_asset(kind: str, node: dict, seed: dict, file_: str) -> dict:
@@ -202,7 +217,7 @@ def _apply_tool_facts(kind: str, node: dict, seed: dict, facts: List[dict]) -> d
 
 def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
                    kind: str, cands: List[dict], model_id: Optional[str],
-                   use_llm: bool) -> List[dict]:
+                   use_llm: bool, context_manager=None) -> List[dict]:
     from . import asset_tools
 
     out: List[dict] = []
@@ -213,42 +228,60 @@ def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
     facts: List[dict] = asset_tools._tl.facts  # 同一列表对象，工具 append 可见
     try:
         return _extract_group_inner(root, project, ctx, file_, kind, cands,
-                                    model_id, use_llm, facts)
+                                    model_id, use_llm, facts,
+                                    context_manager=context_manager)
     finally:
         asset_tools.clear_extraction_context()
 
 
 def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: str,
                          kind: str, cands: List[dict], model_id: Optional[str],
-                         use_llm: bool, facts: List[dict]) -> List[dict]:
+                         use_llm: bool, facts: List[dict],
+                         context_manager=None) -> List[dict]:
     from .req_agent import get_max_tokens_preference, run_tools_loop
+    from . import tagent_extract
 
     out: List[dict] = []
     cands = cands[:_GROUP_CAP]
     llm_part = cands[:_GROUP_LLM_CAP]
 
+    # 上下文编译循环(方案 B)：开关默认开，每 file×kind 组一实例；可外部注入共享
+    # cm(知识库自我更新等长 cm 场景跨文件累积，见 tagent_extract)。
+    cm = context_manager
+    if cm is None and use_llm and llm_part and tagent_extract.ctx_asset_enabled():
+        cm = tagent_extract.build_extraction_context(
+            file_=file_, kind=kind, task_spec=_task_spec(file_, kind))
+
     enrich: Dict[str, dict] = {}
     if use_llm and llm_part:
-        sys_msg = (
-            "你是代码语义资产补齐器。候选表已由规则分类(类别定死不可更改)，"
-            "种子数据由确定性分析预填(字段/调用链/分支条件/路由/常量值均为 ground truth)。"
-            "你只负责语义层：业务命名、描述、不变式、跨资产关系、逐项语义注释。"
-            "不得臆造种子与工具返回中不存在的数据。" + _tool_protocol_text()
-        )
         user_msg = _directed_prompt(file_, kind, llm_part)
-        schema = enrichment_schema(kind)
         names = [c["node"].get("qualified_name") or c["node"].get("name")
                  for c in llm_part]
         res = None
-        try:
-            res = run_tools_loop(
-                [{"role": "system", "content": sys_msg},
-                 {"role": "user", "content": user_msg}],
-                root=root, project=project, mode="structured",
-                output_schema=schema, max_rounds=2,
-                max_tokens=get_max_tokens_preference(), model_id=model_id)
-        except Exception as e:
-            logger.warning("[asset_extract] %s %s 提取异常: %s", file_, kind, e)
+        if cm is not None:
+            # tAgent agentic_loop + ContextManager(phase=kb_analysis, 可达性豁免)
+            try:
+                res = tagent_extract.run_extraction_agentic(
+                    sys_msg=_sys_base(), user_msg=user_msg,
+                    root=root, project=project, model_id=model_id,
+                    max_rounds=2, max_tokens=get_max_tokens_preference(),
+                    context_manager=cm, file_=file_, kind=kind,
+                    task_spec=_task_spec(file_, kind))
+            except Exception as e:
+                logger.warning("[asset_extract] %s %s 提取异常(tagent): %s",
+                               file_, kind, e)
+        else:
+            # 旧路径(TOPOCODE_CTX_ASSET=0 双轨对拍)
+            sys_msg = _sys_base() + _tool_protocol_text()
+            try:
+                res = run_tools_loop(
+                    [{"role": "system", "content": sys_msg},
+                     {"role": "user", "content": user_msg}],
+                    root=root, project=project, mode="structured",
+                    output_schema=enrichment_schema(kind), max_rounds=2,
+                    max_tokens=get_max_tokens_preference(), model_id=model_id)
+            except Exception as e:
+                logger.warning("[asset_extract] %s %s 提取异常: %s", file_, kind, e)
         if res and isinstance(res.get("output"), dict):
             enrich = parse_enrichments(res["output"], names)
         else:
@@ -276,15 +309,26 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
                               for it in pending)
             syms = [(it["_cand"]["node"].get("qualified_name")
                      or it["_cand"]["node"].get("name")) for it in pending]
-            res2 = run_tools_loop(
-                [{"role": "system", "content": "你是代码语义资产补齐器(修复轮)。"},
-                 {"role": "user", "content":
-                     f"文件: {file_}，类别: {kind}。以下资产未通过验收，请仅针对它们重新输出完整资产"
-                     f"(symbol/name/desc 及语义字段)：\n{hints}\n只输出 JSON 对象 "
-                     f'{{"assets": [...]}}。'}],
-                root=root, project=project, mode="structured",
-                output_schema=enrichment_schema(kind), max_rounds=2,
-                max_tokens=get_max_tokens_preference(), model_id=model_id)
+            repair_user = (
+                f"文件: {file_}，类别: {kind}。以下资产未通过验收，请仅针对它们重新输出完整资产"
+                f"(symbol/name/desc 及语义字段)：\n{hints}\n只输出 JSON 对象 "
+                f'{{"assets": [...]}}。')
+            res2 = None
+            if cm is not None:
+                # 复用同一 cm：继承首轮任务规格钉驻 + 工具结果工作集
+                res2 = tagent_extract.run_extraction_agentic(
+                    sys_msg="你是代码语义资产补齐器(修复轮)。",
+                    user_msg=repair_user,
+                    root=root, project=project, model_id=model_id,
+                    max_rounds=2, max_tokens=get_max_tokens_preference(),
+                    context_manager=cm)
+            else:
+                res2 = run_tools_loop(
+                    [{"role": "system", "content": "你是代码语义资产补齐器(修复轮)。"},
+                     {"role": "user", "content": repair_user}],
+                    root=root, project=project, mode="structured",
+                    output_schema=enrichment_schema(kind), max_rounds=2,
+                    max_tokens=get_max_tokens_preference(), model_id=model_id)
         except Exception as e:
             logger.warning("[asset_extract] %s %s 修复轮异常: %s", file_, kind, e)
             res2 = None
@@ -371,8 +415,13 @@ def _norm_llm_rels(rels) -> List[dict]:
 def extract_directed(root: str, project: Optional[str], ctx: dict,
                      kinds: Optional[List[str]] = None,
                      model_id: Optional[str] = None,
-                     use_llm: bool = True) -> List[dict]:
-    """实现层定向提取(文件×类型批量)。返回资产列表(与 _save_assets 同构)。"""
+                     use_llm: bool = True,
+                     context_manager=None) -> List[dict]:
+    """实现层定向提取(文件×类型批量)。返回资产列表(与 _save_assets 同构)。
+
+    context_manager: 可选共享 ContextManager——传入则所有 (文件×类型) 组共用
+    (清单跨文件累积，知识库自我更新等长 cm 场景)；缺省每组建新(开关关闭则纯旧路径)。
+    """
     nodes = ctx.get("nodes") or []
     node_by_id = {n.get("id"): n for n in nodes}
     rc = RuleContext(ctx.get("edges") or [], ctx.get("implDetails") or {}, node_by_id,
@@ -394,7 +443,8 @@ def extract_directed(root: str, project: Optional[str], ctx: dict,
         for kind in sorted(groups):
             try:
                 all_assets += _extract_group(root, project, ctx, file_, kind,
-                                             groups[kind], model_id, use_llm)
+                                             groups[kind], model_id, use_llm,
+                                             context_manager)
             except Exception as e:
                 logger.warning("[asset_extract] %s %s 分组提取失败(走地板): %s",
                                file_, kind, e)

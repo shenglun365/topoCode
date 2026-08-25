@@ -127,11 +127,15 @@ def build_pool() -> ExecutorPool:
     default = None
 
     if default_id == "opencode":
+        from topocode_agent.core.context import default_coding_prompt_builder
         base_url = os.environ.get("OPENCODE_SERVE_URL", "http://127.0.0.1:3478")
         default = ServeExecutor(
             id="opencode", base_url=base_url,
             api_key=os.environ.get("OPENCODE_API_KEY", ""),
             timeout=float(os.environ.get("OPENCODE_TIMEOUT", "300")),
+            # C4：任务 prompt = 环境简报 + 任务规格 + 前置依赖状态栈 + 工作区未提交 diff
+            prompt_builder=default_coding_prompt_builder(
+                os.environ.get("RUNNER_PROJECT_ROOT", "")),
         )
     codex_cmd = os.environ.get("CODEX_CMD", "")
     if codex_cmd:

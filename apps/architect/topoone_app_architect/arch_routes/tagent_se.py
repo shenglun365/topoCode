@@ -127,6 +127,9 @@ class ArchitectToolAdapter(AgentTool):
     fn 签名：`fn(root, project, **args) -> dict|list|str`（同步，可能触 KB/本地模型）。
     parameters：`{arg: {"type": ..., "description": ...}}`，用于生成 LLM 可见的
     function schema（architect 原工具未声明参数 schema，由宿主在此补）。
+    in_thread：True（默认）→ 工具在 worker 线程执行（KB 类工具，无线程亲和）；
+    False → 在事件循环线程同步执行（asset.* 提取工具依赖 asset_tools 的
+    thread-local 提取上下文/facts，必须与 set_extraction_context 同线程）。
     """
 
     llm_visible = True
@@ -138,7 +141,8 @@ class ArchitectToolAdapter(AgentTool):
                  fn: Callable[..., Any],
                  parameters: Optional[dict] = None,
                  root: Optional[str] = None,
-                 project: Optional[str] = None):
+                 project: Optional[str] = None,
+                 in_thread: bool = True):
         # 净化为 tAgent 安全名（点号→下划线）；handler 绑定与原始名无关
         self.name = sanitize_tool_name(name)
         self.description = description
@@ -146,6 +150,7 @@ class ArchitectToolAdapter(AgentTool):
         self._params = parameters or {}
         self._root = root
         self._project = project
+        self._in_thread = in_thread
 
     def to_openai_schema(self) -> Optional[dict]:
         if not self.llm_visible:
@@ -181,7 +186,10 @@ class ArchitectToolAdapter(AgentTool):
 
     async def execute(self, **kwargs) -> ToolResult:
         try:
-            result = await asyncio.to_thread(self._invoke, kwargs)
+            if self._in_thread:
+                result = await asyncio.to_thread(self._invoke, kwargs)
+            else:
+                result = self._invoke(kwargs)  # 同线程同步执行（thread-local 亲和）
             return ToolResult.ok(result)
         except Exception as e:  # noqa: BLE001
             logger.warning("[ArchitectTool] %s failed: %s", self.name, e)

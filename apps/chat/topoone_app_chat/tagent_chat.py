@@ -105,6 +105,10 @@ class _WebToolAdapter(AgentTool):
             result = await asyncio.to_thread(self._executor.execute, self.name, kwargs)
             if isinstance(result, dict) and result.get("error"):
                 return ToolResult.fail(str(result["error"]))
+            if isinstance(result, (dict, list)):
+                # JSON 文本：LLM 可读（避免 Python repr）；且 session.stream 仅把
+                # str 结果路由进上下文清单（observe_tool_result），参与预算编译/GC。
+                result = json.dumps(result, ensure_ascii=False, default=str)
             return ToolResult.ok(result)
         except Exception as e:  # noqa: BLE001
             logger.warning("[ChatTool] %s failed: %s", self.name, e)
@@ -230,16 +234,26 @@ async def run_tagent_chat(
     session_id: str = "",
     sdb=None,
     persist: bool = True,
+    context_manager=None,
 ) -> AsyncIterator[dict]:
     """跑 tAgent 流式 agentic 循环，产出 chat SSE 事件 dict 流。
 
     history：DB 载入的上下文（system + 之前各轮，**不含本次 user 消息**）。
     user_input：本次用户消息（由 stream 追加）。最终 yield 一个
     {type:done, content, quality} 事件。
+    context_manager：可选共享 ContextManager——传会话级持久 cm 则跨请求累积
+    （长 cm/超长会话 checkpoint 场景，调用方负责 pin/播种）；缺省每请求新建
+    （phase=chat，本轮诉求钉驻 Base，工具结果经 loop 入工作集）。
     """
+    if context_manager is None:
+        from topocode_agent.core.context import ContextManager
+        context_manager = ContextManager(phase="chat")
+        if user_input:
+            context_manager.pin_requirement(user_input)  # 本轮诉求钉驻（L2 底座）
     session = ConversationSession(
         llm, tools, system_prompt=system_prompt,
         max_turns=max_turns, model=model, temperature=temperature,
+        context_manager=context_manager,
     )
     # 用 DB 历史做种子（_ensure_system 见首条非 system 才补 system）
     if history:

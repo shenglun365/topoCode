@@ -117,9 +117,10 @@ def test_build_web_tool_registry():
     assert reg.get("web_read_file") is not None
     assert reg.get("web_search_symbols") is not None
     assert reg.get("web_unknown") is None
-    # 执行委托 executor
+    # 执行委托 executor；dict 结果序列化为 JSON 文本（LLM 可读 + 路由进上下文清单）
     res = _await(reg.get("web_read_file").execute(path="a.py"))
-    assert res.success and res.data == {"content": "data"}
+    assert res.success and isinstance(res.data, str)
+    assert json.loads(res.data) == {"content": "data"}
     assert ex.calls == [("web_read_file", {"path": "a.py"})]
 
 
@@ -213,3 +214,56 @@ def test_run_tagent_chat_no_content_low_quality():
         history=[], user_input="hi", session_id="s1", sdb=None, persist=False))
     assert events[-1]["type"] == "done"
     assert events[-1]["quality"] == "low"
+
+
+# ── context 编译体系接线（phase=chat + 本轮诉求钉驻 + cm 可注入）──
+
+
+class CapLLM(FakeLLM):
+    """记录每轮 chat_stream 收到的 messages。"""
+
+    def __init__(self, script, **kw):
+        super().__init__(script, **kw)
+        self.seen = []
+
+    async def chat_stream(self, messages, **kw):
+        self.seen.append([dict(m) for m in messages])
+        async for e in super().chat_stream(messages, **kw):
+            yield e
+
+
+def test_run_tagent_chat_pins_requirement_into_system():
+    """默认 cm(phase=chat)：本轮诉求钉驻 Base → 并入 system 消息。"""
+    llm = CapLLM([("ok answer", None)])
+    reg = T.build_web_tool_registry([], FakeExecutor(), definitions=[])
+    events = _run(T.run_tagent_chat(
+        llm=llm, tools=reg, system_prompt="sys",
+        history=[{"role": "system", "content": "sys"}], user_input="本轮诉求XYZ",
+        session_id="s1", sdb=None, persist=False))
+    assert events[-1]["content"] == "ok answer"
+    first_sys = llm.seen[0][0]
+    assert first_sys["role"] == "system"
+    assert "sys" in first_sys["content"]
+    assert "本轮诉求XYZ" in first_sys["content"]
+
+
+def test_run_tagent_chat_injected_cm_used_and_tool_result_to_manifest():
+    """注入共享 cm：被实际使用(turn 递增)，工具结果路由进清单(参与后续编译)。"""
+    from topocode_agent.core.context import ContextManager
+    cm = ContextManager(phase="chat")
+    cm.pin_requirement("持久规格ABC")
+    llm = FakeLLM([
+        ("", [ToolCall("web_read_file", {"path": "a.py"})]),
+        ("Done reading", None),
+    ], supports_tools=True)
+    ex = FakeExecutor({"web_read_file": {"content": "file-data-xyz"}})
+    reg = T.build_web_tool_registry(["web_read_file"], ex,
+                                    definitions=[_def("web_read_file")])
+    events = _run(T.run_tagent_chat(
+        llm=llm, tools=reg, system_prompt="sys",
+        history=[], user_input="read a.py", session_id="s1", sdb=None,
+        persist=False, context_manager=cm))
+    assert events[-1]["content"] == "Done reading"
+    assert cm.turn >= 1  # 注入的 cm 被实际使用
+    # 工具结果(str)路由进清单
+    assert any("file-data-xyz" in (e.text or "") for e in cm.manifest.entries())
