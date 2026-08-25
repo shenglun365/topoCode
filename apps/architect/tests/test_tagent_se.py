@@ -183,6 +183,95 @@ def test_se_analyze_text_fallback_loop(tmp_path):
     assert gw.calls[0][1]["mode"] == "chat"
 
 
+# ── SE 任务树生成（替换机械 _build_task_tree）────────────────────
+
+_TREE_JSON = (
+    '{"roots": [{"id": "epic1", "title": "订单退款", "kind": "epic", "est_min": 180, "children": ['
+    '{"id": "t1", "title": "梳理现状", "kind": "task", "est_min": 30, "files": ["order.go"]},'
+    '{"id": "t2", "title": "实现退款", "kind": "task", "est_min": 120, "depends_on": ["t1"], "files": ["refund.go"]},'
+    '{"id": "t3", "title": "单元测试", "kind": "check", "est_min": 30, "depends_on": ["t2"]}'
+    ']}]}'
+)
+
+
+def test_build_task_tree_se_success(tmp_path):
+    gw = ScriptedGateway([{"content": _TREE_JSON, "mode": "chat"}])
+    from topoone_app_architect.arch_routes.tagent_se import build_task_tree_se
+    reqs = [{"id": "req-1", "title": "订单退款", "desc": "支持退款",
+             "analysis": {"assessmentSummary": "可行", "functionalScope": ["退款"],
+                          "implementationPath": "refund.go"}}]
+    tree, problems = _run(build_task_tree_se(
+        reqs, root=str(tmp_path), project="p1", model_id="m", gateway=gw))
+    assert problems == []
+    assert tree["kind"] == "epic"
+    assert tree["title"] == "订单退款"
+    assert tree["estMin"] == 180  # est_min → estMin
+    assert tree["status"] == "pending"
+    # id 重映射为唯一 se-NNNN（DFS 序），dependsOn 同步重映射
+    assert tree["id"] == "se-0001"
+    by_title = {c["title"]: c for c in tree["children"]}
+    t1, t2, t3 = by_title["梳理现状"], by_title["实现退款"], by_title["单元测试"]
+    assert (t1["id"], t2["id"], t3["id"]) == ("se-0002", "se-0003", "se-0004")
+    assert t2["dependsOn"] == [t1["id"]]  # t1 → se-0002
+    assert t3["dependsOn"] == [t2["id"]]  # t2 → se-0003
+    assert t2["estMin"] == 120
+    assert t3["kind"] == "check"
+    assert t1["files"] == ["order.go"]
+
+
+def test_build_task_tree_se_failure(tmp_path):
+    gw = ScriptedGateway([{"content": "抱歉，我无法生成任务树。", "mode": "chat"}])
+    from topoone_app_architect.arch_routes.tagent_se import build_task_tree_se
+    tree, problems = _run(build_task_tree_se(
+        [{"id": "req-1", "title": "x", "desc": "", "analysis": {}}],
+        root=str(tmp_path), project="p1", model_id="m", gateway=gw))
+    assert tree is None
+    assert problems  # 有明确失败原因
+
+
+def test_create_execution_task_uses_se_tree(tmp_path, monkeypatch):
+    """POST /exec 用 SE 任务树替换机械拆分（直接替换，无旧路径）。"""
+    from fastapi.testclient import TestClient
+    import topoone_app_architect.arch_routes.tagent_se as T
+    from topoone_app_architect.arch_routes import store
+    from topoone_app_architect.server import build_app
+
+    data = str(tmp_path / "arch")
+    app = build_app(data_dir=data)
+    client = TestClient(app)
+
+    # 建需求（默认库，无项目上下文）
+    store.RequirementsStore.create({
+        "id": "req-1", "title": "订单退款", "desc": "支持退款", "kind": "user-story",
+        "analysis": {"assessmentSummary": "可行", "functionalScope": ["退款"],
+                     "implementationPath": "refund.go"},
+    })
+
+    fe_tree = {"id": "SEID", "title": "订单退款", "kind": "epic", "status": "pending",
+               "estMin": 180, "context": [], "files": [], "dependsOn": [],
+               "children": [{"id": "t1", "title": "梳理现状", "kind": "task",
+                             "status": "pending", "estMin": 30, "context": [],
+                             "files": ["order.go"], "dependsOn": []}]}
+
+    async def fake_se(reqs, root=None, project=None, model_id="", gateway=None):
+        return fe_tree, []
+    monkeypatch.setattr(T, "build_task_tree_se", fake_se)
+
+    res = client.post("/api/architect/exec", json={
+        "reqIds": ["req-1"], "root": str(tmp_path), "project": "p1",
+        "adapter": "opencode",
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()["data"]
+    assert body["plan"]["status"] == "confirmed"
+    assert body["plan"]["taskPlanId"]  # SE 树 id 已回填
+    # 落库任务树为 SE 形状（含 dependsOn 字段）
+    tree = store.TaskTreesStore.get_by_plan(body["plan"]["id"])["root"]
+    assert tree["title"] == "订单退款"
+    assert tree["children"][0]["id"] == "t1"
+    assert "dependsOn" in tree["children"][0]
+
+
 def _run(coro):
     import asyncio
     loop = asyncio.new_event_loop()

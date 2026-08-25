@@ -18,6 +18,7 @@ architect 既有领域工具（KB 资产/语义检索/依赖图/项目上下文�
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 from typing import Any, Callable, Optional
@@ -168,10 +169,19 @@ class ArchitectToolAdapter(AgentTool):
             },
         }
 
+    def _invoke(self, kwargs: dict) -> Any:
+        """按 req_agent.run_arch_tool 约定调用：root/project 按签名注入，其余关键字透传。"""
+        params = inspect.signature(self._fn).parameters
+        kw = dict(kwargs)
+        if "root" in params and "root" not in kw:
+            kw["root"] = self._root
+        if "project" in params and "project" not in kw:
+            kw["project"] = self._project
+        return self._fn(**kw)
+
     async def execute(self, **kwargs) -> ToolResult:
         try:
-            result = await asyncio.to_thread(
-                self._fn, self._root, self._project, **kwargs)
+            result = await asyncio.to_thread(self._invoke, kwargs)
             return ToolResult.ok(result)
         except Exception as e:  # noqa: BLE001
             logger.warning("[ArchitectTool] %s failed: %s", self.name, e)
@@ -190,6 +200,41 @@ def adapt_domain_tool(tool: dict, root: Optional[str], project: Optional[str],
         parameters=parameters,
         root=root, project=project,
     )
+
+
+# 只读探查工具参数 schema（供 LLM 生成 [TOOL_CALL] 参数；root/project 由适配器注入）
+TOOL_PARAMS = {
+    "project.ctx": {},
+    "kb.asset.search": {
+        "text": {"type": "string", "description": "检索关键词", "required": True},
+        "preferred": {"type": "array", "description": "首选资产 id 列表"},
+    },
+    "kb.baseline": {},
+    "kb.graph": {
+        "comp_ids": {"type": "array", "description": "组件 id 列表", "required": True},
+    },
+    "kb.code_mappings": {
+        "asset_ids": {"type": "array", "description": "资产 id 列表", "required": True},
+    },
+    "asset.semantic.search": {
+        "text": {"type": "string", "description": "语义检索关键词"},
+        "kind": {"type": "string",
+                 "description": "类别 structure/behavior/rule/contract"},
+    },
+}
+
+
+def architect_domain_tools(root, project, tool_names=None):
+    """从 req_agent 注册表取领域工具 `[{name, description, handler}]`（惰性导入，避免环）。"""
+    from . import req_agent
+    names = list(tool_names) if tool_names else list(TOOL_PARAMS.keys())
+    out = []
+    for name in names:
+        entry = req_agent._ARCH_TOOLS.get(name)
+        if entry:
+            out.append({"name": name, "description": entry.get("description", ""),
+                        "handler": entry["handler"]})
+    return out
 
 
 def build_architect_se(
@@ -240,3 +285,112 @@ def build_architect_se(
             tool, root, project,
             parameters=(tool_parameters or {}).get(name)))
     return se
+
+
+# ── SE 任务树生成（替换 execution._build_task_tree 的机械拆分）────────
+
+_STATUS_MAP = {
+    "running": "in-progress", "done": "done", "failed": "blocked",
+    "blocked": "blocked", "stale": "pending", "skipped": "pending",
+}
+
+
+def _req_text(reqs) -> str:
+    parts = [f"【{r.get('title', '')}】{r.get('desc', '')}" for r in reqs]
+    return "\n\n".join(p for p in parts if p.strip(" 【】")) or "（无需求文本）"
+
+
+def _analysis_text(reqs) -> str:
+    parts = []
+    for r in reqs:
+        a = r.get("analysis") or {}
+        bits = []
+        if a.get("assessmentSummary"):
+            bits.append(str(a["assessmentSummary"]))
+        if a.get("functionalScope"):
+            bits.append("功能范围: " + ", ".join(map(str, a["functionalScope"])))
+        if a.get("implementationPath"):
+            bits.append("实现路径: " + str(a["implementationPath"]))
+        if bits:
+            parts.append(f"[{r.get('title', '')}]\n" + "\n".join(bits))
+    return "\n\n".join(parts) or "（无分析结论）"
+
+
+def _design_text(reqs) -> str:
+    import json as _json
+    parts = []
+    for r in reqs:
+        d = r.get("design")
+        if isinstance(d, dict):
+            d = d.get("content") or d.get("doc") or d.get("markdown") \
+                or _json.dumps(d, ensure_ascii=False)
+        if d:
+            parts.append(f"[{r.get('title', '')}]\n{d}")
+    return "\n\n".join(parts)
+
+
+def _node_fe(n) -> dict:
+    return {
+        "id": n.id, "title": n.title, "kind": n.kind,
+        "status": _STATUS_MAP.get(n.status, "pending"),
+        "estMin": n.est_min, "context": list(n.context), "files": list(n.files),
+        "dependsOn": list(n.depends_on),
+        "children": [_node_fe(c) for c in n.children],
+    }
+
+
+def _tree_to_frontend(tree) -> dict:
+    """CodingTaskTree → 前端 TaskNode 形状（est_min→estMin，状态映射，保留 dependsOn）。"""
+    roots = tree.roots
+    if len(roots) == 1:
+        return _node_fe(roots[0])
+    total = sum(r.est_min for r in roots)
+    return {"id": "tp-se", "title": "任务方案", "kind": "epic", "status": "pending",
+            "estMin": total, "context": [], "files": [], "dependsOn": [],
+            "children": [_node_fe(r) for r in roots]}
+
+
+def _reid_tree(node: dict, prefix: str = "se") -> dict:
+    """重映射为唯一 id（LLM 生成的 id 可能重复/不稳定），同步 dependsOn 引用。"""
+    old_to_new: dict = {}
+    counter = [0]
+
+    def _assign(n):
+        old = n["id"]
+        counter[0] += 1
+        new = f"{prefix}-{counter[0]:04d}"
+        # 重复旧 id：仅首个映射生效（后续同 id 节点复用首映射，保持依赖一致）
+        old_to_new.setdefault(old, new)
+        n["id"] = old_to_new[old]
+        for c in n.get("children") or []:
+            _assign(c)
+
+    def _fix_deps(n):
+        n["dependsOn"] = [old_to_new.get(d, d) for d in n.get("dependsOn") or []]
+        for c in n.get("children") or []:
+            _fix_deps(c)
+
+    _assign(node)
+    _fix_deps(node)
+    return node
+
+
+async def build_task_tree_se(reqs, root=None, project=None, model_id: str = "",
+                             gateway: Any = None):
+    """SE 大脑生成任务树（显式 depends_on）→ 前端 TaskNode 形状。
+
+    复用需求已产出的 analysis/design 文本作为 SE 输入；plan 阶段 SE 仍跑 agentic
+    循环（可用注入的 KB/代码探查工具核实）。失败返回 (None, problems)。
+    """
+    from .kb_gateway import get_gateway
+    gw = gateway or get_gateway()
+    se = build_architect_se(
+        gw, root=root, project=project, model_id=model_id,
+        domain_tools=architect_domain_tools(root, project),
+        tool_parameters=TOOL_PARAMS,
+        project_root=root or "",
+    )
+    result = await se.plan(_req_text(reqs), _analysis_text(reqs), _design_text(reqs))
+    if result.tree is None:
+        return None, list(result.problems or [])
+    return _reid_tree(_tree_to_frontend(result.tree)), []

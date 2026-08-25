@@ -13,6 +13,28 @@ router = APIRouter()
 BASELINE_COMMIT = "1a2b3c4d5e6f"
 
 
+def _resolve_root_project(reqs, body):
+    """解析 SE 探查所需的 root(源码根)/project(项目 id)。
+
+    优先 body（前端显式传入）；缺省经请求级项目上下文 + arch_projects 解析。
+    """
+    root = body.get("root")
+    project = body.get("project")
+    if not project:
+        try:
+            from . import ctx
+            project = ctx.get_project()
+        except Exception:
+            project = None
+    if not root and project:
+        try:
+            proj = store.ProjectsStore.get(project) or {}
+            root = proj.get("rootPath") or proj.get("kbRoot") or ""
+        except Exception:
+            root = ""
+    return root, project
+
+
 # ── 纯函数: 合成方案 / 生成任务树 ──────────────────────────────
 
 def _assemble_change_items(reqs):
@@ -59,37 +81,6 @@ def _build_plan(reqs, req_ids, provided=None):
         },
         "status": "draft", "taskPlanId": None, "baseCommit": base_commit,
         "updatedAt": now,
-    }
-
-
-def _build_task_tree(plan, reqs):
-    """需求 analysis.steps[] → TaskNode 树(对齐前端 execution-batch.buildTaskTree)。"""
-    plan_id = plan.get("taskPlanId") or store.next_id("tp")
-    plan["taskPlanId"] = plan_id
-    children = []
-    total = 0
-    for r in reqs:
-        steps = (r.get("analysis") or {}).get("steps") or []
-        for s in steps:
-            est = s.get("estMin", 30)
-            total += est
-            children.append({
-                "id": store.next_id("task"), "title": s.get("title", "实现任务"),
-                "kind": "task", "status": "pending", "estMin": est,
-                "context": s.get("context") or [f"需求: {r['id']}"],
-                "files": s.get("files") or [],
-            })
-    if not children:
-        total = 90
-        children.append({"id": store.next_id("task"), "title": "梳理现状与边界", "kind": "task",
-                         "status": "pending", "estMin": 30, "context": [], "files": []})
-        children.append({"id": store.next_id("task"), "title": "实现核心逻辑", "kind": "task",
-                         "status": "pending", "estMin": 60, "context": [], "files": []})
-    return {
-        "id": plan_id, "title": plan.get("title", "任务方案"), "kind": "epic",
-        "status": "pending", "estMin": total,
-        "context": ["需求: " + "/".join(reqs[0]["id"] if reqs else "")],
-        "files": [], "children": children,
     }
 
 
@@ -191,7 +182,17 @@ async def create_execution_task(request: Request):
 
     plan = _build_plan(reqs, req_ids, provided=body.get("plan"))
     plan["status"] = "confirmed"
-    root = _build_task_tree(plan, reqs)
+
+    # SE 大脑生成任务树（显式 depends_on），替换机械 steps→树。
+    # 在原子写之前调用（LLM 异步，不可持有 DB 事务）；失败明确报错，不伪造。
+    from . import tagent_se
+    se_root, se_project = _resolve_root_project(reqs, body)
+    root, problems = await tagent_se.build_task_tree_se(
+        reqs, root=se_root, project=se_project,
+        model_id=(body.get("modelId") or ""))
+    if root is None:
+        return err(502, "SE 任务树生成失败: " + "; ".join(problems or ["LLM 未产出任务树"]))
+    root["id"] = store.next_id("tp")
     plan["taskPlanId"] = root["id"]
 
     now = _ts()
