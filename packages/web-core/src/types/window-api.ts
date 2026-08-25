@@ -1,5 +1,6 @@
 /* ========================================
-   Preload API 全局类型 — 对应 electron/preload.ts
+   window.api 全局类型 — IPC 桥单一契约源
+   （实现：services/browser-api.ts，HTTP /api/rpc + /ws/events）
    ======================================== */
 export {} // make this a module so `declare global` works
 

@@ -210,10 +210,17 @@ async function loadDoc() {
 const canOpenInBrowser = computed(() => !!(doc.value?.id || props.subDocId || (doc.value?.content && props.taskId)))
 
 async function openInBrowser() {
-  console.log('[SubDocViewer] openInBrowser clicked, subDocId prop:', props.subDocId, 'doc.id:', doc.value?.id, 'httpPort:', httpPort.value, 'taskId:', props.taskId)
+  console.log('[SubDocViewer] openInBrowser clicked, subDocId prop:', props.subDocId, 'doc.id:', doc.value?.id, 'parentCommId:', props.parentCommId, 'taskId:', props.taskId)
+  const params = new URLSearchParams()
+  params.set('taskId', props.taskId || '')
+  // 架构分析组件上下文：直接打开 doc viewer 的社区文档页（viewer 中 communityId 优先于 docId）
+  if (props.parentCommId) {
+    params.set('communityId', props.parentCommId)
+    params.set('edgeType', props.parentEdgeType || 'INCLUDE')
+  }
   let docId = doc.value?.id || props.subDocId
-  if (!docId && doc.value?.content && props.taskId) {
-    console.log('[SubDocViewer] no docId, creating subdoc first')
+  if (!docId && !props.parentCommId && doc.value?.content && props.taskId) {
+    // 非社区上下文且文档未持久化（内联内容）→ 先存为子文档再打开
     try {
       const result = await reportStore.createSubDoc({
         taskId: props.taskId,
@@ -228,15 +235,24 @@ async function openInBrowser() {
       return
     }
   }
-  if (!docId) {
+  if (docId) params.set('docId', docId)
+  if (!docId && !props.parentCommId) {
     console.warn('[SubDocViewer] openInBrowser aborted: no docId available')
     return
   }
-  const url = `http://127.0.0.1:${httpPort.value}/doc?taskId=${props.taskId}&docId=${docId}`
+  // 用当前页面 host（浏览器 LAN 访问时 127.0.0.1 指向的是客户端本机，不是服务器）
+  const host = window.location.host || `127.0.0.1:${httpPort.value}`
+  const url = `http://${host}/doc?${params.toString()}`
   console.log('[SubDocViewer] openInBrowser url:', url)
-  window.api!.shell.openExternal(url)
-    .then(() => console.log('[SubDocViewer] openExternal success'))
-    .catch((err: any) => console.error('[SubDocViewer] openExternal error:', err))
+  const shellApi = (window as any).api?.shell
+  if (shellApi?.openExternal) {
+    await shellApi.openExternal(url)
+      .then(() => console.log('[SubDocViewer] openExternal success'))
+      .catch(() => window.open(url, '_blank', 'noopener'))
+  } else {
+    // 浏览器环境无 shell API → 新标签页打开
+    window.open(url, '_blank', 'noopener')
+  }
 }
 
 

@@ -425,15 +425,17 @@ watch(agentCompletedSignal, async () => {
       v-if="showId"
       class="cmp-id"
     >{{ componentId }}</span>
-    <template v-if="loading">
-      <div class="loading-state">
-        <div class="loading-spinner" />
-        <span>{{ t('common.loading') }}</span>
-      </div>
-    </template>
+    <!-- 加载覆盖层：覆盖旧内容但不卸载 DOM（刷新/重挂载时无空白帧） -->
+    <div
+      v-if="loading && !loadError"
+      class="loading-overlay"
+    >
+      <div class="loading-spinner" />
+      <span>{{ t('common.loading') }}</span>
+    </div>
 
     <div
-      v-else-if="loadError"
+      v-if="loadError"
       class="load-error"
     >
       <ExclamationTriangleIcon class="w-4 h-4" />
@@ -446,7 +448,7 @@ watch(agentCompletedSignal, async () => {
       </button>
     </div>
 
-    <template v-else>
+    <template v-if="!loadError">
       <div class="report-home-scroll">
         <!-- 项目概要 + 任务概要 折叠容器 -->
         <div
@@ -796,6 +798,20 @@ watch(agentCompletedSignal, async () => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(8px * var(--ui-scale, 1));
+  color: var(--text-muted);
+  font-size: calc(12px * var(--ui-scale, 1));
+  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
 }
 
 .loading-state {

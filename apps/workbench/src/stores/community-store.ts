@@ -1182,9 +1182,13 @@ export const useCommunityStore = defineStore('community', () => {
         updateAgentTask(taskId, idx, { progress: 0, message: `文件数: ${result.fileCount || 0}` })
         _pollAgentProgress(taskId, idx, result.agentTaskId, 0)
         // console.log('[pipeline] polling started for agent=%s idx=%d', result.agentTaskId, idx)
+      } else if (result.success) {
+        // 无 agentTaskId = 全部批次已缓存（后端已跳过）→ 快速标记完成，不留 running
+        // 同步替换占位 steps（卡片无 taskLogs 时渲染最后一个 step 的描述，占位文案"等待 LLM 分析完成"对已完成卡片是错的）
+        t.agentTasks[idx].steps = [{ description: '全部已缓存，已跳过', status: 'done' }]
+        updateAgentTask(taskId, idx, { status: 'completed', progress: 100, message: '全部已缓存，已跳过' })
       } else {
-        // console.log('[pipeline] no agentTaskId returned, keeping placeholder for history poll')
-        updateAgentTask(taskId, idx, { status: 'running', progress: 0, message: `全缓存，等待后续批次…` })
+        updateAgentTask(taskId, idx, { status: 'failed', message: result.error || '启动失败' })
       }
       return result
     } catch (e: any) {

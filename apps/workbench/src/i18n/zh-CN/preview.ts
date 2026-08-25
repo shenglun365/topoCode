@@ -1,6 +1,5 @@
 export default { preview: {
   fileTooLarge: '文件过大，不建议预览（>5MB）',
-  electronOnly: '文件预览不可用（无后端读取器）',
   readFailed: '读取文件失败',
   binaryFile: '二进制文件无法预览',
   pinToTab: '固定到标签页',

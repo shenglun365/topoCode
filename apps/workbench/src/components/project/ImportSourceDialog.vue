@@ -21,7 +21,7 @@ const head = ref('')
 const error = ref('')
 const busy = ref(false)
 
-// 服务端目录浏览器（Web 替代 Electron dialog 选目录）
+// 服务端目录浏览器（Web 模式选目录）
 const pickerVisible = ref(false)
 const pickerTarget = ref<'dir' | 'localRepo'>('dir')
 

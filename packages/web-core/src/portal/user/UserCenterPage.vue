@@ -74,7 +74,7 @@ async function autoDownloadAndImport(resourceId: number) {
     const url = info.oss_url || `${API_BASE}${info.redirect_url}`
     const api = (window as any).api
     if (api?.fs?.downloadUrl && api?.call) {
-      // Electron：本地下载并导入为工作台项目
+      // 本地下载并导入为工作台项目
       importMessage.value = t('resource.import.downloading')
       const filePath = await api.fs.downloadUrl(url)
       importMessage.value = t('resource.import.importing')

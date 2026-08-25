@@ -519,7 +519,7 @@ export interface IPCAPI {
     getProjectGroups: (projectId: string) => Promise<GroupNode[]>
   }
 
-  // 服务器目录浏览器（Web 替代 Electron 选目录）
+  // 服务器目录浏览器（Web 模式选目录）
   dir: {
     list: (path?: string | null) => Promise<{
       path: string
@@ -584,7 +584,7 @@ export interface IPCAPI {
     getPreSummaryStatus: (params: { taskId: string }) => Promise<{ counts: Record<string, number>; total_files: number; cached_count: number; project_root: string; failed_count: number }>
     listPreSummaryFiles: (params: { taskId: string; batch?: string; page?: number; page_size?: number; search?: string }) => Promise<{ batch: string; page: number; page_size: number; total: number; files: Array<{ file_path: string; score: number; cross: number; edges: number; size: number; is_large: number; quality: number; batch: string; has_summary?: boolean }> }>
     startPreSummary: (params: { taskId: string; batch?: string; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; agentTaskId?: string; fileCount?: number; error?: string; allCached?: boolean }>
-    startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number; agentTaskId?: string; fileCount?: number }>
+    startPreSummaryPipeline: (params: { taskId: string; batches: string[]; limit?: number; subagentConcurrency?: number }) => Promise<{ success: boolean; batches: string[]; total: number; agentTaskId?: string; fileCount?: number; allCached?: boolean; error?: string }>
     getFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ found: boolean; summary?: string; summary_len?: number; created_at?: string; source?: string }>
     deleteFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; deleted?: number }>
     rerunFileSummary: (params: { taskId: string; file_path: string }) => Promise<{ success: boolean; agentTaskId?: string }>
@@ -775,7 +775,7 @@ export interface IPCAPI {
     renderPlantuml: (params: { code: string; format?: string; useRemote?: boolean }) => Promise<{ data: string; format: string; size: number }>
   }
 
-  // Electron 专用 (preload 暴露)
+  // 应用/窗口控制（浏览器模式为 no-op 降级，见 browser-api.ts）
   app: {
     quit: () => Promise<void>
   }

@@ -219,7 +219,7 @@ export const useProjectStore = defineStore('project', () => {
     if (selectedProjectId.value !== id) {
       selectedFile.value = null
     }
-    // 将项目根目录加入 Electron 白名单
+    // 将项目根目录加入服务端目录白名单
     const project = projects.value.find(p => p.id === id)
     if (project && project.path) {
       try {

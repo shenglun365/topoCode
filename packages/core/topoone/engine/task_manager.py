@@ -2884,15 +2884,21 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 "project_root": _get_project_root(pid),
                 "project_summary": _get_project_summary(pid),
             }, timeout=30.0)
-            _save_agent_running_history(project_db, pid, tid, result.get("agentTaskId"), "presummary_files")
+            if isinstance(result, dict) and result.get("error"):
+                return {"success": False, "error": result["error"], "batches": batches,
+                        "total": len(batches), "agentTaskId": "", "fileCount": 0}
+            agent_task_id = result.get("agentTaskId", "") if isinstance(result, dict) else ""
+            _save_agent_running_history(project_db, pid, tid, agent_task_id, "presummary_files")
             return {"success": True, "batches": batches, "total": len(batches),
-                    "agentTaskId": result.get("agentTaskId", ""), "fileCount": 0}
+                    "agentTaskId": agent_task_id, "fileCount": 0,
+                    "allCached": not agent_task_id}
 
         result = _chain_start_pre_summary(tid, pid, project_db, batches, 0, limit, subagent_concurrency)
         agent_task_id = result.get("agentTaskId", "") if result else ""
         _save_agent_running_history(project_db, pid, tid, agent_task_id, "presummary_files")
         file_count = result.get("fileCount", 0) if result else 0
-        return {"success": True, "batches": batches, "total": len(batches), "agentTaskId": agent_task_id, "fileCount": file_count}
+        return {"success": True, "batches": batches, "total": len(batches), "agentTaskId": agent_task_id,
+                "fileCount": file_count, "allCached": not agent_task_id}
 
     def _launch_pre_summary_batch(tid, pid, project_db, batch="P0", limit=0,
                                    subagent_concurrency=None, on_complete=None):
@@ -3028,13 +3034,15 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
 
     def _chain_start_pre_summary(tid, pid, project_db, batches, idx=0, limit=0, subagent_concurrency=1):
         """链式顺序启动预摘要批次：前一批完成后触发下一批。
-        返回第一批的启动结果（含 agentTaskId），后续批次通过回调链式触发。
+        返回链中第一个实际启动的 agentTaskId（跳过全缓存批次），
+        全部批次均已缓存时返回 {"allCached": True}。
         """
         if idx >= len(batches):
             logger.info("[chainPreSummary] all batches done: %s", batches)
             return {}
         batch = batches[idx]
         logger.info("[chainPreSummary] starting batch %s (%d/%d)", batch, idx + 1, len(batches))
+        launched = {}
 
         def _chain_cb(state):
             fc = state.get("failed_count", 0)
@@ -3045,10 +3053,16 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 logger.info("[chainPreSummary] batch %s %s, stopping chain", batch, st)
                 return
             logger.info("[chainPreSummary] batch %s done, starting next", batch)
-            _chain_start_pre_summary(tid, pid, project_db, batches, idx + 1, limit, subagent_concurrency)
+            nxt = _chain_start_pre_summary(tid, pid, project_db, batches, idx + 1, limit, subagent_concurrency)
+            if nxt and nxt.get("agentTaskId"):
+                launched["agentTaskId"] = nxt["agentTaskId"]
 
-        first_result = _launch_pre_summary_batch(tid, pid, project_db, batch, limit, subagent_concurrency, on_complete=_chain_cb)
-        return first_result or {}
+        first_result = _launch_pre_summary_batch(tid, pid, project_db, batch, limit, subagent_concurrency, on_complete=_chain_cb) or {}
+        if first_result.get("agentTaskId"):
+            return first_result
+        if launched.get("agentTaskId"):
+            return {"agentTaskId": launched["agentTaskId"], "fileCount": first_result.get("fileCount", 0)}
+        return {"allCached": True, "fileCount": first_result.get("fileCount", 0)}
 
     @server.register("analysis.getFileSummary")
     def get_file_summary(task_id=None, taskId=None, file_path=None):

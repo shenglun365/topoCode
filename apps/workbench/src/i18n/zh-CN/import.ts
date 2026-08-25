@@ -3,7 +3,6 @@ export default { import: {
   error: {
     invalidPath: '无效的路径',
     failed: '导入失败',
-    electronOnly: '此功能需要在后端环境中运行',
     duplicate: '项目已存在',
   },
   dragDrop: '拖放文件到此处',

@@ -77,7 +77,7 @@ function adaptTaskList(list: any[]): AnalysisTask[] {
  *
  * 浏览器环境: window.api 由 browser-api.ts 注入（HTTP /api/rpc + /ws/events）
  */
-// 浏览器模式优先注入 window.api（幂等；Electron 已有则跳过），
+// 浏览器模式优先注入 window.api（幂等；已存在则跳过），
 // 保证下方 createRealIPC() 在模块加载时即取到浏览器 API。
 import { installBrowserAPI } from './browser-api'
 installBrowserAPI()
@@ -88,7 +88,7 @@ function createRealIPC() {
   const api: any = typeof window !== 'undefined' ? (window as any).api : null
 
   if (!api) {
-    console.warn('[IPC] window.api not available - running in browser without Electron')
+    console.warn('[IPC] window.api not available - browser-api not installed')
   }
 
   // 事件回调存储 (用于浏览器降级)
@@ -167,7 +167,7 @@ function createRealIPC() {
       },
     },
 
-    // ==================== 服务器目录浏览器 (Web 替代 Electron 选目录) ====================
+    // ==================== 服务器目录浏览器 (Web 模式选目录) ====================
     dir: {
       list: async (path?: string | null) => {
         return await api.call('dir.list', path ? { path } : {})
@@ -393,7 +393,7 @@ function createRealIPC() {
         return await api.analysis.analyzeComponents(params)
       },
       saveCommunityResult: async (params: any) => {
-        // 深拷贝剥离 Pinia 响应式 Proxy → 避免 Electron Structured Clone 失败
+        // 深拷贝剥离 Pinia 响应式 Proxy → 避免 RPC 传输序列化异常
         const safe = JSON.parse(JSON.stringify(params))
         return await api.analysis.saveCommunityResult(safe)
       },

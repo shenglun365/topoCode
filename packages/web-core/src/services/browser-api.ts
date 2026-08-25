@@ -1,7 +1,7 @@
 /**
- * Browser API — 浏览器模式下替换 Electron preload 的 window.api。
+ * Browser API — 注入 window.api 的浏览器实现（HTTP /api/rpc + /ws/events 传输）。
  *
- * 与 `electron/preload.ts` 暴露的 IPCAPI 同构：`createRealIPC()`（src/services/ipc.ts）
+ * 与 `types/window-api.ts` 声明的 IPCAPI 契约同构：`createRealIPC()`（src/services/ipc.ts）
  * 已把所有调用收敛为 `api.<group>.<method>(...)` 或 `api.call(method, params)`。
  * 本模块在浏览器环境注入 `window.api = createBrowserAPI()`，使 src/ 81+ 处
  * `window.api` / `ipc` 引用零改动存活。
@@ -76,7 +76,7 @@ function makeGroup(group: string, methodNames: string[]): Record<string, (...arg
 
 /**
  * 构造浏览器 window.api。
- * 覆盖 preload 的全部方法组；**签名与 electron/preload.ts 一致**（位置参数 →
+ * 覆盖契约的全部方法组；**签名与 types/window-api.ts 一致**（位置参数 →
  * 后端命名参数），使 src/ 调用方零改动。全部参数对象的方法经 makeGroup。
  */
 export function createBrowserAPI(): any {
@@ -441,12 +441,15 @@ const _queued: Array<{ channel: string; data: any }> = []
 const _listeners: Array<{ channel: string; handler: Handler; dispose: () => void }> = []
 
 function _ensureWs(): WebSocket | null {
-  if (_wsEvents && _wsEvents.readyState === WebSocket.OPEN) return _wsEvents
+  // CONNECTING 或 OPEN 均复用：CONNECTING 期间再开会建出并行连接，
+  // 每条存活连接都会把同一事件分派进 _handlers → 流式内容被重复 N 次
+  if (_wsEvents && _wsEvents.readyState <= WebSocket.OPEN) return _wsEvents
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const tok = getToken()
   const wsUrl = `${proto}://${window.location.host}/ws/events${tok ? `?token=${encodeURIComponent(tok)}` : ''}`
-  _wsEvents = new WebSocket(wsUrl)
-  _wsEvents.onmessage = (e) => {
+  const ws = new WebSocket(wsUrl)
+  _wsEvents = ws
+  ws.onmessage = (e) => {
     let msg: any
     try { msg = JSON.parse(e.data) } catch { return }
     if (!msg || msg.type === 'ping') return
@@ -477,11 +480,13 @@ function _ensureWs(): WebSocket | null {
     _queued.push({ channel, data: enriched })
     if (_queued.length > 500) _queued.shift()
   }
-  _wsEvents.onclose = () => {
+  ws.onclose = () => {
+    if (_wsEvents !== ws) return  // 已被新连接取代，勿清空
     _wsEvents = null
-    setTimeout(() => { if (_listeners.length) _ensureWs() }, 2000)
+    // 仍有活动订阅（channel 级 _listeners 或 topic 级 _handlers，如 llm.subscribe）才重连
+    setTimeout(() => { if (_listeners.length || _handlers.size) _ensureWs() }, 2000)
   }
-  return _wsEvents
+  return ws
 }
 
 function subscribeChannel(channel: string, callback: Handler): () => void {
@@ -523,7 +528,7 @@ function subscribeLlm(requestId: string, callbacks: {
   return subscribeEvent('llm', handler)
 }
 
-/** 安装浏览器 API：存在 window.api 则跳过（Electron 已注入），否则注入 */
+/** 安装浏览器 API：存在 window.api 则跳过（防御），否则注入 */
 export function installBrowserAPI(): void {
   if (typeof window !== 'undefined' && !(window as any).api) {
     ;(window as any).api = createBrowserAPI()

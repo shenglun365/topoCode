@@ -108,7 +108,7 @@ function transformHistory(h: any) {
 }
 
 async function loadHistory(cursor: number) {
-  if (!taskId.value) return
+  if (!taskId.value) { historyLoaded.value = true; return }
   const results = await communityStore.loadAgentTaskHistory(taskId.value, cursor, 10)
   if (cursor === 0) {
     if (!_historySame(results, historyTasks.value)) {
@@ -135,12 +135,15 @@ async function loadMore() {
   pageSize.value += 10
 }
 
-async function refresh() {
-  pageSize.value = 10
-  historyLoaded.value = false
-  console.log('[AT] refresh start historyLoaded=false')
+async function refresh(silent = false) {
+  // 后台轮询静默刷新：保留旧数据直接替换，不闪 loading（避免空白帧/DOM 闪）
+  if (!silent) {
+    pageSize.value = 10
+    historyLoaded.value = false
+    console.log('[AT] refresh start historyLoaded=false')
+  }
   await loadHistory(0)
-  console.log('[AT] refresh done historyLoaded=true')
+  console.log('[AT] refresh done', { silent })
   // 将 history 中新发现的 running/queued agent 注入 store，启动轮询
   // （页面刷新后 live store 为空，需从后端持久化历史恢复执行中任务）
   const t = communityStore.ensureTask(taskId.value)
@@ -189,12 +192,13 @@ let historyPollTimer: ReturnType<typeof setInterval> | null = null
 
 watch(liveTaskKeys, () => {
   const tasks = liveTasks.value
-  const hasPresummary = tasks.some(t => t.action === 'presummary_files')
+  // 仅 running/queued 才需要 3s 轮询；已完成卡片不再维持轮询（否则永不停止，周期性 DOM 抖动）
+  const hasPresummary = tasks.some(t => t.action === 'presummary_files' && (t.status === 'running' || t.status === 'queued'))
   const hasRunning = tasks.some(t => t.status === 'running' || t.status === 'queued')
   // console.log('[watchLive] hasRunning=%s hasPresummary=%s timer=%s tasks=%d', hasRunning, hasPresummary, historyPollTimer ? 'active' : 'none', tasks.length)
   if ((hasRunning || hasPresummary) && !historyPollTimer) {
     // console.log('[watchLive] starting 3s history poll')
-    historyPollTimer = setInterval(() => { refresh() }, 3000)
+    historyPollTimer = setInterval(() => { refresh(true) }, 3000)
   } else if (!hasRunning && !hasPresummary && historyPollTimer) {
     // console.log('[watchLive] stopping history poll')
     clearInterval(historyPollTimer)
