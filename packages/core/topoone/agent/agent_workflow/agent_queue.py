@@ -242,6 +242,61 @@ class AgentTaskManager:
         logger.info(f"[AgentQueue] enqueued {agent_id} task={task_id} running={self.running_count}/{self._max}")
         return agent_id
 
+    def enqueue_async(
+        self,
+        task_id: str,
+        make_coro: Callable[[Callable], Any],
+        cancel_event: threading.Event,
+        on_complete: Optional[Callable[[dict], None]] = None,
+    ) -> str:
+        """入队通用异步任务（宿主薄接线入口，如 tAgent run_kb_pipeline）。
+
+        make_coro(on_progress) -> coroutine（返回 WorkflowResult 同构对象）；
+        取消经 cancel_event（任务侧轮询/传入工具），完成后按结果置终态。
+        与 enqueue 共用并发槽位与状态机。
+        """
+        agent_id = f"agent-{int(time.time())}-{uuid.uuid4().hex[:6]}"
+
+        state = AgentTaskState(
+            agent_id=agent_id,
+            task_id=task_id,
+            status=TaskState.QUEUED,
+            created_at=time.time(),
+        )
+
+        with self._lock:
+            self._tasks[agent_id] = state
+            self._save_persisted()
+
+        if on_complete:
+            self._callbacks[agent_id] = on_complete
+
+        logger.info(f"[AgentQueue] waiting slot (async) for {agent_id} task={task_id} running={self.running_count}/{self._max}")
+        acquired = self._sem.acquire(timeout=86400)
+        if not acquired:
+            logger.warning(f"[AgentQueue] {agent_id} failed to acquire slot within 24h")
+            with self._lock:
+                self._tasks[agent_id].status = TaskState.FAILED
+                self._tasks[agent_id].error = "timeout waiting for slot"
+            return agent_id
+
+        class _AsyncCancelHandle:
+            def __init__(self):
+                self._ev = cancel_event
+
+            def cancel(self):
+                self._ev.set()
+
+        thread = threading.Thread(
+            target=self._run_async,
+            args=(agent_id, make_coro, _AsyncCancelHandle()),
+            daemon=True,
+        )
+        thread.start()
+
+        logger.info(f"[AgentQueue] enqueued (async) {agent_id} task={task_id} running={self.running_count}/{self._max}")
+        return agent_id
+
     def get_progress(self, agent_id: str) -> dict | None:
         """查询任务进度"""
         with self._lock:
@@ -320,26 +375,9 @@ class AgentTaskManager:
             with self._lock:
                 s = self._tasks.get(agent_id)
                 if s and s.status != TaskState.CANCELLED:
-                    if getattr(runtime, '_cancelled', False):
-                        s.status = TaskState.CANCELLED
-                        s.error = "cancelled"
-                    elif result and not result.success and result.steps_completed > 0:
-                        # 部分步骤完成 + 部分失败 → PARTIAL（而非笼统 FAILED），
-                        # 前端可展示"部分完成"并提示哪些步骤失败
-                        s.status = TaskState.PARTIAL
-                        s.error = result.error or "partial failure"
-                    elif result and not result.success:
-                        s.status = TaskState.FAILED
-                        s.error = result.error or "unknown error"
-                    elif result and result.steps_completed < result.steps_total and result.steps_completed > 0:
-                        s.status = TaskState.PARTIAL
-                    elif result:
-                        s.status = TaskState.COMPLETED
-                    else:
-                        s.status = TaskState.FAILED
-                        s.error = "runtime produced no result"
-                    s.result = result
-                    s.finished_at = time.time()
+                    # 部分步骤完成 + 部分失败 → PARTIAL（而非笼统 FAILED），
+                    # 前端可展示"部分完成"并提示哪些步骤失败
+                    self._finalize_state(s, result, getattr(runtime, '_cancelled', False))
 
         except BaseException as e:
             logger.exception(f"[AgentQueue] {agent_id} crash: {e}")
@@ -367,6 +405,105 @@ class AgentTaskManager:
 
             self._save_persisted()
             logger.info(f"[AgentQueue] {agent_id} done status={state.status.value}")
+
+    # ── 通用异步任务（宿主薄接线） ──
+
+    @staticmethod
+    def _finalize_state(s: AgentTaskState, result, cancelled: bool) -> None:
+        """按结果置终态（enqueue / enqueue_async 共用）。"""
+        if cancelled:
+            s.status = TaskState.CANCELLED
+            s.error = "cancelled"
+        elif result and not result.success and result.steps_completed > 0:
+            s.status = TaskState.PARTIAL
+            s.error = result.error or "partial failure"
+        elif result and not result.success:
+            s.status = TaskState.FAILED
+            s.error = result.error or "unknown error"
+        elif result and result.steps_completed < result.steps_total and result.steps_completed > 0:
+            s.status = TaskState.PARTIAL
+        elif result:
+            s.status = TaskState.COMPLETED
+        else:
+            s.status = TaskState.FAILED
+            s.error = "runtime produced no result"
+        s.result = result
+        s.finished_at = time.time()
+
+    def _run_async(self, agent_id: str, make_coro: Callable[[Callable], Any],
+                   cancel_handle: Any) -> None:
+        with self._lock:
+            state = self._tasks.get(agent_id)
+        if not state:
+            return
+
+        state.status = TaskState.RUNNING
+        state.started_at = time.time()
+        logger.info(f"[AgentQueue] {agent_id} START (async) task={state.task_id}")
+
+        with self._lock:
+            self._running += 1
+
+        def progress_cb(progress):
+            with self._lock:
+                s = self._tasks.get(agent_id)
+                if s:
+                    s.progress = progress
+
+        try:
+            import asyncio
+            with self._lock:
+                s = self._tasks.get(agent_id)
+                if s:
+                    s.runtime = cancel_handle
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = None
+            try:
+                result = loop.run_until_complete(make_coro(progress_cb))
+            except (Exception, asyncio.CancelledError) as e:
+                logger.exception(f"[AgentQueue] {agent_id} async error: {e}")
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+                with self._lock:
+                    s2 = self._tasks.get(agent_id)
+                    if s2:
+                        s2.runtime = None
+
+            with self._lock:
+                s = self._tasks.get(agent_id)
+                if s and s.status != TaskState.CANCELLED:
+                    self._finalize_state(s, result, cancel_handle._ev.is_set())
+
+        except BaseException as e:
+            logger.exception(f"[AgentQueue] {agent_id} crash (async): {e}")
+            with self._lock:
+                s = self._tasks.get(agent_id)
+                if s:
+                    s.status = TaskState.FAILED
+                    s.error = str(e)
+                    s.finished_at = time.time()
+
+        finally:
+            self._sem.release()
+            with self._lock:
+                self._running = max(0, self._running - 1)
+
+            cb = self._callbacks.pop(agent_id, None)
+            if cb:
+                try:
+                    with self._lock:
+                        s = self._tasks.get(agent_id)
+                    if s:
+                        cb(s.to_dict())
+                except Exception:
+                    pass
+
+            self._save_persisted()
+            logger.info(f"[AgentQueue] {agent_id} done (async) status={state.status.value}")
 
 
 # 全局单例

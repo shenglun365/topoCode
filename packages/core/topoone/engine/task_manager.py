@@ -2586,23 +2586,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             _save_agent_running_history(project_db, pid, tid, result.get("agent_id"), "pipeline")
             return {"taskId": tid, "success": True, "agentTaskId": result.get("agent_id"), "skipped": False}
 
-        from topoone.agent.agent_workflow.router import RouterHarness, RouteEntry
-        from topoone.agent.agent_workflow.workflows.pipeline import PipelineWorkflow
-        from topoone.agent.agent_workflow.tool_factory import build_pipeline_tools
-        from topoone.agent.agent_workflow.sandbox import AgentSandbox
-
-        tools = build_pipeline_tools(multi_db, project_db, project_root, tid, pid, project_summary,
-                                     concurrency=conc, subagent_concurrency=sub_conc,
-                                     component_timeout=comp_timeout)
-
-        router = RouterHarness(project_root=project_root, multi_db=multi_db)
-        router.register("pipeline", RouteEntry(
-            workflow_class=PipelineWorkflow,
-            tool_builder=lambda ctx: tools,
-            description="Pipeline execution: project summary -> pre-summary -> component analysis -> architecture analysis. Options: -j N (concurrency 1-5, default 1), --force (force regenerate), -L zh/en (output language)",
-            sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
-        ))
-
         # Pre-compute total and cached counts for stable progress denominator
         _total_files = 0
         _total_comps = 0
@@ -2632,6 +2615,66 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             _est_weight = 60
         logger.info(f"[Pipeline] total files={_total_files} comps={_total_comps} est_weight={_est_weight}")
 
+        def _on_pipeline_complete(state_dict):
+            _make_agent_history_cb(pid, project_db, tid, "pipeline")(state_dict)
+
+        backend = os.environ.get("TOPOCODE_PIPELINE_BACKEND", "tagent").lower()
+
+        if backend == "tagent":
+            # ── I3: tAgent 薄接线（替代旧 RouterHarness + PipelineWorkflow 直跑路径）──
+            import threading as _threading
+            from topocode_agent.workflows.pipeline import run_kb_pipeline
+            from topoone.llm.tagent_adapter import TopoLLMClientAdapter
+            from topoone.agent.tagent_host import (
+                TopoPipelineProvider, build_topo_pipeline_callbacks,
+            )
+
+            model_id = ""  # LLMService 默认模型（与旧路径同口径）
+            llm = TopoLLMClientAdapter(multi_db, model_id=model_id,
+                                       session_suffix=f"tagent-{tid[:8]}")
+            provider = TopoPipelineProvider(multi_db, project_db,
+                                            project_root=project_root,
+                                            project_id=pid, task_id=tid)
+            callbacks = build_topo_pipeline_callbacks(
+                multi_db, pid, tid, model_id=model_id,
+                project_root=project_root, concurrency=conc)
+            cancel_event = _threading.Event()
+
+            def _make_coro(on_progress):
+                return run_kb_pipeline(
+                    llm, provider, callbacks,
+                    project_root, pid, tid,
+                    project_summary=project_summary, model=model_id,
+                    project_name=project_name, force=force, language=language or "",
+                    subagent_concurrency=sub_conc, component_timeout=comp_timeout,
+                    estimated_total_weight=_est_weight,
+                    total_files=_total_files, total_comps=_total_comps,
+                    on_progress=on_progress, cancel_event=cancel_event,
+                )
+
+            agent_id = mgr.enqueue_async(tid, _make_coro, cancel_event,
+                                         on_complete=_on_pipeline_complete)
+            _save_agent_running_history(project_db, pid, tid, agent_id, "pipeline")
+            logger.info(f"[startPipeline] dispatched via tAgent agent_id={agent_id}")
+            return {"taskId": tid, "success": True, "agentTaskId": agent_id, "skipped": False}
+
+        # ── legacy: 旧 RouterHarness + PipelineWorkflow（I6 删除） ──
+        from topoone.agent.agent_workflow.router import RouterHarness, RouteEntry
+        from topoone.agent.agent_workflow.workflows.pipeline import PipelineWorkflow
+        from topoone.agent.agent_workflow.tool_factory import build_pipeline_tools
+        from topoone.agent.agent_workflow.sandbox import AgentSandbox
+
+        tools = build_pipeline_tools(multi_db, project_db, project_root, tid, pid, project_summary,
+                                      concurrency=conc, subagent_concurrency=sub_conc,
+                                      component_timeout=comp_timeout)
+        router = RouterHarness(project_root=project_root, multi_db=multi_db)
+        router.register("pipeline", RouteEntry(
+            workflow_class=PipelineWorkflow,
+            tool_builder=lambda ctx: tools,
+            description="Pipeline execution: project summary -> pre-summary -> component analysis -> architecture analysis. Options: -j N (concurrency 1-5, default 1), --force (force regenerate), -L zh/en (output language)",
+            sandbox_builder=lambda root: AgentSandbox(root, max_tokens=0, timeout_seconds=0),
+        ))
+
         context = {
             "task_id": tid, "project_id": pid,
             "project_name": project_name,
@@ -2644,10 +2687,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
             "_total_files": _total_files,
             "_total_comps": _total_comps,
         }
-
-        def _on_pipeline_complete(state_dict):
-            _make_agent_history_cb(pid, project_db, tid, "pipeline")(state_dict)
-
         agent_id = router.dispatch("pipeline", tid, context,
             on_complete=_on_pipeline_complete)
         _save_agent_running_history(project_db, pid, tid, agent_id, "pipeline")
