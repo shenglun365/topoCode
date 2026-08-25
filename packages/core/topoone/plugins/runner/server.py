@@ -172,18 +172,13 @@ def init_runner() -> None:
     state = RunnerState()
     state.db, state.pool, state.scheduler, state.hub = db, pool, scheduler, hub
 
-    # 重启恢复：未终态树重新 submit（保留 status，未 done 节点自动续跑）
+    # 重启恢复：未终态树重新 submit（保留原 id 与 status，未 done 节点自动续跑）
     for row in db.all_pending():
         try:
             tree = CodingTaskTree.from_dict(json.loads(row["tree_json"]))
             tree_id = row["id"]
-            scheduler.submit(tree, context=json.loads(row["context_json"] or "{}"))
-            # submit 生成新 id → 用原 id 覆盖（保持对外 id 稳定）
-            new_id = list(scheduler._trees.keys())[-1]
-            if new_id != tree_id:
-                scheduler._trees[tree_id] = scheduler._trees.pop(new_id)
-                scheduler._contexts[tree_id] = scheduler._contexts.pop(new_id)
-                scheduler._state[tree_id] = scheduler._state.pop(new_id)
+            scheduler.submit(
+                tree, context=json.loads(row["context_json"] or "{}"), tree_id=tree_id)
             logger.info("[runner] restored tree %s (status=%s)", tree_id, row["status"])
         except Exception as e:  # noqa: BLE001
             logger.warning("[runner] restore tree %s failed: %s", row["id"], e)
@@ -193,8 +188,8 @@ def persist(tree_id: str) -> None:
     tree = state.scheduler.get_tree(tree_id)
     if tree is None:
         return
-    ctx = state.scheduler._contexts.get(tree_id, {})
-    state.db.upsert(tree_id, tree, ctx, project_root=os.environ.get("RUNNER_PROJECT_ROOT", ""))
+    state.db.upsert(tree_id, tree, state.scheduler.get_context(tree_id),
+                    project_root=os.environ.get("RUNNER_PROJECT_ROOT", ""))
 
 
 # ── 端点（INTEGRATION.md §2.2） ──
@@ -202,12 +197,12 @@ def persist(tree_id: str) -> None:
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "coding-agent-runner", "port": PORT,
-            "executors": state.pool.health()}
+            "executors": await state.pool.health()}
 
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "executors": state.pool.health()}
+    return {"ok": True, "executors": await state.pool.health()}
 
 
 @app.post("/api/trees")
