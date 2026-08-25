@@ -640,7 +640,7 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
     @server.register("system.verifyFiles")
     def verify_files(projectId: str):
         """文件比对校验"""
-        import topoone.engine.verify_service
+        from topoone.engine import verify_service
         verify_id = verify_service.start_verify(
             multi_db, projectId,
             lambda ch, ev, data: server.publish(ch, ev, data)
@@ -649,8 +649,8 @@ def register_project_methods(server: ZMQServer, multi_db: MultiDBManager):
 
     @server.register("system.verifyStatus")
     def verify_status(verifyId: str):
-        import topoone.engine.verify_service
-        return verify_service.get_verify_status(verify_id)
+        from topoone.engine import verify_service
+        return verify_service.get_verify_status(verifyId)
 
     @server.register("project.clearSampleData")
     def clear_sample_data(project_id: str):
@@ -2090,7 +2090,7 @@ async def _import_project_impl(server: ZMQServer, main_db, multi_db: MultiDBMana
     logger.info(f"[import] ===== import started: {path} mode={mode} =====")
     t0 = _t.time()
 
-    import topoone.engine.git_service
+    from topoone.engine import git_service
     from topoone.engine.version_sync_service import register_version
 
     mode = (mode or "static")

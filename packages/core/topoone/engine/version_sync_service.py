@@ -506,7 +506,7 @@ def sync(multi_db: MultiDBManager, project_id: str, *,
             target_task = task_id or _latest_done_task(main_db, project_id)
             if target_task:
                 try:
-                    import topoone.engine.incremental_runner
+                    from topoone.engine import incremental_runner
                     incremental_results = incremental_runner.apply_incremental(
                         multi_db, project_id,
                         target_task["id"] if isinstance(target_task, dict) else target_task,
@@ -696,7 +696,7 @@ def confirm_update(multi_db: MultiDBManager, request_id: str, method: str = "pul
 
     返回预览（变更幅度/影响范围），由用户选择更新环节后再调 version.sync 执行。
     """
-    import topoone.engine.git_service
+    from topoone.engine import git_service
 
     main_db = multi_db.main_db
     req = main_db.fetchone("SELECT * FROM project_update_requests WHERE id = ?", (request_id,))
