@@ -668,6 +668,37 @@ async def send_chat_message(session_id: str, request: Request):
                 else:
                     context_messages.insert(0, {"role": "system", "content": tool_text})
 
+        # ── I2: tAgent 薄化路径（TOPOCODE_CHAT_BACKEND=tagent；默认 legacy 保安全）──
+        import os as _os
+        if _os.environ.get("TOPOCODE_CHAT_BACKEND", "legacy").strip().lower() == "tagent":
+            from topoone_app_chat import tagent_chat as _tchat
+            model_cfg = common.multi_db.main_db.fetchone(
+                "SELECT * FROM model_configs WHERE id = ?", (model_id,))
+            if not model_cfg:
+                raise HTTPException(500, f"Model not found: {model_id}")
+            md = dict(model_cfg)
+            _llm = _tchat.make_chat_llm(md)
+            _call_kw = _tchat.llm_call_kwargs(md)
+            _executor = common.web_tool_executor
+            _executor._current_session_id = session_id
+            _tools = _tchat.build_web_tool_registry(tool_names, _executor)
+            _system = context_messages[0]["content"] if (
+                context_messages and context_messages[0]["role"] == "system") else ""
+            _history, _user_input = _tchat.split_history(context_messages, content)
+            _temperature = _call_kw.pop("temperature", 0.3)
+
+            async def event_stream_tagent():
+                async for ev in _tchat.run_tagent_chat(
+                        llm=_llm, tools=_tools, system_prompt=_system,
+                        history=_history, user_input=_user_input,
+                        model=md.get("model", ""), temperature=_temperature,
+                        max_turns=config.TOOL_ROUND_LIMIT,
+                        session_id=session_id, sdb=_sdb(), persist=True):
+                    yield f"event: {ev['type']}\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                asyncio.create_task(asyncio.to_thread(_check_auto_title, session_id))
+
+            return StreamingResponse(event_stream_tagent(), media_type="text/event-stream")
+
         # ── Multi-round tool calling ──
         from topoone_app_chat.web_tools import get_web_tool_definitions
         tool_defs = get_web_tool_definitions(tool_names) if has_tools else None
