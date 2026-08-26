@@ -1,11 +1,9 @@
-"""Streaming // non-streaming paths of `_run_opencode_task` via a fake adapter.
+"""Coding agent 适配器事件归一化测试(agent_adapters)。
 
-These tests exercise the WS task flow without a real agent server:
-  - stream : supports_stream=True → /event-like events forwarded as
-            status/message/tool_call, terminal `done` sent exactly once.
-  - nostream: supports_stream=False → synchronous text reply extraction.
+注：WS 任务执行流(`_run_opencode_task`/`_run_coding_agent_task`)已迁移到 runner 流
+(POST /exec/{id}/run + WS /ws/trees/{id}/events)，本文件仅保留 adapter 层测试。
 
-Run:  cd <repo> && python -m pytest plugins/architect/tests -q
+Run:  cd <repo> && python -m pytest tests -q
 """
 
 import asyncio
@@ -16,7 +14,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from topoone_app_architect.arch_routes import agent_adapters as AA
-import topoone_app_architect.arch_routes.websocket as wmod
 
 
 def run_async(awaitable):
@@ -25,140 +22,6 @@ def run_async(awaitable):
 
 async def collect_events(agen):
     return [e async for e in agen]
-
-
-class FakeWS:
-    def __init__(self):
-        self.sent: list[dict] = []
-
-    async def send_json(self, obj: dict) -> None:
-        self.sent.append(obj)
-
-
-class _SessionStore:
-    def __init__(self):
-        self.messages: list[dict] = []
-
-    def next_id(self, kind: str) -> str:
-        return f"{kind}_9"
-
-    def get(self, sid: str) -> dict:
-        return {"id": sid, "stats": {}, "artifacts": [], "testResult": None}
-
-    def update(self, sid: str, data: dict) -> None:
-        pass
-
-    def append_message(self, msg: dict) -> None:
-        self.messages.append(msg)
-
-
-class FakeStore:
-    AgentSessionsStore = _SessionStore()
-
-    @staticmethod
-    def next_id(kind: str) -> str:
-        return f"{kind}_9"
-
-
-class FakeStreamAdapter(AA.AgentAdapter):
-    id = "fake"
-    name = "Fake"
-    desc = ""
-    supports_stream = True
-
-    def env_check(self) -> dict:
-        return {"status": "ok"}
-
-    def probe(self, cfg: dict) -> dict:
-        return {"status": "ok"}
-
-    def addr(self, cfg: dict, instance=None) -> str:
-        return "http://fake"
-
-    def spawn(self, base: dict) -> list:
-        return []
-
-    def health(self, addr: str, username: str) -> bool:
-        return True
-
-    def make_client(self, addr, username, password):
-        raise NotImplementedError
-
-    async def iter_events(self, client, session_id: str):
-        yield {"type": "status", "status": "working"}
-        yield {"type": "message", "role": "assistant", "content": "part1"}
-        yield {"type": "tool_call", "tool": {"type": "run-command", "label": "go test", "ok": True}}
-
-
-class FakeNoStreamAdapter(FakeStreamAdapter):
-    supports_stream = False
-
-
-class FakeClient:
-    def __init__(self):
-        self.calls = 0
-
-    def create_session(self, title="", parent_id=""):
-        return {"id": "ocx"}
-
-    def send_message(self, sid, text, model="", no_reply=False):
-        self.calls += 1
-        if no_reply:
-            return {"info": {"id": "ctx"}, "parts": []}
-        return {"info": {"id": "r"}, "parts": [{"type": "text", "text": "nonstream reply"}]}
-
-    def abort(self, sid):
-        return True
-
-
-def _install(store, adapter, client):
-    wmod.store = store
-    wmod._config_for_adapter = lambda a: {"host": "h", "port": 1, "env": "local"}
-    wmod._project_for_root = lambda root: None
-    wmod.agent_adapters.get_agent = lambda aid: adapter
-    wmod._CANCELLED.clear()
-    wmod._RUNNING.clear()
-    import topoone_app_architect.arch_routes.agent_server as _as
-
-    _as.agent_client_for = lambda inst, cfg, aid: client
-
-
-def test_stream_path():
-    ws = FakeWS()
-    client = FakeClient()
-    _install(FakeStore(), FakeStreamAdapter(), client)
-    asyncio.run(
-        wmod._run_opencode_task(
-            ws,
-            {"id": "s5", "adapter": "fake", "opencodeSessionId": "oc5", "model": "x", "instanceId": "i1"},
-            {"id": "i1", "workDir": "/tmp", "taskBranch": "arch/t1"},
-            {"title": "T", "context": ["a.go"]},
-        )
-    )
-    events = [(e.get("type"), e.get("status"), e.get("content"), (e.get("tool") or {}).get("label")) for e in ws.sent]
-    assert ("status", "planning", None, None) in events
-    assert ("status", "working", None, None) in events
-    assert ("message", None, "part1", None) in events
-    assert ("tool_call", None, None, "go test") in events
-    assert ("status", "done", None, None) in events
-    # 终态 `done` 只发一次。
-    assert sum(1 for e in ws.sent if e.get("type") == "done") == 1
-
-
-def test_nostream_sync_reply():
-    ws = FakeWS()
-    client = FakeClient()
-    _install(FakeStore(), FakeNoStreamAdapter(), client)
-    awaitable = wmod._run_opencode_task(
-        ws,
-        {"id": "s9", "adapter": "nos", "opencodeSessionId": "oc9", "model": "m", "instanceId": "i1"},
-        {"id": "i1", "workDir": "/tmp", "taskBranch": "arch/t2"},
-        {"title": "T", "context": []},
-    )
-    asyncio.run(awaitable)
-    events = [(e.get("type"), e.get("content")) for e in ws.sent]
-    assert ("message", "nonstream reply") in events
-    assert ws.sent[-1].get("type") == "done"
 
 
 def test_send_message_model_id_split():
@@ -281,18 +144,3 @@ def test_cline_stderr_noise_filtered(monkeypatch):
     out = run_async(collect_events(AA.ClineAdapter().process_events(ClineSession({}), "task")))
     msgs = [e.get("content") for e in out if e.get("type") == "message"]
     assert "hook dispatch failed" not in msgs and "WARNING" not in msgs
-
-
-if __name__ == "__main__":
-    import os
-    _install(FakeStore(), FakeStreamAdapter(), FakeClient())
-    ws = FakeWS()
-    asyncio.run(
-        wmod._run_opencode_task(
-            ws,
-            {"id": "s5", "adapter": "fake", "opencodeSessionId": "oc5", "model": "x", "instanceId": "i1"},
-            {"id": "i1", "workDir": "/tmp", "taskBranch": "arch/t1"},
-            {"title": "T", "context": ["a.go"]},
-        )
-    )
-    print("stream run:", [e.get("type") for e in ws.sent])

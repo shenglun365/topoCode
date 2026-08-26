@@ -19,7 +19,6 @@ sys.path.insert(0, _repo)
 import topoone_app_architect.arch_routes.ctx as C
 import topoone_app_architect.arch_routes.store as store
 from topoone_app_architect.arch_routes import semantic_assets as S
-from topoone_app_architect.arch_routes import websocket as W
 
 
 def _ctx(tmp_path, monkeypatch):
@@ -243,22 +242,6 @@ def test_context_block_for(tmp_path, monkeypatch):
     assert "订单聚合" in block
     assert "src/order.py:L1-L10" in block
     assert S.context_block_for("/tmp/x", None, ["无资产上下文"]) == ""
-
-
-def test_task_prompt_expands_semantic(tmp_path, monkeypatch):
-    _ctx(tmp_path, monkeypatch)
-    store.SemanticAssetsStore.create({
-        "id": "sa-d-l-p-2", "projectId": "proj-1", "kind": "process",
-        "level": "logic", "name": "下单流程", "desc": "下单处理链路", "detail": {"steps": []},
-        "astRefs": [{"file": "src/order.py", "symbol": "checkout", "kind": "func",
-                     "startLine": 20, "endLine": 25}],
-        "scopeType": "comm", "scopeKey": "k", "source": "live",
-        "srcHash": "h", "change": "added", "status": "active",
-        "createdAt": 1, "updatedAt": 1,
-    })
-    prompt = W._task_prompt({"title": "实现下单", "context": ["sa-d-l-p-2"]}, "/tmp/x")
-    assert "下单流程" in prompt
-    assert "src/order.py:L20-L25" in prompt
 
 
 def test_extract_scope_heuristic(tmp_path, monkeypatch):
