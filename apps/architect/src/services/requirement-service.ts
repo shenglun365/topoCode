@@ -4,7 +4,9 @@ import { currentProjectParams } from './project-service'
 
 export const requirementService = {
   async list(): Promise<Requirement[]> {
-    return apiGet<Requirement[]>('/requirements')
+    const { project } = currentProjectParams()
+    const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+    return apiGet<Requirement[]>(`/requirements${qs}`)
   },
   async create(data: Partial<Requirement>): Promise<Requirement> {
     return apiPost<Requirement>('/requirements', data)

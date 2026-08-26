@@ -7,6 +7,7 @@ import {
   verifyExecution as verifyApi, type TreeEventConnection,
 } from '@/services/runner-service'
 import { apiGet } from '@/services/api-client'
+import { currentProjectParams } from '@/services/project-service'
 import { useArchTaskStore } from './task-store'
 import { useArchRequirementStore } from './requirement-store'
 
@@ -39,7 +40,9 @@ export const useArchAgentStore = defineStore('arch-agent', {
       if (this.loaded || this.loading) return
       this.loading = true
       try {
-        const sessions = await apiGet<AgentSession[]>('/agent/sessions').catch(() => [] as AgentSession[])
+        const { project } = currentProjectParams()
+        const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+        const sessions = await apiGet<AgentSession[]>(`/agent/sessions${qs}`).catch(() => [] as AgentSession[])
         // 仅并入对当前(已存在)执行任务的会话；其余保持不显示，避免残留。
         this.sessions = (sessions ?? []).filter((s) => !!s.taskId)
         this.activeSessionId = this.sessions[0]?.id ?? null

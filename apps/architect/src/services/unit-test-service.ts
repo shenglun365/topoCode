@@ -16,11 +16,15 @@ export interface UnitTestRunOpts {
 
 export const unitTestService = {
   async listTests(): Promise<UnitTest[]> {
-    return apiGet<UnitTest[]>('/unit-tests')
+    const { project } = currentProjectParams()
+    const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+    return apiGet<UnitTest[]>(`/unit-tests${qs}`)
   },
 
   async listSessions(): Promise<UnitTestSession[]> {
-    return apiGet<UnitTestSession[]>('/unit-test-sessions')
+    const { project } = currentProjectParams()
+    const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+    return apiGet<UnitTestSession[]>(`/unit-test-sessions${qs}`)
   },
 
   async addTest(data: Partial<UnitTest>): Promise<UnitTest> {
