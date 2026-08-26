@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { TestChannel, UnitTest, UnitTestSession } from '@/types'
+import type { TestChannel, TestLevel, UnitTest, UnitTestSession } from '@/types'
 import { unitTestService } from '@/services/unit-test-service'
 import { useArchTaskStore } from './task-store'
 
@@ -70,6 +70,13 @@ export const useArchUnitTestStore = defineStore('arch-unit-test', {
       const t = await unitTestService.addTest(data)
       this.tests.unshift(t)
       return t
+    },
+    /** 确认 AI 生成草稿：逐条创建选中单测(来源 ai)。 */
+    async confirmDraft(tests: { name: string; levels: TestLevel[]; scriptPath: string }[]) {
+      for (const t of tests) {
+        if (!t.name.trim()) continue
+        await this.addTest({ name: t.name.trim(), scriptPath: t.scriptPath.trim(), levels: [...t.levels], source: 'ai' })
+      }
     },
     /** 执行指定单测(单条或批量)，写入当前会话。 */
     async runTests(testIds: string[]) {

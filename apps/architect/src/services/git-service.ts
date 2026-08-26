@@ -112,5 +112,3 @@ class HttpGitService implements GitService {
 }
 
 export const gitService: GitService = new HttpGitService()
-
-export const PROJECT_GIT_PATH = '/home/dev/topo-projects/order-service'

@@ -52,7 +52,7 @@ _JSON_COLUMNS = {
     "changelog", "default_channel", "scaffold",
     "related_to", "preferred_asset_ids", "meta",
     "detail", "ast_refs", "asset_refs", "anchor_hashes",
-    "name_alias",
+    "name_alias", "pending_rejudge",
     "symbols", "imports", "refs", "statements", "routes", "constants",
     "comp_ids", "progress", "messages",
 }

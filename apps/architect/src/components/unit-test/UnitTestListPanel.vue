@@ -6,6 +6,7 @@ import { PlayIcon, PlusIcon, SparklesIcon } from '@heroicons/vue/24/outline'
 import type { TestChannel, UnitTest } from '@/types'
 import { useArchUnitTestStore } from '@/stores/unit-test-store'
 import UnitTestAddDialog from './UnitTestAddDialog.vue'
+import UnitTestGenerateDialog from './UnitTestGenerateDialog.vue'
 
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n()
@@ -17,6 +18,7 @@ const tests = computed(() => (includeLinked.value ? store.tests : []))
 const selected = ref<string[]>([])
 const channel = ref<TestChannel>('cli')
 const addOpen = ref(false)
+const genOpen = ref(false)
 
 const statusColor: Record<string, string> = {
   idle: 'bg-ctp-surface0 text-ctp-subtext0',
@@ -74,6 +76,12 @@ function onAdded() {
       </div>
       <button
         class="btn btn-xs btn-ghost ml-auto"
+        @click="genOpen = true"
+      >
+        <SparklesIcon class="w-3 h-3" />{{ t('unitTest.generate') }}
+      </button>
+      <button
+        class="btn btn-xs btn-ghost"
         @click="addOpen = true"
       >
         <PlusIcon class="w-3 h-3" />{{ t('unitTest.addTest') }}
@@ -183,6 +191,11 @@ function onAdded() {
     <UnitTestAddDialog
       :open="addOpen"
       @close="addOpen = false"
+      @added="onAdded"
+    />
+    <UnitTestGenerateDialog
+      :open="genOpen"
+      @close="genOpen = false"
       @added="onAdded"
     />
   </div>

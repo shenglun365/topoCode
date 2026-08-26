@@ -34,6 +34,7 @@ export class ArchWs {
   private readyPromise: Promise<void>
   private anyHandlers = new Set<Handler>()
   private onType = new Map<string, Set<Handler>>()
+  private closeHandlers = new Set<() => void>()
 
   constructor(path: string) {
     this.ws = new WebSocket(`${WS_BASE}/${path}${tokenQuery()}`)
@@ -41,6 +42,7 @@ export class ArchWs {
       this.ws.onopen = () => resolve()
       this.ws.onerror = () => reject(new Error(`WebSocket connect failed: ${path}`))
     })
+    this.ws.onclose = () => this.closeHandlers.forEach((h) => h())
     this.ws.onmessage = (e) => {
       let msg: any
       try {
@@ -71,6 +73,12 @@ export class ArchWs {
   onAny(handler: Handler): () => void {
     this.anyHandlers.add(handler)
     return () => this.anyHandlers.delete(handler)
+  }
+
+  /** 连接关闭(对端关闭/断线)时回调。 */
+  onClose(handler: () => void): () => void {
+    this.closeHandlers.add(handler)
+    return () => this.closeHandlers.delete(handler)
   }
 
   /** 等到第一个 type 事件解析。不自动关闭。 */

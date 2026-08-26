@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { ArchComponent, ArchitectureModel, DataFlow, EntityClass, ErTable, ExecutionFlow, OrmMapping } from '@/types'
+import type { ArchComponent, ArchitectureModel, CodeMapping, DataFlow, EntityClass, ErTable, ExecutionFlow, OrmMapping } from '@/types'
 import { architectureService } from '@/services/architecture-service'
 
 export const useArchArchitectureStore = defineStore('arch-architecture', {
@@ -27,6 +27,9 @@ export const useArchArchitectureStore = defineStore('arch-architecture', {
     },
     dataFlows(): DataFlow[] {
       return this.model?.dataFlows ?? []
+    },
+    codeMappings(): CodeMapping[] {
+      return this.model?.codeMappings ?? []
     },
     rootComponents(): ArchComponent[] {
       return this.components.filter((c) => !c.parentId)

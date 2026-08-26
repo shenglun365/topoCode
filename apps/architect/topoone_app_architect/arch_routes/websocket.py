@@ -818,6 +818,7 @@ async def unit_test_ws(websocket: WebSocket):
             elif msg_type == "run":
                 session_id = data.get("sessionId")
                 test_ids = data.get("testIds", [])
+                root = data.get("root") or ""
                 session = store.UnitTestSessionsStore.get(session_id)
                 if not session:
                     await websocket.send_json({"type": "error", "message": "Session not found"})
@@ -835,27 +836,22 @@ async def unit_test_ws(websocket: WebSocket):
                         })
                         continue
                     name = test["name"] or test_id
-                    script = test["scriptPath"] or name
+                    script = test["scriptPath"] or ""
                     # 开始 tool 消息
-                    tool_start = {"type": "run-test", "label": script, "detail": f"开始执行「{name}」", "ok": True}
+                    tool_start = {"type": "run-test", "label": script or name, "detail": f"开始执行「{name}」", "ok": True}
                     start_msg = _push_session_message(session_id, "tool", "", tool_start)
                     await websocket.send_json({"type": "tool_call", "tool": tool_start, "id": start_msg["id"], "time": start_msg["time"]})
-                    await asyncio.sleep(0.5)
-                    # 服务端模拟判定: ut-3 失败
-                    fail = (test_id == "ut-3")
-                    if fail:
-                        last_result = {"passed": 5, "failed": 2, "error": "TestRelayRetry: 重试退避断言失败",
-                                       "note": f"go test {script}", "at": _ts()}
-                        status = "failed"
-                        detail = f"失败: {last_result['error']}"
-                    else:
-                        last_result = {"passed": 12, "failed": 0, "note": "全部通过", "at": _ts()}
-                        status = "passed"
-                        detail = f"通过: {last_result['passed']} 用例"
+                    # 真实 subprocess 执行（自主路径·确定性），替代服务端模拟判定
+                    from .test_runner import run_test_script
+                    raw = await asyncio.to_thread(run_test_script, script, root)
+                    last_result = {**raw, "at": _ts()}
+                    status = "passed" if raw.get("failed", 0) == 0 and raw.get("passed", 0) > 0 else "failed"
+                    detail = (f"失败: {raw['error']}" if status == "failed"
+                              else f"通过: {raw.get('passed', 0)} 用例")
                     store.UnitTestsStore.update(test_id, {"status": status, "lastResult": last_result, "updatedAt": _ts()})
                     store.UnitTestSessionsStore.update(session_id, {"updatedAt": _ts()})
                     await websocket.send_json({"type": "result", "testId": test_id, "status": status, "lastResult": last_result})
-                    tool_end = {"type": "run-test", "label": script, "detail": detail, "ok": not fail}
+                    tool_end = {"type": "run-test", "label": script or name, "detail": detail, "ok": status == "passed"}
                     end_msg = _push_session_message(session_id, "tool", "", tool_end)
                     await websocket.send_json({"type": "tool_call", "tool": tool_end, "id": end_msg["id"], "time": end_msg["time"]})
 
@@ -886,3 +882,102 @@ async def unit_test_ws(websocket: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("Unit-test WebSocket disconnected")
+
+
+# ── Runner 任务树进度事件代理（A2：同源转发，前端免直连 :3458）──────
+
+def _runner_ws_url(tree_id: str) -> str:
+    """由 RunnerGateway.base_url(http://) 推导 runner WS 地址(ws://)。"""
+    from .runner_gateway import get_runner
+    base = get_runner().base_url
+    ws_base = base.replace("http://", "ws://").replace("https://", "wss://")
+    return f"{ws_base}/api/trees/{tree_id}/events"
+
+
+@router.websocket("/ws/trees/{tree_id}/events")
+async def tree_events_ws(websocket: WebSocket, tree_id: str):
+    """代理 runner 任务树进度事件到前端。
+
+    - runner → 前端：原样转发 `AgentEvent.to_dict()`(`{type, data:{stage,...}, ts}`)；
+      前端据 `data.stage` + `data.message`(节点 id / 树级原因) 更新任务树进度。
+    - 前端 → runner：控制消息 `{cmd: run/pause/resume/cancel/skip/retry, taskId?}`
+      → RunnerGateway HTTP(经 to_thread，避免阻塞事件循环)。
+    runner 不可达 → 推一条 error 事件后关闭。
+    """
+    await websocket.accept()
+    try:
+        import websockets
+    except Exception as e:  # noqa: BLE001
+        await websocket.send_json({"type": "error",
+                                   "data": {"stage": "proxy_error", "message": f"websockets 不可用: {e}"}})
+        await websocket.close()
+        return
+
+    url = _runner_ws_url(tree_id)
+    try:
+        runner_ws = await asyncio.wait_for(websockets.connect(url), timeout=5)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[tree-events] runner WS 不可达(%s): %s", url, e)
+        await websocket.send_json({"type": "error",
+                                   "data": {"stage": "proxy_error", "message": "runner 不可达"}})
+        await websocket.close()
+        return
+
+    # 初始状态同步：下发当前 tree + progress，前端据此对齐(消除"run 先于订阅"的早期事件竞态)
+    from .runner_gateway import get_runner
+    try:
+        cur = await asyncio.to_thread(get_runner().get_tree, tree_id)
+        if cur:
+            await websocket.send_json({"type": "state", "data": cur})
+    except Exception:  # noqa: BLE001
+        pass
+
+    async def _relay_runner_to_client() -> None:
+        try:
+            async for raw in runner_ws:
+                if isinstance(raw, (bytes, bytearray)):
+                    raw = raw.decode()
+                await websocket.send_text(raw)  # 原样转发 AgentEvent JSON
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _relay_client_to_runner() -> None:
+        from .runner_gateway import get_runner
+        r = get_runner()
+        try:
+            while True:
+                data = await websocket.receive_json()
+                cmd = data.get("cmd")
+                if cmd == "run":
+                    await asyncio.to_thread(r.run, tree_id)
+                elif cmd == "pause":
+                    await asyncio.to_thread(r.pause, tree_id)
+                elif cmd == "resume":
+                    await asyncio.to_thread(r.resume, tree_id)
+                elif cmd == "cancel":
+                    await asyncio.to_thread(r.cancel, tree_id)
+                elif cmd == "skip" and data.get("taskId"):
+                    await asyncio.to_thread(r.skip, tree_id, data["taskId"])
+                elif cmd == "retry" and data.get("taskId"):
+                    await asyncio.to_thread(r.retry, tree_id, data["taskId"])
+        except WebSocketDisconnect:
+            pass
+        except Exception:  # noqa: BLE001
+            pass
+
+    relay_out = asyncio.create_task(_relay_runner_to_client())
+    relay_in = asyncio.create_task(_relay_client_to_runner())
+    try:
+        # 任一侧结束(前端断开 / runner 关闭) → 取消另一侧
+        await asyncio.wait({relay_out, relay_in}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in (relay_out, relay_in):
+            t.cancel()
+        try:
+            await runner_ws.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await websocket.close()
+        except Exception:  # noqa: BLE001
+            pass

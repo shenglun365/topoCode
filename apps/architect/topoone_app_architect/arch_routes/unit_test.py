@@ -14,6 +14,34 @@ async def list_unit_tests():
     return ok(store.UnitTestsStore.all())
 
 
+@router.post("/unit-tests/generate")
+async def generate_unit_tests_route(request: Request):
+    """单测生成(自主路径·B1)：agentic_loop 分析 scope 返回**草稿**，用户确认后创建。
+
+    KB/LLM 不可达或解析失败 → 502(明确降级，不伪造草稿)。
+    """
+    from fastapi.responses import JSONResponse
+    body = await request.json()
+    scope = (body.get("scope") or "").strip()
+    if not scope:
+        return err(400, "测试范围不能为空")
+    import asyncio
+    from . import tagent_utgen
+    # generate_unit_tests 内部 asyncio.run(新事件循环) → 须经 to_thread 在独立线程运行，
+    # 不能在 async 端点的运行中事件循环里直接调用。
+    draft = await asyncio.to_thread(
+        tagent_utgen.generate_unit_tests,
+        scope=scope, root=body.get("root") or "", project=body.get("project") or "",
+        model_id=body.get("modelId") or "")
+    if draft is None or not draft.get("tests"):
+        return JSONResponse(status_code=502, content={
+            "code": 502,
+            "message": "KB/LLM 不可达或生成失败，无法产出单测草稿。请检查知识库网关后重试。",
+            "data": None,
+        })
+    return ok({"scope": scope, "tests": draft["tests"], "draft": True})
+
+
 @router.post("/unit-tests")
 async def add_unit_test(request: Request):
     body = await request.json()

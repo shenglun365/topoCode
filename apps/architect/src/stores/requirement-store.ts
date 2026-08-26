@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import type { DesignPlan, Requirement, RequirementAnalysis } from '@/types'
-import { CODE_MAPPINGS } from '@/services/mock/order-system'
+import { useArchArchitectureStore } from '@/stores/architecture-store'
 import { apiGet, apiPost } from '@/services/api-client'
 import { backendReady, backendUp } from '@/services/backend'
 import { requirementService } from '@/services/requirement-service'
@@ -10,13 +10,14 @@ function locationOf(r: Requirement): 'proposal' | 'pool' {
   return r.location ?? (r.tier === 'raw' ? 'proposal' : 'pool')
 }
 
-/** 代码映射对齐：补 file；核心资产补伪代码示意。 */
+/** 代码映射对齐：补 file；核心资产补代码定位示意(真实 /kb/model codeMappings)。 */
 function enrichAnalysis(rep?: RequirementAnalysis): RequirementAnalysis | undefined {
   if (!rep) return undefined
+  const mappings = useArchArchitectureStore().codeMappings
   rep.assetScope.forEach((a) => {
-    if (!a.file) a.file = CODE_MAPPINGS.find((m) => m.targetId === a.assetId)?.file
+    if (!a.file) a.file = mappings.find((m) => m.targetId === a.assetId)?.file
     if (!a.keyNode && a.role === 'core') {
-      const cm = CODE_MAPPINGS.find((m) => m.targetId === a.assetId)
+      const cm = mappings.find((m) => m.targetId === a.assetId)
       a.keyNode = `${cm?.file ? `${cm.file} ` : ''}${cm?.line ? `${cm.line} ` : ''}· 核心逻辑示意：锁定现状实现后按需求扩展(状态流转/唯一约束/边界校验)`
     }
   })

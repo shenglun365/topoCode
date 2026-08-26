@@ -1,5 +1,6 @@
 import type { OverviewData } from '@/types'
 import { apiGet } from './api-client'
+import { currentProjectParams } from './project-service'
 
 /**
  * 概览页聚合接口：GET /overview 一次返回四组栏目所需数据
@@ -8,8 +9,13 @@ import { apiGet } from './api-client'
  */
 export async function getOverview(mode?: string): Promise<OverviewData | null> {
   try {
-    const qs = mode ? `?mode=${encodeURIComponent(mode)}` : ''
-    const data = await apiGet<OverviewData | null>(`/overview${qs}`)
+    const { root, project } = currentProjectParams()
+    const qs = new URLSearchParams()
+    if (mode) qs.set('mode', mode)
+    if (root) qs.set('root', root)
+    if (project) qs.set('project', project)
+    const query = qs.toString()
+    const data = await apiGet<OverviewData | null>(`/overview${query ? '?' + query : ''}`)
     return data && typeof data === 'object' ? data : null
   } catch {
     return null

@@ -1,6 +1,5 @@
 import type { AssetScopeItem, AssetType, FormDraft } from '@/types'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
-import { CODE_MAPPINGS } from './mock/order-system'
 
 export interface ValidationIssue {
   field: string
@@ -38,14 +37,16 @@ export function knownAssets(): AssetRefInfo[] {
   return list
 }
 
-/** 代码映射中的已知文件集合。 */
+/** 代码映射中的已知文件集合(真实 /kb/model 的 codeMappings)。 */
 export function knownFiles(): string[] {
-  return [...new Set(CODE_MAPPINGS.map((m) => m.file))]
+  const arch = useArchArchitectureStore()
+  return [...new Set(arch.codeMappings.map((m) => m.file))]
 }
 
 /** 资产 ID → 代码映射文件。 */
 export function assetFile(assetId: string): string | undefined {
-  return CODE_MAPPINGS.find((m) => m.targetId === assetId)?.file
+  const arch = useArchArchitectureStore()
+  return arch.codeMappings.find((m) => m.targetId === assetId)?.file
 }
 
 export function resolveAsset(assetId: string): AssetRefInfo | undefined {

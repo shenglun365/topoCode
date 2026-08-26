@@ -2,6 +2,7 @@
 import re
 from fastapi import APIRouter, Request
 from .common import _ts, ok, err
+from .knowledge import KB_NOTE
 from . import store
 
 router = APIRouter()

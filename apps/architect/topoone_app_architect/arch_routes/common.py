@@ -25,7 +25,24 @@ _MODEL_KEYS = ("components", "erTables", "ormMappings", "entityClasses",
 
 def empty_architecture_model() -> dict:
     """空架构模型(项目未绑定 KB 基线的降级态——非伪造，接口应提示用户先关联)。"""
-    return {k: [] for k in _MODEL_KEYS}
+    return {**{k: [] for k in _MODEL_KEYS}, "codeMappings": []}
+
+
+def _derive_code_mappings(model: dict) -> list:
+    """KB 未返回 codeMappings 时，从各组件 owns 首文件推导，保证字段非空可用。"""
+    mappings = model.get("codeMappings") or []
+    if mappings:
+        return mappings
+    derived = []
+    for c in model.get("components") or []:
+        owns = c.get("owns") or []
+        derived.append({
+            "id": f"cm-{c['id']}", "targetType": "component", "targetId": c["id"],
+            "targetName": c.get("name") or c["id"],
+            "file": owns[0] if owns else f"app/{c.get('name') or c['id']}",
+            "line": "L1", "level": "logical", "note": c.get("desc") or "",
+        })
+    return derived
 
 
 class KbUnavailableError(Exception):
@@ -59,7 +76,9 @@ def build_architecture_model(root=None, project=None, include_code_mappings: boo
             raise KbUnavailableError("KB 能力不足：architecture.model 返回了非模型结构。")
         for k in _MODEL_KEYS:
             model.setdefault(k, [])
-        if not include_code_mappings:
+        if include_code_mappings:
+            model["codeMappings"] = _derive_code_mappings(model)
+        else:
             model.pop("codeMappings", None)
         return model
     except KbUnavailableError:

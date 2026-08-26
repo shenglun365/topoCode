@@ -16,6 +16,11 @@ function resolveRootPath(): string {
   return import.meta.env.VITE_BOUND_ROOT || ''
 }
 
+/** 当前项目工作目录(真实 root，来自 URL ?root= 或绑定兜底；空串表示未选定)。 */
+export function currentProjectRoot(): string {
+  return resolveRootPath()
+}
+
 function projectQuery(): URLSearchParams {
   const params = new URLSearchParams()
   const { project } = currentProjectParams()

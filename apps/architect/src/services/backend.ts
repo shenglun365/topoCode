@@ -3,8 +3,8 @@ import { apiGet } from './api-client'
 /**
  * 后端可达性探测(结果带时效, 失败会自动重探)。
  *
- * 以 `/git/status`(阶段 4 新增路由)为探针: 旧栈没有该路由 → 不可达 → 前端回退 mock;
- * 新栈具备 → 走真实后端。与 agent/unit-test 域的 ensureBackend 独立。
+ * 以 `/git/status`(阶段 4 新增路由)为探针: 旧栈没有该路由 → 不可达。
+ * 消费方要么抛错要么软降级为默认值(无 mock 回退)。与 agent/unit-test 域的 ensureBackend 独立。
  */
 let up = false
 let lastProbeAt = 0

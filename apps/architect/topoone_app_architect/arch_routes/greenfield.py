@@ -3,6 +3,7 @@
 契约见 docs/architect/api-knowledge-greenfield.md。服务端返回确定性的模拟结果，
 形状与前端 blueprint-agent / scaffold-service / extract-service 对齐。
 """
+from typing import Optional
 from fastapi import APIRouter, Request
 from .common import _ts, _id, ok, err
 from . import store
@@ -214,17 +215,20 @@ async def kb_baseline(request: Request):
 
 # ── Launch / Guide ───────────────────────────────────────────
 
-_LAUNCH = {
-    "execRoot": "/home/dev/topo-projects/order-service",
-    "kbRoot": "/home/dev/topo-kb",
-    "mode": "existing",
-    "productForm": "web",
-    "scaffold": None,
-}
-
-
-def launch_info() -> dict:
-    return dict(_LAUNCH)
+def launch_info(root=None, project=None) -> dict:
+    """启动信息(宿主机工作目录/KB 目录/模式)：已绑定项目 → 该项目真实 rootPath/kbRoot/mode；
+    未绑定 → 空 execRoot(中性，不再返回假项目路径)。"""
+    from . import project as _project_mod
+    proj = _project_mod._resolve_project(root, project)
+    if not proj:
+        return {"execRoot": "", "kbRoot": "", "mode": "existing", "productForm": "web", "scaffold": None}
+    return {
+        "execRoot": proj.get("rootPath") or "",
+        "kbRoot": proj.get("kbRoot") or "",
+        "mode": proj.get("mode") or "existing",
+        "productForm": proj.get("productForm") or "web",
+        "scaffold": proj.get("scaffold"),
+    }
 
 
 _MISSIONS = {
@@ -246,8 +250,8 @@ def guide_missions(mode: str = "existing") -> list:
 
 
 @router.get("/launch")
-async def launch_route():
-    return ok(launch_info())
+async def launch_route(root: Optional[str] = None, project: Optional[str] = None):
+    return ok(launch_info(root, project))
 
 
 @router.get("/guide/missions")

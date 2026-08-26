@@ -1,6 +1,7 @@
 """Knowledge base / architecture model routes.
 
-KB-REQ-16(图谱复合查询)仍为占位；KB-REQ-17 组件模型已由 KB `/zmq/architecture.model`
+KB-REQ-16(图谱复合查询)已实现(基于真实模型组件 + 跨社区调用边合成，见 /kb/query)；
+KB-REQ-17 组件模型已由 KB `/zmq/architecture.model`
 (backend-core/architecture_model_service.py，分析图社区→组件/代码映射/依赖/版本差异)接管，
 `build_architecture_model` 经 KbGateway 拉取真实模型。已实现的 KB 方法
 (`version.*`、`knowledge.pullRequest/pendingUpdates/updateConfirm/updateCancel`)
@@ -57,7 +58,7 @@ def _all_assets(root: Optional[str] = None, project: Optional[str] = None):
 
 
 def _empty_model():
-    return {k: [] for k in _MODEL_KEYS}
+    return {**{k: [] for k in _MODEL_KEYS}, "codeMappings": []}
 
 
 @router.get("/kb/model")
@@ -68,7 +69,7 @@ async def get_kb_model(version: str = "v1", root: Optional[str] = None, project:
     if degraded:
         return ok({**_empty_model(), "degraded": True, "note": KB_NOTE})
     try:
-        return ok(build_architecture_model(root, project))
+        return ok(build_architecture_model(root, project, include_code_mappings=True))
     except KbUnavailableError as e:
         return JSONResponse(status_code=502, content={"code": 502, "message": str(e), "data": None})
 
@@ -123,19 +124,29 @@ async def get_code_mappings(root: Optional[str] = None, project: Optional[str] =
     if degraded:
         return ok([])
     model = build_architecture_model(root, project, include_code_mappings=True)
-    mappings = model.get("codeMappings") or []
-    if mappings:
-        return ok(mappings)
-    return ok([{
-        "id": f"cm-{c['id']}", "targetType": "component", "targetId": c["id"],
-        "targetName": c["name"], "file": f"{'/'.join((c.get('owns') or [])[:1]) or 'app/' + str(c['name'])}",
-        "line": "L1", "level": "logical", "note": c["desc"],
-    } for c in model["components"]])
+    return ok(model.get("codeMappings") or [])
 
 
 @router.get("/kb/coding-rules")
 async def get_coding_rules():
-    return "## 编码规约 v1.0\n\n### 提交规范\n- feat: 新功能\n- fix: 修复\n\n### 校验\n- 所有 public 函数必须有注释"
+    """编码规约(真实)：从 KB 文档中查找规约/约定/规则类文档并汇总；
+    KB 不可达或无匹配文档 → 返回空串(前端展示空，不伪造固定文本)。"""
+    try:
+        from .kb_gateway import call_kb
+        docs = call_kb("knowledge.listDocs") or []
+    except Exception:
+        return ""
+    blocks = []
+    for d in docs:
+        title = (d.get("title") or d.get("id") or "").strip()
+        if not title:
+            continue
+        tl = title.lower()
+        if not any(k in tl for k in ("规约", "约定", "convention", "coding", "rule", "style", "spec")):
+            continue
+        content = (d.get("content") or d.get("text") or d.get("body") or "").strip()
+        blocks.append(f"## {title}\n\n{content}" if content else f"## {title}")
+    return "\n\n".join(blocks)
 
 
 @router.post("/kb/query")
@@ -290,10 +301,20 @@ async def kb_update_confirm(req_id: str, request: Request):
     body = await request.json()
     res = call_kb("knowledge.updateConfirm",
                   requestId=req_id, method=body.get("method", "pull"))
-    return ok(res or {"requestId": req_id, "status": "confirmed"})
+    if not res:
+        return JSONResponse(status_code=502, content={
+            "code": 502, "message": "KB 能力不足：knowledge.updateConfirm 未打通，无法确认基线更新。",
+            "data": None,
+        })
+    return ok(res)
 
 
 @router.post("/kb/update-requests/{req_id}/cancel")
 async def kb_update_cancel(req_id: str):
     res = call_kb("knowledge.updateCancel", requestId=req_id)
-    return ok(res or {"requestId": req_id, "cancelled": True})
+    if not res:
+        return JSONResponse(status_code=502, content={
+            "code": 502, "message": "KB 能力不足：knowledge.updateCancel 未打通，无法取消基线更新。",
+            "data": None,
+        })
+    return ok(res)

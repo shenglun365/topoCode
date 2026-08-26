@@ -3,8 +3,8 @@
 契约见 docs/architect/api-execution.md §5(WS) 与 execution.md §4.4。
 REST 只做查询与会话持久化读取；执行/对话走 WS(/ws/coding-agent)。
 
-适配器清单来自 `agent_adapters` 注册表(当前仅 opencode)。opencode 的「已安装/适配」
-验证为**本机真实探测**：可执行文件存在 + `opencode --version` 可运行 + 全局配置文件存在。
+适配器清单来自 `agent_adapters` 注册表(OpenCode/Qwen/Codex/Cline)。
+「已安装/适配」验证为**本机真实探测**：可执行文件存在 + `--version` 可运行 + 配置文件存在。
 """
 from fastapi import APIRouter
 from .common import ok, err

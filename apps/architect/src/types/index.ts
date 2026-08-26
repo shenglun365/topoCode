@@ -629,6 +629,7 @@ export interface ArchitectureModel {
   entityClasses: EntityClass[]
   executionFlows: ExecutionFlow[]
   dataFlows: DataFlow[]
+  codeMappings?: CodeMapping[]
 }
 
 export type TaskStatus = 'pending' | 'in-progress' | 'reviewing' | 'done' | 'blocked'
@@ -900,7 +901,7 @@ export type TestChannel = 'agent' | 'cli'
 
 export type UnitTestStatus = 'idle' | 'running' | 'passed' | 'failed' | 'error' | 'skipped'
 
-export type UnitTestSource = 'requirement' | 'manual' | 'scan'
+export type UnitTestSource = 'requirement' | 'manual' | 'scan' | 'ai'
 
 /** 单元测试用例(脚本已编写，左栏列表展示；经「添加」关连脚本入库)。 */
 export interface UnitTest {

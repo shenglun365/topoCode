@@ -402,3 +402,95 @@ async def build_task_tree_se(reqs, root=None, project=None, model_id: str = "",
     if result.tree is None:
         return None, list(result.problems or [])
     return _reid_tree(_tree_to_frontend(result.tree)), []
+
+
+# ── 任务树提交 runner（A1：SE.execute → on_submit → runner）──────
+
+# 前端 TaskNode 状态 → CodingTaskNode 状态（_tree_to_frontend/_STATUS_MAP 的逆映射）
+_FE_STATUS_REVERSE = {
+    "in-progress": "running", "done": "done", "blocked": "blocked",
+    "pending": "pending", "ready": "ready",
+}
+
+
+def frontend_tree_to_coding(node: dict):
+    """前端 TaskNode 形状(camelCase) → CodingTaskTree(snake_case, {roots:[...]}).
+
+    `_tree_to_frontend` 的逆操作：把 DB 里用户确认的树还原为 runner 需要的
+    `CodingTaskTree`（经 `CodingTaskTree.from_dict` 校验结构）。
+    """
+    from topocode_agent.orchestration import CodingTaskTree
+
+    def _conv(n: dict) -> dict:
+        return {
+            "id": n["id"],
+            "title": n.get("title", ""),
+            "kind": n.get("kind", "task"),
+            "status": _FE_STATUS_REVERSE.get(n.get("status", "pending"), "pending"),
+            "depends_on": list(n.get("dependsOn") or []),
+            "context": list(n.get("context") or []),
+            "files": list(n.get("files") or []),
+            "est_min": n.get("estMin", 0),
+            "source_hash": n.get("sourceHash", ""),
+            "children": [_conv(c) for c in n.get("children") or []],
+        }
+    return CodingTaskTree.from_dict({"roots": [_conv(node)]})
+
+
+def make_runner_on_submit(runner=None):
+    """构建 `on_submit(tree: CodingTaskTree, context: dict) -> tree_id` 回调。
+
+    经 RunnerGateway 把树提交给 runner(:3458)。on_submit 是**同步**回调
+    （`se.execute` 同步调用）→ 内部为阻塞 HTTP POST，调用方应以
+    `asyncio.to_thread` 包裹 `se.execute` 以免阻塞事件循环。
+    runner 不可达返回 None（`se.execute` 透传，调用方据此报 502）。
+    """
+    from .runner_gateway import get_runner
+    r = runner or get_runner()
+
+    def _submit(tree, context):
+        return r.submit_tree(tree.to_dict(), context or {})
+    return _submit
+
+
+def make_se_context(reqs, root: str, project: Optional[str],
+                    task: Optional[dict] = None) -> dict:
+    """提交 runner 的树级 context（str/list 值进 coding prompt L1 简报）。"""
+    ctx = {
+        "requirement": _req_text(reqs),
+        "project": project or "",
+        "root": root or "",
+    }
+    if task:
+        if task.get("taskBranch"):
+            ctx["branch"] = task["taskBranch"]
+        if task.get("baseCommit"):
+            ctx["baseCommit"] = task["baseCommit"]
+    return ctx
+
+
+# ── 哈希失效重判（A3：blocked_stale → se.rejudge → 再确认 → PUT+rejudge+run）──
+
+def stale_node_ids(runner_tree_dict: dict) -> list:
+    """从 runner 树(snake_case)提取 stale 节点 id 列表。"""
+    out: list = []
+
+    def _walk(n: dict) -> None:
+        if n.get("status") == "stale":
+            out.append(n["id"])
+        for c in n.get("children") or []:
+            _walk(c)
+    for r in runner_tree_dict.get("roots") or []:
+        _walk(r)
+    return out
+
+
+def seed_runner_tree(se, tree_id: str, runner_tree_dict: dict):
+    """跨进程重判：把 runner 侧当前树注入 SE，使 `se.rejudge` 能读到 old_tree。
+
+    跨进程(on_submit)执行时 SE 本地 `_trees` 不含该树(树在 runner)，
+    rejudge 依赖 `self._trees.get(tree_id)` 构建失效清单/原树上下文。
+    """
+    from topocode_agent.orchestration import CodingTaskTree
+    se._trees[tree_id] = CodingTaskTree.from_dict(runner_tree_dict)
+    return se._trees[tree_id]

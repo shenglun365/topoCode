@@ -79,22 +79,57 @@ async function openSession() {
   if (s) agent.select(s.id)
 }
 function runCurrent() {
-  if (selectedSession.value) agent.runTask(selectedSession.value.id)
+  if (exec.value) agent.runExec(exec.value.id)
 }
 function runNext() { agent.runNextPending() }
 function runAll() { agent.runAll() }
+
+// A3: stale 重判（blocked 状态）
+const rejudged = ref(false)
+async function doRejudge() {
+  if (!exec.value) return
+  rejudged.value = false
+  await agent.rejudge(exec.value.id)
+  rejudged.value = true
+}
+function doConfirmRejudge() {
+  if (exec.value) agent.confirmRejudge(exec.value.id)
+}
+
+// A4: SE 验证（accepting 状态）
+const verifyResult = ref<{ passed: boolean; issues: string[]; unmetRequirements: string[]; report: string } | null>(null)
+async function doVerify() {
+  if (!exec.value) return
+  verifyResult.value = await agent.verify(exec.value.id)
+}
+
+// B3 闭环：真实执行关联单测
+const runTestsResult = ref<{ ran: number; passed: number; failed: number; allPassed: boolean; note?: string } | null>(null)
+const runTestsBusy = ref(false)
+async function doRunLinkedTests() {
+  if (!exec.value || !exec.value.testIds?.length || runTestsBusy.value) return
+  runTestsBusy.value = true
+  runTestsResult.value = null
+  try {
+    const { currentProjectRoot } = await import('@/services/project-service')
+    const res = await (await import('@/services/runner-service')).runLinkedTests(exec.value.id, currentProjectRoot())
+    runTestsResult.value = res
+    unitTest.load()
+  } finally {
+    runTestsBusy.value = false
+  }
+}
 
 async function checkBaseline() {
   if (!exec.value || !plan.value) return
   baselineBusy.value = true
   const head = await git.head()
   baselineBusy.value = false
-  const ok = head.commit === plan.value.baseCommit && !head.dirty
-  baselineWarn.value = !ok
-  if (ok) {
-    const s = selectedSession.value ?? await openSession()
-    if (s) await agent.runTask(s.id)
-  }
+    const ok = head.commit === plan.value.baseCommit && !head.dirty
+    baselineWarn.value = !ok
+    if (ok) {
+      await agent.runExec(exec.value.id)
+    }
 }
 async function resetBaseline() {
   if (!exec.value || !plan.value) return
@@ -408,6 +443,32 @@ function toggleExpanded(id: string) {
                 <ArrowUturnLeftIcon class="w-3 h-3" />{{ t('execute.reflow') }}
               </button>
             </div>
+            <!-- A3: stale 重判(blocked 状态) -->
+            <div
+              v-if="exec?.status === 'blocked'"
+              class="border border-ctp-orange/40 bg-ctp-orange/10 rounded-lg p-2"
+            >
+              <div class="text-[11px] font-medium text-ctp-orange mb-1 flex items-center gap-1.5">
+                <ExclamationTriangleIcon class="w-3.5 h-3.5 shrink-0" />{{ t('execute.rejudgeTitle') }}
+              </div>
+              <div class="text-[10px] text-ctp-overlay1 mb-1.5">{{ t('execute.rejudgeHint') }}</div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  class="btn btn-xs btn-ghost"
+                  :disabled="agent.running"
+                  @click="doRejudge"
+                >
+                  <ArrowPathRoundedSquareIcon class="w-3 h-3" />{{ t('execute.rejudge') }}
+                </button>
+                <button
+                  class="btn btn-xs btn-primary"
+                  :disabled="agent.running || !rejudged"
+                  @click="doConfirmRejudge"
+                >
+                  <CheckCircleIcon class="w-3 h-3" />{{ t('execute.rejudgeConfirm') }}
+                </button>
+              </div>
+            </div>
             <div
               v-if="baselineWarn"
               class="border border-ctp-red/40 bg-ctp-red/10 rounded-lg px-2 py-1.5 text-[11px] text-ctp-red flex items-center gap-1.5"
@@ -440,6 +501,33 @@ function toggleExpanded(id: string) {
                     class="w-3 h-3 text-ctp-red shrink-0"
                   />
                   <span class="truncate">{{ c.name }}</span>
+                </div>
+              </div>
+              <!-- A4: SE 验证(agentic 复查变更是否满足需求，不跑测试) -->
+              <div class="mt-2 border-t border-ctp-yellow/20 pt-2">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span class="text-[11px] font-medium text-ctp-yellow">{{ t('execute.verify') }}</span>
+                  <span class="text-[10px] text-ctp-overlay1 flex-1">{{ t('execute.verifyHint') }}</span>
+                  <button
+                    class="btn btn-xs btn-ghost"
+                    :disabled="agent.running"
+                    @click="doVerify"
+                  >
+                    <ShieldCheckIcon class="w-3 h-3" />{{ t('execute.verify') }}
+                  </button>
+                </div>
+                <div
+                  v-if="verifyResult"
+                  class="text-[11px] rounded-lg px-2 py-1.5"
+                  :class="verifyResult.passed ? 'bg-ctp-green/10 text-ctp-green' : 'bg-ctp-red/10 text-ctp-red'"
+                >
+                  <div class="font-medium mb-0.5">
+                    {{ verifyResult.passed ? t('execute.verifyPassed') : t('execute.verifyFailed') }}
+                  </div>
+                  <div v-if="verifyResult.issues.length" class="text-[10px] mb-0.5">
+                    {{ verifyResult.issues.join('；') }}
+                  </div>
+                  <div v-if="verifyResult.report" class="text-[10px] text-ctp-overlay1">{{ verifyResult.report }}</div>
                 </div>
               </div>
               <!-- 关联单元测试(agent 辅助判定 + 人工增减；不随任务自动执行) -->
@@ -478,6 +566,25 @@ function toggleExpanded(id: string) {
                   class="text-[10px] text-ctp-overlay1"
                 >
                   {{ t('execute.linkedTestsEmpty') }}
+                </div>
+                <!-- B3 闭环：真实执行关联单测 -->
+                <button
+                  v-if="linkedTestIds.length"
+                  class="btn btn-xs btn-ghost mt-1"
+                  :disabled="runTestsBusy"
+                  @click="doRunLinkedTests"
+                >
+                  <PlayIcon class="w-3 h-3" />{{ runTestsBusy ? t('execute.runTestsRunning') : t('execute.runLinkedTests') }}
+                </button>
+                <div
+                  v-if="runTestsResult"
+                  class="text-[11px] rounded-lg px-2 py-1.5 mt-1"
+                  :class="runTestsResult.allPassed ? 'bg-ctp-green/10 text-ctp-green' : 'bg-ctp-red/10 text-ctp-red'"
+                >
+                  {{ runTestsResult.allPassed
+                    ? t('execute.runTestsAllPassed', { n: runTestsResult.passed })
+                    : t('execute.runTestsFailed', { p: runTestsResult.passed, f: runTestsResult.failed }) }}
+                  <span v-if="runTestsResult.note" class="text-ctp-overlay1"> · {{ runTestsResult.note }}</span>
                 </div>
                 <button
                   class="btn btn-xs btn-ghost mt-1"

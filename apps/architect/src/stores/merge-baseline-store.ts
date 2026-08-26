@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import type { GitCommit, GitFileChange } from '@/services/git-service'
-import { PROJECT_GIT_PATH, gitService } from '@/services/git-service'
-import { delay } from '@/services/mock/delay'
+import { gitService } from '@/services/git-service'
+import { currentProjectRoot } from '@/services/project-service'
+import { apiPost } from '@/services/api-client'
 import { useArchMcpStore } from './mcp-store'
 import { useArchProjectStore } from './project-store'
 import { useArchWorkflowStore } from './workflow-store'
@@ -44,23 +45,26 @@ export const useArchMergeBaselineStore = defineStore('arch-merge-baseline', {
     async load() {
       if (this.loaded || this.loading) return
       this.loading = true
+      const root = currentProjectRoot()
       const [commits, uncommitted] = await Promise.all([
-        gitService.log(PROJECT_GIT_PATH, '', ''),
-        gitService.workingTree(PROJECT_GIT_PATH),
+        gitService.log(root, '', ''),
+        gitService.workingTree(root),
       ])
       this.commits = commits
       this.uncommitted = uncommitted
       this.loading = false
     },
     async commitUncommitted() {
-      await delay(400)
+      const msg = 'chore: 提交未入库变更'
+      const res = await apiPost<{ oid: string; subject: string }>('/git/commit', { message: msg })
+      const oid = res.oid || `unknown${Date.now().toString(16)}`
       const head = this.commits[0]
       this.commits = [
         {
-          hash: `tmp${Date.now().toString(16)}`,
-          short: `tmp${Date.now().toString(16).slice(0, 6)}`,
-          message: 'chore: 提交未入库变更',
-          author: 'dev-li',
+          hash: oid,
+          short: oid.slice(0, 7),
+          message: res.subject || msg,
+          author: 'git',
           date: Date.now(),
           files: this.uncommitted,
         },
@@ -91,7 +95,7 @@ export const useArchMergeBaselineStore = defineStore('arch-merge-baseline', {
       this.sync.requestedAt = Date.now()
       this.sync.status = 'syncing'
       this.sync.message = ''
-      await delay(1100)
+      await apiPost('/project/baseline/sync', req)
       this.sync.status = 'done'
       this.sync.message = '知识库已基于 git 同步代码并更新基线 git 表示'
       mcp.record({

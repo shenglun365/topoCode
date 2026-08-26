@@ -1,6 +1,7 @@
-import type { AgentMessage, TestChannel, UnitTest, UnitTestSession } from '@/types'
+import type { AgentMessage, TestChannel, TestLevel, UnitTest, UnitTestSession } from '@/types'
 import { apiGet, apiPost } from './api-client'
 import { ArchWs } from './ws-client'
+import { currentProjectParams } from './project-service'
 
 /**
  * 单元测试适配接口。
@@ -24,6 +25,12 @@ export const unitTestService = {
 
   async addTest(data: Partial<UnitTest>): Promise<UnitTest> {
     return apiPost<UnitTest>('/unit-tests', data)
+  },
+
+  /** AI 生成单测草稿(自主路径·B1)：返回草稿，不直接创建。 */
+  async generateTests(scope: string): Promise<{ scope: string; draft: boolean; tests: { name: string; levels: TestLevel[]; scriptPath: string; desc: string }[] }> {
+    const { root, project } = currentProjectParams()
+    return apiPost('/unit-tests/generate', { scope, root, project })
   },
 
   async createSession(opts: { title: string; channel: TestChannel; adapter: string; testIds?: string[] }): Promise<UnitTestSession> {
@@ -55,7 +62,9 @@ export const unitTestService = {
       t.lastResult = ev.lastResult
     })
 
-    ws.send('run', { sessionId: session.id, testIds: target.map((x) => x.id) })
+    // 带上当前项目 root，后端按扩展名真实 subprocess 执行脚本（相对路径对 root 解析）
+    const { root, project } = currentProjectParams()
+    ws.send('run', { sessionId: session.id, testIds: target.map((x) => x.id), root, project })
 
     try {
       await Promise.race([terminal, new Promise((_, reject) => setTimeout(() => reject(new Error('run timeout')), 120000))])

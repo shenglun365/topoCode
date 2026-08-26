@@ -4,13 +4,23 @@
 POST /exec 为原子 commitBatch(经 store.run_atomic, WriteQueue 单事务)：
 合成/接收方案 → 生成任务树 → 建确认方案 → 创建执行任务 → 绑定需求 execId。
 """
+from typing import Optional
 from fastapi import APIRouter, Request
 from .common import _ts, ok, err
 from . import store
 
 router = APIRouter()
 
-BASELINE_COMMIT = "1a2b3c4d5e6f"
+
+def _real_base_commit(root: Optional[str] = None) -> str:
+    """工程目录真实 git HEAD(基线提交)；非 git/无 HEAD → 空串(调用方兜底)。"""
+    if not root:
+        return ""
+    try:
+        from . import arch_git
+        return (arch_git.head_commit(root) or "").strip()
+    except Exception:
+        return ""
 
 
 def _resolve_root_project(reqs, body):
@@ -53,18 +63,19 @@ def _assemble_change_items(reqs):
     return changes
 
 
-def _build_plan(reqs, req_ids, provided=None):
+def _build_plan(reqs, req_ids, provided=None, base_commit: str = ""):
     now = _ts()
+    # 基线提交：真实 git HEAD(由调用方解析)；缺失则空(前端/校验按未定基线处理)。
+    bc = (base_commit or "").strip()
     if provided and provided.get("id"):
         base = dict(provided)
         base["id"] = provided["id"]
         base["reqIds"] = req_ids
-        base["baseCommit"] = base.get("baseCommit") or BASELINE_COMMIT
+        base["baseCommit"] = (base.get("baseCommit") or bc or "").strip()
         base.setdefault("status", "draft")
         base.setdefault("updatedAt", now)
         return base
     title = reqs[0]["title"] if reqs else "批次执行方案"
-    base_commit = reqs[0].get("analysis", {}).get("implementationPath") and BASELINE_COMMIT or BASELINE_COMMIT
     affected = []
     for r in reqs:
         for a in (r.get("analysis") or {}).get("assetScope") or []:
@@ -79,7 +90,7 @@ def _build_plan(reqs, req_ids, provided=None):
             "affected": affected, "grade": grade,
             "basis": "由各需求的资产范围聚合", "risks": ["涉及跨模块改动, 需关注回归"],
         },
-        "status": "draft", "taskPlanId": None, "baseCommit": base_commit,
+        "status": "draft", "taskPlanId": None, "baseCommit": bc,
         "updatedAt": now,
     }
 
@@ -96,7 +107,9 @@ async def create_plan(request: Request):
     body = await request.json()
     reqs = [store.RequirementsStore.get(i) for i in body.get("reqIds", [])]
     reqs = [r for r in reqs if r]
-    plan = _build_plan(reqs, body.get("reqIds", []), provided=body.get("plan"))
+    root, _project = _resolve_root_project(reqs, body)
+    plan = _build_plan(reqs, body.get("reqIds", []), provided=body.get("plan"),
+                       base_commit=_real_base_commit(root))
     store.PlansStore.create(plan)
     return ok(store.PlansStore.get(plan["id"]))
 
@@ -145,14 +158,11 @@ async def get_task_tree(plan_id: str):
     tree = store.TaskTreesStore.get_by_plan(plan_id)
     if tree:
         return ok(tree["root"])
-    return ok(store._loads("[]") and {
+    # 无任务树(SE 树未生成/旧计划)→ 返回空树骨架(不伪造假任务/假文件)。
+    return ok({
         "id": store.next_id("tp"), "title": "任务方案", "kind": "epic",
-        "status": "pending", "estMin": 300, "context": [], "files": [],
-        "children": [
-            {"id": store.next_id("task"), "title": "梳理现状与边界", "kind": "task", "status": "pending", "estMin": 30, "context": [], "files": ["app/order.go"]},
-            {"id": store.next_id("task"), "title": "实现核心逻辑", "kind": "task", "status": "pending", "estMin": 120, "context": [], "files": ["app/order.go"]},
-            {"id": store.next_id("task"), "title": "单元测试", "kind": "task", "status": "pending", "estMin": 60, "context": [], "files": []},
-        ],
+        "status": "pending", "estMin": 0, "context": [], "files": [],
+        "dependsOn": [], "children": [],
     })
 
 
@@ -180,13 +190,15 @@ async def create_execution_task(request: Request):
     reqs = [store.RequirementsStore.get(i) for i in req_ids]
     reqs = [r for r in reqs if r]
 
-    plan = _build_plan(reqs, req_ids, provided=body.get("plan"))
+    from . import tagent_se
+    se_root, se_project = _resolve_root_project(reqs, body)
+    # 基线提交取工程目录真实 git HEAD(非 git → 空，按未定基线处理，不再用假常量)。
+    plan = _build_plan(reqs, req_ids, provided=body.get("plan"),
+                       base_commit=_real_base_commit(se_root))
     plan["status"] = "confirmed"
 
     # SE 大脑生成任务树（显式 depends_on），替换机械 steps→树。
     # 在原子写之前调用（LLM 异步，不可持有 DB 事务）；失败明确报错，不伪造。
-    from . import tagent_se
-    se_root, se_project = _resolve_root_project(reqs, body)
     root, problems = await tagent_se.build_task_tree_se(
         reqs, root=se_root, project=se_project,
         model_id=(body.get("modelId") or ""))
@@ -237,6 +249,215 @@ async def create_execution_task(request: Request):
     plan_out = store.PlansStore.get(plan_id)
     exec_out = store.ExecutionTasksStore.get(exec_id)
     return ok({"plan": plan_out, "exec": exec_out})
+
+
+@router.post("/exec/{task_id}/run")
+async def run_execution_task(task_id: str):
+    """把已确认的任务树提交给 runner 执行(SE.execute → on_submit → runner)。
+
+    从 DB 还原用户确认的树 → CodingTaskTree，构建 SE(on_submit=提交 runner)，
+    `se.execute` 取 tree_id 落库(runnerTreeId)，再触发非阻塞 run。
+    前端凭返回的 treeId 直连 runner WS `/api/trees/{treeId}/events` 渲染进度。
+    """
+    import asyncio
+
+    from . import tagent_se
+    from .kb_gateway import get_gateway
+    from .runner_gateway import get_runner
+
+    task = store.ExecutionTasksStore.get(task_id)
+    if not task:
+        return err(404, "Task not found")
+    tree_row = store.TaskTreesStore.get_by_plan(task["planId"])
+    if not tree_row or not tree_row.get("root"):
+        return err(409, "任务树不存在")
+
+    coding_tree = tagent_se.frontend_tree_to_coding(tree_row["root"])
+    problems = coding_tree.validate()
+    if problems:
+        return err(500, "任务树非法: " + "; ".join(problems))
+
+    reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+    reqs = [r for r in reqs if r]
+    root, project = _resolve_root_project(reqs, {})
+    context = tagent_se.make_se_context(reqs, root, project, task)
+
+    se = tagent_se.build_architect_se(
+        get_gateway(), root=root, project=project,
+        project_root=root or "",
+        on_submit=tagent_se.make_runner_on_submit(),
+    )
+    runner = get_runner()
+    tree_id = await asyncio.to_thread(se.execute, coding_tree, context)
+    if not tree_id:
+        return err(502, "runner 不可达, 任务树提交失败")
+
+    store.ExecutionTasksStore.update(task_id, {
+        "runnerTreeId": tree_id, "status": "running",
+        "runCount": (task.get("runCount") or 0) + 1, "updatedAt": _ts(),
+    })
+    progress = await asyncio.to_thread(runner.run, tree_id)
+    return ok({"treeId": tree_id, "progress": progress})
+
+
+@router.post("/exec/{task_id}/rejudge")
+async def rejudge_execution_task(task_id: str):
+    """stale 重判：SE 基于当前源码重判依赖，返回更新后的树(供用户再确认)。
+
+    runner 检出 blocked_stale → 前端调本端点 → SE 重判 → 落 pending 树(供 confirm)
+    + 返回前端树。跨进程：旧树从 runner 拉取并注入 SE。
+    """
+    task = store.ExecutionTasksStore.get(task_id)
+    if not task:
+        return err(404, "Task not found")
+    tree_id = task.get("runnerTreeId")
+    if not tree_id:
+        return err(409, "无 runner 任务树(未提交执行)")
+
+    from . import tagent_se
+    from .kb_gateway import get_gateway
+    from .runner_gateway import get_runner
+
+    runner = get_runner()
+    got = runner.get_tree(tree_id)
+    if not got or "tree" not in got:
+        return err(502, "runner 不可达")
+    runner_tree = got["tree"]  # {roots: [...]} (snake_case)
+    stale_ids = tagent_se.stale_node_ids(runner_tree)
+    if not stale_ids:
+        return err(409, "无失效(stale)节点")
+
+    reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+    reqs = [r for r in reqs if r]
+    root, project = _resolve_root_project(reqs, {})
+    se = tagent_se.build_architect_se(
+        get_gateway(), root=root, project=project, project_root=root or "")
+    tagent_se.seed_runner_tree(se, tree_id, runner_tree)
+    result = await se.rejudge(tree_id, stale_ids, tagent_se._req_text(reqs))
+    if result.tree is None:
+        return err(502, "重判失败: " + "; ".join(result.problems or ["LLM 未产出树"]))
+
+    new_tree_dict = result.tree.to_dict()
+    new_tree_fe = tagent_se._tree_to_frontend(result.tree)
+    store.ExecutionTasksStore.update(task_id, {
+        "pendingRejudge": {"tree": new_tree_dict, "staleIds": stale_ids, "treeId": tree_id},
+        "status": "blocked", "updatedAt": _ts(),
+    })
+    return ok({"treeId": tree_id, "staleIds": stale_ids, "newTree": new_tree_fe})
+
+
+@router.post("/exec/{task_id}/rejudge/confirm")
+async def confirm_rejudge(task_id: str):
+    """确认重判：PUT 新树 + rejudge(刷新哈希基线) + run，继续执行。"""
+    task = store.ExecutionTasksStore.get(task_id)
+    if not task:
+        return err(404, "Task not found")
+    pending = task.get("pendingRejudge")
+    if not pending or not pending.get("tree"):
+        return err(409, "无待确认的重判")
+
+    from .runner_gateway import get_runner
+    runner = get_runner()
+    tree_id = pending.get("treeId") or task.get("runnerTreeId")
+    stale_ids = pending.get("staleIds") or []
+    ok_update = runner.update_tree(tree_id, pending["tree"])
+    ok_rejudge = runner.rejudge(tree_id, stale_ids)
+    if not (ok_update and ok_rejudge):
+        return err(502, "重判确认失败(runner)")
+
+    store.ExecutionTasksStore.update(task_id, {
+        "pendingRejudge": None, "status": "running", "updatedAt": _ts(),
+    })
+    progress = runner.run(tree_id)
+    return ok({"treeId": tree_id, "progress": progress})
+
+
+@router.post("/exec/{task_id}/verify")
+async def verify_execution_task(task_id: str):
+    """验证：SE 基于已变更文件 agentic 复查(不跑测试)，返回验证报告。
+
+    返回 {passed, issues[], unmetRequirements[], report}；不通过可 retry/skip 后重跑。
+    """
+    task = store.ExecutionTasksStore.get(task_id)
+    if not task:
+        return err(404, "Task not found")
+    tree_id = task.get("runnerTreeId")
+    if not tree_id:
+        return err(409, "无 runner 任务树(未提交执行)")
+
+    from . import tagent_se
+    from .kb_gateway import get_gateway
+    from .runner_gateway import get_runner
+
+    runner = get_runner()
+    got = runner.get_tree(tree_id)
+    if not got or "tree" not in got:
+        return err(502, "runner 不可达")
+
+    reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+    reqs = [r for r in reqs if r]
+    root, project = _resolve_root_project(reqs, {})
+    se = tagent_se.build_architect_se(
+        get_gateway(), root=root, project=project, project_root=root or "")
+    tagent_se.seed_runner_tree(se, tree_id, got["tree"])
+    result = await se.verify(tree_id, tagent_se._req_text(reqs))
+    return ok({
+        "treeId": tree_id,
+        "passed": result.passed,
+        "issues": result.issues,
+        "unmetRequirements": result.unmet,
+        "report": result.report,
+    })
+
+
+@router.post("/exec/{task_id}/run-tests")
+async def run_execution_tests(task_id: str, request: Request):
+    """闭环(B3)：真实 subprocess 执行任务关联单测(testIds)，记录结果并汇总。
+
+    root 经 body 传入(前端当前项目)；缺省尝试从需求/项目解析。
+    无关联单测 → ran:0(明确，不伪造)。结果回写各单测 lastResult/status。
+    """
+    import asyncio
+    task = store.ExecutionTasksStore.get(task_id)
+    if not task:
+        return err(404, "Task not found")
+    test_ids = task.get("testIds") or []
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    root = (body.get("root") or "").strip()
+    if not root:
+        reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+        reqs = [r for r in reqs if r]
+        root, _project = _resolve_root_project(reqs, {})
+        root = root or ""
+
+    if not test_ids:
+        return ok({"ran": 0, "passed": 0, "failed": 0, "allPassed": True,
+                   "results": [], "note": "任务未关联单测", "at": _ts()})
+
+    from .test_runner import run_test_script
+    results = []
+    passed = failed = 0
+    for tid in test_ids:
+        test = store.UnitTestsStore.get(tid)
+        if not test:
+            results.append({"testId": tid, "status": "error",
+                            "lastResult": {"passed": 0, "failed": 1, "error": "test not found", "at": _ts()}})
+            failed += 1
+            continue
+        raw = await asyncio.to_thread(run_test_script, test.get("scriptPath") or "", root)
+        last_result = {**raw, "at": _ts()}
+        status = "passed" if raw.get("failed", 0) == 0 and raw.get("passed", 0) > 0 else "failed"
+        store.UnitTestsStore.update(tid, {"status": status, "lastResult": last_result, "updatedAt": _ts()})
+        results.append({"testId": tid, "status": status, "lastResult": last_result})
+        if status == "passed":
+            passed += 1
+        else:
+            failed += 1
+    return ok({"ran": len(results), "passed": passed, "failed": failed,
+               "allPassed": failed == 0, "results": results, "at": _ts()})
 
 
 @router.patch("/exec/{task_id}")

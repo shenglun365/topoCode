@@ -19,8 +19,6 @@ from . import store
 
 router = APIRouter()
 
-BASELINE_COMMIT = "1a2b3c4d5e6f"
-
 _DEFAULT_CONFIG = {"estMinMin": 60, "estMinMax": 480, "acceptanceMax": 4, "p0SubsetMax": 5}
 
 # KB 项目字段映射: main_db.projects 的 snake_case 列 → architect 消费的 camelCase。
@@ -442,20 +440,53 @@ async def get_project_status(root: Optional[str] = None, project: Optional[str] 
     if not proj.get("baselineId"):
         # 未关联知识库 → 无基线状态(返回 None)，由前端提示降级。
         return ok(None)
+    from . import arch_git
+    work_dir = proj.get("rootPath") or ""
+    # 真实 git head/branch/ahead + 工作树相对基线的真实差异
+    st = arch_git.repo_status(work_dir) if work_dir else {}
+    head = {
+        "commit": arch_git.head_commit(work_dir) if work_dir else "",
+        "branch": st.get("branch", ""),
+        "ahead": st.get("ahead", 0),
+    }
+    diff_raw = arch_git.diff_worktree(proj) if work_dir else {
+        "filesChanged": 0, "added": 0, "modified": 0, "deleted": 0,
+        "deletedHighRisk": False, "files": []}
+    diff = {
+        "filesChanged": diff_raw.get("filesChanged", 0),
+        "added": diff_raw.get("added", 0),
+        "modified": diff_raw.get("modified", 0),
+        "deleted": diff_raw.get("deleted", 0),
+        "deletedHighRisk": diff_raw.get("deletedHighRisk", False),
+        "files": [f.get("path") if isinstance(f, dict) else str(f)
+                  for f in diff_raw.get("files", [])],
+    }
+    # 基线：项目真实 baselineId/baselineCommit；version 经 KB version.list 查询(不可达→空)
+    version = ""
+    kb_project_id = proj.get("kbProjectId") or ""
+    if kb_project_id:
+        try:
+            from .kb_gateway import call_kb
+            versions = call_kb("version.list", projectId=kb_project_id) or []
+            for v in versions:
+                if v.get("id") == proj.get("baselineId"):
+                    version = v.get("label") or v.get("id") or ""
+                    break
+            if not version and versions:
+                version = versions[0].get("label") or versions[0].get("id") or ""
+        except Exception:
+            version = ""
+    baseline = {
+        "id": proj.get("baselineId") or "",
+        "version": version,
+        "commit": proj.get("baselineCommit") or "",
+        "manifestHash": "",
+        "createdAt": 0,
+    }
     return ok({
-        "baseline": {
-            "id": "baseline_id = N", "version": "v0.0.1", "commit": BASELINE_COMMIT,
-            "manifestHash": "sha256:9f7...c21", "createdAt": _ts() - 86400000 * 3,
-        },
-        "head": {"commit": "a1b2c3d4e5f6", "branch": "main", "ahead": 6},
-        "diff": {
-            "filesChanged": 5, "added": 2, "modified": 3, "deleted": 0,
-            "deletedHighRisk": False, "files": [
-                "order-service/order.go", "order-service/service.go",
-                "order-service/close.go", "outbox-service/relay.go",
-                "tests/integration_test.go",
-            ],
-        },
+        "baseline": baseline,
+        "head": head,
+        "diff": diff,
         "lastRebaseline": None,
     })
 
@@ -524,13 +555,18 @@ async def create_snapshot(request: Request, root: Optional[str] = None, project:
         return err(400, "未绑定项目，无法创建架构快照")
     snap_id = store.next_id("snap")
     now = _ts()
+    from . import arch_git
+    work_dir = resolved.get("rootPath") or ""
+    commit = (body.get("commit") or "").strip() or (arch_git.head_commit(work_dir) if work_dir else "")
+    branch = (body.get("branch") or "").strip()
+    if not branch:
+        branch = (arch_git.repo_status(work_dir) or {}).get("branch", "main") if work_dir else "main"
     db = store._target_db("arch_snapshot_records")
     db.execute(
         "INSERT INTO arch_snapshot_records (id, name, version, task_id, git_branch, git_commit, model, root_path, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (snap_id, body.get("name", "架构快照"), body.get("version", "v1"),
-         body.get("taskId", "manual"), body.get("branch", "main"),
-         body.get("commit", BASELINE_COMMIT),
+         body.get("taskId", "manual"), branch, commit,
          store._dumps(body.get("model") or build_architecture_model(root, project)),
          resolved.get("rootPath") or "", now),
     )
@@ -545,11 +581,17 @@ async def get_baseline_meta(root: Optional[str] = None, project: Optional[str] =
     proj = _resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         return err(400, "未关联知识库，无法读取基线信息。请在项目概览「查找关联」中关联知识库后重试。")
+    from . import arch_git
+    work_dir = proj.get("rootPath") or ""
+    st = arch_git.repo_status(work_dir) if work_dir else {}
+    name = proj.get("name") or ""
     return ok({
-        "gitTag": "v1.0.0-order-service", "branch": "main",
-        "gitDate": _ts() - 86400000 * 3, "analyzedAt": _ts() - 86400000 * 3,
-        "archVersion": "v1", "commit": BASELINE_COMMIT,
-        "desc": "订单领域服务（示例）",
+        "gitTag": f"v1.0.0-{name}" if name else "v1.0.0",
+        "branch": st.get("branch") or proj.get("branch") or "main",
+        "gitDate": 0, "analyzedAt": 0,
+        "archVersion": "v1",
+        "commit": proj.get("baselineCommit") or "",
+        "desc": proj.get("desc") or "",
     })
 
 
@@ -558,7 +600,10 @@ async def get_baseline_dirty(root: Optional[str] = None, project: Optional[str] 
     proj = _resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         return err(400, "未关联知识库，无法读取基线状态。")
-    return ok({"dirty": True})
+    from . import arch_git
+    work_dir = proj.get("rootPath") or ""
+    st = arch_git.repo_status(work_dir) if work_dir else {}
+    return ok({"dirty": bool(st.get("dirty"))})
 
 
 @router.post("/project/baseline/sync")
@@ -569,9 +614,14 @@ async def sync_baseline(request: Request):
     proj = _resolve_project(root, project)
     if not proj or not proj.get("baselineId"):
         return err(400, "未关联知识库，无法同步基线。请在项目概览「查找关联」中关联知识库后重试。")
+    from . import arch_git
+    work_dir = proj.get("rootPath") or ""
+    head = arch_git.head_commit(work_dir) if work_dir else ""
+    commit = (body.get("commit") or head).strip()
+    # 如实返回真实 commit + 项目当前 baselineId（不伪造新基线号）。
     return ok({
-        "success": True, "commit": body.get("commit", BASELINE_COMMIT),
-        "baselineId": "baseline_id = N+1",
+        "success": True, "commit": commit,
+        "baselineId": proj.get("baselineId") or "",
     })
 
 

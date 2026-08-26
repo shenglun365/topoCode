@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
-import type { AgentAdapterInfo, AgentMessage, AgentSession, AgentStatus, ExecutionTask } from '@/types'
+import type { AgentAdapterInfo, AgentSession, AgentStatus, ExecutionTask, TaskNode } from '@/types'
 import { agentService, listAgentAdapters } from '@/services/agent-service'
+import {
+  runExecution, connectTreeEvents, isTreeLevelStage,
+  rejudge as rejudgeApi, confirmRejudge as confirmRejudgeApi,
+  verifyExecution as verifyApi, type TreeEventConnection,
+} from '@/services/runner-service'
 import { apiGet } from '@/services/api-client'
 import { useArchTaskStore } from './task-store'
 import { useArchRequirementStore } from './requirement-store'
@@ -16,6 +21,9 @@ export const useArchAgentStore = defineStore('arch-agent', {
     log: [] as string[],
     /** 已请求停止的会话。 */
     stopping: new Set<string>(),
+    /** 当前 runner 执行：treeId + 进度流连接(供停止/控制)。 */
+    activeTreeId: null as string | null,
+    activeConn: null as TreeEventConnection | null,
   }),
   getters: {
     active(): AgentSession | undefined {
@@ -77,32 +85,155 @@ export const useArchAgentStore = defineStore('arch-agent', {
       if (!s || this.running) return
       const taskStore = useArchTaskStore()
       const exec = taskStore.findExecution(s.taskId)
-      const tree = exec ? taskStore.taskPlan(exec.planId) : undefined
-      if (!exec || !tree) return
+      if (!exec) return
+      await this.runExec(exec.id)
+    },
+    /** P2-A 主入口：按执行任务直接提交 runner 执行(无需 opencode 会话)。 */
+    async runExec(execId: string) {
+      if (this.running) return
+      const taskStore = useArchTaskStore()
+      const exec = taskStore.findExecution(execId)
+      if (!exec) return
       this.running = true
       taskStore.setExecStatus(exec.id, 'running')
-      const onMessage = (msg: AgentMessage) => {
-        if (msg.role === 'tool' && msg.tool) this.log.unshift(`[工具] ${msg.tool.label}: ${msg.tool.detail}`)
+      try {
+        await this._runViaRunner(exec)
+      } finally {
+        this.running = false
       }
-      await agentService.runTask(s, tree, {
-        onMessage,
-        onTreeChange: (reason) => taskStore.rebuildPlanTree(exec.planId, reason),
-        isCancelled: () => this.stopping.has(sessionId),
-      })
-      if (s.status === 'done') taskStore.setExecStatus(exec.id, 'accepting')
-      else if (s.status === 'failed') taskStore.setExecStatus(exec.id, 'failed')
-      else if (s.status === 'stopped') taskStore.stopTask(exec.id)
-      if (s.stats) taskStore.setStats(exec.id, s.stats)
-      this.running = false
-      this.stopping.delete(sessionId)
     },
-    /** 停止执行(前端 mock；真实后端需适配各 agent 终止接口)。 */
+    /** P2-A：把已确认任务树提交 runner 并订阅进度流(替换 opencode WS task.run)。 */
+    async _runViaRunner(exec: ExecutionTask) {
+      const taskStore = useArchTaskStore()
+      this.log.unshift(`[执行] ${exec.planId} → 提交 runner`)
+      let treeId: string
+      try {
+        const res = await runExecution(exec.id)
+        treeId = res.treeId
+      } catch (e: any) {
+        this.log.unshift(`[执行] 提交 runner 失败: ${e?.message ?? e}`)
+        taskStore.setExecStatus(exec.id, 'failed')
+        return
+      }
+      taskStore.setRunnerTreeId(exec.id, treeId)
+      this.log.unshift(`[执行] runner tree=${treeId}`)
+      await this._watchTree(exec, treeId)
+    },
+    /** 订阅指定 runner 树的进度流并等待终态(设置执行任务终态)。runExec/confirmRejudge 复用。 */
+    async _watchTree(exec: ExecutionTask, treeId: string) {
+      const taskStore = useArchTaskStore()
+      this.activeTreeId = treeId
+      const finishState = { reason: 'closed' as 'completed' | 'cancelled' | 'blocked_stale' | 'closed' }
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const finish = (reason: 'completed' | 'cancelled' | 'blocked_stale' | 'closed') => {
+          if (settled) return
+          settled = true
+          finishState.reason = reason
+          this.activeConn = null
+          this.activeTreeId = null
+          resolve()
+        }
+        const conn = connectTreeEvents(treeId, {
+          onState: (data) => taskStore.applyRunnerTree(data.tree?.roots ?? []),
+          onStatus: (data) => {
+            const stage = data.stage
+            if (!stage) return
+            if (isTreeLevelStage(stage)) {
+              if (stage === 'blocked_stale') this.log.unshift(`[重判] 源码变更，任务失效需重判: ${data.message ?? ''}`)
+              else if (stage === 'cancelled') this.log.unshift('[执行] 已取消')
+              else if (stage === 'completed') this.log.unshift('[执行] runner 执行完成')
+            } else if (data.message) {
+              taskStore.applyRunnerNodeStatus(String(data.message), stage)
+            }
+            if (stage === 'completed') finish('completed')
+            else if (stage === 'cancelled') finish('cancelled')
+            else if (stage === 'blocked_stale') finish('blocked_stale')
+          },
+          onError: (data) => this.log.unshift(`[错误] ${data.message ?? 'runner 错误'}`),
+          onClosed: () => finish('closed'),
+        })
+        this.activeConn = conn
+        // 兜底：runner 已终态(无后续事件) → 靠 onClosed 收口；超时保护避免悬挂
+        setTimeout(() => finish('closed'), 6 * 3600 * 1000)
+      })
+
+      let finalStatus: ExecutionTask['status']
+      if (finishState.reason === 'cancelled') finalStatus = 'stopped'
+      else if (finishState.reason === 'blocked_stale') finalStatus = 'blocked'
+      else {
+        const root = taskStore.taskPlan(exec.planId)
+        let bad = false
+        const walk = (n: TaskNode) => {
+          if (n.status === 'blocked') bad = true
+          ;(n.children ?? []).forEach(walk)
+        }
+        if (root) walk(root)
+        finalStatus = bad ? 'failed' : 'accepting'
+      }
+      taskStore.setExecStatus(exec.id, finalStatus)
+      this.log.unshift(`[执行] ${exec.planId} → ${finalStatus}`)
+    },
+    /** A3：触发 stale 重判(SE 基于当前源码重判)，更新树反映到任务树供用户再确认。 */
+    async rejudge(execId: string) {
+      const taskStore = useArchTaskStore()
+      const exec = taskStore.findExecution(execId)
+      if (!exec) return
+      this.log.unshift(`[重判] ${exec.planId} → SE 重判失效节点`)
+      try {
+        const { newTree, staleIds } = await rejudgeApi(execId)
+        const key = taskStore.taskPlan(exec.planId)?.id
+        if (key) taskStore.planToTaskTree[key] = newTree as any
+        this.log.unshift(`[重判] ${exec.planId} → 完成(${staleIds.length} 个失效节点)，请再确认后继续`)
+      } catch (e: any) {
+        this.log.unshift(`[重判] 失败: ${e?.message ?? e}`)
+      }
+    },
+    /** A3：确认重判 → 后端 PUT+rejudge+run，续订阅进度流执行。 */
+    async confirmRejudge(execId: string) {
+      if (this.running) return
+      const taskStore = useArchTaskStore()
+      const exec = taskStore.findExecution(execId)
+      if (!exec) return
+      this.running = true
+      taskStore.setExecStatus(exec.id, 'running')
+      try {
+        const { treeId } = await confirmRejudgeApi(execId)
+        await this._watchTree(exec, treeId)
+      } catch (e: any) {
+        this.log.unshift(`[重判] 确认失败: ${e?.message ?? e}`)
+        taskStore.setExecStatus(exec.id, 'blocked')
+      } finally {
+        this.running = false
+      }
+    },
+    /** A4：SE 验证(不跑测试)，返回并记录验证报告。 */
+    async verify(execId: string) {
+      const taskStore = useArchTaskStore()
+      const exec = taskStore.findExecution(execId)
+      if (!exec) return null
+      this.log.unshift(`[验证] ${exec.planId} → SE 复查变更`)
+      try {
+        const v = await verifyApi(execId)
+        this.log.unshift(`[验证] ${exec.planId} → ${v.passed ? '通过' : '未通过'}${v.issues.length ? `(${v.issues.length} 问题)` : ''}`)
+        return v
+      } catch (e: any) {
+        this.log.unshift(`[验证] 失败: ${e?.message ?? e}`)
+        return null
+      }
+    },
+    /** 停止执行：经 runner 进度流发送 cancel(无活动连接时回退旧 terminate)。 */
     async stop(sessionId: string) {
       const s = this.sessions.find((x) => x.id === sessionId)
       if (!s) return
       this.stopping.add(sessionId)
-      await agentService.terminate(sessionId)
-      this.log.unshift(`[停止] 已请求停止会话 ${sessionId}`)
+      if (this.activeConn && this.activeTreeId) {
+        this.activeConn.send('cancel')
+        this.log.unshift(`[停止] 已请求取消 runner ${this.activeTreeId}`)
+      } else {
+        await agentService.terminate(sessionId)
+        this.log.unshift(`[停止] 已请求停止会话 ${sessionId}`)
+      }
     },
     setStatus(sessionId: string, status: AgentStatus) {
       const s = this.sessions.find((x) => x.id === sessionId)
@@ -130,13 +261,7 @@ export const useArchAgentStore = defineStore('arch-agent', {
       const taskStore = useArchTaskStore()
       const pending = taskStore.executionTasks.filter((t) => t.status === 'created' || t.status === 'running')
       for (const exec of pending) {
-        let s = this.byExecution[exec.id]
-        if (!s) {
-          s = await this.openSession(exec.id)
-          if (!s) continue
-        }
-        this.activeSessionId = s.id
-        await this.runTask(s.id)
+        await this.runExec(exec.id)
       }
       const finished = taskStore.executionTasks.filter((t) => t.status === 'accepting' || t.status === 'done').length
       this.log.unshift(`[批量执行] 完成执行 ${finished}/${taskStore.totalCount} 个任务(含待验收)`)
@@ -148,14 +273,8 @@ export const useArchAgentStore = defineStore('arch-agent', {
       const pending = taskStore.executionTasks.filter((t) => t.status === 'created' && t.connectivity === 'ok')
       if (!pending.length || this.running) return null
       const exec = pending[0]
-      let s = this.byExecution[exec.id]
-      if (!s) {
-        s = await this.openSession(exec.id)
-        if (!s) return null
-      }
-      this.activeSessionId = s.id
-      await this.runTask(s.id)
-      this.log.unshift(`[单步执行] ${exec.planId} → ${s.status}`)
+      await this.runExec(exec.id)
+      this.log.unshift(`[单步执行] ${exec.planId} → ${taskStore.findExecution(exec.id)?.status}`)
       return exec
     },
   },

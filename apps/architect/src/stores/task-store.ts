@@ -85,6 +85,29 @@ export const useArchTaskStore = defineStore('arch-task', {
       const node = this.allTaskNodes.find((n) => n.id === id)
       if (node) node.status = status
     },
+    /** runner 节点状态(snake_case) → 前端 TaskStatus 映射(与后端 _STATUS_MAP 一致)。 */
+    applyRunnerNodeStatus(nodeId: string, runnerStatus: string) {
+      const map: Record<string, TaskStatus> = {
+        pending: 'pending', ready: 'pending', running: 'in-progress',
+        done: 'done', failed: 'blocked', blocked: 'blocked',
+        stale: 'pending', skipped: 'pending',
+      }
+      const st = map[runnerStatus]
+      if (st) this.updateStatus(nodeId, st)
+    },
+    /** 应用 runner 完整树状态(state 消息 / 终态对齐)：遍历 roots 逐节点更新。 */
+    applyRunnerTree(roots: { id: string; status: string; children?: any[] }[]) {
+      const walk = (n: { id: string; status: string; children?: any[] }) => {
+        this.applyRunnerNodeStatus(n.id, n.status)
+        ;(n.children ?? []).forEach(walk)
+      }
+      ;(roots ?? []).forEach(walk)
+    },
+    /** 执行任务关联的 runner treeId 落本地(供进度流/控制复用)。 */
+    setRunnerTreeId(execId: string, treeId: string) {
+      const t = this.findExecution(execId)
+      if (t) (t as any).runnerTreeId = treeId
+    },
     async createTask(planId: string, adapter: string, opts?: { model?: string; reqIds?: string[] }): Promise<ExecutionTask> {
       const task: ExecutionTask = {
         id: `ex-${Date.now().toString().slice(-4)}`,

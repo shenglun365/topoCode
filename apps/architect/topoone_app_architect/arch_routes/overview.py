@@ -41,9 +41,9 @@ def _build_overview(mode: str = "existing") -> dict:
 
 
 @router.get("/overview")
-async def get_overview(mode: Optional[str] = None):
+async def get_overview(mode: Optional[str] = None, root: Optional[str] = None, project: Optional[str] = None):
     """概览页聚合数据。mode 缺省跟随 launch.mode(existing|greenfield)。"""
-    launch = greenfield_routes.launch_info()
+    launch = greenfield_routes.launch_info(root, project)
     mode = mode or launch.get("mode") or "existing"
     data = _build_overview(mode)
     data["launch"] = launch

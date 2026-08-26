@@ -12,8 +12,6 @@ from . import store, arch_git
 
 router = APIRouter()
 
-BASELINE_COMMIT = "1a2b3c4d5e6f"
-
 
 def _resolve_project(request: Request) -> Optional[dict]:
     root = request.query_params.get("root") or request.query_params.get("repo")
@@ -31,7 +29,7 @@ async def git_status(request: Request):
     proj = _resolve_project(request)
     if not proj or not proj.get("rootPath"):
         return ok({"branch": "main", "ahead": 0, "behind": 0, "dirty": False,
-                   "uncommitted": [], "staged": [], "baseline": BASELINE_COMMIT})
+                   "uncommitted": [], "staged": [], "baseline": ""})
     return ok(_status(proj.get("rootPath")))
 
 
@@ -41,7 +39,7 @@ async def git_log(request: Request, limit: int = 10):
     root = (proj or {}).get("rootPath") or ""
     entries = arch_git.commit_log(root, limit=limit)
     return ok({"branch": arch_git.repo_status(root).get("branch") or "main",
-               "entries": entries, "baseline": BASELINE_COMMIT})
+               "entries": entries, "baseline": (proj or {}).get("baselineCommit") or ""})
 
 
 @router.get("/git/head")

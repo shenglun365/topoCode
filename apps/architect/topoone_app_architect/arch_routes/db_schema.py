@@ -187,7 +187,9 @@ ARCH_PROJECT_TABLES_SQL = """
         instance_id TEXT DEFAULT '',
         task_branch TEXT DEFAULT '',
         branch_mode TEXT DEFAULT 'auto',
-        asset_invalidated INTEGER DEFAULT 0
+        asset_invalidated INTEGER DEFAULT 0,
+        runner_tree_id TEXT DEFAULT '',
+        pending_rejudge TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS arch_agent_sessions (
@@ -447,6 +449,8 @@ def _project_migrations(db) -> None:
         ("task_branch", "TEXT DEFAULT ''"),
         ("branch_mode", "TEXT DEFAULT 'auto'"),
         ("asset_invalidated", "INTEGER DEFAULT 0"),
+        ("runner_tree_id", "TEXT DEFAULT ''"),
+        ("pending_rejudge", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_agent_sessions", [
         ("instance_id", "TEXT DEFAULT ''"),

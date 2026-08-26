@@ -736,7 +736,7 @@ def _hint(hits: List[Dict[str, Any]]) -> str:
 def req_harness_clarify(req: Dict[str, Any], root: Optional[str] = None,
                         project: Optional[str] = None,
                         model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """clarify 回合: KB 资产检索 → LLM 生成澄清问题清单。返回 None 表示降级(mock/heuristic)。
+    """clarify 回合: KB 资产检索 → LLM 生成澄清问题清单。返回 None 表示未生成(调用方明确报 502，不回退伪造)。
 
     model_id: 本次对话选择的模型(可选)；空则回退全局 llm.modelId → 主后端默认。
     """
