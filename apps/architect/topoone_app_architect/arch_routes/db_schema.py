@@ -3,7 +3,7 @@
 统一 DB 布局(docs/architect/conventions.md §7):
 - 主库 `architect.db`(全局表 + arch_projects 注册表 + 全局 id 序列):
   arch_projects / arch_specs / arch_mcp_calls / arch_interactions /
-  arch_collab_config / arch_agent_configs / arch_agent_instances
+  arch_collab_config
 - 项目库 `architect/<project_id>/arch.db`(每 architect 项目独立，
   按 arch_projects.id 定位，与 KB 项目无存量绑定):
   需求/方案/任务树/执行/会话/单测/对话/蓝图/标签/快照/语义资产/AST 缓存等。
@@ -71,46 +71,6 @@ ARCH_MAIN_TABLES_SQL = """
         value TEXT DEFAULT ''
     );
 
-    CREATE TABLE IF NOT EXISTS arch_agent_configs (
-        id TEXT PRIMARY KEY,
-        adapter TEXT DEFAULT '',          -- opencode / codex / claude / ...
-        name TEXT DEFAULT '',
-        mode TEXT DEFAULT 'server',       -- server | cli
-        host TEXT DEFAULT '',
-        port INTEGER DEFAULT 0,
-        username TEXT DEFAULT '',
-        url TEXT DEFAULT '',              -- 探测地址(如 http://127.0.0.1:4096)
-        models TEXT,                      -- JSON: 选用的模型 id 列表
-        default_model TEXT DEFAULT '',
-        last_status TEXT DEFAULT 'unknown', -- unknown | ok | fail
-        last_detail TEXT DEFAULT '',
-        last_check_at INTEGER DEFAULT 0,
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0,
-        instance_mode TEXT DEFAULT 'managed' -- managed | external
-    );
-
-    CREATE TABLE IF NOT EXISTS arch_agent_instances (
-        id TEXT PRIMARY KEY,
-        project_id TEXT DEFAULT '',       -- arch_projects.id
-        adapter TEXT DEFAULT 'opencode',
-        host TEXT DEFAULT '127.0.0.1',    -- 实例所在主机(支持远程 IP)
-        mode TEXT DEFAULT 'managed',      -- managed | external
-        state TEXT DEFAULT 'idle',        -- starting | ready | busy | idle | stopped | error
-        pid INTEGER DEFAULT 0,            -- managed 子进程 pid
-        port INTEGER DEFAULT 0,           -- serve 端口
-        work_dir TEXT DEFAULT '',         -- 工程实现目录(= arch_projects.root_path)
-        repo_url TEXT DEFAULT '',         -- 外部 git 仓库(统一代码事实源)
-        base_branch TEXT DEFAULT 'main',
-        base_commit TEXT DEFAULT '',
-        task_branch TEXT DEFAULT '',      -- 当前任务分支(arch/<task_id>)
-        last_commit TEXT DEFAULT '',
-        ref_count INTEGER DEFAULT 0,      -- 活跃会话引用数
-        idle_until INTEGER DEFAULT 0,     -- 空闲超时回收时间戳(0=不回收)
-        error TEXT DEFAULT '',
-        created_at INTEGER DEFAULT 0,
-        updated_at INTEGER DEFAULT 0
-    );
 """
 
 # ── 项目库(每 architect 项目一个 arch.db) ─────────────────────
@@ -421,9 +381,6 @@ def _main_migrations(db) -> None:
         ("favorite", "INTEGER DEFAULT 0"),
         ("remote_url", "TEXT DEFAULT ''"),
         ("default_branch", "TEXT DEFAULT 'main'"),
-    ])
-    _add_cols(db, "arch_agent_configs", [
-        ("instance_mode", "TEXT DEFAULT 'managed'"),
     ])
 
 
