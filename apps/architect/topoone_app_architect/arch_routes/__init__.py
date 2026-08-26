@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter
 
-from . import project, knowledge, requirements, execution, arch_change, mcp_collab, unit_test, agent, websocket, git, greenfield, tags, overview, dirs, agent_config, docs, semantic_assets, diagram, design
+from . import project, knowledge, requirements, execution, arch_change, mcp_collab, unit_test, agent, websocket, git, greenfield, tags, overview, dirs, docs, semantic_assets, diagram, design
 
 router = APIRouter(prefix="/api/architect")
 router.include_router(project.router)
@@ -17,7 +17,6 @@ router.include_router(arch_change.router)
 router.include_router(mcp_collab.router)
 router.include_router(unit_test.router)
 router.include_router(agent.router)
-router.include_router(agent_config.router)
 router.include_router(websocket.router)
 router.include_router(git.router)
 router.include_router(greenfield.router)

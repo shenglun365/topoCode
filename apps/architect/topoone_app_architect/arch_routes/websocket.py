@@ -5,8 +5,6 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .common import _ts, _id
 from . import store
-from . import agent_server
-from . import agent_adapters
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -260,17 +258,19 @@ def _req_chat_stream(msgs, model_id):
 
 @router.websocket("/ws/coding-agent")
 async def coding_agent_ws(websocket: WebSocket):
-    """coding-agent 会话流(聊天/对话 + 落库；真实 opencode 对接，经 AgentInstancePool)。
+    """coding-agent 会话流(代码问答聊天 + 落库；A7 起经 tAgent，不再对接 opencode)。
 
-    注：任务执行(task.run)已迁移到 runner 流(POST /exec/{id}/run + WS /ws/trees/{id}/events)，
-    本 WS 仅保留会话创建/对话/停止。契约见 docs/architect/api-execution.md §5。客户端消息:
-      session.create  { exec, planTitle, keepContext?, root? }   → session_created { session }
-      session.message { sessionId, content }                      → message
-      session.stop   { sessionId }                                → status stopped
+    注：
+    - 任务执行(task.run)已迁移到 runner 流(POST /exec/{id}/run + WS /ws/trees/{id}/events)；
+    - 对话(session.message)经 tAgent 代码问答(agentic_loop + KB/代码工具，见 tagent_chat.py)，
+      按会话关联的执行任务解析 root/project 作为上下文。
+    本 WS 仅保留会话创建/对话/停止。客户端消息:
+      session.create  { exec, planTitle, keepContext?, root?, project? } → session_created { session }
+      session.message { sessionId, content }                              → (assistant message) + message
+      session.stop   { sessionId }                                       → status stopped
       ping                                                        → pong
 
-    session.create 携带 root(工程实现目录)时走真实 opencode(经 AgentInstancePool)；
-    无 root / 实例不可达 / 探测失败 → 会话仍可创建(无 opencodeSessionId)，消息仅落库回显。
+    KB/LLM 不可达 → 无 assistant 回复，仅落库回显用户消息(降级)。
     """
     await websocket.accept()
     try:
@@ -319,21 +319,12 @@ async def coding_agent_ws(websocket: WebSocket):
                 }
                 store.AgentSessionsStore.append_message({**init_msg, "sessionId": session_id})
                 session["messages"] = [init_msg]
-
-                # 真实 opencode 对接: 需要 root 或 project + 该 adapter 的连接配置。
-                inst = None
-                if root or project_id:
-                    inst = await _ensure_opencode_session(root, project_id, exec_data, session_id)
-                if inst:
-                    store.AgentSessionsStore.update(session_id, {
-                        "instanceId": inst["id"], "status": "idle", "updatedAt": _ts(),
-                    })
-                    session["instanceId"] = inst["id"]
+                # A7：会话仅落库；对话经 tAgent 代码问答(见 session.message)，不再对接 opencode。
                 await websocket.send_json({"type": "session_created", "session": session})
 
             elif msg_type == "session.message":
                 session_id = data.get("sessionId")
-                content = data.get("content", "")
+                content = (data.get("content") or "").strip()
                 session = store.AgentSessionsStore.get(session_id)
                 if not session:
                     await websocket.send_json({"type": "error", "message": "Session not found"})
@@ -343,8 +334,9 @@ async def coding_agent_ws(websocket: WebSocket):
                 }
                 store.AgentSessionsStore.append_message({**user_msg, "sessionId": session_id})
                 store.AgentSessionsStore.update(session_id, {"updatedAt": _ts()})
-                if session.get("opencodeSessionId"):
-                    reply = await _opencode_message(session, content)
+                # A7：tAgent 代码问答(替换 opencode 直连)。KB/LLM 不可达 → reply=None，仅落库回显用户消息。
+                if content:
+                    reply = await _agent_chat_reply(session, content)
                     if reply:
                         m = {"id": store.next_id("m"), "role": "assistant", "time": _ts(), "content": reply}
                         store.AgentSessionsStore.append_message({**m, "sessionId": session_id})
@@ -353,9 +345,8 @@ async def coding_agent_ws(websocket: WebSocket):
 
             elif msg_type == "session.stop":
                 session_id = data.get("sessionId")
-                session = store.AgentSessionsStore.get(session_id)
-                if session and session.get("opencodeSessionId"):
-                    await _opencode_abort(session)
+                # A7：无 opencode 会话，停止仅置状态。
+                store.AgentSessionsStore.update(session_id, {"status": "stopped", "updatedAt": _ts()})
                 await websocket.send_json({"type": "stopped", "sessionId": session_id, "status": "stopped"})
 
     except WebSocketDisconnect:
@@ -364,92 +355,37 @@ async def coding_agent_ws(websocket: WebSocket):
         logger.exception(f"Coding agent WS error: {e}")
 
 
-# ── 真实 opencode 对接辅助 ─────────────────────────────────────
+# ── A7: tAgent 代码问答辅助 ─────────────────────────────────────
 
-def _config_for_adapter(adapter: str):
-    for c in store.AgentConfigsStore.all():
-        if (c.get("adapter") or "").lower() == (adapter or "opencode").lower():
-            return c
-    return None
+async def _agent_chat_reply(session: dict, content: str) -> Optional[str]:
+    """A7: tAgent 代码问答(替换 opencode 直连)。
 
-
-def _project_for(root: Optional[str], project_id: Optional[str]):
-    from .project import _resolve_project
-    return _resolve_project(root, project_id)
-
-
-async def _ensure_opencode_session(root: str, project_id: Optional[str], exec_data: dict, session_id: str) -> Optional[dict]:
-    """确保项目实例就绪 + 创建 agent 会话。失败返回 None(调用方回退模拟)。"""
+    解析会话关联的执行任务 → root/project → chat_reply(agentic_loop + KB/代码工具) → 回答。
+    无任务 / KB 不可达 / 异常 → None(调用方仅落库回显用户消息)。阻塞调用放线程。
+    """
+    from . import tagent_chat
+    task_id = (session.get("taskId") or "").strip()
+    task = store.ExecutionTasksStore.get(task_id) if task_id else None
+    root, project, task_context = "", "", ""
+    if task:
+        from .execution import _resolve_root_project
+        reqs = [store.RequirementsStore.get(i) for i in task.get("reqIds") or []]
+        reqs = [r for r in reqs if r]
+        root, project = _resolve_root_project(reqs, {})
+        root = root or ""
+        titles = [r.get("title", "") for r in reqs if r.get("title")]
+        task_context = (
+            f"执行任务: {task.get('id', '')}\n"
+            f"需求: {'; '.join(titles) if titles else '无'}\n"
+            "说明: 用户正在与该任务的实现会话对话，问题可能涉及该任务要实现的代码。"
+        )
     try:
-        project = _project_for(root or None, project_id)
-        if not project or not project.get("id"):
-            return None
-        adapter = (exec_data.get("adapter") or "opencode").lower()
-        agent = agent_adapters.get_agent(adapter)
-        if agent is None:
-            return None
-        cfg = _config_for_adapter(adapter)
-        if not cfg:
-            return None
-        pool = agent_server.get_pool()
-        inst = await pool.ensure(project, cfg)
-        if not inst or inst.get("state") not in ("ready", "busy", "idle"):
-            return None
-        client = agent_server.agent_client_for(inst, cfg, agent.id)
-        title = f"architect/{session_id} · {exec_data.get('id', '')}"
-        oc = client.create_session(title=title)
-        oc_id = oc.get("id") or oc.get("_id")
-        if not oc_id or oc.get("_error"):
-            logger.warning(f"[coding-agent] opencode 会话创建失败: {oc.get('_error', 'no id')}")
-            return None
-        store.AgentSessionsStore.update(session_id, {"opencodeSessionId": oc_id, "updatedAt": _ts()})
-        # 任务树由 exec 提供; 建 task 分支并记录到实例。
-        task_branch = exec_data.get("taskBranch") or f"arch/{exec_data.get('id', session_id)}"
-        store.AgentInstancesStore.update(inst["id"], {
-            "taskBranch": task_branch, "updatedAt": _ts(),
-        })
-        return inst
+        return await asyncio.to_thread(
+            tagent_chat.chat_reply,
+            question=content, root=root, project=project, task_context=task_context)
     except Exception as e:
-        logger.warning(f"[coding-agent] 真实 opencode 会话创建失败, 回退模拟: {e}")
+        logger.warning(f"[coding-agent] tAgent 聊天失败: {e}")
         return None
-
-
-async def _opencode_message(session: dict, content: str) -> str:
-    """向 agent 会话发消息(同步取回复文本)。失败返回空串。阻塞调用放线程。"""
-    try:
-        inst = store.AgentInstancesStore.get(session.get("instanceId") or "")
-        cfg = _config_for_adapter(session.get("adapter") or "opencode")
-        if not inst or not cfg:
-            return ""
-        adapter = agent_adapters.get_agent(session.get("adapter") or "opencode")
-        if adapter is None:
-            return ""
-        client = agent_server.agent_client_for(inst, cfg, adapter.id)
-        res = await asyncio.to_thread(client.send_message, session.get("opencodeSessionId", ""), content)
-        if res.get("_error"):
-            return ""
-        info = res.get("info") or {}
-        parts = res.get("parts") or []
-        texts = [p.get("text", "") for p in parts if p.get("type") == "text" and p.get("text")]
-        return "\n".join(texts) or (info.get("id") or "")
-    except Exception as e:
-        logger.warning(f"[coding-agent] agent 消息失败: {e}")
-        return ""
-
-
-async def _opencode_abort(session: dict) -> None:
-    try:
-        inst = store.AgentInstancesStore.get(session.get("instanceId") or "")
-        cfg = _config_for_adapter(session.get("adapter") or "opencode")
-        if not inst or not cfg:
-            return
-        adapter = agent_adapters.get_agent(session.get("adapter") or "opencode")
-        if adapter is None:
-            return
-        client = agent_server.agent_client_for(inst, cfg, adapter.id)
-        await asyncio.to_thread(client.abort, session.get("opencodeSessionId", ""))
-    except Exception:
-        pass
 
 
 def _push_session_message(session_id: str, role: str, content: str, tool=None):
