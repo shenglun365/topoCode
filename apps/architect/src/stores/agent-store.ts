@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import type { AgentAdapterInfo, AgentSession, AgentStatus, ExecutionTask, TaskNode } from '@/types'
-import { agentService, listAgentAdapters } from '@/services/agent-service'
+import type { AgentSession, AgentStatus, ExecutionTask, TaskNode } from '@/types'
+import { agentService } from '@/services/agent-service'
 import {
   runExecution, connectTreeEvents, isTreeLevelStage,
   rejudge as rejudgeApi, confirmRejudge as confirmRejudgeApi,
@@ -13,7 +13,6 @@ import { useArchRequirementStore } from './requirement-store'
 export const useArchAgentStore = defineStore('arch-agent', {
   state: () => ({
     sessions: [] as AgentSession[],
-    adapters: [] as AgentAdapterInfo[],
     activeSessionId: null as string | null,
     loaded: false,
     loading: false,
@@ -40,11 +39,7 @@ export const useArchAgentStore = defineStore('arch-agent', {
       if (this.loaded || this.loading) return
       this.loading = true
       try {
-        const [adapters, sessions] = await Promise.all([
-          listAgentAdapters().catch(() => [] as AgentAdapterInfo[]),
-          apiGet<AgentSession[]>('/agent/sessions').catch(() => [] as AgentSession[]),
-        ])
-        this.adapters = adapters ?? []
+        const sessions = await apiGet<AgentSession[]>('/agent/sessions').catch(() => [] as AgentSession[])
         // 仅并入对当前(已存在)执行任务的会话；其余保持不显示，避免残留。
         this.sessions = (sessions ?? []).filter((s) => !!s.taskId)
         this.activeSessionId = this.sessions[0]?.id ?? null

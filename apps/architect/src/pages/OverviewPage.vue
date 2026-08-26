@@ -4,28 +4,20 @@ import { useI18n } from 'vue-i18n'
 import {
   ArrowPathIcon, BookOpenIcon, DocumentTextIcon, FolderIcon,
   MagnifyingGlassIcon, RocketLaunchIcon, ShieldCheckIcon, SparklesIcon,
-  CheckCircleIcon, PlusIcon, TrashIcon, XMarkIcon,
+  CheckCircleIcon, TrashIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { ArrowUpOnSquareIcon, StarIcon } from '@heroicons/vue/24/solid'
-import { StopIcon } from '@heroicons/vue/24/outline'
 import HostDirPickerDialog from '@/components/project/HostDirPickerDialog.vue'
-import AgentConfigDialog from '@/components/project/AgentConfigDialog.vue'
-import type { AgentConfig, AgentInstance, KbConfig, OverviewAdapter, OverviewMission, ProjectInfo } from '@/types'
+import type { KbConfig, OverviewMission, ProjectInfo } from '@/types'
 import { getOverview } from '@/services/overview-service'
 import { apiGet } from '@/services/api-client'
 import { projectService } from '@/services/project-service'
-import { deleteAgentConfig, listAgentInstances, stopAgentInstance, testAgentConfig } from '@/services/agent-service'
 import { kbService } from '@/services/kb-service'
 
 const { t } = useI18n()
 
 const showSetup = ref(false)
-const showAgentConfig = ref(false)
 const recent = ref<ProjectInfo[]>([])
-const adapters = ref<OverviewAdapter[]>([])
-const agentConfigs = ref<AgentConfig[]>([])
-const instances = ref<AgentInstance[]>([])
-const loadingInstances = ref(false)
 const kbConfig = ref<KbConfig | null>(null)
 const kbCount = ref(0)
 const kbLinked = ref(false)
@@ -37,9 +29,7 @@ const deleting = ref<ProjectInfo | null>(null)
 const deleteData = ref(false)
 const busyId = ref<string | null>(null)
 
-const testingCfgId = ref<string | null>(null)
 const testingKb = ref(false)
-const deletingCfg = ref<AgentConfig | null>(null)
 
 const pinnedWarning = ref(false)
 let pinnedWarningTimer: ReturnType<typeof setTimeout> | null = null
@@ -67,35 +57,12 @@ async function loadOverview() {
   const data = await getOverview()
   if (data) {
     recent.value = data.recent ?? []
-    adapters.value = data.adapters ?? []
-    agentConfigs.value = data.agentConfigs ?? []
     kbConfig.value = data.kbConfig ?? null
     kbCount.value = data.kb?.count ?? 0
     kbLinked.value = !!data.kb?.linked
     missions.value = data.missions ?? []
   }
   loading.value = false
-  loadInstances()
-}
-
-async function loadInstances() {
-  loadingInstances.value = true
-  try {
-    instances.value = await listAgentInstances()
-  } catch {
-    instances.value = []
-  } finally {
-    loadingInstances.value = false
-  }
-}
-
-async function stopInstance(i: AgentInstance) {
-  try {
-    await stopAgentInstance(i.id)
-    await loadInstances()
-  } catch {
-    // 忽略
-  }
 }
 
 function reload() {
@@ -174,32 +141,6 @@ async function confirmDelete() {
   }
 }
 
-async function onAgentConfigSaved() {
-  showAgentConfig.value = false
-  await loadOverview()
-}
-
-async function testAgent(cfg: AgentConfig) {
-  testingCfgId.value = cfg.id
-  try {
-    await testAgentConfig(cfg.id)
-    await loadOverview()
-  } finally {
-    testingCfgId.value = null
-  }
-}
-
-async function confirmDeleteCfg() {
-  if (!deletingCfg.value) return
-  try {
-    await deleteAgentConfig(deletingCfg.value.id)
-    deletingCfg.value = null
-    await loadOverview()
-  } catch (e) {
-    console.error('delete agent config failed', e)
-  }
-}
-
 async function testKb() {
   testingKb.value = true
   try {
@@ -253,7 +194,6 @@ function openDoc(id: string) {
     </section>
 
     <HostDirPickerDialog v-if="showSetup" @close="showSetup = false" @saved="onSetupSaved" />
-    <AgentConfigDialog v-if="showAgentConfig" @close="showAgentConfig = false" @saved="onAgentConfigSaved" />
 
     <!-- 左栏：近期项目；右栏：agent设置 + 使用文档 -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
@@ -359,116 +299,6 @@ function openDoc(id: string) {
             </span>
           </div>
           <div class="p-4 space-y-4">
-            <!-- Coding Agent -->
-            <div>
-              <div class="flex items-center justify-between mb-1.5">
-                <div class="text-xs text-ctp-overlay1">{{ t('overview.codingAgent') }}</div>
-                <button class="btn btn-ghost !px-2 !py-1 text-xs text-ctp-blue" @click="showAgentConfig = true">
-                  <PlusIcon class="w-3.5 h-3.5" />{{ t('agent.newConfig') }}
-                </button>
-              </div>
-
-              <div v-if="loading" class="text-xs text-ctp-subtext0">{{ t('app.loading') }}</div>
-
-              <!-- 已保存连接配置 -->
-              <div v-else-if="agentConfigs.length" class="space-y-1.5">
-                <div
-                  v-for="c in agentConfigs"
-                  :key="c.id"
-                  class="flex items-center gap-2 border border-ctp-surface0 rounded-md px-3 py-1.5"
-                >
-                  <span
-                    class="w-2 h-2 rounded-full shrink-0"
-                    :class="c.lastStatus === 'ok' ? 'bg-ctp-green' : c.lastStatus === 'fail' ? 'bg-ctp-red' : 'bg-ctp-overlay0'"
-                  />
-                  <div class="flex-1 min-w-0">
-                    <div class="text-sm text-ctp-text truncate">{{ c.name }}</div>
-                    <div class="text-[10px] text-ctp-overlay1 font-mono truncate">{{ c.host }}:{{ c.port }}</div>
-                  </div>
-                  <span class="text-[10px] shrink-0" :class="c.lastStatus === 'ok' ? 'text-ctp-green' : c.lastStatus === 'fail' ? 'text-ctp-red' : 'text-ctp-overlay1'">
-                    {{ t(`agent.configStatus.${c.lastStatus || 'unknown'}`) }}
-                  </span>
-                  <button
-                    class="btn btn-ghost !px-1.5 !py-1 text-ctp-overlay1 hover:text-ctp-green shrink-0"
-                    :title="t('agent.retest')"
-                    :disabled="testingCfgId === c.id"
-                    @click="testAgent(c)"
-                  >
-                    <ArrowPathIcon :class="['w-3.5 h-3.5', testingCfgId === c.id ? 'animate-spin' : '']" />
-                  </button>
-                  <button
-                    class="btn btn-ghost !px-1.5 !py-1 text-ctp-overlay1 hover:text-ctp-red shrink-0"
-                    :title="t('agent.delete')"
-                    @click="deletingCfg = c"
-                  >
-                    <TrashIcon class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <!-- 已检测到但未配置的适配器(当前仅 opencode, 附本机安装验证) -->
-              <div v-else class="space-y-1">
-                <p class="text-[11px] text-ctp-subtext0">{{ t('agent.noConfigs') }}</p>
-                <div
-                  v-for="a in adapters"
-                  :key="a.id"
-                  class="flex items-center gap-2 border border-ctp-surface0 rounded-md px-3 py-1.5"
-                >
-                  <span
-                    class="w-2 h-2 rounded-full shrink-0"
-                    :class="a.conn === 'ok' ? 'bg-ctp-green' : a.conn === 'fail' ? 'bg-ctp-red' : 'bg-ctp-overlay0'"
-                  />
-                  <span class="text-sm text-ctp-text shrink-0">{{ a.name }}</span>
-                  <span v-if="a.env?.version" class="text-[10px] text-ctp-overlay1 shrink-0">v{{ a.env.version }}</span>
-                  <span
-                    class="text-[10px] text-ctp-overlay1 truncate"
-                    :class="a.conn === 'ok' ? 'text-ctp-green' : a.conn === 'fail' ? 'text-ctp-red' : ''"
-                    :title="a.env?.detail"
-                  >{{ a.env?.detail }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 运行实例((project, adapter, host)) -->
-            <div v-if="instances.length">
-              <div class="flex items-center justify-between mb-1.5">
-                <div class="text-xs text-ctp-overlay1">{{ t('agent.instances') }}</div>
-                <button
-                  class="btn btn-ghost !px-2 !py-1 text-xs"
-                  :title="t('agent.refresh')"
-                  @click="loadInstances"
-                >
-                  <ArrowPathIcon :class="['w-3.5 h-3.5', loadingInstances ? 'animate-spin' : '']" />
-                </button>
-              </div>
-              <div class="space-y-1.5">
-                <div
-                  v-for="i in instances"
-                  :key="i.id"
-                  class="flex items-center gap-2 border border-ctp-surface0 rounded-md px-3 py-1.5"
-                >
-                  <span
-                    class="w-2 h-2 rounded-full shrink-0"
-                    :class="i.state === 'ready' || i.state === 'busy' || i.state === 'idle' ? 'bg-ctp-green' : i.state === 'error' ? 'bg-ctp-red' : i.state === 'starting' ? 'bg-ctp-yellow' : 'bg-ctp-overlay0'"
-                  />
-                  <span class="text-[10px] font-mono text-ctp-subtext1 shrink-0">{{ i.adapter }}</span>
-                  <span class="text-[10px] font-mono text-ctp-overlay1 shrink-0">{{ i.host }}:{{ i.port || '—' }}</span>
-                  <span v-if="i.taskBranch" class="text-[10px] font-mono text-ctp-sapphire truncate">{{ i.taskBranch }}</span>
-                  <span class="flex-1" />
-                  <span class="text-[10px] shrink-0" :class="i.state === 'error' ? 'text-ctp-red' : 'text-ctp-overlay1'">
-                    {{ t(`agent.instanceState.${i.state || 'stopped'}`) }}
-                  </span>
-                  <button
-                    class="btn btn-ghost !px-1.5 !py-1 text-ctp-overlay1 hover:text-ctp-red shrink-0"
-                    :title="t('agent.stopInstance')"
-                    @click="stopInstance(i)"
-                  >
-                    <StopIcon class="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
             <!-- 知识库 -->
             <div>
               <div class="flex items-center justify-between mb-1.5">
@@ -594,36 +424,5 @@ function openDoc(id: string) {
       </div>
     </div>
 
-    <!-- 删除 agent 配置确认弹窗 -->
-    <div
-      v-if="deletingCfg"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-ctp-base/70 backdrop-blur-sm"
-      @click.self="deletingCfg = null"
-    >
-      <div class="panel w-full max-w-md p-5">
-        <div class="flex items-center justify-between mb-1">
-          <div class="flex items-center gap-2">
-            <TrashIcon class="w-5 h-5 text-ctp-red" />
-            <h2 class="text-base font-medium text-ctp-text">{{ t('agent.deleteTitle') }}</h2>
-          </div>
-          <button class="text-ctp-overlay1 hover:text-ctp-text" @click="deletingCfg = null">
-            <XMarkIcon class="w-5 h-5" />
-          </button>
-        </div>
-        <p class="text-xs text-ctp-subtext0 mb-3">{{ t('agent.deleteDesc') }}</p>
-        <div class="border border-ctp-surface0 rounded-lg px-3 py-2 mb-3">
-          <div class="text-sm text-ctp-text truncate">{{ deletingCfg.name }}</div>
-          <div class="text-[11px] text-ctp-overlay1 font-mono truncate">{{ deletingCfg.host }}:{{ deletingCfg.port }}</div>
-        </div>
-        <div class="flex justify-end gap-2">
-          <button class="btn btn-ghost text-xs" @click="deletingCfg = null">
-            {{ t('common.cancel') }}
-          </button>
-          <button class="btn btn-red text-xs" @click="confirmDeleteCfg">
-            {{ t('common.confirm') }}
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>

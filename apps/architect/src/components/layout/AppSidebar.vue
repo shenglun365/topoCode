@@ -209,7 +209,6 @@ function isOverviewActive() {
         >
           <Cog6ToothIcon class="w-4 h-4 text-ctp-lavender" />
           <span class="flex-1 text-left">{{ t('nav.tree.config') }}</span>
-          <span class="chip bg-ctp-surface0 text-ctp-subtext0">{{ agent.adapters.length }}</span>
         </button>
       </template>
     </div>

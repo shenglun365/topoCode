@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, CubeIcon, RocketLaunchIcon, SparklesIcon, ArrowRightIcon, ExclamationTriangleIcon,
@@ -8,7 +8,6 @@ import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchTaskStore } from '@/stores/task-store'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { commitBatch } from '@/services/execution-batch'
-import { apiGet } from '@/services/api-client'
 import type { ExecutionTask } from '@/types'
 import PoolSelectDialog from '@/components/coding/PoolSelectDialog.vue'
 
@@ -23,29 +22,14 @@ const agent = useArchAgentStore()
 const taskStore = useArchTaskStore()
 const requirement = useArchRequirementStore()
 
-const selectedAdapter = ref(agent.adapters[0]?.id ?? 'opencode')
-const selectedModel = ref(agent.adapters[0]?.models?.[0] ?? '')
-const testing = ref(false)
-const connectivity = ref<'unknown' | 'ok' | 'fail'>('unknown')
 const picked = ref<string[]>([])
 const pickerOpen = ref(false)
 const created = ref(false)
-
-watch(selectedAdapter, (id) => {
-  const a = agent.adapters.find((x) => x.id === id)
-  selectedModel.value = a?.models?.[0] ?? ''
-  connectivity.value = 'unknown'
-})
 
 onMounted(() => {
   if (props.preselect?.length) picked.value = [...props.preselect]
 })
 
-const connColor: Record<string, string> = {
-  unknown: 'bg-ctp-surface0 text-ctp-overlay1',
-  ok: 'bg-ctp-green/15 text-ctp-green',
-  fail: 'bg-ctp-red/15 text-ctp-red',
-}
 const prioColor: Record<string, string> = {
   P0: 'bg-ctp-red/15 text-ctp-red',
   P1: 'bg-ctp-peach/15 text-ctp-peach',
@@ -55,24 +39,13 @@ const selectedReqs = computed(() => picked.value.map((id) => requirement.byId(id
 const activeTask = computed(() => taskStore.activeTaskOf)
 const busy = computed(() => agent.running)
 
-async function testConnectivity() {
-  testing.value = true
-  connectivity.value = 'unknown'
-  try {
-    const res = await apiGet<{ status: string }>(`/agent/adapters/${selectedAdapter.value}/connectivity`)
-    connectivity.value = res.status === 'ok' ? 'ok' : 'fail'
-  } catch {
-    connectivity.value = 'fail'
-  }
-  testing.value = false
-}
-
 async function start() {
   if (!picked.value.length || created.value) return
   const reqs = picked.value.map((id) => requirement.byId(id)!).filter(Boolean)
   if (!reqs.length) return
   created.value = true
-  const { exec } = await commitBatch(reqs, selectedAdapter.value, undefined, { model: selectedModel.value || undefined })
+  // A7：执行走 runner、对话走 tAgent，adapter 字段已无实际用途(传空占位)。
+  const { exec } = await commitBatch(reqs, '')
   emit('created', exec)
 }
 </script>
@@ -106,56 +79,7 @@ async function start() {
         </span>
       </div>
       <div class="p-4 space-y-4">
-        <!-- coding agent + 模型 + 连通性 -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="text-xs text-ctp-overlay1">{{ t('execute.selectAgent') }}</label>
-            <div class="flex flex-wrap gap-1.5 mt-1.5">
-              <button
-                v-for="a in agent.adapters"
-                :key="a.id"
-                class="chip cursor-pointer"
-                :class="selectedAdapter === a.id ? 'ring-1 ring-ctp-sky/50 bg-ctp-sky/10 text-ctp-sky' : 'bg-ctp-surface0 text-ctp-subtext1'"
-                @click="selectedAdapter = a.id"
-              >
-                {{ a.name }}
-              </button>
-            </div>
-            <div
-              v-if="selectedModel"
-              class="flex items-center gap-2 mt-2"
-            >
-              <label class="text-[11px] text-ctp-overlay1">{{ t('execute.selectModel') }}</label>
-              <select
-                v-model="selectedModel"
-                class="input !w-36 !py-1 text-xs"
-              >
-                <option
-                  v-for="m in agent.adapters.find((a) => a.id === selectedAdapter)?.models ?? []"
-                  :key="m"
-                  :value="m"
-                >
-                  {{ m }}
-                </option>
-              </select>
-              <button
-                class="btn btn-ghost !py-1"
-                :disabled="testing"
-                @click="testConnectivity"
-              >
-                <BoltIcon
-                  class="w-3.5 h-3.5"
-                  :class="{ 'animate-spin': testing }"
-                />{{ testing ? t('execute.testing') : t('execute.testConn') }}
-              </button>
-              <span
-                v-if="connectivity !== 'unknown'"
-                class="chip"
-                :class="connColor[connectivity]"
-              >{{ t(`execute.conn${connectivity === 'ok' ? 'Ok' : 'Fail'}`) }}</span>
-            </div>
-          </div>
-
+        <div>
           <div>
             <label class="text-xs text-ctp-overlay1">{{ t('execute.selectReq') }}</label>
             <button

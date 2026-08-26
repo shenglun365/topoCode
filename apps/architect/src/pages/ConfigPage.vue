@@ -19,7 +19,6 @@ const project = useArchProjectStore()
 spec.load()
 agent.load()
 
-const adapters = computed(() => agent.adapters)
 const sessions = computed(() => agent.sessions)
 
 const statusColor: Record<string, string> = {
@@ -161,35 +160,6 @@ loadLlm()
     />
 
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-      <div class="panel overflow-hidden">
-        <div class="panel-header">
-          <span class="flex items-center gap-2">
-            <CpuChipIcon class="w-4 h-4 text-ctp-green" />{{ t('config.externalAgents') }}
-          </span>
-          <span class="text-[11px] text-ctp-overlay1">{{ adapters.length }} {{ t('config.adapters') }}</span>
-        </div>
-        <div class="p-3 space-y-2">
-          <div
-            v-for="a in adapters"
-            :key="a.id"
-            class="border border-ctp-surface0 rounded-lg px-3 py-2.5"
-          >
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-sm text-ctp-text">{{ a.name }}</span>
-              <span class="chip bg-ctp-surface0 text-ctp-subtext1">{{ a.id }}</span>
-              <div class="flex-1" />
-              <span
-                v-if="a.keepContext"
-                class="chip bg-ctp-teal/15 text-ctp-teal"
-              >{{ t('coding.keepContext') }}</span>
-            </div>
-            <p class="text-[11px] text-ctp-subtext0 mt-1">
-              {{ a.note }}
-            </p>
-          </div>
-        </div>
-      </div>
-
       <div class="panel overflow-hidden">
         <div class="panel-header">
           <span class="flex items-center gap-2">

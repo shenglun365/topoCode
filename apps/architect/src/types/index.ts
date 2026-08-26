@@ -694,95 +694,9 @@ export interface LaunchInfo {
   scaffold?: Record<string, unknown> | null
 }
 
-/** 概览页「agent设置」栏目：coding agent 适配器。 */
-export interface AgentAdapterInfo {
-  id: string
-  name: string
-  desc?: string
-  models?: string[]
-  keepContext?: boolean
-  note?: string
-}
-
 /** 概览页「agent设置」栏目：KB 关联项(来自 /project/kb/list 的关联项目)。 */
 export interface KbLinkItem extends KbProject {
   bound?: boolean
-}
-
-/** 概览页「agent设置」栏目：coding agent 适配器 + 联通性。 */
-export interface OverviewAdapter extends AgentAdapterInfo {
-  conn: Connectivity
-  /** opencode 本机安装/适配验证(仅 opencode 携带)。 */
-  env?: AgentEnvCheck
-}
-
-/** 三方 coding agent 连接配置(架构师不存三方密码，仅存连接参数)。 */
-export interface AgentConfig {
-  id: string
-  adapter: string
-  name: string
-  mode: 'server' | 'cli'
-  /** 实例运行模式: managed(架构师 spawn serve) | external(直连已有/远程 serve)。 */
-  instanceMode?: 'managed' | 'external'
-  host: string
-  port: number
-  username: string
-  /** 探测地址(如 http://127.0.0.1:4096)，缺省由 host/port 推导。 */
-  url?: string
-  /** 选用的模型 id 列表(来自 agent 自身已配置 auth 的模型)。 */
-  models: string[]
-  defaultModel?: string
-  lastStatus?: 'unknown' | 'ok' | 'fail'
-  lastDetail?: string
-  lastCheckAt?: number
-  createdAt?: number
-  updatedAt?: number
-}
-
-/** Agent 运行实例((project, adapter, host) 维度) — 连接配置 × 具体项目的运行时实体。 */
-export interface AgentInstance {
-  id: string
-  projectId: string
-  adapter: string
-  /** 实例所在主机(支持远程 IP)。 */
-  host: string
-  mode: 'managed' | 'external'
-  state: 'starting' | 'ready' | 'busy' | 'idle' | 'stopped' | 'error'
-  pid?: number
-  port?: number
-  /** 工程实现目录(= arch_projects.rootPath)。 */
-  workDir?: string
-  repoUrl?: string
-  baseBranch?: string
-  baseCommit?: string
-  /** 当前任务分支(arch/<task_id>)。 */
-  taskBranch?: string
-  lastCommit?: string
-  refCount?: number
-  idleUntil?: number
-  error?: string
-  createdAt?: number
-  updatedAt?: number
-}
-
-/** 连通性测试结果。 */
-export interface AgentProbeResult {
-  status: 'ok' | 'fail'
-  detail: string
-  version?: string
-  models?: { id: string; name: string }[]
-  connected?: string[]
-}
-
-/** 本机 opencode 安装/适配验证结果。 */
-export interface AgentEnvCheck {
-  status: 'ok' | 'partial' | 'fail'
-  installed: boolean
-  binary?: string
-  version?: string
-  config?: string[]
-  detail: string
-  checks: { binary: boolean; version: boolean; config: boolean }
 }
 
 /** 知识库连接配置。 */
@@ -809,9 +723,6 @@ export interface OverviewMission {
 export interface OverviewData {
   launch: LaunchInfo
   recent: ProjectInfo[]
-  adapters: OverviewAdapter[]
-  /** 已保存的三方 agent 连接配置。 */
-  agentConfigs: AgentConfig[]
   kb: {
     count: number
     linked: boolean
