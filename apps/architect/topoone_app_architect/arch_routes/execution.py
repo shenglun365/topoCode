@@ -251,6 +251,62 @@ async def create_execution_task(request: Request):
     return ok({"plan": plan_out, "exec": exec_out})
 
 
+# ── Subagent 指派(P3.2: 经 agent-bus broker 交接) ────────────────────
+
+def assign_requirement(req_id: str, target: str, exec_id: str = "",
+                       tool: str = "", params: Optional[dict] = None):
+    """把需求指派给 subagent：runner(内部执行任务) / mcp(外部 MCP 工具)。
+
+    成功: 向 broker 发布 execution.handoff → 需求 status→executing + 持久化 assignedTo
+    (broker 分发循环按 dst 路由: runner→architect /exec/{id}/run, mcp→MCP 工具调用)。
+    返回 (req, None)；失败 (None, (http_code, msg))。
+    """
+    req = store.RequirementsStore.get(req_id)
+    if not req:
+        return None, (404, "需求不存在")
+    target = (target or "").strip().lower()
+    if target not in ("runner", "mcp"):
+        return None, (400, "target 必须为 runner 或 mcp")
+    exec_id = (exec_id or "").strip()
+    tool = (tool or "").strip()
+    if target == "runner":
+        exec_id = exec_id or (req.get("execId") or "").strip()
+        if not exec_id:
+            return None, (400, "指派 runner 需要 execId(执行任务)")
+        if not store.ExecutionTasksStore.get(exec_id):
+            return None, (400, f"执行任务 {exec_id} 不存在")
+        assigned = "runner"
+    else:
+        if not tool:
+            return None, (400, "指派 mcp 需要 tool(MCP 工具名)")
+        assigned = f"mcp:{tool}"
+    from .bus_client import get_bus
+    pub = get_bus().publish("architect", target, "execution.handoff", {
+        "reqId": req_id, "execId": exec_id, "tool": tool,
+        "params": params or {}, "assignedTo": assigned,
+    })
+    if pub is None:
+        return None, (503, "agent-bus broker 不可达，无法发布交接消息")
+    store.RequirementsStore.update(req_id, {
+        "status": "executing", "assignedTo": assigned,
+        "execId": exec_id or req.get("execId"), "updatedAt": _ts(),
+    })
+    return store.RequirementsStore.get(req_id), None
+
+
+@router.post("/requirements/{req_id}/assign")
+async def assign_requirement_endpoint(req_id: str, request: Request):
+    """P3.2: 需求指派 subagent(runner/mcp) → bus handoff → 状态→executing。"""
+    body = await request.json()
+    row, e = assign_requirement(
+        req_id, body.get("target") or "", exec_id=body.get("execId") or "",
+        tool=body.get("tool") or "", params=body.get("params") or {})
+    if not row:
+        code, msg = e
+        return err(code, msg)
+    return ok(row)
+
+
 @router.post("/exec/{task_id}/run")
 async def run_execution_task(task_id: str):
     """把已确认的任务树提交给 runner 执行(SE.execute → on_submit → runner)。

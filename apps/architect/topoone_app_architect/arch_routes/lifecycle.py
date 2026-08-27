@@ -65,6 +65,7 @@ def build_session_groups(reqs: list, convs: list, include_cancelled: bool = Fals
             "hasDesign": bool(r.get("design")),
             "planId": r.get("planId") or "",
             "execId": r.get("execId") or "",
+            "assignedTo": r.get("assignedTo") or "",
             "updatedAt": r.get("updatedAt") or 0,
         })
     for k in groups:

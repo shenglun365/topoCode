@@ -348,6 +348,8 @@ export interface ReqSession {
   hasDesign: boolean
   planId: string
   execId: string
+  /** 指派的 subagent: runner | mcp:<tool>(P3.2)。 */
+  assignedTo: string
   updatedAt: number
 }
 

@@ -514,6 +514,35 @@ def tool_req_finalize(title: str = "", description: str = "",
     }
 
 
+# ── 需求指派工具(定稿后 → subagent 执行，经 agent-bus broker 交接) ─────
+
+@register_architect_tool(
+    "execution.assign",
+    "指派：把本会话需求指派给 subagent 执行(定稿/待执行后可用)。"
+    "target=runner 指派内部执行任务(需 execId，缺省取需求已绑定执行任务；"
+    "broker 将触发 /exec/{execId}/run)；target=mcp 指派外部 MCP 工具(需 tool，"
+    "可选 params)。成功后需求状态→执行中，左栏会话移入「执行中」组。"
+    "参数：target(\"runner\"|\"mcp\")、execId?(runner)、tool?(mcp)、params?{…}(mcp)。",
+)
+def tool_execution_assign(target: str = "", execId: str = "",
+                          tool: str = "",
+                          params: Optional[Dict[str, Any]] = None,
+                          root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx
+    from .execution import assign_requirement
+    req_id = ctx.get_req()
+    if not req_id:
+        return {"ok": False, "error": "当前会话未绑定需求，无法指派"}
+    row, e = assign_requirement(req_id, target, exec_id=execId, tool=tool, params=params)
+    if not row:
+        return {"ok": False, "error": e[1]}
+    return {
+        "ok": True, "reqId": req_id, "status": row.get("status"),
+        "assignedTo": row.get("assignedTo"), "lifecycle": "executing",
+        "summary": f"已指派给 {row.get('assignedTo')}，需求进入执行中(broker 已发布交接)。",
+    }
+
+
 # ── LLM 通道: 复用主后端 ai chat ─────────────────────────────────────
 
 _MODEL_KEY = "llm.modelId"
@@ -651,7 +680,8 @@ _CAPABILITY_DOC = (
     "- asset.semantic.reconcile：校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)\n"
     "- asset.semantic.refresh：更新过期资产(增量重提；失败软删并重新生成)\n"
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
-    "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n\n"
+    "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n"
+    "- execution.assign：指派(把定稿/待执行需求指派给 subagent 执行：runner=内部执行任务，mcp=外部 MCP 工具；成功后需求进入执行中)\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
@@ -671,6 +701,8 @@ _CAPABILITY_DOC = (
     '- req.finalize: {"title": "…", "description": "…", "functionalScope": ["…"], '
     '"entityBoundary": ["…"], "assetScope": [{"assetId":"…","assetType":"component","role":"core",'
     '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…"}\n'
+    '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
+    '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"
     "可处理范围：\n"

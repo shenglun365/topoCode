@@ -116,10 +116,73 @@ class TestDispatch:
         from topoone_app_architect import agent_bus
         store.AgentBusStore.create({
             "id": "bus-d1", "src": "plan", "dst": "runner",
-            "topic": "execution.handoff", "payload": {}, "status": "pending",
-            "createdAt": 1, "updatedAt": 1,
+            "topic": "execution.handoff", "payload": {"execId": "ex-1"},
+            "status": "pending", "createdAt": 1, "updatedAt": 1,
         })
+        monkeypatch.setattr(agent_bus, "_http_post_json",
+                            lambda url, payload, timeout=120.0: (True, "ok"))
         msg = store.AgentBusStore.pending()[0]
         out = agent_bus._route_and_mark(msg)
         assert out["status"] == "delivered"
         assert store.AgentBusStore.count_pending() == 0
+
+
+class TestRouting:
+    def _seed(self, tmp_path, monkeypatch, topic="execution.handoff",
+              dst="runner", payload=None):
+        _setup(tmp_path, monkeypatch)
+        from topoone_app_architect import agent_bus
+        store.AgentBusStore.create({
+            "id": "bus-r1", "src": "architect", "dst": dst, "topic": topic,
+            "payload": payload or {}, "status": "pending",
+            "createdAt": 1, "updatedAt": 1,
+        })
+        return agent_bus
+
+    def test_handoff_runner_calls_architect_run(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, dst="runner", payload={"execId": "ex-9"})
+        calls = []
+        monkeypatch.setattr(ab, "_http_post_json",
+                            lambda url, payload, timeout=120.0: calls.append((url, payload)) or (True, "ok"))
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert calls and calls[0][0].endswith("/api/architect/exec/ex-9/run")
+        assert out["status"] == "delivered"
+
+    def test_handoff_runner_missing_execid_fails(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, dst="runner", payload={})
+
+        def _boom(*a, **k):
+            raise AssertionError("不应发起 HTTP 调用")
+        monkeypatch.setattr(ab, "_http_post_json", _boom)
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert out["status"] == "failed"
+        assert "execId" in (out.get("error") or "")
+
+    def test_handoff_mcp_calls_tool(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, dst="mcp",
+                        payload={"tool": "deploy", "params": {"env": "staging"}})
+        calls = []
+        monkeypatch.setattr(ab, "_http_post_json",
+                            lambda url, payload, timeout=120.0: calls.append((url, payload)) or (True, "ok"))
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert calls and calls[0][0].endswith("/v1/tools/deploy/call")
+        assert calls[0][1] == {"env": "staging"}
+        assert out["status"] == "delivered"
+
+    def test_handoff_upstream_failure_marks_failed(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, dst="runner", payload={"execId": "ex-9"})
+        monkeypatch.setattr(ab, "_http_post_json",
+                            lambda url, payload, timeout=120.0: (False, "HTTP 502: runner down"))
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert out["status"] == "failed"
+        assert "502" in (out.get("error") or "")
+
+    def test_other_topics_delivered_without_http(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, topic="execution.progress",
+                        dst="monitor", payload={"step": 1})
+
+        def _boom(*a, **k):
+            raise AssertionError("监控事件不应发起 HTTP 调用")
+        monkeypatch.setattr(ab, "_http_post_json", _boom)
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert out["status"] == "delivered"

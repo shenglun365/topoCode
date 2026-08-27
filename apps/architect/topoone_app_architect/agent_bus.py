@@ -16,14 +16,21 @@ P3.1 分发 = 标记已分发(持久化 + 已推送)；P3.2 按 `to` 路由到 r
 """
 import argparse
 import asyncio
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
 # broker 进程内单例状态(单进程)：WS 订阅者集合。
 _subscribers: set = set()
+
+# P3.2 路由目标(默认本地拓扑，可用环境变量覆盖)
+_DEFAULT_ARCH_URL = os.environ.get("ARCH_BASE_URL", "http://127.0.0.1:3470").rstrip("/")
+_DEFAULT_MCP_URL = os.environ.get("MCP_BASE_URL", "http://127.0.0.1:3460").rstrip("/")
 
 
 async def _broadcast(payload: dict) -> None:
@@ -38,12 +45,62 @@ async def _broadcast(payload: dict) -> None:
         _subscribers.discard(ws)
 
 
+def _http_post_json(url: str, payload: dict, timeout: float = 120.0):
+    """POST JSON。返回 (ok, detail)：HTTP 2xx→(True, 响应摘要)；否则 (False, 原因)。"""
+    req = urllib.request.Request(
+        url, data=json.dumps(payload or {}).encode(),
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode()
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = body[:200]
+            return True, str(data)[:300]
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            d = json.loads(raw)
+            detail = d.get("message") or d.get("detail") or str(e)
+        except Exception:
+            detail = raw[:200] or str(e)
+        return False, f"HTTP {e.code}: {detail}"[:300]
+    except Exception as e:  # noqa: BLE001
+        return False, f"unreachable: {e}"[:300]
+
+
 def _route_and_mark(msg: dict) -> dict:
-    """单条消息分发(P3.1：标记已分发；P3.2 按 to 路由到 runner/plan/外部)。同步执行。"""
+    """单条消息分发(P3.2)：execution.handoff 按 dst 路由执行，其余仅持久化+已推送。
+
+    同步执行(store/HTTP 调用)；返回标记后的行。
+    """
     from topoone_app_architect.arch_routes import store
-    # P3.2 将在此按 to 路由：runner → 触发执行；plan → 触发 plan agent；
-    # 其余(monitor/user/*)仅持久化 + 已推送(监控事件)。
-    store.AgentBusStore.mark(msg["id"], status="delivered")
+    topic = (msg.get("topic") or "").strip()
+    dst = (msg.get("dst") or "").strip()
+    payload = msg.get("payload") or {}
+    ok_flag, detail = True, ""
+    if topic == "execution.handoff":
+        if dst == "runner":
+            exec_id = (payload.get("execId") or "").strip()
+            if not exec_id:
+                ok_flag, detail = False, "handoff 缺少 execId"
+            else:
+                url = f"{_DEFAULT_ARCH_URL}/api/architect/exec/{exec_id}/run"
+                ok_flag, detail = _http_post_json(url, {})
+        elif dst == "mcp":
+            tool = (payload.get("tool") or "").strip()
+            if not tool:
+                ok_flag, detail = False, "handoff 缺少 MCP tool 名"
+            else:
+                url = f"{_DEFAULT_MCP_URL}/v1/tools/{tool}/call"
+                ok_flag, detail = _http_post_json(url, payload.get("params") or {})
+        else:
+            detail = f"dst={dst or '*'} 仅持久化(监控/用户事件)"
+    store.AgentBusStore.mark(
+        msg["id"], status="delivered" if ok_flag else "failed",
+        error="" if ok_flag else detail)
     return store.AgentBusStore.get(msg["id"])
 
 

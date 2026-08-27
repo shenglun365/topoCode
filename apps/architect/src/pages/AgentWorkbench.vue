@@ -3,13 +3,14 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PlusIcon, ChevronDownIcon, ChevronRightIcon, ChatBubbleLeftRightIcon,
-  DocumentTextIcon, CheckCircleIcon,
+  DocumentTextIcon, CheckCircleIcon, UsersIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import DesignPanel from '@/components/design/DesignPanel.vue'
 import { LIFECYCLE_ORDER, lifecycleLabelKey } from '@/config/lifecycle'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { requirementService } from '@/services/requirement-service'
+import { useArchTaskStore } from '@/stores/task-store'
 import { readModelPref } from '@topo/web-core/shell'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import type { ConversationDetail, ReqLifecycle, ReqSession, ReqSessionGroups } from '@/types'
@@ -24,6 +25,7 @@ import type { ConversationDetail, ReqLifecycle, ReqSession, ReqSessionGroups } f
 
 const { t } = useI18n()
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
+const task = useArchTaskStore()
 
 const groups = ref<ReqSessionGroups | null>(null)
 const selectedId = ref('')
@@ -34,6 +36,15 @@ const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const chatConvId = ref('')
 const finalizing = ref(false)
+
+// P3.2: 指派 subagent 弹窗
+const assignFor = ref<ReqSession | null>(null)
+const assignTarget = ref<'runner' | 'mcp'>('runner')
+const assignExecId = ref('')
+const assignTool = ref('')
+const assignParams = ref('')
+const assignBusy = ref(false)
+const assignError = ref('')
 
 const allSessions = computed<ReqSession[]>(() => {
   const g = groups.value
@@ -197,8 +208,61 @@ async function finalize() {
   }
 }
 
+/** P3.2: 指派 subagent(待执行 → 执行中，经 broker handoff)。 */
+function openAssign(s: ReqSession) {
+  assignFor.value = s
+  assignTarget.value = 'runner'
+  assignExecId.value = s.execId || ''
+  assignTool.value = ''
+  assignParams.value = ''
+  assignError.value = ''
+  void task.load()
+}
+function closeAssign() {
+  assignFor.value = null
+}
+async function confirmAssign() {
+  const s = assignFor.value
+  if (!s) return
+  if (assignTarget.value === 'runner' && !assignExecId.value) {
+    assignError.value = t('workbench.assign.execTaskEmpty')
+    return
+  }
+  if (assignTarget.value === 'mcp' && !assignTool.value.trim()) {
+    assignError.value = t('workbench.assign.tool')
+    return
+  }
+  let params: Record<string, unknown> | undefined
+  if (assignTarget.value === 'mcp' && assignParams.value.trim()) {
+    try {
+      params = JSON.parse(assignParams.value)
+    } catch {
+      assignError.value = 'JSON'
+      return
+    }
+  }
+  assignBusy.value = true
+  assignError.value = ''
+  try {
+    await requirementService.assign(s.id, {
+      target: assignTarget.value,
+      execId: assignTarget.value === 'runner' ? assignExecId.value : undefined,
+      tool: assignTarget.value === 'mcp' ? assignTool.value.trim() : undefined,
+      params,
+    })
+    closeAssign()
+    await loadSessions()
+    selectedId.value = s.id
+  } catch (err) {
+    assignError.value = err instanceof Error ? err.message : t('workbench.assign.error')
+  } finally {
+    assignBusy.value = false
+  }
+}
+
 onMounted(() => {
   void loadSessions()
+  void task.load()
 })
 </script>
 
@@ -228,20 +292,33 @@ onMounted(() => {
             </span>
           </button>
           <div v-if="isGroupOpen(lc)">
-            <button
+            <div
               v-for="s in groups?.[lc] ?? []"
               :key="s.id"
-              class="block w-full px-3 py-1.5 text-left transition-colors"
-              :class="s.id === selectedId ? 'bg-ctp-surface0/70' : 'hover:bg-ctp-surface0/40'"
-              @click="selectSession(s)"
+              class="flex items-stretch"
             >
-              <div class="truncate text-xs text-ctp-text">{{ s.title || s.id }}</div>
-              <div class="mt-0.5 flex items-center gap-1.5">
-                <span class="chip !text-[9px]" :class="prioClass(s.priority)">{{ s.priority }}</span>
-                <span class="font-mono text-[9px] text-ctp-overlay0">{{ s.id }}</span>
-                <ChatBubbleLeftRightIcon v-if="s.conversationId" class="h-3 w-3 text-ctp-overlay1" />
-              </div>
-            </button>
+              <button
+                class="block min-w-0 flex-1 px-3 py-1.5 text-left transition-colors"
+                :class="s.id === selectedId ? 'bg-ctp-surface0/70' : 'hover:bg-ctp-surface0/40'"
+                @click="selectSession(s)"
+              >
+                <div class="truncate text-xs text-ctp-text">{{ s.title || s.id }}</div>
+                <div class="mt-0.5 flex items-center gap-1.5">
+                  <span class="chip !text-[9px]" :class="prioClass(s.priority)">{{ s.priority }}</span>
+                  <span class="font-mono text-[9px] text-ctp-overlay0">{{ s.id }}</span>
+                  <ChatBubbleLeftRightIcon v-if="s.conversationId" class="h-3 w-3 text-ctp-overlay1" />
+                  <UsersIcon v-if="s.assignedTo" class="h-3 w-3 text-ctp-green" />
+                </div>
+              </button>
+              <button
+                v-if="lc === 'ready'"
+                class="shrink-0 px-1.5 text-ctp-overlay1 transition-colors hover:text-ctp-blue"
+                :title="t('workbench.assign.title')"
+                @click="openAssign(s)"
+              >
+                <UsersIcon class="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         </template>
         <div v-if="allSessions.length === 0" class="px-3 py-8 text-center">
@@ -299,5 +376,64 @@ onMounted(() => {
         <p class="text-xs">{{ t('workbench.empty') }}</p>
       </div>
     </section>
+
+    <!-- P3.2: 指派 subagent 弹窗 -->
+    <div
+      v-if="assignFor"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      @click.self="closeAssign"
+    >
+      <div class="w-96 rounded-lg border border-ctp-surface0 bg-ctp-mantle p-4 shadow-xl">
+        <div class="mb-3 flex items-center justify-between">
+          <span class="text-sm font-semibold text-ctp-text">{{ t('workbench.assign.title') }}</span>
+          <button class="btn btn-xs btn-ghost" @click="closeAssign">
+            <XMarkIcon class="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <p class="mb-3 truncate text-xs text-ctp-subtext0">
+          {{ assignFor.title || assignFor.id }}
+          <span class="font-mono text-[10px] text-ctp-overlay0">{{ assignFor.id }}</span>
+        </p>
+        <div class="mb-3">
+          <span class="mb-1.5 block text-[11px] text-ctp-subtext1">{{ t('workbench.assign.target') }}</span>
+          <div class="flex gap-3">
+            <label class="flex cursor-pointer items-center gap-1.5 text-xs text-ctp-text">
+              <input v-model="assignTarget" type="radio" value="runner" class="accent-ctp-blue" />
+              {{ t('workbench.assign.runner') }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-1.5 text-xs text-ctp-text">
+              <input v-model="assignTarget" type="radio" value="mcp" class="accent-ctp-blue" />
+              {{ t('workbench.assign.mcp') }}
+            </label>
+          </div>
+        </div>
+        <div v-if="assignTarget === 'runner'" class="mb-3">
+          <span class="mb-1.5 block text-[11px] text-ctp-subtext1">{{ t('workbench.assign.execTask') }}</span>
+          <select v-model="assignExecId" class="input w-full !py-1.5 text-xs">
+            <option value="">{{ t('workbench.assign.execTaskEmpty') }}</option>
+            <option v-for="e in task.executionTasks" :key="e.id" :value="e.id">
+              {{ e.id }} · {{ e.status }}
+            </option>
+          </select>
+        </div>
+        <template v-else>
+          <div class="mb-3">
+            <span class="mb-1.5 block text-[11px] text-ctp-subtext1">{{ t('workbench.assign.tool') }}</span>
+            <input v-model="assignTool" class="input w-full !py-1.5 text-xs" />
+          </div>
+          <div class="mb-3">
+            <span class="mb-1.5 block text-[11px] text-ctp-subtext1">{{ t('workbench.assign.params') }}</span>
+            <textarea v-model="assignParams" rows="2" class="input w-full resize-none text-xs" placeholder='{"key": "value"}' />
+          </div>
+        </template>
+        <p v-if="assignError" class="mb-2 text-[11px] text-ctp-red">{{ assignError }}</p>
+        <div class="flex justify-end gap-2">
+          <button class="btn btn-xs btn-ghost" @click="closeAssign">{{ t('workbench.assign.cancel') }}</button>
+          <button class="btn btn-xs btn-blue" :disabled="assignBusy" @click="confirmAssign">
+            {{ assignBusy ? t('workbench.assign.busy') : t('workbench.assign.submit') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

@@ -111,6 +111,7 @@ ARCH_PROJECT_TABLES_SQL = """
         updated_at INTEGER DEFAULT 0,
         plan_id TEXT,
         exec_id TEXT,
+        assigned_to TEXT DEFAULT '',     -- 指派的 subagent: runner | mcp:<tool>
         remarks TEXT,
         parent_id TEXT,
         related_to TEXT,
@@ -418,6 +419,7 @@ def _project_migrations(db) -> None:
         ("design", "TEXT"),
         ("asset_invalidated", "INTEGER DEFAULT 0"),
         ("asset_invalidated_at", "INTEGER DEFAULT 0"),
+        ("assigned_to", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_execution_tasks", [
         ("instance_id", "TEXT DEFAULT ''"),
