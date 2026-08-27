@@ -18,7 +18,10 @@ export const requirementService = {
     return apiGet<ReqSessionGroups>(`/requirements/sessions${s ? `?${s}` : ''}`)
   },
   async create(data: Partial<Requirement>): Promise<Requirement> {
-    return apiPost<Requirement>('/requirements', data)
+    // 必须带 project：否则后端按无项目上下文写入主库，项目页(?project=)读项目库 → 新建不可见
+    const { project } = currentProjectParams()
+    const qs = project ? `?project=${encodeURIComponent(project)}` : ''
+    return apiPost<Requirement>(`/requirements${qs}`, data)
   },
   /** P3.2: 指派需求给 subagent(runner 内部执行任务 / mcp 外部工具) → 经 broker handoff → 执行中。 */
   async assign(reqId: string, data: {
