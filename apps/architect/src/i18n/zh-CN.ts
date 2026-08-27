@@ -5,6 +5,18 @@ export default {
     loading: '加载中...',
     fontScale: '界面字号（当前字体 1~3 倍）',
   },
+  workbench: {
+    sessions: {
+      title: '需求会话',
+      new: '新建会话',
+      newTitle: '未命名需求',
+      defaultTitle: '需求会话',
+      empty: '暂无会话，点击「新建会话」开始一条需求提案',
+    },
+    tabs: { chat: '对话', design: '方案' },
+    finalize: '定稿',
+    empty: '选择左侧会话或新建一条需求会话',
+  },
   nav: {
     overview: '项目概览',
     workbench: '工作台',

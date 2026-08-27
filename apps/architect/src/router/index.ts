@@ -29,14 +29,14 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'requirements',
         name: 'Requirements',
-        component: () => import('@/pages/RequirementsPage.vue'),
-        meta: { workbench: true, stepper: true, title: '需求分析' },
+        component: () => import('@/pages/AgentWorkbench.vue'),
+        meta: { workbench: true, title: '需求工作台' },
       },
       {
         path: 'requirements/analysis',
         name: 'RequirementAnalysis',
         component: () => import('@/pages/RequirementWorkspace.vue'),
-        meta: { workbench: true, stepper: true, title: '需求管理' },
+        meta: { workbench: true, title: '需求管理' },
       },
       {
         path: 'assets',

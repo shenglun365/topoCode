@@ -5,6 +5,18 @@ export default {
     loading: 'Loading...',
     fontScale: 'Interface font scale (1x–3x of current)',
   },
+  workbench: {
+    sessions: {
+      title: 'Requirement Sessions',
+      new: 'New Session',
+      newTitle: 'Untitled Requirement',
+      defaultTitle: 'Requirement Session',
+      empty: 'No sessions yet. Click "New Session" to start a requirement proposal.',
+    },
+    tabs: { chat: 'Chat', design: 'Design' },
+    finalize: 'Finalize',
+    empty: 'Select a session on the left or start a new one',
+  },
   nav: {
     overview: 'Overview',
     workbench: 'Workbench',

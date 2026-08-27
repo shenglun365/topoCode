@@ -25,6 +25,8 @@ const props = defineProps<{
   reqId: string
   analysis?: RequirementAnalysis
   canExecute?: boolean
+  /** inline 模式：不渲染全屏遮罩，作为页面内嵌面板（供 AgentWorkbench「方案」步骤复用）。 */
+  inline?: boolean
 }>()
 const emit = defineEmits<{ close: []; execute: [] }>()
 
@@ -50,6 +52,7 @@ watch(
     reset()
     load()
   },
+  { immediate: true },
 )
 
 function reset() {
@@ -145,9 +148,15 @@ function columnsText(ch: DesignDataChange): string {
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    :class="inline
+      ? 'flex-1 min-h-0 w-full flex flex-col'
+      : 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4'"
   >
-    <div class="flex flex-col w-full max-w-5xl max-h-[88vh] rounded-xl bg-ctp-base border border-ctp-surface1 shadow-2xl overflow-hidden">
+    <div
+      :class="inline
+        ? 'flex flex-col flex-1 min-h-0 w-full rounded-xl bg-ctp-base border border-ctp-surface1 overflow-hidden'
+        : 'flex flex-col w-full max-w-5xl max-h-[88vh] rounded-xl bg-ctp-base border border-ctp-surface1 shadow-2xl overflow-hidden'"
+    >
       <div class="shrink-0 px-4 py-3 border-b border-ctp-surface0">
         <div class="flex items-center gap-2">
           <SparklesIcon class="w-4 h-4 text-ctp-sky" />
@@ -168,6 +177,7 @@ function columnsText(ch: DesignDataChange): string {
             />{{ generating ? t('design.running') : t('design.button') }}
           </button>
           <button
+            v-if="!inline"
             class="btn btn-xs btn-ghost"
             @click="emit('close')"
           >
