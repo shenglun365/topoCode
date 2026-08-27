@@ -24,6 +24,7 @@ import { useComponentSelectionStore } from '@/stores/component-selection-store'
 import { useChatSession, type SessionPage } from '@/stores/chat-session-store'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
 import { ipc } from '@topo/web-core/services/ipc'
+import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 
 const { showId, componentId } = useComponentId('SH-004')
 const { t } = useI18n()
@@ -88,11 +89,34 @@ function handleMessagesClick(e: MouseEvent) {
   })
 }
 
-function formatMessageContent(msg: Message): string {
-  if (msg.role === 'assistant') {
-    return renderMarkdown(msg.content)
+interface MsgBlock { type: 'text' | 'mermaid' | 'plantuml'; html?: string; code?: string; diagId?: string }
+const DIAG_FENCE_RE = /```(mermaid|plantuml)\n([\s\S]*?)```/g
+
+/** 助手消息拆为 文本 / mermaid / plantuml 块；图块经 DiagramViewer（topoOne 内核）渲染。
+ *  文本段沿用本面板 MarkdownIt(hljs + 指令点击)渲染；非助手消息按纯文本转义。 */
+function blocksOf(msg: Message): MsgBlock[] {
+  const content = msg.content || ''
+  const blocks: MsgBlock[] = []
+  if (!content.trim()) return blocks
+  if (msg.role !== 'assistant') {
+    blocks.push({ type: 'text', html: escapeHtml(content) })
+    return blocks
   }
-  return msg.content
+  let last = 0
+  let idx = 0
+  let m: RegExpExecArray | null
+  DIAG_FENCE_RE.lastIndex = 0
+  while ((m = DIAG_FENCE_RE.exec(content)) !== null) {
+    const before = content.slice(last, m.index)
+    if (before.trim()) blocks.push({ type: 'text', html: renderMarkdown(before) })
+    const code = m[2].trim()
+    if (code) blocks.push({ type: m[1] as 'mermaid' | 'plantuml', code, diagId: `diag_${msg.id}_${idx++}` })
+    last = m.index + m[0].length
+  }
+  const after = content.slice(last)
+  if (after.trim()) blocks.push({ type: 'text', html: renderMarkdown(after) })
+  if (!blocks.length) blocks.push({ type: 'text', html: renderMarkdown(content) })
+  return blocks
 }
 
 interface Message {
@@ -714,7 +738,31 @@ onMounted(() => {
               <span class="ai-loading-dot" />
               <span class="ai-loading-dot" />
             </template>
-            <span v-html="formatMessageContent(msg)" />
+            <template v-else>
+              <template
+                v-for="(b, i) in blocksOf(msg)"
+                :key="i"
+              >
+                <span
+                  v-if="b.type === 'text'"
+                  v-html="b.html"
+                />
+                <DiagramViewer
+                  v-else-if="b.type === 'mermaid'"
+                  lang="mermaid"
+                  :code="b.code!"
+                  :diag-id="b.diagId!"
+                  :msg-id="msg.id"
+                />
+                <DiagramViewer
+                  v-else-if="b.type === 'plantuml'"
+                  lang="plantuml"
+                  :code="b.code!"
+                  :diag-id="b.diagId!"
+                  :msg-id="msg.id"
+                />
+              </template>
+            </template>
           </div>
         </div>
       </div>
@@ -1195,6 +1243,10 @@ onMounted(() => {
 
 .ai-message-assistant .ai-message-bubble :deep(em) {
   font-style: italic;
+}
+
+.ai-message-assistant .ai-message-bubble :deep(.diagram-container) {
+  margin: 0.5em 0;
 }
 
 /* ---- 组件选择引用区 ---- */

@@ -13,6 +13,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { isLLMConfigured, chat, type ChatOptions } from '@/services/llmClient'
 import { useComponentId } from '@topo/web-core/composables/useComponentId'
+import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 
 const props = defineProps<{
   taskId?: string
@@ -97,15 +98,11 @@ async function handleSend() {
       messages: sendMessages,
       onChunk(chunk: string) {
         assistantMsg.content += chunk
-        // Basic Markdown rendering — convert ```mermaid / ```plantuml blocks
-        if (chunk.includes('```mermaid') || chunk.includes('```plantuml')) {
-          assistantMsg.content = _renderMarkdownInline(assistantMsg.content)
-        }
         scrollToBottom()
       },
       signal: ac.signal,
     })
-    assistantMsg.content = _renderMarkdownInline(fullContent || assistantMsg.content)
+    assistantMsg.content = fullContent || assistantMsg.content
     assistantMsg.isStreaming = false
   } catch (err: any) {
     if (err.name === 'AbortError') {
@@ -145,18 +142,40 @@ function stopStreaming() {
   abortController.value?.abort()
 }
 
-// Basic inline markdown rendering (for mermaid/plantuml blocks)
-function _renderMarkdownInline(text: string): string {
-  // Wrap mermaid blocks for rendering
+/** 纯文本 Markdown（代码块/加粗/斜体/列表/换行）。mermaid/plantuml 围栏由 blocksOf 拆出、经内核渲染。 */
+function _renderText(text: string): string {
   return text
-    .replace(/```mermaid\n([\s\S]*?)```/g, '<div class="mermaid-block">$1</div>')
-    .replace(/```plantuml\n([\s\S]*?)```/g, '<div class="plantuml-block" data-code="$1">PlantUML</div>')
     .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/\n\n/g, '<br><br>')
     .replace(/\n/g, '<br>')
+}
+
+interface MsgBlock { type: 'text' | 'mermaid' | 'plantuml'; html?: string; code?: string; diagId?: string }
+const DIAG_FENCE_RE = /```(mermaid|plantuml)\n([\s\S]*?)```/g
+
+/** 把助手消息拆为 文本 / mermaid / plantuml 块；图块经 DiagramViewer（topoOne 内核）渲染。 */
+function blocksOf(msg: Message): MsgBlock[] {
+  const content = msg.content || ''
+  const blocks: MsgBlock[] = []
+  if (!content.trim()) return blocks
+  let last = 0
+  let idx = 0
+  let m: RegExpExecArray | null
+  DIAG_FENCE_RE.lastIndex = 0
+  while ((m = DIAG_FENCE_RE.exec(content)) !== null) {
+    const before = content.slice(last, m.index)
+    if (before.trim()) blocks.push({ type: 'text', html: _renderText(before) })
+    const code = m[2].trim()
+    if (code) blocks.push({ type: m[1] as 'mermaid' | 'plantuml', code, diagId: `diag_${msg.id}_${idx++}` })
+    last = m.index + m[0].length
+  }
+  const after = content.slice(last)
+  if (after.trim()) blocks.push({ type: 'text', html: _renderText(after) })
+  if (!blocks.length) blocks.push({ type: 'text', html: _renderText(content) })
+  return blocks
 }
 
 onMounted(() => {
@@ -227,9 +246,38 @@ watch(llmConfigured, (val) => {
           </div>
           <div class="msg-body">
             <div
+              v-if="msg.role === 'user'"
               class="msg-html"
-              v-html="msg.content"
+              v-text="msg.content"
             />
+            <div
+              v-else
+              class="msg-html"
+            >
+              <template
+                v-for="(b, i) in blocksOf(msg)"
+                :key="i"
+              >
+                <span
+                  v-if="b.type === 'text'"
+                  v-html="b.html"
+                />
+                <DiagramViewer
+                  v-else-if="b.type === 'mermaid'"
+                  lang="mermaid"
+                  :code="b.code!"
+                  :diag-id="b.diagId!"
+                  :msg-id="msg.id"
+                />
+                <DiagramViewer
+                  v-else-if="b.type === 'plantuml'"
+                  lang="plantuml"
+                  :code="b.code!"
+                  :diag-id="b.diagId!"
+                  :msg-id="msg.id"
+                />
+              </template>
+            </div>
 
             <!-- Tool calls display -->
             <div
@@ -370,9 +418,8 @@ watch(llmConfigured, (val) => {
 .tool-name { font-weight: 600; color: var(--accent, #7c3aed); }
 
 /* Code / diagram blocks */
-.msg-html :deep(.mermaid-block) { background: #fff; border-radius: 0.375rem; padding: 0.5rem; margin: 0.5rem 0; }
-.msg-html :deep(.plantuml-block) { background: #f0fdf4; border-radius: 0.375rem; padding: 0.5rem; margin: 0.5rem 0; font-size: 0.75rem; }
 .msg-html :deep(.code-block) { background: #1e293b; color: #e2e8f0; border-radius: 0.375rem; padding: 0.5rem 0.75rem; margin: 0.5rem 0; font-size: 0.8rem; overflow-x: auto; line-height: 1.4; }
+.msg-html :deep(.diagram-container) { margin: 0.5rem 0; }
 .msg-html :deep(li) { margin-left: 1rem; }
 .msg-html :deep(strong) { font-weight: 600; }
 
