@@ -71,6 +71,24 @@ ARCH_MAIN_TABLES_SQL = """
         value TEXT DEFAULT ''
     );
 
+    -- agent_bus 持久化消息队列(全局跨 agent 总线；broker 进程轮询本表分发)。
+    -- 消息类型(topic): execution.handoff / interaction.clarify / interaction.answer /
+    --   plan.revise / execution.progress / execution.result / execution.amend
+    -- from/to: plan | coding | runner | monitor | user | *
+    CREATE TABLE IF NOT EXISTS arch_bus_messages (
+        id TEXT PRIMARY KEY,
+        src TEXT NOT NULL DEFAULT '',         -- 源 agent: plan | coding | runner | user | *
+        dst TEXT NOT NULL DEFAULT '',         -- 目标 agent: plan | coding | runner | monitor | *
+        topic TEXT NOT NULL DEFAULT '',
+        payload TEXT,                         -- JSON: 消息体
+        status TEXT DEFAULT 'pending',        -- pending | delivered | failed
+        error TEXT,                           -- 失败原因
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_bus_status ON arch_bus_messages(status);
+    CREATE INDEX IF NOT EXISTS idx_arch_bus_dst ON arch_bus_messages(dst, status);
+
 """
 
 # ── 项目库(每 architect 项目一个 arch.db) ─────────────────────

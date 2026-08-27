@@ -1,0 +1,13 @@
+# 子项目：Agent Bus Broker（P3，kind=service，独立进程 :3486）
+# agent 间持久化消息总线 broker：轮询 arch_bus_messages(全局主库表)分发 + WS 推送。
+# 代码在 architect 包(topoone_app_architect.agent_bus)，共享 architect.db(经 --data-dir)。
+# 前端(监控页，P3.3)经 gateway 反代 /api/agent-bus 访问。
+[app]
+name = "agent-bus"
+kind = "service"
+python_entry = "topoone_app_architect.agent_bus:main"
+port = 3486
+health = "/health"
+api_prefixes = [
+  "/api/agent-bus",
+]
