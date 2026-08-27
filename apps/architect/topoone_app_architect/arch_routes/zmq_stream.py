@@ -30,12 +30,16 @@ def pub_port() -> int:
         return DEFAULT_LLM_PUB_PORT
 
 
-async def iter_llm_events(request_id: str, timeout: float = 0.5) -> AsyncIterator[Tuple[str, dict]]:
+async def iter_llm_events(request_id: str, timeout: float = 0.5,
+                          idle_timeout: Optional[float] = None) -> AsyncIterator[Tuple[str, dict]]:
     """订阅主后端 llm.* PUB，产出 (event_type, payload)，按 requestId 过滤。
 
     产出 chunk/done/error/tool_call/tool_result 全部事件；流结束时由调用方
     依 done/error 退出循环。连接失败/超时不阻塞：每轮空转后重试。
+    idle_timeout: 连续这么久收不到本 requestId 的任何事件则停止产出(流中断检测，
+    供调用方降级 llm.sync)；None=不限时(默认，向后兼容)。
     """
+    import time
     import zmq
     import zmq.asyncio
 
@@ -45,13 +49,18 @@ async def iter_llm_events(request_id: str, timeout: float = 0.5) -> AsyncIterato
         sock.setsockopt(zmq.SUBSCRIBE, b"llm")
         sock.setsockopt(zmq.LINGER, 0)
         sock.connect(f"tcp://127.0.0.1:{pub_port()}")
+        last_relevant = time.monotonic()
         while True:
             try:
                 frames = await asyncio.wait_for(sock.recv_multipart(), timeout=timeout)
             except asyncio.TimeoutError:
+                if idle_timeout and (time.monotonic() - last_relevant) >= idle_timeout:
+                    return
                 continue
             except Exception:
                 await asyncio.sleep(0.2)
+                if idle_timeout and (time.monotonic() - last_relevant) >= idle_timeout:
+                    return
                 continue
             if len(frames) < 3:
                 continue
@@ -62,6 +71,7 @@ async def iter_llm_events(request_id: str, timeout: float = 0.5) -> AsyncIterato
                 continue
             if not isinstance(payload, dict) or payload.get("requestId") != request_id:
                 continue
+            last_relevant = time.monotonic()
             yield event_type, payload
     finally:
         try:

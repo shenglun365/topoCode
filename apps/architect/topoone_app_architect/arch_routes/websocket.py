@@ -16,6 +16,11 @@ _MAX_TOOL_ROUNDS = 4
 # 默认传 None 由主后端按 model_configs.max_tokens(设置中可配，如 32000)；也可经 KB 侧 `llm.maxTokens` 覆盖。
 _MIN_CHAT_MAX_TOKENS = 8192
 
+# 自由对话流式(ZMQ SUB)空闲超时：连续这么久收不到本 requestId 的任何事件(chunk/done/error)
+# 即判定流中断(主后端/llm 服务重启、任务取消、瞬时断连)，降级 llm.sync 一次性收尾，
+# 避免前端「知识库检索中…」永久挂起、内容始终不返回。
+_STREAM_IDLE_TIMEOUT_S = 60.0
+
 
 def _chat_max_tokens() -> Optional[int]:
     """读 KB 侧 `llm.maxTokens` 偏好(与 llm.modelId 同源)；未配置返回 None → 主后端用模型配置。
@@ -124,7 +129,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                                    "requestId": rid, "userMessageId": last_user_msg_id})
         round_text = ""
         round_ok = True
-        async for event_type, payload in _iter_llm_events(rid):
+        async for event_type, payload in _iter_llm_events(rid, idle_timeout=_STREAM_IDLE_TIMEOUT_S):
             if event_type == "chunk":
                 round_text += payload.get("text") or ""
             elif event_type == "reasoning":
@@ -141,6 +146,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 await websocket.send_json({"type": "error", "requestId": rid,
                                            "message": payload.get("message", "")})
                 break
+        else:
+            # 流自然结束(idle 超时)却未收到 done/error → ZMQ 流中断，标记降级 llm.sync 收尾
+            round_ok = False
+            logger.warning("[kb-chat] stream idle timeout rid=%s partial_chars=%s → llm.sync 收尾",
+                           rid, len(round_text))
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
@@ -243,10 +253,10 @@ def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = F
     return msgs
 
 
-async def _iter_llm_events(request_id: str):
+async def _iter_llm_events(request_id: str, idle_timeout: Optional[float] = None):
     """architect 进程内 ZMQ SUB 订阅主后端 llm.* 流(按 requestId 过滤)。"""
     from .zmq_stream import iter_llm_events
-    async for e in iter_llm_events(request_id):
+    async for e in iter_llm_events(request_id, idle_timeout=idle_timeout):
         yield e
 
 

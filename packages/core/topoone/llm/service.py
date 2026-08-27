@@ -666,6 +666,13 @@ class LLMService:
         except asyncio.CancelledError:
             _status = 'aborted'
             _latency_ms = int((time.monotonic() - _start_time) * 1000)
+            # 发布 error 事件：否则订阅方(architect ZMQ SUB)收不到任何终止信号会永久挂起。
+            # 服务关闭/取消时 PUB 可能已不可用，_publish 内部已容错(no-op)。
+            self._publish('llm', 'error', {
+                'requestId': request_id,
+                'message': 'Stream cancelled',
+                'code': 'cancelled',
+            })
             self._save_stream_messages(
                 session_id, messages, "", model, mode, request_id,
                 template_id=template_id, extra_meta=extra_meta, latency_ms=_latency_ms, status='aborted',
