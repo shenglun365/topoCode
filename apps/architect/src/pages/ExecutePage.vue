@@ -1,27 +1,80 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  PlusIcon, XMarkIcon, MagnifyingGlassIcon,
+  PlusIcon, XMarkIcon, MagnifyingGlassIcon, ExclamationCircleIcon,
 } from '@heroicons/vue/24/outline'
 import TaskCreateView from '@/components/coding/TaskCreateView.vue'
 import TaskDetailView from '@/components/coding/TaskDetailView.vue'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useArchTaskStore } from '@/stores/task-store'
+import { busService, connectBusEvents, type BusMessage } from '@/services/bus-service'
 import type { ExecutionTask } from '@/types'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const requirement = useArchRequirementStore()
 const task = useArchTaskStore()
 requirement.load()
 task.load()
 
 interface Tab { key: string; label: string }
-const tabs = ref<Tab[]>([{ key: 'list', label: t('execute.listTitle') }])
+const tabs = ref<Tab[]>([
+  { key: 'list', label: t('execute.listTitle') },
+  { key: 'bus', label: t('execute.busTab') },
+])
 const activeKey = ref('list')
 const createPreselect = ref<string[]>([])
+
+// ---- P3.3: 总线事件流(architect WS 代理 → broker) ----
+const busMessages = ref<BusMessage[]>([])
+const busError = ref('')
+let busConn: { close(): void } | null = null
+function pushBusMessage(m: BusMessage) {
+  busMessages.value.unshift(m)
+  if (busMessages.value.length > 200) busMessages.value.pop()
+}
+function busSummary(m: BusMessage): string {
+  const p = m.payload || {}
+  if (p.message) return String(p.message)
+  if (p.reqId) return `reqId=${p.reqId}`
+  return JSON.stringify(p)
+}
+function busTopicClass(topic: string): string {
+  if (topic === 'execution.handoff') return 'bg-ctp-blue/15 text-ctp-blue'
+  if (topic === 'execution.progress') return 'bg-ctp-green/15 text-ctp-green'
+  if (topic === 'execution.result') return 'bg-ctp-green/15 text-ctp-green'
+  if (topic === 'execution.amend') return 'bg-ctp-peach/15 text-ctp-peach'
+  if (topic === 'interaction.clarify') return 'bg-ctp-yellow/15 text-ctp-yellow'
+  if (topic === 'interaction.answer') return 'bg-ctp-yellow/15 text-ctp-yellow'
+  return 'bg-ctp-surface0 text-ctp-subtext1'
+}
+function openBus() {
+  activeKey.value = 'bus'
+  if (!busConn) {
+    busConn = connectBusEvents({
+      onState: (msgs) => { busMessages.value = [...msgs].reverse() },
+      onMessage: (m) => pushBusMessage(m),
+      onError: (msg) => { busError.value = msg },
+    })
+  }
+}
+
+// ---- P3.3: 需要你输入(N) 轮询 ----
+const needsCount = ref(0)
+let niTimer: ReturnType<typeof setInterval> | null = null
+async function pollNeedsInput() {
+  try {
+    needsCount.value = (await busService.needsInput()).count
+  } catch {
+    // broker 暂不可达 → 保持
+  }
+}
+function goWorkbench() {
+  router.push('/workbench/requirements')
+}
 
 const execTabKey = (id: string) => `exec:${id}`
 const isExecTab = (key: string) => key.startsWith('exec:')
@@ -91,6 +144,13 @@ onMounted(() => {
   if (typeof sel === 'string' && sel.trim()) {
     openCreate(sel.split(',').filter(Boolean))
   }
+  void pollNeedsInput()
+  niTimer = setInterval(() => void pollNeedsInput(), 5000)
+})
+onUnmounted(() => {
+  if (niTimer) clearInterval(niTimer)
+  busConn?.close()
+  busConn = null
 })
 
 // ---- 列表：搜索 / 排序 / 状态过滤 ----
@@ -141,16 +201,25 @@ const sortArrow = (key: string) => (sortKey.value === key ? (sortDir.value === '
         :key="tab.key"
         class="group flex items-center gap-1.5 rounded-t-lg border border-ctp-surface1 px-3 py-1.5 text-xs transition-colors"
         :class="activeKey === tab.key ? 'bg-ctp-crust text-ctp-text border-b-transparent' : 'bg-ctp-mantle text-ctp-subtext0 hover:text-ctp-text'"
-        @click="activeKey = tab.key"
+        @click="tab.key === 'bus' ? openBus() : (activeKey = tab.key)"
       >
         <span class="whitespace-nowrap">{{ tab.label }}</span>
         <button
-          v-if="tab.key !== 'list'"
+          v-if="tab.key !== 'list' && tab.key !== 'bus'"
           class="text-ctp-overlay1 hover:text-ctp-red"
           @click.stop="closeTab(tab.key)"
         >
           <XMarkIcon class="w-3 h-3" />
         </button>
+      </button>
+      <button
+        v-if="needsCount > 0"
+        class="btn btn-sm shrink-0 !bg-ctp-peach/15 !text-ctp-peach"
+        :title="t('workbench.needsInput.title')"
+        @click="goWorkbench"
+      >
+        <ExclamationCircleIcon class="w-3.5 h-3.5" />
+        {{ t('workbench.needsInput.title') }}({{ needsCount }})
       </button>
       <button
         v-if="!tabs.some((x) => x.key === 'create')"
@@ -273,6 +342,43 @@ const sortArrow = (key: string) => (sortKey.value === key ? (sortDir.value === '
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- P3.3: 总线事件流(监控) -->
+      <div
+        v-else-if="activeKey === 'bus'"
+        class="h-full flex flex-col min-h-0"
+      >
+        <div class="shrink-0 flex items-center gap-2 mb-3">
+          <span class="text-xs font-semibold text-ctp-subtext1">{{ t('execute.busTitle') }}</span>
+          <span v-if="busError" class="chip bg-ctp-red/15 text-ctp-red !text-[10px]">{{ busError }}</span>
+        </div>
+        <div class="flex-1 min-h-0 overflow-auto panel divide-y divide-ctp-surface0">
+          <div
+            v-for="m in busMessages"
+            :key="m.id"
+            class="flex items-start gap-2 px-3 py-2 text-xs"
+          >
+            <span class="shrink-0 font-mono text-[10px] text-ctp-overlay0 w-36">
+              {{ new Date(m.createdAt).toLocaleTimeString() }}
+            </span>
+            <span class="chip shrink-0 !text-[10px]" :class="busTopicClass(m.topic)">{{ m.topic }}</span>
+            <span class="shrink-0 font-mono text-[10px] text-ctp-subtext1">
+              {{ m.src || '*' }} → {{ m.dst || '*' }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-ctp-text" :title="busSummary(m)">
+              {{ busSummary(m) }}
+            </span>
+            <span
+              class="chip shrink-0 !text-[9px]"
+              :class="m.status === 'failed' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-surface0 text-ctp-subtext0'"
+              :title="m.error || ''"
+            >{{ m.status }}</span>
+          </div>
+          <div v-if="!busMessages.length" class="px-3 py-10 text-center text-ctp-overlay0 text-xs">
+            {{ t('execute.busEmpty') }}
+          </div>
         </div>
       </div>
 

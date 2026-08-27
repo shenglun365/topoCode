@@ -543,6 +543,36 @@ def tool_execution_assign(target: str = "", execId: str = "",
     }
 
 
+# ── 澄清提问工具(plan agent → 用户，经 broker 总线，「需要你输入」可见) ──
+
+@register_architect_tool(
+    "interaction.clarify",
+    "澄清提问：执行中发现信息不足/存在歧义/需要用户决策时，向用户提问"
+    "(经 broker 总线发布；工作台「需要你输入」会提示用户回答，"
+    "用户回答会作为新消息注入本会话，你在下一回合可见)。"
+    "参数：message(问题文本，简洁明确，一次只问一个关键问题)。",
+)
+def tool_interaction_clarify(message: str = "",
+                             root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx
+    from .bus_client import get_bus
+    req_id = ctx.get_req()
+    if not req_id:
+        return {"ok": False, "error": "当前会话未绑定需求，无法提问"}
+    message = (message or "").strip()
+    if not message:
+        return {"ok": False, "error": "缺少提问内容(message)"}
+    pub = get_bus().publish("plan", "user", "interaction.clarify",
+                            {"reqId": req_id, "message": message})
+    if pub is None:
+        return {"ok": False, "error": "agent-bus broker 不可达，无法发布提问"}
+    return {
+        "ok": True, "reqId": req_id, "messageId": pub.get("id"),
+        "summary": "已向用户提问(工作台「需要你输入」可见)；继续当前回合的其它工作，"
+                   "用户回答会在下一回合注入本会话。",
+    }
+
+
 # ── LLM 通道: 复用主后端 ai chat ─────────────────────────────────────
 
 _MODEL_KEY = "llm.modelId"
@@ -681,7 +711,8 @@ _CAPABILITY_DOC = (
     "- asset.semantic.refresh：更新过期资产(增量重提；失败软删并重新生成)\n"
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
     "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n"
-    "- execution.assign：指派(把定稿/待执行需求指派给 subagent 执行：runner=内部执行任务，mcp=外部 MCP 工具；成功后需求进入执行中)\n\n"
+    "- execution.assign：指派(把定稿/待执行需求指派给 subagent 执行：runner=内部执行任务，mcp=外部 MCP 工具；成功后需求进入执行中)\n"
+    "- interaction.clarify：澄清提问(信息不足/存在歧义/需要用户决策时向用户提问；用户回答会在下一回合注入本会话)\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
@@ -703,6 +734,7 @@ _CAPABILITY_DOC = (
     '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…"}\n'
     '- execution.assign: {"target": "runner", "execId": "ex-xxx(缺省取需求已绑定任务)"} '
     '或 {"target": "mcp", "tool": "<mcp工具名>", "params": {…}}\n'
+    '- interaction.clarify: {"message": "<问题文本>"}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"
     "可处理范围：\n"

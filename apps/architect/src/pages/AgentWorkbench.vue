@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PlusIcon, ChevronDownIcon, ChevronRightIcon, ChatBubbleLeftRightIcon,
-  DocumentTextIcon, CheckCircleIcon, UsersIcon, XMarkIcon,
+  DocumentTextIcon, CheckCircleIcon, UsersIcon, XMarkIcon, ExclamationCircleIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import DesignPanel from '@/components/design/DesignPanel.vue'
 import { LIFECYCLE_ORDER, lifecycleLabelKey } from '@/config/lifecycle'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { requirementService } from '@/services/requirement-service'
+import { busService, type NeedsInputItem } from '@/services/bus-service'
 import { useArchTaskStore } from '@/stores/task-store'
 import { readModelPref } from '@topo/web-core/shell'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
@@ -45,6 +46,12 @@ const assignTool = ref('')
 const assignParams = ref('')
 const assignBusy = ref(false)
 const assignError = ref('')
+
+// P3.3: 需要你输入(N) + 澄清回答
+const needsInput = ref<{ count: number; items: NeedsInputItem[] } | null>(null)
+const niOpen = ref(false)
+const clarifyDraft = ref('')
+const clarifyBusy = ref(false)
 
 const allSessions = computed<ReqSession[]>(() => {
   const g = groups.value
@@ -128,6 +135,18 @@ function applyConversation(conv: ConversationDetail) {
   if (!msgs.length) return
   turns.value = msgs.map((m) => ({ role: m.role, content: m.content, id: m.id }))
   chatConvId.value = conv.id
+}
+
+/** 重载当前会话历史(broker 注入消息后刷新对话)。 */
+async function reloadConversation() {
+  const req = selected.value
+  if (!req) return
+  try {
+    const conv = await requirementService.conversationByReq(req.id)
+    if (conv) applyConversation(conv)
+  } catch {
+    // 无历史会话 → 忽略
+  }
 }
 
 /** plan 模式对话：经 WS 流式回复，沿用 conversationId 续聊。 */
@@ -260,9 +279,57 @@ async function confirmAssign() {
   }
 }
 
+/** P3.3: 需要你输入(N) 轮询(5s) + 当前会话未回复 clarify。 */
+let niTimer: ReturnType<typeof setInterval> | null = null
+async function pollNeedsInput() {
+  try {
+    needsInput.value = await busService.needsInput()
+  } catch {
+    // broker/architect 暂不可达 → 保持上次值
+  }
+}
+const pendingClarify = computed<NeedsInputItem | null>(() => {
+  const items = needsInput.value?.items ?? []
+  const id = selected.value?.id
+  if (!id) return null
+  return items.find((i) => i.type === 'clarify' && i.reqId === id) ?? null
+})
+async function answerClarify() {
+  const c = pendingClarify.value
+  const req = selected.value
+  const text = clarifyDraft.value.trim()
+  if (!c || !req || !text || clarifyBusy.value) return
+  clarifyBusy.value = true
+  try {
+    await busService.publish('user', c.src || 'plan', 'interaction.answer',
+      { replyTo: c.id, reqId: req.id, answer: text })
+    turns.value.push({ role: 'user', content: text })
+    clarifyDraft.value = ''
+    await loadSessions()
+    // 用户回答经 broker 注入会话 → 稍后重载以展示注入消息
+    setTimeout(() => void reloadConversation(), 1500)
+  } catch (err) {
+    console.error('[workbench] 澄清回答失败', err)
+  } finally {
+    clarifyBusy.value = false
+  }
+}
+function onNiItem(item: NeedsInputItem) {
+  niOpen.value = false
+  if (item.type === 'clarify' && item.reqId) {
+    const s = allSessions.value.find((x) => x.id === item.reqId)
+    if (s) void selectSession(s)
+  }
+}
+
 onMounted(() => {
   void loadSessions()
   void task.load()
+  void pollNeedsInput()
+  niTimer = setInterval(() => void pollNeedsInput(), 5000)
+})
+onUnmounted(() => {
+  if (niTimer) clearInterval(niTimer)
 })
 </script>
 
@@ -272,9 +339,39 @@ onMounted(() => {
     <aside class="flex w-72 shrink-0 flex-col border-r border-ctp-surface0 bg-ctp-mantle">
       <div class="flex items-center justify-between border-b border-ctp-surface0 px-3 py-2.5">
         <span class="text-xs font-semibold text-ctp-subtext1">{{ t('workbench.sessions.title') }}</span>
-        <button class="btn btn-xs btn-blue" @click="newSession">
-          <PlusIcon class="h-3.5 w-3.5" />{{ t('workbench.sessions.new') }}
-        </button>
+        <div class="flex items-center gap-1.5">
+          <div class="relative">
+            <button
+              v-if="needsInput && needsInput.count > 0"
+              class="btn btn-xs btn-ghost !text-ctp-peach"
+              :title="t('workbench.needsInput.title')"
+              @click="niOpen = !niOpen"
+            >
+              <ExclamationCircleIcon class="h-3.5 w-3.5" />
+              {{ t('workbench.needsInput.title') }}({{ needsInput.count }})
+            </button>
+            <div
+              v-if="niOpen && needsInput && needsInput.count > 0"
+              class="absolute left-0 top-full z-40 mt-1 w-72 rounded-md border border-ctp-surface0 bg-ctp-mantle p-2 shadow-xl"
+            >
+              <button
+                v-for="item in needsInput.items"
+                :key="item.id"
+                class="block w-full truncate rounded px-2 py-1.5 text-left text-[11px] text-ctp-text transition-colors hover:bg-ctp-surface0/60"
+                :title="item.label"
+                @click="onNiItem(item)"
+              >
+                <span class="chip mr-1.5 !text-[9px]" :class="item.type === 'task' ? 'bg-ctp-yellow/15 text-ctp-yellow' : 'bg-ctp-peach/15 text-ctp-peach'">
+                  {{ item.type === 'task' ? t('workbench.needsInput.task') : t('workbench.needsInput.clarify') }}
+                </span>
+                {{ item.label || item.id }}
+              </button>
+            </div>
+          </div>
+          <button class="btn btn-xs btn-blue" @click="newSession">
+            <PlusIcon class="h-3.5 w-3.5" />{{ t('workbench.sessions.new') }}
+          </button>
+        </div>
       </div>
       <div class="min-h-0 flex-1 overflow-auto py-1">
         <template v-for="lc in LIFECYCLE_ORDER" :key="lc">
@@ -352,6 +449,30 @@ onMounted(() => {
           </div>
         </div>
         <div class="min-h-0 flex-1">
+          <div
+            v-if="rightTab === 'chat' && pendingClarify"
+            class="shrink-0 border-b border-ctp-surface0 bg-ctp-peach/10 px-4 py-2.5"
+          >
+            <p class="mb-1.5 flex items-center gap-1.5 text-[11px] text-ctp-peach">
+              <ExclamationCircleIcon class="h-3.5 w-3.5 shrink-0" />
+              <span class="truncate">{{ t('workbench.needsInput.clarifyFrom') }}：{{ pendingClarify.label || pendingClarify.id }}</span>
+            </p>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="clarifyDraft"
+                class="input min-w-0 flex-1 !py-1.5 text-xs"
+                :placeholder="t('workbench.needsInput.answerPh')"
+                @keyup.enter="answerClarify"
+              />
+              <button
+                class="btn btn-xs btn-blue"
+                :disabled="clarifyBusy || !clarifyDraft.trim()"
+                @click="answerClarify"
+              >
+                {{ clarifyBusy ? t('workbench.needsInput.sending') : t('workbench.needsInput.send') }}
+              </button>
+            </div>
+          </div>
           <AnalysisChat
             v-if="rightTab === 'chat'"
             :turns="turns"

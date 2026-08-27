@@ -30,6 +30,15 @@ export default {
       success: '已指派，需求进入执行中',
       error: '指派失败',
     },
+    needsInput: {
+      title: '需要你输入',
+      task: '任务',
+      clarify: '提问',
+      clarifyFrom: 'subagent 提问',
+      answerPh: '输入回答…',
+      send: '回答',
+      sending: '发送中…',
+    },
     empty: '选择左侧会话或新建一条需求会话',
   },
   nav: {
@@ -861,6 +870,9 @@ export default {
   },
   execute: {
     title: '任务执行',
+    busTab: '总线',
+    busTitle: '总线事件(实时监控)',
+    busEmpty: '暂无总线事件——指派/执行/协商消息将实时显示在此',
     desc: '任务列表统一管理全部执行任务(含异常终止)；新建任务从需求池多选(或从需求池带入)，选择 coding agent 与模型、测试连通性后开始执行；执行详情中查看任务树/代码变更/会话统计，并与 agent 会话。',
     modeLabel: '协作模式',
     step: '单步执行',

@@ -186,3 +186,43 @@ class TestRouting:
         monkeypatch.setattr(ab, "_http_post_json", _boom)
         out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
         assert out["status"] == "delivered"
+
+    def test_plan_dst_injects_to_requirement(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, topic="execution.amend", dst="plan",
+                        payload={"reqId": "rq-9", "message": "计划需修正"})
+        calls = []
+        monkeypatch.setattr(ab, "_http_post_json",
+                            lambda url, payload, timeout=120.0: calls.append((url, payload)) or (True, "ok"))
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert calls and calls[0][0].endswith("/api/architect/requirements/rq-9/injection")
+        assert calls[0][1] == {"message": "计划需修正", "src": "architect",
+                               "topic": "execution.amend"}
+        assert out["status"] == "delivered"
+
+    def test_plan_dst_clarify_from_coding(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        from topoone_app_architect import agent_bus
+        store.AgentBusStore.create({
+            "id": "bus-r2", "src": "coding", "dst": "plan",
+            "topic": "interaction.clarify",
+            "payload": {"reqId": "rq-9", "message": "选哪个方案?"},
+            "status": "pending", "createdAt": 1, "updatedAt": 1,
+        })
+        calls = []
+        monkeypatch.setattr(agent_bus, "_http_post_json",
+                            lambda url, payload, timeout=120.0: calls.append((url, payload)) or (True, "ok"))
+        out = agent_bus._route_and_mark(store.AgentBusStore.get("bus-r2"))
+        assert calls and calls[0][1]["src"] == "coding"
+        assert calls[0][1]["topic"] == "interaction.clarify"
+        assert out["status"] == "delivered"
+
+    def test_plan_dst_missing_fields_fails(self, tmp_path, monkeypatch):
+        ab = self._seed(tmp_path, monkeypatch, topic="interaction.clarify",
+                        dst="plan", payload={})
+
+        def _boom(*a, **k):
+            raise AssertionError("缺少 reqId/message 不应发起 HTTP 调用")
+        monkeypatch.setattr(ab, "_http_post_json", _boom)
+        out = ab._route_and_mark(store.AgentBusStore.get("bus-r1"))
+        assert out["status"] == "failed"
+        assert "reqId" in (out.get("error") or "")

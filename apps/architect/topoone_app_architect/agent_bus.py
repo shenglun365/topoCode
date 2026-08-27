@@ -98,6 +98,18 @@ def _route_and_mark(msg: dict) -> dict:
                 ok_flag, detail = _http_post_json(url, payload.get("params") or {})
         else:
             detail = f"dst={dst or '*'} 仅持久化(监控/用户事件)"
+    elif dst == "plan":
+        # 双向协商：clarify/amend/answer → 注入 plan agent 需求会话(下一回合可见)
+        req_id = (payload.get("reqId") or "").strip()
+        message = (payload.get("message") or payload.get("text")
+                   or payload.get("answer") or "").strip()
+        if not req_id or not message:
+            ok_flag, detail = False, "dst=plan 缺少 reqId/message"
+        else:
+            url = f"{_DEFAULT_ARCH_URL}/api/architect/requirements/{req_id}/injection"
+            ok_flag, detail = _http_post_json(url, {
+                "message": message, "src": msg.get("src") or "", "topic": topic,
+            })
     store.AgentBusStore.mark(
         msg["id"], status="delivered" if ok_flag else "failed",
         error="" if ok_flag else detail)

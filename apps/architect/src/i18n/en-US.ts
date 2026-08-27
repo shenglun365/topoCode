@@ -30,6 +30,15 @@ export default {
       success: 'Assigned. Requirement is now executing.',
       error: 'Assignment failed',
     },
+    needsInput: {
+      title: 'Needs Input',
+      task: 'Task',
+      clarify: 'Question',
+      clarifyFrom: 'Subagent question',
+      answerPh: 'Type your answer…',
+      send: 'Answer',
+      sending: 'Sending…',
+    },
     empty: 'Select a session on the left or start a new one',
   },
   nav: {
@@ -835,6 +844,9 @@ export default {
   },
   execute: {
     title: 'Task Execution',
+    busTab: 'Bus',
+    busTitle: 'Bus Events (live monitor)',
+    busEmpty: 'No bus events yet — assignment/execution/negotiation messages will appear here in real time',
     desc: 'One list for all execution tasks (including abnormal terminations). Create a task from pooled requirements (or brought in from the pool), pick a coding agent and model, test connectivity, then run; inspect task tree / code changes / session stats and converse with the agent.',
     modeLabel: 'Collaboration Mode',
     step: 'Step',

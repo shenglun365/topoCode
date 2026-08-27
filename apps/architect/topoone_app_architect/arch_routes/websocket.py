@@ -1,6 +1,9 @@
 """WebSocket routes for KB analysis agent, coding agent and unit-test execution."""
 import asyncio
+import json
 import logging
+import os
+import urllib.request
 from typing import Dict, List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .common import _ts, _id
@@ -609,6 +612,84 @@ async def tree_events_ws(websocket: WebSocket, tree_id: str):
             t.cancel()
         try:
             await runner_ws.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await websocket.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _bus_ws_url() -> str:
+    base = (os.environ.get("BROKER_BASE_URL") or "http://127.0.0.1:3486").rstrip("/")
+    return base.replace("https://", "wss://").replace("http://", "ws://") + "/ws/agent-bus"
+
+
+@router.websocket("/ws/agent-bus")
+async def agent_bus_ws(websocket: WebSocket):
+    """代理 agent-bus broker WS 到前端(同源 + 鉴权；监控页总线事件流)。
+
+    - broker → 前端：`{type: "message", message}`(新消息，原样转发)；
+    - 前端 → broker：`{type: "ping"}`(keepalive，broker 回 pong)；
+    - 连接时：先发 `{type: "state", messages: [最近20条]}` 对齐(消除订阅竞态)。
+    broker 不可达 → 推一条 error 后关闭。
+    """
+    await websocket.accept()
+    try:
+        import websockets
+    except Exception as e:  # noqa: BLE001
+        await websocket.send_json({"type": "error", "message": f"websockets 不可用: {e}"})
+        await websocket.close()
+        return
+
+    url = _bus_ws_url()
+    try:
+        bus_ws = await asyncio.wait_for(websockets.connect(url), timeout=5)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[agent-bus] broker WS 不可达(%s): %s", url, e)
+        await websocket.send_json({"type": "error", "message": "agent-bus broker 不可达"})
+        await websocket.close()
+        return
+
+    # 初始同步：最近 20 条消息(监控页立即可见历史)
+    try:
+        base = (os.environ.get("BROKER_BASE_URL") or "http://127.0.0.1:3486").rstrip("/")
+        with urllib.request.urlopen(f"{base}/api/agent-bus/messages?limit=20", timeout=3) as resp:
+            body = json.loads(resp.read().decode())
+        await websocket.send_json({"type": "state",
+                                   "messages": (body or {}).get("data") or []})
+    except Exception:  # noqa: BLE001
+        pass
+
+    async def _relay_broker_to_client() -> None:
+        try:
+            async for raw in bus_ws:
+                if isinstance(raw, (bytes, bytearray)):
+                    raw = raw.decode()
+                await websocket.send_text(raw)  # 原样转发 {type: "message", message}
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _relay_client_to_broker() -> None:
+        try:
+            while True:
+                data = await websocket.receive_json()
+                if (data or {}).get("type") == "ping":
+                    await bus_ws.send(json.dumps({"type": "ping"}))
+        except WebSocketDisconnect:
+            pass
+        except Exception:  # noqa: BLE001
+            pass
+
+    relay_out = asyncio.create_task(_relay_broker_to_client())
+    relay_in = asyncio.create_task(_relay_client_to_broker())
+    try:
+        await asyncio.wait({relay_out, relay_in}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in (relay_out, relay_in):
+            t.cancel()
+        try:
+            await bus_ws.close()
         except Exception:  # noqa: BLE001
             pass
         try:

@@ -466,6 +466,16 @@ def make_se_context(reqs, root: str, project: Optional[str],
             ctx["branch"] = task["taskBranch"]
         if task.get("baseCommit"):
             ctx["baseCommit"] = task["baseCommit"]
+    req_ids = [r.get("id") or "" for r in (reqs or []) if r.get("id")]
+    first_req = req_ids[0] if req_ids else ""
+    ctx["busReport"] = (
+        "协作回报(可选，仅在需要时调用，勿阻塞执行)：发现需求不符/计划需修正/需要用户决策时，"
+        "可 curl POST http://127.0.0.1:3470/api/architect/bus/publish 回报："
+        '需求修正 {"src":"coding","dst":"plan","topic":"execution.amend",'
+        f'"payload":{{"reqId":"{first_req}","message":"<描述>"}}'
+        "；需要用户输入 {\"src\":\"coding\",\"dst\":\"user\",\"topic\":\"interaction.clarify\","
+        f'"payload":{{"reqId":"{first_req}","message":"<问题>"}}'
+    )
     return ctx
 
 
