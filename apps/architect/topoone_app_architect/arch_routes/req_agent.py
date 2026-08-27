@@ -68,8 +68,12 @@ def architect_tools() -> List[Dict[str, str]]:
 
 # ── 自由对话工具协议: 模型文本工具块 → 解析/执行 ──────────────────────
 # [TOOL_CALL]{"tool":"x","arguments":{...}}[/TOOL_CALL]
-# (模型可能再套 ```json 围栏，解析时剥离；闭合标签容忍 [ / > 及 >] 写法)
-_TOOL_CALL_BLOCK = re.compile(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL[>\]]+\]?', re.DOTALL)
+# (模型可能再套 ```json 围栏，解析时剥离；闭合标签容忍 [ / > 及 >] 写法。
+#  部分模型会写成 ```TOOL_CALL]{...}[/TOOL_CALL]```(丢前导 '[' 且包围栏)——开标签
+#  的 '[' 与前置围栏均设为可选，仅以闭合标签 [/TOOL_CALL] 保证匹配唯一性。)
+_TOOL_CALL_BLOCK = re.compile(
+    r'(?:```(?:json)?\s*)?\[?\s*TOOL_CALL\](.*?)\[/TOOL_CALL[>\]]+\]?\s*(?:```)?',
+    re.DOTALL)
 _FENCE = re.compile(r'^\s*```(?:json)?\s*|\s*```\s*$')
 
 
