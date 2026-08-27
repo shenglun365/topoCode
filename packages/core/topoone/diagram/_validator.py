@@ -31,6 +31,10 @@ def _validate_mermaid(code: str) -> dict[str, Any]:
             continue
         if re.match(r"^\s*graph\s+(TB|TD|LR|RL|BT)\b", stripped, re.IGNORECASE):
             continue
+        if re.match(r"^\s*flowchart\s+(TB|TD|LR|RL|BT)\b", stripped, re.IGNORECASE):
+            continue
+        if re.match(r"^\s*flowchart\b", stripped, re.IGNORECASE):
+            continue
         if re.match(r"^\s*sequenceDiagram\b", stripped, re.IGNORECASE):
             continue
         if re.match(r"^\s*classDiagram\b", stripped, re.IGNORECASE):
@@ -42,6 +46,9 @@ def _validate_mermaid(code: str) -> dict[str, Any]:
         if re.match(r"^\s*gantt\b", stripped, re.IGNORECASE):
             continue
         if re.match(r"^\s*pie\b", stripped, re.IGNORECASE):
+            continue
+        # pie 数据行: `"label" : value`
+        if re.match(r'^"\s*[^"]*\s*"\s*:\s*\d', stripped):
             continue
         if re.match(r"^\s*journey\b", stripped, re.IGNORECASE):
             continue
@@ -64,7 +71,7 @@ def _validate_mermaid(code: str) -> dict[str, Any]:
         if re.match(r"^\s*class\s+\w[\w\d_]*\s", stripped, re.IGNORECASE):
             continue
         node_edge = re.match(
-            r"^\s*(\w[\w\d_]*)\s*(-->|==>|-\.->|---?)\s*(?:\(\(|\(|\[\(|\{|\[)?"
+            r"^\s*(\w[\w\d_]*)\s*(-->>|-->|==>|-\.->|--x|-x|->>|->|---?)\s*(?:\(\(|\(|\[\(|\{|\[)?"
             r"[^\]\)\}]*[\]\)\}]?\s*(?:\|([^|]*)\|)?\s*(\w[\w\d_]*)",
             stripped,
         )

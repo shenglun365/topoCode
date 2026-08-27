@@ -29,4 +29,9 @@ def create_app(diag: DiagramSettings | None = None,
     app = FastAPI(title="topo-one (test)", lifespan=lifespan)
     app.state.diagram_services = svc
     app.include_router(create_topo_router(svc, fallback_renderer=fallback_renderer))
+
+    @app.get("/health")
+    def health() -> dict:
+        return {"status": "ok", **svc.status()}
+
     return app

@@ -189,3 +189,25 @@ def test_unknown_legacy_type_fails_closed():
     sch = legacy_ir_to_schema(legacy)
     assert not validate_schema_document(sch)["ok"]
     assert schema_to_legacy_ir(sch) == legacy  # lossless regardless
+
+
+def test_code_validator_accepts_builder_output():
+    # 回归：/api/diagram/build 生成 `flowchart TB` 与 pie 数据行，代码校验器不得误报。
+    from topoone.diagram._validator import validate_diagram_syntax
+    for code in [
+        "flowchart TB\n    a[A]\n    b[B]\n    a --> b",
+        "flowchart LR\n    a[A] -->|x| b[B]",
+        'pie\n    title dist\n    "A" : 3\n    "B" : 7',
+        "sequenceDiagram\n    participant A\n    A ->> B : hi",
+        "@startuml\nAlice -> Bob: hi\n@enduml",
+    ]:
+        lang = "plantuml" if code.startswith("@startuml") else "mermaid"
+        rep = validate_diagram_syntax(code, lang)
+        assert rep["valid"], (lang, code, rep["errors"])
+
+
+def test_code_validator_rejects_bad():
+    from topoone.diagram._validator import validate_diagram_syntax
+    assert not validate_diagram_syntax("flowchart TB\n    a b c d", "mermaid")["valid"]
+    assert not validate_diagram_syntax("not a diagram", "mermaid")["valid"]
+    assert not validate_diagram_syntax("Alice -> Bob", "plantuml")["valid"]
