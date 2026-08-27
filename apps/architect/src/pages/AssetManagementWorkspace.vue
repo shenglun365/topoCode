@@ -17,14 +17,13 @@ import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
-import { useChatModel } from '@/composables/useChatModel'
+import { readModelPref } from '@topo/web-core/shell'
 import { useArchArchitectureStore } from '@/stores/architecture-store'
 import type { AssetDetail, AssetDiagramItem, ConversationDetail, SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 
 const { t } = useI18n()
 
-// ---- 对话模型(选择持久化到浏览器，刷新恢复或回退默认) ----
-const { chatModelId, chatModels, loadChatModels, onChatModelChange } = useChatModel()
+// ---- 对话模型: 统一用顶部工具栏选择(读同一 localStorage 键 topoone-model-architect, 透传后端) ----
 
 // ---- 左右栏分割(资产内容 | agent 对话) ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane()
@@ -611,7 +610,7 @@ async function submitExtract() {
     })
     const { taskId } = await semanticAssetService.startExtractTask(ids, {
       kinds: kinds.map((k) => k.value),
-      modelId: chatModelId.value || undefined,
+      modelId: readModelPref('architect') || undefined,
     })
     pollExtractTask(taskId)
   } catch (err: any) {
@@ -674,7 +673,7 @@ async function extractComp(c: AssetDetail) {
     turns.value.push({ role: 'assistant', content: `▶ 开始提取组件「${c.name}」的语义资产…` })
     const { taskId } = await semanticAssetService.startExtractTask([c.assetId], {
       kinds: kinds.map((k) => k.value),
-      modelId: chatModelId.value || undefined,
+      modelId: readModelPref('architect') || undefined,
     })
     pollExtractTask(taskId)
   } catch (err: any) {
@@ -732,7 +731,7 @@ async function runBatch(action: 'clear') {
       includeOther,
       scope,
       kinds: kinds.map((k) => k.value),
-      modelId: chatModelId.value || undefined,
+      modelId: readModelPref('architect') || undefined,
     })
     batchLast.value = t('assetMgmt.batchDone', { action: t(`assetMgmt.batchAction.${action}`), n: res.count })
     await Promise.all([loadSemantic(), refreshStatus()])
@@ -839,7 +838,7 @@ function askAgent(text: string) {
     conversationId: chatConvId.value || undefined,
     kind: 'asset',
     title: t('assetMgmt.chatTitle'),
-    modelId: chatModelId.value || undefined,
+    modelId: readModelPref('architect') || undefined,
     diagramSkill: diagramSkill.value,
   }, (ev) => {
     if (ev.conversationId) chatConvId.value = ev.conversationId
@@ -866,7 +865,7 @@ async function onSend(text: string) {
       conversationId: chatConvId.value || undefined,
       kind: 'asset',
       title: t('assetMgmt.chatTitle'),
-      modelId: chatModelId.value || undefined,
+      modelId: readModelPref('architect') || undefined,
       diagramSkill: diagramSkill.value,
     }, (ev) => {
       if (ev.conversationId) chatConvId.value = ev.conversationId
@@ -894,7 +893,7 @@ function onExtractAssets() {
   if (busy.value) return
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
-  semanticAssetService.extractAll(kinds.map((k) => k.value), { modelId: chatModelId.value || undefined })
+  semanticAssetService.extractAll(kinds.map((k) => k.value), { modelId: readModelPref('architect') || undefined })
     .then(async (res) => {
       const assets = res.assets ?? []
       turns.value[idx].content = assets.length
@@ -942,7 +941,6 @@ function gotoPage(p: number) {
 }
 
 onMounted(async () => {
-  await loadChatModels()
   await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus()])
   turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
   await restoreExtractTask()
@@ -2043,12 +2041,9 @@ onUnmounted(() => stopExtractPoll())
           class="flex-1 min-h-0"
           :turns="turns"
           :busy="busy"
-          :models="chatModels"
-          :model-id="chatModelId"
           :title="t('assetMgmt.chatTitle')"
           :diagram-skill="diagramSkill"
           @send="onSend"
-          @model-change="onChatModelChange"
           @delete-turn="onDeleteTurn"
           @extract-assets="onExtractAssets"
           @refresh-asset="onRefreshAsset"

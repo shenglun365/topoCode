@@ -375,7 +375,6 @@ export default {
     chat: {
       title: 'Requirement Chat',
       kb: 'TopoCode Architect',
-      selectModel: 'Select model…',
       thinking: 'Querying knowledge base…',
       placeholder: 'Add acceptance criteria, constraints or change suggestions to refine the report…',
       fallback: 'Agent unavailable; retry later or answer the clarification questions.',

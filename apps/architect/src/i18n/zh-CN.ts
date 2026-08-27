@@ -401,7 +401,6 @@ export default {
     chat: {
       title: '需求分析对话',
       kb: 'TopoCode Architect',
-      selectModel: '选择模型…',
       thinking: '知识库检索中…',
       placeholder: '补充验收标准、约束或修改建议，与知识库 agent 对话完善报告…',
       fallback: '智能体不可达，请稍后重试或先回答澄清问题。',

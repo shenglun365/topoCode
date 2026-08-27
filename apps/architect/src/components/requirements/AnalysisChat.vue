@@ -4,13 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
-import type { ArchLlmModel, SemanticAsset, SemanticAssetKind } from '@/types'
+import type { SemanticAsset, SemanticAssetKind } from '@/types'
 
 const props = defineProps<{
   turns: KbAnalysisTurn[]
   busy: boolean
-  models?: ArchLlmModel[]
-  modelId?: string
   /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
   title?: string
   /** 是否显示「提取语义资产」按钮(需求分析对话隐藏；资产管理保留)。 */
@@ -23,7 +21,6 @@ const emit = defineEmits<{
   send: [text: string]
   answers: [answers: Record<string, string>]
   'confirm-draft': []
-  'model-change': [id: string]
   'delete-turn': [index: number]
   'extract-assets': [kinds?: SemanticAssetKind[]]
   'refresh-asset': [assetId: string]
@@ -35,11 +32,6 @@ const input = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 const answers = reactive<Record<string, string>>({})
-
-function onModelChange(e: Event) {
-  const id = (e.target as HTMLSelectElement).value
-  emit('model-change', id)
-}
 
 watch(
   () => props.turns.length,
@@ -269,23 +261,6 @@ onUnmounted(() => {
       <span class="flex items-center gap-2">
         <ChatBubbleLeftRightIcon class="w-4 h-4 text-ctp-blue" />{{ title ?? t('requirement.chat.title') }}
       </span>
-      <select
-        v-if="props.models?.length"
-        class="input !py-0.5 !px-2 !text-[11px] w-auto font-mono"
-        :value="props.modelId ?? ''"
-        @change="onModelChange"
-      >
-        <option value="" disabled>{{ t('requirement.chat.selectModel') }}</option>
-        <option
-          v-for="m in props.models"
-          :key="m.id"
-          :value="m.id"
-        >{{ m.name }} · {{ m.model }}</option>
-      </select>
-      <span
-        v-else
-        class="chip bg-ctp-teal/10 text-ctp-teal"
-      >topocode KB</span>
     </div>
 
     <div

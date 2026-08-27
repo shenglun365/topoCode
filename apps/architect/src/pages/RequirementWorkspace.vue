@@ -15,7 +15,7 @@ import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
-import { useChatModel } from '@/composables/useChatModel'
+import { readModelPref } from '@topo/web-core/shell'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useSplitPane } from '@/composables/useSplitPane'
@@ -58,8 +58,7 @@ function nextDraftReqId(): string {
 const form = reactive<FormDraft>(emptyForm())
 provide('requirement-form', form)
 
-// ---- 对话模型选择(需求分析对话复用 /llm/models，透传后端 llm.sync；选择持久化到浏览器) ----
-const { chatModelId, chatModels, loadChatModels, onChatModelChange } = useChatModel()
+// ---- 对话模型: 统一用顶部工具栏选择(读同一 localStorage 键 topoone-model-architect, 透传后端 llm.sync) ----
 
 // ---- 左右栏分割(表单 | 对话) ----
 const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane()
@@ -130,7 +129,7 @@ function base() {
     priority: form.priority,
     kind: form.kind,
     preferredAssetIds: preferredIds(),
-    modelId: chatModelId.value || undefined,
+    modelId: readModelPref('architect') || undefined,
   }
 }
 function emptyAssessment(): RequirementAnalysis['assessment'] {
@@ -160,7 +159,6 @@ function analysisFromForm(): RequirementAnalysis {
 onMounted(async () => {
   await reProbeBackend()
   await store.load().catch((err) => console.error('[arch] 需求加载失败', err))
-  await loadChatModels()
   const q = route.query
   if (typeof q.id === 'string') {
     const seedItem = store.byId(q.id)
@@ -260,7 +258,7 @@ async function onSend(text: string) {
       kind: 'requirement',
       reqId: editingId.value ?? (draftReqId.value || undefined),
       title: form.title.trim() || '需求分析对话',
-      modelId: chatModelId.value || undefined,
+      modelId: readModelPref('architect') || undefined,
       diagramSkill: diagramSkill.value,
     }, (ev) => {
       if (ev.conversationId) chatConvId.value = ev.conversationId
@@ -292,7 +290,7 @@ async function onExtractAssets(kinds?: SemanticAssetKind[]) {
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
   try {
-    const res = await semanticAssetService.extractAll(kinds, { modelId: chatModelId.value || undefined })
+    const res = await semanticAssetService.extractAll(kinds, { modelId: readModelPref('architect') || undefined })
     const assets = res.assets ?? []
     turns.value[idx].content = assets.length
       ? `${t('requirement.chat.semanticExtracted')}${res.count ?? assets.length}${t('requirement.chat.semanticExtractedTail')}`
@@ -729,14 +727,11 @@ function backToList() {
           class="flex-1 min-h-0"
           :turns="turns"
           :busy="busy"
-          :models="chatModels"
-          :model-id="chatModelId"
           :show-extract="false"
           :diagram-skill="diagramSkill"
           @send="onSend"
           @answers="onAnswers"
           @confirm-draft="confirmDraft"
-          @model-change="onChatModelChange"
           @delete-turn="onDeleteTurn"
           @extract-assets="onExtractAssets"
           @refresh-asset="onRefreshAsset"
