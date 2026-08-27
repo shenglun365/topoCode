@@ -419,6 +419,101 @@ def tool_diagram_validate(code: str, lang: str = "mermaid") -> Dict[str, Any]:
     return _diagram.call_validate(code, lang)
 
 
+# ── MCP 出向工具(经 MCP server 转发，供 plan agent 调用开放/外部 MCP 工具) ──
+
+_MCP_TOOLS_CACHE: Dict[str, Any] = {"ts": 0.0, "tools": []}
+_MCP_TOOLS_TTL = 60.0  # 秒：列工具带 TTL 缓存，避免每回合网络往返
+
+
+def _mcp_tool_list() -> List[Dict[str, Any]]:
+    """列 MCP 可用工具(GET /v1/tools，带 TTL 缓存)。不可达返回缓存/[]。"""
+    import time
+    now = time.time()
+    if _MCP_TOOLS_CACHE["tools"] and now - _MCP_TOOLS_CACHE["ts"] <= _MCP_TOOLS_TTL:
+        return _MCP_TOOLS_CACHE["tools"]
+    tools = _kb_gateway().tools(timeout=5) or []
+    if tools:
+        _MCP_TOOLS_CACHE["ts"] = now
+        _MCP_TOOLS_CACHE["tools"] = tools
+    return tools
+
+
+def _mcp_doc() -> str:
+    """MCP 开放工具清单(动态)：注入系统提示，供 plan agent 经 mcp.call 调用。"""
+    tools = _mcp_tool_list()
+    if not tools:
+        return ("MCP(mcp.call)：当前无可用 MCP 工具(MCP server 不可达或未注册工具)，"
+                "如需外部工具请先在「外部调用」页配置。")
+    lines = ["MCP 开放工具(经 mcp.call 调用，参数 {\"tool\":\"<名>\",\"params\":{…}})："]
+    for t in tools[:20]:
+        lines.append(f"- {t.get('name', '')}: {t.get('description', '')}")
+    return "\n".join(lines)
+
+
+@register_architect_tool(
+    "mcp.call",
+    "调用 MCP 开放工具(经 MCP server 转发，可调用外部/注册的工具)。"
+    "参数 {\"tool\": \"<mcp工具名>\", \"params\": {…工具参数}}。返回 {ok, tool, call|error}。",
+)
+def tool_mcp_call(tool: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not tool:
+        return {"ok": False, "error": "缺少 MCP 工具名(tool)"}
+    result = _kb_gateway().query(tool, timeout=30, **(params or {}))
+    if result is None:
+        return {"ok": False, "tool": tool, "error": "MCP 不可达或超时"}
+    return result
+
+
+# ── 需求定稿工具(plan 结论 → 结构化分析 + 转入待执行) ────────────────
+
+@register_architect_tool(
+    "req.finalize",
+    "定稿：把 plan 结论固化为结构化需求分析并转入待执行。当需求讨论收敛、可明确范围/影响/实现路径时调用"
+    "(调用后本会话需求状态→待执行，左栏会话移入「待执行」组)。"
+    "参数：title、description、functionalScope[str]、entityBoundary[str]、"
+    "assetScope[{assetId,assetType,role,source}]、estMin(int 分钟)、implementationPath(str)、assessmentSummary(str)。",
+)
+def tool_req_finalize(title: str = "", description: str = "",
+                      functionalScope: Optional[List[str]] = None,
+                      entityBoundary: Optional[List[str]] = None,
+                      assetScope: Optional[List[Dict[str, Any]]] = None,
+                      estMin: Optional[int] = None,
+                      implementationPath: str = "",
+                      assessmentSummary: str = "",
+                      root: Optional[str] = None, project: Optional[str] = None) -> Dict[str, Any]:
+    from . import ctx
+    req_id = ctx.get_req()
+    if not req_id:
+        return {"ok": False, "error": "当前会话未绑定需求，无法定稿"}
+    row = store.RequirementsStore.get(req_id)
+    if not row:
+        return {"ok": False, "error": f"需求 {req_id} 不存在"}
+    try:
+        est = int(estMin or 0)
+    except (TypeError, ValueError):
+        est = 0
+    analysis = {
+        "functionalScope": functionalScope or [],
+        "entityBoundary": entityBoundary or [],
+        "assessmentSummary": assessmentSummary or "",
+        "assetScope": assetScope or [],
+        "estMin": est,
+        "implementationPath": implementationPath or "",
+        "changes": [],
+        "steps": [],
+    }
+    store.RequirementsStore.update(req_id, {
+        "title": (title or "").strip() or row.get("title") or req_id,
+        "analysis": analysis,
+        "status": "analyzed",
+        "location": "pool",
+    })
+    return {
+        "ok": True, "reqId": req_id, "status": "analyzed", "location": "pool",
+        "lifecycle": "ready", "summary": "已定稿，需求转入待执行(可指派 subagent 执行)。",
+    }
+
+
 # ── LLM 通道: 复用主后端 ai chat ─────────────────────────────────────
 
 _MODEL_KEY = "llm.modelId"
@@ -554,7 +649,9 @@ _CAPABILITY_DOC = (
     "- asset.semantic.detail：读取单个语义资产的完整描述/结构化细节/AST 锚点\n"
     "- asset.semantic.mappings：查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」\n"
     "- asset.semantic.reconcile：校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)\n"
-    "- asset.semantic.refresh：更新过期资产(增量重提；失败软删并重新生成)\n\n"
+    "- asset.semantic.refresh：更新过期资产(增量重提；失败软删并重新生成)\n"
+    "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
+    "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n\n"
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
@@ -570,6 +667,10 @@ _CAPABILITY_DOC = (
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"
     '- asset.semantic.refresh: {"asset_id": "sa-xxx"}\n'
+    '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
+    '- req.finalize: {"title": "…", "description": "…", "functionalScope": ["…"], '
+    '"entityBoundary": ["…"], "assetScope": [{"assetId":"…","assetType":"component","role":"core",'
+    '"source":"auto"}], "estMin": 90, "implementationPath": "…", "assessmentSummary": "…"}\n'
     "输出工具调用块后不要再写其它内容；收到工具结果后才继续回答。"
     "若无需检索即可直接回答，就不要调用工具。\n\n"
     "可处理范围：\n"
@@ -634,10 +735,11 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
         else "KB 降级(无资产检索)，仅能基于需求描述给出规划建议，建议先关联知识库。"
     )
     extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
+    mcp_extra = f"\n\n{_mcp_doc()}"
     return (
         "你是 TopoCode 架构需求分析 agent(自由对话)。\n"
         f"当前项目：{ctx.get('name') or '(未绑定)'}，模式：{mode}。{kb}\n\n"
-        f"{_CAPABILITY_DOC}{extra}"
+        f"{_CAPABILITY_DOC}{extra}{mcp_extra}"
     )
 
 

@@ -97,6 +97,19 @@ class KbGateway:
             return None
 
 
+    def tools(self, timeout: float = None) -> list:
+        """列出 MCP 可用工具(`GET /v1/tools`)。不可达/超时返回 []。"""
+        t = (self.timeout if timeout is None else float(timeout))
+        url = f"{self.mcp_url}/v1/tools"
+        try:
+            with urllib.request.urlopen(url, timeout=min(t, 5)) as resp:
+                body = json.loads(resp.read().decode())
+            return body.get("tools") or []
+        except Exception as e:
+            logger.info("[KbGateway] mcp tools list unreachable (%s): %s", url, e)
+            return []
+
+
 _default = None
 
 

@@ -85,6 +85,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             _ctx.set_project(_proj["id"])
     except Exception:
         pass
+    # 请求级需求上下文(供 plan agent「定稿」工具定位当前会话需求)
+    try:
+        _ctx.set_req(data.get("reqId") or "")
+    except Exception:
+        pass
 
     # ---- 会话落库(阶段D 统一表) ----
     now = _ts()

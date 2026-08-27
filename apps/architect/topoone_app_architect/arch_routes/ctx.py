@@ -92,6 +92,27 @@ def reset_project(token) -> None:
         pass
 
 
+# 请求级需求定位(WS 会话消息设置；供 plan agent「定稿」工具定位当前会话需求)
+_req_var: contextvars.ContextVar = contextvars.ContextVar(
+    "architect_req_id", default=None)
+
+
+def set_req(req_id: str):
+    """设置当前请求的需求 id，返回 token(可用 reset_req 还原)。"""
+    return _req_var.set(req_id or None)
+
+
+def get_req():
+    return _req_var.get()
+
+
+def reset_req(token) -> None:
+    try:
+        _req_var.reset(token)
+    except (ValueError, LookupError):
+        pass
+
+
 # ── 项目库管理(architect/<pid>/arch.db) ───────────────────────
 
 def project_db_dir() -> str:
