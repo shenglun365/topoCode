@@ -1,4 +1,13 @@
+/** 内联图渲染（```mermaid```/```plantuml``` 代码块 → 注入占位 div）。
+
+统一经 topoOne 内核渲染（@topo/web-core/composables/useTopoRender）：
+- mermaid  主线程 MermaidEngine
+- plantuml POST {base}/plantuml/svg（gateway /api/topo）
+取代旧实现（直连 mermaid + IPC render.renderPlantuml）。
+*/
+
 import { ref } from 'vue'
+import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
 
 export interface DiagramBlock {
   id: string
@@ -10,25 +19,6 @@ export interface DiagramBlock {
 }
 
 export type DiagramLang = 'mermaid' | 'plantuml'
-
-let mermaidApi: any = null
-
-async function ensureMermaid() {
-  if (mermaidApi) return
-  try {
-    const mod = await import('mermaid')
-    mermaidApi = mod.default
-    mermaidApi.initialize({
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'dark',
-      fontFamily: 'var(--font-sans)',
-    })
-  } catch (e) {
-    console.warn('[useDiagramRenderer] ensureMermaid FAILED:', e)
-    throw e
-  }
-}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -67,9 +57,6 @@ function normalizeDiagramCode(lang: string, code: string): string {
     code = code.replace(/[ \t]+$/gm, '')
     return code
   }
-  if (lang === 'plantuml') {
-    return code
-  }
   return code
 }
 
@@ -97,17 +84,7 @@ export function useDiagramRenderer() {
       block.error = undefined
       const cleaned = normalizeDiagramCode(block.lang, block.code)
       try {
-        let svg = ''
-        if (block.lang === 'mermaid') {
-          await ensureMermaid()
-          const id = `sd-${block.id}`
-          const result = await mermaidApi.render(id, cleaned)
-          svg = result.svg
-        } else {
-          const result = await (window as any).api.render.renderPlantuml({ code: cleaned, format: 'svg' })
-          svg = atob(result.data)
-        }
-        block.svg = svg
+        block.svg = await renderDiagram(block.lang, cleaned)
         injectDiagram(block)
       } catch (e: unknown) {
         block.error = (e as Error).message || 'Render failed'

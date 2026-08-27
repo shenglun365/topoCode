@@ -12,20 +12,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@topo/web-core": "*",
-    "vue": "3.5.13",
-    "vue-router": "4.5.1",
-    "vue-i18n": "9.14.5",
-    "pinia": "3.0.3",
-    "pinia-plugin-persistedstate": "4.7.1",
     "@heroicons/vue": "2.2.0",
+    "@topo/web-core": "*",
     "d3": "7.9.0",
     "highlight.js": "^11.11.1",
     "markdown-it": "14.1.1",
-    "mermaid": "^11.16.0",
+    "pinia": "3.0.3",
+    "pinia-plugin-persistedstate": "4.7.1",
     "pixi.js": "8.18.1",
-    "plantuml-encoder": "1.4.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "vue": "3.5.13",
+    "vue-i18n": "9.14.5",
+    "vue-router": "4.5.1"
   },
   "devDependencies": {
     "@tailwindcss/forms": "0.5.11",

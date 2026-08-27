@@ -1,0 +1,7 @@
+@startuml
+actor "User" as u
+participant "Server" as s
+u -> s : GET /api
+s --> u : 200 OK
+s ->> s : audit log
+@enduml

@@ -10,8 +10,7 @@ import ChatSidebar from '@/components/ChatSidebar.vue'
 import { AppToolbar, ModelSettingsDropdown } from '@topo/web-core/shell'
 import type { ModelSettingsProvider } from '@topo/web-core/shell'
 import ChatMessage from '@/components/ChatMessage.vue'
-import MermaidViewer from '@topo/web-core/components/MermaidViewer.vue'
-import PlantUmlViewer from '@topo/web-core/components/PlantUmlViewer.vue'
+import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 import RenameDialog from '@/components/RenameDialog.vue'
 import SaveAsDocDialog from '@/components/SaveAsDocDialog.vue'
 import { useToast } from '@topo/web-core/composables/useToast'
@@ -1313,8 +1312,9 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
         <div v-else class="note-view-body" @click="onDocAnnoClick">
           <template v-for="(b, i) in noteBlocks" :key="i">
             <span v-if="b.type === 'text'" class="note-render" v-html="getAnnotationBlocks(b.html || '')"></span>
-            <MermaidViewer
+            <DiagramViewer
               v-else-if="b.type === 'mermaid'"
+              lang="mermaid"
               :code="b.code!"
               :diag-id="b.diagId!"
               :msg-id="viewingNote?.id"
@@ -1322,8 +1322,9 @@ onUnmounted(() => { bc.close(); window.removeEventListener('storage', onStorage)
               @code-change="onNoteCodeChange"
               @save-state="saveViewingDocDiagState"
             />
-            <PlantUmlViewer
+            <DiagramViewer
               v-else-if="b.type === 'plantuml'"
+              lang="plantuml"
               :code="b.code!"
               :diag-id="b.diagId!"
               :msg-id="viewingNote?.id"

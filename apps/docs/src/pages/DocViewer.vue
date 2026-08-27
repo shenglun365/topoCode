@@ -3,8 +3,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { diagramStateStore } from '@topo/web-core/services/diagramStateStore'
 import { parseDocContent } from '@topo/web-core/services/parseContent'
-import MermaidViewer from '@topo/web-core/components/MermaidViewer.vue'
-import PlantUmlViewer from '@topo/web-core/components/PlantUmlViewer.vue'
+import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 import { useFloatDrag } from '@topo/web-core/composables/useFloatDrag'
 import { useDocState } from '@/composables/useDocState'
 import { useNotes } from '@/composables/useNotes'
@@ -680,16 +679,18 @@ onMounted(() => {
           <div v-else-if="doc" ref="docContentRef" class="content" @click="onDocAnnoClick">
             <template v-for="(b, i) in docBlocks" :key="i">
               <span v-if="b.type === 'text'" class="doc-render" v-html="getAnnotationBlocks(b.html || '')"></span>
-              <MermaidViewer
+              <DiagramViewer
                 v-else-if="b.type === 'mermaid'"
+                lang="mermaid"
                 :code="b.code!"
                 :diag-id="b.diagId!"
                 :msg-id="docId.value || originalDocId.value"
                 :initial-state="b.initialState"
                 @save-state="saveDiagramStates"
               />
-              <PlantUmlViewer
+              <DiagramViewer
                 v-else-if="b.type === 'plantuml'"
+                lang="plantuml"
                 :code="b.code!"
                 :diag-id="b.diagId!"
                 :msg-id="docId.value || originalDocId.value"

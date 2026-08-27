@@ -1,0 +1,13 @@
+@startuml
+' Deployment
+package "Backend" as backend {
+  rectangle "FastAPI" as api
+  rectangle "Postgres" as db
+}
+
+rectangle "User" as user
+rectangle "Agent Web" as web
+user -> web : HTTPS
+web -> api : REST
+api -> db : SQL
+@enduml

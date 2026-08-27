@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { fitScale } from '../services/render'
+import { normalizeDiagram, enqueueRender, fitScale, mermaidParseErrorDetail } from '../services/render'
 import { diagramStateStore, type DiagramViewState } from '../services/diagramStateStore'
 import DiagramRebuildDialog from './DiagramRebuildDialog.vue'
+import { MermaidEngine } from '../topoOne/engines/mermaid/mermaid'
+import { PlantUmlEngine } from '../topoOne/engines/plantuml/plantuml'
+import { themeVariablesFor } from '../topoOne/vue/themes'
+import { authHeaders } from '../services/api'
 
 function stripHtml(s: string) { return s.replace(/<!--[\s\S]*?-->/g, '') }
 
@@ -10,6 +14,7 @@ const props = defineProps<{
   code: string
   diagId: string
   msgId?: string
+  lang: 'mermaid' | 'plantuml'
   initialState?: DiagramViewState | null
   toolGenerated?: boolean
 }>()
@@ -20,9 +25,62 @@ const emit = defineEmits<{
   'save-state': []
 }>()
 
+// ── topoOne 内核引擎（统一渲染）：mermaid 主线程、plantuml 经 gateway /api/topo ──
+
+const mermaidEngine = new MermaidEngine()
+const plantumlEngine = new PlantUmlEngine({ baseUrl: '/api/topo', protocol: 'post-raw', headers: authHeaders() })
+
+function currentTheme(): 'light' | 'dark' {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
+
+async function renderWithEngine(codeOverride?: string) {
+  loading.value = true
+  error.value = ''
+  try {
+    const n = normalizeDiagram(stripHtml(codeOverride ?? props.code), props.lang)
+    let svg: string
+    if (props.lang === 'mermaid') {
+      const result = await mermaidEngine.render({
+        container: svgWrap.value!,
+        code: n.code,
+        theme: currentTheme(),
+        themeVariables: themeVariablesFor(currentTheme()),
+        securityLevel: 'loose',
+      })
+      svg = result.svg
+    } else {
+      const result = await plantumlEngine.render({ container: svgWrap.value!, code: n.code })
+      svg = result.svg
+    }
+    if (svgWrap.value) {
+      svgWrap.value.innerHTML = svg
+      applyScale()
+    }
+    loading.value = false
+    await nextTick()
+    if (svgWrap.value && diagView.value) {
+      const sw = svgWrap.value.scrollWidth
+      const sh = svgWrap.value.scrollHeight
+      const cw = diagView.value.clientWidth
+      const ch = diagView.value.clientHeight
+      if (!hasSavedState && (sw > cw || sh > ch)) {
+        const s = fitScale(sw, sh, cw, ch)
+        if (s !== null && s < zs) {
+          zs = s; dx = 0; dy = 0
+          zoomPct.value = Math.round(s * 100) + '%'
+          applyScale()
+        }
+      }
+    }
+  } catch (e: any) {
+    error.value = mermaidParseErrorDetail(e) || e.message || '渲染失败'
+    loading.value = false
+  }
+}
+
 const contentId = computed(() => props.msgId || '')
 
-// ── 状态 ──
 const svgWrap = ref<HTMLElement>()
 const diagView = ref<HTMLElement>()
 const textarea = ref<HTMLTextAreaElement>()
@@ -77,7 +135,8 @@ function applyScale() {
       if (vb) {
         const parts = vb.trim().split(/\s+/).map(Number)
         if (parts.length >= 4) {
-          const nw = parts[2], nh = parts[3]
+          const nw = parts[2]
+          const nh = parts[3]
           if (nw > 0 && nh > 0) {
             svg.style.width = Math.round(nw * zs) + 'px'
             svg.style.height = Math.round(nh * zs) + 'px'
@@ -94,68 +153,19 @@ function applyScale() {
 
 function reFit() {
   if (userZoomed || hasSavedState || !diagView.value || !svgWrap.value) return
-  const sw = svgWrap.value.scrollWidth, sh = svgWrap.value.scrollHeight
-  const cw = diagView.value.clientWidth, ch = diagView.value.clientHeight
-  const s = fitScale(sw, sh, cw, ch)
+  const s = fitScale(svgWrap.value.scrollWidth, svgWrap.value.scrollHeight, diagView.value.clientWidth, diagView.value.clientHeight)
   if (s !== null) { zs = s; dx = 0; dy = 0; zoomPct.value = Math.round(s * 100) + '%'; applyScale(); scheduleNotify() }
 }
 
-async function renderPlantUml(codeOverride?: string) {
-  loading.value = true
-  error.value = ''
-  try {
-    const resp = await fetch('/api/plantuml', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: stripHtml(codeOverride ?? props.code),
-    })
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '')
-      let msg = (text && text.trim()) ? text : 'PlantUML server returned ' + resp.status
-      try {
-        const j = JSON.parse(text)
-        if (j && j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
-      } catch { /* keep raw text */ }
-      throw new Error(msg)
-    }
-    const svg = await resp.text()
-    if (svgWrap.value) {
-      svgWrap.value.innerHTML = svg
-      applyScale()
-    }
-    loading.value = false
-    await nextTick()
-    if (svgWrap.value && diagView.value) {
-      const sw = svgWrap.value.scrollWidth
-      const sh = svgWrap.value.scrollHeight
-      const cw = diagView.value.clientWidth
-      const ch = diagView.value.clientHeight
-      if (!hasSavedState && (sw > cw || sh > ch)) {
-        const s = fitScale(sw, sh, cw, ch)
-        if (s !== null && s < zs) {
-          zs = s; dx = 0; dy = 0
-          zoomPct.value = Math.round(s * 100) + '%'
-          applyScale()
-        }
-      }
-    }
-  } catch (e: any) {
-    error.value = e.message || '渲染失败'
-    loading.value = false
-  }
-}
-
-// —— 懒渲染 + 响应 code prop 变化 ——
 onMounted(() => {
-  renderPlantUml()
+  enqueueRender(renderWithEngine)
   if (diagView.value) {
     ro = new ResizeObserver(() => reFit())
     ro.observe(diagView.value)
   }
 })
-watch(() => props.code, () => { userZoomed = false; activeTab.value = 'chart'; renderPlantUml() })
+watch(() => props.code, () => { userZoomed = false; activeTab.value = 'chart'; renderWithEngine() })
 
-// ── 缩放 / 平移 ──
 function onWheel(e: WheelEvent) {
   if (!(e.ctrlKey || e.metaKey) || !diagView.value) return
   e.preventDefault()
@@ -168,7 +178,6 @@ function onWheel(e: WheelEvent) {
   zs = Math.max(0.25, Math.min(5, zs * factor))
   dx = dx + mx * (1 - zs / old)
   dy = dy + my * (1 - zs / old)
-  console.log(`[diag] zoom msgId=${props.msgId||'-'} ${old.toFixed(3)}→${zs.toFixed(3)} dx=${dx.toFixed(0)} dy=${dy.toFixed(0)}`)
   applyScale()
   zoomPct.value = Math.round(zs * 100) + '%'
   scheduleNotify()
@@ -265,10 +274,10 @@ const rebuildResult = ref('')
 async function onRebuild() {
   rebuilding.value = true
   try {
-    const resp = await fetch('/api/plantuml/rebuild', {
+    const resp = await fetch(`/api/${props.lang}/rebuild`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: stripHtml(props.code), type: 'auto' }),
+      body: JSON.stringify({ code: stripHtml(props.code) }),
     })
     if (!resp.ok) {
       const text = await resp.text()
@@ -290,7 +299,7 @@ async function onRebuildConfirm(finalCode: string) {
   activeTab.value = 'chart'
   await nextTick()
   emit('code-change', props.diagId, finalCode)
-  renderPlantUml(finalCode)
+  renderWithEngine(finalCode)
 }
 
 let rsDragging = false, rsStartY = 0, rsStartH = 0
@@ -362,7 +371,7 @@ function zoomOut() {
     </div>
 
     <div v-show="activeTab === 'chart'" class="diag-view" ref="diagView" @wheel.prevent="onWheel">
-      <div v-if="loading" class="diagram-loading">PlantUML rendering...</div>
+      <div v-if="loading" class="diagram-loading">{{ lang === 'mermaid' ? 'Mermaid' : 'PlantUML' }} rendering...</div>
       <div v-else-if="error" class="diag-error">✖ {{ error }}</div>
       <div class="diag-svg-wrap" ref="svgWrap" :style="{ display: (loading || error) ? 'none' : '' }" @mousedown="onSvgMouseDown"></div>
     </div>
@@ -381,7 +390,7 @@ function zoomOut() {
       :visible="rebuildDialogVisible"
       :original-code="code"
       :rebuilt-code="rebuildResult"
-      lang="plantuml"
+      :lang="lang"
       @confirm="onRebuildConfirm"
       @cancel="rebuildDialogVisible = false"
     />
@@ -391,17 +400,7 @@ function zoomOut() {
 </template>
 
 <style>
-.diagram-container{display:flex;flex-direction:column}
-.diag-view{flex:1;min-height:0}
-.diagram-loading{padding:32px;color:var(--text-muted,#888);font-size:var(--ui-font-size,14px);text-align:center}
-.diag-error{padding:16px 24px;text-align:left;white-space:pre-wrap;word-break:break-word;color:#e06c75;font-size:14px;font-family:var(--font-mono,monospace);max-height:300px;overflow:auto;margin:8px}
-.diag-code{padding:0;display:flex;flex-direction:column;max-height:55vh;overflow-y:auto}
-.diag-textarea{width:100%;min-height:150px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:vertical;outline:none;box-sizing:border-box;tab-size:2}
-.diag-code-actions{display:flex}
-.diag-code-actions .diag-render-btn{flex:1}
-.diag-rebuild-btn{flex:1;padding:8px 14px;background:none;border:none;border-left:1px solid var(--border,#e4e4e7);cursor:pointer;font-size:13px;color:var(--text-muted,#888)}
-.diag-rebuild-btn:hover:not(:disabled){color:var(--accent,#4d6bfe);background:var(--bg-hover,#e8e8e8)}
-.diag-rebuild-btn:disabled{opacity:0.4;cursor:not-allowed}
+.diagram-container{border:1px solid var(--border,#e4e4e7);border-radius:var(--radius-lg,12px);overflow:hidden;margin:8px 0;position:relative;min-height:120px;display:flex;flex-direction:column}
 .diag-toolbar{display:flex;align-items:center;justify-content:space-between;padding:4px 8px;background:var(--bg-hover,#f0f0f2);border-bottom:1px solid var(--border,#e4e4e7);gap:4px}
 .diag-tabs{display:flex;gap:2px}
 .diag-tab{background:none;border:none;padding:3px 10px;border-radius:var(--radius-sm,6px);cursor:pointer;font-size:12px;color:var(--text-muted,#888);transition:all .15s}
@@ -410,4 +409,35 @@ function zoomOut() {
 .diag-tab-active:hover{background:var(--accent-hover,#3a56d4);color:#fff}
 .diag-tool-badge{font-size:11px;padding:1px 6px;border-radius:4px;background:#e8f5e9;color:#2e7d32;margin-left:6px;white-space:nowrap}
 
+.diag-actions{display:flex;align-items:center;gap:2px}
+.diag-actions button{background:none;border:none;color:var(--text-muted,#888);cursor:pointer;padding:2px 6px;border-radius:4px;font-size:13px;line-height:1}
+.diag-actions button:hover{background:var(--bg-tertiary,#e8e8e8);color:var(--text-primary,#1a1a1a)}
+.diag-save-btn{font-size:12px!important;padding:2px 5px!important;display:inline-flex!important;align-items:center;gap:2px;margin:0 4px}
+.diag-save-btn:disabled{opacity:0.35;cursor:not-allowed!important}
+.diag-save-btn.has-unsaved{color:var(--accent,#4d6bfe)!important}
+.diag-save-btn.has-unsaved:hover{background:var(--accent-light)!important}
+.save-red-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444}
+.diag-zoom-pct{font-size:11px;color:var(--text-muted,#888);min-width:30px;text-align:center}
+.diag-view{flex:1;min-height:0}
+.diag-svg-wrap{transform-origin:0 0;cursor:grab}
+.diag-svg-wrap:active{cursor:grabbing}
+.diag-code{padding:0;display:flex;flex-direction:column;max-height:55vh;overflow-y:auto}
+.diag-textarea{width:100%;min-height:150px;border:none;padding:12px;font-family:var(--font-mono,monospace);font-size:13px;background:var(--bg-code,#f4f4f5);color:var(--code-text,#1a1a1a);resize:vertical;outline:none;box-sizing:border-box;tab-size:2}
+.diag-render-btn{display:block;width:100%;padding:8px;background:var(--accent,#4d6bfe);color:#fff;border:none;cursor:pointer;font-size:13px}
+.diag-render-btn:hover{background:var(--accent-hover,#3a56d4)}
+.diag-code-actions{display:flex}
+.diag-code-actions .diag-render-btn{flex:1}
+.diag-rebuild-btn{flex:1;padding:8px 14px;background:none;border:none;border-left:1px solid var(--border,#e4e4e7);cursor:pointer;font-size:13px;color:var(--text-muted,#888)}
+.diag-rebuild-btn:hover:not(:disabled){color:var(--accent,#4d6bfe);background:var(--bg-hover,#e8e8e8)}
+.diag-rebuild-btn:disabled{opacity:0.4;cursor:not-allowed}
+.diagram-loading{padding:32px;color:var(--text-muted,#888);font-size:var(--ui-font-size,14px);text-align:center}
+.diag-error{padding:16px 24px;text-align:left;white-space:pre-wrap;word-break:break-word;color:#e06c75;font-size:14px;font-family:var(--font-mono,monospace);max-height:300px;overflow:auto;margin:8px}
+.diag-resize-handle{position:absolute;bottom:0;left:0;right:0;height:6px;cursor:ns-resize;background:transparent;z-index:1}
+.diag-resize-handle::after{content:'';display:block;height:2px;margin:2px 24px;border-radius:1px;background:var(--border,#e4e4e7);transition:background .15s}
+.diag-resize-handle:hover::after,.diag-resize-handle:active::after{background:var(--accent,#4d6bfe)}
+.diag-fullscreen-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:40px}
+.diag-fullscreen-overlay .diag-fs-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;z-index:1}
+.diag-fullscreen-overlay .diag-fs-close:hover{background:rgba(255,255,255,.3)}
+.diag-fullscreen-overlay .diag-fs-content{max-width:95%;max-height:90vh;overflow:auto;transform-origin:0 0}
+.diag-fullscreen-overlay .diag-fs-content svg{max-width:none!important}
 </style>

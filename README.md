@@ -84,8 +84,9 @@ topoOne-ui/
 │   ├── core/                     # 核心基础框架（topoone-core，editable 安装）
 │   │   └── topoone/
 │   │       ├── engine/           # 引擎（app/service/task_manager/report_service/diagram_ir_docs）
+│       ├── diagram/          # 统一图内核（DiagramSchema IR + validation/capabilities + builder + plantuml sidecar + 无头渲染池）
 │   │       ├── gateway/          # 网关（:3456 反代 + RPC 路由 + 鉴权 + SPA 静态）
-│   │       ├── supervisor/       # 进程治理（topo serve 拉起 9 进程）
+│   │       ├── supervisor/       # 进程治理（topo serve 拉起 10 进程）
 │   │       ├── rpc/              # ZeroMQ RPC 服务
 │   │       ├── db/               # SQLite 多数据库管理
 │   │       ├── agent/            # AI Agent 工作流
@@ -93,7 +94,7 @@ topoOne-ui/
 │   │       ├── plugins/          # 核心插件（parsers/community/mcp/runner/llm-provider-*）
 │   │       └── manifest.py       # 子项目 manifest 驱动注册
 │   └── web-core/                 # 前端共享内核（@topo/web-core：组件/服务/门户 dist-portal）
-├── apps/                         # 4 个独立子项目（各自 vite 工程 + Python 后端包）
+├── apps/                         # 独立子项目（各自 vite 工程 + Python 后端包，含纯后端 agent-bus）
 │   ├── workbench/                # ① 主工作台（topoone_app_workbench + @topo/app-workbench）
 │   ├── docs/                     # ② 文档浏览（topoone_app_docs :3481 + @topo/app-docs）
 │   ├── chat/                     # ③ AI 对话（topoone_app_chat :3483 + @topo/app-chat）
@@ -111,8 +112,9 @@ topoOne-ui/
 | **docs** | `@topo/app-docs` | `topoone_app_docs` | `:3481` | 文档浏览（viewer/web-root，render.* RPC） |
 | **chat** | `@topo/app-chat` | `topoone_app_chat` | `:3483` | AI 对话（会话/技能/草稿） |
 | **architect** | `@topo/app-architect` | `topoone_app_architect` | `:3470` | Architect 工作台（语义资产/需求/设计/Coding Agent） |
+| **agent-bus** | — | `topoone_app_architect.agent_bus` | `:3486` | Agent 间消息总线 broker（arch_bus_messages 轮询分发 + WS 推送） |
 
-> 核心框架（`packages/core`）提供网关、RPC、DB、Agent、LLM、插件与进程治理；4 个子项目经 manifest 驱动注册，独立进程运行，由 `topo serve` 统一拉起（9 进程）。
+> 核心框架（`packages/core`）提供网关、RPC、DB、Agent、LLM、插件与进程治理；子项目经 manifest 驱动注册，独立进程运行，由 `topo serve` 统一拉起（10 进程：核心 kb/gateway/llm/agent + 生态 mcp/runner + docs/chat/architect/agent-bus）。
 
 ---
 
@@ -170,7 +172,7 @@ npm run setup
 # 全栈开发（core 后端 + 4 前端 dev server 并发）
 npm run dev
 
-# 仅后端服务集（supervisor 拉起 9 进程，:3456）
+# 仅后端服务集（supervisor 拉起 10 进程，:3456）
 npm run serve          # 等价于 topo serve
 
 # 查看进程状态 / 停止
@@ -181,6 +183,20 @@ bash scripts/serve.sh stop
 > 亦可直接用 `topo` CLI（安装后即全局可用）：`topo serve` / `topo status` / `topo doctor` / `topo init` 等。
 
 首次启动会生成访问 token（见终端输出）。浏览器访问: `http://localhost:3456/#token=<token>`
+
+### 图表渲染（topo 内核）部署说明
+
+图渲染统一走 `packages/core/topoone/diagram` 内核（DiagramSchema IR 单一事实源，mermaid/plantuml
+引擎可插拔）。docs 服务 `:3481` 挂载 `/api/topo`（gateway 自动反代）：
+
+- **PlantUML**：优先启动 sidecar（独立 JVM `:3491`）。需 plantuml jar，部署时复制到
+  `~/.topocode/plantuml.jar`（与既有 `plantuml_service` 共用；可用 `TOPOONE_PLANTUML_JAR` 覆盖）。
+  sidecar 未就绪时自动兜底：本地 jar → 远程 plantuml.com。
+- **无头渲染池**（`/api/topo/render/mermaid`、`/render/schema`）：chromium 跑 web-core 的 IIFE bundle
+  （`packages/web-core/dist-topoone/topo-one.js`，`npm run build:topoone-browser` 生成）。需
+  `pip install -e "packages/core[diagrams]"` + `playwright install chromium`；未装则 render/* 返回 503。
+- 浏览器端 mermaid 主线程渲染、plantuml 经 `/api/topo/plantuml/svg` 同源访问（见 web-core
+  `useTopoRender` / `DiagramViewer`）。
 
 | URL | 说明 |
 |---|---|
@@ -254,7 +270,7 @@ PLANTUML_SERVER=http://localhost:8300
 对外部 Agent/工具提供 Model Context Protocol（HTTP）接口，独立进程监听 `:3460`，工具调用转发至 architect 服务（`:3470`）。
 
 ```bash
-# 独立启动（topo serve 会随 9 进程自动拉起，通常无需手动启动）
+# 独立启动（topo serve 会随 10 进程自动拉起，通常无需手动启动）
 python -m topoone.plugins.mcp
 ```
 

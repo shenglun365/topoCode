@@ -1,0 +1,13 @@
+@startuml
+package "Client" as l1 {
+  rectangle "Request" as a
+}
+
+package "Server" as l2 {
+  rectangle "Handle" as b
+  rectangle "Respond" as c
+}
+
+a -> b
+b -> c
+@enduml

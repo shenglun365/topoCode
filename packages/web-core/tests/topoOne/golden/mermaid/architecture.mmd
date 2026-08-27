@@ -1,0 +1,11 @@
+C4Context
+title Deployment
+Boundary(backend, "Backend") {
+  System(api, "FastAPI")
+  SystemDb(db, "Postgres")
+}
+Person(user, "User")
+System(web, "Agent Web")
+Rel(user, web, "HTTPS")
+Rel(web, api, "REST")
+Rel(api, db, "SQL")

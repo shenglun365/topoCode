@@ -47,6 +47,7 @@ dependencies = [
   "python-multipart==0.0.32",
   "pydantic==2.13.4",
   "pydantic-settings==2.14.1",
+  "jsonschema>=4.18",
   "diskcache==5.6.3",
   "duckdb>=0.10.0",
   "psutil>=6.0",
@@ -59,6 +60,9 @@ topo = "topoone.supervisor.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
+# Headless render pool（topoone.diagram RenderPool：chromium 跑 web IIFE bundle）。
+# 未安装时 render/* 端点返回 503，plantuml 与 validate 仍可用。
+diagrams = ["playwright>=1.40"]
 
 [tool.setuptools.packages.find]
 include = ["topoone*"]

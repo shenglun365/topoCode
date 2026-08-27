@@ -6,10 +6,8 @@ import type {
   RenderResult,
   RenderData,
   RenderOptions,
-  MermaidData,
   D3LayoutData,
   D3HierarchyData,
-  MermaidResult,
   D3LayoutResult,
   D3HierarchyResult,
 } from '@/workers/types'
@@ -38,7 +36,6 @@ export interface RenderManagerConfig {
 // ==================== 路由表 ====================
 
 const ROUTES: Record<RenderType, RenderManagerConfig> = {
-  'mermaid':      { backend: 'worker',      timeout: 15000, cache: true },
   'd3-layout':    { backend: 'worker',      timeout: 10000, cache: false },
   'd3-hierarchy': { backend: 'worker',      timeout: 10000, cache: false },
 }

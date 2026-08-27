@@ -1,0 +1,13 @@
+@startuml
+class Animal {
+#name : string
++speak() : string
+}
+
+class Dog {
++bark()
+}
+
+Dog <|-- Animal
+Dog -- Animal : likes
+@enduml

@@ -1585,18 +1585,31 @@ class WebToolExecutor:
         if not ir:
             return {"error": "ir is required", "_skip": True}
         try:
-            from diagram_tools import build_from_ir, validate_ir
-            dt = ir.get("diagram_type", "")
-            valid_schema, schema_errors = validate_ir(ir, dt) if dt else (True, [])
-            if not valid_schema:
-                return {"error": f"IR schema validation failed: {schema_errors[:3]}", "_skip": True}
-            result = build_from_ir(ir)
+            from topoone.diagram import build_from_ir, is_legacy_ir, schema_to_legacy_ir
+            from topoone.diagram.validation import validate_schema_document
+            from topoone.diagram._ir_schema import validate_ir
+            from topoone.diagram._validator import validate_diagram_syntax
+
+            if is_legacy_ir(ir):
+                legacy, lang = ir, ir.get("lang", "mermaid")
+                dt = ir.get("diagram_type", "")
+                valid_schema, schema_errors = validate_ir(ir, dt) if dt else (True, [])
+                if not valid_schema:
+                    return {"error": f"IR schema validation failed: {schema_errors[:3]}", "_skip": True}
+            else:
+                report = validate_schema_document(ir)
+                if not report["ok"]:
+                    codes = [e["code"] for e in report["errors"]][:3]
+                    return {"error": f"DiagramSchema validation failed: {codes}", "_skip": True}
+                legacy = schema_to_legacy_ir(ir)
+                lang = ir.get("lang") or legacy.get("lang", "mermaid")
+
+            result = build_from_ir(legacy)
             if "error" in result:
                 return {"error": result["error"], "_skip": True}
-            from diagram_tools._validator import validate_diagram_syntax
-            validation = validate_diagram_syntax(result["code"], ir.get("lang", "mermaid"))
-            modified_nodes = sum(1 for n in (ir.get("nodes") or []) if n.get("_is_modified"))
-            modified_edges = sum(1 for e in (ir.get("edges") or []) if e.get("_is_modified"))
+            validation = validate_diagram_syntax(result["code"], lang)
+            modified_nodes = sum(1 for n in (legacy.get("nodes") or []) if n.get("_is_modified"))
+            modified_edges = sum(1 for e in (legacy.get("edges") or []) if e.get("_is_modified"))
             resp: dict = {
                 "code": result["code"],
                 "type": result["type"],
@@ -1619,7 +1632,7 @@ class WebToolExecutor:
         if not code:
             return {"error": "code is required", "_skip": True}
         try:
-            from diagram_tools._validator import validate_diagram_syntax
+            from topoone.diagram._validator import validate_diagram_syntax
             return validate_diagram_syntax(code, lang)
         except Exception as e:
             return {"error": f"Validation failed: {e}", "_skip": True}

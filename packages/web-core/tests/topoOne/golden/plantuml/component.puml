@@ -1,0 +1,7 @@
+@startuml
+component "Web" as web
+component "API" as api
+node "DB" as db
+web --> api : uses
+api --> db : uses
+@enduml

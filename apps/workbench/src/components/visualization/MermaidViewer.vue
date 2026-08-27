@@ -1,9 +1,9 @@
 <script setup lang="ts">
-/** Mermaid 查看器 - 在 Worker 中渲染 Mermaid 图表 */
+/** Mermaid 查看器 - 经 topoOne 内核渲染（收敛，见 useTopoRender） */
 
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useMermaidRender } from '@/composables/useMermaidRender'
+import { useTopoRender } from '@topo/web-core/composables/useTopoRender'
 import {
   ArrowPathIcon,
   ArrowDownTrayIcon,
@@ -46,9 +46,10 @@ watch(() => props.diagram, (v) => {
   editorCode.value = v
 })
 
-const { svg, loading, error, progress, refresh, exportSvg, exportPng } = useMermaidRender(
+const { svg, loading, error, progress, refresh, exportSvg, exportPng } = useTopoRender(
   diagramCode,
-  { theme: props.theme, cache: props.cache }
+  'mermaid',
+  { theme: props.theme === 'light' ? 'light' : 'dark', cache: props.cache }
 )
 
 // 监听渲染完成

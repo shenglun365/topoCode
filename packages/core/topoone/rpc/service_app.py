@@ -124,12 +124,16 @@ class _NoopBus:
         pass
 
 
-def create_service_app(server: MethodServer, multi_db, title: str = "TopoOne Service"):
-    """FastAPI app：POST /zmq/{method} + GET /health。"""
+def create_service_app(server: MethodServer, multi_db, title: str = "TopoOne Service",
+                       lifespan=None):
+    """FastAPI app：POST /zmq/{method} + GET /health。
+
+    lifespan：可选的 asynccontextmanager（如 diagram 服务的 DiagramServices 启停）。
+    """
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import JSONResponse
 
-    app = FastAPI(title=title)
+    app = FastAPI(title=title, lifespan=lifespan)
 
     @app.post("/zmq/{method}")
     async def call_zmq(method: str, body: dict = None):

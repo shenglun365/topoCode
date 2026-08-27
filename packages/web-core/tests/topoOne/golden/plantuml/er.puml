@@ -1,0 +1,12 @@
+@startuml
+entity "USER" as user {
+id : int <<pk>>
+name : varchar
+}
+
+entity "ORDER" as order {
+id : int <<pk>>
+}
+
+user ||--o{ order : "places"
+@enduml

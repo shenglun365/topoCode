@@ -2,7 +2,7 @@
 
 // ==================== 渲染类型 ====================
 
-export type RenderType = 'mermaid' | 'd3-layout' | 'd3-hierarchy'
+export type RenderType = 'd3-layout' | 'd3-hierarchy'
 
 // ==================== 请求消息 ====================
 
@@ -13,12 +13,7 @@ export interface RenderRequest {
   options?: RenderOptions
 }
 
-export type RenderData = MermaidData | D3LayoutData | D3HierarchyData
-
-export interface MermaidData {
-  diagram: string
-  theme?: 'dark' | 'light' | 'forest' | 'neutral'
-}
+export type RenderData = D3LayoutData | D3HierarchyData
 
 export interface D3LayoutData {
   nodes: D3Node[]
@@ -73,12 +68,7 @@ export interface RenderResponse {
   error?: string
 }
 
-export type RenderResult = MermaidResult | D3LayoutResult | D3HierarchyResult
-
-export interface MermaidResult {
-  svg: string
-  theme?: string
-}
+export type RenderResult = D3LayoutResult | D3HierarchyResult
 
 export interface D3LayoutResult {
   nodes: D3NodePosition[]

@@ -1,172 +1,23 @@
-import { apiBaseUrl, getToken } from '@/services/api-client'
+/** 图渲染统一入口（收敛到 topoOne 内核）。
+
+mermaid/plantuml 渲染统一经 @topo/web-core/composables/useTopoRender：
+- mermaid  主线程 MermaidEngine（catppuccin 主题随 data-theme，见内核 themes）
+- plantuml POST {base}/plantuml/svg（gateway /api/topo，sidecar→本地 jar→远程兜底）
+规模预判/超限友好提示等纯函数保留于此。
+*/
+
+import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
 
 export type DiagramLang = 'mermaid' | 'plantuml' | 'toposcript'
 
-export interface DiagramBlock {
-  id: string
-  lang: DiagramLang
-  code: string
-  title?: string
-  svg?: string
-  url?: string
-  error?: string
-  loading?: boolean
-}
-
-let mermaidApi: any = null
-let mermaidInit = false
-let mermaidTheme = ''
-
-function currentDiagramTheme(): 'dark' | 'light' {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
-}
-
-const MERMAID_THEMES = {
-  dark: {
-    startOnLoad: false,
-    securityLevel: 'loose',
-    theme: 'dark',
-    themeVariables: {
-      background: '#181825',
-      primaryColor: '#313244',
-      primaryTextColor: '#cdd6f4',
-      primaryBorderColor: '#45475a',
-      secondaryColor: '#1e1e2e',
-      tertiaryColor: '#181825',
-      lineColor: '#7f849c',
-      fontFamily: 'var(--font-sans)',
-      fontSize: '13px',
-    },
-  },
-  light: {
-    startOnLoad: false,
-    securityLevel: 'loose',
-    theme: 'base',
-    themeVariables: {
-      background: '#e6e9ef',
-      primaryColor: '#ccd0da',
-      primaryTextColor: '#4c4f69',
-      primaryBorderColor: '#acb0be',
-      secondaryColor: '#eff1f5',
-      tertiaryColor: '#e6e9ef',
-      lineColor: '#5c5f77',
-      fontFamily: 'var(--font-sans)',
-      fontSize: '13px',
-    },
-  },
-} as const
-
-async function ensureMermaid(): Promise<any> {
-  if (mermaidApi) return mermaidApi
-  const mod = await import('mermaid')
-  mermaidApi = mod.default
-  if (!mermaidInit) {
-    mermaidTheme = currentDiagramTheme()
-    mermaidApi.initialize(MERMAID_THEMES[mermaidTheme])
-    mermaidInit = true
-  }
-  return mermaidApi
-}
-
-/** 主题切换后重初始化 mermaid（主题仅允许在 initialize 时指定）。 */
-function refreshMermaidTheme() {
-  if (!mermaidApi || !mermaidInit) return
-  const t = currentDiagramTheme()
-  if (t === mermaidTheme) return
-  mermaidTheme = t
-  mermaidApi.initialize(MERMAID_THEMES[t])
-}
-
-/** mermaid 语法错误时渲染出的是「错误提示 SVG」(aria-roledescription=error)，而非抛异常。
- * 识别后转抛错，走统一的错误提示路径，避免错误 DOM 直接注入页面影响布局。 */
-function isMermaidErrorSvg(svg: string): boolean {
-  return /aria-roledescription=["']error["']/.test(svg)
-    || /class=["'][^"']*error-(icon|text)[^"']*["']/.test(svg)
-    || /Syntax error in text/.test(svg)
-}
-
-/** 清理 mermaid 遗留的临时容器：mermaid 渲染成功后会自行移除，
- * 但语法/绘制错误时(11.x)在抛异常前不会移除，错误 SVG 会挂在 document.body 尾部。 */
-function cleanupMermaidTemp(uid?: string) {
-  const ids = uid ? [`#d${uid}`, `#i${uid}`] : []
-  ids.forEach((sel) => {
-    try { document.querySelector(sel)?.remove() } catch { /* keep going */ }
-  })
-  document.querySelectorAll<HTMLElement>('[id^="dmd-"],[id^="imd-"]').forEach((el) => el.remove())
-}
-
-/** 每次渲染使用唯一临时容器 id，避免复用固定 id 时与在途渲染冲突。 */
-async function renderMermaidOnce(code: string): Promise<string> {
-  const mermaid = await ensureMermaid()
-  refreshMermaidTheme()
-  const uid = `md-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  try {
-    const result = await mermaid.render(uid, code)
-    if (isMermaidErrorSvg(result.svg)) {
-      const text = result.svg.match(/(?:Syntax error in text|error-text)[^<]*/) || ['Syntax error in mermaid diagram']
-      throw new Error(text[0].replace(/[<>&]/g, '').trim())
-    }
-    return result.svg
-  } finally {
-    cleanupMermaidTemp(uid)
-  }
-}
-
-/** 渲染队列：串行化 mermaid 渲染，避免并发触发同一内部实例导致首次冷加载互相干扰。 */
-const renderQueue: (() => Promise<void>)[] = []
-let rendering = false
-
-async function processQueue() {
-  if (rendering) return
-  rendering = true
-  while (renderQueue.length) {
-    const task = renderQueue.shift()
-    if (task) await task()
-  }
-  rendering = false
-}
-
-function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    renderQueue.push(() => fn().then(resolve, reject))
-    processQueue()
-  })
-}
-
+/** 渲染 Mermaid 为 SVG 文本（主线程内核，主题跟随 data-theme）。 */
 export async function renderMermaid(code: string): Promise<string> {
-  return enqueue(async () => {
-    try {
-      return await renderMermaidOnce(code)
-    } catch (e) {
-      // 首次冷启动渲染可能因 mermaid 模块/懒加载子分块尚未就绪而失败，稍候重试一次。
-      console.warn('[diagram] mermaid first render failed, retrying:', (e as Error)?.message || e)
-      await new Promise((r) => setTimeout(r, 300))
-      return await renderMermaidOnce(code)
-    }
-  })
+  return renderDiagram('mermaid', code)
 }
 
-/** 渲染 PlantUML 为 SVG 文本：POST 到 architect 后端 `/diagram/plantuml`，
- * 由后端经 `plantuml_service`(PLANTUML_SERVER，本地 8300)渲染。与 KB AI chat `/api/plantuml` 同构。 */
+/** 渲染 PlantUML 为 SVG 文本（经 gateway /api/topo，sidecar 优先 + 注入兜底）。 */
 export async function renderPlantuml(code: string): Promise<string> {
-  const tok = getToken()
-  const headers: Record<string, string> = { 'Content-Type': 'text/plain' }
-  if (tok) headers['Authorization'] = `Bearer ${tok}`
-  const resp = await fetch(`${apiBaseUrl()}/diagram/plantuml`, {
-    method: 'POST',
-    headers,
-    body: code,
-  })
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    let msg = text?.trim() || `PlantUML server returned ${resp.status}`
-    try {
-      const j = JSON.parse(text)
-      if (j && j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
-    } catch { /* keep raw text */ }
-    throw new Error(msg)
-  }
-  return resp.text()
+  return renderDiagram('plantuml', code)
 }
 
 export function normalizeMermaid(code: string): string {

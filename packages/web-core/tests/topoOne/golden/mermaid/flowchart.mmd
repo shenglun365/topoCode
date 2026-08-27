@@ -1,0 +1,8 @@
+flowchart TB
+a(["Start"])
+b{"Check"}
+c(["Done"])
+a --> b
+b -->|ok| c
+b -.->|retry| a
+style c fill:#e8f5e9,stroke:#2e7d32

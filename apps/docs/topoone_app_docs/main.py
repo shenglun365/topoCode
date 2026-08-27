@@ -12,6 +12,7 @@
 import argparse
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from topoone.logging_config import setup_logging
 setup_logging()
@@ -58,9 +59,32 @@ def main():
     server = MethodServer(pub_port=None)
     register_methods(server, multi_db)
 
-    app = create_service_app(server, multi_db, title="docs-service")
+    # topo diagram 服务（统一 IR 内核）：plantuml sidecar(:3491) + 无头渲染池。
+    # 依赖按需降级：无 jar → sidecar 停；无 playwright/bundle → pool 停（render/* 503）。
+    from topoone.diagram.diagrams import DiagramServices, DiagramSettings, create_topo_router
+
+    diagram_services = DiagramServices(DiagramSettings())
+
+    @asynccontextmanager
+    async def _topo_lifespan(app):
+        await diagram_services.start()
+        try:
+            yield
+        finally:
+            await diagram_services.stop()
+
+    def _fallback_pu(code: str) -> bytes:
+        # sidecar 未就绪时的兜底：本地 jar 优先，失败再退远程（与既有 /api/plantuml 行为一致）
+        from topoone.engine.plantuml_service import render_plantuml as _pu
+        try:
+            return _pu(code, format="svg", use_remote=False)
+        except Exception:
+            return _pu(code, format="svg", use_remote=True)
+
+    app = create_service_app(server, multi_db, title="docs-service", lifespan=_topo_lifespan)
     app.include_router(viewer_router)
     app.include_router(web_root_router)
+    app.include_router(create_topo_router(diagram_services, fallback_renderer=_fallback_pu, prefix="/api/topo"))
 
     logger.info(f"[docs-service] starting on http://{args.host}:{args.port}")
     from topoone.http_logging import install_heartbeat_filter

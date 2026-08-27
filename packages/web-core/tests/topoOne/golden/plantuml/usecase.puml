@@ -1,0 +1,7 @@
+@startuml
+actor "Admin" as admin
+usecase "Login" as login
+usecase "Authenticate" as auth
+admin --> login
+login ..> auth : <<include>>
+@enduml

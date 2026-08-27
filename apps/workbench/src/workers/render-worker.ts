@@ -1,6 +1,6 @@
-/** 渲染 Worker - Mermaid 解析 + D3 布局计算
+/** 渲染 Worker - D3 布局计算（mermaid 已收敛到 topoOne 内核主线程，见 useTopoRender）
 
-注意: d3/mermaid 使用动态导入以避免 Vite Worker IIFE 格式下 code-splitting 报错。
+注意: d3 使用动态导入以避免 Vite Worker IIFE 格式下 code-splitting 报错。
 */
 
 import type {
@@ -8,43 +8,10 @@ import type {
   RenderResponse,
   RenderProgress,
   RenderType,
-  MermaidData,
   D3LayoutData,
   D3HierarchyData,
-  MermaidResult,
   D3LayoutResult,
 } from './types'
-
-// ==================== Mermaid 渲染器 ====================
-
-let mermaidReady = false
-let mermaidApi: any = null
-
-async function initMermaid(): Promise<void> {
-  if (mermaidReady) return
-  try {
-    const mod = await import('mermaid')
-    mermaidApi = mod.default
-    await mermaidApi.initialize({
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'dark',
-      fontFamily: 'var(--font-sans)',
-    })
-    mermaidReady = true
-  } catch (e) {
-    console.error('[Worker] Mermaid init failed:', e)
-  }
-}
-
-async function renderMermaid(data: MermaidData): Promise<MermaidResult> {
-  await initMermaid()
-  if (!mermaidApi) throw new Error('Mermaid not initialized')
-
-  const id = `m${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const { svg } = await mermaidApi.render(id, data.diagram)
-  return { svg, theme: data.theme || 'dark' }
-}
 
 // ==================== D3 力导向布局 ====================
 
@@ -160,12 +127,6 @@ self.onmessage = async (e: MessageEvent<RenderRequest>) => {
 
   try {
     switch (type) {
-      case 'mermaid': {
-        const result = await renderMermaid(data as MermaidData)
-        response.result = result
-        break
-      }
-
       case 'd3-layout': {
         const result = await computeD3Layout(data as D3LayoutData)
         response.result = result
@@ -191,4 +152,4 @@ self.onmessage = async (e: MessageEvent<RenderRequest>) => {
 }
 
 // 类型断言辅助
-type RenderTypeKey = 'mermaid' | 'd3-layout' | 'd3-hierarchy'
+type RenderTypeKey = 'd3-layout' | 'd3-hierarchy'

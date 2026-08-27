@@ -3,8 +3,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { renderMarkdown, codeFullscreen, autoFitCodeBlock } from '@topo/web-core/services/render'
 import { parseMessageContent } from '@topo/web-core/services/parseContent'
 import type { ChatMessage } from '@topo/web-core/types/domain'
-import MermaidViewer from '@topo/web-core/components/MermaidViewer.vue'
-import PlantUmlViewer from '@topo/web-core/components/PlantUmlViewer.vue'
+import DiagramViewer from '@topo/web-core/components/DiagramViewer.vue'
 
 const props = defineProps<{
   message: ChatMessage
@@ -99,8 +98,9 @@ watch(() => props.message.content, () => nextTick(fitCodeBlocks))
       <div v-if="message.content" class="bubble" ref="bubbleRef" @click="onBubbleClick">
         <template v-for="(b, i) in blocks" :key="i">
           <span v-if="b.type === 'text'" v-html="b.html"></span>
-          <MermaidViewer
+          <DiagramViewer
             v-else-if="b.type === 'mermaid'"
+            lang="mermaid"
             :code="b.code!"
             :diag-id="b.diagId!"
             :msg-id="message.id"
@@ -110,8 +110,9 @@ watch(() => props.message.content, () => nextTick(fitCodeBlocks))
             @state-change="emit('state-change')"
             @save-state="emit('save-state')"
           />
-          <PlantUmlViewer
+          <DiagramViewer
             v-else-if="b.type === 'plantuml'"
+            lang="plantuml"
             :code="b.code!"
             :diag-id="b.diagId!"
             :msg-id="message.id"

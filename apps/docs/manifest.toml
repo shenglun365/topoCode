@@ -34,6 +34,7 @@ api_prefixes = [
   "/api/diagram/ir-docs",
   "/api/diagram-editor/process",
   "/api/diagram-tools/apply",
+  "/api/topo",
   "/api/graph-layout",
   # web_root 业务 API（M11 从 gateway 移入）
   "/api/projects",
