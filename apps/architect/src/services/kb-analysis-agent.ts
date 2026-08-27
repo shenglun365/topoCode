@@ -61,6 +61,7 @@ export interface RequirementAnalysisAgent {
 /** 自由对话流式事件(阶段A)：逐字增量 + 推理内容 + 回合结束。 */
 export interface ChatStreamEvent {
   type: 'chunk' | 'reasoning' | 'done' | 'error' | 'chat_fallback' | 'chat_start'
+    | 'tool_call' | 'tool_result'
   delta?: string
   content?: string
   message?: string
@@ -69,6 +70,12 @@ export interface ChatStreamEvent {
   userMessageId?: string
   /** 本回合助手消息 id(done 携带)。 */
   messageId?: string
+  /** 工具进度(tool_call/tool_result)：工具名。 */
+  tool?: string
+  /** 工具进度(tool_result)：执行是否成功。 */
+  ok?: boolean
+  /** 工具进度(tool_result)：结果摘要(截断)。 */
+  summary?: string
 }
 
 export interface ChatStreamOptions {
@@ -131,6 +138,15 @@ export async function chatStream(
       })
       ws.on('chat_fallback', (ev: any) => {
         onEvent({ type: 'chat_fallback', conversationId: ev?.conversationId })
+      })
+      ws.on('tool_call', (ev: any) => {
+        onEvent({ type: 'tool_call', tool: ev?.tool, conversationId: ev?.conversationId })
+      })
+      ws.on('tool_result', (ev: any) => {
+        onEvent({
+          type: 'tool_result', tool: ev?.tool, ok: ev?.ok, summary: ev?.summary,
+          conversationId: ev?.conversationId,
+        })
       })
       ws.on('error', (ev: any) => {
         onEvent({ type: 'error', message: ev?.message, conversationId: ev?.conversationId })

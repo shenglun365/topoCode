@@ -174,11 +174,8 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                 for c in calls:
                     name = c.get("tool", "")
                     args = c.get("arguments", {})
-                    result = await asyncio.to_thread(
-                        req_agent.run_arch_tool, name, args, root, project
-                    )
-                    results.append({"name": name,
-                                    "text": req_agent.tool_result_text(name, result)})
+                    results.append(await _run_tool_with_progress(
+                        websocket, rid, name, args, root, project))
                 if results:
                     tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
@@ -191,13 +188,10 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             for c in calls:
                 name = c.get("tool", "")
                 args = c.get("arguments", {})
-                result = await asyncio.to_thread(
-                    req_agent.run_arch_tool, name, args, root, project
-                )
-                logger.info("[req_agent] kb chat tool round=%s call=%s result_keys=%s",
-                            tool_round, name, list(result.keys()) if isinstance(result, dict) else ())
-                results.append({"name": name,
-                                "text": req_agent.tool_result_text(name, result)})
+                logger.info("[req_agent] kb chat tool round=%s call=%s",
+                            tool_round, name)
+                results.append(await _run_tool_with_progress(
+                    websocket, rid, name, args, root, project))
             if results:
                 tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
                 msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
@@ -249,6 +243,25 @@ async def _sync_with_tools(msgs, root, project, model_id, max_rounds: int = 4) -
         mode="chat", max_tokens=_chat_max_tokens(), max_rounds=max_rounds,
     )
     return res.get("content", "") if isinstance(res, dict) else ""
+
+
+async def _run_tool_with_progress(websocket, request_id: str, name: str, args: dict,
+                                  root: str, project: str) -> Dict[str, str]:
+    """执行单个 architect 工具，并向前端推送 tool_call/tool_result 进度事件。
+
+    工具轮次(可能跨多轮 LLM 重算)期间前端零反馈是「检索中…」久挂的主因；
+    这里在工具执行前后各推一条状态，前端据此显示实时进度而非静态等待。
+    """
+    from . import req_agent
+    await websocket.send_json({"type": "tool_call", "requestId": request_id, "tool": name})
+    result = await asyncio.to_thread(req_agent.run_arch_tool, name, args, root, project)
+    summary = req_agent.tool_result_text(name, result)
+    await websocket.send_json({
+        "type": "tool_result", "requestId": request_id, "tool": name,
+        "ok": not (isinstance(result, dict) and result.get("error")),
+        "summary": summary[:160],
+    })
+    return {"name": name, "text": summary}
 
 
 def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False):

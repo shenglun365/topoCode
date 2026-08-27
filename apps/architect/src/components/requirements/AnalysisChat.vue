@@ -9,6 +9,8 @@ import type { SemanticAsset, SemanticAssetKind } from '@/types'
 const props = defineProps<{
   turns: KbAnalysisTurn[]
   busy: boolean
+  /** 忙碌态动态文案(如「正在调用工具 kb.asset.search…」)；缺省用静态「知识库检索中…」。 */
+  busyLabel?: string
   /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
   title?: string
   /** 是否显示「提取语义资产」按钮(需求分析对话隐藏；资产管理保留)。 */
@@ -573,7 +575,7 @@ onUnmounted(() => {
         v-if="busy"
         class="flex items-center gap-2 text-xs text-ctp-blue animate-pulse"
       >
-        <ArrowPathIcon class="w-3.5 h-3.5 animate-spin" />{{ t('requirement.chat.thinking') }}
+        <ArrowPathIcon class="w-3.5 h-3.5 animate-spin" />{{ props.busyLabel || t('requirement.chat.thinking') }}
       </div>
     </div>
 

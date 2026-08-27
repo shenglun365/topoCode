@@ -37,6 +37,8 @@ const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const chatConvId = ref('')
 const finalizing = ref(false)
+/** P3.5: 工具轮次实时进度(「知识库检索中…」动态化)。 */
+const toolStatus = ref('')
 
 // P3.2: 指派 subagent 弹窗
 const assignFor = ref<ReqSession | null>(null)
@@ -115,6 +117,7 @@ function resetChat() {
   turns.value = []
   busy.value = false
   chatConvId.value = ''
+  toolStatus.value = ''
 }
 
 async function selectSession(s: ReqSession) {
@@ -171,7 +174,12 @@ async function sendViaChat(text: string) {
         req.conversationId = ev.conversationId
       }
       if (ev.type === 'chat_start') {
+        toolStatus.value = ''
         if (ev.userMessageId && idx >= 1) turns.value[idx - 1].id = ev.userMessageId
+      } else if (ev.type === 'tool_call') {
+        toolStatus.value = `${t('workbench.toolCalling')}: ${ev.tool ?? ''}`
+      } else if (ev.type === 'tool_result') {
+        toolStatus.value = `${ev.ok === false ? '✗' : '✓'} ${ev.tool ?? ''}`
       } else if (ev.type === 'chunk') {
         turns.value[idx].content += ev.delta ?? ''
       } else if (ev.type === 'reasoning') {
@@ -179,6 +187,7 @@ async function sendViaChat(text: string) {
       } else if (ev.type === 'done') {
         turns.value[idx].content = ev.content ?? turns.value[idx].content
         if (ev.messageId) turns.value[idx].id = ev.messageId
+        toolStatus.value = ''
         void loadSessions()
       } else if (ev.type === 'chat_fallback') {
         turns.value[idx].content = t('requirement.chat.fallback')
@@ -477,6 +486,7 @@ onUnmounted(() => {
             v-if="rightTab === 'chat'"
             :turns="turns"
             :busy="busy"
+            :busy-label="toolStatus"
             :title="selected.title || t('workbench.sessions.defaultTitle')"
             :diagram-skill="diagramSkill"
             @send="onSend"

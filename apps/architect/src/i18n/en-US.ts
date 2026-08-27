@@ -15,6 +15,7 @@ export default {
     },
     tabs: { chat: 'Chat', design: 'Design' },
     finalize: 'Finalize',
+    toolCalling: 'Calling tool',
     assign: {
       title: 'Assign Subagent',
       target: 'Assign to',

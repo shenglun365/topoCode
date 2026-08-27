@@ -15,6 +15,7 @@ export default {
     },
     tabs: { chat: '对话', design: '方案' },
     finalize: '定稿',
+    toolCalling: '正在调用工具',
     assign: {
       title: '指派 subagent',
       target: '指派给',
