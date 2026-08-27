@@ -113,15 +113,17 @@ async def delete_conversation(conv_id: str):
 
 @router.delete("/requirements/conversations/{conv_id}/messages/{message_id}")
 async def delete_conversation_message(conv_id: str, message_id: str):
-    """对话流单条消息删除(可回退当前轮工具上下文)。"""
+    """对话流单条消息删除(可回退当前轮工具上下文)。
+
+    统一工作台(AgentWorkbench)中需求会话即主编辑界面，删除单条消息是正常聊天操作，
+    故不再限制已绑定正式提案的会话(结构化定稿结果 analysis/design 独立持久化，不受影响)。
+    """
     conv = store.ConversationsStore.get(conv_id)
     if not conv:
         return err(404, "Conversation not found")
     msg = store.ConversationsStore.messages(conv_id)
     if not any(m.get("id") == message_id for m in msg):
         return err(404, "Message not found")
-    if _conv_bound(conv):
-        return err(400, "已绑定正式提案的会话不可删除消息")
     ok_deleted = store.ConversationsStore.delete_message(conv_id, message_id)
     store.ConversationsStore.update(conv_id, {"updatedAt": _ts()})
     return ok({"deleted": ok_deleted, "id": message_id})
