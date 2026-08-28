@@ -26,7 +26,7 @@ const { t } = useI18n()
 // ---- 对话模型: 统一用顶部工具栏选择(读同一 localStorage 键 topoone-model-architect, 透传后端) ----
 
 // ---- 左右栏分割(资产内容 | agent 对话) ----
-const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane()
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane()
 const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const chatConvId = ref<string>('')
@@ -2024,10 +2024,6 @@ onUnmounted(() => stopExtractPoll())
         class="w-4 shrink-0 -mx-0.5 flex items-center justify-center cursor-col-resize select-none touch-none group"
         :class="dragging ? 'cursor-col-resize' : ''"
         @pointerdown="onSplitPointerDown"
-        @pointermove="onSplitPointerMove"
-        @pointerup="onSplitPointerUp"
-        @pointercancel="onSplitPointerUp"
-        @pointerleave="onSplitPointerUp"
       >
         <div
           class="h-12 w-0.5 rounded-full bg-ctp-overlay1/40 transition-colors group-hover:bg-ctp-blue/60"
@@ -2036,7 +2032,7 @@ onUnmounted(() => stopExtractPoll())
       </div>
 
       <!-- 右：agent 对话区 -->
-      <div class="min-h-0 flex-1 flex flex-col gap-2">
+      <div class="min-h-0 min-w-0 flex-1 flex flex-col gap-2">
         <AnalysisChat
           class="flex-1 min-h-0"
           :turns="turns"

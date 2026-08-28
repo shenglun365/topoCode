@@ -33,7 +33,7 @@ staging.load()
 unitTest.load()
 
 // ---- 左右分割 ----
-const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown, onMove: onSplitPointerMove, onUp: onSplitPointerUp } = useSplitPane({ max: 70, min: 32 })
+const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = useSplitPane({ max: 70, min: 32 })
 
 const exec = computed(() => task.findExecution(props.execId))
 const selectedSession = computed(() => agent.byExecution[props.execId])
@@ -609,10 +609,6 @@ function toggleExpanded(id: string) {
         class="w-4 shrink-0 -mx-0.5 flex items-center justify-center cursor-col-resize select-none touch-none group"
         :class="dragging ? 'cursor-col-resize' : ''"
         @pointerdown="onSplitPointerDown"
-        @pointermove="onSplitPointerMove"
-        @pointerup="onSplitPointerUp"
-        @pointercancel="onSplitPointerUp"
-        @pointerleave="onSplitPointerUp"
       >
         <div
           class="h-12 w-0.5 rounded-full bg-ctp-overlay1/40 transition-colors group-hover:bg-ctp-blue/60"
@@ -621,7 +617,7 @@ function toggleExpanded(id: string) {
       </div>
 
       <!-- 右栏：会话 -->
-      <div class="min-h-0 flex-1 flex flex-col">
+      <div class="min-h-0 min-w-0 flex-1 flex flex-col">
         <AgentSessionPanel
           v-if="selectedSession"
           :session="selectedSession"

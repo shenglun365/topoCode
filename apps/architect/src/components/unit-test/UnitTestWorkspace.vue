@@ -13,7 +13,7 @@ const { t } = useI18n()
 const store = useArchUnitTestStore()
 
 const session = computed(() => store.sessions.find((s) => s.id === props.sessionId))
-const { splitPct, dragging, boxRef, onDown, onMove, onUp } = useSplitPane({ max: 62, min: 42 })
+const { splitPct, dragging, boxRef, onDown } = useSplitPane({ max: 62, min: 42 })
 </script>
 
 <template>
@@ -45,10 +45,6 @@ const { splitPct, dragging, boxRef, onDown, onMove, onUp } = useSplitPane({ max:
       <div
         class="w-4 shrink-0 -mx-0.5 flex items-center justify-center cursor-col-resize select-none touch-none group"
         @pointerdown="onDown"
-        @pointermove="onMove"
-        @pointerup="onUp"
-        @pointercancel="onUp"
-        @pointerleave="onUp"
       >
         <div
           class="h-12 w-0.5 rounded-full bg-ctp-overlay1/40 transition-colors group-hover:bg-ctp-blue/60"
@@ -57,7 +53,7 @@ const { splitPct, dragging, boxRef, onDown, onMove, onUp } = useSplitPane({ max:
       </div>
 
       <!-- 右栏：执行反馈 -->
-      <div class="min-h-0 flex-1 flex flex-col">
+      <div class="min-h-0 min-w-0 flex-1 flex flex-col">
         <UnitTestSessionPanel v-if="session" :session="session" />
       </div>
     </div>
