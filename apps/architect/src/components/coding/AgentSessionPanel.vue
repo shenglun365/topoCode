@@ -25,6 +25,8 @@ agent.load()
 const input = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
+/** 对话发送中(用于显示停止按钮, 可中止在途请求)。 */
+const sending = ref(false)
 
 const execTask = computed(() => task.findExecution(props.session.taskId))
 const title = computed(() => {
@@ -109,12 +111,17 @@ function onInputKeydown(e: KeyboardEvent) {
 }
 
 async function send() {
-  if (!input.value.trim()) return
+  if (!input.value.trim() || sending.value) return
   const text = input.value.trim()
-  await agent.send(props.session.id, text)
-  if (/^(?:追加|append)\s*[：:]/.test(text)) {
-    const appended = task.addConversationalAmendment(props.session.taskId, text)
-    if (appended) agent.noteAppended(props.session.id, appended.title)
+  sending.value = true
+  try {
+    await agent.send(props.session.id, text)
+    if (/^(?:追加|append)\s*[：:]/.test(text)) {
+      const appended = task.addConversationalAmendment(props.session.taskId, text)
+      if (appended) agent.noteAppended(props.session.id, appended.title)
+    }
+  } finally {
+    sending.value = false
   }
   input.value = ''
   resetInputHeight()
@@ -277,7 +284,7 @@ function answer(interactionId: string) {
         @keydown="onInputKeydown"
       />
       <button
-        v-if="agent.running && agent.activeSessionId === session.id"
+        v-if="(agent.running && agent.activeSessionId === session.id) || sending"
         class="btn btn-red shrink-0 whitespace-nowrap !py-2"
         @click="stop"
       >
@@ -286,7 +293,7 @@ function answer(interactionId: string) {
       <button
         v-else
         class="btn btn-primary shrink-0 whitespace-nowrap !py-2"
-        :disabled="!input.trim()"
+        :disabled="!input.trim() || sending"
         @click="send"
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}

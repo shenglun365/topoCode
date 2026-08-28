@@ -11,6 +11,9 @@ import { currentProjectParams } from '@/services/project-service'
 import { useArchTaskStore } from './task-store'
 import { useArchRequirementStore } from './requirement-store'
 
+/** 在途 coding-agent 对话的 AbortController(供 stop 中止)。 */
+let chatAbort: AbortController | null = null
+
 export const useArchAgentStore = defineStore('arch-agent', {
   state: () => ({
     sessions: [] as AgentSession[],
@@ -76,7 +79,12 @@ export const useArchAgentStore = defineStore('arch-agent', {
     async send(sessionId: string, content: string) {
       const s = this.sessions.find((x) => x.id === sessionId)
       if (!s) return
-      await agentService.sendMessage(s, content)
+      chatAbort = new AbortController()
+      try {
+        await agentService.sendMessage(s, content, { signal: chatAbort.signal })
+      } finally {
+        chatAbort = null
+      }
     },
     async runTask(sessionId: string) {
       const s = this.sessions.find((x) => x.id === sessionId)
@@ -225,10 +233,16 @@ export const useArchAgentStore = defineStore('arch-agent', {
       const s = this.sessions.find((x) => x.id === sessionId)
       if (!s) return
       this.stopping.add(sessionId)
+      const abortedChat = !!chatAbort
+      if (chatAbort) {
+        chatAbort.abort()
+        chatAbort = null
+        this.log.unshift(`[停止] 已中止会话对话 ${sessionId}`)
+      }
       if (this.activeConn && this.activeTreeId) {
         this.activeConn.send('cancel')
         this.log.unshift(`[停止] 已请求取消 runner ${this.activeTreeId}`)
-      } else {
+      } else if (!abortedChat) {
         await agentService.terminate(sessionId)
         this.log.unshift(`[停止] 已请求停止会话 ${sessionId}`)
       }

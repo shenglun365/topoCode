@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, toValue, watch, type Ref } from 'vue';
+import { authHeaders } from '../../services/api';
 import { createDiagram, type DiagramView } from '../core/DiagramView';
 import type { DiagramSchema } from '../core/types';
 import type { DegradeWarning, ThemeName } from '../engines/types';
@@ -27,7 +28,7 @@ export interface UseTopoDiagramOptions {
   interactions?: InteractionOptions | false;
   /** Playback: autoPlay + optional custom steps (selectors) / plan factory. */
   animation?: AnimationPluginOptions;
-  /** PlantUml engine only: rendering server base URL (default http://127.0.0.1:3491). */
+  /** PlantUml engine only: rendering server base URL (默认 /api/topo 同源网关，随浏览器访问的主机自适应；需带鉴权)。 */
   plantUmlBaseUrl?: string;
   onNodeClick?: (e: NodeClickEvent) => void;
   onReady?: (view: DiagramView) => void;
@@ -86,7 +87,7 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
       themeVariables: opts.themeVariables,
       interactions: opts.interactions,
       animation: opts.animation,
-      engineOptions: opts.plantUmlBaseUrl ? { baseUrl: opts.plantUmlBaseUrl } : undefined,
+      engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo', headers: authHeaders() },
       onReady: (v) => {
         ready.value = true;
         opts.onReady?.(v);

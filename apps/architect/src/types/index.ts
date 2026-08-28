@@ -116,6 +116,8 @@ export interface SemanticAsset {
   parentId?: string
   name: string
   desc: string
+  /** 关联代码伪码级说明(查询时 LLM 生成，有效生命周期内缓存)。 */
+  pseudo?: string
   detail?: SemanticAssetDetail
   astRefs: AstNodeRef[]
   scopeType?: 'files' | 'symbols' | 'comm' | 'project'

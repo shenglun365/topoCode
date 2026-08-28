@@ -29,11 +29,25 @@ def _reports_base() -> str:
     return (os.environ.get("ARCH_REPORTS_URL") or "http://127.0.0.1:3456").rstrip("/")
 
 
+def _auth_headers() -> dict:
+    """reports(经网关) 需鉴权：转发本地数据目录的 token(architect 与网关同源)。"""
+    try:
+        from . import ctx
+        tok_path = os.path.join(ctx.data_dir(), "token")
+        with open(tok_path, "r", encoding="utf-8") as f:
+            tok = f.read().strip()
+        if tok:
+            return {"Authorization": f"Bearer {tok}"}
+    except Exception:
+        pass
+    return {}
+
+
 def _forward(method: str, path: str, body: bytes, timeout: float = 20.0):
     """转发到 reports 服务；业务错误(HTTP 4xx/5xx)映射为 HTTPException。"""
     url = f"{_reports_base()}{path}"
-    req = urllib.request.Request(url, data=body, method=method,
-                                 headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json", **_auth_headers()}
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())

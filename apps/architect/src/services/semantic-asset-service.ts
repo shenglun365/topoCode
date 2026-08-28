@@ -213,6 +213,13 @@ export const semanticAssetService = {
     return apiGet<SemanticAsset>(`/kb/semantic/${assetId}${qsWith('')}`)
   },
 
+  /** 查询时生成/获取资产关联代码的伪码级说明(有效生命周期内缓存；stale 时重生成)。 */
+  async pseudo(assetId: string, modelId?: string): Promise<{ pseudo: string; cached: boolean; degraded: boolean }> {
+    const extra = modelId ? `model_id=${encodeURIComponent(modelId)}` : ''
+    return apiGet<{ pseudo: string; cached: boolean; degraded: boolean }>(
+      `/kb/semantic/${assetId}/pseudo${qsWith(extra)}`)
+  },
+
   /** 按范围即时提取并落库。 */
   async extract(scope: SemanticExtractScope, kinds?: SemanticAssetKind[], opts?: { modelId?: string; level?: SemanticAssetLevel }): Promise<SemanticExtractResult> {
     return apiPost<SemanticExtractResult>('/kb/semantic/extract', {
@@ -226,7 +233,7 @@ export const semanticAssetService = {
   },
 
   /** 批量提取(按 KB 组件/全项目)。 */
-  async extractAll(kinds?: SemanticAssetKind[], opts?: { modelId?: string; maxComponents?: number; level?: SemanticAssetLevel }): Promise<SemanticExtractResult> {
+  async extractAll(kinds?: SemanticAssetKind[], opts?: { modelId?: string; maxComponents?: number; level?: SemanticAssetLevel; signal?: AbortSignal }): Promise<SemanticExtractResult> {
     return apiPost<SemanticExtractResult>('/kb/semantic/extractAll', {
       root: currentProjectParams().root,
       project: currentProjectParams().project,
@@ -234,7 +241,7 @@ export const semanticAssetService = {
       modelId: opts?.modelId,
       maxComponents: opts?.maxComponents,
       level: opts?.level,
-    })
+    }, opts?.signal)
   },
 
   /** 按需聚合业务级(high)语义资产。 */
@@ -338,6 +345,11 @@ export const semanticAssetService = {
   /** 轮询提取任务状态(进度 + 对话消息，供资产管理对话同步)。 */
   async extractTaskStatus(taskId: string): Promise<ExtractTaskStatus> {
     return apiGet<ExtractTaskStatus>(`/kb/semantic/extract-task/${encodeURIComponent(taskId)}`)
+  },
+
+  /** 请求取消提取任务(后台线程在组件边界停止)。 */
+  async cancelExtractTask(taskId: string): Promise<{ ok: boolean; cancelled?: boolean; status?: string; error?: string }> {
+    return apiPost(`/kb/semantic/extract-task/${encodeURIComponent(taskId)}/cancel`)
   },
 
   /** 最近一次提取任务(刷新后恢复页面状态读取)。 */

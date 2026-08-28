@@ -749,26 +749,25 @@ _CAPABILITY_DOC = (
     "需求分析语境，不深入执行，但允许用户继续提问。\n"
     "回复保持简洁、直接、可操作，可输出 Markdown。\n\n"
     "图表输出能力：当描述语义数据资产(数据结构/处理流程/控制逻辑)、依赖链路、"
-    "实现路径或改动影响时，可用 Mermaid 或 PlantUML 图直观表达。直接以代码围栏输出，前端会自动渲染成图：\n"
-    "  ```mermaid\n  graph LR\n    A[订单实体] --> B[订单明细]\n  ```\n"
-    "  ```plantuml\n  @startuml\n  class Order {\n    +id: Long\n    +amount: BigDecimal\n  }\n  @enduml\n  ```\n"
-    "要求：图代码语法正确、节点精简、命名与代码资产一致；围栏语言标签只能用 mermaid 或 plantuml；"
-    "图中不要包含 [TOOL_CALL] 块。"
+    "实现路径或改动影响时，用图直观表达。**优先**输出 ```diagram 围栏，内容为 JSON 图结构(DiagramSchema)，"
+    "前端会自动把它确定性地转成 Mermaid/PlantUML 并动画，避免直接写图语法出错：\n"
+    "  ```diagram\n  {\"version\":1,\"type\":\"flowchart\",\"direction\":\"LR\","
+    "\"nodes\":[{\"id\":\"a\",\"label\":\"订单实体\"},{\"id\":\"b\",\"label\":\"订单明细\"}],"
+    "\"edges\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"1:N\"}]}\n  ```\n"
+    "仅当图极简单(≤2节点)或 IR 无法表达时，才直接输出 ```mermaid / ```plantuml 代码围栏。"
+    "要求：节点精简、命名与代码资产一致；图中不要包含 [TOOL_CALL] 块。"
 )
 
 
-def _diagram_skill_doc() -> str:
-    """绘图增强(IR→代码)能力文档：从 reports 拉共享 IR schema(单一起源)。
+def _ir_schema_doc() -> str:
+    """绘图 IR(DiagramSchema) 结构参考：从 reports 拉共享 schema(单一起源)，失败降级最小说明。默认注入。
 
-    拉取失败时降级为最小说明(不阻塞对话)。
+    前端据 IR 的 type 选择引擎并确定性地转成 Mermaid/PlantUML + 动画(见 ```diagram 围栏)。
     """
     base = (
-        "绘图增强(diagram.build)：当需要输出复杂/较大图表时，优先用结构化中间表示(IR)描述图，"
-        "再调用 diagram.build 生成语法正确的代码，避免小模型直接写 mermaid/plantuml 源码出错。\n"
-        "用法：输出一个工具调用块 "
-        '[TOOL_CALL]{"tool":"diagram.build","arguments":{"ir":{lang, diagram_type, nodes, edges, ...}}}[/TOOL_CALL]，'
-        "收到返回代码后，以 ```mermaid 或 ```plantuml 围栏输出；可再用 diagram.validate 校验。\n\n"
-        "IR schema：\n"
+        "绘图 IR 结构(DiagramSchema)：```diagram 围栏内为 JSON，type 取 "
+        "flowchart|activity|sequence|state|class|er|usecase|component|architecture|gantt|pie；"
+        "前端据 type 选择引擎并转成 Mermaid/PlantUML。\n"
     )
     try:
         from . import diagram as _diagram
@@ -778,12 +777,21 @@ def _diagram_skill_doc() -> str:
     except Exception as e:
         logger.warning("[req_agent] fetch ir-docs failed: %s", e)
     return base + (
-        "mermaid: flowchart{nodes[{id,text,shape}], edges[{from,to,label}], direction} / "
-        "sequence{participants[], messages[{from,to,label,arrow}]} / "
-        "class{classes[{name,stereotype,members[]}], relations[]} / "
-        "state{states[], transitions[]} / er{entities[], relations[]} / gantt / pie；"
-        "plantuml: component{nodes[], edges[]} / sequence{participants[], messages[]}。\n"
-        "lang 字段取 mermaid | plantuml。"
+        "flowchart/activity/usecase/component/architecture: nodes[{id,label,kind?}], edges[{from,to,label?,kind?}]；"
+        "sequence: participants[{id,label,type?}], messages[{from,to,label,kind?}]；"
+        "state: states[{id,label,initial?,final?}], transitions[{from,to,label?,guard?}]；"
+        "class: classes[{id,name,members[{name,kind?,type?}]}], classRelations[{from,to,kind?}]；"
+        "er: entities[{id,name,attrs[{name,type?,key?}]}], erRelations[{from,to,kind?}]。"
+    )
+
+
+def _diagram_skill_doc() -> str:
+    """可选的后端预校验工具(diagram.build/validate)说明。diagram_skill=True(前端 📐 开关)时注入。"""
+    return (
+        "绘图预校验(可选，复杂/较大图)：可先输出工具调用块 "
+        '[TOOL_CALL]{"tool":"diagram.build","arguments":{"ir":{…DiagramSchema…}}}[/TOOL_CALL] '
+        "由后端预生成/校验语法(返回 {code,type} 或 {error})，据此修正后仍以 ```diagram 围栏输出；"
+        "diagram.validate 可校验已有 mermaid/plantuml 代码。"
     )
 
 
@@ -791,7 +799,8 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
                        diagram_skill: bool = False) -> str:
     """自由对话系统提示：能力文档 + 当前项目/KB 上下文 + 范围限定(软拒绝)。
 
-    diagram_skill=True 时注入绘图增强(IR→代码)文档与工具说明(对应前端 📐 开关)。
+    绘图 IR(DiagramSchema) 参考默认注入(模型优先输出 ```diagram IR 围栏，前端转码)；
+    diagram_skill=True 时额外注入后端预校验工具说明(对应前端 📐 开关)。
     """
     ctx = tool_project_ctx(root, project)
     mode = "greenfield(从零)" if not project else "existing(既有)"
@@ -802,12 +811,13 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
         if bound and not degraded
         else "KB 降级(无资产检索)，仅能基于需求描述给出规划建议，建议先关联知识库。"
     )
+    ir_doc = f"\n\n{_ir_schema_doc()}"
     extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
     mcp_extra = f"\n\n{_mcp_doc()}"
     return (
         "你是 TopoCode 架构需求分析 agent(自由对话)。\n"
         f"当前项目：{ctx.get('name') or '(未绑定)'}，模式：{mode}。{kb}\n\n"
-        f"{_CAPABILITY_DOC}{extra}{mcp_extra}"
+        f"{_CAPABILITY_DOC}{ir_doc}{extra}{mcp_extra}"
     )
 
 

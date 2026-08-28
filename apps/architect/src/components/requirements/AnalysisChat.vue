@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import type { SemanticAsset, SemanticAssetKind } from '@/types'
@@ -27,6 +27,7 @@ const emit = defineEmits<{
   'extract-assets': [kinds?: SemanticAssetKind[]]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
+  stop: []
 }>()
 
 const { t } = useI18n()
@@ -635,8 +636,17 @@ onUnmounted(() => {
         <CubeTransparentIcon class="w-4 h-4" />{{ t('requirement.chat.extractAssets') }}
       </button>
       <button
+        v-if="busy"
+        class="btn btn-red !py-2.5 shrink-0 whitespace-nowrap"
+        :title="t('requirement.chat.stop')"
+        @click="emit('stop')"
+      >
+        <StopIcon class="w-4 h-4" />{{ t('requirement.chat.stop') }}
+      </button>
+      <button
+        v-else
         class="btn btn-primary !py-2.5 shrink-0 whitespace-nowrap"
-        :disabled="!input.trim() || busy"
+        :disabled="!input.trim()"
         @click="send"
       >
         <PaperAirplaneIcon class="w-4 h-4" />{{ t('coding.send') }}

@@ -12,7 +12,7 @@ import { currentProjectParams } from './project-service'
 
 export interface AgentAdapter {
   createSession(opts: { exec: ExecutionTask; planTitle: string; keepContext?: boolean }): Promise<AgentSession>
-  sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean }): Promise<AgentMessage>
+  sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean; signal?: AbortSignal }): Promise<AgentMessage>
   terminate(sessionId: string): Promise<void>
 }
 
@@ -32,21 +32,33 @@ class HttpAgentAdapter implements AgentAdapter {
     return res.session as AgentSession
   }
 
-  async sendMessage(session: AgentSession, content: string): Promise<AgentMessage> {
+  async sendMessage(session: AgentSession, content: string, opts?: { keepContext?: boolean; signal?: AbortSignal }): Promise<AgentMessage> {
     const userMsg: AgentMessage = { id: `m-${Date.now()}`, role: 'user', time: Date.now(), content }
     session.messages.push(userMsg)
     const ws = new ArchWs('ws/coding-agent')
+    const signal = opts?.signal
     await ws.ready()
     const replyP = ws.once<any>('message', 15000)
+    replyP.catch(() => {}) // 防 abort 后 replyP 的 reject 成 unhandled rejection
     ws.send('session.message', { sessionId: session.id, content })
+    let onAbort: (() => void) | null = null
+    const abortP = signal
+      ? new Promise<never>((_, rej) => {
+          onAbort = () => { ws.close(); rej(new Error('aborted')) }
+          if (signal.aborted) onAbort()
+          else signal.addEventListener('abort', onAbort, { once: true })
+        })
+      : null
     try {
-      const reply = await replyP
+      const reply = abortP ? await Promise.race([replyP, abortP]) : await replyP
       const m: AgentMessage = { id: reply.id, role: reply.role, time: reply.time, content: reply.content }
       session.messages.push(m)
     } catch {
-      // 后端无回复时仅保留本地用户消息
+      // 后端无回复或被终止时仅保留本地用户消息
+    } finally {
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort)
+      ws.close()
     }
-    ws.close()
     return userMsg
   }
 

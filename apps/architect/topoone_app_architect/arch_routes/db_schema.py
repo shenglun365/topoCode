@@ -300,6 +300,7 @@ ARCH_PROJECT_TABLES_SQL = """
         level TEXT DEFAULT 'logic',          -- implementation | logic | business(抽象粒度)
         name TEXT DEFAULT '',
         desc TEXT DEFAULT '',
+        pseudo TEXT DEFAULT '',             -- 关联代码伪码级说明(查询时 LLM 生成，有效生命周期内缓存)
         detail TEXT,                        -- JSON: fields/steps/branches/aggregates
         ast_refs TEXT,                      -- JSON: AstNodeRef[]
         scope_type TEXT DEFAULT '',         -- files | symbols | comm
@@ -440,6 +441,7 @@ def _project_migrations(db) -> None:
         ("root_path", "TEXT DEFAULT ''"),
     ])
     _add_cols(db, "arch_semantic_assets", [
+        ("pseudo", "TEXT DEFAULT ''"),
         ("anchor_hashes", "TEXT"),
         ("needs_update", "INTEGER DEFAULT 0"),
         ("last_checked_at", "INTEGER DEFAULT 0"),

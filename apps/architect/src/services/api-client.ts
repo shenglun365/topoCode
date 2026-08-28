@@ -41,11 +41,12 @@ export async function apiGet<T>(path: string): Promise<T> {
   return body.data as T
 }
 
-export async function apiPost<T>(path: string, data?: unknown): Promise<T> {
+export async function apiPost<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: data ? JSON.stringify(data) : undefined,
+    signal,
   })
   const body = await resp.json()
   if (body.code !== 0) throw new Error(body.message || `API error: ${path}`)

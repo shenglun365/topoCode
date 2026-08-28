@@ -3790,6 +3790,8 @@ def purge_semantic_assets(root: Optional[str], project: Optional[str],
 
 _EXTRACT_THREADS: Dict[str, threading.Thread] = {}
 _EXTRACT_LOCK = threading.Lock()
+# 已请求取消的提取任务 id(后台线程在组件边界检查并提前停止)。
+_EXTRACT_CANCEL: set = set()
 
 
 def _task_append_message(task_id: str, role: str, content: str) -> dict:
@@ -3884,6 +3886,8 @@ def _run_extract_task(task_id: str, comp_ids: List[str], names: Dict[str, str],
     progress: List[dict] = []
     done = 0
     for i, cid in enumerate(comp_ids):
+        if task_id in _EXTRACT_CANCEL:
+            break
         name = names.get(cid) or cid
         result = _extract_one_comp(task_id, cid, name, kinds, root, project,
                                    model_id, files=comp_files.get(cid) or [])
@@ -3894,19 +3898,27 @@ def _run_extract_task(task_id: str, comp_ids: List[str], names: Dict[str, str],
         if i < total - 1:
             _task_append_message(task_id, "assistant",
                                  f"…进度 {done}/{i + 1}·{total} 组件完成")
-    if done == total:
+    if task_id in _EXTRACT_CANCEL:
+        status = "cancelled"
+        tail = f"已取消（完成 {done}/{total} 组件）。"
+        mark = "⏹"
+    elif done == total:
         status = "done"
         tail = "全部组件提取完成。"
+        mark = "✅"
     elif done > 0:
         status = "partial"
         tail = f"部分完成：{done}/{total} 组件成功，其余失败。"
+        mark = "⚠️"
     else:
         status = "failed"
         tail = "全部组件提取失败，请检查 LLM/KB 后重试。"
-    _task_append_message(task_id, "assistant", f"✅ {tail}")
+        mark = "⚠️"
+    _task_append_message(task_id, "assistant", f"{mark} {tail}")
     _task_update_progress(task_id, status=status)
     with _EXTRACT_LOCK:
         _EXTRACT_THREADS.pop(task_id, None)
+        _EXTRACT_CANCEL.discard(task_id)
 
 
 def start_extract_task(root: Optional[str], project: Optional[str],
@@ -3966,7 +3978,7 @@ def _reap_orphan_extract_task(task_id: str) -> Optional[dict]:
     task = store.ExtractTaskStore.get(task_id)
     if not task:
         return None
-    if (task.get("status") or "running") == "running" and not _task_thread_alive(task_id):
+    if (task.get("status") or "running") in ("running", "cancelling") and not _task_thread_alive(task_id):
         _task_append_message(task_id, "assistant",
                              "⚠ 提取任务中断：服务进程已重启/关闭，后台线程被终止，无法继续。请重新发起提取。")
         store.ExtractTaskStore.update(task_id, {"status": "failed", "updatedAt": _ts()})
@@ -3995,8 +4007,26 @@ def extract_task_status(task_id: str) -> Dict[str, Any]:
         "messages": msgs,
         "title": (task.get("meta") or {}).get("title") or "语义资产提取",
         "updatedAt": task.get("updatedAt"),
-        "running": (task.get("status") or "running") == "running",
+        "running": (task.get("status") or "running") in ("running", "cancelling"),
     }
+
+
+def cancel_extract_task(task_id: str) -> Dict[str, Any]:
+    """请求取消提取任务：置 cancelling，后台线程在组件边界确认后落 cancelled。
+
+    单次组件 LLM 提取无法即时打断；取消在下一个组件边界生效(单组件任务则待其完成)。
+    """
+    task = store.ExtractTaskStore.get(task_id)
+    if not task:
+        return {"ok": False, "error": "任务不存在"}
+    cur = task.get("status") or "running"
+    if cur not in ("running", "cancelling"):
+        return {"ok": True, "cancelled": False, "status": cur}
+    with _EXTRACT_LOCK:
+        _EXTRACT_CANCEL.add(task_id)
+    store.ExtractTaskStore.update(task_id, {"status": "cancelling", "updatedAt": _ts()})
+    _task_append_message(task_id, "assistant", "⏹ 正在取消提取任务（等待当前组件结束）…")
+    return {"ok": True, "cancelled": True, "status": "cancelling"}
 
 
 # ── 文件变化检测 / 失效 / 反向探测(要求②③) ─────────────────────
@@ -4360,6 +4390,108 @@ def detail(asset_id: str, root: Optional[str] = None,
            project: Optional[str] = None) -> Optional[dict]:
     _lazy_reconcile(root, project)
     return store.SemanticAssetsStore.get(asset_id)
+
+
+# ── 伪码级说明(查询时 LLM 生成，有效生命周期内缓存) ─────────────
+
+def _pseudo_source_snippet(root: Optional[str], ast_refs: List[dict],
+                           max_chars: int = 6000) -> str:
+    """读取 astRefs 指向的真实源码片段(让伪码级说明 grounded 到具体实现)。"""
+    if not root or not ast_refs:
+        return ""
+    parts = []
+    total = 0
+    for r in ast_refs[:3]:
+        rel = (r.get("file") or "").strip()
+        if not rel:
+            continue
+        full = os.path.join(root, rel)
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except Exception:
+            continue
+        start = max(0, int(r.get("startLine") or 1) - 1)
+        end = int(r.get("endLine") or 0) or start + 1
+        end = min(len(lines), max(end, start + 1, int(r.get("startLine") or 1) + 60))
+        if start >= len(lines):
+            continue
+        snippet = "".join(lines[start:end])
+        parts.append(f"# {rel}:{start + 1}-{end}\n{snippet}")
+        total += len(snippet)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)[: max_chars + 200]
+
+
+def _structural_pseudo(a: dict) -> str:
+    """LLM 不可用/无源码时的确定性伪码级说明(基于 detail 结构，贴近实现)。"""
+    detail = a.get("detail") or {}
+    lines = [f"[{a.get('kind') or 'asset'}] {a.get('name') or a.get('id')}"]
+    steps = detail.get("steps") or []
+    if steps:
+        lines.append("流程:")
+        for i, s in enumerate(steps, 1):
+            syms = s.get("symbols") or []
+            lines.append(f"  {i}. {s.get('semantic') or (syms[0] if syms else '—')}")
+    branches = detail.get("branches") or []
+    if branches:
+        lines.append("分支:")
+        for b in branches:
+            lines.append(f"  if {b.get('condition') or '?'} → {b.get('then') or '—'}"
+                         + (f" / else {b.get('else')}" if b.get("else") else ""))
+    fields = detail.get("fields") or []
+    if fields:
+        lines.append("字段: " + ", ".join((f.get("name") or "") for f in fields[:16]))
+    rels = detail.get("relations") or []
+    if rels:
+        lines.append("关联: " + "; ".join((r.get("target") or "") for r in rels[:8]))
+    return "\n".join(lines)
+
+
+def generate_pseudo(asset_id: str, root: Optional[str] = None,
+                    project: Optional[str] = None,
+                    model_id: Optional[str] = None) -> dict:
+    """查询时生成资产关联代码的伪码级说明；有效生命周期内缓存。
+    stale/needsUpdate → 视为失效重生成；LLM 不可用/无源码 → 结构化作确定性降级。"""
+    a = store.SemanticAssetsStore.get(asset_id)
+    if not a:
+        return {"pseudo": "", "cached": False, "degraded": True}
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    cached = (a.get("pseudo") or "").strip()
+    if fresh and cached:
+        return {"pseudo": cached, "cached": True, "degraded": False}
+    snippet = _pseudo_source_snippet(root, a.get("astRefs") or [])
+    pseudo, degraded = "", True
+    if snippet:
+        try:
+            from .req_agent import llm_sync, get_max_tokens_preference
+            sys_prompt = (
+                "你是资深架构师。基于给定的真实源码片段与该语义资产的类别/描述/结构，"
+                "用中文写一段『伪码级』实现走查：带编号的伪码步骤概括它在本项目里具体怎么实现"
+                "(关键入参 → 核心逻辑/分支 → 输出/副作用)。要贴近真实代码(可引用符号名)，"
+                "比源码更抽象、比业务描述更具体。不得臆造源码中不存在的逻辑。"
+            )
+            user_prompt = (
+                f"类别: {a.get('kind')}\n名称: {a.get('name')}\n业务描述: {a.get('desc') or '—'}\n\n"
+                f"真实源码片段:\n{snippet}\n\n"
+                "请输出伪码级实现走查(纯文本，不要 Markdown 代码块)。"
+            )
+            res = llm_sync([{"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": user_prompt}],
+                           mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
+            if isinstance(res, dict):
+                pseudo = (res.get("content") or "").strip()
+        except Exception as e:
+            logger.warning("[semantic] pseudo LLM 失败: %s", e)
+            pseudo = ""
+    if not pseudo:
+        pseudo, degraded = _structural_pseudo(a), True
+    try:
+        store.SemanticAssetsStore.update(asset_id, {"pseudo": pseudo})
+    except Exception as e:
+        logger.warning("[semantic] pseudo 落库失败: %s", e)
+    return {"pseudo": pseudo, "cached": False, "degraded": degraded}
 
 
 def mappings(asset_id: str, root: Optional[str] = None,
@@ -4799,6 +4931,13 @@ async def api_detail(asset_id: str, root: Optional[str] = None, project: Optiona
     return ok(a)
 
 
+@router.get("/kb/semantic/{asset_id}/pseudo")
+async def api_pseudo(asset_id: str, root: Optional[str] = None,
+                     project: Optional[str] = None, model_id: Optional[str] = None):
+    """查询时生成/返回资产关联代码的伪码级说明(有效生命周期内缓存)。"""
+    return ok(generate_pseudo(asset_id, root, project, model_id=model_id))
+
+
 @router.post("/kb/semantic/reconcile")
 async def api_reconcile(request: Request):
     body = await request.json()
@@ -4960,6 +5099,12 @@ async def api_extract_task_latest(root: Optional[str] = None,
 async def api_extract_task_status(task_id: str):
     """轮询提取任务状态(含进度消息，供资产管理对话同步)。"""
     return ok(extract_task_status(task_id))
+
+
+@router.post("/kb/semantic/extract-task/{task_id}/cancel")
+async def api_cancel_extract_task(task_id: str):
+    """请求取消提取任务(后台线程在组件边界停止)。"""
+    return ok(cancel_extract_task(task_id))
 
 
 @router.post("/kb/semantic/purge")

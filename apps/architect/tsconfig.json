@@ -3,6 +3,7 @@
     "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "esModuleInterop": true,
     // M13 迁移：architect-src 源码自 web/ 原样迁入（该目录历史未做严格类型门禁），

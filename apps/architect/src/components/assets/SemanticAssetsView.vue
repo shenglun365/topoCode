@@ -3,7 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, AdjustmentsHorizontalIcon, CubeTransparentIcon, ChevronDownIcon, ChevronRightIcon,
-  ArrowPathIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, SparklesIcon,
+  ArrowPathIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, SparklesIcon, StopIcon,
 } from '@heroicons/vue/24/outline'
 import type { SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
 import { semanticAssetService } from '@/services/semantic-asset-service'
@@ -45,14 +45,22 @@ async function load() {
   }
 }
 
+const extractAbort = ref<AbortController | null>(null)
+function stopExtract() {
+  extractAbort.value?.abort()
+}
 async function extract() {
   extracting.value = true
+  const ac = new AbortController(); extractAbort.value = ac
   try {
     // 默认仅提取实现层(业务层+逻辑层暂停再生)。
-    const res = await semanticAssetService.extractAll(kinds.map((k) => k.value), { level: 'implementation' })
+    const res = await semanticAssetService.extractAll(kinds.map((k) => k.value), { level: 'implementation', signal: ac.signal })
     if (res.error) console.warn('[semantic] extract:', res.error)
     await load()
+  } catch (err: any) {
+    if (err?.name !== 'AbortError') console.warn('[semantic] extract:', err?.message)
   } finally {
+    extractAbort.value = null
     extracting.value = false
   }
 }
@@ -197,18 +205,18 @@ async function copyAsset(a: SemanticAsset) {
         />{{ reconciling ? t('semanticAssets.reconciling') : t('semanticAssets.reconcile') }}
       </button>
       <button
-        class="btn btn-primary !py-1.5"
-        :disabled="extracting"
-        @click="extract"
+        class="btn !py-1.5"
+        :class="extracting ? 'btn-red' : 'btn-primary'"
+        @click="extracting ? stopExtract() : extract()"
       >
         <SparklesIcon
           v-if="!extracting"
           class="w-3.5 h-3.5"
         />
-        <ArrowPathIcon
+        <StopIcon
           v-else
-          class="w-3.5 h-3.5 animate-spin"
-        />{{ extracting ? t('semanticAssets.extracting') : t('semanticAssets.extractAll') }}
+          class="w-3.5 h-3.5"
+        />{{ extracting ? t('semanticAssets.stopExtract') : t('semanticAssets.extractAll') }}
       </button>
     </div>
 

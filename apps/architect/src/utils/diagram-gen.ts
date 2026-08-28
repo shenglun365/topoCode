@@ -283,7 +283,7 @@ function _semNodeId(idx: number): string {
 }
 
 function _semLabel(s: string, max = 26): string {
-  const t = (s || '').replace(/\[|\]|\{|\}|\(|\)/g, ' ').trim()
+  const t = (s || '').replace(/\[|\]|\{|\}|\(|\)/g, ' ').replace(/"/g, "'").replace(/\\/g, '').trim()
   return t.length > max ? `${t.slice(0, max)}…` : (t || '?')
 }
 

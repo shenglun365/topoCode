@@ -103,6 +103,7 @@ export async function chatStream(
   onEvent: (ev: ChatStreamEvent) => void,
 ): Promise<string> {
   const ws = new ArchWs('ws/kb-analysis')
+  if (opts.signal?.aborted) { ws.close(); return '' }
   await ws.ready()
   let full = ''
   let settled = false
@@ -114,45 +115,53 @@ export async function chatStream(
   }
 
   try {
-    const doneP = new Promise<string>((resolve, reject) => {
-      ws.on('chat_start', (ev: any) => {
-        onEvent({ type: 'chat_start', conversationId: ev?.conversationId, userMessageId: ev?.userMessageId })
+    let resolveDone!: (s: string) => void
+    let rejectDone!: (e: Error) => void
+    const doneP = new Promise<string>((res, rej) => { resolveDone = res; rejectDone = rej })
+
+    // 终止：signal abort → 关 WS(后端随之中断) + 以已收部分文本收口(不报错)
+    if (opts.signal) {
+      const onAbort = () => { if (!settled) { settled = true; ws.close(); resolveDone(full) } }
+      opts.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    ws.on('chat_start', (ev: any) => {
+      onEvent({ type: 'chat_start', conversationId: ev?.conversationId, userMessageId: ev?.userMessageId })
+    })
+    ws.on('chunk', (ev: any) => {
+      const delta = ev?.delta ?? ''
+      if (delta) {
+        full += delta
+        onEvent({ type: 'chunk', delta, conversationId: ev?.conversationId })
+      }
+    })
+    ws.on('reasoning', (ev: any) => {
+      const delta = ev?.delta ?? ''
+      if (delta) onEvent({ type: 'reasoning', delta, conversationId: ev?.conversationId })
+    })
+    ws.on('done', (ev: any) => {
+      const content = ev?.content ?? full
+      full = content
+      onEvent({ type: 'done', content, conversationId: ev?.conversationId, messageId: ev?.messageId })
+      finish()
+      resolveDone(content)
+    })
+    ws.on('chat_fallback', (ev: any) => {
+      onEvent({ type: 'chat_fallback', conversationId: ev?.conversationId })
+    })
+    ws.on('tool_call', (ev: any) => {
+      onEvent({ type: 'tool_call', tool: ev?.tool, conversationId: ev?.conversationId })
+    })
+    ws.on('tool_result', (ev: any) => {
+      onEvent({
+        type: 'tool_result', tool: ev?.tool, ok: ev?.ok, summary: ev?.summary,
+        conversationId: ev?.conversationId,
       })
-      ws.on('chunk', (ev: any) => {
-        const delta = ev?.delta ?? ''
-        if (delta) {
-          full += delta
-          onEvent({ type: 'chunk', delta, conversationId: ev?.conversationId })
-        }
-      })
-      ws.on('reasoning', (ev: any) => {
-        const delta = ev?.delta ?? ''
-        if (delta) onEvent({ type: 'reasoning', delta, conversationId: ev?.conversationId })
-      })
-      ws.on('done', (ev: any) => {
-        const content = ev?.content ?? full
-        full = content
-        onEvent({ type: 'done', content, conversationId: ev?.conversationId, messageId: ev?.messageId })
-        finish()
-        resolve(content)
-      })
-      ws.on('chat_fallback', (ev: any) => {
-        onEvent({ type: 'chat_fallback', conversationId: ev?.conversationId })
-      })
-      ws.on('tool_call', (ev: any) => {
-        onEvent({ type: 'tool_call', tool: ev?.tool, conversationId: ev?.conversationId })
-      })
-      ws.on('tool_result', (ev: any) => {
-        onEvent({
-          type: 'tool_result', tool: ev?.tool, ok: ev?.ok, summary: ev?.summary,
-          conversationId: ev?.conversationId,
-        })
-      })
-      ws.on('error', (ev: any) => {
-        onEvent({ type: 'error', message: ev?.message, conversationId: ev?.conversationId })
-        finish()
-        reject(new Error(ev?.message || '对话失败'))
-      })
+    })
+    ws.on('error', (ev: any) => {
+      onEvent({ type: 'error', message: ev?.message, conversationId: ev?.conversationId })
+      finish()
+      rejectDone(new Error(ev?.message || '对话失败'))
     })
 
     ws.send('chat', {

@@ -36,6 +36,8 @@ const rightTab = ref<'chat' | 'design'>('chat')
 const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const chatConvId = ref('')
+const chatAbort = ref<AbortController | null>(null)
+function stopChat() { chatAbort.value?.abort() }
 const finalizing = ref(false)
 /** P3.5: 工具轮次实时进度(「知识库检索中…」动态化)。 */
 const toolStatus = ref('')
@@ -159,6 +161,7 @@ async function sendViaChat(text: string) {
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
+  const ac = new AbortController(); chatAbort.value = ac
   try {
     const msgs = turns.value.slice(0, -1).map((m) => ({ role: m.role, content: m.content }))
     await chatStream(msgs, {
@@ -168,6 +171,7 @@ async function sendViaChat(text: string) {
       title: req.title || t('workbench.sessions.defaultTitle'),
       modelId: readModelPref('architect') || undefined,
       diagramSkill: diagramSkill.value,
+      signal: ac.signal,
     }, (ev) => {
       if (ev.conversationId) {
         chatConvId.value = ev.conversationId
@@ -198,6 +202,7 @@ async function sendViaChat(text: string) {
   } catch (err) {
     turns.value[idx].content = (err instanceof Error ? err.message : '') || t('requirement.chat.fallback')
   } finally {
+    chatAbort.value = null
     busy.value = false
   }
 }
@@ -493,6 +498,7 @@ onUnmounted(() => {
             @answers="onAnswers"
             @delete-turn="onDeleteTurn"
             @toggle-diagram-skill="toggleDiagramSkill"
+            @stop="stopChat"
           />
           <DesignPanel
             v-else

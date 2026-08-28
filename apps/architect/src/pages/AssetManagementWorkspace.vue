@@ -5,11 +5,12 @@ import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
-  ChartBarSquareIcon,
+  ChartBarSquareIcon, StopIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
 import SemanticGraphView, { type GraphTabDef } from '@/components/assets/SemanticGraphView.vue'
+import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import { semanticAssetService, type ExtractTaskMessage, type ExtractTaskStatus, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
@@ -30,6 +31,9 @@ const { splitPct, dragging, boxRef: splitBoxRef, onDown: onSplitPointerDown } = 
 const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const chatConvId = ref<string>('')
+const chatAbort = ref<AbortController | null>(null)
+const extractAbort = ref<AbortController | null>(null)
+function stopChat() { chatAbort.value?.abort(); extractAbort.value?.abort() }
 const historyOpen = ref(false)
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
 
@@ -497,6 +501,9 @@ const extractTaskId = ref<string>('')
 const extractPollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const extractMsgSeen = ref<Set<string>>(new Set())
 const extractRunning = ref(false)
+/** 任务进度(供顶部常驻指示器展示，刷新恢复后同样可见)。 */
+const extractDone = ref(0)
+const extractTotal = ref(0)
 
 function enterExtractMode() {
   tab.value = 'component'
@@ -553,6 +560,16 @@ function stopExtractPoll() {
   extractRunning.value = false
 }
 
+/** 请求取消后台提取任务(服务端线程在组件边界停止)；轮询检测到 cancelled 后自动停止。 */
+async function cancelExtractTask() {
+  if (!extractTaskId.value || !extractRunning.value) return
+  try {
+    await semanticAssetService.cancelExtractTask(extractTaskId.value)
+  } catch (err: any) {
+    console.warn('[asset-mgmt] cancel extract task failed:', err)
+  }
+}
+
 /** 复位全部组件提取按钮的进行态(任务结束后释放)。 */
 function resetCompExtracting() {
   for (const k of Object.keys(compExtracting)) compExtracting[k] = false
@@ -565,6 +582,8 @@ function consumeExtractTask(st: ExtractTaskStatus) {
     resetCompExtracting()
     return
   }
+  extractDone.value = st.done ?? 0
+  extractTotal.value = st.total ?? 0
   for (const m of st.messages ?? []) syncExtractMsg(m)
   if (!st.running) {
     stopExtractPoll()
@@ -626,6 +645,8 @@ async function restoreExtractTask() {
   try {
     const st = await semanticAssetService.latestExtractTask()
     if (!st || !st.found || !st.id) return
+    extractDone.value = st.done ?? 0
+    extractTotal.value = st.total ?? 0
     extractMsgSeen.value = new Set((st.messages ?? []).map((m) => m.id))
     for (const m of st.messages ?? []) syncExtractMsg(m)
     if (st.running) {
@@ -834,12 +855,14 @@ function askAgent(text: string) {
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
+  const ac = new AbortController(); chatAbort.value = ac
   chatStream([{ role: 'user', content: text }], {
     conversationId: chatConvId.value || undefined,
     kind: 'asset',
     title: t('assetMgmt.chatTitle'),
     modelId: readModelPref('architect') || undefined,
     diagramSkill: diagramSkill.value,
+    signal: ac.signal,
   }, (ev) => {
     if (ev.conversationId) chatConvId.value = ev.conversationId
     if (ev.type === 'chunk') {
@@ -851,7 +874,7 @@ function askAgent(text: string) {
     } else if (ev.type === 'error') {
       turns.value[idx].content = ev.message || t('requirement.chat.fallback')
     }
-  }).finally(() => { busy.value = false })
+  }).finally(() => { chatAbort.value = null; busy.value = false })
 }
 
 async function onSend(text: string) {
@@ -859,6 +882,7 @@ async function onSend(text: string) {
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
+  const ac = new AbortController(); chatAbort.value = ac
   try {
     const msgs = turns.value.slice(0, -1).map((t) => ({ role: t.role, content: t.content }))
     await chatStream(msgs, {
@@ -867,6 +891,7 @@ async function onSend(text: string) {
       title: t('assetMgmt.chatTitle'),
       modelId: readModelPref('architect') || undefined,
       diagramSkill: diagramSkill.value,
+      signal: ac.signal,
     }, (ev) => {
       if (ev.conversationId) chatConvId.value = ev.conversationId
       if (ev.type === 'chat_start') {
@@ -885,6 +910,7 @@ async function onSend(text: string) {
   } catch (err: any) {
     turns.value[idx].content = err?.message || t('requirement.chat.fallback')
   } finally {
+    chatAbort.value = null
     busy.value = false
   }
 }
@@ -893,7 +919,8 @@ function onExtractAssets() {
   if (busy.value) return
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
-  semanticAssetService.extractAll(kinds.map((k) => k.value), { modelId: readModelPref('architect') || undefined })
+  const ac = new AbortController(); extractAbort.value = ac
+  semanticAssetService.extractAll(kinds.map((k) => k.value), { modelId: readModelPref('architect') || undefined, signal: ac.signal })
     .then(async (res) => {
       const assets = res.assets ?? []
       turns.value[idx].content = assets.length
@@ -902,8 +929,12 @@ function onExtractAssets() {
       turns.value[idx].assets = assets
       await Promise.all([loadSemantic(), refreshStatus()])
     })
-    .catch(() => { turns.value[idx].content = t('requirement.chat.semanticFailed') })
-    .finally(() => { busy.value = false })
+    .catch((err: any) => {
+      turns.value[idx].content = err?.name === 'AbortError'
+        ? t('requirement.chat.semanticStopped')
+        : t('requirement.chat.semanticFailed')
+    })
+    .finally(() => { extractAbort.value = null; busy.value = false })
 }
 
 function onRefreshAsset(assetId: string) {
@@ -968,6 +999,22 @@ onUnmounted(() => stopExtractPoll())
           </button>
         </div>
         <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ statusText }}</span>
+        <div
+          v-if="extractRunning"
+          class="flex items-center gap-2 rounded-md border border-ctp-yellow/40 bg-ctp-yellow/10 pl-2.5 pr-1 py-1"
+        >
+          <ArrowPathIcon class="w-3.5 h-3.5 animate-spin text-ctp-yellow" />
+          <span class="text-[11px] font-medium text-ctp-yellow whitespace-nowrap">
+            {{ t('assetMgmt.extracting') }} {{ extractDone }}/{{ extractTotal }}
+          </span>
+          <button
+            class="btn btn-xs btn-red"
+            :disabled="!extractTaskId"
+            @click="cancelExtractTask"
+          >
+            <StopIcon class="w-3 h-3" />{{ t('assetMgmt.stopExtract') }}
+          </button>
+        </div>
         <div class="flex-1" />
         <button
           class="btn btn-sm btn-ghost"
@@ -1136,6 +1183,13 @@ onUnmounted(() => stopExtractPoll())
                 @click="exitExtractMode"
               >
                 {{ t('assetMgmt.exitExtractMode') }}
+              </button>
+              <button
+                v-if="extractRunning"
+                class="btn btn-xs btn-red"
+                @click="cancelExtractTask"
+              >
+                <StopIcon class="w-3 h-3" />{{ t('assetMgmt.stopExtract') }}
               </button>
             </template>
           </template>
@@ -1686,6 +1740,7 @@ onUnmounted(() => stopExtractPoll())
                   v-if="expanded[a.id]"
                   class="border-t border-ctp-mauve/15 px-2 py-1.5 space-y-1 text-[10px]"
                 >
+                  <PseudoExplainer :asset-id="a.id" :initial="a.pseudo" />
                   <div v-if="a.detail?.fields?.length">
                     <div class="font-medium text-ctp-mauve mb-0.5">
                       {{ t('assetMgmt.fields') }}
@@ -2044,6 +2099,7 @@ onUnmounted(() => stopExtractPoll())
           @extract-assets="onExtractAssets"
           @refresh-asset="onRefreshAsset"
           @toggle-diagram-skill="toggleDiagramSkill"
+          @stop="stopChat"
         />
         <p class="text-[10px] text-ctp-overlay0 leading-relaxed">
           {{ t('assetMgmt.chatHint') }}

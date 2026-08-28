@@ -67,7 +67,7 @@ def enrichment_schema(kind: str) -> dict:
     props: Dict[str, Any] = {
         "symbol": {"type": "string", "description": "候选符号名(必须与候选表一致)"},
         "name": {"type": "string", "description": "业务语义命名(非符号名)"},
-        "desc": {"type": "string", "description": "语义描述(作用与边界)"},
+        "desc": {"type": "string", "description": "自洽白话说明:它在本项目里做什么/边界/为什么存在/关键输入输出(让不读代码者也能看懂)"},
         "invariants": {"type": "array", "items": {"type": "string"},
                        "description": "不变式/约束(可空)"},
     }

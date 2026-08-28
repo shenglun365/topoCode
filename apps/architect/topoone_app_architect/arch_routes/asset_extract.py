@@ -95,6 +95,8 @@ def _sys_base() -> str:
         "你是代码语义资产补齐器。候选表已由规则分类(类别定死不可更改)，"
         "种子数据由确定性分析预填(字段/调用链/分支条件/路由/常量值均为 ground truth)。"
         "你只负责语义层：业务命名、描述、不变式、跨资产关系、逐项语义注释。"
+        "desc 必须是一段自洽的白话说明(它在本项目里做什么、边界在哪、为什么存在、关键输入/输出)，"
+        "让不读代码的工程师也能直接看懂，而非堆砌符号名；name 用简洁业务名(可作图节点标签)。"
         "不得臆造种子与工具返回中不存在的数据。"
     )
 
@@ -105,7 +107,8 @@ def _task_spec(file_: str, kind: str) -> str:
     return (
         f"文件: {file_}\n候选类别(规则定死，不可更改): {kind}\n"
         f"验收模板: {tpl['desc']}\n"
-        "任务: 对下列每个候选，填写业务 name(非符号名)、desc(作用与边界)、"
+        "任务: 对下列每个候选，填写业务 name(简洁业务名，非符号名，可作图标签)、"
+        "desc(自洽白话说明:作用/边界/为什么存在/关键输入输出)、"
         "invariants(可空)、跨资产 relations(1~3 条，可空)，以及按类别的逐项语义"
         "(field_semantics/step_semantics/branch_semantics/constraint_semantics/"
         "transition_semantics，键必须与种子完全一致)。\n"
