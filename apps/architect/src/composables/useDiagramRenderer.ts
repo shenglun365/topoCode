@@ -8,7 +8,7 @@ mermaid/plantuml 渲染统一经 @topo/web-core/composables/useTopoRender：
 
 import { renderDiagram } from '@topo/web-core/composables/useTopoRender'
 
-export type DiagramLang = 'mermaid' | 'plantuml' | 'toposcript'
+export type DiagramLang = 'mermaid' | 'plantuml'
 
 /** 渲染 Mermaid 为 SVG 文本（主线程内核，主题跟随 data-theme）。 */
 export async function renderMermaid(code: string): Promise<string> {

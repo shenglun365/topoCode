@@ -5,32 +5,28 @@ import { useI18n } from 'vue-i18n'
 import { CodeBracketIcon, ExclamationTriangleIcon, ArrowsPointingOutIcon, XMarkIcon, MagnifyingGlassPlusIcon, MagnifyingGlassMinusIcon } from '@heroicons/vue/24/outline'
 import { renderPlantuml, normalizeMermaid, renderMermaid, DIAGRAM_EDGE_LIMITS, countDiagramEdges, isDiagramSizeError } from '@/composables/useDiagramRenderer'
 import type { DiagramLang } from '@/composables/useDiagramRenderer'
-import { topoScriptSample } from '@/composables/useTopoScript'
-import TopoScriptCanvas from './TopoScriptCanvas.vue'
 
 const props = defineProps<{
   title: string
   diagrams: Partial<Record<DiagramLang, string>>
   badges?: { text: string; cls: string }[]
-  playKey?: number
-  /** 初始语言；缺省按 diagrams 推导(toposcript > mermaid)。 */
+  /** 初始语言；缺省按 diagrams 推导(mermaid)。 */
   defaultLang?: DiagramLang
-  /** 允许切换的语言(缺省全部)。语义图谱等场景可排除 toposcript。 */
+  /** 允许切换的语言(缺省全部)。 */
   allowedLangs?: DiagramLang[]
   /** 隐藏顶部标题栏(由外部工具栏接管语言切换/源码/全屏)。 */
   headerless?: boolean
 }>()
 
 const { t } = useI18n()
-/** 可切换语言：按 allowedLangs 过滤；缺省全部(含 toposcript)。 */
+/** 可切换语言：按 allowedLangs 过滤；缺省全部(mermaid/plantuml)。 */
 const langs = computed<DiagramLang[]>(() => {
   if (props.allowedLangs?.length) return props.allowedLangs
-  return ['mermaid', 'plantuml', 'toposcript']
+  return ['mermaid', 'plantuml']
 })
 const defaultLang = computed<DiagramLang>(() => {
   const cands = langs.value
   if (props.defaultLang && cands.includes(props.defaultLang)) return props.defaultLang
-  if (props.diagrams.toposcript && cands.includes('toposcript')) return 'toposcript'
   if (cands.includes('mermaid')) return 'mermaid'
   return cands[0] ?? 'mermaid'
 })
@@ -39,7 +35,6 @@ const loading = ref(false)
 const svg = ref('')
 const error = ref('')
 const showSource = ref(false)
-const playing = ref(false)
 /** 关系规模超限(不扩容)：渲染前置提示，引导缩小数据范围。 */
 const sizeLimited = ref(false)
 const sizeCount = ref(0)
@@ -160,7 +155,6 @@ function inlineEndDrag() {
 }
 
 const code = computed(() => props.diagrams[lang.value] ?? '')
-const currentCode = computed(() => (lang.value === 'toposcript' && !props.diagrams.toposcript ? topoScriptSample() : props.diagrams[lang.value] ?? ''))
 
 /** 渲染序号：只应用最后一次渲染的结果，避免覆盖中的旧渲染回写 svg/error/loading。 */
 let renderSeq = 0
@@ -191,11 +185,6 @@ async function render() {
   sizeLimited.value = false
   showSource.value = false
   inlineReset()
-  if (lang.value === 'toposcript') {
-    playing.value = false
-    if (seq === renderSeq) loading.value = false
-    return
-  }
   if (!code.value) {
     if (seq === renderSeq) loading.value = false
     return
@@ -235,15 +224,7 @@ async function render() {
   }
 }
 
-watch(
-  () => props.playKey,
-  (v) => {
-    if (v !== undefined && lang.value === 'toposcript') playing.value = true
-  },
-)
-
 onBeforeUnmount(() => {
-  playing.value = false
   teardownInlineObserver()
 })
 
@@ -393,7 +374,7 @@ defineExpose({ currentLang: lang, setLang, toggleSource, openFullscreen })
           <CodeBracketIcon class="w-3.5 h-3.5" />{{ showSource ? t('architecture.diagram') : 'src' }}
         </button>
         <button
-          v-if="svg && lang !== 'toposcript'"
+          v-if="svg"
           class="btn btn-ghost !py-0.5 text-[11px]"
           :title="t('architecture.fullscreen')"
           @click="openFullscreen"
@@ -405,30 +386,6 @@ defineExpose({ currentLang: lang, setLang, toggleSource, openFullscreen })
 
     <div class="p-3 flex-1 min-h-0 flex flex-col min-w-0">
       <div
-        v-if="lang === 'toposcript'"
-        class="space-y-2"
-      >
-        <TopoScriptCanvas
-          :code="currentCode"
-          :playing="playing"
-        />
-        <div class="flex items-center gap-2">
-          <button
-            v-if="!playing"
-            class="btn btn-primary"
-            @click="playing = true"
-          >
-            {{ t('architecture.toposcriptDesc') }} ▶
-          </button>
-          <span
-            v-else
-            class="text-xs text-ctp-teal animate-pulse"
-          >{{ t('architecture.rendering') }}</span>
-        </div>
-      </div>
-
-      <div
-        v-else
         class="relative flex-1 min-h-0"
       >
         <div

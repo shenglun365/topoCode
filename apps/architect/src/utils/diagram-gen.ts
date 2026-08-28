@@ -186,16 +186,6 @@ export function componentsToMermaid(components: ArchComponent[]): string {
   return lines.join('\n')
 }
 
-export function dataflowToTopoScript(df: DataFlow, components: ArchComponent[]): string {
-  const lines = ['graph']
-  const compIds = new Set<string>()
-  df.streams.forEach((s) => { compIds.add(s.from); compIds.add(s.to) })
-  const comp = components.filter((c) => compIds.has(c.id))
-  comp.forEach((c) => lines.push(`${c.id} [${c.name}] :: ${c.kind}`))
-  df.streams.forEach((s) => lines.push(`${s.from} -> ${s.to} : ${s.name}(${s.payload})`))
-  return lines.join('\n')
-}
-
 const CHANGE_CLASS_DEF = (P: Record<string, string>) => ({
   added: `fill:${P.fill},stroke:#a6e3a1,stroke-width:2px,color:${P.text}`,
   removed: `fill:${P.fill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.text}`,

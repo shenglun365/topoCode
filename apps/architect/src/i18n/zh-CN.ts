@@ -714,7 +714,6 @@ export default {
     diagramNarrowHint: '请缩小数据范围后重试：按粒度（业务/逻辑/代码）、类别或组件范围筛选。',
     mermaidDesc: '类/ER/时序图',
     plantumlDesc: '序列/活动图',
-    toposcriptDesc: '自建动画 DSL(引擎建设中)',
     fullscreen: '全屏放大',
     zoomIn: '放大',
     zoomOut: '缩小',

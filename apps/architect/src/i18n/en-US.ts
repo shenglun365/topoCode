@@ -693,7 +693,6 @@ export default {
     zoomOut: 'Zoom out',
     zoomResetHint: 'Double-click to reset zoom; wheel to zoom, drag to pan',
     close: 'Close',
-    toposcriptDesc: 'Custom animation DSL (under construction)',
   },
   asset: {
     title: 'Project Data Assets',
