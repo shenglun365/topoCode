@@ -9,7 +9,7 @@
   supervisor            — 进程治理 + topo CLI + TUI
   plugins               — 本地插件（parsers/community/...）+ 生态（mcp/runner）
 
-设计文档：docs/plan/split/README.md
+设计文档：docs/conventions/CONV-01-核心框架-topoone-core.md
 """
 
 __version__ = "0.3.0"

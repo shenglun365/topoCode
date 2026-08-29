@@ -1227,6 +1227,7 @@ export default {
       title: 'Semantic Layer Graph',
       hint: 'Nodes = semantic assets, edges = asset relations; layered by granularity (high→medium→low). Switch between mermaid/plantuml tabs; copy & tweak the source as needed.',
       reload: 'Reload graph',
+      replay: 'Replay build-up',
       loading: 'Loading graph…',
       empty: 'No semantic assets yet. Extract first, then view the graph.',
       allKinds: 'All kinds',

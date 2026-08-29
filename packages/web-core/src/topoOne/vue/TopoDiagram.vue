@@ -60,7 +60,7 @@ const api = useTopoDiagram({
   animation:
     props.autoPlay || props.animation
       ? { enabled: true, autoPlay: props.autoPlay, ...props.animation }
-      : undefined,
+      : false, // 显式禁用动画插件；undefined 会被当作"启用默认"→ 停在第 0 步
   plantUmlBaseUrl: props.plantUmlBaseUrl,
   onNodeClick: (e) => emit('node-click', e),
   onReady: (view) => emit('ready', view),
@@ -86,6 +86,8 @@ defineExpose<TopoDiagramApi>(api);
 }
 .topo-diagram__canvas {
   width: 100%;
+  /* 父级有确定高度时充满可视区；父级高度 auto(如聊天气泡)时百分比退化为 auto，按内容高。 */
+  height: 100%;
   min-height: 120px;
 }
 .topo-diagram__canvas svg {

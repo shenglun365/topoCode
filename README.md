@@ -101,7 +101,7 @@ topoOne-ui/
 │   └── architect/                # ④ Architect 工作台（topoone_app_architect :3470 + @topo/app-architect）
 ├── build/                        # 构建脚本（bundle-worker/plugin/module）
 ├── scripts/                      # 开发脚本（serve.sh / setup.sh / rpc-baseline）
-└── docs/plan/split/              # 工程拆分规划（M01–M14）
+└── docs/                         # 工程规约（conventions/CONV-00~04）+ 数据库设计
 ```
 
 ### 子项目说明

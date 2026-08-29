@@ -1252,6 +1252,7 @@ export default {
       title: '语义层图谱',
       hint: '节点=语义资产，边=资产间关系；按粒度 high→medium→low 分层。可在 mermaid/plantuml tab 间切换，源码可复制微调。',
       reload: '刷新图谱',
+      replay: '重播构建动画',
       loading: '图谱加载中…',
       empty: '暂无语义资产，先提取后再查看图谱。',
       allKinds: '全部类型',

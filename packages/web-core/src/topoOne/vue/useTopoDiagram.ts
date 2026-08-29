@@ -26,8 +26,9 @@ export interface UseTopoDiagramOptions {
   securityLevel?: SecurityLevel;
   themeVariables?: Record<string, string | number>;
   interactions?: InteractionOptions | false;
-  /** Playback: autoPlay + optional custom steps (selectors) / plan factory. */
-  animation?: AnimationPluginOptions;
+  /** Playback: autoPlay + optional custom steps (selectors) / plan factory.
+   *  `false` disables the animation plugin entirely (omit 会走内置默认=启用). */
+  animation?: AnimationPluginOptions | false;
   /** PlantUml engine only: rendering server base URL (默认 /api/topo 同源网关，随浏览器访问的主机自适应；需带鉴权)。 */
   plantUmlBaseUrl?: string;
   onNodeClick?: (e: NodeClickEvent) => void;

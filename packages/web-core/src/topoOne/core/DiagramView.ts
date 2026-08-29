@@ -25,8 +25,9 @@ export interface DiagramOptions {
    /**
     * Playback. Built-in adapters decide what is animatable by default;
     * `steps` (CSS selectors per step) or `plan` (full factory) override them.
+    * `false` disables the animation plugin entirely (render final graph as-is).
     */
-   animation?: AnimationPluginOptions;
+   animation?: AnimationPluginOptions | false;
    /** Mermaid only: click-handler security level (default 'strict'; main project uses 'loose'). */
    securityLevel?: 'strict' | 'loose' | 'antiscript' | 'sandbox';
    /** Mermaid only: theme variable overrides (e.g. catppuccin palette, see themes.ts). */

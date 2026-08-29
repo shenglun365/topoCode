@@ -113,7 +113,7 @@ topoOne-ui/
 │   └── architect/                # ④ Architect workbench (topoone_app_architect :3470 + @topo/app-architect)
 ├── build/                        # Build scripts (bundle-worker/plugin/module)
 ├── scripts/                      # Dev scripts (serve.sh / setup.sh / rpc-baseline)
-└── docs/plan/split/              # Engineering split plan (M01–M14)
+└── docs/                         # Engineering conventions (conventions/CONV-00~04) + database design
 ```
 
 ### Sub-Projects

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowPathIcon, XMarkIcon, ArrowsPointingOutIcon } from '@heroicons/vue/24/outline'
 import TopoDiagram from '@topo/web-core/topoOne/vue/TopoDiagram.vue'
+import { makeButton } from '@topo/web-core/topoOne/plugins/ui.ts'
 import { themeVariablesFor } from '@topo/web-core/topoOne/vue/themes.ts'
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import { semanticGraphViewDiagrams, supportedViewsFor, viewUnavailableReasons } from '@/utils/diagram-gen'
@@ -50,6 +51,49 @@ function openCardFullscreen() {
 }
 function closeCardFullscreen() {
   cardFullscreen.value = false
+}
+/** 重播：默认(加载/重渲染)直接呈现最终完成图；点图内工具栏的重播按钮才按步骤播放。 */
+const diagRef = ref<InstanceType<typeof TopoDiagram> | null>(null)
+const replayTick = ref(0)
+const animating = ref(false)
+function replayGraph() {
+  replayTick.value += 1
+  animating.value = true
+}
+/** 把重播按钮注入图内浮动工具栏(.td-toolbar，与缩放/导出按钮同排，置首)。 */
+function injectReplayBtn(tries = 0) {
+  const host = diagRef.value?.containerRef
+  if (!host) return
+  if (host.querySelector('[data-td-replay]')) return
+  const bar = host.querySelector('.td-toolbar')
+  if (!bar) {
+    if (tries < 10) setTimeout(() => injectReplayBtn(tries + 1), 100)
+    return
+  }
+  const btn = makeButton('↻', t('assetMgmt.graph.replay'), replayGraph)
+  btn.dataset.tdReplay = '1'
+  bar.prepend(btn)
+}
+/** 播放到最后一步后关掉动画态：之后主题/语言/全屏等重渲染不再重播。 */
+function onDiagramReady() {
+  injectReplayBtn()
+  if (!animating.value) return
+  const tryWatch = (tries = 0) => {
+    const ctrl = diagRef.value?.getAnimation() ?? null
+    if (!ctrl || ctrl.total <= 0) {
+      // 不支持动画的类型(无 plan)：稍候放弃，图本身已是完整态。
+      if (tries < 20) setTimeout(() => tryWatch(tries + 1), 100)
+      else animating.value = false
+      return
+    }
+    const stopWatch = ctrl.subscribe((st) => {
+      if (!st.playing && st.index >= ctrl.total - 1) {
+        stopWatch()
+        animating.value = false
+      }
+    })
+  }
+  tryWatch()
 }
 /** 主题跟随 data-theme(catppuccin 变量随主题切换)。 */
 const themeMode = computed<'dark' | 'light'>(() =>
@@ -354,14 +398,16 @@ onMounted(async () => {
         >{{ diagrams[cardLang] }}</pre>
         <TopoDiagram
           v-else
+          ref="diagRef"
           class="h-full"
-          :key="cardFullscreen ? 'fs' : 'inline'"
+          :key="`${cardFullscreen ? 'fs' : 'inline'}-${replayTick}`"
           :code="diagrams[cardLang]"
           :engine="cardLang"
           :theme="themeMode"
           :theme-variables="themeVars"
           security-level="loose"
-          auto-play
+          :auto-play="animating"
+          @ready="onDiagramReady"
         />
         <button
           v-if="cardFullscreen"
