@@ -245,6 +245,37 @@ def worth_extracting(node: dict, kind: str, rc: RuleContext) -> bool:
     return True
 
 
+def business_value_score(node: dict, kind: str, rc: "RuleContext") -> int:
+    """业务价值打分(规则)：越高越值得送 LLM 做业务命名/描述。
+
+    只用于候选排序/截断(送 LLM 的 top-N)，不影响是否落库(地板兜底覆盖全部)。
+    """
+    name = node.get("name") or ""
+    file_ = node.get("file_path") or ""
+    score = 0
+    if name and not name.startswith("_"):
+        score += 2
+    if (node.get("docstring") or "").strip():
+        score += 2
+    if kind == "contract":
+        score += 3  # 路由/边界端点业务价值高
+    elif kind == "entity":
+        f = node.get("fields")
+        n = len(f) if isinstance(f, list) else 0
+        score += 2 if n >= 3 else (1 if n >= 1 else 0)
+    elif kind in ("process", "decision"):
+        callers = rc.callers_of(node)
+        score += 2 if callers >= 3 else (1 if callers >= 1 else 0)
+        if len(rc.callees_of(node)) >= 4:
+            score += 1
+    base = (file_.split("/")[-1]) if file_ else ""
+    if "/test/" in file_ or "/tests/" in file_ or base.startswith("test_") \
+            or base.endswith(".test.ts") or base.endswith(".spec.ts") \
+            or base.endswith("_test.py") or base.endswith(".test.js"):
+        score -= 3
+    return score
+
+
 # ── 关联范围装配(每候选确定性上下文) ───────────────────────────
 
 
@@ -314,6 +345,52 @@ def entity_fields(root: str, node: dict) -> List[dict]:
     return fields_from_source_text(_src_slice(root, node))
 
 
+def _process_steps(node: dict, rc: "RuleContext", max_steps: int = 30) -> List[dict]:
+    """process 处理流程：行序重建(控制流语句 + 被调符号，按行号合并)。
+
+    用 implDetails.statements(if/switch/case/loop + condition)还原真实操作序列；
+    无 implDetails(live 源)时控制流语句为空 → 退化为 1-hop 被调名序列。
+    每步带 semantic(调用 X / if cond)，供 detail 面板与汇总 desc 直接展示。
+    """
+    name_of = {n.get("id"): (n.get("qualified_name") or n.get("name") or "")
+               for n in rc.node_by_id.values()}
+    for k, v in rc.extra_names.items():
+        if v:
+            name_of.setdefault(k, v)
+
+    events: List[tuple] = []  # (line, suborder, step)
+    for s in rc.statements_of(node, types=("if", "switch", "case", "loop")):
+        op = (s.get("type") or "").strip() or "op"
+        cond = (s.get("condition") or "").strip()
+        step = {"op": op}
+        if cond:
+            step["condition"] = cond
+            step["semantic"] = f"{op} {cond}"
+        else:
+            step["semantic"] = op
+        events.append((int(s.get("startLine") or 0), 0, step))
+    for e in rc.edges:
+        if e.get("kind") != "calls" or e.get("source") != node.get("id") \
+                or not e.get("target"):
+            continue
+        tid = e["target"]
+        sym = str(name_of.get(tid) or tid or "").split("::")[-1]
+        if not sym:
+            continue
+        ln = e.get("line")
+        events.append((ln if isinstance(ln, int) else (1 << 30), 1,
+                       {"op": "call", "symbol": sym, "semantic": f"调用 {sym}"}))
+    if not events:
+        return []
+    events.sort(key=lambda ev: (ev[0], ev[1]))
+    steps: List[dict] = []
+    for i, (_ln, _o, ev) in enumerate(events[:max_steps], 1):
+        step = {"order": i}
+        step.update(ev)
+        steps.append(step)
+    return steps
+
+
 def assemble_context(node: dict, kind: str, rc: RuleContext,
                      root: str = "") -> dict:
     """每候选关联范围 → 种子数据(确定性)。同节点永远同输出。
@@ -365,13 +442,7 @@ def assemble_context(node: dict, kind: str, rc: RuleContext,
         seed["constraints"] = _constants_from_impl(rc.impl_by_file, node)
         seed["configSource"] = node.get("file_path") or ""
     else:  # process
-        name_of = {n.get("id"): (n.get("qualified_name") or n.get("name") or "")
-                   for n in rc.node_by_id.values()}
-        for k, v in rc.extra_names.items():
-            if v:
-                name_of.setdefault(k, v)
-        callees = _callee_names(node.get("id"), rc.edges, name_of)
-        seed["steps"] = [{"order": i, "symbol": c} for i, c in enumerate(callees, 1)]
+        seed["steps"] = _process_steps(node, rc)
         seed["conditions"] = [(s.get("condition") or "").strip()
                               for s in rc.statements_of(node)
                               if (s.get("condition") or "").strip()][:8]

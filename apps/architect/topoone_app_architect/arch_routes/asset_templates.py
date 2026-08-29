@@ -50,6 +50,117 @@ _REL_TYPES = ("calls", "uses", "reads", "writes", "contains", "extends",
               "1:1", "1:N", "N:M")
 
 
+# ── 确定性汇总渲染(结构 → 一句代码级白话 desc，零 LLM) ─────────
+
+
+_KIND_LABEL = {
+    "entity": "实体", "contract": "契约", "state": "状态",
+    "rule": "规则", "process": "过程", "decision": "决策",
+}
+
+
+def _join_short(vals: List[str], limit: int = 3, sep: str = " / ") -> str:
+    """取前 limit 个非空值拼接，超出则补『…（共 N）』。"""
+    vals = [str(v or "").strip() for v in (vals or []) if str(v or "").strip()]
+    if len(vals) > limit:
+        return sep.join(vals[:limit]) + f"{sep}…（共 {len(vals)}）"
+    return sep.join(vals)
+
+
+def _render_core(kind: str, detail: dict) -> str:
+    """结构核心短语(紧凑)：计数 + 前几项。无结构返回 ''。"""
+    detail = detail or {}
+    if kind == "entity":
+        f = detail.get("fields") or []
+        if not f:
+            return ""
+        names = [str(x.get("name") or "").strip() for x in f if isinstance(x, dict)]
+        names = [n for n in names if n]
+        return f"{len(f)} 字段（{_join_short(names, 3, ', ')}）"
+    if kind == "process":
+        steps = detail.get("steps") or []
+        if not steps:
+            return ""
+        spine = [str(s.get("symbol") or "").strip() for s in steps
+                 if isinstance(s, dict) and s.get("symbol")]
+        n_br = len([s for s in steps if isinstance(s, dict)
+                    and s.get("op") in ("if", "switch", "case")])
+        if not n_br:
+            n_br = len(detail.get("conditions") or [])
+        seq = "→".join(spine[:4]) + ("…" if len(spine) > 4 else "")
+        core = f"{len(steps)} 步" + (f"（{seq}）" if seq else "")
+        if n_br:
+            core += f"，{n_br} 分支"
+        return core
+    if kind == "decision":
+        brs = detail.get("branches") or []
+        if not brs:
+            return ""
+        conds = [str(b.get("condition") or "").strip() for b in brs
+                 if isinstance(b, dict) and (b.get("condition") or "").strip()]
+        core = f"{len(brs)} 分支"
+        if conds:
+            core += f"（{_join_short(conds, 3, ' / ')}）"
+        return core
+    if kind == "contract":
+        rels = detail.get("relations") or []
+        http = [r for r in rels if isinstance(r, dict)
+                and r.get("type") == "http" and r.get("target")]
+        if http:
+            parts = [f"{'/'.join(r.get('methods') or ['GET'])} {r.get('target')}"
+                     for r in http[:3]]
+            more = f"，共 {len(http)}" if len(http) > 3 else ""
+            return "、".join(parts) + more
+        sig = ""
+        for r in rels:
+            if isinstance(r, dict) and (r.get("semantic") or r.get("target")):
+                sig = str(r.get("semantic") or r.get("target")).strip()
+                break
+        return f"签名：{sig}" if sig else ("接口契约" if rels else "")
+    if kind == "state":
+        states = detail.get("states") or []
+        if not states:
+            return ""
+        names = [str(s.get("name") or "").strip() for s in states if isinstance(s, dict)]
+        names = [n for n in names if n]
+        return "→".join(names[:6]) + ("…" if len(names) > 6 else "")
+    if kind == "rule":
+        cons = detail.get("constraints") or []
+        if not cons:
+            return "配置项" if detail.get("configSource") else ""
+        parts = [f"{c.get('name')}={c.get('value')}" for c in cons[:3]
+                 if isinstance(c, dict) and c.get("name")]
+        more = f"，共 {len(cons)}" if len(cons) > 3 else ""
+        if parts:
+            return f"{len(cons)} 约束（{'; '.join(parts)}{more}）"
+        return f"{len(cons)} 约束"
+    return ""
+
+
+def render_summary_desc(kind: str, node: dict, detail: dict) -> str:
+    """确定性汇总渲染：把结构渲成一句代码级白话 desc（零 LLM，离线可用）。
+
+    desc 保持紧凑(计数+前几项)，完整结构仍在 detail 面板展示。
+    docstring 存在时打头(截断 60)。
+    """
+    node = node or {}
+    detail = detail or {}
+    name = node.get("name") or node.get("qualified_name") or "?"
+    doc = (node.get("docstring") or "").strip().replace("\n", " ")
+    file_ = node.get("file_path") or ""
+    line = node.get("start_line") or 0
+    loc = f"{file_}:{line}" if file_ else "?"
+    label = _KIND_LABEL.get(kind, kind)
+    core = _render_core(kind, detail)
+    if doc:
+        if core:
+            return f"{label}「{name}」：{doc[:60]}。{core}，位于 {loc}。"
+        return f"{label}「{name}」：{doc[:60]}，位于 {loc}。"
+    if core:
+        return f"{label}「{name}」：{core}，位于 {loc}。"
+    return f"{label}「{name}」，位于 {loc}。"
+
+
 # ── LLM 增强输出 schema(按类别收窄) ───────────────────────────
 
 _REL_ITEM = {
@@ -219,7 +330,7 @@ def merge_seed_enrichment(kind: str, seed: dict, enrichment: Optional[dict],
             m = ss.get(i) or ss.get(int(s.get("order") or i))
             if m and m.get("semantic"):
                 s["semantic"] = m["semantic"]
-            else:
+            elif not (s.get("semantic") or "").strip():
                 s["semantic"] = "调用 " + str(s.get("symbol") or "")
         detail["trigger"] = ""
         detail["kind"] = "call_chain"

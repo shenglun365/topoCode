@@ -119,6 +119,56 @@ def test_process_steps_extra_names():
     assert [s["symbol"] for s in seed["steps"]] == ["execute"]
 
 
+def test_process_steps_line_ordered_reconstruction():
+    """process 处理流程: 控制流语句 + 被调符号按行号合并重建(含 op/semantic)。"""
+    nodes = [_node("f1", "function", "pay", "m.py", 1, 10)]
+    edges = [
+        {"kind": "calls", "source": "f1", "target": "f2", "line": 3},
+        {"kind": "calls", "source": "f1", "target": "f3", "line": 8},
+    ]
+    impl = {"m.py": {"statements": [
+        {"type": "if", "condition": "o.amount > 0", "startLine": 2, "endLine": 4, "enclosing": "pay"},
+        {"type": "loop", "condition": "", "startLine": 7, "endLine": 9, "enclosing": "pay"},
+    ], "routes": [], "constants": []}}
+    rc = R.RuleContext(edges, impl, {
+        "f1": nodes[0],
+        "f2": _node("f2", "function", "charge", "m.py", 20, 20),
+        "f3": _node("f3", "function", "notify", "m.py", 30, 30)})
+    seed = R.assemble_context(nodes[0], "process", rc, root="")
+    steps = seed["steps"]
+    # 行序: if(2) → charge(3) → loop(7) → notify(8)
+    assert [(s.get("op"), s.get("symbol")) for s in steps] == [
+        ("if", None), ("call", "charge"), ("loop", None), ("call", "notify")]
+    assert [s["order"] for s in steps] == [1, 2, 3, 4]
+    assert "o.amount > 0" in steps[0]["semantic"] and steps[0]["semantic"].startswith("if")
+    assert steps[1]["semantic"] == "调用 charge"
+
+
+def test_process_steps_fallback_callees_only():
+    """无 implDetails(live 源) → process steps 退化为 1-hop 被调名序列(不丢)。"""
+    nodes = [_node("f1", "function", "pay", "m.py", 1, 3)]
+    edges = [{"kind": "calls", "source": "f1", "target": "f2", "line": 2}]
+    rc = R.RuleContext(edges, {}, {
+        "f1": nodes[0], "f2": _node("f2", "function", "charge", "m.py", 20, 20)})
+    seed = R.assemble_context(nodes[0], "process", rc, root="")
+    assert [(s.get("op"), s.get("symbol")) for s in seed["steps"]] == [("call", "charge")]
+
+
+def test_business_value_score_ranking():
+    """业务价值打分: 契约/公有/docstring 加分, 私有/测试文件减分(用于 top-N 排序)。"""
+    contract = _node("r1", "route", "POST /x", s=1, e=1)
+    public_fn = _node("f1", "function", "pay", doc="处理支付")
+    private_fn = _node("f2", "function", "_helper", doc="")
+    test_fn = _node("f3", "function", "golden", "web/test/x.test.ts", doc="")
+    rc = R.RuleContext([], {}, {n["id"]: n for n in (contract, public_fn, private_fn, test_fn)})
+    assert R.business_value_score(contract, "contract", rc) > \
+        R.business_value_score(public_fn, "process", rc)
+    assert R.business_value_score(public_fn, "process", rc) > \
+        R.business_value_score(private_fn, "process", rc)
+    assert R.business_value_score(private_fn, "process", rc) > \
+        R.business_value_score(test_fn, "process", rc)
+
+
 def test_worth_extracting_degenerate_span_kept():
     """live 扫描退化行号(start==end)→ 保留(种子源码回读)。"""
     fn = _node("f1", "function", "h", s=3, e=3)
@@ -237,6 +287,47 @@ def test_parse_enrichments_symbol_filter():
     assert list(got) == ["pay"]
 
 
+def test_render_summary_desc_kinds():
+    """确定性汇总渲染: 每类产出代码级白话 desc(计数+前几项, docstring 打头, 离线可用)。"""
+    node = _node("c1", "class", "Order", "m.py", 1, 20, doc="订单实体")
+    d = {"fields": [{"name": "id", "type": "int"}, {"name": "amount", "type": "float"},
+                    {"name": "status", "type": "str"}, {"name": "note", "type": "str"}]}
+    s = T.render_summary_desc("entity", node, d)
+    assert s.startswith("实体「Order」") and "订单实体" in s
+    assert "4 字段" in s and "id" in s and "共 4" in s  # 列前3, 补"共4"
+
+    pnode = _node("f1", "function", "pay", "m.py", 1, 30)
+    pd = {"steps": [{"order": 1, "op": "call", "symbol": "charge", "semantic": "调用 charge"},
+                    {"order": 2, "op": "if", "condition": "x>0", "semantic": "if x>0"},
+                    {"order": 3, "op": "call", "symbol": "notify", "semantic": "调用 notify"}]}
+    ps = T.render_summary_desc("process", pnode, pd)
+    assert "3 步" in ps and "charge→notify" in ps and "1 分支" in ps
+
+    dnode = _node("f2", "function", "decide", "m.py", 1, 20)
+    ds = T.render_summary_desc("decision", dnode,
+                               {"branches": [{"condition": "a>0"}, {"condition": "b==2"}]})
+    assert "2 分支" in ds and "a>0" in ds
+
+    cnode = _node("r1", "route", "POST /x", "m.py", 1, 1)
+    cs = T.render_summary_desc("contract", cnode, {"relations": [
+        {"target": "/x", "type": "http", "methods": ["POST"]},
+        {"target": "/y", "type": "http", "methods": ["GET"]}]}
+    )
+    assert "POST /x" in cs and "GET /y" in cs
+
+    ss = T.render_summary_desc("state", _node("e1", "enum", "Color", "m.py", 1, 5),
+                               {"states": [{"name": "red"}, {"name": "green"}]})
+    assert "red→green" in ss
+
+    rs = T.render_summary_desc("rule", _node("c2", "class", "Cfg", "m.py", 1, 5),
+                               {"constraints": [{"name": "MAX", "value": "3"}], "configSource": "m.py"})
+    assert "1 约束" in rs and "MAX=3" in rs
+
+    # 无结构 → 仅 名称+位置(仍可读)
+    bare = T.render_summary_desc("entity", _node("x", "class", "Empty", "m.py", 1, 1), {"fields": []})
+    assert bare.startswith("实体「Empty」") and "m.py:1" in bare
+
+
 # ── asset_tools ───────────────────────────────────────────────
 
 
@@ -319,6 +410,18 @@ def test_extract_directed_floor(tmp_path, monkeypatch):
     assert [f["name"] for f in by["Order"]["detail"]["fields"]] == ["amount"]
     assert by["pay"]["kind"] == "decision"
     assert by["pay"]["detail"]["branches"][0]["condition"] == "o.amount > 0"
+
+
+def test_floor_desc_is_code_grounded(tmp_path, monkeypatch):
+    """地板 desc 由规则汇总渲染(代码级白话), 不再是空模板。"""
+    _ctx(tmp_path, monkeypatch)
+    nodes = [_node("c1", "class", "Order", "m.py", 1, 2)]
+    ctx = _mk_ctx(tmp_path, nodes)
+    assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=False)
+    a = assets[0]
+    assert a["kind"] == "entity"
+    assert a["desc"].startswith("实体「Order」")
+    assert "字段" in a["desc"] and "amount" in a["desc"]  # 渲染出字段结构, 非"位于…"空模板
 
 
 def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):

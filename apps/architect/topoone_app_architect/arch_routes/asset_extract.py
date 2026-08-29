@@ -3,31 +3,29 @@
 
 与旧 `_llm_extract`(整包自由识别)的区别：
   - 类别由规则定死(asset_rules)，LLM 不做识别/分类；
-  - 每 (文件×类型) 一次定向调用，prompt 为候选表+种子预填+验收模板+工具清单；
+  - 每 (文件×类型) 一次定向调用，prompt 为候选表(每候选一行结构摘要)+验收模板+工具清单；
   - 骨架只来自种子/工具 ground truth，LLM 只贴语义(asset_templates.merge)；
   - 验收不过 → 定向修复轮(≤1 次, 可工具) → 仍不过 → 种子原样落库(地板)。
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Dict, List, Optional
 
-from .asset_rules import RuleContext, candidates_for_file
+from .asset_rules import RuleContext, business_value_score, candidates_for_file
 from .asset_templates import (KIND_TEMPLATES, enrichment_schema, merge_seed_enrichment,
-                              parse_enrichments, repair_hint, validate_kind)
+                              parse_enrichments, render_summary_desc, repair_hint,
+                              validate_kind)
 
 logger = logging.getLogger(__name__)
 
-# 每 (文件×类型) 送 LLM 的候选上限；超出部分直接走种子地板(确定性，不依赖 LLM)。
-_GROUP_LLM_CAP = 30
+# 每 (文件×类型) 送 LLM 的候选上限(按业务价值取 top-N；控制输出规模)。
+# 未入选者走确定性地板(规则汇总 desc，全量覆盖，不依赖 LLM)。
+_GROUP_LLM_CAP = 15
+# 每 (文件×类型) 候选材料 char 预算(控制输入规模；小模型上下文受限)。
+_GROUP_PROMPT_BUDGET = 8000
 # 每 (文件×类型) 落库资产上限(防超大文件爆炸)。
 _GROUP_CAP = 80
-
-_KIND_LABEL = {
-    "entity": "实体", "contract": "契约", "state": "状态",
-    "rule": "规则", "process": "过程", "decision": "决策",
-}
 
 _TAG_SIGNALS = (
     ("transactional", ("commit", "rollback", "atomic", "事务")),
@@ -51,12 +49,44 @@ def _auto_tags(node: dict, seed: dict) -> List[str]:
     return tags[:4]
 
 
-def _seed_text(seed: dict, kind: str, max_len: int = 1200) -> str:
-    """种子数据 → prompt 预填文本(截断防超预算)。"""
-    slim = dict(seed or {})
-    slim.pop("source", None)  # 源码切片不进 prompt(工具可取)
-    s = json.dumps(slim, ensure_ascii=False)
-    return s if len(s) <= max_len else s[:max_len] + "...(truncated)"
+def _seed_summary(seed: dict, kind: str) -> str:
+    """种子结构 → 一行紧凑摘要(替代整包 seed JSON，省 token)。逐项细节靠工具取。"""
+    seed = seed or {}
+    if kind == "entity":
+        f = seed.get("fields") or []
+        if f:
+            names = [str(x.get("name") or "") for x in f if isinstance(x, dict)][:6]
+            more = "…" if len(f) > 6 else ""
+            return f"{len(f)} 字段: {', '.join(n for n in names if n)}{more}"
+        return "(类体源码已备好，字段待补)" if seed.get("source") else "无字段"
+    if kind == "process":
+        st = seed.get("steps") or []
+        if st:
+            syms = [str(s.get("symbol") or "") for s in st if s.get("symbol")][:6]
+            n_br = len([s for s in st if s.get("op") in ("if", "switch", "case")])
+            return (f"{len(st)} 步: {'→'.join(s for s in syms if s)}"
+                    + (f"（{n_br} 分支）" if n_br else ""))
+        return "无步骤(可用 asset_query_calls 补)"
+    if kind == "decision":
+        br = seed.get("branches") or []
+        conds = [str(b.get("condition") or "") for b in br if b.get("condition")][:4]
+        return f"{len(br)} 分支: {' / '.join(c for c in conds if c)}" if br else "无分支"
+    if kind == "contract":
+        rels = seed.get("relations") or []
+        if rels:
+            parts = [f"{'/'.join(r.get('methods') or ['GET'])} {r.get('target')}"
+                     for r in rels[:4] if r.get("target")]
+            return "; ".join(p for p in parts if p) or "签名契约"
+        return seed.get("signature") or "签名契约(可用 asset_query_routes 补)"
+    if kind == "state":
+        st = seed.get("states") or []
+        names = [str(s.get("name") or "") for s in st][:8]
+        return "→".join(n for n in names if n) or "无状态"
+    if kind == "rule":
+        cons = seed.get("constraints") or []
+        parts = [f"{c.get('name')}={c.get('value')}" for c in cons[:4] if c.get("name")]
+        return f"{len(cons)} 约束: {'; '.join(parts)}" if cons else "配置项"
+    return ""
 
 
 def _candidate_lines(cands: List[dict], kind: str) -> str:
@@ -64,15 +94,17 @@ def _candidate_lines(cands: List[dict], kind: str) -> str:
     for i, c in enumerate(cands, 1):
         n = c["node"]
         head = (f"{i}. symbol=`{n.get('qualified_name') or n.get('name')}` "
-                f"@L{n.get('start_line')}-{n.get('end_line')} kind={n.get('kind')}")
+                f"@L{n.get('start_line')}-{n.get('end_line')} kind={kind}")
         sig = (n.get("signature") or "").strip()
         doc = (n.get("docstring") or "").strip().replace("\n", " ")
         if sig:
             head += f" sig=({sig[:120]})"
         if doc:
             head += f" // {doc[:100]}"
+        summary = _seed_summary(c["seed"], kind)
+        if summary:
+            head += f"\n   结构: {summary}"
         lines.append(head)
-        lines.append(f"   种子: {_seed_text(c['seed'], kind)}")
     return "\n".join(lines)
 
 
@@ -122,38 +154,18 @@ def _directed_prompt(file_: str, kind: str, cands: List[dict]) -> str:
 
 
 def _floor_asset(kind: str, node: dict, seed: dict, file_: str) -> dict:
-    """种子地板：LLM 增强缺失/验收失败时，确定性种子原样成资产。"""
+    """种子地板：LLM 增强缺失/未入选时，确定性种子原样成资产。
+
+    desc 由 render_summary_desc 渲染(代码级白话，全量覆盖，不依赖 LLM)。
+    """
     detail = merge_seed_enrichment(kind, seed, None)
     name = node.get("name") or node.get("qualified_name") or "?"
-    doc = (node.get("docstring") or "").strip().replace("\n", " ")
-    loc = f"位于 {node.get('file_path')}:{node.get('start_line')}"
-    desc = f"{_KIND_LABEL.get(kind, kind)}「{name}」，{loc}。"
-    if doc:
-        desc = f"{_KIND_LABEL.get(kind, kind)}「{name}」：{doc[:120]}，{loc}。"
-    if kind == "entity":
-        f = detail.get("fields") or []
-        if f:
-            d2 = f"，{len(f)} 个字段"
-            desc = f"实体「{name}」{d2}，{loc}。" + (f"（{doc[:60]}）" if doc else "")
-    elif kind == "contract":
-        rels = [r for r in (detail.get("relations") or []) if r.get("type") == "http"]
-        if rels:
-            r0 = rels[0]
-            desc = (f"契约「{name}」({'/'.join(r0.get('methods') or ['GET'])} "
-                    f"{r0.get('target')})，位于 {node.get('file_path')}:{node.get('start_line')}。")
-    elif kind == "decision":
-        br = detail.get("branches") or []
-        if br:
-            desc = f"分支逻辑「{name}」，{len(br)} 个判定条件，位于 {node.get('file_path')}:{node.get('start_line')}。"
-    elif kind == "process":
-        steps = detail.get("steps") or []
-        if steps:
-            desc = f"调用链「{name}」，{len(steps)} 步，位于 {node.get('file_path')}:{node.get('start_line')}。"
-    return {"kind": kind, "level": "implementation", "name": name, "desc": desc,
+    return {"kind": kind, "level": "implementation", "name": name,
+            "desc": render_summary_desc(kind, node, detail),
             "detail": detail,
             "astRefs": [{"file": node.get("file_path"), "symbol": node.get("qualified_name") or name,
-                         "kind": _ast_kind_of(node), "startLine": int(node.get("start_line") or 0),
-                         "endLine": int(node.get("end_line") or 0)}],
+                          "kind": _ast_kind_of(node), "startLine": int(node.get("start_line") or 0),
+                          "endLine": int(node.get("end_line") or 0)}],
             "tags": _auto_tags(node, seed)}
 
 
@@ -220,7 +232,8 @@ def _apply_tool_facts(kind: str, node: dict, seed: dict, facts: List[dict]) -> d
 
 def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
                    kind: str, cands: List[dict], model_id: Optional[str],
-                   use_llm: bool, context_manager=None) -> List[dict]:
+                   use_llm: bool, context_manager=None,
+                   rc: Optional["RuleContext"] = None) -> List[dict]:
     from . import asset_tools
 
     out: List[dict] = []
@@ -231,7 +244,7 @@ def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
     facts: List[dict] = asset_tools._tl.facts  # 同一列表对象，工具 append 可见
     try:
         return _extract_group_inner(root, project, ctx, file_, kind, cands,
-                                    model_id, use_llm, facts,
+                                    model_id, use_llm, facts, rc,
                                     context_manager=context_manager)
     finally:
         asset_tools.clear_extraction_context()
@@ -240,13 +253,35 @@ def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
 def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: str,
                          kind: str, cands: List[dict], model_id: Optional[str],
                          use_llm: bool, facts: List[dict],
+                         rc: Optional["RuleContext"] = None,
                          context_manager=None) -> List[dict]:
     from .req_agent import get_max_tokens_preference, run_tools_loop
     from . import tagent_extract
 
     out: List[dict] = []
     cands = cands[:_GROUP_CAP]
-    llm_part = cands[:_GROUP_LLM_CAP]
+    if rc is None:
+        node_by_id = {n.get("id"): n for n in ctx.get("nodes") or []}
+        rc = RuleContext(ctx.get("edges") or [], ctx.get("implDetails") or {},
+                         node_by_id, extra_names=ctx.get("calleeNames"))
+    # 送 LLM 的 top-N：按业务价值降序，受 char 预算 + 上限约束(控制上下文，
+    # 小模型只在"高价值 + 小 prompt"下高质量处理；未入选走确定性地板)。
+    if use_llm and cands:
+        scored = sorted(cands,
+                        key=lambda c: business_value_score(c["node"], c.get("kind") or kind, rc),
+                        reverse=True)
+        llm_part: List[dict] = []
+        used = 0
+        for c in scored:
+            cost = len(_candidate_lines([c], c.get("kind") or kind))
+            if llm_part and (used + cost > _GROUP_PROMPT_BUDGET
+                             or len(llm_part) >= _GROUP_LLM_CAP):
+                break
+            llm_part.append(c)
+            used += cost
+        llm_part.sort(key=lambda c: int(c["node"].get("start_line") or 0))
+    else:
+        llm_part = []
 
     # 上下文编译循环(方案 B)：开关默认开，每 file×kind 组一实例；可外部注入共享
     # cm(知识库自我更新等长 cm 场景跨文件累积，见 tagent_extract)。
@@ -359,8 +394,7 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
         n = c["node"]
         if en and (en.get("name") or "").strip():
             name = str(en["name"]).strip()
-            desc = str(en.get("desc") or "").strip() or \
-                f"{_KIND_LABEL.get(kind, kind)}「{n.get('name')}」，位于 {n.get('file_path')}:{n.get('start_line')}。"
+            desc = str(en.get("desc") or "").strip() or render_summary_desc(kind, n, detail)
             inv = [str(x) for x in (en.get("invariants") or []) if str(x).strip()][:6]
             if inv and not (detail.get("invariants") or []):
                 detail["invariants"] = inv
@@ -447,7 +481,7 @@ def extract_directed(root: str, project: Optional[str], ctx: dict,
             try:
                 all_assets += _extract_group(root, project, ctx, file_, kind,
                                              groups[kind], model_id, use_llm,
-                                             context_manager)
+                                             context_manager, rc=rc)
             except Exception as e:
                 logger.warning("[asset_extract] %s %s 分组提取失败(走地板): %s",
                                file_, kind, e)
