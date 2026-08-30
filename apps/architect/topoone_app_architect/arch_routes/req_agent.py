@@ -400,6 +400,207 @@ def tool_semantic_refresh(asset_id: str, root: Optional[str] = None,
     return S.handle_stale_asset(asset_id, root, project)
 
 
+# ── 对话式提取工具（plan-C §4.1 skills+tools calling；M0 §8 工具清单） ──
+
+@register_architect_tool(
+    "code.read_symbols",
+    "读取项目源码片段(按文件/符号/行号)，对话式提取前先看真实代码。"
+    '参数 {"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行}。',
+)
+def tool_code_read_symbols(root: Optional[str] = None, project: Optional[str] = None,
+                           file: str = "", symbol: str = "",
+                           startLine: int = 0, endLine: int = 0) -> Dict[str, Any]:
+    import os
+    from .semantic_assets import resolve_root, project_id_for
+    from . import store as _store
+    rpath = resolve_root(root, project)
+    if not rpath or not file:
+        return {"error": "缺少项目根或文件路径"}
+    full = os.path.realpath(os.path.join(rpath, file))
+    base = os.path.realpath(rpath)
+    if not full.startswith(base + os.sep):
+        return {"error": f"路径越界: {file}"}
+    if not os.path.isfile(full):
+        return {"error": f"文件不存在: {file}"}
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        return {"error": f"读取失败: {e}"}
+    s, e = int(startLine or 0), int(endLine or 0)
+    sym_info: Optional[Dict[str, Any]] = None
+    if symbol and not (s and e):
+        pid = project_id_for(root, project)
+        cached = _store.AstCacheStore.get(pid, file.replace("\\", "/"))
+        for n in (cached or {}).get("symbols") or []:
+            if (n.get("name") or "") == symbol:
+                s, e = int(n.get("startLine") or 0), int(n.get("endLine") or 0)
+                sym_info = {"kind": n.get("kind") or "", "signature": n.get("signature") or ""}
+                break
+        if not (s and e):
+            return {"error": f"符号未找到且未给行号: {symbol}",
+                    "hint": "可改传 startLine/endLine 直接读行段"}
+    if not s:
+        s, e = 1, min(len(lines), 200)
+    e = min(e or len(lines), len(lines))
+    truncated = False
+    if e - s + 1 > 240:
+        e = s + 239
+        truncated = True
+    snippet = "\n".join(f"{i:4d}| {lines[i - 1]}" for i in range(s, e + 1))
+    if len(snippet) > 12000:
+        snippet = snippet[:12000] + "\n…(截断)"
+        truncated = True
+    return {"file": file, "symbol": symbol or None, "range": [s, e],
+            "totalLines": len(lines), "truncated": truncated,
+            "signature": (sym_info or {}).get("signature") or None,
+            "code": snippet}
+
+
+@register_architect_tool(
+    "asset.semantic.save",
+    "对话式提取落库：把按规约产出的语义资产写入项目(归一化管线：框架值域校验/名称继承/墓碑承接)。"
+    "资产形态 {name, kind: entity|contract|state|rule|process|decision, level?, desc?, detail?, "
+    "astRefs:[{file,symbol,startLine,endLine}]}。实现层资产必须带 astRefs 锚点；"
+    "canonicalKey 命中既有资产时旧名优先，LLM 提议名以 proposedNames 返回供设计者定夺。",
+)
+def tool_asset_semantic_save(root: Optional[str] = None,
+                             project: Optional[str] = None,
+                             assets: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    from .semantic_assets import save_agent_assets
+    return save_agent_assets(root, project, assets or [], executed_by="agent")
+
+
+@register_architect_tool(
+    "asset.semantic.update",
+    "认知层编辑既有语义资产(仅改名/描述，overlay 审计)：patch={name? 新名(旧名自动入历史), desc? 新描述}。"
+    "与 asset.semantic.save(新建)互补——已提取资产的措辞修正用本工具，勿重复 save。"
+    "main-KB 关联项目会拒绝(应在主 KB 界面编辑)，错误信息含深链。",
+)
+def tool_asset_semantic_update(root: Optional[str] = None,
+                               project: Optional[str] = None,
+                               assetId: str = "",
+                               patch: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    from .semantic_assets import edit_asset_desc, rename_asset
+    patch = patch or {}
+    if not (assetId or "").strip():
+        return {"error": "assetId 必填"}
+    if not patch:
+        return {"error": "patch 必填(至少含 name 或 desc)"}
+    try:
+        out: Dict[str, Any] = {}
+        if (patch.get("name") or "").strip():
+            out.update(rename_asset(assetId, patch["name"], author="agent"))
+        if "desc" in patch:
+            out.update(edit_asset_desc(assetId, patch.get("desc") or "", author="agent"))
+        if not out:
+            return {"error": "patch 无有效字段(仅支持 name/desc)"}
+        return out
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@register_architect_tool(
+    "asset.semantic.merge",
+    "合并语义资产：目标资产(intoId)吸收 targetIds 的锚点(并集)，目标行标记 mergedInto 留痕。"
+    "用于设计者判定多个资产实为同一概念时。targetName 可选(合并后改名)。",
+)
+def tool_asset_semantic_merge(root: Optional[str] = None,
+                              project: Optional[str] = None,
+                              intoId: str = "",
+                              targetIds: Optional[List[str]] = None,
+                              targetName: str = "") -> Dict[str, Any]:
+    from .semantic_assets import merge_assets
+    try:
+        return merge_assets((intoId or "").strip(), list(targetIds or []),
+                            (targetName or "").strip(), author="agent")
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@register_architect_tool(
+    "asset.semantic.split",
+    "拆分语义资产：按锚点组拆出新资产。parts=[{name, anchorKeys:[\"file:symbol\"], desc?}]，"
+    "anchorKeys 必须取自原资产 astRefs 的 file:symbol；原资产标记 splitInto 留痕。",
+)
+def tool_asset_semantic_split(root: Optional[str] = None,
+                              project: Optional[str] = None,
+                              assetId: str = "",
+                              parts: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    from .semantic_assets import split_asset
+    try:
+        return split_asset((assetId or "").strip(), list(parts or []), author="agent")
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@register_architect_tool(
+    "convention.propose",
+    "把对话中观察到的命名重复模式固化为命名规约『提案』(pending，待设计者确认，你无决定权)。"
+    "当你多次看到设计者把资产改名为同一模式(如统一加 Service/Controller 后缀、"
+    "过程用动宾结构)时调用。ruleText 要具体可判定(如『服务以 XxxService 结尾』)；"
+    "scenarios 用适用场景(命名=naming/提取=extract/验收=accept/通用=general)。"
+    "设计者在界面点『确认』才生效(active)，点『忽略』则删除——你只提议不生效。",
+)
+def tool_convention_propose(root: Optional[str] = None,
+                            project: Optional[str] = None,
+                            ruleText: str = "",
+                            scenarios: Optional[List[str]] = None,
+                            appliesKinds: Optional[List[str]] = None) -> Dict[str, Any]:
+    from . import naming as _naming
+    from .semantic_assets import project_id_for
+    pid = project_id_for(root, project)
+    try:
+        row = _naming.propose_convention(
+            pid, ruleText or "", scenarios=scenarios or None,
+            applies_kinds=appliesKinds or None, author="agent")
+        return {"id": row.get("id"), "ruleText": row.get("ruleText"),
+                "scenarios": row.get("scenarios"), "status": row.get("status")}
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@register_architect_tool(
+    "contract.propose",
+    "把对话中讨论出的期望固化为契约条目草稿(draft，待设计者逐条确认，你无判定权)。"
+    "items: [{kind: entity|contract|state|rule|process|decision, level?: implementation, "
+    "target: {file?, symbol?}, behavior?: {steps?: [{order, semantic, condition?}], "
+    "branches?: [{condition, semantic}], fields?: [{name, semantic?}], relations?: [{target, type?}]}, "
+    "zAxis?: [{category: observability|resilience|config|security, text, anchor?}], "
+    "acceptance?: {mode?: auto|assisted|manual, criteria?, linkedTests?}, "
+    "origin: {quote: 设计者原话引用(必填证据), messageId?}, reqId?}]。"
+    "kind/level 必须在当前框架值域内；target 无 file 且无 symbol 会自动标为意图级。",
+)
+def tool_contract_propose(root: Optional[str] = None,
+                          project: Optional[str] = None,
+                          items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    from . import ctx as _ctx
+    from . import contracts as _contracts
+    from .semantic_assets import project_id_for
+    pid = project_id_for(root, project)
+    conv_id = _ctx.get_conv() or ""
+    out: List[Dict[str, Any]] = []
+    created = 0
+    for it in items or []:
+        if not isinstance(it, dict):
+            out.append({"error": "item 必须是对象"})
+            continue
+        try:
+            origin = it.get("origin")
+            if not isinstance(origin, dict):
+                origin = {}
+            if not origin.get("convId"):
+                origin = {**origin, "convId": conv_id}
+            row = _contracts.create_item(pid, {**it, "origin": origin}, author="agent")
+            created += 1
+            out.append({"id": row.get("id"), "kind": row.get("kind"),
+                        "intentOnly": bool(row.get("intentOnly")),
+                        "status": row.get("status")})
+        except ValueError as e:
+            out.append({"error": str(e), "kind": it.get("kind")})
+    return {"created": created, "items": out}
+
+
 # ── 绘图增强工具（经薄代理转发 reports diagram_tools 服务，单一起源） ──
 
 @register_architect_tool(
@@ -713,6 +914,13 @@ _CAPABILITY_DOC = (
     "- asset.semantic.mappings：查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」\n"
     "- asset.semantic.reconcile：校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)\n"
     "- asset.semantic.refresh：更新过期资产(增量重提；失败软删并重新生成)\n"
+    "- code.read_symbols：读取项目源码片段(按文件/符号)，对话式提取前先看真实代码\n"
+    "- asset.semantic.save：对话式提取落库(按规约产出资产 → 框架值域校验/名称继承/墓碑承接)\n"
+    "- asset.semantic.update：认知层编辑既有资产(改名/描述；旧名自动入历史，overlay 留痕)\n"
+    "- asset.semantic.merge：合并资产(intoId 吸收 targetIds 锚点；目标留痕 mergedInto)\n"
+    "- asset.semantic.split：拆分资产(按 anchorKeys 锚点组拆出新资产；原资产留痕 splitInto)\n"
+    "- convention.propose：把观察到的命名重复模式固化为命名规约提案(pending，待设计者确认/忽略)\n"
+    "- contract.propose：把对话中讨论出的期望固化为契约条目草稿(待设计者逐条确认；kind/level 按框架值域校验)\n"
     "- mcp.call：调用 MCP 开放工具(外部/注册工具)，参数 {\"tool\":\"<名>\",\"params\":{…}}\n"
     "- req.finalize：定稿(把 plan 结论固化为结构化需求分析并转入待执行)\n"
     "- execution.assign：指派(把定稿/待执行需求指派给 subagent 执行：runner=内部执行任务，mcp=外部 MCP 工具；成功后需求进入执行中)\n"
@@ -732,6 +940,18 @@ _CAPABILITY_DOC = (
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"
     '- asset.semantic.refresh: {"asset_id": "sa-xxx"}\n'
+    '- code.read_symbols: {"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行}\n'
+    '- asset.semantic.save: {"assets": [{"name": "…", "kind": "entity|contract|state|rule|process|decision", '
+    '"level"?: "implementation", "desc"?: "…", "detail"?: {…}, '
+    '"astRefs": [{"file": "…", "symbol": "…", "startLine": n, "endLine": n}]}]}\n'
+    '- asset.semantic.update: {"assetId": "sa-xxx", "patch": {"name"?: "新名", "desc"?: "新描述"}}\n'
+    '- asset.semantic.merge: {"intoId": "sa-xxx", "targetIds": ["sa-yyy"], "targetName"?: "合并后名称"}\n'
+    '- asset.semantic.split: {"assetId": "sa-xxx", "parts": [{"name": "…", "anchorKeys": ["file:symbol"], "desc"?: "…"}]}\n'
+    '- convention.propose: {"ruleText": "服务以 XxxService 结尾", "scenarios": ["naming"], "appliesKinds"?: ["process"]}\n'
+    '- contract.propose: {"items": [{"kind": "…", "level"?: "implementation", "target": {"file"?: "…", "symbol"?: "…"}, '
+    '"behavior"?: {"steps": [{"order": 1, "semantic": "…"}], "branches": [{"condition": "…", "semantic": "…"}]}, '
+    '"zAxis"?: [{"category": "…", "text": "…"}], "acceptance"?: {"mode"?: "auto", "criteria"?: "…"}, '
+    '"origin": {"quote": "设计者原话(必填)"}, "reqId"?: "…"}]}\n'
     '- mcp.call: {"tool": "<mcp工具名>", "params": {…}}\n'
     '- req.finalize: {"title": "…", "description": "…", "functionalScope": ["…"], '
     '"entityBoundary": ["…"], "assetScope": [{"assetId":"…","assetType":"component","role":"core",'
@@ -796,11 +1016,13 @@ def _diagram_skill_doc() -> str:
 
 
 def chat_system_prompt(root: Optional[str], project: Optional[str],
-                       diagram_skill: bool = False) -> str:
+                       diagram_skill: bool = False,
+                       skill_scenarios: Optional[List[str]] = None) -> str:
     """自由对话系统提示：能力文档 + 当前项目/KB 上下文 + 范围限定(软拒绝)。
 
     绘图 IR(DiagramSchema) 参考默认注入(模型优先输出 ```diagram IR 围栏，前端转码)；
-    diagram_skill=True 时额外注入后端预校验工具说明(对应前端 📐 开关)。
+    diagram_skill=True 时额外注入后端预校验工具说明(对应前端 📐 开关)；
+    skill_scenarios 非空时按场景注入语义资产 skill 文档（plan-C §4.1 按场景加载，禁全量）。
     """
     ctx = tool_project_ctx(root, project)
     mode = "greenfield(从零)" if not project else "existing(既有)"
@@ -814,10 +1036,17 @@ def chat_system_prompt(root: Optional[str], project: Optional[str],
     ir_doc = f"\n\n{_ir_schema_doc()}"
     extra = f"\n\n{_diagram_skill_doc()}" if diagram_skill else ""
     mcp_extra = f"\n\n{_mcp_doc()}"
+    skill_extra = ""
+    if skill_scenarios:
+        try:
+            from .asset_skill import skill_docs
+            skill_extra = skill_docs(root, project, skill_scenarios)
+        except Exception as e:
+            logger.warning("[req_agent] skill 文档注入失败: %s", e)
     return (
         "你是 TopoCode 架构需求分析 agent(自由对话)。\n"
         f"当前项目：{ctx.get('name') or '(未绑定)'}，模式：{mode}。{kb}\n\n"
-        f"{_CAPABILITY_DOC}{ir_doc}{extra}{mcp_extra}"
+        f"{_CAPABILITY_DOC}{ir_doc}{extra}{mcp_extra}{skill_extra}"
     )
 
 

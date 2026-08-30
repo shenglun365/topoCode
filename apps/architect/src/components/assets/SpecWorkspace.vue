@@ -2,8 +2,9 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CheckIcon } from '@heroicons/vue/24/solid'
-import { ShieldCheckIcon, MapPinIcon, BeakerIcon, ClipboardDocumentCheckIcon } from '@heroicons/vue/24/outline'
+import { ShieldCheckIcon, MapPinIcon, BeakerIcon, ClipboardDocumentCheckIcon, BookOpenIcon } from '@heroicons/vue/24/outline'
 import MarkdownView from '@/components/MarkdownView.vue'
+import NamingGovernancePanel from '@/components/assets/NamingGovernancePanel.vue'
 import { useArchWorkflowStore } from '@/stores/workflow-store'
 import { useArchSpecStore } from '@/stores/spec-store'
 import { kbAssetService } from '@/services/kb-assets'
@@ -13,7 +14,7 @@ const workflow = useArchWorkflowStore()
 const spec = useArchSpecStore()
 spec.load()
 
-const tab = ref<'spec' | 'rules'>('spec')
+const tab = ref<'spec' | 'rules' | 'naming'>('spec')
 
 /** 编码规约(后端获取；失败显示空)。 */
 const codingRules = ref('')
@@ -43,6 +44,13 @@ const ruleLevelColor: Record<string, string> = {
         @click="tab = 'rules'"
       >
         <ClipboardDocumentCheckIcon class="w-4 h-4" />{{ t('architecture.tab.rules') }}
+      </button>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors"
+        :class="tab === 'naming' ? 'bg-ctp-surface1 text-ctp-text' : 'text-ctp-subtext0 hover:text-ctp-text'"
+        @click="tab = 'naming'"
+      >
+        <BookOpenIcon class="w-4 h-4" />{{ t('architecture.tab.naming') }}
       </button>
     </div>
 
@@ -177,5 +185,8 @@ const ruleLevelColor: Record<string, string> = {
         <MarkdownView :content="codingRules" />
       </div>
     </div>
+
+    <!-- 命名治理（规约/术语/墓碑） -->
+    <NamingGovernancePanel v-else-if="tab === 'naming'" />
   </div>
 </template>

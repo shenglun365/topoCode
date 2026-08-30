@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import PageHeader from '@/components/PageHeader.vue'
 import ChangeSummaryBar from '@/components/assets/ChangeSummaryBar.vue'
 import ChangeMapView from '@/components/assets/ChangeMapView.vue'
+import ImpactAnalysisView from '@/components/assets/ImpactAnalysisView.vue'
 import MergeBaselineWorkspace from '@/components/assets/MergeBaselineWorkspace.vue'
 import { useArchProjectStore } from '@/stores/project-store'
 import { useArchStagingStore } from '@/stores/staging-store'
@@ -37,10 +38,11 @@ watch(
       :desc="t('archMap.desc')"
     />
 
-    <!-- 架构变更视图: 累计变更影响概要 + 详细变更地图 -->
+    <!-- 架构变更视图: 累计变更影响概要 + 详细变更地图 + A6 整体基线变更分析 -->
     <template v-if="view === 'impact'">
       <ChangeSummaryBar :report="report" />
       <ChangeMapView :report="report" />
+      <ImpactAnalysisView />
     </template>
 
     <!-- 合并基线视图 -->

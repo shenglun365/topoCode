@@ -7,6 +7,12 @@
 from fastapi import APIRouter
 
 from . import project, knowledge, requirements, execution, arch_change, mcp_collab, unit_test, agent, websocket, git, greenfield, tags, overview, dirs, docs, semantic_assets, diagram, design, bus_routes
+from . import asset_framework
+from . import agent_roles
+from . import contracts
+from . import acceptance
+from . import naming
+from . import mainkb
 
 router = APIRouter(prefix="/api/architect")
 router.include_router(project.router)
@@ -25,6 +31,12 @@ router.include_router(overview.router)
 router.include_router(dirs.router)
 router.include_router(docs.router)
 router.include_router(semantic_assets.router)
+router.include_router(asset_framework.router)
+router.include_router(agent_roles.router)
+router.include_router(contracts.router)
+router.include_router(acceptance.router)
+router.include_router(naming.router)
+router.include_router(mainkb.router)
 router.include_router(diagram.router)
 router.include_router(design.router)
 router.include_router(bus_routes.router)

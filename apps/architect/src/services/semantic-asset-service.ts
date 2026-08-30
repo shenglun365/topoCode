@@ -55,6 +55,15 @@ export interface SemanticStatusResult {
   changed: { added: string[]; modified: string[]; deleted: string[] }
 }
 
+/** A6 影响分析：跨组件变更扩散链 + 契约↔实现全局漂移。 */
+export interface ImpactAnalysisResult {
+  direct: { id: string; name: string; kind: string }[]
+  propagated: { id: string; name: string; kind: string; via: string; viaName: string }[]
+  drift: { itemId: string; kind: string; reason: 'missing' | 'stale' | 'intent'; assetId?: string; assetName?: string; quote?: string }[]
+  coverage: { verifiable: number; covered: number; pct: number }
+  patterns: { kind: string; count: number }[]
+}
+
 /** 资产概览统计。 */
 export interface SemanticStatsResult {
   total: number
@@ -283,6 +292,40 @@ export const semanticAssetService = {
     })
   },
 
+  // ── 就地认知编辑（plan-C-M0 §7.2；main-KB 关联项目后端 409 拒绝） ──
+
+  /** 资产改名（旧名自动入 renamedFrom/nameAlias 历史；overlay 审计）。 */
+  async renameAsset(assetId: string, newName: string): Promise<{ asset: SemanticAsset; overlayId: string }> {
+    return apiPost<{ asset: SemanticAsset; overlayId: string }>('/semantic/assets/rename', {
+      root: currentProjectParams().root,
+      project: currentProjectParams().project,
+      assetId,
+      newName,
+    })
+  },
+
+  /** 资产合并（目标锚点并入 intoId；目标行留痕 mergedInto）。 */
+  async mergeAssets(intoId: string, targetIds: string[], targetName = ''): Promise<{ asset: SemanticAsset; merged: string[]; overlayId: string }> {
+    return apiPost<{ asset: SemanticAsset; merged: string[]; overlayId: string }>('/semantic/assets/merge', {
+      root: currentProjectParams().root,
+      project: currentProjectParams().project,
+      intoId,
+      targetIds,
+      targetName,
+    })
+  },
+
+  /** 资产拆分（按 anchorKeys=file:symbol 锚点组拆出新资产）。 */
+  async splitAsset(assetId: string, parts: { name: string; anchorKeys: string[]; desc?: string }[]): Promise<{ deletedAssetId: string; created: { id: string; name: string; anchors: number }[]; overlayId: string }> {
+    return apiPost<{ deletedAssetId: string; created: { id: string; name: string; anchors: number }[]; overlayId: string }>(
+      '/semantic/assets/split', {
+        root: currentProjectParams().root,
+        project: currentProjectParams().project,
+        assetId,
+        parts,
+      })
+  },
+
   /** 批量管理选定组件范围的语义资产(extract/clear)。
    *  clear 支持 dryRun=true 预览影响(需求池/任务)供前端确认。 */
   async batchManage(action: 'extract' | 'clear', components: string[], opts?: { includeOther?: boolean; kinds?: SemanticAssetKind[]; modelId?: string; level?: SemanticAssetLevel; scope?: string[]; dryRun?: boolean }): Promise<SemanticBatchResult> {
@@ -303,6 +346,11 @@ export const semanticAssetService = {
   /** 资产新鲜度状态(active/stale/deleted/needsUpdate + 变更文件)。 */
   async status(): Promise<SemanticStatusResult> {
     return apiGet<SemanticStatusResult>(`/kb/semantic/status${qsWith('')}`)
+  },
+
+  /** A6 影响分析：跨组件变更扩散链 + 契约↔实现全局漂移总览。 */
+  async impact(): Promise<ImpactAnalysisResult> {
+    return apiGet<ImpactAnalysisResult>(`/kb/semantic/impact${qsWith('')}`)
   },
 
   /** 资产概览统计：总量 / 按类别 / 按粒度 / 状态。 */
@@ -366,4 +414,91 @@ export const semanticAssetService = {
       confirm: opts?.confirm,
     })
   },
+
+  // ── M1 认知框架（plan-C-M0 §7.1；框架即配置） ──────────────────
+
+  /** 当前生效框架配置（无定制 → 后端默认 mid 预设）。 */
+  async getFramework(): Promise<FrameworkResult> {
+    return apiGet<FrameworkResult>(`/framework${qsWith('')}`)
+  },
+
+  /** dry-run：标准变更影响预览（作废确认流数据源）。 */
+  async previewFrameworkChange(): Promise<FrameworkPreview> {
+    return apiPost<FrameworkPreview>('/framework/preview-change', { ...currentProjectParams() })
+  },
+
+  /** 执行标准变更（切换预设档位；存量资产整体作废、命名不迁移）。 */
+  async switchFramework(tier: 'low' | 'mid' | 'high', note?: string): Promise<FrameworkVersionRow> {
+    return apiPost<FrameworkVersionRow>('/framework/switch', { tier, note, ...currentProjectParams() })
+  },
+
+  /** 自建框架载入（high 档能力；M1 仅透传，UI 编辑器后续切片）。 */
+  async loadCustomFramework(config: Record<string, unknown>, note?: string): Promise<FrameworkVersionRow> {
+    return apiPost<FrameworkVersionRow>('/framework/custom', { config, note, ...currentProjectParams() })
+  },
+
+  /** 框架版本历史（变更留痕）。 */
+  async frameworkVersions(limit = 50): Promise<FrameworkVersionRow[]> {
+    return apiGet<FrameworkVersionRow[]>(`/framework/versions${qsWith(`limit=${limit}`)}`)
+  },
+
+  /** 覆盖度统计（诚实呈现部分真相：已提取/过期/未提取组件清单）。 */
+  async coverage(): Promise<CoverageInfo> {
+    return apiGet<CoverageInfo>(`/semantic/coverage${qsWith('')}`)
+  },
+}
+
+// ── M1 认知框架类型 ────────────────────────────────────────────
+
+export interface FrameworkAxisValue { id: string; label: string; builtin?: boolean }
+
+export interface FrameworkTierDef {
+  x: string[]
+  y: string[]
+  z: string[]
+  acceptanceDefault?: { mode?: string; layers?: string[]; l3?: string }
+  directivesDepth?: string
+}
+
+export interface FrameworkConfig {
+  version?: number
+  activeTier: 'low' | 'mid' | 'high' | 'custom'
+  axes?: { id: string; label: string; values: FrameworkAxisValue[] }[]
+  tiers?: Record<string, FrameworkTierDef>
+  frameworkVersion?: number
+}
+
+export interface FrameworkView {
+  kinds: string[]
+  levels: string[]
+  z: string[]
+  acceptanceDefault?: FrameworkTierDef['acceptanceDefault']
+  directivesDepth?: string
+}
+
+export interface FrameworkResult { config: FrameworkConfig; view: FrameworkView; presets: Record<string, FrameworkTierDef> }
+
+export interface FrameworkPreview { voidedAssets: number; byKind: Record<string, number>; namingMigrated: boolean }
+
+export interface FrameworkVersionRow {
+  id: string
+  projectId: string
+  version: number
+  config: FrameworkConfig
+  changeKind: string
+  affectedSummary?: { voidedAssets?: number; byKind?: Record<string, number>; note?: string }
+  executedBy?: string
+  note?: string
+  active?: number
+  createdAt?: number
+  voidedAssets?: number
+}
+
+export interface CoverageInfo {
+  extracted: number
+  stale: number
+  unowned: number
+  componentsTotal: number
+  componentsCovered: number
+  components: { componentId: string; name: string; coverage: 'full' | 'partial' | 'none'; assets: number; stale: number }[]
 }

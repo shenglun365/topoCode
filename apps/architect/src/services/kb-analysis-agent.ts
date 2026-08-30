@@ -1,6 +1,8 @@
 import type {
   FormDraft, QuestionItem, ReqKind, RequirementAnalysis, SemanticAsset,
 } from '@/types'
+import type { AcceptanceReportDetail, ContractItem } from './contract-service'
+import type { NamingConvention } from './naming-service'
 import { apiPost } from './api-client'
 import { backendUp } from './backend'
 import { currentProjectParams } from './project-service'
@@ -26,6 +28,12 @@ export interface KbAnalysisTurn {
   formDraft?: FormDraft
   /** 语义数据资产卡片(提取/检索结果，供对话确认)。 */
   assets?: SemanticAsset[]
+  /** 契约条目固化卡(方案对话 🧾 固化产出，逐条确认/修改/删)。 */
+  contracts?: ContractItem[]
+  /** 命名规约归纳提议卡(agent 检测命名模式 → pending 提案，确认固化/忽略)。 */
+  conventions?: NamingConvention[]
+  /** 差异报告通知卡(验收触发后：L1/L2 通过率 + L3 待人工 + 前三差异摘要 + 前往验收)。 */
+  acceptance?: AcceptanceReportDetail
   /** 后端持久化消息 id(对话流单条删除用)。 */
   id?: string
 }
@@ -89,6 +97,8 @@ export interface ChatStreamOptions {
   modelId?: string
   /** 绘图增强(IR→代码)：开启后后端注入 diagram.build/validate 工具文档。 */
   diagramSkill?: boolean
+  /** 语义资产 skill 场景（plan-C §4.1 按场景加载）：资产管理对话传 ['extract']。 */
+  skillScenarios?: string[]
   /** 是否有流式通道可用(后端不可达/未启用时回退一次性回复)。 */
   signal?: AbortSignal
 }
@@ -173,6 +183,7 @@ export async function chatStream(
       title: opts.title,
       modelId: opts.modelId,
       diagramSkill: opts.diagramSkill,
+      skillScenarios: opts.skillScenarios,
     })
 
     return await doneP

@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { MagnifyingGlassIcon, PlusIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import UnitTestCreateView from '@/components/unit-test/UnitTestCreateView.vue'
 import UnitTestWorkspace from '@/components/unit-test/UnitTestWorkspace.vue'
+import AcceptancePanel from '@/components/unit-test/AcceptancePanel.vue'
 import { useArchUnitTestStore } from '@/stores/unit-test-store'
 
 const { t } = useI18n()
@@ -13,8 +14,12 @@ const store = useArchUnitTestStore()
 store.load()
 
 interface Tab { key: string; label: string }
-const tabs = ref<Tab[]>([{ key: 'list', label: t('unitTest.listTitle') }])
-const activeKey = ref('list')
+const tabs = ref<Tab[]>([
+  { key: 'list', label: t('unitTest.listTitle') },
+  { key: 'acceptance', label: t('localAcceptance.tabTitle') },
+])
+/** 深链支持：?tab=acceptance 直接打开局部验收区块（A5 差异报告卡「前往验收」跳转）。 */
+const activeKey = ref(route.query.tab === 'acceptance' ? 'acceptance' : 'list')
 
 const utTabKey = (id: string) => `ut:${id}`
 const isUtTab = (key: string) => key.startsWith('ut:')
@@ -37,6 +42,7 @@ const channelClass: Record<string, string> = {
 
 function labelOf(key: string): string {
   if (key === 'list') return t('unitTest.listTitle')
+  if (key === 'acceptance') return t('localAcceptance.tabTitle')
   if (key === 'create') return t('unitTest.newSession')
   const s = store.sessions.find((x) => x.id === utIdOf(key))
   return s ? s.title : key
@@ -87,7 +93,7 @@ const filtered = computed(() => {
       >
         <span class="whitespace-nowrap">{{ tab.label }}</span>
         <button
-          v-if="tab.key !== 'list'"
+          v-if="tab.key !== 'list' && tab.key !== 'acceptance'"
           class="text-ctp-overlay1 hover:text-ctp-red"
           @click.stop="closeTab(tab.key)"
         >
@@ -167,6 +173,12 @@ const filtered = computed(() => {
         v-else-if="activeKey === 'create'"
         @created="onCreated"
         @back="onBackFromCreate"
+      />
+
+      <!-- M2-5 局部验收区块（契约包 → 验收报告 → L1/L2 事实 + L3 按需 + 判定） -->
+      <AcceptancePanel
+        v-else-if="activeKey === 'acceptance'"
+        class="h-full min-h-0"
       />
 
       <!-- 工作区 -->

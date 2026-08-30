@@ -113,6 +113,27 @@ def reset_req(token) -> None:
         pass
 
 
+# 请求级会话定位(WS 对话设置；供 contract.propose 工具回填 origin.convId 证据链)
+_conv_var: contextvars.ContextVar = contextvars.ContextVar(
+    "architect_conv_id", default=None)
+
+
+def set_conv(conv_id: str):
+    """设置当前请求的会话 id，返回 token(可用 reset_conv 还原)。"""
+    return _conv_var.set(conv_id or None)
+
+
+def get_conv():
+    return _conv_var.get()
+
+
+def reset_conv(token) -> None:
+    try:
+        _conv_var.reset(token)
+    except (ValueError, LookupError):
+        pass
+
+
 # ── 项目库管理(architect/<pid>/arch.db) ───────────────────────
 
 def project_db_dir() -> str:

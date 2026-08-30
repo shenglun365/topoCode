@@ -1,0 +1,147 @@
+"""M1 角色注册表 + 规约场景注入测试（plan-C §9/§4.1）。
+
+Run: cd <repo> && PYTHONPATH=apps/architect python -m pytest apps/architect/tests/test_agent_roles_skill.py -q
+"""
+import os
+import sys
+
+_repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+sys.path.insert(0, _repo)
+
+import topoone_app_architect.arch_routes.ctx as C
+from topoone_app_architect.arch_routes import agent_roles as R
+from topoone_app_architect.arch_routes import asset_skill as K
+from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.arch_routes import req_agent
+from topoone_app_architect.arch_routes.store import (
+    CollabConfigStore, NamingConventionStore)
+
+
+def _setup(tmp_path, monkeypatch):
+    data = str(tmp_path / "arch")
+    monkeypatch.setenv("ARCH_DATA_DIR", data)
+    C._db = None
+    C._kb = None
+    C._data_dir = None
+    C._project_dbs.clear()
+    C.reset_project(C._project_var.set(None))
+    return C.setup(data_dir=data)
+
+
+# ── 角色注册表 ─────────────────────────────────────────────────
+
+class TestAgentRoles:
+    def test_defaults_merge_and_override(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        roles = R.get_roles()
+        assert {r["name"] for r in roles} == {"extract", "verify", "induce", "pseudo"}
+        R.set_roles([{"name": "extract", "modelId": "qwen-fast"},
+                     {"name": "verify", "modelId": "deepseek-r1"},
+                     {"name": "unknown-role", "modelId": "x"}])  # 未知 name 丢弃
+        roles = R.get_roles()
+        by = {r["name"]: r for r in roles}
+        assert by["extract"]["modelId"] == "qwen-fast"
+        assert by["verify"]["modelId"] == "deepseek-r1"
+        assert by["pseudo"]["modelId"] == ""  # 未设置保持空
+
+    def test_role_model_id_resolution(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        assert R.role_model_id("extract") == ""     # 未配置 → 空串回退
+        assert R.role_model_id("") == ""            # 空角色 → 空串
+        R.set_roles([{"name": "induce", "modelId": "glm-mid"}])
+        assert R.role_model_id("induce") == "glm-mid"
+        assert R.role_model_id("nope") == ""
+
+    def test_persisted_in_collab_config(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        R.set_roles([{"name": "verify", "modelId": "m1"}])
+        raw = CollabConfigStore.get("agent_roles", "")
+        assert "verify" in raw and "m1" in raw
+
+    def test_resolve_role_model_priority(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        # explicit 会话选择优先于角色注册表
+        R.set_roles([{"name": "extract", "modelId": "role-fast"}])
+        assert R.resolve_role_model("extract", "user-pick") == "user-pick"
+        # 无 explicit → 角色注册表
+        assert R.resolve_role_model("extract", "") == "role-fast"
+        # 角色未配置 → None（调用方回退全局偏好）
+        assert R.resolve_role_model("pseudo", "") is None
+        assert R.resolve_role_model("", "explicit-only") == "explicit-only"
+
+    def test_scenario_role_mapping(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        assert R.scenario_role(["extract"]) == "extract"
+        assert R.scenario_role(["accept"]) == "verify"
+        assert R.scenario_role(["naming"]) == "induce"
+        # 首个命中生效
+        assert R.scenario_role(["accept", "extract"]) == "verify"
+        # 无角色场景 / 通用对话 → ''（保持既有模型链）
+        assert R.scenario_role(["contract"]) == ""
+        assert R.scenario_role([]) == ""
+        assert R.scenario_role(None) == ""
+
+
+# ── 规约场景注入（按场景加载，禁全量） ──────────────────────────
+
+class TestAssetSkillDocs:
+    def test_no_scenario_empty(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        assert K.skill_docs(str(tmp_path), None, []) == ""
+
+    def test_extract_scenario_builtin(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        doc = K.skill_docs(str(tmp_path), None, ["extract"])
+        assert "语义资产提取规约" in doc
+        assert "asset.semantic.save" in doc
+        assert "行号顺序重建" in doc
+        assert "命名纪律" in doc
+
+    def test_project_convention_injected(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        NamingConventionStore.create(S.project_id_for(str(tmp_path), None), "过程资产用动宾结构",
+                                     scenarios=["extract"])
+        doc = K.skill_docs(str(tmp_path), None, ["extract"])
+        assert "项目命名规约" in doc and "过程资产用动宾结构" in doc
+
+    def test_convention_other_scenario_not_leaked(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        NamingConventionStore.create(S.project_id_for(str(tmp_path), None), "仅验收场景的规约",
+                                     scenarios=["accept"])
+        doc = K.skill_docs(str(tmp_path), None, ["extract"])
+        assert "仅验收场景的规约" not in doc  # R7：场景隔离
+
+    def test_chat_prompt_gated_by_scenarios(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        # 无场景 → 不含 skill 段
+        p0 = req_agent.chat_system_prompt(str(tmp_path), None)
+        assert "语义资产技能" not in p0
+        # extract 场景 → 注入
+        p1 = req_agent.chat_system_prompt(str(tmp_path), None,
+                                          skill_scenarios=["extract"])
+        assert "语义资产技能" in p1 and "asset.semantic.save" in p1
+
+
+class TestContractScenarioSkill:
+    """🧾 期望固化：contract 场景规约按场景注入（M2）。"""
+
+    def test_contract_scenario_builtin(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        doc = K.skill_docs(str(tmp_path), None, ["contract"])
+        assert "期望固化规约" in doc
+        assert "contract.propose" in doc
+        assert "origin.quote" in doc
+        assert "设计者" in doc  # 只产草稿，不代判
+
+    def test_contract_not_in_extract(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        doc = K.skill_docs(str(tmp_path), None, ["extract"])
+        assert "期望固化规约" not in doc  # 场景隔离
+
+    def test_chat_prompt_contract_gated(self, tmp_path, monkeypatch):
+        _setup(tmp_path, monkeypatch)
+        p0 = req_agent.chat_system_prompt(str(tmp_path), None)
+        assert "期望固化规约" not in p0
+        p1 = req_agent.chat_system_prompt(str(tmp_path), None,
+                                          skill_scenarios=["contract"])
+        assert "期望固化规约" in p1

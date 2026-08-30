@@ -4,12 +4,49 @@
 POST /exec 为原子 commitBatch(经 store.run_atomic, WriteQueue 单事务)：
 合成/接收方案 → 生成任务树 → 建确认方案 → 创建执行任务 → 绑定需求 execId。
 """
+import logging
+import threading
 from typing import Optional
 from fastapi import APIRouter, Request
 from .common import _ts, ok, err
 from . import store
+from .agent_roles import role_model_id
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _auto_acceptance_after_runner_done(task: dict, reqs: list,
+                                       root: str, project: str) -> None:
+    """M3-6: runner 完成（verify 触发）→ 自动局部验收(trigger=runner_done)。
+
+    后台线程运行(严 profile 提取可含 LLM，耗时)；条目转 verifying，
+    通过/打回判定仍唯一归设计者（保真纪律）；异常仅记日志不阻断主流程。
+    """
+    from . import acceptance as _acc
+    from .semantic_assets import project_id_for
+    try:
+        pid = project_id_for(root, project)
+        req_ids = {r.get("id") for r in reqs if r.get("id")}
+        pkg_ids = []
+        for pkg in store.ContractPackageStore.list(pid):
+            if pkg.get("status") not in ("created", "injected"):
+                continue
+            linked = [iid for iid in (pkg.get("itemIds") or [])
+                      if (store.ContractItemStore.get(iid, pid) or {}).get("reqId") in req_ids]
+            if linked:
+                pkg_ids.append(pkg["id"])
+        for pkg_id in pkg_ids:
+            try:
+                _acc.run_acceptance(pid, root, project or "", pkg_id,
+                                    trigger_type="runner_done",
+                                    ref=task.get("id") or "")
+                logger.info("[exec] runner_done 自动验收: task=%s pkg=%s",
+                            task.get("id"), pkg_id)
+            except Exception as e:
+                logger.warning("[exec] 自动验收失败 pkg=%s: %s", pkg_id, e)
+    except Exception as e:
+        logger.warning("[exec] 自动验收触发异常: %s", e)
 
 
 def _real_base_commit(root: Optional[str] = None) -> str:
@@ -387,7 +424,8 @@ async def rejudge_execution_task(task_id: str):
     reqs = [r for r in reqs if r]
     root, project = _resolve_root_project(reqs, {})
     se = tagent_se.build_architect_se(
-        get_gateway(), root=root, project=project, project_root=root or "")
+        get_gateway(), root=root, project=project, project_root=root or "",
+        model_id=role_model_id("verify"))
     tagent_se.seed_runner_tree(se, tree_id, runner_tree)
     result = await se.rejudge(tree_id, stale_ids, tagent_se._req_text(reqs))
     if result.tree is None:
@@ -454,9 +492,16 @@ async def verify_execution_task(task_id: str):
     reqs = [r for r in reqs if r]
     root, project = _resolve_root_project(reqs, {})
     se = tagent_se.build_architect_se(
-        get_gateway(), root=root, project=project, project_root=root or "")
+        get_gateway(), root=root, project=project, project_root=root or "",
+        model_id=role_model_id("verify"))
     tagent_se.seed_runner_tree(se, tree_id, got["tree"])
     result = await se.verify(tree_id, tagent_se._req_text(reqs))
+    # M3-6: runner 完成信号 → 自动触发局部验收(后台；判定仍归设计者)
+    if root:
+        threading.Thread(
+            target=_auto_acceptance_after_runner_done,
+            args=(task, reqs, root, project), daemon=True,
+        ).start()
     return ok({
         "treeId": tree_id,
         "passed": result.passed,

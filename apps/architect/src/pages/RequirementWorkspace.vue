@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, provide, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, provide, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -15,6 +15,8 @@ import { validateForm } from '@/services/asset-validator'
 import { commitBatch } from '@/services/execution-batch'
 import { useArchRequirementStore } from '@/stores/requirement-store'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
+import { useContractSkill } from '@/composables/useContractSkill'
+import { contractService, type AcceptanceReportDetail, type ContractItem } from '@/services/contract-service'
 import { readModelPref } from '@topo/web-core/shell'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchProjectStore } from '@/stores/project-store'
@@ -72,6 +74,53 @@ const analyzed = ref(false)
 const committed = ref<'proposal' | 'pool' | null>(null)
 const committedReqs = ref<Requirement[]>([])
 const seedPreferred = ref<string[]>([])
+
+// ── A5 差异报告通知卡（验收触发后轮询新报告 → 对话内摘要卡 + 前往验收） ──
+
+/** 已展示过的验收报告 id（首轮快照，避免历史报告当新通知弹卡）。 */
+const seenReportIds = ref<Set<string>>(new Set())
+/** 是否已做首轮快照。 */
+const reportSeeded = ref(false)
+let reportPollTimer: ReturnType<typeof setInterval> | null = null
+
+async function pollAcceptanceReports() {
+  try {
+    const reports = await contractService.reports('', 10)
+    const fresh = reports.filter((r) => r.id && !seenReportIds.value.has(r.id))
+    if (!reportSeeded.value) {
+      // 首轮仅快照，不弹卡（历史报告不视为新通知）
+      reportSeeded.value = true
+      for (const r of reports) if (r.id) seenReportIds.value.add(r.id)
+      return
+    }
+    for (const r of fresh) {
+      seenReportIds.value.add(r.id)
+      try {
+        const detail = await contractService.reportDetail(r.id)
+        turns.value.push({ role: 'assistant', content: '', acceptance: detail })
+      } catch (err: any) {
+        console.warn('[arch] 拉取验收报告详情失败:', err?.message)
+      }
+    }
+  } catch (err: any) {
+    // 后端不可达时静默降级（轮询下轮再试）
+    if (reportSeeded.value) console.warn('[arch] 验收报告轮询失败:', err?.message)
+  }
+}
+
+function startReportPolling() {
+  if (reportPollTimer) return
+  pollAcceptanceReports()
+  reportPollTimer = setInterval(pollAcceptanceReports, 15000)
+}
+
+function stopReportPolling() {
+  if (reportPollTimer) { clearInterval(reportPollTimer); reportPollTimer = null }
+}
+
+function onGotoAcceptance() {
+  router.push('/workbench/unit-test?tab=acceptance')
+}
 
 // ---- 提案多选(需求分析入口)：勾选后逐个分析 ----
 const picker = ref(false)
@@ -172,6 +221,11 @@ onMounted(async () => {
   } else {
     draftReqId.value = nextDraftReqId()
   }
+  startReportPolling()
+})
+
+onUnmounted(() => {
+  stopReportPolling()
 })
 
 /** 将某个提案装入当前分析会话(清空聊天，必要时重新澄清)。 */
@@ -248,11 +302,81 @@ const chatAbort = ref<AbortController | null>(null)
 const extractAbort = ref<AbortController | null>(null)
 function stopChat() { chatAbort.value?.abort(); extractAbort.value?.abort() }
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
+const { contractSkill, toggleContractSkill } = useContractSkill()
+
+/** 🧾 期望固化：agent 产出契约草稿后，把「本会话新增」的 draft 作为卡片回合追加。 */
+const seenContractIds = ref<Set<string>>(new Set())
+let contractIdsSeeded = false
+
+async function seedContractIds() {
+  if (contractIdsSeeded) return
+  contractIdsSeeded = true
+  try {
+    const drafts = await contractService.items('draft')
+    seenContractIds.value = new Set(drafts.map((d) => d.id))
+  } catch {
+    seenContractIds.value = new Set()
+  }
+}
+
+async function onContractProposed() {
+  try {
+    const drafts = await contractService.items('draft')
+    const fresh = drafts.filter((d) => !seenContractIds.value.has(d.id))
+    if (!fresh.length) return
+    fresh.forEach((d) => seenContractIds.value.add(d.id))
+    turns.value.push({ role: 'assistant', content: '', contracts: fresh })
+  } catch (err) {
+    console.warn('[contract] 固化卡加载失败:', err)
+  }
+}
+
+function updateTurnContract(id: string, patch: Partial<ContractItem>) {
+  for (const turn of turns.value) {
+    const i = (turn.contracts ?? []).findIndex((c) => c.id === id)
+    if (i >= 0) {
+      turn.contracts![i] = { ...turn.contracts![i], ...patch }
+      return
+    }
+  }
+}
+
+async function onContractConfirm(id: string) {
+  try {
+    const row = await contractService.confirmItem(id)
+    updateTurnContract(id, { status: row.status })
+  } catch (err: any) {
+    console.warn('[contract] 确认失败:', err?.message)
+  }
+}
+
+async function onContractDelete(id: string) {
+  try {
+    await contractService.deleteItem(id)
+    for (const turn of turns.value) {
+      if (turn.contracts?.some((c) => c.id === id)) {
+        turn.contracts = turn.contracts.filter((c) => c.id !== id)
+      }
+    }
+  } catch (err: any) {
+    console.warn('[contract] 删除失败:', err?.message)
+  }
+}
+
+async function onContractEditSave(id: string, patch: Record<string, unknown>) {
+  try {
+    const row = await contractService.updateItem(id, patch as Partial<ContractItem>)
+    updateTurnContract(id, row)
+  } catch (err: any) {
+    console.warn('[contract] 修改失败:', err?.message)
+  }
+}
 
 async function onSend(text: string) {
   if (busy.value) return
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
+  if (contractSkill.value) void seedContractIds()
   busy.value = true
   const ac = new AbortController(); chatAbort.value = ac
   try {
@@ -264,6 +388,7 @@ async function onSend(text: string) {
       title: form.title.trim() || '需求分析对话',
       modelId: readModelPref('architect') || undefined,
       diagramSkill: diagramSkill.value,
+      skillScenarios: contractSkill.value ? ['contract'] : [],
       signal: ac.signal,
     }, (ev) => {
       if (ev.conversationId) chatConvId.value = ev.conversationId
@@ -280,6 +405,8 @@ async function onSend(text: string) {
         turns.value[idx].content = t('requirement.chat.fallback')
       } else if (ev.type === 'error') {
         turns.value[idx].content = ev.message || t('requirement.chat.fallback')
+      } else if (ev.type === 'tool_result' && ev.tool === 'contract.propose' && ev.ok) {
+        void onContractProposed()
       }
     })
   } catch (err: any) {
@@ -735,6 +862,8 @@ function backToList() {
           :busy="busy"
           :show-extract="false"
           :diagram-skill="diagramSkill"
+          :contract-skill="contractSkill"
+          show-contract-skill
           @send="onSend"
           @answers="onAnswers"
           @confirm-draft="confirmDraft"
@@ -742,6 +871,11 @@ function backToList() {
           @extract-assets="onExtractAssets"
           @refresh-asset="onRefreshAsset"
           @toggle-diagram-skill="toggleDiagramSkill"
+          @toggle-contract-skill="toggleContractSkill"
+          @contract-confirm="onContractConfirm"
+          @contract-delete="onContractDelete"
+          @contract-edit-save="onContractEditSave"
+          @goto-acceptance="onGotoAcceptance"
           @stop="stopChat"
         />
         <p class="text-[10px] text-ctp-overlay0 leading-relaxed">

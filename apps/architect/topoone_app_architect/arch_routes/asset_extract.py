@@ -235,6 +235,11 @@ def _extract_group(root: str, project: Optional[str], ctx: dict, file_: str,
                    use_llm: bool, context_manager=None,
                    rc: Optional["RuleContext"] = None) -> List[dict]:
     from . import asset_tools
+    from .agent_roles import resolve_role_model
+
+    # tAgent 角色模型路由(§9/B1)：提取循环入口按 extract 角色取模型；
+    # 调用方已显式传入(如验收严 profile)则优先，未配置角色回退 None→全局偏好。
+    model_id = resolve_role_model("extract", model_id)
 
     out: List[dict] = []
     cands = cands[:_GROUP_CAP]

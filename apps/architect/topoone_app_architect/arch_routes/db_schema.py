@@ -369,6 +369,178 @@ ARCH_PROJECT_TABLES_SQL = """
         created_at INTEGER DEFAULT 0,
         updated_at INTEGER DEFAULT 0
     );
+
+    -- ── M0 冻结 schema（docs/architect-reconstruction/plan-C-M0.md §6） ──
+
+    -- 框架配置（版本行即变更审计；每 project 至多一行 active=1）
+    CREATE TABLE IF NOT EXISTS arch_framework_configs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        config TEXT NOT NULL,               -- JSON: {axes, tiers, activeTier, acceptanceDefault, directivesDepth}
+        change_kind TEXT DEFAULT 'init',    -- init | tier_switch | values_edit | custom_load
+        affected_summary TEXT,              -- JSON: {voidedAssets, byKind, note}
+        executed_by TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        active INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT 0,
+        UNIQUE(project_id, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_fwcfg_active ON arch_framework_configs(project_id, active);
+
+    -- 命名墓碑（参考池；仅服务"标准不变的代码变更"生命周期——框架作废不写墓碑 R1）
+    CREATE TABLE IF NOT EXISTS arch_name_tombstones (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        file_path TEXT DEFAULT '',
+        symbol TEXT DEFAULT '',
+        name TEXT NOT NULL,
+        source TEXT DEFAULT 'llm',          -- user | llm | rule
+        reason TEXT DEFAULT 'anchor_gone',  -- anchor_gone | partial_fail | reconcile_deleted
+        asset_id TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_tombstone_lookup
+        ON arch_name_tombstones(project_id, file_path, symbol);
+    CREATE INDEX IF NOT EXISTS idx_arch_tombstone_name
+        ON arch_name_tombstones(project_id, name);
+
+    -- 用户编辑层（overlay：改名/合并/拆分/描述修订；seq 有序重放）
+    CREATE TABLE IF NOT EXISTS arch_user_overlays (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        author TEXT DEFAULT '',
+        op TEXT NOT NULL,                   -- rename | merge | split | edit_desc | edit_detail
+        target_asset_ids TEXT NOT NULL,     -- JSON: string[]
+        payload TEXT,                       -- JSON: rename{newName} / merge{intoId,targetName} / split{parts} / edit_desc{desc}
+        anchor_basis TEXT,                  -- JSON: [{file,symbol}] 操作时锚点快照（重放匹配依据）
+        reason TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',       -- active | orphaned | rolled_back
+        approval_status TEXT DEFAULT '',    -- 多人留位: pending | approved | rejected
+        approved_by TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        applied_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_overlay_proj ON arch_user_overlays(project_id, seq);
+
+    -- 资产命名规约（项目规约页·资产命名规约区块；scenarios NOT NULL 防全量注入 R7）
+    CREATE TABLE IF NOT EXISTS arch_naming_conventions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        scope TEXT DEFAULT 'project',       -- project | component
+        component_id TEXT DEFAULT '',
+        applies_kinds TEXT,                 -- JSON: kind 数组（空=全部）
+        rule_text TEXT NOT NULL,
+        source TEXT DEFAULT 'manual',       -- induced | manual
+        scenarios TEXT NOT NULL,            -- JSON: ["extract","accept","naming","general"]
+        status TEXT DEFAULT 'active',       -- active | disabled | pending_review
+        author TEXT DEFAULT '',
+        framework_version INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_conv_proj ON arch_naming_conventions(project_id, status);
+    CREATE INDEX IF NOT EXISTS idx_arch_conv_scenario ON arch_naming_conventions(project_id, status, scenarios);
+
+    -- 术语表（词典，纯参考非约束）
+    CREATE TABLE IF NOT EXISTS arch_glossary (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        term TEXT NOT NULL,
+        alias TEXT,                         -- JSON: 别名/英文对应
+        definition TEXT DEFAULT '',
+        source TEXT DEFAULT 'manual',       -- doc_import | manual
+        source_ref TEXT DEFAULT '',
+        author TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        updated_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_glossary_term ON arch_glossary(project_id, term);
+
+    -- 契约条目（= 验收条目，plan-C-M0 §2.1）
+    CREATE TABLE IF NOT EXISTS arch_contract_items (
+        id TEXT PRIMARY KEY,                -- ci-{seq}
+        project_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        req_id TEXT DEFAULT '',
+        conv_id TEXT DEFAULT '',
+        origin TEXT,                        -- JSON: {convId, messageId, quote}
+        kind TEXT NOT NULL,
+        level TEXT DEFAULT 'implementation',
+        target TEXT,                        -- JSON: {file?, symbol?, componentId?}
+        intent_only INTEGER DEFAULT 0,
+        behavior TEXT,                      -- JSON: fields/steps/branches/states/transitions/relations
+        z_axis TEXT,                        -- JSON: [{category,text,anchor?}]
+        acceptance TEXT,                    -- JSON: {mode, criteria?, linkedTests?}
+        status TEXT DEFAULT 'draft',        -- draft|confirmed|injected|verifying|accepted|rejected
+        stale_by_framework INTEGER DEFAULT 0,
+        version INTEGER DEFAULT 1,
+        created_by TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        confirmed_at INTEGER DEFAULT 0,
+        injected_at INTEGER DEFAULT 0,
+        verified_at INTEGER DEFAULT 0,
+        UNIQUE(project_id, seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_citem_proj ON arch_contract_items(project_id, status);
+
+    -- 契约包（注入 runner 的单元）
+    CREATE TABLE IF NOT EXISTS arch_contract_packages (
+        id TEXT PRIMARY KEY,                -- cp-{seq}
+        project_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        framework_snapshot TEXT NOT NULL,   -- JSON: {version, activeTier}
+        item_ids TEXT NOT NULL,             -- JSON: 仅 confirmed+
+        asset_refs TEXT,                    -- JSON: 语义资产 id（X 轴基线）
+        component_refs TEXT,                -- JSON: Y 轴组件引用
+        agents_md TEXT DEFAULT '',
+        status TEXT DEFAULT 'created',      -- created | injected | superseded
+        injected_to TEXT DEFAULT '',
+        created_at INTEGER DEFAULT 0,
+        injected_at INTEGER DEFAULT 0,
+        UNIQUE(project_id, seq)
+    );
+
+    -- 验收报告（facts 与 opinions 物理分表——事实/意见分离 R6）
+    CREATE TABLE IF NOT EXISTS arch_acceptance_reports (
+        id TEXT PRIMARY KEY,                -- ar-{seq}
+        project_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        package_id TEXT NOT NULL,
+        trigger_info TEXT,                  -- JSON: {type: runner_done|git_diff|manual, ref}（trigger 为保留字）
+        extraction_profile TEXT DEFAULT 'strict',
+        summary TEXT,                       -- JSON: {pass, fail, l3AwaitingHuman}
+        created_at INTEGER DEFAULT 0,
+        UNIQUE(project_id, seq)
+    );
+
+    CREATE TABLE IF NOT EXISTS arch_acceptance_facts (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        report_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        check_layer TEXT NOT NULL,          -- L1 | L2（check 为保留字）
+        verdict TEXT NOT NULL,              -- pass | fail | partial
+        evidence TEXT,                      -- JSON: {assetId?, anchors:[], detail}
+        created_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_afact_report ON arch_acceptance_facts(project_id, report_id);
+
+    CREATE TABLE IF NOT EXISTS arch_acceptance_opinions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        report_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        confidence REAL DEFAULT 0,
+        model TEXT DEFAULT '',
+        evidence TEXT,                      -- JSON: 同 facts 结构
+        trigger_by TEXT DEFAULT '',         -- 触发用户（仅人工，无自动写入方）
+        created_at INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_arch_aopin_report ON arch_acceptance_opinions(project_id, report_id);
 """
 
 # 旧单库全量 schema(迁移脚本/兼容参考用；新库分主/项目两套)
@@ -413,6 +585,14 @@ def architect_db_migrations(db) -> None:
 # ── 项目库迁移(旧项目库升级兜底，幂等) ─────────────────────────
 
 def _project_migrations(db) -> None:
+    # M0 冻结: 语义资产作废态（标准变更 → 整体作废，行保留可溯源；plan-C-M0 §6.4）
+    _add_cols(db, "arch_semantic_assets", [
+        ("voided_reason", "TEXT DEFAULT ''"),
+        ("voided_at", "INTEGER DEFAULT 0"),
+        ("voided_by", "TEXT DEFAULT ''"),
+        ("voided_framework_version", "INTEGER DEFAULT 0"),
+        ("stale_by_framework", "INTEGER DEFAULT 0"),
+    ])
     _add_cols(db, "arch_requirements", [
         ("plan_id", "TEXT"), ("exec_id", "TEXT"), ("remarks", "TEXT"),
         ("parent_id", "TEXT"), ("related_to", "TEXT"), ("merged_into", "TEXT"),

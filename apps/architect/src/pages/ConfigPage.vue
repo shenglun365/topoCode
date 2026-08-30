@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { CpuChipIcon, Cog6ToothIcon, ArrowDownTrayIcon, PlusIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 import PageHeader from '@/components/PageHeader.vue'
 import { useArchAgentStore } from '@/stores/agent-store'
 import { useArchSpecStore } from '@/stores/spec-store'
@@ -20,6 +20,35 @@ spec.load()
 agent.load()
 
 const sessions = computed(() => agent.sessions)
+
+// ── M1 tAgent 角色模型映射（plan-C §9；per-call 生效，不写全局 llm 配置） ──
+interface AgentRole { name: string; label: string; modelId: string; note?: string }
+const roles = ref<AgentRole[]>([])
+const rolesSaving = ref(false)
+const rolesSavedAt = ref(0)
+
+async function loadRoles() {
+  try {
+    const r = await apiGet<{ roles: AgentRole[] }>('/agent/roles')
+    roles.value = r.roles ?? []
+  } catch {
+    roles.value = []
+  }
+}
+
+async function saveRoles() {
+  rolesSaving.value = true
+  try {
+    const r = await apiPut<{ roles: AgentRole[] }>('/agent/roles', { roles: roles.value })
+    roles.value = r.roles ?? []
+    rolesSavedAt.value = Date.now()
+    setTimeout(() => { rolesSavedAt.value = 0 }, 2000)
+  } finally {
+    rolesSaving.value = false
+  }
+}
+
+loadRoles()
 
 const statusColor: Record<string, string> = {
   idle: 'bg-ctp-surface0 text-ctp-subtext1',
@@ -368,6 +397,39 @@ loadLlm()
           >{{ t(`coding.status.${s.status}`) }}</span>
         </div>
       </div>
+    </div>
+    <!-- M1 tAgent 角色模型映射：不同认知工作绑不同模型/API（per-call 生效） -->
+    <div class="panel overflow-hidden">
+      <div class="panel-header">
+        <span class="flex items-center gap-2">
+          <AdjustmentsHorizontalIcon class="w-4 h-4 text-ctp-mauve" />{{ t('config.roles.title') }}
+        </span>
+        <button
+          class="btn btn-xs btn-blue"
+          :disabled="rolesSaving"
+          @click="saveRoles"
+        >
+          {{ rolesSaving ? t('config.roles.saving') : (rolesSavedAt ? t('config.roles.saved') : t('config.roles.save')) }}
+        </button>
+      </div>
+      <div class="divide-y divide-ctp-surface0">
+        <div
+          v-for="r in roles"
+          :key="r.name"
+          class="flex items-center gap-3 px-4 py-2.5 text-xs"
+        >
+          <span class="w-20 font-semibold text-ctp-text shrink-0">{{ r.label }}</span>
+          <span class="flex-1 text-[10px] text-ctp-overlay1 leading-snug">{{ r.note }}</span>
+          <input
+            v-model="r.modelId"
+            class="input !py-1 !px-2 !text-[11px] w-56 font-mono"
+            :placeholder="t('config.roles.modelPlaceholder')"
+          >
+        </div>
+      </div>
+      <p class="px-4 pb-3 text-[10px] text-ctp-overlay0 leading-relaxed">
+        {{ t('config.roles.hint') }}
+      </p>
     </div>
   </div>
 </template>

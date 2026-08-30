@@ -1,17 +1,49 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   PlusIcon, ArrowRightIcon, BoltIcon, TrashIcon, PencilSquareIcon, ArrowPathRoundedSquareIcon, CubeIcon, LinkIcon,
 } from '@heroicons/vue/24/outline'
-import { ClipboardDocumentListIcon, CheckIcon } from '@heroicons/vue/24/outline'
+import { ClipboardDocumentListIcon, CheckIcon, RectangleStackIcon } from '@heroicons/vue/24/outline'
 import { useArchRequirementStore } from '@/stores/requirement-store'
+import { contractService, type ContractItem } from '@/services/contract-service'
 
 const { t } = useI18n()
 const store = useArchRequirementStore()
 const route = useRoute()
 const router = useRouter()
+
+/** M2-4 需求详情契约条目只读区（状态机展示；生成/确认仍在方案对话 🧾）。 */
+const contractOpen = reactive<Record<string, boolean>>({})
+const contractsByReq = reactive<Record<string, ContractItem[]>>({})
+const contractsLoading = reactive<Record<string, boolean>>({})
+
+async function toggleContracts(reqId: string) {
+  contractOpen[reqId] = !contractOpen[reqId]
+  if (contractOpen[reqId] && !contractsByReq[reqId]) {
+    contractsLoading[reqId] = true
+    try {
+      contractsByReq[reqId] = await contractService.items('', reqId)
+    } catch {
+      contractsByReq[reqId] = []
+    } finally {
+      contractsLoading[reqId] = false
+    }
+  }
+}
+
+function contractStatusCls(s?: string): string {
+  const map: Record<string, string> = {
+    draft: 'bg-ctp-yellow/15 text-ctp-yellow',
+    confirmed: 'bg-ctp-blue/15 text-ctp-blue',
+    injected: 'bg-ctp-sky/15 text-ctp-sky',
+    verifying: 'bg-ctp-mauve/15 text-ctp-mauve',
+    accepted: 'bg-ctp-green/15 text-ctp-green',
+    rejected: 'bg-ctp-red/15 text-ctp-red',
+  }
+  return map[s ?? 'draft'] ?? map.draft
+}
 
 const tab = ref<'proposal' | 'pool'>('proposal')
 
@@ -300,6 +332,52 @@ function executeFromPool() {
                   class="chip"
                   :class="r.analysis.feasibility.ok ? 'bg-ctp-green/15 text-ctp-green' : 'bg-ctp-red/15 text-ctp-red'"
                 >{{ t(`requirement.feasibility${r.analysis.feasibility.ok ? 'Ok' : 'No'}`) }}</span>
+                <button
+                  class="chip cursor-pointer bg-ctp-teal/10 text-ctp-teal hover:bg-ctp-teal/20 transition-colors"
+                  :title="t('requirement.contracts.title')"
+                  @click="toggleContracts(r.id)"
+                >
+                  <RectangleStackIcon class="w-3 h-3" />
+                  {{ t('requirement.contracts.title') }}
+                  <template v-if="contractsByReq[r.id]">
+                    {{ contractsByReq[r.id].length }}
+                  </template>
+                </button>
+              </div>
+              <!-- M2-4 契约条目只读区（状态机；判定动作在单元测试页验收区块） -->
+              <div
+                v-if="contractOpen[r.id]"
+                class="mt-2 border border-ctp-teal/20 rounded-md p-2 space-y-1"
+              >
+                <p
+                  v-if="contractsLoading[r.id]"
+                  class="text-[10px] text-ctp-overlay0"
+                >
+                  {{ t('common.loading') }}
+                </p>
+                <template v-else-if="contractsByReq[r.id]?.length">
+                  <div
+                    v-for="c in contractsByReq[r.id]"
+                    :key="c.id"
+                    class="flex items-center gap-1.5 text-[10px]"
+                  >
+                    <span class="font-mono text-ctp-overlay1 shrink-0">{{ c.id }}</span>
+                    <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext1 shrink-0">{{ c.kind }}/{{ c.level }}</span>
+                    <span class="font-mono text-ctp-subtext0 truncate flex-1">
+                      {{ [c.target?.file, c.target?.symbol].filter(Boolean).join('::') || t('requirement.chat.contractIntentOnly') }}
+                    </span>
+                    <span class="chip !text-[9px] shrink-0" :class="contractStatusCls(c.status)">
+                      {{ t(`requirement.chat.contractStatus.${c.status}`) }}
+                    </span>
+                    <span v-if="c.version > 1" class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1 shrink-0">v{{ c.version }}</span>
+                  </div>
+                </template>
+                <p
+                  v-else
+                  class="text-[10px] text-ctp-overlay0"
+                >
+                  {{ t('requirement.contracts.empty') }}
+                </p>
               </div>
             </div>
             <p

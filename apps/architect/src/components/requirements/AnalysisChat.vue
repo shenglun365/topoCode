@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, PaperAirplaneIcon, ChatBubbleLeftRightIcon, BookOpenIcon, CheckIcon, QuestionMarkCircleIcon, ClipboardDocumentCheckIcon, ClipboardDocumentIcon, TrashIcon, CubeTransparentIcon, BoltIcon, AdjustmentsHorizontalIcon, ChevronDownIcon, ChevronRightIcon, StopIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
+import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
+import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
 import type { SemanticAsset, SemanticAssetKind } from '@/types'
 
@@ -17,6 +19,10 @@ const props = defineProps<{
   showExtract?: boolean
   /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
   diagramSkill?: boolean
+  /** 期望固化(🧾)：开启后 agent 把可验证期望固化为契约条目草稿。 */
+  contractSkill?: boolean
+  /** 是否显示 🧾 开关(仅需求方案对话显示；资产管理/工作台不显示)。 */
+  showContractSkill?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +33,13 @@ const emit = defineEmits<{
   'extract-assets': [kinds?: SemanticAssetKind[]]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
+  'toggle-contract-skill': [enabled: boolean]
+  'contract-confirm': [id: string]
+  'contract-delete': [id: string]
+  'contract-edit-save': [id: string, patch: Record<string, unknown>]
+  'convention-confirm': [id: string]
+  'convention-ignore': [id: string]
+  'goto-acceptance': []
   stop: []
 }>()
 
@@ -250,6 +263,106 @@ function assetUsable(a: SemanticAsset): boolean {
 function onRefreshAsset(a: SemanticAsset) {
   if (props.busy) return
   emit('refresh-asset', a.id)
+}
+
+// ── 契约条目固化卡（🧾 期望固化） ─────────────────────────────
+
+const contractEditOpen = reactive<Record<string, boolean>>({})
+const contractEditText = reactive<Record<string, string>>({})
+
+function contractStatusLabel(s?: string): string {
+  return t(`requirement.chat.contractStatus.${s ?? 'draft'}`)
+}
+
+function contractStatusCls(s?: string): string {
+  const map: Record<string, string> = {
+    draft: 'bg-ctp-yellow/15 text-ctp-yellow',
+    confirmed: 'bg-ctp-blue/15 text-ctp-blue',
+    injected: 'bg-ctp-sky/15 text-ctp-sky',
+    verifying: 'bg-ctp-mauve/15 text-ctp-mauve',
+    accepted: 'bg-ctp-green/15 text-ctp-green',
+    rejected: 'bg-ctp-red/15 text-ctp-red',
+  }
+  return map[s ?? 'draft'] ?? map.draft
+}
+
+function contractTargetText(c: ContractItem): string {
+  const tgt = c.target ?? {}
+  const t2 = [tgt.file, tgt.symbol].filter(Boolean).join('::')
+  return t2 || t('requirement.chat.contractIntentOnly')
+}
+
+function contractBehaviorText(c: ContractItem): string {
+  const b = c.behavior ?? {}
+  const parts: string[] = []
+  if (b.steps?.length) parts.push(`${t('requirement.chat.assetSteps')} ${b.steps.length}`)
+  if (b.branches?.length) parts.push(`${t('requirement.chat.assetBranches')} ${b.branches.length}`)
+  if (b.fields?.length) parts.push(`${t('requirement.chat.assetFields')} ${b.fields.length}`)
+  if (c.zAxis?.length) parts.push(`Z ${c.zAxis.length}`)
+  return parts.join(' · ')
+}
+
+/** 展开「修改」：把可编辑期望字段序列化为 JSON 供设计者调整。 */
+function openContractEdit(c: ContractItem) {
+  if (contractEditOpen[c.id]) { contractEditOpen[c.id] = false; return }
+  const editable = {
+    target: c.target ?? {},
+    behavior: c.behavior ?? {},
+    zAxis: c.zAxis ?? [],
+    acceptance: c.acceptance ?? {},
+  }
+  contractEditText[c.id] = JSON.stringify(editable, null, 2)
+  contractEditOpen[c.id] = true
+}
+
+function saveContractEdit(c: ContractItem) {
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(contractEditText[c.id] || '{}')
+  } catch {
+    showToast(t('requirement.chat.contractEditInvalid'))
+    return
+  }
+  contractEditOpen[c.id] = false
+  emit('contract-edit-save', c.id, parsed)
+}
+
+function onContractConfirm(c: ContractItem) {
+  if (props.busy) return
+  emit('contract-confirm', c.id)
+}
+
+function onContractDelete(c: ContractItem) {
+  if (props.busy) return
+  emit('contract-delete', c.id)
+}
+
+function onConventionConfirm(c: NamingConvention) {
+  if (props.busy) return
+  emit('convention-confirm', c.id)
+}
+
+function onConventionIgnore(c: NamingConvention) {
+  if (props.busy) return
+  emit('convention-ignore', c.id)
+}
+
+function onGotoAcceptance() {
+  if (props.busy) return
+  emit('goto-acceptance')
+}
+
+/** 差异报告卡：L1/L2 通过率 + 待人工数 + 前三差异事实（事实/意见分区，判定在验收区块）。 */
+function diffSummary(detail: AcceptanceReportDetail): { rate: string; awaiting: number; top: AcceptanceFact[] } {
+  const facts = detail.facts ?? []
+  const pass = facts.filter((f) => f.verdict === 'pass').length
+  const rate = facts.length ? `${Math.round((pass / facts.length) * 100)}%` : '—'
+  const awaiting = (detail.report?.summary?.awaitingHuman ?? 0)
+    + facts.filter((f) => f.verdict === 'fail' || f.verdict === 'partial').length
+  const top = facts
+    .filter((f) => f.verdict !== 'pass')
+    .slice(0, 3)
+  return { rate, awaiting, top }
 }
 
 onUnmounted(() => {
@@ -488,6 +601,177 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- 契约条目固化卡（🧾 期望固化：逐条确认/修改/删；判定动作在验收区块） -->
+          <div
+            v-if="m.contracts?.length"
+            class="mt-2 space-y-1.5"
+          >
+            <div
+              v-for="c in m.contracts"
+              :key="c.id"
+              class="border border-ctp-teal/25 bg-ctp-teal/5 rounded-lg overflow-hidden"
+            >
+              <div class="flex items-center gap-1.5 px-2 py-1.5">
+                <span class="chip !text-[9px] bg-ctp-teal/15 text-ctp-teal shrink-0">
+                  {{ t(`assetMgmt.kind.${c.kind}`) }} · {{ c.level }}
+                </span>
+                <span class="font-mono text-[10px] text-ctp-subtext0 shrink-0">{{ c.id }}</span>
+                <span
+                  v-if="c.intentOnly"
+                  class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0"
+                >{{ t('requirement.chat.contractIntentOnly') }}</span>
+                <span
+                  v-if="c.staleByFramework"
+                  class="chip !text-[9px] bg-ctp-peach/15 text-ctp-peach shrink-0"
+                >{{ t('requirement.chat.contractStale') }}</span>
+                <span class="flex-1" />
+                <span class="chip !text-[9px] shrink-0" :class="contractStatusCls(c.status)">
+                  {{ contractStatusLabel(c.status) }}
+                </span>
+              </div>
+              <div class="px-2 pb-1.5 space-y-1 text-[11px]">
+                <div class="text-ctp-text">
+                  <span class="text-[9px] uppercase tracking-wide text-ctp-overlay0">{{ t('requirement.chat.contractTarget') }}</span>
+                  <span class="font-mono">{{ contractTargetText(c) }}</span>
+                </div>
+                <div v-if="contractBehaviorText(c)" class="text-ctp-subtext0">{{ contractBehaviorText(c) }}</div>
+                <div
+                  v-if="c.origin?.quote"
+                  class="text-[10px] text-ctp-overlay0 border-l-2 border-ctp-teal/30 pl-1.5 italic"
+                >「{{ c.origin.quote }}」
+                </div>
+                <div
+                  v-for="(z, zi) in c.zAxis ?? []"
+                  :key="zi"
+                  class="text-[10px] text-ctp-subtext0"
+                >Z[{{ z.category }}] {{ z.text }}
+                </div>
+                <div
+                  v-if="c.acceptance?.criteria"
+                  class="text-[10px] text-ctp-subtext0"
+                >
+                  <span class="text-ctp-overlay0">{{ t('requirement.chat.contractAcceptance') }}</span> {{ c.acceptance.criteria }}
+                </div>
+                <!-- 修改模式（仅 draft） -->
+                <div v-if="contractEditOpen[c.id]" class="pt-1">
+                  <textarea
+                    v-model="contractEditText[c.id]"
+                    rows="8"
+                    class="input !text-[10px] font-mono"
+                    :placeholder="t('requirement.chat.contractEditHint')"
+                  />
+                  <div class="flex gap-1.5 mt-1">
+                    <button class="btn btn-xs btn-green" @click="saveContractEdit(c)">{{ t('common.save') }}</button>
+                    <button class="btn btn-xs btn-ghost" @click="contractEditOpen[c.id] = false">{{ t('common.cancel') }}</button>
+                  </div>
+                </div>
+                <!-- 操作（仅 draft：确认/修改/删——判定统一在验收区块） -->
+                <div v-else-if="c.status === 'draft' && !busy" class="flex gap-1.5 pt-0.5">
+                  <button class="btn btn-xs btn-green" @click="onContractConfirm(c)">
+                    <CheckIcon class="w-3 h-3" />{{ t('requirement.chat.contractConfirm') }}
+                  </button>
+                  <button class="btn btn-xs btn-ghost" @click="openContractEdit(c)">{{ t('requirement.chat.contractEdit') }}</button>
+                  <button class="btn btn-xs btn-ghost text-ctp-red" @click="onContractDelete(c)">
+                    <TrashIcon class="w-3 h-3" />{{ t('requirement.chat.contractDelete') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 命名规约归纳提议卡（agent 检测命名模式 → pending 提案；确认固化/忽略） -->
+          <div
+            v-if="m.conventions?.length"
+            class="mt-2 space-y-1.5"
+          >
+            <div
+              v-for="cv in m.conventions"
+              :key="cv.id"
+              class="border border-ctp-mauve/25 bg-ctp-mauve/5 rounded-lg overflow-hidden"
+            >
+              <div class="flex items-center gap-1.5 px-2 py-1.5">
+                <BookOpenIcon class="w-3.5 h-3.5 text-ctp-mauve shrink-0" />
+                <span class="chip !text-[9px] bg-ctp-mauve/15 text-ctp-mauve shrink-0">
+                  {{ t('naming.tabConventions') }}
+                </span>
+                <span class="font-mono text-[10px] text-ctp-subtext0 shrink-0">{{ cv.id }}</span>
+                <span class="flex-1" />
+                <span class="chip !text-[9px] bg-ctp-yellow/15 text-ctp-yellow shrink-0">
+                  {{ t('naming.status.pending') }}
+                </span>
+              </div>
+              <div class="px-2 pb-1.5 space-y-1 text-[11px]">
+                <div class="text-ctp-text">{{ cv.ruleText }}</div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span
+                    v-for="s in cv.scenarios"
+                    :key="s"
+                    class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext1"
+                  >{{ t(`naming.scenario.${s}`) }}</span>
+                </div>
+                <p class="text-[10px] text-ctp-overlay0">{{ t('naming.proposeHint') }}</p>
+                <div v-if="cv.status === 'pending' && !busy" class="flex gap-1.5 pt-0.5">
+                  <button class="btn btn-xs btn-green" @click="onConventionConfirm(cv)">
+                    <CheckIcon class="w-3 h-3" />{{ t('naming.confirmRule') }}
+                  </button>
+                  <button class="btn btn-xs btn-ghost" @click="onConventionIgnore(cv)">{{ t('naming.ignoreRule') }}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- A5 差异报告通知卡（验收触发后：摘要 + 前往验收；判定统一在验收区块） -->
+          <div
+            v-if="m.acceptance"
+            class="mt-2 border border-ctp-sky/25 bg-ctp-sky/5 rounded-lg overflow-hidden"
+          >
+            <div class="flex items-center gap-1.5 px-2 py-1.5">
+              <ClipboardDocumentCheckIcon class="w-3.5 h-3.5 text-ctp-sky shrink-0" />
+              <span class="chip !text-[9px] bg-ctp-sky/15 text-ctp-sky shrink-0">
+                {{ t('localAcceptance.tabTitle') }}
+              </span>
+              <span class="font-mono text-[10px] text-ctp-subtext0 shrink-0">{{ m.acceptance.report.id }}</span>
+              <span
+                v-if="m.acceptance.report.packageId"
+                class="font-mono text-[10px] text-ctp-overlay0 shrink-0"
+              >{{ m.acceptance.report.packageId }}</span>
+              <span class="flex-1" />
+              <button class="btn btn-xs btn-blue" @click="onGotoAcceptance">
+                <ArrowTopRightOnSquareIcon class="w-3 h-3" />{{ t('requirement.chat.gotoAcceptance') }}
+              </button>
+            </div>
+            <div class="px-2 pb-2 space-y-1.5 text-[11px]">
+              <div class="flex items-center gap-3">
+                <span class="text-ctp-subtext0">
+                  L1/L2 {{ t('requirement.chat.passRate') }}:
+                  <span class="font-medium text-ctp-text">{{ diffSummary(m.acceptance).rate }}</span>
+                </span>
+                <span class="text-ctp-subtext0">
+                  {{ t('requirement.chat.awaitingHuman') }}:
+                  <span class="font-medium" :class="diffSummary(m.acceptance).awaiting > 0 ? 'text-ctp-yellow' : 'text-ctp-green'">
+                    {{ diffSummary(m.acceptance).awaiting }}
+                  </span>
+                </span>
+              </div>
+              <template v-if="diffSummary(m.acceptance).top.length">
+                <div class="text-[10px] uppercase tracking-wide text-ctp-sky">{{ t('requirement.chat.topDiffs') }}</div>
+                <div
+                  v-for="(f, fi) in diffSummary(m.acceptance).top"
+                  :key="f.id"
+                  class="flex items-start gap-1.5"
+                >
+                  <span class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext1 shrink-0">{{ f.checkLayer }}</span>
+                  <span
+                    class="chip !text-[9px] shrink-0"
+                    :class="f.verdict === 'fail' ? 'bg-ctp-red/15 text-ctp-red' : 'bg-ctp-yellow/15 text-ctp-yellow'"
+                  >{{ t(`localAcceptance.${f.verdict}`) }}</span>
+                  <span class="text-ctp-subtext0 break-all">{{ f.evidence?.detail || '—' }}</span>
+                </div>
+              </template>
+              <p class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.acceptanceCardHint') }}</p>
+            </div>
+          </div>
+
           <div
             v-if="m.questions"
             class="mt-2 border border-ctp-blue/25 bg-ctp-blue/5 rounded-lg p-2 space-y-2"
@@ -613,7 +897,27 @@ onUnmounted(() => {
         ><path d="M3 3h18v18H3z" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /></svg>
         {{ t('requirement.chat.diagramSkill') }}
       </button>
-      <span class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.diagramSkillHint') }}</span>
+      <span v-if="props.showContractSkill === undefined || props.showContractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.diagramSkillHint') }}</span>
+      <button
+        v-if="props.showContractSkill"
+        class="btn btn-xs"
+        :class="props.contractSkill ? 'btn-green' : 'btn-ghost'"
+        :disabled="busy"
+        :title="t('requirement.chat.contractSkillHint')"
+        @click="emit('toggle-contract-skill', !props.contractSkill)"
+      >
+        <svg
+          class="w-3.5 h-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M9 12h6" /><path d="M9 16h6" /><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+        {{ t('requirement.chat.contractSkill') }}
+      </button>
+      <span v-if="props.showContractSkill && props.contractSkill" class="text-[10px] text-ctp-overlay0">{{ t('requirement.chat.contractSkillHint') }}</span>
     </div>
 
     <div class="flex items-end gap-2 border-t border-ctp-surface0 p-2.5 shrink-0">

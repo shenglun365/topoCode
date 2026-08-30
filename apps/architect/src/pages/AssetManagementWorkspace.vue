@@ -13,9 +13,10 @@ import SemanticGraphView, { type GraphTabDef } from '@/components/assets/Semanti
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { semanticAssetService, type ExtractTaskMessage, type ExtractTaskStatus, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
+import { semanticAssetService, type CoverageInfo, type ExtractTaskMessage, type ExtractTaskStatus, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
+import { namingService, type NamingConvention } from '@/services/naming-service'
 import { useSplitPane } from '@/composables/useSplitPane'
 import { useDiagramSkill } from '@/composables/useDiagramSkill'
 import { readModelPref } from '@topo/web-core/shell'
@@ -123,9 +124,7 @@ function closeGraphTab(id: string) {
 }
 const q = ref('')
 const items = ref<SemanticAsset[]>([])
-const comps = ref<AssetDetail[]>([])
 const loading = ref(false)
-const extracting = ref(false)
 const reconciling = ref(false)
 const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
@@ -307,26 +306,6 @@ const compRows = computed<CompRow[]>(() => {
 
 /** 组件资产 tab 树行：全部层级从根展开；选 L0/L1 时以该层组件为初始列表(可展开从属组件)。
  *  行对象 = 组件(AssetDetail) + depth(缩进层级)。 */
-interface CompAssetRow extends AssetDetail { depth: number }
-const compAssetRows = computed<CompAssetRow[]>(() => {
-  const roots = compLevel.value === 'all'
-    ? comps.value.filter((c) => !c.parentId)
-    : comps.value.filter((c) => (c.hierLevel ?? '') === compLevel.value)
-  const rows: CompAssetRow[] = []
-  const walk = (parentId: string | undefined, depth: number) => {
-    for (const c of comps.value) {
-      if (c.parentId !== parentId) continue
-      rows.push({ ...c, depth })
-      if (compOpen[c.assetId] !== false) walk(c.assetId, depth + 1)
-    }
-  }
-  for (const r of roots) {
-    rows.push({ ...r, depth: 0 })
-    if (compOpen[r.assetId] !== false) walk(r.assetId, 1)
-  }
-  return rows
-})
-
 interface SemanticGroup { key: string; name: string; depth: number; assets: SemanticAsset[]; hierLevel?: string }
 /** 组件 id 层级映射(组件树 → L0/L1，供层级筛选)。 */
 const compHierLevel = computed<Map<string, string>>(() => {
@@ -411,19 +390,6 @@ async function loadSemantic() {
   }
 }
 
-async function loadComponents() {
-  loading.value = true
-  try {
-    // compLevel(L0/L1) 仅作树起点筛选(客户端)，需拉全量组件才能展开从属层级，
-    // 故不传给后端；compType(INCLUDE/CALL) 是真实口径分区，保留后端过滤。
-    comps.value = await kbAssetService.searchComponents(q.value, {
-      type: compType.value === 'all' ? undefined : compType.value,
-    })
-  } finally {
-    loading.value = false
-  }
-}
-
 /** 概览统计：语义资产总量/类别/粒度/状态。 */
 async function loadOverview() {
   try {
@@ -482,20 +448,6 @@ function cancelPurge() {
   purgeResult.value = null
 }
 
-// ---- 组件 tab：类型(INCLUDE/CALL) + 层级(L0/L1) 筛选 ----
-const compType = ref<'all' | 'INCLUDE' | 'CALL'>('all')
-const compLevel = ref<'all' | 'L0' | 'L1'>('all')
-
-// ---- 组件 tab：概要展开(KB) / KB viewer / 单组件提取 ----
-const compExpanded = reactive<Record<string, boolean>>({})
-const compDetails = reactive<Record<string, AssetDetail>>({})
-const compDetailLoading = reactive<Record<string, boolean>>({})
-const compDetailMiss = reactive<Record<string, boolean>>({})
-const compExtracting = reactive<Record<string, boolean>>({})
-
-// ---- 提取语义资产：组件复选模式(右上角按钮 → 切到组件 tab 勾选后提交) ----
-const extractMode = ref(false)
-const extractSelected = ref<string[]>([])
 /** 提取任务(服务端后台执行，刷新不中断)：当前任务 id + 轮询句柄 + 已同步消息游标。 */
 const extractTaskId = ref<string>('')
 const extractPollTimer = ref<ReturnType<typeof setInterval> | null>(null)
@@ -504,45 +456,6 @@ const extractRunning = ref(false)
 /** 任务进度(供顶部常驻指示器展示，刷新恢复后同样可见)。 */
 const extractDone = ref(0)
 const extractTotal = ref(0)
-
-function enterExtractMode() {
-  tab.value = 'component'
-  extractMode.value = true
-  extractSelected.value = []
-  loadComponents()
-}
-
-function exitExtractMode() {
-  extractMode.value = false
-  extractSelected.value = []
-}
-
-function toggleExtractSelect(id: string) {
-  const i = extractSelected.value.indexOf(id)
-  if (i >= 0) extractSelected.value.splice(i, 1)
-  else extractSelected.value.push(id)
-}
-
-function selectAllExtract() {
-  extractSelected.value = comps.value.map((c) => c.assetId)
-}
-
-function invertExtract() {
-  const all = comps.value.map((c) => c.assetId)
-  const sel = new Set(extractSelected.value)
-  extractSelected.value = all.filter((id) => !sel.has(id))
-}
-
-/** 右上角「提取语义资产」：未进入复选 → 切到组件 tab 并进入复选；已进入 → 提交所选组件提取。 */
-function handleExtract() {
-  if (extractRunning.value) return
-  if (!extractMode.value) {
-    enterExtractMode()
-    return
-  }
-  if (!extractSelected.value.length) return
-  submitExtract()
-}
 
 /** 向资产管理对话同步一条提取进度消息(去重：按消息 id)。 */
 function syncExtractMsg(m: ExtractTaskMessage) {
@@ -570,16 +483,10 @@ async function cancelExtractTask() {
   }
 }
 
-/** 复位全部组件提取按钮的进行态(任务结束后释放)。 */
-function resetCompExtracting() {
-  for (const k of Object.keys(compExtracting)) compExtracting[k] = false
-}
-
 /** 消费一次任务快照：同步新消息；任务结束 → 停止轮询并刷新。 */
 function consumeExtractTask(st: ExtractTaskStatus) {
   if (!st.found || !st.id) {
     stopExtractPoll()
-    resetCompExtracting()
     return
   }
   extractDone.value = st.done ?? 0
@@ -587,11 +494,8 @@ function consumeExtractTask(st: ExtractTaskStatus) {
   for (const m of st.messages ?? []) syncExtractMsg(m)
   if (!st.running) {
     stopExtractPoll()
-    resetCompExtracting()
     extractTaskId.value = ''
-    Promise.all([loadSemantic(), refreshStatus()]).then(() => {
-      if (extractMode.value) exitExtractMode()
-    })
+    Promise.all([loadSemantic(), refreshStatus(), loadCoverage()]).then(() => {})
   }
 }
 
@@ -614,32 +518,6 @@ function pollExtractTask(taskId: string) {
 
 /** 提交：创建服务端后台提取任务，轮询并把进度消息同步到对话消息栏。
  *  已有任务进行中 → 忽略重复点击，避免重复激活任务。 */
-async function submitExtract() {
-  if (extractRunning.value || extracting.value) return
-  const ids = extractSelected.value
-  if (!ids.length) return
-  extracting.value = true
-  try {
-    const names = ids
-      .map((id) => comps.value.find((c) => c.assetId === id)?.name ?? id)
-      .join('、')
-    turns.value.push({
-      role: 'assistant',
-      content: `▶ 开始提取语义资产，组件：${names}（任务在服务端执行，刷新页面不中断）。`,
-    })
-    const { taskId } = await semanticAssetService.startExtractTask(ids, {
-      kinds: kinds.map((k) => k.value),
-      modelId: readModelPref('architect') || undefined,
-    })
-    pollExtractTask(taskId)
-  } catch (err: any) {
-    turns.value.push({ role: 'assistant', content: `✘ 提取任务创建失败：${err?.message || err}` })
-    exitExtractMode()
-  } finally {
-    extracting.value = false
-  }
-}
-
 /** 刷新后恢复：读取最近一次提取任务，若仍在运行则恢复轮询并同步历史消息。 */
 async function restoreExtractTask() {
   try {
@@ -654,53 +532,6 @@ async function restoreExtractTask() {
     }
   } catch (err: any) {
     console.warn('[asset-mgmt] restore extract task failed:', err)
-  }
-}
-
-async function toggleCompDetail(c: AssetDetail) {
-  const id = c.assetId
-  if (compExpanded[id]) {
-    compExpanded[id] = false
-    return
-  }
-  compExpanded[id] = true
-  if (compDetails[id] || compDetailLoading[id]) return
-  compDetailLoading[id] = true
-  compDetailMiss[id] = false
-  try {
-    const d = await kbAssetService.detail(id)
-    if (d) compDetails[id] = d
-    else compDetailMiss[id] = true
-  } catch {
-    compDetailMiss[id] = true
-  } finally {
-    compDetailLoading[id] = false
-  }
-}
-
-/** 在知识库 viewer 打开组件文档(新标签页，URL 与 ComponentPickerModal 一致)。 */
-function openKB(c: AssetDetail) {
-  const taskId = c.taskId ?? ''
-  const url = `/doc?taskId=${encodeURIComponent(taskId)}&docId=${encodeURIComponent(`overall-${taskId}`)}&communityId=${encodeURIComponent(c.assetId)}&edgeType=${encodeURIComponent(c.edgeType ?? 'INCLUDE')}`
-  window.open(url, '_blank')
-}
-
-/** 提取单个组件的语义资产(comm 范围，统一走服务端后台任务)。
- *  任务进行中(existing task running 或该组件已在提取) → 忽略重复点击，避免重复激活任务。 */
-async function extractComp(c: AssetDetail) {
-  if (extractRunning.value || compExtracting[c.assetId]) return
-  compExtracting[c.assetId] = true
-  try {
-    turns.value.push({ role: 'assistant', content: `▶ 开始提取组件「${c.name}」的语义资产…` })
-    const { taskId } = await semanticAssetService.startExtractTask([c.assetId], {
-      kinds: kinds.map((k) => k.value),
-      modelId: readModelPref('architect') || undefined,
-    })
-    pollExtractTask(taskId)
-  } catch (err: any) {
-    compExtracting[c.assetId] = false
-    turns.value.push({ role: 'assistant', content: `✘ 组件「${c.name}」提取任务创建失败：${err?.message || err}` })
-    console.warn('[asset-mgmt] extract component failed:', err)
   }
 }
 
@@ -862,6 +693,7 @@ function askAgent(text: string) {
     title: t('assetMgmt.chatTitle'),
     modelId: readModelPref('architect') || undefined,
     diagramSkill: diagramSkill.value,
+    skillScenarios: ['extract'],
     signal: ac.signal,
   }, (ev) => {
     if (ev.conversationId) chatConvId.value = ev.conversationId
@@ -879,6 +711,7 @@ function askAgent(text: string) {
 
 async function onSend(text: string) {
   if (busy.value) return
+  seedConventionIds()
   turns.value.push({ role: 'user', content: text })
   const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
   busy.value = true
@@ -896,6 +729,8 @@ async function onSend(text: string) {
       if (ev.conversationId) chatConvId.value = ev.conversationId
       if (ev.type === 'chat_start') {
         if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
+      } else if (ev.type === 'tool_result' && ev.tool === 'convention.propose' && ev.ok) {
+        onConventionProposed(idx)
       } else if (ev.type === 'chunk') {
         turns.value[idx].content += ev.delta ?? ''
       } else if (ev.type === 'reasoning') {
@@ -915,30 +750,128 @@ async function onSend(text: string) {
   }
 }
 
-function onExtractAssets() {
-  if (busy.value) return
-  const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
-  busy.value = true
-  const ac = new AbortController(); extractAbort.value = ac
-  semanticAssetService.extractAll(kinds.map((k) => k.value), { modelId: readModelPref('architect') || undefined, signal: ac.signal })
-    .then(async (res) => {
-      const assets = res.assets ?? []
-      turns.value[idx].content = assets.length
-        ? `${t('requirement.chat.semanticExtracted')}${res.count ?? assets.length}${t('requirement.chat.semanticExtractedTail')}`
-        : t('requirement.chat.semanticEmpty')
-      turns.value[idx].assets = assets
-      await Promise.all([loadSemantic(), refreshStatus()])
-    })
-    .catch((err: any) => {
-      turns.value[idx].content = err?.name === 'AbortError'
-        ? t('requirement.chat.semanticStopped')
-        : t('requirement.chat.semanticFailed')
-    })
-    .finally(() => { extractAbort.value = null; busy.value = false })
-}
-
 function onRefreshAsset(assetId: string) {
   refreshOne(items.value.find((x) => x.id === assetId) as SemanticAsset).catch(() => {})
+}
+
+// ── A4 命名规约归纳提议卡（agent 检测命名模式 → pending 提案；确认固化/忽略） ──
+
+/** 已展示过的规约提案 id（防历史 pending 在每次发送时重复弹卡）。 */
+const seenConventionIds = ref<Set<string>>(new Set())
+/** 会话首轮发送前是否已快照既有 pending 提案。 */
+const conventionSeeded = ref(false)
+
+function seedConventionIds() {
+  if (conventionSeeded.value) return
+  conventionSeeded.value = true
+  // 会话首轮发送前快照既有 pending 提案，避免把历史提案当本次新提议
+  namingService.conventions('pending').then((rows) => {
+    for (const r of rows) if (r.id) seenConventionIds.value.add(r.id)
+  }).catch(() => {})
+}
+
+/** tool_result(convention.propose, ok) → 拉取 pending 提案，把新增的挂到当前助手回合。 */
+async function onConventionProposed(idx: number) {
+  try {
+    const rows = await namingService.conventions('pending')
+    const fresh = rows.filter((r) => r.id && !seenConventionIds.value.has(r.id))
+    if (!fresh.length) return
+    fresh.forEach((r) => seenConventionIds.value.add(r.id))
+    const turn = turns.value[idx]
+    if (!turn) return
+    turn.conventions = [...(turn.conventions ?? []), ...fresh]
+  } catch (err: any) {
+    console.warn('[naming] 拉取规约提案失败:', err?.message)
+  }
+}
+
+async function onConventionConfirm(id: string) {
+  try {
+    await namingService.updateConvention(id, { status: 'active' })
+  } catch (err: any) {
+    console.warn('[naming] 规约确认失败:', err?.message)
+  }
+}
+
+async function onConventionIgnore(id: string) {
+  try {
+    await namingService.deleteConvention(id)
+  } catch (err: any) {
+    console.warn('[naming] 规约忽略失败:', err?.message)
+  }
+}
+
+// ── M1 认知框架（框架即配置；概览 tab 面板 + 标准变更确认流） ──
+
+const frameworkInfo = ref<FrameworkResult | null>(null)
+const coverageInfo = ref<CoverageInfo | null>(null)
+const fwLoading = ref(false)
+const fwSwitching = ref(false)
+const fwPreview = ref<FrameworkPreview | null>(null)
+
+async function loadFramework() {
+  fwLoading.value = true
+  try {
+    frameworkInfo.value = await semanticAssetService.getFramework()
+  } catch {
+    frameworkInfo.value = null
+  } finally {
+    fwLoading.value = false
+  }
+}
+
+async function loadCoverage() {
+  try {
+    coverageInfo.value = await semanticAssetService.coverage()
+  } catch {
+    coverageInfo.value = null
+  }
+}
+
+/** 标准变更确认流：preview(dry-run) → 设计者确认 → switch（整体作废+命名不迁移）。 */
+async function switchTier(tier: 'low' | 'mid' | 'high') {
+  if (fwSwitching.value) return
+  try {
+    fwPreview.value = await semanticAssetService.previewFrameworkChange()
+    const pv = fwPreview.value
+    const dist = Object.entries(pv.byKind ?? {})
+      .map(([k, n]) => `${t(`assetMgmt.kind.${k}`)}×${n}`)
+      .join(', ') || '0'
+    const msg = t('assetMgmt.framework.confirmMsg', { n: pv.voidedAssets, dist })
+    if (!window.confirm(msg)) return
+    fwSwitching.value = true
+    await semanticAssetService.switchFramework(tier)
+    await Promise.all([loadFramework(), loadSemantic(), loadOverview(), loadCoverage(), refreshStatus()])
+  } catch (e: any) {
+    window.alert(e?.message || t('assetMgmt.framework.switchFailed'))
+  } finally {
+    fwSwitching.value = false
+  }
+}
+
+/** 对话提取：聚焦右栏对话并预填提取提示（按需提取，提议制由 agent 承接）。 */
+function askExtractGeneral() {
+  askAgent(t('assetMgmt.chatExtractPrompt'))
+}
+
+function askExtractComponent(name: string) {
+  askAgent(t('assetMgmt.compExtractPrompt', { name }))
+}
+
+/** 组件覆盖状态（概览覆盖度数据投影到语义 tab 组头）；无数据返回 '' 不渲染。 */
+function compCoverage(compId: string): 'full' | 'partial' | 'none' | '' {
+  const c = coverageInfo.value?.components?.find((x) => x.componentId === compId)
+  return c?.coverage ?? ''
+}
+
+/** 组件元数据（owns/dependsOn 摘要，供组头 tooltip）。 */
+function compMetaText(compId: string): string {
+  const c = compById.value.get(compId)
+  if (!c) return ''
+  const parts: string[] = []
+  if (c.owns?.length) parts.push(`owns: ${c.owns.slice(0, 6).join(', ')}${c.owns.length > 6 ? '…' : ''}`)
+  if (c.parentId) parts.push(`parent: ${compById.value.get(c.parentId)?.name ?? c.parentId}`)
+  return parts.join(' · ')
 }
 
 function referenceAsset(a: SemanticAsset) {
@@ -951,11 +884,10 @@ function onSearch() {
   if (tab.value === 'graph') return
   if (tab.value === 'overview') {
     loadOverview()
-  } else if (tab.value === 'semantic') {
+    loadCoverage()
+  } else {
     page.value = 1
     loadSemantic()
-  } else {
-    loadComponents()
   }
 }
 
@@ -972,7 +904,7 @@ function gotoPage(p: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus()])
+  await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
   turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
   await restoreExtractTask()
 })
@@ -989,11 +921,11 @@ onUnmounted(() => stopExtractPoll())
         </h2>
         <div class="flex items-center gap-1">
           <button
-            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'component' as const, label: t('assetMgmt.tab.component') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
+            v-for="tb in [{ id: 'overview' as const, label: t('assetMgmt.tab.overview') }, { id: 'semantic' as const, label: t('assetMgmt.tab.semantic') }, { id: 'graph' as const, label: t('assetMgmt.tab.graph') }]"
             :key="tb.id"
             class="btn btn-xs"
             :class="tab === tb.id ? 'btn-blue' : 'btn-ghost'"
-            @click="tab = tb.id; if (tb.id !== 'component') exitExtractMode(); onSearch()"
+            @click="tab = tb.id; onSearch()"
           >
             {{ tb.label }}
           </button>
@@ -1034,10 +966,11 @@ onUnmounted(() => stopExtractPoll())
         </button>
         <button
           class="btn btn-sm btn-primary"
-          :disabled="extracting || extractRunning"
-          @click="handleExtract"
+          :disabled="busy"
+          :title="t('assetMgmt.chatExtractHint')"
+          @click="askExtractGeneral"
         >
-          <SparklesIcon class="w-3.5 h-3.5" />{{ extracting || extractRunning ? t('assetMgmt.extracting') : t('assetMgmt.extractSemantic') }}
+          <SparklesIcon class="w-3.5 h-3.5" />{{ t('assetMgmt.chatExtract') }}
         </button>
       </div>
     </div>
@@ -1053,7 +986,7 @@ onUnmounted(() => stopExtractPoll())
       >
         <div class="panel-header shrink-0 relative !justify-start gap-1.5">
           <span class="flex items-center gap-2">
-            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ tab === 'overview' ? t('assetMgmt.tab.overview') : tab === 'semantic' ? t('assetMgmt.tab.semantic') : tab === 'graph' ? t('assetMgmt.tab.graph') : t('assetMgmt.tab.component') }}
+            <ClipboardDocumentListIcon class="w-4 h-4 text-ctp-mauve" />{{ t(`assetMgmt.tab.${tab}`) }}
           </span>
           <input
             v-if="tab !== 'graph' && tab !== 'overview'"
@@ -1062,40 +995,6 @@ onUnmounted(() => stopExtractPoll())
             :placeholder="t('assetMgmt.searchPlaceholder')"
             @keydown.enter="onSearch"
           >
-          <select
-            v-if="tab === 'component'"
-            v-model="compType"
-            class="input !py-0.5 !px-2 !text-[11px] w-auto"
-            :title="t('assetMgmt.compType')"
-            @change="onSearch"
-          >
-            <option value="all">
-              {{ t('assetMgmt.compTypeAll') }}
-            </option>
-            <option value="INCLUDE">
-              {{ t('assetMgmt.compTypeInclude') }}
-            </option>
-            <option value="CALL">
-              {{ t('assetMgmt.compTypeCall') }}
-            </option>
-          </select>
-          <select
-            v-if="tab === 'component'"
-            v-model="compLevel"
-            class="input !py-0.5 !px-2 !text-[11px] w-auto"
-            :title="t('assetMgmt.compLevel')"
-            @change="onSearch"
-          >
-            <option value="all">
-              {{ t('assetMgmt.compLevelAll') }}
-            </option>
-            <option value="L0">
-              L0
-            </option>
-            <option value="L1">
-              L1
-            </option>
-          </select>
           <select
             v-if="tab === 'semantic'"
             v-model="kind"
@@ -1152,47 +1051,6 @@ onUnmounted(() => stopExtractPoll())
           >
             <ArrowPathIcon class="w-3 h-3" />{{ t('assetMgmt.search') }}
           </button>
-          <template v-if="tab === 'component'">
-            <button
-              v-if="!extractMode"
-              class="btn btn-xs btn-blue"
-              :disabled="!comps.length"
-              @click="enterExtractMode"
-            >
-              <SparklesIcon class="w-3 h-3" />{{ t('assetMgmt.enterExtractMode') }}
-            </button>
-            <template v-else>
-              <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ extractSelected.length }}/{{ comps.length }}</span>
-              <button
-                class="btn btn-xs btn-ghost"
-                :disabled="extractRunning"
-                @click="selectAllExtract"
-              >
-                {{ t('assetMgmt.selectAll') }}
-              </button>
-              <button
-                class="btn btn-xs btn-ghost"
-                :disabled="extractRunning"
-                @click="invertExtract"
-              >
-                {{ t('assetMgmt.invert') }}
-              </button>
-              <button
-                class="btn btn-xs btn-ghost"
-                :disabled="extractRunning"
-                @click="exitExtractMode"
-              >
-                {{ t('assetMgmt.exitExtractMode') }}
-              </button>
-              <button
-                v-if="extractRunning"
-                class="btn btn-xs btn-red"
-                @click="cancelExtractTask"
-              >
-                <StopIcon class="w-3 h-3" />{{ t('assetMgmt.stopExtract') }}
-              </button>
-            </template>
-          </template>
           <template v-if="tab === 'semantic'">
             <div
               class="inline-flex items-center rounded-md border border-ctp-surface1 bg-ctp-mantle/60 overflow-hidden"
@@ -1516,7 +1374,7 @@ onUnmounted(() => stopExtractPoll())
                   </div>
                   <div class="border border-ctp-surface0 rounded-lg px-3 py-2 flex-1">
                     <div class="text-lg font-semibold text-ctp-text">
-                      {{ comps.length || compCatalog.length }}
+                      {{ compCatalog.length }}
                     </div>
                     <div class="text-[9px] text-ctp-overlay0">
                       {{ t('assetMgmt.overview.components') }}
@@ -1582,6 +1440,88 @@ onUnmounted(() => stopExtractPoll())
                 </div>
               </div>
             </div>
+
+            <!-- M1 认知框架：三组默认预设 + 标准变更确认流（plan-C §3；框架即配置） -->
+            <div class="panel overflow-hidden">
+              <div class="panel-header">
+                <span class="flex items-center gap-2">
+                  <AdjustmentsHorizontalIcon class="w-4 h-4 text-ctp-blue" />{{ t('assetMgmt.framework.title') }}
+                </span>
+                <span
+                  v-if="frameworkInfo?.config?.frameworkVersion"
+                  class="chip bg-ctp-surface0 text-ctp-overlay1 font-mono !text-[9px]"
+                >v{{ frameworkInfo.config.frameworkVersion }}</span>
+              </div>
+              <div class="p-3 space-y-2">
+                <div class="grid grid-cols-3 gap-2">
+                  <button
+                    v-for="tier in (['low', 'mid', 'high'] as const)"
+                    :key="tier"
+                    class="border rounded-md p-2 text-left transition-colors"
+                    :class="frameworkInfo?.config?.activeTier === tier
+                      ? 'border-ctp-blue/60 bg-ctp-blue/10'
+                      : 'border-ctp-surface0 hover:border-ctp-blue/40'"
+                    :disabled="fwLoading || fwSwitching"
+                    @click="switchTier(tier)"
+                  >
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-[11px] font-semibold text-ctp-text">{{ t(`assetMgmt.framework.tier.${tier}`) }}</span>
+                      <span
+                        v-if="frameworkInfo?.config?.activeTier === tier"
+                        class="chip !text-[8px] bg-ctp-blue/20 text-ctp-blue"
+                      >{{ t('assetMgmt.framework.active') }}</span>
+                    </div>
+                    <div class="text-[9px] text-ctp-overlay0 mt-1 leading-snug">
+                      {{ t(`assetMgmt.framework.tierDesc.${tier}`) }}
+                    </div>
+                    <div class="text-[9px] text-ctp-subtext0 mt-1 font-mono">
+                      {{ frameworkInfo?.presets?.[tier]?.x?.length ?? '—' }} {{ t('assetMgmt.framework.kindsUnit') }} · {{ frameworkInfo?.presets?.[tier]?.y?.length ?? '—' }} {{ t('assetMgmt.framework.levelsUnit') }}
+                    </div>
+                  </button>
+                </div>
+                <p class="text-[9px] text-ctp-overlay0 leading-relaxed">
+                  {{ t('assetMgmt.framework.hint') }}
+                </p>
+              </div>
+            </div>
+
+            <!-- M1 覆盖度（诚实呈现部分真相：plan-C §4.3） -->
+            <div class="panel overflow-hidden">
+              <div class="panel-header">
+                <span class="flex items-center gap-2">
+                  <ChartBarSquareIcon class="w-4 h-4 text-ctp-green" />{{ t('assetMgmt.coverage.title') }}
+                </span>
+              </div>
+              <div class="p-3 space-y-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="chip bg-ctp-green/15 text-ctp-green">{{ t('assetMgmt.coverage.extracted') }} · {{ coverageInfo?.extracted ?? '—' }}</span>
+                  <span class="chip bg-ctp-yellow/15 text-ctp-yellow">{{ t('assetMgmt.coverage.stale') }} · {{ coverageInfo?.stale ?? '—' }}</span>
+                  <span class="chip bg-ctp-surface0 text-ctp-subtext0">
+                    {{ t('assetMgmt.coverage.components') }} · {{ coverageInfo?.componentsCovered ?? '—' }}/{{ coverageInfo?.componentsTotal ?? '—' }}
+                  </span>
+                </div>
+                <div
+                  v-if="coverageInfo?.components?.some((c) => c.coverage === 'none')"
+                  class="space-y-0.5"
+                >
+                  <div class="text-[9px] text-ctp-overlay0">{{ t('assetMgmt.coverage.noneHint') }}</div>
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="c in coverageInfo.components.filter((c) => c.coverage === 'none').slice(0, 8)"
+                      :key="c.componentId"
+                      class="chip !text-[9px] bg-ctp-surface0 text-ctp-overlay1"
+                    >{{ c.name }}</span>
+                    <span
+                      v-if="coverageInfo.components.filter((c) => c.coverage === 'none').length > 8"
+                      class="text-[9px] text-ctp-overlay0"
+                    >+{{ coverageInfo.components.filter((c) => c.coverage === 'none').length - 8 }}</span>
+                  </div>
+                </div>
+                <p class="text-[9px] text-ctp-overlay0 leading-relaxed">
+                  {{ t('assetMgmt.coverage.hint') }}
+                </p>
+              </div>
+            </div>
           </template>
 
           <!-- 语义资产：按组件树文件树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
@@ -1624,16 +1564,29 @@ onUnmounted(() => stopExtractPoll())
                   v-if="g.hierLevel"
                   class="chip !text-[8px] bg-ctp-surface0 text-ctp-overlay1 shrink-0 font-mono"
                 >{{ g.hierLevel }}</span>
-                <span class="text-[10px] font-semibold text-ctp-subtext1 truncate">{{ g.name }}</span>
+                <span class="text-[10px] font-semibold text-ctp-subtext1 truncate" :title="compMetaText(g.key) || undefined">{{ g.name }}</span>
                 <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[9px]">{{ g.assets.length }}</span>
-                <button
-                  v-if="g.key !== OTHER_KEY"
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :title="t('assetMgmt.graph.viewCompGraph')"
-                  @click="openGraphTab('comp', g.key, g.name)"
-                >
-                  <Squares2X2Icon class="w-3 h-3" />
-                </button>
+                <template v-if="g.key !== OTHER_KEY">
+                  <span
+                    v-if="compCoverage(g.key)"
+                    class="chip !text-[8px] shrink-0"
+                    :class="compCoverage(g.key) === 'full' ? 'bg-ctp-green/15 text-ctp-green' : compCoverage(g.key) === 'partial' ? 'bg-ctp-yellow/15 text-ctp-yellow' : 'bg-ctp-surface0 text-ctp-overlay1'"
+                  >{{ t(`assetMgmt.coverage.state.${compCoverage(g.key)}`) }}</span>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.chatExtractHint')"
+                    @click="askExtractComponent(g.name)"
+                  >
+                    <SparklesIcon class="w-3 h-3" />
+                  </button>
+                  <button
+                    class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
+                    :title="t('assetMgmt.graph.viewCompGraph')"
+                    @click="openGraphTab('comp', g.key, g.name)"
+                  >
+                    <Squares2X2Icon class="w-3 h-3" />
+                  </button>
+                </template>
               </div>
               <div
                 v-for="a in g.assets"
@@ -1896,157 +1849,6 @@ onUnmounted(() => stopExtractPoll())
           </template>
 
           <!-- 组件资产：按 KB 组件树文件目录树形式逐层展开(选 L0/L1 时以该层为初始列表) -->
-          <template v-if="tab === 'component'">
-            <div
-              v-for="c in compAssetRows"
-              :key="c.assetId"
-              class="border border-ctp-blue/20 hover:border-ctp-blue/40 rounded-lg overflow-hidden"
-            >
-              <div
-                class="flex items-center gap-2 px-2 py-1.5"
-                :style="{ paddingLeft: (c.depth * 14 + 8) + 'px' }"
-              >
-                <button
-                  v-if="comps.some((x) => x.parentId === c.assetId)"
-                  class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
-                  :title="t('assetMgmt.expandCollapse')"
-                  @click="toggleOpen(c.assetId)"
-                >
-                  <ChevronDownIcon
-                    v-if="compOpen[c.assetId] !== false"
-                    class="w-3 h-3"
-                  />
-                  <ChevronRightIcon
-                    v-else
-                    class="w-3 h-3"
-                  />
-                </button>
-                <span
-                  v-else
-                  class="w-3.5 shrink-0"
-                />
-                <input
-                  v-if="extractMode"
-                  type="checkbox"
-                  class="accent-ctp-blue shrink-0"
-                  :checked="extractSelected.includes(c.assetId)"
-                  @change="toggleExtractSelect(c.assetId)"
-                >
-                <ServerStackIcon class="w-3.5 h-3.5 text-ctp-blue shrink-0" />
-                <span class="text-[11px] font-medium text-ctp-text truncate">{{ c.name }}</span>
-                <span class="chip !text-[9px] bg-ctp-blue/15 text-ctp-blue shrink-0">{{ t(`assetMgmt.componentKind.${c.kind ?? 'component'}`) }}</span>
-                <span
-                  v-if="c.parentName"
-                  class="chip !text-[9px] bg-ctp-surface0 text-ctp-subtext0 shrink-0"
-                >{{ t('assetMgmt.parent') }}: {{ c.parentName }}</span>
-                <span
-                  v-if="c.fileCount !== undefined"
-                  class="text-[9px] text-ctp-overlay1 shrink-0"
-                >{{ c.fileCount }} {{ t('assetMgmt.files') }}</span>
-                <span class="flex-1" />
-                <span class="text-[9px] text-ctp-overlay0 font-mono hidden sm:inline">{{ c.assetId }}</span>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-blue p-0.5"
-                  :title="t('assetMgmt.viewKb')"
-                  @click="openKB(c)"
-                >
-                  <EyeIcon class="w-3.5 h-3.5" />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :title="t('assetMgmt.graph.viewCompGraph')"
-                  @click="openGraphTab('comp', c.assetId, c.name)"
-                >
-                  <Squares2X2Icon class="w-3.5 h-3.5" />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
-                  :disabled="compExtracting[c.assetId] || extractRunning"
-                  :title="t('assetMgmt.extractComp')"
-                  @click="extractComp(c)"
-                >
-                  <ArrowPathIcon
-                    class="w-3.5 h-3.5"
-                    :class="compExtracting[c.assetId] ? 'animate-spin text-ctp-mauve' : ''"
-                  />
-                </button>
-                <button
-                  class="text-ctp-overlay0 hover:text-ctp-blue p-0.5"
-                  :title="t('assetMgmt.summary')"
-                  @click="toggleCompDetail(c)"
-                >
-                  <ChevronDownIcon
-                    v-if="compExpanded[c.assetId]"
-                    class="w-3.5 h-3.5"
-                  />
-                  <ChevronRightIcon
-                    v-else
-                    class="w-3.5 h-3.5"
-                  />
-                </button>
-              </div>
-
-              <!-- 组件概要信息(从 KB 获取) -->
-              <div
-                v-if="compExpanded[c.assetId]"
-                class="border-t border-ctp-blue/15 px-2 py-1.5 space-y-1 text-[10px]"
-              >
-                <p
-                  v-if="compDetailLoading[c.assetId]"
-                  class="text-ctp-overlay0"
-                >
-                  {{ t('assetMgmt.summaryLoading') }}
-                </p>
-                <p
-                  v-else-if="compDetailMiss[c.assetId]"
-                  class="text-ctp-peach"
-                >
-                  {{ t('assetMgmt.summaryMiss') }}
-                </p>
-                <template v-else-if="compDetails[c.assetId]">
-                  <p
-                    v-if="compDetails[c.assetId].desc"
-                    class="text-ctp-subtext1 leading-relaxed"
-                  >
-                    {{ compDetails[c.assetId].desc }}
-                  </p>
-                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-ctp-overlay0">
-                    <span v-if="compDetails[c.assetId].lang">lang: {{ compDetails[c.assetId].lang }}</span>
-                    <span v-if="compDetails[c.assetId].hierLevel">hier: {{ compDetails[c.assetId].hierLevel }}</span>
-                    <span v-if="compDetails[c.assetId].edgeType">edge: {{ compDetails[c.assetId].edgeType }}</span>
-                    <span v-if="compDetails[c.assetId].parentName">{{ t('assetMgmt.parent') }}: {{ compDetails[c.assetId].parentName }}</span>
-                    <span v-if="compDetails[c.assetId].fileCount !== undefined">{{ compDetails[c.assetId].fileCount }} {{ t('assetMgmt.files') }}</span>
-                    <span v-if="compDetails[c.assetId].nodeCount !== undefined">{{ compDetails[c.assetId].nodeCount }} nodes</span>
-                    <span v-if="compDetails[c.assetId].edgeCount !== undefined">{{ compDetails[c.assetId].edgeCount }} edges</span>
-                  </div>
-                  <div v-if="compDetails[c.assetId].responsibilities?.length">
-                    <span class="font-medium text-ctp-blue">{{ t('assetMgmt.resp') }}:</span>
-                    <span class="text-ctp-subtext1">{{ (compDetails[c.assetId]?.responsibilities ?? []).join('；') }}</span>
-                  </div>
-                  <div v-if="compDetails[c.assetId].owns?.length">
-                    <span class="font-medium text-ctp-blue">{{ t('assetMgmt.owns') }}:</span>
-                    <span class="font-mono text-ctp-subtext1">{{ (compDetails[c.assetId]?.owns ?? []).join(', ') }}</span>
-                  </div>
-                  <div v-if="compDetails[c.assetId].dependsOn?.length">
-                    <span class="font-medium text-ctp-blue">{{ t('assetMgmt.deps') }}:</span>
-                    <span class="font-mono text-ctp-subtext1">{{ (compDetails[c.assetId]?.dependsOn ?? []).join(', ') }}</span>
-                  </div>
-                </template>
-                <p
-                  v-else
-                  class="text-ctp-overlay0"
-                >
-                  {{ t('assetMgmt.summaryMiss') }}
-                </p>
-              </div>
-            </div>
-            <p
-              v-if="!comps.length && !loading"
-              class="text-xs text-ctp-overlay0 text-center py-8"
-            >
-              {{ t('assetMgmt.emptyComponent') }}
-            </p>
-          </template>
         </div>
 
         <!-- 分页：数据资产每页 ≤100，超出翻页 -->
@@ -2094,11 +1896,13 @@ onUnmounted(() => stopExtractPoll())
           :busy="busy"
           :title="t('assetMgmt.chatTitle')"
           :diagram-skill="diagramSkill"
+          :show-extract="false"
           @send="onSend"
           @delete-turn="onDeleteTurn"
-          @extract-assets="onExtractAssets"
           @refresh-asset="onRefreshAsset"
           @toggle-diagram-skill="toggleDiagramSkill"
+          @convention-confirm="onConventionConfirm"
+          @convention-ignore="onConventionIgnore"
           @stop="stopChat"
         />
         <p class="text-[10px] text-ctp-overlay0 leading-relaxed">

@@ -1,10 +1,15 @@
 # Architect 重建方案（Plan C）：以源码为核心的认知对齐中枢
 
-> 版本 v1.2 | 日期 2026-08-30 | 状态：讨论收敛稿（待评审）
+> 版本 v1.7 | 日期 2026-08-30 | 状态：**开发前核查稿**（M0 第一二批 schema/API 冻结稿已产出）
 > 上游输入：`plan-A.md`（外部建议 A：三核引擎+动态适配器）、`plan-B.md`（外部建议 B：四阶流水线+契约包）、与需求方的多轮讨论决议。
 > 与 A/B 的核心差异：**以源码为唯一事实源**。A/B 均为需求正向出发的 greenfield 蓝图；本方案中元认知框架是给代码现实配的坐标系，不是悬空的建模词汇。
 > v1.1 变更：新增 §11 跨模块兼容与影响面（KB 解析构建/文档 viewer/AI CHAT/workbench 逐模块核实结论 + 共享面护栏）；§5.4 补充"主 KB"定义（与 KB 模块消歧）。
 > v1.2 变更：界面变化已细化至配套文档 `plan-C-UI.md`（§12 各阶段 UI 落地对照）。
+> v1.3 变更（需求方决议）：① 框架标准变更 ≠ 代码变更——**标准变更时资产与命名整体作废、命名继承中断**，代码变更仍走 stale/墓碑/命名继承（§3.2/§5.2）；② 预设清单以 plan-A/B/C 三档定义为源（§13）；③ 规约/术语按**场景加载**注入 agent，禁止默认全量（§4.1/§5.3）；④ 命名治理 UI 归属"项目规约"页（§5.3）；⑤ 界面决议同步 `plan-C-UI.md` v1.1。
+> v1.4 变更（开发前核查，8 项）：§3.2 补 canonical_key 指纹机制事实与 status 作废态扩展；§4.1 补双 agent 通道执行载体分工；§10 补 name_alias/renamed_from 复用与前端服务缺口行；§12 M0 补 API 端点清单；配套 `plan-C-UI.md` 同步（chat 内嵌全量提取入口、INCLUDE/CALL 筛选、SpecWorkspace 载体、单元测试挂载位）。
+> v1.5 变更（M0 第一批执行）：新增 `plan-C-M0.md` —— 三组预设具体清单（low 依 plan-A 修正为 5 类无 state，§3.1 已同步）+ 契约条目 schema/状态机/契约包/验收报告定稿 + 校验规则 V1-V8；§13#2 关闭。
+> v1.6 变更（M0 评审决议）：① 预设清单 low 档 5 类确认、mid 档 Z 轴 4 类全开、契约条目 id=`ci-{seq}`；② **L3 不自动运行/抽样**——人工主判为主，按需手动激活模型辅助（§6.2 已同步，plan-C-M0 §5 决议记录）。
+> v1.7 变更（M0 第二批执行）：`plan-C-M0.md` 升 v1.1 —— 全部存储 DDL 冻结稿（§6）+ REST API 端点清单（§7）+ agent 新增 8 工具（§8）+ 设计规则 R1-R7（§9，含"框架作废不写墓碑"存储分界）；§13#1/#6 关闭。
 
 ---
 
@@ -103,8 +108,8 @@ framework:
     - id: y                       # 抽象轴：business/logic/implementation（可裁剪）
     - id: z                       # 治理轴：observability/resilience/config/security
   tiers:
-    low:    { x: [entity, process, rule],   y: [implementation], z: [] }
-    mid:    { x: 默认6类, y: 全部3层, z: [轻量条目] }   # 新项目默认
+    low:    { x: [entity, contract, rule, process, decision],  y: [implementation], z: [] }   # 无 state（综合 plan-A 低配，见 plan-C-M0.md §1）
+    mid:    { x: 默认6类, y: 全部3层, z: [4类轻量条目] }   # 新项目默认
     high:   { 全量 + 自定义开放 }
   activeTier: mid
 ```
@@ -113,7 +118,11 @@ framework:
 
 - **档位**：高/中/低，项目级设置，手动可调；新项目默认中。
 - **自定义分两步**：先做**值域裁剪/扩展**（axis 不变，值可增删改），再做**新轴**。新轴默认只参与**过滤/标注/分组**，不参与图谱视图生成（视图生成器只认内置 kind 映射）。
-- **版本化与迁移**：切换档位/改值域时，被裁剪 kind 的存量资产**归档而非删除**；值改名 → 提示重映射；框架变更触发一次 reconcile 建议。
+- **版本化与迁移（两条生命周期，严格区分）**：
+  - **标准变更**（切档位/改值域/换预设/载入自建框架）：这是**设计者决策**——变更前弹影响范围（N 个资产将作废）确认后执行；确认后**存量资产整体作废（从工作集清除），命名继承中断**——用户改名/历史名**不跨框架迁移**（新框架下本体定义已变，旧命名无参照意义）；关联旧值域的命名规约标记"待复核"。变更后按需重新提取，覆盖度如实显示空窗。
+  - **代码变更（标准不变）**：走既有机制——stale/reconcile、墓碑参考池、命名继承（用户名>历史名>规约生成名）、用户编辑重放（§5）。
+  - **机制事实（M0 设计依据）**：现有 `canonical_key` 指纹 = `kind|level|锚点`（db_schema `arch_semantic_assets.canonical_key`，semantic_assets.py `_canonical_key`）。① kind/level 值域变更 → 指纹天然变化，新旧资产不会误合并；② **同值域切档**（如 mid→low 且 kind 子集不变）时指纹不变，旧资产会被 canonicalKey 去重复用——故"标准变更→整体作废"必须是**显式操作**，不能依赖指纹隐式生效；③ 代码变更场景 kind|level 不变，按 canonicalKey 匹配做名称继承成立。
+  - **status 枚举扩展（M0 冻结项）**：现有 `active|stale|deleted(+needs_update)` 需新增**作废态**（如 `voided`，含原因=框架变更），与软删 `deleted` 区分（§13#6）。
 - **下游参数化**：store 校验、提取 prompt 分类指令、UI 过滤、图谱过滤全部读框架配置；提取 skill 的分类指令由值域定义文本动态生成。
 
 ---
@@ -125,7 +134,12 @@ framework:
 ### 4.1 执行形态：skills + tools calling（沿用既定路线）
 
 - 规约模板（本体判定/detail 结构规约/desc 白话规范/行序流程重建/验收清单）沉淀为 **skill 文档**，注入对话 agent 的 system prompt。
+- **规约按场景加载（防上下文污染）**：agent 只注入**当前场景相关**的规约子集（提取场景→本体判定/detail 规约；验收场景→符合性规约；命名场景→命名规约），**禁止默认全量加载**项目规约。规约条目带场景标签（§5.3），注入按标签过滤。
 - 执行经 **tools calling**：`code.read_symbols`（读源码片段）、`asset.semantic.draft`（可选，规则管线出草稿）、`asset.semantic.save`（校验+落库）等。
+- **执行载体分工（现有双 agent 通道，不合并）**：
+  - **对话内提取/整理** → `req_agent` tools loop（提取/保存/改名/合并/拆分工具，提议制）；
+  - **后台任务**（stale 批量修复、运行中任务恢复）→ 保留 `tAgent` agentic_loop（phase=kb_analysis，任务化+进度恢复机制现成）；
+  - **严 profile 验收提取** → tAgent 任务化（触发源是异步 git diff/runner 完成事件，需要进度与恢复能力）。
 - **触发提议制**：需求/分析对话中 agent 检索发现资产缺失或过期 → 提议提取（范围+理由）→ 设计者确认 → 执行。提取永远是被请求的动作。
 
 ### 4.2 两档提取 profile
@@ -176,7 +190,11 @@ asset:
 | 作用 | 约束新生成的**结构**；合并门禁（见 §8） | 引导首次生成的**词汇**；UI 展示对齐沟通 |
 | 来源 | agent 归纳用户改名模式**提议**（默认开启）→ 设计者确认固化；或手写 | 可从项目文档导入生成 |
 | 作用域 | project / component（锚定组件） | project |
-| 生命周期 | 作用组件代码结构大变时提示复核 | 随项目文档演进 |
+| 生命周期 | 作用组件代码结构大变时提示复核；**框架标准变更时，关联旧值域的规约标记"待复核"** | 随项目文档演进 |
+| **UI 归属** | **"项目规约"页**（`/workbench/assets`）新增"资产命名规约"区块——与既有架构规约同页分区块，规约条目带**场景标签**（提取/验收/命名/通用） | 同页"术语表"区块 |
+| **agent 消费** | **按场景标签加载**（提取对话只注入提取相关规约），**禁止默认全量注入**——防止上下文污染 | 注入为词典参考（同按需） |
+
+> 注意：既有"项目规约"（架构规约/编码规约）与新增"资产命名规约"是**不同对象**，同页分区块管理，不混用。
 
 优先级链：**用户单点改名 > 规约 > LLM 默认**。用户改名违反规约时提示但不阻止（规约是约定不是法律）。
 
@@ -244,9 +262,9 @@ contract_item:                       # 契约条目 = 验收条目
 |---|---|---|---|
 | **L1 覆盖性** | 契约要求的实体/过程/规则/决策是否存在、锚点是否落在预期位置 | 资产 id/符号/文件机械比对 | 事实 |
 | **L2 行为符合性** | 步骤顺序、分支、状态转移、调用关系与设计是否一致 | 提取的 steps/branches（行序重建）与契约条目做序列/图比对；图谱 flow/seq/state 视图做"期望 vs 实际"双图对照 | 事实 |
-| **L3 语义符合性** | 命名、业务语义、Z 轴约束是否符合期望 | LLM 按规约评审 + 人工终审 | **参考意见**（隔离呈现，证据必须引用锚点/资产 id） |
+| **L3 语义符合性** | 命名、业务语义、Z 轴约束是否符合期望 | **人工主判**（基于 L1/L2 事实与代码/资产证据）；判断困难时由设计者**手动激活** LLM 评审——产出参考意见（带来源/置信度/证据），非判定 | **参考意见**（隔离呈现，证据必须引用锚点/资产 id） |
 
-触发：runner 任务完成 / git diff 变更文件（`changed_files` 现成）→ 对 diff 文件跑**严 profile** 增量提取 → L1/L2 自动 → L3 抽样。
+触发：runner 任务完成 / git diff 变更文件（`changed_files` 现成）→ 对 diff 文件跑**严 profile** 增量提取 → L1/L2 自动；**L3 不自动运行**——人工主判，按需手动激活模型辅助（plan-C-M0 §5 决议）。
 
 ### 6.3 差异报告与反馈（architect 不设自动修复循环）
 
@@ -314,9 +332,10 @@ role = {name, model_id | api_profile, prompt_profile, 权限级别}
 | 反向提取 | 规则+LLM 管线（top-N、行序重建）、extract_scope(files/symbols/comm) | 转 skills+tools、严 profile、置信度 |
 | 差分校验 | reconcile/handle_stale（哈希比对、changed_files） | 升格为全流程校验器 |
 | 认知还原可视化 | 图谱 7 视图 + diagram.build IR 管线 + PseudoExplainer | "期望 vs 实际"双图对照 |
-| 命名治理 | canonicalKey、merge_seed_enrichment 语义保留 | 身份/名称分离、墓碑表、规约/术语表、API 归一化 |
+| 命名治理 | canonicalKey、`name_alias`（历史语义名 JSON）、`renamed_from`（改名溯源）——names[] 历史演进自这两列而非从零建；merge_seed_enrichment 语义保留 | 身份/名称分离、墓碑表、规约/术语表（落项目规约页+场景标签）、API 归一化、标准变更/代码变更双生命周期、status 作废态扩展 |
 | 编码对接 | runner（execution.assign）+ MCP 出向雏形（mcp.call） | 契约→AGENTS.md 词汇表注入 |
-| agent 编排 | 自研 tools loop / tAgent agentic_loop + ContextManager | 角色注册表路由 |
+| agent 编排 | 自研 tools loop（req_agent，对话通道）/ tAgent agentic_loop+ContextManager（后台任务通道，进度/恢复现成）——**分工见 §4.1** | 角色注册表路由；`asset.semantic.save/update/merge/split`、`code.read_symbols` 新工具 |
+| 前端服务 | semantic-asset-service.ts（search/searchPage/detail/pseudo/extract/refresh/status/stats/reconcile/assetDiagram/批量清理/提取任务恢复） | 新增：framework CRUD、规约/术语 CRUD、merge/split/rename、契约条目 CRUD、验收报告 API（M0 定端点清单，走既有 `/api/architect` 前缀） |
 | 验收比对 | codegraph AST 锚点 | L1/L2 比对器、符合性报告 |
 
 ---
@@ -343,21 +362,34 @@ Monorepo 共 5 个模块群：core（kb :3459 / llm :3484 / gateway :3456 / runn
 
 ## 12. 实施路线
 
-- **M0（schema 冻结）**：定契约条目/验收单 schema（含 Z 轴轻结构与部署拓扑占位）、框架配置 schema、墓碑表/overlay schema。**schema 即协议，是唯一必须先冻结的东西**。冻结清单同时锁定 §11 四条总护栏（零 KB 写入 / diagram 单一起源 / 模型路由局部化 / 工具面只增不改）。
-- **M1（认知底座配置化 + 按需提取）**：框架配置（档位/值域）落地；提取转对话式 skills+tools（`code.read_symbols`/`asset.semantic.save`）；覆盖度标注；角色注册表。
-- **M2（正向闭环）**：方案对话中期望固化 → 契约包生成 → runner 消费（AGENTS.md 注入）→ git diff 触发严 profile 提取 → L1/L2 比对 + 差异报告 → 主 KB 界面（命名/结构编辑收口）。
-- **M3（验收收敛 + 治理完备）**：L3 语义评审、L1/L2/L3 事实与参考意见双通道呈现、经验回写（失败模式反哺规约/默认值）、术语表导入、单机→主KB晋升。
+- **M0（schema 冻结）**：定契约条目/验收单 schema（含 Z 轴轻结构与部署拓扑占位）、框架配置 schema、墓碑表/overlay schema、**`arch_semantic_assets.status` 作废态扩展**、**新增 API 端点清单**（framework/规约/术语/契约/验收，走 `/api/architect` 既有前缀）。**schema 即协议，是唯一必须先冻结的东西**。冻结清单同时锁定 §11 四条总护栏（零 KB 写入 / diagram 单一起源 / 模型路由局部化 / 工具面只增不改）。
+  - **第一批已评审关闭**：`plan-C-M0.md` §1-§3 —— 三组预设具体清单（§1，low 修正为 5 类无 state）+ 契约条目 schema/状态机/契约包/验收报告（§2，facts/opinions 分表）+ 联动校验规则 V1-V8（§3）。
+  - **第二批已产出（评审中）**：`plan-C-M0.md` §6-§9 —— 全部存储 DDL 冻结稿（墓碑/overlay/框架配置/voided 列扩展/规约+术语/契约验收五表）、REST API 端点清单（§7，`/api/architect` 前缀）、agent 新增 8 工具（§8）、设计规则 R1-R7（§9：框架作废不写墓碑/overlay 有序重放/版本行即审计/facts-opinions 分表/场景标签 NOT NULL 等）。
+- **M1（认知底座配置化 + 按需提取）**：框架配置（三组预设+自建，UI 在资产概览 tab；变更作废确认流）落地；语义/组件 tab 合并为组件树挂资产；提取转对话式 skills+tools（`code.read_symbols`/`asset.semantic.save`）；覆盖度标注；角色注册表；规约场景标签。
+  - **后端已完成**（2026-08-30，289 tests passed）：M0 全部 DDL 落地 `db_schema.py`（10 表+voided 列迁移）；stores（FrameworkConfig/NameTombstone/UserOverlay/NamingConvention/Glossary）；`asset_framework.py`（预设/switch/preview/coverage + REST `/framework*`、`/semantic/coverage`）；agent 工具 `code.read_symbols`+`asset.semantic.save`（归一化管线：值域校验/名称继承/墓碑承接/复用 `_save_assets` 去重与幻影拒绝）。
+  - **前端已完成**（bundle `architect.CcPMBPq6.js`）：资产 tab 四→三（语义+组件合并为组件树挂资产，组头带覆盖度徽标+对话提取+owns tooltip）；概览新增框架标准面板（三档卡片+preview→confirm→switch 确认流）与覆盖度面板；**全量提取入口退役**（头部按钮→对话提取、chat 内嵌按钮 `show-extract=false`、组件复选批量模式 UI+函数整体移除，任务恢复指示器保留）；INCLUD/CALL 与 L0/L1 组件口径假筛选移除（合并 tab 无作用，如实原则）；i18n zh/en。
+  - **后端补齐 + 前端配置**（bundle `architect.BTlz_9Am.js`，297 tests passed）：角色注册表 `agent_roles.py`（默认四角色 extract/verify/induce/pseudo + REST `/agent/roles` + `role_model_id()` per-call 解析助手，三级覆盖留位）；`asset_skill.py` 规约按场景注入（builtin extract/accept/naming 规约 + 项目规约库按 scenarios 标签过滤，R7 落地）——WS `skillScenarios` 链路打通，资产管理对话恒传 `['extract']`；ConfigPage 新增「角色模型映射」卡片。
+  - **M1 关闭**。顺延 M2：命名历史 API+行内徽标（行内已有 renamedFrom/alias 展示，完整历史随 overlay）、merge/split UI、`role_model_id` 接入 tAgent 循环入口（当前 helper 就绪未接线）。
+ - **M2（正向闭环）**：方案对话中期望固化 → 契约包生成 → runner 消费（AGENTS.md 注入）→ git diff 触发严 profile 提取 → L1/L2 比对 + 差异报告 → **局部验收 UI 落单元测试页** → 主 KB 界面（命名/结构编辑收口）。
+   - **M2 后端已完成**（314 tests passed）：`store.py` 追加 `ContractItemStore`/`ContractPackageStore`/`AcceptanceStore`（facts/opinions 物理分表 R6）；`contracts.py` 契约条目状态机（V1-V8 校验：值域/origin/入包/意图级/low 档 z/state 专用/rejected 改期望/框架变更 stale 重确认）+ 契约包（框架快照随行冻结 + agentsMd brief/full/full-scaffold 三档详略 + inject 条目→injected）+ REST 10 端点（含 draft 修改 PUT/删除 DELETE）；`acceptance.py` 验收执行（变更范围→严 profile 提取→L1 覆盖性/L2 行为符合性机械比对→facts 落库→条目 verifying）+ 手动激活 L3（模型辅助参考意见，`triggerBy=user`，无自动写入方）+ 修复指令起草（只起草不发送）；`asset_framework._apply_change` 补 V8 联动（非 accepted 条目标 staleByFramework + 切 z 空值域清 zAxis）；`req_agent` 新增 `contract.propose` 工具（ctx 回填 origin.convId 证据链）+ 能力文档；`asset_skill` 新增 `contract` 场景规约（🧾 注入）。
+   - **M2 前端已完成**（vue-tsc 零错误 · build `architect.BlnwQx3G.js`）：`contract-service.ts`（契约/验收全端点适配）；`useContractSkill` composable（🧾 会话级开关）；`AnalysisChat` 契约条目固化卡（逐条 确认/修改/删，仅 draft 可操作——判定统一在验收区块）+ 🧾 开关按钮；`RequirementWorkspace` 接线（`skillScenarios:['contract']` + tool_result 钩子按新增 draft 追加卡片回合 + 会话首发送前快照旧草稿防误报）；`RequirementsPage` 需求详情契约条目只读区（状态机展示）；`UnitTestPage` 新增固定「局部验收」tab → `AcceptancePanel.vue`（契约包选择 + 触发验收 + 报告展开 L1/L2 事实徽标/证据 + 设计者通过/打回 + 激活 L3 参考意见 + 修复指令草稿复制）；i18n zh/en。
+    - **M2 剩余（顺延）→ 已收尾**：~~runner 完成自动触发验收~~ → M3 完成（verify 端点后台钩子，trigger=runner_done）；~~`role_model_id` 接入 tAgent 循环入口~~ → **B1 完成**（`resolve_role_model` per-call 接线 websocket/execution/extract/generate_pseudo）；~~命名历史完整 API~~ → M3 完成（`GET /semantic/assets/{id}/names`）；~~merge/split~~ → M3 完成（端点+工具+overlay 审计，UI 入口随 rename 同区扩展位）；~~"期望 vs 实际"双图对照~~ → **B2 完成**（§13.5 评估：无需扩展 IR；`acceptance.dual_diagram` + 前端双 DiagramCard 并排 + 差异 style 高亮）；~~差异报告通知卡~~ → **A5 完成**（对话内轮询新报告→通知卡+摘要+深链验收区块，判定动作仍在验收区块）。
+ - **M3（验收收敛 + 治理完备）**：L3 语义评审（人工主判 + 按需模型辅助入口）、L1/L2/L3 事实与参考意见双通道呈现、经验回写（失败模式反哺规约/默认值）、**命名规约/术语表落"项目规约"页（场景化加载）**、术语表导入、单机→主KB晋升。
+   - **M3 后端已完成**（2026-08-30，333 tests passed）：`naming.py`（M0 §7.2/§7.3 全部端点：命名规约 CRUD+induce 提案（pending→active 设计者确认）+场景检索、术语表 CRUD+文档导入（JSON/行式解析、realpath 越界校验、512KB/500 条上限、source_ref 溯源）、墓碑参考池查询、`GET /semantic/assets/{id}/names` 命名历史（墓碑+overlay 改名重放+行内溯源，pid 以资产行自身为准））；`semantic_assets.py` 就地认知编辑三端点 `POST /semantic/assets/rename|merge|split`（rename：旧名入 renamedFrom/nameAlias；merge：锚点并集+目标行 deleted+mergedInto；split：按 anchorKeys 锚点组拆新资产+原行 splitInto；均 overlay 审计 op=rename/merge/split）；**R5 策略开关在端点层**（`MainKbEditRejected`：main-KB 关联项目 409 拒绝+深链 `/kb/{pid}/assets`，standalone 直过）；`req_agent` 新增 3 工具 `asset.semantic.update`（{assetId, patch{name?,desc?}}）/`asset.semantic.merge`/`asset.semantic.split` + 能力文档（含补 contract.propose 参数行）；`execution.py` **M3-6 runner 完成自动触发验收**（verify 端点=runner 完成信号 → 后台线程按 reqId 关联契约包 → `run_acceptance(trigger=runner_done, ref=taskId)`；判定仍唯一归设计者）；`acceptance.run_acceptance` 补状态机守卫（仅 confirmed/injected/verifying 条目进入 verifying，draft/accepted/rejected 不受触碰）；`store.py` 补 `NamingConventionStore.get/delete`、`GlossaryStore.get`。
+   - **M3 前端已完成**（vue-tsc 零错误 · build `architect.CpYOVqb3.js`）：`naming-service.ts`（规约/术语/墓碑/命名历史全端点适配）；`NamingGovernancePanel.vue`（三子 tab：命名规约——新增/场景标签多选/pending 确认/停用启用/删除、术语表——搜索/新增/文档导入/删除、命名历史——墓碑参考池搜索）；SpecWorkspace 第三 tab「命名规约」挂载；`semantic-asset-service.ts` 补 rename/merge/split；`SemanticAssetsView` 资产行内改名（铅笔→inline 输入→确认/取消，main-KB 409 弹错误消息）；i18n zh/en（`naming.*`、`architecture.tab.naming`、`semanticAssets.rename`、`common.loading`）。
+    - **M3 剩余（顺延）→ 已收尾**：~~经验回写（失败模式反哺规约/默认值）~~ → **A1 完成**（打回→后台归纳 pending 规约 + skill_docs accept 场景注入）；单机→主KB晋升 → **A2' 完成（仅预留对接 API 层）**：新增 `mainkb.py`（`GET /mainkb/status` 授权策略开关/深链/晋升预留位 + `POST /mainkb/promote` 预留 501 不静默）+ 前端 `mainkb-service.ts`；**晋升本体**（用户命名整体晋升为初始权威）仍后置独立服务化（§后置）；~~merge/split 独立 UI 操作位~~ → **A3 完成**（SemanticAssetsView 行内 split 编辑器 + 多选 merge 操作条）；L3 自动触发策略 → **维持仅手动激活**（保真纪律，不实现自动触发）。
 - **后置**：部署/运维模型实现、多人合并协议、外部 coding agent（Cursor/Devin）适配器、"主 KB"独立服务化（如需，届时作为新模块立项，仍不改 KB engine）。
 
 ---
 
 ## 13. 遗留待定项
 
-1. 墓碑表/overlay 表的具体 schema 与索引（实现期定）。
-2. 低/中/高各档的 kind 裁剪清单（M0 定）。
-3. 术语表导入格式（从项目文档/词汇表文件）。
-4. Z 轴条目与 acceptance `mode=auto` 的可授权清单细则（M3 前定）。
-5. "期望 vs 实际"双图对照是否需要扩展共享 IR（`packages/core/topoone/diagram/`）——M2 前出兼容性评估，默认用既有 type 组合表达。
+1. ~~墓碑表/overlay 表的具体 schema 与索引~~ → **已冻结**：`plan-C-M0.md` §6.1/§6.2。
+2. ~~低/中/高三组默认预设的 kind/粒度组成清单~~ → **已定稿评审关闭**：见 `plan-C-M0.md` §1（综合 plan-A §五 / plan-B §4.4 / 本方案，low 修正为 5 类无 state）。
+3. ~~术语表导入格式（从项目文档/词汇表文件）~~ → **已实现**（M3）：JSON 数组/对象 或 行式「- 术语: 定义」「术语 | 定义」，source_ref 记录来源文件，越界路径/超大文件/超条数拒绝。
+4. ~~Z 轴条目与 acceptance `mode=auto` 的可授权清单细则~~ → **已定稿（C1）**：可授权清单 = 当前 `acceptance.mode` 下**哪些校验可自动授权、哪些必须人工**。**可自动授权（机械可比）**：L1 覆盖性、L2 行为符合性、**带锚点的 Z 轴条目**（锚点存在性）；**必须人工**：意图级 Z 轴条目（无锚点，机械查不出"理解跑偏"）、L3 语义（永远不自动）。mode 语义：`auto`=L1/L2 通过即过（low 默认，不跑 L3）/`assisted`=L1/L2 自动+L3 人工主判按需激活（mid/high 默认）/`manual`=逐条人审（机械项也不自动）。**`autoPassable`** = 条目结构上可被 `mode=auto` 自动授权（`mode=auto` 且无意图级 Z 轴条目）。判定权仍归设计者（contracts.verdict 唯一入口），清单只是"可自动授权边界"的显式化。实现：`contracts.authorization_list` 核心 + `POST /contracts/items/{item_id}/authorization` 端点 + 前端验收面板「可授权清单」卡（逐条标 可自动授权/需人工 + autoPassable 结论）。
+5. ~~"期望 vs 实际"双图对照是否需要扩展共享 IR（`packages/core/topoone/diagram/`）~~ → **评估完成（B2）**：**无需扩展 IR**。双图 = 两个独立 `DiagramSchema`（期望侧/实际侧各一，`type=flowchart`，复用 11 种既有 type），并排渲染；差异高亮用**既有字段**表达——`DiagramNode.style.stroke/fill`（期望侧"实现缺失"红、实际侧"实现多余"琥珀）+ `DiagramEdge.kind`/`label`，不新增任何 IR 字段/type，不 fork 第二套 IR（§11 护栏 ① 守住）。实现：`acceptance.dual_diagram` 端点产出两份 schema，前端经共享转译器 `toMermaid`（`@topo/web-core/topoOne`）转码后由既有 `DiagramCard` 渲染。
+6. ~~标准变更作废的物理存储策略~~ → **已冻结**：`plan-C-M0.md` §6.3/§6.4（版本行即审计 + voided 列扩展）+ §9 R1/R4。
 
 ---
 

@@ -35,6 +35,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from .common import _ts, err, ok
 from . import store
@@ -2887,6 +2888,265 @@ def _resolve_extract_levels(level: str) -> Tuple[str, ...]:
     return ("implementation",)
 
 
+# ── 对话式提取落库（agent 工具 asset.semantic.save 的实现；plan-C §4.1/§5.5） ──
+
+def save_agent_assets(root: Optional[str], project: Optional[str],
+                      assets: List[dict], executed_by: str = "") -> Dict[str, Any]:
+    """agent 对话式提取的落库通道（API 归一化管线，写入口唯一）。
+
+    - V1 框架校验：kind/level 必须在当前档位值域内（越域拒绝并说明）；
+    - 名称继承：canonicalKey 命中旧行 → **旧行名优先**（用户名>历史名>新生成名），
+      LLM 提议名不直接生效，作为 proposedName 返回供设计者定夺；
+    - 墓碑承接：新资产查参考池，同名符号有历史命名 → 沿用；
+    - 复用 _save_assets（canonicalKey 去重/实现层幻影拒绝/renamed 溯源/多归属合并）。
+    """
+    from . import asset_framework as F
+    pid = project_id_for(root, project)
+    allowed_kinds = set(F.allowed_kinds(pid))
+    allowed_levels = set(F.allowed_levels(pid))
+
+    accepted: List[dict] = []
+    rejected: List[dict] = []
+    proposed: List[dict] = []
+    scope_symbols: List[str] = []
+    scope_files: List[str] = []
+
+    for a in assets or []:
+        name = (a.get("name") or "").strip()
+        kind = (a.get("kind") or "").strip()
+        level = (a.get("level") or "implementation").strip()
+        refs = a.get("astRefs") or []
+        if not name:
+            rejected.append({"name": name, "reason": "缺少 name"})
+            continue
+        if kind not in allowed_kinds:
+            rejected.append({"name": name, "reason": f"kind={kind} 不在当前框架值域内(允许: {sorted(allowed_kinds)})"})
+            continue
+        if level not in allowed_levels:
+            rejected.append({"name": name, "reason": f"level={level} 不在当前框架值域内(允许: {sorted(allowed_levels)})"})
+            continue
+        if not refs:
+            rejected.append({"name": name, "reason": "实现层资产必须携带 astRefs 锚点"})
+            continue
+        # 名称继承（先于 _save_assets）：canonicalKey 命中旧行 → 旧行名优先
+        ck = _canonical_key(kind, level, refs, name=name,
+                            scope_type="symbols", scope_key="")
+        old = None
+        for old_a in store.SemanticAssetsStore.all_status(pid, limit=20000):
+            if (old_a.get("canonicalKey") or "") == ck:
+                old = old_a
+                break
+        if old:
+            old_name = old.get("name") or ""
+            if old_name and old_name != name:
+                proposed.append({"assetId": old["id"], "proposedName": name,
+                                 "keptName": old_name})
+                a = dict(a)
+                a["name"] = old_name  # 旧行名优先，LLM 提议不直接生效
+        else:
+            # 墓碑承接：新资产查参考池（同名文件+符号的历史命名）
+            f0 = (refs[0] or {}).get("file") or ""
+            s0 = (refs[0] or {}).get("symbol") or ""
+            hits = store.NameTombstoneStore.lookup(pid, f0, s0, limit=1)
+            if hits and hits[0].get("name"):
+                a = dict(a)
+                a["name"] = hits[0]["name"]  # 捞回历史命名
+        accepted.append(a)
+        for r in refs:
+            if r.get("file") and r["file"] not in scope_files:
+                scope_files.append(r["file"])
+            if r.get("symbol") and r["symbol"] not in scope_symbols:
+                scope_symbols.append(r["symbol"])
+
+    if not accepted:
+        return {"count": 0, "saved": [], "rejected": rejected, "proposedNames": proposed}
+
+    scope_key = ",".join(scope_symbols[:20])
+    ctx = collect_context(root, project, "symbols", scope_key,
+                          scope_files[:40], scope_symbols[:40])
+    ctx["source"] = ctx.get("source") or "live"
+    saved = _save_assets(pid, "symbols", scope_key, accepted, ctx)
+    logger.info("[semantic] agent save project=%s saved=%d rejected=%d proposed=%d",
+                pid, len(saved), len(rejected), len(proposed))
+    return {"count": len(saved), "saved": saved, "rejected": rejected,
+            "proposedNames": proposed}
+
+
+# ── 就地认知编辑（plan-C-M0 §7.2 rename/merge/split；R5 策略开关在端点/核心层） ──
+
+class MainKbEditRejected(Exception):
+    """R5: main-KB 关联项目的就地认知编辑被拒绝（应在主 KB 界面进行）。"""
+
+    def __init__(self, kb_project_id: str):
+        self.kb_project_id = kb_project_id
+        self.deep_link = f"/kb/{kb_project_id}/assets"
+        super().__init__(f"项目已关联主 KB({kb_project_id})，就地认知编辑请在主 KB 界面进行")
+
+
+def _check_main_kb_policy(pid: str) -> None:
+    """R5 写入口唯一：standalone 直过；main-KB(已关联) 拒绝 → 深链。"""
+    proj = store.ProjectsStore.get(pid) if pid else None
+    kb_pid = (proj or {}).get("kbProjectId") or ""
+    if kb_pid:
+        raise MainKbEditRejected(kb_pid)
+
+
+def _asset_anchor_basis(asset: dict) -> List[str]:
+    return [f"{r.get('file', '')}:{r.get('symbol', '')}"
+            for r in (asset.get("astRefs") or []) if r.get("file")]
+
+
+def rename_asset(asset_id: str, new_name: str, author: str = "") -> Dict[str, Any]:
+    """资产改名（认知层编辑）：旧名 → renamedFrom + nameAlias 历史；overlay 审计。"""
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise ValueError("newName 不能为空")
+    asset = store.SemanticAssetsStore.get(asset_id)
+    if not asset:
+        raise ValueError(f"资产不存在: {asset_id}")
+    if asset.get("status") != "active":
+        raise ValueError(f"资产非 active 状态({asset.get('status')})，不可改名")
+    _check_main_kb_policy(asset.get("projectId") or "")
+    old_name = asset.get("name") or ""
+    if new_name == old_name:
+        raise ValueError("新名与当前名相同")
+    alias = list(asset.get("nameAlias") or [])
+    if old_name and old_name not in alias:
+        alias.insert(0, old_name)
+    updated = store.SemanticAssetsStore.update(asset_id, {
+        "name": new_name, "renamedFrom": old_name, "nameAlias": alias,
+        "updatedAt": _ts(),
+    })
+    overlay = store.UserOverlayStore.add(
+        asset.get("projectId") or "", "rename", [asset_id],
+        {"newName": new_name, "oldName": old_name},
+        _asset_anchor_basis(asset), author=author)
+    logger.info("[semantic] rename %s: %r -> %r (ovl=%s)", asset_id, old_name, new_name, overlay.get("id"))
+    return {"asset": updated, "overlayId": overlay.get("id")}
+
+
+def edit_asset_desc(asset_id: str, desc: str, author: str = "") -> Dict[str, Any]:
+    """资产描述修订（认知层编辑）：overlay 审计 op=edit_desc。"""
+    asset = store.SemanticAssetsStore.get(asset_id)
+    if not asset:
+        raise ValueError(f"资产不存在: {asset_id}")
+    if asset.get("status") != "active":
+        raise ValueError(f"资产非 active 状态({asset.get('status')})，不可编辑")
+    _check_main_kb_policy(asset.get("projectId") or "")
+    updated = store.SemanticAssetsStore.update(asset_id, {"desc": desc or "", "updatedAt": _ts()})
+    overlay = store.UserOverlayStore.add(
+        asset.get("projectId") or "", "edit_desc", [asset_id],
+        {"desc": desc or ""}, _asset_anchor_basis(asset), author=author)
+    return {"asset": updated, "overlayId": overlay.get("id")}
+
+
+def merge_assets(into_id: str, target_ids: List[str],
+                 target_name: str = "", author: str = "") -> Dict[str, Any]:
+    """资产合并：目标资产锚点并入 intoId，目标行 deleted + meta.mergedInto 溯源。"""
+    into = store.SemanticAssetsStore.get(into_id)
+    if not into:
+        raise ValueError(f"目标资产不存在: {into_id}")
+    if into.get("status") != "active":
+        raise ValueError(f"目标资产非 active 状态({into.get('status')})")
+    targets = [t for t in (target_ids or []) if t and t != into_id]
+    if not targets:
+        raise ValueError("targetIds 为空")
+    _check_main_kb_policy(into.get("projectId") or "")
+    now = _ts()
+    into_refs = list(into.get("astRefs") or [])
+    anchor_basis = _asset_anchor_basis(into)
+    merged: List[str] = []
+    for tid in targets:
+        tgt = store.SemanticAssetsStore.get(tid)
+        if not tgt:
+            raise ValueError(f"待合并资产不存在: {tid}")
+        if tgt.get("status") != "active":
+            raise ValueError(f"待合并资产非 active 状态({tid}: {tgt.get('status')})")
+        tmeta = dict(tgt.get("meta") or {})
+        tmeta["mergedInto"] = into_id
+        store.SemanticAssetsStore.update(tid, {
+            "status": "deleted", "deletedAt": now, "meta": tmeta, "updatedAt": now,
+        })
+        for r in (tgt.get("astRefs") or []):
+            key = (r.get("file", ""), r.get("symbol", ""))
+            if all((x.get("file", ""), x.get("symbol", "")) != key for x in into_refs):
+                into_refs.append(r)
+                if r.get("file"):
+                    anchor_basis.append(f"{r.get('file', '')}:{r.get('symbol', '')}")
+        merged.append(tid)
+    patch: Dict[str, Any] = {"astRefs": into_refs, "updatedAt": now}
+    if target_name and target_name != into.get("name"):
+        alias = list(into.get("nameAlias") or [])
+        old = into.get("name") or ""
+        if old and old not in alias:
+            alias.insert(0, old)
+        patch.update({"name": target_name, "renamedFrom": old, "nameAlias": alias})
+    updated = store.SemanticAssetsStore.update(into_id, patch)
+    overlay = store.UserOverlayStore.add(
+        into.get("projectId") or "", "merge", [into_id] + merged,
+        {"intoId": into_id, "targetIds": merged, "targetName": target_name or ""},
+        anchor_basis, author=author)
+    logger.info("[semantic] merge into=%s merged=%d (ovl=%s)", into_id, len(merged), overlay.get("id"))
+    return {"asset": updated, "merged": merged, "overlayId": overlay.get("id")}
+
+
+def split_asset(asset_id: str, parts: List[Dict[str, Any]],
+                author: str = "") -> Dict[str, Any]:
+    """资产拆分：按锚点组(anchorKeys=file:symbol)拆出多个新资产；原行 deleted + meta.splitInto。"""
+    asset = store.SemanticAssetsStore.get(asset_id)
+    if not asset:
+        raise ValueError(f"资产不存在: {asset_id}")
+    if asset.get("status") != "active":
+        raise ValueError(f"资产非 active 状态({asset.get('status')})，不可拆分")
+    _check_main_kb_policy(asset.get("projectId") or "")
+    parts = [p for p in (parts or []) if isinstance(p, dict) and (p.get("name") or "").strip()]
+    if not parts:
+        raise ValueError("parts 为空(需 {name, anchorKeys[]})")
+    now = _ts()
+    pid = asset.get("projectId") or ""
+    refs = asset.get("astRefs") or []
+    level = asset.get("level") or "implementation"
+    kind = asset.get("kind") or "entity"
+    created: List[Dict[str, Any]] = []
+    new_ids: List[str] = []
+    parts_payload: List[Dict[str, Any]] = []
+    for p in parts:
+        keys = [k.strip() for k in (p.get("anchorKeys") or []) if (k or "").strip()]
+        if not keys:
+            raise ValueError(f"拆分部分 {p.get('name')} 缺少 anchorKeys")
+        sub = [r for r in refs
+               if f"{r.get('file', '')}:{r.get('symbol', '')}" in set(keys)]
+        if not sub:
+            raise ValueError(f"拆分部分 {p.get('name')} 无匹配锚点(anchorKeys={keys})")
+        new_id = store.next_id(_id_prefix(level, kind))
+        meta = {"splitFrom": asset_id}
+        store.SemanticAssetsStore.create({
+            "id": new_id, "projectId": pid, "kind": kind, "level": level,
+            "name": p["name"].strip(), "desc": (p.get("desc") or "").strip(),
+            "detail": p.get("detail") or {},
+            "astRefs": sub, "scopeType": asset.get("scopeType") or "",
+            "scopeKey": asset.get("scopeKey") or "",
+            "source": asset.get("source") or "codegraph",
+            "status": "active", "meta": meta,
+            "canonicalKey": _canonical_key(kind, level, sub, name=p["name"].strip()),
+            "nameAlias": [], "renamedFrom": "",
+            "createdAt": now, "updatedAt": now,
+        })
+        new_ids.append(new_id)
+        created.append({"id": new_id, "name": p["name"].strip(), "anchors": len(sub)})
+        parts_payload.append({"name": p["name"].strip(), "anchorKeys": keys})
+    meta = dict(asset.get("meta") or {})
+    meta["splitInto"] = new_ids
+    store.SemanticAssetsStore.update(asset_id, {
+        "status": "deleted", "deletedAt": now, "meta": meta, "updatedAt": now,
+    })
+    overlay = store.UserOverlayStore.add(
+        pid, "split", [asset_id] + new_ids,
+        {"parts": parts_payload}, _asset_anchor_basis(asset), author=author)
+    logger.info("[semantic] split %s -> %s (ovl=%s)", asset_id, new_ids, overlay.get("id"))
+    return {"deletedAssetId": asset_id, "created": created, "overlayId": overlay.get("id")}
+
+
 def extract_all(root: Optional[str], project: Optional[str],
                 kinds: Optional[List[str]] = None,
                 model_id: Optional[str] = None,
@@ -4466,6 +4726,9 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     if snippet:
         try:
             from .req_agent import llm_sync, get_max_tokens_preference
+            from .agent_roles import resolve_role_model
+            # tAgent 角色模型路由(§9/B1)：伪码解释走 pseudo 角色；显式传入优先
+            model_id = resolve_role_model("pseudo", model_id)
             sys_prompt = (
                 "你是资深架构师。基于给定的真实源码片段与该语义资产的类别/描述/结构，"
                 "用中文写一段『伪码级』实现走查：带编号的伪码步骤概括它在本项目里具体怎么实现"
@@ -4923,6 +5186,99 @@ async def api_graph(root: Optional[str] = None, project: Optional[str] = None,
                              focus=focus, hops=hops))
 
 
+# ── A6 影响分析：整体基线变更级追踪（跨组件扩散链 + 契约↔实现全局漂移） ──
+
+def _impact_analysis(root: Optional[str], project: Optional[str]) -> Dict[str, Any]:
+    """变更追踪（stale/needsUpdate 资产 + 关系边扩散）+ 全局漂移（活跃契约条目 ↔ 实现锚点）。"""
+    pid = project_id_for(root, project)
+    empty = {"direct": [], "propagated": [], "drift": [],
+             "coverage": {"verifiable": 0, "covered": 0, "pct": 0}, "patterns": []}
+    if not pid:
+        return empty
+    rows = store.SemanticAssetsStore.all_status(pid, limit=4000)
+    by_id = {a.get("id"): a for a in rows if a.get("id")}
+    # 直接变更：reconcile 标记的 stale / needsUpdate（排除 deleted）
+    direct = [a for a in rows
+              if a.get("status") == "stale" or a.get("needsUpdate")]
+    direct_ids = {a.get("id") for a in direct}
+    # 扩散：经关系边，引用直接变更资产的活跃资产间接受影响
+    g = semantic_graph(root, project, kind="", scopes=None, level="",
+                       limit=2000, focus="", hops=1)
+    active_ids = {n.get("id") for n in g.get("nodes") or []}
+    via_map: Dict[str, str] = {}
+    for e in g.get("edges") or []:
+        to, frm = e.get("to"), e.get("from")
+        if to in direct_ids and frm not in direct_ids \
+                and frm in active_ids and frm not in via_map:
+            via_map[frm] = to
+    propagated = [{"id": bid,
+                   "name": (by_id.get(bid) or {}).get("name") or bid,
+                   "kind": (by_id.get(bid) or {}).get("kind") or "",
+                   "via": v,
+                   "viaName": (by_id.get(v) or {}).get("name") or v}
+                  for bid, v in via_map.items()]
+    # 全局漂移：活跃契约条目(confirmed/injected/verifying) ↔ 实现锚点
+    anchors_by_asset: Dict[str, List[tuple]] = {}
+    for a in rows:
+        refs = a.get("astRefs") or []
+        if refs:
+            anchors_by_asset[a.get("id")] = [
+                (r.get("file") or "", r.get("symbol") or "") for r in refs]
+    items = store.ContractItemStore.list(pid, limit=500)
+    drift: List[Dict[str, Any]] = []
+    verifiable = covered = 0
+    for it in items:
+        if it.get("status") not in ("confirmed", "injected", "verifying"):
+            continue
+        tgt = it.get("target") or {}
+        file = tgt.get("file") or ""
+        symbol = tgt.get("symbol") or ""
+        quote = (it.get("origin") or {}).get("quote") or ""
+        base = {"itemId": it.get("id"), "kind": it.get("kind") or "", "quote": quote}
+        if not file and not symbol:
+            drift.append({**base, "reason": "intent"})
+            continue
+        verifiable += 1
+        matched = None
+        for aid, al in anchors_by_asset.items():
+            if any((not file or f == file) and (not symbol or s == symbol)
+                   for f, s in al):
+                matched = aid
+                break
+        if not matched:
+            drift.append({**base, "reason": "missing"})
+            continue
+        node = by_id.get(matched) or {}
+        if node.get("status") == "stale" or node.get("needsUpdate"):
+            drift.append({**base, "reason": "stale", "assetId": matched,
+                          "assetName": node.get("name") or ""})
+            continue
+        covered += 1
+    pct = round(covered / verifiable * 100) if verifiable else 0
+    by_kind: Dict[str, int] = {}
+    for x in drift:
+        if x["reason"] == "intent":
+            continue
+        by_kind[x["kind"]] = by_kind.get(x["kind"], 0) + 1
+    patterns = [{"kind": k, "count": c} for k, c in
+                sorted(by_kind.items(), key=lambda kv: -kv[1])]
+    return {
+        "direct": [{"id": a.get("id"), "name": a.get("name") or "",
+                    "kind": a.get("kind") or ""} for a in direct],
+        "propagated": propagated,
+        "drift": drift,
+        "coverage": {"verifiable": verifiable, "covered": covered, "pct": pct},
+        "patterns": patterns,
+    }
+
+
+@router.get("/kb/semantic/impact")
+async def api_impact(root: Optional[str] = None, project: Optional[str] = None):
+    """A6 影响分析：跨组件变更扩散链 + 契约↔实现全局漂移总览。"""
+    _lazy_reconcile(root, project)
+    return ok(_impact_analysis(root, project))
+
+
 @router.get("/kb/semantic/{asset_id}")
 async def api_detail(asset_id: str, root: Optional[str] = None, project: Optional[str] = None):
     a = detail(asset_id, root, project)
@@ -5122,3 +5478,56 @@ async def api_purge_semantic(request: Request):
                                 stale_days=int(body.get("staleDays") or 7),
                                 confirm=bool(body.get("confirm")))
     return ok(res)
+
+
+# ── 就地认知编辑端点（plan-C-M0 §7.2；R5: main-KB 拒绝→深链，standalone 直过） ──
+
+def _run_cognitive_edit(fn, *args, **kwargs):
+    """认知编辑统一错误面：MainKbEditRejected → 409+深链；ValueError → 400。"""
+    try:
+        return ok(fn(*args, **kwargs))
+    except MainKbEditRejected as e:
+        return JSONResponse(status_code=409, content={
+            "code": 409, "message": str(e),
+            "data": {"mainKb": True, "kbProjectId": e.kb_project_id,
+                     "deepLink": e.deep_link},
+        })
+    except ValueError as e:
+        return err(400, str(e))
+
+
+@router.post("/semantic/assets/rename")
+async def api_asset_rename(request: Request):
+    """资产改名（认知层编辑 → overlay 审计；旧名入 renamedFrom/nameAlias）。
+
+    body: {assetId, newName, author?}
+    """
+    body = await request.json()
+    return _run_cognitive_edit(
+        rename_asset, (body.get("assetId") or "").strip(),
+        body.get("newName") or "", (body.get("author") or "").strip())
+
+
+@router.post("/semantic/assets/merge")
+async def api_asset_merge(request: Request):
+    """资产合并（目标锚点并入 intoId；目标行 deleted + mergedInto 溯源）。
+
+    body: {intoId, targetIds[], targetName?, author?}
+    """
+    body = await request.json()
+    return _run_cognitive_edit(
+        merge_assets, (body.get("intoId") or "").strip(),
+        list(body.get("targetIds") or []),
+        (body.get("targetName") or "").strip(), (body.get("author") or "").strip())
+
+
+@router.post("/semantic/assets/split")
+async def api_asset_split(request: Request):
+    """资产拆分（按 anchorKeys=file:symbol 锚点组拆出新资产；原行 deleted + splitInto）。
+
+    body: {assetId, parts[{name, anchorKeys[], desc?}], author?}
+    """
+    body = await request.json()
+    return _run_cognitive_edit(
+        split_asset, (body.get("assetId") or "").strip(),
+        list(body.get("parts") or []), (body.get("author") or "").strip())

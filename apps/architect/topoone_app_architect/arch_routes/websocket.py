@@ -93,7 +93,6 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         _ctx.set_req(data.get("reqId") or "")
     except Exception:
         pass
-
     # ---- 会话落库(阶段D 统一表) ----
     now = _ts()
     conv_id = data.get("conversationId") or ""
@@ -108,6 +107,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         if not conv:
             await websocket.send_json({"type": "error", "message": "conversation not found"})
             return
+    # 请求级会话上下文(供 contract.propose 工具回填 origin.convId 证据链)
+    try:
+        _ctx.set_conv(conv_id)
+    except Exception:
+        pass
     user_msgs = [m for m in history if m.get("role") == "user" and (m.get("content") or "").strip()]
     last_user_msg_id = ""
     for m in user_msgs[-1:]:
@@ -117,8 +121,17 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
             "role": "user", "time": now, "content": m.get("content", ""),
         })
 
-    # ---- 上下文: 能力文档 + 历史(带软拒绝范围) ----
-    msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill)
+    # ---- 上下文: 能力文档 + 历史(带软拒绝范围) + 按场景 skill 文档 ----
+    skill_scenarios = data.get("skillScenarios") or []
+    if not isinstance(skill_scenarios, list):
+        skill_scenarios = []
+    msgs = _build_chat_messages(root, project, history, diagram_skill=diagram_skill,
+                                skill_scenarios=[str(s) for s in skill_scenarios])
+
+    # tAgent 角色模型路由(§9/B1)：按场景角色取模型；explicit 会话选择优先，
+    # 无角色命中时 eff_model=None → 回退全局偏好(既有链不变)。护栏 R3：per-call 参数。
+    from . import agent_roles as _roles
+    eff_model = _roles.resolve_role_model(_roles.scenario_role(skill_scenarios), model_id)
 
     # ---- 连续多轮流式: 工具调用循环(architect 自持，最多 MAX_TOOL_ROUNDS 轮) ----
     request_id = None
@@ -126,11 +139,11 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     tool_round = 0
     loop_fell_back = False
     while tool_round <= _MAX_TOOL_ROUNDS:
-        rid = _req_chat_stream(msgs, model_id or req_agent.get_model_preference())
+        rid = _req_chat_stream(msgs, eff_model or req_agent.get_model_preference())
         if not rid:
             # 流式通道中断：带工具结果的累积上下文改走 llm.sync 收尾
             loop_fell_back = True
-            assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+            assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
             break
         request_id = rid
         await websocket.send_json({"type": "chat_start", "conversationId": conv_id,
@@ -162,7 +175,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
         if not round_ok:
             # 该轮流式出错但已带工具上下文：降级到 llm.sync 收尾，避免无结果
             loop_fell_back = True
-            assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+            assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
             break
 
         # 本轮工具调用解析并在 architect 侧执行
@@ -181,7 +194,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
                     msgs.append({"role": "assistant", "content": req_agent.strip_tool_blocks(round_text) or "(调用知识库检索)"})
                     msgs.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
                 loop_fell_back = True
-                assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+                assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
                 break
             tool_round += 1
             results: List[Dict[str, str]] = []
@@ -211,7 +224,7 @@ async def _handle_kb_chat(websocket: WebSocket, data: dict) -> None:
     elif not loop_fell_back:
         # 流式通道空响应(如思考型模型推理阶段耗尽 token 仅产出 reasoning_content)：
         # 带工具结果/上下文的累积上下文改走 llm.sync 收尾，避免「LLM 未返回内容」硬失败。
-        assistant_text = await _sync_with_tools(msgs, root, project, model_id)
+        assistant_text = await _sync_with_tools(msgs, root, project, eff_model)
         if assistant_text:
             CHUNK_SIZE = 24
             for i in range(0, len(assistant_text), CHUNK_SIZE):
@@ -264,10 +277,15 @@ async def _run_tool_with_progress(websocket, request_id: str, name: str, args: d
     return {"name": name, "text": summary}
 
 
-def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False):
-    """组装 prompt: 能力文档(system) + 最近 N 条历史。diagram_skill 开启绘图增强(IR→代码)。"""
+def _build_chat_messages(root, project, history, cap=20, diagram_skill: bool = False,
+                         skill_scenarios: Optional[List[str]] = None):
+    """组装 prompt: 能力文档(system) + 最近 N 条历史。diagram_skill 开启绘图增强(IR→代码)。
+
+    skill_scenarios 非空 → 按场景注入语义资产 skill 文档（资产管理对话='extract'）。
+    """
     from .req_agent import chat_system_prompt
-    msgs = [{"role": "system", "content": chat_system_prompt(root, project, diagram_skill=diagram_skill)}]
+    msgs = [{"role": "system", "content": chat_system_prompt(
+        root, project, diagram_skill=diagram_skill, skill_scenarios=skill_scenarios)}]
     for m in history[-cap:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and (m.get("content") or "").strip():
             msgs.append({"role": m["role"], "content": m["content"]})
