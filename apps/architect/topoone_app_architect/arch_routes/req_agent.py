@@ -337,9 +337,11 @@ def tool_semantic_search(root: Optional[str], project: Optional[str],
 
 @register_architect_tool(
     "asset.semantic.extract",
-    "从最新代码结构提取语义数据资产(类别: structure/behavior/rule/contract，粒度: high/medium/low)并落库，"
-    "供对话确认与需求/设计引用。"
-    "参数 scope={type: files|symbols|comm|project, key?, files?, symbols?}，kinds=[asset|process|decision|contract|state]。",
+    "按指令从最新代码提取语义数据资产(六类: entity/contract/state/rule/process/decision，实现层)并落库。"
+    "指令化提取的唯一执行入口：规则定死类别+tAgent 定向+锚定代码段+语义解释。"
+    "参数 scope={type: comm|files|symbols|project, key?, files?, symbols?}，"
+    "comm 时 key 为**组件ID**(comm-…，权威范围)；kinds 可选[六类]。"
+    "返回紧凑摘要 {count, byKind, degraded, source[, error, candidates, reason]}。",
 )
 def tool_semantic_extract(root: Optional[str], project: Optional[str],
                           scope: Dict[str, Any] = None,
@@ -347,15 +349,31 @@ def tool_semantic_extract(root: Optional[str], project: Optional[str],
     from . import semantic_assets as S
     scope = scope or {}
     try:
-        return S.extract_scope(root, project,
-                               scope.get("type") or "project",
-                               scope.get("key") or "",
-                               scope.get("files") or [],
-                               scope.get("symbols") or [],
-                               kinds=kinds)
+        res = S.extract_scope(root, project,
+                              scope.get("type") or "project",
+                              scope.get("key") or "",
+                              scope.get("files") or [],
+                              scope.get("symbols") or [],
+                              kinds=kinds)
     except Exception as e:
         logger.warning("[req_agent] asset.semantic.extract failed: %s", e)
-        return {"assets": [], "count": 0, "degraded": True, "error": str(e)}
+        return {"count": 0, "degraded": True, "error": str(e)}
+    # 紧凑摘要(供 agent 如实汇报；不回传全量资产对象，省对话上下文)
+    from collections import Counter
+    assets = res.get("assets") or []
+    summary: Dict[str, Any] = {
+        "count": res.get("count", len(assets)),
+        "byKind": dict(Counter(a.get("kind") for a in assets)),
+        "degraded": res.get("degraded", False),
+        "source": res.get("source"),
+    }
+    if res.get("error"):
+        summary["error"] = res["error"]
+    if res.get("candidates"):
+        summary["candidates"] = res["candidates"]
+    if res.get("reason"):
+        summary["reason"] = res["reason"]
+    return summary
 
 
 @register_architect_tool(
@@ -865,10 +883,14 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                    mode: str = "chat",
                    output_schema: Optional[Dict[str, Any]] = None,
                    max_tokens: Optional[int] = None,
-                   max_rounds: int = 4) -> Dict[str, Any]:
+                   max_rounds: int = 4,
+                   allowed: Optional[List[str]] = None) -> Dict[str, Any]:
     """统一工具调用循环(同步通道)：解析模型输出的 `[TOOL_CALL]` 块 → 逐个执行 →
     回喂结果 → 再次询问，直至得到不含工具块的最终内容。供 harness(clarify/collect)
     与 WS 降级通道共用，杜绝「裸 [TOOL_CALL] 中断」。
+
+    allowed: 工具白名单(如逐行解读等受限任务)；非 None 时白名单外的工具调用不执行，
+    回喂拒绝提示让模型改用允许工具或直接作答。默认 None=不限制(原行为)。
 
     返回 {'content': str, 'output': Any|None}；content 已剥离所有工具块。
     """
@@ -889,6 +911,11 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
         for c in calls:
             name = c.get("tool", "")
             args = c.get("arguments", {})
+            if allowed and name not in allowed:
+                results.append({"name": name,
+                                "text": f"工具 {name} 不在本任务允许列表(仅限: {'/'.join(allowed)})，"
+                                        "请改用允许的工具，或直接基于已有信息作答。"})
+                continue
             result = run_arch_tool(name, args, root, project)
             results.append({"name": name, "text": tool_result_text(name, result)})
         if not results:
@@ -909,7 +936,7 @@ _CAPABILITY_DOC = (
     "- kb.graph：遍历组件依赖图(依赖/被调用)，判断需求改动的影响链路\n"
     "- project.ctx：读取项目上下文(项目名/分支/基线 id/降级状态)\n"
     "- asset.semantic.search：检索已提取的语义数据资产(数据结构/处理流程/控制逻辑，比组件更细、锚定 AST 节点)\n"
-    "- asset.semantic.extract：从最新代码结构提取语义数据资产并落库，供对话确认与需求/设计引用\n"
+    "- asset.semantic.extract：按指令从最新代码提取语义数据资产并落库(指令化唯一入口：comm 时 key=组件ID 为权威范围，确定执行)\n"
     "- asset.semantic.detail：读取单个语义资产的完整描述/结构化细节/AST 锚点\n"
     "- asset.semantic.mappings：查询语义资产对应的代码映射(文件/行号)，锁定「改哪里」\n"
     "- asset.semantic.reconcile：校验资产新鲜度，标记因文件变更/新增文件影响而过期的资产(需更新后使用)\n"
@@ -935,7 +962,7 @@ _CAPABILITY_DOC = (
     '- kb.graph: {"comp_ids": ["组件ID"]}\n'
     "- project.ctx: {}\n"
     '- asset.semantic.search: {"text": "关键词", "kind": "entity|contract|state|rule|process|decision(可选)"}\n'
-    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID", "files": [], "symbols": []}, "kinds": ["entity","contract","state","rule","process","decision"]}\n'
+    '- asset.semantic.extract: {"scope": {"type": "comm|files|symbols|project", "key": "组件ID(comm-…，先 kb.asset.search 取 id；未命中返回 error+候选清单须如实告知)", "files": [], "symbols": []}, "kinds": ["entity","contract","state","rule","process","decision"]}\n'
     '- asset.semantic.detail: {"asset_id": "sa-xxx"}\n'
     '- asset.semantic.mappings: {"asset_ids": ["sa-xxx"]}\n'
     "- asset.semantic.reconcile: {}\n"

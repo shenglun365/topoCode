@@ -425,12 +425,7 @@ def test_floor_desc_is_code_grounded(tmp_path, monkeypatch):
 
 
 def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
-    """LLM 增强: 业务命名+语义注释合并进种子骨架; http 关系不可由 LLM 伪造。
-
-    双轨：本测试钉住旧 run_tools_loop 路径（TOPOCODE_CTX_ASSET=0）；
-    tAgent 上下文编译路径见 test_tagent_extract.py。
-    """
-    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
+    """LLM 增强(tAgent 路径): 业务命名+语义注释合并进种子骨架; http 关系不可由 LLM 伪造。"""
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("f1", "function", "api_pay", "m.py", 1, 3, sig="(request: Request)")]
     ctx = _mk_ctx(tmp_path, nodes, impl={
@@ -440,8 +435,8 @@ def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
                  "constants": []}})
     calls = []
 
-    def _fake_run_tools_loop(msgs, **kw):
-        calls.append((kw.get("mode"), kw.get("output_schema")))
+    def _fake_tagent(**kw):
+        calls.append(kw.get("task_spec"))
         return {"content": "", "output": {"assets": [{
             "symbol": "api_pay", "name": "支付端点", "desc": "接收支付请求",
             "invariants": ["幂等"],
@@ -449,10 +444,10 @@ def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
                           {"target": "Order", "type": "uses", "semantic": "扣款"}],
         }]}}
 
-    import topoone_app_architect.arch_routes.req_agent as RA
-    monkeypatch.setattr(RA, "run_tools_loop", _fake_run_tools_loop)
+    import topoone_app_architect.arch_routes.tagent_extract as TE
+    monkeypatch.setattr(TE, "run_extraction_agentic", _fake_tagent)
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=True)
-    assert calls and calls[0][0] == "structured"
+    assert len(calls) == 1  # 恒走 tAgent 路径
     a = assets[0]
     assert a["name"] == "支付端点" and a["kind"] == "contract"
     rels = a["detail"]["relations"]
@@ -463,16 +458,13 @@ def test_extract_directed_llm_enrichment(tmp_path, monkeypatch):
 
 
 def test_extract_group_llm_failure_falls_to_floor(tmp_path, monkeypatch):
-    """LLM 无结构化输出 → 种子地板(不丢资产, 不空 detail)。
-
-    双轨：本测试钉住旧 run_tools_loop 路径（TOPOCODE_CTX_ASSET=0）。
-    """
-    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
+    """LLM(tAgent) 无结构化输出 → 种子地板(不丢资产, 不空 detail)。"""
     _ctx(tmp_path, monkeypatch)
     nodes = [_node("c1", "class", "Order", "m.py", 1, 2)]
     ctx = _mk_ctx(tmp_path, nodes)
-    import topoone_app_architect.arch_routes.req_agent as RA
-    monkeypatch.setattr(RA, "run_tools_loop", lambda *a, **k: {"content": "oops", "output": None})
+    import topoone_app_architect.arch_routes.tagent_extract as TE
+    monkeypatch.setattr(TE, "run_extraction_agentic",
+                        lambda **k: {"content": "oops", "output": None})
     assets = E.extract_directed(str(tmp_path), None, ctx, None, use_llm=True)
     assert len(assets) == 1 and assets[0]["kind"] == "entity"
     assert assets[0]["detail"]["fields"] == [{"name": "amount", "type": "int"}]

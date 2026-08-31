@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -267,48 +268,99 @@ def _query_edges(conn: sqlite3.Connection, node_ids: List[str], limit: int = 300
 
 # ── 范围解析 ──────────────────────────────────────────────────
 
-def _comm_files(root: str, comm_key: str, project: Optional[str] = None) -> List[str]:
-    """组件范围 → 文件集合。
-
-    组件 id 来自组件目录(architecture.catalog，跨 INCLUDE/CALL × L0/L1，即组件列表的
-    完整来源)；architecture.model 仅为 INCLUDE·L1/L0 子集视图。以目录为主解析
-    (目录 ⊇ 模型)，模型兜底兼容仅模型存在的场景。
-    """
+def _comm_components(root: str, project: Optional[str] = None) -> List[dict]:
+    """组件全集：组件目录(architecture.catalog)为主，架构模型兜底（去重 by id）。"""
     from .common import build_component_catalog, build_architecture_model
-    try:
-        catalog = build_component_catalog(root, project)
-        for c in catalog.get("components") or []:
-            if c.get("id") == comm_key:
-                files = [_norm_path(f) for f in (c.get("owns") or []) if f]
-                logger.info("[semantic] comm %s 命中组件目录, 文件数=%d", comm_key, len(files))
-                return files
-    except Exception as e:
-        logger.warning("[semantic] comm %s 组件目录解析失败: %s", comm_key, e, exc_info=True)
-    try:
-        model = build_architecture_model(root, project)
-        for c in model.get("components") or []:
-            if c.get("id") == comm_key:
-                files = [_norm_path(f) for f in (c.get("owns") or []) if f]
-                logger.info("[semantic] comm %s 命中架构模型, 文件数=%d", comm_key, len(files))
-                return files
-    except Exception as e:
-        logger.warning("[semantic] comm %s 架构模型解析失败: %s", comm_key, e, exc_info=True)
-    logger.warning("[semantic] comm %s 组件目录与模型均未命中, 返回空文件集合", comm_key)
-    return []
+    comps: List[dict] = []
+    seen: set = set()
+    for fetch in (lambda: build_component_catalog(root, project),
+                  lambda: build_architecture_model(root, project)):
+        try:
+            for c in fetch().get("components") or []:
+                cid = c.get("id") or ""
+                if cid and cid not in seen:
+                    seen.add(cid)
+                    comps.append(c)
+        except Exception as e:
+            logger.warning("[semantic] 组件来源解析失败: %s", e, exc_info=True)
+    return comps
+
+
+def _comm_match(comps: List[dict], comm_key: str) -> Tuple[Optional[dict], List[dict]]:
+    """按 key 匹配组件：精确 id → 精确名称 → 忽略大小写 → 唯一子串包含。
+
+    返回 (命中组件|None, 子串多义时的候选列表)。多义不猜（保真：宁可返回候选）。
+    """
+    key = (comm_key or "").strip()
+    if not key:
+        return None, []
+    for c in comps:
+        if c.get("id") == key:
+            return c, []
+    for c in comps:
+        if (c.get("name") or "") == key:
+            return c, []
+    low = key.lower()
+    for c in comps:
+        if str(c.get("id") or "").lower() == low or str(c.get("name") or "").lower() == low:
+            return c, []
+    subs = [c for c in comps
+            if low and (low in str(c.get("name") or "").lower()
+                        or low in str(c.get("id") or "").lower()
+                        or str(c.get("name") or "").lower() in low)]
+    if len(subs) == 1:
+        return subs[0], []
+    return None, subs
+
+
+def _comm_files_ex(root: str, comm_key: str, project: Optional[str] = None
+                   ) -> Tuple[List[str], Optional[Dict[str, Any]]]:
+    """组件范围 → (文件集合, 未命中诊断)。
+
+    命中 → (files, None)；未命中 → ([], {error, candidates:[{id,name}…]})——
+    诊断随提取结果透传给 agent（如实报告失败原因与可选组件，禁止静默空结果）。
+    """
+    comps = _comm_components(root, project)
+    hit, subs = _comm_match(comps, comm_key)
+    if hit:
+        files = [_norm_path(f) for f in (hit.get("owns") or []) if f]
+        logger.info("[semantic] comm %s 命中组件 %s(%s), 文件数=%d",
+                    comm_key, hit.get("name"), hit.get("id"), len(files))
+        return files, None
+    candidates = [{"id": c.get("id"), "name": c.get("name")}
+                  for c in (subs or comps)[:12]]
+    why = "组件目录与模型均未命中" if not subs else "名称模糊命中多个组件，需精确组件ID"
+    logger.warning("[semantic] comm %s %s, 返回空文件集合(候选 %d 个)",
+                   comm_key, why, len(candidates))
+    return [], {"error": f"组件范围「{comm_key}」{why}",
+                "candidates": candidates}
+
+
+def _comm_files(root: str, comm_key: str, project: Optional[str] = None) -> List[str]:
+    """组件范围 → 文件集合（兼容旧调用点；未命中返回空集合）。"""
+    files, _ = _comm_files_ex(root, comm_key, project)
+    return files
 
 
 def resolve_scope_files(root: str, scope_type: str, scope_key: str,
                         files: Optional[List[str]] = None,
                         symbols: Optional[List[str]] = None,
-                        project: Optional[str] = None):
-    """范围 → (files, symbols)。comm 解析为文件集合；symbols 保持符号名列表。"""
+                        project: Optional[str] = None,
+                        out: Optional[Dict[str, Any]] = None):
+    """范围 → (files, symbols)。comm 解析为文件集合；symbols 保持符号名列表。
+
+    out(可选)：comm 未命中时写入 out["scopeError"]={error, candidates}（诊断透传）。
+    """
     st = scope_type or "project"
     if st == "files":
         return [_norm_path(f) for f in (files or []) if f], []
     if st == "symbols":
         return [], [s for s in (symbols or []) if s]
     if st == "comm":
-        return _comm_files(root, scope_key, project), []
+        fs, err_info = _comm_files_ex(root, scope_key, project)
+        if out is not None and err_info:
+            out["scopeError"] = err_info
+        return fs, []
     return [], []  # project: 全量
 
 
@@ -875,14 +927,18 @@ def collect_context(root: str, scope_type: str, scope_key: str,
 
     取数四层(要求③): 缓存命中 → codegraph → KB parseFileAst → live 扫描。
     """
-    files, syms = resolve_scope_files(root, scope_type, scope_key, files, symbols, project)
+    _scope_out: Dict[str, Any] = {}
+    files, syms = resolve_scope_files(root, scope_type, scope_key, files, symbols, project,
+                                      out=_scope_out)
+    scope_error = _scope_out.get("scopeError")
     logger.info("[semantic] collect_context 范围 %s(%s): files=%d symbols=%d",
                 scope_type, scope_key or "-", len(files), len(syms))
     # 组件范围未解析到任何文件(组件目录/模型均未命中) → 直接空上下文，避免退化为全项目扫描。
     if scope_type == "comm" and not files and not syms:
         logger.warning("[semantic] collect_context comm(%s) 未解析到文件, 返回空上下文", scope_key or "-")
         return {"root": root, "files": [], "symbols": [], "nodes": [], "table": {},
-                "edges": [], "text": "", "srcHash": "", "source": "none"}
+                "edges": [], "text": "", "srcHash": "", "source": "none",
+                "scopeError": scope_error}
     source = "live"
     impl_by_file: Dict[str, dict] = {}
     callee_names: Dict[str, str] = {}
@@ -1251,548 +1307,7 @@ def _normalize_level(raw: Any) -> Optional[str]:
     return None
 
 
-def _flat_str(v: Any) -> str:
-    """then/else 等字段可能是 str / list / dict → 扁平化为字符串。"""
-    if v is None:
-        return ""
-    if isinstance(v, str):
-        return v.strip()
-    if isinstance(v, (list, tuple)):
-        parts = []
-        for x in v:
-            if isinstance(x, str):
-                parts.append(x.strip())
-            elif isinstance(x, dict):
-                parts.append(str(x.get("action") or x.get("semantic") or "").strip() or json.dumps(x, ensure_ascii=False))
-            else:
-                parts.append(str(x))
-        return "；".join(p for p in parts if p)
-    if isinstance(v, dict):
-        return str(v.get("action") or v.get("semantic") or "").strip() or json.dumps(v, ensure_ascii=False)
-    return str(v)
-
-
-def _norm_llm_asset(a: dict, table: Dict[str, dict]) -> Optional[dict]:
-    """把 LLM 返回的资产归一化为内部规范结构。
-
-    LLM(尤其本地中文模型)常输出 `type` 而非 `kind`、`steps.symbol` 单数而非
-    `symbols` 列表、`source_symbols`/`anchor_symbol` 作锚点。此处做宽容归一化：
-      - type → kind(含中文/驼峰变体)
-      - steps: {step,symbol,action} → {order,semantic,symbols[]}
-      - branches: {condition,then,else,result_symbol} → {condition,then,else,semantic,symbols[]}
-      - relations: {from,to,via} → {target,type,semantic}
-      - states: {state,description} → {name,desc,initial,final}
-      - transitions: {source,target,event,guard} → {from,to,event,condition,action}
-      - 锚点: source_symbols[] + anchor_symbol → astRefs(可解析则真实节点，否则记录警告)
-    无法归一化(缺 kind/name)返回 None。
-    """
-    if not isinstance(a, dict):
-        return None
-    kind = _normalize_kind(a.get("kind") or a.get("type"))
-    name = (a.get("name") or "").strip()
-    if not kind or not name:
-        return None
-    level = _normalize_level(a.get("level")) or "logic"
-    detail: Dict[str, Any] = {}
-    if isinstance(a.get("fields"), list):
-        detail["fields"] = a["fields"]
-    rels = []
-    for r in a.get("relations") or []:
-        if not isinstance(r, dict):
-            continue
-        rels.append({
-            "target": (r.get("target") or r.get("to") or "").strip(),
-            "type": (r.get("type") or r.get("via") or "").strip(),
-            "semantic": (r.get("semantic") or "").strip(),
-        })
-    if rels:
-        detail["relations"] = rels
-    if isinstance(a.get("invariants"), list):
-        detail["invariants"] = [str(x) for x in a["invariants"]]
-    if a.get("trigger"):
-        detail["trigger"] = str(a["trigger"])
-    if isinstance(a.get("steps"), list):
-        steps = []
-        for s in a["steps"]:
-            if not isinstance(s, dict):
-                continue
-            syms = s.get("symbols")
-            if not isinstance(syms, list):
-                syms = [s.get("symbol")] if s.get("symbol") else []
-            steps.append({
-                "order": s.get("order") if s.get("order") is not None else s.get("step"),
-                "semantic": (s.get("semantic") or s.get("action") or "").strip(),
-                "condition": (s.get("condition") or "").strip(),
-                "symbols": [x for x in syms if x],
-            })
-        detail["steps"] = steps
-    if isinstance(a.get("branches"), list):
-        branches = []
-        for b in a["branches"]:
-            if not isinstance(b, dict):
-                continue
-            syms = b.get("symbols")
-            if not isinstance(syms, list):
-                syms = [b.get("symbol")] if b.get("symbol") else []
-            branches.append({
-                "condition": (b.get("condition") or "").strip(),
-                "then": _flat_str(b.get("then")),
-                "else": _flat_str(b.get("else")),
-                "semantic": (b.get("semantic") or b.get("result_symbol") or "").strip(),
-                "symbols": [x for x in syms if x],
-            })
-        detail["branches"] = branches
-    if isinstance(a.get("states"), list):
-        states = []
-        for st in a["states"]:
-            if isinstance(st, str) and st.strip():
-                states.append({"name": st.strip(), "desc": "", "initial": False, "final": False})
-            elif isinstance(st, dict) and (st.get("name") or "").strip():
-                states.append({
-                    "name": (st.get("name") or "").strip(),
-                    "desc": (st.get("desc") or "").strip(),
-                    "initial": bool(st.get("initial")),
-                    "final": bool(st.get("final")),
-                })
-        if states:
-            detail["states"] = states
-    if isinstance(a.get("transitions"), list):
-        transitions = []
-        for tr in a["transitions"]:
-            if isinstance(tr, dict) and (tr.get("from") or tr.get("to")):
-                transitions.append({
-                    "from": (tr.get("from") or tr.get("source") or "").strip(),
-                    "to": (tr.get("to") or tr.get("target") or "").strip(),
-                    "event": (tr.get("event") or "").strip(),
-                    "condition": (tr.get("condition") or tr.get("guard") or "").strip(),
-                    "action": (tr.get("action") or "").strip(),
-                })
-        if transitions:
-            detail["transitions"] = transitions
-    if isinstance(a.get("tags"), list):
-        tags = [str(x).strip() for x in a["tags"] if str(x).strip()]
-        if tags:
-            detail["tags"] = tags
-    # H 级聚合：aggress 字段 → detail.aggregates(子资产组合链)。
-    agg = a.get("aggregates")
-    if isinstance(agg, list):
-        agg_norm = []
-        for x in agg:
-            if isinstance(x, str) and x.strip():
-                agg_norm.append({"assetId": x.strip()})
-            elif isinstance(x, dict) and x.get("assetId"):
-                agg_norm.append({"assetId": str(x.get("assetId")),
-                                 "name": (x.get("name") or "").strip(),
-                                 "role": (x.get("role") or "").strip()})
-        if agg_norm:
-            detail["aggregates"] = agg_norm
-
-    # 锚点：source_symbols[] + anchor_symbol → astRefs
-    # 宽容解析：LLM 常输出 file::GET:/path / Class::method 等形式，需解析到真实 AST 节点。
-    node_idx = _node_index(table)
-    ast_refs: List[dict] = []
-    src_syms = a.get("source_symbols") or []
-    if not isinstance(src_syms, list):
-        src_syms = [src_syms] if isinstance(src_syms, str) else []
-    for sym in src_syms:
-        if not sym:
-            continue
-        sym_s = str(sym).strip()
-        _f, _, _s = sym_s.partition("::")
-        file_hint = (_f or "").strip()
-        node = _resolve_symbol_node(_s or sym_s, file_hint, 0, table, node_idx)
-        if node:
-            ast_refs.append(_node_to_ref(node))
-        else:
-            logger.warning("[semantic] LLM 资产符号无法解析(锚点忽略): %s", sym_s)
-    anchor = a.get("anchor_symbol") or a.get("anchor") or ""
-    if anchor:
-        _file, _, _sym = str(anchor).partition("::")
-        _file = (_file or "").strip()
-        _sym = (_sym or "").strip()
-        line = int(a.get("anchor_line") or 0)
-        node = _resolve_symbol_node(_sym, _file, line, table, node_idx)
-        if node:
-            ast_refs.append(_node_to_ref(node))
-        else:
-            logger.warning("[semantic] LLM 资产锚点符号无法解析(忽略): %s", anchor)
-    ast_refs = list({json.dumps(r, ensure_ascii=False, sort_keys=True): r for r in ast_refs}.values())
-
-    return {"kind": kind, "level": level, "name": name, "desc": (a.get("desc") or "").strip(),
-            "detail": detail, "astRefs": ast_refs}
-
-
-def _normalize_llm_assets(output: dict, level: str, table: Dict[str, dict],
-                          max_assets: int) -> Tuple[List[dict], int]:
-    """LLM 输出 → 归一化资产列表。返回 (valid, dropped)。"""
-    assets = output.get("assets") or []
-    valid: List[dict] = []
-    dropped = 0
-    for a in assets:
-        norm = _norm_llm_asset(a, table)
-        if norm:
-            # 请求粒度权威：一次提取只产出一级，避免 LLM 混级(否则按粒度展示会不稳定)。
-            norm["level"] = level
-            valid.append(norm)
-        else:
-            dropped += 1
-        if len(valid) >= max_assets:
-            break
-    # 空锚点兜底：LLM 未给出可解析的 source_symbols/anchor_symbol 时，
-    # 从 name/desc 反查符号表补真实 AST 锚点(保证资产可定位到源码)。
-    if table:
-        _backfill_anchors(valid, table)
-    # 类别-锚点一致性后置校验：kind 与锚点节点类别冲突的资产丢弃(仅实现层)。
-    # entity 锚到函数、contract 锚到变量等 —— LLM 常见误标，此处确定性纠正。
-    if level == "implementation":
-        valid = [a for a in valid if _asset_anchor_kind_ok(a.get("kind") or "", a.get("astRefs") or [])]
-    return valid, dropped
-
-
-def _backfill_anchors(valid: List[dict], table: Dict[str, dict]) -> None:
-    """为无 astRefs 的资产补启发式锚点。
-
-    候选符号来源(依次)：
-      1) name/desc 中的反引号符号 `sym`(含 file::sym)；
-      2) detail.relations[].target(关系目标常为同文件真实符号名)；
-      3) steps/branches 中的 symbols[]。
-    在符号表中反查真实节点。找不到明确符号时**不补**(宁缺毋滥，避免锚到无关节点)——
-    跨文件引用(如 infra 资产描述中提到的其它模块函数)不在此表内，属正常。
-    """
-    idx = _node_index(table)
-    import re as _re
-    token_re = _re.compile(r"`([A-Za-z_][\w.:]*)`")
-    for a in valid:
-        if a.get("astRefs"):
-            continue
-        detail = a.get("detail") or {}
-        candidates: List[str] = []
-        text = f"{a.get('name') or ''} {a.get('desc') or ''}"
-        candidates += [m.group(1) for m in token_re.finditer(text)]
-        for r in (detail.get("relations") or []):
-            if isinstance(r, dict) and (r.get("target") or "").strip():
-                candidates.append(str(r["target"]).strip())
-        for s in (detail.get("steps") or []):
-            if isinstance(s, dict) and s.get("symbols"):
-                candidates += [str(x) for x in s["symbols"] if x]
-        for b in (detail.get("branches") or []):
-            if isinstance(b, dict) and b.get("symbols"):
-                candidates += [str(x) for x in b["symbols"] if x]
-        found: Optional[dict] = None
-        seen: set = set()
-        for tok in candidates:
-            tok = tok.strip()
-            if not tok or tok in seen:
-                continue
-            seen.add(tok)
-            _f, _, _s = tok.partition("::")
-            node = _resolve_symbol_node(_s or tok, (_f or "").strip(), 0, table, idx)
-            if node:
-                found = node
-                break
-        if found:
-            a["astRefs"] = [_node_to_ref(found)]
-
-
-def _llm_asset_detail_ok(a: dict) -> bool:
-    """资产 detail 是否满足类别完整性要求：process 需 steps 或 trigger；decision 需 branches；
-    state 需 states+transitions。
-
-    schema 中 steps/branches 均为可选，模型预算紧张时常跳过 → 产出「业务命名但空 detail」
-    的资产，污染活动图/状态图(直线流程)。此处做类别强制校验，防止空 detail 落库。
-    """
-    kind = a.get("kind") or ""
-    detail = a.get("detail") or {}
-    if not isinstance(detail, dict):
-        return False
-    if kind == "process":
-        steps = detail.get("steps")
-        if isinstance(steps, list) and steps:
-            return True
-        return bool((detail.get("trigger") or "").strip())
-    if kind == "decision":
-        branches = detail.get("branches")
-        return isinstance(branches, list) and bool(branches)
-    if kind == "state":
-        states = detail.get("states")
-        transitions = detail.get("transitions")
-        return isinstance(states, list) and bool(states) \
-            and isinstance(transitions, list) and bool(transitions)
-    return True
-
-
-def _detail_retry_hint(incomplete: List[dict]) -> str:
-    """针对缺 detail 资产的定向补全提示(回喂给模型)。"""
-    lines = ["以下资产未按要求填写 detail，请仅针对这些资产重新输出修正后的完整资产列表："]
-    for a in incomplete:
-        kind = a.get("kind") or ""
-        name = a.get("name") or ""
-        detail = a.get("detail") or {}
-        missing = []
-        if kind == "process" and not (isinstance(detail.get("steps"), list) and detail.get("steps")) \
-                and not (detail.get("trigger") or "").strip():
-            missing.append("steps(按执行顺序逐条，含 semantic/symbols；有分支时在 condition 字段写前置判定条件)")
-        if kind == "decision" and not (isinstance(detail.get("branches"), list) and detail.get("branches")):
-            missing.append("branches(condition/then/else 逐条，condition 不得留空)")
-        if kind == "state":
-            if not (isinstance(detail.get("states"), list) and detail.get("states")):
-                missing.append("states(状态集合，标注 initial/final)")
-            if not (isinstance(detail.get("transitions"), list) and detail.get("transitions")):
-                missing.append("transitions(迁移 from/to/event/condition)")
-        lines.append(f"- [{kind}] {name}: 缺少 {', '.join(missing)}")
-    lines.append("重新输出完整 JSON 对象 {\"assets\": [...]}，包含全部资产(不要省略已完整的资产)，"
-                 "不要 Markdown 代码块。")
-    return "\n".join(lines)
-
-
-_ASSET_OUTPUT_SCHEMA = {
-    "type": "object",
-    "required": ["assets"],
-    "properties": {
-        "assets": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["kind", "level", "name", "desc"],
-                "properties": {
-                    "kind": {"type": "string", "enum": list(SEMANTIC_KINDS)},
-                    "level": {"type": "string", "enum": list(SEMANTIC_LEVELS)},
-                    "name": {"type": "string", "description": "语义化名称(业务命名, 非符号名)"},
-                    "desc": {"type": "string", "description": "语义描述(逻辑层级, 比伪代码更概括)"},
-                    "source_symbols": {"type": "array", "items": {"type": "string"},
-                                       "description": "锚定本资产的清单符号名列表(必须来自符号清单，用于定位真实代码)"},
-                    "anchor_symbol": {"type": "string",
-                                      "description": "主要锚定符号(可选，格式: 符号名 或 文件::符号名)"},
-                    "fields": {"type": "array", "items": {"type": "object",
-                                 "properties": {"name": {"type": "string"}, "type": {"type": "string"},
-                                                "semantic": {"type": "string"}}}},
-                    "relations": {"type": "array", "items": {"type": "object",
-                                  "properties": {"target": {"type": "string",
-                                                             "description": "关联目标: 其它资产业务名或清单中符号名"},
-                                                 "type": {"type": "string",
-                                                          "description": "关系类型: calls/contains/extends/implements/1:N/读写 等"},
-                                                 "semantic": {"type": "string",
-                                                              "description": "关系语义一句话说明"}}}},
-                    "invariants": {"type": "array", "items": {"type": "string"}},
-                    "trigger": {"type": "string"},
-                    "steps": {"type": "array", "items": {"type": "object",
-                              "properties": {"order": {"type": "integer"}, "semantic": {"type": "string"},
-                                             "condition": {"type": "string",
-                                                           "description": "该步骤的前置判断条件(有分支时必填，如「验证码有效」)"},
-                                             "symbols": {"type": "array", "items": {"type": "string"}}}}},
-                     "branches": {"type": "array", "items": {"type": "object",
-                                 "properties": {"condition": {"type": "string"}, "then": {"type": "string"},
-                                                "else": {"type": "string"}, "semantic": {"type": "string"},
-                                                "symbols": {"type": "array", "items": {"type": "string"}}}}},
-                     "states": {"type": "array", "items": {"type": "object",
-                                "properties": {"name": {"type": "string"},
-                                               "desc": {"type": "string"},
-                                               "initial": {"type": "boolean", "description": "是否初始状态"},
-                                               "final": {"type": "boolean", "description": "是否终态"}}},
-                                "description": "state 类别: 状态集合(实体生命周期状态)"},
-                     "transitions": {"type": "array", "items": {"type": "object",
-                                     "properties": {"from": {"type": "string"},
-                                                    "to": {"type": "string"},
-                                                    "event": {"type": "string", "description": "触发事件"},
-                                                    "condition": {"type": "string", "description": "迁移守卫条件"},
-                                                    "action": {"type": "string"}}},
-                                     "description": "state 类别: 允许的状态迁移(事件驱动)"},
-                     "aggregates": {"type": "array", "items": {"type": "object",
-                                    "properties": {"assetId": {"type": "string"}, "name": {"type": "string"},
-                                                   "role": {"type": "string"}}}},
-                     "tags": {"type": "array", "items": {"type": "string"},
-                              "description": "横向切面标签(可多选): transactional/caching/security/observability/async/middleware/resilience 等"},
-                 },
-            },
-        }
-    },
-}
-
-_SYSTEM_PROMPT = (
-    "你是代码语义化建模专家。基于给定的最新代码符号清单(文件/符号/行号/签名/docstring/关系边)，"
-    "提取语义化的数据资产。\n"
-    "语义资产按「类别轴(静态·定义 / 动态·处理) × 粒度轴(业务 / 逻辑 / 实现)」二维分类，"
-    "并用 tags 标注横向切面。\n"
-    "类别 kind(值只能是 entity / contract / state / rule / process / decision，禁止翻译成中文):\n"
-    "  - entity   : 实体(静态) —— 数据对象、领域实体：字段/类型/关系(1:N/FK)/不变式\n"
-    "  - contract : 契约(静态) —— 交换的形状：接口签名、API 端点、消息/事件 schema\n"
-    "  - state    : 状态(静态) —— 生命周期定义：状态集合 + 允许迁移(仅定义面)\n"
-    "  - rule     : 规则(静态，条件性) —— 配置化的约束/策略/阈值定义(仅当存在真实配置拆分时产出)\n"
-    "  - process  : 过程(动态) —— 输入→有序步骤→输出：trigger + inputs/steps/outputs\n"
-    "  - decision : 决策(动态) —— 运行时分支：condition→then/else(无配置化拆分的规则归此类)\n"
-    "规则(重要): 规则 vs 决策 —— 硬编码在代码里的 if/分支是 decision(动态)；"
-    "只有存在真实配置拆分(配置表/阈值存储/策略文件/env)时，配置侧才是 rule(静态)，执行侧仍是 decision/process。\n"
-    "tags(横向切面，可多选，按代码特征自动打标):\n"
-    "  - transactional 事务性(commit/rollback/atomic/事务装饰器)\n"
-    "  - caching 缓存(redis/@lru_cache/cachetools)\n"
-    "  - security 安全鉴权(auth/login/jwt/token/permission)\n"
-    "  - observability 可观测性(logger/trace/metrics)\n"
-    "  - async 并发异步(async def/await/thread/semaphore/pool)\n"
-    "  - middleware 中间件(middleware/hook/interceptor)\n"
-    "  - resilience 限流重试(rate_limit/retry/backoff)\n"
-    "粒度 level(越低越贴近代码实现；值只能是 business / logic / implementation):\n"
-    "  - business       : 业务级 —— 组件下的业务功能模块/共性目标(如「订单创建与支付结算」「用户统一认证」)，"
-    "    聚合多条逻辑(detail 用 aggregates 列出组成资产)，回答「业务上是什么」；"
-    "    一个叶子组件通常对应 1~2 个业务资产(允许跨一级同源组件的共性特征)\n"
-    "  - logic          : 逻辑级 —— 伪码之上的概括简化：模块职责、用例/流程、决策表(谁负责 Who)；"
-    "    锚定符号集合\n"
-    "  - implementation : 实现级 —— 代码事实层，贴近伪码：具体计算、调用序、分支条件(具体步骤 How)；"
-    "    锚定单符号或连续同类 AST\n"
-    "约束(重要):\n"
-    "1. 只输出 JSON 对象 {\"assets\": [...]}，不要 Markdown 代码块、不要解释。\n"
-    "2. 每个资产必须真实来源于清单中的符号; steps/branches 的 symbols 必须是清单中的符号名，不得臆造。\n"
-    "3. name 用业务语义命名(如「支付结算聚合」「鉴权校验链」)，不是符号名。\n"
-    "4. desc 概括其逻辑作用与边界，比伪代码抽象。\n"
-    "5. 建议提取 2~6 个资产；无匹配数据时返回空数组。\n"
-    "6. 每个资产建议填写 source_symbols(清单中真实符号名数组)或 anchor_symbol(主要符号名)，"
-    "帮助定位其真实代码位置。\n"
-    "7. 高(business)粒度资产应聚合多个逻辑单元并填写 aggregates 字段，避免与 logic 资产重复表述。\n"
-    "8. relations 用于表达资产之间的依赖/关联，强烈建议为每个资产填写(可空) 1~3 条："
-    "target 填**其它资产业务名**或清单中的符号名(如「支付结算聚合」依赖「订单实体」、"
-    "「鉴权校验链」被「下单流程」调用)，type 填关系类型(calls/uses/reads/writes/contains/"
-    "extends/references/constrains/sends/triggers/1:N 等)，semantic 一句话说明关系含义。"
-    "relations 是图谱连边的数据来源，务必填写。"
-)
-
-
-def _llm_extract(root: Optional[str], project: Optional[str],
-                 context_text: str, model_id: Optional[str],
-                 table: Optional[Dict[str, dict]] = None,
-                 max_assets: int = 6,
-                 level: str = "logic") -> List[dict]:
-    """LLM 结构化提取。LLM 不可用/解析失败返回空列表(调用方启发式兜底)。
-
-    LLM 输出经 `_norm_llm_asset` 宽容归一化(兼容 type/kind、单复数字段、中文变体)。
-    level: 请求粒度(logic 默认)；提示词据此要求产出对应抽象层的资产。
-    """
-    from .req_agent import llm_sync
-    table = table or {}
-    sys_prompt = _SYSTEM_PROMPT
-    if level == "implementation":
-        sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 implementation 实现/代码事实层资产：名称贴近符号(如 `Order.calcTotal`)，"
-            "锚定清单中的真实符号。detail 必须逐条完整填写：\n"
-            "  - entity → fields(列出该类型/结构体的字段 name/type)\n"
-            "  - process → steps(按真实调用顺序，每步 symbols 填被调符号名；"
-            "若步骤前存在 if/分支判定，在 condition 字段写判定条件原文)\n"
-            "  - decision → branches(逐条列出分支 condition 尽量按代码原文 + then/else，condition 不得留空)\n"
-            "  - contract → relations(签名/消息约定)\n"
-            "  - state → states(状态集合) + transitions(迁移 from/to/event/condition)\n"
-            "  - rule → 仅当存在真实配置拆分(配置表/阈值存储/常量字典如 `_DEFAULT_*`/env)时才产出；"
-            "detail 记录 configSource/约束/阈值。硬编码分支不是 rule。\n"
-            "类别-锚点对应(重要):\n"
-            "  - entity 只能锚 class/struct/enum/interface 类型节点；禁止把函数当实体。\n"
-            "  - contract 只能锚 route 节点或 api_*/handle_* 路由处理函数(上下文「API 路由清单」"
-            "中出现的 handler)；禁止把内部函数(get_config/send_sms_code 等)当契约。\n"
-            "  - state 只能锚 enum 枚举。\n"
-            "  - 每个符号只产一个资产(选最合适类别)，禁止同一函数同时输出 process+contract+decision。\n"
-            "上下文若提供「API 路由清单/常量值清单/控制流语句清单」，它们是该文件的权威实现事实："
-            "  - contract 的 relations 必须采用路由清单中的真实 path/methods(不要臆造端点)；\n"
-            "  - decision 的 branches.condition 必须采用语句清单中的条件原文(按行号对应所属函数)；\n"
-            "  - rule 的 constraints/thresholds 采用常量值清单中的真实值。\n"
-            "不得输出 business/logic 级归纳，不得臆造清单中不存在的符号。"
-        )
-    elif level == "business":
-        sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 business 业务级资产：组件下的业务功能模块/共性目标(如「订单创建与支付结算」「用户统一认证」)，"
-            "聚合多个逻辑/实现级资产，detail 用 aggregates 列出组成资产。不要输出 logic/implementation 级细节。"
-        )
-    elif level == "logic":
-        sys_prompt = _SYSTEM_PROMPT + (
-            "\n\n本批只提取 logic 逻辑级资产：伪码之上的概括简化(模块职责/用例/流程/决策表)。"
-            "detail 必须按类别完整填写，不得留空：\n"
-            "  - entity → fields(名称/类型/语义) + relations + invariants\n"
-            "  - process → trigger + inputs/outputs(端点引用其它资产或符号) + steps(按执行顺序，"
-            "每步 semantic + symbols；存在分支时在 condition 字段写前置判定条件) + invariants\n"
-            "  - decision → branches(condition/then/else 逐条，condition 不得留空) + inputs + invariants\n"
-            "  - contract → relations(端点/事件/消息，target 用符号名或其它资产业务名)\n"
-            "  - state → states(状态集合，标注 initial/final) + transitions(from/to/event/condition)\n"
-            "  - rule → 仅当存在真实配置拆分时才产出；否则相关逻辑归 decision/process。\n"
-            "不要输出 business/implementation 级资产。"
-        )
-    logger.info("[semantic] llm 提取: model=%s level=%s text_len=%d",
-                model_id or "(默认)", level, len(context_text or ""))
-    # 输出预算取自 KB 配置(arch_collab_config.llm.maxTokens；空则透传 None，
-    # 由主后端按 model_configs.max_tokens 兜底)。固定 4000 对大文件过紧，易致 JSON
-    # 截断后整批落入启发式兜底(空 steps/branches)；KB 模型配置默认 16384 足够。
-    from .req_agent import get_max_tokens_preference
-    max_tokens = get_max_tokens_preference()
-    messages = [{"role": "system", "content": sys_prompt},
-                {"role": "user", "content": context_text}]
-    res = llm_sync(messages, mode="structured", output_schema=_ASSET_OUTPUT_SCHEMA,
-                   max_tokens=max_tokens, model_id=model_id)
-    if not res:
-        logger.warning("[semantic] llm 提取返回空/失败(将走启发式兜底)")
-        return []
-    output = res.get("output")
-    if not isinstance(output, dict):
-        logger.warning("[semantic] llm 提取输出非 dict: type=%s content_len=%d "
-                       "structuredError=%r(将走启发式兜底)",
-                       type(output).__name__, len(res.get("content") or ""),
-                       str(res.get("structuredError"))[:300])
-        return []
-    valid, dropped = _normalize_llm_assets(output, level, table, max_assets)
-    # detail 完整性定向重试：behavior 缺 steps/trigger、rule 缺 branches 时，回喂提示
-    # 让模型补全(与 B1 的 JSON 解析重试互补，B1 只覆盖解析失败，不覆盖「可解析但空 detail」)。
-    incomplete = [a for a in valid if not _llm_asset_detail_ok(a)]
-    if incomplete:
-        hint = _detail_retry_hint(incomplete)
-        retry_msgs = messages + [
-            {"role": "assistant", "content": res.get("content") or ""},
-            {"role": "user", "content": hint},
-        ]
-        res2 = llm_sync(retry_msgs, mode="structured", output_schema=_ASSET_OUTPUT_SCHEMA,
-                        max_tokens=max_tokens, model_id=model_id)
-        if res2 and isinstance(res2.get("output"), dict):
-            valid2, dropped2 = _normalize_llm_assets(res2["output"], level, table, max_assets)
-            # 仅当重试结果比首轮有更多 detail 完整资产时采用(模型可能反而退化/省略已完整资产)。
-            if valid2 and (sum(_llm_asset_detail_ok(a) for a in valid2)
-                           > sum(_llm_asset_detail_ok(a) for a in valid)):
-                valid, dropped = valid2, dropped + dropped2
-    # 仍缺 detail 的资产：仅当存在其它完整资产时丢弃并告警(避免空 steps/branches 资产
-    # 污染活动图/状态图)；若全部缺 detail，则保留(业务命名仍优于启发式符号名兜底，
-    # 且丢弃整批会级联触发启发式，同样空 detail 且名称更差)。
-    kept = [a for a in valid if _llm_asset_detail_ok(a)]
-    dropped_empty = 0
-    if kept:
-        dropped_empty = len(valid) - len(kept)
-        if dropped_empty:
-            logger.warning("[semantic] llm 提取丢弃缺 detail 资产 %d 个: %s",
-                           dropped_empty,
-                           ", ".join((a.get("name") or "?") for a in valid if not _llm_asset_detail_ok(a))[:200])
-        valid = kept
-    elif valid:
-        logger.warning("[semantic] llm 提取全部缺 detail(%d 个)，保留业务命名资产", len(valid))
-    logger.info("[semantic] llm 提取输出: 原始=%d 有效=%d 丢弃=%d",
-                len(output.get("assets") or []), len(valid), dropped + dropped_empty)
-    raw_assets = output.get("assets") or []
-    if raw_assets and not valid:
-        logger.warning("[semantic] llm 提取资产全部未通过归一化: 首个键=%s 首个type=%r",
-                       list((raw_assets[0] or {}).keys()) if isinstance(raw_assets[0], dict) else "-",
-                       (raw_assets[0] or {}).get("type") if isinstance(raw_assets[0], dict) else None)
-    return valid
-
-
 # ── 启发式降级 ────────────────────────────────────────────────
-
-# infra 量化信号：符号签名/文档命中任一类别即判基础设施级(首个命中类别写入 tags)。
-_INFRA_SIGNALS: List[Tuple[str, Tuple[str, ...]]] = [
-    ("async", ("async def", "await ", "asyncio", "thread", "semaphore", "queue", "pool")),
-    ("transactional", ("@transaction", "transaction", "commit(", "rollback", "atomic", "begin(")),
-    ("caching", ("@lru_cache", "cache", "redis", "memoiz", "@cache")),
-    ("security", ("auth", "login", "jwt", "token", "permission", "require_")),
-    ("observability", ("logger", "trace", "metric", "instrument", "@log")),
-    ("middleware", ("middleware", "before_request", "after_request", "hook", "interceptor")),
-    ("resilience", ("rate_limit", "throttl", "retry", "backoff")),
-]
-
-
-def _infra_tags(text: str) -> List[str]:
-    """符号签名/文档 → 命中的 infra 切面标签(量化：≥1 信号即 infra)。"""
-    t = (text or "").lower()
-    hit = [tag for tag, sigs in _INFRA_SIGNALS if any(s in t for s in sigs)]
-    return hit
-
 
 # 配置载体命名信号(角色判定：命中 → 倾向静态 Rule)。
 _CONFIG_CARRIER_NAMES = (
@@ -1836,166 +1351,6 @@ def _config_carrier_signal(node: dict) -> bool:
             and ("key" in sig or "default" in sig):
         return True
     return False
-
-
-def _config_consumer_signal(node: dict, edges: List[dict],
-                            name_of: Optional[Dict[str, str]] = None) -> bool:
-    """强信号②：符号 calls 配置读写符号(如 register_success calls get_config) → 是执行点，非 Rule。"""
-    out_edges = [e for e in (edges or []) if e.get("source") == node.get("id")]
-    for e in out_edges:
-        if e.get("kind") != "calls":
-            continue
-        tgt = e.get("target") or ""
-        if tgt.startswith("cache:") or "::" in tgt:
-            tgt = tgt.rsplit("::", 1)[-1]
-        t = tgt.lower()
-        if any(k in t for k in ("get_config", "set_config", "get_threshold", "set_threshold",
-                                "get_settings", "load_config", "get_all_config")):
-            return True
-    return False
-
-
-def _classify_rule_role(node: dict, edges: List[dict],
-                        name_of: Optional[Dict[str, str]] = None) -> str:
-    """符号的规则角色判定(信号优先)：
-    - 'rule'    : 配置载体(定义侧) → 静态 Rule 资产；
-    - 'dynamic' : 配置消费者(执行侧) → 归 process/decision，由 detail 用 uses 关联规则；
-    - ''        : 无信号，不参与规则判定。
-    """
-    if _config_carrier_signal(node):
-        return "rule"
-    if _config_consumer_signal(node, edges, name_of):
-        return "dynamic"
-    return ""
-
-
-def _heuristic_extract(kind: str, ctx: Dict[str, Any],
-                       level: str = "logic") -> List[dict]:
-    """无 LLM 时的确定性提取。
-
-    - level='implementation' : 代码事实层。concrete_type/call_chain/branch_logic/message_contract
-                              一一对应 codegraph 符号节点(名称=符号名，锚定真实节点)，零臆造。
-    - level='logic' : 逻辑级降级。以符号名+签名/docstring 兜底(名称=符号名，粒度近 implementation，
-                     供 LLM 不可用时仍能消费)。
-    - kind='rule'   : 配置载体强信号过滤 —— 仅当命中配置读写符号(Config 类 / _DEFAULT_* 常量 /
-                      get_config(key,default) 类签名)时产出，硬编码分支归 decision。
-    - kind='state'  : 从枚举/含状态字段的类型归纳状态机(独立于粒度信号)。
-    """
-    nodes = ctx.get("nodes") or []
-    edges = ctx.get("edges") or []
-    root = ctx.get("root") or ""
-    out: List[dict] = []
-    low = level == "implementation"
-    node_by_id = {n.get("id"): n for n in nodes}
-    name_of = {n.get("id"): (n.get("qualified_name") or n.get("name") or "") for n in nodes}
-    if kind == "entity":
-        for n in nodes:
-            if n.get("kind") not in ("class", "interface", "enum", "struct", "component"):
-                continue
-            doc = (n.get("docstring") or "").strip()
-            desc = doc or (f"数据结构「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。"
-                           if not low else
-                           f"具体类型「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。")
-            fields = _fields_from_node(n) or _member_fields_from_edges(n.get("id"), edges, node_by_id)
-            if not fields:
-                # codegraph 对 Python 等语言常缺字段级节点 → 源码回读兜底(所有粒度都填属性)。
-                fields = _fields_from_source(root, n)
-            detail = {"fields": fields, "relations": [], "invariants": []}
-            if low:
-                detail = {"kind": "type", "signature": n.get("signature") or "",
-                          "fields": fields, "invariants": []}
-            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
-                        "detail": detail, "astRefs": [_node_to_ref(n)]})
-    elif kind == "process":
-        for n in nodes:
-            if n.get("kind") not in ("function", "method", "route"):
-                continue
-            sig = n.get("signature") or ""
-            doc = (n.get("docstring") or "").strip()
-            desc = doc or (f"处理流程「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。"
-                           if not low else
-                           f"调用链「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。")
-            detail = {"trigger": "", "steps": [], "invariants": []}
-            if low:
-                callees = _callee_names(n.get("id"), edges, name_of)
-                branches = _branches_from_impl(
-                    ctx.get("implDetails"), n, types=("if", "switch", "case", "loop"))
-                detail = {"trigger": "", "kind": "call_chain",
-                          "steps": [{"order": i, "semantic": "调用 " + c, "symbols": [c]}
-                                    for i, c in enumerate(callees, 1)],
-                          "conditions": [b["condition"] for b in branches
-                                         if b.get("condition")][:8],
-                          "invariants": []}
-            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
-                        "detail": detail, "astRefs": [_node_to_ref(n)]})
-    elif kind == "decision":
-        for n in nodes:
-            if n.get("kind") not in ("function", "method", "route"):
-                continue
-            sig = n.get("signature") or ""
-            doc = (n.get("docstring") or "").strip()
-            desc = doc or (f"控制逻辑「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。"
-                           if not low else
-                           f"分支逻辑「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。")
-            detail = {"branches": [], "invariants": []}
-            if low:
-                branches = _branches_from_impl(ctx.get("implDetails"), n)
-                if not branches:
-                    branches = [{"condition": "", "then": "", "else": "",
-                                 "semantic": f"分支判定: {n['name']}", "symbols": [n["name"]]}]
-                detail = {"kind": "branch_logic", "branches": branches, "invariants": []}
-            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
-                        "detail": detail, "astRefs": [_node_to_ref(n)]})
-    elif kind == "contract":
-        for n in nodes:
-            if n.get("kind") not in ("function", "method", "route"):
-                continue
-            sig = n.get("signature") or ""
-            doc = (n.get("docstring") or "").strip()
-            desc = doc or (f"服务契约「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。"
-                           if not low else
-                           f"消息/签名约定「{n['name']}」，签名 ({sig})，位于 {n['file_path']}:{n['start_line']}。")
-            detail = {"relations": [], "invariants": []}
-            if low:
-                rels = _relations_from_routes(ctx.get("implDetails"), n)
-                if not rels:
-                    rels = [{"target": "", "type": "signature", "semantic": sig}]
-                detail = {"kind": "message_contract", "relations": rels, "invariants": []}
-            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
-                        "detail": detail, "astRefs": [_node_to_ref(n)]})
-    elif kind == "rule":
-        # 配置载体强信号：仅产出命中配置读写信号的符号(定义侧)；配置消费者(执行侧)归 decision/process。
-        for n in nodes:
-            role = _classify_rule_role(n, edges, name_of)
-            if role != "rule":
-                continue
-            doc = (n.get("docstring") or "").strip()
-            desc = doc or f"配置/阈值「{n['name']}」，位于 {n['file_path']}:{n['start_line']}。"
-            detail = {"configSource": "", "constraints": [], "thresholds": []}
-            if low:
-                detail = {"kind": "config_item", "configSource": n.get("file_path") or "",
-                          "constraints": _constants_from_impl(ctx.get("implDetails"), n),
-                          "thresholds": []}
-            out.append({"kind": kind, "level": level, "name": n["name"], "desc": desc,
-                        "detail": detail, "astRefs": [_node_to_ref(n)]})
-    elif kind == "state":
-        # 从枚举(状态集合)或含 status/state 字段的类型归纳状态机；迁移为确定性推导(条件留空)。
-        enum_nodes = [n for n in nodes if n.get("kind") == "enum"]
-        for n in enum_nodes:
-            members = _member_fields_from_edges(n.get("id"), edges, node_by_id)
-            if not members:
-                continue
-            states = [{"name": m.get("name") or f"s{i}", "desc": "",
-                       "initial": i == 0, "final": i == len(members) - 1}
-                      for i, m in enumerate(members)]
-            transitions = [{"from": states[i]["name"], "to": states[i + 1]["name"],
-                            "event": "", "condition": "", "action": ""}
-                           for i in range(len(states) - 1)]
-            out.append({"kind": kind, "level": level,
-                        "name": n["name"], "desc": f"实体生命周期「{n['name']}」的状态机(枚举推导)。",
-                        "detail": {"states": states, "transitions": transitions, "invariants": []},
-                        "astRefs": [_node_to_ref(n)]})
-    return out[:12]
 
 
 # ── 实现层主类别分配(每符号只产一个资产，消除跨类别重复) ──────────────
@@ -2446,6 +1801,42 @@ _EDGE_SEMANTIC = {
 }
 
 
+def _inherit_names(pid: str, assets: List[dict]) -> List[dict]:
+    """名称继承(旧行名优先 + 墓碑承接)：re-extract 覆盖前保住用户改名。
+
+    与 save_agent_assets 同口径，但按 canonicalKey 一次建索引(定向管线每批资产多，
+    不可逐资产扫全表)。就地改写 asset['name']；返回 (assets, proposed)。
+    资产身份=代码锚点(kind|level|anchors)，与组件口径无关 → 跨组件 re-extract 亦命中。
+    """
+    by_key: Dict[str, dict] = {}
+    for old_a in store.SemanticAssetsStore.all_status(pid, limit=20000):
+        ck = old_a.get("canonicalKey") or ""
+        if ck and ck not in by_key:
+            by_key[ck] = old_a
+    for i, a in enumerate(assets):
+        refs = a.get("astRefs") or []
+        if not refs:
+            continue
+        ck = _canonical_key(a.get("kind") or "", a.get("level") or "implementation",
+                            refs, name=a.get("name") or "")
+        old = by_key.get(ck)
+        if old:
+            old_name = old.get("name") or ""
+            if old_name and old_name != (a.get("name") or ""):
+                a = dict(a)
+                a["name"] = old_name  # 旧行名优先，re-extract 不覆盖用户改名
+                assets[i] = a
+        else:
+            f0 = (refs[0] or {}).get("file") or ""
+            s0 = (refs[0] or {}).get("symbol") or ""
+            hits = store.NameTombstoneStore.lookup(pid, f0, s0, limit=1)
+            if hits and hits[0].get("name"):
+                a = dict(a)
+                a["name"] = hits[0]["name"]  # 捞回历史命名
+                assets[i] = a
+    return assets
+
+
 def _merge_high_details(payload: dict, old: dict) -> None:
     """同批合并 business 资产时聚合 detail：把旧行的 aggregates/invariants 并入新 payload，
     避免后写覆盖导致跨叶子聚合的子资产(id)与组件归属丢失。"""
@@ -2740,6 +2131,12 @@ def extract_scope(root: Optional[str], project: Optional[str],
     except Exception as e:
         logger.exception("[semantic] collect_context 异常: scope=%s(%s)", scope_type, scope_key or "-")
         return {"assets": [], "source": "error", "degraded": True, "count": 0}
+    if ctx.get("scopeError"):
+        # comm 范围未命中：显式返回失败原因+可选组件清单（如实报告，禁止静默空结果）
+        se = ctx["scopeError"]
+        logger.warning("[semantic] extract_scope 范围解析失败: %s", se.get("error"))
+        return {"assets": [], "source": "none", "degraded": True, "count": 0,
+                "error": se.get("error"), "candidates": se.get("candidates") or []}
     pid = project_id_for(root, project)
     degraded = ctx.get("source") != "codegraph"
     logger.info(
@@ -2750,105 +2147,39 @@ def extract_scope(root: Optional[str], project: Optional[str],
     all_assets: List[dict] = []
     llm_count = 0
     heur_counts: Dict[str, int] = {}
-    if level == "implementation":
-        # 新管线：规则候选(类别定死) → (文件×类型)定向 LLM → 验收 → 工具补齐 → 种子地板。
-        # LLM 不可用/关闭时管线自动退化为纯确定性种子资产(不丢类别覆盖)。
-        from . import asset_extract
-        all_assets = asset_extract.extract_directed(
-            root, project, ctx, kinds, model_id=model_id, use_llm=use_llm)
-        if not use_llm:
-            degraded = True
-        for a in all_assets:
-            heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
-        llm_count = sum(1 for a in all_assets if not a.get("meta", {}).get("degraded"))
-    elif use_llm:
-        try:
-            llm_assets = _llm_extract(root, project, ctx.get("text") or "", model_id,
-                                      table=ctx.get("table") or {}, level=level)
-            llm_count = len(llm_assets or [])
-        except Exception as e:
-            logger.warning("[semantic] llm extract failed: %s", e, exc_info=True)
-            llm_assets = []
-        if llm_assets:
-            all_assets = llm_assets
+    if level != "implementation":
+        # 逻辑层/业务层暂停再生：提取统一为实现层定向管线(tAgent 单管线)。
+        # 显式请求低层返回空(如实标注，不再整包自由识别)。
+        logger.info("[semantic] extract_scope level=%s 暂停再生, 统一实现层定向管线", level)
+        return {"assets": [], "source": "paused", "degraded": False, "count": 0,
+                "reason": f"level={level} 暂停再生，提取统一为实现层"}
+    # 实现层：规则候选(类别定死) → (文件×类型)定向 tAgent → 验收 → 工具补齐 → 种子地板。
+    # LLM 不可用/关闭时管线自动退化为纯确定性种子资产(不丢类别覆盖)。
+    from . import asset_extract
+    all_assets = asset_extract.extract_directed(
+        root, project, ctx, kinds, model_id=model_id, use_llm=use_llm)
+    if not use_llm:
+        degraded = True
+    for a in all_assets:
+        heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
+    llm_count = sum(1 for a in all_assets if not a.get("meta", {}).get("degraded"))
     if not all_assets:
         degraded = True
-        if level == "implementation":
-            # 兜底(新管线异常时)：旧单趟主类别启发式。
-            all_assets = _heuristic_extract_primary(ctx, kinds)
-            for a in all_assets:
-                heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
-        else:
-            for k in kinds:
-                _before = len(all_assets)
-                all_assets += _heuristic_extract(k, ctx, level=level)
-                heur_counts[k] = len(all_assets) - _before
+        # 兜底(新管线异常时)：旧单趟主类别启发式。
+        all_assets = _heuristic_extract_primary(ctx, kinds)
+        for a in all_assets:
+            heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
     logger.info(
         "[semantic] extract_scope 结果: scope=%s(%s) llm=%d heuristic=%s "
         "degraded=%s saved=%d text_len=%d",
         scope_type, scope_key or "-", llm_count, heur_counts or "-",
         degraded, len(all_assets), len(ctx.get("text") or ""))
+    # 名称继承：re-extract 覆盖前保住用户改名(旧行名优先)+ 新资产墓碑承接
+    _inherit_names(pid, all_assets)
     saved = _save_assets(pid, scope_type or "project", scope_key or "_", all_assets, ctx)
     return {"assets": saved, "source": ctx.get("source"), "degraded": degraded,
             "count": len(saved)}
 
-
-def _extract_file_set(root: str, project: Optional[str],
-                      files: Optional[List[str]],
-                      kinds: Optional[List[str]] = None,
-                      model_id: Optional[str] = None,
-                      use_llm: bool = True,
-                      level: str = "implementation") -> Tuple[List[dict], int, List[str]]:
-    """对去重后的文件集合逐文件单次提取(每文件独立 LLM 上下文)。
-
-    INCLUDE/CALL 两套组件重叠文件只提取一次；资产身份=代码锚点，
-    归属(membership)由 `_save_assets` 按锚点文件推导，不重复建行。
-    返回 (assets, extracted_files, failed_files)。
-    """
-    todo = sorted({_norm_path(f) for f in (files or []) if f})
-    assets: List[dict] = []
-    failed: List[str] = []
-    done = 0
-    for f in todo:
-        try:
-            res = extract_scope(root, project, "files", f, files=[f],
-                                kinds=kinds, model_id=model_id,
-                                use_llm=use_llm, level=level)
-            assets += res.get("assets") or []
-            done += 1
-        except Exception as e:
-            failed.append(f)
-            logger.warning("[semantic] extract file %s failed: %s", f, e, exc_info=True)
-    return assets, done, failed
-
-
-def _extract_file_set_levels(root: str, project: Optional[str],
-                             files: Optional[List[str]],
-                             kinds: Optional[List[str]] = None,
-                             model_id: Optional[str] = None,
-                             use_llm: bool = True,
-                             levels: Tuple[str, ...] = ("implementation",)) -> Tuple[List[dict], int, List[str]]:
-    """对文件集合逐级提取(默认仅 implementation)，合并各层级资产。
-
-    满足按粒度展示：业务级(business)由聚合层按需从 logic 资产聚合；
-    逻辑级+业务级当前暂停再生，需要时显式传 levels。
-    """
-    assets: List[dict] = []
-    done, failed = 0, []
-    for lv in levels:
-        a, d, f = _extract_file_set(root, project, files, kinds,
-                                    model_id=model_id, use_llm=use_llm, level=lv)
-        assets += a
-        done += d
-        failed += f
-    return assets, done, failed
-
-
-_AGG_HINT = {
-    "llm": "LLM 服务不可达或调用失败，已重试仍失败",
-    "parse": "LLM 返回内容未能解析为结构化资产，已重试仍失败",
-    "empty": "当前无足够交互/算法级资产可聚合",
-}
 
 def _aggregate_high_best_effort(root: Optional[str], project: Optional[str],
                                 model_id: Optional[str] = None) -> Dict[str, Any]:
@@ -3145,62 +2476,6 @@ def split_asset(asset_id: str, parts: List[Dict[str, Any]],
         {"parts": parts_payload}, _asset_anchor_basis(asset), author=author)
     logger.info("[semantic] split %s -> %s (ovl=%s)", asset_id, new_ids, overlay.get("id"))
     return {"deletedAssetId": asset_id, "created": created, "overlayId": overlay.get("id")}
-
-
-def extract_all(root: Optional[str], project: Optional[str],
-                kinds: Optional[List[str]] = None,
-                model_id: Optional[str] = None,
-                use_llm: bool = True,
-                max_components: int = 12,
-                level: str = "all") -> Dict[str, Any]:
-    """批处理: 组件目录(跨 INCLUDE/CALL × L0/L1)文件并集 → 逐文件多级提取。
-
-    组件是下游投影(资产身份=代码锚点)，两套组件重叠文件不重复提取。
-    无组件时按全项目提取一次。缺省 level 仅产出 implementation(业务层/逻辑层
-    暂停再生；显式传 level='logic'/'business' 才单独产出/聚合)。
-    """
-    root = resolve_root(root, project)
-    if not root:
-        logger.warning("[semantic] extract_all 中止: 项目 root 解析失败 (root=%r project=%r)", root, project)
-        return {"assets": [], "count": 0, "components": 0}
-    from .common import build_component_catalog
-    comps = []
-    try:
-        comps = (build_component_catalog(root, project) or {}).get("components") or []
-    except Exception as e:
-        logger.warning("[semantic] extract_all 组件目录解析失败: %s", e, exc_info=True)
-        comps = []
-    files: List[str] = []
-    for c in comps[:max_components]:
-        files += (c.get("owns") or [])
-    logger.info("[semantic] extract_all 组件目录: 组件=%d 文件(去重前)=%d level=%s",
-                len(comps), len(files), level)
-    levels = _resolve_extract_levels(level)
-    file_levels = tuple(lv for lv in levels if lv in ("implementation", "logic"))
-    # 业务级聚合暂停再生：仅当显式请求 level="business" 才触发聚合(默认不再自动产 business)。
-    do_business = level == "business"
-    business_count = 0
-    if not files:
-        logger.info("[semantic] extract_all 无组件文件, 按全项目提取一次")
-        assets: List[dict] = []
-        for lv in file_levels:
-            res = extract_scope(root, project, "project", kinds=kinds,
-                                model_id=model_id, use_llm=use_llm, level=lv)
-            assets += res.get("assets") or []
-    else:
-        assets, done, _failed = _extract_file_set_levels(root, project, files, kinds,
-                                                         model_id=model_id, use_llm=use_llm,
-                                                         levels=file_levels)
-    business_count = 0
-    business_reason = "ok"
-    if do_business:
-        agg = _aggregate_high_best_effort(root, project, model_id) or {}
-        business_count = agg.get("count") or 0
-        business_reason = agg.get("reason") or "ok"
-    logger.info("[semantic] extract_all 完成: 文件=%d 资产=%d business=%d business_reason=%s",
-                len(files), len(assets), business_count, business_reason)
-    return {"assets": assets, "count": len(assets), "components": len(comps),
-            "business": business_count, "businessReason": business_reason}
 
 
 def refresh_scope(root: Optional[str], project: Optional[str],
@@ -3745,7 +3020,6 @@ def _asset_scope_membership(ast_refs: List[dict],
     return sorted(comps)
 
 
-
 def _component_asset_ids(pid: str, comp_files: Dict[str, set],
                          scopes: Optional[List[str]]) -> List[str]:
     """选定组件范围 → 资产 id 集合(与 search 的 scope 语义一致)。
@@ -3803,56 +3077,16 @@ def batch_manage(root: Optional[str], project: Optional[str],
                  dry_run: bool = False) -> Dict[str, Any]:
     """批量管理组件范围语义资产。
 
-    - extract: 对每个组件(未指定则全部)按 comm 范围提取并落库。
-               更新语义 = 重新提取(可先 clear 删除再提取，或直接重提覆盖)。
-    - clear:   物理删除选定组件范围内的语义资产(不做软删保留)，
-               dry_run=True 仅返回影响范围供确认。
+    仅支持 action="clear"：物理删除选定组件范围内的语义资产(不做软删保留)，
+    dry_run=True 仅返回影响范围供确认。批量全量提取已退役——提取统一为
+    组件 ID 指令化单管线(asset.semantic.extract / 单组件范围 /extract)。
 
-    scopes: 与 search 一致的组件范围语义(None=全部 / ['__other__']=仅其它 /
-            组件 id 列表)。兼容旧参数 comp_ids+include_other(空 comp_ids 且 include_other=True = 全部)。
-    返回 {action, count, components?, cleared?, updated?}。
+    兼容保留 kinds/model_id/level 参数(clear 不使用)。scopes: 与 search 一致的
+    组件范围语义(None=全部 / ['__other__']=仅其它 / 组件 id 列表)。
+    返回 {action, count, cleared?, impact?}。
     """
     root = resolve_root(root, project)
     comp_ids = [c for c in (comp_ids or []) if c]
-    if action == "extract":
-        if not comp_ids:
-            try:
-                from .common import build_component_catalog
-                comps = (build_component_catalog(root, project) or {}).get("components") or []
-                seen: set = set()
-                comp_ids = []
-                for c in comps:
-                    cid = c.get("id")
-                    if cid and cid not in seen:
-                        seen.add(cid)
-                        comp_ids.append(cid)
-            except Exception as e:
-                logger.warning("[semantic] batch extract resolve components failed: %s", e)
-                comp_ids = []
-        # 组件文件并集 → 逐文件单次提取(INCLUDE/CALL 重叠不重复)。
-        files: List[str] = []
-        for cid in comp_ids:
-            files += _comm_files(root, cid, project)
-        logger.info("[semantic] batch extract 开始: comp_ids=%d 文件=%d kinds=%s level=%s",
-                    len(comp_ids), len(files), kinds, level)
-        if not files:
-            return {"action": action, "count": 0, "components": len(comp_ids),
-                    "cleared": [], "updated": []}
-        levels = _resolve_extract_levels(level or "")
-        assets, done, _failed = _extract_file_set_levels(root, project, files, kinds,
-                                                         model_id=model_id, use_llm=True,
-                                                         levels=levels)
-        high_count = 0
-        high_reason = "ok"
-        # 业务层暂停再生：仅显式请求 level="business" 才聚合。
-        if (level or "") == "business":
-            agg = _aggregate_high_best_effort(root, project, model_id) or {}
-            high_count = agg.get("count") or 0
-            high_reason = agg.get("reason") or "ok"
-        logger.info("[semantic] batch extract 完成: 文件=%d 资产=%d high=%d high_reason=%s",
-                    done, len(assets), high_count, high_reason)
-        return {"action": action, "count": len(assets), "components": len(comp_ids),
-                "cleared": [], "updated": [], "high": high_count, "highReason": high_reason}
     if action != "clear":
         return {"action": action, "count": 0, "cleared": [], "updated": []}
     pid = project_id_for(root, project)
@@ -4044,249 +3278,6 @@ def purge_semantic_assets(root: Optional[str], project: Optional[str],
     return {"purged": purged, "dryRun": False, "confirmRequired": False,
             "candidates": len(to_delete), "byStatus": by_status,
             "impact": impact, "marked": marked}
-
-
-# ── 提取任务(状态保持：服务端后台执行，进度/消息持久化) ──────────
-
-_EXTRACT_THREADS: Dict[str, threading.Thread] = {}
-_EXTRACT_LOCK = threading.Lock()
-# 已请求取消的提取任务 id(后台线程在组件边界检查并提前停止)。
-_EXTRACT_CANCEL: set = set()
-
-
-def _task_append_message(task_id: str, role: str, content: str) -> dict:
-    """向提取任务追加一条对话消息(持久化到 task.messages，供前端轮询同步)。"""
-    now = _ts()
-    msg = {"id": store.next_id("m"), "role": role, "content": content, "time": now}
-    try:
-        task = store.ExtractTaskStore.get(task_id)
-        msgs = list(task.get("messages") or []) if task else []
-        msgs.append(msg)
-        store.ExtractTaskStore.update(task_id, {"messages": msgs, "updatedAt": now})
-    except Exception as e:
-        logger.warning("[semantic] extract task append message failed: %s", e)
-    return msg
-
-
-def _task_update_progress(task_id: str, progress: Optional[list] = None,
-                          done: Optional[int] = None, total: Optional[int] = None,
-                          status: Optional[str] = None) -> None:
-    """更新任务进度(progress: 每组件状态 [{compId,status,count,error}])。"""
-    payload: Dict[str, Any] = {"updatedAt": _ts()}
-    if progress is not None:
-        payload["progress"] = progress
-    if done is not None:
-        payload["done"] = done
-    if total is not None:
-        payload["total"] = total
-    if status is not None:
-        payload["status"] = status
-    try:
-        store.ExtractTaskStore.update(task_id, payload)
-    except Exception as e:
-        logger.warning("[semantic] extract task update failed: %s", e)
-
-
-def _extract_one_comp(task_id: str, cid: str, name: str, kinds: Optional[List[str]],
-                      root: Optional[str], project: Optional[str],
-                      model_id: Optional[str], files: Optional[List[str]] = None) -> dict:
-    """执行单个组件提取并同步消息/进度；返回该组件结果。
-
-    files: 该组件内本次**尚未提取**的文件(任务级去重后)；为空表示已被其它组件覆盖。
-    """
-    _task_append_message(task_id, "assistant", f"▶ 开始提取组件「{name}」({cid})…")
-    result: Dict[str, Any] = {"compId": cid, "status": "running", "count": 0, "error": ""}
-    try:
-        if not files:
-            result["status"] = "done"
-            _task_append_message(task_id, "assistant",
-                                 f"✔ 组件「{name}」文件已被其它组件覆盖，跳过重复提取。")
-            return result
-        assets, _, failed = _extract_file_set_levels(root, project, files, kinds,
-                                                     model_id=model_id, use_llm=True,
-                                                     levels=("implementation",))
-        result["count"] = len(assets)
-        if failed:
-            result["status"] = "failed"
-            result["error"] = "文件提取失败: " + ", ".join(failed[:3])
-            _task_append_message(task_id, "assistant",
-                                 f"✘ 组件「{name}」部分文件提取失败：{', '.join(failed[:3])}")
-        else:
-            result["status"] = "done"
-            _task_append_message(task_id, "assistant",
-                                 f"✔ 组件「{name}」完成，产出 {len(assets)} 个语义资产。")
-    except Exception as e:
-        result["status"] = "failed"
-        result["error"] = str(e)
-        _task_append_message(task_id, "assistant",
-                             f"✘ 组件「{name}」提取失败：{e}")
-    return result
-
-
-def _run_extract_task(task_id: str, comp_ids: List[str], names: Dict[str, str],
-                      kinds: Optional[List[str]], root: Optional[str],
-                      project: Optional[str], model_id: Optional[str]) -> None:
-    """后台执行提取任务：跨组件去重后逐文件单次提取(INCLUDE/CALL 重叠不重复)，
-    进度/消息按组件持久化，任务结束更新状态。"""
-    # 后台线程不继承请求上下文 → 显式设置项目上下文(项目库路由)
-    from . import ctx as _ctx
-    if project:
-        _ctx.set_project(project)
-    # 先为每个组件解析其文件，任务级按文件去重：每文件只提取一次。
-    seen_files: set = set()
-    comp_files: Dict[str, List[str]] = {}
-    for cid in comp_ids:
-        own = []
-        for f in _comm_files(root, cid, project):
-            if f not in seen_files:
-                seen_files.add(f)
-                own.append(f)
-        comp_files[cid] = own
-    total = len(comp_ids)
-    progress: List[dict] = []
-    done = 0
-    for i, cid in enumerate(comp_ids):
-        if task_id in _EXTRACT_CANCEL:
-            break
-        name = names.get(cid) or cid
-        result = _extract_one_comp(task_id, cid, name, kinds, root, project,
-                                   model_id, files=comp_files.get(cid) or [])
-        progress.append(result)
-        if result["status"] == "done":
-            done += 1
-        _task_update_progress(task_id, progress=progress, done=done, total=total)
-        if i < total - 1:
-            _task_append_message(task_id, "assistant",
-                                 f"…进度 {done}/{i + 1}·{total} 组件完成")
-    if task_id in _EXTRACT_CANCEL:
-        status = "cancelled"
-        tail = f"已取消（完成 {done}/{total} 组件）。"
-        mark = "⏹"
-    elif done == total:
-        status = "done"
-        tail = "全部组件提取完成。"
-        mark = "✅"
-    elif done > 0:
-        status = "partial"
-        tail = f"部分完成：{done}/{total} 组件成功，其余失败。"
-        mark = "⚠️"
-    else:
-        status = "failed"
-        tail = "全部组件提取失败，请检查 LLM/KB 后重试。"
-        mark = "⚠️"
-    _task_append_message(task_id, "assistant", f"{mark} {tail}")
-    _task_update_progress(task_id, status=status)
-    with _EXTRACT_LOCK:
-        _EXTRACT_THREADS.pop(task_id, None)
-        _EXTRACT_CANCEL.discard(task_id)
-
-
-def start_extract_task(root: Optional[str], project: Optional[str],
-                       comp_ids: List[str], kinds: Optional[List[str]] = None,
-                       model_id: Optional[str] = None,
-                       title: str = "语义资产提取") -> Dict[str, Any]:
-    """创建并后台启动提取任务。返回 {taskId, ...}；线程 daemon 运行，不阻塞 HTTP。"""
-    comp_ids = [c for c in (comp_ids or []) if c]
-    if not comp_ids:
-        return {"taskId": "", "error": "未选择任何组件"}
-    # 组件名解析(展示用；缺失退化为 id)
-    names: Dict[str, str] = {}
-    try:
-        from .common import build_component_catalog
-        catalog = build_component_catalog(root, project)
-        for c in catalog.get("components") or []:
-            if c.get("id"):
-                names[c["id"]] = c.get("name") or c.get("id") or c["id"]
-    except Exception:
-        pass
-    now = _ts()
-    task_id = store.next_id("saxt")
-    task = {
-        "id": task_id, "projectId": project_id_for(root, project),
-        "root": resolve_root(root, project) or "", "status": "running",
-        "kind": "semantic", "compIds": comp_ids,
-        "total": len(comp_ids), "done": 0,
-        "progress": [], "messages": [], "meta": {"title": title},
-        "createdAt": now, "updatedAt": now,
-    }
-    store.ExtractTaskStore.create(task)
-    thread = threading.Thread(
-        target=_run_extract_task,
-        args=(task_id, comp_ids, names, kinds, root, project_id_for(root, project), model_id),
-        daemon=True,
-    )
-    with _EXTRACT_LOCK:
-        _EXTRACT_THREADS[task_id] = thread
-    thread.start()
-    return {"taskId": task_id}
-
-
-def get_extract_task(task_id: str) -> Optional[dict]:
-    return store.ExtractTaskStore.get(task_id)
-
-
-def _task_thread_alive(task_id: str) -> bool:
-    """任务对应的后台线程是否仍存活(模块内进程重启后均为 False → 孤儿任务)。"""
-    with _EXTRACT_LOCK:
-        t = _EXTRACT_THREADS.get(task_id)
-        return bool(t and t.is_alive())
-
-
-def _reap_orphan_extract_task(task_id: str) -> Optional[dict]:
-    """回收孤儿任务：状态为 running 但后台线程已死(进程强杀/重启遗留)。
-    标记 failed 并追加提示消息，返回回收后的任务；非孤儿返回 None。"""
-    task = store.ExtractTaskStore.get(task_id)
-    if not task:
-        return None
-    if (task.get("status") or "running") in ("running", "cancelling") and not _task_thread_alive(task_id):
-        _task_append_message(task_id, "assistant",
-                             "⚠ 提取任务中断：服务进程已重启/关闭，后台线程被终止，无法继续。请重新发起提取。")
-        store.ExtractTaskStore.update(task_id, {"status": "failed", "updatedAt": _ts()})
-        logger.info("[semantic] reaped orphan extract task %s (process restarted)", task_id)
-        return store.ExtractTaskStore.get(task_id)
-    return None
-
-
-def extract_task_status(task_id: str) -> Dict[str, Any]:
-    """任务状态快照(供前端轮询)：status/progress/messages + 概要。
-    进程重启遗留的 running 孤儿任务在此被标记为 failed，避免前端永久卡在"提取中"。"""
-    task = _reap_orphan_extract_task(task_id)
-    if task is None:
-        task = store.ExtractTaskStore.get(task_id)
-    if not task:
-        return {"found": False}
-    msgs = task.get("messages") or []
-    progress = task.get("progress") or []
-    return {
-        "found": True,
-        "id": task.get("id"),
-        "status": task.get("status") or "running",
-        "done": task.get("done") or 0,
-        "total": task.get("total") or 0,
-        "progress": progress,
-        "messages": msgs,
-        "title": (task.get("meta") or {}).get("title") or "语义资产提取",
-        "updatedAt": task.get("updatedAt"),
-        "running": (task.get("status") or "running") in ("running", "cancelling"),
-    }
-
-
-def cancel_extract_task(task_id: str) -> Dict[str, Any]:
-    """请求取消提取任务：置 cancelling，后台线程在组件边界确认后落 cancelled。
-
-    单次组件 LLM 提取无法即时打断；取消在下一个组件边界生效(单组件任务则待其完成)。
-    """
-    task = store.ExtractTaskStore.get(task_id)
-    if not task:
-        return {"ok": False, "error": "任务不存在"}
-    cur = task.get("status") or "running"
-    if cur not in ("running", "cancelling"):
-        return {"ok": True, "cancelled": False, "status": cur}
-    with _EXTRACT_LOCK:
-        _EXTRACT_CANCEL.add(task_id)
-    store.ExtractTaskStore.update(task_id, {"status": "cancelling", "updatedAt": _ts()})
-    _task_append_message(task_id, "assistant", "⏹ 正在取消提取任务（等待当前组件结束）…")
-    return {"ok": True, "cancelled": True, "status": "cancelling"}
 
 
 # ── 文件变化检测 / 失效 / 反向探测(要求②③) ─────────────────────
@@ -4721,6 +3712,8 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     cached = (a.get("pseudo") or "").strip()
     if fresh and cached:
         return {"pseudo": cached, "cached": True, "degraded": False}
+    # 注册项目按 id 解析 rootPath(同 line-notes；URL 可能只带 project)
+    root = resolve_root(root, project)
     snippet = _pseudo_source_snippet(root, a.get("astRefs") or [])
     pseudo, degraded = "", True
     if snippet:
@@ -4755,6 +3748,177 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
     except Exception as e:
         logger.warning("[semantic] pseudo 落库失败: %s", e)
     return {"pseudo": pseudo, "cached": False, "degraded": degraded}
+
+
+# ── AI 逐行解读(资产卡源码窗口：关键行用途说明，结合术语/规约) ──
+
+_LINE_NOTE_MAX_LINES = 40
+
+
+def _is_noise_line(code: str) -> bool:
+    """纯结构行(空行/纯括号/注释/导入)不值得逐行解释。"""
+    t = code.strip()
+    if not t or t in ("{", "}", "});", ");", ")", "}", "{", "},", "],", "]", "["):
+        return True
+    low = t.lower()
+    return low.startswith(("#", "//", "/*", "*", "import ", "from ", "using ", "package "))
+
+
+def _key_lines(codes: List[str], start: int) -> List[int]:
+    """选取值得逐行解释的关键行(1-based 绝对行号)。
+
+    声明/赋值/控制流/调用行均有语义，皆入选；仅跳过噪声行。封顶防超长。
+    全窗皆噪声(如纯导入段) → 回退解释全部非空行(导入关系也可解读)。
+    """
+    out: List[int] = []
+    fallback: List[int] = []
+    for i, code in enumerate(codes):
+        ln = start + i
+        if code.strip():
+            fallback.append(ln)
+        if not _is_noise_line(code):
+            out.append(ln)
+    out = out[:_LINE_NOTE_MAX_LINES]
+    return out if out else fallback[:_LINE_NOTE_MAX_LINES]
+
+
+def _line_note_context(pid: str) -> Tuple[str, str]:
+    """术语表 + 生效规约文本(注入逐行解读 prompt；为空返回空串)。"""
+    terms_txt, conv_txt = "", ""
+    try:
+        rows = []
+        for t in (store.GlossaryStore.list(pid, limit=30) or [])[:30]:
+            alias = " / ".join(t.get("alias") or [])
+            d = (t.get("definition") or "").strip()
+            rows.append(f"- {t.get('term')}" + (f"({alias})" if alias else "")
+                        + (f": {d[:60]}" if d else ""))
+        if rows:
+            terms_txt = "术语表:\n" + "\n".join(rows)
+    except Exception as e:
+        logger.warning("[semantic] line-notes 术语加载失败: %s", e)
+    try:
+        convs = store.NamingConventionStore.list(pid, status="active", limit=20) or []
+        rows = [f"- {(c.get('ruleText') or '').strip()[:80]}"
+                for c in convs[:20] if (c.get("ruleText") or "").strip()]
+        if rows:
+            conv_txt = "命名/设计规约:\n" + "\n".join(rows)
+    except Exception as e:
+        logger.warning("[semantic] line-notes 规约加载失败: %s", e)
+    return terms_txt, conv_txt
+
+
+def generate_line_notes(asset_id: str, file: str, start: int, end: int,
+                        root: Optional[str] = None, project: Optional[str] = None,
+                        model_id: Optional[str] = None) -> dict:
+    """资产卡源码窗口的关键行逐行用途说明(前端按钮手动触发)。
+
+    缓存键 = 资产 + file + 行段 + 窗口内容 md5；fresh(active 且非 needsUpdate)且命中 → 直接返回。
+    资产 stale/重提 → 缓存自然失效重生成(与 pseudo 同生命周期)。
+    LLM 失败/无可解释行 → degraded 且不落库(可重试)。
+    """
+    a = store.SemanticAssetsStore.get(asset_id)
+    if not a:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "资产不存在"}
+    # 注册项目按 id 解析 rootPath(URL 可能只带 project 不带 root)
+    root = resolve_root(root, project)
+    file = (file or "").strip()
+    try:
+        start, end = int(start), int(end)
+    except (TypeError, ValueError):
+        return {"notes": {}, "cached": False, "degraded": True, "error": "行段无效"}
+    if not file or start < 1 or end < start:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "行段无效"}
+    full = os.path.join(root or "", file)
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as fh:
+            all_lines = fh.read().splitlines()
+    except Exception:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "源码不可读"}
+    end = min(end, len(all_lines))
+    codes = all_lines[start - 1:end]
+    if not codes:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "行段为空"}
+    win_hash = hashlib.md5("\n".join(codes).encode("utf-8")).hexdigest()
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    try:
+        cached = json.loads((a.get("lineNotes") or "") or "{}")
+    except Exception:
+        cached = {}
+    if (fresh and isinstance(cached, dict) and cached.get("file") == file
+            and int(cached.get("start") or 0) == start and int(cached.get("end") or 0) == end
+            and cached.get("hash") == win_hash):
+        notes = cached.get("notes") or {}
+        if isinstance(notes, dict) and notes:
+            return {"notes": {int(k): str(v) for k, v in notes.items()},
+                    "cached": True, "degraded": False}
+    key_lines = _key_lines(codes, start)
+    if not key_lines:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "无可解释的关键行"}
+    pid = project_id_for(root, project)
+    terms_txt, conv_txt = _line_note_context(pid)
+    ctx = [f"资产: [{a.get('kind')}] {a.get('name')}",
+           f"业务描述: {(a.get('desc') or '—')[:200]}"]
+    fields = (a.get("detail") or {}).get("fields") or []
+    if fields:
+        ctx.append("字段: " + ", ".join((f.get("name") or "") for f in fields[:12]))
+    if terms_txt:
+        ctx.append(terms_txt)
+    if conv_txt:
+        ctx.append(conv_txt)
+    numbered = "\n".join(f"{ln}. {codes[ln - start]}" for ln in key_lines)
+    sys_prompt = (
+        "你是资深架构师。对给定的带行号源码行逐行说明用途：结合术语表与规约解释业务含义，"
+        "贴合真实代码，不得臆造源码中不存在的逻辑。每行说明不超过 40 字，用中文。"
+        "信息不足时(如行内调用了看不懂的符号/想确认相关资产语义)，可先输出工具调用块收集信息再作答；"
+        '信息足够后只输出 JSON：{"notes":[{"line":<行号>,"note":"<说明>"}]}，不要输出其它内容。'
+    )
+    tools_doc = (
+        "\n可用工具(按需调用，格式 [TOOL_CALL]{\"tool\":\"<名>\",\"arguments\":{参数}}[/TOOL_CALL])：\n"
+        '- code.read_symbols: {"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行} 读被调用符号的真实实现\n'
+        '- asset.semantic.search: {"text": "关键词", "kind"?: "entity|contract|state|rule|process|decision"} 检索相关语义资产\n'
+        '- asset.semantic.detail: {"asset_id": "sa-xxx"} 读相关资产完整定义\n'
+    )
+    user_prompt = "\n".join(ctx) + f"\n\n源码(文件 {file}，仅解释以下行):\n{numbered}\n\n请输出 JSON。"
+    notes: Dict[int, str] = {}
+    try:
+        from .req_agent import run_tools_loop, get_max_tokens_preference
+        from .agent_roles import resolve_role_model
+        # 逐行解读与伪码走查同属 pseudo 角色(查询期轻量解读)；
+        # 多轮工具调用(白名单只读工具，封顶 3 轮)允许模型补读符号/检索资产后再给注解。
+        model_id = resolve_role_model("pseudo", model_id)
+        res = run_tools_loop(
+            [{"role": "system", "content": sys_prompt + tools_doc},
+             {"role": "user", "content": user_prompt}],
+            root=root, project=project, model_id=model_id,
+            max_tokens=get_max_tokens_preference(), max_rounds=3,
+            allowed=["code.read_symbols", "asset.semantic.search", "asset.semantic.detail"])
+        raw = (res or {}).get("content") or ""
+        raw = raw.strip()
+        if raw.startswith("```"):   # 容错剥离 ```json 包裹
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        parsed = json.loads(raw)
+        for item in (parsed.get("notes") or []) if isinstance(parsed, dict) else []:
+            try:
+                ln, note = int(item.get("line")), str(item.get("note") or "").strip()
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if start <= ln <= end and note:
+                notes[ln] = note[:120]
+    except Exception as e:
+        logger.warning("[semantic] line-notes LLM 失败: %s", e)
+        notes = {}
+    if not notes:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "LLM 未返回有效注解"}
+    try:
+        store.SemanticAssetsStore.update(asset_id, {
+            "lineNotes": json.dumps({"file": file, "start": start, "end": end,
+                                     "hash": win_hash, "notes": notes}, ensure_ascii=False)})
+    except Exception as e:
+        logger.warning("[semantic] line-notes 落库失败: %s", e)
+    return {"notes": notes, "cached": False, "degraded": False}
 
 
 def mappings(asset_id: str, root: Optional[str] = None,
@@ -5091,7 +4255,6 @@ def _grouped_search_items(root: Optional[str], project: Optional[str],
     return rows[int(offset):int(offset) + int(limit)]
 
 
-
 def _scope(body: dict) -> tuple:
     scope = body.get("scope") or {}
     return (scope.get("type") or body.get("scopeType") or "project",
@@ -5279,6 +4442,62 @@ async def api_impact(root: Optional[str] = None, project: Optional[str] = None):
     return ok(_impact_analysis(root, project))
 
 
+@router.get("/kb/semantic/source-snippet")
+async def api_source_snippet(root: Optional[str] = None, project: Optional[str] = None,
+                             file: str = "", line: int = 0, symbol: str = "",
+                             before: int = 10, after: int = 10, limit: int = 60):
+    """锚点前后源码窗口（实现层逻辑精确核对）。
+
+    symbol 已知（AST 缓存可解析行段）→ 优先展开整个符号体（startLine..endLine + 尾部余量）；
+    否则按 anchor±before/after 取窗口。总窗口上限 limit 行，防超长文件全量返回。
+    """
+    rpath = resolve_root(root, project)
+    if not rpath or not file:
+        return err(400, "缺少项目根或文件路径")
+    full = os.path.realpath(os.path.join(rpath, file))
+    base = os.path.realpath(rpath)
+    if not full.startswith(base + os.sep):
+        return err(400, f"路径越界: {file}")
+    if not os.path.isfile(full):
+        return err(400, f"文件不存在: {file}")
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        return err(500, f"读取失败: {e}")
+    if not lines:
+        return ok({"file": file, "symbol": symbol, "anchorLine": 0,
+                   "highlight": [], "lines": []})
+    n = len(lines)
+    anchor = int(line or 0)
+    start = end = anchor
+    highlight: List[int] = []
+    if symbol and anchor:
+        # AST 缓存里有该符号的行段 → 整段显示（更精确覆盖实现层逻辑）
+        try:
+            pid = project_id_for(root, project)
+            cached = store.AstCacheStore.get(pid, file.replace("\\", "/"))
+            for nd in (cached or {}).get("symbols") or []:
+                if (nd.get("name") or "") == symbol:
+                    s_, e_ = int(nd.get("startLine") or 0), int(nd.get("endLine") or 0)
+                    if s_ and e_:
+                        start, end = s_, e_
+                        highlight = list(range(s_, min(e_ + 1, n + 1)))
+                    break
+        except Exception:
+            logger.warning("[semantic] source-snippet 符号行段解析失败: %s", symbol)
+    if not anchor:
+        anchor = start
+    b = max(1, (anchor or 1) - before)
+    e = min(n, max(end + after, (anchor or 1) + after))
+    if e - b + 1 > limit:  # 上限裁剪（防超长）
+        e = b + limit - 1
+    out = [{"line": i, "code": lines[i - 1]} for i in range(b, e + 1)]
+    highlight = [h for h in highlight if b <= h <= e]
+    return ok({"file": file, "symbol": symbol, "anchorLine": anchor,
+               "highlight": highlight, "lines": out})
+
+
 @router.get("/kb/semantic/{asset_id}")
 async def api_detail(asset_id: str, root: Optional[str] = None, project: Optional[str] = None):
     a = detail(asset_id, root, project)
@@ -5291,7 +4510,17 @@ async def api_detail(asset_id: str, root: Optional[str] = None, project: Optiona
 async def api_pseudo(asset_id: str, root: Optional[str] = None,
                      project: Optional[str] = None, model_id: Optional[str] = None):
     """查询时生成/返回资产关联代码的伪码级说明(有效生命周期内缓存)。"""
-    return ok(generate_pseudo(asset_id, root, project, model_id=model_id))
+    # LLM 同步调用 offload 到线程(P0：async 内禁阻塞事件循环)
+    return ok(await asyncio.to_thread(generate_pseudo, asset_id, root, project, model_id))
+
+
+@router.get("/kb/semantic/{asset_id}/line-notes")
+async def api_line_notes(asset_id: str, file: str, start: int, end: int,
+                         root: Optional[str] = None, project: Optional[str] = None,
+                         model_id: Optional[str] = None):
+    """资产卡源码窗口关键行逐行用途说明(手动触发，落库缓存随资产生命周期)。"""
+    return ok(await asyncio.to_thread(
+        generate_line_notes, asset_id, file, start, end, root, project, model_id))
 
 
 @router.post("/kb/semantic/reconcile")
@@ -5308,8 +4537,10 @@ async def api_handle_stale(request: Request):
     asset_id = (body.get("assetId") or body.get("asset_id") or "").strip()
     if not asset_id:
         return err(400, "assetId 不能为空")
-    res = handle_stale_asset(asset_id, body.get("root"), body.get("project"),
-                             model_id=body.get("modelId"))
+    # 提取/重提触及 tAgent asyncio.run，不能在事件循环线程直接调 → offload 到线程
+    res = await asyncio.to_thread(
+        handle_stale_asset, asset_id, body.get("root"), body.get("project"),
+        body.get("modelId"))
     return ok(res)
 
 
@@ -5320,29 +4551,13 @@ async def api_extract(request: Request):
     lvl = body.get("level") or "implementation"
     logger.info("[semantic] /kb/semantic/extract 请求: type=%s key=%s files=%d symbols=%d kinds=%s level=%s",
                 st, sk or "-", len(files or []), len(symbols or []), body.get("kinds"), lvl)
-    res = extract_scope(body.get("root"), body.get("project"),
-                        st, sk, files, symbols,
-                        kinds=body.get("kinds"),
-                        model_id=body.get("modelId"),
-                        level=lvl)
+    # offload 到线程：tAgent 提取用 asyncio.run，不能在事件循环线程直接调(否则静默落地板)
+    res = await asyncio.to_thread(
+        extract_scope, body.get("root"), body.get("project"), st, sk, files, symbols,
+        kinds=body.get("kinds"), model_id=body.get("modelId"), level=lvl)
     if not (res.get("count") or 0):
         logger.warning("[semantic] /kb/semantic/extract 产出 0: type=%s key=%s source=%s degraded=%s",
                        st, sk or "-", res.get("source"), res.get("degraded"))
-    return ok(res)
-
-
-@router.post("/kb/semantic/extractAll")
-async def api_extract_all(request: Request):
-    body = await request.json()
-    lvl = body.get("level") or "all"
-    logger.info("[semantic] /kb/semantic/extractAll 请求: kinds=%s model=%s max_components=%s level=%s",
-                body.get("kinds"), body.get("modelId"), body.get("maxComponents"), lvl)
-    res = extract_all(body.get("root"), body.get("project"),
-                      kinds=body.get("kinds"),
-                      model_id=body.get("modelId"),
-                      use_llm=body.get("useLlm", True),
-                      max_components=int(body.get("maxComponents") or 12),
-                      level=lvl)
     return ok(res)
 
 
@@ -5384,8 +4599,10 @@ async def api_refresh(request: Request):
             m = rows[0].get("meta") or {}
             files = m.get("files") or []
             symbols = m.get("symbols") or []
-    res = refresh_scope(body.get("root"), body.get("project"), st, sk,
-                        files=files, symbols=symbols, model_id=body.get("modelId"))
+    # offload 到线程：refresh_scope 内部重提触及 tAgent asyncio.run
+    res = await asyncio.to_thread(
+        refresh_scope, body.get("root"), body.get("project"), st, sk,
+        files=files, symbols=symbols, model_id=body.get("modelId"))
     return ok(res)
 
 
@@ -5421,46 +4638,6 @@ async def api_batch(request: Request):
     logger.info("[semantic] /kb/semantic/batch 响应: action=%s count=%s components=%s",
                 body.get("action"), res.get("count"), res.get("components"))
     return ok(res)
-
-
-@router.post("/kb/semantic/extract-task")
-async def api_start_extract_task(request: Request):
-    """创建并后台启动组件语义资产提取任务(服务端执行，刷新不中断)。
-
-    body: {root?, project?, components: string[], kinds?, modelId?}
-    返回 {taskId}。前端轮询 GET /kb/semantic/extract-task/{id} 同步进度消息。
-    """
-    body = await request.json()
-    res = start_extract_task(body.get("root"), body.get("project"),
-                             comp_ids=body.get("components") or [],
-                             kinds=body.get("kinds"),
-                             model_id=body.get("modelId"))
-    if not res.get("taskId"):
-        return err(400, res.get("error") or "未选择任何组件")
-    return ok({"taskId": res["taskId"]})
-
-
-@router.get("/kb/semantic/extract-task/latest")
-async def api_extract_task_latest(root: Optional[str] = None,
-                                  project: Optional[str] = None):
-    """最近一次提取任务(供刷新后恢复页面状态读取)。"""
-    pid = project_id_for(root, project)
-    task = store.ExtractTaskStore.latest(pid, kind="semantic")
-    if not task:
-        return ok(None)
-    return ok(extract_task_status(task["id"]))
-
-
-@router.get("/kb/semantic/extract-task/{task_id}")
-async def api_extract_task_status(task_id: str):
-    """轮询提取任务状态(含进度消息，供资产管理对话同步)。"""
-    return ok(extract_task_status(task_id))
-
-
-@router.post("/kb/semantic/extract-task/{task_id}/cancel")
-async def api_cancel_extract_task(task_id: str):
-    """请求取消提取任务(后台线程在组件边界停止)。"""
-    return ok(cancel_extract_task(task_id))
 
 
 @router.post("/kb/semantic/purge")

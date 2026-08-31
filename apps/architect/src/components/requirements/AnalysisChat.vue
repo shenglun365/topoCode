@@ -6,7 +6,7 @@ import type { KbAnalysisTurn } from '@/services/kb-analysis-agent'
 import type { AcceptanceFact, AcceptanceReportDetail, ContractItem } from '@/services/contract-service'
 import type { NamingConvention } from '@/services/naming-service'
 import ChatMessageBlocks from '@/components/ChatMessageBlocks.vue'
-import type { SemanticAsset, SemanticAssetKind } from '@/types'
+import type { SemanticAsset } from '@/types'
 
 const props = defineProps<{
   turns: KbAnalysisTurn[]
@@ -15,8 +15,6 @@ const props = defineProps<{
   busyLabel?: string
   /** 对话标题(缺省「需求分析对话」；资产管理等复用场景可覆盖)。 */
   title?: string
-  /** 是否显示「提取语义资产」按钮(需求分析对话隐藏；资产管理保留)。 */
-  showExtract?: boolean
   /** 绘图增强(IR→代码)：开启后 agent 经 diagram.build 工具生成语法正确的图。 */
   diagramSkill?: boolean
   /** 期望固化(🧾)：开启后 agent 把可验证期望固化为契约条目草稿。 */
@@ -30,7 +28,6 @@ const emit = defineEmits<{
   answers: [answers: Record<string, string>]
   'confirm-draft': []
   'delete-turn': [index: number]
-  'extract-assets': [kinds?: SemanticAssetKind[]]
   'refresh-asset': [assetId: string]
   'toggle-diagram-skill': [enabled: boolean]
   'toggle-contract-skill': [enabled: boolean]
@@ -248,11 +245,6 @@ function copyAsset(a: SemanticAsset) {
     lines.push(...a.astRefs.slice(0, 10).map((r) => `${r.file}:L${r.startLine}-L${r.endLine} ${r.symbol}`))
   }
   void copyToClipboard(lines.join('\n')).then((ok) => showToast(ok ? t('requirement.chat.copySuccess') : t('requirement.chat.copyFailed')))
-}
-
-function onExtractAssets() {
-  if (props.busy) return
-  emit('extract-assets')
 }
 
 /** 资产是否可引用(active 且未标记需更新)。 */
@@ -930,15 +922,6 @@ onUnmounted(() => {
         @input="autoResize"
         @keydown="onInputKeydown"
       />
-      <button
-        v-if="props.showExtract !== false"
-        class="btn !py-2.5 shrink-0 whitespace-nowrap btn-ghost"
-        :disabled="busy"
-        :title="t('requirement.chat.extractAssets')"
-        @click="onExtractAssets"
-      >
-        <CubeTransparentIcon class="w-4 h-4" />{{ t('requirement.chat.extractAssets') }}
-      </button>
       <button
         v-if="busy"
         class="btn btn-red !py-2.5 shrink-0 whitespace-nowrap"

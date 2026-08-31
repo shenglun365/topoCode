@@ -299,8 +299,7 @@ function onAnswers(answers: Record<string, string>) { collect(answers) }
 /** 自由对话(阶段A)：经 WS 流式回复，保持会话一致性(conversationId 续聊)。 */
 const chatConvId = ref<string>('')
 const chatAbort = ref<AbortController | null>(null)
-const extractAbort = ref<AbortController | null>(null)
-function stopChat() { chatAbort.value?.abort(); extractAbort.value?.abort() }
+function stopChat() { chatAbort.value?.abort() }
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
 const { contractSkill, toggleContractSkill } = useContractSkill()
 
@@ -413,30 +412,6 @@ async function onSend(text: string) {
     turns.value[idx].content = err?.message || t('requirement.chat.fallback')
   } finally {
     chatAbort.value = null
-    busy.value = false
-  }
-}
-
-/** 语义数据资产提取：从最新代码结构(codegraph)提取并作为对话回合卡片展示。 */
-async function onExtractAssets(kinds?: SemanticAssetKind[]) {
-  if (busy.value) return
-  const idx = turns.value.push({ role: 'assistant', content: '' }) - 1
-  busy.value = true
-  const ac = new AbortController(); extractAbort.value = ac
-  try {
-    const res = await semanticAssetService.extractAll(kinds, { modelId: readModelPref('architect') || undefined, signal: ac.signal })
-    const assets = res.assets ?? []
-    turns.value[idx].content = assets.length
-      ? `${t('requirement.chat.semanticExtracted')}${res.count ?? assets.length}${t('requirement.chat.semanticExtractedTail')}`
-      : t('requirement.chat.semanticEmpty')
-    turns.value[idx].assets = assets
-    if (res.degraded) turns.value[idx].content += t('requirement.chat.semanticDegraded')
-  } catch (err: any) {
-    turns.value[idx].content = err?.name === 'AbortError'
-      ? t('requirement.chat.semanticStopped')
-      : (err?.message || t('requirement.chat.semanticFailed'))
-  } finally {
-    extractAbort.value = null
     busy.value = false
   }
 }
@@ -860,7 +835,6 @@ function backToList() {
           class="flex-1 min-h-0"
           :turns="turns"
           :busy="busy"
-          :show-extract="false"
           :diagram-skill="diagramSkill"
           :contract-skill="contractSkill"
           show-contract-skill
@@ -868,7 +842,6 @@ function backToList() {
           @answers="onAnswers"
           @confirm-draft="confirmDraft"
           @delete-turn="onDeleteTurn"
-          @extract-assets="onExtractAssets"
           @refresh-asset="onRefreshAsset"
           @toggle-diagram-skill="toggleDiagramSkill"
           @toggle-contract-skill="toggleContractSkill"

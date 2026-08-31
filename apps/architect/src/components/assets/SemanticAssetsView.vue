@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, AdjustmentsHorizontalIcon, CubeTransparentIcon, ChevronDownIcon, ChevronRightIcon,
-  ArrowPathIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon, SparklesIcon, StopIcon,
+  ArrowPathIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon,
   PencilIcon, CheckIcon, XMarkIcon, ScissorsIcon, ArrowsRightLeftIcon, PlusIcon, TrashIcon,
 } from '@heroicons/vue/24/outline'
 import type { SemanticAsset, SemanticAssetKind, SemanticAssetLevel } from '@/types'
@@ -17,7 +17,6 @@ const level = ref<SemanticAssetLevel | ''>('implementation')
 const q = ref('')
 const items = ref<SemanticAsset[]>([])
 const loading = ref(false)
-const extracting = ref(false)
 const reconciling = ref(false)
 const statusCounts = ref<Record<string, number>>({})
 const expanded = reactive<Record<string, boolean>>({})
@@ -43,26 +42,6 @@ async function load() {
     items.value = await semanticAssetService.search(q.value, kind.value || undefined, undefined, level.value || undefined)
   } finally {
     loading.value = false
-  }
-}
-
-const extractAbort = ref<AbortController | null>(null)
-function stopExtract() {
-  extractAbort.value?.abort()
-}
-async function extract() {
-  extracting.value = true
-  const ac = new AbortController(); extractAbort.value = ac
-  try {
-    // 默认仅提取实现层(业务层+逻辑层暂停再生)。
-    const res = await semanticAssetService.extractAll(kinds.map((k) => k.value), { level: 'implementation', signal: ac.signal })
-    if (res.error) console.warn('[semantic] extract:', res.error)
-    await load()
-  } catch (err: any) {
-    if (err?.name !== 'AbortError') console.warn('[semantic] extract:', err?.message)
-  } finally {
-    extractAbort.value = null
-    extracting.value = false
   }
 }
 
@@ -328,20 +307,6 @@ async function copyAsset(a: SemanticAsset) {
           v-else
           class="w-3.5 h-3.5 animate-spin"
         />{{ reconciling ? t('semanticAssets.reconciling') : t('semanticAssets.reconcile') }}
-      </button>
-      <button
-        class="btn !py-1.5"
-        :class="extracting ? 'btn-red' : 'btn-primary'"
-        @click="extracting ? stopExtract() : extract()"
-      >
-        <SparklesIcon
-          v-if="!extracting"
-          class="w-3.5 h-3.5"
-        />
-        <StopIcon
-          v-else
-          class="w-3.5 h-3.5"
-        />{{ extracting ? t('semanticAssets.stopExtract') : t('semanticAssets.extractAll') }}
       </button>
     </div>
 

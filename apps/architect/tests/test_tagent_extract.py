@@ -2,7 +2,7 @@
 
 fake gateway（duck-typed .call）脚本化 llm.sync 响应，零真实 HTTP/LLM。
 验证：
-- 双轨开关：默认开 = tAgent 路径；TOPOCODE_CTX_ASSET=0 → 旧 run_tools_loop；
+- 双轨已取消：提取恒走 tAgent 路径（不再回退 run_tools_loop）；
 - 端到端：TextFallback [TOOL_CALL: name] 工具轮 + 底座(钉驻任务规格)写入 system
   + 上下文块注入(工具结果入清单) + JSON 解析增强；
 - 工具同线程执行（in_thread=False，thread-local facts/ctx 亲和）；
@@ -52,11 +52,9 @@ def _msgs_text(call_params):
     return json.dumps(call_params.get("messages") or [], ensure_ascii=False)
 
 
-# ── 双轨开关 ──────────────────────────────────────────────────────
+# ── 双轨已取消：恒走 tAgent ──────────────────────────────────────
 
-def test_switch_default_on_uses_tagent(monkeypatch):
-    monkeypatch.delenv("TOPOCODE_CTX_ASSET", raising=False)
-    assert tagent_extract.ctx_asset_enabled() is True
+def test_extraction_always_uses_tagent(monkeypatch):
     called = {"tagent": 0, "legacy": 0}
 
     def fake_tagent(**kw):
@@ -72,25 +70,6 @@ def test_switch_default_on_uses_tagent(monkeypatch):
     asset_extract._extract_group("/r", None, {}, "svc.py", "entity",
                                  [_cand()], "m", True)
     assert called == {"tagent": 1, "legacy": 0}
-
-
-def test_switch_off_uses_legacy(monkeypatch):
-    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
-    assert tagent_extract.ctx_asset_enabled() is False
-    called = {"tagent": 0, "legacy": 0}
-
-    def fake_tagent(**kw):
-        raise AssertionError("开关关闭时不应走 tAgent 路径")
-
-    def fake_legacy(*a, **k):
-        called["legacy"] += 1
-        return {"content": "", "output": None}
-
-    monkeypatch.setattr(tagent_extract, "run_extraction_agentic", fake_tagent)
-    monkeypatch.setattr(RA, "run_tools_loop", fake_legacy)
-    asset_extract._extract_group("/r", None, {}, "svc.py", "entity",
-                                 [_cand()], "m", True)
-    assert called == {"tagent": 0, "legacy": 1}
 
 
 # ── 端到端：工具轮 + 上下文块 + 同线程 facts + JSON 增强 ───────────

@@ -107,7 +107,7 @@ export interface AssetUpdateResult {
 }
 
 export interface SemanticBatchResult {
-  action: 'extract' | 'clear'
+  action: 'clear'
   count: number
   components?: number | null
   cleared?: string[]
@@ -163,34 +163,21 @@ export interface SemanticGraphResult {
   count: number
 }
 
-/** 提取任务进度项(逐组件)。 */
-export interface ExtractTaskProgressItem {
-  compId: string
-  status: 'running' | 'done' | 'failed'
-  count: number
+/** 锚点前后源码窗口（SourceSnippet：行号+代码+命中高亮行段）。 */
+export interface SourceSnippet {
+  file: string
+  symbol?: string
+  anchorLine: number
+  highlight: number[]
+  lines: { line: number; code: string }[]
+}
+
+/** AI 逐行解读结果(关键行行号 → 用途说明)。 */
+export interface LineNotesResult {
+  notes: Record<number, string>
+  cached: boolean
+  degraded: boolean
   error?: string
-}
-
-/** 提取任务对话消息(同步到资产管理对话消息栏)。 */
-export interface ExtractTaskMessage {
-  id: string
-  role: string
-  content: string
-  time: number
-}
-
-/** 提取任务状态(服务端后台执行，刷新不中断，前端轮询恢复)。 */
-export interface ExtractTaskStatus {
-  found: boolean
-  id?: string
-  status?: 'running' | 'done' | 'partial' | 'failed'
-  done?: number
-  total?: number
-  progress?: ExtractTaskProgressItem[]
-  messages?: ExtractTaskMessage[]
-  title?: string
-  updatedAt?: number
-  running?: boolean
 }
 
 export const semanticAssetService = {
@@ -222,11 +209,28 @@ export const semanticAssetService = {
     return apiGet<SemanticAsset>(`/kb/semantic/${assetId}${qsWith('')}`)
   },
 
+  /** 锚点前后源码窗口（symbol 已知时后端优先展开整个符号体；limit 可放宽以取全文）。 */
+  async sourceSnippet(file: string, line: number, symbol?: string, before = 10, after = 10, limit?: number): Promise<SourceSnippet | undefined> {
+    const parts = [`file=${encodeURIComponent(file)}`, `line=${line}`]
+    if (symbol) parts.push(`symbol=${encodeURIComponent(symbol)}`)
+    parts.push(`before=${before}`)
+    parts.push(`after=${after}`)
+    if (limit) parts.push(`limit=${limit}`)
+    return apiGet<SourceSnippet>(`/kb/semantic/source-snippet${qsWith(parts.join('&'))}`)
+  },
+
   /** 查询时生成/获取资产关联代码的伪码级说明(有效生命周期内缓存；stale 时重生成)。 */
   async pseudo(assetId: string, modelId?: string): Promise<{ pseudo: string; cached: boolean; degraded: boolean }> {
     const extra = modelId ? `model_id=${encodeURIComponent(modelId)}` : ''
     return apiGet<{ pseudo: string; cached: boolean; degraded: boolean }>(
       `/kb/semantic/${assetId}/pseudo${qsWith(extra)}`)
+  },
+
+  /** 资产卡源码窗口关键行逐行用途说明(手动触发；落库缓存随资产生命周期)。 */
+  async lineNotes(assetId: string, file: string, start: number, end: number, modelId?: string): Promise<LineNotesResult> {
+    const parts = [`file=${encodeURIComponent(file)}`, `start=${start}`, `end=${end}`]
+    if (modelId) parts.push(`model_id=${encodeURIComponent(modelId)}`)
+    return apiGet<LineNotesResult>(`/kb/semantic/${assetId}/line-notes${qsWith(parts.join('&'))}`)
   },
 
   /** 按范围即时提取并落库。 */
@@ -239,18 +243,6 @@ export const semanticAssetService = {
       modelId: opts?.modelId,
       level: opts?.level,
     })
-  },
-
-  /** 批量提取(按 KB 组件/全项目)。 */
-  async extractAll(kinds?: SemanticAssetKind[], opts?: { modelId?: string; maxComponents?: number; level?: SemanticAssetLevel; signal?: AbortSignal }): Promise<SemanticExtractResult> {
-    return apiPost<SemanticExtractResult>('/kb/semantic/extractAll', {
-      root: currentProjectParams().root,
-      project: currentProjectParams().project,
-      kinds,
-      modelId: opts?.modelId,
-      maxComponents: opts?.maxComponents,
-      level: opts?.level,
-    }, opts?.signal)
   },
 
   /** 按需聚合业务级(high)语义资产。 */
@@ -326,18 +318,15 @@ export const semanticAssetService = {
       })
   },
 
-  /** 批量管理选定组件范围的语义资产(extract/clear)。
-   *  clear 支持 dryRun=true 预览影响(需求池/任务)供前端确认。 */
-  async batchManage(action: 'extract' | 'clear', components: string[], opts?: { includeOther?: boolean; kinds?: SemanticAssetKind[]; modelId?: string; level?: SemanticAssetLevel; scope?: string[]; dryRun?: boolean }): Promise<SemanticBatchResult> {
+  /** 批量清除选定组件范围的语义资产(clear)。
+   *  支持 dryRun=true 预览影响(需求池/任务)供前端确认。 */
+  async batchManage(action: 'clear', components: string[], opts?: { includeOther?: boolean; scope?: string[]; dryRun?: boolean }): Promise<SemanticBatchResult> {
     return apiPost<SemanticBatchResult>('/kb/semantic/batch', {
       root: currentProjectParams().root,
       project: currentProjectParams().project,
       action,
       components,
       includeOther: opts?.includeOther,
-      kinds: opts?.kinds,
-      modelId: opts?.modelId,
-      level: opts?.level,
       scope: opts?.scope,
       dryRun: opts?.dryRun,
     })
@@ -377,32 +366,6 @@ export const semanticAssetService = {
       project: currentProjectParams().project,
       assetIds,
     })
-  },
-
-  /** 创建并后台启动组件语义资产提取任务(服务端执行，刷新不中断)。返回 {taskId}。 */
-  async startExtractTask(components: string[], opts?: { kinds?: SemanticAssetKind[]; modelId?: string }): Promise<{ taskId: string }> {
-    return apiPost<{ taskId: string }>('/kb/semantic/extract-task', {
-      root: currentProjectParams().root,
-      project: currentProjectParams().project,
-      components,
-      kinds: opts?.kinds,
-      modelId: opts?.modelId,
-    })
-  },
-
-  /** 轮询提取任务状态(进度 + 对话消息，供资产管理对话同步)。 */
-  async extractTaskStatus(taskId: string): Promise<ExtractTaskStatus> {
-    return apiGet<ExtractTaskStatus>(`/kb/semantic/extract-task/${encodeURIComponent(taskId)}`)
-  },
-
-  /** 请求取消提取任务(后台线程在组件边界停止)。 */
-  async cancelExtractTask(taskId: string): Promise<{ ok: boolean; cancelled?: boolean; status?: string; error?: string }> {
-    return apiPost(`/kb/semantic/extract-task/${encodeURIComponent(taskId)}/cancel`)
-  },
-
-  /** 最近一次提取任务(刷新后恢复页面状态读取)。 */
-  async latestExtractTask(): Promise<ExtractTaskStatus | null> {
-    return apiGet<ExtractTaskStatus | null>(`/kb/semantic/extract-task/latest${qsWith('')}`)
   },
 
   /** 物理清理语义资产：先 dry-run 返回影响范围，确认后带 confirm=true 真正删除。 */

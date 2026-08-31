@@ -13,7 +13,7 @@ import logging
 from typing import Dict, List, Optional
 
 from .asset_rules import RuleContext, business_value_score, candidates_for_file
-from .asset_templates import (KIND_TEMPLATES, enrichment_schema, merge_seed_enrichment,
+from .asset_templates import (KIND_TEMPLATES, merge_seed_enrichment,
                               parse_enrichments, render_summary_desc, repair_hint,
                               validate_kind)
 
@@ -108,21 +108,9 @@ def _candidate_lines(cands: List[dict], kind: str) -> str:
     return "\n".join(lines)
 
 
-def _tool_protocol_text() -> str:
-    return (
-        "可用工具(缺数据时输出工具调用块获取，格式 "
-        "[TOOL_CALL]{\"tool\":\"asset.xxx\",\"arguments\":{...}}[/TOOL_CALL]，可多次)：\n"
-        "  - asset.read_source(file, symbol): 符号源码切片(补 entity 字段)\n"
-        "  - asset.query_constants(file): 常量值清单(补 rule 约束)\n"
-        "  - asset.query_calls(file, symbol): 行序调用链(补 process steps)\n"
-        "  - asset.query_routes(file): 框架路由清单(补 contract relations)\n"
-        "  - asset.query_symbol(file, symbol): 符号 AST 信息"
-    )
-
-
 def _sys_base() -> str:
-    """系统提示基座（两路共用）；tAgent 路不附 _tool_protocol_text——
-    TextFallback 策略自行把工具清单与 [TOOL_CALL: name] 协议注入 system 末尾。"""
+    """系统提示基座。工具清单与 [TOOL_CALL: name] 协议由 tAgent 的
+    TextFallback 策略自行注入 system 末尾，此处不重复。"""
     return (
         "你是代码语义资产补齐器。候选表已由规则分类(类别定死不可更改)，"
         "种子数据由确定性分析预填(字段/调用链/分支条件/路由/常量值均为 ground truth)。"
@@ -260,7 +248,7 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
                          use_llm: bool, facts: List[dict],
                          rc: Optional["RuleContext"] = None,
                          context_manager=None) -> List[dict]:
-    from .req_agent import get_max_tokens_preference, run_tools_loop
+    from .req_agent import get_max_tokens_preference
     from . import tagent_extract
 
     out: List[dict] = []
@@ -288,10 +276,10 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
     else:
         llm_part = []
 
-    # 上下文编译循环(方案 B)：开关默认开，每 file×kind 组一实例；可外部注入共享
-    # cm(知识库自我更新等长 cm 场景跨文件累积，见 tagent_extract)。
+    # 上下文编译循环：每 file×kind 组一实例；可外部注入共享 cm(跨文件累积场景)。
+    # 提取统一走 tAgent agentic_loop（双轨已取消，恒 tAgent）。
     cm = context_manager
-    if cm is None and use_llm and llm_part and tagent_extract.ctx_asset_enabled():
+    if cm is None and use_llm and llm_part:
         cm = tagent_extract.build_extraction_context(
             file_=file_, kind=kind, task_spec=_task_spec(file_, kind))
 
@@ -313,18 +301,6 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
             except Exception as e:
                 logger.warning("[asset_extract] %s %s 提取异常(tagent): %s",
                                file_, kind, e)
-        else:
-            # 旧路径(TOPOCODE_CTX_ASSET=0 双轨对拍)
-            sys_msg = _sys_base() + _tool_protocol_text()
-            try:
-                res = run_tools_loop(
-                    [{"role": "system", "content": sys_msg},
-                     {"role": "user", "content": user_msg}],
-                    root=root, project=project, mode="structured",
-                    output_schema=enrichment_schema(kind), max_rounds=2,
-                    max_tokens=get_max_tokens_preference(), model_id=model_id)
-            except Exception as e:
-                logger.warning("[asset_extract] %s %s 提取异常: %s", file_, kind, e)
         if res and isinstance(res.get("output"), dict):
             enrich = parse_enrichments(res["output"], names)
         else:
@@ -365,13 +341,6 @@ def _extract_group_inner(root: str, project: Optional[str], ctx: dict, file_: st
                     root=root, project=project, model_id=model_id,
                     max_rounds=2, max_tokens=get_max_tokens_preference(),
                     context_manager=cm)
-            else:
-                res2 = run_tools_loop(
-                    [{"role": "system", "content": "你是代码语义资产补齐器(修复轮)。"},
-                     {"role": "user", "content": repair_user}],
-                    root=root, project=project, mode="structured",
-                    output_schema=enrichment_schema(kind), max_rounds=2,
-                    max_tokens=get_max_tokens_preference(), model_id=model_id)
         except Exception as e:
             logger.warning("[asset_extract] %s %s 修复轮异常: %s", file_, kind, e)
             res2 = None

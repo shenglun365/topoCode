@@ -13,7 +13,7 @@
 与 chat/SE 用户指令场景的区分：作用域=每 (file×kind) 组一实例（隔离并发），
 播种=任务规格钉驻+工具结果工作集，阶段=kb_analysis——同机制、不同配置。
 
-双轨开关 `TOPOCODE_CTX_ASSET`（默认开；0/off/false → 回退旧 run_tools_loop 路径）。
+提取统一走本 tAgent 路径（旧 run_tools_loop 双轨已取消，恒 tAgent）。
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from typing import Any, Optional
 
 from .tagent_se import ArchitectToolAdapter, KbGatewayLLMClient
@@ -63,12 +62,6 @@ EXTRACT_TOOL_PARAMS = {
 
 # 上下文块预算（与 C3 KB 组件分析 CTX_BLOCK_MAX_CHARS 同预算：保守不挤占输出）
 CTX_BLOCK_MAX_CHARS = 24000
-
-
-def ctx_asset_enabled() -> bool:
-    """双轨开关：环境变量 TOPOCODE_CTX_ASSET；默认开启，0/off/false 关闭（回退旧路径）。"""
-    return os.environ.get("TOPOCODE_CTX_ASSET", "1").strip().lower() \
-        not in ("0", "off", "false", "no")
 
 
 def build_extraction_context(*, file_: str = "", kind: str = "",

@@ -31,6 +31,16 @@ def _ctx(tmp_path, monkeypatch):
     return db
 
 
+def _run_coro(coro):
+    import asyncio
+    import json as _json
+    from fastapi.responses import JSONResponse
+    out = asyncio.run(coro)
+    if isinstance(out, JSONResponse):
+        return _json.loads(out.body.decode("utf-8"))
+    return out
+
+
 def _assets(tmp_path, monkeypatch):
     _ctx(tmp_path, monkeypatch)
     return S
@@ -474,30 +484,6 @@ def test_batch_no_separate_update_action(tmp_path, monkeypatch):
     assert store.SemanticAssetsStore.get("sa-d-31") is not None
 
 
-def test_batch_extract_all_components(tmp_path, monkeypatch):
-    """extract 未指定组件时解析组件目录(完整来源)，文件并集去重后逐文件单次提取。"""
-    _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.common as common
-    # INCLUDE/CALL 两套组件，重叠 shared.py → 每文件只提取一次
-    monkeypatch.setattr(common, "build_component_catalog", lambda *a, **k: {
-        "components": [
-            {"id": "L0-0001", "owns": ["a.py", "shared.py"]},
-            {"id": "L0-0002", "owns": ["shared.py", "b.py"]},
-        ]})
-    calls = []
-    def fake_extract(root, project, scope_type, scope_key, **kw):
-        calls.append((scope_type, scope_key))
-        return {"assets": [{"id": f"sa-{scope_key}-1"}, {"id": f"sa-{scope_key}-2"}],
-                "count": 2}
-    monkeypatch.setattr(S, "extract_scope", fake_extract)
-    res = S.batch_manage("/tmp/x", None, "extract", comp_ids=[])
-    assert res["components"] == 2
-    assert res["count"] == 6                       # 3 个唯一文件 × 2
-    # 每文件单次提取(scope_type=files)，重叠文件不重复
-    assert sorted(calls) == [("files", "a.py"), ("files", "b.py"), ("files", "shared.py")]
-    assert calls.count(("files", "shared.py")) == 1
-
-
 def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
     """模型(INCLUDE·L1)查不到的组件 id(如 CALL/L0) → 回退组件目录解析文件。"""
     _ctx(tmp_path, monkeypatch)
@@ -517,9 +503,10 @@ def test_comm_files_falls_back_to_catalog(tmp_path, monkeypatch):
 def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
     """comm 组件未命中目录/模型(文件为空)时，不得退化为全项目扫描。"""
     _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.common as common
-    common.build_component_catalog = lambda root, project: {"components": []}
-    common.build_architecture_model = lambda *a, **k: {"components": []}
+    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+                        lambda root, project: {"components": []})
+    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+                        lambda *a, **k: {"components": []})
     # 即使存在 codegraph 节点，未解析文件的 comm 范围也不应扫全项目。
     monkeypatch.setattr(S, "_query_nodes", lambda conn, files=None, symbols=None, limit=400: [
         {"id": "n1", "kind": "class", "name": "Other", "qualified_name": "Other",
@@ -530,6 +517,118 @@ def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
                           kinds=["asset"], use_llm=False)
     assert res["count"] == 0
     assert res["source"] == "none"
+    # 未命中必须显式带失败原因（不再静默空结果）
+    assert res.get("error")
+    assert res.get("candidates") == []
+
+
+def test_comm_files_ex_matching(tmp_path, monkeypatch):
+    """comm 解析匹配链：精确 id → 精确名称 → 忽略大小写 → 唯一子串；多义/全未命中返回候选。"""
+    _ctx(tmp_path, monkeypatch)
+    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+                        lambda root, project: {"components": [
+                            {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
+                            {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
+                            {"id": "comm-3", "name": "图表转译引擎", "owns": ["c/z.ts"]},
+                        ]})
+    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+                        lambda *a, **k: {"components": []})
+    # 1) 精确 id
+    files, err = S._comm_files_ex("/r", "comm-1")
+    assert files == ["a/x.ts"] and err is None
+    # 2) 精确名称（组件中文名，非 id）
+    files, err = S._comm_files_ex("/r", "拓扑图渲染引擎")
+    assert files == ["a/x.ts"] and err is None
+    # 3) 唯一子串（"plantuml" 仅命中 comm-2）
+    files, err = S._comm_files_ex("/r", "plantuml")
+    assert files == ["b/y.ts"] and err is None
+    # 4) 项目名当 key（全未命中）→ error + 全量候选清单
+    files, err = S._comm_files_ex("/r", "topoOne-animation")
+    assert files == [] and err and len(err["candidates"]) == 3
+    assert "未命中" in err["error"]
+    # 5) 多义子串（"渲染引擎" 命中 comm-1/comm-2）→ 不猜，返回候选
+    files, err = S._comm_files_ex("/r", "渲染引擎")
+    assert files == [] and err and len(err["candidates"]) == 2
+
+
+def test_extract_comm_miss_carries_candidates(tmp_path, monkeypatch):
+    """comm 未命中 → extract_scope 返回 error+候选清单（agent 可如实报告并请用户重选）。"""
+    _ctx(tmp_path, monkeypatch)
+    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_component_catalog",
+                        lambda root, project: {"components": [
+                            {"id": "comm-1", "name": "拓扑图渲染引擎", "owns": ["a/x.ts"]},
+                            {"id": "comm-2", "name": "PlantUML渲染引擎", "owns": ["b/y.ts"]},
+                        ]})
+    monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
+                        lambda *a, **k: {"components": []})
+    res = S.extract_scope("/tmp/x", None, scope_type="comm", scope_key="topoOne-animation",
+                          kinds=["asset"], use_llm=False)
+    assert res["count"] == 0
+    assert "未命中" in (res.get("error") or "")
+    assert [c["id"] for c in res.get("candidates") or []] == ["comm-1", "comm-2"]
+
+
+def test_source_snippet_window(tmp_path, monkeypatch):
+    """锚点前后源码窗口：默认 ±10 行 + 符号体展开 + 上限裁剪。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    src = proj / "a.py"
+    lines = [f"line-{i:02d}" for i in range(1, 81)]
+    src.write_text("\n".join(lines), encoding="utf-8")
+    res = _run_coro(S.api_source_snippet(root=str(proj), project=None,
+                                         file="a.py", line=20, symbol="", before=10, after=10))
+    assert res["code"] == 0
+    data = res["data"]
+    assert data["anchorLine"] == 20
+    assert data["lines"][0]["line"] == 10          # 20-10
+    assert data["lines"][-1]["line"] == 30         # 20+10
+    assert len(data["lines"]) == 21
+    assert data["lines"][10]["code"] == "line-20"  # 锚点行本身
+    assert data["highlight"] == []
+
+
+def test_source_snippet_symbol_expand_and_cap(tmp_path, monkeypatch):
+    """符号体展开（AST 缓存有行段 → 覆盖整段）+ 超长上限裁剪。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    src = proj / "b.py"
+    src.write_text("\n".join(f"code-{i}" for i in range(1, 201)), encoding="utf-8")
+    pid = S.project_id_for(str(proj), None)
+    store.AstCacheStore.upsert(pid, "b.py", {
+        "contentHash": "h", "language": "py",
+        "symbols": [{"name": "fn", "startLine": 30, "endLine": 90}],
+        "imports": [], "refs": [], "source": "kb"})
+    # 默认窗口 ±10 行内，符号体 30-90 超限 → 上限裁剪到 60 行，起点仍为 anchor 前 10
+    res = _run_coro(S.api_source_snippet(root=str(proj), project=None,
+                                         file="b.py", line=30, symbol="fn"))
+    data = res["data"]
+    assert data["lines"][0]["line"] == 20          # 30-10
+    assert len(data["lines"]) == 60                # limit 上限
+    # 高亮覆盖符号体在窗口内的行段
+    assert data["highlight"] and data["highlight"][0] == 30
+    # 小符号体：整段显示
+    store.AstCacheStore.upsert(pid, "b.py", {
+        "contentHash": "h", "language": "py",
+        "symbols": [{"name": "fn", "startLine": 30, "endLine": 33}],
+        "imports": [], "refs": [], "source": "kb"})
+    res2 = _run_coro(S.api_source_snippet(root=str(proj), project=None,
+                                          file="b.py", line=30, symbol="fn"))
+    d2 = res2["data"]
+    assert d2["lines"][0]["line"] == 20            # 30-10（before 默认）
+    assert d2["lines"][-1]["line"] == 43           # 33+10（after 默认尾部余量）
+    assert d2["highlight"] == [30, 31, 32, 33]
+
+
+def test_source_snippet_path_safety(tmp_path, monkeypatch):
+    """越界路径拒绝。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    res = _run_coro(S.api_source_snippet(root=str(proj), project=None,
+                                         file="../etc/passwd", line=1))
+    assert res["code"] != 0
 
 
 def test_ast_cache_store(tmp_path, monkeypatch):
@@ -610,127 +709,6 @@ def test_normalize_level_aliases():
     assert S._normalize_level(None) is None
 
 
-def test_norm_llm_asset_type_field_and_steps():
-    """LLM 用 type 字段、steps.symbol 单数 → 归一化为 kind/steps.symbols。"""
-    table = {
-        "create_order": {"id": "n1", "kind": "function", "name": "create_order",
-                         "qualified_name": "create_order", "file_path": "svc/order.py",
-                         "start_line": 3, "end_line": 5, "start_column": 0, "end_column": 0,
-                         "signature": "", "docstring": "", "return_type": ""},
-        "_consume": {"id": "n2", "kind": "function", "name": "_consume",
-                     "qualified_name": "_consume", "file_path": "svc/order.py",
-                     "start_line": 10, "end_line": 14, "start_column": 0, "end_column": 0,
-                     "signature": "", "docstring": "", "return_type": ""},
-    }
-    a = {
-        "name": "订单生命周期管理", "type": "processing_flow",
-        "desc": "订单创建到过期清理的完整流程。",
-        "steps": [{"symbol": "create_order", "action": "初始化新订单", "condition": "库存充足"},
-                  {"step": 2, "symbol": "_consume", "action": "资源扣减"}],
-        "source_symbols": ["create_order", "_consume", "missing_sym"],
-    }
-    norm = S._norm_llm_asset(a, table)
-    assert norm["kind"] == "process"
-    assert norm["level"] == "logic"
-    assert norm["detail"]["steps"][0] == {"order": None, "semantic": "初始化新订单",
-                                          "condition": "库存充足", "symbols": ["create_order"]}
-    assert norm["detail"]["steps"][1]["order"] == 2
-    assert norm["detail"]["steps"][1]["condition"] == ""
-    # source_symbols → astRefs(可解析的真实节点；无法解析的记警告跳过)
-    files = {r["file"] for r in norm["astRefs"]}
-    assert files == {"svc/order.py"}
-    assert len(norm["astRefs"]) == 2
-
-
-def test_norm_llm_asset_relations_branches():
-    """relations {from,to,via} 与 branches {condition,then,else,result_symbol} 归一化。"""
-    a = {
-        "name": "用户认证鉴权", "type": "control_logic",
-        "desc": "登录鉴权分支逻辑。",
-        "relations": [{"from": "user", "to": "session", "via": "token"},
-                      {"target": "balance", "type": "1:1"}],
-        "branches": [{"condition": "未登录", "then": ["return 401"], "result_symbol": "err"}],
-    }
-    norm = S._norm_llm_asset(a, {})
-    assert norm["kind"] == "decision"
-    assert norm["detail"]["relations"] == [
-        {"target": "session", "type": "token", "semantic": ""},
-        {"target": "balance", "type": "1:1", "semantic": ""},
-    ]
-    b = norm["detail"]["branches"][0]
-    assert b["condition"] == "未登录"
-    assert b["then"] == "return 401"
-    assert b["semantic"] == "err"
-
-
-def test_norm_llm_asset_rejects_missing_kind_name():
-    """缺 kind/name → 返回 None(丢弃)。"""
-    assert S._norm_llm_asset({"name": "x", "type": "未知"}, {}) is None
-    assert S._norm_llm_asset({"kind": "asset"}, {}) is None
-    assert S._norm_llm_asset("not-dict", {}) is None
-
-
-def test_llm_extract_normalizes_chinese_type(tmp_path, monkeypatch):
-    """mock llm_sync 返回中文 type 的资产 → 归一化后有效 > 0。"""
-    _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.req_agent as RA
-    monkeypatch.setattr(RA, "llm_sync", lambda *a, **k: {
-        "output": {"assets": [
-            {"name": "订单流程", "type": "处理流程", "desc": "d",
-             "steps": [{"symbol": "create_order", "action": "init"}]},
-            {"name": "用户模型", "type": "数据结构", "desc": "d",
-             "fields": [{"name": "id", "type": "int"}]},
-        ]}})
-    table = {"create_order": {"id": "n1", "kind": "function", "name": "create_order",
-                              "qualified_name": "create_order", "file_path": "svc/order.py",
-                              "start_line": 1, "end_line": 2, "start_column": 0,
-                              "end_column": 0, "signature": "", "docstring": "", "return_type": ""}}
-    out = S._llm_extract("/tmp/x", None, "ctx-text", None, table=table)
-    assert len(out) == 2
-    kinds = {a["kind"] for a in out}
-    assert kinds == {"process", "entity"}
-
-
-def test_llm_extract_drops_empty_detail_but_keeps_all_empty(tmp_path, monkeypatch):
-    """detail 完整性强制：behavior 缺 steps/trigger、rule 缺 branches 时丢弃(仅当存在完整资产)。"""
-    _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.req_agent as RA
-    calls = {"n": 0}
-
-    def fake_llm(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return {"output": {"assets": [
-                {"kind": "process", "level": "logic", "name": "好流程", "desc": "d",
-                 "trigger": "触发", "steps": [{"semantic": "s", "symbols": ["f"]}]},
-                {"kind": "process", "level": "logic", "name": "空流程", "desc": "d"},
-                {"kind": "decision", "level": "logic", "name": "空规则", "desc": "d"},
-            ]}}
-        # 重试仍空 detail → 不级联丢空(保留业务命名资产)
-        return {"output": {"assets": [
-            {"kind": "process", "level": "logic", "name": "空流程", "desc": "d"},
-            {"kind": "decision", "level": "logic", "name": "空规则", "desc": "d"},
-        ]}}
-
-    monkeypatch.setattr(RA, "llm_sync", fake_llm)
-    out = S._llm_extract("/tmp/x", None, "ctx-text", None, table={})
-    assert calls["n"] == 2
-    # 首轮存在完整资产 → 丢弃 2 个空 detail
-    assert [a["name"] for a in out] == ["好流程"]
-
-
-def test_llm_extract_keeps_when_all_empty_detail(tmp_path, monkeypatch):
-    """全部资产缺 detail 时保留(避免丢弃整批触发启发式兜底)。"""
-    _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.req_agent as RA
-    monkeypatch.setattr(RA, "llm_sync", lambda *a, **k: {"output": {"assets": [
-        {"kind": "process", "level": "logic", "name": "空流程", "desc": "d"},
-        {"kind": "decision", "level": "logic", "name": "空规则", "desc": "d"},
-    ]}})
-    out = S._llm_extract("/tmp/x", None, "ctx-text", None, table={})
-    assert sorted(a["name"] for a in out) == ["空流程", "空规则"]
-
-
 def _anchored(name, file="src/order.py", symbol="Order"):
     return {"kind": "asset", "level": "logic", "name": name, "desc": "d",
             "astRefs": [{"file": file, "symbol": symbol, "kind": "class",
@@ -807,32 +785,6 @@ def test_semantic_graph_nodes_edges_anchors(tmp_path, monkeypatch):
                for a in g["anchors"])
 
 
-def test_heuristic_extract_low_level_deterministic(tmp_path, monkeypatch):
-    """实现级确定性提取：concrete_type/call_chain/branch_logic/message_contract 零 LLM。"""
-    _ctx(tmp_path, monkeypatch)
-    nodes = [
-        {"id": "n1", "kind": "class", "name": "Order", "qualified_name": "Order",
-         "file_path": "src/order.py", "start_line": 1, "end_line": 10,
-         "start_column": 0, "end_column": 0, "signature": "", "docstring": "订单", "return_type": ""},
-        {"id": "n2", "kind": "function", "name": "checkout", "qualified_name": "checkout",
-         "file_path": "src/order.py", "start_line": 20, "end_line": 30,
-         "start_column": 0, "end_column": 0, "signature": "(o)", "docstring": "", "return_type": ""},
-    ]
-    ctx = {"nodes": nodes, "edges": [{"source": "n2", "target": "n1", "kind": "calls"}]}
-    for kind in ("entity", "process", "decision", "contract"):
-        got = S._heuristic_extract(kind, ctx, level="implementation")
-        assert got, kind
-        for a in got:
-            assert a["level"] == "implementation"
-            assert a["astRefs"], f"{kind} 应有真实 AST 锚点"
-    # 同一函数在行为/决策下不再二义性重复(行为是 call_chain，决策是 branch_logic)
-    beh = S._heuristic_extract("process", ctx, level="implementation")
-    rul = S._heuristic_extract("decision", ctx, level="implementation")
-    assert beh[0]["detail"].get("kind") == "call_chain"
-    assert rul[0]["detail"].get("kind") == "branch_logic"
-    assert {a["name"] for a in beh} == {"checkout"}
-
-
 def test_derive_relations_from_ast_edges(tmp_path, monkeypatch):
     """AST 调用/包含边确定性派生资产间 relations(不依赖 LLM 产出)。"""
     _ctx(tmp_path, monkeypatch)
@@ -870,38 +822,28 @@ def test_derive_relations_from_ast_edges(tmp_path, monkeypatch):
     assert len(order["detail"]["relations"]) == 1
 
 
-def test_extract_scope_low_level_uses_llm_with_heuristic_fallback(tmp_path, monkeypatch):
-    """level=low 走 LLM(代码事实层)并统一为 low 层级；LLM 不可用回退增强启发式。
-
-    双轨：本测试钉住旧 LLM 通道（TOPOCODE_CTX_ASSET=0，llm 不可用→兜底语义）；
-    tAgent 上下文编译路径见 test_tagent_extract.py。
-    """
-    monkeypatch.setenv("TOPOCODE_CTX_ASSET", "0")
+def test_extract_scope_low_level_paused_and_impl_fallback(tmp_path, monkeypatch):
+    """非实现层(level=algorithm)暂停再生返回空；实现层 tAgent 无输出→种子地板兜底。"""
     _ctx(tmp_path, monkeypatch)
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "order.py").write_text(
         "class Order:\n    pass\n\ndef checkout(o):\n    pass\n", encoding="utf-8")
     monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
-    # LLM 可用 → 使用 LLM 资产且层级统一为 low
-    monkeypatch.setattr(S, "_llm_extract", lambda *a, **k: [
-        {"kind": "process", "level": "algorithm", "name": "checkout 调用链", "desc": "d",
-         "detail": {"steps": [{"order": 1, "semantic": "调用 Order", "symbols": ["Order"]}]},
-         "astRefs": [{"file": "order.py", "symbol": "checkout", "kind": "func",
-                      "startLine": 1, "endLine": 5}]}])
+    # 非实现层：统一暂停再生，返回空(不再整包自由识别)
     res = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
-                          files=["order.py"], kinds=["asset", "process"],
+                          files=["order.py"], kinds=["process"],
                           use_llm=True, level="algorithm")
-    assert res["assets"]
-    assert all((a.get("level") or "interaction") == "algorithm" for a in res["assets"])
-    assert res["assets"][0]["name"] == "checkout 调用链"
-    # LLM 返回空 → 启发式兜底，层级仍 low
-    monkeypatch.setattr(S, "_llm_extract", lambda *a, **k: [])
+    assert res["assets"] == [] and res["count"] == 0
+    assert res.get("source") == "paused"
+    # 实现层：tAgent 无结构化输出 → 种子地板兜底，层级 implementation
+    import topoone_app_architect.arch_routes.tagent_extract as TE
+    monkeypatch.setattr(TE, "run_extraction_agentic",
+                        lambda **k: {"content": "", "output": None})
     res2 = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
                            files=["order.py"], kinds=["entity", "process"],
                            use_llm=True, level="implementation")
-    assert res2["degraded"] is True
-    assert res2["count"] >= 2
+    assert res2["count"] >= 1
     assert all((a.get("level") or "logic") == "implementation" for a in res2["assets"])
 
 
@@ -1230,94 +1172,6 @@ def test_link_parent_propagates_component_membership(tmp_path, monkeypatch):
     assert intent["id"] in got_ids
 
 
-def test_extract_task_runs_and_terminates(tmp_path, monkeypatch):
-    """提取任务在后台线程执行并正常结束(不产生死循环)：状态/进度/消息持久化可读。"""
-    _ctx(tmp_path, monkeypatch)
-    calls = []
-
-    def fake_comm_files(root, comm_key, project=None):
-        # 组件 → 文件(带重叠：shared.py 属于 c1/c2，任务级去重只提取一次)
-        return {
-            "c1": ["a.py", "shared.py"],
-            "c2": ["b.py", "shared.py"],
-            "bad": ["x.py"],
-        }.get(comm_key, [])
-
-    monkeypatch.setattr(S, "_comm_files", fake_comm_files)
-
-    def fake_extract_scope(root, project, scope_type, scope_key, kinds=None,
-                           model_id=None, use_llm=True, level="logic", files=None):
-        calls.append((scope_type, scope_key, level))
-        if scope_key == "x.py":
-            raise RuntimeError("boom")
-        return {"assets": [{"id": f"sa-{scope_key}-{level}"}], "count": 2,
-                "degraded": False, "source": "codegraph"}
-
-    monkeypatch.setattr(S, "extract_scope", fake_extract_scope)
-    monkeypatch.setattr(S, "_aggregate_high_best_effort",
-                        lambda *a, **k: {"count": 0})
-    import time
-    res = S.start_extract_task("/tmp/x", None, ["c1", "c2", "bad"], kinds=["entity"])
-    tid = res["taskId"]
-    assert tid
-    # 轮询直到任务结束(有界等待，避免死循环)
-    st = None
-    for _ in range(200):
-        st = S.extract_task_status(tid)
-        if not st["running"]:
-            break
-        time.sleep(0.02)
-    assert st is not None and st["found"] is True
-    assert st["status"] == "partial"
-    assert st["done"] == 2 and st["total"] == 3
-    # 进度项: 逐组件
-    assert {p["compId"] for p in st["progress"]} == {"c1", "c2", "bad"}
-    assert next(p for p in st["progress"] if p["compId"] == "bad")["status"] == "failed"
-    # 消息持久化为 JSON(非字符串), 含开始/完成/失败各阶段
-    assert isinstance(st["messages"], list) and len(st["messages"]) >= 6
-    for m in st["messages"]:
-        assert isinstance(m, dict) and m.get("content")
-    # 每文件单次提取(scope_type=files)且仅实现层(业务/逻辑层暂停再生)；shared.py 跨组件去重只取一次
-    assert calls.count(("files", "shared.py", "implementation")) == 1
-    assert ("files", "a.py", "implementation") in calls
-    assert ("files", "b.py", "implementation") in calls
-    assert ("files", "x.py", "implementation") in calls
-    assert not any(lv == "logic" for (_t, _k, lv) in calls)
-    # 最近任务可读(刷新后恢复用)
-    latest = S.extract_task_status(store.ExtractTaskStore.latest(pid_for("/tmp/x", None))["id"])
-    assert latest["id"] == tid
-
-
-def test_extract_task_orphan_reaped_on_process_restart(tmp_path, monkeypatch):
-    """进程重启后遗留的 running 孤儿任务(线程已死)被标记 failed，前端轮询不会永久卡死。"""
-    _ctx(tmp_path, monkeypatch)
-    # 无线程在跑：清空 _EXTRACT_THREADS，模拟进程重启
-    with S._EXTRACT_LOCK:
-        S._EXTRACT_THREADS.clear()
-    now = S._ts()
-    task = {
-        "id": "saxt-orphan-1", "projectId": pid_for("/tmp/x", None),
-        "root": "/tmp/x", "status": "running", "kind": "semantic",
-        "compIds": ["c1"], "total": 1, "done": 0,
-        "progress": [], "messages": [], "meta": {"title": "语义资产提取"},
-        "createdAt": now, "updatedAt": now,
-    }
-    store.ExtractTaskStore.create(task)
-    st = S.extract_task_status("saxt-orphan-1")
-    # 被回收：状态 failed、running=False、追加中断提示消息
-    assert st["found"] is True
-    assert st["status"] == "failed"
-    assert st["running"] is False
-    assert any("中断" in (m.get("content") or "") for m in st["messages"])
-    # DB 已持久化失败状态
-    persisted = store.ExtractTaskStore.get("saxt-orphan-1")
-    assert persisted["status"] == "failed"
-    # 再次查询幂等(不再反复追加消息)
-    msgs_len = len(store.ExtractTaskStore.get("saxt-orphan-1")["messages"])
-    S.extract_task_status("saxt-orphan-1")
-    assert len(store.ExtractTaskStore.get("saxt-orphan-1")["messages"]) == msgs_len
-
-
 def test_purge_semantic_assets(tmp_path, monkeypatch):
     """物理清理：stale/deleted 行全部删除(不再软删保留)；active 保留。"""
     _ctx(tmp_path, monkeypatch)
@@ -1458,94 +1312,6 @@ def test_semantic_graph_symbol_target_resolution(tmp_path, monkeypatch):
     assert edge["resolved"] is True and edge["to"] == order["id"]
 
 
-def test_llm_extract_forces_requested_level(tmp_path, monkeypatch):
-    """LLM 混级输出统一规整为请求层级(层级权威)。"""
-    _ctx(tmp_path, monkeypatch)
-    import topoone_app_architect.arch_routes.req_agent as ra
-    monkeypatch.setattr(ra, "llm_sync", lambda *a, **k: {
-        "output": {"assets": [
-            {"kind": "process", "level": "algorithm", "name": "x", "desc": "d",
-             "trigger": "触发", "steps": [{"semantic": "s", "symbols": ["f"]}]},
-            {"kind": "asset", "level": "business", "name": "y", "desc": "d",
-             "fields": [{"name": "id", "type": "int"}]},
-            {"type": "decision", "name": "z", "desc": "d",
-             "branches": [{"condition": "c", "then": "t", "else": "e"}]},
-        ]}})
-    got = S._llm_extract(None, None, "ctx", None, table={}, level="interaction")
-    assert got and [a["level"] for a in got] == ["interaction", "interaction", "interaction"]
-
-
-def test_heuristic_low_fields_and_call_chain_symbols():
-    """低粒度启发式增强：contains 边派生字段、calls 边用符号名。"""
-    nodes = [
-        {"id": "n1", "kind": "class", "name": "Order", "qualified_name": "Order",
-         "file_path": "src/order.py", "start_line": 1, "end_line": 10,
-         "start_column": 0, "end_column": 0, "signature": "", "docstring": "", "return_type": ""},
-        {"id": "n2", "kind": "function", "name": "checkout", "qualified_name": "checkout",
-         "file_path": "src/order.py", "start_line": 20, "end_line": 30,
-         "start_column": 0, "end_column": 0, "signature": "(o)", "docstring": "", "return_type": ""},
-        {"id": "n3", "kind": "variable", "name": "total", "qualified_name": "Order::total",
-         "file_path": "src/order.py", "start_line": 5, "end_line": 5,
-         "start_column": 0, "end_column": 0, "signature": "", "docstring": "", "return_type": "float"},
-        {"id": "n4", "kind": "function", "name": "calc", "qualified_name": "calc",
-         "file_path": "src/other.py", "start_line": 1, "end_line": 5,
-         "start_column": 0, "end_column": 0, "signature": "(o)", "docstring": "", "return_type": ""},
-    ]
-    edges = [
-        {"source": "n1", "target": "n3", "kind": "contains"},
-        {"source": "n2", "target": "n4", "kind": "calls"},
-    ]
-    ctx = {"nodes": nodes, "edges": edges}
-    st = S._heuristic_extract("entity", ctx, level="implementation")
-    order = next(a for a in st if a["name"] == "Order")
-    assert any(f["name"] == "total" and f["type"] == "float"
-               for f in order["detail"]["fields"])
-    beh = S._heuristic_extract("process", ctx, level="implementation")
-    ch = next(a for a in beh if a["name"] == "checkout")
-    steps = ch["detail"]["steps"]
-    assert steps and steps[0]["symbols"] == ["calc"]
-
-
-def test_extract_all_default_only_implementation_and_no_business(tmp_path, monkeypatch):
-    """extract_all 缺省 level 仅产 implementation；业务层+逻辑层暂停再生(不聚合 business)。"""
-    _ctx(tmp_path, monkeypatch)
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    (proj / "a.py").write_text("def f():\n    pass\n", encoding="utf-8")
-
-    def fake_catalog(root, project=None):
-        return {"components": [{"id": "c1", "owns": ["a.py"]}]}
-
-    import topoone_app_architect.arch_routes.common as common
-    monkeypatch.setattr(common, "build_component_catalog", fake_catalog)
-    monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
-    seen = []
-
-    def fake_extract_scope(root, project, scope_type, scope_key, kinds=None,
-                           model_id=None, use_llm=True, level="logic", files=None):
-        seen.append(level)
-        return {"assets": [{"id": f"sa-{level}-{scope_key}"}], "count": 1,
-                "degraded": False, "source": "codegraph"}
-
-    monkeypatch.setattr(S, "extract_scope", fake_extract_scope)
-    agg = {"n": 0}
-    monkeypatch.setattr(S, "_aggregate_high_best_effort",
-                        lambda *a, **k: (agg.__setitem__("n", agg["n"] + 1) or {"count": 1}))
-    res = S.extract_all(str(proj), None, kinds=["entity"], max_components=12, level="")
-    assert seen == ["implementation"]  # 暂停 logic 再生
-    assert agg["n"] == 0               # 暂停 business 聚合
-    assert res.get("business") == 0
-    # 显式层级只产该级
-    seen.clear()
-    agg["n"] = 0
-    res = S.extract_all(str(proj), None, kinds=["entity"], max_components=12, level="implementation")
-    assert seen == ["implementation"] and agg["n"] == 0
-    # 显式请求 logic 仍可单独产出(单资产重提/按需聚合不受影响)
-    seen.clear()
-    res = S.extract_all(str(proj), None, kinds=["entity"], max_components=12, level="logic")
-    assert seen == ["logic"] and agg["n"] == 0
-
-
 def test_grouped_search_items_contiguous_by_component(tmp_path, monkeypatch):
     """分页检索按「所属组件」分组排序：同一组件资产连续，不跨页分散，「其它」排最后。"""
     _ctx(tmp_path, monkeypatch)
@@ -1630,27 +1396,6 @@ def test_resolve_symbol_node_route_and_class_method():
     assert S._resolve_symbol_node("no_such_symbol", "", 0, table, idx) is None
     # 符号与文件都不在表中 → None
     assert S._resolve_symbol_node("ghost", "app/other.py", 0, table, idx) is None
-
-
-def test_backfill_anchors_from_relations():
-    """无锚点资产兜底: 从 detail.relations[].target 反查真实节点。"""
-    table = {
-        "admin_blacklist_add": {"id": "n1", "kind": "function", "name": "admin_blacklist_add",
-                                "qualified_name": "admin_blacklist_add", "file_path": "app/routes/admin.py",
-                                "start_line": 40, "end_line": 60, "start_column": 0, "end_column": 0,
-                                "signature": "", "docstring": "", "return_type": ""},
-    }
-    assets = [{"kind": "process", "level": "infra", "name": "高频限流",
-               "desc": "集成 `check_rate_limit`",  # 反引号符号不在表内
-               "detail": {"relations": [{"target": "admin_blacklist_add", "type": "calls"}]},
-               "astRefs": []}]
-    S._backfill_anchors(assets, table)
-    assert assets[0]["astRefs"][0]["symbol"] == "admin_blacklist_add"
-    # 找不到明确符号 → 不硬补(宁缺毋滥)
-    assets2 = [{"kind": "process", "level": "infra", "name": "跨模块行为",
-                "desc": "集成 `remote_func`", "detail": {}, "astRefs": []}]
-    S._backfill_anchors(assets2, table)
-    assert assets2[0]["astRefs"] == []
 
 
 def test_norm_cache_symbol_roundtrip_snake_case():
@@ -1786,48 +1531,6 @@ def test_collect_via_cache_kb_path_rebuilds_edges(tmp_path, monkeypatch):
                for e in contains)
 
 
-def test_classify_rule_role_signals():
-    """Rule 角色判定(信号优先)：配置载体→rule；配置消费者→dynamic；无信号→空。"""
-    # 配置载体：Config 类 / _DEFAULT_* 常量 / get_config(key,default) 存取器。
-    assert S._classify_rule_role(
-        {"id": "n1", "kind": "class", "name": "Config", "signature": ""}, []) == "rule"
-    assert S._classify_rule_role(
-        {"id": "n2", "kind": "variable", "name": "_DEFAULT_THRESHOLDS", "signature": "= {}"}, []) == "rule"
-    assert S._classify_rule_role(
-        {"id": "n3", "kind": "function", "name": "get_config", "signature": "(key, default='')"}, []) == "rule"
-    assert S._classify_rule_role(
-        {"id": "n4", "kind": "function", "name": "set_threshold", "signature": "(key, value)"}, []) == "rule"
-    # 配置消费者：register_success calls get_config → 动态(执行点)。
-    assert S._classify_rule_role(
-        {"id": "n5", "kind": "function", "name": "register_success", "signature": "(user)"},
-        [{"source": "n5", "target": "get_config", "kind": "calls"}]) == "dynamic"
-    # 无信号普通函数 → 空(不参与规则判定)。
-    assert S._classify_rule_role(
-        {"id": "n6", "kind": "function", "name": "calc_total", "signature": "(o)"}, []) == ""
-
-
-def test_heuristic_rule_carrier_and_consumer(tmp_path, monkeypatch):
-    """启发式 rule 分支：只产配置载体，配置消费者不产 rule。"""
-    _ctx(tmp_path, monkeypatch)
-    nodes = [
-        {"id": "n1", "kind": "function", "name": "get_config",
-         "qualified_name": "get_config", "file_path": "c.py",
-         "start_line": 1, "end_line": 3, "start_column": 0, "end_column": 0,
-         "signature": "(key, default='')", "docstring": "", "return_type": "str"},
-        {"id": "n2", "kind": "function", "name": "register_success",
-         "qualified_name": "register_success", "file_path": "c.py",
-         "start_line": 10, "end_line": 15, "start_column": 0, "end_column": 0,
-         "signature": "(user)", "docstring": "", "return_type": ""},
-    ]
-    ctx = {"nodes": nodes, "edges": [{"source": "n2", "target": "get_config", "kind": "calls"}]}
-    got = S._heuristic_extract("rule", ctx, level="implementation")
-    names = {a["name"] for a in got}
-    assert names == {"get_config"}  # register_success 是消费者 → 不产 rule
-    # 消费者仍可被 process 分支提取(动态执行点)。
-    proc = S._heuristic_extract("process", ctx, level="implementation")
-    assert "register_success" in {a["name"] for a in proc}
-
-
 def test_fields_from_source(tmp_path):
     """源码回读扫描实体字段：注解式 + self. 实例属性。"""
     proj = tmp_path / "p"
@@ -1848,22 +1551,6 @@ def test_fields_from_source(tmp_path):
     # 文件缺失 → 空。
     assert S._fields_from_source(str(proj), {"kind": "class", "name": "X",
                                              "file_path": "missing.py", "start_line": 1}) == []
-
-
-def test_heuristic_entity_fields_all_levels(tmp_path, monkeypatch):
-    """entity 在所有粒度都填字段(源码回读兜底)，不再硬编码空。"""
-    _ctx(tmp_path, monkeypatch)
-    proj = tmp_path / "p"
-    proj.mkdir()
-    (proj / "m.py").write_text(
-        "class User:\n    \"\"\"用户\"\"\"\n    id: int\n    name: str\n    pass\n", encoding="utf-8")
-    monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
-    ctx = S.collect_context(str(proj), "files", "m.py", files=["m.py"])
-    for level in ("implementation", "logic"):
-        got = S._heuristic_extract("entity", ctx, level=level)
-        user = next(a for a in got if a["name"] == "User")
-        assert {f["name"] for f in user["detail"]["fields"]} == {"id", "name"}
-        assert user["astRefs"], "entity 应有 AST 锚点"
 
 
 def test_inherit_ast_refs_from_aggregates(tmp_path, monkeypatch):
@@ -2287,9 +1974,6 @@ def test_collect_context_cache_path_impl_block(tmp_path, monkeypatch):
     assert ctx["implDetails"]["m.py"]["statements"][0]["condition"] == "a > 0"
     assert "控制流语句清单" in ctx["text"]
     assert "- f:2 [if] a > 0" in ctx["text"]
-    # decision 资产可用 impl 分支
-    got = S._heuristic_extract("decision", ctx, level="implementation")
-    assert got and got[0]["detail"]["branches"][0]["condition"] == "a > 0"
 
 
 def test_migration_keeps_rule_as_first_class_kind(tmp_path, monkeypatch):
@@ -2330,3 +2014,202 @@ def test_migration_keeps_rule_as_first_class_kind(tmp_path, monkeypatch):
     legacy = store.SemanticAssetsStore.get("sa-s-l-e-9")
     assert legacy["kind"] == "entity"
     assert legacy["level"] == "logic"
+
+
+# ── AI 逐行解读(关键行启发式 + 术语/规约注入 + 缓存/降级) ──────────
+
+_LN_SRC = [
+    "class Order:",
+    "    def total(self, items):",
+    "        # 汇总金额",
+    "        amount = 0",
+    "        for it in items:",
+    "            amount += it.price",
+    "        return amount",
+]
+
+
+def _ln_source(root, rel="src/order.py"):
+    p = os.path.join(str(root), rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("\n".join(_LN_SRC) + "\n")
+    return rel
+
+
+def _ln_asset(pid, asset_id, rel, line_notes=""):
+    store.SemanticAssetsStore.create({
+        "id": asset_id, "projectId": pid, "kind": "entity",
+        "level": "implementation", "name": "订单", "desc": "订单金额汇总",
+        "detail": {"fields": [{"name": "amount"}]},
+        "astRefs": [{"file": rel, "symbol": "Order", "kind": "class",
+                     "startLine": 1, "endLine": 7}],
+        "status": "active", "needsUpdate": 0, "lineNotes": line_notes,
+    })
+
+
+def test_key_lines_heuristic(tmp_path, monkeypatch):
+    _assets(tmp_path, monkeypatch)
+    # 声明/赋值/控制流/调用行皆入选；仅注释等噪声行跳过
+    out = S._key_lines(_LN_SRC, 1)
+    assert out == [1, 2, 4, 5, 6, 7]
+
+
+def test_key_lines_type_declarations(tmp_path, monkeypatch):
+    """类型/接口声明窗(无控制流无调用)也能入选；纯导入窗回退解释非空行。"""
+    _assets(tmp_path, monkeypatch)
+    codes = [
+        "import raw from '../../../schema/capabilities.json';",
+        "import type { DiagramType } from './types';",
+        "",
+        "export type TypeSupport = 'native' | 'emulated' | 'unsupported';",
+        "",
+        "export interface AnimationCapability {",
+        "  sequencePlayback: boolean;",
+        "  nodeHighlight: boolean;",
+        "}",
+    ]
+    assert S._key_lines(codes, 1) == [4, 6, 7, 8]
+    assert S._key_lines(codes[:2], 1) == [1, 2]
+
+
+def test_generate_line_notes_llm_context_and_persist(tmp_path, monkeypatch):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-1", rel)
+    store.GlossaryStore.create(pid, term="订单", definition="购买行为的数据载体")
+    store.NamingConventionStore.create(pid, "实体类以业务名词命名", scenarios=["naming"])
+    captured = {}
+
+    def fake_llm(msgs, **kw):
+        import json as _j
+        captured["msgs"] = msgs
+        return {"content": _j.dumps({"notes": [
+            {"line": 2, "note": "定义订单金额汇总方法"},
+            {"line": 99, "note": "越界行应被丢弃"},
+        ]}, ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    res = S.generate_line_notes("sa-ln-1", rel, 1, 6, root=str(root))
+    assert res["degraded"] is False and res["cached"] is False
+    assert res["notes"] == {2: "定义订单金额汇总方法"}
+    user = captured["msgs"][1]["content"]
+    assert "订单" in user and "购买行为的数据载体" in user
+    assert "实体类以业务名词命名" in user
+    # 成功后落库(缓存字段)
+    row = store.SemanticAssetsStore.get("sa-ln-1")
+    assert "订单金额汇总方法" in (row.get("lineNotes") or "")
+
+
+def test_generate_line_notes_cache_hit(tmp_path, monkeypatch):
+    import hashlib
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    win = "\n".join(_LN_SRC[0:6])
+    h = hashlib.md5(win.encode("utf-8")).hexdigest()
+    _ln_asset(pid, "sa-ln-2", rel, line_notes=_j.dumps(
+        {"file": rel, "start": 1, "end": 6, "hash": h,
+         "notes": {"2": "缓存注解"}}, ensure_ascii=False))
+
+    def boom(*a, **k):
+        raise AssertionError("缓存命中时不应调用 LLM")
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", boom)
+    res = S.generate_line_notes("sa-ln-2", rel, 1, 6, root=str(root))
+    assert res["cached"] is True and res["notes"] == {2: "缓存注解"}
+
+
+def test_generate_line_notes_llm_fail_degraded(tmp_path, monkeypatch):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-3", rel)
+
+    def fail(*a, **k):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fail)
+    res = S.generate_line_notes("sa-ln-3", rel, 1, 6, root=str(root))
+    assert res["degraded"] is True and res["notes"] == {}
+    # 失败不落库(可重试)
+    row = store.SemanticAssetsStore.get("sa-ln-3")
+    assert not (row.get("lineNotes") or "")
+
+
+def test_line_notes_endpoint_cached(tmp_path, monkeypatch):
+    import hashlib
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    win = "\n".join(_LN_SRC[0:6])
+    h = hashlib.md5(win.encode("utf-8")).hexdigest()
+    _ln_asset(pid, "sa-ln-4", rel, line_notes=_j.dumps(
+        {"file": rel, "start": 1, "end": 6, "hash": h,
+         "notes": {"6": "返回汇总金额"}}, ensure_ascii=False))
+    out = _run_coro(S.api_line_notes("sa-ln-4", rel, 1, 6,
+                                     root=str(root), project=None, model_id=None))
+    assert out["code"] == 0
+    assert out["data"]["cached"] is True
+    assert out["data"]["notes"] == {6: "返回汇总金额"}
+
+
+def test_generate_line_notes_tool_round_whitelist(tmp_path, monkeypatch):
+    """多轮工具调用：白名单工具真执行回喂，白名单外拒绝；最终 JSON 正常解析。"""
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-5", rel)
+    seen = []
+
+    def fake_llm(msgs, **kw):
+        import json as _j
+        seen.append(list(msgs))
+        if len(seen) == 1:
+            tc = ('[TOOL_CALL]{"tool":"asset.semantic.extract","arguments":{"scope":{"type":"project"}}}[/TOOL_CALL]\n'
+                  '[TOOL_CALL]{"tool":"code.read_symbols","arguments":{"file":"%s","startLine":1,"endLine":3}}[/TOOL_CALL]' % rel)
+            return {"content": tc}
+        return {"content": _j.dumps({"notes": [{"line": 5, "note": "for 循环汇总"}]}, ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    res = S.generate_line_notes("sa-ln-5", rel, 1, 6, root=str(root))
+    assert res["degraded"] is False
+    assert res["notes"] == {5: "for 循环汇总"}
+    assert len(seen) == 2
+    feed = seen[1][-1]["content"]
+    assert "不在本任务允许列表" in feed   # extract 被白名单拒绝
+    assert "class Order" in feed          # read_symbols 真执行且源码回喂
+
+
+def test_generate_line_notes_resolves_project_root(tmp_path, monkeypatch):
+    """只传 project id(URL 无 root) → 按注册项目 rootPath 解析，可读源码。"""
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    store.ProjectsStore.create({"id": "proj-ln", "name": "t", "rootPath": str(root)})
+    pid = S.project_id_for(None, "proj-ln")
+    _ln_asset(pid, "sa-ln-6", rel)
+
+    def fake_llm(msgs, **kw):
+        return {"content": _j.dumps({"notes": [{"line": 5, "note": "for 循环汇总"}]},
+                                    ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    res = S.generate_line_notes("sa-ln-6", rel, 1, 6, root=None, project="proj-ln")
+    assert res["degraded"] is False
+    assert res["notes"] == {5: "for 循环汇总"}

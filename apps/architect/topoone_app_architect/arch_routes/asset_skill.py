@@ -18,38 +18,35 @@ logger = logging.getLogger(__name__)
 
 _BUILTIN_EXTRACT = """## 语义资产提取规约（extract 场景）
 
-### 工作流（提议制，每次提取必经）
-1. `asset.semantic.search` 查已有资产（查重/过期判定）——已有且新鲜则不重复提取；
-2. `code.read_symbols` 读真实源码（禁止凭空产出）；
-3. 按下方本体规约构造资产 JSON，经 `asset.semantic.save` 落库；
-4. 汇报结果：保存了几条 / 被拒原因（值域越界等）/ 命名继承情况（proposedNames）。
+### 指令化提取（唯一路径，确定执行）
+- 提取由**明确指令**触发：指令携带**组件ID**（形如 `comm-…`）作为**权威范围**——
+  由组件资产 UI 按钮自动生成，或设计者在对话手动输入。
+- 组件ID 即范围：以其为 scope 直接执行定向提取，**不再提议范围、不等确认**
+  （只有 ID 缺失/多义时才需澄清，见下）。
+- 提取统一走 `asset.semantic.extract`（规则定死类别 + tAgent 定向 + 锚定代码段 +
+  语义解释）——**不要**改用 `code.read_symbols` 手工读码 + `asset.semantic.save` 拼资产。
 
-### 本体判定（六类，X 轴）
-- **entity 实体**：承载业务状态的数据结构（类/结构体/枚举），锚 class/struct/enum；
-- **contract 契约**：跨边界交互接口（HTTP 路由/RPC/对外函数签名），锚 route/func；
-- **state 状态**：显式状态机（枚举+合法转移），锚 class/enum；低配框架无此类；
-- **rule 规则**：配置化业务规则（校验/阈值/白名单），锚 func/field；
-- **process 过程**：有步骤序列的处理流程（函数/方法），锚 func/method/route；
-- **decision 决策**：分支判定逻辑（if/switch 链），锚 func。
+### 工作流（每次提取必经）
+1. 确定组件ID：指令带 `comm-…` ID 直接用；只给组件名 → `kb.asset.search` 取 `id`；
+   多义（多个候选）→ **如实报告候选清单请设计者确认**，禁止猜。
+2. `asset.semantic.search` 查该组件已有资产（查重/过期判定）——已有且新鲜则提示，不重复提取。
+3. `asset.semantic.extract` 以 `{scope:{type:"comm", key:<组件ID>}}` 执行定向提取。
+4. 如实汇报：保存几条 / 各类别数 / 是否降级(degraded) / 命名继承(proposedNames) /
+   范围未命中时的 error+候选清单；`count=0` 则说明"未提取到任何资产"及原因。
+   禁止声称"提取已启动/后台运行/请等待"——你拿到的是同步完成的结果。
 
-### detail 结构规约
-- process：`steps:[{order,semantic,condition?}]`（**按源码行号顺序重建**，含调用与分支）；
-- entity：`fields:[{name,type?,semantic?}]`；decision：`branches:[{condition,semantic}]`；
-- state：`states`+`transitions`；契约：`relations:[{target,type,semantic?}]`。
-
-### desc 白话规范
-- 一句话讲清"这是什么、做什么"（代码级白话，禁止空模板话术）；
-- 格式：「实体「X」：…N 字段（a, b…）」/「过程「X」：N 步（a→b→c），M 分支」；
-- 命名与代码一致；源码 docstring 优先作为语义来源。
+### 产出契约（管线保证，你如实转述即可，不自行判断类别）
+- 每条资产 = 类别(六类之一，规则定死) + 锚定代码段(astRefs: file/symbol/startLine/endLine)
+  + 语义解释(desc 白话 + detail 结构化)；
+- 六类：entity 实体 / contract 契约 / state 状态 / rule 规则 / process 过程 / decision 决策；
+- 实现层资产必带 astRefs 锚点，无锚点会被幻影拒绝。
 
 ### 命名纪律（重要）
-- canonicalKey 命中既有资产 → **旧名自动保留**，你的提议名进 proposedNames 由设计者定夺，不要反复改名；
-- 新资产先查参考池（墓碑）——同名符号有历史命名则沿用；
-- 提取前先 `asset.semantic.search` 查重，避免重复产出。
+- canonicalKey 命中既有资产 → **旧名自动保留**，提议名进 proposedNames 由设计者定夺；
+- 新资产沿用历史命名（墓碑）；提取前先 `asset.semantic.search` 查重，避免重复产出。
 
 ### 框架值域
-- kind/level 必须在当前框架档位值域内，越域会被拒绝（返回 rejected 原因）；
-- 实现层资产必须带 astRefs 锚点（file/symbol/startLine/endLine），无锚点会被幻影拒绝。
+- kind/level 必须在当前框架档位值域内，越域会被拒绝（返回 rejected 原因）。
 """
 
 _BUILTIN_ACCEPT = """## 验收比对规约（accept 场景）

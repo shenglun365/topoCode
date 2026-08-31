@@ -93,8 +93,9 @@ class TestAssetSkillDocs:
         _setup(tmp_path, monkeypatch)
         doc = K.skill_docs(str(tmp_path), None, ["extract"])
         assert "语义资产提取规约" in doc
-        assert "asset.semantic.save" in doc
-        assert "行号顺序重建" in doc
+        assert "asset.semantic.extract" in doc      # 指令化：统一走定向管线
+        assert "组件ID" in doc                       # 指令携带组件ID作为权威范围
+        assert "确定执行" in doc                     # 不再提议范围等确认
         assert "命名纪律" in doc
 
     def test_project_convention_injected(self, tmp_path, monkeypatch):

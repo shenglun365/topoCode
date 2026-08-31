@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BoltIcon, ChevronDownIcon, ChevronRightIcon, ArrowPathIcon,
   SparklesIcon, CubeTransparentIcon, AdjustmentsHorizontalIcon, ServerStackIcon, Squares2X2Icon,
   ClipboardDocumentListIcon, ClipboardDocumentIcon, ScaleIcon, EyeIcon, TrashIcon,
-  ChartBarSquareIcon, StopIcon,
+  ChartBarSquareIcon, StopIcon, XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import AnalysisChat from '@/components/requirements/AnalysisChat.vue'
 import RequirementHistoryModal from '@/components/requirements/RequirementHistoryModal.vue'
@@ -13,7 +13,7 @@ import SemanticGraphView, { type GraphTabDef } from '@/components/assets/Semanti
 import PseudoExplainer from '@/components/assets/PseudoExplainer.vue'
 import DiagramCard from '@/components/diagram/DiagramCard.vue'
 import { chatStream, type KbAnalysisTurn } from '@/services/kb-analysis-agent'
-import { semanticAssetService, type CoverageInfo, type ExtractTaskMessage, type ExtractTaskStatus, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
+import { semanticAssetService, type CoverageInfo, type FrameworkPreview, type FrameworkResult, type SemanticBatchResult, type SemanticPurgeResult, type SemanticStatsResult } from '@/services/semantic-asset-service'
 import { kbAssetService } from '@/services/kb-assets'
 import { requirementService } from '@/services/requirement-service'
 import { namingService, type NamingConvention } from '@/services/naming-service'
@@ -33,8 +33,7 @@ const turns = ref<KbAnalysisTurn[]>([])
 const busy = ref(false)
 const chatConvId = ref<string>('')
 const chatAbort = ref<AbortController | null>(null)
-const extractAbort = ref<AbortController | null>(null)
-function stopChat() { chatAbort.value?.abort(); extractAbort.value?.abort() }
+function stopChat() { chatAbort.value?.abort() }
 const historyOpen = ref(false)
 const { diagramSkill, toggleDiagramSkill } = useDiagramSkill()
 
@@ -282,6 +281,8 @@ function clearScope() {
 /** 范围筛选变化 → 回到第 1 页并按选中组件重新查询(服务端 scope 过滤)。 */
 watch(scopeSel, () => {
   page.value = 1
+  batchAction.value = ''
+  batchPreview.value = null
   if (tab.value === 'semantic') loadSemantic()
 })
 
@@ -448,92 +449,6 @@ function cancelPurge() {
   purgeResult.value = null
 }
 
-/** 提取任务(服务端后台执行，刷新不中断)：当前任务 id + 轮询句柄 + 已同步消息游标。 */
-const extractTaskId = ref<string>('')
-const extractPollTimer = ref<ReturnType<typeof setInterval> | null>(null)
-const extractMsgSeen = ref<Set<string>>(new Set())
-const extractRunning = ref(false)
-/** 任务进度(供顶部常驻指示器展示，刷新恢复后同样可见)。 */
-const extractDone = ref(0)
-const extractTotal = ref(0)
-
-/** 向资产管理对话同步一条提取进度消息(去重：按消息 id)。 */
-function syncExtractMsg(m: ExtractTaskMessage) {
-  if (extractMsgSeen.value.has(m.id)) return
-  extractMsgSeen.value.add(m.id)
-  turns.value.push({ role: (m.role as 'user' | 'assistant') || 'assistant', content: m.content, id: m.id })
-}
-
-/** 停止任务轮询(清理定时器)。 */
-function stopExtractPoll() {
-  if (extractPollTimer.value) {
-    clearInterval(extractPollTimer.value)
-    extractPollTimer.value = null
-  }
-  extractRunning.value = false
-}
-
-/** 请求取消后台提取任务(服务端线程在组件边界停止)；轮询检测到 cancelled 后自动停止。 */
-async function cancelExtractTask() {
-  if (!extractTaskId.value || !extractRunning.value) return
-  try {
-    await semanticAssetService.cancelExtractTask(extractTaskId.value)
-  } catch (err: any) {
-    console.warn('[asset-mgmt] cancel extract task failed:', err)
-  }
-}
-
-/** 消费一次任务快照：同步新消息；任务结束 → 停止轮询并刷新。 */
-function consumeExtractTask(st: ExtractTaskStatus) {
-  if (!st.found || !st.id) {
-    stopExtractPoll()
-    return
-  }
-  extractDone.value = st.done ?? 0
-  extractTotal.value = st.total ?? 0
-  for (const m of st.messages ?? []) syncExtractMsg(m)
-  if (!st.running) {
-    stopExtractPoll()
-    extractTaskId.value = ''
-    Promise.all([loadSemantic(), refreshStatus(), loadCoverage()]).then(() => {})
-  }
-}
-
-/** 轮询任务直到结束(服务端后台执行，浏览器刷新不中断)。 */
-function pollExtractTask(taskId: string) {
-  stopExtractPoll()
-  extractTaskId.value = taskId
-  extractRunning.value = true
-  const tick = async () => {
-    try {
-      const st = await semanticAssetService.extractTaskStatus(taskId)
-      consumeExtractTask(st)
-    } catch (err: any) {
-      console.warn('[asset-mgmt] extract task poll failed:', err)
-    }
-  }
-  void tick()
-  extractPollTimer.value = setInterval(() => void tick(), 1200)
-}
-
-/** 提交：创建服务端后台提取任务，轮询并把进度消息同步到对话消息栏。
- *  已有任务进行中 → 忽略重复点击，避免重复激活任务。 */
-/** 刷新后恢复：读取最近一次提取任务，若仍在运行则恢复轮询并同步历史消息。 */
-async function restoreExtractTask() {
-  try {
-    const st = await semanticAssetService.latestExtractTask()
-    if (!st || !st.found || !st.id) return
-    extractDone.value = st.done ?? 0
-    extractTotal.value = st.total ?? 0
-    extractMsgSeen.value = new Set((st.messages ?? []).map((m) => m.id))
-    for (const m of st.messages ?? []) syncExtractMsg(m)
-    if (st.running) {
-      pollExtractTask(st.id)
-    }
-  } catch (err: any) {
-    console.warn('[asset-mgmt] restore extract task failed:', err)
-  }
-}
 
 // ---- 语义资产批量管理(选定组件范围) ----
 const batchOpen = ref(false)
@@ -550,24 +465,29 @@ function targetScope() {
   return { compIds, includeOther }
 }
 
+/** 批量范围签名(预览与执行之间范围变化 → 作废预览)。 */
+function batchScopeSig() {
+  return JSON.stringify([targetScope(), scopeParams()])
+}
+
 async function runBatch(action: 'clear') {
   if (batchRunning.value) return
-  if (action === 'clear' && batchAction.value !== 'clear') {
-    batchAction.value = 'clear'
-    return
-  }
   const { compIds, includeOther } = targetScope()
-  // 清除 = 物理删除：确认前先 dry-run 预览对需求池/任务的影响范围。
-  if (action === 'clear' && !batchPreview.value) {
+  // 清除 = 物理删除：一击式确认——首击 dry-run 预览影响并把同一按钮转为「确认清除」，再击执行。
+  if (!batchPreview.value) {
+    const sig = batchScopeSig()
     batchRunning.value = true
     try {
       const scope = scopeParams()
       const res = await semanticAssetService.batchManage(action, compIds, {
         includeOther, scope, dryRun: true,
       })
+      if (sig !== batchScopeSig()) return
       batchPreview.value = res
+      batchAction.value = action
     } catch {
       batchPreview.value = null
+      batchAction.value = ''
       batchLast.value = t('assetMgmt.batchFailed')
     } finally {
       batchRunning.value = false
@@ -582,8 +502,6 @@ async function runBatch(action: 'clear') {
     const res = await semanticAssetService.batchManage(action, compIds, {
       includeOther,
       scope,
-      kinds: kinds.map((k) => k.value),
-      modelId: readModelPref('architect') || undefined,
     })
     batchLast.value = t('assetMgmt.batchDone', { action: t(`assetMgmt.batchAction.${action}`), n: res.count })
     await Promise.all([loadSemantic(), refreshStatus()])
@@ -681,6 +599,22 @@ async function copyAsset(a: SemanticAsset) {
 }
 
 // ---- 对话区：引用资产 → agent 确认 ----
+
+// 提取完成 → 主动刷新资产数据(agent 在对话中执行 asset.semantic.extract 落库后，
+// 资产列表/状态/覆盖度不会自动更新；此处去抖合并刷新，回合结束时兜底再刷一次)。
+let extractDirty = false
+let extractRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function refreshAfterExtract() {
+  extractDirty = false
+  if (extractRefreshTimer) { clearTimeout(extractRefreshTimer); extractRefreshTimer = null }
+  void Promise.all([loadSemantic(), refreshStatus(), loadOverview(), loadCoverage()])
+}
+function markExtracted() {
+  extractDirty = true
+  if (extractRefreshTimer) clearTimeout(extractRefreshTimer)
+  extractRefreshTimer = setTimeout(refreshAfterExtract, 1500)
+}
+
 function askAgent(text: string) {
   if (busy.value || !text.trim()) return
   turns.value.push({ role: 'user', content: text })
@@ -701,12 +635,18 @@ function askAgent(text: string) {
       turns.value[idx].content += ev.delta ?? ''
     } else if (ev.type === 'reasoning') {
       turns.value[idx].reasoning = (turns.value[idx].reasoning ?? '') + (ev.delta ?? '')
+    } else if (ev.type === 'tool_result' && ev.tool === 'asset.semantic.extract' && ev.ok) {
+      markExtracted()
     } else if (ev.type === 'done') {
       turns.value[idx].content = ev.content ?? turns.value[idx].content
     } else if (ev.type === 'error') {
       turns.value[idx].content = ev.message || t('requirement.chat.fallback')
     }
-  }).finally(() => { chatAbort.value = null; busy.value = false })
+  }).finally(() => {
+    chatAbort.value = null
+    busy.value = false
+    if (extractDirty) refreshAfterExtract()
+  })
 }
 
 async function onSend(text: string) {
@@ -718,19 +658,23 @@ async function onSend(text: string) {
   const ac = new AbortController(); chatAbort.value = ac
   try {
     const msgs = turns.value.slice(0, -1).map((t) => ({ role: t.role, content: t.content }))
-    await chatStream(msgs, {
-      conversationId: chatConvId.value || undefined,
-      kind: 'asset',
-      title: t('assetMgmt.chatTitle'),
-      modelId: readModelPref('architect') || undefined,
-      diagramSkill: diagramSkill.value,
-      signal: ac.signal,
-    }, (ev) => {
+      await chatStream(msgs, {
+        conversationId: chatConvId.value || undefined,
+        kind: 'asset',
+        title: t('assetMgmt.chatTitle'),
+        modelId: readModelPref('architect') || undefined,
+        diagramSkill: diagramSkill.value,
+        // 手动输入也注入 extract 场景：指令化提取(组件ID 权威范围，确定执行)
+        skillScenarios: ['extract'],
+        signal: ac.signal,
+      }, (ev) => {
       if (ev.conversationId) chatConvId.value = ev.conversationId
       if (ev.type === 'chat_start') {
         if (ev.userMessageId) turns.value[idx - 1].id = ev.userMessageId
       } else if (ev.type === 'tool_result' && ev.tool === 'convention.propose' && ev.ok) {
         onConventionProposed(idx)
+      } else if (ev.type === 'tool_result' && ev.tool === 'asset.semantic.extract' && ev.ok) {
+        markExtracted()
       } else if (ev.type === 'chunk') {
         turns.value[idx].content += ev.delta ?? ''
       } else if (ev.type === 'reasoning') {
@@ -747,6 +691,7 @@ async function onSend(text: string) {
   } finally {
     chatAbort.value = null
     busy.value = false
+    if (extractDirty) refreshAfterExtract()
   }
 }
 
@@ -854,8 +799,9 @@ function askExtractGeneral() {
   askAgent(t('assetMgmt.chatExtractPrompt'))
 }
 
-function askExtractComponent(name: string) {
-  askAgent(t('assetMgmt.compExtractPrompt', { name }))
+function askExtractComponent(key: string, name: string) {
+  // 指令化：组件ID 作为权威范围写进指令（确定执行，不再提议范围）
+  askAgent(t('assetMgmt.compExtractPrompt', { name, key }))
 }
 
 /** 组件覆盖状态（概览覆盖度数据投影到语义 tab 组头）；无数据返回 '' 不渲染。 */
@@ -906,10 +852,7 @@ function gotoPage(p: number) {
 onMounted(async () => {
   await Promise.all([loadCompCatalog(), loadOverview(), loadSemantic(), refreshStatus(), loadFramework(), loadCoverage()])
   turns.value.push({ role: 'assistant', content: t('assetMgmt.welcome') })
-  await restoreExtractTask()
 })
-
-onUnmounted(() => stopExtractPoll())
 </script>
 
 <template>
@@ -931,22 +874,6 @@ onUnmounted(() => stopExtractPoll())
           </button>
         </div>
         <span class="chip bg-ctp-surface0 text-ctp-subtext0 font-mono text-[10px]">{{ statusText }}</span>
-        <div
-          v-if="extractRunning"
-          class="flex items-center gap-2 rounded-md border border-ctp-yellow/40 bg-ctp-yellow/10 pl-2.5 pr-1 py-1"
-        >
-          <ArrowPathIcon class="w-3.5 h-3.5 animate-spin text-ctp-yellow" />
-          <span class="text-[11px] font-medium text-ctp-yellow whitespace-nowrap">
-            {{ t('assetMgmt.extracting') }} {{ extractDone }}/{{ extractTotal }}
-          </span>
-          <button
-            class="btn btn-xs btn-red"
-            :disabled="!extractTaskId"
-            @click="cancelExtractTask"
-          >
-            <StopIcon class="w-3 h-3" />{{ t('assetMgmt.stopExtract') }}
-          </button>
-        </div>
         <div class="flex-1" />
         <button
           class="btn btn-sm btn-ghost"
@@ -1090,7 +1017,14 @@ onUnmounted(() => stopExtractPoll())
                   :disabled="batchRunning"
                   @click="runBatch('clear')"
                 >
-                  <TrashIcon class="w-3 h-3" />{{ t('assetMgmt.batchClear') }}
+                  <TrashIcon class="w-3 h-3" />{{ batchAction === 'clear' ? t('assetMgmt.batchConfirm') : t('assetMgmt.batchClear') }}
+                </button>
+                <button
+                  v-if="batchAction === 'clear'"
+                  class="btn btn-xs btn-ghost"
+                  @click="batchAction = ''; batchPreview = null"
+                >
+                  {{ t('assetMgmt.batchCancel') }}
                 </button>
               </div>
               <div
@@ -1143,21 +1077,6 @@ onUnmounted(() => stopExtractPoll())
                   >
                     {{ t('assetMgmt.purgeConfirm.noImpact') }}
                   </p>
-                </div>
-                <div class="flex items-center gap-1">
-                  <button
-                    class="btn btn-xs btn-red"
-                    :disabled="batchRunning"
-                    @click="runBatch('clear')"
-                  >
-                    {{ t('assetMgmt.batchConfirm') }}
-                  </button>
-                  <button
-                    class="btn btn-xs btn-ghost"
-                    @click="batchAction = ''; batchPreview = null"
-                  >
-                    {{ t('assetMgmt.batchCancel') }}
-                  </button>
                 </div>
               </div>
               <div
@@ -1535,7 +1454,7 @@ onUnmounted(() => stopExtractPoll())
                 :style="{ paddingLeft: (g.depth * 12) + 'px' }"
               >
                 <button
-                  v-if="hasChildren(g.key)"
+                  v-if="g.key !== OTHER_KEY && (hasChildren(g.key) || g.assets.length)"
                   class="p-0.5 text-ctp-overlay0 hover:text-ctp-text shrink-0"
                   @click="toggleOpen(g.key)"
                 >
@@ -1575,7 +1494,7 @@ onUnmounted(() => stopExtractPoll())
                   <button
                     class="text-ctp-overlay0 hover:text-ctp-mauve p-0.5"
                     :title="t('assetMgmt.chatExtractHint')"
-                    @click="askExtractComponent(g.name)"
+                    @click="askExtractComponent(g.key, g.name)"
                   >
                     <SparklesIcon class="w-3 h-3" />
                   </button>
@@ -1588,6 +1507,8 @@ onUnmounted(() => stopExtractPoll())
                   </button>
                 </template>
               </div>
+              <!-- 折叠该组件时隐藏其资产(组头保留，计数 chip 仍在) -->
+              <template v-if="compOpen[g.key] !== false">
               <div
                 v-for="a in g.assets"
                 :key="a.id"
@@ -1839,6 +1760,7 @@ onUnmounted(() => stopExtractPoll())
                   </div>
                 </div>
               </div>
+              </template>
             </template>
             <p
               v-if="!semanticGroups.length && !loading"
@@ -1896,7 +1818,6 @@ onUnmounted(() => stopExtractPoll())
           :busy="busy"
           :title="t('assetMgmt.chatTitle')"
           :diagram-skill="diagramSkill"
-          :show-extract="false"
           @send="onSend"
           @delete-turn="onDeleteTurn"
           @refresh-asset="onRefreshAsset"

@@ -622,6 +622,7 @@ def _project_migrations(db) -> None:
     ])
     _add_cols(db, "arch_semantic_assets", [
         ("pseudo", "TEXT DEFAULT ''"),
+        ("line_notes", "TEXT DEFAULT ''"),
         ("anchor_hashes", "TEXT"),
         ("needs_update", "INTEGER DEFAULT 0"),
         ("last_checked_at", "INTEGER DEFAULT 0"),

@@ -438,6 +438,24 @@ function _safeSemId(id: string): string {
   return (id || 'x').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1')
 }
 
+/** mermaid classDiagram 类名：由显示名净化而来(可读)，全局去重保证唯一。
+ *  注：mermaid classDiagram 不支持 `class "显示名" as 别名`(报 got 'STR')，
+ *  类名本身必须直接可读。 */
+function _safeClassNames(items: { id: string; name: string }[]): Map<string, string> {
+  const used = new Set<string>()
+  const out = new Map<string, string>()
+  for (const it of items) {
+    let s = (_semLabel(it.name, 40) || 'C').replace(/[^\p{L}\p{N}_-]+/gu, '_')
+    if (!s || /^_+$/.test(s)) s = 'C'
+    if (/^[0-9]/.test(s)) s = `C_${s}`
+    let unique = s
+    for (let i = 2; used.has(unique); i++) unique = `${s}_${i}`
+    used.add(unique)
+    out.set(it.id, unique)
+  }
+  return out
+}
+
 /** 类/ER 字段名等简单标识符。 */
 function _safeIdent(s: string, fallback = 'f'): string {
   const t = (s || '').replace(/[^A-Za-z0-9_]/g, '_')
@@ -557,13 +575,14 @@ export function viewUnavailableReasons(
 export function semanticClassDiagramToMermaid(nodes: _Node[], edges: _Edge[]): string {
   const P = currentDiagramPalette()
   const classes = nodes.filter((n) => n.kind === 'entity' || (n.kind === 'contract' && n.level === 'implementation'))
-  const safe = new Map(nodes.map((n) => [n.id, _safeSemId(n.id)]))
+  // 类名由业务名净化而来(声明/成员/边引用一致)；mermaid 不支持带引号的别名语法。
+  const safe = _safeClassNames(nodes)
   const lines = ['classDiagram', '  direction LR']
   lines.push(`  classDef asset fill:${P.fill},stroke:#cba6f7,stroke-width:2px,color:${P.text}`)
   lines.push(`  classDef contract fill:${P.fill},stroke:#f9e2af,stroke-width:2px,color:${P.text}`)
-  lines.push(`  classDef stale fill:${P.staleFill},stroke:#f38ba8,stroke-width:2px,color:${P.staleText}`)
+  lines.push(`  classDef stale fill:${P.staleFill},stroke:#f38ba8,stroke-width:2px,stroke-dasharray:4 2,color:${P.staleText}`)
   for (const n of classes) {
-    lines.push(`  class "${_semLabel(n.name, 40)}" as ${safe.get(n.id)}`)
+    lines.push(`  class ${safe.get(n.id)}`)
     const fields = (n.detail?.fields ?? []).slice(0, 30)
     if (fields.length) {
       lines.push(`  class ${safe.get(n.id)} {`)
@@ -1203,11 +1222,11 @@ export function semanticMindmapToMermaid(nodes: _Node[]): string {
     for (const n of high.slice(0, 40)) {
       if (shownHigh.has(n.id)) continue
       shownHigh.add(n.id)
-      lines.push(`  ${_semLabel(n.name, 30)}`)
+      lines.push(`    ${_semLabel(n.name, 30)}`)
       for (const a of (n.detail?.aggregates ?? []).slice(0, 30)) {
         if (a.assetId && byId.has(a.assetId) && !shownHigh.has(a.assetId)) {
           shownHigh.add(a.assetId)
-          lines.push(`    ${_semLabel(a.name || byId.get(a.assetId)?.name || a.assetId, 30)}`)
+          lines.push(`      ${_semLabel(a.name || byId.get(a.assetId)?.name || a.assetId, 30)}`)
         }
       }
     }
@@ -1217,12 +1236,12 @@ export function semanticMindmapToMermaid(nodes: _Node[]): string {
     for (const n of roots.slice(0, 40)) {
       if (shownHigh.has(n.id)) continue
       shownHigh.add(n.id)
-      lines.push(`  ${_semLabel(n.name, 30)}`)
+      lines.push(`    ${_semLabel(n.name, 30)}`)
       const kids = nodes.filter((o) => o.id !== n.id && o.detail?.aggregates?.some((a) => a.assetId === n.id))
       for (const k of kids.slice(0, 20)) {
         if (shownHigh.has(k.id)) continue
         shownHigh.add(k.id)
-        lines.push(`    ${_semLabel(k.name, 30)}`)
+        lines.push(`      ${_semLabel(k.name, 30)}`)
       }
     }
   }
@@ -1273,4 +1292,22 @@ export function semanticGraphViewDiagrams(
 ): { mermaid: string; plantuml: string } {
   const g = SEMANTIC_VIEW_GENERATORS[view] ?? SEMANTIC_VIEW_GENERATORS.flow
   return { mermaid: g.mermaid(nodes, edges), plantuml: g.plantuml(nodes, edges) }
+}
+
+/** 图内点击节点 id(node-click 插件剥壳后) → 资产 id 映射；未渲染的合成节点不在表内。 */
+export function semanticViewClickIds(
+  view: SemanticGraphViewId,
+  nodes: { id: string; name: string }[],
+): Map<string, string> {
+  const out = new Map<string, string>()
+  if (view === 'flow') {
+    nodes.forEach((n, i) => out.set(`n${i}`, n.id))
+    return out
+  }
+  if (view === 'class') {
+    for (const [id, name] of _safeClassNames(nodes)) out.set(name, id)
+    return out
+  }
+  for (const n of nodes) out.set(_safeSemId(n.id), n.id)
+  return out
 }
