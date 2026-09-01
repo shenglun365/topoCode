@@ -1,11 +1,13 @@
 import { createExportPlugin } from './export';
 import { createNodeClickPlugin } from './node-click';
-import { createZoomPanPlugin, type ZoomPanApi } from './zoom-pan';
+import { createZoomPanPlugin, type ZoomPanApi, type ZoomPanOptions } from './zoom-pan';
 import { createAnimationPlugin, type AnimationPluginOptions } from '../animation/plugin';
 import type { DiagramPlugin } from './types';
 
 export interface InteractionOptions {
   zoomPan?: boolean;
+  /** Zoom/pan config (min fit scale etc.). Only used when zoomPan is enabled. */
+  zoomPanOptions?: ZoomPanOptions;
   nodeClick?: boolean;
   export?: boolean;
   /** Playback toolbar + animation controller (built-in adapters or custom steps/plan). */
@@ -21,7 +23,7 @@ export function createInteractionPlugins(opts: InteractionOptions = {}): PluginS
   const plugins: DiagramPlugin[] = [];
   let zoomPan: ZoomPanApi | null = null;
   if (opts.zoomPan !== false) {
-    const zp = createZoomPanPlugin();
+    const zp = createZoomPanPlugin(opts.zoomPanOptions);
     plugins.push(zp);
     zoomPan = zp.api;
   }

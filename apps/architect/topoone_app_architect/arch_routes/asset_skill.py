@@ -85,12 +85,33 @@ _BUILTIN_CONTRACT = """## 期望固化规约（contract 场景，🧾 开启时�
 """
 
 
+_BUILTIN_LINENOTE = """## 代码逐行解读规约（linenote 场景）
+
+### 目标
+- 对给定带行号源码**逐行**给出代码级用途说明（≤40 字/行），读者不看实现也能懂每行在做什么；
+- 说明必须贴合真实代码：只解释源码中可见的逻辑，禁止臆造不存在的分支/调用/参数。
+
+### 按需取证（工具辅助：先查证，再作答）
+- 行内调用了看不懂的符号/函数 → `code.read_symbols` 读其真实实现后再解释，
+  不要凭名字猜测行为；
+- 涉及其它语义资产（实体/契约/状态/规则）→ `asset.semantic.search` 检索、
+  `asset.semantic.detail` 读完整定义，在说明中点出业务含义与关联；
+- 信息已足够时立即作答，不要为取证而取证。
+
+### 输出纪律
+- 只输出 JSON：{"notes":[{"line":<行号>,"note":"<说明>"}]}，不要输出其它内容；
+- 每行一条，行号必须来自输入清单；空行/纯括号等结构行不必解释；
+- 说明里可引用行内真实的标识符名（帮助定位），但不复述整行代码。
+"""
+
+
 def _builtin_for(scenario: str) -> str:
     return {
         "extract": _BUILTIN_EXTRACT,
         "accept": _BUILTIN_ACCEPT,
         "naming": _BUILTIN_NAMING,
         "contract": _BUILTIN_CONTRACT,
+        "linenote": _BUILTIN_LINENOTE,
     }.get(scenario, "")
 
 

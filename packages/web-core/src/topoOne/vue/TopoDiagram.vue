@@ -24,6 +24,8 @@ const props = withDefaults(
     themeVariables?: Record<string, string | number>;
     /** false disables the interaction plugins (zoom-pan / node-click / export). */
     interactions?: boolean;
+    /** 自动适配(fit/reset)最小缩放下限(默认 0.1)；语义图谱传 ~0.3 避免宽/大图缩到不可读。 */
+    zoomFitMinScale?: number;
     /** Custom playback: steps (CSS selectors per step) and/or a plan factory. */
     animation?: {
       steps?: { label: string; selectors: string[] }[];
@@ -57,6 +59,7 @@ const api = useTopoDiagram({
   securityLevel: props.securityLevel,
   themeVariables: props.themeVariables,
   interactions: props.interactions ? undefined : false,
+  zoomPanOptions: props.zoomFitMinScale != null ? { minFitScale: props.zoomFitMinScale } : undefined,
   animation:
     props.autoPlay || props.animation
       ? { enabled: true, autoPlay: props.autoPlay, ...props.animation }

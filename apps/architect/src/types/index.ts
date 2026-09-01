@@ -118,6 +118,10 @@ export interface SemanticAsset {
   desc: string
   /** 关联代码伪码级说明(查询时 LLM 生成，有效生命周期内缓存)。 */
   pseudo?: string
+  /** 节点简介(提取时/懒生成：锚点源码 + 术语/规约 → ≤80 字代码级描述)。 */
+  nodeBrief?: string
+  /** 出边关系描述缓存({from|to 资产id: 证据式描述})。 */
+  edgeNotes?: Record<string, { desc?: string; at?: number }>
   detail?: SemanticAssetDetail
   astRefs: AstNodeRef[]
   scopeType?: 'files' | 'symbols' | 'comm' | 'project'

@@ -263,6 +263,8 @@ def test_extract_scope_heuristic(tmp_path, monkeypatch):
         "def checkout(order):\n    pass\n", encoding="utf-8")
     # 使测试确定走 live 扫描(KB 兜底路径可能被本机运行中的 KB 命中)。
     monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
+    # ensure_synced 现在会对无索引项目自动 codegraph init(真实 CLI)，打桩隔离。
+    monkeypatch.setattr(S, "ensure_synced", lambda *a, **k: False)
     res = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
                           files=["order.py"], kinds=["entity", "process"],
                           use_llm=False)
@@ -2099,6 +2101,9 @@ def test_generate_line_notes_llm_context_and_persist(tmp_path, monkeypatch):
     user = captured["msgs"][1]["content"]
     assert "订单" in user and "购买行为的数据载体" in user
     assert "实体类以业务名词命名" in user
+    # skill(linenote 场景) + 工具文档注入 system prompt
+    assert "代码逐行解读规约" in captured["msgs"][0]["content"]
+    assert "code.read_symbols" in captured["msgs"][0]["content"]
     # 成功后落库(缓存字段)
     row = store.SemanticAssetsStore.get("sa-ln-1")
     assert "订单金额汇总方法" in (row.get("lineNotes") or "")
@@ -2142,6 +2147,78 @@ def test_generate_line_notes_llm_fail_degraded(tmp_path, monkeypatch):
     assert res["degraded"] is True and res["notes"] == {}
     # 失败不落库(可重试)
     row = store.SemanticAssetsStore.get("sa-ln-3")
+    assert not (row.get("lineNotes") or "")
+
+
+def test_is_ctx_overflow_marks():
+    """上下文超限错误识别：各厂商措辞命中；限流/空文本不误判。"""
+    assert S._is_ctx_overflow("Error: This model's maximum context length is 8192 tokens")
+    assert S._is_ctx_overflow("prompt is too long: 200000 tokens > 8192 maximum")
+    assert S._is_ctx_overflow("输入 tokens 超出上下文长度限制")
+    assert not S._is_ctx_overflow("rate limit exceeded, retry after 5s")
+    assert not S._is_ctx_overflow("")
+
+
+def _ln_overflow_llm(seen, note_batches):
+    """构造「第 1 次整窗超限、后续批各自返回注解」的假 llm_sync。"""
+    import json as _j
+
+    def fake(msgs, **kw):
+        seen.append(list(msgs))
+        if len(seen) == 1:
+            if kw.get("on_error"):
+                kw["on_error"]("This model's maximum context length is 8192 tokens")
+            return None
+        idx = min(len(seen), len(note_batches) + 1) - 2
+        return {"content": _j.dumps({"notes": note_batches[idx]}, ensure_ascii=False)}
+    return fake
+
+
+def test_generate_line_notes_ctx_overflow_halving(tmp_path, monkeypatch):
+    """整窗超限 → 1/2 分批重试：两批注解合并、视为成功并落库。"""
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-7", rel)
+    seen = []
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync",
+                        _ln_overflow_llm(seen, [
+                            [{"line": 2, "note": "批一注解"}],
+                            [{"line": 5, "note": "批二注解"}],
+                        ]))
+    res = S.generate_line_notes("sa-ln-7", rel, 1, 6, root=str(root))
+    assert res["degraded"] is False and res["cached"] is False
+    assert res["notes"] == {2: "批一注解", 5: "批二注解"}
+    assert len(seen) == 3   # 1 次整窗 + 2 次半窗
+    row = store.SemanticAssetsStore.get("sa-ln-7")
+    assert "批一注解" in (row.get("lineNotes") or "")
+
+
+def test_generate_line_notes_ctx_overflow_depth_exhausted(tmp_path, monkeypatch):
+    """持续超限 → 1/2→1/4→1/8 封底后放弃：degraded、不落库(可重试)。"""
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-8", rel)
+    calls = []
+
+    def always_overflow(msgs, **kw):
+        calls.append(1)
+        if kw.get("on_error"):
+            kw["on_error"]("prompt is too long: 200000 tokens > 8192 maximum")
+        return None
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", always_overflow)
+    res = S.generate_line_notes("sa-ln-8", rel, 1, 6, root=str(root))
+    assert res["degraded"] is True and res["notes"] == {}
+    assert "解读失败" in (res.get("error") or "")
+    assert len(calls) == 11   # 1(整窗) + 2(1/2) + 4(1/4) + 4(1/8 叶子)；单行子段封底不再二分
+    row = store.SemanticAssetsStore.get("sa-ln-8")
     assert not (row.get("lineNotes") or "")
 
 
@@ -2213,3 +2290,268 @@ def test_generate_line_notes_resolves_project_root(tmp_path, monkeypatch):
     res = S.generate_line_notes("sa-ln-6", rel, 1, 6, root=None, project="proj-ln")
     assert res["degraded"] is False
     assert res["notes"] == {5: "for 循环汇总"}
+
+
+def test_generate_line_notes_multi_window_cache(tmp_path, monkeypatch):
+    """同资产多窗口缓存互不覆盖：窗口A/B 各自生成一次，重复请求均命中不再调 LLM。"""
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-7", rel)
+    calls = {"n": 0}
+
+    def fake_llm(msgs, **kw):
+        calls["n"] += 1
+        user = msgs[-1]["content"]
+        if "5. " in user:   # 窗口 1-6：关键行 [2,5]
+            notes = [{"line": 5, "note": "窗口W1注解"}]
+        else:               # 窗口 1-3：关键行 [2]
+            notes = [{"line": 2, "note": "窗口W2注解"}]
+        return {"content": _j.dumps({"notes": notes}, ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    r1 = S.generate_line_notes("sa-ln-7", rel, 1, 6, root=str(root))
+    r2 = S.generate_line_notes("sa-ln-7", rel, 1, 3, root=str(root))
+    assert calls["n"] == 2
+    assert r1["notes"] == {5: "窗口W1注解"} and r2["notes"] == {2: "窗口W2注解"}
+    # 重复请求两个窗口均命中缓存，LLM 不再被调用
+    r3 = S.generate_line_notes("sa-ln-7", rel, 1, 6, root=str(root))
+    r4 = S.generate_line_notes("sa-ln-7", rel, 1, 3, root=str(root))
+    assert calls["n"] == 2
+    assert r3["cached"] is True and r3["notes"] == {5: "窗口W1注解"}
+    assert r4["cached"] is True and r4["notes"] == {2: "窗口W2注解"}
+
+
+def test_generate_line_notes_full_and_segment_share_cache(tmp_path, monkeypatch):
+    """确认：完整代码窗口(1..N 全文)与代码锚点片段窗口共存于同一缓存池，互不覆盖、各自命中。"""
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)   # 7 行
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-ln-8", rel)
+    calls = {"n": 0}
+
+    def fake_llm(msgs, **kw):
+        calls["n"] += 1
+        user = msgs[-1]["content"]
+        if "7. " in user:   # 全文窗口 1-7：关键行含 7
+            notes = [{"line": 7, "note": "全文注解"}]
+        else:               # 分段窗口 3-6：关键行 [4,5,6]
+            notes = [{"line": 5, "note": "分段注解"}]
+        return {"content": _j.dumps({"notes": notes}, ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    full = S.generate_line_notes("sa-ln-8", rel, 1, 7, root=str(root))
+    seg = S.generate_line_notes("sa-ln-8", rel, 3, 6, root=str(root))
+    assert calls["n"] == 2
+    assert full["notes"] == {7: "全文注解"} and seg["notes"] == {5: "分段注解"}
+    # 各自重复请求 → 均命中缓存，LLM 零调用
+    f2 = S.generate_line_notes("sa-ln-8", rel, 1, 7, root=str(root))
+    s2 = S.generate_line_notes("sa-ln-8", rel, 3, 6, root=str(root))
+    assert calls["n"] == 2
+    assert f2["cached"] is True and f2["notes"] == {7: "全文注解"}
+    assert s2["cached"] is True and s2["notes"] == {5: "分段注解"}
+
+
+def test_generate_line_notes_force_regenerates(tmp_path, monkeypatch):
+    """force=True：命中缓存也视同无缓存，重新调用 LLM 并覆盖原窗口条目。"""
+    import hashlib
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    win = "\n".join(_LN_SRC[0:6])
+    h = hashlib.md5(win.encode("utf-8")).hexdigest()
+    _ln_asset(pid, "sa-ln-9", rel, line_notes=_j.dumps(
+        {"file": rel, "start": 1, "end": 6, "hash": h,
+         "notes": {"2": "旧缓存注解"}}, ensure_ascii=False))
+    calls = {"n": 0}
+
+    def fake_llm(msgs, **kw):
+        calls["n"] += 1
+        return {"content": _j.dumps({"notes": [{"line": 5, "note": "新注解"}]}, ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    # 不带 force → 命中旧缓存
+    r1 = S.generate_line_notes("sa-ln-9", rel, 1, 6, root=str(root))
+    assert r1["cached"] is True and r1["notes"] == {2: "旧缓存注解"} and calls["n"] == 0
+    # force=True → 重新生成并覆盖
+    r2 = S.generate_line_notes("sa-ln-9", rel, 1, 6, root=str(root), force=True)
+    assert r2["cached"] is False and r2["notes"] == {5: "新注解"} and calls["n"] == 1
+    row = store.SemanticAssetsStore.get("sa-ln-9")
+    assert "新注解" in (row.get("lineNotes") or "")
+    # 之后再请求 → 命中新缓存
+    r3 = S.generate_line_notes("sa-ln-9", rel, 1, 6, root=str(root))
+    assert r3["cached"] is True and r3["notes"] == {5: "新注解"} and calls["n"] == 1
+
+
+def _mk_proc_asset(pid, asset_id, name, rels=None, file="web/src/core/capabilities.ts"):
+    store.SemanticAssetsStore.create({
+        "id": asset_id, "projectId": pid, "kind": "process",
+        "level": "implementation", "name": name, "desc": f"过程「{name}」：模板描述",
+        "detail": {"steps": [{"semantic": f"loop items of {name}"}], "relations": rels or []},
+        "astRefs": [{"file": file, "symbol": name, "kind": "function",
+                     "startLine": 1, "endLine": 7}],
+        "status": "active", "needsUpdate": 0,
+    })
+
+
+def test_generate_node_brief_grounded_and_cached(tmp_path, monkeypatch):
+    """简介必须引用真实符号(接地校验)，否则降级；成功后缓存命中。"""
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _mk_proc_asset(pid, "sa-nb-1", "total", file=rel)
+    a = store.SemanticAssetsStore.get("sa-nb-1")
+
+    def fake_llm_bad(msgs, **kw):
+        return {"content": "这段代码实现了一个通用的数据处理流程，结构清晰。"}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm_bad)
+    r = S.generate_node_brief(a, str(root), None)
+    assert r["degraded"] is True and "通用的数据处理" not in (a.get("nodeBrief") or "")
+
+    def fake_llm_good(msgs, **kw):
+        return {"content": "total 方法遍历 items 汇总 amount 金额并返回。"}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm_good)
+    r2 = S.generate_node_brief(store.SemanticAssetsStore.get("sa-nb-1"), str(root), None)
+    assert r2["degraded"] is False and "total" in r2["brief"]
+    # 缓存命中(不再调 LLM)
+    calls = {"n": 0}
+    def fake_llm_count(msgs, **kw):
+        calls["n"] += 1
+        return {"content": "total 汇总。"}
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm_count)
+    r3 = S.generate_node_brief(store.SemanticAssetsStore.get("sa-nb-1"), str(root), None)
+    assert r3["cached"] is True and calls["n"] == 0
+
+
+def test_generate_node_briefs_batch(tmp_path, monkeypatch):
+    """按文件批量：一次 LLM 调用生成同文件多个资产简介，接地校验过滤臆造项。"""
+    import json as _j
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    rel = _ln_source(root)
+    pid = S.project_id_for(str(root), None)
+    _mk_proc_asset(pid, "sa-nb-b1", "total", file=rel)
+    _mk_proc_asset(pid, "sa-nb-b2", "Order", file=rel)
+    calls = {"n": 0}
+
+    def fake_llm(msgs, **kw):
+        calls["n"] += 1
+        return {"content": _j.dumps({"briefs": [
+            {"id": "sa-nb-b1", "brief": "total 方法汇总 items 的 amount。"},
+            {"id": "sa-nb-b2", "brief": "这段代码实现了完全抽象的数据处理。"},
+        ]}, ensure_ascii=False)}
+
+    monkeypatch.setattr("topoone_app_architect.arch_routes.req_agent.llm_sync", fake_llm)
+    n = S.generate_node_briefs_batch(pid, rel, [
+        store.SemanticAssetsStore.get("sa-nb-b1"),
+        store.SemanticAssetsStore.get("sa-nb-b2"),
+    ], str(root), None)
+    assert calls["n"] == 1 and n == 1   # b2 未引用真实符号被过滤
+    assert "total" in (store.SemanticAssetsStore.get("sa-nb-b1").get("nodeBrief") or "")
+
+
+def test_semantic_graph_skips_member_relation_edges(tmp_path, monkeypatch):
+    """关系清洗：指向字段/成员的 contains 不进图边；指向真实资产的关系保留。"""
+    root = tmp_path / "proj"
+    root.mkdir()
+    _ctx(tmp_path, monkeypatch)
+    pid = S.project_id_for(str(root), None)
+    _ln_asset(pid, "sa-cl-1", "web/src/x.ts")
+    _mk_proc_asset(pid, "sa-cl-2", "Order")
+    store.SemanticAssetsStore.update("sa-cl-1", {"detail": {"relations": [
+        {"target": "name", "type": "contains"},          # 字段 → 不进图
+        {"target": "sa-cl-2", "type": "calls"},          # 真实资产 → 保留
+    ]}})
+    g = S.semantic_graph(str(root), None)
+    edges = [e for e in g["edges"] if e["from"] == "sa-cl-1"]
+    assert [(e["to"], e["type"]) for e in edges] == [("sa-cl-2", "calls")]
+
+
+# ── ensure_synced 自动建索引(此前只检查不建，首次提取永远走降级) ──────────
+
+class _FakeProc:
+    def __init__(self, initialized: bool):
+        self.returncode = 0
+        self.stdout = '{"initialized": %s}' % ("true" if initialized else "false")
+        self.stderr = ""
+
+
+def test_ensure_synced_auto_init(tmp_path, monkeypatch):
+    """未初始化 → 自动 codegraph init(首建索引) → 视为已同步。"""
+    root = str(tmp_path)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[1])
+        return _FakeProc(initialized="init" in calls)
+
+    monkeypatch.setattr(S.subprocess, "run", fake_run)
+    assert S.ensure_synced(root) is True
+    assert calls[0] == "status" and "init" in calls
+
+
+def test_ensure_synced_init_failure_degrades(tmp_path, monkeypatch):
+    """init 后仍未初始化(codegraph CLI 异常等) → False，调用方走降级路径。"""
+    root = str(tmp_path)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[1])
+        return _FakeProc(initialized=False)
+
+    monkeypatch.setattr(S.subprocess, "run", fake_run)
+    assert S.ensure_synced(root) is False
+    assert "init" in calls   # 确实尝试过自动补建
+
+
+def test_ensure_synced_already_initialized(tmp_path, monkeypatch):
+    """已初始化 → 不重复 init，仅 sync 保鲜。"""
+    root = str(tmp_path)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[1])
+        return _FakeProc(initialized=True)
+
+    monkeypatch.setattr(S.subprocess, "run", fake_run)
+    assert S.ensure_synced(root) is True
+    assert calls == ["status", "sync"]
+
+
+def test_source_snippet_codegraph_fallback(tmp_path, monkeypatch):
+    """AST 缓存符号缺行段(如 ts 解析未记录行号) → codegraph 符号表兜底展开+高亮。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    src = proj / "c.ts"
+    src.write_text("\n".join(f"code-{i}" for i in range(1, 61)), encoding="utf-8")
+    pid = S.project_id_for(str(proj), None)
+    store.AstCacheStore.upsert(pid, "c.ts", {
+        "contentHash": "h", "language": "ts",
+        "symbols": [{"name": "EngineCapability", "startLine": None, "endLine": None}],
+        "imports": [], "refs": [], "source": "kb"})
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE nodes (file_path TEXT, name TEXT, qualified_name TEXT, start_line INT, end_line INT)")
+    conn.execute("INSERT INTO nodes VALUES ('c.ts','EngineCapability','EngineCapability',12,16)")
+    monkeypatch.setattr(S, "_open_cg", lambda root: conn)
+    res = _run_coro(S.api_source_snippet(root=str(proj), project=None,
+                                         file="c.ts", line=12, symbol="EngineCapability"))
+    assert res["code"] == 0
+    d = res["data"]
+    assert d["highlight"] == [12, 13, 14, 15, 16]
+    assert d["lines"][0]["line"] == 2     # anchor-10
+    assert d["lines"][-1]["line"] == 26   # symbolEnd+10

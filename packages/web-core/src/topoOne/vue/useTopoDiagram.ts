@@ -4,6 +4,7 @@ import { createDiagram, type DiagramView } from '../core/DiagramView';
 import type { DiagramSchema } from '../core/types';
 import type { DegradeWarning, ThemeName } from '../engines/types';
 import type { InteractionOptions } from '../plugins';
+import type { ZoomPanOptions } from '../plugins/zoom-pan';
 import type { NodeClickEvent } from '../plugins/types';
 import type { AnimationController } from '../animation/controller';
 import type { AnimationPluginOptions } from '../animation/plugin';
@@ -26,6 +27,8 @@ export interface UseTopoDiagramOptions {
   securityLevel?: SecurityLevel;
   themeVariables?: Record<string, string | number>;
   interactions?: InteractionOptions | false;
+  /** Zoom/pan config (e.g. min fit scale). Merged into `interactions.zoomPanOptions`. */
+  zoomPanOptions?: ZoomPanOptions;
   /** Playback: autoPlay + optional custom steps (selectors) / plan factory.
    *  `false` disables the animation plugin entirely (omit 会走内置默认=启用). */
   animation?: AnimationPluginOptions | false;
@@ -81,12 +84,18 @@ export function useTopoDiagram(opts: UseTopoDiagramOptions): TopoDiagramApi {
     destroy();
     error.value = null;
     warnings.value = [];
+    const interactions = opts.interactions === false
+      ? false
+      : {
+          ...(typeof opts.interactions === 'object' && opts.interactions ? opts.interactions : {}),
+          ...(opts.zoomPanOptions ? { zoomPanOptions: opts.zoomPanOptions } : {}),
+        };
     view = createDiagram(containerRef.value, {
       source: buildSource(),
       theme: toValue(opts.theme),
       securityLevel: opts.securityLevel,
       themeVariables: opts.themeVariables,
-      interactions: opts.interactions,
+      interactions,
       animation: opts.animation,
       engineOptions: { baseUrl: opts.plantUmlBaseUrl ?? '/api/topo', headers: authHeaders() },
       onReady: (v) => {

@@ -23,11 +23,12 @@ function resolvePlantuml(el: Element): { nodeId: string; label: string } | null 
   return null;
 }
 
-function resolveMermaid(el: Element): { nodeId: string; label: string } | null {
-  const m = MERMAID_ID_RE.exec(el.id ?? '');
+function resolveMermaid(el: Element, rootPrefix = ''): { nodeId: string; label: string } | null {
+  const raw = rootPrefix && el.id?.startsWith(rootPrefix) ? el.id.slice(rootPrefix.length) : (el.id ?? '');
+  const m = MERMAID_ID_RE.exec(raw);
   if (m) return { nodeId: m[2], label: firstText(el) };
-  if (/^seq-\d+$/.test(el.id ?? '')) {
-    return { nodeId: el.id, label: firstText(el) };
+  if (/^seq-\d+$/.test(raw)) {
+    return { nodeId: raw, label: firstText(el) };
   }
   return null;
 }
@@ -48,12 +49,63 @@ export function createNodeClickPlugin(): DiagramPlugin {
     if ((ctx.shared.dragDistance ?? 0) > DRAG_THRESHOLD_PX) return;
     const containerRect = ctx.container.getBoundingClientRect();
 
+    // 文本兜底：部分引擎/图型(plantuml class/er/state/activity/mindmap、mermaid mindmap)
+    // 不产生可寻址 id，只有可见文本。
+    // 优先取「离点击位置最近的文本」(节点内常有多段文本，如 UML 构造型 + 名称)；
+    // 全部不可测(getBoundingClientRect 恒 0，如 jsdom)则退回向上遍历途中元素的第一个文本。
+    // 仅当全程未命中正式寻址(uid/mermaid id)时作为降级 hit(nodeId = 'txt:' + 文本)。
+    const px = e.clientX;
+    const py = e.clientY;
+    const nearestTextIn = (el: Element, px: number, py: number): string | null => {
+      const ts = el.querySelectorAll('text');
+      if (el.matches?.('text')) return el.textContent?.trim() || null;
+      if (!ts.length) return null;
+      let best: string | null = null;
+      let bestD = Infinity;
+      let measurable = false;
+      ts.forEach((t) => {
+        const label = t.textContent?.trim();
+        if (!label) return;
+        let r: DOMRect;
+        try { r = t.getBoundingClientRect(); } catch { return; }
+        if (!r || (!r.width && !r.height)) return;
+        measurable = true;
+        const dx = px - (r.left + r.width / 2);
+        const dy = py - (r.top + r.height / 2);
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = label; }
+      });
+      return (measurable && best) ? best : (ts[0]?.textContent?.trim() || null);
+    };
+    let textFallback: { nodeId: string; label: string } | null = null;
+    const nearestText = (px: number, py: number): { nodeId: string; label: string } | null => {
+      const svg = ctx?.svg;
+      if (!svg) return null;
+      const texts = svg.querySelectorAll('text');
+      let best: { nodeId: string; label: string } | null = null;
+      let bestD = Infinity;
+      let measurable = false;
+      texts.forEach((t) => {
+        const label = t.textContent?.trim();
+        if (!label) return;
+        let r: DOMRect;
+        try { r = t.getBoundingClientRect(); } catch { return; }
+        if (!r || (!r.width && !r.height)) return;
+        measurable = true;
+        const dx = px - (r.left + r.width / 2);
+        const dy = py - (r.top + r.height / 2);
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = { nodeId: `txt:${label}`, label }; }
+      });
+      return measurable ? best : null;
+    };
+
     let el: Element | null = (e.target as Element) ?? null;
     while (el && el !== ctx.svg) {
       const hit =
         ctx.engineName === 'plantuml'
           ? resolvePlantuml(el)
-          : resolveMermaid(el) ?? resolvePlantuml(el);
+          : resolveMermaid(el, ctx.svg?.id ? `${ctx.svg.id}-` : '') ?? resolvePlantuml(el);
       if (hit) {
         ctx.onNodeClick({
           engine: ctx.engineName,
@@ -65,7 +117,25 @@ export function createNodeClickPlugin(): DiagramPlugin {
         });
         return;
       }
+      if (!textFallback) {
+        const t = nearestTextIn(el, px, py);
+        if (t) textFallback = { nodeId: `txt:${t}`, label: t };
+      }
       el = el.parentElement;
+    }
+    if (!textFallback && ctx?.svg) {
+      // 注意坐标系一致：文本 rect 为视口坐标，点击也用原始 clientX/Y(不减 container 偏移)
+      textFallback = nearestText(e.clientX, e.clientY);
+    }
+    if (textFallback) {
+      ctx.onNodeClick({
+        engine: ctx.engineName,
+        nodeId: textFallback.nodeId,
+        label: textFallback.label,
+        diagramType: ctx.diagramType,
+        x: Math.round(e.clientX - containerRect.left),
+        y: Math.round(e.clientY - containerRect.top),
+      });
     }
   };
 

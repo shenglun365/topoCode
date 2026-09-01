@@ -42,4 +42,20 @@ describe('PlantUmlEngine', () => {
     const v = await engine.validate('@startsequence\nA\n@enduml');
     expect(v.valid).toBe(false);
   });
+
+  it('does NOT false-positive on 200 SVG whose labels contain "syntax error"', async () => {
+    // 渲染 plantuml 引擎自身代码的资产时，图内文本可能包含 "/syntax error/i.test body"
+    const svgOkWithCodeText =
+      '<svg xmlns="http://www.w3.org/2000/svg">' +
+      '<g id="part1" data-entity-uid="part1"><text>status !== 200</text><text>/syntax error/i.test body</text></g></svg>';
+    mockFetch(200, svgOkWithCodeText);
+    const engine = new PlantUmlEngine({ baseUrl: 'http://test' });
+    const res = await engine.render({
+      container: document.createElement('div'),
+      code: '@startuml\\n:validate;\\n@enduml',
+    });
+    expect(res.svg).toContain('data-entity-uid');
+    const v = await engine.validate('@startuml\\n:validate;\\n@enduml');
+    expect(v.valid).toBe(true);
+  });
 });

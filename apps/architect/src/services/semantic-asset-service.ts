@@ -33,6 +33,8 @@ export interface SemanticExtractResult {
   assets: SemanticAsset[]
   source?: 'codegraph' | 'live' | 'kb'
   degraded?: boolean
+  /** 降级归因(index_missing=代码索引缺失/llm_disabled=显式关 LLM/heuristic_fallback=旧启发式兜底)。 */
+  reason?: string
   count: number
   error?: string
   /** 业务级(high)聚合产出数；highReason 为聚合失败原因(ok/llm/parse/empty)。 */
@@ -136,6 +138,8 @@ export interface SemanticGraphNode {
   scopeKey?: string
   needsUpdate?: number
   canonicalKey?: string
+  /** 节点简介(代码级、grounded；提取时/懒生成)。 */
+  nodeBrief?: string
   /** 精简 detail(供类图/ER/序列/状态/聚合图生成)。 */
   detail?: SemanticAssetDetail
 }
@@ -146,6 +150,8 @@ export interface SemanticGraphEdge {
   resolved?: boolean
   type?: string
   semantic?: string
+  /** 证据式关系描述(edge_notes 生成；优先于 type/semantic 作边标签)。 */
+  desc?: string
 }
 
 export interface SemanticGraphAnchor {
@@ -226,11 +232,37 @@ export const semanticAssetService = {
       `/kb/semantic/${assetId}/pseudo${qsWith(extra)}`)
   },
 
-  /** 资产卡源码窗口关键行逐行用途说明(手动触发；落库缓存随资产生命周期)。 */
-  async lineNotes(assetId: string, file: string, start: number, end: number, modelId?: string): Promise<LineNotesResult> {
+  /** 资产卡源码窗口关键行逐行用途说明(手动触发；落库缓存随资产生命周期；force 跳过缓存重生成)。 */
+  async lineNotes(assetId: string, file: string, start: number, end: number, opts?: { modelId?: string; force?: boolean }): Promise<LineNotesResult> {
     const parts = [`file=${encodeURIComponent(file)}`, `start=${start}`, `end=${end}`]
-    if (modelId) parts.push(`model_id=${encodeURIComponent(modelId)}`)
+    if (opts?.modelId) parts.push(`model_id=${encodeURIComponent(opts.modelId)}`)
+    if (opts?.force) parts.push('force=true')
     return apiGet<LineNotesResult>(`/kb/semantic/${assetId}/line-notes${qsWith(parts.join('&'))}`)
+  },
+
+  /** 资产节点简介(≤80 字代码级描述；fresh 命中缓存 / stale·force 重生成；失败降级原 desc)。 */
+  async nodeBrief(assetId: string, force = false): Promise<{ brief: string; cached: boolean; degraded: boolean }> {
+    return apiGet(`/kb/semantic/${assetId}/node-brief${qsWith(force ? 'force=true' : '')}`)
+  },
+
+  /** 资产出边关系描述(证据式；edge_notes 缓存，force 重生成)。 */
+  async edgeNotes(assetId: string, force = false): Promise<{ notes: Record<string, string>; cached: boolean; degraded: boolean }> {
+    return apiGet(`/kb/semantic/${assetId}/edge-notes${qsWith(force ? 'force=true' : '')}`)
+  },
+
+  /** 入边(被谁引用)：反向扫描活跃资产 relations 指向本资产的边(附 from 资产证据描述如有)。 */
+  async inEdges(assetId: string): Promise<{ inEdges: { fromId: string; fromName: string; type?: string; desc?: string }[] }> {
+    return apiGet(`/kb/semantic/${assetId}/in-edges${qsWith('')}`)
+  },
+
+  /** 启动存量资产描述批量增强(后台线程)：节点简介(按文件批量) + 出边关系描述。 */
+  async enhanceDesc(force = false): Promise<{ started: boolean; running: boolean; done: number; total: number; nodeBriefs: number; edgeNotes: number }> {
+    return apiPost(`/kb/semantic/enhance-desc${qsWith(force ? 'force=true' : '')}`)
+  },
+
+  /** 批量增强进度。 */
+  async enhanceDescStatus(): Promise<{ running: boolean; done: number; total: number; nodeBriefs: number; edgeNotes: number; error?: string }> {
+    return apiGet(`/kb/semantic/enhance-desc/status${qsWith('')}`)
   },
 
   /** 按范围即时提取并落库。 */

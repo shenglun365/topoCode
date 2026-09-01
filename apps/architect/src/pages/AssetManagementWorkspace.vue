@@ -799,9 +799,46 @@ function askExtractGeneral() {
   askAgent(t('assetMgmt.chatExtractPrompt'))
 }
 
-function askExtractComponent(key: string, name: string) {
-  // 指令化：组件ID 作为权威范围写进指令（确定执行，不再提议范围）
-  askAgent(t('assetMgmt.compExtractPrompt', { name, key }))
+/** 按需提取：确定性直调 REST(不走对话模型——小模型可能不按工具协议执行而编造报告)。
+ *  过程与结果以对话回合呈现；完成后刷新资产数据。 */
+async function askExtractComponent(key: string, name: string) {
+  if (busy.value) return
+  turns.value.push({ role: 'user', content: t('assetMgmt.compExtractUser', { name, key }) })
+  const idx = turns.value.push({ role: 'assistant', content: t('assetMgmt.compExtractRunning') }) - 1
+  busy.value = true
+  const ac = new AbortController(); chatAbort.value = ac
+  try {
+    const res = await semanticAssetService.extract(
+      { type: 'comm', key },
+      kinds.map((k) => k.value),
+      { level: 'implementation' },
+    )
+    const n = res.count ?? res.assets?.length ?? 0
+    if (res.error) {
+      turns.value[idx].content = `${t('assetMgmt.compExtractFailed')}\n${res.error}`
+      const cands: { id: string; name: string }[] = (res as { candidates?: { id: string; name: string }[] }).candidates ?? []
+      if (cands.length) {
+        turns.value[idx].content += '\n' + t('assetMgmt.compExtractCandidates')
+        for (const c of cands.slice(0, 8)) turns.value[idx].content += `\n· ${c.name} (${c.id})`
+      }
+    } else {
+      turns.value[idx].content = res.degraded
+        ? (res.reason === 'index_missing' || (res.source && res.source !== 'codegraph')
+            ? t('assetMgmt.compExtractDegradedIndex', { n })
+            : t('assetMgmt.compExtractDegraded', { n }))
+        : t('assetMgmt.compExtractDone', { n })
+      turns.value[idx].assets = res.assets ?? []
+    }
+    // 数据变更 → 刷新列表/状态/覆盖度(与对话提取联动同口径)
+    refreshAfterExtract()
+  } catch (err: any) {
+    turns.value[idx].content = err?.name === 'AbortError'
+      ? t('requirement.chat.semanticStopped')
+      : (err?.message || t('assetMgmt.batchFailed'))
+  } finally {
+    chatAbort.value = null
+    busy.value = false
+  }
 }
 
 /** 组件覆盖状态（概览覆盖度数据投影到语义 tab 组头）；无数据返回 '' 不渲染。 */

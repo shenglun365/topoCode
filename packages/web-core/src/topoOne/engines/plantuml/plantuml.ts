@@ -64,8 +64,10 @@ export class PlantUmlEngine implements DiagramEngine {
   async render(ctx: RenderContext): Promise<RenderResult> {
     const { status, body } = await this.fetchSvg(ctx.code);
     if (status !== 200) throw new Error(`plantuml server returned HTTP ${status}`);
-    if (/syntax error/i.test(body)) {
-      throw new Error(extractErrorMessage(body) ?? 'plantuml syntax error');
+    // 服务端契约：语法错误返回 HTTP 400 + 错误 SVG。200 即成功——
+    // 不做 'syntax error' 子串猜测：图内文本本身可能包含该词(如渲染 plantuml 引擎自身代码的资产)。
+    if (!body.includes('<svg')) {
+      throw new Error(extractErrorMessage(body) ?? 'plantuml: non-SVG response');
     }
     const clean = DOMPurify.sanitize(body, {
       USE_PROFILES: { svg: true, svgFilters: true },
@@ -82,8 +84,8 @@ export class PlantUmlEngine implements DiagramEngine {
     if (status === 302 || status >= 400) {
       return { valid: false, error: `plantuml server returned HTTP ${status}` };
     }
-    if (/syntax error/i.test(body)) {
-      return { valid: false, error: extractErrorMessage(body) ?? 'plantuml syntax error' };
+    if (!body.includes('<svg')) {
+      return { valid: false, error: extractErrorMessage(body) ?? 'plantuml: non-SVG response' };
     }
     return { valid: true };
   }

@@ -199,3 +199,14 @@
 .animate-fade-up {
   animation: fade-up 0.25s ease-out both;
 }
+
+/* ========================================
+   字号联动（P4 补充）：固定 px 的 text-[Xpx] 工具类随全局字号等比缩放。
+   --ui-scale = 全局字号 / 16（由 setFontSize 落在 <html>，默认 16 → 1）。
+   覆盖普通与 !important 两个变体；置于 @tailwind utilities 之后(未分层)确保胜出。
+   资产卡代码字号走独立 codeFontSize(内联)，不受此处影响。
+   ======================================== */
+.text-\[8px\],  .\!text-\[8px\]  { font-size: calc(8px  * var(--ui-scale, 1)) !important; }
+.text-\[9px\],  .\!text-\[9px\]  { font-size: calc(9px  * var(--ui-scale, 1)) !important; }
+.text-\[10px\], .\!text-\[10px\] { font-size: calc(10px * var(--ui-scale, 1)) !important; }
+.text-\[11px\], .\!text-\[11px\] { font-size: calc(11px * var(--ui-scale, 1)) !important; }

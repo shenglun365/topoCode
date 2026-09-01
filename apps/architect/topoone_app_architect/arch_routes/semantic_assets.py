@@ -163,20 +163,38 @@ def cg_dir(root: str) -> Optional[str]:
 
 
 def ensure_synced(root: str, timeout: int = 90) -> bool:
-    """确保 codegraph 索引存在且保鲜。无索引/同步失败返回 False(调用方降级)。"""
+    """确保 codegraph 索引存在且保鲜。
+
+    未初始化时自动 `codegraph init`(init 自带首建索引，给更长超时)；
+    仍失败 → 返回 False(调用方降级 AST 缓存/live 扫描，不阻塞提取)。
+    """
     if not root or not os.path.isdir(root):
         return False
-    try:
-        r = subprocess.run(["codegraph", "status", "-j", root],
-                           capture_output=True, text=True, timeout=timeout)
-        if r.returncode == 0:
-            data = json.loads(r.stdout or "{}") if (r.stdout or "").strip() else {}
-            if not data.get("initialized"):
-                return False
-        else:
-            return False
-    except Exception:
+
+    def _initialized() -> bool:
+        try:
+            r = subprocess.run(["codegraph", "status", "-j", root],
+                               capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0:
+                data = json.loads(r.stdout or "{}") if (r.stdout or "").strip() else {}
+                return bool(data.get("initialized"))
+        except Exception as e:
+            logger.warning("[semantic] codegraph status 失败: %s", e)
         return False
+
+    if not _initialized():
+        # 此前只检查不建：首次提取永远走降级路径(degraded 误报)。现在自动补建。
+        try:
+            logger.info("[semantic] codegraph 未初始化，自动 init(首建索引): %s", root)
+            subprocess.run(["codegraph", "init", root],
+                           capture_output=True, text=True,
+                           timeout=max(timeout * 3, 300))
+        except Exception as e:
+            logger.warning("[semantic] codegraph init 失败: %s", e)
+            return False
+        if not _initialized():
+            logger.warning("[semantic] codegraph init 后仍未初始化: %s", root)
+            return False
     try:
         subprocess.run(["codegraph", "sync", "-q", root],
                        capture_output=True, text=True, timeout=timeout)
@@ -2138,7 +2156,10 @@ def extract_scope(root: Optional[str], project: Optional[str],
         return {"assets": [], "source": "none", "degraded": True, "count": 0,
                 "error": se.get("error"), "candidates": se.get("candidates") or []}
     pid = project_id_for(root, project)
+    # degraded 归因：index_missing=代码图谱索引缺失(与 LLM 无关)；llm_disabled=显式关 LLM；
+    # heuristic_fallback=定向管线零产出走旧启发式。供前端按真实原因提示。
     degraded = ctx.get("source") != "codegraph"
+    reason = "index_missing" if degraded else ""
     logger.info(
         "[semantic] extract_scope 范围 %s(%s) level=%s kinds=%s files=%d symbols=%d "
         "source=%s nodes=%d codegraph_synced=%s",
@@ -2160,11 +2181,13 @@ def extract_scope(root: Optional[str], project: Optional[str],
         root, project, ctx, kinds, model_id=model_id, use_llm=use_llm)
     if not use_llm:
         degraded = True
+        reason = "llm_disabled"
     for a in all_assets:
         heur_counts[a["kind"]] = heur_counts.get(a["kind"], 0) + 1
     llm_count = sum(1 for a in all_assets if not a.get("meta", {}).get("degraded"))
     if not all_assets:
         degraded = True
+        reason = "heuristic_fallback"
         # 兜底(新管线异常时)：旧单趟主类别启发式。
         all_assets = _heuristic_extract_primary(ctx, kinds)
         for a in all_assets:
@@ -2177,8 +2200,16 @@ def extract_scope(root: Optional[str], project: Optional[str],
     # 名称继承：re-extract 覆盖前保住用户改名(旧行名优先)+ 新资产墓碑承接
     _inherit_names(pid, all_assets)
     saved = _save_assets(pid, scope_type or "project", scope_key or "_", all_assets, ctx)
+    # 节点简介(node_brief)：提取时按文件批量生成(LLM 路径)，失败静默(选中时可懒生成)
+    try:
+        if not degraded:
+            nb = node_briefs_after_extract(pid, saved, ctx, model_id=ctx.get("modelId"))
+            if nb:
+                logger.info("[semantic] node briefs 生成 %d/%d", nb, len(saved))
+    except Exception as e:
+        logger.warning("[semantic] node briefs after extract failed: %s", e)
     return {"assets": saved, "source": ctx.get("source"), "degraded": degraded,
-            "count": len(saved)}
+            "reason": reason, "count": len(saved)}
 
 
 def _aggregate_high_best_effort(root: Optional[str], project: Optional[str],
@@ -2297,6 +2328,11 @@ def save_agent_assets(root: Optional[str], project: Optional[str],
                           scope_files[:40], scope_symbols[:40])
     ctx["source"] = ctx.get("source") or "live"
     saved = _save_assets(pid, "symbols", scope_key, accepted, ctx)
+    # 节点简介：对话式保存同样按文件批量补齐(单批，失败静默)
+    try:
+        node_briefs_after_extract(pid, saved, ctx)
+    except Exception as e:
+        logger.warning("[semantic] agent save node briefs failed: %s", e)
     logger.info("[semantic] agent save project=%s saved=%d rejected=%d proposed=%d",
                 pid, len(saved), len(rejected), len(proposed))
     return {"count": len(saved), "saved": saved, "rejected": rejected,
@@ -3752,7 +3788,27 @@ def generate_pseudo(asset_id: str, root: Optional[str] = None,
 
 # ── AI 逐行解读(资产卡源码窗口：关键行用途说明，结合术语/规约) ──
 
-_LINE_NOTE_MAX_LINES = 40
+# 单次送 LLM 的关键行数上限：兜底防失控，常规窗口全量入选(旧值 40 是
+# 「长函数只有头部约 60 行被解读」的成因之一)；输入/输出超限由二分降级兜住。
+_LINE_NOTE_MAX_LINES = 4000
+
+# 上下文超限二分降级：1/2 → 1/4 → 1/8(封底，depth 上限 3)
+_LN_MAX_DEPTH = 3
+
+# 各厂商「上下文 tokens 超限」错误特征(小写子串匹配并集)。
+# 注意 max_tokens 是生成量上限，不在此列；但输出截断导致 JSON 解析失败同样按可降级处理。
+_CTX_OVERFLOW_MARKS = (
+    "context length", "context_length", "context window", "contextwindowexceeded",
+    "maximum context", "max context", "prompt is too long", "too many input tokens",
+    "input tokens exceed", "input length exceed", "token limit",
+    "上下文长度", "上下文超", "超出上下文", "超过上下文", "输入过长", "输入超限",
+)
+
+
+def _is_ctx_overflow(text: str) -> bool:
+    """判断 LLM 错误文本是否上下文 tokens 超限(二分降级的触发信号)。"""
+    t = (text or "").lower()
+    return any(m in t for m in _CTX_OVERFLOW_MARKS)
 
 
 def _is_noise_line(code: str) -> bool:
@@ -3807,13 +3863,398 @@ def _line_note_context(pid: str) -> Tuple[str, str]:
     return terms_txt, conv_txt
 
 
+# ── 节点简介(node_brief)：锚点源码 + 术语/规约 → ≤80 字代码级描述(后验校验防脱离代码) ──
+
+def _anchor_symbols(a: dict) -> List[str]:
+    """资产锚点的真实符号名集合(astRefs 符号 + 字段名 + 资产名)，用于后验校验。"""
+    out: List[str] = []
+    for s in [a.get("name")] + [r.get("symbol") or "" for r in (a.get("astRefs") or [])] \
+             + [f.get("name") or "" for f in ((a.get("detail") or {}).get("fields") or [])]:
+        s = (s or "").strip()
+        if len(s) >= 3:
+            out.append(s)
+    return out
+
+
+def _brief_grounded(brief: str, a: dict) -> bool:
+    """后验校验：简介必须引用锚点源码中真实存在的符号名(不靠 prompt 自觉)。"""
+    if not brief:
+        return False
+    return any(sym in brief for sym in _anchor_symbols(a))
+
+
+def generate_node_brief(a: dict, root: Optional[str], project: Optional[str],
+                        model_id: Optional[str] = None, force: bool = False) -> dict:
+    """单资产 ≤80 字代码级简介(懒生成端点用)：fresh 命中缓存 / stale·force 重生成。"""
+    aid = a.get("id") or ""
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    existing = (a.get("nodeBrief") or "").strip()
+    if fresh and existing and not force:
+        return {"brief": existing, "cached": True, "degraded": False}
+    brief, degraded = "", True
+    try:
+        root_r = resolve_root(root, project)
+        snippet = _pseudo_source_snippet(root_r, a.get("astRefs") or [])
+        if snippet:
+            pid = project_id_for(root, project)
+            terms_txt, conv_txt = _line_note_context(pid)
+            ctx_lines = [f"资产: [{a.get('kind')}] {a.get('name')}",
+                         f"业务描述: {(a.get('desc') or '—')[:160]}"]
+            if terms_txt:
+                ctx_lines.append(terms_txt)
+            if conv_txt:
+                ctx_lines.append(conv_txt)
+            sys_prompt = (
+                "你是资深架构师。基于真实源码片段，用中文写一句该代码实体『是什么/在做什么』的简介："
+                "必须引用源码中真实存在的符号名，贴着代码说，不做高层抽象概括。不超过 80 字。"
+                "只输出简介正文。"
+            )
+            user_prompt = "\n".join(ctx_lines) + f"\n\n真实源码片段:\n{snippet}\n\n请输出简介。"
+            from .req_agent import llm_sync, get_max_tokens_preference
+            from .agent_roles import resolve_role_model
+            model_id = resolve_role_model("pseudo", model_id)
+            res = llm_sync([{"role": "system", "content": sys_prompt},
+                            {"role": "user", "content": user_prompt}],
+                           mode="chat", max_tokens=get_max_tokens_preference(), model_id=model_id)
+            brief = (res.get("content") or "").strip() if isinstance(res, dict) else ""
+            brief = brief.strip('"').strip()
+            if brief and not _brief_grounded(brief, a):
+                logger.warning("[semantic] node brief 未通过接地校验(未引用真实符号): %s", aid)
+                brief = ""
+    except Exception as e:
+        logger.warning("[semantic] node brief 生成失败: %s", e)
+        brief = ""
+    if not brief:
+        return {"brief": existing or (a.get("desc") or ""), "cached": False, "degraded": True}
+    try:
+        store.SemanticAssetsStore.update(aid, {"nodeBrief": brief})
+    except Exception as e:
+        logger.warning("[semantic] node brief 落库失败: %s", e)
+    return {"brief": brief, "cached": False, "degraded": False}
+
+
+def generate_node_briefs_batch(pid: str, file: str, assets: List[dict],
+                               root: Optional[str], project: Optional[str],
+                               model_id: Optional[str] = None) -> int:
+    """按文件批量生成节点简介(提取完成后调用)：同文件资产共用一份源码上下文，一次 LLM 调用。
+    返回成功生成的条数。失败静默(资产保留模板 desc，选中时可懒生成)。"""
+    if not assets:
+        return 0
+    root_r = resolve_root(root, project)
+    full = os.path.join(root_r or "", file)
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as fh:
+            all_lines = fh.read().splitlines()
+    except Exception:
+        return 0
+    ctx_blocks: List[str] = []
+    targets: List[dict] = []
+    for a in assets[:12]:   # 单批上限 12 个资产，控 token
+        refs = [r for r in (a.get("astRefs") or []) if (r.get("file") or "") == file]
+        if not refs:
+            continue
+        start = min(int(r.get("startLine") or 1) for r in refs)
+        end = max(int(r.get("endLine") or start) for r in refs)
+        s = max(1, start - 2)
+        e = min(len(all_lines), end + 8)
+        seg = "\n".join(f"{i} {all_lines[i - 1]}" for i in range(s, e + 1))[:1400]
+        fields = ", ".join((f.get("name") or "") for f in ((a.get("detail") or {}).get("fields") or [])[:8])
+        ctx_blocks.append(f"### [{a.get('kind')}] {a.get('name')} (id={a.get('id')})\n字段: {fields or '—'}\n源码:\n{seg}")
+        targets.append(a)
+    if not targets:
+        return 0
+    pid = pid or project_id_for(root, project)
+    terms_txt, conv_txt = _line_note_context(pid)
+    sys_prompt = (
+        "你是资深架构师。对给定的多个代码实体，各写一句中文简介『是什么/在做什么』："
+        "必须引用其源码中真实存在的符号名，贴着代码说，不做高层抽象概括。每句不超过 80 字。"
+        '只输出 JSON：{"briefs":[{"id":"<实体id>","brief":"<简介>"}]}，不要输出其它内容。'
+    )
+    user_prompt = (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "") \
+        + "\n\n".join(ctx_blocks) + "\n\n请输出 JSON。"
+    try:
+        from .req_agent import llm_sync, get_max_tokens_preference
+        from .agent_roles import resolve_role_model
+        mid = resolve_role_model("pseudo", model_id)
+        res = llm_sync([{"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": user_prompt}],
+                       mode="chat", max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=mid)
+        raw = (res.get("content") or "").strip() if isinstance(res, dict) else ""
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        parsed = json.loads(raw)
+        items = (parsed.get("briefs") or []) if isinstance(parsed, dict) else []
+    except Exception as e:
+        logger.warning("[semantic] node briefs batch 失败(%s): %s", file, e)
+        return 0
+    by_id = {a.get("id"): a for a in targets}
+    n = 0
+    for it in items if isinstance(items, list) else []:
+        try:
+            bid = str(it.get("id") or "")
+            brief = str(it.get("brief") or "").strip()
+        except AttributeError:
+            continue
+        a = by_id.get(bid)
+        if not a or not brief:
+            continue
+        brief = brief[:120]
+        if not _brief_grounded(brief, a):
+            continue
+        try:
+            store.SemanticAssetsStore.update(bid, {"nodeBrief": brief})
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
+def node_briefs_after_extract(pid: str, saved: List[dict], ctx: Dict[str, Any],
+                              model_id: Optional[str] = None) -> int:
+    """提取完成后按文件批量补节点简介(最多 4 批，控制提取耗时)；失败静默。"""
+    if not saved:
+        return 0
+    by_file: Dict[str, List[dict]] = {}
+    for a in saved:
+        f = ((a.get("astRefs") or [])[:1] and a["astRefs"][0].get("file")) or ""
+        if f:
+            by_file.setdefault(f, []).append(a)
+    root = ctx.get("root")
+    n = 0
+    for file, group in list(by_file.items())[:4]:
+        try:
+            n += generate_node_briefs_batch(pid, file, group, root, ctx.get("project"), model_id)
+        except Exception as e:
+            logger.warning("[semantic] node briefs(%s) 失败: %s", file, e)
+    return n
+
+
+def generate_edge_notes(asset_id: str, root: Optional[str], project: Optional[str],
+                        model_id: Optional[str] = None, force: bool = False) -> dict:
+    """资产出边的关系描述(≤40 字证据式)：在 from 资产锚点源码中定位被调用符号行作为证据。
+    落库 edge_notes JSON({from|to: {desc, at}})；未解析到真实资产的成员归属不生成。"""
+    a = store.SemanticAssetsStore.get(asset_id)
+    if not a:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "资产不存在"}
+    pid = project_id_for(root, project)
+    if not pid:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "缺少项目"}
+    fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    try:
+        old = json.loads((a.get("edgeNotes") or "") or "{}")
+    except Exception:
+        old = {}
+    idx = _relation_target_index([x for x in store.SemanticAssetsStore.all_status(pid, limit=4000)
+                                  if x.get("status") != "deleted"])
+    all_active = [x for x in store.SemanticAssetsStore.all_status(pid, limit=4000)
+                  if x.get("status") == "active"]
+    rels: List[Tuple[str, dict]] = []
+    for rel in (a.get("detail") or {}).get("relations") or []:
+        tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), idx)
+        if tgt and resolved:
+            rels.append((tgt, rel))
+    if not rels:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "无可解析的资产间关系"}
+    keys = [f"{asset_id}|{t}" for t, _ in rels]
+    if fresh and not force and all(k in old and isinstance(old.get(k), dict) and (old[k] or {}).get("desc") for k in keys):
+        return {"notes": {k.split("|", 1)[1]: (old[k] or {}).get("desc") or "" for k in keys},
+                "cached": True, "degraded": False}
+    root_r = resolve_root(root, project)
+    refs = a.get("astRefs") or []
+    snippet = _pseudo_source_snippet(root_r, refs) if refs else ""
+    if not snippet:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "源码不可读"}
+    by_id = {x.get("id"): x for x in all_active}
+    tgt_blocks: List[str] = []
+    for t, rel in rels:
+        ta = by_id.get(t) or {}
+        tgt_blocks.append(f"- target={rel.get('target') or t} | [{ta.get('kind') or rel.get('type') or 'asset'}] "
+                          f"{ta.get('name') or t} | {(ta.get('desc') or '')[:80]}")
+    terms_txt, conv_txt = _line_note_context(pid)
+    sys_prompt = (
+        "你是资深架构师。基于 from 资产的真实源码片段，逐条描述它与各 target 资产的关系："
+        "必须在源码中指明关系发生的位置(引用真实符号/语句)，说明『在做什么的过程中与对方发生该关系』。"
+        "每条不超过 40 字，中文，贴着代码，不得臆造源码中不存在的关系。"
+        '只输出 JSON：{"edges":[{"target":"<原始target名>","brief":"<描述>"}]}。'
+    )
+    user = (f"from 资产: [{a.get('kind')}] {a.get('name')}\n"
+            + (terms_txt + "\n" if terms_txt else "") + (conv_txt + "\n" if conv_txt else "")
+            + "\n真实源码片段:\n" + snippet
+            + "\n\ntarget 资产清单:\n" + "\n".join(tgt_blocks) + "\n\n请输出 JSON。")
+    notes: Dict[str, str] = {}
+    try:
+        from .req_agent import llm_sync, get_max_tokens_preference
+        from .agent_roles import resolve_role_model
+        mid = resolve_role_model("pseudo", model_id)
+        res = llm_sync([{"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": user}],
+                       mode="chat", max_tokens=max(get_max_tokens_preference() or 0, 2000), model_id=mid)
+        raw = (res.get("content") or "").strip() if isinstance(res, dict) else ""
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        parsed = json.loads(raw)
+        by_target = {rel.get("target") or t: t for t, rel in rels}
+        for it in (parsed.get("edges") or []) if isinstance(parsed, dict) else []:
+            try:
+                tn = str(it.get("target") or "").strip()
+                brief = str(it.get("brief") or "").strip()[:80]
+            except AttributeError:
+                continue
+            t = by_target.get(tn)
+            if not t or not brief:
+                continue
+            ta = by_id.get(t) or {}
+            tok_names = [ta.get("name") or ""] + [r.get("symbol") or "" for r in (ta.get("astRefs") or [])]
+            if not any(len(k) >= 3 and k in brief for k in tok_names):
+                continue   # 接地校验：描述必须引用 target 真实符号
+            notes[f"{asset_id}|{t}"] = brief
+    except Exception as e:
+        logger.warning("[semantic] edge notes LLM 失败: %s", e)
+        notes = {}
+    if not notes:
+        return {"notes": {}, "cached": False, "degraded": True, "error": "LLM 未返回有效关系描述"}
+    try:
+        merged = dict(old)
+        now = _ts()
+        for k, desc in notes.items():
+            merged[k] = {"desc": desc, "at": now}
+        store.SemanticAssetsStore.update(asset_id, {
+            "edgeNotes": json.dumps(merged, ensure_ascii=False)})
+    except Exception as e:
+        logger.warning("[semantic] edge notes 落库失败: %s", e)
+    out = {k.split("|", 1)[1]: v for k, v in notes.items()}
+    return {"notes": out, "cached": False, "degraded": False}
+
+
+@router.get("/kb/semantic/{asset_id}/edge-notes")
+async def api_edge_notes(asset_id: str, root: Optional[str] = None, project: Optional[str] = None,
+                         model_id: Optional[str] = None, force: bool = False):
+    """资产出边的关系描述(证据式；落库 edge_notes 缓存，force 重生成)。"""
+    return ok(await asyncio.to_thread(
+        generate_edge_notes, asset_id, root, project, model_id, force))
+
+
+# ── 存量资产描述批量增强(后台线程 + 进度查询)：节点简介(按文件批量) + 出边关系描述 ──
+
+_ENHANCE: Dict[str, Any] = {"running": False, "done": 0, "total": 0,
+                            "nodeBriefs": 0, "edgeNotes": 0, "error": ""}
+
+
+def _enhance_state() -> Dict[str, Any]:
+    return {k: _ENHANCE.get(k) for k in ("running", "done", "total", "nodeBriefs", "edgeNotes", "error")}
+
+
+def _enhance_worker(pid: str, root: Optional[str], project: Optional[str],
+                    model_id: Optional[str], force: bool) -> None:
+    try:
+        rows = [a for a in store.SemanticAssetsStore.all_status(pid, limit=4000)
+                if a.get("status") == "active"]
+        by_file: Dict[str, List[dict]] = {}
+        edge_todo: List[dict] = []
+        for a in rows:
+            f = ((a.get("astRefs") or [])[:1] and a["astRefs"][0].get("file")) or ""
+            if (force or not (a.get("nodeBrief") or "").strip()) and f:
+                by_file.setdefault(f, []).append(a)
+            if (a.get("detail") or {}).get("relations") and \
+                    (force or not (a.get("edgeNotes") or "").strip()):
+                edge_todo.append(a)
+        _ENHANCE["total"] = len(by_file) + len(edge_todo)
+        _ENHANCE["done"] = 0
+        for file, group in by_file.items():
+            try:
+                _ENHANCE["nodeBriefs"] += generate_node_briefs_batch(
+                    pid, file, group, root, project, model_id)
+            except Exception as e:
+                logger.warning("[semantic] enhance briefs(%s): %s", file, e)
+            _ENHANCE["done"] += 1
+        for a in edge_todo:
+            try:
+                r = generate_edge_notes(a.get("id") or "", root, project, model_id, force)
+                if not r.get("degraded"):
+                    _ENHANCE["edgeNotes"] += len(r.get("notes") or {})
+            except Exception as e:
+                logger.warning("[semantic] enhance edge notes: %s", e)
+            _ENHANCE["done"] += 1
+        _ENHANCE["error"] = ""
+    except Exception as e:
+        logger.warning("[semantic] enhance worker failed: %s", e)
+        _ENHANCE["error"] = str(e)
+    finally:
+        _ENHANCE["running"] = False
+
+
+@router.post("/kb/semantic/enhance-desc")
+async def api_enhance_desc(root: Optional[str] = None, project: Optional[str] = None,
+                           model_id: Optional[str] = None, force: bool = False):
+    """存量资产描述批量增强(后台线程)：节点简介(按文件批量) + 出边关系描述。"""
+    pid = project_id_for(root, project)
+    if not pid:
+        return err(400, "缺少项目")
+    if _ENHANCE.get("running"):
+        return ok({"started": False, **_enhance_state()})
+    _ENHANCE.update({"running": True, "done": 0, "total": 0,
+                     "nodeBriefs": 0, "edgeNotes": 0, "error": ""})
+    threading.Thread(target=_enhance_worker,
+                     args=(pid, resolve_root(root, project), project, model_id, force),
+                     daemon=True).start()
+    return ok({"started": True, **_enhance_state()})
+
+
+@router.get("/kb/semantic/enhance-desc/status")
+async def api_enhance_desc_status():
+    return ok(_enhance_state())
+
+
+@router.get("/kb/semantic/{asset_id}/in-edges")
+async def api_in_edges(asset_id: str, root: Optional[str] = None, project: Optional[str] = None):
+    """入边(被谁引用)：反向扫描活跃资产的 relations，解析指向本资产的边；
+    描述优先取 from 资产 edge_notes 中的证据式描述(如有)。"""
+
+    def _run():
+        pid = project_id_for(root, project)
+        me = store.SemanticAssetsStore.get(asset_id) if pid else None
+        if not me:
+            return {"inEdges": []}
+        res_idx = {asset_id: asset_id}
+        me_name = (me.get("name") or "").strip()
+        if me_name:
+            res_idx[me_name] = asset_id
+        out: List[dict] = []
+        for x in store.SemanticAssetsStore.all_status(pid, limit=4000):
+            if x.get("status") != "active" or x.get("id") == asset_id:
+                continue
+            try:
+                en = json.loads((x.get("edgeNotes") or "") or "{}")
+            except Exception:
+                en = {}
+            for rel in (x.get("detail") or {}).get("relations") or []:
+                tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), res_idx)
+                if not resolved or tgt != asset_id:
+                    continue
+                desc = (en.get(f"{x.get('id')}|{asset_id}") or {}).get("desc") \
+                    or rel.get("semantic") or rel.get("type") or ""
+                out.append({"fromId": x.get("id"), "fromName": x.get("name") or x.get("id"),
+                            "type": rel.get("type") or "", "desc": desc})
+        return {"inEdges": out}
+
+    return ok(await asyncio.to_thread(_run))
+
+
 def generate_line_notes(asset_id: str, file: str, start: int, end: int,
                         root: Optional[str] = None, project: Optional[str] = None,
-                        model_id: Optional[str] = None) -> dict:
+                        model_id: Optional[str] = None, force: bool = False) -> dict:
     """资产卡源码窗口的关键行逐行用途说明(前端按钮手动触发)。
 
     缓存键 = 资产 + file + 行段 + 窗口内容 md5；fresh(active 且非 needsUpdate)且命中 → 直接返回。
     资产 stale/重提 → 缓存自然失效重生成(与 pseudo 同生命周期)。
+    窗口优先**全量**送 LLM(关键行不截头)；上下文超限/输出截断 → 窗口二分
+    (1/2 → 1/4 → 1/8 封底)递归重试并合并各批注解(见 _LN_MAX_DEPTH/_is_ctx_overflow)。
     LLM 失败/无可解释行 → degraded 且不落库(可重试)。
     """
     a = store.SemanticAssetsStore.get(asset_id)
@@ -3840,20 +4281,24 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
         return {"notes": {}, "cached": False, "degraded": True, "error": "行段为空"}
     win_hash = hashlib.md5("\n".join(codes).encode("utf-8")).hexdigest()
     fresh = (a.get("status") == "active") and not a.get("needsUpdate")
+    # 多窗口缓存(line_notes.windows)：同资产不同窗口(多代码段/全文/分段)互不覆盖，LRU 上限 8。
+    # 兼容旧单窗口格式 {file,start,end,hash,notes} → 迁移进 windows。
     try:
-        cached = json.loads((a.get("lineNotes") or "") or "{}")
+        cache = json.loads((a.get("lineNotes") or "") or "{}")
     except Exception:
-        cached = {}
-    if (fresh and isinstance(cached, dict) and cached.get("file") == file
-            and int(cached.get("start") or 0) == start and int(cached.get("end") or 0) == end
-            and cached.get("hash") == win_hash):
-        notes = cached.get("notes") or {}
-        if isinstance(notes, dict) and notes:
-            return {"notes": {int(k): str(v) for k, v in notes.items()},
-                    "cached": True, "degraded": False}
-    key_lines = _key_lines(codes, start)
-    if not key_lines:
-        return {"notes": {}, "cached": False, "degraded": True, "error": "无可解释的关键行"}
+        cache = {}
+    windows: Dict[str, dict] = {}
+    if isinstance(cache, dict) and isinstance(cache.get("windows"), dict):
+        windows = cache["windows"]
+    elif isinstance(cache, dict) and cache.get("file") and isinstance(cache.get("notes"), dict) and cache["notes"]:
+        windows = {f"{cache.get('file')}|{int(cache.get('start') or 0)}|{int(cache.get('end') or 0)}|{cache.get('hash') or ''}":
+                   {"notes": cache["notes"]}}
+    ck = f"{file}|{start}|{end}|{win_hash}"
+    # force=True(用户清除缓存重生成)：视同无缓存，重新生成并覆盖原窗口条目
+    hit = windows.get(ck) if (fresh and not force) else None
+    if isinstance(hit, dict) and isinstance(hit.get("notes"), dict) and hit["notes"]:
+        return {"notes": {int(k): str(v) for k, v in hit["notes"].items()},
+                "cached": True, "degraded": False}
     pid = project_id_for(root, project)
     terms_txt, conv_txt = _line_note_context(pid)
     ctx = [f"资产: [{a.get('kind')}] {a.get('name')}",
@@ -3865,57 +4310,106 @@ def generate_line_notes(asset_id: str, file: str, start: int, end: int,
         ctx.append(terms_txt)
     if conv_txt:
         ctx.append(conv_txt)
-    numbered = "\n".join(f"{ln}. {codes[ln - start]}" for ln in key_lines)
-    sys_prompt = (
-        "你是资深架构师。对给定的带行号源码行逐行说明用途：结合术语表与规约解释业务含义，"
-        "贴合真实代码，不得臆造源码中不存在的逻辑。每行说明不超过 40 字，用中文。"
-        "信息不足时(如行内调用了看不懂的符号/想确认相关资产语义)，可先输出工具调用块收集信息再作答；"
-        '信息足够后只输出 JSON：{"notes":[{"line":<行号>,"note":"<说明>"}]}，不要输出其它内容。'
-    )
+    try:
+        from .asset_skill import skill_docs
+        skill_txt = skill_docs(root, project, ["linenote"])
+    except Exception as e:
+        logger.warning("[semantic] line-notes skill 加载失败: %s", e)
+        skill_txt = ""
     tools_doc = (
         "\n可用工具(按需调用，格式 [TOOL_CALL]{\"tool\":\"<名>\",\"arguments\":{参数}}[/TOOL_CALL])：\n"
         '- code.read_symbols: {"file": "相对路径", "symbol"?: "符号名", "startLine"?: 行, "endLine"?: 行} 读被调用符号的真实实现\n'
         '- asset.semantic.search: {"text": "关键词", "kind"?: "entity|contract|state|rule|process|decision"} 检索相关语义资产\n'
         '- asset.semantic.detail: {"asset_id": "sa-xxx"} 读相关资产完整定义\n'
     )
-    user_prompt = "\n".join(ctx) + f"\n\n源码(文件 {file}，仅解释以下行):\n{numbered}\n\n请输出 JSON。"
-    notes: Dict[int, str] = {}
-    try:
-        from .req_agent import run_tools_loop, get_max_tokens_preference
-        from .agent_roles import resolve_role_model
-        # 逐行解读与伪码走查同属 pseudo 角色(查询期轻量解读)；
-        # 多轮工具调用(白名单只读工具，封顶 3 轮)允许模型补读符号/检索资产后再给注解。
-        model_id = resolve_role_model("pseudo", model_id)
-        res = run_tools_loop(
-            [{"role": "system", "content": sys_prompt + tools_doc},
-             {"role": "user", "content": user_prompt}],
-            root=root, project=project, model_id=model_id,
-            max_tokens=get_max_tokens_preference(), max_rounds=3,
-            allowed=["code.read_symbols", "asset.semantic.search", "asset.semantic.detail"])
-        raw = (res or {}).get("content") or ""
-        raw = raw.strip()
+    base_prompt = (
+        "你是资深架构师。对给定的带行号源码行逐行说明用途：结合术语表与规约解释业务含义，"
+        "贴合真实代码，不得臆造源码中不存在的逻辑。每行说明不超过 40 字，用中文。"
+        "信息不足时(如行内调用了看不懂的符号/想确认相关资产语义)，可先输出工具调用块收集信息再作答；"
+        '信息足够后只输出 JSON：{"notes":[{"line":<行号>,"note":"<说明>"}]}，不要输出其它内容。'
+    )
+    sys_prompt = (skill_txt + "\n\n" if skill_txt else "") + base_prompt + tools_doc
+
+    from .req_agent import run_tools_loop, get_max_tokens_preference
+    from .agent_roles import resolve_role_model
+    # 逐行解读与伪码走查同属 pseudo 角色(查询期轻量解读)；
+    # 多轮工具调用(白名单只读工具，封顶 3 轮)允许模型补读符号/检索资产后再给注解。
+    model_id = resolve_role_model("pseudo", model_id)
+
+    def _attempt(sub_start: int, sub_codes: List[str]) -> Tuple[Dict[int, str], str, bool]:
+        """解读一个子窗口。返回 (notes, err, retryable)。
+        retryable=True 表示上下文超限/输出截断(tokens 不足)，窗口可二分降级重试。"""
+        keys = _key_lines(sub_codes, sub_start)
+        if not keys:
+            return {}, "", False
+        numbered = "\n".join(f"{ln}. {sub_codes[ln - sub_start]}" for ln in keys)
+        user_prompt = ("\n".join(ctx)
+                       + f"\n\n源码(文件 {file}，仅解释以下行):\n{numbered}\n\n请输出 JSON。")
+        try:
+            res = run_tools_loop(
+                [{"role": "system", "content": sys_prompt},
+                 {"role": "user", "content": user_prompt}],
+                root=root, project=project, model_id=model_id,
+                max_tokens=get_max_tokens_preference(), max_rounds=3,
+                allowed=["code.read_symbols", "asset.semantic.search", "asset.semantic.detail"])
+        except Exception as e:
+            logger.warning("[semantic] line-notes LLM 失败: %s", e)
+            return {}, str(e), _is_ctx_overflow(str(e))
+        raw = ((res or {}).get("content") or "").strip()
+        err_text = str((res or {}).get("error") or "")
+        if not raw:
+            return {}, err_text or "LLM 未返回内容", _is_ctx_overflow(err_text)
         if raw.startswith("```"):   # 容错剥离 ```json 包裹
             raw = raw.strip("`")
             if raw.lower().startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        parsed = json.loads(raw)
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            # 截断的 JSON(生成超限被掐断)同为 tokens 不足的常见表现 → 可二分降级
+            return {}, f"输出无法解析({raw[:80]}…)", True
+        out: Dict[int, str] = {}
+        sub_end = sub_start + len(sub_codes) - 1
         for item in (parsed.get("notes") or []) if isinstance(parsed, dict) else []:
             try:
                 ln, note = int(item.get("line")), str(item.get("note") or "").strip()
             except (TypeError, ValueError, AttributeError):
                 continue
-            if start <= ln <= end and note:
-                notes[ln] = note[:120]
-    except Exception as e:
-        logger.warning("[semantic] line-notes LLM 失败: %s", e)
-        notes = {}
+            if sub_start <= ln <= sub_end and note:
+                out[ln] = note[:120]
+        return out, "", False
+
+    # 优先整窗全量解读；超限/截断 → 窗口二分(1/2→1/4→1/8 封底)递归重试，合并各批注解
+    notes: Dict[int, str] = {}
+    failures: List[str] = []
+
+    def _recurse(sub_start: int, sub_codes: List[str], depth: int) -> None:
+        part, err, retryable = _attempt(sub_start, sub_codes)
+        if not err:
+            notes.update(part)
+            return
+        if retryable and depth < _LN_MAX_DEPTH and len(sub_codes) > 1:
+            mid = len(sub_codes) // 2
+            _recurse(sub_start, sub_codes[:mid], depth + 1)
+            _recurse(sub_start + mid, sub_codes[mid:], depth + 1)
+            return
+        failures.append(f"L{sub_start}-L{sub_start + len(sub_codes) - 1}: {err[:120]}")
+
+    _recurse(start, codes, 0)
+    if failures:
+        return {"notes": notes, "cached": False, "degraded": True,
+                "error": "部分行段解读失败(可重试): " + "; ".join(failures[:3])}
     if not notes:
         return {"notes": {}, "cached": False, "degraded": True, "error": "LLM 未返回有效注解"}
     try:
+        windows[ck] = {"notes": notes, "at": _ts()}
+        # LRU 裁剪：只保留最近 8 个窗口
+        if len(windows) > 8:
+            for k, _ in sorted(windows.items(), key=lambda kv: kv[1].get("at") or 0)[:-8]:
+                windows.pop(k, None)
         store.SemanticAssetsStore.update(asset_id, {
-            "lineNotes": json.dumps({"file": file, "start": start, "end": end,
-                                     "hash": win_hash, "notes": notes}, ensure_ascii=False)})
+            "lineNotes": json.dumps({"windows": windows}, ensure_ascii=False)})
     except Exception as e:
         logger.warning("[semantic] line-notes 落库失败: %s", e)
     return {"notes": notes, "cached": False, "degraded": False}
@@ -4126,6 +4620,10 @@ def semantic_graph(root: Optional[str], project: Optional[str],
     all_active = [a for a in store.SemanticAssetsStore.all_status(pid, limit=4000)
                   if a.get("status") == "active"]
     idx = _relation_target_index(all_active)
+    # 关系清洗用全量索引(含 stale)：未解析到任何资产的目标才是成员/字段噪音；
+    # 指向 stale 资产的真实关系必须保留(影响分析依赖)。
+    idx_all = _relation_target_index([a for a in store.SemanticAssetsStore.all_status(pid, limit=4000)
+                                      if a.get("status") != "deleted"])
     nodes: List[dict] = []
     edges: List[dict] = []
     anchors: List[dict] = []
@@ -4139,27 +4637,41 @@ def semantic_graph(root: Optional[str], project: Optional[str],
             "scopeType": a.get("scopeType") or "", "scopeKey": a.get("scopeKey") or "",
             "needsUpdate": a.get("needsUpdate") or 0,
             "canonicalKey": a.get("canonicalKey") or "",
+            "nodeBrief": (a.get("nodeBrief") or ""),
             "detail": _graph_node_detail(a),
         })
         detail = a.get("detail") or {}
+        edge_notes_map: Dict[str, dict] = {}
+        try:
+            en = json.loads((a.get("edgeNotes") or "") or "{}")
+            if isinstance(en, dict):
+                edge_notes_map = en
+        except Exception:
+            edge_notes_map = {}
         for rel in detail.get("relations") or []:
-            tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), idx)
-            if not tgt:
+            tgt_all, resolved_all = _resolve_relation_target((rel.get("target") or "").strip(), idx_all)
+            # 关系清洗：未解析到任何资产的目标(字段/成员归属)不进图边，仅保留在卡内 detail；
+            # 指向 stale 资产的真实关系保留(idx_all 含非删除全量)。
+            if not tgt_all or not resolved_all:
                 continue
+            tgt, resolved = _resolve_relation_target(tgt_all, idx)
             edges.append({"from": aid, "to": tgt,
                           "resolved": resolved,
                           "type": rel.get("type") or "",
-                          "semantic": rel.get("semantic") or ""})
+                          "semantic": rel.get("semantic") or "",
+                          "desc": ((edge_notes_map.get(f"{aid}|{tgt_all}") or {}).get("desc") or "")})
         # 动态过程的三段端点(输入/输出) → 类型化边：inputs=uses/reads, outputs=writes/sends。
         for ep, etype in (("inputs", "uses"), ("outputs", "writes")):
             for rel in detail.get(ep) or []:
-                tgt, resolved = _resolve_relation_target((rel.get("target") or "").strip(), idx)
-                if not tgt:
+                tgt_all, resolved_all = _resolve_relation_target((rel.get("target") or "").strip(), idx_all)
+                if not tgt_all or not resolved_all:
                     continue
+                tgt, resolved = _resolve_relation_target(tgt_all, idx)
                 edges.append({"from": aid, "to": tgt,
                               "resolved": resolved,
                               "type": rel.get("type") or etype,
-                              "semantic": rel.get("semantic") or ""})
+                              "semantic": rel.get("semantic") or "",
+                              "desc": ((edge_notes_map.get(f"{aid}|{tgt_all}") or {}).get("desc") or "")})
         for r in a.get("astRefs") or []:
             if r.get("file"):
                 anchors.append({"assetId": aid, "file": r.get("file"),
@@ -4472,6 +4984,7 @@ async def api_source_snippet(root: Optional[str] = None, project: Optional[str] 
     anchor = int(line or 0)
     start = end = anchor
     highlight: List[int] = []
+    resolved = False
     if symbol and anchor:
         # AST 缓存里有该符号的行段 → 整段显示（更精确覆盖实现层逻辑）
         try:
@@ -4483,9 +4996,32 @@ async def api_source_snippet(root: Optional[str] = None, project: Optional[str] 
                     if s_ and e_:
                         start, end = s_, e_
                         highlight = list(range(s_, min(e_ + 1, n + 1)))
+                        resolved = True
                     break
         except Exception:
             logger.warning("[semantic] source-snippet 符号行段解析失败: %s", symbol)
+        if not resolved:
+            # AST 缓存缺行段(如 ts 符号未记录行号) → codegraph 符号表兜底：
+            # 优先取包含锚点行的符号体，否则取同名首个有行段的符号。
+            try:
+                rows: List[tuple] = []
+                conn = _open_cg(root)
+                if conn is not None:
+                    rel = _norm_path(file)
+                    rows = conn.execute(
+                        "SELECT start_line, end_line FROM nodes "
+                        "WHERE file_path = ? AND (name = ? OR qualified_name = ?) "
+                        "AND start_line > 0 AND end_line > 0",
+                        (rel, symbol, symbol)).fetchall()
+                    conn.close()
+                span = next(((s_, e_) for s_, e_ in rows if s_ <= anchor <= e_), None)
+                if span is None and rows:
+                    span = (rows[0][0], rows[0][1])
+                if span:
+                    start, end = span
+                    highlight = list(range(start, min(end + 1, n + 1)))
+            except Exception as e:
+                logger.warning("[semantic] source-snippet codegraph 行段兜底失败: %s", e)
     if not anchor:
         anchor = start
     b = max(1, (anchor or 1) - before)
@@ -4514,13 +5050,26 @@ async def api_pseudo(asset_id: str, root: Optional[str] = None,
     return ok(await asyncio.to_thread(generate_pseudo, asset_id, root, project, model_id))
 
 
+@router.get("/kb/semantic/{asset_id}/node-brief")
+async def api_node_brief(asset_id: str, root: Optional[str] = None, project: Optional[str] = None,
+                         model_id: Optional[str] = None, force: bool = False):
+    """资产节点简介(≤80 字代码级描述；fresh 命中缓存 / stale·force 重生成；失败降级原 desc)。"""
+    def _run():
+        a = store.SemanticAssetsStore.get(asset_id)
+        if not a:
+            return {"brief": "", "cached": False, "degraded": True, "error": "资产不存在"}
+        return generate_node_brief(a, root, project, model_id, force)
+    return ok(await asyncio.to_thread(_run))
+
+
 @router.get("/kb/semantic/{asset_id}/line-notes")
 async def api_line_notes(asset_id: str, file: str, start: int, end: int,
                          root: Optional[str] = None, project: Optional[str] = None,
-                         model_id: Optional[str] = None):
-    """资产卡源码窗口关键行逐行用途说明(手动触发，落库缓存随资产生命周期)。"""
+                         model_id: Optional[str] = None, force: bool = False):
+    """资产卡源码窗口关键行逐行用途说明(手动触发，落库缓存随资产生命周期)。
+    force=True 跳过缓存读取，重新生成并覆盖原窗口缓存。"""
     return ok(await asyncio.to_thread(
-        generate_line_notes, asset_id, file, start, end, root, project, model_id))
+        generate_line_notes, asset_id, file, start, end, root, project, model_id, force))
 
 
 @router.post("/kb/semantic/reconcile")

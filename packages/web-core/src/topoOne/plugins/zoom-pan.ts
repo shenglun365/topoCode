@@ -8,6 +8,11 @@ export interface ZoomPanApi {
   zoomOut(): void;
 }
 
+export interface ZoomPanOptions {
+  /** 自动适配(fit/reset)的最小缩放下限(默认 0.1)；避免宽/大图被整体适配缩到不可读。手动缩放仍受 MIN_SCALE 约束。 */
+  minFitScale?: number;
+}
+
 interface ViewTransform {
   x: number;
   y: number;
@@ -35,7 +40,8 @@ function parseViewBox(svg: SVGSVGElement): { w: number; h: number } | null {
  * Wheel zoom (cursor anchored), drag pan, double-click zoom, fit/reset.
  * Implemented as a CSS transform on the <svg> element itself so engine DOM stays untouched.
  */
-export function createZoomPanPlugin(): DiagramPlugin & { api: ZoomPanApi } {
+export function createZoomPanPlugin(opts?: ZoomPanOptions): DiagramPlugin & { api: ZoomPanApi } {
+  const minFitScale = opts?.minFitScale ?? MIN_SCALE;
   let container: HTMLElement | null = null;
   let svg: SVGSVGElement | null = null;
   let shared: SharedInteractionState | null = null;
@@ -74,8 +80,22 @@ export function createZoomPanPlugin(): DiagramPlugin & { api: ZoomPanApi } {
     const cw = container.clientWidth;
     const ch = container.clientHeight;
     if (!size || !cw || !ch) return;
-    const s = clamp(Math.min(cw / size.w, ch / size.h) * 0.96, MIN_SCALE, MAX_SCALE);
-    t = { s, x: (cw - size.w * s) / 2, y: (ch - size.h * s) / 2 };
+    // 宽图(宽高比明显大于容器)→ 按宽度适配(水平居中、顶对齐、垂直可平移)，
+    // 避免整体适配把宽图缩到不可读；下限用 minFitScale(手动缩放仍受 MIN_SCALE 约束)。
+    const wide = size.w / size.h > (cw / ch) * 1.25;
+    let s: number;
+    let x: number;
+    let y: number;
+    if (wide) {
+      s = clamp((cw / size.w) * 0.96, minFitScale, MAX_SCALE);
+      x = (cw - size.w * s) / 2;
+      y = 0;
+    } else {
+      s = clamp(Math.min(cw / size.w, ch / size.h) * 0.96, minFitScale, MAX_SCALE);
+      x = (cw - size.w * s) / 2;
+      y = (ch - size.h * s) / 2;
+    }
+    t = { s, x, y };
     apply();
   };
 

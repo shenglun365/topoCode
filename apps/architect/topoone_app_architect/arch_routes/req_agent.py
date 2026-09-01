@@ -842,11 +842,14 @@ def llm_sync(messages: List[Dict[str, str]],
              tools: Optional[List[str]] = None,
              output_schema: Optional[Dict[str, Any]] = None,
              max_tokens: Optional[int] = None,
-             model_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+             model_id: Optional[str] = None,
+             on_error: Optional[Callable[[str], None]] = None) -> Optional[Dict[str, Any]]:
     """经 KbGateway 调主后端 llm.sync。不可达/异常返回 None(调用方降级)。
 
     model_id: 本次对话的模型偏好(对话侧单独选择)，优先于全局 `llm.modelId`；
     空串则回退全局偏好，再由主后端 is_default 兜底。
+    on_error: 可选回调，捕获失败原因文本(KbError 详情/异常信息)，供调用方
+    识别上下文超限等可重试错误(如逐行解读的二分降级)；不改变 None 返回语义。
     """
     gateway = _kb_gateway()
     try:
@@ -865,6 +868,11 @@ def llm_sync(messages: List[Dict[str, str]],
             logger.warning("[req_agent] llm.sync 返回非 dict(%s): %r",
                            type(res).__name__,
                            str(res)[:200] if res is not None else None)
+            if on_error:
+                try:
+                    on_error(f"llm.sync 返回非 dict: {type(res).__name__}")
+                except Exception:
+                    pass
             return None
         if mode == "structured" and output_schema and res.get("output") is None:
             logger.warning("[req_agent] llm.sync structured 输出为空: "
@@ -874,6 +882,11 @@ def llm_sync(messages: List[Dict[str, str]],
         return res
     except Exception as e:
         logger.warning("[req_agent] llm.sync failed: %s", e, exc_info=True)
+        if on_error:
+            try:
+                on_error(str(e))
+            except Exception:
+                pass
         return None
 
 
@@ -884,23 +897,37 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
                    output_schema: Optional[Dict[str, Any]] = None,
                    max_tokens: Optional[int] = None,
                    max_rounds: int = 4,
-                   allowed: Optional[List[str]] = None) -> Dict[str, Any]:
+                   allowed: Optional[List[str]] = None,
+                   on_error: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     """统一工具调用循环(同步通道)：解析模型输出的 `[TOOL_CALL]` 块 → 逐个执行 →
     回喂结果 → 再次询问，直至得到不含工具块的最终内容。供 harness(clarify/collect)
     与 WS 降级通道共用，杜绝「裸 [TOOL_CALL] 中断」。
 
     allowed: 工具白名单(如逐行解读等受限任务)；非 None 时白名单外的工具调用不执行，
     回喂拒绝提示让模型改用允许工具或直接作答。默认 None=不限制(原行为)。
+    on_error: 透传给 llm_sync 的失败原因回调(见其 docstring)。
 
     返回 {'content': str, 'output': Any|None}；content 已剥离所有工具块。
+    LLM 失败导致无内容时额外带 'error'(最近一次失败原因文本，空串=不可达/超时)。
     """
     work = list(msgs or [])
+    last_err = ""
+
+    def _err(msg: str) -> None:
+        nonlocal last_err
+        last_err = msg or last_err
+        if on_error:
+            try:
+                on_error(msg)
+            except Exception:
+                pass
+
     for _round in range(max_rounds + 1):
         res = llm_sync(work, mode=mode, output_schema=output_schema,
-                       max_tokens=max_tokens, model_id=model_id)
+                       max_tokens=max_tokens, model_id=model_id, on_error=_err)
         content = (res or {}).get("content", "") if res else ""
         if not content:
-            return {"content": "", "output": None}
+            return {"content": "", "output": None, "error": last_err}
         calls = extract_tool_calls(content)
         if not calls:
             return {
@@ -923,7 +950,7 @@ def run_tools_loop(msgs: List[Dict[str, str]], *,
         tool_feed = "\n".join(f"[{r['name']}] {r['text']}" for r in results)
         work.append({"role": "assistant", "content": strip_tool_blocks(content) or "(调用知识库检索)"})
         work.append({"role": "user", "content": f"以下是知识库工具返回结果，请基于结果直接回答，不再输出工具调用块：\n{tool_feed}"})
-    return {"content": "", "output": None}
+    return {"content": "", "output": None, "error": last_err or "工具调用轮次耗尽"}
 
 
 # ── 自由对话(流式)通道 ────────────────────────────────────────────────
@@ -955,6 +982,10 @@ _CAPABILITY_DOC = (
     "工具调用协议(重要)：当需要检索知识库/项目数据才能回答(例如确认真实资产、基线、依赖链路)时，"
     "先且仅先输出一个工具调用块，格式为：\n"
     '[TOOL_CALL]{"tool":"<=工具名>","arguments":{参数}}[/TOOL_CALL]\n'
+    "硬性规则(执行类指令)：凡用户要求『提取/抽取语义资产』或给出组件ID(comm-…)要求提取/刷新/保存时，"
+    "你的第一条回复必须是对应的 asset.semantic.* 工具调用块；工具结果是同步返回的真实执行结果。"
+    "严禁在不调用工具的情况下输出『提取报告/结果摘要/新鲜度检查/产出条数』等编造结论——"
+    "你没有调用工具就没有任何执行结果，如实说明需要调用工具即可。\n"
     "各工具的参数：\n"
     '- kb.asset.search: {"text": "检索关键词", "preferred": ["资产ID(可选)"]}\n'
     '- kb.code_mappings: {"asset_ids": ["资产ID"]}\n'
