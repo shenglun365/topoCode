@@ -4,17 +4,20 @@
 
 命令结构:
   topo init/uninit/status            — 项目初始化
-  topo community/arch/diff/quality   — 架构查询
+  topo community/quality             — 架构查询
   topo serve                         — 启动后端服务集（supervisor 唯一 owner，manifest 驱动）
   topo status/doctor                 — 服务健康 / 进程拓扑诊断
   topo import/analyze/tasks/export/verify/settings — 经 daemon /api/rpc
-  topo session                       — AI 会话追踪 (待实现)
   topo install/uninstall/detect      — Agent Installer
   topo tui                           — 终端界面（Textual）
+
+Planned（未实现，C5: 不再对外广告可用性）:
+  topo arch/diff/track/session       — 架构操作/版本差异/变更追踪/AI 会话
 """
 
 import argparse
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -41,7 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_comm.add_argument("--level", type=int, default=0)
     p_comm.add_argument("--json", action="store_true")
 
-    p_arch = sub.add_parser("arch", help="架构操作")
+    p_arch = sub.add_parser("arch", help="架构操作（planned，未实现）")
     p_arch_subs = p_arch.add_subparsers(dest="arch_action")
 
     p_arch_analyze = p_arch_subs.add_parser("analyze", help="批量 LLM 分析社区")
@@ -62,7 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_arch_list.add_argument("--level", default="L0")
     p_arch_list.add_argument("--json", action="store_true")
 
-    p_diff = sub.add_parser("diff", help="版本差异")
+    p_diff = sub.add_parser("diff", help="版本差异（planned，未实现）")
     p_diff_subs = p_diff.add_subparsers(dest="diff_action")
     p_diff_snapshots = p_diff_subs.add_parser("snapshots", help="列出可用快照")
     p_diff_compare = p_diff_subs.add_parser("compare", help="对比两个版本")
@@ -70,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_diff_compare.add_argument("to_version", nargs="?", default="")
     p_diff_compare.add_argument("--output", default="")
 
-    p_track = sub.add_parser("track", help="架构变更追踪")
+    p_track = sub.add_parser("track", help="架构变更追踪（planned，未实现）")
     p_track_subs = p_track.add_subparsers(dest="track_action")
     p_track_start = p_track_subs.add_parser("start", help="开始追踪")
     p_track_start.add_argument("--tag", default="", help="版本标签")
@@ -96,7 +99,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("detect", help="检测已安装的 AI Agents")
 
     # === Session ===
-    p_session = sub.add_parser("session", help="AI 会话追踪")
+    p_session = sub.add_parser("session", help="AI 会话追踪（planned，未实现）")
     p_session.add_argument("action", nargs="?", default="list", choices=["list", "summary"])
 
     # === 进程治理 (P0) ===
@@ -326,10 +329,10 @@ def _make_cmd(name: str, data_dir: str, http_port: int, http_host: str) -> list[
     """构造固定核心/生态进程启动命令（doc/chat/architect 改由 _make_manifest_cmd）"""
     meta = _FIXED_SERVICES[name]
     if name == "kb":
-        # core 进程：ZMQ + data-api(3459) + ingest；不自行 spawn reports/architect/mcp
+        # core 进程：ZMQ + data-api(3459) + ingest；进程拓扑唯一 owner 本服务（C3：无自 spawn）
         # M03: 入口迁至核心包（python -m topoone.engine）
         return [sys.executable, "-m", "topoone.engine", data_dir,
-                "--http-port", str(http_port), "--http-host", http_host, "--no-spawn"]
+                "--http-port", str(http_port), "--http-host", http_host]
     if name == "llm":
         # M04: llm 服务入口迁至核心包（python -m topoone.llm）
         return [sys.executable, "-m", "topoone.llm", "--data-dir", data_dir,
@@ -429,9 +432,8 @@ def _cmd_serve(args):
         else:
             # 固定核心/生态进程
             if name == "kb":
-                env = {"TOPO_MODE": "monolith",
-                       "ZMQ_PUB_PORT": "5681",
-                       "AGENT_API_URL": f"http://127.0.0.1:{_service_port('agent')}"}
+                # kb PUB 端口单一源 = config.KB_PUB_PORT（默认 5681），此处不再强改（C4 修正）
+                env = {"AGENT_API_URL": f"http://127.0.0.1:{_service_port('agent')}"}
             elif name == "llm":
                 env = {"LLM_SERVICE_PORT": str(_service_port("llm")),
                        "LLM_PUB_PORT": str(int(os.environ.get("LLM_PUB_PORT", "5682")))}
@@ -522,22 +524,27 @@ def _cmd_doctor(args):
     print(f"data_dir: {data_dir}")
     print()
 
-    # 1. spawn 路径核查
-    print("[1] spawn 路径一致性")
-    # M03: kb 入口迁至核心包 engine/app.py（python -m topoone.engine）
+    # 1. 拓扑/端口一致性核查
+    print("[1] 拓扑与端口一致性")
+    # C2/C3: engine/app.py 已无自 spawn 路径，进程拓扑唯一 owner = 本 CLI（`topo serve`）
     main_py = os.path.join(_PARENT, "packages", "core", "topoone", "engine", "app.py")
     main_src = open(main_py).read()
-    no_spawn_support = "--no-spawn" in main_src
-    # app.py 保留 mcp spawn 是 Electron 兼容路径；`topo serve` 经 --no-spawn 由 supervisor 接管。
-    # M06: gateway 入口迁至核心包 topoone/gateway/server.py（不再自行 spawn runner/mcp）
-    web_server_py = os.path.join(_PARENT, "packages", "core", "topoone", "gateway", "server.py")
-    if os.path.exists(web_server_py):
-        web_src = open(web_server_py).read()
-        web_spawn = "coding_agent_runner" in web_src and "create_subprocess" in web_src
-    else:
-        web_spawn = False
-    print(f"  engine/app.py --no-spawn 支持: {'YES (topo serve 经此接管)' if no_spawn_support else 'NO (缺失)'}")
-    print(f"  web_server 含 runner/mcp:  {'YES (需移除)' if web_spawn else 'no (OK)'}")
+    no_spawn_left = "subprocess.Popen" in main_src
+    print(f"  engine/app.py 无自 spawn: {'OK' if not no_spawn_left else 'FAIL (仍含 subprocess.Popen)'}")
+    # C4: kb PUB 端口单一源核查 —— 绑定方(engine/app.py)与订阅方(gateway) 同名同默认
+    gateway_py = os.path.join(_PARENT, "packages", "core", "topoone", "gateway", "gateway.py")
+    gw_src = open(gateway_py).read() if os.path.exists(gateway_py) else ""
+    cfg_py = os.path.join(_PARENT, "packages", "core", "topoone", "config.py")
+    cfg_src = open(cfg_py).read() if os.path.exists(cfg_py) else ""
+    cfg_ok = "KB_PUB_PORT" in cfg_src and "5681" in cfg_src and "ZMQ_PUB_PORT" not in cfg_src
+    bind_ok = "KB_PUB_PORT" in main_src
+    sub_ok = 'os.environ.get("KB_PUB_PORT"' in gw_src
+    print(f"  config.py KB_PUB_PORT 单一源:  {'OK (默认 5681)' if cfg_ok else 'FAIL'}")
+    print(f"  kb 绑定 KB_PUB_PORT:           {'OK' if bind_ok else 'FAIL'}")
+    print(f"  gateway 订阅 KB_PUB_PORT:      {'OK' if sub_ok else 'FAIL'}")
+    # A2: codegraph 可用性（语义资产符号源）
+    cg = shutil.which("codegraph")
+    print(f"  codegraph CLI:                 {'OK (' + cg + ')' if cg else '缺失 — 语义资产将降级轻量扫描'}")
 
     # 2. 端口占用
     print("\n[2] 端口")
@@ -851,7 +858,7 @@ def _cmd_arch(args):
         print("Usage: topocode arch [analyze|overview|export|list]")
         return
 
-    print(f"[arch] {action} — feature in development (AgentRuntime complete, pending integration)")
+    print(f"[arch] {action} — planned（未实现；AgentRuntime 已就绪待接入）")
     print(f"  project: {project_root}")
     if action == "analyze":
         print(f"  level: {getattr(args, 'level', 'L0')}")
@@ -876,7 +883,7 @@ def _cmd_track(args):
         print("Usage: topocode track [start|stop|list|status]")
         return
 
-    print(f"[track] {action} — feature in development (ArchSentinel complete, pending integration)")
+    print(f"[track] {action} — planned（未实现；ArchSentinel 已就绪待接入）")
     print(f"  project: {project_root}")
     if action == "start":
         tag = getattr(args, "tag", "") or f"v-auto-{int(time.time())}"
@@ -888,7 +895,7 @@ def _cmd_track(args):
 def _cmd_diff(args):
     """版本差异命令。"""
     project_root = os.path.abspath(args.project_root)
-    print(f"[diff] — feature in development")
+    print(f"[diff] — planned（未实现）")
     if args.diff_action == "snapshots":
         print("  listing available snapshots...")
     elif args.diff_action == "compare":

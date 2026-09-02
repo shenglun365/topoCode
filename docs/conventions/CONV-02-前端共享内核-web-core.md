@@ -9,7 +9,11 @@
 |---|---|
 | `src/services/browser-api.ts` | **RPC + 鉴权客户端（全前端唯一权威实现）**：`POST /api/rpc/{method}`、token 读取（`#token=` 首粘 → localStorage `topocode:token` → Bearer 头 / WS `?token=`）、401 提示 |
 | `src/services/api.ts` | 轻量 API 封装（同 token 逻辑） |
+| `src/services/token.ts` | token 单一源（R2 修正：browser-api/api 共同 import，勿再复制） |
+| `src/services/chat-stream.ts` | chat SSE 流消费助手（R2 修正：`data:` 行协议统一解析） |
 | `src/services/ipc.ts` | 历史 IPC 兼容层（Electron 移除后的浏览器实现） |
+
+**传输边界（R2 厘清）**：KB 系（workbench/docs/chat）访问 gateway 一律经 `browser-api`/`api.ts`（token 单一源 `services/token.ts`）；`utils/http.ts` 是 **portal 认证域专用客户端**（独立后端 `VITE_API_BASE`、独立 token `topocode_token` + 懒续期），与 gateway 传输**分域并存、禁止合并**；architect 自带传输（`api-client.ts`）属独立战略范围（见 F3/A5）。`window.api`（`installBrowserAPI`）定位 = web-core IPC 契约的浏览器实现层，KB 系组件/服务可经其订阅事件（`/ws/events`）。
 | `src/components/` | 共享组件：`MermaidViewer`、`PlantUmlViewer`、`AppDialog`、`ConfirmDialog`、`StarLogoMark` 等 |
 | `src/composables/` | `useDialog`/`useToast`/`useFloatDrag`/`useComponentId` 等 |
 | `src/i18n/` | 双语资源 + `setup`/`web-locales`（zh-CN / en-US） |

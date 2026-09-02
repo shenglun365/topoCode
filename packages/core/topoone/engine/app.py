@@ -2,9 +2,8 @@
 
 入口: python -m topoone.engine  （engine/__main__.py → app.main()）
 
-模式:
-  monolith (default)  — 单进程，所有模块在同一进程内
-  distributed         — 多进程，各服务独立进程通过 ZMQ Internal Bus 通信
+进程拓扑唯一 owner = supervisor/cli.py（`topo serve`，C2 修正）：
+gateway/architect/mcp 等均由 supervisor 拉起，本进程不再自 spawn 子进程（C3 修正）。
 """
 
 import asyncio
@@ -12,7 +11,6 @@ import json
 import logging
 import os
 import signal
-import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -27,7 +25,7 @@ from pathlib import Path as _Path
 
 _REPO_ROOT = _Path(__file__).resolve().parents[4]
 
-from topoone.config import TOPO_MODE
+from topoone.config import KB_PUB_PORT
 from topoone.logging_config import setup_logging
 from topoone.db.manager import MultiDBManager
 from topoone.rpc.zmq_server import ZMQServer
@@ -67,8 +65,7 @@ if os.environ.get("TOPOCODE_CHAT_DEBUG", "") == "1":
 class BackendApp:
     """单进程后端应用"""
 
-    def __init__(self, data_dir: str = None, http_port: int = None, http_host: str = None,
-                 no_spawn: bool = False):
+    def __init__(self, data_dir: str = None, http_port: int = None, http_host: str = None):
         if data_dir is None:
             if sys.platform == "win32":
                 data_dir = os.path.join(os.environ.get("APPDATA", ""), "TopoOne")
@@ -81,16 +78,12 @@ class BackendApp:
         self.data_dir = data_dir
         self.http_port = http_port
         self.http_host = http_host or '0.0.0.0'
-        self.no_spawn = no_spawn
         self.multi_db = MultiDBManager(data_dir)
 
         dealer_port = int(os.environ.get('ZMQ_DEALER_PORT', '5671'))
-        pub_port = int(os.environ.get('ZMQ_PUB_PORT', '5680'))
+        pub_port = KB_PUB_PORT  # 单一事实源（C4）：kb PUB 绑定与 gateway 订阅同名同默认
         self.server = ZMQServer(self.multi_db, dealer_port=dealer_port, pub_port=pub_port)
         self.plugin_manager = PluginManager()
-        self._web_proc = None
-        self._arch_proc = None
-        self._mcp_proc = None
 
     def _setup_signals(self):
         try:
@@ -178,8 +171,12 @@ class BackendApp:
                 logger.error(f"[manifest] FAILED to register kind=core app '{app.name}' ({app.python_entry}): {e}")
 
     def _start_optional_services(self):
+        """进程内后台服务：ingest 消费 + Data API。
+
+        gateway/architect/mcp 等 子进程一律由 supervisor（`topo serve`）拉起 —— 进程
+        拓扑唯一 owner（C2/C3 修正：原 Electron 兼容自 spawn 路径已确认废弃并删除）。
+        """
         self._ingest_consumer = None
-        self._web_proc = None
 
         # 启动 ingest 消费后台线程
         try:
@@ -206,59 +203,6 @@ class BackendApp:
             self._data_api_thread = None
             logger.warning(f"Failed to start data API: {e}")
 
-        # no_spawn：reports/architect/mcp 由 supervisor 作为独立子进程纳管，此处不再自行 spawn
-        # （`topo serve` 唯一 owner 场景；独立运行时 supervisor 负责拉起）
-        if self.no_spawn:
-            logger.info("no_spawn mode: reports/architect/mcp handled by supervisor")
-            return
-
-        # 启动 Web 端（子进程）
-        if self.http_port:
-            self.multi_db.http_port = self.http_port
-            self.multi_db.http_host = self.http_host
-            try:
-                # Use subprocess to run web端 as a child process（M06: 入口迁至核心包）
-                data_port = int(os.environ.get('DATA_API_PORT', '3459'))
-                self._web_proc = subprocess.Popen(
-                    [sys.executable, "-m", "topoone.gateway",
-                     "--port", str(self.http_port),
-                     "--host", str(self.http_host),
-                     "--data-dir", self.data_dir,
-                     "--data-api-port", str(data_port)],
-                    stdout=None, stderr=None,
-                )
-                logger.info(f"Web server subprocess started (PID {self._web_proc.pid}) on http://{self.http_host}:{self.http_port}")
-            except Exception as e:
-                logger.warning(f"Failed to start web server subprocess: {e}")
-
-        # 启动 Architect 独立服务（子进程，3470）— M13 迁至 apps/architect（python -m topoone_app_architect）
-        arch_port = int(os.environ.get('ARCH_PORT', '3470'))
-        try:
-            self._arch_proc = subprocess.Popen(
-                [sys.executable, "-m", "topoone_app_architect",
-                 "--port", str(arch_port),
-                 "--host", "127.0.0.1",
-                 "--data-dir", self.data_dir],
-                stdout=None, stderr=None,
-            )
-            logger.info(f"Architect server subprocess started (PID {self._arch_proc.pid}) on http://127.0.0.1:{arch_port}")
-        except Exception as e:
-            self._arch_proc = None
-            logger.warning(f"Failed to start architect subprocess: {e}")
-
-        # 启动 MCP Server（子进程，3460）— 提供外部 agent/工具访问 KB 的通道
-        try:
-            mcp_port = int(os.environ.get('MCP_SERVER_PORT', '3460'))
-            # M08: MCP Server 入口迁至核心包（python -m topoone.plugins.mcp）
-            self._mcp_proc = subprocess.Popen(
-                [sys.executable, "-m", "topoone.plugins.mcp"],
-                stdout=None, stderr=None,
-            )
-            logger.info(f"MCP server subprocess started (PID {self._mcp_proc.pid}) on http://127.0.0.1:{mcp_port}")
-        except Exception as e:
-            self._mcp_proc = None
-            logger.warning(f"Failed to start MCP server subprocess: {e}")
-
     async def run(self):
         logger.info(f"Starting TopoOne Backend (data_dir: {self.data_dir})")
         self.register_all()
@@ -267,51 +211,11 @@ class BackendApp:
         try:
             await self.server.run_forever()
         finally:
-            self._shutdown_web_process()
-            self._shutdown_arch_process()
-            self._shutdown_mcp_process()
             self.multi_db.close_all()
             logger.info("Backend shutdown complete")
 
-    def _shutdown_arch_process(self):
-        if self._arch_proc and self._arch_proc.poll() is None:
-            logger.info(f"Terminating architect subprocess (PID {self._arch_proc.pid})...")
-            self._arch_proc.terminate()
-            try:
-                self._arch_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning("Architect subprocess did not exit in 5s, killing...")
-                self._arch_proc.kill()
-                self._arch_proc.wait(timeout=2)
-
-    def _shutdown_mcp_process(self):
-        if self._mcp_proc and self._mcp_proc.poll() is None:
-            logger.info(f"Terminating MCP server subprocess (PID {self._mcp_proc.pid})...")
-            self._mcp_proc.terminate()
-            try:
-                self._mcp_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning("MCP server subprocess did not exit in 5s, killing...")
-                self._mcp_proc.kill()
-                self._mcp_proc.wait(timeout=2)
-
-    def _shutdown_web_process(self):
-        if self._web_proc and self._web_proc.poll() is None:
-            logger.info(f"Terminating web server subprocess (PID {self._web_proc.pid})...")
-            self._web_proc.terminate()
-            try:
-                self._web_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.warning("Web server subprocess did not exit in 5s, killing...")
-                self._web_proc.kill()
-                self._web_proc.wait(timeout=2)
-            logger.info("Web server subprocess terminated")
-
     def shutdown(self):
         logger.info("Shutting down...")
-        self._shutdown_web_process()
-        self._shutdown_arch_process()
-        self._shutdown_mcp_process()
         self.server.stop()
         if self._ingest_consumer:
             self._ingest_consumer.stop()
@@ -320,84 +224,7 @@ class BackendApp:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 多进程模式 — Phase 2+ 逐步启用
-# ═══════════════════════════════════════════════════════════════
-
-async def _run_distributed(data_dir: str, http_port: int | None, http_host: str | None):
-    """多进程入口 — Supervisor 管理所有子进程生命周期"""
-    logger.info("=" * 60)
-    logger.info("TopoOne Distributed Mode")
-    logger.info("=" * 60)
-    logger.info(f"data_dir={data_dir}")
-
-    from topoone.supervisor.supervisor import Supervisor
-    sv = Supervisor(log_dir=os.path.join(data_dir, "logs"))
-
-    # 注册受管进程（M03: db_service 迁至 topoone.engine.db_service；M05: agent_worker 并入 topoone.agent）
-    sv.register("db_service",
-                 [sys.executable, "-m", "topoone.engine.db_service", "--data-dir", data_dir],
-                 restart_limit=3)
-    sv.register("agent_worker",
-                 [sys.executable, "-m", "topoone.agent", "--data-dir", data_dir],
-                 restart_limit=3)
-    # M13: architect 迁至 apps/architect（python -m topoone_app_architect）
-    sv.register("architect",
-                 [sys.executable, "-m", "topoone_app_architect",
-                  "--port", str(int(os.environ.get('ARCH_PORT', '3470'))),
-                  "--host", "127.0.0.1", "--data-dir", data_dir],
-                 restart_limit=3)
-    # M08: MCP Server 入口迁至核心包（python -m topoone.plugins.mcp）
-    sv.register("mcp_server",
-                 [sys.executable, "-m", "topoone.plugins.mcp"],
-                 restart_limit=3)
-
-    await sv.start_all()
-
-    # 主进程
-    logger.info("[Distributed] Starting Main Process...")
-    app = BackendApp(data_dir, http_port=http_port)
-    app.multi_db._supervisor = sv
-    if http_host:
-        app.http_host = http_host
-
-    shutdown_task = None
-
-    async def _do_shutdown():
-        logger.info("[Distributed] shutting down...")
-        sv.stop()
-        app.server.stop()
-        if app._ingest_consumer:
-            app._ingest_consumer.stop()
-            app._ingest_consumer.join(timeout=2.0)
-        await sv.shutdown_all(timeout=5.0)
-        app.multi_db.close_all()
-        logger.info("[Distributed] shutdown complete")
-
-    def _signal_handler():
-        nonlocal shutdown_task
-        if shutdown_task is None:
-            shutdown_task = asyncio.create_task(_do_shutdown())
-
-    try:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop = asyncio.get_running_loop()
-                loop.add_signal_handler(sig, _signal_handler)
-            except (NotImplementedError, ValueError):
-                try:
-                    signal.signal(sig, lambda s, f: _signal_handler())
-                except Exception:
-                    pass
-        await app.run()
-    finally:
-        if shutdown_task is None:
-            await _do_shutdown()
-        else:
-            await shutdown_task
-
-
-# ═══════════════════════════════════════════════════════════════
-# CLI + 模式分发
+# CLI
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_args() -> tuple:
@@ -405,7 +232,6 @@ def _parse_args() -> tuple:
     http_port = None
     http_host = None
     memory_limit = None
-    no_spawn = False
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -419,14 +245,14 @@ def _parse_args() -> tuple:
             memory_limit = int(args[i + 1])
             i += 2
         elif args[i] == "--no-spawn":
-            no_spawn = True
+            # 兼容保留：`topo serve` 历史参数，现已无自 spawn 路径（C3），仅接受并忽略
             i += 1
         elif not args[i].startswith("--"):
             data_dir = args[i]
             i += 1
         else:
             i += 1
-    return data_dir, http_port, http_host, memory_limit, no_spawn
+    return data_dir, http_port, http_host, memory_limit
 
 
 def _apply_memory_limit(memory_limit: int):
@@ -465,20 +291,12 @@ def _apply_app_config(app):
 
 def main():
     print("[TopoOne Backend] Starting...", flush=True)
-    data_dir, http_port, http_host, memory_limit, no_spawn = _parse_args()
+    data_dir, http_port, http_host, memory_limit = _parse_args()
     _apply_memory_limit(memory_limit)
 
-    logger.info(f"Mode: {TOPO_MODE}")
-
-    if TOPO_MODE == "distributed":
-        if "--stdio" in sys.argv:
-            logger.warning("stdio mode unsupported in distributed; falling back to monolith")
-        else:
-            asyncio.run(_run_distributed(data_dir, http_port, http_host))
-            return
-
-    # ── monolith ────────────────────────────────────────────────
-    app = BackendApp(data_dir, http_port=http_port, no_spawn=no_spawn)
+    # ── 单一 monolith 拓扑（C2：原 TOPO_MODE=distributed 分发与 _run_distributed 已删除，
+    #    进程拓扑唯一 owner = supervisor/cli.py）──
+    app = BackendApp(data_dir, http_port=http_port)
     if http_host:
         app.http_host = http_host
     _apply_app_config(app)

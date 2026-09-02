@@ -27,7 +27,7 @@ import uuid
 import zmq
 import zmq.asyncio
 
-from topoone.config import AGENT_WORKER_PORT, AGENT_WORKER_PUB_PORT, TOPO_MODE
+from topoone.config import AGENT_WORKER_PORT, AGENT_WORKER_PUB_PORT
 from topoone.logging_config import setup_logging
 
 setup_logging()

@@ -5,7 +5,7 @@
 
 ## 1. 工程形态
 
-Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个前端共享内核 + 4 个独立子项目**，运行时为 **9 个独立进程**，由 `topo serve`（supervisor）统一拉起，`gateway:3456` 是唯一对外入口。
+Monorepo（npm workspaces + pip editable）：**1 个核心基础框架 + 1 个前端共享内核 + 4 个独立子项目**，运行时为 **10 个独立进程**（核心 kb/gateway/llm/agent + 生态 mcp/runner + manifest 服务 docs/chat/architect/agent-bus，C1 修正：以 `supervisor/cli.py` 实际拓扑为准），由 `topo serve`（supervisor）统一拉起，`gateway:3456` 是唯一对外入口。
 
 ```
                     浏览器（唯一入口 :3456）

@@ -33,6 +33,12 @@ def _ts_resolve_body(node: SyntaxNode, body_field: str) -> SyntaxNode | None:
             c = node.named_child(i)
             if c and c.type in ("arrow_function", "function_expression"):
                 return c.child_by_field_name(body_field)
+    # 默认: 普通函数/方法的 body 字段(statement_block)。
+    # 此前恒返回 None → TS 函数体内 calls/instantiates/refs 从未被提取(缺陷修复)。
+    for i in range(node.child_count):
+        c = node.child(i)
+        if c is not None and node.field_name_for_child(i) == body_field:
+            return c
     return None
 
 

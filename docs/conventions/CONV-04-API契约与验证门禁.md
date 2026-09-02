@@ -13,7 +13,7 @@
 | REST `/doc`·`/code`·`/api/community-*`·`/api/file*`·`/api/plantuml*`·`/api/diagram*`·`/api/projects`·`/api/tasks`·`/api/docs`·`/api/export`·`/api/import`·`/api/verify`（27 前缀） | 文档组 | REST（→ docs :3481） | 见 docs manifest |
 | REST `/api/architect/*`（171 路由）+ WS `/api/architect/ws/kb-analysis` | Architect 组 | REST/WS（→ architect :3470） | 含 `/api/architect/mcp/calls`（MCP 外部调用记录） |
 | MCP 工具接口 `GET /v1/tools`·`POST /v1/tools/{name}/call`（:3460，外部 Agent 直连） | 核心组（mcp 插件） | HTTP | 工具调用转发 architect |
-| WS `/ws/events`（任务/导入/LLM 流式事件桥） | 核心组 | WebSocket（ZMQ SUB 5680 转发） | 4 topic：task/project/backend/llm |
+| WS `/ws/events`（任务/导入/LLM 流式事件桥） | 核心组 | WebSocket（ZMQ SUB 5681 转发） | 4 topic：task/project/backend/llm |
 | SPA 页面路由 `/`·`/home`·`/app`·`/projects`·`/viewer`·`/web-root`·`/chat`·`/architect` | 核心组（gateway vue_routes）+ 各 app 提供 HTML | — | URL 布局冻结（CONV-01 §2.3） |
 
 **新增 API 规则**：子项目新 REST 路由必须落在自己 manifest `api_prefixes` 内；新 RPC 方法必须带自己 `rpc_namespaces` 前缀（核心前缀归核心组）。**不得占用他人前缀**（冲突 = manifest 校验失败或线上串流）。
@@ -56,7 +56,7 @@ GET/POST /api/architect/...
 | chat | 3483 |
 | llm | 3484 |
 | docs | 3481 |
-| ZMQ PUB：kb 事件 / llm 流式 / docs 事件 / agent 事件 | 5680 / 5682 / 5683 / 5684 |
+| ZMQ PUB：kb 事件 / llm 流式 / docs 事件 / agent 事件 | 5681（单一源 `config.KB_PUB_PORT`）/ 5682 / 5683 / 5684 |
 | 前端 dev（vite）：workbench / docs / chat / architect | 5173 / 5174 / 5175 / 5176（新 app 顺延 5177+） |
 | PlantUML 渲染服务（外部，建议自部署） | 8300（env `PLANTUML_SERVER`） |
 
@@ -79,7 +79,7 @@ GET/POST /api/architect/...
 | `topoone.db`（main：projects/analysis_tasks/model_configs/agent_* 等 24 表） | kb（核心） | 子项目**读**经 RPC/HTTP；写仅核心 |
 | `projects/<pid>/project.db`（26 表：AST/社区/LLM 结果/agent_task_history 等） | kb（核心） | 同上（architect 经 HTTP 只读） |
 | knowledge / sessions / chat 各库 | kb / llm / chat | 各 owner 独占 |
-| `architect.db`（arch_* 表） | architect :3470 | architect 独占 |
+| `architect.db`（arch_* 表） | architect :3470 | architect 独占；其中 `arch_bus_messages`（非项目路由全局单表）由 agent-bus :3486 共享，broker 读写边界=仅该表（create/mark/pending/list） |
 | docs 业务表（web_root 等） | docs :3481 | docs 独占 |
 | `~/.topocode/token`、`logs/`、`source-cache/` | gateway/supervisor | 用户级，模块不得改动布局 |
 
@@ -94,7 +94,7 @@ GET/POST /api/architect/...
 | G3 后端测试 | core + 4 app pytest 全绿 | `npm run test:py`（当前 252） |
 | G4 前端类型 | 全 workspace type-check | `npm run type-check` |
 | G5 前端构建 | 全量 build（core bundle + portal + 4 app） | `npm run build` |
-| G6 进程拓扑 | `topo serve` 9 进程全 OK | `topo status` |
+| G6 进程拓扑 | `topo serve` 10 进程全 OK（kb/gateway/llm/agent/mcp/runner/docs/chat/architect/agent-bus） | `topo status` |
 | G7 URL 布局 | 5 SPA 入口 HTML+资产 200 + 子项目 API 带 token 200 | curl 矩阵（见 §7） |
 | G8 事件桥 | `/ws/events` 101 + 事件流 + 无 token 401 | WS 握手 + 鉴权抽查 |
 
@@ -115,7 +115,7 @@ GET/POST /api/architect/...
 # 一键
 npm run setup                 # .venv + pip install -e(core+4apps) + npm install
 npm run dev                   # 全栈（core + 4 前端 dev）
-npm run serve / topo serve    # 仅后端 9 进程（:3456）
+npm run serve / topo serve    # 仅后端 10 进程（:3456）
 npm run status / topo status  # 进程状态
 npm run build                 # core bundle + portal + 4 app
 npm run test                  # test:py + test:fe

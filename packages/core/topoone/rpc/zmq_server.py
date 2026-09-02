@@ -72,9 +72,9 @@ class ZMQServer:
         self.multi_db = multi_db
         self.context = zmq.asyncio.Context()
 
-        # 从环境变量读取端口配置，支持用户自定义
+        # 从环境变量读取端口配置，支持用户自定义（kb PUB 单一源见 config.KB_PUB_PORT）
         self.dealer_port = dealer_port or int(os.environ.get('ZMQ_DEALER_PORT', '5671'))
-        self.pub_port = pub_port or int(os.environ.get('ZMQ_PUB_PORT', '5680'))
+        self.pub_port = pub_port or int(os.environ.get('KB_PUB_PORT', '5681'))
 
         # 检查端口可用性
         if not check_port_available(self.dealer_port):

@@ -47,6 +47,8 @@ class EdgeKind(str, Enum):
     OVERRIDES     = "overrides"
     DECORATES     = "decorates"
     CALLBACK      = "callback"
+    ASSIGNS       = "assigns"
+    PASSES        = "passes"
 
 
 class Provenance(str, Enum):

@@ -9,7 +9,10 @@ import os
 # ==================== ZMQ 配置 ====================
 ZMQ_BIND_HOST = os.environ.get("ZMQ_BIND_HOST", "127.0.0.1")
 ZMQ_DEALER_PORT = int(os.environ.get("ZMQ_DEALER_PORT", "5671"))
-ZMQ_PUB_PORT = int(os.environ.get("ZMQ_PUB_PORT", "5680"))
+# kb 事件 PUB 端口 —— 单一事实源（C4 修正）。
+# kb（engine/app.py）绑定它，gateway 事件桥订阅同名 env（gateway.py），
+# `topo serve` 不再单独强改（历史 dual-name/dual-default 漂移已移除）。
+KB_PUB_PORT = int(os.environ.get("KB_PUB_PORT", "5681"))
 
 # RPC 请求超时 (秒)
 RPC_TIMEOUT = int(os.environ.get("RPC_TIMEOUT", "30"))
@@ -66,7 +69,11 @@ INTRAn_FILE_EDGE_FALLBACK_WEIGHT = 0.1  # 备选方案时降权
 # ==================== 进程架构模式 ====================
 # "monolith" — 单进程模式（默认）：所有 Worker 退化为线程池 / asyncio task，适用于开发/调试
 # "distributed" — 多进程模式：AST / LLM / Agent / DB Service 各为独立进程
-TOPO_MODE = os.environ.get("TOPO_MODE", "monolith")
+# C2 修正：进程拓扑唯一 owner = supervisor/cli.py，原 distributed 多进程拓扑
+# （engine/app.py:_run_distributed）已删除。此值钳制为 monolith，不再读 env ——
+# 防止 shell 残留 TOPO_MODE=distributed 误触 db/manager 等处的 remote 分支
+# （那些分支已永死，属后续清理项）。
+TOPO_MODE = "monolith"
 
 # 内部 ZMQ Bus 端口（distributed 模式）
 INTERNAL_BUS_PORT = int(os.environ.get("INTERNAL_BUS_PORT", "18760"))

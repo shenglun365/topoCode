@@ -59,6 +59,7 @@ TopoCode 不是一句提示词生成架构图的效率工具，而是帮助你�
 | **后端语言** | Python 3.10+ |
 | **IPC 通信** | ZeroMQ (pyzmq) |
 | **代码解析** | Tree-sitter (18+ 语言) |
+| **符号索引（外部工具）** | codegraph CLI —— architect 语义资产的符号源（目标项目 `.codegraph/codegraph.db`）；缺失时自动降级为轻量文件扫描（`topo doctor` 可检测） |
 | **图计算** | NetworkX + python-louvain + leidenalg + python-igraph |
 | **Web 服务** | FastAPI + Uvicorn |
 | **AI 推理** | OpenAI / Ollama / LM Studio 兼容接口 |

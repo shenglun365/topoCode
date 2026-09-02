@@ -42,6 +42,36 @@ _TYPE_IDENTIFIER_NODES = frozenset({
 _INSTANTIATION_NODES = frozenset({
     "new_expression", "object_creation_expression",
 })
+# ── 标识符使用收集(引用/赋值/传参) ─────────────────────────
+# 实参容器节点(父为调用/实例化 → passes)。
+_ARG_LIST_NODES = frozenset({
+    "argument_list", "arguments", "argument_list_expression",
+    "call_arguments", "actual_parameter_list",
+})
+# 参数列表定义位(形参标识符的父容器，非使用)。
+_PARAM_LIST_NODES = frozenset({
+    "parameters", "formal_parameters", "parameter_list", "lambda_parameters",
+})
+# 赋值类节点: 节点类型 → (左侧字段名, 右侧字段名)。
+_ASSIGN_FIELD_NODES = {
+    "assignment": ("left", "right"),              # python
+    "augmented_assignment": ("left", "right"),    # python
+    "for_statement": ("left", "right"),           # python for-in
+    "variable_declarator": ("name", "value"),     # ts/js
+    "assignment_expression": ("left", "right"),   # ts/js
+    "for_in_statement": ("left", "right"),        # ts/js for-in/of
+    "short_var_declaration": ("left", "right"),   # go
+    "assignment_statement": ("left", "right"),    # go/ruby
+}
+# 成员访问属性位(裸名误报防护): 父节点类型 → 属性字段名。
+_MEMBER_PROP_FIELDS = {
+    "attribute": "attribute",                     # python obj.attr
+    "member_expression": "property",              # ts/js obj.prop
+    "field_expression": "field",                  # rust/go/cpp
+    "selector_expression": "field",               # go pkg.F
+    "method_invocation": "name",                  # java 方法名
+    "method_declaration": "name",
+}
 
 # ── 扩展名→语言映射 ──────────────────────────────────────
 _EXT_MAP = {
@@ -152,6 +182,11 @@ class TreeSitterWalker:
         # 状态
         self.node_stack: list[str] = []           # 当前 scope 节点 ID 栈
         self._node_index: dict[str, Node] = {}    # id → Node 快速查找
+        # 标识符使用候选(遍历期收集，flush 期过滤落 refs):
+        # (name, category(passes/assigns/references), line, col, scope_id)
+        self._usage_candidates: list[tuple] = []
+        # 函数内局部声明名(赋值左侧，遍历期收集)
+        self._local_decls: set = set()
 
     # ── 主入口 ───────────────────────────────────────────
 
@@ -206,6 +241,8 @@ class TreeSitterWalker:
 
         # 遍历
         self.visit(tree.root_node)
+        # 标识符使用(引用/赋值/传参)收集：需全量符号表就绪后过滤
+        self._flush_usage_refs()
 
         if pkg_node_id:
             self.node_stack.pop()
@@ -334,6 +371,11 @@ class TreeSitterWalker:
         # 14. Rust impl
         if node_type == "impl_item":
             self._extract_rust_impl(node)
+            return False
+
+        # 15. 标识符使用(引用/赋值/传参)——通用叶子收集，flush 期统一过滤
+        if node_type == "identifier":
+            self._collect_usage_candidate(node)
             return False
 
         return False
@@ -882,6 +924,127 @@ class TreeSitterWalker:
                 file_path=self.file_path, language=self.language,
             ))
 
+    # ── 标识符使用(引用/赋值/传参) ────────────────────────
+
+    @staticmethod
+    def _field_of(p: SyntaxNode, n: SyntaxNode) -> Optional[str]:
+        """n 在父节点 p 中占用的字段名(按字节区间定位)。"""
+        for i in range(p.child_count):
+            c = p.child(i)
+            if c is not None and c.start_byte == n.start_byte and c.end_byte == n.end_byte:
+                try:
+                    return p.field_name_for_child(i)
+                except Exception:
+                    return None
+        return None
+
+    def _classify_usage(self, node: SyntaxNode) -> Optional[str]:
+        """爬父链分类标识符用途。
+
+        返回 "passes"(调用实参) / "assigns"(赋值右侧) / "references"(普通引用) /
+        None(跳过：定义名/调用名/成员属性位/导入语句内)。
+        """
+        ex = self.ex
+        n = node
+        for _ in range(12):
+            p = n.parent
+            if p is None:
+                break
+            pt = p.type
+            # 导入语句内 → 非使用
+            if pt in ex.import_types:
+                return None
+            # 调用/实例化的名字位 → 专用收集(calls/instantiates)已覆盖
+            if pt in ex.call_types or pt in _INSTANTIATION_NODES:
+                if self._field_of(p, n) in ("function", "name", "constructor", "type"):
+                    return None
+            # 成员访问的属性位 → 裸名误报防护
+            prop_field = _MEMBER_PROP_FIELDS.get(pt)
+            if prop_field and self._field_of(p, n) == prop_field:
+                return None
+            # 实参容器 → passes
+            if pt in _ARG_LIST_NODES:
+                gp = p.parent
+                if gp is not None and (gp.type in ex.call_types or gp.type in _INSTANTIATION_NODES):
+                    return "passes"
+            # 赋值节点 → 左侧为(局部)声明位，右侧 assigns
+            # (须先于下方 name 字段检查: variable_declarator 声明名即 name 字段)
+            if pt in _ASSIGN_FIELD_NODES:
+                lf, rf = _ASSIGN_FIELD_NODES[pt]
+                fld = self._field_of(p, n)
+                if fld == lf:
+                    return "lhs_decl"
+                if fld == rf:
+                    return "assigns"
+            # 形参列表定义位 → 非使用
+            if pt in _PARAM_LIST_NODES:
+                return None
+            # 定义名的直接持有者(def/class/函数声明等 name 字段) → 定义点非使用
+            if self._field_of(p, n) == "name":
+                return None
+            n = p
+        return "references"
+
+    def _collect_usage_candidate(self, node: SyntaxNode):
+        """遍历期登记标识符使用候选(过滤放 flush 期，避免符号声明顺序依赖)。"""
+        if not self.node_stack:
+            return
+        name = _node_text(node, self.source)
+        if not name or len(name) > 120:
+            return
+        c0 = name[0]
+        if not (c0.isalpha() or c0 == "_"):
+            return
+        cat = self._classify_usage(node)
+        if cat == "lhs_decl":
+            # 赋值左侧 → 函数内局部声明名(不计使用，但纳入 flush 期 decl 集，
+            # 使其后续实参/读取 refs 可保留)
+            self._local_decls.add(name)
+            return
+        if cat is None:
+            return
+        off = getattr(self, "_vue_line_offset", 0)
+        self._usage_candidates.append((
+            name, cat,
+            node.start_point[0] + 1 + off,
+            node.start_point[1],
+            self.node_stack[-1],
+        ))
+
+    def _flush_usage_refs(self):
+        """候选 → unresolved_refs：声明名过滤 + 与专用收集按 (名,行) 去重。
+
+        只追加新类别(references/assigns/passes)，不改写既有 calls/instantiates
+        等专用收集结果——保证社区分析输入(calls/imports 边)逐条不变。
+        """
+        if not self._usage_candidates:
+            return
+        decl_names = {n.name for n in self.nodes if n.name}
+        decl_names |= self._local_decls
+        emitted = {(r.reference_name, r.line) for r in self.unresolved_refs}
+        kind_map = {
+            "assigns": EdgeKind.ASSIGNS,
+            "passes": EdgeKind.PASSES,
+        }
+        seen: set = set()
+        for name, cat, line, col, scope in self._usage_candidates:
+            if name not in decl_names:
+                continue
+            if (name, line) in emitted:
+                continue
+            key = (name, line, col, cat)
+            if key in seen:
+                continue
+            seen.add(key)
+            self.unresolved_refs.append(UnresolvedReference(
+                from_node_id=scope,
+                reference_name=name,
+                reference_kind=kind_map.get(cat, EdgeKind.REFERENCES),
+                line=line, col=col,
+                file_path=self.file_path, language=self.language,
+            ))
+        self._usage_candidates = []
+
     # ── 实例化 ───────────────────────────────────────────
 
     def _collect_instantiation(self, node: SyntaxNode):
@@ -1179,6 +1342,8 @@ class TreeSitterWalker:
                 self._collect_call(n)
             elif n.type in ex.instantiation_types or n.type in _INSTANTIATION_NODES:
                 self._collect_instantiation(n)
+            elif n.type == "identifier":
+                self._collect_usage_candidate(n)
             elif ex.extract_bare_call:
                 cn = ex.extract_bare_call(n, self.source_str)
                 if cn and self.node_stack:

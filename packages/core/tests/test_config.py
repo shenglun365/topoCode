@@ -9,7 +9,7 @@ from topoone.config import (
     MAX_AST_NODES,
     PARSE_WORKERS,
     ZMQ_DEALER_PORT,
-    ZMQ_PUB_PORT,
+    KB_PUB_PORT,
     ZMQ_BIND_HOST,
 )
 
@@ -22,11 +22,15 @@ class TestConfig:
         assert PARSE_WORKERS > 0
 
     def test_zmq_ports_are_different(self):
-        assert ZMQ_DEALER_PORT != ZMQ_PUB_PORT
+        assert ZMQ_DEALER_PORT != KB_PUB_PORT
 
     def test_zmq_ports_in_ephemeral_range(self):
         assert 1024 <= ZMQ_DEALER_PORT <= 65535
-        assert 1024 <= ZMQ_PUB_PORT <= 65535
+        assert 1024 <= KB_PUB_PORT <= 65535
+
+    def test_kb_pub_port_single_source(self):
+        """C4: kb PUB 端口单一源 —— 默认 5681 与 gateway 订阅端一致。"""
+        assert KB_PUB_PORT == 5681
 
     def test_zmq_bind_host_is_localhost(self):
         assert ZMQ_BIND_HOST == "127.0.0.1"
