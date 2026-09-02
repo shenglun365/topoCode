@@ -1,0 +1,364 @@
+"""store 拆分模块（A1-T3：纯移动）。"""
+from __future__ import annotations
+
+from .base import PROJECT_TABLES, _all, _db, _dumps, _fetchall_routed, _get, _insert, _locate_db, _row_to_api, _target_db, _to_snake, _update, next_id
+
+class AgentSessionsStore:
+    TABLE = "arch_agent_sessions"
+
+    @classmethod
+    def all(cls):
+        return _all(cls.TABLE, order_by="created_at DESC")
+
+    @classmethod
+    def get(cls, session_id: str):
+        return _get(cls.TABLE, session_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def update(cls, session_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, session_id, data)
+
+    @classmethod
+    def messages(cls, session_id: str) -> list[dict]:
+        db, found = _locate_db(cls.TABLE, session_id)
+        if not found:
+            return []
+        rows = db.fetchall(
+            "SELECT * FROM arch_agent_messages WHERE session_id = ? "
+            "ORDER BY time ASC, rowid ASC",
+            (session_id,),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def append_message(cls, msg: dict) -> None:
+        sid = msg.get("sessionId") or msg.get("session_id") or ""
+        db, _ = _locate_db(cls.TABLE, sid) if sid else (None, False)
+        if db is None:
+            db = _target_db("arch_agent_messages")
+        cols = [_to_snake(k) for k in msg]
+        vals = [_dumps(v) for k, v in msg.items()]
+        db.execute(
+            f"INSERT INTO arch_agent_messages ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            tuple(vals),
+        )
+        db.commit()
+
+    @classmethod
+    def delete(cls, session_id: str) -> bool:
+        db, found = _locate_db(cls.TABLE, session_id)
+        if not found:
+            return False
+        db.execute("DELETE FROM arch_agent_messages WHERE session_id = ?", (session_id,))
+        cur = db.execute("DELETE FROM arch_agent_sessions WHERE id = ?", (session_id,))
+        db.commit()
+        return cur.rowcount > 0
+
+
+
+
+class UnitTestsStore:
+    TABLE = "arch_unit_tests"
+
+    @classmethod
+    def all(cls):
+        return _all(cls.TABLE, order_by="created_at DESC")
+
+    @classmethod
+    def get(cls, test_id: str):
+        return _get(cls.TABLE, test_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def update(cls, test_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, test_id, data)
+
+
+
+
+class UnitTestSessionsStore:
+    TABLE = "arch_unit_test_sessions"
+
+    @classmethod
+    def all(cls):
+        return _all(cls.TABLE, order_by="created_at DESC")
+
+    @classmethod
+    def get(cls, session_id: str):
+        return _get(cls.TABLE, session_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def update(cls, session_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, session_id, data)
+
+    @classmethod
+    def messages(cls, session_id: str) -> list[dict]:
+        db, found = _locate_db(cls.TABLE, session_id)
+        if not found:
+            return []
+        rows = db.fetchall(
+            "SELECT * FROM arch_unit_test_messages WHERE session_id = ? "
+            "ORDER BY time ASC, rowid ASC",
+            (session_id,),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def append_message(cls, msg: dict) -> None:
+        _insert("arch_unit_test_messages", msg)
+
+
+
+
+class ConversationsStore:
+    """统一会话(阶段D 主干)：requirement/design/execution/unit-test 共用一张表+消息表。"""
+
+    TABLE = "arch_conversations"
+    MSG_TABLE = "arch_conversation_messages"
+
+    @classmethod
+    def all(cls, kind: str = None, project_id: str = None, limit: int = 100):
+        sql = f"SELECT * FROM {cls.TABLE}"
+        conds, params = [], []
+        if kind:
+            conds.append("kind = ?")
+            params.append(kind)
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        rows, mode = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
+        out = [_row_to_api(r) for r in rows]
+        if mode == "scan":
+            out.sort(key=lambda r: (r.get("updatedAt") is None, r.get("updatedAt") or 0), reverse=True)
+            out = out[: int(limit)]
+        return out
+
+    @classmethod
+    def get(cls, conv_id: str):
+        return _get(cls.TABLE, conv_id)
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        """创建会话；缺省补 id/时间字段。"""
+        now = int(__import__("time").time() * 1000)
+        payload = {
+            "id": data.get("id") or next_id("cv"),
+            "kind": data.get("kind", "requirement"),
+            "project_id": data.get("projectId") or "",
+            "req_id": data.get("reqId") or "",
+            "title": data.get("title") or "",
+            "status": data.get("status") or "active",
+            "meta": data.get("meta"),
+            "created_at": data.get("createdAt") or now,
+            "updated_at": data.get("updatedAt") or now,
+        }
+        _insert(cls.TABLE, payload)
+        return payload
+
+    @classmethod
+    def upsert(cls, conv_id: str, data: dict) -> dict:
+        existing = _get(cls.TABLE, conv_id)
+        if existing:
+            _update(cls.TABLE, conv_id, {**data, "updatedAt": int(__import__("time").time() * 1000)})
+            return _get(cls.TABLE, conv_id) or existing
+        return cls.create({"id": conv_id, **data})
+
+    @classmethod
+    def update(cls, conv_id: str, data: dict) -> Optional[dict]:
+        data["updatedAt"] = int(__import__("time").time() * 1000)
+        return _update(cls.TABLE, conv_id, data)
+
+    @classmethod
+    def messages(cls, conv_id: str, limit: int = 200) -> list[dict]:
+        db, found = _locate_db(cls.TABLE, conv_id)
+        if not found:
+            return []
+        rows = db.fetchall(
+            f"SELECT * FROM {cls.MSG_TABLE} WHERE conversation_id = ? "
+            "ORDER BY time ASC, rowid ASC LIMIT ?",
+            (conv_id, int(limit)),
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def by_req(cls, req_id: str, project_id: str = "", limit: int = 20) -> list[dict]:
+        """按关联需求/提案 id 找会话(req_id 匹配; 同需求多会话按更新时间倒序)。"""
+        conds, params = ["req_id = ?"], [req_id]
+        if project_id:
+            conds.append("project_id = ?")
+            params.append(project_id)
+        rows, _ = _fetchall_routed(
+            cls.TABLE,
+            f"SELECT * FROM {cls.TABLE} WHERE {' AND '.join(conds)} "
+            "ORDER BY updated_at DESC LIMIT ?",
+            tuple(params + [int(limit)]),
+            project_id or None,
+        )
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def summaries(cls, kind: str = None, project_id: str = None, limit: int = 100) -> list[dict]:
+        """会话摘要(用于历史导入列表): 会话头 + 消息数 + 首条用户消息预览。"""
+        sql = (f"SELECT c.*, "
+               "(SELECT COUNT(*) FROM {msg} m WHERE m.conversation_id = c.id) AS msg_count, "
+               "(SELECT MIN(m2.time) FROM {msg} m2 WHERE m2.conversation_id = c.id "
+               " AND m2.role = 'user') AS first_user_time, "
+               "(SELECT m3.content FROM {msg} m3 WHERE m3.conversation_id = c.id "
+               " AND m3.role = 'user' ORDER BY m3.time ASC, m3.rowid ASC LIMIT 1) AS preview "
+               f"FROM {cls.TABLE} c").format(msg=cls.MSG_TABLE)
+        conds, params = [], []
+        if kind:
+            conds.append("c.kind = ?")
+            params.append(kind)
+        if project_id:
+            conds.append("c.project_id = ?")
+            params.append(project_id)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY c.updated_at DESC LIMIT ?"
+        params.append(int(limit))
+        rows, _ = _fetchall_routed(cls.TABLE, sql, tuple(params), project_id)
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def append_message(cls, msg: dict) -> dict:
+        _insert(cls.MSG_TABLE, msg)
+        return msg
+
+    @classmethod
+    def delete_message(cls, conv_id: str, message_id: str) -> bool:
+        """删除会话内的单条消息(对话流单条删除)。"""
+        db, found = _locate_db(cls.TABLE, conv_id)
+        if not found:
+            return False
+        cur = db.execute(
+            f"DELETE FROM {cls.MSG_TABLE} WHERE conversation_id = ? AND id = ?",
+            (conv_id, message_id),
+        )
+        db.commit()
+        return cur.rowcount > 0
+
+    @classmethod
+    def delete(cls, conv_id: str) -> bool:
+        db, found = _locate_db(cls.TABLE, conv_id)
+        if not found:
+            return False
+        db.execute(f"DELETE FROM {cls.MSG_TABLE} WHERE conversation_id = ?", (conv_id,))
+        cur = db.execute(f"DELETE FROM {cls.TABLE} WHERE id = ?", (conv_id,))
+        db.commit()
+        return cur.rowcount > 0
+
+
+
+
+class McpCallsStore:
+    TABLE = "arch_mcp_calls"
+
+    @classmethod
+    def all(cls):
+        return _all(cls.TABLE, order_by="time DESC")
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+
+
+
+class InteractionsStore:
+    TABLE = "arch_interactions"
+
+    @classmethod
+    def all(cls):
+        return _all(cls.TABLE, order_by="time DESC")
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def get(cls, interaction_id: str):
+        return _get(cls.TABLE, interaction_id)
+
+    @classmethod
+    def update(cls, interaction_id: str, data: dict) -> Optional[dict]:
+        return _update(cls.TABLE, interaction_id, data)
+
+
+
+
+class AgentBusStore:
+    """agent_bus 持久化消息队列(全局主库表；broker 进程轮询分发)。
+
+    不在 PROJECT_TABLES → 恒主库(broker 单表轮询，无需项目路由)。
+    """
+    TABLE = "arch_bus_messages"
+
+    @classmethod
+    def create(cls, data: dict) -> dict:
+        _insert(cls.TABLE, data)
+        return data
+
+    @classmethod
+    def get(cls, msg_id: str):
+        return _get(cls.TABLE, msg_id)
+
+    @classmethod
+    def pending(cls, limit: int = 20) -> list:
+        rows = _db().fetchall(
+            f"SELECT * FROM {cls.TABLE} WHERE status = 'pending' "
+            "ORDER BY created_at ASC LIMIT ?", (limit,))
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def mark(cls, msg_id: str, status: str, error: str = "") -> Optional[dict]:
+        import time
+        return _update(cls.TABLE, msg_id, {"status": status, "error": error,
+                                           "updatedAt": int(time.time() * 1000)})
+
+    @classmethod
+    def list(cls, dst: str = None, topic: str = None, status: str = None,
+              limit: int = 100) -> list:
+        sql = f"SELECT * FROM {cls.TABLE}"
+        where, params = [], []
+        if dst:
+            where.append("dst = ?"); params.append(dst)
+        if topic:
+            where.append("topic = ?"); params.append(topic)
+        if status:
+            where.append("status = ?"); params.append(status)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = _db().fetchall(sql, tuple(params))
+        return [_row_to_api(r) for r in rows]
+
+    @classmethod
+    def count_pending(cls) -> int:
+        row = _db().fetchone(
+            f"SELECT COUNT(*) AS c FROM {cls.TABLE} WHERE status = 'pending'")
+        return row["c"] if row else 0
+
+
+

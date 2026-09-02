@@ -23,6 +23,11 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 def _default_cors() -> list:
+    """A9 修正：默认仍面向 dev 联调（5173/5174 直连 + 3456 反代），
+    可经 `ARCH_CORS_ORIGINS`（逗号分隔）整体覆盖，供独立/生产部署配置。"""
+    override = os.environ.get("ARCH_CORS_ORIGINS", "").strip()
+    if override:
+        return [o.strip() for o in override.split(",") if o.strip()]
     arch_port = os.environ.get("ARCH_PORT", "3470")
     return [
         "http://localhost:5173", "http://127.0.0.1:5173",

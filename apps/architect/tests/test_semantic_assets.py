@@ -18,7 +18,27 @@ sys.path.insert(0, _repo)
 
 import topoone_app_architect.arch_routes.ctx as C
 import topoone_app_architect.arch_routes.store as store
+_SEM_MODULE_NAMES = ("taxonomy", "paths", "codegraph", "scope", "incremental", "context", "anchors", "engine")
+
+
+def _patch_all(monkeypatch, name, value):
+    """A1 拆分后名字可能绑定在 facade 或任一 sem 模块 —— 全部绑定位统一 patch。"""
+    import importlib
+    import topoone_app_architect.arch_routes.semantic_assets as _sa
+    if hasattr(_sa, name):
+        monkeypatch.setattr(_sa, name, value)
+    for _mn in _SEM_MODULE_NAMES:
+        _mod = importlib.import_module(f"topoone_app_architect.arch_routes.sem.{_mn}")
+        if hasattr(_mod, name):
+            monkeypatch.setattr(_mod, name, value)
+
+
 from topoone_app_architect.arch_routes import semantic_assets as S
+from topoone_app_architect.arch_routes.sem import context as _sem_context
+from topoone_app_architect.arch_routes.sem import engine as _sem_engine
+from topoone_app_architect.arch_routes.sem import scope as _sem_scope
+from topoone_app_architect.arch_routes.sem import incremental as _sem_incremental
+from topoone_app_architect.arch_routes.sem import codegraph as _sem_codegraph
 
 
 def _ctx(tmp_path, monkeypatch):
@@ -105,7 +125,7 @@ def test_cross_partition_dedup_and_membership(tmp_path, monkeypatch):
     """INCLUDE/CALL 两套组件对同一代码提取 → 归一为一条资产，归属合并。"""
     _ctx(tmp_path, monkeypatch)
     # 同一文件被 INCLUDE(A) 与 CALL(B) 两套组件同时拥有(两口径互不隶属)
-    monkeypatch.setattr(S, "_file_to_components", lambda root, project: {
+    _patch_all(monkeypatch, "_file_to_components", lambda root, project: {
         "src/order.py": ["A", "B"]})
     # 同一代码(同一锚点)先后在 INCLUDE(A) 与 CALL(B) 组件下提取
     a1 = S._save_assets("proj-n", "comm", "A", [
@@ -136,7 +156,7 @@ def test_file_scope_extraction_multi_component_scopes(tmp_path, monkeypatch):
     文件级去重(跳过的组件不重复提取)不丢失归属 —— 被跳过的组件视角
     (列表检索/关系图同条件)也能看到该资产。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_file_to_components", lambda root, project: {
+    _patch_all(monkeypatch, "_file_to_components", lambda root, project: {
         "src/shared.py": ["comp-A", "comp-B", "comp-C"]})
     saved = S._save_assets("proj-f", "files", "src/shared.py", [
         {"kind": "process", "level": "implementation", "name": "共享流程", "desc": "d",
@@ -262,9 +282,9 @@ def test_extract_scope_heuristic(tmp_path, monkeypatch):
         "class Order:\n    \"\"\"订单核心结构\"\"\"\n    pass\n\n"
         "def checkout(order):\n    pass\n", encoding="utf-8")
     # 使测试确定走 live 扫描(KB 兜底路径可能被本机运行中的 KB 命中)。
-    monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
+    _patch_all(monkeypatch, "_kb_parse_file", lambda *a, **k: None)
     # ensure_synced 现在会对无索引项目自动 codegraph init(真实 CLI)，打桩隔离。
-    monkeypatch.setattr(S, "ensure_synced", lambda *a, **k: False)
+    _patch_all(monkeypatch, "ensure_synced", lambda *a, **k: False)
     res = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
                           files=["order.py"], kinds=["entity", "process"],
                           use_llm=False)
@@ -302,7 +322,7 @@ def test_reconcile_invalidates_on_file_change(tmp_path, monkeypatch):
     pid = S.project_id_for(root, None)
     # 锚定哈希 = 旧内容 → 与当前 md5 不同 → 应失效
     _mk_asset(pid, anchors={"order.py": "0000000000000000"})
-    monkeypatch.setattr(S, "changed_files", lambda r, project: {
+    _patch_all(monkeypatch, "changed_files", lambda r, project: {
         "added": [], "modified": ["order.py"], "deleted": []})
     res = S.reconcile_semantic(root, None, force=True)
     assert res["invalidated"] == ["sa-s-i-e-99"]
@@ -319,7 +339,7 @@ def test_reconcile_skips_when_anchor_hash_unchanged(tmp_path, monkeypatch):
     root = str(proj)
     pid = S.project_id_for(root, None)
     _mk_asset(pid, anchors={"order.py": S._file_md5(root, "order.py")})
-    monkeypatch.setattr(S, "changed_files", lambda r, project: {
+    _patch_all(monkeypatch, "changed_files", lambda r, project: {
         "added": [], "modified": ["order.py"], "deleted": []})
     res = S.reconcile_semantic(root, None, force=True)
     assert res["invalidated"] == []
@@ -330,7 +350,7 @@ def test_reconcile_deleted_file(tmp_path, monkeypatch):
     _ctx(tmp_path, monkeypatch)
     pid = S.project_id_for("/tmp/x", None)
     _mk_asset(pid, asset_id="sa-s-i-e-98", anchors={"order.py": "oldhash"})
-    monkeypatch.setattr(S, "changed_files", lambda root, project: {
+    _patch_all(monkeypatch, "changed_files", lambda root, project: {
         "added": [], "modified": [], "deleted": ["order.py"]})
     S.reconcile_semantic("/tmp/x", None, force=True)
     assert store.SemanticAssetsStore.get("sa-s-i-e-98")["change"] == "deleted"
@@ -340,9 +360,9 @@ def test_reconcile_new_file_reverse_probe(tmp_path, monkeypatch):
     _ctx(tmp_path, monkeypatch)
     pid = S.project_id_for("/tmp/x", None)
     _mk_asset(pid, asset_id="sa-s-i-e-97", anchors={"dep.py": "h"})
-    monkeypatch.setattr(S, "changed_files", lambda root, project: {
+    _patch_all(monkeypatch, "changed_files", lambda root, project: {
         "added": ["new_mod.py"], "modified": [], "deleted": []})
-    monkeypatch.setattr(S, "probe_impact", lambda root, project, files: {
+    _patch_all(monkeypatch, "probe_impact", lambda root, project, files: {
         "dependents": ["dep.py"], "deps": [], "affectedFiles": ["new_mod.py", "dep.py"]})
     res = S.reconcile_semantic("/tmp/x", None, force=True)
     assert res["newFiles"] == ["new_mod.py"]
@@ -427,7 +447,7 @@ def test_batch_clear_other_only_keeps_components(tmp_path, monkeypatch):
                   "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
         store.SemanticAssetsStore.create(a)
     # 真实场景：组件目录把 svc/a.py 归入 L0-0001。
-    monkeypatch.setattr(S, "_component_file_map", lambda root, project: {"L0-0001": {"svc/a.py"}})
+    _patch_all(monkeypatch, "_component_file_map", lambda root, project: {"L0-0001": {"svc/a.py"}})
     # 仅「其它」范围(scopes=['__other__'])
     res = S.batch_manage("/tmp/x", None, "clear", comp_ids=[], include_other=True,
                          scopes=["__other__"])
@@ -450,7 +470,7 @@ def test_batch_clear_by_file_with_include_other(tmp_path, monkeypatch):
         "name": "Y", "desc": "", "detail": {}, "astRefs": [{"file": "tmp/y.py"}],
         "scopeType": "project", "scopeKey": "_", "srcHash": "h",
         "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1})
-    monkeypatch.setattr(S, "_component_file_map", lambda root, project: {
+    _patch_all(monkeypatch, "_component_file_map", lambda root, project: {
         "L0-0001": {"svc/x.py"}})
     # 仅选 L0-0001 → 命中 svc/x.py，不命中 tmp/y.py
     res = S.batch_manage("/tmp/x", None, "clear", comp_ids=["L0-0001"])
@@ -478,7 +498,7 @@ def test_batch_no_separate_update_action(tmp_path, monkeypatch):
     def fake_handle(asset_id, root, project, model_id=None):
         calls["n"] += 1
         return {"status": "refreshed"}
-    monkeypatch.setattr(S, "handle_stale_asset", fake_handle)
+    _patch_all(monkeypatch, "handle_stale_asset", fake_handle)
     res = S.batch_manage("/tmp/x", None, "update", comp_ids=["L0-0001"])
     assert res["count"] == 0
     assert calls["n"] == 0
@@ -510,7 +530,7 @@ def test_extract_comm_unresolved_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr("topoone_app_architect.arch_routes.common.build_architecture_model",
                         lambda *a, **k: {"components": []})
     # 即使存在 codegraph 节点，未解析文件的 comm 范围也不应扫全项目。
-    monkeypatch.setattr(S, "_query_nodes", lambda conn, files=None, symbols=None, limit=400: [
+    _patch_all(monkeypatch, "_query_nodes", lambda conn, files=None, symbols=None, limit=400: [
         {"id": "n1", "kind": "class", "name": "Other", "qualified_name": "Other",
          "file_path": "other/thing.py", "start_line": 1, "end_line": 1,
          "start_column": 0, "end_column": 0, "signature": "", "docstring": "",
@@ -831,7 +851,7 @@ def test_extract_scope_low_level_paused_and_impl_fallback(tmp_path, monkeypatch)
     proj.mkdir()
     (proj / "order.py").write_text(
         "class Order:\n    pass\n\ndef checkout(o):\n    pass\n", encoding="utf-8")
-    monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
+    _patch_all(monkeypatch, "_kb_parse_file", lambda *a, **k: None)
     # 非实现层：统一暂停再生，返回空(不再整包自由识别)
     res = S.extract_scope(str(proj), None, scope_type="files", scope_key="order",
                           files=["order.py"], kinds=["process"],
@@ -870,7 +890,7 @@ def test_store_level_filter(tmp_path, monkeypatch):
 def test_aggregate_high_links_parent(tmp_path, monkeypatch):
     """H 级聚合：mock LLM 归纳业务资产并回填下级 parentId。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_postorder_component_nodes", lambda root, project: [{
+    _patch_all(monkeypatch, "_postorder_component_nodes", lambda root, project: [{
         "id": "comm-c1", "name": "订单组件", "desc": "订单域", "owns": ["src/order.py"],
         "direct": ["src/order.py"]}])
     pid = S.project_id_for("/tmp/x", None)
@@ -951,7 +971,7 @@ def test_aggregate_high_includes_intermediate_direct(tmp_path, monkeypatch):
     """业务聚合包含中间节点：仅中间节点独有文件产出的逻辑资产也进入 business 聚合。"""
     _ctx(tmp_path, monkeypatch)
     # 中间节点 c1(direct=[shared.py]) + 子 c1-1(direct=[a.py])
-    monkeypatch.setattr(S, "_postorder_component_nodes", lambda root, project: [
+    _patch_all(monkeypatch, "_postorder_component_nodes", lambda root, project: [
         {"id": "c1-1", "name": "子", "desc": "子", "owns": ["a.py"], "parentId": "c1",
          "direct": ["a.py"]},
         {"id": "c1", "name": "父", "desc": "父", "owns": ["shared.py", "a.py"], "parentId": None,
@@ -979,8 +999,8 @@ def test_aggregate_high_includes_intermediate_direct(tmp_path, monkeypatch):
 def test_aggregate_high_per_leaf_batching_and_merge(tmp_path, monkeypatch):
     """按叶子聚合：候选分批完整覆盖(>BATCH 循环)、跨叶子同名 business 合并去重。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_AGG_BATCH", 2)
-    monkeypatch.setattr(S, "_postorder_component_nodes", lambda root, project: [
+    _patch_all(monkeypatch, "_AGG_BATCH", 2)
+    _patch_all(monkeypatch, "_postorder_component_nodes", lambda root, project: [
         {"id": "comm-leafA", "name": "叶子A", "desc": "A", "owns": ["f1.py"], "direct": ["f1.py"]},
         {"id": "comm-leafB", "name": "叶子B", "desc": "B", "owns": ["f2.py"], "direct": ["f2.py"]},
     ])
@@ -1035,7 +1055,7 @@ def test_aggregate_high_per_leaf_batching_and_merge(tmp_path, monkeypatch):
 def test_aggregate_high_leaf_failure_isolated(tmp_path, monkeypatch):
     """叶子失败隔离：某叶子 LLM 不可达产出 0，其它叶子仍正常产出 business。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_postorder_component_nodes", lambda root, project: [
+    _patch_all(monkeypatch, "_postorder_component_nodes", lambda root, project: [
         {"id": "comm-bad", "name": "坏叶子", "desc": "B", "owns": ["f_bad.py"], "direct": ["f_bad.py"]},
         {"id": "comm-ok", "name": "好叶子", "desc": "G", "owns": ["f_ok.py"], "direct": ["f_ok.py"]},
     ])
@@ -1091,7 +1111,7 @@ def test_save_assets_same_batch_dedup_merges_aggregates(tmp_path, monkeypatch):
 def test_aggregate_high_best_effort_retries_on_llm_failure(tmp_path, monkeypatch):
     """聚合失败(LLM 瞬时不可达)时同任务内重试：首次失败后重试成功产出 business 资产。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_postorder_component_nodes", lambda root, project: [{
+    _patch_all(monkeypatch, "_postorder_component_nodes", lambda root, project: [{
         "id": "comm-c1", "name": "订单组件", "desc": "订单域", "owns": ["src/order.py"],
         "direct": ["src/order.py"]}])
     pid = S.project_id_for("/tmp/x", None)
@@ -1124,7 +1144,7 @@ def test_aggregate_high_best_effort_retries_on_llm_failure(tmp_path, monkeypatch
 def test_aggregate_high_best_effort_failure_visible_after_retries(tmp_path, monkeypatch):
     """聚合持续失败(LLM 不可达)时：重试耗尽后返回失败 reason，不吞掉失败。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_postorder_component_nodes", lambda root, project: [{
+    _patch_all(monkeypatch, "_postorder_component_nodes", lambda root, project: [{
         "id": "comm-c1", "name": "订单组件", "desc": "订单域", "owns": ["src/order.py"],
         "direct": ["src/order.py"]}])
     # 制造一条候选资产(归属该叶子)，使聚合走到 LLM 调用
@@ -1146,7 +1166,7 @@ def test_aggregate_high_best_effort_failure_visible_after_retries(tmp_path, monk
 def test_link_parent_propagates_component_membership(tmp_path, monkeypatch):
     """business 聚合资产应继承下级资产的组件归属(meta.scopes)，出现在被聚合组件下。"""
     _ctx(tmp_path, monkeypatch)
-    monkeypatch.setattr(S, "_file_to_components", lambda root, project: {
+    _patch_all(monkeypatch, "_file_to_components", lambda root, project: {
         "src/order.py": ["c-order", "c-pay"]})
     pid = S.project_id_for("/tmp/x", None)
     ctx = {"table": {}, "source": "live", "srcHash": "h1"}
@@ -1275,13 +1295,13 @@ def test_semantic_graph_derived_edges_not_persisted(tmp_path, monkeypatch):
                       "startLine": 1, "endLine": 10}]},
     ], ctx)
     cg = sqlite3.connect(":memory:")
-    cg.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, qualified_name TEXT, name TEXT)")
-    cg.execute("CREATE TABLE edges (source TEXT, target TEXT, kind TEXT)")
-    cg.execute("INSERT INTO nodes VALUES ('n1','checkout','checkout')")
-    cg.execute("INSERT INTO nodes VALUES ('n2','Order','Order')")
-    cg.execute("INSERT INTO edges VALUES ('n1','n2','calls')")
+    cg.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, qualified_name TEXT, name TEXT, file_path TEXT DEFAULT '')")
+    cg.execute("CREATE TABLE edges (source TEXT, target TEXT, kind TEXT, line INTEGER DEFAULT 0, metadata TEXT DEFAULT '')")
+    cg.execute("INSERT INTO nodes VALUES ('n1','checkout','checkout','src/order.py')")
+    cg.execute("INSERT INTO nodes VALUES ('n2','Order','Order','src/order.py')")
+    cg.execute("INSERT INTO edges VALUES ('n1','n2','calls',22,'{\"confidence\":0.9,\"resolvedBy\":\"exact-match\"}')")
     cg.commit()
-    monkeypatch.setattr(S, "_open_cg", lambda root: cg)
+    _patch_all(monkeypatch, "_open_cg", lambda root: cg)
     g = S.semantic_graph("/tmp/x", "proj-g2")
     derived = [e for e in g["edges"] if e.get("derived")]
     assert derived, "应从 codegraph 边程序化合成资产边"
@@ -1291,6 +1311,99 @@ def test_semantic_graph_derived_edges_not_persisted(tmp_path, monkeypatch):
     beh = next(n for n in g["nodes"] if n["name"] == "下单流程")
     a = store.SemanticAssetsStore.get(beh["id"])
     assert not (a.get("detail") or {}).get("relations")
+
+
+def test_derive_edges_evidence_and_contains_expand(tmp_path, monkeypatch):
+    """codegraph 派生边：证据字段(line/file/confidence) + contains 闭包展开。"""
+    _ctx(tmp_path, monkeypatch)
+    cg = sqlite3.connect(":memory:")
+    cg.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, qualified_name TEXT, name TEXT, file_path TEXT DEFAULT '')")
+    cg.execute("CREATE TABLE edges (source TEXT, target TEXT, kind TEXT, line INTEGER DEFAULT 0, metadata TEXT DEFAULT '')")
+    # Order 类资产，其方法 checkout 调 helper —— 关系上卷到 Order
+    cg.execute("INSERT INTO nodes VALUES ('n-order','Order','Order','src/order.py')")
+    cg.execute("INSERT INTO nodes VALUES ('n-checkout','Order::checkout','checkout','src/order.py')")
+    cg.execute("INSERT INTO nodes VALUES ('n-helper','helper','helper','src/util.py')")
+    cg.execute("INSERT INTO edges VALUES ('n-order','n-checkout','contains',1,'')")
+    cg.execute("INSERT INTO edges VALUES ('n-checkout','n-helper','calls',22,'{\"confidence\":0.9,\"resolvedBy\":\"exact-match\"}')")
+    cg.commit()
+    _patch_all(monkeypatch, "_open_cg", lambda root: cg)
+    assets = [
+        {"id": "A", "astRefs": [{"file": "src/order.py", "symbol": "Order", "kind": "class"}]},
+        {"id": "B", "astRefs": [{"file": "src/util.py", "symbol": "helper", "kind": "func"}]},
+    ]
+    edges = S._derive_project_edges("/tmp/x", None, assets)
+    ev = [e for e in edges if e["from"] == "A" and e["to"] == "B" and e["type"] == "calls"]
+    assert ev, f"contains 展开后应产出 A→B calls 边: {edges}"
+    e = ev[0]
+    assert e["line"] == 22 and e["file"] == "src/order.py"
+    assert e.get("confidence") == "0.9" and e.get("resolvedBy") == "exact-match"
+
+
+def test_derive_edges_kb_fallback(tmp_path, monkeypatch):
+    """无 codegraph → KB 兜底(arch_ast_cache)派生边，与 codegraph 口径同构。"""
+    _ctx(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "a.py").write_text("def helper():\n    pass\n", encoding="utf-8")
+    (proj / "b.py").write_text("def runner():\n    helper()\n", encoding="utf-8")
+    _patch_all(monkeypatch, "_open_cg", lambda root: None)
+    _patch_all(monkeypatch, "_cache_content_hash", lambda root, rel: "h")
+    pid = S.project_id_for(str(proj), None)
+    store.AstCacheStore.upsert(pid, "a.py", {
+        "contentHash": "h", "language": "py",
+        "symbols": [{"name": "helper", "startLine": 1, "endLine": 2}],
+        "imports": [], "refs": [], "source": "kb"})
+    store.AstCacheStore.upsert(pid, "b.py", {
+        "contentHash": "h", "language": "py",
+        "symbols": [{"name": "runner", "startLine": 1, "endLine": 2}],
+        "imports": [],
+        "refs": [{"name": "helper", "kind": "calls", "line": 2, "col": 4}],
+        "source": "kb"})
+    assets = [
+        {"id": "R", "astRefs": [{"file": "b.py", "symbol": "runner", "kind": "func"}]},
+        {"id": "H", "astRefs": [{"file": "a.py", "symbol": "helper", "kind": "func"}]},
+    ]
+    edges = S._derive_project_edges_kb(str(proj), None, assets)
+    ev = [e for e in edges if e["from"] == "R" and e["to"] == "H"]
+    assert ev, f"KB 兜底应产出 R→H 边: {edges}"
+    assert ev[0]["type"] == "calls" and ev[0].get("line") == 2
+
+
+def test_derive_indirect_edges(tmp_path, monkeypatch):
+    """间接边(1 跳中转)：无直接边才产出，via 记录中转，低置信过滤。"""
+    _ctx(tmp_path, monkeypatch)
+    dbp = tmp_path / "cg.db"
+    cg = sqlite3.connect(str(dbp))
+    cg.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, qualified_name TEXT, name TEXT, file_path TEXT DEFAULT '')")
+    cg.execute("CREATE TABLE edges (source TEXT, target TEXT, kind TEXT, line INTEGER DEFAULT 0, metadata TEXT DEFAULT '')")
+    cg.execute("INSERT INTO nodes VALUES ('na','fa','fa','a.py')")
+    cg.execute("INSERT INTO nodes VALUES ('nb','fb','fb','b.py')")
+    cg.execute("INSERT INTO nodes VALUES ('nm','mid','mid','m.py')")
+    cg.execute("INSERT INTO nodes VALUES ('nlow','flow','flow','l.py')")
+    # fa → mid(高置信) → fb：A⇝B 间接；mid → flow(低置信) 不参与
+    cg.execute("INSERT INTO edges VALUES ('na','nm','calls',3,'{\"confidence\":0.9}')")
+    cg.execute("INSERT INTO edges VALUES ('nm','nb','calls',8,'{\"confidence\":0.8}')")
+    cg.execute("INSERT INTO edges VALUES ('nm','nlow','calls',9,'{\"confidence\":0.4}')")
+    cg.commit()
+    cg.close()
+    _patch_all(monkeypatch, "_open_cg", lambda root: sqlite3.connect(str(dbp)))
+    assets = [
+        {"id": "A", "astRefs": [{"file": "a.py", "symbol": "fa", "kind": "func"}]},
+        {"id": "B", "astRefs": [{"file": "b.py", "symbol": "fb", "kind": "func"}]},
+        {"id": "L", "astRefs": [{"file": "l.py", "symbol": "flow", "kind": "func"}]},
+    ]
+    edges = S._derive_indirect_edges("/tmp/x", None, assets)
+    ab = [e for e in edges if e["from"] == "A" and e["to"] == "B"]
+    assert ab and ab[0].get("indirect") and ab[0].get("via") == "mid"
+    # 低置信中转不产出 A⇝L
+    assert not any(e["to"] == "L" for e in edges), f"低置信边泄漏: {edges}"
+    # 已有直接边时不产间接
+    cg2 = sqlite3.connect(str(dbp))
+    cg2.execute("INSERT INTO edges VALUES ('na','nb','calls',1,'')")
+    cg2.commit()
+    cg2.close()
+    edges2 = S._derive_indirect_edges("/tmp/x", None, assets)
+    assert not any(e["from"] == "A" and e["to"] == "B" for e in edges2)
 
 
 def test_semantic_graph_symbol_target_resolution(tmp_path, monkeypatch):
@@ -1327,7 +1440,7 @@ def test_grouped_search_items_contiguous_by_component(tmp_path, monkeypatch):
             "scopeType": "comm", "scopeKey": cid, "source": "live", "srcHash": "h",
             "change": "added", "status": "active", "createdAt": 1, "updatedAt": 1 + i,
         })
-    monkeypatch.setattr(S, "_component_order_map",
+    monkeypatch.setattr(_sem_engine, "_component_order_map",
                         lambda *a, **k: ({"c1": 0, "c2": 1}, {}))
     items = S._grouped_search_items("/tmp/x", "proj-grp", "", "", 100, 0, None, "")
     assert [a["scopeKey"] for a in items] == ["c1", "c1", "c2", "c2", "__other__"]
@@ -1511,7 +1624,7 @@ def test_collect_via_cache_kb_path_rebuilds_edges(tmp_path, monkeypatch):
             }
         return res
 
-    monkeypatch.setattr(S, "_kb_parse_file", _fake_kb)
+    _patch_all(monkeypatch, "_kb_parse_file", _fake_kb)
     nodes, edges, source, impl_by_file = S._collect_via_cache(root, None, ["a.py"], [])
     assert source == "kb"
     # impl details 随 KB 路径收集并回写缓存
@@ -1620,7 +1733,7 @@ def test_business_derived_edges_from_inherited_astrefs(tmp_path, monkeypatch):
                         out.append({"from": a, "to": b, "type": k})
         return out
 
-    monkeypatch.setattr(S, "_derive_project_edges", fake_derive)
+    _patch_all(monkeypatch, "_derive_project_edges", fake_derive)
     edges = S._cached_derived_edges("/tmp/x", "proj-bizedge",
                                     store.SemanticAssetsStore.all_status(pid, limit=100))
     pairs = {(e["from"], e["to"]) for e in edges}
@@ -1687,7 +1800,7 @@ def test_primary_kind_allocation_no_cross_kind_dup(tmp_path, monkeypatch):
         "def helper(o):\n    pass\n"
         "def get_config(key, default):\n    return default\n",
         encoding="utf-8")
-    monkeypatch.setattr(S, "_kb_parse_file", lambda *a, **k: None)
+    _patch_all(monkeypatch, "_kb_parse_file", lambda *a, **k: None)
     res = S.extract_scope(str(proj), None, scope_type="files", scope_key="m",
                           files=["m.py"], kinds=None, use_llm=False,
                           level="implementation")
@@ -1937,7 +2050,7 @@ def test_fetch_impl_for_file_kb_and_cache(tmp_path, monkeypatch):
                                             "handler": "h", "framework": "fastapi", "line": 1}],
                                 "constants": []}}
 
-    monkeypatch.setattr(S, "_kb_parse_file", _fake_kb)
+    _patch_all(monkeypatch, "_kb_parse_file", _fake_kb)
     impl = S._fetch_impl_for_file(root, None, "b.py")
     assert impl["routes"][0]["path"] == "/x"
     assert calls == ["b.py"]
@@ -1945,7 +2058,7 @@ def test_fetch_impl_for_file_kb_and_cache(tmp_path, monkeypatch):
     assert S._fetch_impl_for_file(root, None, "b.py")["routes"][0]["path"] == "/x"
     assert calls == ["b.py"]
     # 旧 KB 后端(无 implDetails) → None(降级)
-    monkeypatch.setattr(S, "_kb_parse_file",
+    _patch_all(monkeypatch, "_kb_parse_file",
                         lambda root_, rel, impl=False:
                         {"symbols": [], "refs": [], "language": "python"})
     with open(os.path.join(root, "b.py"), "a", encoding="utf-8") as fh:
@@ -1971,7 +2084,7 @@ def test_collect_context_cache_path_impl_block(tmp_path, monkeypatch):
                                     "startLine": 2, "endLine": 3, "enclosing": "f"}],
                     "routes": [], "constants": []}}
 
-    monkeypatch.setattr(S, "_kb_parse_file", _fake_kb)
+    _patch_all(monkeypatch, "_kb_parse_file", _fake_kb)
     ctx = S.collect_context(str(proj), "files", "m.py", files=["m.py"])
     assert ctx["implDetails"]["m.py"]["statements"][0]["condition"] == "a > 0"
     assert "控制流语句清单" in ctx["text"]
@@ -2547,7 +2660,7 @@ def test_source_snippet_codegraph_fallback(tmp_path, monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE nodes (file_path TEXT, name TEXT, qualified_name TEXT, start_line INT, end_line INT)")
     conn.execute("INSERT INTO nodes VALUES ('c.ts','EngineCapability','EngineCapability',12,16)")
-    monkeypatch.setattr(S, "_open_cg", lambda root: conn)
+    _patch_all(monkeypatch, "_open_cg", lambda root: conn)
     res = _run_coro(S.api_source_snippet(root=str(proj), project=None,
                                          file="c.ts", line=12, symbol="EngineCapability"))
     assert res["code"] == 0
