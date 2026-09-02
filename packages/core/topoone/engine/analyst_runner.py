@@ -10,7 +10,6 @@ import asyncio
 import concurrent.futures
 import logging
 import os
-import subprocess
 import threading
 import time
 import uuid
@@ -36,9 +35,6 @@ logger = logging.getLogger(__name__)
 _task_queue: asyncio.Queue | None = None
 _queue_consumer: asyncio.Task | None = None
 # ==================== 子进程管理 ====================
-# distributed 模式下，记录每个 task_id 对应的 ast_worker 子进程，用于 stop_task 信号
-_ast_worker_procs: dict[str, 'subprocess.Popen'] = {}
-
 
 async def _run_next_task():
     """队列消费者：一次取一个任务执行，完成后取下一个"""
@@ -54,9 +50,7 @@ async def _run_next_task():
 
 
 async def enqueue_analysis_task(server, multi_db, task_id: str, run_id: str, start_time: float):
-    """将分析任务提交到 AST Worker（distributed 模式）或本地队列（monolith 模式）"""
-    from topoone.config import TOPO_MODE
-
+    """将分析任务提交到本地任务队列（monolith 单一模式）"""
     # Phase 0: 首次拿到 multi_db.cache_store，注入 StateStore
     ss = _get_state_store()
     if ss._cache is None and hasattr(multi_db, 'cache_store'):
@@ -65,49 +59,13 @@ async def enqueue_analysis_task(server, multi_db, task_id: str, run_id: str, sta
         logger.info("[StateStore] switched to dual mode with CacheStore")
     ss.add_executing(task_id)
 
-    if TOPO_MODE == "distributed":
-        data_dir = getattr(multi_db, 'data_dir', os.environ.get("TOPOCODE_DB_DIR", ""))
-        logger.info(f"[ENQUEUE] distributed mode: spawning ast_worker for task={task_id}")
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "ast_worker",
-             "--task-id", task_id, "--run-id", run_id,
-             "--data-dir", data_dir],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        )
-        _ast_worker_procs[task_id] = proc
-        # 在后台线程读取子进程输出，避免阻塞 event loop
-        loop = asyncio.get_event_loop()
-        def _read_output(tid=task_id):
-            try:
-                for line in proc.stdout or []:
-                    logger.info(f"[ast_worker:{tid}] {line.decode('utf-8', errors='replace').strip()}")
-                proc.wait()
-            finally:
-                _ast_worker_procs.pop(tid, None)
-                clear_stop_flag(tid)
-                ss.remove_executing(tid)
-        loop.run_in_executor(None, _read_output)
-    else:
-        # ── monolith 模式（原行为） ────────────────────────────────
-        global _task_queue, _queue_consumer
-        if _task_queue is None:
-            _task_queue = asyncio.Queue(maxsize=100)
-        if _queue_consumer is None or _queue_consumer.done():
-            _queue_consumer = asyncio.create_task(_run_next_task())
-        coro = _execute_task(server, multi_db, task_id, run_id, start_time)
-        await _task_queue.put(coro)
-
-
-def stop_ast_worker(task_id: str):
-    """distributed 模式下终止 ast_worker 子进程"""
-    proc = _ast_worker_procs.pop(task_id, None)
-    if proc and proc.poll() is None:
-        logger.info(f"[stop_ast_worker] terminating task={task_id} pid={proc.pid}")
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except Exception:
-            proc.kill()
+    global _task_queue, _queue_consumer
+    if _task_queue is None:
+        _task_queue = asyncio.Queue(maxsize=100)
+    if _queue_consumer is None or _queue_consumer.done():
+        _queue_consumer = asyncio.create_task(_run_next_task())
+    coro = _execute_task(server, multi_db, task_id, run_id, start_time)
+    await _task_queue.put(coro)
 
 
 def set_stop_flag(task_id: str):
@@ -1199,6 +1157,5 @@ async def _execute_task(server, multi_db, task_id: str, run_id: str,
         clear_stop_flag(task_id)
         _get_state_store().remove_executing(task_id)
         raise
-
 
 

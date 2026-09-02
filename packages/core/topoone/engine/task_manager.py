@@ -18,7 +18,7 @@ from topoone.db.manager import MultiDBManager
 from topoone.engine.store.task_store import TaskStore
 from topoone.engine.store.analysis_store import AnalysisStore
 from topoone.engine.analysis_utils import get_cascade_levels_impl, get_l0_comps
-from topoone.engine.analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task, stop_ast_worker
+from topoone.engine.analyst_runner import _execute_task, set_stop_flag, clear_stop_flag, is_task_executing, enqueue_analysis_task
 
 logger = logging.getLogger(__name__)
 
@@ -220,8 +220,7 @@ def _count_batched_source_files(task_id: str, project_db, project_root: str = ""
 def register_analysis_methods(server, multi_db: MultiDBManager):
     """将所有 analysis.* 方法注册到 RPC 服务器"""
 
-    # ── distributed 模式的 Agent Proxy ────────────────────────────
-    from topoone.config import TOPO_MODE as _TOPO_MODE
+    # ── Agent Proxy（P3e：kb 的 agent 执行移交 agent 服务） ──────
     _agent_proxy = None
     _agent_http_url = os.environ.get("AGENT_API_URL", "").strip()
     if _agent_http_url:
@@ -229,10 +228,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
         from topoone.messaging.remote import HttpAgentManager
         _agent_proxy = HttpAgentManager(_agent_http_url)
         logger.info(f"[analysis] agent RPC → HttpAgentManager ({_agent_http_url})")
-    elif _TOPO_MODE == "distributed":
-        from topoone.messaging.remote import RemoteAgentManager
-        _agent_proxy = RemoteAgentManager()
-        logger.info("[analysis] distributed mode: agent RPC → RemoteAgentManager")
 
     def _agent_mgr():
         """返回 AgentTaskManager（本地）或远程 Agent 管理器"""
@@ -586,10 +581,6 @@ def register_analysis_methods(server, multi_db: MultiDBManager):
                 return {"taskId": tid, "status": "error"}
 
             set_stop_flag(tid)
-            # distributed 模式：终止 ast_worker 子进程
-            from topoone.config import TOPO_MODE
-            if TOPO_MODE == "distributed":
-                stop_ast_worker(tid)
             store.update_task_status(tid, "cancelled")
 
         # 发布事件

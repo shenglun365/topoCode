@@ -199,10 +199,6 @@ class Supervisor:
         wi.tail_task = None
         try:
             env = dict(os.environ)
-            # JSON 信号 worker（db_service/agent_worker 等）默认按 distributed 模式启动；
-            # plain 服务（uvicorn/FastAPI）保持调用方模式，可经 env 显式覆盖。
-            if wi.health_url is None:
-                env.setdefault("TOPO_MODE", "distributed")
             if wi.env:
                 env.update(wi.env)
             # stdout 必须落盘（普通文件写入永不阻塞子进程）；无 log_dir 时丢弃

@@ -70,9 +70,10 @@ INTRAn_FILE_EDGE_FALLBACK_WEIGHT = 0.1  # 备选方案时降权
 # "monolith" — 单进程模式（默认）：所有 Worker 退化为线程池 / asyncio task，适用于开发/调试
 # "distributed" — 多进程模式：AST / LLM / Agent / DB Service 各为独立进程
 # C2 修正：进程拓扑唯一 owner = supervisor/cli.py，原 distributed 多进程拓扑
-# （engine/app.py:_run_distributed）已删除。此值钳制为 monolith，不再读 env ——
-# 防止 shell 残留 TOPO_MODE=distributed 误触 db/manager 等处的 remote 分支
-# （那些分支已永死，属后续清理项）。
+# （engine/app.py:_run_distributed）已删除。此值钳制为 monolith，不再读 env。
+# TOPO_MODE 永死分支清理已完成：db/manager、task_manager、analyst_runner、
+# supervisor 的 distributed 分支与 engine/ast_worker.py 均已删除，仅存此常量
+# 作为模式标记（供日志/诊断引用）。
 TOPO_MODE = "monolith"
 
 # 内部 ZMQ Bus 端口（distributed 模式）

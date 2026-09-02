@@ -12,7 +12,6 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Optional
 
-from topoone.config import TOPO_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -1307,56 +1306,41 @@ class MultiDBManager:
         self.data_dir = data_dir
         os.makedirs(self.data_dir, exist_ok=True)
 
-        if TOPO_MODE == "distributed":
-            from topoone.messaging.remote import RemoteWriteQueue, RemoteCacheStore
-            self._write_queue = RemoteWriteQueue()
-            self._cache_store = RemoteCacheStore(self._write_queue)
-            self._duckdb = None  # DuckDB 运行在 DB Service 进程
-            self._is_remote = True
-            logger.info("[MultiDB] distributed mode — all writes via RemoteWriteQueue")
-        else:
-            from topoone.db.data_layer.write_queue import WriteQueue
-            self._write_queue = WriteQueue()
-            from topoone.db.data_layer.cache_store import CacheStore
-            cache_dir = os.path.join(self.data_dir, "cache")
-            self._cache_store = CacheStore(cache_dir)
-            from topoone.db.data_layer.duckdb_reader import DuckDBReader
-            self._duckdb = DuckDBReader(self)
-            self._is_remote = False
+        from topoone.db.data_layer.write_queue import WriteQueue
+        self._write_queue = WriteQueue()
+        from topoone.db.data_layer.cache_store import CacheStore
+        cache_dir = os.path.join(self.data_dir, "cache")
+        self._cache_store = CacheStore(cache_dir)
+        from topoone.db.data_layer.duckdb_reader import DuckDBReader
+        self._duckdb = DuckDBReader(self)
 
         # 初始化主库
         main_db_path = os.path.join(self.data_dir, "topoone.db")
         self._write_queue.register_db("main", main_db_path)
         self.main_db = SQLiteContext(main_db_path, label="main",
                                      write_queue=self._write_queue)
-        if self._is_remote:
-            self._init_main_tables_remote()
-        else:
-            self._init_main_tables()
+        self._init_main_tables()
 
         # 初始化知识库
         knowledge_db_path = os.path.join(self.data_dir, "knowledge.db")
         self._write_queue.register_db("knowledge", knowledge_db_path)
         self.knowledge_db = SQLiteContext(knowledge_db_path, label="knowledge",
                                           write_queue=self._write_queue)
-        if not self._is_remote:
-            self._init_knowledge_tables()
+        self._init_knowledge_tables()
 
         # 初始化会话库
         sessions_db_path = os.path.join(self.data_dir, "sessions.db")
         self._write_queue.register_db("sessions", sessions_db_path)
         self.sessions_db = SQLiteContext(sessions_db_path, label="sessions",
                                          write_queue=self._write_queue)
-        if not self._is_remote:
-            self._init_sessions_tables()
+        self._init_sessions_tables()
 
         # 初始化 CHAT 库（AI 助手会话 + 持久化文档）
         chat_db_path = os.path.join(self.data_dir, "chat.db")
         self._write_queue.register_db("chat", chat_db_path)
         self.chat_db = SQLiteContext(chat_db_path, label="chat",
                                      write_queue=self._write_queue)
-        if not self._is_remote:
-            self._init_chat_tables()
+        self._init_chat_tables()
 
         # 项目库 LRU 缓存 (max=10)
         self._project_db_cache: OrderedDict[str, SQLiteContext] = OrderedDict()
@@ -1375,19 +1359,6 @@ class MultiDBManager:
     @property
     def duckdb(self):
         return self._duckdb
-
-    def _init_main_tables_remote(self):
-        """远程初始化主库表结构（通过 RemoteWriteQueue 发送到 DB Service）"""
-        self._write_queue.execute_sync("main", MAIN_DB_TABLES_SQL, (), timeout=60)
-        try:
-            self._write_queue.execute_sync("main", KNOWLEDGE_DB_TABLES_SQL, (), timeout=60)
-        except Exception:
-            pass
-        try:
-            self._write_queue.execute_sync("main", SESSIONS_DB_TABLES_SQL, (), timeout=60)
-        except Exception:
-            pass
-        self._migrate_main_tables()
 
     def _init_main_tables(self):
         """初始化主库表"""
@@ -1684,20 +1655,14 @@ class MultiDBManager:
             pass
 
     def init_project_db(self, project_id: str, project_root: str = None):
-        """创建并初始化项目库（distributed 模式通过 WriteQueue → DB Service）
-
-        project_root 参数保留仅为调用兼容，路径已完全由 project_id 决定。
-        """
+        """创建并初始化项目库。project_root 参数保留仅为调用兼容。"""
         db_path = self._project_db_path(project_id)
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         label = f"project:{project_id}"
         self._write_queue.register_db(label, db_path)
         project_db = SQLiteContext(db_path, label=label,
                                    write_queue=self._write_queue)
-        if self._is_remote:
-            self._write_queue.execute_sync(label, PROJECT_DB_TABLES_SQL, (), timeout=60)
-        else:
-            project_db.executescript(PROJECT_DB_TABLES_SQL)
+        project_db.executescript(PROJECT_DB_TABLES_SQL)
         return project_db
 
     def _table_exists(self, project_db: SQLiteContext, table: str) -> bool:
